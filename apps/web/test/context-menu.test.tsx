@@ -194,7 +194,7 @@ describe("a tile's menu for the copy it runs on", () => {
     expect(opened.style.left).toBe("40px");
     expect(opened.style.top).toBe("50px");
     expect(labels()).toEqual([
-      WORKSPACE_WORDS.pause,
+      "Pause api",
       WORKSPACE_WORDS.newThread,
       WORKSPACE_WORDS.openTerminal,
       WORKSPACE_WORDS.openBrowser,
@@ -206,9 +206,9 @@ describe("a tile's menu for the copy it runs on", () => {
       WORKSPACE_WORDS.delete,
     ]);
     expect(within(opened).getAllByRole("separator")).toHaveLength(5);
-    expect(item(WORKSPACE_WORDS.pause).getAttribute("aria-disabled")).toBeNull();
+    expect(item("Pause api").getAttribute("aria-disabled")).toBeNull();
     expect(refusalOf(WORKSPACE_WORDS.delete)).toBeNull();
-    expect(refusalOf(WORKSPACE_WORDS.pause)).toBeNull();
+    expect(refusalOf("Pause api")).toBeNull();
     // One destructive tier: neutral where it stands, the danger ink only under the pointer or the keys.
     expect(item(WORKSPACE_WORDS.delete).className.split(" ")).not.toContain("text-destructive-foreground");
     expect(item(WORKSPACE_WORDS.delete).className.split(" ")).toEqual(expect.arrayContaining(["hover:text-destructive-foreground", "focus:text-destructive-foreground"]));
@@ -217,13 +217,13 @@ describe("a tile's menu for the copy it runs on", () => {
     expect(chord.className).toContain("font-mono");
     expect(chord.className).toContain("tabular-nums");
     // The first row that can run holds focus; arrows walk every row, disabled ones too, so their refusal can be read.
-    await waitFor(() => expect(document.activeElement).toBe(item(WORKSPACE_WORDS.pause)));
+    await waitFor(() => expect(document.activeElement).toBe(item("Pause api")));
     fireEvent.keyDown(opened, { key: "ArrowDown" });
     expect(document.activeElement).toBe(item(WORKSPACE_WORDS.newThread));
     fireEvent.keyDown(opened, { key: "End" });
     expect(document.activeElement).toBe(item(WORKSPACE_WORDS.delete));
     fireEvent.keyDown(opened, { key: "ArrowDown" });
-    expect(document.activeElement).toBe(item(WORKSPACE_WORDS.pause));
+    expect(document.activeElement).toBe(item("Pause api"));
     fireEvent.keyDown(opened, { key: "Escape" });
     await waitFor(() => expect(menu()).toBeNull());
     await waitFor(() => expect(document.activeElement).toBe(row));
@@ -246,7 +246,7 @@ describe("a tile's menu for the copy it runs on", () => {
     await mountSidebar(api, "api");
     rightClick(rowOf("api"));
     const opened = await screen.findByRole("menu");
-    await waitFor(() => expect(document.activeElement).toBe(item(WORKSPACE_WORDS.pause)));
+    await waitFor(() => expect(document.activeElement).toBe(item("Pause api")));
     fireEvent.keyDown(opened, { key: "Enter" });
     await waitFor(() => expect(api.nap).toHaveBeenCalledWith("ws_a"));
     await waitFor(() => expect(menu()).toBeNull());
@@ -261,8 +261,8 @@ describe("a tile's menu for the copy it runs on", () => {
     await mountSidebar(fakeApi([OLD], [statusOf(OLD)]), "old");
     rightClick(rowOf("old"));
     await screen.findByRole("menu");
-    await waitFor(() => expect(item(WORKSPACE_WORDS.wake).getAttribute("aria-disabled")).toBe("true"));
-    expect(refusalOf(WORKSPACE_WORDS.wake)).toBe("This workspace's machine is gone with its disk, so work that was not pushed is lost; rebuild it to wake, which brings back its home folder from the last saved nap");
+    await waitFor(() => expect(item("Wake old").getAttribute("aria-disabled")).toBe("true"));
+    expect(refusalOf("Wake old")).toBe("This workspace's machine is gone with its disk, so work that was not pushed is lost; rebuild it to wake, which brings back its home folder from the last saved nap");
     expect(item(WORKSPACE_WORDS.rebuild).getAttribute("aria-disabled")).toBeNull();
     fireEvent.click(item(WORKSPACE_WORDS.forget));
     const dialog = await screen.findByRole("alertdialog");
@@ -275,7 +275,7 @@ describe("a tile's menu for the copy it runs on", () => {
     rightClick(rowOf("fix the port list"));
     await screen.findByRole("menu");
     expect(labels()).toEqual([THREAD_WORDS.stop, THREAD_WORDS.settle, THREAD_WORDS.rename, THREAD_WORDS.copyMarkdown, THREAD_WORDS.pin, THREAD_WORDS.snooze, THREAD_WORDS.copyLink, THREAD_WORDS.forget, ...[
-      WORKSPACE_WORDS.pause,
+      "Pause api",
       WORKSPACE_WORDS.newThread,
       WORKSPACE_WORDS.openTerminal,
       WORKSPACE_WORDS.openBrowser,
@@ -305,7 +305,7 @@ describe("a tile's menu for the copy it runs on", () => {
     await waitFor(() => expect(contextMenu).toHaveBeenCalledTimes(1));
     const sent = contextMenu.mock.calls[0]![0];
     expect(sent.map(i => [i.id, i.label, i.enabled])).toEqual([
-      ["phase", WORKSPACE_WORDS.pause, true],
+      ["phase", "Pause api", true],
       ["new-thread", WORKSPACE_WORDS.newThread, true],
       ["open-terminal", WORKSPACE_WORDS.openTerminal, true],
       ["open-browser", WORKSPACE_WORDS.openBrowser, true],

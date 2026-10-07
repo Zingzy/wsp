@@ -73,17 +73,17 @@ describe("terminalPaneState", () => {
     expect(terminalPaneTitle({ kind: "live" })).toBeNull();
     expect(terminalEmptyLine({ kind: "live" })).toBeNull();
     expect(terminalInputRefusal({ kind: "live" })).toBeNull();
-    expect(terminalPaneTitle({ kind: "paused", pausing: false })).toBe("Paused. The shell is kept; wake the task to continue");
-    expect(terminalPaneTitle({ kind: "paused", pausing: true })).toBe("Pausing. The shell is kept; wake the task to continue");
-    expect(terminalPaneTitle({ kind: "reconnecting" })).toBe("Reconnecting to the task");
-    expect(terminalPaneTitle({ kind: "not-answering" })).toBe("The task is not answering");
-    expect(terminalPaneTitle({ kind: "reauth" })).toBe("Reconnecting to the task");
-    expect(terminalEmptyLine({ kind: "reauth" })).toBe("Reconnecting to the task; terminals open when it is back");
-    expect(terminalInputRefusal({ kind: "reauth" })).toBe("Typing is refused while the task is reconnecting");
-    expect(terminalEmptyLine({ kind: "reconnecting" })).toBe("Reconnecting to the task; terminals open when it is back");
-    expect(terminalEmptyLine({ kind: "paused", pausing: false })).toBe("Task is paused; wake it to open a terminal");
-    expect(terminalInputRefusal({ kind: "paused", pausing: false })).toBe("Typing is refused: the task is paused");
-    expect(terminalInputRefusal({ kind: "reconnecting" })).toBe("Typing is refused while the task is reconnecting");
+    expect(terminalPaneTitle({ kind: "paused", pausing: false })).toBe("Paused. The shell is kept; wake the thread to continue");
+    expect(terminalPaneTitle({ kind: "paused", pausing: true })).toBe("Pausing. The shell is kept; wake the thread to continue");
+    expect(terminalPaneTitle({ kind: "reconnecting" })).toBe("Reconnecting to the thread's computer");
+    expect(terminalPaneTitle({ kind: "not-answering" })).toBe("The thread's computer is not answering");
+    expect(terminalPaneTitle({ kind: "reauth" })).toBe("Reconnecting to the thread's computer");
+    expect(terminalEmptyLine({ kind: "reauth" })).toBe("Reconnecting to the thread's computer; terminals open when it is back");
+    expect(terminalInputRefusal({ kind: "reauth" })).toBe("Typing is refused while the thread's computer reconnects");
+    expect(terminalEmptyLine({ kind: "reconnecting" })).toBe("Reconnecting to the thread's computer; terminals open when it is back");
+    expect(terminalEmptyLine({ kind: "paused", pausing: false })).toBe("The thread is paused; wake it to open a terminal");
+    expect(terminalInputRefusal({ kind: "paused", pausing: false })).toBe("Typing is refused: the thread is paused");
+    expect(terminalInputRefusal({ kind: "reconnecting" })).toBe("Typing is refused while the thread's computer reconnects");
     for (const kind of ["reconnecting", "not-answering", "waking", "gone"] as const) {
       expect(terminalPaneTitle({ kind })).toBeTruthy();
       expect(terminalEmptyLine({ kind })).toBeTruthy();
@@ -95,14 +95,14 @@ describe("terminalPaneState", () => {
 describe("a drop with memory near full", () => {
   const GiB = 1024 ** 3;
   const oom = { used: 3.59 * GiB, total: 3.94 * GiB, load1: 6.4 };
-  const OOM_LINE = "Out of memory (3.6 GB of 3.9 GB used, load 6.4) when the task last answered; the work on it took the memory, not a fault of the computer it runs on";
+  const OOM_LINE = "Out of memory (3.6 GB of 3.9 GB used, load 6.4) when the thread's computer last answered; the work there took the memory, not a fault in the computer";
   const size = { cpu: 2, memMb: 4096 };
   const sizes = [
     { cpu: 2, memMb: 4096, rateUsdPerHour: 0.11 },
     { cpu: 2, memMb: 8192, rateUsdPerHour: 0.15 },
   ];
-  const SIZE_LINE = "A task on 2 vCPU, 8 GB ($0.15/hr) fits more; pick it when you make the next one";
-  const REBUILD = "Rebuild it from the task's row";
+  const SIZE_LINE = "A thread on 2 vCPU, 8 GB ($0.15/hr) fits more; pick it when you start the next one";
+  const REBUILD = "Rebuild it from the thread's row";
 
   it("rides the reconnecting and not-answering panes and no other", () => {
     expect(terminalPaneState({ state: "unreachable", reach: "unreachable", socket: "connecting", outOfMemory: oom })).toEqual({ kind: "reconnecting", outOfMemory: oom });
@@ -115,7 +115,7 @@ describe("a drop with memory near full", () => {
 
   it("once the runtime gave up, the title says out of memory instead of not answering; while reconnecting the title keeps its clock and the line goes under it", () => {
     expect(terminalPaneTitle({ kind: "not-answering", outOfMemory: oom })).toBe(OOM_LINE);
-    expect(terminalPaneTitle({ kind: "reconnecting", outOfMemory: oom })).toBe("Reconnecting to the task");
+    expect(terminalPaneTitle({ kind: "reconnecting", outOfMemory: oom })).toBe("Reconnecting to the thread's computer");
     expect(terminalPaneHints({ kind: "reconnecting", outOfMemory: oom }, size, sizes)).toEqual([OOM_LINE, SIZE_LINE]);
   });
 
@@ -135,9 +135,9 @@ describe("a drop with memory near full", () => {
     // The runtime's own word for a machine it has no daemon road to; nothing is reconnecting.
     const pane = terminalPaneState({ state: "running", reach: "unsupported", socket: "connecting" });
     expect(pane).toEqual({ kind: "no-daemon" });
-    expect(terminalPaneTitle(pane)).toBe("No terminal runs on this task");
-    expect(terminalEmptyLine(pane)).toBe("No terminal runs on this task, so none opens here");
-    expect(terminalInputRefusal(pane)).toBe("Typing is refused: no terminal runs on this task");
+    expect(terminalPaneTitle(pane)).toBe("No terminal runs on the thread's computer");
+    expect(terminalEmptyLine(pane)).toBe("No terminal runs on the thread's computer, so none opens here");
+    expect(terminalInputRefusal(pane)).toBe("Typing is refused: no terminal runs on the thread's computer");
     expect(terminalPaneHints(pane, size, sizes)).toEqual([]);
     // Nothing about it promises a return, which is what the reconnecting copy did for a kind that had no daemon.
     for (const line of [terminalPaneTitle(pane), terminalEmptyLine(pane)]) {
@@ -155,9 +155,9 @@ describe("a drop with memory near full", () => {
     const refused = terminalPaneState({ state: "running", reach: "reachable", socket: "refused", refusal: reason });
     expect(refused).toEqual({ kind: "refused", reason });
     // The words are the coordinator's ruling on this ticket, read against the word table of the design spec.
-    expect(terminalPaneTitle(refused)).toBe("The connection to this task was refused; its threads keep running");
-    expect(terminalEmptyLine(refused)).toBe(`No terminal opens from this window: ${reason}. The task's threads keep running.`);
-    expect(terminalInputRefusal(refused)).toBe("Typing is refused: the connection to this task was refused");
+    expect(terminalPaneTitle(refused)).toBe("The connection to the thread's computer was refused; its threads keep running");
+    expect(terminalEmptyLine(refused)).toBe(`No terminal opens from this window: ${reason}. Your threads keep running.`);
+    expect(terminalInputRefusal(refused)).toBe("Typing is refused: the connection to the thread's computer was refused");
     // Why, in the muted line under the title: what turned the connection away, in its own words.
     expect(terminalPaneHints(refused, size, sizes)).toEqual([reason]);
     const lines = [terminalPaneTitle(refused)!, terminalEmptyLine(refused)!, terminalInputRefusal(refused)!];

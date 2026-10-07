@@ -291,7 +291,7 @@ describe("a machine that stopped answering with its memory near full", () => {
 
   it("the line carries the last figures and says the work took the memory, never that the machine failed", () => {
     expect(outOfMemoryLine({ used: 3.59 * GiB, total: 3.94 * GiB, load1: 6.42 })).toBe(
-      "Out of memory (3.6 GB of 3.9 GB used, load 6.4) when the task last answered; the work on it took the memory, not a fault of the computer it runs on",
+      "Out of memory (3.6 GB of 3.9 GB used, load 6.4) when the thread's computer last answered; the work there took the memory, not a fault in the computer",
     );
   });
 
@@ -301,9 +301,9 @@ describe("a machine that stopped answering with its memory near full", () => {
   });
 
   it("the size line names the smallest offer with more memory and its rate, or that there is none", () => {
-    expect(biggerSizeLine({ cpu: 2, memMb: 4096 }, offers)).toBe("A task on 2 vCPU, 8 GB ($0.15/hr) fits more; pick it when you make the next one");
-    expect(biggerSizeLine({ cpu: 2, memMb: 8192 }, offers)).toBe("A task on 4 vCPU, 16 GB ($0.30/hr) fits more; pick it when you make the next one");
-    expect(biggerSizeLine({ cpu: 4, memMb: 16384 }, offers)).toBe("No size with more memory is offered; run less in the task at once");
+    expect(biggerSizeLine({ cpu: 2, memMb: 4096 }, offers)).toBe("A thread on 2 vCPU, 8 GB ($0.15/hr) fits more; pick it when you start the next one");
+    expect(biggerSizeLine({ cpu: 2, memMb: 8192 }, offers)).toBe("A thread on 4 vCPU, 16 GB ($0.30/hr) fits more; pick it when you start the next one");
+    expect(biggerSizeLine({ cpu: 4, memMb: 16384 }, offers)).toBe("No size with more memory is offered; run less in the thread at once");
     // Order in the table does not pick the offer; memory does.
     expect(biggerSizeLine({ cpu: 2, memMb: 4096 }, [...offers].reverse())).toContain("2 vCPU, 8 GB");
   });

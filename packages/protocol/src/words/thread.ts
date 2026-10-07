@@ -532,7 +532,7 @@ export function memoryNearFull(mem: { used: number; total: number }): boolean {
 /** The line every pane and row shows when a machine stopped answering with its memory near full: the last figures
  * the daemon sent, and that the work took the memory, so nobody rebuilds a machine that is fine. */
 export function outOfMemoryLine(r: MemoryReading): string {
-  return `Out of memory (${fmtBytes(r.used)} of ${fmtBytes(r.total)} used, load ${r.load1.toFixed(1)}) when the task last answered; the work on it took the memory, not a fault of the computer it runs on`;
+  return `Out of memory (${fmtBytes(r.used)} of ${fmtBytes(r.total)} used, load ${r.load1.toFixed(1)}) when the thread's computer last answered; the work there took the memory, not a fault in the computer`;
 }
 
 /** The sidebar row's form of the same fact, in the shape the daemon note takes: the row's second line is about
@@ -545,8 +545,8 @@ export function outOfMemoryRowLine(r: MemoryReading): string {
  * this machine, with its rate, for the next workspace. With none in the table, less at once is the only road. */
 export function biggerSizeLine(current: WorkspaceSize, offers: readonly MachineSizeOffer[]): string {
   const bigger = offers.filter(o => o.memMb > current.memMb).sort((a, b) => a.memMb - b.memMb)[0];
-  if (bigger === undefined) return "No size with more memory is offered; run less in the task at once";
-  return `A task on ${fmtSize(bigger)} (${fmtRate(bigger.rateUsdPerHour)}) fits more; pick it when you make the next one`;
+  if (bigger === undefined) return "No size with more memory is offered; run less in the thread at once";
+  return `A thread on ${fmtSize(bigger)} (${fmtRate(bigger.rateUsdPerHour)}) fits more; pick it when you start the next one`;
 }
 
 /** The machine row's line while the runtime replaces a daemon older than this wsp, and the line it shows instead

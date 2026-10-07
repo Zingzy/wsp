@@ -379,6 +379,53 @@ describe("files surface", () => {
     await waitFor(() => expect(shownFolder(container)).toBe("/root"));
   });
 
+  it("lists again by itself once the box it reads dials back in, with no Refresh pressed", async () => {
+    let up = false;
+    const wire = fakeWire({ "fs.list": params => (up ? (LISTING as (p: Record<string, unknown>) => Record<string, unknown>)(params) : new Error("hetzner is not answering")) });
+    provideDaemonWire(WS, wire);
+    const box = { ...view, kind: "cloud" as const, place: "p_hetzner" };
+    const away = { id: "p_hetzner", kind: "computer", name: "hetzner", default: true, present: false, lastSeenAt: new Date(Date.now() - 60_000).toISOString() };
+    act(() => useStore.setState({ workspaces: [box], places: [away] as never }));
+    // The socket to the host stays live through it: what came back is the box behind it.
+    const wt = new WorkspaceTerminals({ request: async () => ({ ok: true }) });
+    act(() => provideTerminals(WS, wt));
+    act(() => wt.feedStatus("live"));
+    try {
+      const { container } = render(<FilesSurface workspaceId={WS} theme="dark" />);
+      await waitFor(() => expect(listCalls(wire)).toEqual(["/root"]));
+      await settle();
+      up = true;
+      act(() => useStore.setState({ places: [{ ...away, present: true }] as never }));
+      await waitFor(() => expect(treeRows(container).length).toBeGreaterThan(0));
+      expect(listCalls(wire)).toEqual(["/root", "/root"]);
+    } finally {
+      act(() => provideTerminals(WS, null));
+      act(() => useStore.setState({ places: [] }));
+    }
+  });
+
+  it("lists a folder whose read failed again once the link goes live, with no Refresh pressed", async () => {
+    let up = false;
+    const wire = fakeWire({ "fs.list": params => (up ? (LISTING as (p: Record<string, unknown>) => Record<string, unknown>)(params) : new Error("not answering")) });
+    provideDaemonWire(WS, wire);
+    const wt = new WorkspaceTerminals({ request: async () => ({ ok: true }) });
+    act(() => provideTerminals(WS, wt));
+    try {
+      act(() => wt.feedStatus("connecting"));
+      const { container } = render(<FilesSurface workspaceId={WS} theme="dark" />);
+      await waitFor(() => expect(screen.getByText("not answering")).toBeTruthy());
+      up = true;
+      act(() => wt.feedStatus("live"));
+      await waitFor(() => expect(treeRows(container).length).toBeGreaterThan(0));
+      expect(listCalls(wire)).toEqual(["/root", "/root"]);
+      // A link that stays live asks nothing more: only a read that failed is asked again, and only as the link turns.
+      await settle();
+      expect(listCalls(wire)).toEqual(["/root", "/root"]);
+    } finally {
+      act(() => provideTerminals(WS, null));
+    }
+  });
+
   it("follows the thread into the imported project and lists it there", async () => {
     const wire = fakeWire({ "fs.list": LISTING });
     provideDaemonWire(WS, wire);

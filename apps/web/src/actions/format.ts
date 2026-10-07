@@ -8,8 +8,6 @@ import { actionRefusal, type BringBackResult, goneRefusal, isBilling, keepsRenam
 import { MAX_TERMINALS_PER_GROUP } from "../terminal/groups.js";
 
 export const WORKSPACE_WORDS = {
-  pause: "Pause task",
-  wake: "Wake task",
   stopWake: "Stop waking",
   rebuild: "Rebuild task",
   newThread: "New thread",
@@ -66,10 +64,11 @@ export const TERMINAL_WORDS = {
 } as const;
 
 /** Pause, wake and the stop are one slot: a machine that is up offers the pause, one the host is still asking the
- * provider for offers the stop, and every other state the wake. */
-export function phaseWord(state: WorkspaceState): string {
+ * provider for offers the stop, and every other state the wake. The pause and the wake name what they act on, the
+ * workspace every thread on it runs in, by the name its row shows. */
+export function phaseWord(state: WorkspaceState, name: string): string {
   if (state === "waking") return WORKSPACE_WORDS.stopWake;
-  return isBilling(state) ? WORKSPACE_WORDS.pause : WORKSPACE_WORDS.wake;
+  return `${isBilling(state) ? "Pause" : "Wake"} ${name}`;
 }
 
 /** The phase slot's two words per state: what its button offers, and the verb a machine that cannot take the move
@@ -90,8 +89,13 @@ export const phaseButtonWord = (state: WorkspaceState): string => PHASE_SLOT[sta
 /** The verb the machine cannot take, for the one sentence a machine wsp does not drive refuses with. */
 export const phaseCannot = (state: WorkspaceState): string => PHASE_SLOT[state].cannot;
 
-export const phaseHint = (state: WorkspaceState): string =>
-  state === "waking" ? "Stop asking the provider to wake this task" : isBilling(state) ? "Suspend the VM and keep the disk" : "Boot the VM from its disk";
+/** The hover goes on from the palette's own words, so the button and the row cannot say two things, and says that
+ * every thread there stops or starts with it, since a thread an agent opened beside this one runs there too. */
+export const phaseHint = (state: WorkspaceState, name: string): string => {
+  const word = phaseWord(state, name);
+  if (state === "waking") return `${word} ${name}`;
+  return isBilling(state) ? `${word} and every thread on it; its files are kept` : `${word} and every thread on it, with its files as they were`;
+};
 export const FORGET_HINT = "Its computer is gone; forget the task to drop it from this computer";
 export const REBUILD_HINT = "The task answers nothing; rebuild it from your image";
 

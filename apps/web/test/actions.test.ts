@@ -60,7 +60,7 @@ describe("workspace actions", () => {
     // The rebuild, the start and the forget are roads out of a state this workspace is not in, so they are not
     // drawn at all: a row held with a reason a person cannot clear is furniture.
     expect(titles(actions)).toEqual([
-      WORKSPACE_WORDS.pause,
+      "Pause api",
       WORKSPACE_WORDS.newThread,
       WORKSPACE_WORDS.openTerminal,
       WORKSPACE_WORDS.openBrowser,
@@ -88,10 +88,10 @@ describe("workspace actions", () => {
 
   it("pause and wake are one slot: the word follows the state, and the moving states refuse it with a word", () => {
     const verbs = workspaceVerbs();
-    expect(actionById(resolveActions(workspaceActions, workspace("running"), verbs), "phase").title).toBe(WORKSPACE_WORDS.pause);
-    expect(actionById(resolveActions(workspaceActions, workspace("unreachable"), verbs), "phase").title).toBe(WORKSPACE_WORDS.pause);
+    expect(actionById(resolveActions(workspaceActions, workspace("running"), verbs), "phase").title).toBe("Pause api");
+    expect(actionById(resolveActions(workspaceActions, workspace("unreachable"), verbs), "phase").title).toBe("Pause api");
     const paused = actionById(resolveActions(workspaceActions, workspace("paused"), verbs), "phase");
-    expect(paused.title).toBe(WORKSPACE_WORDS.wake);
+    expect(paused.title).toBe("Wake api");
     expect(paused.refusal).toBeNull();
     expect(actionById(resolveActions(workspaceActions, workspace("pausing"), verbs), "phase").refusal).toBe("Task is pausing; it can be woken once it is paused");
     // A waking workspace is the one moving state with something to offer: the stop on the host's own asking again.
@@ -192,12 +192,12 @@ describe("workspace actions", () => {
     expect([phaseOf("running").buttonWord, phaseOf("unreachable").buttonWord, phaseOf("paused").buttonWord, phaseOf("gone").buttonWord]).toEqual(["Pause", "Pause", "Wake", "Wake"]);
     expect([phaseOf("pausing").buttonWord, phaseOf("waking").buttonWord]).toEqual(["Pausing…", "Stop"]);
     expect([phaseOf("running").icon, phaseOf("paused").icon, phaseOf("waking").icon]).toEqual([PauseIcon, PlayIcon, SquareIcon]);
-    expect(phaseOf("running").hint).toBe("Suspend the VM and keep the disk");
-    expect(phaseOf("paused").hint).toBe("Boot the VM from its disk");
-    expect(phaseOf("waking").hint).toBe("Stop asking the provider to wake this task");
+    expect(phaseOf("running").hint).toBe("Pause api and every thread on it; its files are kept");
+    expect(phaseOf("paused").hint).toBe("Wake api and every thread on it, with its files as they were");
+    expect(phaseOf("waking").hint).toBe("Stop waking api");
     // A record that still says running while the provider holds the machine paused reads Wake, as its label does.
     const behind = phaseOf("running", { machineState: "paused" });
-    expect([behind.buttonWord, behind.rowLabel, behind.title]).toEqual(["Wake", "Wake api", WORKSPACE_WORDS.wake]);
+    expect([behind.buttonWord, behind.rowLabel, behind.title]).toEqual(["Wake", "Wake api", "Wake api"]);
     const gone = resolveActions(workspaceActions, workspace("gone", { reason: "machine m_a is gone at the provider: Not found" }), verbs);
     expect(actionById(gone, "forget").buttonWord).toBe("Forget");
     expect(actionById(gone, "forget").hint).toBe("Its computer is gone; forget the task to drop it from this computer");
@@ -489,7 +489,7 @@ describe("menu items from actions", () => {
   it("carry the label, the group, the enabled bit, the refusal and the chord for the platform", () => {
     const items = toMenuItems(resolveActions(workspaceActions, workspace("paused"), workspaceVerbs()), DEFAULT_RESOLVED_KEYBINDINGS, { platform: "MacIntel" });
     expect(items.map(i => [i.id, i.label, i.group, i.enabled])).toEqual([
-      ["phase", WORKSPACE_WORDS.wake, "state", true],
+      ["phase", "Wake api", "state", true],
       ["new-thread", WORKSPACE_WORDS.newThread, "open", true],
       ["open-terminal", WORKSPACE_WORDS.openTerminal, "open", true],
       ["open-browser", WORKSPACE_WORDS.openBrowser, "open", false],

@@ -10,7 +10,7 @@ import { PreviewLocalServerCard } from "./PreviewLocalServerCard";
 import { PreviewRecentUrlCard } from "./PreviewRecentUrlCard";
 
 /** What the tab says while nothing has listened and nothing was opened: one quiet sentence. */
-export const PREVIEW_EMPTY = "No preview yet. Type a port above or run a dev script, and servers listening on this task show up here.";
+export const PREVIEW_EMPTY = "No preview yet. Type a port above or run a dev script, and servers listening on the thread's computer show up here.";
 
 export const PREVIEW_NO_MATCH = "No address or server matches.";
 

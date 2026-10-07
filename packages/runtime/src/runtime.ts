@@ -690,6 +690,9 @@ function runtimeCore(ctx: RuntimeContext, opts: RuntimeOptions): RuntimeCore {
           if (entry !== undefined) void ctx.syncDaemon(entry);
           else await ctx.rereadHeld(stored.id, "record load");
         }
+        // Every row on that computer read unreachable while it was away, and a pane over a live socket says
+        // reconnecting until its row turns: the next tick is up to a whole poll away.
+        await ctx.status.poll(ctx.held().filter(h => workspacePlace(h.record) === e.placeId).map(h => h.record.id));
       })().catch((err: unknown) => console.warn(`the records on ${placeDoor!.nameOf(e.placeId)} were not read again: ${err instanceof Error ? err.message : String(err)}`));
     });
   }

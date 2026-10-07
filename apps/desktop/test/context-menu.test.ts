@@ -10,12 +10,12 @@ import type { ContextMenuItem, WorkspaceView } from "@wsp/protocol";
 import type { MenuItemConstructorOptions } from "electron";
 import { describe, expect, it, vi } from "vitest";
 import { chooseFrom, contextMenuTemplate, parseContextMenuItems } from "../src/context-menu.js";
-import { WORKSPACE_WORDS } from "../../web/src/actions/format.js";
+import { phaseWord, WORKSPACE_WORDS } from "../../web/src/actions/format.js";
 import { workspaceActions, workspaceTarget } from "../../web/src/actions/workspaceActions.js";
 import { SEPARATOR, workspaceMenuShape } from "./workspace-menu.js";
 
 const ITEMS: ContextMenuItem[] = [
-  { id: "phase", label: "Pause task", group: "state", enabled: true },
+  { id: "phase", label: "Pause api", group: "state", enabled: true },
   { id: "rebuild", label: "Rebuild machine", group: "state", enabled: false, refusal: "Rebuild replaces a gone or zombie machine; this one answers" },
   { id: "open-terminal", label: "Open terminal", group: "open", enabled: true, shortcut: "⌘J", accelerator: "CommandOrControl+J" },
   { id: "forget", label: "Forget task", group: "remove", enabled: false, refusal: "Only a workspace whose machine is gone can be forgotten; this one is running", destructive: true },
@@ -27,7 +27,7 @@ const fakeClick = (): [MenuItem: import("electron").MenuItem, window: undefined,
 describe("contextMenuTemplate", () => {
   it("gives a row that can run its hint as the hover text, and a dimmed row's reason still wins the slot", () => {
     const rows: ContextMenuItem[] = [
-      { id: "nap", label: "Pause task", group: "state", enabled: true, checked: false, hint: "a nap keeps the memory and bills nothing" },
+      { id: "nap", label: "Pause api", group: "state", enabled: true, checked: false, hint: "a nap keeps the memory and bills nothing" },
       { id: "rebuild", label: "Rebuild machine", group: "state", enabled: false, refusal: "this one answers", hint: "never read" },
     ];
     const template = contextMenuTemplate(rows, vi.fn());
@@ -41,7 +41,7 @@ describe("contextMenuTemplate", () => {
     const choose = vi.fn();
     const template = contextMenuTemplate(ITEMS, choose);
     expect(template.map(row => row.type === "separator" ? "---" : `${row.label}${row.enabled === false ? " (off)" : ""}`)).toEqual([
-      "Pause task",
+      "Pause api",
       "Rebuild machine (off)",
       "---",
       "Open terminal",
@@ -60,7 +60,7 @@ describe("contextMenuTemplate", () => {
 describe("chooseFrom", () => {
   it("answers with the row clicked", async () => {
     const chosen = chooseFrom(ITEMS, (template, _onClose) => {
-      clickOf(template, "Pause task")(...fakeClick());
+      clickOf(template, "Pause api")(...fakeClick());
     });
     await expect(chosen).resolves.toBe("phase");
   });
@@ -108,9 +108,9 @@ describe("the workspace menu the smoke expects", () => {
     const groups = shown.map(entry => entry.group);
     expect(shape.filter(row => row === SEPARATOR)).toHaveLength(groups.filter((group, i) => i > 0 && groups[i - 1] !== group).length);
     // Read straight through, so a separator in the wrong place is a failure and not only a wrong count. The words
-    // are named by key from the one table that holds them, never spelled again here.
+    // come from the web app's own words, the pause off the function that names its workspace, never spelled here.
     expect(shape).toEqual([
-      WORKSPACE_WORDS.pause,
+      phaseWord("running", target.displayName),
       SEPARATOR,
       WORKSPACE_WORDS.newThread,
       WORKSPACE_WORDS.openTerminal,

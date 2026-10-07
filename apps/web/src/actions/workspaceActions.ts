@@ -114,11 +114,11 @@ export const workspaceActions: ReadonlyArray<ActionEntry<WorkspaceTarget, Worksp
     id: "phase",
     group: "state",
     icon: target => (stateOf(target) === "waking" ? SquareIcon : isBilling(stateOf(target)) ? PauseIcon : PlayIcon),
-    searchTerms: ["pause task", "nap", "sleep", "wake task", "resume", "start", "stop waking"],
-    title: target => phaseWord(stateOf(target)),
-    rowLabel: target => rowVerb(phaseWord(stateOf(target)).split(" ")[0]!, target.displayName),
+    searchTerms: ["pause", "nap", "sleep", "wake", "resume", "start", "stop waking"],
+    title: target => phaseWord(stateOf(target), target.displayName),
+    rowLabel: target => rowVerb(phaseWord(stateOf(target), target.displayName).split(" ")[0]!, target.displayName),
     buttonWord: target => phaseButtonWord(stateOf(target)),
-    hint: target => phaseHint(stateOf(target)),
+    hint: target => phaseHint(stateOf(target), target.displayName),
     // A machine wsp neither forked nor pays for is neither paused nor woken by wsp, so the row offers neither verb
     // rather than offering one it would refuse whatever the person did.
     applies: target => kindWords(target.kind).driven,
