@@ -7,6 +7,7 @@
 // same table before it asks a daemon for the same thing, so no workspace is
 // sampled twice.
 import { readingRoad, workspaceKind } from "@wsp/protocol";
+import { noticeFailure } from "../notices/store.js";
 import type { Api } from "../protocol/client.js";
 import type { useStore } from "../protocol/store.js";
 import { getLive, liveWatched, onLiveWatched } from "./live.js";
@@ -17,6 +18,8 @@ import { getLive, liveWatched, onLiveWatched } from "./live.js";
 export function wireHostLive(store: typeof useStore): () => void {
   /** The workspaces this page has asked the socket it holds now about. */
   const asked = new Set<string>();
+  /** The workspaces whose refused readings have been said on the socket it holds now: each refusal comes again. */
+  const said = new Set<string>();
   let offSamples: (() => void) | null = null;
   /** The transport the readings are being taken off, so a page that binds another is listened to on that one. */
   let bound: Api | null = null;
@@ -28,6 +31,7 @@ export function wireHostLive(store: typeof useStore): () => void {
       offSamples?.();
       bound = api;
       asked.clear();
+      said.clear();
       offSamples = api.onSysSample(e => getLive(e.workspaceId).feedSample(e.sample));
     }
     const here = new Set(workspaces.filter(w => readingRoad(workspaceKind(w), "metrics") === "host" && liveWatched(w.id)).map(w => w.id));
@@ -48,9 +52,13 @@ export function wireHostLive(store: typeof useStore): () => void {
       asked.add(id);
       void api.watchSys(id).then(
         () => getLive(id).feedReach("live"),
-        () => {
+        (e: unknown) => {
           asked.delete(id);
           getLive(id).feedReach("unreachable");
+          if (said.has(id)) return;
+          said.add(id);
+          const name = store.getState().workspaces.find(w => w.id === id)?.name ?? id;
+          noticeFailure(e, words => `Live readings for ${name} are not coming from the host: ${words}`);
         },
       );
     }

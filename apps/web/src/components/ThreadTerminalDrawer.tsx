@@ -38,7 +38,8 @@ import { PanelTabCloseButton } from "./ui/panel-tab-close-button";
 import { isTerminalAppShortcut } from "../keybindings";
 import type { ResolvedKeybindingsConfig } from "../keybindingTypes";
 import { currentKeybindings, useKeybindings } from "../shell/useKeybindings";
-import { cn, errorText } from "../lib/utils";
+import { cn } from "../lib/utils";
+import { noticeFailureOnce } from "../notices/store";
 import { getTerminalLabel } from "../lib/terminalLabels";
 import { GhosttyTerminalSurface, type GhosttyTerminalFont, type GhosttyTerminalSurfaceOptions } from "../terminal/ghostty/surface";
 import { DEFAULT_TERMINAL_SIZING, appScheme, terminalFontWith, terminalSurfaceSettings, terminalThemeWith, type TerminalSizing } from "../terminal/ghosttyConfig";
@@ -224,12 +225,12 @@ interface TerminalViewportProps {
 const NO_REFUSAL = (): string | null => null;
 const IGNORE_REFUSED = (): void => {};
 
-/** The person's Ghostty config from the host, or null when the host cannot answer, which is said once, never swallowed. */
-async function readTerminalFile(read: NonNullable<Api["hostTerminalConfig"]>, scheme: TerminalScheme): Promise<TerminalConfig | null> {
+/** The person's Ghostty config from the host, or null when the host cannot answer, which is said once. */
+export async function readTerminalFile(read: NonNullable<Api["hostTerminalConfig"]>, scheme: TerminalScheme): Promise<TerminalConfig | null> {
   try {
     return await read(scheme);
   } catch (e) {
-    console.warn(`terminal config not read from the host, the pane keeps its defaults until the socket is live: ${errorText(e)}`);
+    noticeFailureOnce("terminal-config", e, said => `Terminal config not read from the host: ${said}. The pane keeps its defaults.`);
     return null;
   }
 }

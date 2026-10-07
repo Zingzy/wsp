@@ -20,19 +20,7 @@ import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collaps
 import { ScrollArea } from "../ui/scroll-area";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { serializeTableElementToCsv, serializeTableElementToMarkdown } from "../../lib/markdownClipboard";
-
-interface MarkdownActionFailureContext {
-  readonly operation: string;
-  readonly target?: string;
-  readonly format?: "markdown" | "csv";
-  readonly language?: string;
-  readonly fenceTitle?: string;
-  readonly copyTarget?: string;
-}
-
-export function reportMarkdownActionFailure(context: MarkdownActionFailureContext, cause: unknown): void {
-  console.error("[chat-markdown] action failed", context, cause);
-}
+import { noticeFailure, notCopied } from "../../notices/store";
 
 export function findTaskListMarkerOffset(markdown: string, listItemStart: number): number | null {
   const firstLineEnd = markdown.indexOf("\n", listItemStart);
@@ -159,7 +147,7 @@ export function MarkdownTable({
         }, 1200);
       })
       .catch((cause) => {
-        reportMarkdownActionFailure({ operation: "copy-table", format }, cause);
+        noticeFailure(cause, notCopied);
       });
   }, []);
 

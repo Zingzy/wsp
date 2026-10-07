@@ -259,7 +259,7 @@ describe("Devices", () => {
     expect(lineLabels()).toEqual([DEVICES_WORDS.none]);
     document.body.innerHTML = "";
     resetSettings();
-    await mount({ devicesList: async () => Promise.reject(new Error(DEVICES_TICKET_REFUSAL)) } as Partial<Api>, "devices");
+    await mount({ devicesList: async () => Promise.reject(new RequestError(DEVICES_TICKET_REFUSAL, "ticket")) } as Partial<Api>, "devices");
     expect(lineLabels()).toEqual([DEVICES_WORDS.refused]);
   });
 });
