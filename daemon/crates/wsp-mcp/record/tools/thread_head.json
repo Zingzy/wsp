@@ -178,6 +178,18 @@
             "setupRefusal": {
               "type": "string"
             },
+            "limit": {
+              "type": "object",
+              "properties": {
+                "resetsAt": {
+                  "type": "number"
+                }
+              },
+              "additionalProperties": false
+            },
+            "resumeAt": {
+              "type": "number"
+            },
             "costUsd": {
               "type": "number"
             },
@@ -322,6 +334,9 @@
                   "afterCut": {
                     "type": "boolean",
                     "const": true
+                  },
+                  "afterLimit": {
+                    "type": "number"
                   },
                   "opensThread": {
                     "type": "boolean",
@@ -591,6 +606,9 @@
                         "enum": [
                           "sign-in"
                         ]
+                      },
+                      "limit": {
+                        "$ref": "#/properties/facts/properties/limit"
                       }
                     },
                     "required": [
@@ -1535,6 +1553,18 @@
             "setupRefusal": {
               "type": "string"
             },
+            "limit": {
+              "type": "object",
+              "properties": {
+                "resetsAt": {
+                  "type": "number"
+                }
+              },
+              "additionalProperties": false
+            },
+            "resumeAt": {
+              "type": "number"
+            },
             "costUsd": {
               "type": "number"
             },
@@ -1679,6 +1709,9 @@
                   "afterCut": {
                     "type": "boolean",
                     "const": true
+                  },
+                  "afterLimit": {
+                    "type": "number"
                   },
                   "opensThread": {
                     "type": "boolean",
@@ -1948,6 +1981,9 @@
                         "enum": [
                           "sign-in"
                         ]
+                      },
+                      "limit": {
+                        "$ref": "#/properties/facts/properties/limit"
                       }
                     },
                     "required": [

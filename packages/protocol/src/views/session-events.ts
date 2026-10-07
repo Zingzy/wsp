@@ -3,7 +3,7 @@
 import { z } from "zod";
 import { HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, TURN_TOKEN_ENV } from "../env.js";
 import { AttachmentRecord } from "../attachments.js";
-import { UsageTokens } from "../usage.js";
+import { TurnLimit, UsageTokens } from "../usage.js";
 import { SessionSlateEvent } from "../slate/wire.js";
 import { permissionPrompt } from "../wire/helpers.js";
 import { PermissionOutcome, SessionOrigin, SubagentState, TurnRefusal } from "./session.js";
@@ -51,6 +51,9 @@ export const TurnResult = z.object({
   error: z.string().optional(),
   /** Set only on a turn the agent refused outright for a cause wsp knows; the status is failed with it. */
   refusal: TurnRefusal.optional(),
+  /** Set only on a turn the agent's usage limit stopped; the status is failed with it, and the thread offers to go
+   * on at the reset where the agent named one. */
+  limit: TurnLimit.optional(),
 });
 export type TurnResult = z.infer<typeof TurnResult>;
 
@@ -97,6 +100,9 @@ export const SessionStartEvent = z.object({
   /** Set when the thread's previous turn ended with no exit code and no result (a deadline, a host restart, a nap
    * that ended it), so clients say the harness resumes a transcript that may be missing context; absent otherwise. */
   afterCut: z.literal(true).optional(),
+  /** Set on a turn Resume at reset opened: the reset it went on at, ms epoch, so the transcript says why a turn
+   * started with nobody writing. */
+  afterLimit: z.number().optional(),
   /** Set on the turn that opened its thread; absent on every later one and on a turn from before it was recorded. */
   opensThread: z.literal(true).optional(),
   /** Who opened this turn's thread, as its row says it. Absent on a turn from before it was recorded. */

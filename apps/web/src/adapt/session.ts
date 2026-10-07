@@ -7,7 +7,7 @@
 // session id repeats across turns. Wire order is the timeline order. createdAt
 // is the wire's `at` (ms epoch) as ISO, else the caller's receipt clock, else
 // "" for unstamped history.
-import { AFTER_CUT_LINE, NOTIFY_ME, internalToolResult, subagentTaskLine, toolActivityLine, toolCallFacts, toolDoneLine, toolResultLine, type PlanStep, type SessionEvent, type SessionHarness, type SessionRunEvent, type TurnResult } from "@wsp/protocol";
+import { AFTER_CUT_LINE, LIMIT_WORDS, NOTIFY_ME, internalToolResult, subagentTaskLine, toolActivityLine, toolCallFacts, toolDoneLine, toolResultLine, type PlanStep, type SessionEvent, type SessionHarness, type SessionRunEvent, type TurnResult } from "@wsp/protocol";
 import type {
   ChatMessage,
   PermissionPrompt,
@@ -267,8 +267,10 @@ export function createSessionFold(): SessionFold {
     if (result.status === "completed" && !t.sawText && result.text !== undefined && result.text.length > 0) {
       addMessage(t, "assistant", result.text, at, false);
     }
-    // The failure's words stand as their own row; a failure with none leaves the turn's one word to say it.
-    if (result.status === "failed" && result.error !== undefined) {
+    // The failure's words stand as their own row; a failure with none leaves the turn's one word to say it. A turn the
+    // agent's usage limit stopped is news, not a fault: the turn's footer and the strip over the composer say it, so no
+    // row repeats the agent's words.
+    if (result.status === "failed" && result.error !== undefined && result.limit === undefined) {
       addWork(t, { createdAt: at, label: result.error, tone: "error", sourceActivityKind: "runtime.error" }, at);
     }
     t.summary = {
@@ -279,6 +281,7 @@ export function createSessionFold(): SessionFold {
       tokens: result.tokens ?? null,
       model: result.model ?? t.summary.model,
       error: result.error ?? null,
+      limit: result.limit ?? null,
       completedAt: at || null,
     };
     turns[turns.length - 1] = t.summary;
@@ -324,6 +327,7 @@ export function createSessionFold(): SessionFold {
       startedAt: at || null,
       completedAt: null,
       checkpoint: null,
+      limit: null,
     };
     turns.push(summary);
     return { summary, startCount: count, ordinal: 0, openMessage: null, openMessageId: null, sawText: false, tools: new Map(), childCalls: new Map(), openAnonymousTool: null, subagents: new Map(), reply: null, planRow: null };
@@ -352,7 +356,8 @@ export function createSessionFold(): SessionFold {
         agent = event.agent ?? agent;
         permissionMode = event.permissionMode ?? permissionMode;
         turn = openTurn(event, event.turnId ?? `${event.sessionId}#${count}`, count, at);
-        if (event.prompt !== undefined) {
+        // Resume at reset's own words to the agent are nobody's message: the notice line below stands for them.
+        if (event.prompt !== undefined && event.afterLimit === undefined) {
           addMessage(turn, "user", event.prompt, at, false, false, {
             ...(event.attachments !== undefined ? { attachments: event.attachments } : {}),
             ...(event.requestId !== undefined ? { requestId: event.requestId } : {}),
@@ -360,6 +365,7 @@ export function createSessionFold(): SessionFold {
           });
         }
         if (event.afterCut === true) addWork(turn, { createdAt: at, label: AFTER_CUT_LINE, tone: "notice", sourceActivityKind: "runtime.resume" }, at);
+        if (event.afterLimit !== undefined) addWork(turn, { createdAt: at, label: LIMIT_WORDS.resumed, tone: "notice", sourceActivityKind: "runtime.resume" }, at);
         return;
       }
       case "session.delta": {

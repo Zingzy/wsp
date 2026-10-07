@@ -5,7 +5,7 @@
 // useDiscoveredLocalServers.ts and contracts (commit 57a66608). Fields the
 // wsp wire cannot fill today are kept when a copied component reads them and
 // dropped when nothing does. Everything here is data: no React, no schemas.
-import type { AttachmentRecord, MachineState, PermissionOption, PermissionOutcome, ReachState, SessionOrigin, SessionStatus, ThreadPlacement, WorkspacePhase, WorkspaceState, WorkspaceStatus, WorkspaceView, PlanStep, TurnChangedFile, TurnTokens } from "@wsp/protocol";
+import type { AttachmentRecord, MachineState, PermissionOption, PermissionOutcome, ReachState, SessionOrigin, SessionStatus, ThreadPlacement, TurnLimit, WorkspacePhase, WorkspaceState, WorkspaceStatus, WorkspaceView, PlanStep, TurnChangedFile, TurnTokens } from "@wsp/protocol";
 
 // --- chat -------------------------------------------------------------------
 
@@ -204,6 +204,8 @@ export interface TurnSummary {
   readonly checkpoint: { readonly ref: string | null; readonly anchor: string | null; readonly kept?: string } | null;
   /** The agent wrote the thread's slate during the turn: its last reply carries one line saying so. */
   readonly slated?: true;
+  /** The usage limit that stopped the turn, off its result; null on a turn that ended another way. */
+  readonly limit?: TurnLimit | null;
 }
 
 export type ToolGroupAction = "read" | "edit" | "command" | "code-search" | "search" | "other" | "update";
@@ -380,6 +382,10 @@ export interface SidebarThreadSnapshot {
   /** Why the thread's agent cannot start or read its own store on that computer now, in the host's words; absent while
    * nothing stops it. */
   readonly setupRefusal?: string;
+  /** The usage limit that stopped the latest turn, as the protocol's fold reads it; null on a turn that ended another
+   * way. resumeAt is the reset the turn is armed to go on at, null while nobody pressed Resume at reset. */
+  readonly limit?: TurnLimit | null;
+  readonly resumeAt?: number | null;
   /** What the thread has spent, as the protocol's fold adds its rows up; null where no turn of it reported a
    * figure, which is not the same as nothing spent. */
   readonly costUsd: number | null;

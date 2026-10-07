@@ -1462,6 +1462,47 @@ describe("a Codex account's plan limits on the app server", () => {
     await adapterOver(launch).start({ prompt: "hi", onEvent }).finished;
     expect(limitsOf(events).map(l => l.windows.map(w => w.usedPercent))).toEqual([[10]]);
   });
+  describe("a turn the plan's usage limit stopped", () => {
+    // The sentence the owner saw when a Plus window was spent, under the code the app server's schema names for it;
+    // not a recording of a real limit.
+    const SAID = "You've hit your usage limit. Upgrade to Pro (https://openai.com/chatgpt/pricing) or try again at 1:13 PM.";
+    const error = (code: string) => JSON.stringify({ method: "error", params: { threadId: THREAD_ID, turnId: TURN_ID, willRetry: false, error: { message: SAID, codexErrorInfo: code, additionalDetails: null } } });
+    const failed = (code: string) => completed("failed", `,"error":${JSON.stringify({ message: SAID, codexErrorInfo: code, additionalDetails: null })}`);
+    const inAnHour = Math.floor(Date.now() / 1000) + 3600;
+    const run = async (lines: string[]) => (await adapterOver(launcher(scripted(lines))).start({ prompt: "hi", onEvent: () => {} }).finished);
+
+    it("carries the limit with the reset of the window the latest reading has at its cap", async () => {
+      const result = await run([
+        read(snapshot({ primary: window(97, 300, inAnHour), secondary: window(40, 10_080, inAnHour + 86_400) }), {}),
+        updated(snapshot({ primary: window(100, 300, inAnHour), reached: "rate_limit_reached" })),
+        error("usageLimitExceeded"),
+        failed("usageLimitExceeded"),
+      ]);
+      expect(result).toMatchObject({ status: "failed", limit: { resetsAt: inAnHour * 1000 } });
+    });
+
+    it("carries the reset of the fullest window ahead where the server stopped the turn at 99 (rollout 11-28-17)", async () => {
+      const result = await run([
+        read(snapshot({ primary: window(97, 300, inAnHour), secondary: window(40, 10_080, inAnHour + 86_400) }), {}),
+        updated(snapshot({ primary: window(99, 300, inAnHour) })),
+        error("usageLimitExceeded"),
+        failed("usageLimitExceeded"),
+      ]);
+      expect(result).toMatchObject({ status: "failed", limit: { resetsAt: inAnHour * 1000 } });
+    });
+
+    it("carries the limit with no reset where no window names one ahead", async () => {
+      const result = await run([read(snapshot({ primary: window(99, 300, Math.floor(Date.now() / 1000) - 60) }), {}), failed("usageLimitExceeded")]);
+      expect(result.status).toBe("failed");
+      expect(result.limit).toEqual({});
+    });
+
+    it("carries none on a turn that failed another way, whatever the reading says", async () => {
+      const result = await run([updated(snapshot({ primary: window(100, 300, inAnHour), reached: "rate_limit_reached" })), error("serverOverloaded"), failed("serverOverloaded")]);
+      expect(result.status).toBe("failed");
+      expect(result).not.toHaveProperty("limit");
+    });
+  });
 });
 
 describe("creditsOf", () => {

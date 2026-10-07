@@ -329,6 +329,16 @@ export function creditsOf(answer: Record<string, unknown> | undefined): HarnessL
   return { count: banked, credits };
 }
 
+/** The reset a turn the server stopped at the plan's limit waits on: the fullest window whose reset is still ahead.
+ * At the cap the server reads 99 as often as 100, so no threshold says which window it was. */
+function stoppedUntil(windows: readonly LimitWindow[], now: number): number | undefined {
+  const ahead = windows.filter((w): w is LimitWindow & { resetsAt: number } => w.resetsAt !== undefined && w.resetsAt > now);
+  return ahead.sort((a, b) => b.usedPercent - a.usedPercent || b.resetsAt - a.resetsAt)[0]?.resetsAt;
+}
+
+/** The server's codexErrorInfo on an error the plan's usage limit raised. */
+const USAGE_LIMIT_CODE = "usageLimitExceeded";
+
 /** The snapshot a rate-limits answer reads the windows off: the legacy single bucket can name another meter than
  * codex's own, and the buckets by id say which is which. */
 export const snapshotOf = (answer: Record<string, unknown> | undefined): Record<string, unknown> | undefined => rec(rec(answer?.rateLimitsByLimitId)?.codex) ?? rec(answer?.rateLimits);
@@ -522,6 +532,8 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
     let words: { line: string; cause?: TurnRefusal } | undefined;
     /** What the server said last in an error, for a process that dies without completing its turn. */
     let lastError: string | undefined;
+    /** Set once the server said the plan's usage limit stopped this turn, in an error it will not retry. */
+    let usageLimited = false;
     let stallTimer: ReturnType<typeof setTimeout> | undefined;
     let stalledAt: number | undefined;
     const stderrTail: string[] = [];
@@ -666,8 +678,17 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
 
     /** The turn's reply is final: the server waits for more input after it, and EOF is what lets it exit; one that
      * does not go on its own is ended with its tree once the wait passes. */
-    const finish = (result: TurnResult): void => {
+    /** A failed turn the plan's limit stopped, with the limit on it: the reset is the latest reading's fullest window
+     * still ahead, and unknown where no window names one. */
+    const withLimit = (result: TurnResult): TurnResult => {
+      if (result.status !== "failed" || !usageLimited) return result;
+      const resetsAt = stoppedUntil(limitOf(rateLimits ?? {}, account)?.windows ?? [], Date.now());
+      return { ...result, limit: resetsAt !== undefined ? { resetsAt } : {} };
+    };
+
+    const finish = (ended: TurnResult): void => {
       if (turnResult !== undefined) return;
+      const result = withLimit(ended);
       turnResult = result;
       // A server is kept only past a turn that went as it should, so a sign-in or a fix made in between reaches the
       // next turn on a server launched again.
@@ -926,6 +947,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
           const error = rec(params.error);
           const message = str(error?.message) ?? "";
           lastError = message;
+          if (error?.codexErrorInfo === USAGE_LIMIT_CODE && params.willRetry !== true) usageLimited = true;
           words = failureWords(`${message} ${str(error?.additionalDetails) ?? ""}`, deps.login, deps.keyEnv) ?? words;
           if (RECONNECTING.test(message)) reconnecting();
           break;
@@ -935,6 +957,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
           const id = str(turn?.id);
           if (turnId !== undefined && id !== undefined && id !== turnId) break;
           const error = str(rec(turn?.error)?.message);
+          if (rec(turn?.error)?.codexErrorInfo === USAGE_LIMIT_CODE) usageLimited = true;
           leadEnd = { status: str(turn?.status) ?? "failed", ...(error !== undefined ? { error } : {}) };
           settleLead();
           break;
@@ -999,7 +1022,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
       // A subagent lives in this process, so it is over too, whatever its thread last said.
       for (const [task, c] of children) if (c.state === "running") endChild(task, interruptRequested ? "stopped" : "failed");
       if (turnResult === undefined && leadEnd !== undefined) {
-        turnResult = leadResult(leadEnd);
+        turnResult = withLimit(leadResult(leadEnd));
         emit({ type: "turn.done", sessionId: threadId, result: turnResult });
       }
       const sawResult = turnResult !== undefined;
@@ -1008,9 +1031,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
         const died = `codex exited with code ${String(exitCode)} before its turn ended${reason === undefined ? "" : `: ${reason}`}`;
         turnResult = interruptRequested
           ? { status: "interrupted" }
-          : words !== undefined
-            ? { status: "failed", error: words.line, ...(words.cause !== undefined ? { refusal: words.cause } : {}) }
-            : { status: "failed", error: streamError ?? died };
+          : withLimit(words !== undefined ? { status: "failed", error: words.line, ...(words.cause !== undefined ? { refusal: words.cause } : {}) } : { status: "failed", error: streamError ?? died });
         emit({ type: "turn.done", sessionId: threadId, result: turnResult });
       }
       emit({ type: "session.end", sessionId: threadId, exitCode, sawResult });

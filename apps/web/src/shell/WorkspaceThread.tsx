@@ -7,16 +7,19 @@
 // prompt closes; a prompt another thread is stopped on, or one of a
 // subagent's, keeps its buttons in the timeline. Write a message instead, Esc,
 // or a letter typed outside the dock's own keys folds the prompt to one line
-// over the composer until the person opens it again.
+// over the composer until the person opens it again. A turn the agent's usage
+// limit stopped puts its one row over the composer until the turn goes on or
+// the thread moves on without it.
 import { useMemo, useState } from "react";
 import { ChatComposer } from "../components/chat/ChatComposer.js";
 import { ChatView } from "../components/chat/ChatView.js";
+import { LimitStrip } from "../components/chat/LimitStrip.js";
 import { answerPrompt, type AnswerPrompt } from "../components/chat/answerPrompt.js";
 import { PromptDock, PromptStrip } from "../components/chat/PromptDock.js";
 import { useTypeToWrite } from "../components/chat/composerTypeToFocus.js";
 import type { ChatThreadHandle } from "../components/chat/useChatThread.js";
 import { isPromptOpen, type PermissionPrompt } from "../adapt/index.js";
-import { useHarnessCatalog, useStore } from "../protocol/store.js";
+import { useHarnessCatalog, useStore, useThreadSessions } from "../protocol/store.js";
 import { requestComposerFocus } from "./shellRequests.js";
 
 /** The prompt the latest turn waits on, where this thread's own agent raised one and nobody has answered. */
@@ -64,6 +67,9 @@ function Slot({
   const catalog = useHarnessCatalog(thread.view.agent, workspaceId);
   const docked = prompt !== null && dockedPrompt(thread, writing) !== null;
   useTypeToWrite(workspaceId, docked, () => setWriting(prompt?.askId ?? null));
+  const api = useStore(s => s.api);
+  const latest = useThreadSessions(workspaceId, thread.threadKey).at(-1);
+  const limit = latest !== undefined && latest.status === "failed" ? latest.limit : undefined;
   if (prompt !== null && docked)
     return (
       <PromptDock
@@ -82,6 +88,15 @@ function Slot({
   return (
     <>
       {prompt === null ? null : <PromptStrip permission={prompt} onOpen={() => setWriting(null)} />}
+      {latest === undefined || limit === undefined ? null : (
+        <LimitStrip
+          agent={latest.harness}
+          limit={limit}
+          resumeAt={latest.resumeAt ?? null}
+          onResume={() => void api?.markThreads?.([thread.threadKey], { resumeAtReset: true })}
+          onCancel={() => void api?.markThreads?.([thread.threadKey], { resumeAtReset: false })}
+        />
+      )}
       <ChatComposer key={workspaceId} workspaceId={workspaceId} thread={thread} />
     </>
   );

@@ -39,7 +39,7 @@ export function turnsArea(ctx: RuntimeContext): TurnsArea {
     scopeDeviceId?: string;
     outcome: SessionStartOutcome;
     /** What this turn's own session.start row carries, for the road that still has to write it. */
-    opening: { prompt: string; requestId?: string; via?: "slate"; afterCut?: boolean; opensThread?: boolean; title?: string; attachments?: readonly AttachmentRecord[] };
+    opening: { prompt: string; requestId?: string; via?: "slate"; afterCut?: boolean; afterLimit?: number; opensThread?: boolean; title?: string; attachments?: readonly AttachmentRecord[] };
     /** The message the agent is handed and the effort it runs at, kept beside the run while the turn runs. */
     asked?: TurnAsked;
     /** The harness session this turn resumes, so the row it takes over keeps who opened the thread and with what. */
@@ -269,6 +269,7 @@ export function turnsArea(ctx: RuntimeContext): TurnsArea {
             ...(opening.requestId !== undefined ? { requestId: opening.requestId } : {}),
             ...(opening.via !== undefined ? { via: opening.via } : {}),
             ...(opening.afterCut === true ? { afterCut: true } : {}),
+            ...(opening.afterLimit !== undefined ? { afterLimit: opening.afterLimit } : {}),
             ...(opening.opensThread === true ? { opensThread: true } : {}),
             startedBy: view.startedBy,
             ...(opening.attachments !== undefined ? { attachments: [...opening.attachments] } : {}),
@@ -338,6 +339,8 @@ export function turnsArea(ctx: RuntimeContext): TurnsArea {
           // The cause rides the row too, since a refused turn did none of the work: what a thread is read as having
           // run is decided off the rows, and the result itself lives only in the transcript.
           if (result.refusal !== undefined) view.refusal = result.refusal;
+          // So does the usage limit that stopped it, which the thread offers to go on from at the reset.
+          if (result.limit !== undefined) view.limit = result.limit;
           // So does what the turn cost, added to what the row's earlier turns cost: a resumed turn takes over the
           // row it resumes, and a listing has to answer what a thread spent without reading anyone's transcript.
           if (result.costUsd !== undefined) view.costUsd = (view.costUsd ?? 0) + result.costUsd;
