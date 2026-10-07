@@ -20,11 +20,19 @@ wsp reads your computer once, builds a machine that has what it has (your agents
 
 ## Before you start
 
-- Node 22 or newer, on macOS or Linux.
+- macOS, or Linux on x64.
 - A [Solari](https://console.getsolari.com) account and API key. Solari provides the machines; they cost money while they run and nap on their own when idle.
 - A way for Claude Code to sign in: an Anthropic API key, or a Claude subscription you log in with on the machine during the first run. Codex signs in the same way.
 
 ## Install
+
+```sh
+curl --proto '=https' --tlsv1.2 -fsSL https://usewsp.com/install | sh
+```
+
+On a Mac this puts wsp.app in Applications and opens it; on Linux it puts the AppImage in `~/Applications`. Either way the `wsp` command lands in `~/.wsp/bin`, on PATH in a new terminal. Each download comes from this repo's releases and is checked against the sha256 GitHub publishes for it. `WSP_VERSION=1.2.3` installs that release; running it again upgrades in place.
+
+With Node 22 or newer, this installs the command line alone:
 
 ```sh
 npm i -g @wsp-labs/wsp

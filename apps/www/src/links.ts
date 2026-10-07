@@ -2,7 +2,7 @@
 import { RELEASES, REPO } from "../../../packages/protocol/src/bundles.mjs";
 
 export { RELEASES, REPO };
-export const INSTALL = "npm i -g @wsp-labs/wsp";
+export const INSTALL = "curl --proto '=https' --tlsv1.2 -fsSL https://usewsp.com/install | sh";
 export const DOCS = "https://wsp.apidocumentation.com";
 export const ISSUES = `${REPO}/issues`;
 export const README = `${REPO}#readme`;
