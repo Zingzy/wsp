@@ -149,7 +149,7 @@ describe("the door a computer you own dials", () => {
 });
 
 describe("the join line and the ssh hosts the app asks for", () => {
-  const view = { port: 4420, addresses: ["http://192.168.1.20:4420"], relay: "https://p_ab12cd34.singhi.me" };
+  const view = { port: 4420, addresses: ["http://192.168.1.20:4420"], relay: "https://p_ab12cd34.usewsp.com" };
   const at = Date.parse("2026-09-24T10:00:00.000Z");
 
   it("mints one code into every line the door and the relay answer on, and the code is the one a join spends", async () => {

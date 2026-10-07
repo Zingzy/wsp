@@ -150,6 +150,15 @@ describe("the queue", () => {
     expect(new Set(uuids).size).toBe(45);
   });
 
+  it("goes to PostHog's EU host where the build named no host, since the install id must stay in the EU", async () => {
+    const capture = fakeCapture();
+    const { client } = clientOn({ fetch: capture.fetch, host: undefined });
+    client.setOn(true);
+    recordN(client, 1);
+    await client.flush();
+    expect(capture.posts.map(p => p.url)).toEqual(["https://eu.i.posthog.com/batch/"]);
+  });
+
   it("posts on its own once twenty are queued, without waiting for the timer", async () => {
     const capture = fakeCapture();
     const { client } = clientOn({ fetch: capture.fetch });
