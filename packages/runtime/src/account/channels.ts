@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { join, relative } from "node:path";
 import { remoteHost } from "@wsp/catalog";
-import { type DaemonFrame, type DaemonResponse, type DaemonReachView, type ProjectRef, type ProjectView, type WorkspaceAgents, type PlaceSettings, branchUnreadRefusal, GitPushReply, GitStatusReply, GitStartOnReply, DETACHED_HEAD, childStartedLine, forkNeedsPushLine, pushedForChildLine, uncommittedStayed, agentsFrom, placeAtLimitLine, placeSpendLimit, spendCapRefusal, THIS_COMPUTER, isLocalWorkspace, kindWords, machineWord, noSuchProjectLine, absentComputer, HERE_PLACE_ID, placeBlocked, placeWatchesItselfLine, forkProcsUnreadLine, forkOpRefusedLine, placeServesDaemonLine, ownerRepoOf } from "@wsp/protocol";
+import { type DaemonFrame, type DaemonResponse, type DaemonReachView, type ProjectRef, type ProjectView, type WorkspaceAgents, type PlaceSettings, branchUnreadRefusal, GitPushReply, GitStatusReply, GitStartOnReply, DETACHED_HEAD, childStartedLine, forkNeedsPushLine, pushedForChildLine, uncommittedStayed, agentsFrom, placeAtLimitLine, placeSpendLimit, spendCapRefusal, THIS_COMPUTER, isLocalWorkspace, kindWords, machineWord, noSuchProjectLine, absentComputer, HERE_PLACE_ID, placeBlocked, placeWatchesItselfLine, forkProcsUnreadLine, forkOpRefusedLine, placeServesDaemonLine, ownerRepoOf, PROC_SCOPED_DAEMON_VERSION, MachineReadingReply, workspaceSample, DAEMON_SAMPLER_INTERVAL_MS, type HeldReading } from "@wsp/protocol";
 import { groupExists } from "../local-exec.js";
 import type { DaemonChannel } from "../daemon-channel.js";
 import type { MachineExecOptions } from "../machine-exec.js";
@@ -188,20 +188,26 @@ export function channelsArea(ctx: RuntimeContext): ChannelsArea {
   /** What a pty pushes, each naming the pty it is of; a computer answering for many workspaces pushes every
    * workspace's up the one link. */
   const PTY_EVENTS = ["pty.data", "pty.exit", "pty.mode"];
-  /** The two a pane opens every link with, and the two a workspace on a computer somebody owns has no answer of
-   * its own for: the ports and the load that computer's daemon reads are the whole computer's. */
-  const COMPUTER_WATCHES = ["ports.watch", "sys.watch"];
-  /** That computer's daemon watches, reads and signals any pid on it and names no workspace on its answers, and the
-   * one watch it holds is the link's, which the computer's own page shares. */
-  const COMPUTER_PROCS = ["proc.watch", "proc.unwatch", "proc.inspect", "proc.kill"];
+  /** What a process frame of a workspace's own watch is, named by the workspace on it. */
+  const PROC_EVENTS = ["proc.snapshot", "proc.changes"];
+  /** The watch a pane opens every link with that a workspace on a computer somebody owns has no answer of its own
+   * for: the ports that computer's daemon reads are the whole computer's. */
+  const COMPUTER_WATCHES = ["ports.watch"];
+  /** The process ops, which that computer's daemon answers for the workspace they name; one behind this host reads
+   * no workspace on them and would run them on the whole computer. */
+  const SCOPED_PROCS = ["proc.watch", "proc.unwatch", "proc.inspect", "proc.kill"];
   /** The whole of what a client's channel into a served workspace carries, for the reason DEVICE_OPS is a list: that
    * computer's daemon runs every other op on the computer itself, so a deny list would let an op added later reach it.
    * Each of these names the workspace it is for, and the daemon answers it inside that workspace. */
-  const WORKSPACE_FRAMES = ["pty.create", "pty.attach", "pty.detach", "pty.write", "pty.resize", "pty.kill", "pty.tab", "pty.list", "fs.list", "fs.files", "fs.read", "fs.write", "fs.search", "git.status", "git.diff", "git.snapshot", "git.range", "git.turn", "git.push", "git.pr", "git.prList", "ping"];
+  const WORKSPACE_FRAMES = ["pty.create", "pty.attach", "pty.detach", "pty.write", "pty.resize", "pty.kill", "pty.tab", "pty.list", "fs.list", "fs.files", "fs.read", "fs.write", "fs.search", "git.status", "git.diff", "git.snapshot", "git.range", "git.turn", "git.push", "git.pr", "git.prList", ...SCOPED_PROCS, "ping"];
   /** And the host's own guest road, which answers the sessions that computer relays by the id it gave them, and
    * carries an editor's ssh to the server it starts inside the workspace. A client's channel carries neither: a
    * tunnel reaches any port inside the workspace, and only this host's relay listens for one. */
   const GUEST_ROAD_FRAMES = [...WORKSPACE_FRAMES, "guest.watch", "guest.reply", "guest.close", "ssh.start", "tunnel.open", "tunnel.write", "tunnel.close"];
+
+  /** How many channels watch each served workspace's processes, by place and machine: the computer's daemon keeps
+   * one watch per workspace on the link every channel there rides, so the last pane to stop is the one that ends it. */
+  const procWatchers = new Map<string, number>();
 
   /** The ptys each local workspace's own channels opened, by pty, with the pid each leads. Every local workspace
    * dials the one daemon this host runs and its panes list every pty there, so the one a workspace opened is the
@@ -317,7 +323,47 @@ export function channelsArea(ctx: RuntimeContext): ChannelsArea {
     if (placeId === undefined || placeDoor === undefined) throw new Error(placeServesDaemonLine(entry.record.name, computerOf(entry)));
     const door = placeDoor;
     const version = (await door.reportOf(placeId))?.daemonVersion;
+    // A daemon before the one that scopes them reads no workspace on the proc ops and keeps no disk on a reading, so
+    // it is asked for neither and the pane says why.
+    const behind = version === undefined || version < PROC_SCOPED_DAEMON_VERSION;
     const machineId = entry.machine.id;
+    const watchKey = `${placeId}/${machineId}`;
+    /** Whether this channel holds one of the workspace's proc watchers. */
+    let watchingProcs = false;
+    /** Ends the readings this channel polls for the Workspace tab, once it has asked for them. */
+    let stopReadings: (() => void) | undefined;
+    const counted = (by: number): number => {
+      const now = (procWatchers.get(watchKey) ?? 0) + by;
+      if (now > 0) procWatchers.set(watchKey, now);
+      else procWatchers.delete(watchKey);
+      return now;
+    };
+    /** The Workspace tab's samples off the workspace's own cgroup, read every interval the computer's own are. */
+    const watchReadings = (): void => {
+      let before: HeldReading | undefined;
+      let stopped = false;
+      const tick = (): void => {
+        void served({ op: "machine.metrics" })
+          .then(reply => {
+            const read = MachineReadingReply.safeParse(reply);
+            if (stopped || reply["ok"] !== true || !read.success) return;
+            const now = { at: clock.now(), reading: read.data.reading };
+            const sample = workspaceSample(before, now);
+            before = now;
+            if (sample !== undefined) onEvent(sample);
+          })
+          .catch(() => undefined)
+          .finally(() => {
+            if (!stopped) cancel = clock.schedule(tick, DAEMON_SAMPLER_INTERVAL_MS, { unref: true });
+          });
+      };
+      let cancel = (): void => {};
+      stopReadings = () => {
+        stopped = true;
+        cancel();
+      };
+      tick();
+    };
     const checkout = checkoutOf(entry.record);
     /** The ptys on that computer this channel named, so an event of a pty another pane opened is not pushed at
      * this one; of those, the ones it is listening to, which it takes its listeners off when it goes. */
@@ -325,7 +371,7 @@ export function channelsArea(ctx: RuntimeContext): ChannelsArea {
     const attached = new Set<string>();
     const link = door.channel(placeId, event => {
       const type = String(event["type"]);
-      if (GUEST_EVENTS.includes(type)) {
+      if (GUEST_EVENTS.includes(type) || PROC_EVENTS.includes(type)) {
         if (event["machineId"] === machineId) onEvent(event);
         return;
       }
@@ -352,18 +398,47 @@ export function channelsArea(ctx: RuntimeContext): ChannelsArea {
       }
       if (op === "pty.detach" || op === "pty.kill") attached.delete(ptyId);
     };
+    /** A watch the computer refused or never answered holds nothing there, so it is not counted. */
+    const undoWatch = (): void => {
+      watchingProcs = false;
+      counted(-1);
+    };
+    // The link going takes the computer's watch with its socket, and nothing polls a computer that is not there.
+    void link.closed.then(() => {
+      stopReadings?.();
+      if (watchingProcs) undoWatch();
+    });
     onEvent({ type: "daemon.hello", root: checkout, ...(version !== undefined ? { version } : {}) });
     return {
       async send(frame) {
         const op = frame.op;
-        if (COMPUTER_WATCHES.includes(op)) return { id: null, ok: false, code: "unsupported", error: placeWatchesItselfLine(door.nameOf(placeId)) };
-        if (COMPUTER_PROCS.includes(op)) return { id: null, ok: false, code: "unsupported", error: forkProcsUnreadLine(entry.record.name, door.nameOf(placeId)) };
+        if (COMPUTER_WATCHES.includes(op) || (behind && op === "sys.watch")) return { id: null, ok: false, code: "unsupported", error: placeWatchesItselfLine(door.nameOf(placeId)) };
+        if (behind && SCOPED_PROCS.includes(op)) return { id: null, ok: false, code: "unsupported", error: forkProcsUnreadLine(entry.record.name, door.nameOf(placeId)) };
+        if (op === "sys.watch") {
+          if (stopReadings === undefined) watchReadings();
+          return { id: null, ok: true };
+        }
         if (!carries.includes(op)) return { id: null, ok: false, code: "unsupported", error: forkOpRefusedLine(op, entry.record.name, door.nameOf(placeId)) };
+        if (op === "proc.unwatch") {
+          if (!watchingProcs) return { id: null, ok: true };
+          watchingProcs = false;
+          // Another pane on this workspace still reads the stream the computer keeps for it.
+          if (counted(-1) > 0) return { id: null, ok: true };
+        }
+        const opensWatch = op === "proc.watch" && !watchingProcs;
+        if (opensWatch) {
+          watchingProcs = true;
+          counted(1);
+        }
         // The pane's first tab names no folder, and the daemon answering for a workspace has no working directory
         // inside it: without one the shell would open in the home of the computer, which is bound in.
         const asked = op === "pty.create" && frame["cwd"] === undefined ? { ...frame, cwd: checkout } : frame;
-        const reply = await served(asked);
+        const reply = await served(asked).catch((e: unknown) => {
+          if (opensWatch) undoWatch();
+          throw e;
+        });
         if (reply["ok"] === true) held(op, asked, reply);
+        else if (opensWatch) undoWatch();
         return { id: null, ...reply } as DaemonResponse;
       },
       close: () => {
@@ -371,6 +446,11 @@ export function channelsArea(ctx: RuntimeContext): ChannelsArea {
         // is done with; the socket's own close would be the link's, and that is the whole computer going.
         for (const ptyId of attached) void served({ op: "pty.detach", ptyId }).catch(() => undefined);
         attached.clear();
+        stopReadings?.();
+        if (watchingProcs) {
+          watchingProcs = false;
+          if (counted(-1) === 0) void served({ op: "proc.unwatch" }).catch(() => undefined);
+        }
         link.close();
       },
       closed: link.closed,

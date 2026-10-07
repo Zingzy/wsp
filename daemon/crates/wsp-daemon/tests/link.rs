@@ -342,10 +342,11 @@ async fn settled(ms: u64) {
     tokio::time::sleep(Duration::from_millis(ms)).await;
 }
 
-/// Asks one op on the held socket and reads frames until its reply lands; events seen on the way are kept.
+/// Asks one op on the held socket and reads frames until its reply lands; events seen on the way are kept. The
+/// frame names the computer's own road, as every frame the host sends on a link that names no workspace does.
 async fn ask(held: &mut (Held, Seal), id: u64, op: &str, events: &mut Vec<Value>) -> Value {
     let (ws, seal) = held;
-    let out = seal.seal(&json!({"id": id, "op": op}).to_string());
+    let out = seal.seal(&json!({"id": id, "op": op, "road": wsp_frames::numbers::COMPUTER_ROAD}).to_string());
     ws.send(Message::Binary(out.into())).await.unwrap();
     loop {
         let msg = tokio::time::timeout(Duration::from_secs(5), ws.next()).await.expect("an answer").unwrap().unwrap();

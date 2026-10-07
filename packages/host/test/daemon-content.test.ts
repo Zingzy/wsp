@@ -9,7 +9,7 @@ import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { DAEMON_CONTENT_SHA, DAEMON_ROOTS_PATH, DAEMON_VERSION, workScoreLine } from "@wsp/protocol";
+import { DAEMON_CONTENT_SHA, DAEMON_ROOTS_PATH, DAEMON_VERSION, PROC_SCOPED_DAEMON_VERSION, workScoreLine } from "@wsp/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { CLOUD_PLACE, daemonUnit, deployScript, openShimScript } from "../src/doctor.js";
 import { GUEST_DAEMON_TARGETS } from "../src/daemon-binary.js";
@@ -53,6 +53,17 @@ describe("the daemon version names the content the host deploys", () => {
     else expect(sha, ask).toBe(DAEMON_CONTENT_SHA);
     // The version is the count of recorded contents, so the current one is a sha and not a placeholder.
     expect(DAEMON_CONTENT_SHA).toMatch(/^[0-9a-f]{64}$/);
+  });
+});
+
+describe("a daemon version named before the cut writes it", () => {
+  it("holds the first daemon that scopes the process ops to the version whose note the landing's cut wrote for it", () => {
+    const record = readFileSync(fileURLToPath(new URL("../../protocol/src/wire/daemon-version.ts", import.meta.url)), "utf8");
+    const written = record.includes(`Version ${PROC_SCOPED_DAEMON_VERSION}: every frame on a computer's link names its road`);
+    const ask = `PROC_SCOPED_DAEMON_VERSION is ${PROC_SCOPED_DAEMON_VERSION}, and the record's note under that version is not the one that scoped the process ops: set it to the version the cut wrote`;
+    // A branch still holds the note in daemon/version-note.md; once the cut has written it, the number must name it.
+    if (!written && !contentGateEnforced()) console.log(`::notice::${ask}`);
+    else expect(written, ask).toBe(true);
   });
 });
 

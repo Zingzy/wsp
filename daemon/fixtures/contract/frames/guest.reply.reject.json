@@ -9,5 +9,14 @@
     "op": "guest.reply",
     "session": 1,
     "message": {}
+  },
+  {
+    "id": 9,
+    "op": "guest.reply",
+    "session": "g1",
+    "message": {
+      "exit": 0
+    },
+    "machineId": 7
   }
 ]

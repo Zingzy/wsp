@@ -390,6 +390,9 @@ fn rendered_words() -> BTreeMap<&'static str, String> {
     m.insert("portScopeRefusal", words::port_scope_refusal("{port}"));
     m.insert("foldersOutside", words::folders_outside("{dir}", "{roots}"));
     m.insert("notOnThisRoad", words::NOT_ON_THIS_ROAD.to_owned());
+    m.insert("roadUnnamed", words::ROAD_UNNAMED.to_owned());
+    m.insert("procOutsideWorkspace", words::proc_outside_workspace("{pid}"));
+    m.insert("pidfdMissing", words::PIDFD_MISSING.to_owned());
     m.insert("notOnThisKind", words::NOT_ON_THIS_KIND.to_owned());
     m.insert("noImagesHere", words::NO_IMAGES_HERE.to_owned());
     m.insert("guestNotWatcher", words::GUEST_NOT_WATCHER.to_owned());
@@ -475,6 +478,7 @@ fn rendered_numbers() -> BTreeMap<&'static str, Value> {
     m.insert("pidMax", Value::from(numbers::PID_MAX));
     m.insert("openBodyMax", Value::from(numbers::OPEN_BODY_CAP));
     m.insert("daemonDefaultHost", Value::from(numbers::DEFAULT_HOST));
+    m.insert("computerRoad", Value::from(numbers::COMPUTER_ROAD));
     m.insert("daemonDefaultPort", Value::from(numbers::DEFAULT_PORT));
     m.insert("daemonSamplerIntervalMs", Value::from(numbers::SAMPLER_INTERVAL_MS));
     m.insert("guestWspHome", Value::from(numbers::GUEST_WSP_HOME));

@@ -156,6 +156,8 @@ export interface ForkingPlace {
   daemonAnswersAfter: number;
   /** Ops this computer takes and never answers, so a test can close the socket with a frame in flight on it. */
   swallow: Set<string>;
+  /** What the next machine.metrics answers for a workspace's reading; none until a test sets one. */
+  reading?: Record<string, unknown>;
   /** One event up the link, as this computer's daemon pushes one for a workspace on it. */
   push(event: Record<string, unknown>): void;
   /** Holds every resume frame until it is called, for a wake a test wants in flight. */
@@ -294,7 +296,7 @@ export function forks(
       case "machine.facts":
         return say({ facts: { os: "Ubuntu 24.04", uptimeMs: 1000, folder: "/root" } });
       case "machine.metrics":
-        return say({});
+        return say(seen.reading === undefined ? {} : { reading: seen.reading });
       case "machine.daemonAnswers":
         return say({ answers: (seen.asked[op] ?? 0) >= seen.daemonAnswersAfter });
       case "machine.previewUrl":
@@ -356,8 +358,10 @@ export function forks(
       case "proc.watch":
       case "proc.unwatch":
       case "proc.kill":
+        seen.frames.push(frame);
         return say({});
       case "proc.inspect":
+        seen.frames.push(frame);
         return say({ pid: frame["pid"] });
       case "ping":
       case "fs.list":

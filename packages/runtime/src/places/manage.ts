@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { randomBytes } from "node:crypto";
 import {
+  COMPUTER_ROAD,
   HERE_PLACE_ID,
   NO_PLACE_INSTALLER,
   NO_RECIPE,
@@ -292,7 +293,7 @@ export function manageDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, 
         // The link's own heartbeat op: the cheapest frame that proves the computer at the other end is still
         // answering, rather than that this host is still holding a socket to it.
         try {
-          await bounded(link.request("ping"), dialWaitMs, `ping on ${held.name}`);
+          await bounded(link.request("ping", { road: COMPUTER_ROAD }), dialWaitMs, `ping on ${held.name}`);
           dialled = { at: stamp, answered: true, roundTripMs: took() };
         } catch (e) {
           dialled = { at: stamp, answered: false, said: e instanceof Error ? e.message : String(e) };
@@ -337,6 +338,7 @@ export function manageDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, 
       let answer: Record<string, unknown>;
       try {
         answer = await held.reach.request("exec", {
+          road: COMPUTER_ROAD,
           cmd,
           ...(execOpts.timeoutMs !== undefined ? { timeoutMs: execOpts.timeoutMs } : {}),
           ...(execOpts.stdin !== undefined ? { stdin: Buffer.from(execOpts.stdin).toString("base64") } : {}),
@@ -536,7 +538,7 @@ export function manageDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, 
             // Before the folder holding the list goes with the leave: the servers wsp merged into the agents' own
             // files there are keys inside files that are theirs, which the daemon knows no format to take out.
             const took = await unmergedOver(placeId, held);
-            const answer = await reach.request("place.leave");
+            const answer = await reach.request("place.leave", { road: COMPUTER_ROAD });
             swept = [...took, ...(Array.isArray(answer["swept"]) ? (answer["swept"] as unknown[]).map(String) : [])];
             if (loginRoad !== undefined) note = placeSweptOverLinkLine(held.name, loginRoad.at, loginRoad.said);
           } catch (e) {

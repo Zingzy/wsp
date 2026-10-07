@@ -8,7 +8,7 @@
 // those are one exec frame each.
 
 import { createServer, type Server, type Socket } from "node:net";
-import { LOOPBACK, type DaemonEvent } from "@wsp/protocol";
+import { COMPUTER_ROAD, LOOPBACK, type DaemonEvent } from "@wsp/protocol";
 import type { DaemonReach } from "./reach.js";
 import { plumbTunnel, tunnelFrame } from "./tunnel.js";
 
@@ -27,7 +27,7 @@ export function openPlaceForward(reach: DaemonReach, daemonPort: number): Promis
   let seq = 0;
   let closed = false;
   const server: Server = createServer(socket =>
-    plumbTunnel((op, params) => reach.request(op, params), socket, { port: daemonPort, conns, tunnelId: `pl${++seq}` }),
+    plumbTunnel((op, params) => reach.request(op, { ...params, road: COMPUTER_ROAD }), socket, { port: daemonPort, conns, tunnelId: `pl${++seq}` }),
   );
   return new Promise((done, fail) => {
     server.once("error", fail);

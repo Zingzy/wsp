@@ -156,14 +156,38 @@ pub enum DaemonOp {
     /// daemon kept while it ran, whether or not anybody watched.
     #[serde(rename = "sys.history", rename_all = "camelCase")]
     SysHistory { from: i64, to: i64, step_ms: u64 },
-    #[serde(rename = "proc.watch")]
-    ProcWatch,
-    #[serde(rename = "proc.unwatch")]
-    ProcUnwatch,
-    #[serde(rename = "proc.inspect")]
-    ProcInspect { pid: NonZeroU32 },
-    #[serde(rename = "proc.kill")]
-    ProcKill { pid: NonZeroU32, signal: ProcSignal },
+    /// With a machine id, the processes of that workspace alone: the pids under its cgroup, on a daemon that runs
+    /// workspaces, each frame of the stream naming it. Without one, every process on this daemon's own machine. A
+    /// socket keeps one watch per workspace it names and one of its own.
+    #[serde(rename = "proc.watch", rename_all = "camelCase")]
+    ProcWatch {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        machine_id: Option<String>,
+    },
+    /// Ends the watch this socket holds for the workspace named, or its own without one.
+    #[serde(rename = "proc.unwatch", rename_all = "camelCase")]
+    ProcUnwatch {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        machine_id: Option<String>,
+    },
+    /// With a machine id, a pid outside that workspace's cgroup is refused, as on proc.kill.
+    #[serde(rename = "proc.inspect", rename_all = "camelCase")]
+    ProcInspect {
+        pid: NonZeroU32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        machine_id: Option<String>,
+    },
+    #[serde(rename = "proc.kill", rename_all = "camelCase")]
+    ProcKill {
+        pid: NonZeroU32,
+        signal: ProcSignal,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        machine_id: Option<String>,
+    },
     #[serde(rename = "ping")]
     Ping,
     #[serde(rename = "fs.list", rename_all = "camelCase")]
@@ -716,9 +740,22 @@ pub enum DaemonOp {
         machine_id: Option<String>,
     },
     #[serde(rename = "tunnel.write", rename_all = "camelCase")]
-    TunnelWrite { tunnel_id: String, data: String },
+    TunnelWrite {
+        tunnel_id: String,
+        data: String,
+        /// The workspace whose road this frame is on; it must be the one the tunnel was opened for.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        machine_id: Option<String>,
+    },
     #[serde(rename = "tunnel.close", rename_all = "camelCase")]
-    TunnelClose { tunnel_id: String },
+    TunnelClose {
+        tunnel_id: String,
+        /// The workspace whose road this frame is on; it must be the one the tunnel was opened for.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        machine_id: Option<String>,
+    },
     #[serde(rename = "exec", rename_all = "camelCase")]
     Exec {
         #[serde(deserialize_with = "bounded::<_, 0, { crate::numbers::EXEC_BODY_MAX }>")]
@@ -757,18 +794,26 @@ pub enum DaemonOp {
     },
     #[serde(rename = "guest.watch")]
     GuestWatch,
-    #[serde(rename = "guest.reply")]
+    #[serde(rename = "guest.reply", rename_all = "camelCase")]
     GuestReply {
         session: String,
         #[ts(type = "unknown")]
         message: serde_json::Value,
+        /// The workspace whose road this frame is on; it must be the one the session was opened inside.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        machine_id: Option<String>,
     },
-    #[serde(rename = "guest.close")]
+    #[serde(rename = "guest.close", rename_all = "camelCase")]
     GuestClose {
         session: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[ts(optional)]
         error: Option<String>,
+        /// The workspace whose road this frame is on, as on guest.reply.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        machine_id: Option<String>,
     },
     /// The daemon this host deploys, in parts under one upload id, and the restart the last part ends in. The other
     /// link op: a binary travels as bytes and never as a command line.
@@ -876,3 +921,67 @@ pub const DAEMON_OPS: [&str; 72] = [
 /// The five of those that belong to the road a client of this machine dials in on: a guest process's two and the
 /// host's three on the socket it holds. A daemon that dialled outward to its host serves none of them.
 pub const GUEST_OPS: [&str; 5] = ["guest.open", "guest.send", "guest.watch", "guest.reply", "guest.close"];
+
+/// What a frame naming one workspace may ask on the link of a computer that runs workspaces: every op the daemon
+/// answers inside the workspace it names, and the few that touch nothing of the computer under it, which are ping, a
+/// tunnel's bytes on the tunnel this socket opened, and the host's three guest ops, which answer sessions by the id
+/// this daemon gave them. An allow list, so an op added later is refused on that road until it is put here.
+pub const FORK_OPS: [&str; 57] = [
+    "pty.create",
+    "pty.attach",
+    "pty.detach",
+    "pty.write",
+    "pty.resize",
+    "pty.kill",
+    "pty.tab",
+    "pty.list",
+    "fs.list",
+    "fs.files",
+    "fs.read",
+    "fs.write",
+    "fs.search",
+    "git.status",
+    "git.diff",
+    "git.snapshot",
+    "git.range",
+    "git.turn",
+    "git.push",
+    "git.discard",
+    "git.commit",
+    "git.pr",
+    "git.prRead",
+    "git.prView",
+    "git.runLog",
+    "git.prMerge",
+    "git.issueRead",
+    "git.prCheckout",
+    "git.prDiff",
+    "git.prReply",
+    "git.prResolve",
+    "git.prReact",
+    "git.prReview",
+    "git.repoRead",
+    "git.update",
+    "git.startOn",
+    "git.mergeIn",
+    "git.prList",
+    "git.checkpoint",
+    "git.restore",
+    "git.checkpointDrop",
+    "git.worktrees",
+    "git.branches",
+    "git.switchNew",
+    "git.fetchBranch",
+    "proc.watch",
+    "proc.unwatch",
+    "proc.inspect",
+    "proc.kill",
+    "tunnel.open",
+    "ssh.start",
+    "ping",
+    "tunnel.write",
+    "tunnel.close",
+    "guest.watch",
+    "guest.reply",
+    "guest.close",
+];

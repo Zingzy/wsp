@@ -2,7 +2,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { hostname } from "node:os";
-import { heldPlaceScript, machineLacksLine, machineNeverAnswered, PLACE_LEAVE_VERB, PLACE_LEAVE_LINE, parsePlaceFile, PlaceAddStep, lastLine, readJoinToken, type PlaceBack, placeDaemonPaths, shellQuote, shellLine, placeNoChipLine, MACHINE_PUT_PART_BYTES, backUrl, hostKeyKeptNote, hostKeyMatches, hostKeyMismatchRefusal, hostKeyUnconfirmedRefusal, PLACE_HOST_KEY_KIND, hostKeyUnscannableRefusal, KNOWN_HOSTS, PLACE_ROOT_SHELLS, placeRootShellRefusal, isLoopback, joinAddressOf } from "@wsp/protocol";
+import { COMPUTER_ROAD, heldPlaceScript, machineLacksLine, machineNeverAnswered, PLACE_LEAVE_VERB, PLACE_LEAVE_LINE, parsePlaceFile, PlaceAddStep, lastLine, readJoinToken, type PlaceBack, placeDaemonPaths, shellQuote, shellLine, placeNoChipLine, MACHINE_PUT_PART_BYTES, backUrl, hostKeyKeptNote, hostKeyMatches, hostKeyMismatchRefusal, hostKeyUnconfirmedRefusal, PLACE_HOST_KEY_KIND, hostKeyUnscannableRefusal, KNOWN_HOSTS, PLACE_ROOT_SHELLS, placeRootShellRefusal, isLoopback, joinAddressOf } from "@wsp/protocol";
 import { GITHUB_TOKEN_ENV, MissingKnownHostsError, PlaceMachine, runChild, SshBackend, SSH_DIAL_MS, SSH_LINE_CAP, clientWords, knownHostKey, landBytes, parseSshAddress, sshClient, sshDial, sshDialsThisComputer, sshLoginWord, sshMachineName, sshRefusalLine, sshWordReach, readSshSudo, trySshSudo, knownHostsWritten, type SshReach, type SshSudo, type SshTransport } from "@wsp/engine";
 import { PlaceAddTakenBackError, PlaceLoginRefusedError, type PlaceDialler, type PlaceInstaller, type PlaceLeaver, type PlaceLogReader, type PlaceStaging, type PlaceUpdateLanded, type PlaceUpdater, type PlaceWiring, type PlaceBackHolder } from "@wsp/runtime";
 import { BackCutError } from "../place-back.js";
@@ -367,6 +367,7 @@ export function placeUpdater(deps: { backend?: SshBackend; daemonDir?: string } 
       for (let seq = 0; seq < parts; seq++) {
         const part = bytes.subarray(seq * MACHINE_PUT_PART_BYTES, (seq + 1) * MACHINE_PUT_PART_BYTES);
         const answer = await req.link.request("place.update", {
+          road: COMPUTER_ROAD,
           uploadId,
           seq,
           last: seq === parts - 1,

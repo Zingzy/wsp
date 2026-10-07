@@ -14,6 +14,8 @@ use tokio::task::AbortHandle;
 use tokio::time::MissedTickBehavior;
 use wsp_frames::{words, DaemonEvent, Usage};
 
+use wsp_runtime::disk::disk_under;
+
 use crate::paths::OpError;
 use crate::{frame_text, Outbound, SharedLog};
 
@@ -97,13 +99,6 @@ pub(crate) trait SysSource: Send + Sync {
 /// A file read whose failure names the file, since the refusal a pane prints is this sentence.
 pub(crate) fn read_named(path: &Path) -> Result<String, String> {
     std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))
-}
-
-/// The filesystem under a folder as statfs reads it, in bytes.
-pub(crate) fn disk_under(path: &Path) -> Result<Usage, String> {
-    let fs = nix::sys::statfs::statfs(path).map_err(|e| format!("statfs {}: {e}", path.display()))?;
-    let bsize = u64::try_from(fs.block_size()).unwrap_or(0);
-    Ok(Usage { used: fs.blocks().saturating_sub(fs.blocks_free()) * bsize, total: fs.blocks() * bsize })
 }
 
 /// The guest's own readings, from /proc and a statfs: the module every machine wsp forks is served by.

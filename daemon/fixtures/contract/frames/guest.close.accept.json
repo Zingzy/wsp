@@ -9,5 +9,11 @@
     "op": "guest.close",
     "session": "g1",
     "error": "the host holds no such session"
+  },
+  {
+    "id": 10,
+    "op": "guest.close",
+    "session": "g1",
+    "machineId": "wsp-a"
   }
 ]

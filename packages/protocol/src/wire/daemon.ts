@@ -395,15 +395,20 @@ export const DaemonRequest = z.discriminatedUnion("op", [
    * cpu is a delta (at once where the sampler is already running), then a
    * proc.changes every five seconds naming the frame it follows. A socket
    * already watching that watches again is sent a whole snapshot next. The
-   * daemon reads /proc only while some socket watches. */
-  z.object({ id: reqId, op: z.literal("proc.watch") }),
-  z.object({ id: reqId, op: z.literal("proc.unwatch") }),
+   * daemon reads /proc only while some socket watches.
+   *
+   * machineId, on these four: the workspace whose processes alone are meant, on a daemon that runs workspaces. The
+   * stream lists the pids under that workspace's cgroup and every frame of it names the workspace, and an inspect or
+   * a kill of a pid outside it is refused with code forbidden. A socket keeps one watch per workspace it names and
+   * one of its own, and an unwatch ends the one it names. */
+  z.object({ id: reqId, op: z.literal("proc.watch"), machineId: z.string().optional() }),
+  z.object({ id: reqId, op: z.literal("proc.unwatch"), machineId: z.string().optional() }),
   /** One process in depth, replied as a ProcInspectReply; this is the only op
    * that scans /proc/net, and only for that pid's sockets. */
-  z.object({ id: reqId, op: z.literal("proc.inspect"), pid: z.number().int().positive() }),
+  z.object({ id: reqId, op: z.literal("proc.inspect"), pid: z.number().int().positive(), machineId: z.string().optional() }),
   /** Sends the signal. pid 1, the daemon and the daemon's parent are refused
    * with code forbidden; a pid that is gone answers not-found. */
-  z.object({ id: reqId, op: z.literal("proc.kill"), pid: z.number().int().positive(), signal: ProcSignal }),
+  z.object({ id: reqId, op: z.literal("proc.kill"), pid: z.number().int().positive(), signal: ProcSignal, machineId: z.string().optional() }),
   z.object({ id: reqId, op: z.literal("ping") }),
   /** Lists one directory's direct children, each request under its own entry
    * cap. Paths are relative to the daemon's home root (HOME unless started
@@ -649,8 +654,11 @@ export const DaemonRequest = z.discriminatedUnion("op", [
    * has no /usr/sbin/sshd. The server and everything its sessions started are ended once its last session has been
    * closed for SSH_IDLE_MS. */
   z.object({ id: reqId, op: z.literal("ssh.start"), authorizedKey: z.string().min(1).max(SSH_KEY_MAX), machineId: z.string().optional() }),
-  z.object({ id: reqId, op: z.literal("tunnel.write"), tunnelId: z.string(), data: z.string() }),
-  z.object({ id: reqId, op: z.literal("tunnel.close"), tunnelId: z.string() }),
+  /** machineId on these two, and on guest.reply and guest.close: the workspace whose road the frame is on, which must
+   * be the one the tunnel was opened for or the session opened inside, none for the daemon's own. Every road on a
+   * computer's link rides one socket, so another road's tunnel or session is refused with code forbidden. */
+  z.object({ id: reqId, op: z.literal("tunnel.write"), tunnelId: z.string(), data: z.string(), machineId: z.string().optional() }),
+  z.object({ id: reqId, op: z.literal("tunnel.close"), tunnelId: z.string(), machineId: z.string().optional() }),
   DaemonExecRequest,
   /** Sweeps wsp off this computer and answers what it took, then the agent exits: the one op whose handler belongs
    * to the link a place opened and not to the daemon's own switch. */
@@ -673,8 +681,8 @@ export const DaemonRequest = z.discriminatedUnion("op", [
   /** The host asks to be handed every guest session this daemon opens; the last socket to ask is where they go. */
   z.object({ id: reqId, op: z.literal("guest.watch") }),
   /** The host's answer on a session, and the host ending one; both are refused on a socket that never watched. */
-  z.object({ id: reqId, op: z.literal("guest.reply"), session: z.string(), message: z.unknown() }),
-  z.object({ id: reqId, op: z.literal("guest.close"), session: z.string(), error: z.string().optional() }),
+  z.object({ id: reqId, op: z.literal("guest.reply"), session: z.string(), message: z.unknown(), machineId: z.string().optional() }),
+  z.object({ id: reqId, op: z.literal("guest.close"), session: z.string(), error: z.string().optional(), machineId: z.string().optional() }),
   /** The daemon this host deploys, landed on the computer the link runs on and started in place of the one running
    * there. The parts arrive as machine.putBytes's do, in seq order under one upload id on one socket; the part
    * marked last is checked against sha256, moved over the binary the unit starts and answered, and then the agent

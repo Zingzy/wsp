@@ -253,7 +253,8 @@ pub(crate) struct Ctx {
     log: SharedLog,
     /// The two samplers, built on the first watch so a daemon nobody asks reads nothing; one each for the daemon.
     sys: Mutex<Option<Arc<sys::SysSampler>>>,
-    procs: Mutex<Option<Arc<proc::ProcSampler>>>,
+    /// The processes sampler of the machine itself under None, and one per workspace a watch named.
+    procs: Mutex<HashMap<Option<String>, Arc<proc::ProcSampler>>>,
     /// Told once a leave has been answered, which is what ends the daemon.
     pub(crate) stop: tokio::sync::Notify,
     /// The workspaces a place's daemon runs and answers the machine ops on its link with; none where no place file
@@ -330,7 +331,7 @@ impl Ctx {
             sshd,
             log: Arc::from(log),
             sys: Mutex::new(None),
-            procs: Mutex::new(None),
+            procs: Mutex::new(HashMap::new()),
             stop: tokio::sync::Notify::new(),
             #[cfg(target_os = "linux")]
             runtime,
@@ -432,13 +433,23 @@ impl Ctx {
         Ok(sampler)
     }
 
-    /// The processes sampler, or the same refusal.
-    pub(crate) fn proc_sampler(self: &Arc<Self>) -> Result<Arc<proc::ProcSampler>, OpError> {
+    /// The processes sampler, or the same refusal. With a workspace named, the sampler that reads this computer's
+    /// /proc for the pids under that workspace's cgroup alone, and the refusal for a workspace this daemon does not
+    /// run.
+    pub(crate) fn proc_sampler(self: &Arc<Self>, machine: Option<&str>) -> Result<Arc<proc::ProcSampler>, OpError> {
         let mut held = self.procs.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(sampler) = held.as_ref() {
+        let key = machine.map(str::to_owned);
+        if let Some(sampler) = held.get(&key) {
             return Ok(Arc::clone(sampler));
         }
         let kind = readings::readings_for(&self.options.kind, std::env::consts::OS)?;
+        let source: Arc<dyn proc::ProcSource> = match machine {
+            None => (kind.processes)(&self.readings_options()),
+            Some(machine) => {
+                let o = self.readings_options();
+                Arc::new(proc::ProcFsSource::new(o.proc_root, o.passwd_path, numbers::PROC_CAP).scoped(ops::pid_scope(self, machine)?))
+            }
+        };
         // An exited pty's pid can be reused by a stranger; only live shells carry the label. Weak, since the sampler
         // lives inside the context it reads.
         let ctx = Arc::downgrade(self);
@@ -447,15 +458,25 @@ impl Ctx {
         let interval = Duration::from_millis(self.options.proc_interval_ms.unwrap_or(numbers::PROC_INTERVAL_MS));
         let opts = proc::ProcSamplerOptions {
             self_pid: std::process::id(),
+            machine: key.clone(),
             ptys,
             first: interval.min(Duration::from_millis(numbers::SAMPLER_INTERVAL_MS)),
             interval,
             now: Arc::new(sys::now_ms),
             log: Arc::clone(&self.log),
         };
-        let sampler = proc::ProcSampler::new((kind.processes)(&self.readings_options()), opts);
-        *held = Some(Arc::clone(&sampler));
+        let sampler = proc::ProcSampler::new(source, opts);
+        held.insert(key, Arc::clone(&sampler));
         Ok(sampler)
+    }
+
+    /// A workspace that stopped holds no processes to read: its sampler stops and leaves, and a watch after a wake
+    /// starts a fresh one.
+    pub(crate) fn drop_proc_sampler(&self, machine: &str) {
+        let gone = self.procs.lock().unwrap_or_else(|e| e.into_inner()).remove(&Some(machine.to_owned()));
+        if let Some(sampler) = gone {
+            sampler.stop_all();
+        }
     }
 
     /// A number no other socket or listener in this daemon has.
@@ -678,6 +699,7 @@ impl wsp_runtime::ops::Watches for WorkspaceDoors {
     fn stopped(&self, id: &str) {
         if let Some(ctx) = self.0.upgrade() {
             ctx.close_workspace_door(id);
+            ctx.drop_proc_sampler(id);
         }
     }
 }
@@ -715,6 +737,29 @@ mod tests {
         std::os::unix::fs::symlink(&theirs, &planted).unwrap();
         let _ = owner_only(&planted);
         assert_eq!(std::fs::metadata(&theirs).unwrap().permissions().mode() & 0o777, 0o644);
+    }
+
+    #[test]
+    fn a_workspace_that_stops_takes_its_process_sampler_with_it() {
+        let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        runtime.block_on(async {
+            let home = tempfile::tempdir().unwrap();
+            std::fs::write(home.path().join("token"), "t\n").unwrap();
+            let mut options = Options::new(home.path().join("token"));
+            options.root = Some(home.path().to_path_buf());
+            options.roots_path = Some(home.path().join("roots"));
+            let ctx = Arc::new(Ctx::new(options, Box::new(|_| {}), 0).unwrap());
+            // A sampler built as the machine's own stands in for a workspace's: what this holds is the map and the clock.
+            let sampler = ctx.proc_sampler(None).unwrap();
+            ctx.procs.lock().unwrap().insert(Some("wsp-a".to_owned()), Arc::clone(&sampler));
+            let (tx, _rx) = mpsc::unbounded_channel();
+            sampler.subscribe(1, Outbound(tx));
+            assert!(sampler.running());
+            ctx.drop_proc_sampler("wsp-a");
+            assert!(!ctx.procs.lock().unwrap().contains_key(&Some("wsp-a".to_owned())));
+            assert!(!sampler.running(), "the sampler of a workspace that stopped kept reading");
+            assert!(ctx.procs.lock().unwrap().contains_key(&None), "the machine's own sampler went with the workspace's");
+        });
     }
 
     #[test]

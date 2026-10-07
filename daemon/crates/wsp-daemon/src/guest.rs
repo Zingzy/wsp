@@ -83,6 +83,14 @@ fn no_such_session(session: &str) -> OpError {
     OpError::coded(DaemonErrorCode::NotFound, format!("no such guest session: {session}"))
 }
 
+/// A session is answered on the road of the workspace it was opened inside, none for the daemon's own.
+fn on_its_road(held: &Session, machine: Option<&str>) -> Result<(), OpError> {
+    if held.machine.as_deref() == machine {
+        return Ok(());
+    }
+    Err(OpError::coded(DaemonErrorCode::Forbidden, words::NOT_ON_THIS_ROAD))
+}
+
 impl State {
     fn watching(&self) -> Option<&Outbound> {
         self.watchers.last().map(|(_, out)| out)
@@ -210,17 +218,21 @@ impl Guests {
         state.sessions.retain(|_, s| !s.ended);
     }
 
-    pub(crate) fn reply(&self, conn: &Conn, session: &str, message: Value) -> Result<(), OpError> {
+    /// The host's answer down a session, on the road of the workspace the session was opened inside and no other:
+    /// every road on a computer that runs workspaces rides the one socket that watches.
+    pub(crate) fn reply(&self, conn: &Conn, session: &str, message: Value, machine: Option<&str>) -> Result<(), OpError> {
         let state = lock(&self.state);
         Guests::watcher(&state, conn)?;
         let held = state.sessions.get(session).ok_or_else(|| no_such_session(session))?;
+        on_its_road(held, machine)?;
         held.out.send_event(&DaemonEvent::GuestMessage { session: session.to_owned(), message, machine_id: held.machine.clone() });
         Ok(())
     }
 
-    pub(crate) fn close(&self, conn: &Conn, session: &str, error: Option<String>) -> Result<(), OpError> {
+    pub(crate) fn close(&self, conn: &Conn, session: &str, error: Option<String>, machine: Option<&str>) -> Result<(), OpError> {
         let mut state = lock(&self.state);
         Guests::watcher(&state, conn)?;
+        on_its_road(state.sessions.get(session).ok_or_else(|| no_such_session(session))?, machine)?;
         let gone = state.sessions.remove(session).ok_or_else(|| no_such_session(session))?;
         drop(state);
         gone.out.send_event(&DaemonEvent::GuestClosed { session: session.to_owned(), error, machine_id: gone.machine });

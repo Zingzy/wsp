@@ -3,5 +3,11 @@
     "id": 1,
     "op": "tunnel.close",
     "tunnelId": "t1"
+  },
+  {
+    "id": 1,
+    "op": "tunnel.close",
+    "tunnelId": "t1",
+    "machineId": "wsp-a"
   }
 ]

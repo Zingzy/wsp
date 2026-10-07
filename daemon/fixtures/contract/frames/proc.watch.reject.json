@@ -1,5 +1,10 @@
 [
   {
     "op": "proc.watch"
+  },
+  {
+    "id": 1,
+    "op": "proc.watch",
+    "machineId": 7
   }
 ]

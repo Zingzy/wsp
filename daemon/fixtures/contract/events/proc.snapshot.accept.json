@@ -34,5 +34,14 @@
     "daemon": 42,
     "total": 3,
     "procs": []
+  },
+  {
+    "type": "proc.snapshot",
+    "at": 1757000000000,
+    "daemon": 42,
+    "total": 1,
+    "procs": [],
+    "seq": 3,
+    "machineId": "wsp-a"
   }
 ]

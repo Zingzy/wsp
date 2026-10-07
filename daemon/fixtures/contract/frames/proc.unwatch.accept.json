@@ -2,5 +2,10 @@
   {
     "id": 1,
     "op": "proc.unwatch"
+  },
+  {
+    "id": 1,
+    "op": "proc.unwatch",
+    "machineId": "wsp-a"
   }
 ]

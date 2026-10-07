@@ -5,6 +5,9 @@
 pub const DAEMON_VERSION: u32 = 132;
 
 pub const DEFAULT_HOST: &str = "0.0.0.0";
+/// The road a link frame names when it is for the computer itself, in its `road` field; a frame for one workspace
+/// names that workspace's machine id instead.
+pub const COMPUTER_ROAD: &str = "computer";
 pub const DEFAULT_PORT: u16 = 7070;
 /// Where the daemon inside a machine keeps everything of its own: its token, its inbox, its manifest, its open
 /// socket, its run and log folders and its roots file, every one of them under this folder by default. A

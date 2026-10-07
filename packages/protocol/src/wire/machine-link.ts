@@ -263,6 +263,9 @@ export const MachineReading = z.object({
   address: z.string().optional(),
   cgroup: z.string(),
   upper: z.string(),
+  /** The filesystem the upper sits on, which is the disk the workspace writes to and shares with the computer under
+   * it. Absent where it cannot be read, and from a daemon a version behind. */
+  disk: z.object({ used: z.number().int().nonnegative(), total: z.number().int().nonnegative() }).optional(),
 });
 export type MachineReading = z.infer<typeof MachineReading>;
 export const MachineReadingReply = z.object({ reading: MachineReading });
@@ -462,6 +465,28 @@ export const SysSample = z.object({
 });
 export type SysSample = z.infer<typeof SysSample>;
 
+/** One reading of a workspace's cgroup and when it was taken. */
+export interface HeldReading {
+  at: number;
+  reading: MachineReading;
+}
+
+/** The Workspace tab's sample for a workspace a computer runs, off two readings of its cgroup: memory against the cap
+ * it was given, the disk its upper sits on, cpu as the share of its cores it used between the two, and for load the
+ * cores it kept busy, the nearest figure a cgroup has to a load average. Undefined where a rate has nothing to run
+ * from (the first reading, a clock that did not move, a counter that went back at a wake) and for a reading missing
+ * a figure, which a workspace that is not running is. */
+export function workspaceSample(before: HeldReading | undefined, now: HeldReading): SysSample | undefined {
+  const { memBytes, memMb, cpuUsageUsec, disk } = now.reading;
+  const spent = before?.reading.cpuUsageUsec;
+  const elapsedUs = before === undefined ? 0 : (now.at - before.at) * 1000;
+  if (memBytes === undefined || memMb === undefined || cpuUsageUsec === undefined || disk === undefined) return undefined;
+  if (spent === undefined || elapsedUs <= 0 || cpuUsageUsec < spent) return undefined;
+  const busy = (cpuUsageUsec - spent) / elapsedUs;
+  const cores = now.reading.cpu !== undefined && now.reading.cpu > 0 ? now.reading.cpu : 1;
+  return { type: "sys.sample", cpu: (busy / cores) * 100, load1: busy, mem: { used: memBytes, total: memMb * 1024 * 1024 }, disk, at: now.at };
+}
+
 /** One step of a computer's kept readings: the mean cpu and load over it, the last memory and disk in it. */
 export const SysPoint = z.object({ at: z.number(), cpu: z.number(), load1: z.number(), mem: z.object({ used: z.number(), total: z.number() }), disk: z.object({ used: z.number(), total: z.number() }) });
 export type SysPoint = WireSysPoint;
@@ -494,6 +519,9 @@ export const ProcSnapshot = z.object({
   /** Counts the daemon's process frames, so the changes after this one name it as their base. A daemon a version
    * behind names none and sends no changes, so its snapshot is a whole list held with no gap to track. */
   seq: z.number().int().optional(),
+  /** The workspace the watch named, whose processes alone these are; absent on a watch of the machine itself. Every
+   * watch on a computer's link rides one socket, so this is what the host routes a workspace's stream by. */
+  machineId: z.string().optional(),
 });
 export type ProcSnapshot = z.infer<typeof ProcSnapshot>;
 
@@ -507,8 +535,13 @@ export const ProcChanges = z.object({
   gone: z.array(z.number().int()),
   seq: z.number().int(),
   base: z.number().int(),
+  machineId: z.string().optional(),
 });
 export type ProcChanges = z.infer<typeof ProcChanges>;
+
+/** A process frame of one workspace's own watch: it rides that workspace's computer's link beside the computer's
+ * own, and the computer's page lists the computer's alone. */
+export const workspaceProcFrame = (event: Record<string, unknown>): boolean => String(event["type"]).startsWith("proc.") && event["machineId"] !== undefined;
 
 /** The snapshot a proc.changes frame leaves, rows by pid as the daemon lists them; undefined where the frame does not
  * follow the snapshot held, which a client answers by watching again for a whole one. */
