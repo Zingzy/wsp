@@ -52,6 +52,8 @@ const START_WAIT: Duration = Duration::from_secs(5);
 const START_PORTS: usize = 3;
 /// How long a dial waits for the server's banner, which is what tells it from whatever else listens there.
 const BANNER_WAIT: Duration = Duration::from_secs(1);
+/// How long what an ended server wrote last is read for: a process it started can hold its stderr open long after.
+const SAID_WAIT: Duration = Duration::from_millis(100);
 
 /// The config, written whole since sshd takes the first occurrence of a keyword. `UsePAM yes` because sshd reads
 /// root as locked without it wherever root has no password (the Boat image) or no shadow entry at all (every fork
@@ -247,7 +249,7 @@ impl Servers {
                 if answers(&machine, port).await {
                     break None;
                 }
-                let ended = !alive_on(&machine, pid);
+                let ended = said.lock().unwrap_or_else(|e| e.into_inner()).ended.is_some();
                 if ended || Instant::now() >= deadline {
                     break Some(ended);
                 }
@@ -259,12 +261,11 @@ impl Servers {
             if ended && tried < START_PORTS {
                 continue;
             }
-            let last = said.lock().unwrap_or_else(|e| e.into_inner()).clone();
-            let last = if last.is_empty() { "it said nothing" } else { &last };
+            let why = said.lock().unwrap_or_else(|e| e.into_inner()).why();
             return Err(OpError::plain(if tried > 1 {
-                format!("the ssh server did not start on any of {tried} ports: {last}")
+                format!("the ssh server did not start on any of {tried} ports: {why}")
             } else {
-                format!("the ssh server did not start: {last}")
+                format!("the ssh server did not start: {why}")
             }));
         };
         self.lock().insert(machine.key(), Running { port, host_key: host_key.clone(), stop, sessions: 0, turn: 0 });
@@ -512,9 +513,35 @@ async fn dial(machine: &Machine<'_>, port: u16) -> io::Result<TcpStream> {
     }
 }
 
-/// The server started in the foreground, and what it last said on stderr, kept for a start that fails.
-async fn spawn(machine: &Machine<'_>, argv: &[String]) -> Result<(i32, Arc<Mutex<String>>), OpError> {
-    let said = Arc::new(Mutex::new(String::new()));
+/// What a server last said on stderr and how it ended, kept for a start that fails.
+#[derive(Default)]
+struct Said {
+    last: String,
+    ended: Option<String>,
+}
+
+impl Said {
+    fn why(&self) -> String {
+        let last = if self.last.is_empty() { "it said nothing" } else { &self.last };
+        match &self.ended {
+            Some(ended) => format!("{ended}: {last}"),
+            None => last.to_owned(),
+        }
+    }
+}
+
+fn ended_by(status: std::process::ExitStatus) -> String {
+    use std::os::unix::process::ExitStatusExt;
+    match (status.code(), status.signal()) {
+        (Some(code), _) => format!("it ended with exit code {code}"),
+        (None, Some(signal)) => format!("it was ended by signal {signal}"),
+        _ => "it ended".to_owned(),
+    }
+}
+
+/// The server started in the foreground, and what it says, kept for a start that fails.
+async fn spawn(machine: &Machine<'_>, argv: &[String]) -> Result<(i32, Arc<Mutex<Said>>), OpError> {
+    let said = Arc::new(Mutex::new(Said::default()));
     let (mut child, pid) = match machine {
         Machine::Here => {
             let mut cmd = tokio::process::Command::new(&argv[0]);
@@ -539,7 +566,7 @@ async fn spawn(machine: &Machine<'_>, argv: &[String]) -> Result<(i32, Arc<Mutex
     };
     let lines = Arc::clone(&said);
     let err = child.stderr.take();
-    tokio::spawn(async move {
+    let reading = tokio::spawn(async move {
         if let Some(mut err) = err {
             let mut buf = vec![0u8; 4096];
             while let Ok(n) = err.read(&mut buf).await {
@@ -548,19 +575,23 @@ async fn spawn(machine: &Machine<'_>, argv: &[String]) -> Result<(i32, Arc<Mutex
                 }
                 let text = String::from_utf8_lossy(&buf[..n]);
                 if let Some(line) = text.lines().map(str::trim).rfind(|l| !l.is_empty()) {
-                    *lines.lock().unwrap_or_else(|e| e.into_inner()) = line.to_owned();
+                    lines.lock().unwrap_or_else(|e| e.into_inner()).last = line.to_owned();
                 }
             }
         }
-        // Reaped here whenever it ends, so nothing is left a zombie of this daemon's.
-        let _ = child.wait().await;
+    });
+    let ended = Arc::clone(&said);
+    tokio::spawn(async move {
+        // Reaped the moment it ends rather than at its stderr's end, which a process it started can hold off: until
+        // then a server that is gone reads as one still starting.
+        let how = match child.wait().await {
+            Ok(status) => ended_by(status),
+            Err(e) => format!("it could not be waited for: {e}"),
+        };
+        let _ = tokio::time::timeout(SAID_WAIT, reading).await;
+        ended.lock().unwrap_or_else(|e| e.into_inner()).ended = Some(how);
     });
     Ok((pid, said))
-}
-
-fn alive_on(machine: &Machine<'_>, pid: i32) -> bool {
-    let _ = machine;
-    std::path::Path::new(&format!("/proc/{pid}")).exists() || nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid), None).is_ok()
 }
 
 /// Kills the server and everything under it, and waits for the cgroup to empty before taking it away.
@@ -674,10 +705,11 @@ pub(crate) mod tests {
         Programs { sshd, keygen, privsep: dir.join("privsep"), dir: Some(dir.join("files")), cgroup_root: dir.join("cgroup") }
     }
 
-    /// Whether the stand-in started last still runs. Its port is no witness: once the server lets it go, another
-    /// test's listener may be handed it.
+    /// Whether the stand-in started last still runs, a zombie nobody reaped counted. Its port is no witness: once the
+    /// server lets it go, another test's listener may be handed it.
     pub(crate) fn stand_in_runs(dir: &Path) -> bool {
-        alive_on(&Machine::Here, std::fs::read_to_string(dir.join("pid")).unwrap().trim().parse().unwrap())
+        let pid: i32 = std::fs::read_to_string(dir.join("pid")).unwrap().trim().parse().unwrap();
+        Path::new(&format!("/proc/{pid}")).exists() || nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid), None).is_ok()
     }
 
     fn servers(dir: &Path, idle: Duration) -> Arc<Servers> {
@@ -846,8 +878,67 @@ pub(crate) mod tests {
         std::fs::set_permissions(&programs.sshd, std::fs::Permissions::from_mode(0o755)).unwrap();
         let s = Arc::new(Servers::new(programs, Duration::from_secs(60), &dir.path().join("token")));
         let refused = s.start(Machine::Here, KEY).await.unwrap_err();
-        assert_eq!(refused.message, "the ssh server did not start on any of 3 ports: Cannot bind any address.");
+        assert_eq!(
+            refused.message,
+            "the ssh server did not start on any of 3 ports: it ended with exit code 255: Cannot bind any address."
+        );
         assert_eq!(std::fs::read_to_string(dir.path().join("tries")).unwrap().lines().count(), 3);
+        assert!(s.lock().is_empty());
+    }
+
+    /// Whether a process of that pid is there and has not been reaped: running, or a zombie its parent never waited
+    /// for, which /proc still lists and a signal of 0 still reaches.
+    fn listed(pid: i32) -> Option<char> {
+        let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+        stat.rsplit_once(") ").and_then(|(_, rest)| rest.chars().next())
+    }
+
+    /// The pids a stand-in wrote to a file, one a line.
+    fn pids_in(file: &Path) -> Vec<i32> {
+        std::fs::read_to_string(file).unwrap_or_default().lines().filter_map(|l| l.trim().parse().ok()).collect()
+    }
+
+    /// Kills every pid listed in its file when dropped, so what a stand-in left running goes whichever way the test
+    /// ends, an assert that panics included.
+    struct KillsListed(PathBuf);
+
+    impl Drop for KillsListed {
+        fn drop(&mut self) {
+            for pid in pids_in(&self.0) {
+                let _ = nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid), nix::sys::signal::Signal::SIGKILL);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn a_server_that_ends_while_a_child_of_its_holds_its_stderr_is_refused_at_once_naming_its_exit_and_last_line() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let programs = stand_ins(dir.path());
+        std::fs::write(
+            &programs.sshd,
+            format!(
+                "#!/bin/sh\necho $$ >> '{0}/pids'\necho 'Bad configuration option: Foo' >&2\nsleep 30 &\necho $! >> '{0}/kids'\nexit 1\n",
+                dir.path().display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&programs.sshd, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let s = Arc::new(Servers::new(programs, Duration::from_secs(60), &dir.path().join("token")));
+        let _kids = KillsListed(dir.path().join("kids"));
+        let began = Instant::now();
+        let started = s.start(Machine::Here, KEY).await;
+        let took = began.elapsed();
+        let pids = pids_in(&dir.path().join("pids"));
+        // Read while the children still hold stderr, which is when a server reaped only at its stderr's end is not.
+        let unreaped: Vec<(i32, char)> = pids.iter().filter_map(|&pid| listed(pid).map(|state| (pid, state))).collect();
+        assert_eq!(
+            started.unwrap_err().message,
+            "the ssh server did not start on any of 3 ports: it ended with exit code 1: Bad configuration option: Foo"
+        );
+        assert!(took < Duration::from_secs(2), "the refusal took {took:?}");
+        assert_eq!(pids.len(), 3);
+        assert!(unreaped.is_empty(), "servers left unreaped while their child held stderr: {unreaped:?}");
         assert!(s.lock().is_empty());
     }
 

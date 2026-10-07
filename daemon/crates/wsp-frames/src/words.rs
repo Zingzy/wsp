@@ -61,6 +61,14 @@ pub fn place_kept_for_link(path: impl std::fmt::Display) -> String {
     format!("nothing was removed at {path}: a folder on the way to it is a link")
 }
 
+/// Why one folder a leave would have taken is still there: something in it is nested deeper than wsp makes its own
+/// folders, which only a workspace writing in that home makes, and the leave goes no deeper on its small blocking
+/// stack. What lay above that depth is gone. Only this daemon says it: the host's own leave goes by path, with no
+/// such depth, and no client matches on it.
+pub fn place_kept_too_deep(path: impl std::fmt::Display) -> String {
+    format!("{path} stays: it holds folders nested deeper than wsp makes, which a leave does not go into; remove it by hand")
+}
+
 /// Why wsp's install folder is still there after a leave: the list in it of what the setup wrote outside the home
 /// still has lines, which only a leave cut short leaves, and the folder holds that list for a leave that finishes.
 /// Said on both roads a leave runs on, and pinned to one text by the contract fixture.
