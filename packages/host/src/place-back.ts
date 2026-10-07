@@ -4,16 +4,9 @@
 // host's door, made again whenever it ends for as long as it is held.
 
 import { randomInt } from "node:crypto";
-import { PLACE_FILE_MODE, backUrl, isLoopback, parsePlaceFile, placeDaemonPaths, placeFileText, shellQuote, type PlaceBack } from "@wsp/protocol";
+import { PLACE_FILE_MODE, backUrl, heldPlaceScript, isLoopback, parsePlaceFile, placeDaemonPaths, placeFileText, shellQuote, type PlaceBack } from "@wsp/protocol";
 import { MissingKnownHostsError, SSH_DIAL_MS, SSH_LINE_CAP, boxWord, carriedSshValues, holdBackForward, keyFingerprint, parseSshAddress, sshClient, type BackForward, type SshCarried, type SshReach, type SshSpawn, type SshTransport } from "@wsp/engine";
 import type { PlaceBackHolder, PlaceLogin } from "@wsp/runtime";
-
-/** How much of the box's place file is read: a real one is well under a kilobyte, and the box is the untrusted side. */
-const HELD_PLACE_READ_BYTES = 65_536;
-
-/** The place file on the box, read before anything of wsp's lands and before a forward's new port is written into
- * it: empty where it holds none. */
-export const heldPlaceScript = (home: string): string => `head -c ${HELD_PLACE_READ_BYTES} ${shellQuote(placeDaemonPaths(home).placeFile)} 2>/dev/null || true`;
 
 /** How long the child gets to stand the forward: the dial, the login and sshd's answer to the forward. */
 const BACK_UP_MS = 20_000;

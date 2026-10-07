@@ -19,7 +19,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { LATEST_PROTOCOL_VERSION, SUPPORTED_PROTOCOL_VERSIONS } from "@modelcontextprotocol/sdk/types.js";
 import { CATALOG, agentName } from "@wsp/catalog";
 import { SEAL_REFUSAL } from "@wsp/keys";
-import { CLOUD_ENV, cloudFromEnv, placeSetRefusal, configDirSignInLine, EXIT_CODES, HERE_PLACE_ID, HOST_CLOSED_LINE, HOST_KEY_ENV, HOST_STOPPING_CLOSE, HOST_STOPPING_LINE, NOT_DELIVERED_LINE, HOST_TOKEN_ENV, HOST_URL_ENV, KIND_CLASS, TURN_TOKEN_ENV, LAUNCHED_WITH, LOOPBACK, SKILL_PREVIEW_BYTES, WS_PATH, isLoopback, isUrl, isWildcard, servedHostname, wsUrlOf, hostNoKeyLine, jsonLine, NEWER_TURN_LINE, noMessagesLine, noReplyLine, NO_TERMINAL_CONFIG_LINE, refusalLine, scopedNoPairLine, commandWords, authRefusal, deviceAuthOldHostLine, noSuchPlaceRefusal, pairKeyRefusal, problemListsOf, SEAL_CLIENT, unclosedQuoteRefusal, validatorRefusal, PROVIDER_KEY_WORDS, RecipeFile, type PendingComputer, type PlaceSpend, type PlaceView, type ServerToolsAnswer } from "@wsp/protocol";
+import { CLOUD_ENV, cloudFromEnv, placeSetRefusal, placeRenameRefusal, placeSshOtherRefusal, usageRefusal, type RefusalHalves, configDirSignInLine, EXIT_CODES, HERE_PLACE_ID, HOST_CLOSED_LINE, HOST_KEY_ENV, HOST_STOPPING_CLOSE, HOST_STOPPING_LINE, NOT_DELIVERED_LINE, HOST_TOKEN_ENV, HOST_URL_ENV, KIND_CLASS, TURN_TOKEN_ENV, LAUNCHED_WITH, LOOPBACK, SKILL_PREVIEW_BYTES, WS_PATH, isLoopback, isUrl, isWildcard, servedHostname, wsUrlOf, hostNoKeyLine, jsonLine, NEWER_TURN_LINE, noMessagesLine, noReplyLine, NO_TERMINAL_CONFIG_LINE, refusalLine, scopedNoPairLine, commandWords, authRefusal, deviceAuthOldHostLine, noSuchPlaceRefusal, pairKeyRefusal, problemListsOf, SEAL_CLIENT, unclosedQuoteRefusal, validatorRefusal, PROVIDER_KEY_WORDS, RecipeFile, type PendingComputer, type PlaceSpend, type PlaceView, type ServerToolsAnswer } from "@wsp/protocol";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { hostExitedLine, noHostAnsweredLine, startingHostLine, upArgs } from "../src/host-start.js";
 import { hostLogPath, hostTokenPath, lockPathFor, POLL_MS, SERVICE_WAIT_MS, STARTED_BY_ENV } from "../src/host-lock.js";
@@ -431,11 +431,15 @@ const PLACE: PlaceView = {
   forks: { running: 1, room: 2 },
 };
 const CLOUD: PlaceView = { id: "place-solari", kind: "provider", name: "solari", default: true, rateUsdPerHour: 0.1 + 0.2 };
+/** A second computer the person added, holding the name a rename of the first asks for. */
+const SPOO: PlaceView = { id: "place-7", kind: "computer", name: "spoo", default: false, present: true };
 const SPEND: PlaceSpend = { place: "place-solari", todayUsd: 1.25, monthUsd: 30, rateUsdPerHour: 0.035 };
 
 const reply = (body: Record<string, unknown>): string => JSON.stringify({ id: 1, ok: true, ...body });
 
 const refused = (error: string, kind?: string): string => JSON.stringify({ id: 1, ok: false, error, ...(kind !== undefined ? { kind } : {}) });
+/** A usage refusal as the host sends one, its fix half beside the line it ends. */
+const refusedHalves = (said: RefusalHalves): string => JSON.stringify({ id: 1, ok: false, error: usageRefusal(said.happened, said.fix).message, kind: "usage", fix: said.fix });
 
 /** The calls recorded per tool, each a case name, the arguments and what the host answered each op with. */
 type Answered = Record<string, TurnCase[]>;
@@ -615,13 +619,18 @@ const ANSWERED: Answered = {
   computers_set: [
     { case: "threads set", arguments: { computer: "attic", threads: 2 }, replies: { "places.list": reply({ places: [PLACE, CLOUD] }), "places.set": reply({ place: { ...PLACE, cap: { threads: 2 }, capDefault: { threads: 6 }, settings: { threads: 2 }, running: 0 } }) } },
     { case: "reset by id", arguments: { computer: "place-9", reset: ["threads"] }, replies: { "places.list": reply({ places: [PLACE, CLOUD] }), "places.set": reply({ place: { ...PLACE, cap: { threads: 6 }, capDefault: { threads: 6 }, running: 1 } }) } },
-    { case: "a cloud's machines and spend", cloud: true, arguments: { computer: "solari", machines: 5, spend: 2.5, reset: ["threads"] }, replies: { "places.list": reply({ places: [PLACE, CLOUD] }), "places.set": refused(placeSetRefusal({ kind: "provider", name: "solari", takesForks: true }, { machines: 5, spendPerDayUsd: 2.5 }, ["threads"])!, "usage") } },
+    { case: "a cloud's machines and spend", cloud: true, arguments: { computer: "solari", machines: 5, spend: 2.5, reset: ["threads"] }, replies: { "places.list": reply({ places: [PLACE, CLOUD] }), "places.set": refused(placeSetRefusal({ id: "place-solari", kind: "provider", name: "solari", takesForks: true }, { machines: 5, spendPerDayUsd: 2.5 }, ["threads"])!, "usage") } },
     { case: "nap after and never", arguments: { computer: "attic", nap: 0 }, replies: { "places.list": reply({ places: [PLACE, CLOUD] }), "places.set": reply({ place: { ...PLACE, cap: { threads: 6 }, capDefault: { threads: 6 }, settings: { napMs: null }, napMs: null, running: 0 } }) } },
     { case: "nap after in minutes", arguments: { computer: "attic", nap: 45, threads: 3 }, replies: { "places.list": reply({ places: [PLACE, CLOUD] }), "places.set": reply({ place: { ...PLACE, cap: { threads: 3 }, capDefault: { threads: 6 }, settings: { threads: 3, napMs: 2_700_000 }, napMs: 2_700_000, running: 0 } }) } },
     { case: "no turn limit", arguments: { computer: "attic", turn_limit: 0 }, replies: { "places.list": reply({ places: [PLACE, CLOUD] }), "places.set": reply({ place: { ...PLACE, cap: { threads: 6 }, capDefault: { threads: 6 }, settings: { turnLimitMs: null }, turnLimitMs: null, turnLimitDefault: null, running: 0 } }) } },
     { case: "a turn limit in hours", arguments: { computer: "solari", turn_limit: 12 }, replies: { "places.list": reply({ places: [PLACE, CLOUD] }), "places.set": reply({ place: { ...CLOUD, settings: { turnLimitMs: 43_200_000 }, turnLimitMs: 43_200_000, turnLimitDefault: 21_600_000 } }) } },
     { case: "agents may not start agents", arguments: { computer: "attic", spawn: "off", max_depth: 2 }, replies: { "places.list": reply({ places: [PLACE, CLOUD] }), "places.set": reply({ place: { ...PLACE, cap: { threads: 6 }, capDefault: { threads: 6 }, settings: { spawn: { spawn: false, maxMachines: 3, maxDepth: 2 } }, spawn: { spawn: false, maxMachines: 3, maxDepth: 2 }, running: 0 } }) } },
-    { case: "nothing to set", arguments: { computer: "attic" }, replies: { "places.list": reply({ places: [PLACE, CLOUD] }), "places.set": refused(placeSetRefusal({ kind: "computer", name: "attic", takesForks: true }, {})!, "usage") } },
+    { case: "a new name", arguments: { computer: "attic", name: "hetzner" }, replies: { "places.list": reply({ places: [PLACE, CLOUD] }), "places.set": reply({ place: { ...PLACE, name: "hetzner", cap: { threads: 6 }, capDefault: { threads: 6 }, running: 0 } }) } },
+    { case: "a name another computer holds", arguments: { computer: "attic", name: "spoo", threads: 2 }, replies: { "places.list": reply({ places: [PLACE, SPOO] }), "places.set": refusedHalves(placeRenameRefusal(PLACE, "spoo", [PLACE, SPOO])!) } },
+    { case: "a new ssh login", arguments: { computer: "attic", ssh: "root@hetzner" }, replies: { "places.list": reply({ places: [PLACE, CLOUD] }), "places.set": reply({ place: { ...PLACE, cap: { threads: 6 }, capDefault: { threads: 6 }, running: 0 } }) } },
+    { case: "a login that reaches another computer", arguments: { computer: "attic", ssh: "root@spoo" }, replies: { "places.list": reply({ places: [PLACE, CLOUD] }), "places.set": refusedHalves(placeSshOtherRefusal("root@spoo", "attic")) } },
+    { case: "a recipe beside a new name, in one set", arguments: { computer: "attic", name: "hetzner", recipe: "laptop" }, replies: { "places.list": reply({ places: [PLACE, CLOUD] }), "places.set": reply({ place: { ...PLACE, name: "hetzner", recipe: "laptop", cap: { threads: 6 }, capDefault: { threads: 6 }, running: 0 } }) } },
+    { case: "nothing to set", arguments: { computer: "attic" }, replies: { "places.list": reply({ places: [PLACE, CLOUD] }), "places.set": refused(placeSetRefusal({ id: "place-9", kind: "computer", name: "attic", takesForks: true }, {})!, "usage") } },
     { case: "no such computer", arguments: { computer: "nowhere", threads: 1 }, replies: { "places.list": reply({ places: [PLACE, CLOUD] }) } },
   ],
   ...RECIPES,

@@ -8,6 +8,13 @@ import {
   PLACE_LEAVE_LINE,
   DAEMON_VERSION,
   placeSetRefusal,
+  placeRenameRefusal,
+  placeSshRefusal,
+  placeSshOtherRefusal,
+  placeSshUncheckedRefusal,
+  heldPlaceScript,
+  parsePlaceFile,
+  lastLine,
   placeSettingDropped,
   PlaceSettings,
   joinToken,
@@ -55,7 +62,7 @@ import {
 import { ownedFloorBytes, PlaceAbsentError, PlaceMachine, keyFingerprint } from "@wsp/engine";
 import { openPlaceForward } from "../place-forward.js";
 import {
-  CAPS, madeBySetup, type PlaceLogin, type PlaceStaging, type RecipeResolver, type PlaceDoor, NO_PLACE_UPDATER,
+  CAPS, madeBySetup, type PlaceLogin, type PlaceRecord, type PlaceStaging, type RecipeResolver, type PlaceDoor, NO_PLACE_UPDATER,
   placeUpdateSlowLine, placeSweptOverSshLine, placeLoginRoadLine, placeSweptOverLinkLine, PlaceLoginRefusedError,
   PlaceAddTakenBackError,
 } from "./types.js";
@@ -83,6 +90,43 @@ export function manageDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, 
     pendingRecords, putPending, dropPending, floorOnce, unmergedOver, pluginsOff, factsOn, cut, forksOf, viewOf,
     joining, joined, forget, hereRow, rowsOf, joinedRow, providerRow,
   } = viewArea;
+
+  /** A computer made to follow a recipe by slug, or none: one that follows none keeps what it has and is in step with
+   * nothing, one that follows a recipe syncs to it. Answers the record as written. */
+  const followTo = async (placeId: string, recipe: string): Promise<PlaceRecord | undefined> => {
+    let before: PlaceRecord | undefined;
+    const moved = await change(placeId, now => {
+      before = now;
+      const { sync: _behind, ...rest } = now;
+      return recipe === NO_RECIPE ? { ...rest, recipe } : { ...now, recipe };
+    });
+    if (recipe === NO_RECIPE && before?.sync !== undefined) syncFrame({ placeId });
+    if (recipe !== NO_RECIPE) syncSoon(placeId, 0);
+    for (const slug of new Set([before?.recipe, recipe])) if (slug !== undefined && slug !== NO_RECIPE) recipesMoved(slug);
+    return moved;
+  };
+
+  /** Reads a login as this computer before it is kept: the place file there, read over that login as root, names this
+   * computer's id and this host's key. A computer that answers anything else, or holds no place file, is another
+   * one; a login that will not stand, or a sudo that asks for a password, leaves it unread. Nothing is written. */
+  const sameComputerOver = async (record: PlaceRecord, ssh: string): Promise<void> => {
+    const unchecked = (why: string): never => {
+      const said = placeSshUncheckedRefusal(ssh, record.name, why);
+      throw usageRefusal(said.happened, said.fix);
+    };
+    const home = record.report.login["HOME"];
+    if (wiring.runOver === undefined) return unchecked("this host holds no ssh road to read it over");
+    if (home === undefined) return unchecked(`${record.name} never said where its home is`);
+    const login: PlaceLogin = { ssh, ...(record.road?.keyPath !== undefined ? { keyPath: record.road.keyPath } : {}) };
+    const read = await wiring.runOver(login, heldPlaceScript(home), dialWaitMs).catch((e: unknown) => unchecked(refusalParts(e).said));
+    // The read itself answers empty where no place file stands, so a failed run is the login or its sudo.
+    if (read.exitCode !== 0) return unchecked(lastLine(read.stderr) ?? `the read exited ${read.exitCode}`);
+    const file = parsePlaceFile(read.stdout);
+    if (file?.placeId !== record.id || file.hostPublicKey !== wiring.hostKey.publicKey) {
+      const said = placeSshOtherRefusal(ssh, record.name);
+      throw usageRefusal(said.happened, said.fix);
+    }
+  };
 
   return {
     async add(req, at) {
@@ -322,27 +366,57 @@ export function manageDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, 
 
     rows: async () => rowsOf(await records()),
 
-    async set(placeId, set, reset = []) {
+    async set(placeId, set, reset = [], also = {}) {
       const marked = (await markHeld()) ?? HERE_PLACE_ID;
       const record = placeId === HERE_PLACE_ID ? undefined : await recordOf(placeId);
       const row = placeId === HERE_PLACE_ID ? hereRow(marked) : record !== undefined ? joinedRow(record, marked) : providerIds().includes(placeId) ? providerRow(placeId, marked) : undefined;
       if (row === undefined) throw Object.assign(new Error(noSuchPlaceRefusal(placeId, [wiring.here().name, ...(await records()).map(r => r.name), ...providerIds()])), { kind: "usage" });
-      const refused = placeSetRefusal(row, set, reset);
-      if (refused !== undefined) throw Object.assign(new Error(refused), { kind: "usage" });
+      const renamed = also.name?.trim();
+      const ssh = also.ssh?.trim();
       const { spawn, ...rest } = set;
       const given = Object.fromEntries(Object.entries(rest).filter(([, value]) => value !== undefined));
-      // Read and written in one turn, so two settings made at once on one place both stand.
-      await inTurn(async () => {
-        const held = await settingsOf(placeId);
-        // The switch is a patch over the parts the place holds, and only the parts named are stored, so a cap named
-        // alone keeps it on or off and every part nobody named follows the default as it reads now.
-        const switched = spawn === undefined ? {} : { spawn: { ...held.spawn, ...spawn } };
-        const next = reset.reduce<PlaceSettings>((at, word) => placeSettingDropped(at, word), { ...held, ...given, ...switched });
-        await (Object.keys(next).length === 0 ? store.delete(CAPS, placeId) : store.put(CAPS, placeId, next));
-        settingsHeld.set(placeId, next);
-      });
+      // A name, a login or a recipe alone names no setting and is not refused as a set of nothing.
+      const settles = (renamed === undefined && ssh === undefined && also.recipe === undefined) || spawn !== undefined || Object.keys(given).length > 0 || reset.length > 0;
+      const refused = settles ? placeSetRefusal(row, set, reset) : undefined;
+      if (refused !== undefined) throw Object.assign(new Error(refused), { kind: "usage" });
+      if (renamed !== undefined) {
+        const others = [hereRow(marked), ...(await records()).map(r => joinedRow(r, marked)), ...providerIds().map(id => providerRow(id, marked))];
+        const misnamed = placeRenameRefusal(row, renamed, others);
+        if (misnamed !== undefined) throw usageRefusal(misnamed.happened, misnamed.fix);
+      }
+      if (ssh !== undefined) {
+        const wrong = placeSshRefusal(row, ssh);
+        if (wrong !== undefined) throw usageRefusal(wrong.happened, wrong.fix);
+      }
+      // Only a computer this host keeps a record of follows a recipe, as places.follow says.
+      if (also.recipe !== undefined && record === undefined) throw Object.assign(new Error(noSuchPlaceRefusal(placeId, (await records()).map(r => r.name))), { kind: "usage" });
+      // The dial goes last, after every check that asks nothing of any computer, and before any write.
+      if (ssh !== undefined && record !== undefined && ssh !== loginOf(record)?.ssh) await sameComputerOver(record, ssh);
+      if (settles) {
+        // Read and written in one turn, so two settings made at once on one place both stand.
+        await inTurn(async () => {
+          const held = await settingsOf(placeId);
+          // The switch is a patch over the parts the place holds, and only the parts named are stored, so a cap named
+          // alone keeps it on or off and every part nobody named follows the default as it reads now.
+          const switched = spawn === undefined ? {} : { spawn: { ...held.spawn, ...spawn } };
+          const next = reset.reduce<PlaceSettings>((at, word) => placeSettingDropped(at, word), { ...held, ...given, ...switched });
+          await (Object.keys(next).length === 0 ? store.delete(CAPS, placeId) : store.put(CAPS, placeId, next));
+          settingsHeld.set(placeId, next);
+        });
+      }
       if (set.napMs !== undefined || reset.includes("nap")) opts.napChanged?.(placeId);
-      const place = await withCap(row, await rowIds());
+      const was = record === undefined ? undefined : loginOf(record);
+      let moved = renamed === undefined && ssh === undefined ? undefined : await change(placeId, now => ({ ...now, ...(renamed !== undefined ? { name: renamed } : {}), ...(ssh !== undefined ? { road: { ...now.road, ssh } } : {}) }));
+      // An add still waiting on its picks lists the computer by the name it holds, and a resume finds it by that name.
+      if (moved !== undefined && renamed !== undefined) for (const pending of await pendingRecords()) if (pending.placeId === placeId) await putPending({ ...pending, name: moved.name });
+      // The forward a box dials back through rides the login: the old one lets it go unless another record holds it,
+      // and the new one holds it from now.
+      if (moved !== undefined && was !== undefined && was.ssh !== ssh && ssh !== undefined && moved.road?.back !== undefined) {
+        if (!(await records()).some(r => r.id !== placeId && loginOf(r)?.ssh === was.ssh)) wiring.back?.release(was);
+        holdBack(moved);
+      }
+      if (also.recipe !== undefined) moved = (await followTo(placeId, also.recipe)) ?? moved;
+      const place = await withCap(moved === undefined ? row : joinedRow(moved, marked), await rowIds());
       emit({ type: "place.changed", place });
       return { place };
     },
@@ -527,17 +601,7 @@ export function manageDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, 
     async follow(placeId, recipe) {
       const held = await recordOf(placeId);
       if (held === undefined) throw Object.assign(new Error(noSuchPlaceRefusal(placeId, (await records()).map(r => r.name))), { kind: "usage" });
-      let before = held;
-      // A computer that follows none keeps what it has and is in step with nothing; one that follows a recipe syncs.
-      const moved = await change(placeId, now => {
-        before = now;
-        const { sync: _behind, ...rest } = now;
-        return recipe === NO_RECIPE ? { ...rest, recipe } : { ...now, recipe };
-      });
-      if (recipe === NO_RECIPE && before.sync !== undefined) syncFrame({ placeId });
-      if (recipe !== NO_RECIPE) syncSoon(placeId, 0);
-      for (const slug of new Set([before.recipe, recipe])) if (slug !== undefined && slug !== NO_RECIPE) recipesMoved(slug);
-      return viewOf(moved ?? held, await defaultId());
+      return viewOf((await followTo(placeId, recipe)) ?? held, await defaultId());
     },
 
     async recipeChanged(slug, afterMs = 0) {

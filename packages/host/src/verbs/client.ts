@@ -43,6 +43,8 @@ import {
   absentComputer,
   placeRoom,
   placeSpendLimit,
+  placeSettingsLine,
+  type PlaceSetAlso,
   placeStateOf,
   PlaceSpend,
   RecipeView,
@@ -633,14 +635,25 @@ export async function readComputers(client: HostClient): Promise<{ computers: Pl
 const CLOUD_SETTINGS: readonly PlaceSettingWord[] = ["machines", "spend"];
 export const SETTING_RESETS = PlaceSettingWord.options.filter(word => CLOUD_ON || !CLOUD_SETTINGS.includes(word)) as [PlaceSettingWord, ...PlaceSettingWord[]];
 
-/** One computer's settings made and reset by the host, answered as the row it now reads: by the id off the listing,
- * since two computers may share a name and the host keys by id. The row passes through as the host wrote it. */
-export async function setComputer(client: HostClient, ref: string, set: PlaceSettingsAsk, reset: readonly PlaceSettingWord[], recipe?: string): Promise<PlaceView> {
+/** One computer's settings made and reset by the host, with its name, its login and its recipe where given, answered
+ * as the row it now reads and the name it was asked by: by the id off the listing, since two computers may share a
+ * name and the host keys by id. One op carries every flag, so the host checks them all before it writes any. */
+export async function setComputer(client: HostClient, ref: string, set: PlaceSettingsAsk, reset: readonly PlaceSettingWord[], also: PlaceSetAlso = {}): Promise<{ computer: PlaceView; was: string }> {
   const place = await placeNamed(client, ref);
-  // The recipe first: a setting refused after it leaves the computer following what was named, which is said.
-  const followed = recipe === undefined ? undefined : (await client.request<{ place: PlaceView }>("places.follow", { placeId: place.id, recipe })).place;
-  if (followed !== undefined && Object.keys(set).length === 0 && reset.length === 0) return followed;
-  return (await client.request<{ place: PlaceView }>("places.set", { placeId: place.id, ...set, ...(reset.length > 0 ? { reset } : {}) })).place;
+  const asked = Object.fromEntries(Object.entries(also).filter(([, value]) => value !== undefined));
+  const { place: computer } = await client.request<{ place: PlaceView }>("places.set", { placeId: place.id, ...set, ...(reset.length > 0 ? { reset } : {}), ...asked });
+  return { computer, was: place.name };
+}
+
+/** What wsp computers set says: a rename first, from the name it had, then the new login, then the recipe it follows,
+ * then its settings where any were named or nothing else was. */
+export function computerSetLines(computer: PlaceView, was: string, also: PlaceSetAlso, settled: boolean): string[] {
+  return [
+    ...(also.name !== undefined && was !== computer.name ? [`${was} is ${computer.name} now`] : []),
+    ...(also.ssh !== undefined ? [`${computer.name} is reached over ssh as ${also.ssh.trim()} from now`] : []),
+    ...(also.recipe !== undefined ? [followLine(computer)] : []),
+    ...(settled || Object.values(also).every(value => value === undefined) ? [placeSettingsLine(computer)] : []),
+  ];
 }
 
 /** A flag as a refusal names it: with the computer it was set for, where the line names one. */

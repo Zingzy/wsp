@@ -227,11 +227,13 @@ export function placeTurnLimit(kind: PlaceKind, settings: PlaceSettings): number
 
 /** Why a set is refused on this place: nothing set or reset at all, a setting its kind does not take, or one both
  * set and reset. Nothing when every key fits. */
-export function placeSetRefusal(place: Pick<PlaceView, "kind" | "name" | "takesForks">, set: PlaceSettingsAsk, reset: readonly PlaceSettingWord[] = []): string | undefined {
+export function placeSetRefusal(place: Pick<PlaceView, "id" | "kind" | "name" | "takesForks">, set: PlaceSettingsAsk, reset: readonly PlaceSettingWord[] = []): string | undefined {
   const takes = settingsOn(place);
   const said = (words: readonly PlaceSettingWord[]): string => andList(words.map(word => SETTINGS[word].words));
   const named = (Object.keys(SETTINGS) as PlaceSettingWord[]).filter(word => placeSettingNamed(set, word));
-  if (named.length === 0 && reset.length === 0) return `nothing to set on ${place.name}: it takes ${said(takes)}`;
+  // A computer the person added also takes a new name and a new ssh login, which are no settings of its kind.
+  const added = place.kind === "computer" && place.id !== HERE_PLACE_ID ? ["a new name", "a new ssh login"] : [];
+  if (named.length === 0 && reset.length === 0) return `nothing to set on ${place.name}: it takes ${andList([...takes.map(word => SETTINGS[word].words), ...added])}`;
   const wrong = [...new Set([...named, ...reset])].filter(word => !takes.includes(word));
   if (wrong.length > 0) return `${place.name} takes ${said(takes)}, not ${said(wrong)}`;
   const both = named.filter(word => reset.includes(word));

@@ -9,6 +9,7 @@
 // browser and imports nothing outside itself.
 
 import { TOOLS_PATH } from "./daemon-contract.js";
+import { shellQuote } from "./shell-quote.js";
 
 /** Whether path is the folder itself or sits inside it; a sibling that shares the prefix is not. */
 export function underProject(path: string, root: string): boolean {
@@ -193,6 +194,13 @@ export function placeDaemonPaths(home: string): {
     placeFound: `${wsp}/place-found`,
   };
 }
+
+/** How much of a box's place file is read: a real one is well under a kilobyte, and the box is the untrusted side. */
+const HELD_PLACE_READ_BYTES = 65_536;
+
+/** The place file on a box, read over ssh before anything of wsp's lands, before a forward's new port is written
+ * into it, and before a new login is kept as that box's: empty where it holds none. */
+export const heldPlaceScript = (home: string): string => `head -c ${HELD_PLACE_READ_BYTES} ${shellQuote(placeDaemonPaths(home).placeFile)} 2>/dev/null || true`;
 
 /** What the job that puts the recipe on a computer you own keeps there: the scratch its long steps run under, the
  * log it appends a line to as it goes, and the outcome it writes at the end, which is what a person at that
