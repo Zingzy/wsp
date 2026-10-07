@@ -25,6 +25,16 @@ const CLAUDE_HIDDEN: HarnessModel[] = [
   { ...option("claude-sonnet-4-5", "Sonnet 4.5"), efforts: [], contextWindows: ["200k", "1m"] },
 ];
 
+const CLAUDE_EFFORTS = levels(["low", "medium", "high", "xhigh", "max"], "high");
+const CLAUDE_MODES: HarnessOption[] = [
+  option("default", "Default"),
+  option("acceptEdits", "Accept edits"),
+  { ...option("bypassPermissions", "Bypass"), isDefault: true },
+  option("auto", "Auto"),
+  option("manual", "Manual"),
+  option("dontAsk", "Don't ask"),
+];
+
 export const CLAUDE_CATALOG: HarnessCatalog = {
   ...table,
   harness: "claude",
@@ -34,19 +44,12 @@ export const CLAUDE_CATALOG: HarnessCatalog = {
   models: CLAUDE_MODELS,
   legacyModels: CLAUDE_LEGACY,
   hiddenModels: CLAUDE_HIDDEN,
-  unshaped: { models: CLAUDE_MODELS, legacyModels: [...CLAUDE_LEGACY, ...CLAUDE_HIDDEN] },
-  efforts: levels(["low", "medium", "high", "xhigh", "max"], "high"),
+  unshaped: { models: CLAUDE_MODELS, legacyModels: [...CLAUDE_LEGACY, ...CLAUDE_HIDDEN], efforts: CLAUDE_EFFORTS, permissionModes: CLAUDE_MODES },
+  efforts: CLAUDE_EFFORTS,
   access: { ask: "default", "auto-edit": "acceptEdits", full: "bypassPermissions" },
   bypassMode: "bypassPermissions",
   readOnlyMode: "dontAsk",
-  permissionModes: [
-    option("default", "Default"),
-    option("acceptEdits", "Accept edits"),
-    { ...option("bypassPermissions", "Bypass"), isDefault: true },
-    option("auto", "Auto"),
-    option("manual", "Manual"),
-    option("dontAsk", "Don't ask"),
-  ],
+  permissionModes: CLAUDE_MODES,
 };
 
 export const CODEX_CATALOG: HarnessCatalog = {

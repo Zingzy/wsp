@@ -15,12 +15,13 @@ const withoutAccess = new WeakMap<HarnessCatalog[], HarnessCatalog[]>();
 /** The host-wide lists with their access modes dropped. Which mode a thread starts at is a fact about the machine it
  * runs on, and the runtime decides it there, once, against that machine's kind: a machine the person keeps asks
  * before a tool, a throwaway fork runs every tool. The host-wide lists were read against no machine, so they answer
- * models and efforts for a workspace still waiting for its own and answer no access at all. The stripped array is
- * kept beside the one it came from, so the selector hands React the same reading every render. */
+ * models and efforts for a workspace still waiting for its own and answer no access at all, the agent's own lists
+ * beside them included. The stripped array is kept beside the one it came from, so the selector hands React the same
+ * reading every render. */
 function hostWide(catalogs: HarnessCatalog[]): HarnessCatalog[] {
   const known = withoutAccess.get(catalogs);
   if (known !== undefined) return known;
-  const stripped = catalogs.map(c => ({ ...c, permissionModes: [] }));
+  const stripped = catalogs.map(c => ({ ...c, permissionModes: [], ...(c.unshaped === undefined ? {} : { unshaped: { ...c.unshaped, permissionModes: [] } }) }));
   withoutAccess.set(catalogs, stripped);
   return stripped;
 }

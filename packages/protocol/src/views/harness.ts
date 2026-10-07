@@ -66,9 +66,10 @@ export const HarnessCatalog = z.object({
   /** Models the person took off this agent's picker, which the composer does not list and a start still takes by
    * name; read with the rest through everyModel. Absent is none. */
   hiddenModels: z.array(HarnessModel).optional(),
-  /** The agent's own lists as they stood before the person's picker shaped the ones above, so a client shaping a
-   * change before the host answers puts each model where the host will. Absent where no picker shaped them. */
-  unshaped: z.object({ models: z.array(HarnessModel), legacyModels: z.array(HarnessModel).optional() }).optional(),
+  /** The agent's own lists as they stood before the person's picker shaped the ones above and their defaults moved
+   * the marks, so a client shaping a change, or reading what a reset falls back to, before the host answers puts each
+   * model and mark where the host will. Absent where the person set nothing for this agent or its project. */
+  unshaped: z.object({ models: z.array(HarnessModel), legacyModels: z.array(HarnessModel).optional(), efforts: z.array(HarnessOption), permissionModes: z.array(HarnessOption) }).optional(),
   efforts: z.array(HarnessOption),
   contextWindows: z.array(HarnessOption),
   permissionModes: z.array(HarnessOption),

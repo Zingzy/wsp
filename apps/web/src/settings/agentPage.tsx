@@ -27,7 +27,7 @@ import { cn } from "../lib/utils.js";
 import { movedBefore } from "../sidebar/NounSwitcher.js";
 import { failureOf } from "../protocol/failure.js";
 import { useStore } from "../protocol/store.js";
-import { AgentsControls, UpdateButton, newThreadPicks, planWord, signInHead, usePickedPlace } from "./agents.js";
+import { AgentsControls, UpdateButton, newThreadDefaults, planWord, signInHead, usePickedPlace } from "./agents.js";
 import { AGENTS_PAGE_WORDS as W } from "./format.js";
 import { CARD_INSET, ROW_FLOOR, SELECT_WIDTH } from "./layout.js";
 import { placeName } from "./places.js";
@@ -222,7 +222,7 @@ function ModelsCard({ catalog, ctx }: { catalog: HarnessCatalog; ctx: SettingsCo
   const { hiddenModels: _shaped, unshaped, ...lists } = catalog;
   const shaped = shapeModels(withCustomModels({ ...lists, ...unshaped }, picker), picker);
   const items = [...pickerModels(shaped).map(m => ({ value: m.value, label: m.label, added: m.added === true, shown: true })), ...(shaped.hiddenModels ?? []).map(m => ({ value: m.value, label: m.label, added: m.added === true, shown: false }))];
-  const fallback = newThreadPicks(catalog).model;
+  const fallback = newThreadDefaults(catalog, ctx.preferences).model?.value;
   const [typed, setTyped] = useState("");
   const [refused, setRefused] = useState<string | null>(null);
   // Only an agent whose binary's list is every model it runs has a list an added id can be missing from.
@@ -352,7 +352,8 @@ function ModelsCard({ catalog, ctx }: { catalog: HarnessCatalog; ctx: SettingsCo
 function NewThreads({ catalog, ctx }: { catalog: HarnessCatalog; ctx: SettingsContext }) {
   const id = catalog.harness;
   const own = ctx.preferences.agentDefaults[id] ?? {};
-  const picks = newThreadPicks(catalog);
+  const defaults = newThreadDefaults(catalog, ctx.preferences);
+  const picks = { model: defaults.model?.value, effort: defaults.effort?.value, access: defaults.access?.value };
   const set = (patch: AgentDefaultsPatch): void => ctx.setPreferences({ agentDefaults: { [id]: patch } });
   const models = pickerModels(catalog);
   const listed = picks.model === undefined || models.some(m => m.value === picks.model) ? models : [...models, modelOf(catalog, picks.model)!];
