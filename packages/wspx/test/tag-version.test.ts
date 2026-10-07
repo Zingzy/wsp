@@ -69,7 +69,7 @@ describe("the tag a release workflow answers to", () => {
 describe("the check between the tag and the manifests", () => {
   it("passes when every versioned manifest carries the tag's number", () => {
     const root = fakeRepo({
-      "packages/wspx": { name: "@zingzy/wsp", version: "0.1.4" },
+      "packages/wspx": { name: "@wsp-labs/wsp", version: "0.1.4" },
       "apps/desktop": { name: "@wsp/desktop", version: "0.1.4", private: true },
       "apps/web": { name: "@wsp/web", private: true },
     });
@@ -80,7 +80,7 @@ describe("the check between the tag and the manifests", () => {
 
   it("fails naming the tag's number and each manifest that disagrees", () => {
     const root = fakeRepo({
-      "packages/wspx": { name: "@zingzy/wsp", version: "0.1.4" },
+      "packages/wspx": { name: "@wsp-labs/wsp", version: "0.1.4" },
       "apps/desktop": { name: "@wsp/desktop", version: "0.1.3", private: true },
     });
     git(root, "tag", "v0.1.4");
@@ -89,7 +89,7 @@ describe("the check between the tag and the manifests", () => {
   });
 
   it("says one sentence for a tag that is not here, not git's own block", () => {
-    const root = fakeRepo({ "packages/wspx": { name: "@zingzy/wsp", version: "0.1.4" } });
+    const root = fakeRepo({ "packages/wspx": { name: "@wsp-labs/wsp", version: "0.1.4" } });
     expect(() => checkTag(root, "v9.9.9", "main")).toThrow("no tag v9.9.9 in this checkout; fetch the tag before asking what it names");
     const script = join(repo, "packages", "wspx", "scripts", "tag-version.mjs");
     const ran = spawnSync("node", [script, "v99.99.99"], { encoding: "utf8" });
@@ -104,7 +104,7 @@ describe("the check between the tag and the manifests", () => {
 
 describe("the check that the tag stands on main's own line", () => {
   it("refuses a tag on a side branch, and takes the same tag once that work is squashed onto main", () => {
-    const root = fakeRepo({ "packages/wspx": { name: "@zingzy/wsp", version: "0.1.4" } });
+    const root = fakeRepo({ "packages/wspx": { name: "@wsp-labs/wsp", version: "0.1.4" } });
     const aside = onSideBranch(root);
     git(root, "tag", "v0.1.4", aside);
     expect(() => checkTag(root, "v0.1.4", "main")).toThrow(
@@ -117,7 +117,7 @@ describe("the check that the tag stands on main's own line", () => {
   });
 
   it("refuses the commit a true merge brought in and takes the merge commit itself, since the read is first parents", () => {
-    const root = fakeRepo({ "packages/wspx": { name: "@zingzy/wsp", version: "0.1.4" } });
+    const root = fakeRepo({ "packages/wspx": { name: "@wsp-labs/wsp", version: "0.1.4" } });
     const aside = onSideBranch(root);
     git(root, "merge", "-q", "--no-ff", "--no-verify", "-m", "the side brought in whole", "side");
     const merge = git(root, "rev-parse", "HEAD").trim();
@@ -128,7 +128,7 @@ describe("the check that the tag stands on main's own line", () => {
   });
 
   it("says the ancestry sentence and not the manifest one when both would fire", () => {
-    const root = fakeRepo({ "packages/wspx": { name: "@zingzy/wsp", version: "0.1.3" } });
+    const root = fakeRepo({ "packages/wspx": { name: "@wsp-labs/wsp", version: "0.1.3" } });
     const aside = onSideBranch(root);
     git(root, "tag", "v0.1.4", aside);
     expect(() => checkTag(root, "v0.1.4", "main")).toThrow(/is not on main's own line/);

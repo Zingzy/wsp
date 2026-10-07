@@ -4,7 +4,7 @@ Two sentences.
 
 ## Ticket
 
-Zingzy/wsp-map#
+wsp-labs/wsp-map#
 
 ## How it was proven
 

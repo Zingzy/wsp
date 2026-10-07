@@ -52,7 +52,7 @@ export const PR838_DIFF: string = sidebarDiff;
 
 export const PR838_PAGE: PullRequestPage = {
   title: view.title,
-  body: "A finished turn nobody had opened looked the same as one that was read, and a thread only left the list after 24 hours. The host now keeps a read and a settled stamp per thread, so every window and wsp threads agree on Done.\n\nA read thread settles after 2 hours quiet, Settle takes a tree by hand, and new activity brings it back. The sidebar list drops its scroll fade, which made a tile part way under the head look broken.\n\nCloses Zingzy/wsp-map#1398 and #1406.",
+  body: "A finished turn nobody had opened looked the same as one that was read, and a thread only left the list after 24 hours. The host now keeps a read and a settled stamp per thread, so every window and wsp threads agree on Done.\n\nA read thread settles after 2 hours quiet, Settle takes a tree by hand, and new activity brings it back. The sidebar list drops its scroll fade, which made a tile part way under the head look broken.\n\nCloses wsp-labs/wsp-map#1398 and #1406.",
   author: view.author.login,
   createdAt: view.createdAt,
   updatedAt: view.updatedAt,
@@ -96,7 +96,7 @@ const checkOf = (c: (typeof view.statusCheckRollup)[number]): PullRequestFact["c
 
 export const PR838_FACT: PullRequestFact = {
   number: view.number,
-  url: "https://github.com/Zingzy/wsp/pull/838",
+  url: "https://github.com/wsp-labs/wsp/pull/838",
   state: "open",
   host: "github.com",
   draft: view.isDraft,
@@ -125,7 +125,7 @@ export function pr838FactLately(nowMs: number): PullRequestFact {
 /** PR 838 as it stands: closed without a merge, its checks kept from the read that saw it close. */
 export const PR838_CLOSED: PullRequestKept = {
   number: view.number,
-  url: "https://github.com/Zingzy/wsp/pull/838",
+  url: "https://github.com/wsp-labs/wsp/pull/838",
   state: "closed",
   base: view.baseRefName,
   closedAt: Date.parse(view.closedAt),

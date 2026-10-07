@@ -17,7 +17,7 @@ Two things are the person's and never the agent's.
 
 Every step ends in what to expect. The agent runs the command, reads that line, and stops at the first one that does not match rather than carrying on.
 
-1. **Health check.** `wsp --version`, then `wsp threads --json`. With no `wsp` on the path, `npm i -g @zingzy/wsp` puts it there; `npx @zingzy/wsp` is worse, since its cache write fails under a sandboxed agent. Expect `wsp <version>` and then `{"threads":[]}`. A `starting the host for <path>` line on stderr before it means nothing was serving and the command started a host, which is the ordinary road.
+1. **Health check.** `wsp --version`, then `wsp threads --json`. With no `wsp` on the path, `npm i -g @wsp-labs/wsp` puts it there; `npx @wsp-labs/wsp` is worse, since its cache write fails under a sandboxed agent. Expect `wsp <version>` and then `{"threads":[]}`. A `starting the host for <path>` line on stderr before it means nothing was serving and the command started a host, which is the ordinary road.
 
 2. **Read the host's log when nothing answers.** `no host answered for <path> within 20.0s`, with the log's last lines under it, means the host the command started could not serve, and the log says why. `Solari API key: no terminal to ask on; set SOLARI_API_KEY in the environment, ./.env, or ~/.wsp/.env.` in it means no key at all, which is the next step. A `Workspace <name> (ws_...) is this computer` line means the state held neither an image nor a workspace, so the host recorded this computer and served that.
 

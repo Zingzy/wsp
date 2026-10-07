@@ -55,7 +55,7 @@ export function Closing() {
             <p className="mt-4 max-w-xl text-[16px] text-muted-foreground">
               File them at{" "}
               <a href={ISSUES} className="text-foreground underline decoration-input underline-offset-4 hover:decoration-foreground">
-                github.com/Zingzy/wsp/issues
+                github.com/wsp-labs/wsp/issues
               </a>
               . Say what you ran, what you saw, and the output of <code className="font-mono text-[14px]">wsp --version</code>.
               Never paste a key.

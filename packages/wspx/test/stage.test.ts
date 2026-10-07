@@ -28,7 +28,7 @@ function sources(): { pkg: string; repo: string; from: Record<string, string> } 
   // The published command is split across chunk files its bin imports by name, so its dist travels whole, and its
   // package.json with it, since the bin reads its version through that file.
   writeFileSync(join(paths.from["cli"]!, "dist", "chunk-1.js"), "export const y = 2;");
-  writeFileSync(join(paths.from["cli"]!, "package.json"), '{"name":"@zingzy/wsp","version":"9.9.9"}');
+  writeFileSync(join(paths.from["cli"]!, "package.json"), '{"name":"@wsp-labs/wsp","version":"9.9.9"}');
   writeFileSync(join(paths.from["cli"]!, "tsup.config.ts"), "// never travels");
   mkdirSync(paths.repo, { recursive: true });
   writeFileSync(join(paths.repo, "LICENSE"), "AGPL-3.0-only");

@@ -42,7 +42,7 @@ describe("the tool server an agent's config launches", () => {
 
   it("is npx's line out of npx's cache, since the binary under the cache goes with it", () => {
     const cached: RunningWsp = { ...RUN, argv: [NODE, "/Users/me/.npm/_npx/abc/node_modules/wsp/dist/bin.js"], toolServer: "/Users/me/.npm/_npx/abc/node_modules/wsp/daemon/wsp-daemon" };
-    expect(mcpServerCommand(cached).args.slice(-2)).toEqual(["@zingzy/wsp@9.9.9", "mcp"]);
+    expect(mcpServerCommand(cached).args.slice(-2)).toEqual(["@wsp-labs/wsp@9.9.9", "mcp"]);
   });
 
   it("leaves the line a place's tools run this wsp by as the wsp itself", () => {

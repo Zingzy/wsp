@@ -756,7 +756,7 @@ describe("listedName and nameList", () => {
 
 describe("titleLine", () => {
   it("is the prompt's first non-empty line with its whitespace collapsed, so a multi-paragraph brief is one line everywhere", () => {
-    expect(titleLine("You are a builder for the wsp repo.\n\nTicket: Zingzy/wsp-map#292.\nBuild: the fix.")).toBe("You are a builder for the wsp repo.");
+    expect(titleLine("You are a builder for the wsp repo.\n\nTicket: wsp-labs/wsp-map#292.\nBuild: the fix.")).toBe("You are a builder for the wsp repo.");
     expect(titleLine("\r\n  \n\tReply  with\texactly   the word pong.  \r\n")).toBe("Reply with exactly the word pong.");
     expect(titleLine("one line")).toBe("one line");
     expect(titleLine("\n \n")).toBe("");
@@ -764,12 +764,12 @@ describe("titleLine", () => {
 });
 
 describe("openingTitle", () => {
-  const brief = "You are a builder for the wsp repo, which is at /Users/dev/wsp on this Mac: read the ticket, then run `pnpm test` and report.\n\nTicket: Zingzy/wsp-map#408.";
+  const brief = "You are a builder for the wsp repo, which is at /Users/dev/wsp on this Mac: read the ticket, then run `pnpm test` and report.\n\nTicket: wsp-labs/wsp-map#408.";
 
   it("is the opening turn's first sentence, so a brief that starts with a whole paragraph never titles a thread with all of it", () => {
     expect(openingTitle("Bump the lockfile. Then run the gate.")).toBe("Bump the lockfile.");
     expect(openingTitle("Is the gate green? Say so.")).toBe("Is the gate green?");
-    expect(openingTitle("You are a builder for the wsp repo.\n\nTicket: Zingzy/wsp-map#292.")).toBe("You are a builder for the wsp repo.");
+    expect(openingTitle("You are a builder for the wsp repo.\n\nTicket: wsp-labs/wsp-map#292.")).toBe("You are a builder for the wsp repo.");
     expect(openingTitle("\r\n  \n\tReply  with\texactly   the word pong.  \r\n")).toBe("Reply with exactly the word pong.");
     expect(openingTitle("Bump to 1.2.3 and run the gate")).toBe("Bump to 1.2.3 and run the gate");
   });
@@ -1121,7 +1121,7 @@ describe("NOT_GONE", () => {
 
 describe("mcpServerCommandLine", () => {
   it("names the command every agent's config now runs, as one shell line a person can paste", () => {
-    expect(mcpServerCommandLine("npx", ["-y", "@zingzy/wsp@0.1.2", "mcp", "--state", "/Users/p/.wsp/state.json"])).toBe("The server command is npx -y @zingzy/wsp@0.1.2 mcp --state /Users/p/.wsp/state.json");
+    expect(mcpServerCommandLine("npx", ["-y", "@wsp-labs/wsp@0.1.2", "mcp", "--state", "/Users/p/.wsp/state.json"])).toBe("The server command is npx -y @wsp-labs/wsp@0.1.2 mcp --state /Users/p/.wsp/state.json");
     expect(mcpServerCommandLine("/Users/p/.local/bin/wsp", ["mcp", "--state", "/Users/p/my wsp/state.json"])).toBe("The server command is /Users/p/.local/bin/wsp mcp --state '/Users/p/my wsp/state.json'");
   });
 });

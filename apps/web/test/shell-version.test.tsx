@@ -96,6 +96,6 @@ describe("a shell and the host that served it its page", () => {
     const button = document.querySelector<HTMLElement>("[data-notice-action]")!;
     expect(button.textContent).toBe(GET_THE_APP_WORD);
     act(() => button.click());
-    expect(open).toHaveBeenCalledWith("https://github.com/Zingzy/wsp/releases", "_blank", "noopener,noreferrer");
+    expect(open).toHaveBeenCalledWith("https://github.com/wsp-labs/wsp/releases", "_blank", "noopener,noreferrer");
   });
 });

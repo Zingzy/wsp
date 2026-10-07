@@ -33,7 +33,7 @@ const OPTIONS: RecipeOptions = {
     { id: "github", label: "the GitHub sign-in" },
   ],
 };
-const wsp: ProjectView = { id: "pr_wsp", name: "wsp", computer: "here", source: { kind: "folder", path: "/Users/zingzy/wsp" }, path: "/Users/zingzy/wsp", remote: "github.com/Zingzy/wsp", defaultBranch: "main", memoryKey: "k", memoryDir: "/m" } as ProjectView;
+const wsp: ProjectView = { id: "pr_wsp", name: "wsp", computer: "here", source: { kind: "folder", path: "/Users/zingzy/wsp" }, path: "/Users/zingzy/wsp", remote: "github.com/wsp-labs/wsp", defaultBranch: "main", memoryKey: "k", memoryDir: "/m" } as ProjectView;
 const RUNNING: PlaceSetup = { state: "running", addId: "a_set", startedAt: "2026-10-03T10:00:00.000Z", steps: [{ step: "floor", state: "done", ms: 72_000 }, { step: "agents", state: "running" }], waiting: [] };
 
 interface Asked {
@@ -413,7 +413,7 @@ describe("Add a computer's picks read the host's facts", () => {
       { id: "github", label: "the GitHub sign-in", signins: ["machine", "skip"] },
     ],
     folders: [
-      { name: "wsp", path: "/Users/zingzy/wsp", remote: "github.com/Zingzy/wsp", private: true, unpushed: 2, bytes: 1.1 * 1024 ** 3 },
+      { name: "wsp", path: "/Users/zingzy/wsp", remote: "github.com/wsp-labs/wsp", private: true, unpushed: 2, bytes: 1.1 * 1024 ** 3 },
       { name: "spoo", path: "/Users/zingzy/spoo", remote: "github.com/spoo-me/url-shortener", private: false, unpushed: 0, bytes: 180 * MB },
       { name: "laya", path: "/Users/zingzy/laya", bytes: 340 * MB },
     ],
@@ -568,7 +568,7 @@ describe("Add a computer's picks read the host's facts", () => {
     expect(row().textContent).toContain("Private; needs GitHub to clone. Go back to sign in, or skip it.");
     act(() => useAddFlow.setState({ picks: picks("vault") }));
     expect(row().textContent).not.toContain("needs GitHub");
-    expect(row().textContent).toContain("github.com/Zingzy/wsp, 2 unpushed commits come along.");
+    expect(row().textContent).toContain("github.com/wsp-labs/wsp, 2 unpushed commits come along.");
   });
 
   it("says of each project whether it has a remote and what of it is not pushed", async () => {
@@ -579,7 +579,7 @@ describe("Add a computer's picks read the host's facts", () => {
     const note = (key: string): string | null | undefined => dialog()!.querySelector(`[data-pick-row='${key}'] [data-pick-note]`)?.textContent;
     await waitFor(() => expect(note("spoo")).toBe("github.com/spoo-me/url-shortener, clean."));
     expect(note("laya")).toBe("No remote; copied whole.");
-    expect(note("wsp")).toBe("github.com/Zingzy/wsp, 2 unpushed commits come along.");
+    expect(note("wsp")).toBe("github.com/wsp-labs/wsp, 2 unpushed commits come along.");
   });
 });
 

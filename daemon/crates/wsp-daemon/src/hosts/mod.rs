@@ -854,7 +854,7 @@ mod tests {
     /// other refusal gh's own last line.
     #[tokio::test]
     async fn a_compare_is_one_gh_line_and_a_head_the_host_lacks_is_not_pushed() {
-        let ask = Ask { cwd: Path::new("/Users/p"), remote_url: "git@github.com:Zingzy/wsp.git" };
+        let ask = Ask { cwd: Path::new("/Users/p"), remote_url: "git@github.com:wsp-labs/wsp.git" };
         let runner = Recorded::new(&["gh"]).answering(vec![(0, "{\"ahead_by\":2,\"behind_by\":1,\"status\":\"diverged\"}\n")]);
         let read = compare(&runner, &ask, "tree/lead", "child/one #2").await.unwrap();
         assert_eq!(
@@ -863,7 +863,10 @@ mod tests {
         );
         let calls = runner.asked();
         assert_eq!((calls.len(), calls[0].program.as_str(), calls[0].cwd.as_str()), (1, "gh", "/Users/p"));
-        assert_eq!(calls[0].args, ["api", "repos/Zingzy/wsp/compare/tree/lead...child/one%20%232", "--jq", "{ahead_by,behind_by,status}"]);
+        assert_eq!(
+            calls[0].args,
+            ["api", "repos/wsp-labs/wsp/compare/tree/lead...child/one%20%232", "--jq", "{ahead_by,behind_by,status}"]
+        );
         let runner = Recorded::new(&["gh"]).answering_said(vec![(1, "{\"message\":\"Not Found\"}", "gh: Not Found (HTTP 404)")]);
         assert_eq!(
             compare(&runner, &ask, "tree/lead", "child/one").await.unwrap(),
@@ -881,18 +884,18 @@ mod tests {
     #[tokio::test]
     async fn a_read_is_three_gh_lines_naming_the_repository_and_never_git() {
         let runner = Recorded::new(&["gh"]).answering(vec![(0, VIEW_JSON), (8, CHECKS_JSON), (0, "3\n")]);
-        let ask = Ask { cwd: Path::new("/Users/p"), remote_url: "git@github.com:Zingzy/wsp.git" };
+        let ask = Ask { cwd: Path::new("/Users/p"), remote_url: "git@github.com:wsp-labs/wsp.git" };
         let pr = read(&runner, &ask, &Pick::Branch("ticket/batch9-git"), None).await.unwrap().pr.unwrap();
         let calls = runner.asked();
         assert!(calls.iter().all(|c| c.program == "gh" && c.cwd == "/Users/p"), "a call ran git or ran somewhere else");
-        assert_eq!(calls[0].args, ["pr", "view", "ticket/batch9-git", "-R", "Zingzy/wsp", "--json", FIELDS]);
+        assert_eq!(calls[0].args, ["pr", "view", "ticket/batch9-git", "-R", "wsp-labs/wsp", "--json", FIELDS]);
         assert_eq!(
             calls[1].args,
-            ["pr", "checks", "870", "-R", "Zingzy/wsp", "--json", "name,bucket,link,workflow,description,startedAt,completedAt"]
+            ["pr", "checks", "870", "-R", "wsp-labs/wsp", "--json", "name,bucket,link,workflow,description,startedAt,completedAt"]
         );
         assert_eq!(
             calls[2].args,
-            ["api", "repos/Zingzy/wsp/compare/main...ec5c10de663bd1860925ad42e9580bab4eb1d377", "--jq", ".behind_by"]
+            ["api", "repos/wsp-labs/wsp/compare/main...ec5c10de663bd1860925ad42e9580bab4eb1d377", "--jq", ".behind_by"]
         );
         assert_eq!((pr.number, pr.mergeable, pr.behind_base), (870, Mergeable::Mergeable, Some(3)));
         // gh answers its checks with a pending code while one runs; the JSON is what is read.
@@ -913,18 +916,18 @@ mod tests {
 
     #[tokio::test]
     async fn a_pull_request_whose_update_head_and_state_stood_answers_unchanged_and_makes_no_checks_call() {
-        let ask = Ask { cwd: Path::new("/Users/p"), remote_url: "git@github.com:Zingzy/wsp.git" };
+        let ask = Ask { cwd: Path::new("/Users/p"), remote_url: "git@github.com:wsp-labs/wsp.git" };
         let runner = Recorded::new(&["gh"]).answering(vec![(0, PROBE)]);
         let got = read(&runner, &ask, &Pick::Number(870), Some(SEEN)).await.unwrap();
         assert_eq!(got, GitPrReadReply { pr: None, seen: Some(SEEN.to_owned()), unchanged: true });
         let calls = runner.asked();
         assert_eq!(calls.len(), 1);
-        assert_eq!(calls[0].args, ["api", "repos/Zingzy/wsp/pulls/870", "--jq", r#""\(.updated_at) \(.head.sha) \(.state)""#]);
+        assert_eq!(calls[0].args, ["api", "repos/wsp-labs/wsp/pulls/870", "--jq", r#""\(.updated_at) \(.head.sha) \(.state)""#]);
     }
 
     #[tokio::test]
     async fn a_pull_request_that_moved_is_read_in_full_and_says_what_it_saw() {
-        let ask = Ask { cwd: Path::new("/Users/p"), remote_url: "git@github.com:Zingzy/wsp.git" };
+        let ask = Ask { cwd: Path::new("/Users/p"), remote_url: "git@github.com:wsp-labs/wsp.git" };
         let moved = "2026-09-29T08:00:00Z ec5c10de663bd1860925ad42e9580bab4eb1d377 open\n";
         let runner = Recorded::new(&["gh"]).answering(vec![(0, moved), (0, VIEW_JSON), (8, CHECKS_JSON), (0, "3\n")]);
         let got = read(&runner, &ask, &Pick::Number(870), Some(SEEN)).await.unwrap();
@@ -934,10 +937,10 @@ mod tests {
         assert_eq!(
             lines,
             [
-                "api repos/Zingzy/wsp/pulls/870",
+                "api repos/wsp-labs/wsp/pulls/870",
                 "pr view",
                 "pr checks",
-                "api repos/Zingzy/wsp/compare/main...ec5c10de663bd1860925ad42e9580bab4eb1d377"
+                "api repos/wsp-labs/wsp/compare/main...ec5c10de663bd1860925ad42e9580bab4eb1d377"
             ]
         );
         // A probe gh could not make at all leaves the full read to say what the host has.
@@ -961,7 +964,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_read_the_host_refused_for_its_rate_limit_is_coded_so_and_never_reads_as_none() {
-        let ask = Ask { cwd: Path::new("/Users/p"), remote_url: "git@github.com:Zingzy/wsp.git" };
+        let ask = Ask { cwd: Path::new("/Users/p"), remote_url: "git@github.com:wsp-labs/wsp.git" };
         for pick in [Pick::Number(870), Pick::Branch("work")] {
             let runner = Recorded::new(&["gh"]).answering_said(vec![(1, "", RATE_LIMITED)]);
             let err = read(&runner, &ask, &pick, None).await.unwrap_err();

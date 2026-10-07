@@ -1368,11 +1368,11 @@ const CREDENTIAL_FIX: &str = "sign gh in on it with gh auth login, then gh auth 
 pub(crate) mod tests {
     use super::*;
 
-    /// What gh 2.97 printed for PR 870 of Zingzy/wsp on 2026-09-29 with the read's fields, its commits cut to one.
-    pub(crate) const VIEW_JSON: &str = r#"{"additions":3369,"baseRefName":"main","changedFiles":95,"commits":[{"authoredDate":"2026-09-26T19:28:02Z","messageHeadline":"an older one","oid":"0000000000000000000000000000000000000001"},{"authoredDate":"2026-09-27T19:28:02Z","messageHeadline":"feat(daemon): commit, discard and save from a pane","oid":"ec5c10de663bd1860925ad42e9580bab4eb1d377"}],"deletions":289,"headRefName":"ticket/batch9-git","headRefOid":"ec5c10de663bd1860925ad42e9580bab4eb1d377","isDraft":false,"mergeStateStatus":"BLOCKED","mergeable":"MERGEABLE","number":870,"reviewDecision":"CHANGES_REQUESTED","state":"OPEN","updatedAt":"2026-09-28T10:00:00Z","url":"https://github.com/Zingzy/wsp/pull/870"}"#;
+    /// What gh 2.97 printed for PR 870 of wsp-labs/wsp on 2026-09-29 with the read's fields, its commits cut to one.
+    pub(crate) const VIEW_JSON: &str = r#"{"additions":3369,"baseRefName":"main","changedFiles":95,"commits":[{"authoredDate":"2026-09-26T19:28:02Z","messageHeadline":"an older one","oid":"0000000000000000000000000000000000000001"},{"authoredDate":"2026-09-27T19:28:02Z","messageHeadline":"feat(daemon): commit, discard and save from a pane","oid":"ec5c10de663bd1860925ad42e9580bab4eb1d377"}],"deletions":289,"headRefName":"ticket/batch9-git","headRefOid":"ec5c10de663bd1860925ad42e9580bab4eb1d377","isDraft":false,"mergeStateStatus":"BLOCKED","mergeable":"MERGEABLE","number":870,"reviewDecision":"CHANGES_REQUESTED","state":"OPEN","updatedAt":"2026-09-28T10:00:00Z","url":"https://github.com/wsp-labs/wsp/pull/870"}"#;
 
     /// Its checks as gh pr checks prints them, one Actions job failed, and one check another service reported.
-    pub(crate) const CHECKS_JSON: &str = r#"[{"bucket":"fail","description":"","link":"https://github.com/Zingzy/wsp/actions/runs/36495564111/job/109174214002","name":"Install, build, test, types","workflow":"ci"},{"bucket":"pending","description":"","link":"https://github.com/Zingzy/wsp/actions/runs/36495564109/job/109174213692","name":"Format, lint, test, build, wire suite","workflow":"daemon"},{"bucket":"pass","description":"All good","link":"https://ci.example.com/build/7","name":"buildkite/wsp","workflow":""},{"bucket":"skipping","description":"","link":"","name":"deploy","workflow":"ci"},{"bucket":"cancel","description":"","link":"","name":"lint","workflow":"ci"}]"#;
+    pub(crate) const CHECKS_JSON: &str = r#"[{"bucket":"fail","description":"","link":"https://github.com/wsp-labs/wsp/actions/runs/36495564111/job/109174214002","name":"Install, build, test, types","workflow":"ci"},{"bucket":"pending","description":"","link":"https://github.com/wsp-labs/wsp/actions/runs/36495564109/job/109174213692","name":"Format, lint, test, build, wire suite","workflow":"daemon"},{"bucket":"pass","description":"All good","link":"https://ci.example.com/build/7","name":"buildkite/wsp","workflow":""},{"bucket":"skipping","description":"","link":"","name":"deploy","workflow":"ci"},{"bucket":"cancel","description":"","link":"","name":"lint","workflow":"ci"}]"#;
 
     #[test]
     fn the_lines_gh_is_given_name_the_repository_the_branch_the_base_and_the_head() {
@@ -1394,8 +1394,8 @@ pub(crate) mod tests {
         assert_eq!(GitHub.behind_argv("o/r", "50% off", "ab")[1], "repos/o/r/compare/50%25%20off...ab");
         assert_eq!(GitHub.behind_argv("o/r", "release/1.0", "ab")[1], "repos/o/r/compare/release/1.0...ab");
         assert_eq!(
-            GitHub.page_argv("Zingzy/wsp", 772),
-            ["api", "graphql", "-f", &format!("query={PAGE_QUERY}"), "-f", "owner=Zingzy", "-f", "name=wsp", "-F", "number=772"]
+            GitHub.page_argv("wsp-labs/wsp", 772),
+            ["api", "graphql", "-f", &format!("query={PAGE_QUERY}"), "-f", "owner=wsp-labs", "-f", "name=wsp", "-F", "number=772"]
         );
         assert_eq!(GitHub.log_argv("o/r", 36, 109), ["run", "view", "36", "-R", "o/r", "--job", "109", "--log-failed"]);
     }
@@ -1503,7 +1503,7 @@ pub(crate) mod tests {
     fn the_pull_request_is_read_off_ghs_json_and_never_off_its_prose() {
         let read = GitHub.read(VIEW_JSON).unwrap();
         assert_eq!((read.number, read.state, read.host.as_str()), (870, PullRequestState::Open, "github.com"));
-        assert_eq!(read.url, "https://github.com/Zingzy/wsp/pull/870");
+        assert_eq!(read.url, "https://github.com/wsp-labs/wsp/pull/870");
         assert_eq!((read.base.as_str(), read.branch.as_str()), ("main", "ticket/batch9-git"));
         assert_eq!(read.head_oid, "ec5c10de663bd1860925ad42e9580bab4eb1d377");
         // The head's own subject where the list holds the head, else the last commit's.
@@ -1541,7 +1541,7 @@ pub(crate) mod tests {
         assert_eq!(run_of("https://github.com/o/r/actions/runs/12"), None);
     }
 
-    /// What GitHub answered for PR 772 of Zingzy/wsp on 2026-10-05 to the page's one GraphQL read, and what gh 2.97
+    /// What GitHub answered for PR 772 of wsp-labs/wsp on 2026-10-05 to the page's one GraphQL read, and what gh 2.97
     /// answered on 2026-10-02 for its checks.
     const PAGE_772: &str = include_str!("../../tests/gh/pr772-page.json");
     const CHECKS_772: &str = include_str!("../../tests/gh/pr772-checks.json");
@@ -1608,7 +1608,7 @@ pub(crate) mod tests {
         assert_eq!((bot.id, bot.author.as_str(), bot.bot), (5841958969, "vercel[bot]", true));
         assert_eq!(bot.association.as_deref(), Some("none"));
         assert_eq!(bot.avatar.as_deref(), Some("https://avatars.githubusercontent.com/in/8329?v=4"));
-        assert_eq!(bot.url, "https://github.com/Zingzy/wsp/pull/772#issuecomment-5841958969");
+        assert_eq!(bot.url, "https://github.com/wsp-labs/wsp/pull/772#issuecomment-5841958969");
         assert_eq!(bot.at, "2026-09-26T01:29:03Z");
         let person = &read.comments[1];
         assert_eq!((person.author.as_str(), person.bot, person.association.as_deref()), ("Zingzy", false, Some("owner")));
@@ -1818,15 +1818,15 @@ pub(crate) mod tests {
     }
 
     /// What GitHub answered on 2026-10-02 to the scope read for a thread, a comment on a line, a review and a comment in
-    /// the conversation of Zingzy/wsp PR 772, and for an id it holds no node for.
+    /// the conversation of wsp-labs/wsp PR 772, and for an id it holds no node for.
     #[test]
     fn the_scope_read_names_the_pull_request_a_thread_or_a_reactable_sits_on_and_nothing_for_any_other_node() {
         let at = |kind: &str| {
             format!(
-                r#"{{"data":{{"node":{{"__typename":"{kind}","pullRequest":{{"number":772,"repository":{{"nameWithOwner":"Zingzy/wsp"}}}}}}}}}}"#
+                r#"{{"data":{{"node":{{"__typename":"{kind}","pullRequest":{{"number":772,"repository":{{"nameWithOwner":"wsp-labs/wsp"}}}}}}}}}}"#
             )
         };
-        let here = Some(("Zingzy/wsp".to_owned(), 772));
+        let here = Some(("wsp-labs/wsp".to_owned(), 772));
         assert_eq!(GitHub.read_scope(&at("PullRequestReviewThread"), true), here);
         for kind in ["PullRequestReviewComment", "PullRequestReview", "IssueComment"] {
             assert_eq!(GitHub.read_scope(&at(kind), false), here, "{kind}");

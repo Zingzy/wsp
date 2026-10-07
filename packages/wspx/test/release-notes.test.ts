@@ -161,7 +161,7 @@ describe("the notes on the draft release", () => {
     expect(names).toEqual({ mac: "wsp-0.1.4-mac.dmg", appImage: "wsp-0.1.4.AppImage" });
     for (const name of Object.values(names)) expect(notes()).toContain(name);
     expect(notes()).not.toContain(macZip);
-    expect(published).toBe("@zingzy/wsp");
+    expect(published).toBe("@wsp-labs/wsp");
     expect(notes()).toContain(`npm i -g ${published}@0.1.4`);
   });
 

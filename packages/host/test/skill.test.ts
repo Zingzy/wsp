@@ -282,9 +282,9 @@ describe("the wsp skill", () => {
     expect(setup).toContain("Starting the host is neither: any command that needs one starts it");
     expect(setup).toContain("it reads those keys off the file itself, so nothing about them passes through you");
     expect(setup).toContain("The tools show up only after that agent restarts");
-    expect(setup).toContain("prefer that over `npx @zingzy/wsp`");
+    expect(setup).toContain("prefer that over `npx @wsp-labs/wsp`");
     // Every install line names the published package; a bare npx or a stale name would send them to another one.
-    expect(wspSkill().match(/\b(?:npm i -g|npx) (?!@zingzy\/wsp\b)\S+/g)).toBeNull();
+    expect(wspSkill().match(/\b(?:npm i -g|npx) (?!@wsp-labs\/wsp\b)\S+/g)).toBeNull();
   });
 
   it("is a runbook: every step ends in its own Expect line, and the section ends with what to run inside the agent", () => {

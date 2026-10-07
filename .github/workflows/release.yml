@@ -315,7 +315,7 @@ jobs:
         run: node packages/wspx/scripts/daemon-binary.mjs --check
       - name: Publish
         if: ${{ github.event_name == 'push' }}
-        run: pnpm --filter @zingzy/wsp exec npm publish --provenance --access public
+        run: pnpm --filter @wsp-labs/wsp exec npm publish --provenance --access public
 
   publish:
     name: Publish the release

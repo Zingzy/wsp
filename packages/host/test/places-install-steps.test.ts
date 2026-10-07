@@ -28,7 +28,7 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
     const cliDir = join(root, "cli");
     mkdirSync(join(cliDir, "dist"), { recursive: true });
     writeFileSync(join(cliDir, "dist", "bin.js"), "");
-    writeFileSync(join(cliDir, "package.json"), JSON.stringify({ name: "@zingzy/wsp", version: "0.0.0" }));
+    writeFileSync(join(cliDir, "package.json"), JSON.stringify({ name: "@wsp-labs/wsp", version: "0.0.0" }));
     return { daemonDir, cliDir };
   }
 

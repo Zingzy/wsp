@@ -14,7 +14,7 @@ const GOOD = "wsp-map#1765 stays open.\n\n## What it does\n\nTypes are generated
 /** PR bodies by number, as the fake GitHub answers them. */
 const BODIES: Record<string, string> = {
   "11": GOOD,
-  "12": "Ticket: https://github.com/Zingzy/wsp-map/issues/1766\n\nSplits a file.\n",
+  "12": "Ticket: https://github.com/wsp-labs/wsp-map/issues/1766\n\nSplits a file.\n",
   "13": `${GOOD}\nGenerated with [Claude Code](https://claude.com/claude-code)\n`,
 };
 
@@ -29,7 +29,7 @@ const scratch = () => {
 
 beforeAll(async () => {
   server = createServer((req, res) => {
-    const number = /^\/repos\/Zingzy\/wsp\/pulls\/(\d+)$/.exec(req.url ?? "")?.[1];
+    const number = /^\/repos\/wsp-labs\/wsp\/pulls\/(\d+)$/.exec(req.url ?? "")?.[1];
     if (!number || !(number in BODIES)) return void res.writeHead(404).end("{}");
     res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ number: Number(number), body: BODIES[number] }));
   });
@@ -65,13 +65,13 @@ function landRepo(messages: string[]): string {
       env: { PATH: process.env.PATH ?? "", HOME: dir, GIT_CONFIG_NOSYSTEM: "1" },
     });
   git("init", "-q", "-b", "land");
-  git("commit", "-q", "--allow-empty", "-m", "base\n\nPR: https://github.com/Zingzy/wsp/pull/13");
+  git("commit", "-q", "--allow-empty", "-m", "base\n\nPR: https://github.com/wsp-labs/wsp/pull/13");
   git("update-ref", "refs/remotes/origin/main", "HEAD");
   for (const message of messages) git("commit", "-q", "--allow-empty", "-m", message);
   return dir;
 }
 
-const LAND = { GITHUB_EVENT_NAME: "push", GITHUB_REF_NAME: "land/1765", GITHUB_REPOSITORY: "Zingzy/wsp" };
+const LAND = { GITHUB_EVENT_NAME: "push", GITHUB_REF_NAME: "land/1765", GITHUB_REPOSITORY: "wsp-labs/wsp" };
 
 describe("pr-body-check on a body", () => {
   it("passes a body that names its ticket", async () => {
@@ -104,13 +104,13 @@ describe("pr-body-check in CI", () => {
   it("reads a pull request's body live by its number", async () => {
     const event = join(scratch(), "event.json");
     writeFileSync(event, JSON.stringify({ pull_request: { number: 13, body: GOOD } }));
-    const { code, out } = await check([], { GITHUB_EVENT_NAME: "pull_request", GITHUB_EVENT_PATH: event, GITHUB_REPOSITORY: "Zingzy/wsp", GITHUB_API_URL: api });
+    const { code, out } = await check([], { GITHUB_EVENT_NAME: "pull_request", GITHUB_EVENT_PATH: event, GITHUB_REPOSITORY: "wsp-labs/wsp", GITHUB_API_URL: api });
     expect(code).toBe(1);
     expect(out).toContain('PR 13: the body carries a "Generated with" line');
   });
 
   it("checks every PR the land branch's commits name, and none on main", async () => {
-    const repo = landRepo(["fix: one\n\nWhy.\n\nPR: https://github.com/Zingzy/wsp/pull/11", "fix: two\n\nWhy.\n\nPR: https://github.com/Zingzy/wsp/pull/12"]);
+    const repo = landRepo(["fix: one\n\nWhy.\n\nPR: https://github.com/wsp-labs/wsp/pull/11", "fix: two\n\nWhy.\n\nPR: https://github.com/wsp-labs/wsp/pull/12"]);
     const { code, out } = await check([], { ...LAND, GITHUB_API_URL: api }, repo);
     expect(code).toBe(0);
     expect(out).toContain("PR 11: the body passes");
@@ -119,7 +119,7 @@ describe("pr-body-check in CI", () => {
   });
 
   it("fails a land branch when one named PR's body breaks the rule", async () => {
-    const repo = landRepo(["fix: one\n\nPR: https://github.com/Zingzy/wsp/pull/11", "fix: two\n\nPR: https://github.com/Zingzy/wsp/pull/13"]);
+    const repo = landRepo(["fix: one\n\nPR: https://github.com/wsp-labs/wsp/pull/11", "fix: two\n\nPR: https://github.com/wsp-labs/wsp/pull/13"]);
     const { code, out } = await check([], { ...LAND, GITHUB_API_URL: api }, repo);
     expect(code).toBe(1);
     expect(out).toContain('PR 13: the body carries a "Generated with" line');

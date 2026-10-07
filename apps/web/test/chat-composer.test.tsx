@@ -718,7 +718,7 @@ describe("composer @ menu", () => {
     expect(document.body.textContent).not.toContain("this computer");
   });
 
-  const PR: HostItem = { kind: "pull-request", number: 880, title: "Sidebar section heads", body: "", url: "https://github.com/Zingzy/wsp/pull/880" };
+  const PR: HostItem = { kind: "pull-request", number: 880, title: "Sidebar section heads", body: "", url: "https://github.com/wsp-labs/wsp/pull/880" };
   const prRows = () => document.querySelectorAll("[data-composer-item-id^='reference:']");
 
   it("# opens the menu the moment it is typed, saying the list is on its way, and fills it when the list answers", async () => {

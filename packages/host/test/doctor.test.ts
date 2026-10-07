@@ -323,9 +323,9 @@ describe("the doctor's line for a place behind this wsp", () => {
   it("puts this computer first where the binary staged beside this wsp is behind, with the line that stages the right one", async () => {
     // A host rebuilt without its daemon binary runs beside the one that was there before, which knows none of this
     // wsp's verbs; the reading is this computer's own and is said before anything else the run says.
-    const here = { version: async () => DAEMON_VERSION - 1, fix: "npm i -g @zingzy/wsp" };
+    const here = { version: async () => DAEMON_VERSION - 1, fix: "npm i -g @wsp-labs/wsp" };
     const lines = await placesBehindLines(listing([{ id: "p_1", kind: "computer", name: "spoo", default: true, daemonVersion: DAEMON_VERSION - 5 }]), Date.now(), here);
-    expect(lines[0]).toBe(`this computer's wsp daemon is version ${DAEMON_VERSION - 1} and this wsp needs ${DAEMON_VERSION}; npm i -g @zingzy/wsp stages the right one`);
+    expect(lines[0]).toBe(`this computer's wsp daemon is version ${DAEMON_VERSION - 1} and this wsp needs ${DAEMON_VERSION}; npm i -g @wsp-labs/wsp stages the right one`);
     expect(lines).toHaveLength(2);
     // Level with this wsp, and a daemon that will not start at all, both say nothing: the roads that need it say so
     // themselves, and the reading a run opens with must not fail on the daemon it is reading.
@@ -335,7 +335,7 @@ describe("the doctor's line for a place behind this wsp", () => {
   });
 
   it("says this computer's own row once, off its own reading, and never with the line that moves a joined computer", async () => {
-    const here = { version: async () => DAEMON_VERSION - 1, fix: "npm i -g @zingzy/wsp" };
+    const here = { version: async () => DAEMON_VERSION - 1, fix: "npm i -g @wsp-labs/wsp" };
     const lines = await placesBehindLines(listing([
       { id: HERE_PLACE_ID, kind: "computer", name: "mac", default: true, daemonVersion: DAEMON_VERSION - 1 },
       { id: "p_1", kind: "computer", name: "spoo", default: false, daemonVersion: DAEMON_VERSION - 5 },
@@ -345,13 +345,13 @@ describe("the doctor's line for a place behind this wsp", () => {
   });
 
   it("reads the line that stages the binary off the road this wsp was installed by", async () => {
-    expect(daemonFixLine({ argv: ["/usr/local/bin/node", "/usr/local/lib/node_modules/@zingzy/wsp/dist/bin.js"] })).toBe("npm i -g @zingzy/wsp");
+    expect(daemonFixLine({ argv: ["/usr/local/bin/node", "/usr/local/lib/node_modules/@wsp-labs/wsp/dist/bin.js"] })).toBe("npm i -g @wsp-labs/wsp");
     expect(daemonFixLine({ argv: ["/n", "/x"], shim: "/Applications/wsp.app/Contents/Resources/bin/wsp" })).toBe("updating the wsp app");
     expect(daemonFixLine({ argv: ["/n", "/Users/dev/wsp/packages/wspx/dist/bin.js"] })).toBe("a cargo build of the daemon and node packages/wspx/scripts/daemon-binary.mjs --from its binary");
   });
 
   it("reads the line that gets a newer release off the same road, pinned to that release where the road takes a version", () => {
-    expect(releaseUpdateLine({ argv: ["/usr/local/bin/node", "/usr/local/lib/node_modules/@zingzy/wsp/dist/bin.js"] }, "0.3.0")).toBe("npm i -g @zingzy/wsp@0.3.0");
+    expect(releaseUpdateLine({ argv: ["/usr/local/bin/node", "/usr/local/lib/node_modules/@wsp-labs/wsp/dist/bin.js"] }, "0.3.0")).toBe("npm i -g @wsp-labs/wsp@0.3.0");
     expect(releaseUpdateLine({ argv: ["/n", "/x"], shim: "/Applications/wsp.app/Contents/Resources/bin/wsp" }, "0.3.0")).toBe("updating the wsp app");
     expect(releaseUpdateLine({ argv: ["/n", "/Users/dev/wsp/packages/wspx/dist/bin.js"] }, "0.3.0")).toBe("a pull of the checkout and a build");
   });
@@ -415,7 +415,7 @@ describe("verifyNoneLeft", () => {
 function fakeCliDir(root: string): string {
   const cli = join(root, "cli");
   mkdirSync(join(cli, "dist"), { recursive: true });
-  writeFileSync(join(cli, "package.json"), JSON.stringify({ name: "@zingzy/wsp", version: "9.9.9" }));
+  writeFileSync(join(cli, "package.json"), JSON.stringify({ name: "@wsp-labs/wsp", version: "9.9.9" }));
   writeFileSync(join(cli, "dist", "bin.js"), 'import "./chunk-1.js";\n');
   writeFileSync(join(cli, "dist", "chunk-1.js"), "export const y = 2;\n");
   writeFileSync(join(cli, "tsup.config.ts"), "// never travels\n");
@@ -662,9 +662,9 @@ describe("the doctor's computer road", () => {
     id: "pr_1",
     name: "spoo-landing",
     computer: "p_1",
-    source: { kind: "git", url: "https://github.com/Zingzy/wsp.git" },
+    source: { kind: "git", url: "https://github.com/wsp-labs/wsp.git" },
     path: "/srv/spoo-landing",
-    remote: "https://github.com/Zingzy/wsp.git",
+    remote: "https://github.com/wsp-labs/wsp.git",
     defaultBranch: "main",
     memoryKey: "k",
     memoryDir: "/root/.wsp/projects/pr_1/memory",
@@ -760,7 +760,7 @@ describe("the doctor's computer road", () => {
     const one = fakeHost({ projects: [project()] });
     const io = captured();
     expect(await computerDoctor(one.rt, io, computer(), { vault: () => ({}) })).toBe(1);
-    expect(io.errors.join("\n")).toContain(projectNeedsReaddLine("spoo-landing", "spoo", { kind: "git", url: "https://github.com/Zingzy/wsp.git" }));
+    expect(io.errors.join("\n")).toContain(projectNeedsReaddLine("spoo-landing", "spoo", { kind: "git", url: "https://github.com/wsp-labs/wsp.git" }));
     expect(one.created).toEqual([]);
 
     const none = fakeHost({ projects: [] });
@@ -816,7 +816,7 @@ describe("which road wsp doctor takes", () => {
       places: { list: async () => [...places] },
       projects: {
         // One project on the computer joined here, cloned once at its add, which is what a workspace there copies.
-        list: async () => [{ id: "pr_1", name: "spoo-landing", computer: "p_1", checkout: "/root/.wsp/projects/pr_1/checkout", source: { kind: "git", url: "https://github.com/Zingzy/wsp.git" } }],
+        list: async () => [{ id: "pr_1", name: "spoo-landing", computer: "p_1", checkout: "/root/.wsp/projects/pr_1/checkout", source: { kind: "git", url: "https://github.com/wsp-labs/wsp.git" } }],
         add: async (o: { source: string }) => ({ id: "pr_local", name: "local", computer: HERE_PLACE_ID, source: { kind: "folder", path: o.source } }),
         remove: async () => ({ said: "gone" }),
       },
@@ -873,7 +873,7 @@ describe("which road wsp doctor takes", () => {
   });
 
   it("opens every road with the newest release, the one that bills included", async () => {
-    const latest = "0.3.0; this is 0.2.0, npm i -g @zingzy/wsp@0.3.0 gets it";
+    const latest = "0.3.0; this is 0.2.0, npm i -g @wsp-labs/wsp@0.3.0 gets it";
     const bare = captured();
     expect(await doctor(fakeHost([]).rt, bare, { latest, vault: () => ({}) })).toBe(0);
     expect(bare.lines[0]).toBe(`latest release ${latest}`);

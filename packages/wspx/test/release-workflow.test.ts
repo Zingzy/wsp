@@ -48,7 +48,7 @@ function stepScript(job: string, name: string): string {
 /** A gh of its own answering the read of the release served as latest, and recording every `gh release` call so a
  * case reads whether the draft was ever flipped. */
 function stubGh(answer: string): string {
-  return `#!/bin/sh\ncase "$1 $2" in\n  "api repos/Zingzy/wsp/releases/latest") ${answer} ;;\nesac\ncase "$1" in release) echo "$*" >> edits ;; esac\n`;
+  return `#!/bin/sh\ncase "$1 $2" in\n  "api repos/wsp-labs/wsp/releases/latest") ${answer} ;;\nesac\ncase "$1" in release) echo "$*" >> edits ;; esac\n`;
 }
 
 /** That step as the runner runs it, `bash -e` with that gh first on PATH, in a checkout of its own carrying the
@@ -65,7 +65,7 @@ function runStep(script: string, gh: string): { status: number; said: string; ed
   const ran = spawnSync("bash", ["-e", "step.sh"], {
     cwd: dir,
     encoding: "utf8",
-    env: { ...process.env, PATH: `${dir}:${process.env["PATH"] ?? ""}`, GITHUB_REF_NAME: "v0.3.0", GITHUB_REPOSITORY: "Zingzy/wsp" },
+    env: { ...process.env, PATH: `${dir}:${process.env["PATH"] ?? ""}`, GITHUB_REF_NAME: "v0.3.0", GITHUB_REPOSITORY: "wsp-labs/wsp" },
   });
   const edits = join(dir, "edits");
   return { status: ran.status ?? -1, said: `${ran.stdout}${ran.stderr}`, edits: existsSync(edits) ? readFileSync(edits, "utf8") : "" };
