@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type {
   GoneWatch,
-  UpgradePlan,
   Builder,
   GoldenImport,
   SealResult,
@@ -191,8 +190,7 @@ export interface RuntimeCore {
   readonly vaultCapBytes: number;
   readonly defaultIdleWindowMs: number;
   readonly hostId: string;
-  readonly vaultExport: (m: Machine, o?: Pick<VaultOptions, "maxBytes" | "drop">) => Promise<Buffer>;
-  readonly imageMovePlan: (m: Machine, from: GoldenVersion | undefined, to: GoldenVersion) => Promise<UpgradePlan>;
+  readonly vaultExport: (m: Machine, o?: Pick<VaultOptions, "maxBytes">) => Promise<Buffer>;
   readonly deviceDoor: DeviceDoor;
   readonly threadLaunch: (entry: LiveWorkspace, threadId: string, rootThreadId: string, o?: { aside?: true; }) => Promise<{ scoped?: Awaited<ReturnType<(name: string, scope: ThreadScope, now: number, more?: { road?: ScopedRoad; aside?: true; }) => Promise<PairedDevice>>>; env: Record<string, string>; wsp?: McpServerSpec; }>;
   readonly landing: Map<string, number>;
@@ -377,7 +375,6 @@ export interface RecordsArea {
   readonly migrateCopies: () => Promise<void>;
   readonly recordOf: (name: string) => Promise<SealedImage | undefined>;
   readonly recordedImages: () => Promise<Set<string>>;
-  readonly goldenManifestOf: (snapshotId: string) => Promise<GoldenManifest | undefined>;
   readonly recipeAsksEngine: (version: GoldenVersion) => Promise<boolean>;
   readonly imageOf: (snapshotId: string) => Promise<{ golden: string; version?: GoldenVersion; projects?: WorkspaceProject[] }>;
   readonly projectGoldenOf: (raw: unknown) => ProjectGolden;

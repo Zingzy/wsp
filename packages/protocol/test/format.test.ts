@@ -184,9 +184,6 @@ import {
   upgradeSealFailedGoneLine,
   upgradeSealFailedStaysLine,
   upgradeSealFailedUnreadLine,
-  imageKeptLine,
-  IMAGE_ALREADY_NEWEST,
-  IMAGE_MOVE_CONFIRM,
   vaultKeptLine,
   HOSTNAME_KEPT,
   hostnameSetLine,
@@ -1349,34 +1346,6 @@ describe("a create's own words", () => {
     expect(HOSTNAME_KEPT).toBe("hostname not set; the workspace keeps the machine's own name");
     expect(HOSTNAME_KEPT).not.toContain("sethostname");
     expect(HOSTNAME_KEPT).not.toContain("failed");
-  });
-});
-
-describe("what a move onto a newer image says about the files", () => {
-  it("the confirm says what moves, what does not and what it costs, without naming a file", () => {
-    expect(IMAGE_MOVE_CONFIRM).toContain("Your home folder moves to the new copy");
-    expect(IMAGE_MOVE_CONFIRM).toContain("minus the files the image itself wrote and you never changed");
-    expect(IMAGE_MOVE_CONFIRM).toContain("Anything installed outside your home comes from the new image");
-    expect(IMAGE_MOVE_CONFIRM).toContain("everything running in this workspace stops with it");
-    // An archive carries no deletion, so a person is told before the move and not after.
-    expect(IMAGE_MOVE_CONFIRM).toContain("a file you deleted from a folder the image writes into comes back with it");
-  });
-
-  it("a move that had nowhere to go says so rather than saying the image's files came across", () => {
-    expect(IMAGE_ALREADY_NEWEST).toBe("already on the newest version of its image, so nothing moved");
-  });
-
-  it("the kept line names the workspace's own edits, counted and sorted, and says the rest came from the new image", () => {
-    expect(imageKeptLine([".zshrc"])).toBe("kept 1 changed file: .zshrc; every other file the image wrote came from the new image");
-    expect(imageKeptLine([".zshrc", ".claude/settings.json"])).toBe("kept 2 changed files: .claude/settings.json, .zshrc; every other file the image wrote came from the new image");
-  });
-
-  it("a move that changed nothing says so rather than printing an empty list", () => {
-    expect(imageKeptLine([])).toBe("every file the image wrote came from the new image; none of them had been changed here");
-  });
-
-  it("a version that recorded no files of its own says the whole home came across, whatever the kept list holds", () => {
-    expect(imageKeptLine([], true)).toBe("the image it stood on lists no files of its own, so its whole home came across and none of the new image's copies stand");
   });
 });
 

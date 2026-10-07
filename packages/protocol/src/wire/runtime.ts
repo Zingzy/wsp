@@ -267,10 +267,6 @@ const RuntimeOp = z.discriminatedUnion("op", [
   /** Stops a wake that is asking the provider again on its own and replies with the record it leaves behind. */
   z.object({ id: reqId, op: z.literal("workspaces.stopWake"), workspaceId: z.string() }),
   z.object({ id: reqId, op: z.literal("workspaces.upgrade"), workspaceId: z.string() }),
-  /** Moves a workspace onto the golden's head version: a fresh fork of the newer image carrying this workspace's
-   * files across. The person asks for it; nothing moves a machine they are working on.
-   * Refused (kind "conflict") for a workspace forked from a project golden, whose disk the move would throw away. */
-  z.object({ id: reqId, op: z.literal("workspaces.updateImage"), workspaceId: z.string() }),
   /** Names the workspace and replies with its fresh { workspace }. The name is unique on this host, so one another
    * workspace holds, one a fork is landing under and a blank one are refused (kind "conflict"); a name the workspace
    * already carries comes back untouched. Threads running on the machine are untouched. */
@@ -1021,7 +1017,6 @@ export const DEVICE_OPS: readonly string[] = [
   "workspaces.stopWake",
   "workspaces.restartDaemon",
   "workspaces.upgrade",
-  "workspaces.updateImage",
   "workspaces.rename",
   "workspaces.look",
   "workspaces.agents",

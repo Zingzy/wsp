@@ -2,7 +2,6 @@
 import { resolve } from "node:path";
 import { z } from "zod";
 import {
-  IMAGE_MOVE_CONFIRM,
   ProjectGolden,
   ProjectGoldenRemoved,
   SealedImage,
@@ -41,7 +40,7 @@ import {
   StartResult,
 } from "@wsp/protocol";
 import { hostBack, usageIs, tool, type Verb, PICK_FLAGS, PICK_OPTIONS, flag, flagList, absoluteFolder, openedThreadLine } from "./client.js";
-import { workspaceOf, pauseModeOf, stateLine, wokeLine, nap, rebuild, rebuiltLine, imageView, buildImageAt, imageLines, HOST_SIDE_VAULT, imagePassphrase, moveImage, imageMovedLine, renameWorkspace, renamedWorkspaceLine, awake, committed, askedToFix, mergedIn, fixLine, startedFrom, reviewStarted, reviewPosted, startedLines, VERDICTS, mergedPr, updateLine, madeWorktree, dropping, deleting, forgetQuestion, forget, forgotLine, deleteQuestion, imageRemoveQuestion, deleteWorkspace, deletedLine, projectOf, createFor, agentsAsked, projectImageOf, removeProjectImage, setAgents, snapshot, projectGoldenLine } from "./workspaces-help.js";
+import { workspaceOf, pauseModeOf, stateLine, wokeLine, nap, rebuild, rebuiltLine, imageView, buildImageAt, imageLines, HOST_SIDE_VAULT, imagePassphrase, renameWorkspace, renamedWorkspaceLine, awake, committed, askedToFix, mergedIn, fixLine, startedFrom, reviewStarted, reviewPosted, startedLines, VERDICTS, mergedPr, updateLine, madeWorktree, dropping, deleting, forgetQuestion, forget, forgotLine, deleteQuestion, imageRemoveQuestion, deleteWorkspace, deletedLine, projectOf, createFor, agentsAsked, projectImageOf, removeProjectImage, setAgents, snapshot, projectGoldenLine } from "./workspaces-help.js";
 import { pickFlags, checkedStart, threadHere, refuseMachineThread, threadDeleted, openingOf, notifyOf, follow, turnFailure, followVerb, beforeSending, turnView } from "./turns-help.js";
 import { confirmed, QUIET, QUIET_LINE, QUIET_TURN, Created, TurnOut, asJson, asText, WorkspaceIn, AgentIn, NotifyIn, CwdIn, ConfirmIn, PICK_INPUTS, SizeIn, SpawnIn, MaxMachinesIn, MaxDepthIn, AGENTS_ASKED_NOTHING_LINE, agentsToolAskedNothing } from "./io.js";
 
@@ -503,7 +502,7 @@ export const WORKSPACE_VERBS: readonly Verb[] = [
   {
     name: "wake",
     usage: "wsp wake <workspace>",
-    about: "wakes the workspace's machine and prints the state the next wsp workspaces will show for it",
+    about: "wakes the workspace's machine and prints the state it came up in",
     page: "front",
     options: {},
     run: async ctx => {
@@ -589,7 +588,7 @@ export const WORKSPACE_VERBS: readonly Verb[] = [
     tool: tool({
       description:
         "Builds this host's image at a place from the record alone: a builder is forked there with the recipe the image was sealed from and every sign-in set to skip, the sign-ins the seal held are landed on it out of the vault, and the copy is sealed and recorded under that place at the record's hash. Nothing signs in again and no Keychain is read. A place that already holds a copy built from this record is answered with that copy and `built` false, so asking twice costs nothing; a place whose copy is building is answered with that build, never a second one. A joined computer builds its copy at the end of its setup; every other copy, and every copy a newer version left behind, is built only when this line asks or when a fork there finds no current copy, and that fork says so before the build starts, since a build bills where it runs. Refused in one line for a place this host does not hold, for a place that takes no copy at all, and for a record sealed without the recipe it was built from. A record holding no sign-ins is refused too, since every copy of it would ask for them again; `force` builds it anyway.",
-      input: { place: z.string().describe("the place to build the copy at, by the name wsp places lists"), force: z.boolean().optional().describe("build even where the record holds no sign-ins, so the copy asks for every one of them again") },
+      input: { place: z.string().describe("the place to build the copy at, by the name wsp computers lists"), force: z.boolean().optional().describe("build even where the record holds no sign-ins, so the copy asks for every one of them again") },
       output: { copy: SealedImageCopy, built: z.boolean() },
       call: async ({ place, force }, deps) => {
         const { image, built } = await buildImageAt(await deps.client(), QUIET, place, force);
@@ -614,36 +613,6 @@ export const WORKSPACE_VERBS: readonly Verb[] = [
       ctx.out.emit({ exported }, sealedExportLine(exported));
       return 0;
     },
-  },
-  {
-    name: "image move",
-    cloud: true,
-    usage: "wsp image move <workspace>",
-    about: "moves the workspace onto the newest version of its image and prints what of the image's own files it kept",
-    page: "app",
-    options: {},
-    run: async ctx => {
-      const [ref] = ctx.args;
-      if (ref === undefined || ctx.args.length !== 1) throw usageRefusal("wsp image move takes one workspace.", usageIs(ctx));
-      const client = await ctx.client();
-      const source = await workspaceOf(client, ref);
-      ctx.io.error(IMAGE_MOVE_CONFIRM);
-      const moved = await moveImage(client, source.id);
-      ctx.out.emit(moved, imageMovedLine(moved));
-      return 0;
-    },
-    tool: tool({
-      description:
-        "Moves the workspace onto the newest version of the image it was forked from: a fresh machine of that image replaces the old one and the workspace's home folder comes across, less the files the image itself wrote and nobody changed here, whose newer copies come with the image. `kept` names the files of the image's own this workspace had changed, which travelled instead. An archive carries no deletion, so a file taken out of a folder the image writes into comes back with the new image. Anything installed outside the home folder comes from the new image, and everything running on the old machine stops with it. Refused in one line on a workspace that is not running, one forked from a project image, and one whose image this host no longer holds; one already on the newest version comes back untouched and says so.",
-      input: { workspace: WorkspaceIn },
-      output: { workspace: WorkspaceOut, moved: z.boolean(), kept: z.array(z.string()), fallback: z.boolean().optional() },
-      call: async ({ workspace: ref }, deps) => {
-        const client = await deps.client();
-        const source = await workspaceOf(client, ref);
-        const moved = await moveImage(client, source.id);
-        return asText(imageMovedLine(moved), moved);
-      },
-    }),
   },
   {
     name: "image remove",

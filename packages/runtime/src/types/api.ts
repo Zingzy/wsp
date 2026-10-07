@@ -38,7 +38,6 @@ import type {
   Attachment,
   McpServerSpec,
   SysSample,
-  UpgradeResult,
   Caller,
   WorkspaceAgents,
   WorkspaceLook,
@@ -152,10 +151,6 @@ export interface Runtime {
     stopWake(id: string, origin?: Caller): Promise<WorkspaceView>;
     /** Replaces the workspace's machine with a fresh fork of the image behind it, its vaulted files carried over. */
     upgrade(id: string, origin?: Caller): Promise<WorkspaceView>;
-    /** Moves the workspace onto its golden's head version, carrying its files across. Refused in one sentence when
-     * the machine is not running, the image is a project golden, or no golden knows the image; a workspace past
-     * those and already on the head is returned untouched. */
-    updateImage(id: string, origin?: Caller): Promise<UpgradeResult>;
     /** Fresh golden fork with the nap-time vault, old machine killed, id and name kept: the way out of a zombie. */
     rebuild(id: string, origin?: Caller): Promise<WorkspaceView>;
     /** Starts another daemon for a workspace whose daemon this host holds the process of, in place of one that is

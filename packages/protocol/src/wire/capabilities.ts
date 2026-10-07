@@ -58,10 +58,9 @@ export const Capabilities = z.object({
    * words; the runtime reads only whether it is there. */
   pauseMode: PauseMode.optional(),
   /** The provider replaces a machine with a fresh fork of the image behind it and the workspace goes on, its
-   * vaulted files carried over: the one road a rebuild and an image move both take, since both throw a machine away
-   * and hand its workspace another. False where nothing forks: this computer, a host with no provider. Whether the
-   * replacement comes up with the processes still running is liveCloneForks, which says nothing about whether one may
-   * stand in at all. */
+   * vaulted files carried over: the road a rebuild takes, since it throws a machine away and hands its workspace
+   * another. False where nothing forks: this computer, a host with no provider. Whether the replacement comes up with
+   * the processes still running is liveCloneForks, which says nothing about whether one may stand in at all. */
   replacesMachine: z.boolean(),
   previewUrls: z.boolean(),
   signedUrls: z.boolean(),

@@ -70,7 +70,6 @@ const CLOUD_LINES = [
   ["fork", "w"],
   ["rebuild", "w"],
   ["image", "build", "somewhere"],
-  ["image", "move", "w"],
   ["image", "remove", "snap-1"],
   ["image", "export", "/tmp/image.wsp"],
   ["add", "solari"],
@@ -80,7 +79,7 @@ const CLOUD_LINES = [
 ];
 
 /** The tools those lines are served as. */
-const CLOUD_TOOLS = ["snapshot", "fork", "rebuild", "image_build", "image_move", "image_remove"];
+const CLOUD_TOOLS = ["snapshot", "fork", "rebuild", "image_build", "image_remove"];
 
 describe.runIf(!CLOUD_ON)("with the cloud off", () => {
   it("registers neither cloud", () => {
@@ -116,7 +115,7 @@ describe.runIf(!CLOUD_ON)("with the cloud off", () => {
 
   it("prints none of the provider's lines on a page", () => {
     const page = agentPage();
-    for (const words of ["snapshot", "fork", "rebuild", "image build", "image move", "image remove", "image export"]) expect(page).not.toContain(`wsp ${words}`);
+    for (const words of ["snapshot", "fork", "rebuild", "image build", "image remove", "image export"]) expect(page).not.toContain(`wsp ${words}`);
     expect(page).not.toContain("--from <project image>");
     expect(HELP).not.toContain("cloud");
   });
@@ -140,7 +139,7 @@ describe.runIf(CLOUD_ON)("with the cloud on", () => {
   });
 
   it("answers every one of the provider's lines", () => {
-    for (const words of ["snapshot", "fork", "rebuild", "image build", "image move", "image remove", "image export"]) expect(CLI_VERBS.map(v => v.name)).toContain(words);
+    for (const words of ["snapshot", "fork", "rebuild", "image build", "image remove", "image export"]) expect(CLI_VERBS.map(v => v.name)).toContain(words);
     expect(agentPage()).toContain("wsp snapshot");
     expect(HELP).toContain("each cloud account");
   });

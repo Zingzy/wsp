@@ -296,9 +296,9 @@ export function machinesArea(ctx: RuntimeContext): MachinesArea {
           ? ({
               // Taken off the running machine right before a replacement, capped: over the cap it says so, in the
               // one line that names the size and the cap, and the replacement goes on with no backup.
-              vaultExport: async (m, drop) => {
+              vaultExport: async m => {
                 try {
-                  return await vaultExport(m, { maxBytes: vaultCapBytes, ...(drop === undefined ? {} : { drop }) });
+                  return await vaultExport(m, { maxBytes: vaultCapBytes });
                 } catch (e) {
                   if (e !== null && typeof e === "object" && (e as { kind?: unknown }).kind === "vaultTooLarge") {
                     console.warn(`vault for ${record.id} not taken before the replacement: ${e instanceof Error ? e.message : String(e)}; replacing with no backup`);

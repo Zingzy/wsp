@@ -763,7 +763,7 @@ describe("backend capabilities", () => {
     // builder that woke still has a seal in it.
     const { snapshotsAnyLife: _a, ...noAnyLife } = full;
     expect(() => Capabilities.parse(noAnyLife)).toThrow();
-    // And one that never says whether a fresh machine may stand in for another leaves the rebuild and the image move guessing.
+    // And one that never says whether a fresh machine may stand in for another leaves the rebuild guessing.
     const { replacesMachine: _m, ...noReplace } = full;
     expect(() => Capabilities.parse(noReplace)).toThrow();
     // A backend that never says whether its machine is the person's own would have every turn's access decided for it.

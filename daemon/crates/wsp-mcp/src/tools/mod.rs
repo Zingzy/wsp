@@ -112,7 +112,6 @@ pub const TOOLS: &[Tool] = &[
     machine::REBUILD,
     image::IMAGE,
     image::BUILD,
-    image::MOVE,
     image::REMOVE,
     dropping::FORGET,
     dropping::DELETE,
