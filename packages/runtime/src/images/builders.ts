@@ -258,7 +258,7 @@ export function buildersArea(ctx: RuntimeContext): BuildersArea {
   const builderLabels = (extra: Record<string, string> | undefined): Record<string, string> => ({ ...extra, [WSP_LABEL]: "1", [BUILDER_LABEL]: "1", [OWNER_LABEL]: ctx.state.owner, [CREATED_AT_LABEL]: new Date().toISOString() });
 
   /** The hold begins the moment the machine exists: a held placeholder is on the store before any stage runs, so
-   * another process over it (a second host, wspx) never reads this machine as lost. */
+   * another process over it (a second host) never reads this machine as lost. */
   const recordingCreates = (
     b: MachineBackend,
     name: string,
