@@ -39,6 +39,29 @@ pub fn cost(usd: f64) -> String {
     format!("${}", js::to_locale_fixed(usd, 2))
 }
 
+/// `fmtTokens`.
+pub fn tokens(n: f64) -> String {
+    let count = if n.is_finite() && n > 0.0 { js::round(n) } else { 0.0 };
+    if count < 1_000.0 {
+        return js::number(count);
+    }
+    let (value, unit) = if count < 999_500.0 {
+        (count / 1_000.0, "k")
+    } else if count < 999_500_000.0 {
+        (count / 1_000_000.0, "M")
+    } else {
+        (count / 1_000_000_000.0, "B")
+    };
+    let places = if value < 10.0 {
+        2
+    } else if value < 100.0 {
+        1
+    } else {
+        0
+    };
+    format!("{}{unit}", js::number(js::to_fixed(value, places).parse().unwrap_or(0.0)))
+}
+
 /// `fmtDuration` in its short style.
 pub fn duration(ms: f64) -> String {
     if ms < 60_000.0 || !ms.is_finite() {
@@ -136,6 +159,27 @@ mod tests {
         for case in section("cost") {
             assert_eq!(cost(case[0].as_f64().unwrap()), case[1], "cost {case}");
         }
+    }
+
+    #[test]
+    fn token_counts_read_as_format_test_ts_holds_them() {
+        let counts = [
+            0.0,
+            251.0,
+            999.0,
+            1_000.0,
+            4_269.0,
+            12_400.0,
+            22_564.0,
+            200_000.0,
+            999_600.0,
+            1_000_000.0,
+            1_250_000.0,
+            687_400_000.0,
+            7_369_100_000.0,
+        ];
+        let want = ["0", "251", "999", "1k", "4.27k", "12.4k", "22.6k", "200k", "1M", "1M", "1.25M", "687M", "7.37B"];
+        assert_eq!(counts.map(tokens), want);
     }
 
     #[test]

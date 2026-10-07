@@ -19,7 +19,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { LATEST_PROTOCOL_VERSION, SUPPORTED_PROTOCOL_VERSIONS } from "@modelcontextprotocol/sdk/types.js";
 import { CATALOG, agentName } from "@wsp/catalog";
 import { SEAL_REFUSAL } from "@wsp/keys";
-import { CLOUD_ENV, cloudFromEnv, placeSetRefusal, configDirSignInLine, EXIT_CODES, HERE_PLACE_ID, HOST_CLOSED_LINE, HOST_KEY_ENV, HOST_STOPPING_CLOSE, HOST_STOPPING_LINE, NOT_DELIVERED_LINE, HOST_TOKEN_ENV, HOST_URL_ENV, KIND_CLASS, TURN_TOKEN_ENV, LAUNCHED_WITH, LOOPBACK, SKILL_PREVIEW_BYTES, WS_PATH, isLoopback, isUrl, isWildcard, servedHostname, wsUrlOf, hostNoKeyLine, jsonLine, NEWER_TURN_LINE, noMessagesLine, noReplyLine, NO_TERMINAL_CONFIG_LINE, refusalLine, scopedNoPairLine, commandWords, authRefusal, deviceAuthOldHostLine, noSuchPlaceRefusal, pairKeyRefusal, problemListsOf, SEAL_CLIENT, unclosedQuoteRefusal, validatorRefusal, PROVIDER_KEY_WORDS, RecipeFile, type PendingComputer, type PlaceSpend, type PlaceView, type ServerToolsAnswer } from "@wsp/protocol";
+import { CLOUD_ENV, cloudFromEnv, placeSetRefusal, configDirSignInLine, EXIT_CODES, HERE_PLACE_ID, HOST_CLOSED_LINE, HOST_KEY_ENV, HOST_STOPPING_CLOSE, HOST_STOPPING_LINE, NOT_DELIVERED_LINE, HOST_TOKEN_ENV, HOST_URL_ENV, KIND_CLASS, TURN_TOKEN_ENV, LAUNCHED_WITH, LOOPBACK, SKILL_PREVIEW_BYTES, WS_PATH, isLoopback, isUrl, isWildcard, servedHostname, wsUrlOf, hostNoKeyLine, jsonLine, NEWER_TURN_LINE, noMessagesLine, noReplyLine, NO_TERMINAL_CONFIG_LINE, refusalLine, scopedNoPairLine, commandWords, authRefusal, deviceAuthOldHostLine, noSuchPlaceRefusal, pairKeyRefusal, problemListsOf, SEAL_CLIENT, unclosedQuoteRefusal, validatorRefusal, PROVIDER_KEY_WORDS, RecipeFile, DeltaKind, SessionEvent, SESSION_EVENT_TYPES, type PendingComputer, type PlaceSpend, type PlaceView, type ServerToolsAnswer } from "@wsp/protocol";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { hostExitedLine, noHostAnsweredLine, startingHostLine, upArgs } from "../src/host-start.js";
 import { hostLogPath, hostTokenPath, lockPathFor, POLL_MS, SERVICE_WAIT_MS, STARTED_BY_ENV } from "../src/host-lock.js";
@@ -35,7 +35,7 @@ import { VERSION } from "../src/version.js";
 import { ADD_TOOL_FIX, ADD_TOOL_MS, addToolRefusal } from "../src/setup-follow.js";
 import { WORKSPACE_ANSWERED, workspaceWords } from "./mcp-record-workspaces.js";
 import { SLATE_ANSWERED } from "./mcp-record-slates.js";
-import { READS } from "./mcp-record-reads.js";
+import { EVENTS, READS } from "./mcp-record-reads.js";
 
 const CRATE = fileURLToPath(new URL("../../../daemon/crates/wsp-mcp/", import.meta.url));
 const RECORD = join(CRATE, "record");
@@ -779,5 +779,12 @@ describe("the record the daemon binary's tool server serves from", () => {
     const rows = cases.find(c => c.case === "rows")!.line;
     expect(rows).not.toMatch(/[\x7f-\x9f]/);
     expect(rows).toContain("\\u0085");
+  });
+
+  it("replays a thread_read transcript holding every session event kind and every delta kind, each as the runtime writes it", () => {
+    for (const event of EVENTS) expect(SessionEvent.safeParse({ workspaceId: "ws-1", sessionId: "s-3", ...event }).error, JSON.stringify(event)).toBeUndefined();
+    expect([...new Set(EVENTS.map(e => e.type))].sort()).toEqual([...SESSION_EVENT_TYPES].sort());
+    expect([...new Set(EVENTS.flatMap(e => (e.type === "session.delta" ? [e.kind] : [])))].sort()).toEqual([...DeltaKind.options].sort());
+    expect(READS["thread_read"]!.find(c => c.case === "messages")!.replies["sessions.history"]).toBe(JSON.stringify({ id: 1, ok: true, events: EVENTS }));
   });
 });

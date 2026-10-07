@@ -121,7 +121,9 @@ const WORKSPACES = reply({
 
 const at = (ms: number) => 1727431200000 + ms;
 
-const EVENTS = [
+/** A thread of three turns holding every kind of session event and every kind of delta, so a kind one reader folds
+ * into a row and the other drops changes this answer (the coverage test in mcp-record.test.ts). */
+export const EVENTS = [
   { type: "session.moved", threadId: "t-1111aaaa", turnId: "u1", sessionId: "s", workspaceId: "w", from: "/w/tree é", to: "/w/proj", fresh: true, at: at(0) },
   { type: "session.behind", threadId: "t-1111aaaa", turnId: "u1", sessionId: "s", workspaceId: "w", text: "this worktree is behind pull request #7 \u0085", at: at(0) },
   { type: "session.moved", threadId: "t-1111aaaa", turnId: "u1", sessionId: "s", workspaceId: "w", from: "/w/tree", to: "/w/proj", at: at(0) },
@@ -133,28 +135,58 @@ const EVENTS = [
   { type: "session.delta", threadId: "t-1111aaaa", kind: "tool_use", toolUseId: "k1", text: '"/src/🧪.ts"}', at: at(2100) },
   { type: "session.delta", threadId: "t-1111aaaa", kind: "tool_result", toolUseId: "k1", text: "contents", at: at(2200) },
   { type: "session.delta", threadId: "t-1111aaaa", kind: "tool_use", toolUseId: "k2", toolName: "Bash", text: '{"command":"pnpm  test\\n  --run","description":"tests"}', at: at(3000) },
-  { type: "session.delta", threadId: "t-1111aaaa", kind: "tool_result", toolUseId: "k2", isError: true, at: at(3100) },
+  { type: "session.delta", threadId: "t-1111aaaa", kind: "tool_result", toolUseId: "k2", isError: true, text: "", at: at(3100) },
   { type: "session.delta", threadId: "t-1111aaaa", kind: "tool_use", toolUseId: "k3", toolName: "file_change", text: '{"changes":[{"path":"a.ts"},{"path":"b.ts"},{"path":""}]}', at: at(4000) },
-  { type: "session.delta", threadId: "t-1111aaaa", kind: "tool_result", toolUseId: "k3", at: at(4100) },
+  { type: "session.delta", threadId: "t-1111aaaa", kind: "tool_result", toolUseId: "k3", text: "", at: at(4100) },
   { type: "session.delta", threadId: "t-1111aaaa", kind: "tool_use", toolUseId: "k4", toolName: "Grep", text: '{"pattern":"TODO\\n more"}', at: at(4200) },
   { type: "session.delta", threadId: "t-1111aaaa", kind: "tool_use", toolName: "mcp__linear__search", text: "{}", at: at(4300) },
   { type: "session.delta", threadId: "t-1111aaaa", kind: "tool_use", toolUseId: "k5", toolName: "AskUserQuestion", text: '{"questions":[{"question":"No choices?","options":[]},{"question":"Which one?","options":[{"label":"A"}]}]}', at: at(4400) },
   { type: "session.delta", threadId: "t-1111aaaa", kind: "tool_use", toolUseId: "k6", toolName: "Task", text: '{"description":"explore\\nthe code"}', at: at(4450) },
-  { type: "session.delta", threadId: "t-1111aaaa", kind: "tool_result", toolUseId: "k6", at: at(4460) },
+  { type: "session.subagent", threadId: "t-1111aaaa", turnId: "u1", task: "k6", state: "done", title: "explore", summary: "found it", at: at(4455) },
+  { type: "session.delta", threadId: "t-1111aaaa", kind: "tool_result", toolUseId: "k6", text: "", at: at(4460) },
   { type: "session.delta", threadId: "t-1111aaaa", kind: "tool_use", toolUseId: "k7", toolName: "spawn_agent", text: '{"prompt":"review\\nthe diff"}', at: at(4470) },
+  { type: "session.delta", threadId: "t-1111aaaa", kind: "note", text: "a note no read prints", at: at(4475) },
+  { type: "session.plan", threadId: "t-1111aaaa", turnId: "u1", steps: [{ text: "Read the \u0085test", state: "done" }, { text: "Fix 🧪", state: "working" }, { text: "Ship", state: "pending" }], at: at(4480) },
+  { type: "session.context", threadId: "t-1111aaaa", turnId: "u1", context: 154_321, window: 200_000, at: at(4481) },
+  { type: "session.compacted", threadId: "t-1111aaaa", turnId: "u1", before: 154_321, after: 4_270, at: at(4482) },
+  { type: "session.plan", threadId: "t-1111aaaa", turnId: "u1", text: "## Plan\n1. Fix \"it\" 🧪", at: at(4483) },
+  { type: "session.plan", threadId: "t-1111aaaa", turnId: "u1", steps: [{ text: "Read the \u0085test", state: "done" }, { text: "Fix 🧪", state: "done" }, { text: "Ship", state: "working" }], at: at(4484) },
+  { type: "session.plan", threadId: "t-1111aaaa", turnId: "u1", text: "## Plan\n1. Fix \"it\" 🧪\n2. Ship", at: at(4485) },
   { type: "session.delta", threadId: "t-1111aaaa", kind: "text", text: "", at: at(4500) },
   { type: "session.delta", threadId: "t-1111aaaa", kind: "text", text: "Done: ", messageId: "m2", at: at(5000) },
   { type: "session.delta", threadId: "t-1111aaaa", kind: "text", text: "fixed \"it\".", messageId: "m3", at: at(5100) },
   { type: "session.permission", threadId: "t-1111aaaa", askId: "p1", toolName: "Bash", input: "{}", options: [] },
+  { type: "session.permission.closed", threadId: "t-1111aaaa", askId: "p1", outcome: "allowed", at: at(5150) },
   { type: "session.steer", threadId: "t-1111aaaa", prompt: "also docs", at: at(5200) },
+  { type: "session.notify", threadId: "t-1111aaaa", turnId: "u1", notify: "t-0", text: "a line for another thread", at: at(5300) },
+  { type: "session.slate", threadId: "t-1111aaaa", turnId: "u1", cause: "write", version: 2, by: "agent", pieces: ["status"], at: at(5400) },
+  { type: "session.run", threadId: "t-1111aaaa", turnId: "u1", runId: "r1", block: "b1", command: "pnpm test", state: "exited", exitCode: 0, at: at(5500) },
   { type: "session.delta", threadId: "t-other", kind: "text", text: "not this thread" },
-  { type: "session.done", threadId: "t-1111aaaa", turnId: "u1", at: at(6000), result: { status: "completed", durationMs: 125_400, waitedMs: 70_000, costUsd: 0.125, text: "Done: fixed it." } },
-  { type: "session.end", threadId: "t-1111aaaa", turnId: "u1", at: at(6100) },
+  { type: "session.done", threadId: "t-1111aaaa", turnId: "u1", at: at(6000), result: { status: "completed", durationMs: 125_400, waitedMs: 70_000, costUsd: 0.125, tokens: { input: 154_321, output: 4_270, cached: 120_000 }, model: "claude-opus-4-5", text: "Done: fixed it." } },
+  { type: "session.checkpoint", threadId: "t-1111aaaa", turnId: "u1", ref: "refs/wsp/t-1111aaaa/u1", at: at(6050) },
+  {
+    type: "session.changes",
+    threadId: "t-1111aaaa",
+    turnId: "u1",
+    from: "a1",
+    to: "b2",
+    files: [{ path: "src/🧪.ts", kind: "modified", additions: 12, deletions: 3 }, { path: "docs/a b.md", kind: "added", additions: 40, deletions: 0 }],
+    moved: [],
+    at: at(6060),
+  },
+  { type: "session.end", threadId: "t-1111aaaa", turnId: "u1", exitCode: 0, sawResult: true, at: at(6100) },
   { type: "session.start", threadId: "t-1111aaaa", turnId: "u2", prompt: "and the other", at: at(7000) },
-  { type: "session.end", threadId: "t-1111aaaa", turnId: "u2", reason: "the machine went away", at: at(8000) },
+  { type: "session.compacted", threadId: "t-1111aaaa", turnId: "u2", after: 999_500, at: at(7500) },
+  { type: "session.end", threadId: "t-1111aaaa", turnId: "u2", exitCode: null, sawResult: false, reason: "the machine went away", at: at(8000) },
+  { type: "session.changes", threadId: "t-1111aaaa", turnId: "u2", from: "b2", to: "c3", files: [], others: [{ path: "x.ts", kind: "modified", additions: 1, deletions: 1 }], moved: [], at: at(8100) },
   { type: "session.start", threadId: "t-1111aaaa", turnId: "u3", at: at(9000) },
-  { type: "session.done", threadId: "t-1111aaaa", turnId: "u3", result: { status: "completed", durationMs: 800, text: "  " } },
+  { type: "session.compacted", threadId: "t-1111aaaa", turnId: "u3", at: at(9100) },
+  { type: "session.done", threadId: "t-1111aaaa", turnId: "u3", result: { status: "completed", durationMs: 800, tokens: { input: 999, output: 0 }, text: "  " } },
+  { type: "session.changes", threadId: "t-1111aaaa", turnId: "u3", from: "c3", to: "d4", files: [{ path: "y.ts", kind: "modified", additions: 2, deletions: 1 }], moved: [], shared: true },
 ];
+
+/** The transcript as it stood just after the event of that type and turn. */
+const upTo = (type: string, turnId: string) => EVENTS.slice(0, EVENTS.findIndex((e: { type: string; turnId?: string }) => e.type === type && e.turnId === turnId) + 1);
 
 const LISTING = {
   dir: "/Users/zingzy",
@@ -286,9 +318,9 @@ export const READS: Record<string, Case[]> = {
   ],
   thread_read: [
     { case: "messages", arguments: { thread: "t-1111" }, replies: { "sessions.list": reply({ sessions: SESSIONS }), "sessions.history": reply({ events: EVENTS }), "sessions.read": reply({}) } },
-    { case: "last", arguments: { thread: "t-1111aaaa", last: true }, replies: { "sessions.list": reply({ sessions: SESSIONS }), "sessions.history": reply({ events: EVENTS.slice(0, 25) }), "sessions.read": reply({}) } },
-    { case: "last with a newer turn", arguments: { thread: "t-1111aaaa", last: true }, replies: { "sessions.list": reply({ sessions: SESSIONS }), "sessions.history": reply({ events: EVENTS.slice(0, 26) }), "sessions.read": reply({}) } },
-    { case: "last cut by the runtime", arguments: { thread: "t-1111aaaa", last: true }, replies: { "sessions.list": reply({ sessions: SESSIONS }), "sessions.history": reply({ events: EVENTS.slice(0, 27) }), "sessions.read": reply({}) } },
+    { case: "last", arguments: { thread: "t-1111aaaa", last: true }, replies: { "sessions.list": reply({ sessions: SESSIONS }), "sessions.history": reply({ events: upTo("session.done", "u1") }), "sessions.read": reply({}) } },
+    { case: "last with a newer turn", arguments: { thread: "t-1111aaaa", last: true }, replies: { "sessions.list": reply({ sessions: SESSIONS }), "sessions.history": reply({ events: upTo("session.start", "u2") }), "sessions.read": reply({}) } },
+    { case: "last cut by the runtime", arguments: { thread: "t-1111aaaa", last: true }, replies: { "sessions.list": reply({ sessions: SESSIONS }), "sessions.history": reply({ events: upTo("session.end", "u2") }), "sessions.read": reply({}) } },
     { case: "last with no words", arguments: { thread: "t-1111aaaa", last: true }, replies: { "sessions.list": reply({ sessions: SESSIONS }), "sessions.history": reply({ events: EVENTS }), "sessions.read": reply({}) } },
     { case: "a thread of no id", arguments: { thread: "s-2" }, replies: { "sessions.list": reply({ sessions: SESSIONS }), "sessions.history": reply({ events: [] }), "sessions.read": reply({}) } },
     { case: "no reply yet", arguments: { thread: "s-2", last: true }, replies: { "sessions.list": reply({ sessions: SESSIONS }), "sessions.history": reply({ events: [{ type: "session.start", threadId: "s-2", turnId: "x" }] }), "sessions.read": reply({}) } },
