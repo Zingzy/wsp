@@ -158,7 +158,7 @@ export const COMPUTER_VERBS: readonly Verb[] = [
     },
     tool: tool({
       description:
-        "Every recipe this host keeps: a named pick of what goes on a computer of the person's (agents and how each signs in, MCP servers per agent, CLIs by the manager they came from, skills, plugins, folders to move over as projects, and the git, shell and GitHub configs), chosen from what the computer the app runs on has. Each carries summary, one line of what it holds, and machines, the computers that follow it: a recipe edit reaches them. A recipe holds names and never a secret; a token reaches a computer only in the environment of a run there.",
+        "Every recipe this host keeps: a named pick of what goes on a computer of the person's (agents and how each signs in, MCP servers per agent, CLIs by the manager they came from, skills, plugins, folders to move over as projects, and the git, shell and GitHub configs), chosen from what the computer the app runs on has. Each carries summary, one line of what it holds, machines, the computers that follow it, since a recipe edit reaches them, and savedAt, when its file was last written. A recipe holds names and never a secret; a token reaches a computer only in the environment of a run there.",
       input: {},
       output: { recipes: z.array(RecipeView) },
       call: async (_args, deps) => {

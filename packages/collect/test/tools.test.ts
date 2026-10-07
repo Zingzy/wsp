@@ -69,9 +69,9 @@ describe("tools", () => {
     expect(parseNpmGlobals("not json")).toEqual([]);
   });
 
-  it("parses pnpm globals: one project object per global dir, its dependencies map", () => {
+  it("parses pnpm globals: one project object per global dir, its dependencies map, each with the folder it names", () => {
     const out = JSON.stringify([{ path: "/Users/dev/Library/pnpm/global/5", private: true, dependencies: { typescript: { from: "typescript", version: "5.6.2", resolved: "https://x", path: "/y" }, "@biomejs/biome": { from: "@biomejs/biome", version: "1.9.4" } } }]);
-    expect(parsePnpmGlobals(out)).toEqual([{ name: "typescript", version: "5.6.2" }, { name: "@biomejs/biome", version: "1.9.4" }]);
+    expect(parsePnpmGlobals(out)).toEqual([{ name: "typescript", version: "5.6.2", path: "/y" }, { name: "@biomejs/biome", version: "1.9.4" }]);
     expect(parsePnpmGlobals(JSON.stringify([{ path: "/x", private: true, dependencies: {} }]))).toEqual([]);
     expect(parsePnpmGlobals("not json")).toEqual([]);
   });

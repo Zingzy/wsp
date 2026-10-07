@@ -153,6 +153,29 @@ describe("the recipe this host holds, planned for a computer you own", () => {
     expect(plan.files?.lands.map(l => l.dest)).toContain(".claude-cfg/.claude.json");
   });
 
+  it("plans neither wsp's own MCP server nor the package that installs the wsp command where saved picks still hold them, and the rows beside them as before", async () => {
+    writeFileSync(join(home, ".claude.json"), '{ "mcpServers": { "github": { "command": "npx" }, "wsp": { "command": "/Users/z/wsp/bin/wsp", "args": ["mcp"] } } }\n');
+    const server = (name: string) => ({ rung: "agents" as const, id: `${MCP_ID_PREFIX}claude/${name}`, label: name, group: "Claude Code MCP servers", paths: ["~/.claude.json"], bytes: 300, default: "bring" as const });
+    const tool = (via: string, name: string) => ({ rung: "tools" as const, id: `tools/${via}/${name}`, label: name, paths: [], bytes: 0, default: "bring" as const });
+    const manifest = { ...FIXTURE, entries: [...FIXTURE.entries, server("github"), server("wsp"), tool("pnpm", "@wsp/host"), tool("npm", "litmus-cli")] };
+    // wsp's package is the one that installs the wsp command, whatever it is called and whichever manager put it here.
+    const at = { "@wsp/host": join(home, "pnpm/global/v11/21d31-1a1176c18dc/node_modules/@wsp/host"), "litmus-cli": join(home, "npm-root/litmus-cli") };
+    for (const [name, bin] of [["@wsp/host", { wsp: "dist/bin.js" }], ["litmus-cli", { litmus: "bin.js" }]] as const) {
+      mkdirSync(at[name], { recursive: true });
+      writeFileSync(join(at[name], "package.json"), JSON.stringify({ name, bin }));
+    }
+    const listing = JSON.stringify([{ path: join(home, "pnpm/global/v11"), dependencies: { "@wsp/host": { from: "@wsp/host", version: "0.1.0", path: at["@wsp/host"] } } }]);
+    const here = { ...nodeHost(), home, exec: { which: async () => true, run: async (cmd: string, args: readonly string[]) => (cmd === "pnpm" && args[0] === "ls" ? listing : cmd === "npm" && args[0] === "root" ? join(home, "npm-root") : undefined) } };
+    const planner = placeProvisioner({ statePath, home, platform: "linux", collect: async () => manifest, brew: async () => new Map(), here });
+    const saved = { name: "default", agents: { claude: { signin: "vault" as const } }, mcp: { github: { agents: ["claude"] }, wsp: { agents: ["claude"] } }, clis: { "@wsp/host": { via: "pnpm" }, "litmus-cli": { via: "npm" } }, skills: {}, plugins: {}, folders: {}, configs: {} };
+    const plan = await planner.setup(saved, { home });
+    expect(plan.mcp?.agents.map(a => [a.id, a.scopes.flatMap(sc => sc.keep)])).toEqual([["claude", ["github"]]]);
+    const installs = JSON.stringify(plan.steps);
+    expect(installs).toContain("litmus-cli");
+    expect(installs).not.toContain("@wsp/host");
+    expect((await planner.estimate!(saved)).unmeasured).toBe((await planner.estimate!({ ...saved, mcp: { github: saved.mcp.github }, clis: { "litmus-cli": saved.clis["litmus-cli"] } })).unmeasured);
+  });
+
   it("puts a server added here with a header on that computer by name: no file there holds the value, and the vault does", async () => {
     write(SMALL);
     await serversActs({ here: () => ({ ...nodeHost(), home }) }).add({ kind: "here" }, { agent: "claude", name: "linear", url: "https://mcp.linear.app/mcp", headers: { Authorization: "Bearer lin_api_TESTONLY" } });
