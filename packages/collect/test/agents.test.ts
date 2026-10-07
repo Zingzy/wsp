@@ -32,6 +32,25 @@ describe("agents", () => {
     ]);
   });
 
+  it("Claude Code's row lists every local file a hook in its settings runs, and nothing for a system binary or a command on PATH", async () => {
+    const settings = JSON.stringify({
+      hooks: {
+        PreToolUse: [
+          { matcher: "Bash", hooks: [{ type: "command", command: "~/.claude/hooks/commit-batching", timeout: 10 }, { type: "command", command: "bash $HOME/.claude/hooks/no-secret-print.sh" }] },
+          { hooks: [{ type: "command", command: "/usr/bin/true" }, { type: "command", command: "jq -r .tool_input.command" }, { type: "command", command: "~/.claude/hooks/gone" }] },
+        ],
+        Stop: [{ hooks: [{ type: "command", command: "~/.claude/skills/x/run.sh" }] }],
+      },
+    });
+    const host = fakeHost({
+      files: { "~/.claude/settings.json": settings, "~/.claude/skills/x/run.sh": 30, "~/.claude/hooks/commit-batching": 120, "~/.claude/hooks/no-secret-print.sh": 80 },
+      which: ["claude"],
+    });
+    const [claude] = await detectAgents(host);
+    expect(claude?.paths).toEqual(["~/.claude/settings.json", "~/.claude/skills", "~/.claude/hooks/commit-batching", "~/.claude/hooks/no-secret-print.sh"]);
+    expect(claude?.bytes).toBe(settings.length + 30 + 120 + 80);
+  });
+
   it.each([
     ["codex", { "~/.codex/config.toml": 50, "~/.codex/auth.json": 900, "~/.codex/prompts/p.md": 20 }, "Codex", ["~/.codex/config.toml", "~/.codex/prompts"], 70],
     ["gemini", { "~/.gemini/settings.json": 30, "~/.gemini/oauth_creds.json": 500 }, "Gemini CLI", ["~/.gemini/settings.json"], 30],
