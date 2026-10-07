@@ -331,7 +331,7 @@ export function threadsArea(ctx: RuntimeContext): ThreadsArea {
   /** The one line an ending turn sends where its thread's start said: into a thread, or nowhere further for me, whom
    * the recorded event reaches. Recorded before the turn's session.done, since a follower ends there; the person's
    * own row for a line the target's door refused is the exception, since that answer comes after the start it made. */
-  const notifyEnd = (s: { view: SessionView; turnId: string }, notify: readonly string[], named: { by?: ThreadScope; road?: WorkspaceOrigin }, result: TurnResult): void => {
+  const notifyEnd = (s: { view: SessionView; turnId: string; turnLive?: TurnLive }, notify: readonly string[], named: { by?: ThreadScope; road?: WorkspaceOrigin }, result: TurnResult): void => {
     const threadId = s.view.threadId;
     if (threadId === undefined) return;
     // A target whose thread has gone by now cannot be told, and its report must not go with it: the person is told
@@ -352,7 +352,8 @@ export function threadsArea(ctx: RuntimeContext): ThreadsArea {
       const text = notifyLine(threadId, result, target === NOTIFY_ME ? "tail" : "whole");
       ctx.record({ type: "session.notify", workspaceId: s.view.workspaceId, sessionId: s.view.claudeSessionId ?? s.view.id, turnId: s.turnId, threadId, notify: target, text });
       if (target === NOTIFY_ME) continue;
-      const line: Owed = { id: `${s.turnId}:${target}`, from: threadId, notify: target, text, ...named };
+      // A turn whose agent replied over background work sends a line per reply, each kept apart.
+      const line: Owed = { id: `${s.turnId}:${s.turnLive?.told ?? 0}:${target}`, from: threadId, notify: target, text, ...named };
       void ctx.store.put(NOTIFY_OWED, line.id, line).catch((e: unknown) => console.warn(`the line of thread ${threadId.slice(0, 8)} into thread ${target.slice(0, 8)} was not kept: ${e instanceof Error ? e.message : String(e)}`));
       deliver({ ...line, fell });
     }
@@ -365,7 +366,8 @@ export function threadsArea(ctx: RuntimeContext): ThreadsArea {
     }
   };
   /** Settles a running row whose process the runtime ended or lost before the harness's own session.end: to the reply
-   * it held, whose line already went, or failed with `cutLine` as the parent's word when it never replied. The
+   * it held, whose line already went, or failed with `cutLine` as the parent's word when it never replied. A reply held
+   * over background work whose line went, with nothing waking the agent since, is the turn's last word: no line. The
    * session.end carries `reason` either way. The one rule for both roads, the runtime's end() and the restart load. */
   const settleCut = (s: { view: SessionView; turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin; turnLive?: TurnLive; snapshot?: string }, reason: string, cutLine: (endedAt: number) => string): void => {
     const reply = s.turnLive?.reply;
@@ -379,7 +381,7 @@ export function threadsArea(ctx: RuntimeContext): ThreadsArea {
     // one whose process is gone, and a settled row still carrying it would read as waiting on a person forever.
     delete s.view.asking;
     if (s.view.threadId !== undefined) leadAsks.delete(s.view.threadId);
-    if (reply === undefined && s.notify !== undefined) notifyEnd(s, s.notify, tellAs(s), { status: "failed", error: cutLine(endedAt) });
+    if (reply === undefined && s.turnLive?.toldLast !== true && s.notify !== undefined) notifyEnd(s, s.notify, tellAs(s), { status: "failed", error: cutLine(endedAt) });
     ctx.record({ type: "session.end", workspaceId: s.view.workspaceId, sessionId: s.view.claudeSessionId ?? s.view.id, turnId: s.turnId, threadId: s.view.threadId, exitCode: null, sawResult: reply !== undefined, reason });
   };
   /** A folder on this computer git holds no repo in: it keeps no checkpoint and no rewind moves its files. */

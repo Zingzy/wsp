@@ -325,7 +325,7 @@ export function bootArea(ctx: RuntimeContext): BootArea {
           console.warn(`sessions document for ${index.workspaceId} has no rows array, read as empty`);
           continue;
         }
-        for (const { turnId, notify, notifyBy, notifyRoad, reply, run, from, asked: storedAsked, turnToken, scopeDeviceId, snapshot, ...view } of index.sessions) {
+        for (const { turnId, notify, notifyBy, notifyRoad, reply, told, toldLast, run, from, asked: storedAsked, turnToken, scopeDeviceId, snapshot, ...view } of index.sessions) {
           const by = readScope(notifyBy);
           const asked = readAsked(storedAsked);
           const road = readRoad(notifyRoad);
@@ -353,7 +353,7 @@ export function bootArea(ctx: RuntimeContext): BootArea {
             // went then, as the person's; one that does not read as a scope is no scope at all.
             ...(by !== undefined ? { notifyBy: by } : {}),
             ...(road !== undefined ? { notifyRoad: road } : {}),
-            ...(reply !== undefined ? { turnLive: { reply } } : {}),
+            ...(reply !== undefined || typeof told === "number" ? { turnLive: { ...(reply !== undefined ? { reply } : {}), ...(typeof told === "number" ? { told } : {}), ...(toldLast === true ? { toldLast } : {}) } } : {}),
             ...(run !== undefined ? { run } : {}),
             ...(typeof from === "number" && Number.isSafeInteger(from) && from >= 0 ? { from } : {}),
             ...(asked !== undefined ? { asked } : {}),

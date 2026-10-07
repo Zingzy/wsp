@@ -156,6 +156,7 @@ export function turnsArea(ctx: RuntimeContext): TurnsArea {
     // and the persisted row read it whether the harness emits its result synchronously in start() (before the entry
     // exists) or later from its stream.
     const turnLive: TurnLive = t.turnLive ?? {};
+    let replayingTold = turnLive.told ?? 0;
     /** The permission prompts of this turn nobody has answered. The harness is blocked on every one of them, so this
      * map is what the thread is waiting on, and it holds for as long as the turn lives. */
     const open = new Map<string, PermissionAsk>();
@@ -177,6 +178,13 @@ export function turnsArea(ctx: RuntimeContext): TurnsArea {
     /** What the turn has spent on the person by now, the open span included, so a result that lands under a prompt
      * still standing counts the same as one that lands after it closed. */
     const waitedSoFar = (): number => waited + (waitingSince === undefined ? 0 : clock.now() - waitingSince);
+    /** A reply as its finished line and its row carry it: the harness counts wall time from launch to result, prompts
+     * included, so the spans the turn stood on a person ride out with it and every reader takes them off one figure
+     * rather than guessing at them. */
+    const withWaited = (reply: TurnResult): TurnResult => {
+      const onThePerson = waitedSoFar();
+      return onThePerson > 0 ? { ...reply, waitedMs: onThePerson } : reply;
+    };
 
     /** The one expression that says the turn is waiting on something outside its own process, which its stream's
      * idle clock touches on every poll: a prompt of its own nobody has answered, or work it started that the harness
@@ -261,6 +269,8 @@ export function turnsArea(ctx: RuntimeContext): TurnsArea {
       const sessionId = event.sessionId;
       switch (event.type) {
         case "session.start": {
+          // Under a held reply this is the CLI waking its agent, whose end is a new word.
+          delete turnLive.toldLast;
           view.claudeSessionId = sessionId;
           if (event.cwd !== undefined) view.cwd = event.cwd;
           if (event.model !== undefined) view.model = event.model;
@@ -351,10 +361,7 @@ export function turnsArea(ctx: RuntimeContext): TurnsArea {
           // keep working past its result, and a row read as completed here lets a send start a second agent in the
           // same worktree. The result is held and applied at the exit below.
           turnLive.reply = event.result.status;
-          // The harness counts wall time from launch to result, prompts included, so the spans the turn stood on a
-          // person ride out with it and every reader takes them off one figure rather than guessing at them.
-          const onThePerson = waitedSoFar();
-          const result: TurnResult = onThePerson > 0 ? { ...event.result, waitedMs: onThePerson } : event.result;
+          const result = withWaited(event.result);
           // The cause rides the row too, since a refused turn did none of the work: what a thread is read as having
           // run is decided off the rows, and the result itself lives only in the transcript.
           if (result.refusal !== undefined) view.refusal = result.refusal;
@@ -390,7 +397,8 @@ export function turnsArea(ctx: RuntimeContext): TurnsArea {
                 .catch((e: unknown) => console.warn(`the use of turn ${turnId} was not filed: ${e instanceof Error ? e.message : String(e)}`));
           }
           void ctx.persistSessions(workspaceId);
-          if (notify !== undefined) ctx.notifyEnd({ view, turnId }, notify, ctx.tellAs(t), result);
+          // A reply held over background work had its line when it was given, and a lead is never told one reply twice.
+          if (notify !== undefined && event.held !== true) ctx.notifyEnd({ view, turnId, turnLive }, notify, ctx.tellAs(t), result);
           ctx.record({ type: "session.done", workspaceId, sessionId, turnId, threadId, result });
           readChanges(sessionId);
           return;
@@ -458,6 +466,17 @@ export function turnsArea(ctx: RuntimeContext): TurnsArea {
           // its agent has already said, so the idle clock is held the way an open prompt holds it.
           tasksRunning = event.running > 0;
           readsWaiting();
+          // The agent's final reply, given while that work runs: the turn goes on, and nothing reads the reply again
+          // until the work wakes it, so its line goes now. A run re-read after a restart already sent the ones it told.
+          if (event.replied !== undefined) {
+            turnLive.toldLast = true;
+            if (replayingTold > 0) replayingTold--;
+            else if (notify !== undefined) {
+              ctx.notifyEnd({ view, turnId, turnLive }, notify, ctx.tellAs(t), withWaited(event.replied));
+              turnLive.told = (turnLive.told ?? 0) + 1;
+            }
+            void ctx.persistSessions(workspaceId);
+          }
           return;
         case "permission.ask": {
           const ask = { ...event.ask, options: named(event.ask) };

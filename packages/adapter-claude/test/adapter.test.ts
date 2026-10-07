@@ -1306,6 +1306,44 @@ describe("a reply given while the agent's background work runs", () => {
     expect(dones(events)[0]!.result).toMatchObject({ status: "completed", text: "ok" });
   });
 
+  it("hands the runtime the reply once as the agent gives it over its tasks, and marks the turn's end as that reply", async () => {
+    const { m, events, session } = held();
+    const said = () => events.flatMap(e => (e.type === "turn.tasks" ? [{ running: e.running, replied: e.replied?.text }] : []));
+    for (const line of [init, running, startedTask, reply, two, onlyB]) m.push(line);
+    await until(() => said().length === 4);
+    expect(said()).toEqual([
+      { running: 1, replied: undefined },
+      { running: 1, replied: "Waiting for the background sleep to finish." },
+      { running: 2, replied: undefined },
+      { running: 1, replied: undefined },
+    ]);
+    for (const line of [none, updated, notified]) m.push(line);
+    await until(() => dones(events).length === 1);
+    expect(dones(events)[0]).toMatchObject({ held: true, result: { status: "completed" } });
+    await session.finished;
+  });
+
+  it("a woken agent's own reply is a new one: the turn's end is not marked held", async () => {
+    const { m, events, session } = held();
+    for (const line of [init, running, startedTask, reply, none, updated, notified, init, woke, second]) m.push(line);
+    await until(() => dones(events).length === 1);
+    m.end(0);
+    await session.finished;
+    expect(dones(events)[0]!.held).toBeUndefined();
+    expect(dones(events)[0]!.result.text).toBe("The background sleep finished with exit code 0 and printed `done`.");
+  });
+
+  it("a woken agent cut before its own reply ends a turn not marked held, failed with the exit", async () => {
+    const { m, events, session } = held();
+    for (const line of [init, running, startedTask, reply, init]) m.push(line);
+    await drained();
+    m.end(1);
+    await session.finished;
+    expect(dones(events)).toHaveLength(1);
+    expect(dones(events)[0]!.held).toBeUndefined();
+    expect(dones(events)[0]!.result.status).toBe("failed");
+  });
+
   it("reports the CLI's own count to the runtime on every change", async () => {
     const { m, events, session } = held();
     for (const line of [init, running, two, none]) m.push(line);

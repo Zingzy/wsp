@@ -370,6 +370,11 @@ export interface TranscriptRecord {
  * until the harness's result arrives and read by every road that ends the row before the process exits. */
 export interface TurnLive {
   reply?: TurnStatus;
+  /** The finished lines it sent for replies its agent gave over background work, before its end: a re-opened run
+   * skips that many, read off the row since the transcript's cap can drop the lines' own rows. */
+  told?: number;
+  /** The last of those replies is still the agent's latest word, nothing having woken it since: a cut sends no line. */
+  toldLast?: true;
 }
 
 /** The message a turn's agent was handed and the effort it ran at, kept beside its run while it runs: the row's own
@@ -529,8 +534,8 @@ export interface SessionIndexRecord {
    * for it; from is where the turn starts in that run's log, on a process that served the thread's earlier turns. All
    * of these are written for a running row alone. snapshot is the commit the turn's launch took of its
    * folder, which the turn's changes are read against wherever it ends; written while the turn runs and until that
-   * read is in. */
-  sessions: (SessionView & { turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin; reply?: TurnStatus; run?: string; from?: number; asked?: TurnAsked; turnToken?: string; scopeDeviceId?: string; snapshot?: string })[];
+   * read is in. told and toldLast are a running row's `TurnLive` fields of the same names. */
+  sessions: (SessionView & { turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin; reply?: TurnStatus; told?: number; toldLast?: true; run?: string; from?: number; asked?: TurnAsked; turnToken?: string; scopeDeviceId?: string; snapshot?: string })[];
   /** Every thread of the workspace by its runtime id; absent on a document from before threads had a record. */
   threads?: Record<string, ThreadRecord>;
 }
