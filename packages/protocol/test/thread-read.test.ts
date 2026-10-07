@@ -18,6 +18,8 @@ import {
   threadResult,
   threadMovedLine,
   leadAsk,
+  repoPathOf,
+  worktreeOf,
   openAsk,
   threadRowLines,
   turnEndLine,
@@ -258,6 +260,17 @@ describe("a thread's messages", () => {
     const one = threadMessages([...turn("fix", "fixed"), { type: "session.changes", ...SCOPE, turnId: "u1", at: AT + 6_000, from: "a".repeat(40), to: "b".repeat(40), files: files.slice(1), moved: [] }], "t1");
     expect(one.at(-2)!.text).toBe("Changed 1 file, +2 -0");
   });
+
+  it("says which changes were the thread's own in a folder other threads worked in, or that the list is the folder's", () => {
+    const a = { path: "a.ts", kind: "added", additions: 2, deletions: 0 };
+    const b = { path: "b.ts", kind: "added", additions: 5, deletions: 1 };
+    const line = (changes: { files: (typeof a)[]; others?: (typeof a)[]; shared?: true }) =>
+      threadMessages([...turn("go", "went"), { type: "session.changes", ...SCOPE, turnId: "u1", at: AT + 6_000, from: "a".repeat(40), to: "b".repeat(40), moved: [], ...changes }], "t1").at(-2)!.text;
+    expect(line({ files: [a], others: [b], shared: true })).toBe("Changed 1 file, +2 -0; 1 file also changed in this folder");
+    expect(line({ files: [], others: [a, b], shared: true })).toBe("No files from this thread's edits; 2 files also changed in this folder");
+    expect(line({ files: [a], others: [], shared: true })).toBe("Changed 1 file, +2 -0");
+    expect(line({ files: [a, b], shared: true })).toBe("2 files changed in this folder, +7 -1; other threads worked in it too");
+  });
 });
 
 describe("a thread's latest turn and its final reply", () => {
@@ -455,5 +468,23 @@ describe("the thread a new session is handed", () => {
     expect(seed.startsWith("*2 earlier messages left out*\n\n")).toBe(true);
     expect(seed).not.toContain("fix the login page");
     expect(seed).toContain(long.text);
+  });
+});
+
+describe("a folder or a path a tool call named, as git names them", () => {
+  it("is the worktree a folder sits in, the deepest where one sits inside another, through a linked folder too", () => {
+    expect(worktreeOf("/w/repo/apps/web", ["/w/repo", "/w/repo-wt"])).toBe("/w/repo");
+    expect(worktreeOf("/w/repo/.wt/x/src", ["/w/repo", "/w/repo/.wt/x"])).toBe("/w/repo/.wt/x");
+    expect(worktreeOf("/var/T/repo/a", ["/private/var/T/repo"])).toBe("/private/var/T/repo");
+    expect(worktreeOf("/w/elsewhere", ["/w/repo"])).toBeUndefined();
+  });
+
+  it("is the path from the repo's top, from a subfolder, through a linked folder, and nothing outside the repo", () => {
+    expect(repoPathOf("/w/repo/a.ts", "/w/repo", "/w/repo")).toBe("a.ts");
+    expect(repoPathOf("src/b.ts", "/w/repo/apps/web", "/w/repo")).toBe("apps/web/src/b.ts");
+    expect(repoPathOf("../README.md", "/w/repo/apps", "/w/repo")).toBe("README.md");
+    expect(repoPathOf("/var/T/repo/a.ts", "/var/T/repo", "/private/var/T/repo")).toBe("a.ts");
+    expect(repoPathOf("/w/other/a.ts", "/w/repo", "/w/repo")).toBeUndefined();
+    expect(repoPathOf("/w/repo-two/a.ts", "/w/repo", "/w/repo")).toBeUndefined();
   });
 });

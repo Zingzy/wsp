@@ -118,6 +118,7 @@ const SHARED_STARTERS = new Set([
   "fakeAppServer",
   "fakeStty",
   "gitCopier",
+  "loginShell",
   "mcpBinNamed",
   "projectOn",
   "served",
@@ -129,6 +130,7 @@ const SHARED_STARTERS = new Set([
   "startVite",
   "tempRepo",
   "verbsHost",
+  "writeFlowAgents",
   "writeStub",
 ]);
 

@@ -274,6 +274,31 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain("1 changed file");
   });
 
+  it("keeps a turn's own files apart from what else changed in its folder, and draws both under its reply", () => {
+    const scoped = { workspaceId: "ws_s", sessionId: "sess_s", turnId: "turn_s", threadId: "thread_s" } as const;
+    const own = { path: "slate.md", kind: "added", additions: 4, deletions: 0 };
+    const theirs = { path: "scripts/login.ts", kind: "modified", additions: 1, deletions: 3 };
+    const model = deriveSession([
+      { type: "session.start", ...scoped, at: 0, prompt: "write the slate" },
+      { type: "session.delta", ...scoped, at: 1, kind: "text", text: "Wrote the slate." },
+      { type: "session.done", ...scoped, at: 2, result: { status: "completed", text: "Wrote the slate." } },
+      { type: "session.changes", ...scoped, at: 3, from: "a".repeat(40), to: "b".repeat(40), files: [own], others: [theirs], moved: [], shared: true },
+    ]);
+    const changes = model.turns[0]!.changes!;
+    expect(changes).toMatchObject({ files: [own], others: [theirs], shared: true });
+    const reply = model.timeline.findLast(e => e.kind === "message")!;
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        turns={model.turns}
+        timelineEntries={model.timeline}
+        turnDiffSummaryByAssistantMessageId={new Map([[reply.id, { turnId: "turn_s", files: changes.files, moved: [], others: changes.others! }]])}
+      />,
+    );
+    expect(markup).toContain("1 changed file");
+    expect(markup).toContain("Also changed in this folder");
+  });
+
   it("treats only the strict list end as the live edge", async () => {
     const {
       resolveTimelineIsAtEnd,

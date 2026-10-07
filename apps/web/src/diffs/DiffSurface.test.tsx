@@ -48,8 +48,8 @@ import { useStore } from "../protocol/store";
 import { provideTerminals, WorkspaceTerminals, type TerminalWire } from "../terminal/link";
 import { reviewCommentsQuote } from "../reviewCommentContext";
 import { DiffSurface } from "./DiffSurface";
-import { useDiffStore } from "./store";
-import { SEND_TO_THREAD } from "./words";
+import { onlyOf, useDiffStore } from "./store";
+import { NARROWED_WORDS, SEND_TO_THREAD } from "./words";
 
 const WS = "ws_a";
 const workspace: WorkspaceView = {
@@ -168,5 +168,43 @@ describe("the Diff header's branch", () => {
     await waitFor(() => expect(screen.queryByText(SEND_TO_THREAD)).not.toBeNull());
     expect(document.querySelector("[data-folder-crumbs]")).toBeNull();
     expect(document.querySelector("[data-diff-repo-state]")?.textContent).toBe("agent/pricing-page");
+  });
+});
+
+describe("a turn's range", () => {
+  it("shows only the files the card opened it on, in a folder other threads changed too", async () => {
+    const other = { ...DIFF.files[0]!, path: "b.ts", patch: patch.replaceAll("src/a.ts", "b.ts") };
+    const asked: string[] = [];
+    provideDaemonWire(WS, {
+      request: async (op: string) => (asked.push(op), op === "git.turn" ? { ...DIFF, files: [...DIFF.files, other] } : op === "git.status" ? STATUS : {}),
+      onEvent: () => () => {},
+    } as unknown as Parameters<typeof provideDaemonWire>[1]);
+    const range = { turnId: "t1", cwd: "/root", from: "a".repeat(40), to: "b".repeat(40) };
+    useDiffStore.setState({ turnByWorkspaceId: { [WS]: { ...range, only: ["src/a.ts"] } } });
+    render(<DiffSurface workspaceId={WS} theme="dark" />);
+    await waitFor(() => expect(document.querySelector('[data-changed-file="src/a.ts"]')).not.toBeNull());
+    expect(asked).toContain("git.turn");
+    expect(document.querySelector('[data-changed-file="b.ts"]')).toBeNull();
+    act(() => useDiffStore.setState({ turnByWorkspaceId: { [WS]: { ...range, only: ["b.ts"] } } }));
+    await waitFor(() => expect(document.querySelector('[data-changed-file="b.ts"]')).not.toBeNull());
+    expect(document.querySelector('[data-changed-file="src/a.ts"]')).toBeNull();
+    expect(document.querySelector("[data-diff-narrowed]")?.textContent).toBe(`${NARROWED_WORDS.line(1, 2)}${NARROWED_WORDS.all}`);
+    fireEvent.click(screen.getByRole("button", { name: NARROWED_WORDS.all }));
+    await waitFor(() => expect(document.querySelectorAll("[data-changed-file]")).toHaveLength(2));
+    expect(useDiffStore.getState().turnByWorkspaceId[WS]).toEqual(range);
+    expect(document.querySelector("[data-diff-narrowed]")).toBeNull();
+    useDiffStore.setState({ turnByWorkspaceId: {} });
+  });
+});
+
+describe("the files a turn's card opens the range on", () => {
+  const own = [{ path: "slate.md" }];
+  const others = [{ path: "b.ts" }, { path: "c.ts" }];
+  it("are the thread's own from Open diff or its own row, the others' from theirs, and the whole range where none are known", () => {
+    expect(onlyOf({ files: own, others }, "slate.md")).toEqual(["slate.md"]);
+    expect(onlyOf({ files: own, others })).toEqual(["slate.md"]);
+    expect(onlyOf({ files: own, others }, "c.ts")).toEqual(["b.ts", "c.ts"]);
+    expect(onlyOf({ files: [], others }, "b.ts")).toEqual(["b.ts", "c.ts"]);
+    expect(onlyOf({ files: own })).toBeUndefined();
   });
 });

@@ -30,6 +30,42 @@ describe("ChangedFilesCard", () => {
     expect(markup).toContain('data-changed-file="README.md"');
   });
 
+  const shared = (props: { files: ReadonlyArray<{ path: string; kind: string; additions: number; deletions: number }>; others?: ReadonlyArray<{ path: string; kind: string; additions: number; deletions: number }>; folder?: boolean }) =>
+    renderToStaticMarkup(
+      <ChangedFilesCard turnId={"turn-1"} {...props} allDirectoriesExpanded={false} resolvedTheme="light" onToggleAllDirectories={() => {}} onOpenTurnDiff={() => {}} />,
+    );
+  const slate = { path: "slate.md", kind: "added", additions: 4, deletions: 0 };
+  const cache = { path: "output/playwright/a.png", kind: "added", additions: 0, deletions: 0 };
+  const wrangler = { path: ".wrangler/cache/x", kind: "modified", additions: 3, deletions: 1 };
+
+  it("in a folder other threads worked in too, counts the files of the thread's own edits in the header and lists the rest under them", () => {
+    const markup = shared({ files: [slate], others: [cache, wrangler] });
+    const header = markup.slice(markup.indexOf("data-changed-files-header"), markup.indexOf("data-changed-files-others"));
+    expect(header).toContain("1 changed file");
+    expect(header).toContain('data-changed-file="slate.md"');
+    const others = markup.slice(markup.indexOf("data-changed-files-others"));
+    expect(others).toContain("Also changed in this folder");
+    expect(others).not.toContain("slate.md");
+    expect(others).toMatch(/>output[^<]*</);
+    expect(others).toMatch(/>\.wrangler[^<]*</);
+  });
+
+  it("says no files came from the thread's edits where only the rest of the folder changed, and still lists that", () => {
+    const markup = shared({ files: [], others: [wrangler] });
+    expect(markup).toContain("No files from this thread&#x27;s edits");
+    expect(markup).not.toContain("changed file");
+    expect(markup).toContain("Also changed in this folder");
+    expect(markup).toContain('aria-label="Open diff"');
+  });
+
+  it("says the list is the folder's where other threads worked there and the agent named none of its edits", () => {
+    const markup = shared({ files: [slate, wrangler], folder: true });
+    expect(markup).toContain("2 changed files in this folder");
+    expect(markup).toContain("Other threads worked here too");
+    expect(markup).not.toContain("data-changed-files-others");
+    expect(card([slate])).not.toContain("in this folder");
+  });
+
   it("offers expand-all only where the files sit in folders", () => {
     expect(card([{ path: "README.md", kind: "modified", additions: 2, deletions: 1 }])).not.toContain("all folders");
     expect(card([{ path: "src/a.ts", kind: "modified", additions: 2, deletions: 1 }])).toContain('aria-label="Expand all folders"');

@@ -906,7 +906,7 @@ describe("what a turn changed", () => {
       { type: "session.start", ...scoped, turnId: "t2", at: 4_000, prompt: "again" },
       { type: "session.changes", ...scoped, turnId: "t1", at: 4_100, from, to, files, moved: [], shared: true },
     ]);
-    expect(model.turns.map(t => t.changes)).toEqual([{ from, to, files, moved: [] }, null]);
+    expect(model.turns.map(t => t.changes)).toEqual([{ from, to, files, moved: [], shared: true }, null]);
   });
 
   it("stays on a turn whose reply lands after it", () => {

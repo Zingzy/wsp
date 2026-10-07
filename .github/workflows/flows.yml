@@ -1,0 +1,83 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+name: flows
+
+# The flows a person walks every day (apps/desktop/test/flows.electron.test.ts), driven in the packaged Linux app
+# under a virtual screen against a throwaway host and stand-in agents, on every land/** push that changes the app,
+# its shell, the runtime or the host. A flow can break with every unit test of its parts green; this run walks it in
+# the window. The nightly desktop smoke walks the same flows on a Mac.
+on:
+  push:
+    branches:
+      - "land/**"
+    paths:
+      - "apps/web/**"
+      - "apps/desktop/**"
+      - "packages/runtime/**"
+      - "packages/host/**"
+      - ".github/workflows/flows.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: "22"
+  PNPM_VERSION: "11.9.0"
+
+concurrency:
+  group: flows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  flows:
+    name: Package the Linux app and walk the flows
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      # The host spawns the daemon for the project folder's workspace, and a thread on a worktree branch asks it for
+      # the worktree, so the flows want the binary this commit builds.
+      - name: Toolchain from rust-toolchain.toml
+        working-directory: daemon
+        run: |
+          rustup toolchain install
+          rustup show
+      # The daemon workflow's x86_64 musl cache, read only, as ci.yml reads it: the daemon gate's holds every profile.
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            daemon/target
+          key: daemon-artifacts-x86_64-unknown-linux-musl-${{ hashFiles('daemon/Cargo.lock', 'daemon/rust-toolchain.toml') }}
+          restore-keys: |
+            daemon-artifacts-x86_64-unknown-linux-musl-
+      # Cargo rebuilds what is older than its sources, so a cache saved after this checkout never passes for this build.
+      - name: The daemon's sources newer than anything restored
+        run: git ls-files -z daemon | xargs -0 touch
+      - name: C compiler for the musl target, and libseccomp built against musl
+        working-directory: daemon
+        run: |
+          sudo apt-get install -y --no-install-recommends musl-tools gperf
+          ./scripts/libseccomp-archive.sh musl
+      - name: The daemon this runner runs
+        working-directory: daemon
+        run: LIBSECCOMP_LIB_PATH=$PWD/target/libseccomp/musl cargo build --locked --release --target x86_64-unknown-linux-musl -p wsp-daemon-bin
+      - run: node packages/wspx/scripts/daemon-binary.mjs --triple x86_64-unknown-linux-musl
+      - run: pnpm install --frozen-lockfile
+      - name: Build what the desktop app depends on
+        run: pnpm --filter @wsp/desktop run build:deps
+      - name: Stage the desktop app
+        run: pnpm --filter @wsp/desktop run build:app
+      - name: Package the Linux tree
+        run: pnpm --filter @wsp/desktop exec electron-builder --config electron-builder.yml --linux dir --publish never
+      - name: Walk the flows in the packaged app
+        run: xvfb-run --auto-servernum pnpm --filter @wsp/desktop flows

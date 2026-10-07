@@ -15,6 +15,40 @@ export function underProject(path: string, root: string): boolean {
   return path === root || path.startsWith(`${root}/`);
 }
 
+/** A folder git named by its real path, as cwd may name it: the path itself, then each tail of it cwd sits under, since
+ * a cwd reached through a link that only adds leading parts (/var for /private/var on a Mac) carries fewer of them. */
+function namesOf(real: string, cwd: string): string[] {
+  const names = [real];
+  for (let at = real.indexOf("/", 1); at > 0; at = real.indexOf("/", at + 1)) if (underProject(cwd, real.slice(at))) names.push(real.slice(at));
+  return names;
+}
+
+/** A path an agent's tool call named, absolute or from cwd, as git names it from the top of the repo at root; undefined
+ * for one outside it. An absolute path is matched under root as git names it, a relative one through cwd as namesOf
+ * reads it; a relative path under a link whose name differs from the real folder's own (/home/u/work for /data/w)
+ * matches nothing, and its file stays in the folder's list. */
+export function repoPathOf(path: string, cwd: string, root: string): string | undefined {
+  const parts: string[] = [];
+  for (const part of (path.startsWith("/") ? path : `${cwd}/${path}`).split("/")) {
+    if (part === "..") parts.pop();
+    else if (part !== "" && part !== ".") parts.push(part);
+  }
+  const full = `/${parts.join("/")}`;
+  const top = namesOf(root, cwd).find(t => full.startsWith(`${t}/`));
+  return top === undefined ? undefined : full.slice(top.length + 1);
+}
+
+/** The worktree cwd sits in, of the ones git lists for its repo by their real paths: the deepest, since a worktree may
+ * sit inside another; undefined where cwd is in none of them. */
+export function worktreeOf(cwd: string, worktrees: readonly string[]): string | undefined {
+  let deepest: { path: string; at: number } | undefined;
+  for (const path of worktrees) {
+    const at = Math.max(-1, ...namesOf(path, cwd).filter(name => underProject(cwd, name)).map(name => name.length));
+    if (at >= 0 && (deepest === undefined || at > deepest.at)) deepest = { path, at };
+  }
+  return deepest?.path;
+}
+
 /** The folder Claude Code keeps one project's sessions and memory under, its projects directory name: the resolved
  * path with every character outside A-Z a-z 0-9 replaced by a dash. Two paths that differ only in a character the
  * rule replaces collide under one key, which is the CLI's own behaviour and not something to work around. It sits

@@ -137,6 +137,8 @@ export interface ClaudeAdapter {
   readonly sessions: ReadonlyMap<string, ClaudeSession>;
   /** Sessions take a message mid-turn over the stdin channel. */
   readonly steers: true;
+  /** Write, Edit, MultiEdit and NotebookEdit name the file each one wrote. */
+  readonly reportsEdits: true;
   /** A rewind of a Claude Code thread is cut on its next resume, at the message the rewind kept. */
   readonly resumesAt: true;
   /** The CLI's stream-json user message carries image blocks, so an image never lands on the machine. */
@@ -1343,6 +1345,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
       : {}),
     sessions,
     steers: true,
+    reportsEdits: true,
     resumesAt: true,
     movesAccess: true,
     compacts: "/compact",

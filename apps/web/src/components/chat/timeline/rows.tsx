@@ -264,8 +264,9 @@ const AssistantChangedFilesSection = memo(function AssistantChangedFilesSection(
 }) {
   if (!turnSummary) return null;
   const checkpointFiles = turnSummary.files;
-  // A turn that only moved HEAD still shows the one line naming the move.
-  if (checkpointFiles.length === 0 && turnSummary.moved.length === 0) return null;
+  // A turn that only moved HEAD still shows the one line naming the move, and one that changed nothing of its own
+  // still shows what else changed in its folder.
+  if (checkpointFiles.length === 0 && turnSummary.moved.length === 0 && (turnSummary.others?.length ?? 0) === 0) return null;
 
   return (
     <AssistantChangedFilesSectionInner
@@ -297,6 +298,8 @@ function AssistantChangedFilesSectionInner({
       turnId={turnSummary.turnId}
       files={checkpointFiles}
       moved={turnSummary.moved}
+      {...(turnSummary.others !== undefined ? { others: turnSummary.others } : {})}
+      folder={turnSummary.folder === true}
       allDirectoriesExpanded={allDirectoriesExpanded}
       resolvedTheme={resolvedTheme}
       onToggleAllDirectories={() => setAllDirectoriesExpanded((current) => !current)}

@@ -5,8 +5,10 @@ name: desktop smoke
 # main: the smoke needs a 200 MB bundle and a Mac, so no landing's gate runs it
 # for every change, and a smoke nothing runs goes stale unseen. The tree is one
 # chip's, this runner's, packaged from the release's config with the daemon
-# built from the same commit. A land/** push that changes this file or the
-# smoke runs it too, and so does a run started by hand.
+# built from the same commit. The everyday flows walk the same tree after the
+# smoke; a land/** push runs them on Linux in flows.yml. A land/** push that
+# changes this file, the smoke or the flows runs it too, and so does a run
+# started by hand.
 on:
   push:
     branches:
@@ -15,6 +17,10 @@ on:
       - ".github/workflows/desktop-smoke.yml"
       - "apps/desktop/test/smoke.electron.test.ts"
       - "apps/desktop/test/packaged.ts"
+      - "apps/desktop/test/launched-app.ts"
+      - "apps/desktop/test/workspace-menu.ts"
+      - "apps/desktop/test/flows.electron.test.ts"
+      - "apps/desktop/test/flow-agents.ts"
   schedule:
     - cron: "17 3 * * *"
   workflow_dispatch:
@@ -74,3 +80,7 @@ jobs:
         run: pnpm --filter @wsp/desktop exec electron-builder --config electron-builder.yml --mac --dir --publish never
       - name: Drive the packaged app with the smoke
         run: pnpm --filter @wsp/desktop smoke
+      # A smoke case that fails says nothing about the flows, which start a host of their own.
+      - name: Walk the everyday flows in the packaged app
+        if: ${{ !cancelled() }}
+        run: pnpm --filter @wsp/desktop flows

@@ -171,6 +171,10 @@ export interface TurnChanges {
   readonly files: ReadonlyArray<TurnChangedFile>;
   /** Each HEAD move the turn did not write, as one line, no files of its own. */
   readonly moved: ReadonlyArray<string>;
+  /** In a folder other threads worked in too: what else changed there, whoever wrote it, where the agent named its own
+   * edits; absent with shared, files are the folder's. */
+  readonly others?: ReadonlyArray<TurnChangedFile>;
+  readonly shared?: true;
 }
 
 /** One wsp session run is one turn; the chat's footer and folds read this. */

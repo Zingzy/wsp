@@ -2,7 +2,7 @@
 import { CATALOG_AGENTS, type ThreadAgent } from "@wsp/catalog";
 import {
   AGENT_KEEP_MS, AGENTS_KEPT, type PermissionAsk, type SessionRenameWrite, type SessionView, type TurnResult,
-  type Caller, ThreadScope, WorkspaceOrigin, GitDiffReply, foldThreads, threadWord, threadsFollowed, scopeOf,
+  type Caller, ThreadScope, WorkspaceOrigin, GitDiffReply, GitWorktreesReply, repoPathOf, worktreeOf, foldThreads, threadWord, threadsFollowed, scopeOf,
   type ThreadWaitingOn, isLocalWorkspace, NO_SUCH_TURN, NOTIFY_ME, notifyLine, copiesFolder, DEVICE_OPS, sendRefusal,
   workspaceState, HERE_PLACE_ID,
 } from "@wsp/protocol";
@@ -418,15 +418,44 @@ export function threadsArea(ctx: RuntimeContext): ThreadsArea {
     }
   };
 
-  /** Whether another thread's turn in this workspace ran in the same folder at any point between the two times. */
-  const sharedFolder = (workspaceId: string, threadId: string, cwd: string, from: number, to: number): boolean =>
-    [...sessions.values()].some(({ view }) => view.workspaceId === workspaceId && view.threadId !== threadId && view.cwd === cwd && (view.startedAt ?? 0) <= to && (view.endedAt ?? to) >= from);
+  /** The top of the checkout a folder sits in, as git names it, off the repo's worktree list; undefined for a folder
+   * git holds no repo in, or one the daemon did not answer for. */
+  const topOf = (entry: LiveWorkspace, cwd: string): Promise<string | undefined> =>
+    ctx.withDaemon(entry, ask => ask({ op: "git.worktrees", cwd })).then(
+      reply => {
+        const read = GitWorktreesReply.safeParse(reply);
+        return read.success ? worktreeOf(cwd, read.data.worktrees.filter(w => !w.prunable).map(w => w.path)) : undefined;
+      },
+      () => undefined,
+    );
+
+  /** Whether another thread's turn in this workspace ran in the same checkout at any point between the two times: in
+   * this folder, or in another folder of the same checkout, since a turn's snapshots and range cover the whole tree. */
+  const sharedFolder = async (entry: LiveWorkspace, threadId: string, cwd: string, top: () => Promise<string | undefined>, from: number, to: number): Promise<boolean> => {
+    const beside = [...sessions.values()].flatMap(({ view }) =>
+      view.workspaceId === entry.record.id && view.threadId !== threadId && view.cwd !== undefined && (view.startedAt ?? 0) <= to && (view.endedAt ?? to) >= from ? [view.cwd] : [],
+    );
+    if (beside.includes(cwd)) return true;
+    const mine = beside.length === 0 ? undefined : await top();
+    if (mine === undefined) return false;
+    for (const folder of new Set(beside)) if ((await topOf(entry, folder)) === mine) return true;
+    return false;
+  };
+
+  /** Which of the paths an agent's tool calls named are files of the checkout at top, as git names them from it;
+   * undefined where the top cannot be read, so the card stays the folder's. */
+  const ownIn = async (cwd: string, top: () => Promise<string | undefined>, wrote: ReadonlySet<string>): Promise<Set<string> | undefined> => {
+    if (wrote.size === 0) return new Set();
+    const root = await top();
+    return root === undefined ? undefined : new Set([...wrote].flatMap(path => repoPathOf(path, cwd, root) ?? []));
+  };
 
   /** What a turn changed in its folder: a snapshot now, the range from the commit its launch took, and the files in it
-   * recorded under the turn. True once the range is read, whether or not it held anything; a turn that changed nothing
-   * records nothing. */
-  const readTurnChanges = async (entry: LiveWorkspace, turn: { sessionId: string; turnId: string; threadId: string; cwd: string; from: string; startedAt: number }): Promise<boolean> => {
-    const { sessionId, turnId, threadId, cwd, from, startedAt } = turn;
+   * recorded under the turn. wrote holds the paths the agent's own tool calls named, where its harness reports them:
+   * in a folder another thread worked in meanwhile, those are the turn's files and the rest are the others'. True once
+   * the range is read, whether or not it held anything; a turn that changed nothing records nothing. */
+  const readTurnChanges = async (entry: LiveWorkspace, turn: { sessionId: string; turnId: string; threadId: string; cwd: string; from: string; startedAt: number; wrote?: ReadonlySet<string> }): Promise<boolean> => {
+    const { sessionId, turnId, threadId, cwd, from, startedAt, wrote } = turn;
     const workspaceId = entry.record.id;
     const to = await snapshotOf(entry, cwd);
     if (to === undefined) return false;
@@ -440,8 +469,12 @@ export function threadsArea(ctx: RuntimeContext): ThreadsArea {
     const moved = read.data.moved;
     // A turn that only moved HEAD (a checkout or pull with no edit of its own) still records its line.
     if (files.length === 0 && moved.length === 0) return true;
-    const shared = sharedFolder(workspaceId, threadId, cwd, startedAt, Date.now());
-    ctx.record({ type: "session.changes", workspaceId, sessionId, turnId, threadId, from, to, files, moved, ...(shared ? { shared: true as const } : {}) });
+    let topRead: Promise<string | undefined> | undefined;
+    const top = (): Promise<string | undefined> => (topRead ??= topOf(entry, cwd));
+    const shared = await sharedFolder(entry, threadId, cwd, top, startedAt, Date.now());
+    const own = shared && wrote !== undefined ? await ownIn(cwd, top, wrote) : undefined;
+    const split = own === undefined ? { files } : { files: files.filter(f => own.has(f.path)), others: files.filter(f => !own.has(f.path)) };
+    ctx.record({ type: "session.changes", workspaceId, sessionId, turnId, threadId, from, to, ...split, moved, ...(shared ? { shared: true as const } : {}) });
     return true;
   };
 

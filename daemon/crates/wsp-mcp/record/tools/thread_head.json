@@ -959,6 +959,12 @@
                   "shared": {
                     "type": "boolean",
                     "const": true
+                  },
+                  "others": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/properties/events/items/anyOf/9/properties/files/items"
+                    }
                   }
                 },
                 "required": [
@@ -2310,6 +2316,12 @@
                   "shared": {
                     "type": "boolean",
                     "const": true
+                  },
+                  "others": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/properties/events/items/anyOf/9/properties/files/items"
+                    }
                   }
                 },
                 "required": [
