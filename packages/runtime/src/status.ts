@@ -513,7 +513,8 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
     if (reconcile === "always") return askProvider(r);
     if (!reachFailed) return machineStateOf(r.phase);
     const known = reconciled.get(r.id);
-    if (known && clock.now() - known.at < reconcileMinMs) return known.state;
+    // A reading the record has moved past since, the paused one taken during a nap before the wake, is asked again.
+    if (known && known.state === machineStateOf(r.phase) && clock.now() - known.at < reconcileMinMs) return known.state;
     return askProvider(r);
   };
 
