@@ -61,6 +61,29 @@ export const AGENT_STORE_ENVS: readonly string[] = readdirSync(AGENTS_DIR)
 // sessions would land them in the person's own store; without it every store is under the run's home.
 if (!REAL_HOME) for (const name of AGENT_STORE_ENVS) delete process.env[name];
 
+/** Every agent's command, read off the same modules as text: the id `agent()` is called with, unless the module names a
+ * `bin` of its own. The catalog's tests hold this list to the modules' own bin. */
+export const AGENT_BINS: readonly string[] = readdirSync(AGENTS_DIR)
+  .filter(f => f.endsWith(".ts"))
+  .flatMap(f => {
+    const text = readFileSync(join(AGENTS_DIR, f), "utf8");
+    const id = /\bagent\("([^"]+)"/.exec(text)?.[1];
+    return id === undefined ? [] : [/\bbin: "([^"]+)"/.exec(text)?.[1] ?? id];
+  })
+  .sort();
+
+/** The folder of stand-ins for those commands, made by vitest.agent-store.ts, and the file each records its call in,
+ * which that teardown reads and fails the run over. A case whose own stub is gone, or that names none, runs one of
+ * these and never the person's own agent, billed on their key; CI's runners have no agent to find at all. */
+export const AGENT_STAND_INS = join(RUN_TMPDIR, "agent-stand-ins");
+export const AGENT_CALLS = join(RUN_TMPDIR, "agent-calls");
+
+// First on the PATH every worker and every process a case starts inherits. A case that means a real agent's command
+// names it on a PATH of its own, and the live and render runs keep the person's own.
+if (!REAL_HOME && !(process.env["PATH"] ?? "").split(":").includes(AGENT_STAND_INS)) {
+  process.env["PATH"] = `${AGENT_STAND_INS}:${process.env["PATH"] ?? "/usr/bin:/bin"}`;
+}
+
 /** The home every case and every process it starts reads, under the run's own folder, so whatever lands in it is
  * this run's doing; vitest.agent-store.ts makes it and fails the run naming anything left in it. */
 export const RUN_HOME = join(RUN_TMPDIR, "home");

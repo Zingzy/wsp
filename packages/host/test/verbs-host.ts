@@ -51,8 +51,9 @@ const HERE = hostname().toLowerCase();
 /** The fingerprint a pairing pinned, which every record written since wsp pinned keys carries. */
 const HOST_KEY = "SHA256:MVm4EO/x4dkERU6dZOt1s4N04aW619pwoUo/9Qpz40A";
 
-/** What the codex here asks its machine; the stub guest answers nothing to it unless a test puts a catalog there. */
-const PROBE_CMD = "codex --describe";
+/** What the codex here asks its machine; the stub guest answers nothing to it unless a test puts a catalog there, and
+ * on this computer's own workspace it names no agent's command, so it runs none. */
+const PROBE_CMD = "wsp-stub-codex --describe";
 
 /** An agent whose binary can be made to answer: its probe reads the machine's stdout as the answer itself, so a test
  * can put a machine's own catalog in front of the verbs. Nothing on the guest answers by default, which leaves the
