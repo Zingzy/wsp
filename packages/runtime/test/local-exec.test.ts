@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { shellQuote, turnCutLine, type ExecStream } from "@wsp/protocol";
-import { localExecStream, ownOrphans, type GroupWorkReader } from "../src/local-exec.js";
+import { groupExists, localExecStream, ownOrphans, type GroupWorkReader } from "../src/local-exec.js";
 import { alive, gone, grandchild, sweepStrays } from "./strays.js";
 
 async function collect(lines: AsyncIterable<string>): Promise<string[]> {
@@ -249,14 +250,13 @@ describe("what a run leaves on this computer", () => {
 
     expect(modeOf(runDir)).toBe("700");
     expect(modeOf(`${base}.d`)).toBe("700");
-    // The script carries the whole launch environment as export lines; the input channel carries what a person
-    // sends into the turn; the log carries everything the agent prints.
+    // The script carries the command; the input channel carries what a person sends into the turn; the log carries
+    // everything the agent prints.
     for (const suffix of ["sh", "in", "log"]) expect([suffix, modeOf(`${base}.${suffix}`)]).toEqual([suffix, "600"]);
 
-    // The key really is in there, and no file holding anything of the person's is open to another login: the run's
-    // own bookkeeping (a pid, a tail's pid, an exit code) is written by the shell at its own umask, and the folder
-    // at 700 is what keeps that out of anyone else's reach.
-    expect(readFileSync(`${base}.sh`, "utf8")).toContain("sk-ant-x-not-a-key");
+    // No file holding anything of the person's is open to another login: the run's own bookkeeping (a pid, a tail's
+    // pid, an exit code) is written by the shell at its own umask, and the folder at 700 is what keeps that out of
+    // anyone else's reach.
     const carries = new Set(["sh", "in", "log"]);
     const readable = readdirSync(runDir).filter(name => carries.has(name.split(".").at(-1)!) && (statSync(join(runDir, name)).mode & 0o077) !== 0);
     expect(readable).toEqual([]);
@@ -264,6 +264,79 @@ describe("what a run leaves on this computer", () => {
     stream.kill();
     await stream.exited;
     await gone(child);
+  }, 20_000);
+
+  /** Every file under the run folder that holds `value`, read whole. */
+  const holding = (value: string): string[] =>
+    readdirSync(runDir, { recursive: true, withFileTypes: true })
+      .filter(e => e.isFile())
+      .map(e => join(e.parentPath, e.name))
+      .filter(path => readFileSync(path, "utf8").includes(value));
+
+  it("a turn and an exec launched with a key reach it in their environment, and no file under the run folder holds it", async () => {
+    const key = `sk-ant-x-${randomBytes(8).toString("hex")}`;
+    const gate = join(root, "gate");
+    const factory = localExecStream({ root, runDir, pollMs: 10 });
+    const seen = 'case "$ANTHROPIC_API_KEY" in sk-ant-x-*) echo "seen ${#ANTHROPIC_API_KEY}";; esac';
+    // A turn as an agent's launch makes one, its prompt on an input channel; an exec as the exec verb makes one.
+    const turn = factory(`${seen}; read -r line; echo "got $line"`, { env: { ANTHROPIC_API_KEY: key }, input: ["hello"], inputAfter: new Promise(() => {}) });
+    const exec = factory(`${seen}; while [ ! -f ${shellQuote(gate)} ]; do sleep 0.05; done`, { env: { ANTHROPIC_API_KEY: key } });
+    try {
+      const turnLines = turn.lines[Symbol.asyncIterator]();
+      const execLines = exec.lines[Symbol.asyncIterator]();
+      expect(await turnLines.next()).toEqual({ value: `seen ${key.length}`, done: false });
+      expect(await execLines.next()).toEqual({ value: `seen ${key.length}`, done: false });
+
+      // Both are running, each held on its own gate, with every file of theirs on disk.
+      expect(holding(key)).toEqual([]);
+
+      writeFileSync(gate, "");
+      expect(await execLines.next()).toEqual({ value: undefined, done: true });
+      turn.kill();
+      expect([await exec.exited, await turn.exited]).toEqual([0, null]);
+      expect(readdirSync(runDir)).toEqual([]);
+    } finally {
+      turn.kill();
+      exec.kill();
+      await Promise.all([turn.exited, exec.exited]);
+    }
+  }, 20_000);
+
+  it("a script an older host wrote with the key in it is gone once its run ends, read or swept", async () => {
+    const key = `sk-ant-x-${randomBytes(8).toString("hex")}`;
+    const gate = join(root, "gate");
+    mkdirSync(runDir, { recursive: true, mode: 0o700 });
+    /** A run as a host before this one launched it: the environment as export lines at the top of its script. */
+    const started: number[] = [];
+    const older = (id: string, command: string): string => {
+      const base = join(runDir, id);
+      mkdirSync(`${base}.d`, { mode: 0o700 });
+      writeFileSync(`${base}.sh`, `export ANTHROPIC_API_KEY=${shellQuote(key)}\n( ${command}\n)\necho $? > ${shellQuote(`${base}.exit`)}\n`, { mode: 0o600 });
+      writeFileSync(`${base}.log`, "", { mode: 0o600 });
+      const log = openSync(`${base}.log`, "a");
+      const child = spawn("bash", [`${base}.sh`], { cwd: root, stdio: ["ignore", log, log], detached: true });
+      child.unref();
+      closeSync(log);
+      started.push(child.pid!);
+      writeFileSync(`${base}.pid`, `${child.pid}\n`);
+      return base;
+    };
+    try {
+      const read = older("aaaaaaaaaaaa", `while [ ! -f ${shellQuote(gate)} ]; do sleep 0.05; done; echo done`);
+      const ended = older("bbbbbbbbbbbb", "echo done");
+      await vi.waitFor(() => expect(readFileSync(`${ended}.exit`, "utf8").trim()).toBe("0"), { timeout: 5_000 });
+      expect(holding(key).sort()).toEqual([`${read}.sh`, `${ended}.sh`]);
+
+      // The host that comes next re-opens the run its rows hold and sweeps the one they do not.
+      const next = localExecStream({ root, runDir, pollMs: 10 });
+      const attached = (await next.attach!(read, { input: false, startedAt: Date.now() })) as ExecStream;
+      expect(await next.sweep!([read])).toEqual([ended]);
+      writeFileSync(gate, "");
+      expect(await Promise.all([collect(attached.lines), attached.exited])).toEqual([["done"], 0]);
+      expect(readdirSync(runDir)).toEqual([]);
+    } finally {
+      for (const pid of started) if (groupExists(pid)) process.kill(-pid, "SIGKILL");
+    }
   }, 20_000);
 
   it("a run whose recorded pid leads somebody else's group is cleaned up and never signalled", async () => {

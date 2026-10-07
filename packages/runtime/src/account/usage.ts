@@ -116,13 +116,13 @@ export function usageArea(ctx: RuntimeContext): UsageArea {
   };
 
   /** One reset script on one computer: this one as a child of this host, a joined one over its link. */
-  const resetRun = async (place: ResetPlace, script: string): Promise<string> => {
+  const resetRun = async (place: ResetPlace, script: string, agent: string): Promise<string> => {
     if (place.kind === "box") {
       if (placeDoor === undefined) throw new Error(NO_PLACE_DOOR);
       return (await placeDoor.exec(place.id, script, { timeoutMs: RESET_EXEC_MS })).stdout;
     }
     if (local === undefined) throw new Error(absentComputer(place.name, null).sentence);
-    const stream = local.execStream({ idleMs: RESET_EXEC_MS, deadlineMs: RESET_EXEC_MS })(script, { env: { ...local.env() } });
+    const stream = local.execStream({ idleMs: RESET_EXEC_MS, deadlineMs: RESET_EXEC_MS })(script, { env: { ...local.env(), ...setups.launchOf(place.id, agent).env } });
     const lines: string[] = [];
     for await (const line of stream.lines) lines.push(line);
     await stream.exited;
@@ -150,7 +150,8 @@ export function usageArea(ctx: RuntimeContext): UsageArea {
       const launch = setup.launch?.program !== undefined ? { launch: { program: setup.launch.program } } : {};
       if (at.kind === "here") {
         if (local === undefined) throw new Error(absentComputer(at.name, null).sentence);
-        return { home: setup.configDir ?? local.home(agent), env: { PATH: local.env()["PATH"], ...setup.env }, ...launch };
+        // The script here lands in a file, so the setup's variables ride the run's own environment and not its text.
+        return { home: setup.configDir ?? local.home(agent), env: {}, ...launch };
       }
       const report = await placeDoor?.reportOf(at.id);
       const env = { PATH: report?.login["PATH"], ...setup.env };

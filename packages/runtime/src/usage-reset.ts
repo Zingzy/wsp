@@ -59,8 +59,8 @@ export interface UsageResetDeps {
   places(): Promise<(id: string) => ResetPlace>;
   /** Where the agent's login lives on that computer; refuses with the sentence when it cannot be read. */
   road(agent: string, place: ResetPlace): Promise<ResetRoad>;
-  /** One script there, answering what it printed. */
-  run(place: ResetPlace, script: string): Promise<string>;
+  /** One script there for the agent's login, answering what it printed. */
+  run(place: ResetPlace, script: string, agent: string): Promise<string>;
   /** Files a reading the way a turn's is filed, answering the key it went under. */
   file(o: { agent: string; place: ResetPlace; limit: HarnessLimit }): Promise<string>;
   row(key: string): Promise<AccountRow | undefined>;
@@ -119,7 +119,7 @@ export function usageResets(d: UsageResetDeps): (ask: ResetAsk) => Promise<Reset
     const who = resetWho({ label, own: own !== undefined, computer: place.name });
     const road = await d.road(agent, place);
 
-    const read = resets.parseRead(await d.run(place, resets.readCommand(road)));
+    const read = resets.parseRead(await d.run(place, resets.readCommand(road), agent));
     if (read?.keyed === true) throw usage(resetKeyedLine(label));
     if (read?.limit === undefined) throw new Error(resetUnreadLine(name, place.name, label));
     const signedIn = read.limit.account;
@@ -150,7 +150,7 @@ export function usageResets(d: UsageResetDeps): (ask: ResetAsk) => Promise<Reset
       throw usage(e instanceof Error ? e.message : String(e));
     }
     await d.store.put(PENDING, ask.account, { key, before: before ?? banked });
-    const spent = resets.parseSpend(await d.run(place, script));
+    const spent = resets.parseSpend(await d.run(place, script, agent));
     if (!spent.answered) {
       console.warn(`the reset of ${label} on ${place.name} went unanswered; the same request goes again on the next press`);
       throw new Error(resetSilentLine(name, place.name));
