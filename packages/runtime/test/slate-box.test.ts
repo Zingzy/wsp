@@ -258,6 +258,47 @@ describe("a box thread's slate", () => {
     slates.close();
   }, 30_000);
 
+  it("a press on a box whose turns and runs the host is still settling reaches the machine only once that is done", async () => {
+    const machine = bashMachine();
+    let open!: () => void;
+    const settled = { at: false };
+    const booted = new Promise<void>(resolve => (open = resolve)).then(() => void (settled.at = true));
+    const early: string[] = [];
+    const run = machine.run.bind(machine);
+    machine.run = (script, opts) => (settled.at ? undefined : early.push(script), run(script, opts));
+    const thread = `t-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    made.push(boxSlateDir(thread));
+    const slates = createSlates({
+      store: memoryStore(),
+      now: () => Date.now(),
+      record: () => {},
+      emit: () => {},
+      thread: () => ({ workspaceId: "w1", rootThreadId: thread, sessionId: "s1", folder: temp(), hostFolder: temp(), computer: "spoo" }),
+      machineOf: () => machine,
+      wake: () => booted,
+      under: lead => [lead],
+      threadOfToken: () => thread,
+      sources: (threadId, workspaceId) => ({ threadId, workspaceId, now: Date.now(), rows: () => [] }) as never,
+      deliver: async () => ({ outcome: "started" }),
+      runEnv: () => ({ PATH: process.env["PATH"] ?? "/usr/bin:/bin" }),
+    });
+    const asThread: Caller = { origin: "here", by: { kind: "thread", threadId: thread, workspaceId: "w1", rootThreadId: thread } };
+    await slates.write({ text: `<slate title="Held"><value name="go" start={0} />
+  <run name="box" cmd="echo ran" timeout={20} />
+  <when change={$go} do={start($box)} />
+  <column><output run={$box} /></column>
+</slate>` }, asThread);
+    await slates.state({ threadId: thread, values: { $go: 1 } });
+    for (const ask of (await slates.get(thread))!.asks) await slates.approve({ threadId: thread, key: ask.key, scope: "thread" });
+    const value = async () => (await slates.get(thread))!.values["box"] as { state: string; out?: string };
+    await new Promise(r => setTimeout(r, 500));
+    open();
+    for (let i = 0; i < 100 && (await value()).state !== "done"; i++) await new Promise(r => setTimeout(r, 100));
+    expect(await value()).toMatchObject({ state: "done", out: "ran\n" });
+    expect(early).toEqual([]);
+    slates.close();
+  }, 30_000);
+
   it("a then on the box gets the raw result and SLATE_DIR, never the env its command was given", async () => {
     const machine = bashMachine();
     const thread = `t-${Date.now()}-${Math.random().toString(36).slice(2)}`;

@@ -50,6 +50,8 @@ export function statusArea(ctx: RuntimeContext): StatusArea {
         if (entry === undefined || s.machineId !== entry.machine.id) continue;
         if (s.phase === "running") ctx.polledReach.set(s.id, { machineId: s.machineId, reach: s.reach.state });
         else ctx.polledReach.delete(s.id);
+        // A daemon deploy is a run, which the sweep the boot still has out on that machine would end.
+        if (ctx.bootWork.has(s.id)) continue;
         ctx.reviveDaemon(entry, s.reach.state);
         ctx.offerDaemonAgain(entry, s);
         ctx.readVersionAgain(entry, s);
