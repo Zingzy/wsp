@@ -3,6 +3,9 @@
  * was installed on, so both sides of the wire read the same word for it. */
 export const HERE_PLACE_ID = "here";
 
+/** False in a public build, which the bundler fills in where PUBLIC_BUILD=1; never filled in anywhere else. */
+declare const __WSP_CLOUD__: boolean | undefined;
+
 /** Where a Solari key comes from, spelled once for the terminal's ask and the provider's key row. */
 export const SOLARI_CONSOLE = "console.getsolari.com";
 
@@ -10,10 +13,17 @@ export const SOLARI_CONSOLE = "console.getsolari.com";
  * provider registry reads its keyName and keyConsole from here and the app's provider rows read the same, so the
  * screen that asks for a key and the terminal that asks for it say one thing. A provider that takes no key has no
  * row. */
-export const PROVIDER_KEY_WORDS: Record<string, { name: string; keyName: string; keyConsole?: string }> = {
-  box: { name: "Boat", keyName: "Boat API key", keyConsole: "boat.dev/dashboard" },
-  solari: { name: "Solari", keyName: "Solari API key", keyConsole: SOLARI_CONSOLE },
-};
+export const PROVIDER_KEY_WORDS: Record<string, { name: string; keyName: string; keyConsole?: string }> =
+  typeof __WSP_CLOUD__ === "boolean" && !__WSP_CLOUD__ ? {} : cloudKeyWords();
+
+/** The clouds' rows, in a function so a public build, whose bundler reads the test above as false, drops their words.
+ * The test is spelled out where it is read, since a bundler folds the constant only there. */
+function cloudKeyWords(): Record<string, { name: string; keyName: string; keyConsole?: string }> {
+  return {
+    box: { name: "Boat", keyName: "Boat API key", keyConsole: "boat.dev/dashboard" },
+    solari: { name: "Solari", keyName: "Solari API key", keyConsole: SOLARI_CONSOLE },
+  };
+}
 
 /** A provider's name as its key rows say it, by its id; an id with no row reads as itself. */
 export const providerKeyName = (provider: string): string => PROVIDER_KEY_WORDS[provider]?.name ?? provider;

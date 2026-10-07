@@ -165,6 +165,22 @@ describe("the release workflow", () => {
     expect(existsSync(join(repo, "packages/wspx/scripts/daemon-binary.mjs"))).toBe(true);
   });
 
+  it("builds everything it ships public and reads each bundle for a cloud provider before it leaves the runner", () => {
+    const roads = [
+      { job: macJob, build: "- name: Build the bundles\n", check: "node packages/wspx/scripts/public-check.mjs apps/desktop/build/app\n", ships: "gh release upload" },
+      { job: linuxJob, build: "- name: Build the bundle\n", check: "node packages/wspx/scripts/public-check.mjs apps/desktop/build/app\n", ships: "gh release upload" },
+      { job: npmJob, build: "- name: Build, with every daemon binary required\n", check: 'node packages/wspx/scripts/public-check.mjs "$RUNNER_TEMP"/wsp-labs-wsp-*.tgz\n', ships: "npm publish" },
+    ];
+    for (const { job, build, check, ships } of roads) {
+      const at = job.indexOf(build);
+      expect(at, build).toBeGreaterThan(-1);
+      expect(job.slice(at, job.indexOf("- name:", at + 1))).toContain('PUBLIC_BUILD: "1"');
+      expect(job.indexOf(check)).toBeGreaterThan(at);
+      expect(job.indexOf(check)).toBeLessThan(job.indexOf(ships));
+    }
+    expect(workflow.split('PUBLIC_BUILD: "1"').length - 1).toBe(roads.length);
+  });
+
   it("publishes the command line package from the runner through trusted publishing, and holds no npm token", () => {
     expect(workflow).toContain("npm publish --provenance --access public");
     expect(workflow).toContain("id-token: write");
