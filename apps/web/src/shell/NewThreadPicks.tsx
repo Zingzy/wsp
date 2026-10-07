@@ -6,13 +6,13 @@
 // makes its own copy of the project, so it never lands inside another
 // thread's workspace.
 import { PlusIcon } from "lucide-react";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ProjectView } from "@wsp/protocol";
 import { openCommandPalette } from "../commandPaletteBus.js";
 import { Menu, MenuItem, MenuPopup, MenuRadioGroup, MenuRadioItem, MenuSeparator, MenuTrigger } from "../components/ui/menu.js";
-import { usePlaces, useProjects, useStore } from "../protocol/store.js";
+import { usePlaces, useProjects, useSidebarProjects, useStore } from "../protocol/store.js";
 import { storedPicks } from "../sidebar/picks.js";
-import { inProjectOrder } from "../sidebar/threadTree.js";
+import { inPickOrder, inProjectOrder } from "../sidebar/threadTree.js";
 import { placeNames, projectComputerWord } from "../sidebar/workspaceRows.js";
 import { PROJECT_WORDS } from "../sidebar/words.js";
 import { requestAddProject } from "./shellRequests.js";
@@ -37,16 +37,30 @@ export function openNewThread(): void {
 
 const pickerClass = "inline-flex max-w-64 items-baseline gap-1 border-foreground/60 border-b border-dotted align-baseline outline-none transition-colors hover:border-foreground focus-visible:border-foreground";
 
+/** The projects a new thread is picked from, for every list that offers them: the open workspace's project, else the
+ * open New thread page's, first, then by recent turns. While the list is open its order holds, so a turn starting
+ * elsewhere never moves a row under the person's pointer or key; a project added meanwhile joins at the end. */
+export function useNewThreadPicks(open: boolean): ProjectView[] {
+  const projects = useProjects();
+  const rows = useSidebarProjects();
+  const first = useStore(s => s.workspaces.find(w => w.id === s.selectedId)?.project.id ?? s.projectHome ?? null);
+  const order = useStore(s => s.preferences.projectOrder);
+  const ranked = useMemo(() => inPickOrder(projects, rows, first, order), [projects, rows, first, order]);
+  const [held, setHeld] = useState<readonly string[] | null>(null);
+  if (open && held === null) setHeld(ranked.map(project => project.id));
+  if (!open && held !== null) setHeld(null);
+  return useMemo(() => (held === null ? ranked : [...held.flatMap(id => projects.filter(project => project.id === id)), ...projects.filter(project => !held.includes(project.id))]), [held, projects, ranked]);
+}
+
 /** The heading's project name, which is the project picker: every project and Add a project. */
 export function HomeProjectPicker({ project }: { project: ProjectView }) {
-  const projects = useProjects();
   const places = usePlaces();
-  const order = useStore(s => s.preferences.projectOrder);
   const open = useStore(s => s.openProjectHome);
   const named = useMemo(() => placeNames(places), [places]);
-  const rows = useMemo(() => inProjectOrder(projects, p => p.id, order), [projects, order]);
+  const [shown, setShown] = useState(false);
+  const rows = useNewThreadPicks(shown);
   return (
-    <Menu>
+    <Menu open={shown} onOpenChange={setShown}>
       <MenuTrigger render={<button type="button" />} className={pickerClass} aria-label={`Project: ${project.name}`} data-new-thread-project={project.id}>
         <span className="truncate">{project.name}</span>
       </MenuTrigger>

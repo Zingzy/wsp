@@ -16,6 +16,7 @@ const state = (events: ReadonlyArray<SessionEvent>, extra: Partial<ThreadState> 
   sending: null,
   known: [],
   named: null,
+  handed: null,
   stray: null,
   refused: [],
   ...extra,
@@ -370,6 +371,8 @@ describe("reloadTranscript", () => {
     expect(heldForSend(fresh, { type: "session.held", workspaceId: CHAT_WS, threadId: "thr_y", requestId: "req_other" })).toBe(fresh);
     const held = heldForSend(fresh, { type: "session.held", workspaceId: CHAT_WS, threadId: "thr_x", requestId: REQ });
     expect(held.sending).toEqual({ after: undefined, thread: "thr_x" });
+    expect(held.handed).toEqual({ key: CHAT_WS, thread: "thr_x" });
+    expect(heldForSend(fresh, { type: "session.held", workspaceId: CHAT_WS, threadId: "thr_x", requestId: REQ }, "thr_x").handed).toEqual({ key: "thr_x", thread: "thr_x" });
     const y = { workspaceId: CHAT_WS, sessionId: "sess_y", turnId: "turn_y1", threadId: "thr_y" };
     const elsewhere = reduceEvent(held, { type: "session.end", ...y, exitCode: 0, sawResult: true }, T0);
     expect(elsewhere.sending).toEqual({ after: undefined, thread: "thr_x" });

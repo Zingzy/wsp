@@ -719,7 +719,7 @@ describe("buildSwitcherCards", () => {
     const child = { ...session("s_kid", "ws_a", "The child.", Date.parse("2026-09-01T02:00:00Z")), threadId: "thr_kid", parentThreadId: "thr_lead", startedBy: "agent" as const };
     const projects = deriveSidebarProjects({ workspaces: [here], sessions: { ws_a: [lead, child] } });
     const MAC: PlaceView = { id: "here", kind: "computer", name: "zingzy-mbp", label: "zingzy's MacBook Pro", default: true };
-    const palette = (places: PlaceView[]) => buildPaletteItems({ projects, selectedId: null, query: "", messageHits: [], canCreate: false, recorded: [], projectOrder: [], asks: false, handlers: {} as never, verbs: {} as never, places });
+    const palette = (places: PlaceView[]) => buildPaletteItems({ projects, selectedId: null, query: "", messageHits: [], canCreate: false, recorded: [], picks: [], asks: false, handlers: {} as never, verbs: {} as never, places });
     const card = (places: PlaceView[]) => buildSwitcherCards({ places, projects, targets: [{ workspaceId: "ws_a", threadId: "thr_kid" }], images: {} })[0]!.place;
     const said = (node: ReactNode): HTMLElement => render(<>{node}</>).container;
     for (const item of [...palette([]).workspaceItems, ...palette([]).recentThreadItems]) expect(said(item.description).textContent).not.toMatch(/ on\s*$|this computer/);
@@ -734,14 +734,14 @@ describe("buildSwitcherCards", () => {
     const bare = { ...view("ws_a", "wsp"), kind: "local" as const, machineId: "local" };
     const held = { ...view("ws_b", "api"), kind: "local" as const, machineId: "local" };
     const projects = deriveSidebarProjects({ workspaces: [bare, held], sessions: { ws_b: [session("s_b", "ws_b", "The one.", Date.parse("2026-09-01T01:00:00Z"))] } });
-    const items = buildPaletteItems({ projects, selectedId: null, query: "", messageHits: [], canCreate: false, recorded: [], projectOrder: [], asks: false, handlers: {} as never, verbs: {} as never, places: [] });
+    const items = buildPaletteItems({ projects, selectedId: null, query: "", messageHits: [], canCreate: false, recorded: [], picks: [], asks: false, handlers: {} as never, verbs: {} as never, places: [] });
     expect(items.workspaceItems.map(item => item.value)).toEqual(["workspace:ws_b"]);
   });
 
   it("offers Copy as Markdown for the thread on screen, and nothing where no thread is open", async () => {
     const copyThreadMarkdown = vi.fn(async () => {});
     const items = (copy: (() => Promise<void>) | null) =>
-      buildPaletteItems({ projects: [], selectedId: null, query: "", messageHits: [], canCreate: false, recorded: [], projectOrder: [], asks: false, handlers: { copyThreadMarkdown: copy } as never, verbs: {} as never, places: [] }).actionItems;
+      buildPaletteItems({ projects: [], selectedId: null, query: "", messageHits: [], canCreate: false, recorded: [], picks: [], asks: false, handlers: { copyThreadMarkdown: copy } as never, verbs: {} as never, places: [] }).actionItems;
     const copy = items(copyThreadMarkdown).find((item): item is CommandPaletteActionItem => item.kind === "action" && item.title === "Copy as Markdown")!;
     expect(copy.disabled).not.toBe(true);
     await copy.run();
@@ -752,7 +752,7 @@ describe("buildSwitcherCards", () => {
   it("a thread in the palette wears the agent's mark and the one status slot, and a workspace no dot for its state", () => {
     const running = { ...session("s_run", "ws_a", "The running one.", Date.now() - 125_000), status: "running" as const, endedAt: undefined };
     const projects = deriveSidebarProjects({ workspaces: WORKSPACES, sessions: { ws_a: [running] } });
-    const items = buildPaletteItems({ projects, selectedId: null, query: "", messageHits: [], canCreate: false, recorded: [], projectOrder: [], asks: false, handlers: {} as never, verbs: {} as never, places: [] });
+    const items = buildPaletteItems({ projects, selectedId: null, query: "", messageHits: [], canCreate: false, recorded: [], picks: [], asks: false, handlers: {} as never, verbs: {} as never, places: [] });
     const item = items.recentThreadItems.find(found => found.title === "The running one.")!;
     expect(render(<>{item.icon}</>).container.querySelector("[data-harness-mark='claude']")).not.toBeNull();
     const slot = render(<>{item.titleTrailingContent}</>).container.querySelector<HTMLElement>("[data-thread-status]")!;

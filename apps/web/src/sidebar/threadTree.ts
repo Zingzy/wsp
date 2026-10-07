@@ -45,10 +45,26 @@ export function projectGroups(recorded: ReadonlyArray<ProjectView>, rows: Readon
 }
 
 /** Things keyed by project in the order the person dragged the projects into, an id they no longer hold skipped, and
- * then the rest as they came: the one rule every list of projects is drawn by. */
+ * then the rest as they came: the order the sidebar and its switcher draw projects in, since that is where the person
+ * drags them. */
 export function inProjectOrder<T>(items: ReadonlyArray<T>, idOf: (item: T) => string, order: ReadonlyArray<string>): T[] {
   const placed = order.flatMap(id => items.filter(item => idOf(item) === id));
   return [...placed, ...items.filter(item => !placed.includes(item))];
+}
+
+/** The projects a new thread is picked from: the one the person is in first, then each project by the latest turn
+ * started among its threads, so a new turn moves its project up; ties and projects with no thread in the dragged order. */
+export function inPickOrder(projects: ReadonlyArray<ProjectView>, rows: ReadonlyArray<SidebarProjectSnapshot>, open: string | null, order: ReadonlyArray<string>): ProjectView[] {
+  const newest = new Map<string, number>();
+  for (const row of rows) {
+    for (const thread of row.threads) {
+      const at = thread.startedAt === null ? Number.NaN : Date.parse(thread.startedAt);
+      const id = row.workspace.project.id;
+      if (at > (newest.get(id) ?? Number.NEGATIVE_INFINITY)) newest.set(id, at);
+    }
+  }
+  const rank = (project: ProjectView): number => (project.id === open ? Number.POSITIVE_INFINITY : (newest.get(project.id) ?? Number.NEGATIVE_INFINITY));
+  return inProjectOrder(projects, project => project.id, order).sort((a, b) => (rank(a) === rank(b) ? 0 : rank(a) > rank(b) ? -1 : 1));
 }
 
 /** A thread with the workspace it runs on, which is not always the workspace whose rows it is drawn among. */

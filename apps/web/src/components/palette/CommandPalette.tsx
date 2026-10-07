@@ -19,7 +19,7 @@ import { copyText } from "../../actions/clipboard.js";
 import { useRightPanelStore } from "../../rightPanelStore.js";
 import { cycleThreadInSpace, goToAdjacentWorkspace, goToWorkspace } from "../../shell/shellCommands.js";
 import { useKeybindings } from "../../shell/useKeybindings.js";
-import { openNewThread } from "../../shell/NewThreadPicks.js";
+import { openNewThread, useNewThreadPicks } from "../../shell/NewThreadPicks.js";
 import { requestAddProject } from "../../shell/shellRequests.js";
 import { CommandDialog, CommandDialogPopup } from "../ui/command.js";
 import { useSidebar } from "../ui/sidebar.js";
@@ -59,7 +59,7 @@ export function CommandPalette({ keybindings: given }: { keybindings?: ResolvedK
   const openAddComputer = useStore(s => s.openAddComputer);
   const openProjectHome = useStore(s => s.openProjectHome);
   const recorded = useStore(s => s.projects);
-  const projectOrder = useStore(s => s.preferences.projectOrder);
+  const picks = useNewThreadPicks(open);
   const asks = useStore(s => s.preferences.newThreadIn === "ask");
   const selectedId = useSelectedWorkspaceId();
   const selectedThreadId = useSelectedThreadId();
@@ -125,8 +125,8 @@ export function CommandPalette({ keybindings: given }: { keybindings?: ResolvedK
     [api, openAddComputer, openProjectHome, openSettings, select, selectedId, selectedThreadId, toggleRightPanel, toggleSidebar],
   );
   const items = useMemo(
-    () => buildPaletteItems({ projects, selectedId, query, messageHits, canCreate: api !== null, recorded, projectOrder, asks, handlers, verbs, places }),
-    [api, asks, handlers, messageHits, places, projectOrder, projects, query, recorded, selectedId, verbs],
+    () => buildPaletteItems({ projects, selectedId, query, messageHits, canCreate: api !== null, recorded, picks, asks, handlers, verbs, places }),
+    [api, asks, handlers, messageHits, picks, places, projects, query, recorded, selectedId, verbs],
   );
   // A page whose row is gone or held, as the last project's removal leaves it, reads as the root.
   const page = useMemo(() => {
