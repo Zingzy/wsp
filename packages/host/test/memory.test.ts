@@ -10,6 +10,7 @@ import { spawn } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ROOT } from "../../protocol/test/source-files.js";
 import { DIST, describeWithDists, distOf } from "./built-bin.js";
@@ -211,13 +212,12 @@ describe("the page prints the budget the test guards", () => {
   });
 });
 
-describeWithDists("what the host loads to start", ["host"], () => {
-  it("leaves the tool server's library until a tool server opens", async () => {
-    // The library's schemas alone were 8 MB of the budget, held by every host whether or not an agent asked for tools.
-    // register, not registerHooks: the engines floor is Node 22.0 and registerHooks came in 22.15. Its hooks run on a
-    // thread of their own, so the list is read once the hook has seen the last import, which the port keeps in order.
-    const hook = "let port; export const initialize = data => { port = data.port; }; export const load = (url, context, next) => { port.postMessage(url); return next(url, context); };";
-    const script = `
+/** Every module the host's library and the runtime it starts load, as URLs. register, not registerHooks: the engines
+ * floor is Node 22.0 and registerHooks came in 22.15. Its hooks run on a thread of their own, so the list is read once
+ * the hook has seen the last import, which the port keeps in order. */
+async function startLoads(): Promise<string[]> {
+  const hook = "let port; export const initialize = data => { port = data.port; }; export const load = (url, context, next) => { port.postMessage(url); return next(url, context); };";
+  const script = `
 import { register } from "node:module";
 import { MessageChannel } from "node:worker_threads";
 const { port1, port2 } = new MessageChannel();
@@ -225,13 +225,26 @@ register(${JSON.stringify(`data:text/javascript,${encodeURIComponent(hook)}`)}, 
 const last = "data:text/javascript,export%20default%200";
 const seen = new Promise(done => port1.on("message", url => (console.log(url), url === last && done())));
 await import(${JSON.stringify(DIST)});
+await import(${JSON.stringify(distOf("runtime"))});
 await import(last);
 await seen;
 port1.close();
 `;
-    const run = await ran(script, tmpdir());
-    expect(run.code, run.out).toBe(0);
-    expect(run.out.split("\n").filter(url => url.includes("@modelcontextprotocol"))).toEqual([]);
+  const run = await ran(script, tmpdir());
+  expect(run.code, run.out).toBe(0);
+  return run.out.split("\n").filter(url => url !== "");
+}
+
+describeWithDists("what the host loads to start", ["host", "runtime", "protocol"], () => {
+  it("leaves the tool server's library until a tool server opens", async () => {
+    // The library's schemas alone were 8 MB of the budget, held by every host whether or not an agent asked for tools.
+    expect((await startLoads()).filter(url => url.includes("@modelcontextprotocol"))).toEqual([]);
+  });
+
+  it("leaves the slate's code until a thread uses a slate", async () => {
+    // Read off the files themselves, as the bundler names the chunk the parser and the slate store land in.
+    const holding = (await startLoads()).filter(url => url.startsWith("file:") && /function (parseSlate|createSlates)\(/.test(readFileSync(fileURLToPath(url), "utf8")));
+    expect(holding).toEqual([]);
   });
 });
 

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // A line over a list, drawn by the Usage page's own chart: x and value read per row, oldest first.
-import { slateAxisWord as word, slateChartAxis, type SlateJson } from "@wsp/protocol";
+import { slateAxisWord as word, slateChartAxis, type SlateJson } from "@wsp/protocol/slate";
 import { UsageChart } from "../../settings/usageChart.js";
 import type { PieceView } from "../SlateView.js";
 import { useCallback, useState } from "react";

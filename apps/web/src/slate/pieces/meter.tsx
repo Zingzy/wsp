@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { slateFigure } from "@wsp/protocol";
+import { slateFigure } from "@wsp/protocol/slate";
 import { cn } from "../../lib/utils.js";
 import type { PieceView } from "../SlateView.js";
 import { num, str, TONE_FILL, toneOf } from "./look.js";

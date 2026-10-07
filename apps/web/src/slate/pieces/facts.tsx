@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Label and value pairs. In a grid, settings lines: the label 14 px at the left, the value at the right, a hairline
 // between, filling the card they stand in. In a line, one row of pairs 12 px apart that wraps.
-import type { SlateJson, SlatePropValue } from "@wsp/protocol";
+import type { SlateJson, SlatePropValue } from "@wsp/protocol/slate";
 import type { SlateEngine } from "../engine.js";
 import { cn } from "../../lib/utils.js";
 import type { PieceView } from "../SlateView.js";

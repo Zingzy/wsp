@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The path grammar the renderer walks itself: a head name, then ".field" and "[index]" steps, as the expression
 // language writes them. Sources answer the steps after the head; the dependency sets compare paths as text.
-import { getSlateValue, isSlateBinding, isSlateFormat, parseSlateOwnPath, setSlateValue, slateSegments, slateStep, type SlateJson, type SlatePropValue } from "@wsp/protocol";
+import { getSlateValue, isSlateBinding, isSlateFormat, parseSlateOwnPath, setSlateValue, slateSegments, slateStep, type SlateJson, type SlatePropValue } from "@wsp/protocol/slate";
 import { dependencies } from "./expr.js";
 import type { SlatePiece } from "./model.js";
 

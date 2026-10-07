@@ -3,7 +3,8 @@
 // sheet naming the server, the call and the tools it lists, and the destructive confirm with the arguments as sent.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { parseSlate, slateFieldWords, slateResultShape, slateStartValues, type SessionView, type SlateDoc, type SlateJson } from "@wsp/protocol";
+import { type SessionView } from "@wsp/protocol";
+import { parseSlate, slateFieldWords, slateResultShape, slateStartValues, type SlateDoc, type SlateJson } from "@wsp/protocol/slate";
 import type { Api, ProtocolEvent } from "../protocol/client";
 import { useStore } from "../protocol/store";
 import { useRightPanelStore } from "../rightPanelStore";

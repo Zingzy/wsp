@@ -4,7 +4,8 @@
 // while time.now is drawn, and host holds taken while bound and given back after.
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { slateStartValues, type AccountRow, type SessionView, type SlateDoc, type SlateJson, type WorkspaceStatus } from "@wsp/protocol";
+import { type AccountRow, type SessionView, type WorkspaceStatus } from "@wsp/protocol";
+import { slateStartValues, type SlateDoc, type SlateJson } from "@wsp/protocol/slate";
 import { ActionRunner, StateSender } from "../actions";
 import { fakeLink, slate } from "../testing";
 import { SlateEngine, type Scheduler } from "../engine";

@@ -3,7 +3,7 @@
 // the quiz's choices write the pick, and every icon a slate may name has its component.
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import { parseSlate, sketchSlate, slateChartAxis, slateStartValues, SLATE_EXAMPLES, SLATE_ICONS, SLATE_PIECES, type SlateDoc, type SlateJson } from "@wsp/protocol";
+import { parseSlate, sketchSlate, slateChartAxis, slateStartValues, SLATE_EXAMPLES, SLATE_ICONS, SLATE_PIECES, type SlateDoc, type SlateJson } from "@wsp/protocol/slate";
 import { ActionRunner, StateSender } from "./actions";
 import { SlateEngine } from "./engine";
 import { SLATE_VIEWS } from "./pieces";

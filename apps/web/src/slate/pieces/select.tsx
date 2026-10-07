@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // One choice of a few, written to a value: options from a bound list of strings or of { value, label }. A settings
 // line: the label at the left, the select at the settings rows' one width at the right; in the toolbar, alone.
-import type { SlateJson } from "@wsp/protocol";
+import type { SlateJson } from "@wsp/protocol/slate";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../../components/ui/select.js";
 import { SELECT_WIDTH } from "../../settings/layout.js";
 import type { PieceView } from "../SlateView.js";

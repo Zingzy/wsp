@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { slateLinkDomain } from "@wsp/protocol";
+import { slateLinkDomain } from "@wsp/protocol/slate";
 import { stepsOf, type SlateStep } from "../model.js";
 import { Button, DANGER_BUTTON } from "../../components/ui/button.js";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../../components/ui/tooltip.js";

@@ -2,7 +2,7 @@
 // Options to pick one, each a row of the card written to the piece's $value, the question the card's first row. A pick
 // before the answer is known puts a check at its row's end; once known, Right on the right row and Wrong on a wrong
 // pick, the state word in its tone.
-import type { SlateJson } from "@wsp/protocol";
+import type { SlateJson } from "@wsp/protocol/slate";
 import { cn } from "../../lib/utils.js";
 import type { PieceView } from "../SlateView.js";
 import { getOwn } from "../paths.js";

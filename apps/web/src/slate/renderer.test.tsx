@@ -3,7 +3,7 @@
 // make a good slate without the agent asking.
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import { parseSlate, slateStartValues, type SlateDoc, type SlateJson } from "@wsp/protocol";
+import { parseSlate, slateStartValues, type SlateDoc, type SlateJson } from "@wsp/protocol/slate";
 import { ActionRunner, StateSender } from "./actions";
 import { SlateEngine } from "./engine";
 import { SLATE_VIEWS } from "./pieces";

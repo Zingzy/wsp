@@ -24,6 +24,7 @@ const alias = {
   "@wsp/adapter-opencode": pkg("adapter-opencode"),
   "@wsp/keys": pkg("keys"),
   "@wsp/own-file": pkg("own-file"),
+  "@wsp/protocol/slate": here("./packages/protocol/src/slate/index.ts"),
   "@wsp/protocol": pkg("protocol"),
   "@wsp/runtime": pkg("runtime"),
   "@wsp/host": pkg("host"),

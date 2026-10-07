@@ -3,7 +3,7 @@
 // `when`, resolves its props and hands them to the view its type registers. A piece that throws draws one quiet line
 // in its place; a type this build does not know draws its fallback.
 import { createContext, memo, useContext, useMemo, useSyncExternalStore, type ComponentType, type ReactNode } from "react";
-import type { SlateJson } from "@wsp/protocol";
+import type { SlateJson } from "@wsp/protocol/slate";
 import { RenderErrorBoundary } from "../components/RenderErrorBoundary.js";
 import { DOC, type SlateEngine } from "./engine.js";
 import type { ActionRunner, RaiseOptions, RaiseResult, StateSender } from "./actions.js";

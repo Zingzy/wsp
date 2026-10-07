@@ -2,7 +2,7 @@
 // A step-by-step deploy setup the person performs, as the agent writes it: the token reaches vercel through its
 // environment and gh through stdin, never as an argument. Parsed by the protocol's own parser, so the renderer draws
 // what a write would store.
-import { parseSlate, type SlateDoc } from "@wsp/protocol";
+import { parseSlate, type SlateDoc } from "@wsp/protocol/slate";
 
 export const DEPLOY_SLATE_TEXT = `<slate title="Deploy setup">
   <value name="step" start={1} />

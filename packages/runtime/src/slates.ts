@@ -6,20 +6,37 @@
 // flight (01-architecture, 02-model, 09-events). The slate module in @wsp/protocol parses, validates, runs the
 // batch's pure core and sketches; this file decides who may write, keeps the record, spawns and tells the windows.
 import {
+  notFoundRefusal,
+  roadOf,
+  SLATE_SEND_KEY,
+  scopeOf,
+  threadWord,
+  usageRefusal,
+  type Caller,
+  type SessionSlateEvent,
+  type SlateAsk,
+  type SlateBy,
+  type SlateCause,
+  type SlateEmpty,
+  type SlateEventAnswer,
+  type SlateReadAnswer,
+  type SlateRunEvent,
+  type SlateStateAnswer,
+  type SlateValuesEvent,
+  type SlateView,
+  type SlateWriteAnswer,
+} from "@wsp/protocol";
+import {
   applySlatePatch,
   evaluateSlateExpression,
   getSlateValue,
   isSlateBinding,
-  notFoundRefusal,
   parseSlate,
   parseSlateOwnPath,
   parseSlatePatch,
   printSlate,
   resolveSlateProp,
   runSlateBatch,
-  roadOf,
-  SLATE_SEND_KEY,
-  scopeOf,
   sketchSlate,
   slateBytes,
   slateCatalog,
@@ -32,44 +49,28 @@ import {
   SLATE_SOURCES,
   slateStep,
   slateText,
-  threadWord,
-  usageRefusal,
   validateSlate,
   SLATE_RUN_IDLE,
-  type Caller,
-  type SessionSlateEvent,
-  type SlateAsk,
   type SlateBatchResult,
-  type SlateBy,
-  type SlateCause,
   type SlateDoc,
-  type SlateEmpty,
   type SlateEvalContext,
-  type SlateEventAnswer,
   type SlateJson,
   type SlateProblem,
   type SlatePropValue,
-  type SlateReadAnswer,
   type SlateRunDecl,
-  type SlateRunEvent,
   type SlateRunRecord,
-  type SlateStateAnswer,
   type SlateValues,
-  type SlateValuesEvent,
-  type SlateView,
-  type SlateWriteAnswer,
-} from "@wsp/protocol";
+} from "@wsp/protocol/slate";
 import type { Machine } from "@wsp/engine";
-import { mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { isAbsolute, join, relative } from "node:path";
-import { createHash } from "node:crypto";
+import { mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import type { Store } from "./store.js";
+import { SLATES } from "./lazy-slates.js";
 import { createSlateRuns, HELD_APPROVAL, lastResult, mapStrings, restartedRecord, rewoundRecord, runningRecord, type CmdRunDecl, type RunApprovals, type RunAsk, type RunBy, type RunInput, type RunRecord, type SlateRuns, type SlateRunsDeps } from "./slate-runs.js";
 import { boxLedger, boxRoad, boxSlateDir } from "./slate-box.js";
+import { pathsNamed, scriptsNamed, withFiles } from "./slate-files.js";
 import { HELD_CONFIRM, consentKey, createSlateMcp, slateSecretMark, type McpRunDecl, type McpServerSpec } from "./slate-mcp.js";
 import { HOST_SLATE_SOURCES, resolveIn, viewSources, type SlateSourceContext } from "./slate-sources/index.js";
-
-export const SLATES = "slates";
 
 /** The slate's content at one version: what a snapshot, the undo and a rewind keep. */
 interface SlateSnap {
@@ -264,53 +265,6 @@ const sourcesNamed = (text: string): string[] => SOURCE_NAMES.filter(name => new
 
 /** A value path as written, `$` optional: `i` is `$i`. */
 const ownPath = (path: string): string => (path.startsWith("$") ? path : `$${path}`);
-
-/** The files a run's cmd or then reads: every one where it names $SLATE_DIR, else the ones it names. */
-function filesRead(doc: SlateDoc | null, decl: SlateRunDecl): Record<string, string> | undefined {
-  const said = [decl.kind === "cmd" ? decl.cmd : "", (decl as { then?: string }).then ?? ""].join("\n");
-  const every = /\$\{?SLATE_DIR\b/.test(said);
-  const used = Object.entries(doc?.files ?? {}).filter(([name]) => every || new RegExp(`(^|[^A-Za-z0-9._-])${name.replace(/[.]/g, "\\.")}($|[^A-Za-z0-9._-])`).test(said));
-  return used.length === 0 ? undefined : Object.fromEntries(used);
-}
-
-/** A declaration with the text of the files it reads beside it, as its approval key and its sheet take it. */
-function withFiles(doc: SlateDoc | null, decl: SlateRunDecl): SlateRunDecl & { files?: Record<string, string> } {
-  const files = filesRead(doc, decl);
-  return files === undefined ? decl : { ...decl, files };
-}
-
-/** How many named files an approval binds, and how large one may be to be read for it. */
-const SCRIPTS_MAX = 32;
-const SCRIPT_BYTES = 4 * 1024 * 1024;
-
-/** The words of a run's cmd or then that read as a path: what an Always has to cover the content of. */
-function pathsNamed(decl: Extract<SlateRunDecl, { kind: "cmd" }>): string[] {
-  return [decl.cmd, decl.then ?? ""].join("\n").split(/[\s'"`;|&()<>=,]+/).filter(w => w !== "" && !w.startsWith("-") && !w.includes("$") && /[./]/.test(w));
-}
-
-/** Every file a run's cmd or then names that exists under the thread's folder, by its path there, with a hash of its
- * content: an "Always" covers the script the person read, and an edit to it asks again. A file the command reaches
- * some other way (an import, a glob, a path it builds) is out of reach, and the sheet says so. */
-function scriptsNamed(folder: string | undefined, decl: SlateRunDecl): Record<string, string> | undefined {
-  if (folder === undefined || decl.kind !== "cmd") return undefined;
-  let root: string;
-  try { root = realpathSync(folder); } catch { return undefined; }
-  const words = pathsNamed(decl);
-  const found: Record<string, string> = {};
-  for (const word of words) {
-    if (Object.keys(found).length >= SCRIPTS_MAX) break;
-    let at: string;
-    try { at = realpathSync(isAbsolute(word) ? word : join(folder, word)); } catch { continue; }
-    const rel = relative(root, at);
-    if (rel === "" || rel.startsWith("..") || isAbsolute(rel) || found[rel] !== undefined) continue;
-    try {
-      const st = statSync(at);
-      if (!st.isFile() || st.size > SCRIPT_BYTES) continue;
-      found[rel] = createHash("sha256").update(readFileSync(at)).digest("hex").slice(0, 16);
-    } catch { continue; }
-  }
-  return Object.keys(found).length === 0 ? undefined : found;
-}
 
 /** What a run executes, without how often or how long: a change here makes its last result stale. */
 const commandOf = (decl: SlateRunDecl): SlateJson => {

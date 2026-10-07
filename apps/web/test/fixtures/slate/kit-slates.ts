@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Three slates (gold and traffic, a networking quiz, an inbox) as the kit writes them, with made-up values of the
 // shape a run fills, so the renderer's tests draw what a person would see.
-import { parseSlate, slateStartValues, type SlateDoc, type SlateJson } from "@wsp/protocol";
+import { parseSlate, slateStartValues, type SlateDoc, type SlateJson } from "@wsp/protocol/slate";
 
 export const GOLD_TEXT = `<slate title="Gold and traffic">
   <run name="spot" cmd="curl -s https://api.gold-api.com/price/XAU" every={60} />

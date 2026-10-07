@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The renderer's one door into the formula language: evaluate, resolve a prop, list what an expression reads. A
 // formula that fails to parse or evaluate is missing, and the piece draws its quiet placeholder.
-import { evaluateSlateExpression, resolveSlateProp, slateDependencies, type SlateJson, type SlatePropValue } from "@wsp/protocol";
+import { evaluateSlateExpression, resolveSlateProp, slateDependencies, type SlateJson, type SlatePropValue } from "@wsp/protocol/slate";
 
 export type Resolve = (path: string) => SlateJson | undefined;
 export interface Row {

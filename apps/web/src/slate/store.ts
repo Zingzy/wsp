@@ -3,7 +3,8 @@
 // again on every session.slate and after a gap, and folded in place on slate.state. Each thread's engine lives for
 // the window's life, so switching threads and back keeps a section's fold and a field's unsent text.
 import { create } from "zustand";
-import { slateDomainKey, slateLinkDomain, type SessionSlateEvent, type SlateJson, type SlateRunEvent, type SlateValuesEvent, type TurnResult } from "@wsp/protocol";
+import { type SessionSlateEvent, type SlateRunEvent, type SlateValuesEvent, type TurnResult } from "@wsp/protocol";
+import { slateDomainKey, slateLinkDomain, type SlateJson } from "@wsp/protocol/slate";
 import { ActionRunner, StateSender, type SlateLink } from "./actions.js";
 import { SlateEngine } from "./engine.js";
 import { isRunRecord, type SlateAsk, type SlateDoc } from "./model.js";

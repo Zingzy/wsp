@@ -2,7 +2,7 @@
 // Text in, written to a state path as the person types: drawn at once, sent to the host 300 ms after the last
 // keystroke and at once on blur, Enter or a submit. A focused field keeps its text against a write from elsewhere
 // and offers the choice once it loses focus.
-import type { SlateJson } from "@wsp/protocol";
+import type { SlateJson } from "@wsp/protocol/slate";
 import { useId, useRef, useState, type KeyboardEvent } from "react";
 import { Button } from "../../components/ui/button.js";
 import { Input } from "../../components/ui/input.js";

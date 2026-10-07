@@ -3,7 +3,8 @@
 // version through slates.event, and answers an outcome, with the consent sheet's content when it held a run; fill,
 // open, copy and pane run here. The person's value writes go to the host through one sender
 // per slate, typing debounced and every other change at once; a secret's text goes once and is not kept.
-import type { SlateEventAnswer, SlateJson, SlateOpParams } from "@wsp/protocol";
+import type { SlateEventAnswer, SlateOpParams } from "@wsp/protocol";
+import type { SlateJson } from "@wsp/protocol/slate";
 import type { SlateEngine } from "./engine.js";
 import { isHostStep, stepsOf, type SlateApproval, type SlateAsk, type SlateEventName, type SlateStep } from "./model.js";
 import { getOwn } from "./paths.js";
@@ -175,4 +176,4 @@ export class ActionRunner {
   }
 }
 
-export { slateTruthy as truthy } from "@wsp/protocol";
+export { slateTruthy as truthy } from "@wsp/protocol/slate";

@@ -3,7 +3,8 @@
 // each source whose input moved; the clock ticks once a second only while a drawn piece reads time.now; host-held
 // sources are held through slates.subscribe while bound and let go after; and a path the window does not hold is
 // asked of slates.resolve once and drawn as it comes. Nothing is held for a slate that is not on screen.
-import { foldThreads, type SlateJson, type ThreadView } from "@wsp/protocol";
+import { foldThreads, type ThreadView } from "@wsp/protocol";
+import { type SlateJson } from "@wsp/protocol/slate";
 import { threadWorkspaceIn } from "../../protocol/store.js";
 import type { SlateEngine } from "../engine.js";
 import { splitPath } from "../paths.js";

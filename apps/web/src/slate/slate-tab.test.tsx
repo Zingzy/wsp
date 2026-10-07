@@ -4,7 +4,8 @@
 // secret's text never stays in the window once the host has it.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { SLATE_PIECES, slateStartValues, type SessionView, type SlateDoc, type SlateJson } from "@wsp/protocol";
+import { type SessionView } from "@wsp/protocol";
+import { SLATE_PIECES, slateStartValues, type SlateDoc, type SlateJson } from "@wsp/protocol/slate";
 import type { Api, ProtocolEvent } from "../protocol/client";
 import { useStore } from "../protocol/store";
 import { useRightPanelStore } from "../rightPanelStore";

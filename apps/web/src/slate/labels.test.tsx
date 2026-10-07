@@ -2,7 +2,7 @@
 // A label or text built from data that has not come draws its placeholder or nothing, never the words around it.
 import { cleanup, render } from "@testing-library/react";
 import { afterEach, expect, it } from "vitest";
-import { parseSlate, slateStartValues, type SlateJson } from "@wsp/protocol";
+import { parseSlate, slateStartValues, type SlateJson } from "@wsp/protocol/slate";
 import { ActionRunner, StateSender } from "./actions";
 import { SlateEngine } from "./engine";
 import { SLATE_VIEWS } from "./pieces";
