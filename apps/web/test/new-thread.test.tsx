@@ -177,7 +177,7 @@ describe("New thread from Cmd+T", () => {
     expect(asked).toBe(1);
   });
 
-  it("names the computer the thread will run on as the first item of the one row under the box, and picking another computer holding the repo is --on", async () => {
+  it("names the computer the thread will run on as the first item of the one row under the box", async () => {
     await mount([WSP, SPOO, WSP_ON_SPOO]);
     cmdT();
     await waitFor(() => expect(where()?.textContent).toBe("this Mac"));
@@ -187,29 +187,19 @@ describe("New thread from Cmd+T", () => {
     act(() => useStore.setState(s => ({ preferences: { ...s.preferences, computerLook: { here: { icon: "home" } } } })));
     expect(where()!.querySelector("[data-composer-computer] [data-computer-glyph]")?.getAttribute("data-computer-glyph")).toBe("home");
     expect(document.querySelectorAll("[data-slot=composer-tray]")).toHaveLength(1);
-    fireEvent.click(screen.getByRole("button", { name: "Runs on this Mac" }));
-    const menu = await screen.findByRole("menu");
-    expect(within(menu).getAllByRole("menuitemradio").map(item => item.textContent)).toEqual(["this Mac", "spoo"]);
-    fireEvent.click(within(menu).getByRole("menuitemradio", { name: "spoo" }));
-    await waitFor(() => expect(useStore.getState().projectHome).toBe(WSP_ON_SPOO.id));
-    await waitFor(() => expect(where()?.textContent).toBe("spoo"));
   });
 
-  it("names each computer once, however many clones of the repo it holds", async () => {
-    const secondClone = { ...project("pr_wsp_2", "wsp-2", "here", WSP.remote) };
-    await mount([WSP, secondClone, SPOO, WSP_ON_SPOO]);
-    cmdT();
-    fireEvent.click(await screen.findByRole("button", { name: "Runs on this Mac" }));
-    const menu = await screen.findByRole("menu");
-    expect(within(menu).getAllByRole("menuitemradio").map(item => item.textContent)).toEqual(["this Mac", "spoo"]);
-    expect(within(menu).getByRole("menuitemradio", { name: "this Mac" }).getAttribute("aria-checked")).toBe("true");
-  });
-
-  it("the computer is plain words, no picker, where no other computer holds the repo", async () => {
-    await mount();
+  it("offers no computer switch where another computer holds the same repo: each project's composer names its one computer", async () => {
+    await mount([WSP, SPOO, WSP_ON_SPOO]);
     cmdT();
     await waitFor(() => expect(where()?.textContent).toBe("this Mac"));
     expect(where()!.closest("button")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Runs on this Mac" })).toBeNull();
+    act(() => useStore.getState().openProjectHome(WSP_ON_SPOO.id));
+    await waitFor(() => expect(where()?.textContent).toBe("spoo"));
+    expect(where()!.closest("button")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Runs on spoo" })).toBeNull();
+    expect(screen.queryByRole("menu")).toBeNull();
   });
 
   it("the box carries model, effort with its brain, access, attach and send; under it the computer and branch, no folder path, and no project chip", async () => {
