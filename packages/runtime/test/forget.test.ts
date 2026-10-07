@@ -374,3 +374,86 @@ describe("a turn the agent refused for want of a sign-in", () => {
     await rt.close();
   });
 });
+
+describe("a thread whose rows fell off the index cap", () => {
+  /** The state the cap leaves: the index holds no row of the workspace's threads, while the document keeps their
+   * records and the transcript their events, read by a runtime started over the same store. */
+  const capped = async (store: Store, workspaceId: string): Promise<void> => {
+    const doc = (await store.get("sessions", workspaceId)) as { sessions: unknown[] };
+    await store.put("sessions", workspaceId, { ...doc, sessions: [] });
+  };
+
+  it("is forgotten where its only turn died before the agent announced itself, since its record says no turn worked", async () => {
+    const dies: HarnessAdapterFactory = () => ({
+      steers: false,
+      start: () => ({ localId: randomUUID(), finished: Promise.reject(new Error("the agent's process died at launch")), interrupt: async () => {} }),
+    });
+    const backend = stubBackend();
+    const store = memoryStore();
+    const rt = createRuntime({ backend, store, adapters: { claude: dies } });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
+    const handle = await rt.sessions.start(ws.id, { prompt: "build it" });
+    await handle.finished.catch(() => {});
+    const thread = handle.view().threadId!;
+    await rt.close();
+    expect(((await store.get("sessions", ws.id)) as { threads: Record<string, unknown> }).threads[thread]).toMatchObject({ harness: "claude", worked: false });
+    await capped(store, ws.id);
+    const after = createRuntime({ backend, store, adapters: { claude: dies } });
+    expect(await after.sessions.list(ws.id)).toEqual([]);
+
+    await after.sessions.forget(thread);
+
+    await after.close();
+    expect(((await store.get("sessions", ws.id)) as { threads?: Record<string, unknown> }).threads?.[thread]).toBeUndefined();
+  });
+
+  it("is refused where its one turn announced, worked and was cut by a host restart before its rows fell off", async () => {
+    const hangs: HarnessAdapterFactory = () => ({
+      steers: false,
+      start: o => {
+        const sessionId = randomUUID();
+        queueMicrotask(() => o.onEvent({ type: "session.start", sessionId, cwd: "/root/app" }));
+        return { localId: sessionId, finished: new Promise(() => {}), interrupt: async () => {} };
+      },
+    });
+    const backend = stubBackend();
+    const store = memoryStore();
+    const rt = createRuntime({ backend, store, adapters: { claude: hangs } });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
+    const handle = await rt.sessions.start(ws.id, { prompt: "build it" });
+    await expect.poll(async () => (await rt.sessions.list(ws.id))[0]?.claudeSessionId).toBeDefined();
+    const thread = handle.view().threadId!;
+    await rt.close();
+    // The host that comes back cannot re-open the run, so the restart load cuts the turn.
+    const restarted = createRuntime({ backend, store, adapters: { claude: hangs } });
+    await expect.poll(async () => (await restarted.sessions.list(ws.id))[0]?.status).toBe("failed");
+    await restarted.close();
+    await capped(store, ws.id);
+    const after = createRuntime({ backend, store, adapters: { claude: hangs } });
+    expect(await after.sessions.list(ws.id)).toEqual([]);
+
+    await expect(after.sessions.forget(thread)).rejects.toMatchObject({ message: threadForgetRefusal(thread), kind: "conflict" });
+
+    await after.close();
+  });
+
+  it("is refused where its worked turns fell off and its one row left is a later launch refused for want of a sign-in", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const rt = createRuntime({ backend, store, adapters: { claude: working } });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
+    const handle = await rt.sessions.start(ws.id, { prompt: "build it" });
+    await handle.finished;
+    const thread = handle.view().threadId!;
+    await rt.close();
+    await capped(store, ws.id);
+    const after = createRuntime({ backend, store, adapters: { claude: refusingSignIn({ exitCode: 1, sawResult: true, error: signInRefusalLine({ kind: "local" }) }) } });
+    await (await after.sessions.start(ws.id, { prompt: "and again", thread })).finished.catch(() => {});
+    expect((await after.sessions.list(ws.id)).map(r => [r.threadId, r.refusal])).toEqual([[thread, "sign-in"]]);
+
+    await expect(after.sessions.forget(thread)).rejects.toMatchObject({ message: threadForgetRefusal(thread), kind: "conflict" });
+
+    expect((await after.sessions.history(ws.id)).filter(e => e.type === "session.start").map(e => e.threadId)).toEqual([thread, thread]);
+    await after.close();
+  });
+});

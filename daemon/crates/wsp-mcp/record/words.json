@@ -95,7 +95,75 @@
     "llvm": "clang, clang-format, clang-tidy",
     "playwright": "Chromium for Playwright"
   },
-  "otherVersion": "the host answered {op} in a shape this wsp does not read; it runs another version of wsp, restart it with wsp up",
+  "otherVersion": "the host answered {op} in a shape this wsp does not read; it runs another version of wsp, restart it with wsp restart",
+  "release": {
+    "said": "this line runs wsp {mine} and {host} runs wsp {theirs}:",
+    "hostHere": "the host serving {state}",
+    "hostAt": "the host at {where}",
+    "restart": "restart that host with wsp restart.",
+    "reopenApp": "quit and reopen the app that holds it once the app is on wsp {mine}.",
+    "restartUp": "Ctrl-C the terminal running wsp up and run it again.",
+    "initFinish": "let the wsp init that serves it finish, then run this line again.",
+    "updateThere": "update wsp to {mine} on that computer and restart its host there.",
+    "updateHere": "{line} on this computer brings this line to {theirs}.",
+    "roads": {
+      "npm": "npm i -g @wsp-labs/wsp@{version}",
+      "app": "updating the wsp app",
+      "checkout": "a pull of the checkout and a build"
+    },
+    "roadSamples": {
+      "/usr/local/lib/node_modules/@wsp-labs/wsp/daemon/aarch64-apple-darwin/wsp-daemon": "npm",
+      "/Applications/wsp.app/Contents/Resources/daemon/wsp-daemon": "app",
+      "/Users/dev/wsp/packages/wspx/daemon/aarch64-apple-darwin/wsp-daemon": "checkout"
+    },
+    "orderSamples": [
+      [
+        "0.2.0",
+        "0.1.9",
+        1
+      ],
+      [
+        "0.1.10",
+        "0.1.9",
+        1
+      ],
+      [
+        "0.2",
+        "0.2.0",
+        0
+      ],
+      [
+        "1.0.0-rc.2",
+        "1.0.0-rc.10",
+        -1
+      ],
+      [
+        "1.0.0",
+        "1.0.0-rc.1",
+        1
+      ],
+      [
+        "1.0.0-alpha",
+        "1.0.0-beta",
+        -1
+      ],
+      [
+        "1.0.0+build.5",
+        "1.0.0",
+        0
+      ],
+      [
+        "1.0.0-rc",
+        "1.0.0-rc.1",
+        -1
+      ],
+      [
+        "0.0.1",
+        "0.2.0",
+        -1
+      ]
+    ]
+  },
   "noSuchPlace": "no place named {word}; you have {held}",
   "placesFix": "Run wsp places.",
   "aimedUsage": "{tool} takes a workspace or on, not both",
@@ -307,7 +375,7 @@
     "valueLine": "{label} {value}: {from}"
   },
   "workspaces": {
-    "otherVersionResolve": "the host answered workspaces.resolve in a shape this wsp does not read; it runs another version of wsp, restart it with wsp up",
+    "otherVersionResolve": "the host answered workspaces.resolve in a shape this wsp does not read; it runs another version of wsp, restart it with wsp restart",
     "goneBare": "{name}'s machine is gone with its disk, so work that was not pushed is lost; rebuild it to {action}, which brings back its home folder from the last saved nap",
     "goneSaid": "{name}'s machine is gone with its disk, so work that was not pushed is lost; rebuild it to {action}, which brings back its home folder from the last saved nap ({words})",
     "stateLines": {

@@ -511,6 +511,9 @@ export interface ThreadRecord {
   /** The folders this thread's attached files landed in, which a forget of the thread or a delete of its workspace
    * takes them off. */
   filesIn?: string[];
+  /** Whether a turn of the thread did work, by threadRan's rule, kept here because the rows that say so fall off the
+   * cap. Absent reads as worked, so a record that never said is never taken for a thread that ran nothing. */
+  worked?: boolean;
 }
 
 export interface SessionIndexRecord {

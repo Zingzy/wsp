@@ -139,6 +139,21 @@ describe("a watched sign-in", () => {
     return { link, steps, done, type: (code: string) => type?.(code), stop: () => stop() };
   };
 
+  it("a refused or failed step before the command ends the sign-in failed with one sentence naming the computer, and never opens the pty", async () => {
+    const plan = await planSignIn({ ...rootBox(), name: "hetzner" } as AgentsOn, { agent: "codex" });
+    for (const [reply, said] of [
+      [{ ok: false, error: "exec is not served on this channel" }, "exec is not served on this channel"],
+      [{ ok: true, exitCode: 1, stdout: "", stderr: "mkdir: cannot create directory '/wsp/logins/codex': Permission denied\n", truncated: false }, "mkdir: cannot create directory '/wsp/logins/codex': Permission denied"],
+    ] as const) {
+      const link = fakePtyLink();
+      link.answerExec = () => reply;
+      const steps: Omit<AgentsSignInEvent, "type" | "signInId">[] = [];
+      await watchSignIn(plan, { link, emit: s => void steps.push(s), typing: () => {}, stop: new Promise<void>(() => {}) }, { pollMs: 20, graceMs: 10, flushMs: 10 });
+      expect(steps).toEqual([{ state: "failed", said: `the sign-in on hetzner did not start, since the step before it failed: ${said}` }]);
+      expect(link.ops.filter(o => o.op === "pty.create")).toEqual([]);
+    }
+  });
+
   it("shows the page and the code the device flow printed, asks the tool's own status beside it, and ends signed in", async () => {
     let signedIn = false;
     const plan = await planSignIn(rootBox(), { agent: "codex" });

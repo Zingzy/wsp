@@ -550,7 +550,7 @@ describe("wsp verbs over the host: wait, read, exec and the host itself", () => 
       expect(code).toBe(1);
       expect(io.lines).toEqual([]);
       expect(io.streamed).toBe("");
-      expect(io.errors).toEqual(["wsp run: the host answered workspaces.resolve in a shape this wsp does not read; it runs another version of wsp, restart it with wsp up"]);
+      expect(io.errors).toEqual(["wsp run: the host answered workspaces.resolve in a shape this wsp does not read; it runs another version of wsp, restart it with wsp restart"]);
     } finally {
       for (const client of old.clients) client.terminate();
       await new Promise(r => old.close(r));
@@ -588,7 +588,7 @@ describe("wsp verbs over the host: wait, read, exec and the host itself", () => 
       refusal = RuntimeRequest.safeParse({ id: 1, op: "a.verb.this.host.has.never.served" }).error!.message;
       const skewed = await h.run("exec", "alpha", "--", "ls");
       expect(skewed.code).toBe(EXIT_CODES.usage);
-      expect(skewed.io.errors).toEqual(["wsp exec: the host does not serve this line; it runs another version of wsp, restart it with wsp up. usage: wsp exec <workspace> [--cwd <dir>] -- <command...>"]);
+      expect(skewed.io.errors).toEqual(["wsp exec: the host does not serve this line; it runs another version of wsp, restart it with wsp restart. usage: wsp exec <workspace> [--cwd <dir>] -- <command...>"]);
       expect(skewed.io.errors[0]).not.toContain("discriminator");
       expect(skewed.io.errors[0]).not.toContain("workspaces.createLocal");
     } finally {

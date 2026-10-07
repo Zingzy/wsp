@@ -109,4 +109,10 @@ describe("the Workspace pane", () => {
     expect(facts()).toEqual(["dev's MacBook", "macOS 16.1", "10 cores", "32 GB"]);
     expect(document.querySelector("[data-machine-actions]")).toBeNull();
   });
+
+  it("a one-core computer reads 1 core, never 1 cores", () => {
+    act(() => useStore.setState({ places: [{ ...here, shape: { cpu: 1, memMb: 4096 } }] }));
+    render(<MachineSurface workspaceId={HERE_KEY} />);
+    expect(facts()).toContain("1 core");
+  });
 });

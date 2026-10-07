@@ -315,6 +315,7 @@ export function bootArea(ctx: RuntimeContext): BootArea {
             ...(typeof held.resumeAt === "string" ? { resumeAt: held.resumeAt } : {}),
             ...(typeof held.limitResume?.at === "number" && typeof held.limitResume.turnId === "string" ? { limitResume: { at: held.limitResume.at, turnId: held.limitResume.turnId } } : {}),
             ...(typeof held.rewound?.before === "string" && typeof held.rewound.at === "number" ? { rewound: { before: held.rewound.before, at: held.rewound.at } } : {}),
+            ...(typeof held.worked === "boolean" ? { worked: held.worked } : {}),
           });
           if (typeof held.snoozedUntil === "number") wakeAt(threadId, held.snoozedUntil);
           const armed = threadRecords.get(threadId)?.limitResume;

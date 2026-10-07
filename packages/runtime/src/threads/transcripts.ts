@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { randomBytes } from "node:crypto";
 import type { Machine } from "@wsp/engine";
-import { type SessionEvent, type Attachment, type RanPicks, isLocalWorkspace, attachmentKey, isImage, modelPicks, recordedPicks } from "@wsp/protocol";
+import { type SessionEvent, type Attachment, type RanPicks, isLocalWorkspace, attachmentKey, isImage, modelPicks, recordedPicks, threadRan } from "@wsp/protocol";
 import { assertTokenShape, daemonTokenFor, daemonTokenPathOf, rotateDaemonToken } from "../daemon-token.js";
 import type { EventSize, TranscriptRows } from "../sqlite-transcripts.js";
 import { eventBytes, numbered, pickNewest, readThread, type TranscriptReader } from "../transcript-reader.js";
@@ -496,6 +496,12 @@ export function transcriptsArea(ctx: RuntimeContext): TranscriptsArea {
 
   const persistSessions = (workspaceId: string): Promise<void> => {
     if (!live.has(workspaceId)) return Promise.resolve();
+    // Every road a turn settles by comes through here, its own end, a cut and the restart load alike, so a settled
+    // row that did work marks its thread's record before the cap can drop the row that says so.
+    for (const { view } of sessions.values()) {
+      const record = view.threadId === undefined || view.workspaceId !== workspaceId ? undefined : threadRecords.get(view.threadId);
+      if (record?.worked === false && view.status !== "running" && threadRan([view])) threadRecords.set(view.threadId!, { ...record, worked: true });
+    }
     capSessions(workspaceId);
     const rows = [...sessions.values()]
       .filter(s => s.view.workspaceId === workspaceId && s.launch === undefined)

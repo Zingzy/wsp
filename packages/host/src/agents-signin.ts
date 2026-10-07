@@ -34,13 +34,15 @@ import { pageReachOf, type AgentsActs, type AgentsOn, type SignInAsk, type SignI
 import { writeEnvFile } from "./env-keys.js";
 import { STOPPED_NOTE, cadence, codeIn, signInEnv } from "./init-handoff.js";
 import { installMcp } from "./mcp-install.js";
-import { BOX_SIGN_IN_MS } from "./place-signin.js";
+import { BOX_SIGN_IN_MS, prepareFailed, signInPrepareLine } from "./place-signin.js";
 import { openerCommand } from "./relay.js";
 import { runQuiet, watchPty, type WatchOutcome } from "./signin-relay.js";
 
 /** One sign-in as the watched pty runs it: the line, the questions the row answers, the shape of the code it prints,
  * whether what its page hands back is typed into it, and the tool's own status check. */
 export interface SignInPlan {
+  /** The computer it runs on, as the person reads it, where the line runs a step before its command. */
+  where?: string;
   line: SignInLine;
   questions: readonly Question[];
   code?: RegExp;
@@ -116,7 +118,7 @@ export async function planSignIn(on: AgentsOn, ask: SignInAsk, o: { terminal?: b
   if (shared !== undefined && on.kind === "box") {
     if (on.logins === undefined) throw new Error("this computer has not said where it keeps the logins its workspaces share, so there is nowhere to sign one in");
     const home = loginHomeIn(on.logins, shared);
-    return { ...plan, line: { command, env: { [shared.homeEnv]: home }, prepare: `mkdir -p ${shellQuote(home)}`, ...(status !== undefined ? { status } : {}) } };
+    return { ...plan, ...(on.name !== undefined ? { where: on.name } : {}), line: { command, env: { [shared.homeEnv]: home }, prepare: `mkdir -p ${shellQuote(home)}`, ...(status !== undefined ? { status } : {}) } };
   }
   const wrap = await wrapFor(on);
   return { ...plan, line: { command: wrap(command), ...(status !== undefined ? { status: wrap(status) } : {}) } };
@@ -139,7 +141,8 @@ export async function watchSignIn(plan: SignInPlan, run: SignInRun, o: { pollMs?
   const capMs = o.capMs ?? BOX_SIGN_IN_MS;
   const { link } = run;
   const { line } = plan;
-  if (line.prepare !== undefined) await link.op("exec", { cmd: line.prepare });
+  const failed = line.prepare === undefined ? undefined : await prepareFailed(link, line.prepare);
+  if (failed !== undefined) return void run.emit({ state: "failed", said: signInPrepareLine(plan.where ?? "that computer", failed) });
   run.emit({ state: "running" });
   let seen = "";
   let said = "";

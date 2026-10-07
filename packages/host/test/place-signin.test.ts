@@ -40,9 +40,26 @@ describe("the sign-in the host planned, run on that computer's terminal and show
     const link = fakePtyLink();
     link.script = (pty, typed) => script(link, pty, typed);
     const term = terminal();
-    const answer = await relaySignIn({ link, ...(agent !== undefined ? { agent } : {}), line, terminal: term, open: async () => true, timeoutMs: 2_000 });
+    const answer = await relaySignIn({ where: "hetzner", link, ...(agent !== undefined ? { agent } : {}), line, terminal: term, open: async () => true, timeoutMs: 2_000 });
     return { answer, link, term };
   };
+
+  it("stops before the pty where what runs first is refused or exits nonzero, in one sentence naming the computer and the step's last line", async () => {
+    const cases: [Record<string, unknown>, string][] = [
+      [{ ok: false, error: "exec is not served on this channel", kind: "refused" }, "exec is not served on this channel"],
+      [{ ok: true, exitCode: 1, stdout: "", stderr: "mkdir: cannot create directory '/wsp/logins/codex': Permission denied\n", truncated: false }, "mkdir: cannot create directory '/wsp/logins/codex': Permission denied"],
+      [{ exitCode: 2, stdout: "only stdout said it\n", stderr: "", truncated: false }, "only stdout said it"],
+    ];
+    for (const [reply, said] of cases) {
+      const link = fakePtyLink();
+      link.answerExec = cmd => (cmd === CODEX.prepare ? reply : undefined);
+      const term = terminal();
+      await expect(relaySignIn({ where: "hetzner", link, agent: "codex", line: CODEX, terminal: term, open: async () => true, timeoutMs: 2_000 })).rejects.toThrow(
+        `the sign-in on hetzner did not start, since the step before it failed: ${said}`,
+      );
+      expect(link.ops.filter(o => o.op === "pty.create")).toEqual([]);
+    }
+  });
 
   it("runs what comes first, then the command with its environment rather than quoted into the line, then the tool's own status the same way", async () => {
     const { answer, link } = await signIn((l, pty, line) => {

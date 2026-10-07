@@ -13,6 +13,7 @@ mod host;
 mod js;
 mod json;
 mod record;
+mod release;
 mod start;
 mod stdio;
 mod tools;
