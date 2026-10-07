@@ -142,6 +142,7 @@ const DAEMON_CONTENTS = [
   "7ce975e245d718211ba30c356b6fbc500fc2c9170924b46b974ae3f93e8f0508",
   "1597d4f2ea2cdebc749b7771600c6e7e0bd8138057410b65077314a06ed83ac6",
   "166b923c53261c003bd6f0fe2abcb934de3ded0b7a3406847208412bec65a6f1",
+  "2fffa024e4e0dcf10bce9c6e88581cef388c2a6d66018c56cf859549133ef1b2",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -507,7 +508,8 @@ const DAEMON_CONTENTS = [
  * Version 131: the contract fixtures and the daemon's tests name the repo wsp-labs/wsp; nothing the daemon does
  * changed.
  * Version 132: a copy road's refusal writes a size as the app does (512 B, 21 GB, 1.3 GB) and a thread's cost groups
- * thousands and rounds 1.005 to $1.01 as the app does, both held to one case file the TypeScript twins read too. */
+ * thousands and rounds 1.005 to $1.01 as the app does, both held to one case file the TypeScript twins read too.
+ * Version 133: reap sshd on exit and empty a leave's folders by fd. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary

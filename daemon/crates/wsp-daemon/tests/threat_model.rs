@@ -54,7 +54,6 @@ const COPY_MADE: &str = "a copy being made, in a folder of the runtime's own tha
 const PTY: &str = "the pid file in the runtime's own folder, and in the wsp home the folder itself, which the runtime made and no workspace can swap, and an unlink of the size file there; the size file is written through write_file_in";
 const BROKER: &str = "runs inside the workspace as its own pty broker, with the workspace's rights and in its view";
 const ASIDE: &str = "the copy road's set-aside folders beside a project on the computer the person sits at";
-const LEAVE: &str = "the leave's last fallback, after a walk by descriptor found every folder on the way to be a folder and no link";
 
 /// Every function in the root paths allowed a write by path, and why a link a workspace planted cannot steer it.
 const EXEMPT: &[(&str, &str, &str)] = &[
@@ -63,7 +62,6 @@ const EXEMPT: &[(&str, &str, &str)] = &[
     ("wsp-daemon/src/lib.rs", "run", ASIDE),
     ("wsp-daemon/src/manifest.rs", "save", OWN),
     ("wsp-daemon/src/place.rs", "install_daemon", INSTALL),
-    ("wsp-daemon/src/place.rs", "remove_under_home", LEAVE),
     ("wsp-daemon/src/place.rs", "sweep_tool_prefix", INSTALL),
     ("wsp-daemon/src/place.rs", "sweep_updates", INSTALL),
     ("wsp-daemon/src/place.rs", "sweep_workspace_profile", INSTALL),
