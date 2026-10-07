@@ -4,9 +4,8 @@
 // pick every time, the heading's picker that changes it, and the line under
 // the box naming the computer the thread will run on. A thread started here
 // makes its own copy of the project, so it never lands inside another
-// thread's workspace. Picking another computer is --on as the command line
-// reads it today: that computer's record of the same repo.
-import { ChevronDownIcon, PlusIcon } from "lucide-react";
+// thread's workspace.
+import { PlusIcon } from "lucide-react";
 import { useEffect, useMemo } from "react";
 import type { ProjectView } from "@wsp/protocol";
 import { openCommandPalette } from "../commandPaletteBus.js";
@@ -84,47 +83,16 @@ export function RunsOn({ at, name }: { at: string; name: string }) {
 }
 
 /** The first item of the row under the box: the computer the thread will run on, the placement rule's answer the host
- * gives for the project, by its icon and name. Where another computer holds the same repo it is a picker over them. */
+ * gives for the project, by its icon and name. A project is one folder on one computer, so there is nothing to switch:
+ * the same repo on another computer is another project. */
 export function WhereItRuns({ project }: { project: ProjectView }) {
   const landing = useStore(s => s.landings[project.id]);
   const loadLanding = useStore(s => s.loadLanding);
-  const projects = useProjects();
   const places = usePlaces();
-  const open = useStore(s => s.openProjectHome);
   useEffect(() => void loadLanding(project.id), [loadLanding, project.id]);
   const named = useMemo(() => placeNames(places), [places]);
-  const holders = useMemo(() => {
-    const same = project.remote === "" ? [project] : projects.filter(p => p.remote === project.remote);
-    // One row per computer: the open record where it is there, else that computer's first record of the repo.
-    return places.flatMap(place => {
-      const there = same.filter(p => p.computer === place.id);
-      const pick = there.find(p => p.id === project.id) ?? there[0];
-      return pick === undefined ? [] : [pick];
-    });
-  }, [places, project, projects]);
   // The landing names its computer by id; the host's own word for this computer is its id, not the name a person reads.
   const name = named.get(landing?.place ?? project.computer) ?? landing?.name;
   if (name === undefined) return null;
-  const line = `Runs on ${name}`;
-  const at = landing?.place ?? project.computer;
-  const place = places.find(p => p.id === at);
-  if (holders.length < 2) return <RunsOn at={at} name={name} />;
-  return (
-    <Menu>
-      <MenuTrigger render={<button type="button" data-new-thread-where />} className="outline-none transition-colors hover:[&_[data-composer-computer]]:text-foreground focus-visible:[&_[data-composer-computer]]:text-foreground" aria-label={line}>
-        <RowComputer name={name} place={place}>
-          <ChevronDownIcon aria-hidden className="opacity-50" />
-        </RowComputer>
-      </MenuTrigger>
-      <MenuPopup align="start" side="top" className="w-56">
-        <MenuRadioGroup value={project.id} onValueChange={next => typeof next === "string" && open(next)}>
-          {holders.map(holder => (
-            <MenuRadioItem key={holder.id} value={holder.id}>
-              <span className="truncate">{named.get(holder.computer) ?? holder.computer}</span>
-            </MenuRadioItem>
-          ))}
-        </MenuRadioGroup>
-      </MenuPopup>
-    </Menu>
-  );
+  return <RunsOn at={landing?.place ?? project.computer} name={name} />;
 }
