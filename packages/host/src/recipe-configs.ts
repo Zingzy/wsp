@@ -48,7 +48,8 @@ const CONFIG_MAX_BYTES = 1024 * 1024;
  * here, an include names a path on this computer, signing needs the key that stays here, and a filter, a pager
  * table or a diff or merge tool is a command root's own git on the box would run. */
 const GIT_DROPPED_SECTIONS = /^(credential|url|gpg|include|includeif|filter|pager|difftool|mergetool)$/i;
-/** Keys cut out of sections that otherwise travel, by `section.key`: signing, and every key whose value git runs. */
+/** Keys cut out of sections that otherwise travel, by `section.key`: signing, every key whose value git runs, and
+ * rerere, which replays a resolution recorded on one copy into a later merge with nobody asked. */
 const GIT_DROPPED_KEYS = new Set([
   "core.sshcommand",
   "core.fsmonitor",
@@ -63,6 +64,8 @@ const GIT_DROPPED_KEYS = new Set([
   "user.signingkey",
   "commit.gpgsign",
   "tag.gpgsign",
+  "rerere.enabled",
+  "rerere.autoupdate",
 ]);
 /** Keys of a named diff or merge driver that git runs, cut whatever the driver's name. */
 const GIT_DRIVER_KEYS = new Set(["textconv", "command", "driver"]);
@@ -70,14 +73,21 @@ const GIT_DRIVER_KEYS = new Set(["textconv", "command", "driver"]);
  * private repo and nothing writes the file there afterwards. */
 export const GH_CREDENTIAL_HELPER = "!gh auth git-credential";
 
+const GIT_HEADER = /^\s*\[\s*([^\]\s"]+)(\s+"[^"]*")?\s*\]/;
+
 /** A git config with what never travels cut, and on the main file the gh credential helper added. */
 export function gitCut(text: string, main: boolean): string {
   const out: string[] = [];
   let section = "";
   let named = false;
   let dropping = false;
-  for (const line of text.split(/\r?\n/)) {
-    const header = /^\s*\[\s*([^\]\s"]+)(\s+"[^"]*")?\s*\]/.exec(line);
+  // git reads a key written after its section's header on the same line as that section's key, so it is cut as one.
+  const lines = text.split(/\r?\n/).flatMap(line => {
+    const header = GIT_HEADER.exec(line)?.[0];
+    return header === undefined || line.slice(header.length).trim() === "" ? [line] : [header, line.slice(header.length)];
+  });
+  for (const line of lines) {
+    const header = GIT_HEADER.exec(line);
     if (header !== null) {
       section = header[1]!.toLowerCase();
       named = header[2] !== undefined;

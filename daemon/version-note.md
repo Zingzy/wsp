@@ -1,0 +1,1 @@
+An agent's version read tries its spawn again while the binary reads text file busy, inside the read's own deadline, so a binary another process still holds open for writing gives its version line instead of none.
