@@ -8,6 +8,7 @@ use ts_rs::TS;
 use crate::validate::{bounded, bounded_opt, capped_list, exec_timeout, sha256_hex, upload_word};
 use crate::{
     FsReadEncoding, FsSearchMode, GitDiffScope, GuestKind, MergeMethod, ProcSignal, ReactionContent, RequestId, ReviewEvent, ReviewSide,
+    UsageLogFormat,
 };
 
 /// One request on an authed socket: the id the reply echoes and the op with its parameters.
@@ -156,6 +157,13 @@ pub enum DaemonOp {
     /// daemon kept while it ran, whether or not anybody watched.
     #[serde(rename = "sys.history", rename_all = "camelCase")]
     SysHistory { from: i64, to: i64, step_ms: u64 },
+    /// What each agent's own store on this computer counted, for the stores the host names: counts, a model and a
+    /// folder per session and half hour, and the newest plan reading a store kept, never a line of a transcript.
+    #[serde(rename = "usage.logs")]
+    UsageLogs {
+        #[serde(deserialize_with = "usage_stores")]
+        stores: Vec<UsageStore>,
+    },
     #[serde(rename = "proc.watch")]
     ProcWatch,
     #[serde(rename = "proc.unwatch")]
@@ -798,7 +806,27 @@ pub struct ReviewComment {
     pub body: String,
 }
 
-pub const DAEMON_OPS: [&str; 72] = [
+/// One agent's store as the host names it to usage.logs: the catalog's id, the format, and where it is under the home
+/// this daemon serves, as `~/`; a root anywhere else reads as nothing.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct UsageStore {
+    #[serde(deserialize_with = "bounded::<_, 1, 64>")]
+    pub agent: String,
+    pub format: UsageLogFormat,
+    #[serde(deserialize_with = "bounded::<_, 1, 4096>")]
+    pub root: String,
+}
+
+fn usage_stores<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<UsageStore>, D::Error> {
+    let list = Vec::<UsageStore>::deserialize(d)?;
+    if list.len() > crate::numbers::USAGE_STORES_MAX {
+        return Err(serde::de::Error::custom(format!("at most {} stores, got {}", crate::numbers::USAGE_STORES_MAX, list.len())));
+    }
+    Ok(list)
+}
+
+pub const DAEMON_OPS: [&str; 73] = [
     "pty.create",
     "pty.attach",
     "pty.detach",
@@ -814,6 +842,7 @@ pub const DAEMON_OPS: [&str; 72] = [
     "inbox.rescan",
     "sys.watch",
     "sys.history",
+    "usage.logs",
     "proc.watch",
     "proc.unwatch",
     "proc.inspect",

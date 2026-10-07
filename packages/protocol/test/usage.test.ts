@@ -129,9 +129,9 @@ describe("what a range used, said once", () => {
     expect(freshIn({ input: 10_000, cached: 6_000, cacheWrite: 3_000 })).toBe(1_000);
   });
 
-  it("names whose logs it counted and on which computer, wsp's own threads among them", () => {
-    expect(logsLine({ agents: ["Claude Code", "Codex", "OpenCode"], computer: "zingzy's MacBook Pro" })).toBe("Counts what Claude Code, Codex and OpenCode logged on zingzy's MacBook Pro, wsp's threads there included.");
-    expect(logsLine({ agents: ["Codex"], computer: "Boat" })).toBe("Counts what Codex logged on Boat, wsp's threads there included.");
+  it("names whose logs it counted and on which computers, wsp's own threads among them", () => {
+    expect(logsLine({ agents: ["Claude Code", "Codex", "OpenCode"], computers: ["zingzy's MacBook Pro"] })).toBe("Counts what Claude Code, Codex and OpenCode logged on zingzy's MacBook Pro, wsp's threads there included.");
+    expect(logsLine({ agents: ["Codex"], computers: ["Boat", "spoo"] })).toBe("Counts what Codex logged on Boat and spoo, wsp's threads there included.");
   });
 });
 

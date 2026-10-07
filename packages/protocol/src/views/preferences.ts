@@ -119,8 +119,8 @@ export const Preferences = z.object({
   /** Whether the host asks each agent's vendor for its newest version. On unless the person turns it off, and
    * WSP_UPDATE_CHECK=0 in the host's environment stops it whatever this says; defaulted as serverIcons is. */
   agentVersions: z.boolean().default(true),
-  /** Whether the host reads this computer's agent logs for the work done outside wsp, which the Usage page counts on
-   * rows of their own. Read here and kept here; defaulted as serverIcons is. */
+  /** Whether the host has each computer's daemon read that computer's agent logs for the work done outside wsp, which
+   * the Usage page counts on rows of their own. Read there and kept here; defaulted as serverIcons is. */
   usageLogs: z.boolean().default(true),
   /** Whether the host sends PostHog anonymous counts of what wsp did: threads, turns, computers, setups and failures,
    * never a path, a prompt, a name or a key. On unless the person turns it off, and ANALYTICS_ENV=0 in the host's

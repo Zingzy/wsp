@@ -67,6 +67,18 @@ pub enum FsReadEncoding {
     Base64,
 }
 
+/// How an agent keeps the store usage.logs reads: Claude Code's transcripts, Codex's rollouts, OpenCode's database.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub enum UsageLogFormat {
+    #[serde(rename = "claude-jsonl")]
+    ClaudeJsonl,
+    #[serde(rename = "codex-rollout")]
+    CodexRollout,
+    #[serde(rename = "opencode-sqlite")]
+    OpencodeSqlite,
+}
+
 /// What fs.search looks for: file paths, or lines of text inside the files.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export)]

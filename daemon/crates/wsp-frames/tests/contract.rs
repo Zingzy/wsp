@@ -18,8 +18,8 @@ use wsp_frames::{
     GitPrReviewReply, GitPrViewReply, GitPushReply, GitRepoReadReply, GitRestoreReply, GitRunLogReply, GitSnapshotReply, GitStartOnReply,
     GitUpdateReply, GitWorktreesReply, GuestCliMessage, GuestOpenReply, HostFolderListing, MachineAnswersReply, MachineExecReply,
     MachineHandleReply, MachineLinkRequest, MachineListReply, MachineReachReply, MachineReadingReply, MachineShapeReply, MachineStateReply,
-    PlaceAuthRequest, PlaceCapacity, PlaceProveRequest, SshStartReply, SysHistoryReply, WorktreeRemoval, WorktreeReport, DAEMON_OPS,
-    MACHINE_OPS,
+    PlaceAuthRequest, PlaceCapacity, PlaceProveRequest, SshStartReply, SysHistoryReply, UsageLogsReply, WorktreeRemoval, WorktreeReport,
+    DAEMON_OPS, MACHINE_OPS,
 };
 
 fn fixtures() -> PathBuf {
@@ -313,6 +313,9 @@ fn every_reply_fixture_round_trips_through_the_reply_types() {
                 "SysHistoryReply" => {
                     round_trip::<SysHistoryReply>(&sample, &at);
                 }
+                "UsageLogsReply" => {
+                    round_trip::<UsageLogsReply>(&sample, &at);
+                }
                 other => panic!("{at}: no reply type here reads {other}"),
             }
         }
@@ -367,6 +370,7 @@ fn every_reply_fixture_round_trips_through_the_reply_types() {
         "MachineStateReply",
         "SshStartReply",
         "SysHistoryReply",
+        "UsageLogsReply",
     ];
     expected.sort_unstable();
     assert_eq!(seen, expected, "every reply this daemon answers has its fixture");
@@ -448,6 +452,7 @@ fn rendered_numbers() -> BTreeMap<&'static str, Value> {
     m.insert("guestTokenMax", Value::from(numbers::GUEST_TOKEN_MAX));
     m.insert("guestArgvMax", Value::from(numbers::GUEST_ARGV_MAX));
     m.insert("guestCwdMax", Value::from(numbers::GUEST_CWD_MAX));
+    m.insert("usageStoresMax", Value::from(numbers::USAGE_STORES_MAX));
     m.insert("execOutputMax", Value::from(numbers::EXEC_OUTPUT_MAX));
     m.insert("execTimeoutDefaultMs", Value::from(numbers::EXEC_TIMEOUT_DEFAULT_MS));
     m.insert("execDeadlineExit", Value::from(numbers::EXEC_DEADLINE_EXIT));

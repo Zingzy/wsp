@@ -36,8 +36,9 @@ import { GitBranchCompareReply, GitMergeInReply, GitStartOnReply } from "../tree
 import { GitPrReadReply, GitPrViewReply, GitPrMergeReply, GitPrReactReply, GitPrReplyReply, GitPrResolveReply, GitRepoReadReply, GitRunLogReply, GitUpdateReply, MergeMethod, PullRequest, PR_REPLY_BODY_MAX, ReactionContent } from "../pull-request.js";
 import { GitIssueReadReply, GitPrCheckoutReply, GitPrDiffReply, GitPrReviewReply } from "../start.js";
 import { SSH_KEY_MAX } from "../daemon-contract.js";
+import type { UsageStore as WireUsageStore } from "../generated/UsageStore.js";
 import { type Held, reqId, type Same } from "./helpers.js";
-import { EXEC_BODY_MAX, GUEST_ARGV_MAX, GUEST_CWD_MAX, GUEST_TOKEN_MAX } from "./limits.js";
+import { EXEC_BODY_MAX, GUEST_ARGV_MAX, GUEST_CWD_MAX, GUEST_TOKEN_MAX, USAGE_STORES_MAX } from "./limits.js";
 
 // --- daemon wire protocol (ws://0.0.0.0:7070, auth frame first, 4401 on anything else) ---
 
@@ -340,6 +341,12 @@ export type DaemonExecReply = z.infer<typeof DaemonExecReply>;
 export const GuestKind = z.enum(["mcp", "cli"]);
 export type GuestKind = z.infer<typeof GuestKind>;
 
+/** One agent's store as the host names it to usage.logs: the catalog's id, the format, and where it is under the home
+ * the daemon serves, as `~/`; a root anywhere else reads as nothing. */
+export const UsageStore = z.object({ agent: z.string().min(1).max(64), format: z.enum(["claude-jsonl", "codex-rollout", "opencode-sqlite"]), root: z.string().min(1).max(4096) });
+export type UsageStore = WireUsageStore;
+type UsageStoreHeld = Held<Same<z.infer<typeof UsageStore>, UsageStore>>;
+
 export const DaemonRequest = z.discriminatedUnion("op", [
   /** machineId, on these seven and on no other op of this road: the workspace the pty belongs to, on a daemon
    * that runs workspaces. A workspace on a computer somebody owns runs no daemon of its own, so the daemon of
@@ -390,6 +397,9 @@ export const DaemonRequest = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("sys.watch") }),
   // The computer's readings the daemon kept a minute apart, between two instants, folded into steps of stepMs.
   z.object({ id: reqId, op: z.literal("sys.history"), from: z.number().int(), to: z.number().int(), stepMs: z.number().int().nonnegative() }),
+  // What each agent's own store on the daemon's computer counted, for the stores the host names: counts, a model and
+  // a folder per session and half hour, and the newest plan reading a store kept, never a line of a transcript.
+  z.object({ id: reqId, op: z.literal("usage.logs"), stores: z.array(UsageStore).max(USAGE_STORES_MAX) }),
   /** Streams the processes to this socket until proc.unwatch or the socket
    * closes: one whole proc.snapshot first, two seconds after the reply since
    * cpu is a delta (at once where the sampler is already running), then a

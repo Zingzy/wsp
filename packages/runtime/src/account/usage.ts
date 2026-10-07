@@ -1,16 +1,25 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { randomUUID } from "node:crypto";
 import { CATALOG_AGENTS, type ThreadAgent, loginHomeIn, sharedOn } from "@wsp/catalog";
-import { type DaemonFrame, THIS_COMPUTER, underProject, absentComputer, HERE_PLACE_ID, isJoinedComputer, workspacePlace, RANGE_DAYS, READINGS_STEP_MS, SysHistoryReply, resetNoLoginsLine, USAGE_WORDS, outsideWspLine, type ReadingsAnswer, type PlaceView, type AccountsAnswer, type AgentSignInState, type ResetAnswer, type UsageSplit } from "@wsp/protocol";
+import { type DaemonFrame, THIS_COMPUTER, underProject, absentComputer, HERE_PLACE_ID, isJoinedComputer, workspacePlace, RANGE_DAYS, READINGS_STEP_MS, SysHistoryReply, resetNoLoginsLine, USAGE_WORDS, UsageLogsReply, unknownOpLine, type UsageStore, type ReadingsAnswer, type PlaceView, type AccountsAnswer, type AgentSignInState, type ResetAnswer, type UsageSplit } from "@wsp/protocol";
 import { envInput, withEnvFromInput } from "@wsp/engine";
 import { NO_PLACE_DOOR } from "../places.js";
 import { harnessCatalog, modelLabel } from "../harness-catalog.js";
-import { PLAN_RESETS } from "../adapters.js";
-import { accountOf, accountOnComputer, accountRows, createBurn, createPriceTable, createUsageLedger, usageComputerName } from "../usage.js";
+import { LOG_LIMITS, PLAN_RESETS } from "../adapters.js";
+import { accountOf, accountOnComputer, accountRows, createBurn, createPriceTable, createUsageLedger, usageComputerName, type LimitReading, type UsageEntry } from "../usage.js";
 import { planAlerts } from "../plan-alerts.js";
 import { usageResets, type ResetPlace } from "../usage-reset.js";
-import { type WorkspaceRecord, type LiveWorkspace, LOG_READ_EVERY_MS, RESET_EXEC_MS, type UsageDoor } from "../types/wiring.js";
+import { type WorkspaceRecord, type LiveWorkspace, LOG_READ_EVERY_MS, LOG_READ_MS, RESET_EXEC_MS, type UsageDoor } from "../types/wiring.js";
+import { bounded } from "../places/helpers.js";
 import type { RuntimeContext, UsageArea } from "../context.js";
+
+/** The store each agent's use is read off by its computer's daemon: the catalog's history where it carries the
+ * counts, else its usage log. */
+const USAGE_STORES: UsageStore[] = CATALOG_AGENTS.flatMap((a): UsageStore[] => {
+  if (a.history?.format === "claude-jsonl" || a.history?.format === "codex-rollout") return [{ agent: a.id, format: a.history.format, root: a.history.root }];
+  if (a.usageLog !== undefined) return [{ agent: a.id, format: a.usageLog.format, root: a.usageLog.root }];
+  return [];
+});
 
 /** How long this computer's sign-ins, read off every agent's own commands, answer a usage read before they are read again. */
 const SIGN_INS_HELD_MS = 60_000;
@@ -52,7 +61,7 @@ export function usageArea(ctx: RuntimeContext): UsageArea {
       case "model":
         return modelLabel(value);
       case "source":
-        return value === "log" ? outsideWspLine(usageComputerName(places, HERE_PLACE_ID)) : USAGE_WORDS.wspThreads;
+        return value === "log" ? USAGE_WORDS.outsideWsp : USAGE_WORDS.wspThreads;
       default: {
         const _exhaustive: never = split;
         return value;
@@ -60,37 +69,85 @@ export function usageArea(ctx: RuntimeContext): UsageArea {
     }
   };
 
-  /** The logs of this computer's agents, filed into the ledger as outside wsp: a folder under one of this computer's
-   * projects is that project's, the account is this computer's own login of that agent unless a turn here named it. */
+  /** The logs of the agents on this computer and on every joined computer connected now, each read by that
+   * computer's own daemon and filed into the ledger as outside wsp under that computer: a folder under one of its
+   * projects is that project's, and the account is that computer's own login of the agent unless a turn there named
+   * it. A computer that is away, or whose daemon is older than the read, is not read: its rows and its plan readings
+   * stay as its last read left them, so a box asleep never reads as nothing used. */
   let logsReadAt: number | undefined;
   const readLogs = async (): Promise<void> => {
-    if (opts.logUsage === undefined || !(await ctx.preferences.get()).usageLogs) return;
+    if (!(await ctx.preferences.get()).usageLogs) return;
     if (logsReadAt !== undefined && clock.now() - logsReadAt < LOG_READ_EVERY_MS) return;
     logsReadAt = clock.now();
-    const here = [...projectsHeld.values()].filter(p => p.computer === HERE_PLACE_ID);
+    const places = (await placeDoor?.list(clock.now())) ?? [];
+    const frame = { op: "usage.logs", stores: USAGE_STORES } as DaemonFrame;
+    const readOn = async (id: string): Promise<UsageLogsReply> => {
+      if (id === HERE_PLACE_ID) return ctx.onThisComputer(async ask => UsageLogsReply.parse(await ask(frame)));
+      const link = placeDoor?.channel(id, () => {});
+      if (link === undefined) throw new Error(absentComputer(placeDoor?.nameOf(id) ?? id, null).sentence);
+      return ctx.overChannel(link, async ask => UsageLogsReply.parse(await ask(frame)));
+    };
+    const boxes = places.filter(p => isJoinedComputer(p) && p.id !== HERE_PLACE_ID && placeDoor?.link(p.id) !== undefined);
+    const targets = [...(local?.daemonRoad !== undefined ? [HERE_PLACE_ID] : []), ...boxes.map(p => p.id)];
+    const read = (
+      await Promise.all(
+        targets.map(id =>
+          bounded(readOn(id), LOG_READ_MS, `usage.logs on ${usageComputerName(places, id)}`).then(
+            reply => ({ id, reply }),
+            (e: unknown) => {
+              const said = e instanceof Error ? e.message : String(e);
+              // A daemon from before the read names the op it does not know: that computer reads as not read, quietly.
+              if (said !== unknownOpLine("usage.logs")) console.warn(`the agent logs on ${usageComputerName(places, id)} were not read for usage: ${said}`);
+              return undefined;
+            },
+          ),
+        ),
+      )
+    ).filter(r => r !== undefined);
+    if (read.length === 0) return;
     const limits = await ledger.limits();
-    // A thread wsp ran here writes its transcript to the same logs, whether or not its turn filed a row.
+    // A thread wsp ran writes its transcript to the same logs, whether or not its turn filed a row.
     await ctx.ready();
     const threads = new Set([...sessions.values()].flatMap(s => (s.view.claudeSessionId !== undefined ? [s.view.claudeSessionId] : [])));
-    const rows = (await opts.logUsage()).filter(r => !threads.has(r.session));
-    const thisComputer = { id: HERE_PLACE_ID, name: usageComputerName((await placeDoor?.list(clock.now())) ?? [], HERE_PLACE_ID) };
-    // Work in a terminal here runs on the account this computer's turns run on.
-    const accountHere = (agent: string): { key: string; label: string } => accountOnComputer({ agent, agentName: harnessCatalog(agent)?.label ?? agent, computer: thisComputer, limits, vaulted: ctx.vaultedFor(agent) });
+    const entries: UsageEntry[] = [];
+    const readings: LimitReading[] = [];
+    for (const { id, reply } of read) {
+      const projects = [...projectsHeld.values()].filter(p => p.computer === id);
+      const computer = { id, name: usageComputerName(places, id) };
+      // Work in a terminal there runs on the account that computer's turns run on.
+      const accountThere = (agent: string): { key: string; label: string } => accountOnComputer({ agent, agentName: harnessCatalog(agent)?.label ?? agent, computer, limits, vaulted: ctx.vaultedFor(agent) });
+      for (const r of reply.rows) {
+        if (threads.has(r.session)) continue;
+        const account = accountThere(r.agent);
+        entries.push({
+          at: r.at,
+          agent: r.agent,
+          account: account.key,
+          accountLabel: account.label,
+          computer: id,
+          project: (r.folder !== undefined ? projects.find(p => underProject(r.folder!, p.path))?.id : undefined) ?? "",
+          model: r.model,
+          tokens: r.tokens,
+          ...(r.cost !== undefined ? { costUsd: r.cost } : {}),
+          session: r.session,
+          source: "log",
+        });
+      }
+      for (const { agent, at, ...snapshot } of reply.limits) {
+        const limit = LOG_LIMITS[agent as ThreadAgent]?.(snapshot);
+        if (limit === undefined) continue;
+        const account = accountThere(agent);
+        readings.push({ key: account.key, agent, label: account.label, road: limits.find(l => l.key === account.key)?.road ?? "own", computer: id, limit, at });
+      }
+    }
     await ledger.fileLogs(
-      rows.map(r => ({
-        at: r.at,
-        agent: r.agent,
-        account: accountHere(r.agent).key,
-        accountLabel: accountHere(r.agent).label,
-        computer: HERE_PLACE_ID,
-        project: (r.folder !== undefined ? here.find(p => underProject(r.folder!, p.path))?.id : undefined) ?? "",
-        model: r.model,
-        tokens: r.tokens,
-        ...(r.cost !== undefined ? { costUsd: r.cost } : {}),
-        session: r.session,
-        source: "log" as const,
-      })),
+      entries,
+      read.map(r => r.id),
     );
+    for (const reading of readings) {
+      const { before, after } = await ledger.limit(reading);
+      if (after !== before) await alerts.read(before, after);
+    }
   };
 
   /** This computer's own sign-ins, read off its agents since no report carries them, held a minute and shared while a
@@ -208,9 +265,9 @@ export function usageArea(ctx: RuntimeContext): UsageArea {
     used: async q => {
       // The split by source is the one that sets the logs beside wsp's threads, so it reads them whatever the door asked.
       const outside = (q.outside === true || q.split === "source") && (await ctx.preferences.get()).usageLogs;
-      if (outside) await readLogs().catch((e: unknown) => console.warn(`this computer's agent logs were not read for usage: ${e instanceof Error ? e.message : String(e)}`));
+      if (outside) await readLogs().catch((e: unknown) => console.warn(`the agent logs were not read for usage: ${e instanceof Error ? e.message : String(e)}`));
       const places = (await placeDoor?.list(clock.now())) ?? [];
-      return ledger.used({ range: q.range, split: q.split, label: usageLabel(places, await ledger.accountLabels()), outside, logsOn: usageComputerName(places, HERE_PLACE_ID) });
+      return ledger.used({ range: q.range, split: q.split, label: usageLabel(places, await ledger.accountLabels()), outside });
     },
     readings: async (target, range, origin) => {
       const to = clock.now();

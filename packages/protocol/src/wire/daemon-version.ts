@@ -143,6 +143,7 @@ const DAEMON_CONTENTS = [
   "1597d4f2ea2cdebc749b7771600c6e7e0bd8138057410b65077314a06ed83ac6",
   "166b923c53261c003bd6f0fe2abcb934de3ded0b7a3406847208412bec65a6f1",
   "2fffa024e4e0dcf10bce9c6e88581cef388c2a6d66018c56cf859549133ef1b2",
+  "55ddb7999b0cfdfc71b505a67752585dc97e1e74e47db1ab2d256573f577e5f3",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -509,7 +510,11 @@ const DAEMON_CONTENTS = [
  * changed.
  * Version 132: a copy road's refusal writes a size as the app does (512 B, 21 GB, 1.3 GB) and a thread's cost groups
  * thousands and rounds 1.005 to $1.01 as the app does, both held to one case file the TypeScript twins read too.
- * Version 133: reap sshd on exit and empty a leave's folders by fd. */
+ * Version 133: reap sshd on exit and empty a leave's folders by fd.
+ * Version 134: usage.logs reads the agent stores the host names under the home the daemon serves (Claude Code's
+ * transcripts, Codex's rollouts, OpenCode's database) and answers each session's tokens per half hour under one model
+ * and folder, and the newest plan reading a Codex rollout kept, for the host alone: the inbound socket of a daemon that
+ * is no place and the link of one that is. What each file came to is kept for the daemon's life. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary

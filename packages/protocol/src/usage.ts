@@ -85,10 +85,9 @@ export const USAGE_WORDS = {
   reached: "limit reached",
   noUse: "Nothing used in this range",
   wspThreads: "wsp threads",
+  /** The source row of the work the agents' own logs on the computers hold that no wsp thread ran. */
+  outsideWsp: "Outside wsp",
 } as const;
-
-/** The source row of the work the agents' own logs on a computer hold that no wsp thread ran. */
-export const outsideWspLine = (computer: string): string => `Outside wsp on ${computer}`;
 
 /** Why an account row carries no windows: its agent reports none, it signs in with a key, or no turn has run on it. */
 export const AccountNote = z.enum([USAGE_WORDS.noLimit, USAGE_WORDS.keyed, USAGE_WORDS.unread]);
@@ -240,8 +239,8 @@ export const UsedAnswer = z.object({
   series: z.array(z.object({ t: z.number(), tokens: z.number() })),
   since: z.number(),
   until: z.number(),
-  /** Whose logs the range counted and on which computer, where it counted any: the agents by their names. */
-  logs: z.object({ agents: z.array(z.string()), computer: z.string() }).optional(),
+  /** Whose logs the range counted and on which computers, where it counted any: the agents and computers by name. */
+  logs: z.object({ agents: z.array(z.string()), computers: z.array(z.string()) }).optional(),
   /** Each row's own series, on the same steps as series, so a chart draws one line per split value. */
   lines: z.array(z.object({ key: z.string(), label: z.string(), points: z.array(z.number()) })).optional(),
 });
@@ -255,7 +254,7 @@ export const freshIn = (tokens: { input: number; cached: number; cacheWrite?: nu
 export const listWords = (words: readonly string[]): string => (words.length < 2 ? (words[0] ?? "") : `${words.slice(0, -1).join(", ")} and ${words[words.length - 1]}`);
 
 /** What the logs a range counted are, said once under its numbers: the agents that kept them and where. */
-export const logsLine = (logs: { agents: readonly string[]; computer: string }): string => `Counts what ${listWords(logs.agents)} logged on ${logs.computer}, wsp's threads there included.`;
+export const logsLine = (logs: { agents: readonly string[]; computers: readonly string[] }): string => `Counts what ${listWords(logs.agents)} logged on ${listWords(logs.computers)}, wsp's threads there included.`;
 
 const RANGE_WORDS: Record<UsageRange, string> = { day: "today", week: "in the last 7 days", month: "in the last 30 days" };
 

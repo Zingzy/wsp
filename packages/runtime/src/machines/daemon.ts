@@ -72,11 +72,13 @@ export function daemonArea(ctx: RuntimeContext): DaemonArea {
     return done;
   };
 
-  /** The folders the record says this machine's daemon may browse beside its home. Derived state: the record is the
-   * one place, and the file follows it on every connect, so a project that landed before the daemon read that file
-   * is browsable without a second import. Non-fatal: an update or a turn must not fail on it. `entry` names the
-   * machine and may be a record already gone from it, whose folders the write then leaves out. */
-  const writeDaemonRoots = (entry: LiveWorkspace): Promise<void> =>
+  /** The folders the records say this machine's daemon may browse beside its home: each one's project and checkout,
+   * and the folders imports landed beside them. Derived state: the records are the one place, and the file follows
+   * them on every connect, so a project that landed before the daemon read that file is browsable without a second
+   * import, after a host restart too. Non-fatal: an update or a turn must not fail on it. `entry` names the machine
+   * and may be a record already gone from it, whose folders the write then leaves out. `strict` is an import's
+   * write, which fails the import when the machine will not take the file. */
+  const writeDaemonRoots = (entry: LiveWorkspace, strict = false): Promise<void> =>
     rootsWrite(entry.record.machineId, async () => {
       // A host that has closed writes nothing more on a machine: the boot fires this at every running workspace
       // without waiting for it, and a write that landed after the close would be this process touching a computer
@@ -90,12 +92,11 @@ export function daemonArea(ctx: RuntimeContext): DaemonArea {
       // workspace here, each in a copy of the project folder at a path of its own. Read once the write before has
       // landed, so a write never puts back a list older than the one already there.
       const sharing = [...live.values()].filter(e => e.record.machineId === entry.record.machineId);
-      const dests = [...new Set(sharing.flatMap(e => [ctx.projectHeld(e.record.project).path, ctx.checkoutOf(e.record)]))];
-      // Through the kind, which is what knows where that machine's daemon looks; the import road writes the same
-      // file through the same call, so a folder is browsable at the same path whichever of the two got there first.
-      await ctx.moduleOf(entry.record.kind)
-        .roots(entry, dests)
-        .catch((e: unknown) => console.warn(`browsable folders for ${entry.record.id} not written on ${entry.machine.id}: ${(e instanceof Error ? e.message : String(e)).slice(-200)}`));
+      const dests = [...new Set(sharing.flatMap(e => [ctx.projectHeld(e.record.project).path, ctx.checkoutOf(e.record), ...(e.record.landed ?? [])]))];
+      // Through the kind, which is what knows where that machine's daemon looks.
+      const written = ctx.moduleOf(entry.record.kind).roots(entry, dests);
+      if (strict) return written;
+      await written.catch((e: unknown) => console.warn(`browsable folders for ${entry.record.id} not written on ${entry.machine.id}: ${(e instanceof Error ? e.message : String(e)).slice(-200)}`));
     });
 
   /** Settles once no turn is running on the workspace: at once when none is, else when the last one ends. Replacing
@@ -334,7 +335,7 @@ export function daemonArea(ctx: RuntimeContext): DaemonArea {
     void syncDaemon(entry);
   };
   return {
-    sendDetached, toFirstThread, rootsWrite, writeDaemonRoots, turnRuns, deployDaemonOn, daemonSyncs, syncDaemon,
+    sendDetached, toFirstThread, writeDaemonRoots, turnRuns, deployDaemonOn, daemonSyncs, syncDaemon,
     revivedAt, unreadAt, unreached, unreachedOf, reviveDaemon, offerDaemonAgain, readVersionAgain,
   };
 }

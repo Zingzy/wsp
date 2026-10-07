@@ -71,7 +71,7 @@ const used = (range: UsageRange, split: UsageSplit, rows = true): UsedAnswer => 
   series: Array.from({ length: 7 }, (_, i) => ({ t: Date.parse("2026-09-24T00:00:00Z") + i * 24 * HOUR, tokens: rows ? (i + 1) * 100_000_000 : 0 })),
   since: Date.parse("2026-09-24T00:00:00Z"),
   until: Date.parse("2026-10-01T00:00:00Z"),
-  ...(rows ? { logs: { agents: ["Claude Code", "Codex"], computer: "zingzy's MacBook Pro" } } : {}),
+  ...(rows ? { logs: { agents: ["Claude Code", "Codex"], computers: ["zingzy's MacBook Pro"] } } : {}),
 });
 
 const mount = async (over: Partial<Api> = {}): Promise<{ asks: [UsageRange, UsageSplit][]; readings: string[] }> => {
@@ -456,7 +456,7 @@ describe("Usage: used", () => {
     expect(points.some(point => point.hasAttribute("title"))).toBe(false);
     await hover(points[2]!);
     expect([...document.querySelectorAll("[data-k=point-figure]")].map(text)).toEqual([`${USAGE_PAGE_WORDS.tokens}300M`]);
-    expect(text($("[data-k=logs]"))).toBe(logsLine({ agents: ["Claude Code", "Codex"], computer: "zingzy's MacBook Pro" }));
+    expect(text($("[data-k=logs]"))).toBe(logsLine({ agents: ["Claude Code", "Codex"], computers: ["zingzy's MacBook Pro"] }));
   });
 
   it("draws one line per split value with a legend, Claude in its mark's ink and Codex down the neutral ramp, and each line's figure on hover", async () => {

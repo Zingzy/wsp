@@ -28,6 +28,7 @@ mod pty;
 mod readings;
 mod readings_history;
 mod relay;
+mod roads;
 /// The seal a place link agrees in its handshake. Public so the suite that drives both ends of a link can
 /// stand on the host's side of it, which in the product is node's own.
 pub use wsp_seal as seal;
@@ -37,6 +38,7 @@ mod sys_local;
 mod tunnel;
 mod under_home;
 mod urls;
+mod usage_logs;
 
 pub use link::place_backoff_ms;
 
@@ -277,6 +279,8 @@ pub(crate) struct Ctx {
     keys: AtomicU64,
     /// The readings this daemon keeps a minute apart for as long as it runs, which sys.history reads back.
     pub(crate) history: Arc<readings_history::History>,
+    /// What each agent store file came to at its last usage.logs, for as long as this daemon runs.
+    pub(crate) usage_logs: Arc<usage_logs::UsageCache>,
 }
 
 /// One workspace's door: the task accepting on the socket inside that workspace, which a stop ends, and the
@@ -342,6 +346,7 @@ impl Ctx {
             workspace_doors: Mutex::new(HashMap::new()),
             keys: AtomicU64::new(1),
             history,
+            usage_logs: Arc::default(),
         })
     }
 

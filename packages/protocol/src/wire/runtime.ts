@@ -579,7 +579,7 @@ const RuntimeOp = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("cost.spend") }),
   // What was used over a range split one way, and what each account signed in anywhere may still use: two answers,
   // never one figure.
-  /** outside: the rows read from this computer's agent logs, which only the person's own page asks for. */
+  /** outside: the rows read from the computers' agent logs, which only the person's own page asks for. */
   z.object({ id: reqId, op: z.literal("usage.used"), range: UsageRange, split: UsageSplit, outside: z.boolean().optional() }),
   z.object({ id: reqId, op: z.literal("usage.accounts") }),
   /** Replies with a ResetAnswer: spends one of the account's banked resets on a computer of the person's that holds

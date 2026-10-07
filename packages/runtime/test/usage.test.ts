@@ -7,7 +7,7 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { DEVICE_OPS, HERE_PLACE_ID, THREAD_OPS, type AdapterEvent, type DaemonFrame, type DaemonResponse, type HarnessLimit, type TurnResult } from "@wsp/protocol";
+import { DEVICE_OPS, HERE_PLACE_ID, THREAD_OPS, USAGE_WORDS, type AdapterEvent, type DaemonFrame, type DaemonResponse, type HarnessLimit, type TurnResult, type UsageLogsReply } from "@wsp/protocol";
 import type { DaemonChannel, DaemonChannelOptions } from "../src/daemon-channel.js";
 import { createRuntime, type HarnessAdapterFactory, type Runtime } from "../src/runtime.js";
 import { memoryStore } from "../src/store.js";
@@ -231,56 +231,71 @@ describe("this computer's own sign-ins", () => {
   });
 });
 
+/** This computer with a daemon that answers usage.logs with the rows the case hands it, read again at each ask, and
+ * refuses every other frame as one with nothing to read. */
+function logsHere(rows: () => UsageLogsReply["rows"]) {
+  const asks = { count: 0 };
+  const local = { ...fakeLocal(mkdtempSync(join(tmpdir(), "wsp-usage-local-"))), daemonRoad: async () => ({ url: "http://127.0.0.1:1", expiresAt: Number.MAX_SAFE_INTEGER, daemonToken: "t" }) };
+  const daemonChannel = async (_o: DaemonChannelOptions): Promise<DaemonChannel> => ({
+    send: async (frame: DaemonFrame) => {
+      if (frame.op !== "usage.logs") return { id: 1, ok: false, error: `no ${frame.op} here` } as DaemonResponse;
+      asks.count++;
+      return { id: 1, ok: true, rows: rows(), limits: [] } as unknown as DaemonResponse;
+    },
+    close: () => {},
+    closed: new Promise(() => {}),
+  });
+  return { local, daemonChannel, asks };
+}
+
 describe("work done outside wsp", () => {
   const logRow = (session: string, folder: string, input: number) => ({ agent: "claude", session, at: Date.now(), model: "claude-opus-5", folder, tokens: { input, output: 1, cached: 0, cacheWrite: 0, reasoning: 0 } });
 
   it("files the logs' rows as outside wsp, a folder inside a project under it and any other under no project, and reads none once turned off", async () => {
-    let reads = 0;
     const backend = stubBackend();
     backend.execImpl = tokenGuest;
     let project = "";
+    const here = logsHere(() => [logRow("s-in", `${project}/src`, 40), logRow("s-out", "/somewhere/else", 5)]);
     rt = createRuntime({
       backend,
       store: memoryStore(),
       adapters: { claude: turning({ status: "completed", text: "done" }) },
       pricesFetch: async () => ({}),
-      local: fakeLocal(mkdtempSync(join(tmpdir(), "wsp-usage-local-"))),
-      logUsage: async () => {
-        reads++;
-        return [logRow("s-in", `${project}/src`, 40), logRow("s-out", "/somewhere/else", 5)];
-      },
+      local: here.local,
+      daemonChannel: here.daemonChannel,
     });
     // A log on this computer is work in a folder here, so it maps to this computer's projects alone.
-    const here = await projectOn(rt, HERE_PLACE_ID);
-    project = here.path;
+    const held = await projectOn(rt, HERE_PLACE_ID);
+    project = held.path;
     const rows = (await rt.usage.used({ range: "day", split: "project", outside: true })).rows;
     const used = await rt.usage.used({ range: "day", split: "project", outside: true });
     expect(rows.map(r => [r.label, r.tokens.input])).toEqual([
-      [here.name, 40],
+      [held.name, 40],
       ["No project", 5],
     ]);
-    // The answer says whose logs it counted, by the agent's name.
-    expect(used.logs?.agents).toEqual(["Claude Code"]);
+    // The answer says whose logs it counted and where, by the agent's name and the computer's.
+    expect(used.logs).toEqual({ agents: ["Claude Code"], computers: [expect.any(String)] });
     // Only a reader that asks for them gets them: the command line and its tool, whose answer an agent reads, never do.
     expect((await rt.usage.used({ range: "day", split: "project" })).rows).toEqual([]);
     await rt.preferences.set({ usageLogs: false });
-    const off = reads;
+    const off = here.asks.count;
     expect((await rt.usage.used({ range: "day", split: "project", outside: true })).rows).toEqual([]);
-    expect(reads).toBe(off);
+    expect(here.asks.count).toBe(off);
   });
 });
 
 describe("work outside wsp on this computer", () => {
   it("is filed under this computer's own login, not under the vault's token that a thread here ran on", async () => {
     const backend = stubBackend();
+    const here = logsHere(() => [{ agent: "claude", session: "s-terminal", at: Date.now(), model: "claude-opus-5", folder: "/somewhere", tokens: { input: 7, output: 1, cached: 0, cacheWrite: 0, reasoning: 0 } }]);
     rt = createRuntime({
       backend,
       store: memoryStore(),
       adapters: { claude: turning({ status: "completed", text: "done", tokens: { input: 10, output: 1 } }, sessionId => [{ type: "limit", sessionId, limit: window }]) },
       vault: () => OAUTH,
       pricesFetch: async () => ({}),
-      local: fakeLocal(mkdtempSync(join(tmpdir(), "wsp-usage-local-"))),
-      logUsage: async () => [{ agent: "claude", session: "s-terminal", at: Date.now(), model: "claude-opus-5", folder: "/somewhere", tokens: { input: 7, output: 1, cached: 0, cacheWrite: 0, reasoning: 0 } }],
+      local: here.local,
+      daemonChannel: here.daemonChannel,
     });
     const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "here" });
     await (await rt.sessions.start(ws.id, { prompt: "go" })).finished;
@@ -295,17 +310,18 @@ describe("work outside wsp on this computer", () => {
 describe("the split by source", () => {
   it("sets the turns wsp's threads ran beside the other sessions this computer's agents logged, each as one row", async () => {
     const backend = stubBackend();
+    const here = logsHere(() => [
+      { agent: "claude", session: "s-terminal", at: Date.now(), model: "claude-opus-5", folder: "/somewhere", tokens: { input: 7, output: 1, cached: 0, cacheWrite: 0, reasoning: 0 } },
+      { agent: "codex", session: "s-codex", at: Date.now(), model: "gpt-5", folder: "/elsewhere", tokens: { input: 4, output: 2, cached: 0, cacheWrite: 0, reasoning: 0 } },
+    ]);
     rt = createRuntime({
       backend,
       store: memoryStore(),
       adapters: { claude: turning({ status: "completed", text: "done", costUsd: 0.5, tokens: { input: 10, output: 1 } }) },
       vault: () => OAUTH,
       pricesFetch: async () => ({}),
-      local: fakeLocal(mkdtempSync(join(tmpdir(), "wsp-usage-local-"))),
-      logUsage: async () => [
-        { agent: "claude", session: "s-terminal", at: Date.now(), model: "claude-opus-5", folder: "/somewhere", tokens: { input: 7, output: 1, cached: 0, cacheWrite: 0, reasoning: 0 } },
-        { agent: "codex", session: "s-codex", at: Date.now(), model: "gpt-5", folder: "/elsewhere", tokens: { input: 4, output: 2, cached: 0, cacheWrite: 0, reasoning: 0 } },
-      ],
+      local: here.local,
+      daemonChannel: here.daemonChannel,
     });
     const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "here" });
     await (await rt.sessions.start(ws.id, { prompt: "go" })).finished;
@@ -313,7 +329,7 @@ describe("the split by source", () => {
     const used = await rt.usage.used({ range: "day", split: "source" });
     expect(used.split).toBe("source");
     expect(used.rows.map(r => [r.key, r.label, r.tokens.input, r.costReported, r.turns, r.agent])).toEqual([
-      ["log", expect.stringMatching(/^Outside wsp on /), 11, undefined, 0, undefined],
+      ["log", USAGE_WORDS.outsideWsp, 11, undefined, 0, undefined],
       ["wsp", "wsp threads", 10, 0.5, 1, undefined],
     ]);
     // Every other split asked so holds wsp's threads alone.
@@ -339,7 +355,8 @@ describe("a wsp thread's own transcript", () => {
       },
     });
     const row = (session: string) => ({ agent: "claude", session, at: Date.now(), model: "claude-opus-5", folder: "/somewhere", tokens: { input: 9, output: 1, cached: 0, cacheWrite: 0, reasoning: 0 } });
-    rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: fixed }, vault: () => OAUTH, pricesFetch: async () => ({}), logUsage: async () => [row("sess-wsp"), row("sess-mine")] });
+    const here = logsHere(() => [row("sess-wsp"), row("sess-mine")]);
+    rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: fixed }, vault: () => OAUTH, pricesFetch: async () => ({}), local: here.local, daemonChannel: here.daemonChannel });
     const ws = await createOn(rt, { golden: "snap_g", name: "usage" });
     await (await rt.sessions.start(ws.id, { prompt: "go" })).finished;
     const rows = (await rt.usage.used({ range: "day", split: "agent", outside: true })).rows;

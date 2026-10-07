@@ -79,8 +79,6 @@ export interface UsedQuery {
   label: (split: UsageSplit, value: string) => string;
   /** Whether the rows read from the harnesses' own logs are counted; the person can turn that reading off. */
   outside?: boolean;
-  /** The computer whose agents' logs were read, by its name, which the answer says the logs were counted on. */
-  logsOn?: string;
 }
 
 export interface LimitReading {
@@ -90,12 +88,15 @@ export interface LimitReading {
   road: AccountRoad;
   computer: string;
   limit: HarnessLimit;
+  /** When the reading was taken, where it is older than now: one read off a log is kept only over an older one. */
+  at?: number;
 }
 
 export interface UsageLedger {
   add(entry: UsageEntry): Promise<void>;
-  /** Every row read from the logs, in place of the last read's: a session a wsp turn was filed under is left out. */
-  fileLogs(entries: readonly UsageEntry[]): Promise<void>;
+  /** Every row read from the logs of the computers named, in place of the last read's rows of those computers: a
+   * computer not read keeps its rows, and a session a wsp turn was filed under is left out. */
+  fileLogs(entries: readonly UsageEntry[], computers: readonly string[]): Promise<void>;
   used(query: UsedQuery): Promise<UsedAnswer>;
   day(day: string): Promise<UsageDay | undefined>;
   days(): Promise<string[]>;
@@ -273,7 +274,7 @@ export function createUsageLedger(o: { store: Store; clock: Clock; timeZone?: st
       await write(held);
     });
 
-  const fileLogs = (entries: readonly UsageEntry[]): Promise<void> =>
+  const fileLogs = (entries: readonly UsageEntry[], computers: readonly string[]): Promise<void> =>
     inTurn(async () => {
       await nameAccounts(entries.map(e => ({ key: e.account, label: e.accountLabel })));
       const oldest = dayKeyOf(o.clock.now() - (keepDays - 1) * DAY, zone);
@@ -283,11 +284,13 @@ export function createUsageLedger(o: { store: Store; clock: Clock; timeZone?: st
         if (held !== undefined) days.set(day, held);
       }
       const ran = new Set([...days.values()].flatMap(d => d.sessions ?? []));
-      // The last read's rows go, from every day it filed into, before this read's are folded in.
+      // The last read's rows of the computers read go, from every day it filed into, before this read's are folded in.
+      const read = new Set(computers);
+      const fromRead = (r: UsageDay["rows"][number]): boolean => r.source === "log" && read.has(r.computer);
       const touched = new Set<string>();
       for (const held of days.values()) {
-        if (!held.rows.some(r => r.source === "log")) continue;
-        held.rows = held.rows.filter(r => r.source !== "log");
+        if (!held.rows.some(fromRead)) continue;
+        held.rows = held.rows.filter(r => !fromRead(r));
         touched.add(held.day);
       }
       for (const entry of entries) {
@@ -316,6 +319,7 @@ export function createUsageLedger(o: { store: Store; clock: Clock; timeZone?: st
     const outside = q.outside ?? true;
     const rows = new Map<string, UsedRow>();
     const logged = new Set<string>();
+    const loggedOn = new Set<string>();
     const series =
       count === 1
         ? Array.from({ length: 24 }, (_, h) => ({
@@ -328,7 +332,10 @@ export function createUsageLedger(o: { store: Store; clock: Clock; timeZone?: st
       const held = await readDay(dayKeyOf(start + HOUR * 12, zone));
       for (const row of held?.rows ?? []) {
         if (row.source === "log" && !outside) continue;
-        if (row.source === "log") logged.add(row.agent);
+        if (row.source === "log") {
+          logged.add(row.agent);
+          loggedOn.add(row.computer);
+        }
         const value = splitValue(row, q.split);
         const key = q.split === "model" ? `${row.agent}:${value}` : value;
         const line = rows.get(key) ?? {
@@ -366,7 +373,7 @@ export function createUsageLedger(o: { store: Store; clock: Clock; timeZone?: st
     }
     const ordered = [...rows.values()].sort((a, b) => b.tokens.input + b.tokens.output - (a.tokens.input + a.tokens.output) || a.key.localeCompare(b.key));
     // The range ends where today does, so two reads a moment apart answer the same range.
-    const logs = logged.size === 0 || q.logsOn === undefined ? {} : { logs: { agents: [...logged].map(agent => q.label("agent", agent)).sort(), computer: q.logsOn } };
+    const logs = logged.size === 0 ? {} : { logs: { agents: [...logged].map(agent => q.label("agent", agent)).sort(), computers: [...loggedOn].map(c => q.label("computer", c)).sort() } };
     const lines = ordered.map(row => ({ key: row.key, label: row.label, points: points.get(row.key) ?? series.map(() => 0) }));
     return {
       range: q.range,
@@ -384,6 +391,7 @@ export function createUsageLedger(o: { store: Store; clock: Clock; timeZone?: st
     inTurn(async () => {
       const heldRaw = await o.store.get(LIMITS, r.key);
       const held = heldRaw === undefined ? undefined : AccountLimit.safeParse(heldRaw).data;
+      if (held !== undefined && r.at !== undefined && held.readAt >= r.at) return { before: held, after: held };
       const plan = r.limit.plan ?? held?.plan;
       const status = r.limit.status ?? held?.status;
       const keyed = r.limit.keyed ?? held?.keyed;
@@ -398,7 +406,7 @@ export function createUsageLedger(o: { store: Store; clock: Clock; timeZone?: st
         windows: r.limit.windows.length > 0 || r.limit.keyed === true ? r.limit.windows : (held?.windows ?? []),
         ...(status !== undefined ? { status } : {}),
         ...(keyed !== undefined ? { keyed } : {}),
-        readAt: o.clock.now(),
+        readAt: r.at ?? o.clock.now(),
         computers: [...new Set([...(held?.computers ?? []), r.computer])],
         ...(credits !== undefined ? { credits } : {}),
       };

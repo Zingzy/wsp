@@ -1,5 +1,5 @@
 {
-  "daemonVersion": 133,
+  "daemonVersion": 134,
   "execBodyMax": 16384,
   "prReplyBodyMax": 65536,
   "guestMessageCapBytes": 4194304,
@@ -11,6 +11,7 @@
   "guestTokenMax": 512,
   "guestArgvMax": 256,
   "guestCwdMax": 4096,
+  "usageStoresMax": 32,
   "execOutputMax": 2097152,
   "execTimeoutDefaultMs": 20000,
   "execDeadlineExit": 124,

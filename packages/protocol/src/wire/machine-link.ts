@@ -4,6 +4,7 @@ import { z } from "zod";
 import { THIS_COMPUTER } from "../format.js";
 import type { SysHistoryReply as WireSysHistoryReply } from "../generated/SysHistoryReply.js";
 import type { SysPoint as WireSysPoint } from "../generated/SysPoint.js";
+import type { UsageLogsReply as WireUsageLogsReply } from "../generated/UsageLogsReply.js";
 import { HERE_PLACE_ID } from "../place-word.js";
 import { type Held, reqId, type Same } from "./helpers.js";
 import { EXEC_BODY_MAX, isPlainPath } from "./limits.js";
@@ -470,6 +471,21 @@ type SysPointHeld = Held<Same<z.infer<typeof SysPoint>, SysPoint>>;
 export const SysHistoryReply = z.object({ points: z.array(SysPoint), stepMs: z.number(), truncated: z.boolean() });
 export type SysHistoryReply = WireSysHistoryReply;
 type SysHistoryReplyHeld = Held<Same<z.infer<typeof SysHistoryReply>, SysHistoryReply>>;
+
+const UsageTokens = z.object({ input: z.number(), output: z.number(), cached: z.number(), cacheWrite: z.number(), reasoning: z.number() });
+/** One window of a plan reading off an agent's store: how much is used, its length where the store named one, and
+ * when it starts again, epoch seconds. */
+const UsageLimitWindow = z.object({ usedPercent: z.number(), windowDurationMins: z.number().optional(), resetsAt: z.number().optional() });
+/** What usage.logs read: each session's use per half hour under one model and folder, `at` the newest moment of that
+ * half hour, and the newest plan reading each agent's store kept, in the shape that agent's server answers with. */
+export const UsageLogsReply = z.object({
+  rows: z.array(z.object({ agent: z.string(), session: z.string(), at: z.number(), model: z.string(), folder: z.string().optional(), tokens: UsageTokens, cost: z.number().optional() })),
+  limits: z.array(
+    z.object({ agent: z.string(), at: z.number(), primary: UsageLimitWindow.optional(), secondary: UsageLimitWindow.optional(), planType: z.string().optional(), rateLimitReachedType: z.string().optional() }),
+  ),
+});
+export type UsageLogsReply = WireUsageLogsReply;
+type UsageLogsReplyHeld = Held<Same<z.infer<typeof UsageLogsReply>, UsageLogsReply>>;
 
 /** A computer's readings over a range as the Usage page draws them: the kept steps and the span they are drawn over. */
 export const ReadingsAnswer = z.object({ points: z.array(SysPoint), stepMs: z.number(), from: z.number(), to: z.number() });

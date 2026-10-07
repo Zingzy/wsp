@@ -32,10 +32,10 @@ import {
   type TurnResult,
 } from "@wsp/protocol";
 import { HARNESS_ADAPTERS } from "../src/adapters.js";
-import { createRuntime, NO_COPIER_HERE, type HarnessAdapterFactory, type HarnessStartOptions, type LocalWiring, type Runtime } from "../src/runtime.js";
+import { createRuntime, NO_COPIER_HERE, type HarnessAdapterFactory, type HarnessStartOptions, type LocalWiring, type ProjectBundler, type Runtime } from "../src/runtime.js";
 import type { DaemonChannel } from "../src/daemon-channel.js";
 import { localExecStream } from "../src/local-exec.js";
-import { memoryStore } from "../src/store.js";
+import { memoryStore, type Store } from "../src/store.js";
 import { gitCopier } from "./git-copier.js";
 import { stubBackend, testPlatform } from "./stub-backend.js";
 
@@ -118,10 +118,12 @@ function fakeDaemon() {
   return { frames, answers, open };
 }
 
-function here(wire: Partial<LocalWiring> = {}, served = true, adapters: Record<string, HarnessAdapterFactory> = {}) {
-  const root = scratch();
+/** `again` is a host started over the root and store of one before it, as a restart finds them. */
+function here(wire: Partial<LocalWiring> = {}, served = true, adapters: Record<string, HarnessAdapterFactory> = {}, again?: { root: string; store: Store }) {
+  const root = again?.root ?? scratch();
   const state = join(root, "state");
-  mkdirSync(state);
+  mkdirSync(state, { recursive: true });
+  const store = again?.store ?? memoryStore();
   const copier = gitCopier();
   const starts: HarnessStartOptions[] = [];
   const daemon = fakeDaemon();
@@ -139,13 +141,13 @@ function here(wire: Partial<LocalWiring> = {}, served = true, adapters: Record<s
   };
   rt = createRuntime({
     backend: stubBackend(),
-    store: memoryStore(),
+    store,
     adapters: { claude: harness(starts), codex: harness(starts), ...adapters },
     local,
     ...(served ? { statePath: join(state, "state.json") } : {}),
     daemonChannel: daemon.open,
   });
-  return { rt, copier, starts, daemon, home: state, worktrees: join(state, "worktrees"), roots: join(root, "roots"), claudeHome: join(root, ".claude") };
+  return { rt, root, store, copier, starts, daemon, home: state, worktrees: join(state, "worktrees"), roots: join(root, "roots"), claudeHome: join(root, ".claude") };
 }
 
 describe("a thread on a project on this computer", () => {
@@ -862,6 +864,89 @@ describe("a project folder outside the daemon's home", () => {
     expect(readFileSync(roots, "utf8").split("\n").filter(Boolean).sort()).toEqual([kept, removed].sort());
     await rt.projects.remove(removedProject.id);
     expect(readFileSync(roots, "utf8").split("\n").filter(Boolean)).toEqual([kept]);
+  });
+
+  it("keeps every other checkout's folder when a folder is imported, and the imported one stays through a host restart until its workspace goes", async () => {
+    const first = here();
+    const [other, own, landed, removed] = [repo(), repo(), repo(), repo()];
+    await first.rt.workspaces.folderFor({ project: (await first.rt.projects.add({ source: other })).id });
+    const ownProject = await first.rt.projects.add({ source: own });
+    const at = await first.rt.workspaces.folderFor({ project: ownProject.id });
+    const removedProject = await first.rt.projects.add({ source: removed });
+    await first.rt.workspaces.folderFor({ project: removedProject.id });
+    const unpacked = (): never => {
+      throw new Error("a folder on this computer is never packed");
+    };
+    const bundler: ProjectBundler = { plan: async () => ({ source: landed, repo: true, files: 1, bytes: 1, secrets: [], excluded: [], skipped: [], agents: [] }), pack: unpacked, packState: unpacked };
+    await first.rt.projects.import({ workspaceId: at.workspace.id, source: landed, dest: landed, bundler });
+    const listed = () => readFileSync(first.roots, "utf8").split("\n").filter(Boolean).sort();
+    expect(listed()).toEqual([other, own, landed, removed].sort());
+    // A restarted host writes the file whole from the records it reads back, and the imported folder is one of theirs.
+    await first.rt.close();
+    const second = here({}, true, {}, { root: first.root, store: first.store });
+    await second.rt.projects.remove(removedProject.id);
+    expect(listed()).toEqual([other, own, landed].sort());
+    // The folder goes with the workspace that imported it.
+    await second.rt.projects.remove(ownProject.id);
+    expect(listed()).toEqual([other]);
+  });
+
+  it("takes back only its own folder when its roots write is refused, so an import beside it keeps its folder", async () => {
+    // The first write of the roots file is held until the second import is queued behind it, then refused.
+    const backend = new LocalBackend({ root: scratch() });
+    const machine = await backend.get();
+    const exec = machine.exec.bind(machine);
+    let release: () => void = () => {};
+    const held = new Promise<void>(go => (release = go));
+    let refusing = false;
+    machine.exec = async (cmd, o) => {
+      if (cmd.includes(".next") && refusedFolder !== "" && cmd.includes(refusedFolder) && !refusing) {
+        refusing = true;
+        await held;
+        return { exitCode: 1, stdout: "", stderr: "read-only file system" };
+      }
+      return exec(cmd, o);
+    };
+    let refusedFolder = "";
+    const { rt, roots } = here({ backend });
+    const [own, first, second] = [repo(), repo(), repo()];
+    refusedFolder = first;
+    const at = await rt.workspaces.folderFor({ project: (await rt.projects.add({ source: own })).id });
+    const unpacked = (): never => {
+      throw new Error("a folder on this computer is never packed");
+    };
+    let secondPlanned = false;
+    const bundler = (folder: string): ProjectBundler => ({
+      plan: async () => {
+        if (folder === second) secondPlanned = true;
+        return { source: folder, repo: true, files: 1, bytes: 1, secrets: [], excluded: [], skipped: [], agents: [] };
+      },
+      pack: unpacked,
+      packState: unpacked,
+    });
+    const one = rt.projects.import({ workspaceId: at.workspace.id, source: first, dest: first, bundler: bundler(first) });
+    await until(() => refusing);
+    const two = rt.projects.import({ workspaceId: at.workspace.id, source: second, dest: second, bundler: bundler(second) });
+    await until(() => secondPlanned);
+    await new Promise(r => setTimeout(r, 50));
+    release();
+    await expect(one).rejects.toThrow("read-only file system");
+    await two;
+    expect(readFileSync(roots, "utf8").split("\n").filter(Boolean).sort()).toEqual([own, second].sort());
+  });
+
+  it("takes an imported folder off the roots file when the workspace that imported it goes", async () => {
+    const { rt, roots } = here();
+    const [other, own, landed] = [repo(), repo(), repo()];
+    await rt.workspaces.folderFor({ project: (await rt.projects.add({ source: other })).id });
+    const ownProject = await rt.projects.add({ source: own });
+    const at = await rt.workspaces.folderFor({ project: ownProject.id });
+    const unpacked = (): never => {
+      throw new Error("a folder on this computer is never packed");
+    };
+    await rt.projects.import({ workspaceId: at.workspace.id, source: landed, dest: landed, bundler: { plan: async () => ({ source: landed, repo: true, files: 1, bytes: 1, secrets: [], excluded: [], skipped: [], agents: [] }), pack: unpacked, packState: unpacked } });
+    await rt.projects.remove(ownProject.id);
+    expect(readFileSync(roots, "utf8").split("\n").filter(Boolean)).toEqual([other]);
   });
 });
 
