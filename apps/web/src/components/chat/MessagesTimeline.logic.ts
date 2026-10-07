@@ -5,7 +5,6 @@ import {
   commandFirstLine,
   indicatesNeutral,
   type MessagesTimelineRow,
-  type TurnSummary,
   type WorkLogEntry,
 } from "./adapt";
 import { formatWorkspaceRelativePath } from "../../lib/filePathDisplay";
@@ -15,11 +14,6 @@ export const TIMELINE_MINIMAP_MIN_ITEMS = 2;
 export const TIMELINE_MINIMAP_MAX_HEIGHT_CSS = "calc(100vh - 18rem)";
 export const TIMELINE_CONTENT_MAX_WIDTH = 768;
 export const TIMELINE_MINIMAP_PERSISTENT_GUTTER = 48;
-
-export type TimelineLatestTurn = Pick<
-  TurnSummary,
-  "turnId" | "state" | "startedAt" | "completedAt"
->;
 
 /** What a tool row reads: a state word ahead of a command, the label, and whether the label is shell text. */
 export interface WorkEntryLabel {

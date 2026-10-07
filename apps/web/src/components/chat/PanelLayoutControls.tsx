@@ -1,5 +1,5 @@
 // Adapted from pingdotgg/t3code apps/web/src/components/chat/PanelLayoutControls.tsx at 57a66608 (MIT).
-import { Maximize2Icon, Minimize2Icon, PanelBottomIcon, PanelRightIcon } from "lucide-react";
+import { PanelBottomIcon, PanelRightIcon } from "lucide-react";
 import { memo } from "react";
 
 import { Toggle } from "../ui/toggle";
@@ -83,38 +83,5 @@ export const PanelLayoutControls = memo(function PanelLayoutControls({
         </TooltipPopup>
       </Tooltip>
     </div>
-  );
-});
-
-export const RightPanelMaximizeControl = memo(function RightPanelMaximizeControl({
-  maximized,
-  onToggle,
-}: {
-  maximized: boolean;
-  onToggle: () => void;
-}) {
-  const label = maximized ? "Restore panel size" : "Maximize panel";
-  return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <Toggle
-            className="shrink-0 [-webkit-app-region:no-drag]"
-            pressed={maximized}
-            onPressedChange={onToggle}
-            aria-label={label}
-            variant="ghost"
-            size="sm"
-          >
-            {maximized ? (
-              <Minimize2Icon className="size-4" />
-            ) : (
-              <Maximize2Icon className="size-4" />
-            )}
-          </Toggle>
-        }
-      />
-      <TooltipPopup side="bottom">{label}</TooltipPopup>
-    </Tooltip>
   );
 });

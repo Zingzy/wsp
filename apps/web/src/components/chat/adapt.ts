@@ -4,23 +4,9 @@
 // wire event produces yet (checkpoint diffs, harness skills, the timestamp
 // setting) and the two id aliases the copies name.
 export * from "../../adapt/index.js";
-import type { ToolLifecycleItemType } from "../../adapt/index.js";
 
 export type MessageId = string;
 export type TurnId = string;
-
-const TOOL_LIFECYCLE_ITEM_TYPES: ReadonlyArray<ToolLifecycleItemType> = [
-  "command_execution",
-  "file_change",
-  "mcp_tool_call",
-  "dynamic_tool_call",
-  "collab_agent_tool_call",
-  "web_search",
-  "image_view",
-];
-export function isToolLifecycleItemType(value: string): value is ToolLifecycleItemType {
-  return (TOOL_LIFECYCLE_ITEM_TYPES as ReadonlyArray<string>).includes(value);
-}
 
 export type TimestampFormat = "locale" | "12-hour" | "24-hour";
 export const DEFAULT_TIMESTAMP_FORMAT: TimestampFormat = "locale";

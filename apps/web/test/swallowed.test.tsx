@@ -3,7 +3,6 @@
 // the console or nowhere: each now draws its own slot or says an error notice,
 // and a page served on a ticket socket, which may not see a read, says nothing.
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { useRef } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../src/components/markdownMath", () => {
@@ -42,7 +41,6 @@ import { wireHostLive } from "../src/machine/hostLive.js";
 import { resetLive, watchLive } from "../src/machine/live.js";
 import { useCopyToClipboard } from "../src/hooks/useCopyToClipboard.js";
 import { readTerminalFile } from "../src/components/ThreadTerminalDrawer.js";
-import { useCostSeries } from "../src/protocol/machine.js";
 import ChatMarkdown from "../src/components/ChatMarkdown.js";
 import { DiffWorkerPoolProvider } from "../src/components/DiffWorkerPoolProvider.js";
 import { BrowserSurface } from "../src/components/preview/BrowserSurface.js";
@@ -269,16 +267,6 @@ describe("the reads a pane makes once", () => {
     expect(await readTerminalFile(read, "dark")).toBeNull();
     expect(await readTerminalFile(read, "dark")).toBeNull();
     expect(noticeTexts()).toEqual(["Terminal config not read from the host: the config file is not readable. The pane keeps its defaults."]);
-  });
-
-  it("a refused cost history is said, and the chart begins at the first live tick", async () => {
-    useStore.setState({ api: { subscribe: () => () => {}, costHistory: async () => Promise.reject(refusal("no meter for ws_c")) } as unknown as Api });
-    function Chart() {
-      const series = useRef(useCostSeries("ws_c"));
-      return <span>{series.current.length}</span>;
-    }
-    render(<Chart />);
-    await waitFor(() => expect(noticeTexts()).toEqual(["Cost history not read: no meter for ws_c"]));
   });
 
   it("math whose renderer did not load is said, and the message still reads", async () => {

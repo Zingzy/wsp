@@ -1,36 +1,14 @@
 // Adapted from pingdotgg/t3code apps/web/src/components/Sidebar.logic.ts at 57a66608 (MIT).
-// Pure sidebar logic over wsp thread snapshots. Kept: traversal, the row
-// class, the thread status model, timestamps, sort, search and the idle shelf. Left out: context menus, pinned reorder,
+// Pure sidebar logic over wsp thread snapshots. Kept: traversal, the thread
+// status model, timestamps, sort, search and the idle shelf. Left out: context menus, pinned reorder,
 // project scope menus, prewarm leases and the router-bound helpers,
 // which model state wsp's wire does not carry. Contract types are hand-written
 // against the wsp thread snapshot (startedAt and endedAt instead of createdAt,
 // updatedAt and the turn projection).
 import { DEFAULT_PREFERENCES, SETTLE_MS, threadSeen, threadSettled, type SessionStatus, type ThreadSection } from "@wsp/protocol";
-import { cn } from "../lib/utils";
 import { activeThreadAnchorTimestampMs, toSortableTimestamp } from "./threadSort";
 
-export const THREAD_SELECTION_SAFE_SELECTOR = "[data-thread-item], [data-thread-selection-safe]";
-
 export type ThreadTraversalDirection = "previous" | "next";
-
-/** A thread's pill: the adapter's word, and whether it pulses (a running turn does). */
-export interface ThreadStatusPill {
-  label: string;
-  colorClass: string;
-  dotClass: string;
-  pulse: boolean;
-}
-
-export function getVisibleSidebarThreadIds<TThreadId>(
-  renderedProjects: readonly {
-    shouldShowThreadPanel?: boolean;
-    renderedThreadIds: readonly TThreadId[];
-  }[],
-): TThreadId[] {
-  return renderedProjects.flatMap((renderedProject) =>
-    renderedProject.shouldShowThreadPanel === false ? [] : renderedProject.renderedThreadIds,
-  );
-}
 
 export function resolveAdjacentThreadId<T>(input: {
   threadIds: readonly T[];
@@ -57,40 +35,6 @@ export function resolveAdjacentThreadId<T>(input: {
   }
 
   return currentIndex < threadIds.length - 1 ? (threadIds[currentIndex + 1] ?? null) : null;
-}
-
-export function resolveThreadRowClassName(input: {
-  isActive: boolean;
-  isSelected: boolean;
-}): string {
-  const baseClassName =
-    "h-8 w-full translate-x-0 cursor-pointer justify-start rounded-md px-2 text-left text-sm focus-visible:ring-2 focus-visible:ring-ring";
-
-  if (input.isSelected && input.isActive) {
-    return cn(
-      baseClassName,
-      "bg-sidebar-row-active text-sidebar-foreground font-medium hover:bg-sidebar-row-active hover:text-sidebar-foreground",
-    );
-  }
-
-  if (input.isSelected) {
-    return cn(
-      baseClassName,
-      "bg-sidebar-row-selected text-sidebar-foreground hover:bg-sidebar-row-active hover:text-sidebar-foreground",
-    );
-  }
-
-  if (input.isActive) {
-    return cn(
-      baseClassName,
-      "bg-sidebar-row-active text-sidebar-foreground font-medium hover:bg-sidebar-row-active hover:text-sidebar-foreground",
-    );
-  }
-
-  return cn(
-    baseClassName,
-    "text-[var(--sidebar-row-rest)] hover:bg-sidebar-row-hover hover:text-sidebar-foreground",
-  );
 }
 
 // ── Sidebar thread status model ─────────────────────────────────────

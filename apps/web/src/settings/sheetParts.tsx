@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The three pieces both Add a computer and Connect a provider are drawn from:
-// a row holding one fact with the glyph that copies it, the running list of
-// what a road has done so far, and the two-line slot a refusal lands in. The
+// The pieces Add a computer, Connect a provider and the Settings sheets are
+// drawn from: a row holding one fact with the glyph that copies it, the
+// two-line slot a refusal lands in, and the sheet a setting changes in. The
 // slot stands whether or not it holds a sentence, so a refusal arriving moves
 // nothing on the screen under it.
 import { CheckIcon, CopyIcon } from "lucide-react";
@@ -10,13 +10,11 @@ import { copyText } from "../actions/clipboard.js";
 import { Button } from "../components/ui/button.js";
 import { Dialog, DialogDescription, DialogFooter, DialogHeader, DialogPanel, DialogPopup, DialogTitle } from "../components/ui/dialog.js";
 import { Input } from "../components/ui/input.js";
-import { Spinner } from "../components/ui/spinner.js";
 import { GROUP_LABEL } from "../lib/microLabel.js";
 import { cn } from "../lib/utils.js";
 import { noticeFailure, notCopied } from "../notices/store.js";
 import { failureOf } from "../protocol/failure.js";
 import { SETTINGS_WORDS } from "./format.js";
-import { STATE_WORD } from "./recipe/rows.js";
 
 /** How long the copy glyph stands as a check before it is a copy glyph again. */
 const COPIED_MS = 1_400;
@@ -104,34 +102,6 @@ export function CopyRow({ label, value, k, children }: { label?: string; value: 
         {copied ? <CheckIcon /> : <CopyIcon />}
       </Button>
     </div>
-  );
-}
-
-/** One line of what a road has done: the words at the left, and at the right end the spinner while it runs, a check
- * once it is done, or a quiet word where the line carries one. */
-export interface RoadLine {
-  word: string;
-  state: "running" | "done" | "waiting";
-  /** The figure or the word at the right end: how long a stage took, or that a line is not required. */
-  fact?: string;
-}
-
-/** The list of lines under a road, one 32 px line each, in the order they happened. A line longer than the sheet is
- * cut from the right and carries the whole of itself as its hover text. */
-export function RoadLines({ lines, k = "lines" }: { lines: readonly RoadLine[]; k?: string }) {
-  return (
-    <ul data-k={k} className="flex flex-col">
-      {lines.map(line => (
-        <li key={line.word} data-k="line" data-state={line.state} className="flex h-8 items-center gap-3 border-border/60 border-b last:border-transparent">
-          <span className={cn("min-w-0 flex-1 truncate font-mono text-xs", line.state === "waiting" ? "text-muted-foreground" : "text-foreground")} title={line.word}>
-            {line.word}
-          </span>
-          {line.fact === undefined ? null : <span className={STATE_WORD}>{line.fact}</span>}
-          {line.state === "running" ? <Spinner className="size-3.5 shrink-0 text-muted-foreground" /> : null}
-          {line.state === "done" ? <CheckIcon aria-hidden className="size-3.5 shrink-0 text-muted-foreground" /> : null}
-        </li>
-      ))}
-    </ul>
   );
 }
 

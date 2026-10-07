@@ -9,8 +9,6 @@
 /** Every row's hover steps its fill and its ink in 150 ms. The kit's own transition is on a row's size, which no
  * row here changes, so it is replaced rather than joined. */
 const ROW_FADE_CLASS = "transition-[background-color,color] duration-150";
-/** The Forwarded ports head, the one section row left: the rows' inset and the same fade. */
-export const TOP_ROW_CLASS = `px-2 ${ROW_FADE_CLASS}`;
 const ROW_META_GRAMMAR = "font-mono text-[11px] tabular-nums";
 export const ROW_META_CLASS = `${ROW_META_GRAMMAR} text-[var(--top-row-meta)]`;
 /** A word a person reads rather than glances at, a state word or a sentence, in the sans. The counts' whisper sits

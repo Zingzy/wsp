@@ -168,13 +168,6 @@ export function buildFileDiffIdentityKey(fileDiff: FileDiffMetadata): string {
   return `${resolveFileDiffPreviousPath(fileDiff)}\u0000${resolveFileDiffPath(fileDiff)}`;
 }
 
-export function buildFileDiffRenderKey(fileDiff: FileDiffMetadata): string {
-  const cacheKey = fileDiff.cacheKey;
-  if (!cacheKey) return `${fileDiff.prevName ?? "none"}:${fileDiff.name}`;
-
-  return cacheKey.endsWith(":hydrated") ? cacheKey.slice(0, -":hydrated".length) : cacheKey;
-}
-
 function hashFileDiffPart(hash: number, value: string | number | boolean | undefined): number {
   const serialized = value === undefined ? "undefined" : String(value);
   const withLength = fnv1a32(`${typeof value}:${serialized.length}:`, hash);
