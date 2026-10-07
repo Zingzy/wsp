@@ -9,7 +9,7 @@
 // one attempt id, since a queue drains only in a composer on screen and one copy
 // at most is on screen; the computer's free room is read first, and a send it
 // has no room for is refused before any copy is made.
-import { HERE_PLACE_ID, START_WORDS, githubLinkOf, placeRoom, plural, projectForRepo, type ProjectView } from "@wsp/protocol";
+import { HERE_PLACE_ID, START_WORDS, githubLinkOf, nameOfTask, placeRoom, plural, projectForRepo, type ProjectView } from "@wsp/protocol";
 import { Button } from "../components/ui/button.js";
 import { RefusalSlot } from "../settings/sheetParts.js";
 import { EmptyThread } from "../components/chat/ChatView.js";
@@ -25,12 +25,6 @@ import { noticeFailure } from "../notices/store.js";
 import { HomeProjectPicker, WhereItRuns } from "./NewThreadPicks.js";
 import type { Api } from "../protocol/client.js";
 import { projectHomeKey, useHarnessCatalogs, useStore } from "../protocol/store.js";
-
-/** The workspace's name off the task: its first line, cut at a few words, since the row has room for little more. */
-export function nameOfTask(task: string): string {
-  const words = task.trim().split("\n")[0]!.split(/\s+/).filter(Boolean);
-  return words.slice(0, 5).join(" ").slice(0, 40);
-}
 
 /** The line a send to more models than the computer has room for is refused with. */
 export function noRoomLine(where: string, free: number, noun: string, asked: number): string {
