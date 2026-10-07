@@ -5,7 +5,7 @@
 // CODEX_HOME.
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { asideWallLine, CODEX_FEWER_TURNS, CODEX_LEGACY_HISTORY, codexKeyRefusedLine, codexMissingEnvLine, codexNotSignedInLine, codexReconnectLine, PERMISSION_ALLOW, PERMISSION_DENY } from "@wsp/protocol";
+import { asideWallLine, CODEX_FEWER_TURNS, CODEX_LEGACY_HISTORY, codexKeyRefusedLine, codexMissingEnvLine, codexNotSignedInLine, codexReconnectLine, PERMISSION_ALLOW, PERMISSION_DENY, SLATE_SERVER_NAME, toolCallFacts } from "@wsp/protocol";
 import type { AdapterEvent, ExecStream, ExecStreamFactory, TurnResult } from "@wsp/protocol";
 import { createCodexAdapter, creditsOf, type CodexSession } from "../src/adapter.js";
 
@@ -354,12 +354,23 @@ describe("CodexAdapter over codex app-server", () => {
     expect(deltas.map(d => [d.kind, d.toolName, d.toolUseId, d.text])).toEqual([
       ["tool_use", "file_change", "call_2", JSON.stringify({ changes: [{ path: "README.md", kind: "update" }, { path: "docs/new.md", kind: "add" }] })],
       ["tool_result", undefined, "call_2", "update README.md\nadd docs/new.md"],
-      ["tool_use", "wsp.threads", "call_3", JSON.stringify({ workspace: "first" })],
+      ["tool_use", "mcp__wsp__threads", "call_3", JSON.stringify({ workspace: "first" })],
       ["tool_result", undefined, "call_3", JSON.stringify([{ type: "text", text: '{"threads":[]}' }])],
       ["thinking", undefined, undefined, "Listing the repository first."],
       ["tool_use", "web_search", "ws_1", JSON.stringify({ query: "codex app-server" })],
       ["tool_result", undefined, "ws_1", "codex app-server"],
     ]);
+  });
+
+  it("names a call to the slate's second server by wsp's own name, which is the server the person knows", async () => {
+    const item = (phase: "started" | "completed", body: Record<string, unknown>) => `{"method":"item/${phase}","params":{"item":${JSON.stringify(body)},"threadId":"${THREAD_ID}","turnId":"${TURN_ID}"}}`;
+    const slate = { type: "mcpToolCall", id: "call_7", server: SLATE_SERVER_NAME, tool: "slate_write", arguments: { text: "<slate/>" } };
+    const launch = launcher(scripted([item("started", { ...slate, status: "inProgress", result: null, error: null }), completed("completed")]));
+    const { events, onEvent } = collect();
+    await adapterOver(launch).start({ prompt: "x", onEvent }).finished;
+    const uses = deltasOf(events).filter(d => d.kind === "tool_use");
+    expect(uses.map(d => d.toolName)).toEqual(["mcp__wsp__slate_write"]);
+    expect(toolCallFacts(uses[0]!.toolName!, uses[0]!.text).title).toBe("Use wsp's slate write");
   });
 
   it("resumes a thread by the id the row holds: the registry key is that id and the seed asks thread/resume", async () => {

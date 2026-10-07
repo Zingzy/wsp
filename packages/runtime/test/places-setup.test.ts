@@ -1656,6 +1656,19 @@ describe("a computer that follows a recipe", () => {
     expect((await rowOf(place.id)).applied?.rows.find(row => row.id === "signins/codex")).toMatchObject({ outcome: "present", note: FROM_THE_VAULT });
   });
 
+  it("keeps an agent its setup installed as wsp's when a later sync's agents step finds it already there", async () => {
+    const agents: PlaceProvisionRow[] = [{ id: "agents/claude", label: "Claude Code", outcome: "installed" }];
+    const { p, r, placeId } = await following({ rows: { agents } });
+    agents.splice(0, agents.length, { id: "agents/claude", label: "Claude Code", outcome: "present" }, { id: "agents/codex", label: "Codex", outcome: "installed" });
+    r.move({ ...V1, agents: { ...V1.agents, codex: { signin: "vault" } } }, { ...ITEMS, "agents/codex": "c1" }, "h11");
+    await runtime!.places!.recipeChanged("laptop");
+    await until(async () => (await rowOf(placeId)).applied?.hash === "h11");
+    expect(p.ran).toContain("agents");
+    const rows = (await rowOf(placeId)).applied?.rows ?? [];
+    expect(rows.find(row => row.id === "agents/claude")).toMatchObject({ outcome: "installed" });
+    expect(rows.find(row => row.id === "agents/codex")).toMatchObject({ outcome: "installed" });
+  });
+
   it("never takes an agent the box had before wsp off, though wsp landed a file of its own for it, and says why on its row", async () => {
     const cmds: string[] = [];
     const { r, placeId } = await following({

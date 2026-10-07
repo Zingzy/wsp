@@ -81,7 +81,7 @@ describe("the agents report off a computer you own whose daemon runs as root", (
     expect(lines.join("\n")).not.toMatch(/-u 'root'|-u root\b/);
     const agent = (id: string) => read.agents.find(a => a.id === id)!;
     expect(agent("claude")).toMatchObject({ installed: true, version: "2.1.281", road: "own", signIn: "signed-in", signInRoad: "token", wspTools: true });
-    expect(agent("codex")).toMatchObject({ installed: true, signIn: "none", signInRoad: "device", wspTools: false });
+    expect(agent("codex")).toMatchObject({ installed: true, signIn: "none", signInRoad: "device", wspTools: true });
     expect(agent("codex").version).toBeUndefined();
     expect(agent("hermes")).toMatchObject({ installed: true, signIn: "unknown", signInRoad: "terminal" });
     expect(agent("gemini")).toMatchObject({ installed: false, road: "none", signIn: "none", signInRoad: "code" });
@@ -110,6 +110,46 @@ describe("the agents report off a computer you own whose daemon runs as root", (
     expect(read.servers.length).toBeGreaterThanOrEqual(30);
     expect(lines.length).toBeLessThan(10);
     nothingLeaked(at, read, lines);
+  });
+});
+
+describe("what wsp put on a computer you own and on a workspace", () => {
+  const box = (at: AgentHome, path = `${at.bin}:/usr/bin:/bin`) => ({ kind: "box" as const, machine: road(at, { root: true }).machine, login: { HOME: at.home, PATH: path } });
+
+  it("lists the wsp server every launch there is handed, for each agent whose adapter takes one, and keeps a config row that names wsp", async () => {
+    const at = fixture();
+    const reader = agentsReader({ vault: () => ({}) });
+    for (const read of [await reader.read(box(at)), await reader.read({ kind: "machine", machine: road(at).machine })]) {
+      const wsp = read.servers.filter(s => s.name === "wsp");
+      expect(wsp.find(s => s.agent === "codex")).toEqual({ agent: "codex", name: "wsp", scope: "user", launch: true, transport: { kind: "stdio", line: "wsp mcp" }, envNames: [], auth: "open", enabled: true });
+      expect(wsp.filter(s => s.agent === "claude")).toEqual([expect.objectContaining({ file: "~/.claude.json", transport: { kind: "stdio", line: expect.stringContaining("wsp-bin/wsp") } })]);
+      expect(wsp.filter(s => s.agent === "claude")[0]).not.toHaveProperty("launch");
+      // Only the adapters that hand a launch its servers: OpenCode and Cursor run threads but take none.
+      expect(wsp.filter(s => s.launch === true).map(s => s.agent)).toEqual(["codex"]);
+      expect(read.agents.find(a => a.id === "codex")).toMatchObject({ wspTools: true });
+    }
+    // This computer's agents keep Add tools: a session the person starts outside wsp reads only the config.
+    const mine = await agentsReader({ vault: () => ({}), here: () => here(at) }).read({ kind: "here" });
+    expect(mine.servers.filter(s => s.launch === true)).toEqual([]);
+    expect(mine.agents.find(a => a.id === "codex")).toMatchObject({ wspTools: false });
+  });
+
+  it("reads an agent the setup installed as wsp's wherever its manager put it, and one the computer already had as the person's", async () => {
+    const at = fixture();
+    const brew = join(at.root, "linuxbrew/.linuxbrew/bin");
+    mkdirSync(brew, { recursive: true });
+    writeStub(join(brew, "codex"), `#!/bin/sh\necho "codex-cli 0.155.1"\n`);
+    const setupRows = [
+      { id: "agents/codex", label: "Codex", outcome: "installed" as const },
+      { id: "agents/claude", label: "Claude Code", outcome: "present" as const },
+      { id: "agents/gemini", label: "Gemini CLI", outcome: "failed" as const },
+    ];
+    const read = await agentsReader({ vault: () => ({}) }).read({ ...box(at, `${brew}:${at.bin}:/usr/bin:/bin`), setupRows });
+    const agent = (id: string) => read.agents.find(a => a.id === id)!;
+    expect(agent("codex")).toMatchObject({ installed: true, road: "wsp", path: join(brew, "codex") });
+    expect(agent("claude")).toMatchObject({ installed: true, road: "own" });
+    expect(agent("hermes")).toMatchObject({ installed: true, road: "own" });
+    expect(agent("gemini")).toMatchObject({ installed: false, road: "none" });
   });
 });
 

@@ -40,8 +40,9 @@ export const noSuchAgentsProjectRefusal = (id: string, computer: string): string
 /** Why a target named a project by a name two projects on that computer share. */
 export const sharedAgentsProjectRefusal = (name: string, computer: string): string => `Two projects on ${computer} are named ${name}; name one by the id wsp projects shows.`;
 
-/** How the agent's binary got onto that computer: by wsp's own install under its tools folder, by the person or
- * another installer (`own`), as a wrapper another program puts in front of it (`shim`), or it is not there. */
+/** How the agent's binary got onto that computer: by wsp's own install under its tools folder or the setup of a
+ * computer you own, by the person or another installer (`own`), as a wrapper another program puts in front of it
+ * (`shim`), or it is not there. */
 export const AgentRoad = z.enum(["wsp", "own", "shim", "none"]);
 export type AgentRoad = z.infer<typeof AgentRoad>;
 
@@ -72,7 +73,7 @@ export const AgentRow = z.object({
   via: z.string().optional(),
   signIn: z.union([AgentSignInState, z.literal("unknown")]),
   signInRoad: SignInRoad,
-  /** One of its MCP config files names the wsp server. */
+  /** One of its MCP config files names the wsp server, or every turn's launch there hands it over. */
   wspTools: z.boolean(),
   /** How its sign-in there stands, in the status command's own terms (OAuth credentials, an API key and the variable
    * it came from); names only, never a value. */
@@ -251,8 +252,11 @@ export const McpRow = z.object({
   agent: z.string(),
   name: z.string(),
   scope: McpScope,
-  /** The config file it is defined in, `~`-relative under the home. */
-  file: z.string(),
+  /** The config file it is defined in, `~`-relative under the home; absent on a launch row. */
+  file: z.string().optional(),
+  /** The wsp server a turn's launch there hands the agent, which no file names: every thread there gets it, and
+   * nothing turns it off or removes it. */
+  launch: z.literal(true).optional(),
   transport: McpRowTransport,
   /** The variables its definition sets or reads, names only. */
   envNames: z.array(z.string()),

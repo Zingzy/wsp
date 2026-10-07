@@ -1,7 +1,7 @@
 {
   "cloudOff": {
     "name": "servers",
-    "description": "Every MCP server each agent's own config file defines on one computer or workspace, and a workspace's project files: the agent, the file, how it is reached (its command with every value hidden, or its url's host), the names of the variables it sets or reads and never their values, whether the file switches it off, whether wsp's recipe put it there on a box, and its sign-in as the config alone says it: open for a command or a fixed header, unknown for a remote server until something connects. Read as the login the computer was added with, off each agent's config and whether its files are there: no MCP server is started and no login file is opened. A napping workspace answers what stood there when it last ran, marked stale, and is not woken.",
+    "description": "Every MCP server each agent's own config file defines on one computer or workspace, and a workspace's project files: the agent, the file, how it is reached (its command with every value hidden, or its url's host), the names of the variables it sets or reads and never their values, whether the file switches it off, whether wsp's recipe put it there on a box, and its sign-in as the config alone says it: open for a command or a fixed header, unknown for a remote server until something connects. On any computer but the one the app runs on it also lists the wsp server each thread's launch there hands an agent that takes servers on its launch, marked launch, with no file, and never turned off or removed. Read as the login the computer was added with, off each agent's config and whether its files are there: no MCP server is started and no login file is opened. A napping workspace answers what stood there when it last ran, marked stale, and is not woken.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -123,6 +123,10 @@
               "file": {
                 "type": "string"
               },
+              "launch": {
+                "type": "boolean",
+                "const": true
+              },
               "transport": {
                 "anyOf": [
                   {
@@ -236,7 +240,6 @@
               "agent",
               "name",
               "scope",
-              "file",
               "transport",
               "envNames",
               "auth",
@@ -266,7 +269,7 @@
   },
   "cloudOn": {
     "name": "servers",
-    "description": "Every MCP server each agent's own config file defines on one computer or workspace, and a workspace's project files: the agent, the file, how it is reached (its command with every value hidden, or its url's host), the names of the variables it sets or reads and never their values, whether the file switches it off, whether wsp's recipe put it there on a box, and its sign-in as the config alone says it: open for a command or a fixed header, unknown for a remote server until something connects. Read as the login the computer was added with, off each agent's config and whether its files are there: no MCP server is started and no login file is opened. A napping workspace answers what stood there when it last ran, marked stale, and is not woken.",
+    "description": "Every MCP server each agent's own config file defines on one computer or workspace, and a workspace's project files: the agent, the file, how it is reached (its command with every value hidden, or its url's host), the names of the variables it sets or reads and never their values, whether the file switches it off, whether wsp's recipe put it there on a box, and its sign-in as the config alone says it: open for a command or a fixed header, unknown for a remote server until something connects. On any computer but the one the app runs on it also lists the wsp server each thread's launch there hands an agent that takes servers on its launch, marked launch, with no file, and never turned off or removed. Read as the login the computer was added with, off each agent's config and whether its files are there: no MCP server is started and no login file is opened. A napping workspace answers what stood there when it last ran, marked stale, and is not woken.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -388,6 +391,10 @@
               "file": {
                 "type": "string"
               },
+              "launch": {
+                "type": "boolean",
+                "const": true
+              },
               "transport": {
                 "anyOf": [
                   {
@@ -501,7 +508,6 @@
               "agent",
               "name",
               "scope",
-              "file",
               "transport",
               "envNames",
               "auth",

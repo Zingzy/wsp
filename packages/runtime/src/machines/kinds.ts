@@ -13,6 +13,7 @@ import { openDaemonChannel } from "../daemon-channel.js";
 import { machineExecStream, type MachineExecOptions, type TurnWaiting } from "../machine-exec.js";
 import { writeDaemonRootsScript } from "../daemon-roots.js";
 import { PlaceForksNowhereError, placeHomeRefusal, type PlaceDoor } from "../places.js";
+import { GUEST_WSP_MCP } from "../agents-read.js";
 import { loginEnvOn, PLACE_LOGIN_ENV } from "../types/harness.js";
 import { secretEnvOf } from "../adapters.js";
 import { type ProjectImportOptions, type WorkspaceRecord, type LiveWorkspace, type StageReport, CLONE_MS, folderNamed, lastLineOf } from "../types/wiring.js";
@@ -242,7 +243,7 @@ export function kindsArea(ctx: RuntimeContext): KindsArea {
       // chip in its own path, so the one stable name for a fork's wsp is the word a turn's own shell runs. It dials
       // no host of its own, it opens a session on this machine's daemon and the daemon carries it up the socket
       // this host already holds.
-      wspMcp: () => ({ command: "wsp", args: ["mcp"] }),
+      wspMcp: () => GUEST_WSP_MCP,
       turnReach: () => ({}),
       turnRoad: "relayed",
       keepsAgents: false,
@@ -374,7 +375,7 @@ export function kindsArea(ctx: RuntimeContext): KindsArea {
             // binds for its threads, which carries the session up the link this host already holds. Only where its
             // report says that door stands: a daemon older than it, or one that could not bind it, has no such wsp,
             // and a launch naming one shows the tools failed or finds another wsp that dials a host of its own.
-            wspMcp: entry => (entry.record.place !== undefined && placeDoor.folderComputer(entry.record.place)?.tools === true ? { command: "wsp", args: ["mcp"] } : undefined),
+            wspMcp: entry => (entry.record.place !== undefined && placeDoor.folderComputer(entry.record.place)?.tools === true ? GUEST_WSP_MCP : undefined),
             turnReach: () => ({}),
             turnRoad: "relayed",
             keepsAgents: false,

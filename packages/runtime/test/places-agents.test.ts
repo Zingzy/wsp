@@ -84,6 +84,20 @@ describe("the agents on a computer you own", () => {
     expect(asked.at(-1)).toEqual({ kind: "here", projects: [] });
   });
 
+  it("hand the reader the rows that computer's last setup came to, which say the agents wsp installed there", async () => {
+    const asked: AgentsOn[] = [];
+    const { hostKey, store } = await serving({ agentsReader: { read: async on => (asked.push(on), READ), tools: async () => ({ auth: "open", readAt: "2026-10-07T12:00:00.000Z" }) }, vault: {} });
+    const { client, placeId } = await join(hostKey, { code: await code(), name: "srv", report: report("srv", { daemonVersion: DAEMON_VERSION }) });
+    sockets.push(client.ws);
+    const rows = [{ id: "agents/codex", label: "Codex", outcome: "installed" as const }, { id: "agents/claude", label: "Claude Code", outcome: "present" as const }];
+    const record = (await store.get("places", placeId)) as Record<string, unknown>;
+    await store.put("places", placeId, { ...record, applied: { hash: "h", at: "2026-10-07T12:00:00.000Z", rows } });
+    const c = await WsClient.connect(ctx.srv!.port, { token: "host-token" });
+    sockets.push(c.ws);
+    expect((await c.request("agents.read", { target: { placeId } })).ok).toBe(true);
+    expect(asked.at(-1)).toMatchObject({ kind: "box", setupRows: rows });
+  });
+
   it("keep an agent's config folder under that computer's own home, read on that computer with its links followed", async () => {
     const boxHome = mkdtempSync(joinPath(tmpdir(), "wsp-box-home-"));
     try {
