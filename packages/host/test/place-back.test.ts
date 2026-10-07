@@ -12,7 +12,8 @@ import { PassThrough } from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { placeDaemonPaths, placeFileText, type PlaceBack } from "@wsp/protocol";
 import { keyFingerprint, type HeldChild, type SshCarried, type SshTransport } from "@wsp/engine";
-import { backBindLine, backBindScript, backBinds, backNoDoorLine, backNoHostLine, backTakenLine, heldPlaceScript, placeBackHolder } from "../src/place-back.js";
+import { backBindLine, backBindScript, backBinds, backNoDoorLine, backNoHostLine, backTakenLine, placeBackHolder } from "../src/place-back.js";
+import { heldPlaceScript } from "@wsp/protocol";
 
 /** Waits for a condition the holder reaches on its own, on the loop's own turns. */
 const until = (ok: () => boolean): Promise<void> => vi.waitFor(() => expect(ok()).toBe(true), { timeout: 5_000, interval: 5 });

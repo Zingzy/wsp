@@ -155,7 +155,7 @@ export {
   type Rgb,
   type ThemePreset,
 } from "./workspace-look.js";
-export { claudeMemoryDir, claudeProjectKey, folderName, folderSlug, hiddenFolder, parentFolderName, placeDaemonPaths, placeOwnedPaths, placeProvisionPaths, probePath, repoPathOf, rootsPathIn, worktreeOf, SSH_ALIAS_PREFIX, sshAlias, standInMachinePath, standInRecordsPath, underProject, workFolderIn, type FolderMachine } from "./project-path.js";
+export { claudeMemoryDir, claudeProjectKey, folderName, folderSlug, heldPlaceScript, hiddenFolder, parentFolderName, placeDaemonPaths, placeOwnedPaths, placeProvisionPaths, probePath, repoPathOf, rootsPathIn, worktreeOf, SSH_ALIAS_PREFIX, sshAlias, standInMachinePath, standInRecordsPath, underProject, workFolderIn, type FolderMachine } from "./project-path.js";
 export * from "./bring-back.js";
 export * from "./changes.js";
 export * from "./usage.js";

@@ -60,6 +60,10 @@ pub const SET: Tool = Tool { name: SET_NAME, listed: SET_LISTED, call: |host, ar
 pub struct SetIn {
     pub computer: String,
     #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub ssh: Option<String>,
+    #[serde(default)]
     #[cfg_attr(test, schemars(with = "Option<u64>"))]
     pub threads: Option<Number>,
     #[serde(default)]
@@ -101,22 +105,12 @@ struct Placed {
 }
 
 async fn set(host: std::sync::Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
-    let SetIn { computer, threads, machines, spend, nap, turn_limit, spawn, max_machines, max_depth, recipe, reset } =
+    let SetIn { computer, name, ssh, threads, machines, spend, nap, turn_limit, spawn, max_machines, max_depth, recipe, reset } =
         input(SET_NAME, arguments)?;
     let client = host.client().await?;
     let words = record::words();
     let mut frame = Map::new();
     let place = place_id(&client, &words, &computer).await?;
-    // The recipe first, as the command line does: a setting refused after it leaves the computer following it.
-    let followed = match recipe {
-        Some(recipe) => {
-            let mut follow = Map::new();
-            follow.insert("placeId".to_owned(), Value::from(place.clone()));
-            follow.insert("recipe".to_owned(), Value::from(recipe));
-            Some(client.request::<Placed>("places.follow", follow).await?.place)
-        }
-        None => None,
-    };
     frame.insert("placeId".to_owned(), Value::from(place));
     for (key, value) in [("threads", threads), ("machines", machines), ("spendPerDayUsd", spend)] {
         if let Some(n) = value {
@@ -139,8 +133,11 @@ async fn set(host: std::sync::Arc<Host>, arguments: Value) -> Result<Answer, Ref
     if let Some(reset) = reset.filter(|r| !r.is_empty()) {
         frame.insert("reset".to_owned(), Value::from(reset));
     }
-    if let Some(place) = followed.filter(|_| frame.len() == 1) {
-        return Ok(Answer::json(&SetOut { computer: place }));
+    // One frame carries every argument, as the command line sends them, so the host checks them all before it writes.
+    for (key, value) in [("name", name), ("ssh", ssh), ("recipe", recipe)] {
+        if let Some(word) = value {
+            frame.insert(key.to_owned(), Value::from(word));
+        }
     }
     let Placed { place } = client.request("places.set", frame).await?;
     Ok(Answer::json(&SetOut { computer: place }))

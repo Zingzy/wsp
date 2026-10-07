@@ -2,6 +2,7 @@
 import {
   PlaceSettings,
   type PlaceSettingsAsk,
+  type PlaceSetAlso,
   type PlaceSettingWord,
   PendingComputer,
   RecipeFile,
@@ -530,9 +531,11 @@ export interface PlaceDoor {
    * answer. Nothing is installed and nothing is left running either way. */
   dial(placeId: string, now: number): Promise<PlaceDial>;
   /** Sets what a person may set on one place, each key left out keeping what stands and each word reset taking its
-   * setting back to the default, and answers the row as it now reads. Refused as usage for a place this host does
-   * not hold and for a setting the place's kind does not take. */
-  set(placeId: string, set: PlaceSettingsAsk, reset?: readonly PlaceSettingWord[]): Promise<{ place: PlaceView }>;
+   * setting back to the default; on a computer the person added `also` renames it, gives it a new ssh login read as
+   * the same computer first, and makes it follow a recipe by slug. Answers the row as it now reads. Everything is
+   * checked before anything is written: refused as usage for a place this host does not hold, a setting the place's
+   * kind does not take, a name another row answers to and a login that reaches another computer. */
+  set(placeId: string, set: PlaceSettingsAsk, reset?: readonly PlaceSettingWord[], also?: PlaceSetAlso): Promise<{ place: PlaceView }>;
   /** The port on this computer's loopback that carries to the daemon on a linked place, opened at the first ask
    * and held with the link. Throws with the place's name when it is not connected or has said no port. */
   road(placeId: string): Promise<number>;

@@ -993,8 +993,8 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
                 send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
                 return;
               }
-              const { id: _id, op: _op, placeId, reset, ...set } = msg;
-              send({ id: msg.id, ok: true, ...(await places().set(placeId, set, reset)) });
+              const { id: _id, op: _op, placeId, reset, name, ssh, recipe, ...set } = msg;
+              send({ id: msg.id, ok: true, ...(await places().set(placeId, set, reset, { name, ssh, recipe: recipe === undefined || recipe === NO_RECIPE ? recipe : (await recipeNamed(recipe)).slug })) });
               return;
             }
             case "places.follow": {

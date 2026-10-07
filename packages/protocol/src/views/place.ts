@@ -4,7 +4,7 @@ import { z } from "zod";
 import { AgentSignInState } from "../agents-report.js";
 import { KNOWN_HOSTS, PLACE_INSTALL, plural, thisComputer } from "../format.js";
 import { RecipeFile } from "../recipe-file.js";
-import { HERE_PLACE_ID, namesPlace } from "../place-word.js";
+import { HERE_PLACE_ID, namesPlace, placeRenameRefusal, placeSshRefusal, placeSshOtherRefusal, placeSshUncheckedRefusal, type RefusalHalves } from "../place-word.js";
 import { NAP_AFTER_MAX_MS, TURN_LIMIT_MAX_MS } from "../place-state.js";
 import { isPlainPath, PortForward, RelayPort } from "../wire/limits.js";
 import { MachineSizeOffer, WorkspaceSize } from "../wire/capabilities.js";
@@ -435,6 +435,13 @@ export type PlaceSettings = z.infer<typeof PlaceSettings>;
 /** What a set asks for: the settings, with the agents switch as a patch over the parts the place holds. */
 export const PlaceSettingsAsk = PlaceSettings;
 export type PlaceSettingsAsk = z.infer<typeof PlaceSettingsAsk>;
+/** What a set takes on a computer the person added beside its settings: a new name, a new ssh login and the recipe
+ * it follows. */
+export interface PlaceSetAlso {
+  name?: string | undefined;
+  ssh?: string | undefined;
+  recipe?: string | undefined;
+}
 /** A setting on a place by the word the command line and the tool name it with, which a reset takes. */
 export const PlaceSettingWord = z.enum(["threads", "machines", "spend", "nap", "turn-limit", "spawn", "max-depth"]);
 export type PlaceSettingWord = z.infer<typeof PlaceSettingWord>;
@@ -607,7 +614,7 @@ export const PlaceUpdateReply = z.object({
 });
 export type PlaceUpdateReply = z.infer<typeof PlaceUpdateReply>;
 
-export { HERE_PLACE_ID, namesPlace };
+export { HERE_PLACE_ID, namesPlace, placeRenameRefusal, placeSshRefusal, placeSshOtherRefusal, placeSshUncheckedRefusal, type RefusalHalves };
 
 /** What one row of the places list holds of the person's money: the spend it has taken since midnight and since
  * the first of the month, over every workspace that stood on it then, deleted ones included, and what it is burning
