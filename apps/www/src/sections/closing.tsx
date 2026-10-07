@@ -22,7 +22,7 @@ export function Closing() {
         <div className="rise mx-auto flex min-h-[70svh] max-w-7xl flex-col items-center justify-center px-5 py-24 text-center sm:px-8 lg:py-32">
           <h2 className="font-display text-[clamp(3rem,10vw,6rem)] leading-none">Fork it.</h2>
           <p className="mt-6 max-w-xl text-lg text-foreground/85">
-            Node 22 or newer, a{" "}
+            A{" "}
             <a href={SOLARI} className="text-foreground underline decoration-input underline-offset-4 hover:decoration-foreground">
               Solari
             </a>{" "}

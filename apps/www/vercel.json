@@ -6,5 +6,16 @@
       "**": false
     }
   },
-  "ignoreCommand": "git diff HEAD^ HEAD --quiet -- . ../../pnpm-lock.yaml ../../package.json"
+  "ignoreCommand": "git diff HEAD^ HEAD --quiet -- . ../../pnpm-lock.yaml ../../package.json",
+  "headers": [
+    {
+      "source": "/install",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "text/plain; charset=utf-8"
+        }
+      ]
+    }
+  ]
 }

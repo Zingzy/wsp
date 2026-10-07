@@ -29,7 +29,7 @@ const QUESTIONS = [
   },
   {
     q: "Does it run on Linux?",
-    a: "wsp runs on macOS and Linux with Node 22 or newer, and the desktop app ships for both. The machines themselves are Debian.",
+    a: "wsp runs on macOS and Linux, and the install line puts the desktop app and the wsp command on either. The machines themselves are Debian.",
   },
   {
     q: "What does AGPL mean for me?",

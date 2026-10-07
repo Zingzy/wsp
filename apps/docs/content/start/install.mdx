@@ -4,17 +4,21 @@ import { Callout, Tabs, Tab } from 'scalar-mdx-components'
 
 ## Before you start
 
-- Node 22 or newer, on macOS or Linux.
+- macOS, or Linux on x64.
 - A [Solari](https://console.getsolari.com) account and API key. Solari provides the machines. They cost money while they run, about $0.11 an hour for the 2 vCPU, 4 GB size, and nap on their own when idle.
 - A way for Claude Code to sign in: an Anthropic API key, or a Claude subscription you log in with on the machine during the first run. Codex signs in the same way.
 
-## The command line
+## The one line
 
 ```bash
-npm i -g @wsp-labs/wsp
+curl --proto '=https' --tlsv1.2 -fsSL https://usewsp.com/install | sh
 ```
 
-`wsp --version` prints the version. The same package holds the command line, the host and the app, so this is the whole install.
+On a Mac it puts wsp.app in `/Applications`, or `~/Applications` where that is not writable, and opens it once. On Linux it puts the AppImage in `~/Applications`, and on a computer missing the libraries the app links (a server, usually) it installs them with apt-get, saying so first; that is the one step that may ask for sudo. Either way the `wsp` command lands in `~/.wsp/bin`, which the script adds to PATH for new shells, and `wsp --version` prints the version.
+
+Every download is an asset of a release on [github.com/wsp-labs/wsp](https://github.com/wsp-labs/wsp/releases), checked against the sha256 GitHub publishes for it before anything is unpacked. `WSP_VERSION=1.2.3` installs that release instead of the latest, and running the line again upgrades in place.
+
+With Node 22 or newer, `npm i -g @wsp-labs/wsp` installs the command line alone: the same package holds the command line, the host and the app's page.
 
 ## Two ways to set up
 
