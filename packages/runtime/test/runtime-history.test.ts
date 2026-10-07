@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { catalogProbeCommand, parseCatalogProbe } from "@wsp/adapter-claude";
 import { diskFullLine } from "@wsp/protocol";
-import { foldThreads, type AdapterEvent, type EventUnion, type TurnResult, type WorkspaceStatus } from "@wsp/protocol";
+import { foldThreads, type AdapterEvent, type EventUnion, type SessionEvent, type TurnResult, type WorkspaceStatus } from "@wsp/protocol";
 import { DISK_USE_CMD } from "@wsp/engine";
 import { harnessCatalog } from "../src/harness-catalog.js";
 import { CATALOG_TTL_MS, TOOL_RESULT_KEPT, TRANSCRIPT_BYTES, TRANSCRIPT_FLUSH_MS, createRuntime, type HarnessAdapterFactory, type HarnessStartOptions } from "../src/runtime.js";
@@ -958,6 +958,66 @@ describe("runtime session history", () => {
     for (const [b, threadId] of busy.entries()) expect(history.some(e => e.threadId === threadId && e.type === "session.start" && e.prompt === `busy ${b}.19`)).toBe(true);
     expect(jsonBytes(history)).toBeLessThanOrEqual(TRANSCRIPT_BYTES);
     await rt.close();
+  });
+
+  /** A harness whose turns each say what the agent held after two calls, a subagent's between them, then compact,
+   * and whose result names a figure only where `named` says. A turn with `hang` never ends. */
+  const holding = (o: { named: boolean[]; hang?: boolean }): HarnessAdapterFactory => {
+    let turns = 0;
+    return () => ({
+      steers: false,
+      start: ({ onEvent }) => {
+        const sessionId = "44444444-4444-4444-8444-444444444444";
+        const named = o.named[turns++] === true;
+        const result: TurnResult = { status: "completed", text: "", ...(named ? { tokens: { input: 1, output: 1, context: 3_100, window: 200_000 } } : {}) };
+        const feed: AdapterEvent[] = [
+          { type: "session.start", sessionId },
+          { type: "turn.delta", sessionId, kind: "text", text: "before" },
+          { type: "turn.usage", sessionId, tokens: 26_000, context: 26_000, window: 200_000 },
+          { type: "turn.usage", sessionId, tokens: 900 },
+          { type: "turn.usage", sessionId, tokens: 27_500, context: 27_500, window: 200_000 },
+          { type: "turn.compacted", sessionId, before: 27_500, after: 3_100 },
+        ];
+        const finished = (async () => {
+          for (const e of feed) onEvent(e);
+          if (o.hang === true) return new Promise<TurnResult>(() => {});
+          onEvent({ type: "turn.done", sessionId, result });
+          onEvent({ type: "session.end", sessionId, exitCode: 0, sawResult: true });
+          return result;
+        })();
+        return { localId: sessionId, finished, interrupt: async () => {} };
+      },
+    });
+  };
+  const heldRows = (events: readonly SessionEvent[]) => events.flatMap(e => (e.type === "session.context" ? [[e.turnId, e.context, e.window]] : e.type === "session.compacted" ? [["compacted", e.line, e.before, e.after]] : []));
+
+  it("passes what the agent held after each of its own calls by on the bus, and writes it only for a turn whose result names none", async () => {
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: holding({ named: [false, true] }) } });
+    onTestFinished(() => rt.close());
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
+    const passed: unknown[] = [];
+    rt.events.on("session.context", e => passed.push([e.type === "session.context" ? e.context : 0]));
+    const first = await rt.sessions.start(ws.id, { prompt: "/compact" });
+    await first.finished;
+    await (await rt.sessions.start(ws.id, { thread: first.view().threadId!, prompt: "again" })).finished;
+    // A subagent's call names no figure and passes nothing; the first turn's row goes out as it is written.
+    expect(passed).toEqual([[26_000], [27_500], [27_500], [26_000], [27_500]]);
+    const history = await rt.sessions.history(ws.id);
+    // The first turn's result named nothing, so its last reading is its row; the second's result is the reading.
+    expect(heldRows(history)).toEqual([["compacted", 1, 27_500, 3_100], [first.turnId, 27_500, 200_000], ["compacted", 1, 27_500, 3_100]]);
+  });
+
+  it("writes what a running turn's agent held as its host closes, for the next window to read off the transcript", async () => {
+    const store = memoryStore();
+    const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: holding({ named: [], hang: true }) } });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
+    const handle = await rt.sessions.start(ws.id, { prompt: "work" });
+    await until(async () => heldRows(await rt.sessions.history(ws.id)).length === 1, 5_000);
+    expect(heldRows(await rt.sessions.history(ws.id))).toEqual([["compacted", 1, 27_500, 3_100]]);
+    await rt.close();
+    const again = createRuntime({ backend: stubBackend(), store, adapters: {} });
+    onTestFinished(() => again.close());
+    expect(heldRows(await again.sessions.history(ws.id))).toEqual([["compacted", 1, 27_500, 3_100], [handle.turnId, 27_500, 200_000]]);
   });
 
   it("keeps a tool result's opening characters in the transcript and hands the live stream all of it", async () => {

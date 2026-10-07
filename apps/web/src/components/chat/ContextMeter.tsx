@@ -5,15 +5,16 @@
 // hover, in the sidebar tiles' card skin, says the share, the count over the
 // window and a meter, with Compact context where the thread's agent has a
 // compaction of its own. The thread's view publishes its reading and that act,
-// since the top bar stands outside it; a thread whose agent reports no limit
-// draws an empty ring and says the count alone.
+// since the top bar stands outside it. A thread that ran a turn and has no
+// reading draws an empty ring whose card says why, and one with no limit to
+// measure against says the count and why the limit is missing.
 import { useEffect, useRef } from "react";
 import { Minimize2Icon } from "lucide-react";
 import { create } from "zustand";
 import type { TurnSummary } from "../../adapt";
 import { Button } from "../ui/button";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
-import { CONTEXT_WORDS, contextFigure, contextPercent, contextSnapshot, contextTitle, type ContextSnapshot } from "./contextMeter.logic";
+import { CONTEXT_WORDS, contextFigure, contextMissing, contextPercent, contextSnapshot, contextTitle, type ContextSnapshot } from "./contextMeter.logic";
 
 /** The thread's own compaction: `held` is why it cannot run now, in the composer's words, or null. */
 export interface ContextCompact {
@@ -22,8 +23,10 @@ export interface ContextCompact {
 }
 
 interface ContextReading {
-  readonly snapshot: ContextSnapshot;
-  readonly agentLabel: string;
+  /** Null on a thread that ran a turn and has no reading yet, or whose agent gives none. */
+  readonly snapshot: ContextSnapshot | null;
+  /** Why the reading, or its limit, is missing; null where nothing is. */
+  readonly missing: string | null;
   readonly compact: ContextCompact | null;
 }
 
@@ -33,11 +36,12 @@ const useContextStore = create<{ byWorkspaceId: Record<string, ContextReading | 
  * is null where the thread's agent has no compaction wsp can run. */
 export function usePublishContext(
   workspaceId: string,
-  turns: ReadonlyArray<Pick<TurnSummary, "tokens">>,
+  turns: ReadonlyArray<Pick<TurnSummary, "tokens" | "held" | "state">>,
   agentLabel: string,
   compact: ContextCompact | null = null,
 ): void {
   const snapshot = contextSnapshot(turns);
+  const missing = contextMissing(turns, agentLabel);
   const used = snapshot?.used;
   const max = snapshot?.max;
   // The act reads the composer's latest state when clicked, so a new closure each render is not a new reading.
@@ -46,11 +50,11 @@ export function usePublishContext(
   const offered = compact !== null;
   const held = compact?.held ?? null;
   useEffect(() => {
-    const reading = snapshot === null ? undefined : { snapshot, agentLabel, compact: offered ? { run: () => runRef.current?.(), held } : null };
+    const reading = snapshot === null && missing === null ? undefined : { snapshot, missing, compact: offered && snapshot !== null ? { run: () => runRef.current?.(), held } : null };
     useContextStore.setState(s => ({ byWorkspaceId: { ...s.byWorkspaceId, [workspaceId]: reading } }));
     return () => useContextStore.setState(s => ({ byWorkspaceId: { ...s.byWorkspaceId, [workspaceId]: undefined } }));
     // The reading is its numbers; a new array of the same turns is the same reading.
-  }, [workspaceId, used, max, agentLabel, offered, held]);
+  }, [workspaceId, used, max, missing, offered, held]);
 }
 
 const RADIUS = 9.75;
@@ -59,10 +63,10 @@ const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
 export function ContextRing({ workspaceId }: { workspaceId: string }) {
   const reading = useContextStore(s => s.byWorkspaceId[workspaceId]);
   if (reading === undefined) return null;
-  const { snapshot, agentLabel, compact } = reading;
-  const title = contextTitle(snapshot, agentLabel);
-  const share = snapshot.share ?? 0;
-  const percent = contextPercent(snapshot);
+  const { snapshot, missing, compact } = reading;
+  const title = contextTitle(snapshot, missing);
+  const share = snapshot?.share ?? 0;
+  const percent = snapshot === null ? null : contextPercent(snapshot);
   return (
     <Popover>
       <PopoverTrigger
@@ -92,13 +96,15 @@ export function ContextRing({ workspaceId }: { workspaceId: string }) {
         <div className="flex min-w-0 flex-col gap-2 py-1">
           <div className="flex items-baseline justify-between gap-3">
             <p className="whitespace-nowrap font-medium text-foreground">{CONTEXT_WORDS.head}</p>
-            <p data-context-figures className="flex shrink-0 gap-3 font-mono text-xs text-muted-foreground tabular-nums">
-              {percent === null ? null : <span>{percent}</span>}
-              <span>{contextFigure(snapshot)}</span>
-            </p>
+            {snapshot === null ? null : (
+              <p data-context-figures className="flex shrink-0 gap-3 font-mono text-xs text-muted-foreground tabular-nums">
+                {percent === null ? null : <span>{percent}</span>}
+                <span>{contextFigure(snapshot)}</span>
+              </p>
+            )}
           </div>
-          {snapshot.share === null ? (
-            <p className="text-muted-foreground">{CONTEXT_WORDS.noLimit(agentLabel)}</p>
+          {snapshot === null || snapshot.share === null ? (
+            <p data-context-missing className="text-muted-foreground">{missing}</p>
           ) : (
             <div role="progressbar" aria-label={CONTEXT_WORDS.head} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(share * 100)} className="h-1 w-full overflow-hidden rounded-full bg-foreground/10">
               <div data-context-meter className="h-full rounded-full bg-foreground/55 transition-[width] duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none" style={{ width: `${share * 100}%` }} />

@@ -1,0 +1,13 @@
+{
+  "at": "/",
+  "fixture": "meter",
+  "steps": [
+    "390:key:Escape",
+    "390:sidebar=trigger",
+    "row-id=thread:failed",
+    "390:key:Escape",
+    "context-ring"
+  ],
+  "wait": "context-missing",
+  "settleMs": 700
+}

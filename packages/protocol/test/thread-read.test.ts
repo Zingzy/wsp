@@ -247,6 +247,22 @@ describe("a thread's messages", () => {
     ]);
   });
 
+  it("says a compaction as a tool row, with the figures the agent gave", () => {
+    const rows = threadMessages(
+      [
+        { type: "session.start", ...SCOPE, turnId: "u1", at: AT, prompt: "/compact" },
+        { type: "session.compacted", ...SCOPE, turnId: "u1", at: AT + 1, before: 27_500, after: 3_100 },
+        { type: "session.compacted", ...SCOPE, turnId: "u1", at: AT + 2 },
+      ],
+      "t1",
+    );
+    expect(rows.map(r => [r.who, r.text])).toEqual([
+      ["person", "/compact"],
+      ["tool", "Compacted the context, 27.5k to 3.1k tokens"],
+      ["tool", "Compacted the context"],
+    ]);
+  });
+
   it("says what a turn changed as one tool row above the turn's end, however late the count lands", () => {
     const files = [
       { path: "a.ts", kind: "modified", additions: 12, deletions: 3 },

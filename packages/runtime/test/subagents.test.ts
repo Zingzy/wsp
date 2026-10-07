@@ -203,6 +203,31 @@ describe("an agent's own subagents as children of its thread", () => {
     await rt2.close();
   });
 
+  it("a run re-read after a restart writes each compaction once, and every one a host from before them never wrote", async () => {
+    const h = machineRuns();
+    const store = memoryStore();
+    const backend = stubBackend();
+    const { rt, ws, run } = await begin(h, store, backend);
+    const rows = (events: readonly SessionEvent[]) => events.flatMap(e => (e.type === "session.compacted" ? [`compacted to ${e.after}`] : e.type === "session.delta" ? [e.text] : []));
+    // The host before recorded the deltas and no compaction.
+    h.logOnly(run, { type: "turn.compacted", sessionId: "sess-1", before: 10, after: 5 });
+    h.emit(run, { type: "turn.delta", sessionId: "sess-1", kind: "text", text: "one" });
+    await until(async () => rows(await rt.sessions.history(ws.id)).length === 1);
+    await rt.close();
+
+    const rt2 = createRuntime({ backend, store, adapters: { claude: h.adapter } });
+    await until(async () => rows(await rt2.sessions.history(ws.id)).length === 2);
+    h.emit(run, { type: "turn.compacted", sessionId: "sess-1", before: 9, after: 2 });
+    await until(async () => rows(await rt2.sessions.history(ws.id)).length === 3);
+    await rt2.close();
+
+    const rt3 = createRuntime({ backend, store, adapters: { claude: h.adapter } });
+    h.emit(run, { type: "turn.delta", sessionId: "sess-1", kind: "text", text: "two" });
+    await until(async () => rows(await rt3.sessions.history(ws.id)).includes("two"));
+    expect(rows(await rt3.sessions.history(ws.id))).toEqual(["one", "compacted to 5", "compacted to 2", "two"]);
+    await rt3.close();
+  });
+
   it("a resumed child stays while its second start row is in the ring, though its first has left", async () => {
     const h = machineRuns();
     const { rt, ws, run } = await begin(h);

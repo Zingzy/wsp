@@ -106,6 +106,53 @@ describe("deriveChatThread", () => {
   });
 });
 
+describe("a compaction in the thread", () => {
+  const scope = (turnId: string) => ({ workspaceId: CHAT_WS, sessionId: "sess_c", threadId: "thr_c", turnId });
+  const at = (n: number) => Date.parse(T0) + n * 1000;
+  const used = (turnId: string, n: number, context: number): SessionEvent[] => [
+    { type: "session.start", ...scope(turnId), at: at(n), prompt: "work" },
+    { type: "session.delta", ...scope(turnId), at: at(n + 1), kind: "text", text: "done", line: 1 },
+    { type: "session.done", ...scope(turnId), at: at(n + 2), result: { status: "completed", tokens: { input: 1, output: 1, context } } },
+    { type: "session.end", ...scope(turnId), at: at(n + 2), exitCode: 0, sawResult: true },
+  ];
+  const compact = (after: number, before?: number): SessionEvent[] => [
+    { type: "session.start", ...scope("u2"), at: at(10), prompt: "/compact" },
+    { type: "session.compacted", ...scope("u2"), at: at(11), line: 1, after, ...(before !== undefined ? { before } : {}) },
+    { type: "session.done", ...scope("u2"), at: at(12), result: { status: "completed", tokens: { input: 0, output: 0, context: after } } },
+    { type: "session.end", ...scope("u2"), at: at(12), exitCode: 0, sawResult: true },
+  ];
+  const lines = (events: SessionEvent[]) => {
+    const view = deriveChatThread(state(events));
+    const rows = deriveMessagesTimelineRows({ timelineEntries: view.entries, turns: view.turns, isWorking: false, activeTurnStartedAt: null });
+    return rows.flatMap(r => (r.kind === "work" ? r.groupedEntries.map(e => [e.tone, e.label]) : []));
+  };
+
+  it("stands as its own line under the settled /compact turn, with the figures the agent gave", () => {
+    expect(lines([...used("u1", 0, 40_000), ...compact(3_100, 27_500)])).toEqual([["compaction", "Compacted the context, 27.5k to 3.1k tokens"]]);
+  });
+
+  it("puts what the agent held after its last call on the running turn, where the meter reads it before the turn's result", () => {
+    const view = deriveChatThread(state([
+      { type: "session.start", ...scope("u1"), at: at(0), prompt: "work" },
+      { type: "session.context", ...scope("u1"), at: at(1), context: 12_000 },
+      { type: "session.context", ...scope("u1"), at: at(2), context: 28_514, window: 200_000 },
+    ]));
+    expect(view.turns.map(t => [t.state, t.held])).toEqual([["running", { context: 28_514, window: 200_000 }]]);
+    expect(view.entries).toEqual([expect.objectContaining({ kind: "message" })]);
+  });
+
+  it("keeps only the latest reading of a turn as each of the agent's calls passes one by", () => {
+    const start: SessionEvent = { type: "session.start", ...scope("u1"), at: at(0), prompt: "work" };
+    const one = reduceEvent(state([start]), { type: "session.context", ...scope("u1"), at: at(1), context: 12_000 }, T0);
+    const two = reduceEvent(one, { type: "session.context", ...scope("u1"), at: at(2), context: 28_514 }, T0);
+    expect(two.events.map(e => (e.type === "session.context" ? e.context : e.type))).toEqual(["session.start", 28_514]);
+  });
+
+  it("says only what the agent named, as the command line does, where it named no figure for before", () => {
+    expect(lines([...used("u1", 0, 40_000), ...compact(3_100)])).toEqual([["compaction", "Compacted the context to 3.1k tokens"]]);
+  });
+});
+
 describe("stabilizeEntries", () => {
   it("returns the previous objects for equal content and the new ones otherwise", () => {
     const a = deriveChatThread(state(CHAT_STREAM)).entries;

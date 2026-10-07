@@ -176,7 +176,7 @@ export interface RuntimeCore {
   readonly adapters: Record<string, HarnessAdapterFactory>;
   readonly local: LocalWiring | undefined;
   readonly placeDoor: PlaceDoor | undefined;
-  readonly bus: EventBus & { emit(event: EventUnion): void; };
+  readonly bus: EventBus & { emit(event: EventUnion): void; pass(event: EventUnion): void; };
   readonly goneConfirmMs: number;
   readonly lateReadMs: number;
   readonly clock: Clock;
@@ -212,6 +212,8 @@ export interface RuntimeCore {
   readonly resumeOnReset: (threadId: string, at: number) => void;
   readonly sessions: Map<string, SessionEntry>;
   readonly execs: Set<{ workspaceId: string; end: (reason: string) => void }>;
+  /** Each running turn's row of what its agent held, written as the host closes. */
+  readonly heldAtClose: Set<() => void>;
   readonly indexFlushes: Map<string, Promise<void>>;
   readonly transcripts: Map<string, SessionEvent[]>;
   readonly rows: TranscriptRows | undefined;

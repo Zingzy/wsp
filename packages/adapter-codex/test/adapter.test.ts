@@ -185,12 +185,12 @@ describe("a Codex turn's tokens and plan on the app server", () => {
     expect(result.tokens).toEqual({ input: 42_000, cached: 0, cacheWrite: 0, output: 200, reasoning: 0, context: 22_100, window: 258_400 });
   });
 
-  it("says what each model call drew as the server reports it, so the account's draw right now can be read", async () => {
+  it("says what each model call drew as the server reports it, and what the thread then holds of its window", async () => {
     const { events, onEvent } = collect();
     await adapterOver(launcher(scripted([usage([50_000, 900], [20_000, 100]), usage([72_000, 1_000], [22_000, 100]), agentMessage("m1", "done"), completed("completed")]))).start({ prompt: "again", resume: THREAD_ID, onEvent }).finished;
     expect(events.filter(e => e.type === "turn.usage")).toEqual([
-      { type: "turn.usage", sessionId: THREAD_ID, tokens: 20_100 },
-      { type: "turn.usage", sessionId: THREAD_ID, tokens: 22_100 },
+      { type: "turn.usage", sessionId: THREAD_ID, tokens: 20_100, context: 20_100, window: 258_400 },
+      { type: "turn.usage", sessionId: THREAD_ID, tokens: 22_100, context: 22_100, window: 258_400 },
     ]);
   });
 
@@ -198,7 +198,7 @@ describe("a Codex turn's tokens and plan on the app server", () => {
     const stamped = usage([50_000, 900], [20_000, 100]).replace(/}$/, `,"emittedAtMs":1790521480354}`);
     const { events, onEvent } = collect();
     await adapterOver(launcher(scripted([stamped, agentMessage("m1", "done"), completed("completed")]))).start({ prompt: "again", resume: THREAD_ID, onEvent }).finished;
-    expect(events.filter(e => e.type === "turn.usage")).toEqual([{ type: "turn.usage", sessionId: THREAD_ID, tokens: 20_100, at: 1790521480354 }]);
+    expect(events.filter(e => e.type === "turn.usage")).toEqual([{ type: "turn.usage", sessionId: THREAD_ID, tokens: 20_100, context: 20_100, window: 258_400, at: 1790521480354 }]);
   });
 
   it("reads the plan the server updates as the turn's steps, the step under way as working", async () => {
@@ -894,6 +894,8 @@ describe("a subagent's frames on its lead's stream", () => {
     expect(tasks(events).at(-1)).toBe(0);
     expect(live.wires[0]!.closed).toBe(true);
     expect(events.filter(e => e.type === "turn.usage").map(e => (e as { tokens: number }).tokens)).toEqual([900, 18_000]);
+    // The child's call says nothing of what the lead holds.
+    expect(events.filter(e => e.type === "turn.usage").map(e => (e as { context?: number }).context)).toEqual([undefined, 18_000]);
   });
 
   it("a child whose turn failed reads failed, and one a server's activity says completed reads done", async () => {
@@ -1581,6 +1583,33 @@ describe("a Codex thread's own compaction", () => {
   it("reads what the thread holds after the compaction off the usage line's total, where it reports no input or output", async () => {
     const result = await adapterOver(launcher(compactingServer)).start({ prompt: "/compact", resume: THREAD_ID, onEvent: () => {} }).finished;
     expect(result.tokens).toMatchObject({ context: 4_607, window: 258_400 });
+  });
+
+  it("says the /compact turn's compaction once, with what the thread holds after it", async () => {
+    const events: AdapterEvent[] = [];
+    await adapterOver(launcher(compactingServer)).start({ prompt: "/compact", resume: THREAD_ID, onEvent: e => events.push(e) }).finished;
+    expect(events.filter(e => e.type === "turn.compacted")).toEqual([{ type: "turn.compacted", sessionId: THREAD_ID, after: 4_607 }]);
+  });
+
+  it("says a compaction the server ran by itself at a turn's start, with what the thread held before it and after it", async () => {
+    // The recording's first line names its own thread and turn, swapped here for the test's.
+    const [head, ...recorded] = fixtureLines("auto-compaction");
+    const ids = parse(head!) as { threadId: string; turnId: string };
+    const [before, ...turn] = recorded.map(line => line.replaceAll(ids.threadId, THREAD_ID).replaceAll(ids.turnId, TURN_ID));
+    const server = (seed: readonly string[]): Wire => {
+      const w = wire({
+        onWrite: (message, self) => {
+          if (message.method === "thread/resume") self.push(...opened(), before!);
+          if (message.method === "turn/start") self.push('{"id":"wsp-turn","result":{}}', ...turn);
+        },
+      });
+      for (const line of seed) void w.stream.write(line);
+      return w;
+    };
+    const events: AdapterEvent[] = [];
+    const result = await adapterOver(launcher(server)).start({ prompt: "go", resume: THREAD_ID, onEvent: e => events.push(e) }).finished;
+    expect(result.status).toBe("completed");
+    expect(events.filter(e => e.type === "turn.compacted")).toEqual([{ type: "turn.compacted", sessionId: THREAD_ID, before: 31_250, after: 18_935 }]);
   });
 
   it("sends any other message as a turn, /compact with words after it included", async () => {

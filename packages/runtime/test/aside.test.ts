@@ -45,6 +45,7 @@ function answering(asked: AsideQuestion[], o: { announce?: boolean; aside?: bool
       : {
           aside: async (q: AsideQuestion) => {
             asked.push(q);
+            for (const piece of ["You are in ", "/root/b"]) q.onText?.(piece);
             return { text: ANSWER };
           },
         }),
@@ -100,8 +101,30 @@ describe("a side question beside a thread", () => {
     expect(await rt.sessions.aside(first, "what did I last ask?")).toEqual({ text: ANSWER });
     // The row named is the thread's first; the question goes at the latest one's folder and model.
     expect(asked).toEqual([{ session: SESSION, question: "what did I last ask?", cwd: "/root/b", model: "claude-sonnet-5" }]);
+    expect(asked[0]!.onText).toBeUndefined();
     expect(await rt.sessions.history(workspaceId)).toEqual(history);
     expect(await rt.sessions.list(workspaceId)).toEqual(rows);
+  });
+
+  it("passes each piece of the answer by under the question's id while it is written, and keeps none of them for a replay", async () => {
+    rt = runtime(answering(asked));
+    const { first, workspaceId } = await twoTurns();
+    const threadId = (await rt.sessions.list(workspaceId))[0]!.threadId;
+    const { head } = rt.events.since(0, undefined);
+    const seen: unknown[] = [];
+    const off = rt.events.on("aside.text", e => seen.push(e));
+    expect(await rt.sessions.aside(first, "what did I last ask?", undefined, "ask-1")).toEqual({ text: ANSWER });
+    off();
+    expect(seen).toEqual([
+      { type: "aside.text", workspaceId, threadId, askId: "ask-1", text: "You are in ", seq: head },
+      { type: "aside.text", workspaceId, threadId, askId: "ask-1", text: "/root/b", seq: head },
+    ]);
+    expect(rt.events.since(head, undefined).events).toEqual([]);
+    // Asked with no id, the pieces go nowhere.
+    seen.length = 0;
+    rt.events.on("aside.text", e => seen.push(e));
+    await rt.sessions.aside(first, "again?");
+    expect(seen).toEqual([]);
   });
 
   it("hands the side question the wsp server and the host pair a turn of the thread gets, and takes the token back once it is answered", async () => {

@@ -58,7 +58,7 @@ export function deriveMessagesTimelineRows(input: DeriveRowsInput): MessagesTime
   const activeToolEntries: Array<Extract<TimelineEntry, { kind: "work" }>> = [];
   for (let i = entries.length - 1; i >= activeTurnHeaderIndex; i--) {
     const entry = entries[i]!;
-    if (!belongsToActiveTurn(entry, i) || entry.kind !== "work" || entry.entry.tone === "error") break;
+    if (!belongsToActiveTurn(entry, i) || entry.kind !== "work" || standsAlone(entry.entry)) break;
     activeToolEntries.unshift(entry);
   }
   const visibleActive = activeToolEntries.filter(e => isVisibleInGroup(e.entry, true));
@@ -111,7 +111,7 @@ export function deriveMessagesTimelineRows(input: DeriveRowsInput): MessagesTime
     if (collapsed.has(entry.id) || activeIds.has(entry.id)) continue;
 
     if (entry.kind === "work") {
-      if (entry.entry.tone === "error") {
+      if (standsAlone(entry.entry)) {
         rows.push({ kind: "work", id: entry.id, createdAt: entry.createdAt, groupedEntries: [entry.entry], isExpandedToolGroup: false });
         continue;
       }
@@ -119,7 +119,7 @@ export function deriveMessagesTimelineRows(input: DeriveRowsInput): MessagesTime
       let cursor = index + 1;
       while (cursor < entries.length) {
         const next = entries[cursor]!;
-        if (next.kind !== "work" || next.entry.tone === "error" || activeIds.has(next.id) || collapsed.has(next.id) || folds.has(next.id)) break;
+        if (next.kind !== "work" || standsAlone(next.entry) || activeIds.has(next.id) || collapsed.has(next.id) || folds.has(next.id)) break;
         grouped.push(next.entry);
         cursor++;
       }
@@ -242,9 +242,10 @@ function deriveTurnFolds(
   const folds = new Map<string, TurnFold>();
   for (const [turnId, group] of groups) {
     if (turnId === unsettledTurnId || group.streaming) continue;
-    // Error rows stay visible on a settled turn: a failed turn often has no terminal message to stand in for them.
-    // So does the turn's proposed plan, which is what the turn was for as much as its last words.
-    const kept = (e: TimelineEntry): boolean => e.id === group.terminalId || (e.kind === "work" && e.entry.tone === "error") || e.kind === "proposed-plan";
+    // Rows that stand alone stay visible on a settled turn: a failed turn often has no terminal message to stand in
+    // for its error, and a compaction is all a /compact turn did. So does the turn's proposed plan, which is what the
+    // turn was for as much as its last words.
+    const kept = (e: TimelineEntry): boolean => e.id === group.terminalId || (e.kind === "work" && standsAlone(e.entry)) || e.kind === "proposed-plan";
     const hidden = new Set(group.entries.filter(e => !kept(e)).map(e => e.id));
     if (hidden.size === 0) continue;
     const firstHidden = group.entries.find(e => hidden.has(e.id))!;
@@ -342,6 +343,9 @@ function expandedGroupRow(id: string, createdAt: string, grouped: ReadonlyArray<
   return { kind: "work", id: `${id}:details`, createdAt, groupedEntries: grouped, isExpandedToolGroup: true };
 }
 
+/** A row no group folds and no settled turn hides: an error, and a compaction of the agent's context. */
+const standsAlone = (entry: WorkLogEntry): boolean => entry.tone === "error" || entry.tone === "compaction";
+
 export function isToolLike(entry: WorkLogEntry): boolean {
   if (entry.tone === "tool" || entry.tone === "thinking" || entry.tone === "error") return true;
   if (entry.command !== undefined && entry.command.trim().length > 0) return true;
@@ -436,6 +440,7 @@ const TONE_GROUP_KINDS: Record<WorkLogTone, ToolGroupSummaryKind> = {
   tool: "tone-tool",
   notice: "other",
   error: "other",
+  compaction: "other",
 };
 
 export function toolGroupSummaryKind(entries: ReadonlyArray<WorkLogEntry>): ToolGroupSummaryKind {

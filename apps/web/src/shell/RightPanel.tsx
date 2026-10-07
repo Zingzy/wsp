@@ -82,7 +82,7 @@ const viewOf = (kind: RightPanelKind): PaneView<RightPanelKind> => PANE_VIEWS[ki
 function AsidePane({ workspaceId }: { workspaceId: string }) {
   const aside = useAside(workspaceId);
   if (aside === null) return null;
-  return <AsideSurface question={aside.question} answer={aside.answer} error={aside.error} onClose={() => useAsideStore.getState().close(workspaceId)} />;
+  return <AsideSurface question={aside.question} askedAt={aside.askedAt} partial={aside.partial} answer={aside.answer} error={aside.error} onClose={() => useAsideStore.getState().close(workspaceId)} />;
 }
 
 export function RightPanel({

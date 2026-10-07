@@ -23,7 +23,7 @@ import { useProtocolEvents, useStore } from "../../protocol/store";
 import type { Api, ProtocolEvent } from "../../protocol/client";
 import { createSessionFold } from "../../adapt/session";
 import { entryTurnId, type TimelineEntry, type TurnPlan, type TurnSummary } from "./adapt";
-import { comesAfter, liveIndex, transcripts, type HeldFold, type HeldThread } from "./transcripts";
+import { comesAfter, heldReading, liveIndex, transcripts, type HeldFold, type HeldThread } from "./transcripts";
 
 export interface ChatThreadView {
   readonly entries: ReadonlyArray<TimelineEntry>;
@@ -184,6 +184,10 @@ function ownPlace(e: SessionEvent): string | undefined {
       return `session.run:${e.runId}:${e.state}`;
     case "session.subagent":
       return e.line === undefined ? undefined : `session.subagent:${e.turnId}:${e.line}`;
+    case "session.compacted":
+      return e.line === undefined ? undefined : `session.compacted:${e.turnId}:${e.line}`;
+    case "session.context":
+      return undefined;
     case "session.slate":
       return `session.slate:${e.threadId}:${e.version}`;
     default: {
@@ -229,6 +233,8 @@ function foldIn(held: ReadonlyArray<HeldRow>, arriving: ReadonlyArray<HeldRow>):
 
 /** A live row is one this view has not seen, so it is placed rather than folded: no tally, one copy per list. */
 function append(state: ThreadState, e: SessionEvent, at: string): ThreadState {
+  const reading = heldReading(state.events, e);
+  if (reading >= 0) return { ...state, events: state.events.with(reading, e), arrivals: state.arrivals.with(reading, at) };
   const starts = e.type === "session.start";
   const index = liveIndex(state.events, e);
   return {

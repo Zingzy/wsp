@@ -1720,7 +1720,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               send({ id: msg.id, ok: true, ...(await rt.sessions.search(msg.query, origin)) });
               return;
             case "sessions.aside":
-              send({ id: msg.id, ok: true, ...(await rt.sessions.aside(msg.sessionId, msg.question, origin)) });
+              send({ id: msg.id, ok: true, ...(await rt.sessions.aside(msg.sessionId, msg.question, origin, msg.askId)) });
               return;
             case "sessions.run": {
               const { id: _id, op: _op, ...step } = msg;

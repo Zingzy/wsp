@@ -95,6 +95,16 @@ describe("a thread read from its head and its newest window", () => {
     expect(store.get("a")!.events.map(e => e.pos)).toEqual([1, 2, 3]);
   });
 
+  it("each of the agent's calls passes a reading of what it holds off the bus, and a turn keeps only its latest", async () => {
+    const host = fakeHost([delta("a", "one")]);
+    const store = createTranscripts();
+    store.bind(host.api);
+    await store.open(WS, "a");
+    const reading = (context: number): SessionEvent => ({ type: "session.context", workspaceId: WS, sessionId: "s_a", turnId: "t_a", threadId: "a", context });
+    for (const context of [12_000, 20_000, 28_514]) store.apply(reading(context) as never);
+    expect(store.get("a")!.events.map(e => (e.type === "session.context" ? e.context : e.type))).toEqual(["session.delta", 28_514]);
+  });
+
   it("a thread already held whole is opened again with no request", async () => {
     const host = fakeHost([delta("a", "one")]);
     const store = createTranscripts();

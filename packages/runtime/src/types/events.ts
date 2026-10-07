@@ -53,7 +53,7 @@ export const SESSION_TITLE_REFRESH_MAX = 20;
  * provider's 26 s exec cap, so the question is one call on every thread. */
 export const TITLE_MAKE_TIMEOUT_MS = 25_000;
 
-export function eventBus(): EventBus & { emit(event: EventUnion): void } {
+export function eventBus(): EventBus & { emit(event: EventUnion): void; pass(event: EventUnion): void } {
   const listeners = new Map<string, Set<EventListener>>();
   const ring: EventUnion[] = [];
   const stream = randomUUID();
@@ -79,6 +79,14 @@ export function eventBus(): EventBus & { emit(event: EventUnion): void } {
       const stamped: EventUnion = { ...event, seq: ++head };
       ring.push(stamped);
       if (ring.length > EVENT_RING_CAP) ring.splice(0, ring.length - EVENT_RING_CAP);
+      for (const type of [event.type, "*"] as const) {
+        for (const l of listeners.get(type) ?? []) l(stamped);
+      }
+    },
+    /** To every listener and into no ring: a replay reads the ring by sequence, so this takes the head's number and
+     * a client's cursor neither moves past an event it has not had nor counts one the ring cannot give back. */
+    pass(event) {
+      const stamped: EventUnion = head > 0 ? { ...event, seq: head } : event;
       for (const type of [event.type, "*"] as const) {
         for (const l of listeners.get(type) ?? []) l(stamped);
       }

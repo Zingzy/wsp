@@ -787,6 +787,7 @@ function runtimeCore(ctx: RuntimeContext, opts: RuntimeOptions): RuntimeCore {
   const sessions = new Map<string, SessionEntry>();
   /** Every exec stream still running, so the machine going away ends it the way it ends a session. */
   const execs = new Set<{ workspaceId: string; end: (reason: string) => void }>();
+  const heldAtClose = new Set<() => void>();
   const indexFlushes = new Map<string, Promise<void>>();
   /** The transcripts held whole, the one opened last at the end: at most TRANSCRIPTS_HELD, read again from their files
    * once they fall out. A store that keeps them as rows holds none. */
@@ -826,7 +827,7 @@ function runtimeCore(ctx: RuntimeContext, opts: RuntimeOptions): RuntimeCore {
     opts, backend, store, adapters, local, placeDoor, bus, goneConfirmMs, lateReadMs, clock, githubCache, readsState,
     tookTheResume, sleeps, daemonHelloTimeoutMs, vaultCapBytes, defaultIdleWindowMs, hostId, vaultExport, imageMovePlan,
     deviceDoor, threadLaunch, landing, live, projectsHeld, setups, builders, gone, preparing, copyBuilds, stageAt,
-    copyRows, rowSaysFailure, placeAway, frameStopped, threadRecords, snoozeTimers, wakeAt, resumeTimers, resumeOnReset, sessions, execs,
+    copyRows, rowSaysFailure, placeAway, frameStopped, threadRecords, snoozeTimers, wakeAt, resumeTimers, resumeOnReset, sessions, execs, heldAtClose,
     indexFlushes, transcripts, rows, unreadIndexes, pendingEvents, pendingBytes, transcriptIndex, indexFor,
     transcriptBytes, sizeOf, places,
     state: {
@@ -1014,6 +1015,8 @@ function runtimeOf(ctx: RuntimeContext): Runtime {
     close: async () => {
       ctx.state.closing = true;
       clearInterval(ctx.state.rootsRecheck);
+      for (const write of [...ctx.heldAtClose]) write();
+      ctx.heldAtClose.clear();
       await ctx.state.copiesMoving;
       ctx.state.sweepStopped = true;
       ctx.state.sweepTimer?.();

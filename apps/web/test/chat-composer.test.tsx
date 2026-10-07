@@ -825,16 +825,18 @@ describe("a side question from the composer", () => {
   const row: SessionView = { id: "sess_local_1", workspaceId: WS, harness: "claude", status: "completed", claudeSessionId: "sess_0001", threadId: "thr_0001", prompt: "go", startedAt: 0 };
   const asking = (asides: boolean) => {
     const asked: Array<{ sessionId: string; question: string }> = [];
+    const askIds: Array<string | undefined> = [];
     let answer: (text: string) => void = () => {};
     const fixture = fixtureApi([workspace], { [WS]: CHAT_STREAM.slice() }, [], {
       listSessions: async () => [row],
       listHarnesses: async () => [{ ...CLAUDE_CATALOG, ...(asides ? { asides: true } : {}) }],
-      askAside: (sessionId, question) => {
+      askAside: (sessionId, question, askId) => {
         asked.push({ sessionId, question });
+        askIds.push(askId);
         return new Promise(resolve => (answer = text => resolve({ text })));
       },
     });
-    return { ...fixture, asked, answer: (text: string) => act(() => answer(text)) };
+    return { ...fixture, asked, askIds, answer: (text: string) => act(() => answer(text)) };
   };
   const btwItem = () => document.querySelector<HTMLElement>('[data-composer-item-id="provider-slash-command:claude:btw"]');
 
@@ -857,7 +859,7 @@ describe("a side question from the composer", () => {
   });
 
   it("a /btw send asks the host, starts no turn, and opens the right panel on the side question, which goes from asking to the answer and away on Esc", async () => {
-    const { api, started, asked, answer } = asking(true);
+    const { api, started, asked, askIds, answer, emit } = asking(true);
     await setup(api);
     render(<PanelHost />);
     await screen.findByText(/Server is live at :3000\./);
@@ -886,9 +888,20 @@ describe("a side question from the composer", () => {
       return found!;
     });
     expect(surface.querySelector('[data-k="aside-question"]')?.textContent).toBe("what did I last ask?");
-    expect(surface.querySelector('[data-k="aside-asking"]')).not.toBeNull();
+    expect(surface.querySelector('[data-k="aside-asking"]')?.textContent).toMatch(/^Asking\d+s$/);
+    expect(surface.querySelector('[data-k="aside-elapsed"]')?.textContent).toMatch(/^\d+s$/);
+    // The words show as the harness writes them, under the question's own id; another question's pieces land nowhere.
+    const askId = askIds[0]!;
+    expect(askId).toMatch(/^[0-9a-f-]{36}$/);
+    emit({ type: "aside.text", workspaceId: WS, askId, text: "You asked for " });
+    emit({ type: "aside.text", workspaceId: WS, askId: "another", text: "nothing of mine" });
+    emit({ type: "aside.text", workspaceId: WS, askId, text: "a hello world" });
+    await waitFor(() => expect(surface.querySelector('[data-k="aside-partial"]')?.textContent).toBe("You asked for a hello world"));
+    expect(surface.querySelector('[data-k="aside-asking"]')?.textContent).toMatch(/^Answering\d+s$/);
     answer("You asked for a hello world server on :3000.");
     await waitFor(() => expect(surface.querySelector('[data-k="aside-answer"]')?.textContent).toContain("You asked for a hello world server on :3000."));
+    expect(surface.querySelector('[data-k="aside-partial"]')).toBeNull();
+    expect(surface.querySelector('[data-k="aside-asking"]')).toBeNull();
     await act(async () => { fireEvent.keyDown(window, { key: "Escape" }); });
     await waitFor(() => expect(document.querySelector('[data-k="aside-surface"]')).toBeNull());
     // The panel was shut before the question, so it shuts again with it.
