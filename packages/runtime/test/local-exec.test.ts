@@ -594,7 +594,9 @@ describe("a real turn's process group", () => {
     const launched = localExecStream({ root, runDir, reading })(`head -c ${bytes} /dev/zero | tr '\\0' x | fold -w 999; sleep 30`, { env: {} });
     for (const drop of [...reading]) drop();
     const run = launched.run!;
-    await vi.waitUntil(() => existsSync(`${run}.log`) && statSync(`${run}.log`).size > bytes, { timeout: 60_000, interval: 50 });
+    // The whole log, fold's newlines included: the kill ends the writer, so a log still growing is read short.
+    const whole = bytes + Math.floor(bytes / 999);
+    await vi.waitUntil(() => existsSync(`${run}.log`) && statSync(`${run}.log`).size === whole, { timeout: 60_000, interval: 50 });
     const attached = (await localExecStream({ root, runDir }).attach!(run, { input: false, startedAt: Date.now() })) as ExecStream;
     // The poll has read its first chunk; the other 199 MB are the stop's to read.
     attached.kill();
