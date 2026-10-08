@@ -556,11 +556,25 @@ export function startingSaid(state: ThreadState, e: SessionStartingEvent): Threa
 /** A send the host holds until a computer that is away has run the end a stop owed it: the line goes under the send it
  * is for where this view made it, and at the thread's tail where another client did. */
 export function heldSaid(state: ThreadState, e: SessionQueuedEvent, thread: string | null, at: string): ThreadState {
-  if (e.waitsFor === undefined) return state;
-  const line = sendWaitsForLine(e.waitsFor);
   const sent = state.pendingPrompt;
-  if (sent !== null && sent.requestId === e.requestId) return { ...state, pendingPrompt: { ...sent, starting: line } };
-  return thread !== null && e.threadId === thread ? { ...state, waiting: { line, at } } : state;
+  const own = sent !== null && sent.requestId === e.requestId;
+  const here = thread !== null && e.threadId === thread;
+  // A wait with no computer named is one behind a turn, which the thread's own working state already shows: a line
+  // left from a wait on a computer that has since connected goes.
+  if (e.waitsFor === undefined) {
+    if (own && sent.starting !== undefined) {
+      const { starting: _gone, ...kept } = sent;
+      return { ...state, pendingPrompt: kept };
+    }
+    if (!own && here && state.waiting !== undefined) {
+      const { waiting: _gone, ...kept } = state;
+      return kept;
+    }
+    return state;
+  }
+  const line = sendWaitsForLine(e.waitsFor);
+  if (own) return { ...state, pendingPrompt: { ...sent, starting: line } };
+  return here ? { ...state, waiting: { line, at } } : state;
 }
 
 /** The same line off the thread's row, for a window that was not open when the host said it: drawn only where nothing

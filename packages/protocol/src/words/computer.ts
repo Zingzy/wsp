@@ -659,6 +659,9 @@ export const threadEndLateLine = (name: string, seconds: number): string => `${n
 /** What a send says while it waits on the end a stop owed a computer that was away, in the app and on the command line. */
 export const sendWaitsForLine = (name: string): string => `waiting for ${name} to connect; this message runs once the stopped turn has ended there`;
 
+/** What a send that waited on such an end says once its turn started. */
+export const sendWaitedForLine = (name: string): string => `${name} connected and the stopped turn ended there; this turn started`;
+
 /** What a Stop or a delete of a thread says of a message it gave up while that message waited on such an end, and what
  * the send itself is answered. */
 export const sendGivenUpLine = (name: string): string => `the message waiting for ${name} to connect was given up and never ran`;
