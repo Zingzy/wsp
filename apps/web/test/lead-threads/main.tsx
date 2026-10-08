@@ -370,6 +370,7 @@ const STATES: ReadonlyArray<readonly [string, string]> = [
   ["Subagent page: finished", "dock=subagent-done"],
   ["Subagent page: stopped", "dock=subagent-stopped"],
   ["Subagent page: failed", "dock=subagent-failed"],
+  ["Bar: full width", "dock=subagent&width=full"],
   ["Lead's panels open (go to a subagent and back)", "panels=1"],
   ["Subtree folded: the lead", "fold=thr_lead"],
   ["Subtree folded: a child three levels deep", "fold=thr_c_ssh"],

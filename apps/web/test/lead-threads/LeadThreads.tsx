@@ -64,7 +64,7 @@ import { usePlaces, useSidebarProjects, useStore } from "../../src/protocol/stor
 import { ComputerGlyph } from "../../src/settings/ComputerGlyph";
 import { requestComposerFocus } from "../../src/shell/shellRequests";
 import { isThreadSettled, isThreadWorking } from "../../src/sidebar/Sidebar.logic";
-import { CHILD_LIST_CLASS, ONE_LINE_ROW_CLASS, RAIL_ITEM_CLASS, ROW_META_CLASS, threadRowId } from "../../src/sidebar/rowGrammar";
+import { CHILD_LIST_CLASS, HOVER_GLYPH_CLASS, ONE_LINE_ROW_CLASS, RAIL_ITEM_CLASS, ROW_META_CLASS, threadRowId } from "../../src/sidebar/rowGrammar";
 import { RowNameInput } from "../../src/sidebar/RowNameInput";
 import type { TileNode } from "../../src/sidebar/threadTree";
 import { computerName, computerOf } from "../../src/sidebar/workspaceRows";
@@ -515,12 +515,13 @@ const ChildRow = memo(function ChildRow({ thread, part, place, at, note, byKey, 
           </span>
         ) : null}
       </span>
-      <span className="relative flex shrink-0 items-center">
-        <span className={cn("inline-flex min-w-4 shrink-0 items-center justify-end text-xs text-muted-foreground", yields && "group-hover/child:invisible group-focus-within/child:invisible group-data-[acts=shown]/child:invisible")}>
+      {/* The acts' room is kept as the sidebar keeps its hover glyph's, from md up, where the acts are drawn at all. */}
+      <span className={cn("relative flex shrink-0 items-center justify-end", yields && (acts.length > 1 ? "md:min-w-20" : "md:min-w-6"))}>
+        <span className={cn("inline-flex min-w-4 shrink-0 items-center justify-end text-xs text-muted-foreground", yields && "md:group-hover/child:invisible md:group-focus-within/child:invisible md:group-data-[acts=shown]/child:invisible")}>
           <StatusIcon thread={thread} kind={kind} tip={!peek} />
         </span>
         {yields ? (
-          <span data-child-acts className="invisible absolute inset-y-0 right-0 flex items-center justify-end gap-1 rounded-[var(--control-radius)] bg-accent ps-2 group-hover/child:visible group-focus-within/child:visible group-data-[acts=shown]/child:visible">
+          <span data-child-acts className={cn("absolute inset-y-0 right-0 flex items-center justify-end gap-1 transition-opacity duration-150 group-hover/child:opacity-100 group-focus-within/child:opacity-100 group-data-[acts=shown]/child:opacity-100", HOVER_GLYPH_CLASS)}>
             {acts.slice(0, 2).map(act => (
               <Act key={act.id} icon={act.icon!} label={act.title} run={() => void act.run()} />
             ))}
@@ -975,7 +976,7 @@ function SubagentSidebarRow({ thread, part, depth, tree }: { thread: Thread; par
                 data-subagent-stop
                 aria-label={LEAD_WORDS.stopSubagent}
                 title={LEAD_WORDS.stopSubagent}
-                className="invisible absolute top-1/2 right-[-4px] flex size-5 -translate-y-1/2 items-center justify-center rounded-[6px] text-sidebar-muted-foreground transition-colors duration-150 hover:bg-sidebar-row-selected hover:text-sidebar-foreground group-hover/tile:visible"
+                className="invisible absolute top-1/2 right-[-4px] flex size-5 -translate-y-1/2 items-center justify-center rounded-[6px] text-sidebar-muted-foreground transition-colors duration-150 hover:bg-sidebar-row-hover hover:text-sidebar-foreground group-hover/tile:visible"
                 onClick={event => {
                   event.stopPropagation();
                   stop(thread);

@@ -242,7 +242,7 @@ export function ThreadTile({
       data-tile-settle
       aria-label={TILE_WORDS.settle}
       title={TILE_WORDS.settle}
-      className="invisible absolute top-1/2 right-[-4px] flex size-5 -translate-y-1/2 items-center justify-center rounded-[6px] text-sidebar-muted-foreground transition-colors duration-150 hover:bg-sidebar-row-selected hover:text-sidebar-foreground group-hover/tile:visible"
+      className="invisible absolute top-1/2 right-[-4px] flex size-5 -translate-y-1/2 items-center justify-center rounded-[6px] text-sidebar-muted-foreground transition-colors duration-150 hover:bg-sidebar-row-hover hover:text-sidebar-foreground group-hover/tile:visible"
       onClick={event => {
         event.stopPropagation();
         void useStore.getState().settleThreads(settleKeys());

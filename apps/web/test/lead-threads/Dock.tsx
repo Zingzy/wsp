@@ -87,15 +87,20 @@ export function Dock({ k, mark, title, aside, note, foot, acts, children }: { k:
   );
 }
 
-/** A subagent's page bar, after T3 Code's ProviderSubagentBar, on our composer's own grid: one row inside the
- * composer's shell, host and surface, at its height and padding, since nobody can write to a subagent and none of the
- * composer's strips belong to it. Where the composer's words stand, its state in the placeholder's type and ink: what
+/** Whether the subagent's bar takes the composer's whole width (?width=full, kept for comparison) or hugs its words. */
+const BAR_FULL = new URLSearchParams(window.location.search).get("width") === "full";
+
+/** A subagent's page bar, after T3 Code's ProviderSubagentBar: one row inside the composer's shell, host and surface,
+ * at its height, radius and border, since nobody can write to a subagent and none of the composer's strips belong to
+ * it. Nobody types there, so it hugs what it says, centred in the composer's column. One 12 px inset inside the border
+ * all round (the words' left, the button's right, the button's top and bottom in the 48 px row) and one 8 px gap
+ * between every item, the mark and the model included. Where the composer's words stand, its state in the placeholder's type and ink: what
  * it is doing while it runs ("Working for", the timeline's own WorkingTimer, written straight to the page once a
  * second so a running subagent never draws the chat again), and once it ended how long it worked (its result is its
  * last message, right above), why it failed, or when it was stopped, clipped with the whole of it on hover; under
  * 640 px, where there is no hover, it wraps. The row keeps the composer's 48 px floor, which the composer gets from its
  * 32 px send button and this row's xs keycap does not give it. Where the model picker stands, the agent's
- * mark in its colour and the model in the picker's own box, a label and not a menu. Where the send button stands, the
+ * mark in its colour and the model, a label and not a menu. Where the send button stands, the
  * way back to its lead as the language's inline act, the outline xs keycap with its glyph. Under 640 px the model is
  * its mark and the way back its arrow, their words on hover. Stop is on its row in the tree, on hover. A screen
  * reader hears the state once each time it changes. */
@@ -119,7 +124,7 @@ export function SubagentBar({ subagent }: { subagent: SidebarThreadSnapshot }) {
   const state = (
     <span
       data-subagent-state
-      className="min-w-0 leading-relaxed break-words text-placeholder tabular-nums [font-family:var(--font-composer,var(--font-sans))] [font-size:var(--font-size-prompt,0.875rem)] max-sm:line-clamp-3 sm:truncate"
+      className={cn("min-w-0 leading-relaxed break-words text-placeholder tabular-nums [font-family:var(--font-composer,var(--font-sans))] [font-size:var(--font-size-prompt,0.875rem)] max-sm:line-clamp-3 sm:truncate", running && BAR_FULL && "flex-1")}
     >
       {running ? (
         <>
@@ -131,18 +136,18 @@ export function SubagentBar({ subagent }: { subagent: SidebarThreadSnapshot }) {
     </span>
   );
   return (
-    <div className="relative w-full px-3 pt-1.5 pb-4 sm:px-5 sm:pt-2 sm:pb-5" data-subagent-composer>
-      <ComposerSurface.Shell>
+    <div className="relative w-full px-3 pt-1.5 pb-4 sm:px-5 sm:pt-2 sm:pb-5" data-subagent-composer={BAR_FULL ? "full" : "fit"}>
+      <ComposerSurface.Shell {...(BAR_FULL ? {} : { className: "w-fit" })}>
         <ComposerSurface.Host>
           <div className="mx-auto w-full min-w-0 max-w-3xl">
             <ComposerSurface.Main>
               <div className="overflow-hidden rounded-[20px]">
-                <div data-subagent-bar className="grid min-h-12 grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-x-1 py-2 ps-4 pe-2 sm:ps-5">
+                <div data-subagent-bar className="flex min-h-12 items-center gap-2 p-3">
                   {running ? (
                     state
                   ) : (
                     <Tooltip>
-                      <TooltipTrigger render={<span className="flex min-w-0" />}>{state}</TooltipTrigger>
+                      <TooltipTrigger render={<span className={cn("flex min-w-0", BAR_FULL && "flex-1")} />}>{state}</TooltipTrigger>
                       <TooltipPopup side="top" className="max-w-96 whitespace-normal">
                         {ended}
                       </TooltipPopup>
@@ -153,7 +158,7 @@ export function SubagentBar({ subagent }: { subagent: SidebarThreadSnapshot }) {
                   </span>
                   <Tooltip>
                     <TooltipTrigger
-                      render={<span data-composer-picker="model" data-subagent-model className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-[var(--control-radius)] px-2 text-[13px] font-normal text-muted-foreground" />}
+                      render={<span data-subagent-model className="inline-flex shrink-0 items-center gap-2 text-[13px] font-normal text-muted-foreground" />}
                     >
                       <span className="inline-flex text-foreground">
                         <HarnessMark harness={subagent.harness} label={agentName(subagent.harness)} className="size-4" />
@@ -162,7 +167,7 @@ export function SubagentBar({ subagent }: { subagent: SidebarThreadSnapshot }) {
                     </TooltipTrigger>
                     <TooltipPopup side="top">{`${agentName(subagent.harness)}, ${model}`}</TooltipPopup>
                   </Tooltip>
-                  <span className="flex shrink-0 items-center justify-self-end">
+                  <span className="flex shrink-0 items-center">
                     {lead === undefined ? null : (
                       <Tooltip>
                         <TooltipTrigger render={<Button type="button" size="xs" variant="outline" data-subagent-back aria-label={DOCK_WORDS.backTo(lead.title)} onClick={back} />}>
