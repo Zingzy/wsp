@@ -127,6 +127,7 @@ export const SPAWN_ACTS = {
   import: "import a folder",
   export: "export a folder",
   agents: "change what agents may do",
+  size: "pick a machine's size",
 } as const;
 export type SpawnAct = keyof typeof SPAWN_ACTS;
 
@@ -223,9 +224,43 @@ export function guestPersonsComputerLine(word: string): string {
  * launch named is the one a line from that turn reaches, and the state file it would name is on another computer. */
 export const guestHostFlagLine = "a line from a workspace goes to the host that launched it; --host and --state are not read here";
 
+/** Thread and where it runs, as a refusal to a thread's own token names it; `on` absent for a thread whose workspace
+ * this host no longer holds. */
+export function threadAt(threadId: string, on: string | undefined): string {
+  return `thread ${threadWord(threadId)}${on === undefined ? "" : ` on ${on}`}`;
+}
+
 /** The one sentence a thread's own token is refused with for an act no thread may ask for, whatever the caps. */
-export function spawnActRefusal(threadId: string, act: SpawnAct): string {
-  return `this request came out of thread ${threadWord(threadId)} on a machine, and a thread may only ${SPAWN_ACTS_ALLOWED.map(a => SPAWN_ACTS[a]).join(", ")}, never ${SPAWN_ACTS[act]}`;
+export function spawnActRefusal(threadId: string, act: SpawnAct, on: string | undefined): string {
+  return `this request came out of ${threadAt(threadId, on)}, and a thread may only ${SPAWN_ACTS_ALLOWED.map(a => SPAWN_ACTS[a]).join(", ")}, never ${SPAWN_ACTS[act]}`;
+}
+
+/** The one sentence a fork of a project whose threads run in its folder is refused with, the person's and a thread's
+ * alike: the folder is the project itself, and nothing about it is a machine to fork. */
+export function folderForkRefusal(project: string): string {
+  return `${project} is a project folder, not a machine to fork`;
+}
+
+/** The roads that carry a copy's commits to its remote, each refused alike on the project's default branch. */
+export type DefaultBranchRoad = "fork" | "run" | "bring back";
+
+/** The one sentence a copy is refused with on any of those roads when it holds commits on the branch its remote
+ * starts every copy on, as the copy's own daemon reads that branch: no push of wsp's moves it, and a copy started
+ * from it would start without them. */
+export function defaultBranchRefusal(workspace: string, branch: string): string {
+  return `${workspace} is on ${branch}, the project's default branch, with commits the remote lacks, and wsp never pushes ${branch}`;
+}
+
+const DEFAULT_BRANCH_AGAIN: Readonly<Record<DefaultBranchRoad, string>> = { fork: "fork it again", run: "start the thread again", "bring back": "bring it back again" };
+
+/** What to do about that refusal on each road: carry the commits on a branch of their own, then ask again. */
+export function defaultBranchFix(road: DefaultBranchRoad, workspace: string): string {
+  return `Move the commits in ${workspace} onto a branch of their own, then ${DEFAULT_BRANCH_AGAIN[road]}.`;
+}
+
+/** What to do about that refusal: open a thread in the folder instead. */
+export function folderForkFix(project: string): string {
+  return `Open a thread in it with ${shellLine(["wsp", "run", project])} "<task>".`;
 }
 
 /** The one sentence a token scoped to a thread is refused with for arriving on a road this host does not serve its
@@ -236,8 +271,8 @@ export const SCOPED_TOKEN_ROAD_REFUSAL =
 /** The one sentence a thread naming the image its fork starts from is refused with: a thread forks the image its
  * own workspace's project runs, and the manifests that hold every snapshot id are not a thread's to read, so an id
  * it names is one it read outside the tree it may read. */
-export function spawnGoldenRefusal(threadId: string): string {
-  return `this request came out of thread ${threadWord(threadId)} on a machine, and a thread forks the image its own workspace runs; naming an image to fork from is not a thread's to ask for`;
+export function spawnGoldenRefusal(threadId: string, on: string | undefined): string {
+  return `this request came out of ${threadAt(threadId, on)}, and a thread forks the image its own workspace runs; naming an image to fork from is not a thread's to ask for`;
 }
 
 /** The one sentence a fork past the machine cap is refused with, naming the root the machines were counted under. */

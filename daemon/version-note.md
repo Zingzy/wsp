@@ -1,0 +1,1 @@
+A push measured against a base the caller named, as a fork names its lead's branch, refuses the branch the copy's remote starts every copy on with the code on-default-branch, and git.status answers that branch as defaultBranch off the same read, origin/HEAD by the branch's own name, else a main or a master here, so the host and the daemon call one branch the default.

@@ -62,7 +62,8 @@
         },
         {
           "op": "workspaces.landing",
-          "project": "proj-1"
+          "project": "proj-1",
+          "sized": true
         },
         {
           "op": "workspaces.create",

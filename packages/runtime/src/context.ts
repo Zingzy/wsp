@@ -288,6 +288,8 @@ export interface RulesArea {
   readonly agentsReach: (entry: LiveWorkspace) => { url?: string; wsp?: McpServerSpec } | undefined;
   readonly spawnGuard: (act: SpawnAct, caller: Caller | undefined) => (() => void);
   readonly treeOf: (scope: ThreadScope | undefined) => { parentThreadId?: string; rootThreadId?: string };
+  readonly placeOfThread: (scope: ThreadScope) => string | undefined;
+  readonly actRefusal: (scope: ThreadScope, act: SpawnAct) => Error;
 }
 
 export interface TranscriptsArea {
@@ -354,7 +356,7 @@ export interface ChannelsArea {
   readonly portRootsMoved: (workspaceId: string) => void;
   readonly rootedPorts: (workspaceId: string, folder: string, ptys: Map<string, number>, channel: DaemonChannel) => DaemonChannel;
   readonly copyChannel: (entry: LiveWorkspace, onEvent: (event: Record<string, unknown>) => void, carries: readonly string[]) => Promise<DaemonChannel>;
-  readonly leadStart: (lead: LiveWorkspace, child: string) => Promise<ChildStart>;
+  readonly leadStart: (lead: LiveWorkspace, child: string, road: "fork" | "run") => Promise<ChildStart>;
   readonly startChildOn: (child: LiveWorkspace, branch: string, lead: string) => Promise<string>;
   readonly sameRepository: (a: ProjectView, b: ProjectView, caller: Caller | undefined) => boolean;
 }

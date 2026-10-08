@@ -31,7 +31,7 @@ import type {
   WorkspaceSize,
 } from "@wsp/protocol";
 import { type ThreadPlacement, SessionOrigin, ThreadScope, WorkspaceOrigin } from "@wsp/protocol";
-import { EXEC_OUTPUT_MAX, fmtBytes, fmtDuration, type WorktreeFolder } from "@wsp/protocol";
+import { EXEC_OUTPUT_MAX, fmtBytes, fmtDuration, type WorktreeFolder, type DefaultBranchRoad, defaultBranchFix, defaultBranchRefusal, refusal } from "@wsp/protocol";
 import type { MachineExecOptions, TurnWaiting } from "../machine-exec.js";
 import type { SubagentView } from "@wsp/protocol";
 import type { ScopedRoad } from "../devices.js";
@@ -833,6 +833,13 @@ export class DaemonRefusal extends Error {
  * command line for the git host, so there is a branch on the remote and no pull request. */
 export const isNoHostCli = (e: unknown): boolean => e instanceof DaemonRefusal && e.code === "no-host-cli";
 export const isNoGitCredential = (e: unknown): boolean => e instanceof DaemonRefusal && e.code === "no-git-credential";
+/** Whether a push was refused on the branch the copy's remote starts every copy on, by the daemon's own guard. */
+export const isOnDefaultBranch = (e: unknown): boolean => e instanceof DaemonRefusal && e.code === "on-default-branch";
+
+/** The refusal for a copy holding commits on its remote's default branch, worded for the road that met it: the
+ * runtime's guard before a push and the daemon's refusal of one say it alike, in the usage class. */
+export const defaultBranchRefused = (road: DefaultBranchRoad, workspace: string, branch: string): Error =>
+  refusal(defaultBranchRefusal(workspace, branch), defaultBranchFix(road, workspace), "usage");
 
 /** The one place a workspace's kind means anything: the module that answers for machines of that kind. The backend
  * that holds the machine, how a turn's process is launched on it, where each harness keeps its sessions there, the

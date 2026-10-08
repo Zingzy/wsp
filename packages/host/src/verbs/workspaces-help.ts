@@ -778,7 +778,7 @@ export async function createFor(
 ): Promise<WorkspaceCreateResult> {
   // A folder on this computer forks nothing, so a size has nothing to act on: refused before the landing is read.
   if (copiesFolder(kindForComputer(project.computer)) && asked.size !== undefined) throw usageRefusal(copyTakesNone(project.name, ["--size"]), "Drop them.");
-  const capabilities = (await client.request<{ capabilities: Capabilities }>("workspaces.landing", { project: project.id })).capabilities;
+  const capabilities = (await client.request<{ capabilities: Capabilities }>("workspaces.landing", { project: project.id, ...(asked.size !== undefined ? { sized: true } : {}) })).capabilities;
   const chosen = asked.size === undefined ? undefined : sizeChosen(capabilities, asked.size);
   const pushed = pushedFrames(client);
   await client.events();

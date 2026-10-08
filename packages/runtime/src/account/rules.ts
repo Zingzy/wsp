@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { type Capabilities, type PreferencesPatch, type ProjectView, type McpServerSpec, type Caller, type WorkspaceAgents, type WorkspaceKind, ThreadScope, phaseHoldsSlot, SPAWN_ACTS_ALLOWED, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnDepthRefusal, spawnRepositoryRefusal, spawnReachRefusal, type SpawnAct, forksNoMachines, kindWords, NO_PROVIDER_LINE, providerCannotRefusal, machineWord, noWorkspaceRefusal, notFoundRefusal, type WorktreeFolder, runsInFolder, copiesFolder, childOnAnotherComputerLine, childToLeadsComputerLine, elsewhereWorkspaceLine, type AcrossAct, agentsOffComputerRefusal, rootGoneRefusal, refusal, spawnFolderRefusal, SPAWN_FOLDER_FIX, SPAWN_REPOSITORY_FIX, relayedRecordRefusal, relayedRefusal, undrivenRefusal, workspaceState, HERE_PLACE_ID } from "@wsp/protocol";
+import { type Capabilities, type PreferencesPatch, type ProjectView, type McpServerSpec, type Caller, type WorkspaceAgents, type WorkspaceKind, ThreadScope, phaseHoldsSlot, SPAWN_ACTS_ALLOWED, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnDepthRefusal, spawnRepositoryRefusal, spawnReachRefusal, type SpawnAct, threadPlace, forksNoMachines, kindWords, NO_PROVIDER_LINE, providerCannotRefusal, machineWord, noWorkspaceRefusal, notFoundRefusal, type WorktreeFolder, runsInFolder, copiesFolder, childOnAnotherComputerLine, childToLeadsComputerLine, elsewhereWorkspaceLine, type AcrossAct, agentsOffComputerRefusal, rootGoneRefusal, refusal, spawnFolderRefusal, SPAWN_FOLDER_FIX, SPAWN_REPOSITORY_FIX, relayedRecordRefusal, relayedRefusal, undrivenRefusal, workspaceState, HERE_PLACE_ID } from "@wsp/protocol";
 import type { WorkspaceRecord, LiveWorkspace } from "../types/wiring.js";
 import { PROJECTS, type WorkspaceLike } from "../types/internal.js";
 import type { RuntimeContext, RulesArea } from "../context.js";
@@ -270,6 +270,15 @@ export function rulesArea(ctx: RuntimeContext): RulesArea {
     const wsp = ctx.moduleOf(entry.record.kind).wspMcp(entry);
     return { ...reach, ...(wsp !== undefined ? { wsp } : {}) };
   };
+  /** Where a thread runs, as a refusal to its own token names it: its computer by name where it runs in a folder,
+   * else its kind's machine; nothing for a thread whose workspace this host no longer holds. */
+  const placeOfThread = (scope: ThreadScope): string | undefined => {
+    const own = live.get(scope.workspaceId)?.record;
+    return own === undefined ? undefined : threadPlace(own.kind, ctx.placeName(ctx.projectHeld(own.project).computer));
+  };
+  /** The refusal for an act no thread may ask for, in the usage class: the line asked for something the caps never
+   * open, which no retry changes. */
+  const actRefusal = (scope: ThreadScope, act: SpawnAct): Error => Object.assign(new Error(spawnActRefusal(scope.threadId, act, placeOfThread(scope))), { kind: "usage" });
   /** The one door every act a thread's own token asks for goes through: the switch on the workspace that thread
    * runs on, then the acts a thread may ask for at all, then how deep it already is, then how many machines its
    * root already holds. A caller that is not a thread passes straight through; nothing here is a second copy of a
@@ -287,7 +296,7 @@ export function rulesArea(ctx: RuntimeContext): RulesArea {
     const over = rooted === undefined ? undefined : [{ record: rooted, policy: agentsOf(rooted) }, ...(rooted.id !== own.id && runsInFolder(own.kind) ? [{ record: own, policy: agentsOf(own) }] : [])];
     if (over === undefined) throw new Error(rootGoneRefusal(scope.threadId, act));
     for (const { record, policy } of over) if (policy?.spawn !== true) throw new Error(agentsOffLine(record, act, record === own && record !== rooted));
-    if (!SPAWN_ACTS_ALLOWED.includes(act)) throw new Error(spawnActRefusal(scope.threadId, act));
+    if (!SPAWN_ACTS_ALLOWED.includes(act)) throw actRefusal(scope, act);
     // The depth cap counts what a thread starts under itself; a send and a bring back start nothing, so a thread
     // at the cap still talks to its tree and still gets its work out.
     if (act === "send" || act === "bring_back") return free;
@@ -321,6 +330,6 @@ export function rulesArea(ctx: RuntimeContext): RulesArea {
   return {
     rememberProject, rememberTarget, refuseCannot, pauses, refusePauseless, holdsSlot, drives, actsOn, opensIn, projectOfScope, ofThreadsRepository, projectReached, elsewhereRefusal, awayFor, leadActsOn, talksToItsTree,
     refusalFor, refuseRelayed, refuseNamed, held, listedFor, refuseRecording, agentsOf, parentOf, rootOf, agentsReach,
-    spawnGuard, treeOf,
+    spawnGuard, treeOf, placeOfThread, actRefusal,
   };
 }

@@ -351,6 +351,11 @@ pub struct GitStatusReply {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub stashes: Option<u64>,
+    /// The branch the copy's remote starts every copy on, as the push's own guard reads it; absent where neither the
+    /// remote nor the copy names one, and on a stopped workspace, whose git is not run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub default_branch: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]

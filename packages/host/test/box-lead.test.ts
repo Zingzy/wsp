@@ -12,13 +12,14 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { copyKey } from "@wsp/runtime";
-import { childToLeadsComputerLine, elsewhereWorkspaceLine, EXIT_CODES, HERE_PLACE_ID, HOST_TOKEN_ENV, refusalLine, sendFilesAcrossLine, SEND_FILES_ACROSS_FIX, TURN_TOKEN_ENV, threadOpenedLine, waitAcrossLine, WAIT_ACROSS_FIX, type ThreadView } from "@wsp/protocol";
+import { childToLeadsComputerLine, elsewhereWorkspaceLine, EXIT_CODES, threadOpRefusal, HERE_PLACE_ID, HOST_TOKEN_ENV, refusalLine, sendFilesAcrossLine, SEND_FILES_ACROSS_FIX, TURN_TOKEN_ENV, threadOpenedLine, waitAcrossLine, WAIT_ACROSS_FIX, type ThreadView } from "@wsp/protocol";
 import { ctx, sockets, placesOf } from "../../runtime/test/places-fixture.js";
 import { FAIL, HOLD, leadAndBox } from "../../runtime/test/box-fixture.js";
 import { HERE } from "../../runtime/test/place-join.js";
 import { WsClient } from "../../runtime/test/ws-client.js";
 import { CLI_VERBS, runVerb, type HostClient } from "../src/verbs.js";
 import { mcpServer } from "../src/mcp.js";
+import { CLOUD_ON } from "../src/cloud.js";
 import type { ThreadRow } from "../src/verbs/workspaces-help.js";
 import { captured } from "./verbs-fixture.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
@@ -231,7 +232,7 @@ describe("a lead thread on this computer starting a child on a computer the pers
   });
 });
 
-/** The send tool's own server as a thread's launch dials it. */
+/** The wsp tools a thread's launch serves it, over that thread's own token. */
 async function toolsOf(launch: Readonly<Record<string, string>>): Promise<Client> {
   const env = { [HOST_TOKEN_ENV]: launch[HOST_TOKEN_ENV]!, [TURN_TOKEN_ENV]: launch[TURN_TOKEN_ENV]! };
   const client = await asToken(env[HOST_TOKEN_ENV]);
@@ -303,5 +304,40 @@ describe("a lead's tree, once the folder's rows of the lead and a child fell off
     expect(tool.isError, JSON.stringify(tool.content)).not.toBe(true);
     await expect.poll(() => starts.at(-1)!.o.prompt).toBe("and which tag?");
     starts[1]!.answer("asked the lead");
+  });
+});
+
+describe.runIf(CLOUD_ON)("a child on the box forking a machine, refused as wsp run and wsp exec are", () => {
+  it("is refused a cloud project in run's sentence and a cloud machine of its tree in the computer rule's, by the command line and the fork tool, the lead's folder too, and the door names its box", async () => {
+    const { rt, store, starts, threadId, launch, lead: asLead } = await lead(true);
+    await store.put("goldens", copyKey("default", "default"), SEALED_GOLDEN);
+    const cloud = await rt.projects.add({ source: "https://github.com/acme/lab", on: "default", name: "lab-cloud" });
+    const forked = await rt.workspaces.create({ project: cloud.id, name: "lab-cloud-one" }, asLead);
+    expect(forked).toMatchObject({ kind: "cloud", rootThreadId: threadId });
+    expect((await wsp(launch, "run", "lab-box", "--detach", `${HOLD}build it`, "--json")).code).toBe(0);
+    const child = starts[1]!.env;
+    const before = (await rt.workspaces.list()).length;
+    const road = childToLeadsComputerLine("hetzner", "default", threadId);
+    const run = await wsp(child, "run", "lab-cloud", "--detach", "build it there");
+    expect(run.code).toBe(EXIT_CODES.usage);
+    expect(run.errors.join("\n")).toBe(`wsp run: ${road}`);
+    const away = elsewhereWorkspaceLine(forked.name, "default", "hetzner", "work", threadId);
+    const fork = await wsp(child, "fork", forked.name);
+    expect(fork.code).toBe(EXIT_CODES.usage);
+    expect(fork.errors.join("\n")).toBe(`wsp fork: ${away}`);
+    const tool = await (await toolsOf(child)).callTool({ name: "fork", arguments: { workspace: forked.name } });
+    expect(tool).toMatchObject({ isError: true, structuredContent: { error: away, class: "usage" } });
+    expect(await rt.workspaces.list()).toHaveLength(before);
+    const here = (await placesOf()).find(p => p.id === HERE_PLACE_ID)!.name;
+    const home = await wsp(child, "fork", "lab");
+    expect(home.code).toBe(EXIT_CODES.usage);
+    expect(home.errors.join("\n")).toBe(`wsp fork: ${childToLeadsComputerLine("hetzner", here, threadId)}`);
+    // The door names the box the child runs on, and says nothing of forking, which a thread there does not do.
+    const childId = (await rt.sessions.list()).find(r => r.threadId !== threadId)!.threadId!;
+    const door = await (await asToken(child[HOST_TOKEN_ENV]!)).request("pair.issue").then(() => "", (e: Error) => e.message);
+    expect(door).toBe(threadOpRefusal("pair.issue", childId, "hetzner"));
+    expect(door).toContain(`thread ${childId.slice(0, 8)} on hetzner`);
+    expect(door).not.toContain("fork");
+    starts[1]!.answer("refused");
   });
 });

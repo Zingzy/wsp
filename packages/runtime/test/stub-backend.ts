@@ -20,10 +20,12 @@ import { DAEMON_TOKEN_SET, daemonTokenFor } from "../src/daemon-token.js";
 export const GUEST_BRANCH = "work";
 
 /** Daemons for every machine and for this computer, as every workspace has one: a lead's checkout reads as on
- * GUEST_BRANCH (or the branch `branchOf` names for that machine), tracked and level with its upstream, and a child's
+ * GUEST_BRANCH (or the branch `branchOf` names for that machine), tracked and level with its upstream unless `aheadOf`
+ * counts commits over it, which a push of that branch answers for, and names the remote's default branch where
+ * `defaultOf` does, which a push refuses as the daemon's guard does; and a child's
  * copy is put on whatever branch it is asked. What a fork under a lead reads and asks through the lead's and the
  * child's own daemons; every frame is kept with the machine it went to, read off the dial's token. */
-export function branchDaemons(o: { seed?: string; branchOf?: (machineId: string) => string } = {}): {
+export function branchDaemons(o: { seed?: string; branchOf?: (machineId: string) => string; aheadOf?: (machineId: string) => number; defaultOf?: (machineId: string) => string | undefined } = {}): {
   open: (dial: DaemonChannelOptions) => Promise<DaemonChannel>;
   frames: (Record<string, unknown> & { machine: string })[];
 } {
@@ -37,7 +39,13 @@ export function branchDaemons(o: { seed?: string; branchOf?: (machineId: string)
     switch (frame["op"]) {
       case "git.status": {
         const head = o.branchOf?.(machine) ?? GUEST_BRANCH;
-        return { ok: true, branch: { oid: "abc", head, upstream: `origin/${head}`, ahead: 0, behind: 0 }, entries: [], root: String(frame["cwd"]) };
+        const named = o.defaultOf?.(machine);
+        return { ok: true, branch: { oid: "abc", head, upstream: `origin/${head}`, ahead: o.aheadOf?.(machine) ?? 0, behind: 0 }, entries: [], root: String(frame["cwd"]), ...(named !== undefined ? { defaultBranch: named } : {}) };
+      }
+      case "git.push": {
+        const head = o.branchOf?.(machine) ?? GUEST_BRANCH;
+        if (head === o.defaultOf?.(machine)) return { ok: false, code: "on-default-branch", error: `this workspace is on ${head}, the project's default branch, and no push moves it` };
+        return { ok: true, branch: head, base: String(frame["base"] ?? ""), remote: "origin", ahead: o.aheadOf?.(machine) ?? 0, uncommitted: 0, stat: [] };
       }
       case "git.startOn":
         return { ok: true, branch: String(frame["branch"]), oid: "c0ffee" };

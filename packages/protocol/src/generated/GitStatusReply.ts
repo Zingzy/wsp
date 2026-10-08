@@ -16,4 +16,9 @@ countsUnknown?: boolean,
 /**
  * How many stashes the repository holds, work no branch carries and no remote has; absent where there are none.
  */
-stashes?: number, };
+stashes?: number, 
+/**
+ * The branch the copy's remote starts every copy on, as the push's own guard reads it; absent where neither the
+ * remote nor the copy names one, and on a stopped workspace, whose git is not run.
+ */
+defaultBranch?: string, };

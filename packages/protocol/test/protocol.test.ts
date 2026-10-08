@@ -2118,7 +2118,13 @@ describe("bringing work back", () => {
     // Bringing work back is one of the acts a thread may ask for, and it is named in the table like the rest.
     expect(wire.SPAWN_ACTS_ALLOWED).toContain("bring_back");
     expect(wire.SPAWN_ACTS["bring_back"]).toBe("bring its work back");
-    expect(wire.spawnActRefusal("thread_a1b2c3d4", "delete")).toContain("bring its work back");
+    expect(wire.spawnActRefusal("thread_a1b2c3d4", "delete", "hetzner")).toContain("bring its work back");
+    // Every refusal to a thread's own token names where that thread runs, read off the kind table, and claims nothing
+    // about what a thread there may start.
+    expect(wire.spawnActRefusal("thread_a1b2c3d4", "size", "hetzner")).toMatch(/^this request came out of thread \S+ on hetzner, and .*, never pick a machine's size$/);
+    expect(wire.spawnActRefusal("thread_a1b2c3d4", "size", undefined)).toMatch(/^this request came out of thread \S+, and /);
+    expect([wire.threadPlace("local", "mini"), wire.threadPlace("place", "hetzner"), wire.threadPlace("cloud", "solari")]).toEqual(["mini", "hetzner", wire.MACHINE_WSP_FORKS]);
+    expect(wire.threadOpRefusal("pair.issue", "thread_a1b2c3d4", "hetzner")).not.toContain("forks machines");
   });
 });
 

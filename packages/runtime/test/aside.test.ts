@@ -251,7 +251,7 @@ describe("a side question beside a thread", () => {
       return c;
     };
     const thread = (await rt.devices.mint("thread t1", { kind: "thread", threadId: "t1", workspaceId: "w1", rootThreadId: "t1" }, Date.now())).deviceToken;
-    expect(await (await connect(thread)).request("sessions.aside", { sessionId: first, question: "what did I ask?" })).toMatchObject({ ok: false, error: threadOpRefusal("sessions.aside", "t1") });
+    expect(await (await connect(thread)).request("sessions.aside", { sessionId: first, question: "what did I ask?" })).toMatchObject({ ok: false, error: threadOpRefusal("sessions.aside", "t1", undefined) });
     const paired = (await rt.devices.admit("phone", Date.now())).deviceToken;
     expect(await (await connect(paired)).request("sessions.aside", { sessionId: first, question: "what did I ask?" })).toMatchObject({ ok: false, error: deviceHeldRefusal("sessions.aside") });
     expect(asked).toEqual([]);

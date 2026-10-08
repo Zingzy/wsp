@@ -656,7 +656,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
         const asked = (parsed as { op?: unknown }).op;
         const askedId = (parsed as { id?: string | number }).id ?? null;
         if (by !== undefined && (typeof asked !== "string" || !THREAD_OPS.includes(asked))) {
-          send({ id: askedId, ok: false, error: threadOpRefusal(typeof asked === "string" ? asked : "that frame", by.threadId) });
+          send({ id: askedId, ok: false, error: threadOpRefusal(typeof asked === "string" ? asked : "that frame", by.threadId, rt.workspaces.threadPlace(by)) });
           return;
         }
         // The door for a computer the person paired, read the same way and in the same place: shut, with the ops
@@ -1204,7 +1204,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               return;
             }
             case "workspaces.landing":
-              send({ id: msg.id, ok: true, ...(await rt.workspaces.landing({ project: msg.project }, origin)) });
+              send({ id: msg.id, ok: true, ...(await rt.workspaces.landing({ project: msg.project, ...(msg.sized === true ? { sized: true } : {}) }, origin)) });
               return;
             case "workspaces.list":
               send({ id: msg.id, ok: true, workspaces: (await rt.workspaces.list(origin)).map(handed) });

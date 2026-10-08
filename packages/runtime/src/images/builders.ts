@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { hostname } from "node:os";
 import { catalogIdOfRow } from "@wsp/catalog";
 import {
   NotFirstLifeError,
@@ -26,6 +27,7 @@ import {
 import type { GoldenBuilderView, GoldenLogin, GoldenStage, GoldenStep, SealedImage, SealedVault } from "@wsp/protocol";
 import {
   recipePins,
+  HERE_PLACE_ID,
   forksNoMachines,
   NO_PROVIDER_LINE,
   isJoinedComputer,
@@ -218,7 +220,9 @@ export function buildersArea(ctx: RuntimeContext): BuildersArea {
     const at = ctx.backendOfKind("cloud", placeId);
     return forksNoMachines(at.capabilities) ? undefined : at;
   };
-  const placeName = (place: string): string => placeDoor?.nameOf(place) ?? place;
+  /** What a sentence calls a place, as the computers listing names it: with no places door, this computer by its
+   * hostname and any other by its id. */
+  const placeName = (place: string): string => placeDoor?.nameOf(place) ?? (place === HERE_PLACE_ID ? hostname() : place);
   /** Where the image's own seal stands: the place the record names, or the provider this host forks on for a record
    * sealed before places. The manifest there is the one wsp init built and updates. */
   const imagePlace = async (name: string): Promise<string> => (await ctx.recordOf(name))?.place ?? places.wired;

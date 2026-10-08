@@ -184,6 +184,9 @@ export const GitStatusReply = z.object({
   countsUnknown: z.boolean().optional(),
   /** How many stashes the repository holds; absent where there are none. */
   stashes: z.number().int().positive().optional(),
+  /** The branch the copy's remote starts every copy on, as the daemon's push guard reads it; absent where nothing
+   * names one, on a stopped workspace, and from a daemon older than the read. */
+  defaultBranch: z.string().optional(),
 });
 export type GitStatusReply = z.infer<typeof GitStatusReply>;
 
