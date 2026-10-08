@@ -18,11 +18,14 @@ use crate::failure::Failure;
 use crate::host::Host;
 use crate::record::fill;
 
-pub const RECIPE: Tool =
-    Tool { name: "recipe", listed: include_str!("../../record/tools/recipe.json"), call: |host, args| Box::pin(recipe(host, args)) };
+pub const RECIPE: Tool = Tool {
+    name: "recipe",
+    listed: include_str!(concat!(env!("OUT_DIR"), "/record/tools/recipe.json")),
+    call: |host, args| Box::pin(recipe(host, args)),
+};
 pub const SCAN: Tool = Tool {
     name: "recipe_scan",
-    listed: include_str!("../../record/tools/recipe_scan.json"),
+    listed: include_str!(concat!(env!("OUT_DIR"), "/record/tools/recipe_scan.json")),
     call: |host, args| Box::pin(scan(host, args)),
 };
 

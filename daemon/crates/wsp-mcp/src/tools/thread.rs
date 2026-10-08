@@ -14,26 +14,29 @@ use crate::failure::Failure;
 use crate::host::Host;
 use crate::record::fill;
 
-pub const STOP: Tool =
-    Tool { name: "stop", listed: include_str!("../../record/tools/stop.json"), call: |host, args| Box::pin(stop(host, args)) };
+pub const STOP: Tool = Tool {
+    name: "stop",
+    listed: include_str!(concat!(env!("OUT_DIR"), "/record/tools/stop.json")),
+    call: |host, args| Box::pin(stop(host, args)),
+};
 pub const RENAME: Tool = Tool {
     name: "thread_rename",
-    listed: include_str!("../../record/tools/thread_rename.json"),
+    listed: include_str!(concat!(env!("OUT_DIR"), "/record/tools/thread_rename.json")),
     call: |host, args| Box::pin(rename(host, args)),
 };
 pub const FORGET: Tool = Tool {
     name: "thread_forget",
-    listed: include_str!("../../record/tools/thread_forget.json"),
+    listed: include_str!(concat!(env!("OUT_DIR"), "/record/tools/thread_forget.json")),
     call: |host, args| Box::pin(forget(host, args)),
 };
 pub const ALLOW: Tool = Tool {
     name: "thread_allow",
-    listed: include_str!("../../record/tools/thread_allow.json"),
+    listed: include_str!(concat!(env!("OUT_DIR"), "/record/tools/thread_allow.json")),
     call: |host, args| Box::pin(answer("thread_allow", "allow", host, args)),
 };
 pub const DENY: Tool = Tool {
     name: "thread_deny",
-    listed: include_str!("../../record/tools/thread_deny.json"),
+    listed: include_str!(concat!(env!("OUT_DIR"), "/record/tools/thread_deny.json")),
     call: |host, args| Box::pin(answer("thread_deny", "deny", host, args)),
 };
 

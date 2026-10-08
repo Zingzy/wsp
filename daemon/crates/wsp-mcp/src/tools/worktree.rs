@@ -30,8 +30,11 @@ pub struct MakeOut {
 
 const MAKE_NAME: &str = "worktree";
 
-pub const MAKE: Tool =
-    Tool { name: MAKE_NAME, listed: include_str!("../../record/tools/worktree.json"), call: |host, args| Box::pin(make(host, args)) };
+pub const MAKE: Tool = Tool {
+    name: MAKE_NAME,
+    listed: include_str!(concat!(env!("OUT_DIR"), "/record/tools/worktree.json")),
+    call: |host, args| Box::pin(make(host, args)),
+};
 
 async fn make(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
     let MakeIn { project, branch } = input(MAKE_NAME, arguments)?;
@@ -62,7 +65,7 @@ const REMOVE_NAME: &str = "worktree_remove";
 
 pub const REMOVE: Tool = Tool {
     name: REMOVE_NAME,
-    listed: include_str!("../../record/tools/worktree_remove.json"),
+    listed: include_str!(concat!(env!("OUT_DIR"), "/record/tools/worktree_remove.json")),
     call: |host, args| Box::pin(remove(host, args)),
 };
 

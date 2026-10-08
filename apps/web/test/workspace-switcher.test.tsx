@@ -23,6 +23,8 @@ import { ROW_META_CLASS } from "../src/sidebar/rowGrammar.js";
 import { AppShell } from "../src/shell/AppShell.js";
 import { onComposerFocusRequest } from "../src/shell/shellRequests.js";
 import { loadPagePreviews, useWorkspacePreviews } from "../src/shell/workspacePreviews.js";
+import { goToWorkspace } from "../src/shell/shellCommands.js";
+import { addNotice } from "../src/notices/store.js";
 import { recentThreads, SWITCHER_THREADS, useThreadHistory } from "../src/shell/threadHistory.js";
 import { releasesSwitchHold, stepSwitcherAt, SWITCHER_PAINT_DELAY_MS, useWorkspaceSwitcher } from "../src/shell/workspaceSwitcher.js";
 import { useTerminalDrawerStore } from "../src/terminal/drawerStore.js";
@@ -195,7 +197,7 @@ describe("the workspace switcher overlay", () => {
         vi.advanceTimersByTime(SWITCHER_PAINT_DELAY_MS - 1);
       });
       expect(overlay()).toBeNull();
-      act(() => {
+      await act(async () => {
         vi.advanceTimersByTime(1);
       });
       expect(overlay()).not.toBeNull();
@@ -250,7 +252,7 @@ describe("the workspace switcher overlay", () => {
       });
       expect(useWorkspaceSwitcher.getState().at).toBe(2);
       expect(overlay()).toBeNull();
-      act(() => {
+      await act(async () => {
         vi.advanceTimersByTime(20);
       });
       expect(overlay()).not.toBeNull();
@@ -428,10 +430,10 @@ describe("the workspace switcher overlay", () => {
     }
   });
 
-  it("draws the thread's picture where the shell holds one, and asks it to photograph the thread being left", async () => {
+  it("draws the thread's picture where the shell holds one, and asks it to photograph the thread on screen", async () => {
     await mountShell();
     const capturePreview = vi.fn(async () => undefined);
-    const workspacePreview = vi.fn(async (id: string) => (id === "t_b" ? "data:image/png;base64,AAA" : undefined));
+    const workspacePreview = vi.fn(async (id: string) => (id === "/t_b" ? "data:image/png;base64,AAA" : undefined));
     const restore = asDesktopShell({ capturePreview, workspacePreview });
     try {
       tab();
@@ -440,9 +442,191 @@ describe("the workspace switcher overlay", () => {
       expect(cardParts("t_b")).toEqual(["preview", "name", "thread"]);
       release();
       await waitFor(() => expect(opened()).toEqual({ workspaceId: "ws_b", threadId: "t_b" }));
-      expect(capturePreview).toHaveBeenCalledWith("t_a");
+      expect(capturePreview).toHaveBeenCalledWith("/t_a", true);
     } finally {
       restore();
+    }
+  });
+
+  it("bounds only the picture the paint waits on, so the thread a tap leaves is filed however slow the copy", async () => {
+    await mountShell();
+    const capturePreview = vi.fn(async () => undefined);
+    const restore = asDesktopShell({ capturePreview, workspacePreview: async () => undefined });
+    try {
+      tab();
+      release();
+      await waitFor(() => expect(opened()).toEqual({ workspaceId: "ws_b", threadId: "t_b" }));
+      expect(capturePreview.mock.calls).toEqual([
+        ["/t_a", true],
+        ["/t_a", false],
+      ]);
+    } finally {
+      restore();
+    }
+  });
+});
+
+/** The shell as it really keeps pictures: one per id it is handed, each the page as it stands when the copy is made,
+ * so a switcher, a toast or a popup drawn then, Settings in the centre and the theme drawn all go into it. The copy is
+ * made at the ask, or `slow.ms` later where the shell is slow, and a read back is as slow. */
+function recordingShell(delayMs = 0) {
+  const slow = { ms: delayMs };
+  type Shot = { id: string; switcher: boolean; toast: boolean; standIn: boolean; settings: boolean; theme: string | undefined };
+  const shots: Shot[] = [];
+  const held = new Map<string, string>();
+  const look = (id: string): Shot => ({
+    id,
+    switcher: overlay() !== null,
+    toast: document.querySelector("[data-notice]") !== null,
+    standIn: document.querySelector("[data-stand-in]") !== null,
+    settings: document.querySelector("[data-settings-search]") !== null,
+    theme: document.documentElement.dataset["theme"],
+  });
+  const restore = asDesktopShell({
+    capturePreview: async id => {
+      if (slow.ms > 0) await new Promise(resolve => setTimeout(resolve, slow.ms));
+      const shot = look(id);
+      shots.push(shot);
+      held.set(id, `data:image/png;base64,${btoa(JSON.stringify(shot))}`);
+    },
+    workspacePreview: async id => {
+      if (slow.ms > 0) await new Promise(resolve => setTimeout(resolve, slow.ms));
+      return held.get(id);
+    },
+  });
+  const drawn = (threadId: string): Shot | null => {
+    const src = card(threadId)?.querySelector("img")?.getAttribute("src");
+    return src == null ? null : JSON.parse(atob(src.slice("data:image/png;base64,".length)));
+  };
+  return { shots, restore, drawn, slow };
+}
+
+describe("the switcher's pictures", () => {
+  afterEach(() => {
+    delete document.documentElement.dataset["theme"];
+    document.querySelectorAll("[data-stand-in]").forEach(el => el.remove());
+    act(() => clearNotices());
+  });
+
+  it("show each thread's own page, never the switcher a walk ended on", async () => {
+    await mountShell();
+    const shell = recordingShell();
+    try {
+      for (const to of ["t_b", "t_a", "t_b"]) {
+        tab();
+        await waitFor(() => expect(overlay()).not.toBeNull());
+        release();
+        await waitFor(() => expect(opened().threadId).toBe(to));
+        await waitFor(() => expect(overlay()).toBeNull());
+      }
+      tab();
+      await waitFor(() => expect(overlay()).not.toBeNull());
+      await waitFor(() => expect(shell.drawn("t_a")).not.toBeNull());
+      await waitFor(() => expect(shell.drawn("t_b")).not.toBeNull());
+      expect(shell.drawn("t_a")?.switcher).toBe(false);
+      expect(shell.drawn("t_b")?.switcher).toBe(false);
+    } finally {
+      shell.restore();
+    }
+  });
+
+  it("are not taken after the switcher paints, however slow the shell's copy", async () => {
+    await mountShell();
+    const shell = recordingShell(SWITCHER_PAINT_DELAY_MS + 50);
+    try {
+      tab();
+      await waitFor(() => expect(overlay()).not.toBeNull());
+      await waitFor(() => expect(shell.shots.length).toBeGreaterThan(0));
+      escape();
+      await settle();
+      expect(shell.shots.filter(s => s.switcher)).toEqual([]);
+    } finally {
+      shell.restore();
+    }
+  });
+
+  it("file nothing under the open thread while Settings is on screen, opening the switcher or leaving", async () => {
+    await mountShell();
+    const shell = recordingShell();
+    try {
+      act(() => useStore.getState().openSettings());
+      visit("ws_b", "t_b");
+      await settle();
+      act(() => useStore.getState().openSettings());
+      tab();
+      await waitFor(() => expect(overlay()).not.toBeNull());
+      escape();
+      await settle();
+      expect(shell.shots.filter(s => s.settings)).toEqual([]);
+    } finally {
+      shell.restore();
+    }
+  });
+
+  it("are not taken while a toast stands, as the switcher opens or when the toast's own Open switches", async () => {
+    await mountShell();
+    const shell = recordingShell();
+    try {
+      act(() => void addNotice({ kind: "waiting", key: "needs", text: "A thread needs you", action: { word: "Open", run: () => goToWorkspace("ws_b", "t_b") } }));
+      await waitFor(() => expect(document.querySelector("[data-notice-action]")).not.toBeNull());
+      tab();
+      await waitFor(() => expect(overlay()).not.toBeNull());
+      escape();
+      await settle();
+      fireEvent.click(document.querySelector<HTMLElement>("[data-notice-action]")!);
+      await waitFor(() => expect(opened().threadId).toBe("t_b"));
+      await settle();
+      expect(shell.shots.filter(s => s.toast)).toEqual([]);
+    } finally {
+      shell.restore();
+    }
+  });
+
+  // Stand-ins carry the slot each popup draws with: Base UI's menu, tooltip and sheet popups.
+  it.each([
+    ["a menu", "menu", "menu-popup"],
+    ["a tooltip", "tooltip", "tooltip-popup"],
+    ["a sheet", "dialog", "sheet-popup"],
+  ])("are not taken while %s is open over the page", async (_name, role, slot) => {
+    await mountShell();
+    const shell = recordingShell();
+    try {
+      const popup = document.createElement("div");
+      popup.setAttribute("role", role);
+      popup.setAttribute("data-slot", slot);
+      popup.setAttribute("data-stand-in", "");
+      document.body.append(popup);
+      tab();
+      await waitFor(() => expect(overlay()).not.toBeNull());
+      escape();
+      await settle();
+      expect(shell.shots.filter(s => s.standIn)).toEqual([]);
+    } finally {
+      shell.restore();
+    }
+  });
+
+  it("never show a theme the page has since left, not even on the first paint after the change", async () => {
+    document.documentElement.dataset["theme"] = "paper";
+    await mountShell();
+    const shell = recordingShell();
+    try {
+      visit("ws_b", "t_b");
+      visit("ws_c", "t_c");
+      visit("ws_a", "t_a");
+      tab();
+      await waitFor(() => expect(shell.drawn("t_b")?.theme).toBe("paper"));
+      escape();
+      await settle();
+      document.documentElement.dataset["theme"] = "graphite";
+      shell.slow.ms = 400;
+      tab();
+      await waitFor(() => expect(overlay()).not.toBeNull());
+      expect(cardIds().map(id => shell.drawn(id)?.theme ?? null)).not.toContain("paper");
+      await waitFor(() => expect(shell.drawn("t_a")?.theme).toBe("graphite"));
+      for (const id of ["t_a", "t_b", "t_c"]) expect(shell.drawn(id)?.theme ?? "graphite").toBe("graphite");
+    } finally {
+      shell.restore();
     }
   });
 });
@@ -450,10 +634,10 @@ describe("the workspace switcher overlay", () => {
 describe("loadPagePreviews", () => {
   it("keeps what the shell still answers for and drops what it has let go at its own cap", async () => {
     useWorkspacePreviews.setState({ images: { t_a: "data:image/png;base64,OLD" } });
-    const restore = asDesktopShell({ workspacePreview: async id => (id === "t_b" ? "data:image/png;base64,NEW" : undefined) });
+    const restore = asDesktopShell({ workspacePreview: async id => (id === "/t_b" ? "data:image/png;base64,NEW" : undefined) });
     try {
       await loadPagePreviews(["t_a", "t_b"]);
-      expect(useWorkspacePreviews.getState().images).toEqual({ t_b: "data:image/png;base64,NEW" });
+      expect(useWorkspacePreviews.getState().images).toEqual({ "/t_b": "data:image/png;base64,NEW" });
     } finally {
       restore();
     }

@@ -96,7 +96,7 @@ answer("fonts:families", () => fontFamilies(fonts));
 
 const previews = pagePreviews();
 // A picture of the page can hold anything the page shows, so only the app's own host's page may take one or read one.
-answer("preview:capture", (event, workspaceId) => previews.capture(typeof workspaceId === "string" ? workspaceId : "", event.sender));
+answer("preview:capture", (event, workspaceId, bounded) => previews.capture(typeof workspaceId === "string" ? workspaceId : "", event.sender, bounded === true));
 answer("preview:read", (_event, workspaceId) => previews.get(typeof workspaceId === "string" ? workspaceId : ""));
 
 // The picker returns a path on this computer, so only the app's own host's page may open it.

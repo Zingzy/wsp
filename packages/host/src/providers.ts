@@ -58,31 +58,39 @@ export const BOX_KEY_ENV = "BOAT_API_KEY";
 /** The Solari key. */
 export const SOLARI_KEY_ENV = "SOLARI_API_KEY";
 
-/** The clouds, which are registered only with the cloud on. */
-const CLOUD_MODULES: readonly ProviderModule[] = [
-  {
-    id: "box",
-    envNames: [PROVIDER_ENV],
-    keyEnv: BOX_KEY_ENV,
-    keyName: PROVIDER_KEY_WORDS["box"]!.keyName,
-    keyConsole: PROVIDER_KEY_WORDS["box"]!.keyConsole,
-    // Named alone: the word says which cloud this computer forks on, and a missing key is asked for by its own
-    // variable on the key screen rather than guessed at here.
-    selects: env => env[PROVIDER_ENV] === "box",
-    build: env => new BoxBackend({ apiKey: env[BOX_KEY_ENV] ?? "" }),
-  },
-  {
-    id: "solari",
-    envNames: [PROVIDER_ENV],
-    keyEnv: SOLARI_KEY_ENV,
-    keyName: PROVIDER_KEY_WORDS["solari"]!.keyName,
-    keyConsole: PROVIDER_KEY_WORDS["solari"]!.keyConsole,
-    // Named, or taken by its key alone: this is the cloud a computer that names no provider is offered, so a key
-    // saved on its own is the whole answer.
-    selects: env => env[PROVIDER_ENV] === "solari" || keyIn(env, SOLARI_KEY_ENV) !== undefined,
-    build: env => new SolariBackend({ apiKey: env[SOLARI_KEY_ENV] ?? "" }),
-  },
-];
+/** False in a public build, which the bundler fills in where PUBLIC_BUILD=1; never filled in anywhere else. */
+declare const __WSP_CLOUD__: boolean | undefined;
+
+/** The clouds, which are registered only with the cloud on. Built in a function so a public build, whose bundler
+ * reads the test below as false, drops the rows, the backends they build and their words. The test is spelled here
+ * and not imported from cloud.ts: a bundler folds the constant only where it is written. */
+function cloudModules(): readonly ProviderModule[] {
+  return [
+    {
+      id: "box",
+      envNames: [PROVIDER_ENV],
+      keyEnv: BOX_KEY_ENV,
+      keyName: PROVIDER_KEY_WORDS["box"]!.keyName,
+      keyConsole: PROVIDER_KEY_WORDS["box"]!.keyConsole,
+      // Named alone: the word says which cloud this computer forks on, and a missing key is asked for by its own
+      // variable on the key screen rather than guessed at here.
+      selects: env => env[PROVIDER_ENV] === "box",
+      build: env => new BoxBackend({ apiKey: env[BOX_KEY_ENV] ?? "" }),
+    },
+    {
+      id: "solari",
+      envNames: [PROVIDER_ENV],
+      keyEnv: SOLARI_KEY_ENV,
+      keyName: PROVIDER_KEY_WORDS["solari"]!.keyName,
+      keyConsole: PROVIDER_KEY_WORDS["solari"]!.keyConsole,
+      // Named, or taken by its key alone: this is the cloud a computer that names no provider is offered, so a key
+      // saved on its own is the whole answer.
+      selects: env => env[PROVIDER_ENV] === "solari" || keyIn(env, SOLARI_KEY_ENV) !== undefined,
+      build: env => new SolariBackend({ apiKey: env[SOLARI_KEY_ENV] ?? "" }),
+    },
+  ];
+}
+const CLOUD_MODULES: readonly ProviderModule[] = typeof __WSP_CLOUD__ === "boolean" && !__WSP_CLOUD__ ? [] : cloudModules();
 
 /** The providers a process answers for, by whether its cloud is on: with it off the clouds are not among them, and
  * everything read off the table (the words `wsp add` takes, the keys, the places, the Add a cloud sheet) goes with

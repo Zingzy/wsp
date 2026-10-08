@@ -54,8 +54,11 @@ async fn acted(host: &Host, reference: &str, op: &str) -> Result<Box<RawValue>, 
 
 const PAUSE_NAME: &str = "pause";
 
-pub const PAUSE: Tool =
-    Tool { name: PAUSE_NAME, listed: include_str!("../../record/tools/pause.json"), call: |host, args| Box::pin(pause(host, args)) };
+pub const PAUSE: Tool = Tool {
+    name: PAUSE_NAME,
+    listed: include_str!(concat!(env!("OUT_DIR"), "/record/tools/pause.json")),
+    call: |host, args| Box::pin(pause(host, args)),
+};
 
 async fn pause(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
     let WorkspaceIn { workspace } = input(PAUSE_NAME, arguments)?;
@@ -64,8 +67,11 @@ async fn pause(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
 
 const WAKE_NAME: &str = "wake";
 
-pub const WAKE: Tool =
-    Tool { name: WAKE_NAME, listed: include_str!("../../record/tools/wake.json"), call: |host, args| Box::pin(wake(host, args)) };
+pub const WAKE: Tool = Tool {
+    name: WAKE_NAME,
+    listed: include_str!(concat!(env!("OUT_DIR"), "/record/tools/wake.json")),
+    call: |host, args| Box::pin(wake(host, args)),
+};
 
 async fn wake(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
     let WorkspaceIn { workspace } = input(WAKE_NAME, arguments)?;
@@ -76,8 +82,11 @@ async fn wake(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
 
 const REBUILD_NAME: &str = "rebuild";
 
-pub const REBUILD: Tool =
-    Tool { name: REBUILD_NAME, listed: include_str!("../../record/tools/rebuild.json"), call: |host, args| Box::pin(rebuild(host, args)) };
+pub const REBUILD: Tool = Tool {
+    name: REBUILD_NAME,
+    listed: include_str!(concat!(env!("OUT_DIR"), "/record/tools/rebuild.json")),
+    call: |host, args| Box::pin(rebuild(host, args)),
+};
 
 /// The status is read beside the record, since the record alone carries no reach: a machine that stopped answering
 /// is the row's own refusal, not a rebuild.
@@ -120,7 +129,7 @@ const SNAPSHOT_NAME: &str = "snapshot";
 
 pub const SNAPSHOT: Tool = Tool {
     name: SNAPSHOT_NAME,
-    listed: include_str!("../../record/tools/snapshot.json"),
+    listed: include_str!(concat!(env!("OUT_DIR"), "/record/tools/snapshot.json")),
     call: |host, args| Box::pin(snapshot(host, args)),
 };
 
@@ -142,8 +151,11 @@ async fn snapshot(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> 
 
 const RENAME_NAME: &str = "rename";
 
-pub const RENAME: Tool =
-    Tool { name: RENAME_NAME, listed: include_str!("../../record/tools/rename.json"), call: |host, args| Box::pin(rename(host, args)) };
+pub const RENAME: Tool = Tool {
+    name: RENAME_NAME,
+    listed: include_str!(concat!(env!("OUT_DIR"), "/record/tools/rename.json")),
+    call: |host, args| Box::pin(rename(host, args)),
+};
 
 #[derive(Debug, Serialize, Deserialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
@@ -173,7 +185,7 @@ async fn rename(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
 
 const AGENTS_NAME: &str = "workspaces_agents";
 
-const AGENTS_LISTED: &str = include_str!("../../record/tools/workspaces_agents.json");
+const AGENTS_LISTED: &str = include_str!(concat!(env!("OUT_DIR"), "/record/tools/workspaces_agents.json"));
 
 pub const AGENTS: Tool = Tool { name: AGENTS_NAME, listed: AGENTS_LISTED, call: |host, args| Box::pin(set_agents(host, args)) };
 

@@ -5,7 +5,7 @@
 
 import { parseArgs } from "node:util";
 import { cloudOffRefusal, runForTheList, unknownWordLine, usageRefusal, foreignFlagLine } from "@wsp/protocol";
-import { CLOUD_ON } from "./cloud.js";
+import { CLOUD_BUILT, CLOUD_ON } from "./cloud.js";
 // The writer of a host's own .env now sits beside its reader; the name stays exported here for every caller
 // that already had it from this module.
 export { writeEnvFile } from "./env-keys.js";
@@ -155,7 +155,7 @@ export async function cli(
   if (values.host !== undefined && command.host === "refused") {
     return failed(io, json, usageRefusal(`Unknown option '--host' for wsp ${words}: it runs on this computer.`, `That flag belongs to ${HOST_COMMANDS.map(w => `wsp ${w}`).join(", ")}, and to every verb.`));
   }
-  const cloudFlag = CLOUD_ON ? undefined : SERVE_FLAGS.find(f => f.cloud === true && values[f.name] !== undefined);
+  const cloudFlag = CLOUD_ON || !CLOUD_BUILT ? undefined : SERVE_FLAGS.find(f => f.cloud === true && values[f.name] !== undefined);
   if (cloudFlag !== undefined) return failed(io, json, cloudOffRefusal(`wsp ${words} --${cloudFlag.name}`));
   // A flag another command of the shared parse reads: the union is one parse, so the line that does not read it is
   // told which lines do rather than taking it and doing nothing with it.

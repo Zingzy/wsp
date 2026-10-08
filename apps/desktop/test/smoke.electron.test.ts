@@ -176,7 +176,8 @@ function deadPid(): number {
  * of the four folders launchd gives an app, which is what a person's shell prints on their Mac. A launch handed
  * launchd's set reads it, and so does the service's host, which starts with that set; so this is what decides which
  * agents the app finds. Without one the app would read the shell of the Mac running the suite and find its agents
- * instead of the fixture's. */
+ * instead of the fixture's. A case's own PATH is its stub folder before those four too: the suite's PATH holds a
+ * stand-in for every agent, and a host that finds them runs each one's version and sign-in commands. */
 function loginShellIn(home: string, path: string | undefined): string {
   const bin = join(home, "bin");
   mkdirSync(bin, { recursive: true });
@@ -359,6 +360,11 @@ interface DesktopWindow {
 
 function readPreview(page: Page, workspaceId: string): Promise<string | undefined> {
   return page.evaluate(id => (window as unknown as DesktopWindow).wsp.workspacePreview(id), workspaceId);
+}
+
+/** A thread's picture as the page files it, under the theme drawn now. */
+function readThreadPicture(page: Page, threadId: string): Promise<string | undefined> {
+  return page.evaluate(id => (window as unknown as DesktopWindow).wsp.workspacePreview(`${document.documentElement.dataset["theme"] ?? ""}/${id}`), threadId);
 }
 
 /** A page in both themes: the shell's theme source is flipped, since the onboarding page follows the system's. */
@@ -691,7 +697,7 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     const agents = mkdtempSync(join(tmpdir(), "wsp-desktop-smoke-agents-"));
     const pidFile = join(agents, "claude.pids");
     claudeStandIn(join(agents, "bin"), join(agents, "gate"), pidFile);
-    const env = { PATH: `${join(agents, "bin")}:${process.env["PATH"] ?? ""}` };
+    const env = { PATH: `${join(agents, "bin")}:${LAUNCHD_PATH.join(":")}` };
     try {
       launched = await launch(env, seedLocalWorkspace);
       const { home } = launched;
@@ -712,7 +718,7 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
       await win.keyboard.press("Tab");
       await win.keyboard.up("Control");
       await win.waitForSelector("[data-workspace-switcher]", { state: "detached" });
-      await vi.waitFor(async () => expect(await readPreview(win, opened!)).toMatch(/^data:image\/png;base64,\w/), { timeout: 30_000, interval: 100 });
+      await vi.waitFor(async () => expect(await readThreadPicture(win, opened!)).toMatch(/^data:image\/png;base64,\w/), { timeout: 30_000, interval: 100 });
 
       await win.keyboard.down("Control");
       await win.keyboard.press("Tab");
@@ -912,7 +918,7 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     const gate = join(agents, "gate");
     const pidFile = join(agents, "claude.pids");
     claudeStandIn(join(agents, "bin"), gate, pidFile);
-    const env = { PATH: `${join(agents, "bin")}:${process.env["PATH"] ?? ""}` };
+    const env = { PATH: `${join(agents, "bin")}:${LAUNCHD_PATH.join(":")}` };
     let claudes: number[] = [];
     try {
       launched = await launch(env, seedLocalWorkspace);
@@ -1063,7 +1069,7 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
       const gate = join(agents, "gate");
       const pidFile = join(agents, "claude.pids");
       claudeStandIn(join(agents, "bin"), gate, pidFile, { asks: true });
-      const env = { PATH: `${join(agents, "bin")}:${process.env["PATH"] ?? ""}` };
+      const env = { PATH: `${join(agents, "bin")}:${LAUNCHD_PATH.join(":")}` };
       try {
         launched = await launch(env, seedLocalWorkspace);
         const { app, home } = launched;
@@ -1146,7 +1152,7 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     const gate = join(agents, "gate");
     writeFileSync(gate, "go\n");
     claudeStandIn(join(agents, "bin"), gate, join(agents, "claude.pids"));
-    const env = { PATH: `${join(agents, "bin")}:${process.env["PATH"] ?? ""}` };
+    const env = { PATH: `${join(agents, "bin")}:${LAUNCHD_PATH.join(":")}` };
     launched = await launch(env, seedLocalWorkspace);
     const win = await windowAt(launched.app, APP_URL);
     await openedOnSeeded(win);

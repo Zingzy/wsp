@@ -17,8 +17,11 @@ type Arc<T> = std::sync::Arc<T>;
 
 const NAME: &str = "add";
 
-pub const ADD: Tool =
-    Tool { name: NAME, listed: include_str!("../../record/tools/add.json"), call: |host, args| Box::pin(call(host, args)) };
+pub const ADD: Tool = Tool {
+    name: NAME,
+    listed: include_str!(concat!(env!("OUT_DIR"), "/record/tools/add.json")),
+    call: |host, args| Box::pin(call(host, args)),
+};
 
 /// What the add tool says and reads off the record: its refusal of a word that is no computer, the providers whose
 /// names it refuses, and how long one call runs.

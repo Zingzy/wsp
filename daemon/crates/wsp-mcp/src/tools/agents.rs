@@ -17,9 +17,9 @@ use crate::record::{self, fill};
 use crate::words::{cell, table};
 use crate::zod::{self, Ordered, Schema};
 
-const AGENTS_LISTED: &str = include_str!("../../record/tools/agents.json");
-const SKILLS_LISTED: &str = include_str!("../../record/tools/skills.json");
-const SERVERS_LISTED: &str = include_str!("../../record/tools/servers.json");
+const AGENTS_LISTED: &str = include_str!(concat!(env!("OUT_DIR"), "/record/tools/agents.json"));
+const SKILLS_LISTED: &str = include_str!(concat!(env!("OUT_DIR"), "/record/tools/skills.json"));
+const SERVERS_LISTED: &str = include_str!(concat!(env!("OUT_DIR"), "/record/tools/servers.json"));
 
 pub const AGENTS: Tool = Tool { name: "agents", listed: AGENTS_LISTED, call: |host, args| Box::pin(call(host, args, Rows::Agents)) };
 pub const SKILLS: Tool = Tool { name: "skills", listed: SKILLS_LISTED, call: |host, args| Box::pin(call(host, args, Rows::Skills)) };

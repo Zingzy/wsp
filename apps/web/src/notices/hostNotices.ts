@@ -17,10 +17,10 @@
 // dock's badge counts the threads waiting on the person. A newer release on an
 // app that replaces itself is downloaded and checked in the background, then
 // said once it is ready, with Restart and Later.
-import { GET_THE_APP_WORD, NOTIFY_ME, releaseAbove, waitLine, setupNeedsYouLine, setupReadyLine, askingLine, exitLine, foldThreads, initJobBuilding, initNeedsYouLine, needsYouCount, outsideLine, planAlertLine, threadFinishedLine, threadKeyOf, threadStoppedLine, titleWithNeed, type OutsideLine, type BundleOutcome, type DesktopBridge, type OutsideMoment, type PlaceView, type ReleaseView, type TurnResult } from "@wsp/protocol";
+import { GET_THE_APP_WORD, NOTIFY_ME, releaseAbove, waitLine, setupNeedsYouLine, setupReadyLine, askingLine, exitLine, foldThreads, initJobBuilding, initNeedsYouLine, needsYouCount, outsideLine, planAlertLine, threadFinishedLine, threadStoppedLine, titleWithNeed, type OutsideLine, type BundleOutcome, type DesktopBridge, type OutsideMoment, type PlaceView, type ReleaseView, type TurnResult } from "@wsp/protocol";
 import { useCallback, useEffect, useRef } from "react";
 import type { ProtocolEvent } from "../protocol/client.js";
-import { threadRows, useProtocolEvents, useStore } from "../protocol/store.js";
+import { threadOnScreen, useProtocolEvents, useStore } from "../protocol/store.js";
 import { desktopBridge } from "../lib/desktopShell.js";
 import { placeName } from "../settings/places.js";
 import { openSetup, useAddFlow } from "../settings/add/addFlow.js";
@@ -79,12 +79,7 @@ const threadOf = (workspaceId: string, threadId: string | undefined) => foldThre
 /** The line a moment makes outside the app under the person's choices, by the one rule the desktop shell reads too. */
 const lineFor = (moment: OutsideMoment): OutsideLine | undefined => outsideLine(moment, useStore.getState().preferences);
 
-function threadOnScreen(e: { workspaceId: string; sessionId: string; threadId?: string | undefined }): boolean {
-  const s = useStore.getState();
-  if (s.settingsOpen || s.freshThread || s.selectedId !== e.workspaceId) return false;
-  const shown = threadRows(s.sessions[e.workspaceId] ?? [], e.workspaceId, s.selectedThreadId ?? e.workspaceId).at(-1);
-  return shown === undefined ? s.selectedThreadId === null || s.selectedThreadId === e.threadId : threadKeyOf(shown) === (e.threadId ?? e.sessionId);
-}
+const onScreenNow = (e: { workspaceId: string; sessionId: string; threadId?: string | undefined }): boolean => threadOnScreen(useStore.getState(), e);
 
 const workspaceOnScreen = (workspaceId: string): boolean => !useStore.getState().settingsOpen && useStore.getState().selectedId === workspaceId;
 
@@ -335,7 +330,7 @@ const RULES: { [T in ProtocolEvent["type"]]?: Rule<T> } = {
       const error = result.error ?? exitLine(e.exitCode);
       sayOutside(held, () => useStore.getState().select(workspaceId, threadId ?? null), lineFor({ kind: "failed", thread: thread.title, where: workspaceNamed(workspaceId) ?? "", error }));
     }
-    if (e.exitCode === 0 || e.sawResult || e.reason !== undefined || result?.status === "interrupted" || threadOnScreen(e)) return;
+    if (e.exitCode === 0 || e.sawResult || e.reason !== undefined || result?.status === "interrupted" || onScreenNow(e)) return;
     const where = workspaceNamed(e.workspaceId);
     const said = result?.error ?? exitLine(e.exitCode);
     addNotice({ kind: "error", text: HOST_NOTICE_WORDS.threadStopped(threadTitle(e.workspaceId, e.threadId), said), ...(where === undefined ? {} : { where }), action: openThread(e.workspaceId, e.threadId) });
@@ -343,13 +338,13 @@ const RULES: { [T in ProtocolEvent["type"]]?: Rule<T> } = {
   "session.permission": (e, held) => {
     const { workspaceId, threadId } = e;
     sayOutside(held, () => useStore.getState().select(workspaceId, threadId ?? null), lineFor({ kind: "asks", line: askingLine(e) }));
-    if (threadOnScreen(e)) return;
+    if (onScreenNow(e)) return;
     const where = workspaceNamed(workspaceId);
     addNotice({ kind: "waiting", key: askKey(workspaceId, threadId, e.askId), text: askingLine(e), ...(where === undefined ? {} : { where }), action: openThread(workspaceId, threadId) });
   },
   "session.permission.closed": e => useNotices.getState().end(askKey(e.workspaceId, e.threadId, e.askId)),
   "session.notify": e => {
-    if (e.notify !== NOTIFY_ME || threadOnScreen(e)) return;
+    if (e.notify !== NOTIFY_ME || onScreenNow(e)) return;
     const where = workspaceNamed(e.workspaceId);
     addNotice({ kind: "note", text: e.text, ...(where === undefined ? {} : { where }), action: openThread(e.workspaceId, e.threadId) });
   },

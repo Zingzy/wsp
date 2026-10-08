@@ -79,9 +79,11 @@ jobs:
         run: |
           sudo apt-get install -y --no-install-recommends musl-tools gperf
           ./scripts/libseccomp-archive.sh musl
+      # Public: a Mac daemon's tool server embeds no cloud tool and no provider. The jobs that ship it read it for one.
       - name: Build
         env:
           TARGET: ${{ matrix.target }}
+          PUBLIC_BUILD: "1"
         run: |
           FEATURES=$(node ../packages/wspx/scripts/daemon-features.mjs "$TARGET")
           if [ "$RUNNER_OS" = "Linux" ]; then
@@ -172,6 +174,7 @@ jobs:
       - name: Build the bundles
         env:
           WSP_REQUIRE_DAEMON: "1"
+          PUBLIC_BUILD: "1"
           POSTHOG_KEY: ${{ vars.POSTHOG_KEY }}
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
@@ -181,6 +184,9 @@ jobs:
         run: |
           if [ -z "$CSC_LINK" ]; then unset CSC_LINK; fi
           pnpm --filter @wsp/desktop run build:mac
+      # A public release carries no cloud provider: Boat and Solari stay in the builds wsp's own development runs on.
+      - name: The app carries no cloud provider
+        run: node packages/wspx/scripts/public-check.mjs apps/desktop/build/app
       # Each bundle's signature and the packaged tree, and with a certificate the check insists on a notarized,
       # stapled bundle. It reads whether one signed from WSP_SIGNED, so the certificate's bytes stay in the
       # environment of the build step and reach no test.
@@ -250,8 +256,11 @@ jobs:
       - name: Build the bundle
         env:
           WSP_REQUIRE_DAEMON: "1"
+          PUBLIC_BUILD: "1"
           POSTHOG_KEY: ${{ vars.POSTHOG_KEY }}
         run: pnpm --filter @wsp/desktop run build:linux
+      - name: The app carries no cloud provider
+        run: node packages/wspx/scripts/public-check.mjs apps/desktop/build/app
       - name: Name the AppImage after the release, and copy it to the name that never moves
         run: |
           shopt -s nullglob
@@ -309,10 +318,15 @@ jobs:
       - name: Build, with every daemon binary required
         env:
           WSP_REQUIRE_DAEMON: "1"
+          PUBLIC_BUILD: "1"
           POSTHOG_KEY: ${{ vars.POSTHOG_KEY }}
         run: pnpm -r --filter '!./apps/www' --filter '!./apps/docs' --filter '!@wsp/desktop' build
       - name: Every target the host names is in the package
         run: node packages/wspx/scripts/daemon-binary.mjs --check
+      - name: The package carries no cloud provider
+        run: |
+          pnpm --filter @wsp-labs/wsp exec npm pack --pack-destination "$RUNNER_TEMP"
+          node packages/wspx/scripts/public-check.mjs "$RUNNER_TEMP"/wsp-labs-wsp-*.tgz
       - name: Publish
         if: ${{ github.event_name == 'push' }}
         run: pnpm --filter @wsp-labs/wsp exec npm publish --provenance --access public

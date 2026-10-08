@@ -18,8 +18,11 @@ use crate::record;
 
 const NAME: &str = "terminal_config";
 
-pub const TOOL: Tool =
-    Tool { name: NAME, listed: include_str!("../../record/tools/terminal_config.json"), call: |host, args| Box::pin(call(host, args)) };
+pub const TOOL: Tool = Tool {
+    name: NAME,
+    listed: include_str!(concat!(env!("OUT_DIR"), "/record/tools/terminal_config.json")),
+    call: |host, args| Box::pin(call(host, args)),
+};
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
