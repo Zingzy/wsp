@@ -173,6 +173,9 @@ export const SessionView = z.object({
   setupRefusal: z.string().optional(),
   /** The computer's threads at once this turn waits on before it starts; absent on every turn that is not held. */
   capped: ThreadCapWait.optional(),
+  /** The computer this send waits on to connect, by name, while a stop that could not reach it owes it the end of
+   * the thread's group, as session.queued says it; absent on every other row. */
+  waitsFor: z.string().optional(),
   /** The process this turn leads on the computer the host runs on, where the turn runs there: the pid the Processes
    * pane heads this thread's tree with. Absent on a turn running on another machine, whose pids are not this
    * computer's, and on a turn that is over. It is never written down: a pid outlives nothing, and the computer is

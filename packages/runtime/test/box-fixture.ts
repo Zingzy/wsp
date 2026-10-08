@@ -38,6 +38,14 @@ export interface Box {
   configs: Map<string, string>;
   /** How the configs read answers, given what it printed: as printed and exiting 0 unless a test says otherwise. */
   readAs?: (stdout: string) => { stdout: string; exitCode: number; stderr?: string };
+  /** The computer answers no frame, a ping included, as one whose network was cut while its socket still stands. */
+  quiet?: boolean;
+  /** A turn's launch and a thread's end, in the order they reached the computer and it answered them. */
+  order: string[];
+  /** How long the computer takes to answer a thread's end, given its command; at once unless a test says otherwise. */
+  endMs?: (cmd: string) => number;
+  /** A thread's end there leaves pid 4242 standing, as a process stuck in the kernel does. */
+  endFails?: boolean;
 }
 
 export interface BoxLogin {
@@ -55,12 +63,14 @@ export const handedLine = (cmd: string): string => {
 
 export function box(client: WsClient, login: BoxLogin, o: { failClone?: boolean; logins?: string } = {}): Box {
   let ptys = 0;
-  const seen: Box = { ops: [], execs: [], frames: [], taken: new Set(), kills: [], push: event => client.say(event), configs: new Map() };
-  let stopped = false;
+  const seen: Box = { ops: [], execs: [], frames: [], taken: new Set(), kills: [], push: event => client.say(event), configs: new Map(), order: [] };
+  /** The runs a signal reached, by the run's own path off the command. */
+  const stopped = new Set<string>();
+  const runOf = (cmd: string): string | undefined => /cat (\S+)\.pid/.exec(cmd)?.[1];
   client.onFrame(raw => {
     const frame = raw as unknown as Record<string, unknown>;
     const op = typeof frame["op"] === "string" ? frame["op"] : undefined;
-    if (op === undefined) return;
+    if (op === undefined || seen.quiet === true) return;
     const say = (payload: Record<string, unknown>): void => client.say({ id: frame["id"], ok: true, ...payload });
     seen.ops.push(op);
     if (op === "machine.backend") return say(o.logins === undefined ? KEEPS_NO_IMAGE : { ...KEEPS_NO_IMAGE, logins: o.logins });
@@ -94,12 +104,24 @@ export function box(client: WsClient, login: BoxLogin, o: { failClone?: boolean;
       const read = seen.readAs?.(printed) ?? { stdout: printed, exitCode: 0 };
       return say({ exitCode: read.exitCode, stdout: read.stdout, stderr: read.stderr ?? "", truncated: false });
     }
-    if (cmd.includes("WSP_LAUNCHED")) return out("WSP_LAUNCHED\n");
+    if (cmd.includes("WSP_LAUNCHED")) {
+      seen.order.push("launch");
+      return out("WSP_LAUNCHED\n");
+    }
+    if (cmd.includes("wsp_end()")) {
+      seen.order.push("end starts");
+      setTimeout(() => {
+        seen.order.push("end answers");
+        if (seen.endFails === true) say({ exitCode: 1, stdout: "", stderr: `processes 4242 of ${/wsp_end '([^']+)'/.exec(cmd)?.[1] ?? ""} did not end\n`, truncated: false });
+        else out("");
+      }, seen.endMs?.(cmd) ?? 0);
+      return;
+    }
     const sentinel = /(__WSP_EOF_[0-9a-f]+__)/.exec(cmd)?.[1];
-    if (sentinel !== undefined) return out(stopped ? `\n${sentinel} 143 down \n` : `\n${sentinel}  up \n`);
+    if (sentinel !== undefined) return out(stopped.has(runOf(cmd) ?? "") ? `\n${sentinel} 143 down \n` : `\n${sentinel}  up \n`);
     if (cmd.includes("kill -TERM -- -$P") || cmd.includes("kill -KILL -- -$P")) {
       seen.kills.push(cmd);
-      stopped = true;
+      stopped.add(runOf(cmd) ?? "");
     }
     return out("");
   });

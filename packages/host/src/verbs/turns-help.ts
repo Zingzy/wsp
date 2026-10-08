@@ -19,6 +19,8 @@ import {
   type SessionSteerEvent,
   type SessionStartingEvent,
   agentStartingLine,
+  sendWaitsForLine,
+  type SessionQueuedEvent,
   ThreadMessage,
   ThreadHead,
   ThreadView,
@@ -373,7 +375,7 @@ const OTHER_VERSION = otherVersion("sessions.start");
  * moment the harness took a message into that turn. Both are minted by this start's own request id, so a view with
  * the same text in flight cannot hand this one another start's news. */
 interface StartNews {
-  queued?(): void;
+  queued?(event: SessionQueuedEvent): void;
   /** Fires when the start has waited on its agent long enough to say the agent is starting. */
   starting?(event: SessionStartingEvent): void;
   /** Fires when the runtime records the steer, which is the moment the harness took the message; it carries what
@@ -389,7 +391,7 @@ async function begin(client: HostClient, start: Sent, startedBy: SessionOrigin, 
   const { requestId, ...asked } = start;
   const offNews = client.onFrame(f => {
     if (f["requestId"] !== requestId) return;
-    if (f.type === "session.queued") news.queued?.();
+    if (f.type === "session.queued") news.queued?.(f as unknown as SessionQueuedEvent);
     if (f.type === "session.steer") news.steered?.(f as unknown as SessionSteerEvent);
   });
   // The start is answered once its launch is handed over, which is before the agent's session starts, and the wait
@@ -448,7 +450,7 @@ async function redialUnanswered(failed: unknown, socket: HostClient, redial: (()
  * carries the end. Answers once the turn is started, so a start queued behind the thread's running turn answers
  * when that turn has ended and this one began. A host that stops before it answers is dialled again through
  * `redial`, and the same start goes to the host that comes back. */
-export async function startDetached(client: HostClient, start: Record<string, unknown>, startedBy: SessionOrigin, onQueued?: () => void, redial?: () => Promise<HostClient>): Promise<Turn> {
+export async function startDetached(client: HostClient, start: Record<string, unknown>, startedBy: SessionOrigin, onQueued?: (event: SessionQueuedEvent) => void, redial?: () => Promise<HostClient>): Promise<Turn> {
   const going = sent(start);
   let socket = client;
   for (;;) {
@@ -475,7 +477,7 @@ export async function follow(
   client: HostClient,
   start: Record<string, unknown>,
   startedBy: SessionOrigin,
-  on: { queued?(): void; starting?(event: SessionStartingEvent): void; steered?(event: SessionSteerEvent): void; started?(turn: Turn): void; redialed?(): void; event(e: SessionEvent, turn: Turn): void },
+  on: { queued?(event: SessionQueuedEvent): void; starting?(event: SessionStartingEvent): void; steered?(event: SessionSteerEvent): void; started?(turn: Turn): void; redialed?(): void; event(e: SessionEvent, turn: Turn): void },
   redial?: () => Promise<HostClient>,
 ): Promise<Turn> {
   const going = sent({ ...start, followed: true });
@@ -691,6 +693,8 @@ export function turnRefusal(turn: Turn): Error | undefined {
  * the rest once it answered. A steered message cannot change the running turn's picks, so the line names the flags
  * it dropped. */
 const WAITING = "waiting behind the running turn";
+/** The line for one wait: behind the running turn, or on a computer that is away to run the end a stop owed it. */
+const waitingLine = (e: SessionQueuedEvent): string => (e.waitsFor !== undefined ? sendWaitsForLine(e.waitsFor) : WAITING);
 const JOINED: Record<Exclude<SessionStartOutcome, "started" | "held">, (picks: Picks) => string> = {
   steered: picks => {
     const dropped = [...PICK_FLAGS.filter(name => picks[name] !== undefined), ...(picks.fast === true ? ["fast"] : [])].map(name => `--${name}`);
@@ -901,7 +905,7 @@ export async function followVerb(ctx: VerbContext, client: HostClient, start: Re
   let turn: Turn;
   try {
     turn = await follow(client, start, "cli", {
-      queued: () => ctx.io.error(WAITING),
+      queued: e => ctx.io.error(waitingLine(e)),
       starting: event => ctx.io.error(agentStartingLine(agentName(event.harness), event.installs === true)),
       steered: event => {
         joinedWaiting = event.waiting === true;
@@ -973,7 +977,7 @@ export async function beforeSending<T>(client: HostClient, read: () => Promise<T
  * thread's id on stdout the moment the runtime names it, and nothing of the reply, which the thread's finished line
  * carries to whoever its start named. */
 export async function detachVerb(ctx: VerbContext, client: HostClient, start: Record<string, unknown>, picks: Picks = {}, opened?: (threadId: string, folder?: string) => string): Promise<void> {
-  const turn = await startDetached(client, start, "cli", () => ctx.io.error(WAITING), () => hostBack(ctx));
+  const turn = await startDetached(client, start, "cli", e => ctx.io.error(waitingLine(e)), () => hostBack(ctx));
   if (turn.outcome === "held" && turn.session.capped !== undefined) ctx.io.error(capWaitLine(turn.session.capped));
   else if (turn.outcome !== "started" && turn.outcome !== "held") ctx.io.error(JOINED[turn.outcome](picks));
   ctx.out.emit(turnView(turn), openedThreadSaid(turn.threadId, opened, turn.session.cwd));

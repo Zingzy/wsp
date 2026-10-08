@@ -345,7 +345,7 @@ export function bootArea(ctx: RuntimeContext): BootArea {
             turnToken?: string;
             scopeDeviceId?: string;
             snapshot?: string;
-            end?: (reason: string) => void;
+            end?: (reason: string, stopped?: boolean) => void;
           } = {
             view,
             turnId,
@@ -368,9 +368,9 @@ export function bootArea(ctx: RuntimeContext): BootArea {
           };
           // A row left running because nothing answered about its run has no harness of its own to end, and the poll
           // that finds its machine gone must still be able to settle it.
-          row.end = reason => {
+          row.end = (reason, stopped) => {
             if (row.view.status !== "running") return;
-            ctx.settleCut(row, reason, () => reason);
+            ctx.settleCut(row, reason, () => reason, stopped);
             void ctx.persistSessions(row.view.workspaceId);
           };
           if (view.status === "running") left.push(row);

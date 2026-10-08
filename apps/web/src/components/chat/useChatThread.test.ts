@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import type { SessionEvent } from "@wsp/protocol";
+import { sendWaitsForLine, type SessionEvent, type SessionQueuedEvent } from "@wsp/protocol";
 import { CHAT_STREAM, CHAT_WS } from "../../../test/fixtures/chat-stream";
 import { deriveMessagesTimelineRows } from "./adapt";
-import { deriveChatThread, dropEvent, heldForSend, leaveView, reduceEvent, reloadTranscript, stabilizeEntries, startedSession, type ThreadState } from "./useChatThread";
+import { deriveChatThread, dropEvent, heldForSend, heldSaid, waitingOffRow, leaveView, reduceEvent, reloadTranscript, stabilizeEntries, startedSession, type ThreadState } from "./useChatThread";
 
 const T0 = "2026-09-01T02:00:00.000Z";
 const REQ = "req_own";
@@ -1135,5 +1135,38 @@ describe("a send whose turn never wrote a row of its own", () => {
     expect(reloaded.sending).toBeNull();
     expect(reloaded.pendingPrompt).toBeNull();
     expect(rendered(reloaded)).toEqual([...THREAD_SO_FAR, "user: stop the docs one", "claude answered with no output and no usage after 48ms"]);
+  });
+});
+
+describe("a send the host holds until a computer that is away has run the end a stop owed it", () => {
+  const queued = (o: Partial<SessionQueuedEvent> = {}): SessionQueuedEvent => ({ type: "session.queued", workspaceId: CHAT_WS, threadId: "thr_a", harness: "claude", prompt: "and then", requestId: REQ, waitsFor: "hetzner", ...o });
+  const notices = (s: ThreadState): string[] => deriveChatThread(s).entries.flatMap(e => (e.kind === "work" && e.entry.tone === "notice" ? [e.entry.label] : []));
+
+  it("says under this view's own send that it waits for that computer to connect", () => {
+    const sent = state([], { pendingPrompt: { text: "and then", at: T0, requestId: REQ } });
+    expect(notices(heldSaid(sent, queued(), "thr_a", T0))).toEqual([sendWaitsForLine("hetzner")]);
+  });
+
+  it("says it at the thread's tail for a send another client made, and drops it once the thread's next turn starts or ends", () => {
+    const shown = heldSaid(state([]), queued({ requestId: "req_cli" }), "thr_a", T0);
+    expect(notices(shown)).toEqual([sendWaitsForLine("hetzner")]);
+    const started = reduceEvent(shown, { type: "session.start", workspaceId: CHAT_WS, sessionId: "sess_n", turnId: "turn_n", threadId: "thr_a", prompt: "and then" }, T0, "thr_a");
+    expect(notices(started)).toEqual([]);
+    const ended = reduceEvent(shown, { type: "session.end", workspaceId: CHAT_WS, sessionId: "sess_n", turnId: "turn_n", threadId: "thr_a", exitCode: null, sawResult: false, reason: "given up" }, T0, "thr_a");
+    expect(notices(ended)).toEqual([]);
+  });
+
+  it("says nothing for a wait behind a running turn, nor for another thread", () => {
+    const { waitsFor: _waitsFor, ...behindTurn } = queued();
+    expect(notices(heldSaid(state([]), behindTurn, "thr_a", T0))).toEqual([]);
+    expect(notices(heldSaid(state([]), queued({ threadId: "thr_b", requestId: "req_cli" }), "thr_a", T0))).toEqual([]);
+  });
+
+  it("says it off the thread's row in a window opened while the send waits, once, and not after the send is let go", () => {
+    const row = { id: "turn_n", workspaceId: CHAT_WS, harness: "claude", status: "running" as const, threadId: "thr_a", startedAt: Date.parse(T0), waitsFor: "hetzner" };
+    expect(notices(waitingOffRow(state([]), row))).toEqual([sendWaitsForLine("hetzner")]);
+    expect(notices(waitingOffRow(heldSaid(state([]), queued({ requestId: "req_cli" }), "thr_a", T0), row))).toEqual([sendWaitsForLine("hetzner")]);
+    const { waitsFor: _gone, ...letGo } = row;
+    expect(notices(waitingOffRow(state([]), letGo))).toEqual([]);
   });
 });
