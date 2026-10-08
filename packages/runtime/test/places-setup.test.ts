@@ -45,6 +45,8 @@ import {
   type PlaceView,
   type PlaceReport,
   type SeedPlan,
+  heldPlaceScript,
+  placeFileText,
 } from "@wsp/protocol";
 import { loginSignIn } from "@wsp/catalog";
 import type { EngineStep, ProvisionPlan, ProvisionStage } from "@wsp/engine";
@@ -273,7 +275,7 @@ async function hosting(o: { provision: PlaceProvisioner; checkouts?: Checkouts; 
           stage("connect", "done", "Ubuntu 24.04");
           stage("check", "running");
           stage("check", "done", "root, systemd, cgroup v2");
-          await req.beforeDeploy?.("undo-script", "root@10.0.0.9");
+          await req.beforeDeploy?.("undo-script", "root@10.0.0.9", "ssh-ed25519 SHA256:box");
           const { client, placeId, pair } = await joinAt(srv!.port, hostKey, { code: readJoinToken(req.code).code, name: "spoo", report: o.report ?? CURRENT, proveReport: o.report ?? CURRENT, answers });
           sockets.push(client.ws);
           joined.push({ placeId, pair });
@@ -410,9 +412,16 @@ describe("a remove of a computer set up with picks", () => {
     });
     const over: { login: string; script: string }[] = [];
     const order: string[] = [];
+    const hostKey = newPlaceKeyPair();
+    let joined = "";
+    const held = heldPlaceScript(CURRENT.login["HOME"]!);
+    const file = (): string => placeFileText({ placeId: joined, name: "spoo", hostName: "zingzys-mac", hostUrls: DOOR, hostPublicKey: hostKey.publicKey, keyPath: "/home/maya/.wsp/place.key", joinedAt: "2026-10-07T00:00:00.000Z" });
     await hosting({
       provision: p.wired,
+      hostKey,
       runOver: async (login, script) => {
+        // The place file names this computer, which is what the remove reads before anything else runs there.
+        if (script === held) return { exitCode: 0, stdout: file(), stderr: "" };
         over.push({ login: login.ssh, script });
         order.push(script);
         return script.includes("stuck") ? { exitCode: 1, stdout: "", stderr: "Plugin is in use" } : { exitCode: 0, stdout: "", stderr: "" };
@@ -424,6 +433,7 @@ describe("a remove of a computer set up with picks", () => {
     });
     const picks = RecipeFile.parse({ name: "laptop", agents: { claude: { signin: "vault" } }, plugins: { "superpowers@market": {}, "stuck@market": {}, "had@market": {} } });
     const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: picks }, Date.now());
+    joined = place.id;
     await until(async () => (await rowOf(place.id)).setup?.state === "done");
     for (const ws of sockets.splice(0)) ws.close();
     await until(async () => (await rowOf(place.id)).present === false);
@@ -1061,7 +1071,7 @@ describe("a computer added before anything is picked", () => {
     // What a client reads names no key file and no undo: those stay in the store.
     const [pending] = await runtime!.places!.pending();
     expect(pending).not.toHaveProperty("undo");
-    expect((await store.get("pending-computers", "a_wait")) as { undo?: string }).toMatchObject({ undo: "undo-script", login: "root@10.0.0.9" });
+    expect((await store.get("pending-computers", "a_wait")) as { undo?: string }).toMatchObject({ undo: "undo-script", login: "root@10.0.0.9", hostKey: "ssh-ed25519 SHA256:box" });
   });
 
   it("keeps the choices through a host restart, refuses a resume with nothing chosen, and sets up from them at the resume", async () => {
@@ -1142,19 +1152,20 @@ describe("a host that stops in the middle of a setup", () => {
 
   it("finishes an add it stopped while wsp went on into the join that landed, or takes the install back", async () => {
     const store = memoryStore();
-    const pending = (id: string, login: string) => ({ id, address: login, step: "wsp", choices: LAPTOP, startedAt: new Date().toISOString(), undo: `undo ${id}`, login });
+    const pending = (id: string, login: string) => ({ id, address: login, step: "wsp", choices: LAPTOP, startedAt: new Date().toISOString(), undo: `undo ${id}`, login, hostKey: `key of ${login}` });
     await store.put("places", "p_spoo", record());
     await store.put("pending-computers", "a_joined", pending("a_joined", "root@10.0.0.9"));
     await store.put("pending-computers", "a_lost", pending("a_lost", "root@10.0.0.7"));
-    const undone: [string, string][] = [];
-    await hosting({ provision: provisioner().wired, store, undo: async (login, script) => void undone.push([login.ssh, script]) });
+    const undone: [string, string | undefined, string][] = [];
+    // The key the add saw rides to the undo, which runs nothing on a box answering with another.
+    await hosting({ provision: provisioner().wired, store, undo: async (login, script) => void undone.push([login.ssh, login.hostKey, script]) });
     // The one hydration every road waits on, which is what a host does before it serves anything.
     await runtime!.workspaces.list();
     await until(async () => (await runtime!.places!.pending()).some(p => p.id === "a_lost" && p.failed !== undefined));
     const now = await runtime!.places!.pending();
     expect(now.find(p => p.id === "a_joined")).toMatchObject({ placeId: "p_spoo", step: "floor" });
     expect(now.find(p => p.id === "a_lost")).toMatchObject({ failed: { said: ADD_STOPPED_LINE } });
-    expect(undone).toEqual([["root@10.0.0.7", "undo a_lost"]]);
+    expect(undone).toEqual([["root@10.0.0.7", "key of root@10.0.0.7", "undo a_lost"]]);
   });
 
   it("resumes at the computer's next link, redoing no step that ended and asking a waiting sign-in for a fresh code", async () => {

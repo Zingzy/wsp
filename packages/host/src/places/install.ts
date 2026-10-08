@@ -3,8 +3,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { heldPlaceScript, machineLacksLine, machineNeverAnswered, PLACE_LEAVE_VERB, PLACE_LEAVE_LINE, parsePlaceFile, PlaceAddStep, lastLine, readJoinToken, type PlaceBack, placeDaemonPaths, shellQuote, shellLine, placeNoChipLine, MACHINE_PUT_PART_BYTES, backUrl, hostKeyKeptNote, hostKeyMatches, hostKeyMismatchRefusal, hostKeyUnconfirmedRefusal, PLACE_HOST_KEY_KIND, hostKeyUnscannableRefusal, KNOWN_HOSTS, PLACE_ROOT_SHELLS, placeRootShellRefusal, isLoopback, joinAddressOf } from "@wsp/protocol";
-import { GITHUB_TOKEN_ENV, MissingKnownHostsError, PlaceMachine, runChild, SshBackend, SSH_DIAL_MS, SSH_LINE_CAP, clientWords, knownHostKey, landBytes, parseSshAddress, sshClient, sshDial, sshDialsThisComputer, sshLoginWord, sshMachineName, sshRefusalLine, sshWordReach, readSshSudo, trySshSudo, knownHostsWritten, type SshReach, type SshSudo, type SshTransport } from "@wsp/engine";
-import { PlaceAddTakenBackError, PlaceLoginRefusedError, type PlaceDialler, type PlaceInstaller, type PlaceLeaver, type PlaceLogReader, type PlaceStaging, type PlaceUpdateLanded, type PlaceUpdater, type PlaceWiring, type PlaceBackHolder } from "@wsp/runtime";
+import { GITHUB_TOKEN_ENV, MissingKnownHostsError, PlaceMachine, runChild, SshBackend, SSH_DIAL_MS, SSH_LINE_CAP, SUDO_ASKS_LINE, clientWords, knownHostKey, landBytes, parseSshAddress, sshClient, sshDial, sshDialsThisComputer, sshLoginWord, sshMachineName, sshRefusalLine, sshWordReach, readSshSudo, trySshSudo, knownHostsWritten, type SshReach, type SshSudo, type SshTransport } from "@wsp/engine";
+import { PlaceAddTakenBackError, PlaceHostKeyChangedError, PlaceLoginRefusedError, type PlaceDialler, type PlaceInstaller, type PlaceLeaver, type PlaceLogReader, type PlaceStaging, type PlaceUpdateLanded, type PlaceUpdater, type PlaceWiring, type PlaceBackHolder } from "@wsp/runtime";
 import { BackCutError } from "../place-back.js";
 import { floorBytes } from "@wsp/catalog";
 import { ADD_TAKEN_LINE, DAEMON_GONE_LINE, PLACE_JOINED_LINE, PlaceAlreadyJoinedError, PlaceJoinedThenFailedError, WSP_READY_LINE, addFound, addFoundScript, addUndoScript, deployDaemon, joinedAddWrites, joinedPlace, loginFilesStep, placeInstallFailedLine, sshDaemonPlace } from "../doctor.js";
@@ -120,7 +120,7 @@ export function placeInstaller(deps: { backend?: SshBackend; sshWord?: SshWordRe
       let { noRoot, adopted: read } = await rootBy(road === "asks" ? await tried() : road);
       // The read said root asks for nothing and the first script under sudo -n was refused for a password: a sudoers
       // the read could not see through. It is the ask, never the login's refusal, and the password where one came.
-      if (read instanceof Error && road === "free" && read.message.includes("a password is required")) ({ noRoot, adopted: read } = await rootBy(await tried()));
+      if (read instanceof Error && road === "free" && read.message.includes(SUDO_ASKS_LINE)) ({ noRoot, adopted: read } = await rootBy(await tried()));
       if (read instanceof Error) loginRefused(read);
       const adopted = read as Exclude<typeof read, Error>;
       const { machine, login, system, arch, shell, hostKey } = adopted;
@@ -214,7 +214,7 @@ export function placeInstaller(deps: { backend?: SshBackend; sshWord?: SshWordRe
     const found = addFound((await machine.run(addFoundScript(place, writes, unit.systemctl.join(" ")), { deadlineMs: SSH_DIAL_MS }).catch(() => undefined))?.stdout ?? "", writes.length);
     // Written down before a byte of wsp's is sent: what takes this install back, join and all, so a host that stops
     // in the middle of it can. A box that would not say what it held gets no undo, which keeps everything there.
-    await req.beforeDeploy?.(found === undefined ? "" : addUndoScript(place, writes, found, unit.systemctl.join(" "), true), road.ssh);
+    await req.beforeDeploy?.(found === undefined ? "" : addUndoScript(place, writes, found, unit.systemctl.join(" "), true), road.ssh, hostKey);
     await deployDaemon(machine, {
       place,
       target,
@@ -493,7 +493,7 @@ export function placeSudoReader(
       const answered = await (deps.hostKey ?? knownHostKey)(reach).catch(() => undefined);
       if (!hostKeyMatches(login.hostKey, answered ?? "")) {
         const entry = await (deps.knownHosts ?? knownHostsWritten)(reach).catch((): { file?: string; target?: string } => ({}));
-        throw new Error(hostKeyMismatchRefusal({ address: login.ssh, pinned: login.hostKey, ...(answered !== undefined ? { wrote: answered } : {}), target: entry.target ?? reach.host, file: entry.file ?? KNOWN_HOSTS }));
+        throw new PlaceHostKeyChangedError(hostKeyMismatchRefusal({ address: login.ssh, pinned: login.hostKey, ...(answered !== undefined ? { wrote: answered } : {}), target: entry.target ?? reach.host, file: entry.file ?? KNOWN_HOSTS }));
       }
     }
     const sudo = road === "asks" && sudoPassword !== undefined ? await trySshSudo(reach, sudoPassword, transport) : road;
@@ -508,18 +508,29 @@ export function placeSudoReader(
 export const placeUndoNeedsSudoLine = (ssh: string): string =>
   `${ssh.slice(0, 64)} runs sudo only with a password, which an undo with nobody at it cannot give, so what the add put there stays; log in there and run ${PLACE_LEAVE_LINE}`;
 
+/** What an undo says where nothing holds the login to the box the add reached: no key was kept from the add, or the
+ * box answers with another one now, so the root script runs nowhere. */
+export const placeUndoNoKeyLine = (ssh: string): string =>
+  `this wsp kept no key ${ssh.slice(0, 64)} answered the add with, so it changed nothing there; log in there and run ${PLACE_LEAVE_LINE}`;
+export const placeUndoOtherKeyLine = (ssh: string): string =>
+  `${ssh.slice(0, 64)} answers with another key than the one the add saw, so nothing was changed there; log in to the computer the add reached and run ${PLACE_LEAVE_LINE}`;
+
 /** How long taking back an add the host stopped in the middle of gets: systemd's own stop, then the files. */
 const PLACE_UNDO_MS = 120_000;
 
 /** Takes back what an add put on a box before the host stopped mid-install, over the login that add used: the script
- * the installer wrote down before it sent anything. Throws ssh's own line, or the box's, where it did not finish. */
-export function placeUndoer(deps: { transport?: SshTransport } = {}): NonNullable<PlaceWiring["undo"]> {
+ * the installer wrote down before it sent anything, run only where the key the box answers with now is the one the
+ * add saw, as the sudo read holds a password. Throws ssh's own line, or the box's, where it did not finish. */
+export function placeUndoer(deps: { transport?: SshTransport; hostKey?: (reach: SshReach) => Promise<string | undefined> } = {}): NonNullable<PlaceWiring["undo"]> {
   return async (login, script) => {
     if (script === "") throw new Error("the box would not say what it held before the install, so nothing of it is taken back");
     const reach = parseSshAddress(login.ssh, login.keyPath === undefined ? {} : { keyPath: login.keyPath });
+    if (login.hostKey === undefined) throw new Error(placeUndoNoKeyLine(login.ssh));
+    const answered = await (deps.hostKey ?? knownHostKey)(reach).catch(() => undefined);
+    if (!hostKeyMatches(login.hostKey, answered ?? "")) throw new Error(placeUndoOtherKeyLine(login.ssh));
     const said = await (deps.transport ?? sshClient)(reach, shellLine(["bash", "-c", script]), { timeoutMs: PLACE_UNDO_MS });
     if (said.exitCode === SSH_REFUSED_EXIT) throw new PlaceLoginRefusedError(sshRefusalLine(said, reach));
-    if (said.stderr.includes("a password is required")) throw new Error(placeUndoNeedsSudoLine(login.ssh));
+    if (said.stderr.includes(SUDO_ASKS_LINE)) throw new Error(placeUndoNeedsSudoLine(login.ssh));
     if (said.exitCode !== 0 || !said.stdout.includes(DAEMON_GONE_LINE)) throw new Error(lastLine(said.stderr) ?? lastLine(said.stdout) ?? `exit ${said.exitCode}`);
   };
 }

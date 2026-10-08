@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { readJoinToken, placeNoLinkLine, MCP_ID_PREFIX, placeStillInstalledLine, PLACE_SUDO_KIND } from "@wsp/protocol";
+import { readJoinToken, placeNoLinkLine, MCP_ID_PREFIX, placeStillInstalledLine, PLACE_SUDO_KIND, heldPlaceScript, placeFileText, placeLoginOtherRefusal, placeLoginUncheckedRefusal, placeLoginElsewhere, placeLoginElsewhereRemovedLine } from "@wsp/protocol";
 import { CODEX_TOML } from "@wsp/catalog";
 import { createRuntime } from "../src/runtime.js";
 import { HANDSHAKE, MCP_READ_MARK, SERVER_MARK } from "@wsp/engine";
-import { PlaceLoginRefusedError, newPlaceKeyPair, placeLoginRoadLine, placeSweptOverLinkLine, placeSweptOverSshLine, type PlaceDialler, type PlaceLeaveRequest, type PlaceLeaver, type PlaceLogin, type PlaceUpdateRequest, type PlaceWiring } from "../src/places.js";
+import { PlaceHostKeyChangedError, PlaceLoginRefusedError, newPlaceKeyPair, placeLoginRoadLine, placeSweptOverLinkLine, placeElsewhereSweptOverLinkLine, placeSweptOverSshLine, type PlaceDialler, type PlaceKeyPair, type PlaceLeaveRequest, type PlaceLeaver, type PlaceLogin, type PlaceUpdateRequest, type PlaceWiring } from "../src/places.js";
 import { serveRuntime } from "../src/serve.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { stubBackend } from "./stub-backend.js";
@@ -100,10 +100,20 @@ describe("taking a place back out", () => {
   });
 });
 
+/** The place file a box holds, naming one computer and the key of the host it joined. */
+const placeFile = (placeId: string, hostPublicKey: string): string =>
+  placeFileText({ placeId, name: "vps", hostName: "zingzys-mac", hostUrls: ["http://192.168.1.10:14621"], hostPublicKey, keyPath: "/home/maya/.wsp/place.key", joinedAt: "2026-10-07T00:00:00.000Z" });
+
+/** A login that reaches whatever box `file` says stands there, writing down every script it was asked to run. */
+const boxAnswering = (file: () => string, ran: string[] = []): NonNullable<PlaceWiring["runOver"]> => async (_login, script) => {
+  ran.push(script);
+  return { exitCode: 0, stdout: script === heldPlaceScript(report("vps").login["HOME"]!) ? file() : "", stderr: "" };
+};
+
 describe("taking a place back out over the login the install used", () => {
   /** A computer this host put the agent on over ssh and then stopped hearing from: its record carries that login
    * and no link, which is the box a remove has to reach itself. */
-  const installedAndSilent = async (leave?: PlaceLeaver, more: Partial<PlaceWiring> = {}, boxKey?: string): Promise<{ placeId: string; store: Store }> => {
+  const installedAndSilent = async (leave?: PlaceLeaver, more: Partial<PlaceWiring> = {}, boxKey?: string): Promise<{ placeId: string; store: Store; hostKey: PlaceKeyPair }> => {
     const hostKey = newPlaceKeyPair();
     const store = memoryStore();
     let joined = "";
@@ -124,6 +134,7 @@ describe("taking a place back out over the login the install used", () => {
           return { name: "vps", ssh: "root@65.21.4.12", sshKeyPath: "/Users/lena/.ssh/hetzner", ...(boxKey === undefined ? {} : { hostKey: boxKey }) };
         },
         ...(leave === undefined ? {} : { leave }),
+        runOver: boxAnswering(() => placeFile(joined, hostKey.publicKey)),
         ...more,
       },
       placeJoinWaitMs: 60,
@@ -131,7 +142,7 @@ describe("taking a place back out over the login the install used", () => {
     });
     ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices });
     await expect(ctx.runtime.places!.add({ address: "root@65.21.4.12", keyPath: "/Users/lena/.ssh/hetzner", hostUrls: DOOR }, Date.now())).rejects.toThrow(placeNoLinkLine("vps"));
-    return { placeId: joined, store };
+    return { placeId: joined, store, hostKey };
   };
 
   it("runs the leave over that login, keeps the record until it answered, and says which road it took", async () => {
@@ -250,7 +261,7 @@ describe("taking a place back out over the login the install used", () => {
    * a test that has to drop the link mid-remove the way the stop on it does. */
   const installedAndLinked = async (
     leave: PlaceLeaver,
-    over: { box?: WsClient; dial?: PlaceDialler } = {},
+    over: { box?: WsClient; dial?: PlaceDialler; runOver?: PlaceWiring["runOver"] } = {},
   ): Promise<{ placeId: string; overLink: string[]; askedOverLink: string[]; store: Store }> => {
     const hostKey = newPlaceKeyPair();
     const askedOverLink: string[] = [];
@@ -275,6 +286,7 @@ describe("taking a place back out over the login the install used", () => {
           return { name: "vps", ssh: "root@65.21.4.12", sshKeyPath: "/Users/lena/.ssh/hetzner" };
         },
         leave,
+        runOver: over.runOver ?? boxAnswering(() => placeFile(joined, hostKey.publicKey)),
       },
       placeJoinWaitMs: 60,
     });
@@ -372,5 +384,165 @@ describe("taking a place back out over the login the install used", () => {
     expect(removed.swept).toEqual(overLink);
     expect(removed.note).toBe(placeSweptOverLinkLine("vps", "root@65.21.4.12", said));
     expect(removed.note).not.toContain("did not answer the login");
+  });
+  it("runs nothing over a login that reaches another computer's place file, or none, and lets the record go saying so", async () => {
+    for (const file of [() => placeFile("p_0123456789abcdef", newPlaceKeyPair().publicKey), () => ""]) {
+      const asked: PlaceLeaveRequest[] = [];
+      const ran: string[] = [];
+      const { placeId, store } = await installedAndSilent(async req => (asked.push(req), []), { runOver: boxAnswering(file, ran) });
+      const removed = await ctx.runtime!.places!.remove(placeId);
+      // The read of the place file is the one thing that ran there: no plugin came off and no leave went.
+      expect(ran).toEqual([heldPlaceScript("/home/maya")]);
+      expect(asked).toEqual([]);
+      expect(removed.swept).toEqual([]);
+      expect(removed.note).toBe(placeLoginElsewhereRemovedLine("root@65.21.4.12", "vps"));
+      expect(removed.note).toBe("root@65.21.4.12 no longer reaches the computer added here as vps, so nothing was changed on the machine it reaches; vps is off this host, and whatever wsp left on vps itself stays until wsp leave runs there");
+      expect(await store.get("places", placeId)).toBeUndefined();
+    }
+  });
+
+  it("names the other computer added here where a failed add tried again left a stale record on the same login", async () => {
+    const asked: PlaceLeaveRequest[] = [];
+    const released: string[] = [];
+    let live = "";
+    const back: PlaceWiring["back"] = { hold: async (_login, at) => at, release: login => void released.push(login.ssh), door: () => {}, close: () => {} };
+    const updates: PlaceUpdateRequest[] = [];
+    const { placeId, store, hostKey } = await installedAndSilent(async req => (asked.push(req), []), {
+      runOver: boxAnswering(() => placeFile(live, hostKey.publicKey)),
+      back,
+      update: async req => (updates.push(req), { road: "ssh", at: "/root/.wsp/daemon/wsp-daemon" }),
+    });
+    const again = await join(hostKey, { code: await code(), name: "vps", report: report("vps") });
+    sockets.push(again.client.ws);
+    live = again.placeId;
+    // Both records dial back through one forward on that login, as an add tried again leaves them.
+    for (const id of [placeId, live]) {
+      const record = (await store.get("places", id)) as { road?: Record<string, unknown> };
+      await store.put("places", id, { ...record, road: { ...record.road, ssh: "root@65.21.4.12", back: { boxPort: 4640 } } });
+    }
+    // An update of the stale record is refused, and told to take that record away by its id: both go by vps.
+    const refused = placeLoginOtherRefusal("root@65.21.4.12", { id: placeId, name: "vps" }, "vps");
+    await expect(ctx.runtime!.places!.update(placeId)).rejects.toThrow(refused.happened);
+    expect(refused.fix).toBe(`This record of vps stands beside that one; take it away with wsp remove ${placeId}.`);
+    expect(updates).toEqual([]);
+    const removed = await ctx.runtime!.places!.remove(placeId);
+    // The live record still holds that forward, so taking the stale one away lets nothing go.
+    expect(released).toEqual([]);
+    expect(asked).toEqual([]);
+    expect(removed.note).toBe(placeLoginElsewhereRemovedLine("root@65.21.4.12", "vps", "vps"));
+    // The machine the login reaches is the live computer: the note keeps it added and names no leave to run there.
+    expect(removed.note).toBe("root@65.21.4.12 reaches the other computer added here as vps, which stays added, so nothing was changed there; this record of vps is off this host");
+    expect(await store.get("places", placeId)).toBeUndefined();
+    expect(await store.get("places", live)).toBeDefined();
+  });
+
+  it("lets the record go where the login's sudo asks for a password and the box answers with another key, running nothing there", async () => {
+    const kinds = ["no password", "typed"] as const;
+    for (const typed of kinds) {
+      const asked: PlaceLeaveRequest[] = [];
+      const ran: string[] = [];
+      const tried: (string | undefined)[] = [];
+      const { placeId, store } = await installedAndSilent(async req => (asked.push(req), []), {
+        // What placeSudoReader throws where the key the login answers with is not the one the add kept.
+        sudoOver: async (_login, sudoPassword) => {
+          tried.push(sudoPassword);
+          throw new PlaceHostKeyChangedError("root@65.21.4.12 answered with ssh-ed25519 AAAAother, not the ssh-ed25519 SHA256:kept you pinned");
+        },
+        runOver: boxAnswering(() => "", ran),
+      }, "ssh-ed25519 SHA256:kept");
+      const removed = await ctx.runtime!.places!.remove(placeId, typed === "typed" ? { sudoPassword: "typed" } : {});
+      expect(ran).toEqual([]);
+      expect(asked).toEqual([]);
+      expect(tried).toEqual([typed === "typed" ? "typed" : undefined]);
+      expect(removed.note).toBe(placeLoginElsewhereRemovedLine("root@65.21.4.12", "vps"));
+      expect(await store.get("places", placeId)).toBeUndefined();
+    }
+  });
+
+  it("refuses an update where the login's sudo asks and the box answers with another key", async () => {
+    const updates: PlaceUpdateRequest[] = [];
+    const { placeId, store } = await installedAndSilent(undefined, {
+      sudoOver: async () => {
+        throw new PlaceHostKeyChangedError("root@65.21.4.12 answered with ssh-ed25519 AAAAother, not the ssh-ed25519 SHA256:kept you pinned");
+      },
+      update: async req => (updates.push(req), { road: "ssh", at: "/root/.wsp/daemon/wsp-daemon" }),
+    }, "ssh-ed25519 SHA256:kept");
+    await expect(ctx.runtime!.places!.update(placeId)).rejects.toBeInstanceOf(PlaceHostKeyChangedError);
+    expect(updates).toEqual([]);
+    expect(await store.get("places", placeId)).toBeDefined();
+  });
+
+  it("sweeps a linked computer over its link where its login reaches another machine, and runs nothing over the login", async () => {
+    const asked: PlaceLeaveRequest[] = [];
+    const ran: string[] = [];
+    const { placeId, overLink, askedOverLink, store } = await installedAndLinked(async req => (asked.push(req), []), { runOver: boxAnswering(() => "", ran) });
+    const removed = await ctx.runtime!.places!.remove(placeId);
+    expect(asked).toEqual([]);
+    expect(ran).toEqual([heldPlaceScript("/home/maya")]);
+    expect(askedOverLink).toEqual(["place.leave"]);
+    expect(removed.swept).toEqual(overLink);
+    expect(removed.note).toBe(placeElsewhereSweptOverLinkLine("vps", placeLoginElsewhere("root@65.21.4.12", "vps")));
+    expect(await store.get("places", placeId)).toBeUndefined();
+  });
+
+  it("refuses an update over a login that reaches another machine before a byte goes there", async () => {
+    const updates: PlaceUpdateRequest[] = [];
+    const { placeId } = await installedAndSilent(undefined, {
+      runOver: boxAnswering(() => placeFile("p_0123456789abcdef", newPlaceKeyPair().publicKey)),
+      update: async req => (updates.push(req), { road: "ssh", at: "/root/.wsp/daemon/wsp-daemon" }),
+    });
+    await expect(ctx.runtime!.places!.update(placeId)).rejects.toMatchObject({ message: expect.stringContaining(placeLoginOtherRefusal("root@65.21.4.12", { id: placeId, name: "vps" }).happened), kind: "usage" });
+    expect(updates).toEqual([]);
+  });
+
+  it("reads the place file with the password sudo took, so a login whose sudo asks is checked and not refused", async () => {
+    const asked: PlaceLeaveRequest[] = [];
+    const reads: (string | undefined)[] = [];
+    let live = "";
+    const { placeId, store, hostKey } = await installedAndSilent(async req => (asked.push(req), []), {
+      sudoOver: async () => "taken",
+      runOver: async (_login, script, _timeoutMs, sudoPassword) => {
+        if (script === heldPlaceScript("/home/maya")) reads.push(sudoPassword);
+        return { exitCode: 0, stdout: script === heldPlaceScript("/home/maya") ? placeFile(live, hostKey.publicKey) : "", stderr: "" };
+      },
+    }, "ssh-ed25519 SHA256:kept");
+    live = placeId;
+    const removed = await ctx.runtime!.places!.remove(placeId, { sudoPassword: "right" });
+    expect(reads).toEqual(["right"]);
+    expect(asked.map(r => r.sudoPassword)).toEqual(["right"]);
+    expect(removed.note).toBe(placeSweptOverSshLine("vps"));
+    expect(await store.get("places", placeId)).toBeUndefined();
+  });
+
+  it("refuses a remove and an update whose place file read times out or fails, and runs nothing more there", async () => {
+    for (const failed of [{ exitCode: 124, stderr: "", said: "the read timed out after" }, { exitCode: 1, stderr: "sudo: a password is required\n", said: "sudo: a password is required" }]) {
+      const asked: PlaceLeaveRequest[] = [];
+      const updates: PlaceUpdateRequest[] = [];
+      const ran: string[] = [];
+      const { placeId, store } = await installedAndSilent(async req => (asked.push(req), []), {
+        runOver: async (_login, script) => (ran.push(script), { exitCode: failed.exitCode, stdout: "", stderr: failed.stderr }),
+        update: async req => (updates.push(req), { road: "ssh", at: "/root/.wsp/daemon/wsp-daemon" }),
+      });
+      const checked = placeLoginUncheckedRefusal("root@65.21.4.12", "vps", failed.said).happened;
+      await expect(ctx.runtime!.places!.remove(placeId)).rejects.toMatchObject({ message: expect.stringContaining(checked), kind: "usage" });
+      await expect(ctx.runtime!.places!.update(placeId)).rejects.toMatchObject({ message: expect.stringContaining(checked), kind: "usage" });
+      expect(ran).toEqual([heldPlaceScript("/home/maya"), heldPlaceScript("/home/maya")]);
+      expect(asked).toEqual([]);
+      expect(updates).toEqual([]);
+      expect(await store.get("places", placeId)).toBeDefined();
+    }
+  });
+
+  it("lets go of a computer whose login stops answering at the read, running nothing there", async () => {
+    const asked: PlaceLeaveRequest[] = [];
+    const { placeId, store } = await installedAndSilent(async req => (asked.push(req), []), {
+      runOver: async () => {
+        throw new PlaceLoginRefusedError("ssh: connect to host 65.21.4.12 port 22: Connection refused");
+      },
+    });
+    const removed = await ctx.runtime!.places!.remove(placeId);
+    expect(asked).toEqual([]);
+    expect(removed.note).toBe(placeStillInstalledLine("vps"));
+    expect(await store.get("places", placeId)).toBeUndefined();
   });
 });

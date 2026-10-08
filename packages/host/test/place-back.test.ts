@@ -10,8 +10,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { placeDaemonPaths, placeFileText, type PlaceBack } from "@wsp/protocol";
-import { keyFingerprint, type HeldChild, type SshCarried, type SshTransport } from "@wsp/engine";
+import { placeDaemonPaths, placeFileText, placeLoginElsewhere, type PlaceBack } from "@wsp/protocol";
+import { type HeldChild, type SshCarried, type SshTransport } from "@wsp/engine";
 import { backBindLine, backBindScript, backBinds, backNoDoorLine, backNoHostLine, backTakenLine, placeBackHolder } from "../src/place-back.js";
 import { heldPlaceScript } from "@wsp/protocol";
 
@@ -91,12 +91,12 @@ afterEach(() => {
 });
 
 /** A box's home holding a place file that names this host, dialling the relay and then the forward at 4640. */
-function placeHome(hostPublicKey = HOST_KEY): string {
+function placeHome(hostPublicKey = HOST_KEY, placeId = "p_1"): string {
   const home = mkdtempSync(join(tmpdir(), "wsp-back-"));
   homes.push(home);
   const path = placeDaemonPaths(home).placeFile;
   mkdirSync(join(path, ".."), { recursive: true });
-  const file = { placeId: "p_1", name: "spoo", hostName: "studio", hostUrls: ["https://relay.example", "http://127.0.0.1:4640"], hostPublicKey, keyPath: `${home}/.wsp/place.key`, joinedAt: "2026-09-24T10:00:00Z" };
+  const file = { placeId, name: "spoo", hostName: "studio", hostUrls: ["https://relay.example", "http://127.0.0.1:4640"], hostPublicKey, keyPath: `${home}/.wsp/place.key`, joinedAt: "2026-09-24T10:00:00Z" };
   writeFileSync(path, placeFileText(file), { mode: 0o600 });
   return home;
 }
@@ -105,7 +105,7 @@ describe("the forward a host holds back from a computer", () => {
   it("stands at the door's own port, reads where sshd bound it, and is made again after it ends", async () => {
     const children = spawner();
     const { transport, ran } = box(loopback);
-    const holder = holderAt({ hostKey: keyFingerprint(HOST_KEY), carry, log: () => {}, spawn: children.spawn, transport, waitMs: () => 5 });
+    const holder = holderAt({ hostPublicKey: HOST_KEY, carry, log: () => {}, spawn: children.spawn, transport, waitMs: () => 5 });
     const first = holder.hold(LOGIN, AT_DOOR, { home: "/root" });
     await until(() => children.started.length === 1);
     children.started[0]!.fake.stdout.write("WSP_BACK_UP\n");
@@ -119,13 +119,126 @@ describe("the forward a host holds back from a computer", () => {
     holder.close();
   });
 
+  it("reads the place file of a computer's own login first, and stands nowhere where it names another computer or none", async () => {
+    const cut = `${placeLoginElsewhere(LOGIN.ssh, "spoo")}, so the forward back to this computer was cut`;
+    const empty = mkdtempSync(join(tmpdir(), "wsp-back-"));
+    homes.push(empty);
+    for (const [home, id] of [[placeHome(), "p_2"], [placeHome("b3RoZXIgaG9zdA=="), "p_1"], [empty, "p_1"]] as const) {
+      const children = spawner();
+      const { transport, ran } = box(loopback);
+      const said: string[] = [];
+      const holder = holderAt({ hostPublicKey: HOST_KEY, carry, log: line => said.push(line), spawn: children.spawn, transport, waitMs: () => 5 });
+      await expect(holder.hold(LOGIN, AT_DOOR, { home, computer: { id, name: "spoo" } })).rejects.toThrow(cut);
+      expect(ran).toEqual([heldPlaceScript(home)]);
+      expect(children.started).toEqual([]);
+      expect(said).toEqual([cut]);
+      holder.close();
+    }
+  });
+
+  it("stands the forward once the place file there names the computer and this host", async () => {
+    const home = placeHome();
+    const children = spawner();
+    const { transport, ran } = box(loopback);
+    const holder = holderAt({ hostPublicKey: HOST_KEY, carry, log: () => {}, spawn: children.spawn, transport, waitMs: () => 5 });
+    const first = holder.hold(LOGIN, AT_DOOR, { home, computer: { id: "p_1", name: "spoo" } });
+    await until(() => children.started.length === 1);
+    children.started[0]!.fake.stdout.write("WSP_BACK_UP\n");
+    await expect(first).resolves.toEqual(AT_DOOR);
+    expect(ran).toEqual([heldPlaceScript(home), backBindScript(4640)]);
+    holder.close();
+  });
+
+  it("keeps every computer held on one login, so a stale record beside the live one never cuts its forward", async () => {
+    const home = placeHome();
+    const children = spawner();
+    const { transport } = box(loopback);
+    const holder = placeBackHolder({ hostPublicKey: HOST_KEY, carry, log: () => {}, spawn: children.spawn, transport, waitMs: () => 5 });
+    const live = holder.hold(LOGIN, AT_DOOR, { home, computer: { id: "p_1", name: "spoo" } });
+    const stale = holder.hold(LOGIN, AT_DOOR, { home, computer: { id: "p_0", name: "spoo" } });
+    holder.door(async () => 4640);
+    await until(() => children.started.length === 1);
+    children.started[0]!.fake.stdout.write("WSP_BACK_UP\n");
+    await expect(live).resolves.toEqual(AT_DOOR);
+    await expect(stale).resolves.toEqual(AT_DOOR);
+    holder.close();
+  });
+
+  it("names a computer once in the cut line where two records on the login share its name", async () => {
+    const home = placeHome(HOST_KEY, "p_9");
+    const children = spawner();
+    const { transport } = box(loopback);
+    const said: string[] = [];
+    const holder = placeBackHolder({ hostPublicKey: HOST_KEY, carry, log: line => said.push(line), spawn: children.spawn, transport, waitMs: () => 5 });
+    const first = holder.hold(LOGIN, AT_DOOR, { home, computer: { id: "p_1", name: "spoo" } });
+    const second = holder.hold(LOGIN, AT_DOOR, { home, computer: { id: "p_0", name: "spoo" } });
+    holder.door(async () => 4640);
+    await expect(first).rejects.toThrow();
+    await expect(second).rejects.toThrow();
+    expect(said).toEqual([`${placeLoginElsewhere(LOGIN.ssh, "spoo")}, so the forward back to this computer was cut`]);
+    expect(children.started).toEqual([]);
+    holder.close();
+  });
+
+  it("stands nothing while the place file read fails, unless sudo only asked for a password", async () => {
+    const home = placeHome();
+    const read = heldPlaceScript(home);
+    for (const failed of [{ exitCode: 124, stderr: "" }, { exitCode: 255, stderr: "ssh: connect to host spoo port 22: Connection refused\n" }, { exitCode: 1, stderr: "cat: permission denied\n" }]) {
+      const children = spawner();
+      const inner = box(loopback);
+      const transport: SshTransport = async (reach, script, opts) => (script === read ? { ...failed, stdout: "" } : inner.transport(reach, script, opts));
+      const said: string[] = [];
+      const holder = holderAt({ hostPublicKey: HOST_KEY, carry, log: line => said.push(line), spawn: children.spawn, transport, waitMs: () => 5 });
+      await expect(holder.hold(LOGIN, AT_DOOR, { home, computer: { id: "p_1", name: "spoo" } })).rejects.toThrow("did not let wsp read its place file");
+      expect(children.started).toEqual([]);
+      holder.close();
+    }
+    const children = spawner();
+    const inner = box(loopback);
+    const transport: SshTransport = async (reach, script, opts) => (script === read ? { exitCode: 1, stdout: "", stderr: "sudo: a password is required\n" } : inner.transport(reach, script, opts));
+    const holder = holderAt({ hostPublicKey: HOST_KEY, carry, log: () => {}, spawn: children.spawn, transport, waitMs: () => 5 });
+    const first = holder.hold(LOGIN, AT_DOOR, { home, computer: { id: "p_1", name: "spoo" } });
+    await until(() => children.started.length === 1);
+    children.started[0]!.fake.stdout.write("WSP_BACK_UP\n");
+    await expect(first).resolves.toEqual(AT_DOOR);
+    holder.close();
+  });
+
+  it("writes a moved port only into a place file naming a computer held on that login", async () => {
+    // The box's file names p_2, another computer of this host; the check read is answered as p_1's, so only the
+    // rewrite's own read stands between the moved port and p_2's file.
+    const home = placeHome(HOST_KEY, "p_2");
+    const before = readFileSync(placeDaemonPaths(home).placeFile, "utf8");
+    const children = spawner();
+    const inner = box(loopback);
+    let checked = false;
+    const transport: SshTransport = async (reach, script, opts) => {
+      if (script === heldPlaceScript(home) && !checked) {
+        checked = true;
+        return { exitCode: 0, stdout: before.replace('"p_2"', '"p_1"'), stderr: "" };
+      }
+      return inner.transport(reach, script, opts);
+    };
+    const holder = holderAt({ hostPublicKey: HOST_KEY, carry, log: () => {}, spawn: children.spawn, transport, waitMs: () => 5, pickPort: () => 23456 });
+    const first = holder.hold(LOGIN, AT_DOOR, { home, computer: { id: "p_1", name: "spoo" } });
+    await until(() => children.started.length === 1);
+    children.started[0]!.fake.stderr.write("Error: remote port forwarding failed for listen port 4640\n");
+    children.started[0]!.fake.exit(255);
+    await until(() => children.started.length === 2);
+    children.started[1]!.fake.stdout.write("WSP_BACK_UP\n");
+    await expect(first).resolves.toEqual({ boxPort: 23456 });
+    expect(inner.ran).toContain(heldPlaceScript(home));
+    expect(readFileSync(placeDaemonPaths(home).placeFile, "utf8")).toBe(before);
+    holder.close();
+  });
+
   it("takes a fresh port when the box still holds the old one, and writes it into the place file at its mode before saying so", async () => {
     const home = placeHome();
     const children = spawner();
     const { transport } = box(loopback);
     const moved: PlaceBack[] = [];
-    const holder = holderAt({ hostKey: keyFingerprint(HOST_KEY), carry, log: () => {}, spawn: children.spawn, transport, waitMs: () => 5, pickPort: () => 23456 });
-    const first = holder.hold(LOGIN, AT_DOOR, { home }, to => moved.push(to));
+    const holder = holderAt({ hostPublicKey: HOST_KEY, carry, log: () => {}, spawn: children.spawn, transport, waitMs: () => 5, pickPort: () => 23456 });
+    const first = holder.hold(LOGIN, AT_DOOR, { home, computer: { id: "p_1", name: "spoo" } }, to => moved.push(to));
     await until(() => children.started.length === 1);
     children.started[0]!.fake.stdout.write("WSP_BACK_UP\n");
     await first;
@@ -152,7 +265,7 @@ describe("the forward a host holds back from a computer", () => {
     const before = readFileSync(placeDaemonPaths(home).placeFile, "utf8");
     const children = spawner();
     const { transport, ran } = box(loopback);
-    const holder = holderAt({ hostKey: keyFingerprint(HOST_KEY), carry, log: () => {}, spawn: children.spawn, transport, waitMs: () => 5, pickPort: () => 23456 });
+    const holder = holderAt({ hostPublicKey: HOST_KEY, carry, log: () => {}, spawn: children.spawn, transport, waitMs: () => 5, pickPort: () => 23456 });
     const first = holder.hold(LOGIN, AT_DOOR, { home });
     await until(() => children.started.length === 1);
     children.started[0]!.fake.stderr.write("Error: remote port forwarding failed for listen port 4640\n");
@@ -169,7 +282,7 @@ describe("the forward a host holds back from a computer", () => {
     const children = spawner();
     const { transport } = box(port => [`0.0.0.0:${port}${SSHD}`, `[::]:${port}${SSHD}`]);
     const said: string[] = [];
-    const holder = holderAt({ hostKey: keyFingerprint(HOST_KEY), carry, spawn: children.spawn, transport, waitMs: () => 5, log: (line: string) => said.push(line) });
+    const holder = holderAt({ hostPublicKey: HOST_KEY, carry, spawn: children.spawn, transport, waitMs: () => 5, log: (line: string) => said.push(line) });
     const first = holder.hold(LOGIN, AT_DOOR, { home: "/root" });
     await until(() => children.started.length === 1);
     children.started[0]!.fake.stdout.write("WSP_BACK_UP\n");
@@ -186,7 +299,7 @@ describe("the forward a host holds back from a computer", () => {
   it("cuts a forward whose bind the box would not show", async () => {
     const children = spawner();
     const { transport } = box(() => []);
-    const holder = holderAt({ hostKey: keyFingerprint(HOST_KEY), carry, log: () => {}, spawn: children.spawn, transport, waitMs: () => 5 });
+    const holder = holderAt({ hostPublicKey: HOST_KEY, carry, log: () => {}, spawn: children.spawn, transport, waitMs: () => 5 });
     const first = holder.hold(LOGIN, AT_DOOR, { home: "/root" });
     await until(() => children.started.length === 1);
     children.started[0]!.fake.stdout.write("WSP_BACK_UP\n");
@@ -196,7 +309,7 @@ describe("the forward a host holds back from a computer", () => {
   it("ends a child whose up line never comes at the bound", async () => {
     const children = spawner();
     const { transport } = box(loopback);
-    const holder = holderAt({ hostKey: keyFingerprint(HOST_KEY), carry, log: () => {}, spawn: children.spawn, transport, waitMs: () => 60_000, upMs: 30 });
+    const holder = holderAt({ hostPublicKey: HOST_KEY, carry, log: () => {}, spawn: children.spawn, transport, waitMs: () => 60_000, upMs: 30 });
     await expect(holder.hold(LOGIN, AT_DOOR, { home: "/root" })).rejects.toThrow("root@spoo did not stand the forward back to this computer within");
     await until(() => children.started[0]!.fake.stdinEnded());
     holder.release(LOGIN);
@@ -205,7 +318,7 @@ describe("the forward a host holds back from a computer", () => {
   it("makes nothing again once released, and close releases every one", async () => {
     const children = spawner();
     const { transport } = box(loopback);
-    const holder = holderAt({ hostKey: keyFingerprint(HOST_KEY), carry, log: () => {}, spawn: children.spawn, transport, waitMs: () => 5 });
+    const holder = holderAt({ hostPublicKey: HOST_KEY, carry, log: () => {}, spawn: children.spawn, transport, waitMs: () => 5 });
     const first = holder.hold(LOGIN, AT_DOOR, { home: "/root" });
     const second = holder.hold({ ssh: "root@other" }, AT_DOOR, { home: "/root" });
     await until(() => children.started.length === 2);
@@ -225,7 +338,7 @@ describe("the door a forward lands on", () => {
   it("stands nothing until the host hands over its door, then lands on the door as it stands", async () => {
     const children = spawner();
     const { transport } = box(loopback);
-    const holder = placeBackHolder({ hostKey: keyFingerprint(HOST_KEY), carry, log: () => {}, spawn: children.spawn, transport, waitMs: () => 5 });
+    const holder = placeBackHolder({ hostPublicKey: HOST_KEY, carry, log: () => {}, spawn: children.spawn, transport, waitMs: () => 5 });
     const first = holder.hold(LOGIN, AT_DOOR, { home: "/root" });
     await new Promise(r => setTimeout(r, 50));
     expect(children.started).toHaveLength(0);
@@ -241,7 +354,7 @@ describe("the door a forward lands on", () => {
     const children = spawner();
     const { transport } = box(loopback);
     const said: string[] = [];
-    const holder = placeBackHolder({ hostKey: keyFingerprint(HOST_KEY), carry, log: line => said.push(line), spawn: children.spawn, transport, waitMs: () => 5, upMs: 30 });
+    const holder = placeBackHolder({ hostPublicKey: HOST_KEY, carry, log: line => said.push(line), spawn: children.spawn, transport, waitMs: () => 5, upMs: 30 });
     await expect(holder.hold(LOGIN, AT_DOOR, { home: "/root" })).rejects.toThrow(backNoHostLine("root@spoo"));
     expect(backNoHostLine("root@spoo").split(". ")).toHaveLength(1);
     expect(children.started).toHaveLength(0);
@@ -254,7 +367,7 @@ describe("the door a forward lands on", () => {
   it("settles a hold still waiting for the door once it is released", async () => {
     const children = spawner();
     const { transport } = box(loopback);
-    const holder = placeBackHolder({ hostKey: keyFingerprint(HOST_KEY), carry, log: () => {}, spawn: children.spawn, transport, waitMs: () => 5 });
+    const holder = placeBackHolder({ hostPublicKey: HOST_KEY, carry, log: () => {}, spawn: children.spawn, transport, waitMs: () => 5 });
     const first = holder.hold(LOGIN, AT_DOOR, { home: "/root" });
     holder.release(LOGIN);
     await expect(Promise.race([first, new Promise((_, fail) => setTimeout(() => fail(new Error("still pending")), 200))])).rejects.toThrow("the forward back from root@spoo was let go");
@@ -267,7 +380,7 @@ describe("the door a forward lands on", () => {
     const children = spawner();
     const { transport } = box(loopback);
     const said: string[] = [];
-    const holder = holderAt({ hostKey: keyFingerprint(HOST_KEY), carry, log: line => said.push(line), spawn: children.spawn, transport, waitMs: () => 5 }, async () => undefined);
+    const holder = holderAt({ hostPublicKey: HOST_KEY, carry, log: line => said.push(line), spawn: children.spawn, transport, waitMs: () => 5 }, async () => undefined);
     await expect(holder.hold(LOGIN, AT_DOOR, { home: "/root" })).rejects.toThrow(backNoDoorLine("root@spoo"));
     await new Promise(r => setTimeout(r, 50));
     expect(children.started).toHaveLength(0);
@@ -279,7 +392,7 @@ describe("the door a forward lands on", () => {
     const { transport } = box(loopback);
     const moved: PlaceBack[] = [];
     let door: () => Promise<number> = async () => 4640;
-    const holder = holderAt({ hostKey: keyFingerprint(HOST_KEY), carry, log: () => {}, spawn: children.spawn, transport, waitMs: () => 5 }, () => door());
+    const holder = holderAt({ hostPublicKey: HOST_KEY, carry, log: () => {}, spawn: children.spawn, transport, waitMs: () => 5 }, () => door());
     const first = holder.hold(LOGIN, AT_DOOR, { home: "/root" }, to => moved.push(to));
     await until(() => children.started.length === 1);
     children.started[0]!.fake.stdout.write("WSP_BACK_UP\n");
@@ -309,7 +422,7 @@ describe("a listener on the forward's port that is not sshd's", () => {
     const { transport } = box(port => (port === 4640 ? [`127.0.0.1:4640${SSHD}`, "203.0.113.9:4640", '[::]:4640 users:(("nginx",pid=77,fd=6))'] : loopback(port)));
     const moved: PlaceBack[] = [];
     const said: string[] = [];
-    const holder = holderAt({ hostKey: keyFingerprint(HOST_KEY), carry, log: line => said.push(line), spawn: children.spawn, transport, waitMs: () => 5, pickPort: () => 23456 });
+    const holder = holderAt({ hostPublicKey: HOST_KEY, carry, log: line => said.push(line), spawn: children.spawn, transport, waitMs: () => 5, pickPort: () => 23456 });
     const first = holder.hold(LOGIN, AT_DOOR, { home }, to => moved.push(to));
     await until(() => children.started.length === 1);
     children.started[0]!.fake.stdout.write("WSP_BACK_UP\n");
@@ -326,7 +439,7 @@ describe("a listener on the forward's port that is not sshd's", () => {
   it("a wide listener the box names no owner for is taken too, and two taken ports are a try that failed, not a stop", async () => {
     const children = spawner();
     const { transport } = box(port => [`0.0.0.0:${port}`]);
-    const holder = holderAt({ hostKey: keyFingerprint(HOST_KEY), carry, log: () => {}, spawn: children.spawn, transport, waitMs: () => 5, pickPort: () => 23456 });
+    const holder = holderAt({ hostPublicKey: HOST_KEY, carry, log: () => {}, spawn: children.spawn, transport, waitMs: () => 5, pickPort: () => 23456 });
     const first = holder.hold(LOGIN, AT_DOOR, { home: "/root" });
     await until(() => children.started.length === 1);
     children.started[0]!.fake.stdout.write("WSP_BACK_UP\n");
@@ -345,7 +458,7 @@ describe("a box without ss", () => {
     const transport: SshTransport = async (reach, script, opts) =>
       script === backBindScript(4640) ? { exitCode: 0, stdout: "WSP_BINDHEX 0100007F:1220\nWSP_BINDHEX 00000000:1220\n", stderr: "" } : inner.transport(reach, script, opts);
     const said: string[] = [];
-    const holder = holderAt({ hostKey: keyFingerprint(HOST_KEY), carry, log: line => said.push(line), spawn: children.spawn, transport, waitMs: () => 5, pickPort: () => 23456 });
+    const holder = holderAt({ hostPublicKey: HOST_KEY, carry, log: line => said.push(line), spawn: children.spawn, transport, waitMs: () => 5, pickPort: () => 23456 });
     const first = holder.hold(LOGIN, AT_DOOR, { home: "/root" });
     await until(() => children.started.length === 1);
     children.started[0]!.fake.stdout.write("WSP_BACK_UP\n");
@@ -376,7 +489,7 @@ describe("a release while the forward is moving", () => {
       return inner.transport(reach, script, opts);
     };
     const moved: PlaceBack[] = [];
-    const holder = holderAt({ hostKey: keyFingerprint(HOST_KEY), carry, log: () => {}, spawn: children.spawn, transport, waitMs: () => 5, pickPort: () => 23456 });
+    const holder = holderAt({ hostPublicKey: HOST_KEY, carry, log: () => {}, spawn: children.spawn, transport, waitMs: () => 5, pickPort: () => 23456 });
     const first = holder.hold(LOGIN, AT_DOOR, { home }, to => moved.push(to));
     await until(() => children.started.length === 1);
     children.started[0]!.fake.stderr.write("Error: remote port forwarding failed for listen port 4640\n");
@@ -399,7 +512,7 @@ describe("a login held twice and a log that repeats", () => {
   it("a second hold after a failed first try answers the next try, not the stale failure", async () => {
     const children = spawner();
     const { transport } = box(loopback);
-    const holder = holderAt({ hostKey: keyFingerprint(HOST_KEY), carry, log: () => {}, spawn: children.spawn, transport, waitMs: () => 60_000 });
+    const holder = holderAt({ hostPublicKey: HOST_KEY, carry, log: () => {}, spawn: children.spawn, transport, waitMs: () => 60_000 });
     const first = holder.hold(LOGIN, AT_DOOR, { home: "/root" });
     await until(() => children.started.length === 1);
     children.started[0]!.fake.stderr.write("ssh: connect to host spoo port 22: Connection refused\n");
@@ -416,7 +529,7 @@ describe("a login held twice and a log that repeats", () => {
     const children = spawner();
     const { transport } = box(loopback);
     const said: string[] = [];
-    const holder = holderAt({ hostKey: keyFingerprint(HOST_KEY), carry, log: line => said.push(line), spawn: children.spawn, transport, waitMs: () => 5 });
+    const holder = holderAt({ hostPublicKey: HOST_KEY, carry, log: line => said.push(line), spawn: children.spawn, transport, waitMs: () => 5 });
     void holder.hold(LOGIN, AT_DOOR, { home: "/root" });
     for (let n = 0; n < 4; n += 1) {
       await until(() => children.started.length === n + 1);

@@ -9,12 +9,12 @@ import { describe, expect, it } from "vitest";
 import WebSocket from "ws";
 import { DAEMON_VERSION, PLACE_SUDO_KIND, hostKeyMismatchRefusal, PLACE_LEAVE_VERB, PlaceReport, placeDaemonPaths, shellQuote, workFolderIn, wsUrlOf } from "@wsp/protocol";
 import { CATALOG_AGENTS } from "@wsp/catalog";
-import { PlaceLoginRefusedError } from "@wsp/runtime";
+import { PlaceHostKeyChangedError, PlaceLoginRefusedError } from "@wsp/runtime";
 import { SSH_SUDO_READ, keyFingerprint, type SshReach, type SshTransport } from "@wsp/engine";
 import { daemonBinaryHere } from "../src/assets.js";
 import { noPlaceSystemLine } from "../src/daemon-binary.js";
-import { daemonFlags, sshDaemonPlace } from "../src/doctor.js";
-import { deviceLeftLine, joinCommand, placeDaemonFlags, preparePlaceHome, joinPlace, placeNameHere, removeCommand, placeLeaver, placeRunner, placeLeaveFailedLine, placeNoKeyForSudoLine, placeSudoReader, placeUndoer, placeUndoNeedsSudoLine, sudoPasswordAsk } from "../src/places.js";
+import { DAEMON_GONE_LINE, daemonFlags, sshDaemonPlace } from "../src/doctor.js";
+import { deviceLeftLine, joinCommand, placeDaemonFlags, preparePlaceHome, joinPlace, placeNameHere, removeCommand, placeLeaver, placeRunner, placeLeaveFailedLine, placeNoKeyForSudoLine, placeSudoReader, placeUndoer, placeUndoNeedsSudoLine, placeUndoNoKeyLine, placeUndoOtherKeyLine, sudoPasswordAsk } from "../src/places.js";
 import { placeFilePath, placeKeyPath, readPlaceFile, sweptLine, writePlaceFile } from "../src/place-report.js";
 import { captured } from "./verbs-fixture.js";
 import { type ServiceRunner } from "../src/service.js";
@@ -211,6 +211,8 @@ describe("root over a login whose sudo asks for a password, for a remove and an 
     const said = await placeSudoReader({ transport: changed.transport, ...keys("ssh-ed25519 SHA256:somebody-else") })(login, "Tq-not-a-real-pw", act).catch((e: unknown) => e as Error & { kind?: string });
     expect((said as Error).message).toBe(hostKeyMismatchRefusal({ address: "maya@box", pinned: KEPT, wrote: "ssh-ed25519 SHA256:somebody-else", target: "box", file: "/root/.ssh/known_hosts" }));
     expect((said as { kind?: string }).kind).toBeUndefined();
+    // Its own class, which a remove reads as a login reaching another machine and lets the record go on.
+    expect(said).toBeInstanceOf(PlaceHostKeyChangedError);
     expect(changed.asked.map(a => a.script)).toEqual([SSH_SUDO_READ]);
     expect(changed.asked.some(a => a.stdin !== undefined || a.sudoPassword !== undefined)).toBe(false);
     // A record made before the key was kept, or one whose add could read none: no password road at all.
@@ -237,8 +239,19 @@ describe("root over a login whose sudo asks for a password, for a remove and an 
 
   it("says an undo on a box whose sudo asks for a password stays undone, with the line to run there", async () => {
     const transport: SshTransport = async () => ({ exitCode: 1, stdout: "", stderr: "sudo: a password is required\n" });
-    await expect(placeUndoer({ transport })(login, "true")).rejects.toThrow(placeUndoNeedsSudoLine("maya@box"));
+    await expect(placeUndoer({ transport, hostKey: async () => KEPT })(login, "true")).rejects.toThrow(placeUndoNeedsSudoLine("maya@box"));
     expect(placeUndoNeedsSudoLine("maya@box")).toContain("log in there and run wsp leave");
+  });
+
+  it("runs an undo only on the box that answers with the key the add saw, and nothing where it kept none", async () => {
+    const ran: string[] = [];
+    const transport: SshTransport = async (_reach, script) => (ran.push(script), { exitCode: 0, stdout: `${DAEMON_GONE_LINE}\n`, stderr: "" });
+    await expect(placeUndoer({ transport, hostKey: async () => "ssh-ed25519 SHA256:another-box" })(login, "true")).rejects.toThrow(placeUndoOtherKeyLine("maya@box"));
+    await expect(placeUndoer({ transport, hostKey: async () => undefined })(login, "true")).rejects.toThrow(placeUndoOtherKeyLine("maya@box"));
+    await expect(placeUndoer({ transport, hostKey: async () => KEPT })({ ssh: "maya@box" }, "true")).rejects.toThrow(placeUndoNoKeyLine("maya@box"));
+    expect(ran).toEqual([]);
+    await placeUndoer({ transport, hostKey: async () => KEPT })(login, "true");
+    expect(ran).toHaveLength(1);
   });
 
   it("asks at the terminal once for a remove the host refused for the password, and removes again carrying it", async () => {

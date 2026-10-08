@@ -186,8 +186,9 @@ export interface PlaceBackHolder {
   /** Holds the forward for that login until it is released, making it again each time it ends. Answers where it
    * first stood, or throws the sentence for why the first try did not; a login already held takes the new `moved`
    * and answers where it stands. `moved` hears the port on that computer whenever a remake had to take another,
-   * after the place file there names it. */
-  hold(login: PlaceLogin, back: PlaceBack, on: { home: string }, moved?: (back: PlaceBack) => void): Promise<PlaceBack>;
+   * after the place file there names it. With `computer`, each standing first reads the place file there and cuts
+   * the forward where it names another computer or none: the add's own hold comes before that file exists. */
+  hold(login: PlaceLogin, back: PlaceBack, on: { home: string; computer?: { id: string; name: string } }, moved?: (back: PlaceBack) => void): Promise<PlaceBack>;
   release(login: PlaceLogin): void;
   /** The door every forward lands on, handed over once the host serves: its port on this computer's loopback as it
    * stands when asked, or nothing on a host with no door of its own. Nothing stands before it is handed. */
@@ -316,8 +317,9 @@ export interface PlaceInstallRequest {
   /** The relay's address among `hostUrls`, when this host is linked to one. */
   relay?: string;
   /** Awaited right before anything of wsp's is sent, with the script that would take it all back off that computer:
-   * the host writes it down first, so a host that stops mid-install can finish the join or take the install back. */
-  beforeDeploy?(undo: string, ssh: string): Promise<void>;
+   * the host writes it down first, so a host that stops mid-install can finish the join or take the install back.
+   * The key the box's ssh answered with rides along, which the undo holds that login to before it runs. */
+  beforeDeploy?(undo: string, ssh: string, hostKey?: string): Promise<void>;
 }
 
 /** What the install answers once the computer has run its own join: the name it was given, and the key its ssh
@@ -613,6 +615,16 @@ export const placeLoginRoadLine = (name: string, at: string, said?: string): str
  * service that starts the agent on that computer, and nothing here can reach it to take it. */
 export const placeSweptOverLinkLine = (name: string, at: string, said?: string): string =>
   `${placeLoginRoadLine(name, at, said)}, so it swept itself over the link: its files came off and the service that starts the agent there did not`;
+
+/** What a remove says where the computer's own login reached another machine, so nothing ran over it, and the place
+ * swept itself over its link instead. */
+export const placeElsewhereSweptOverLinkLine = (name: string, away: string): string =>
+  `${away}, so nothing was changed on the machine it reaches; ${name} swept itself over the link: its files came off and the service that starts the agent there did not`;
+
+/** The key a login's ssh answers with is not the one the add kept, read before a password goes there: the login
+ * reaches another machine, or the computer was rebuilt and wsp is gone from it. A remove lets the record go on it
+ * with nothing run there; an update refuses. */
+export class PlaceHostKeyChangedError extends Error {}
 
 /** The refusal the login itself got, as against anything the computer at the end of it said: ssh would not take
  * the login, so nothing ran there at all. The roads that log in throw this one for that case alone, and the lines
