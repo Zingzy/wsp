@@ -1,0 +1,1 @@
+A leave takes wsp's own folder only once it is empty, and names the manifest, the put folder, the readings, the sshd folder, the add's place-found.part and join code, and the folder a project's install logs go to instead, so the person's own wsp and a host's state on the same login stay.

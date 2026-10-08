@@ -49,7 +49,10 @@ pub use place::{
     PlaceAuthRequest, PlaceClient, PlaceEphemeral, PlaceFile, PlaceNonce, PlaceProveRequest, PlacePublicKey, PlaceReport, PlaceSignature,
     Platform, WorkspaceSize,
 };
-pub use place_paths::{place_daemon_paths, place_owned_paths, place_provision_paths, probe_path, PlaceDaemonPaths, PlaceProvisionPaths};
+pub use place_paths::{
+    place_daemon_paths, place_owned_paths, place_provision_paths, probe_path, PlaceDaemonPaths, PlaceProvisionPaths, READINGS_FOLDER,
+    SSH_FOLDER,
+};
 pub use reply::{
     DaemonErrorResponse, DaemonExecReply, Empty, False, FsEntry, FsFilesReply, FsListReply, FsReadReply, FsSearchHit, FsSearchReply,
     FsWriteReply, GitBranch, GitBranchCompareReply, GitBranchesReply, GitCheckpointDropReply, GitCheckpointReply, GitCommitReply,

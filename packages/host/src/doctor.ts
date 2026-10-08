@@ -764,7 +764,7 @@ export function placeFoundStep(place: DaemonPlace, at: { profile: string; prefix
   const prefix = sh(place, at.prefix);
   const links = sh(place, at.links);
   const record = sh(place, placeDaemonPaths(place.root).placeFound);
-  const part = sh(place, placeFoundPart(place.root));
+  const part = sh(place, placeDaemonPaths(place.root).placeFoundPart);
   const listing = [
     `rm -f ${part}`,
     "found=1",
@@ -791,9 +791,6 @@ export function placeFoundStep(place: DaemonPlace, at: { profile: string; prefix
     "esac",
   ];
 }
-
-/** Where that record is written before it is renamed into place. */
-export const placeFoundPart = (home: string): string => `${placeDaemonPaths(home).placeFound}.part`;
 
 /** Stops whatever holds the daemon's place before the new daemon starts: an update lands on a machine whose daemon
  * is running, and a second bind would fail while the port check still read the old one as up. The unit goes first,
@@ -905,12 +902,10 @@ const underHome = (home: string, path: string): string[] => (path !== "/" && pat
 
 /** Everything a joined add can leave on a computer, off the place that names each path: what the deploy lands,
  * what the join on that computer writes, and what its agent writes if it started. The work folder is a folder the
- * join made and is never taken with anything in it; wsp's own folder is never taken whole, since a host on the
- * same login keeps its state there. */
+ * join made and is never taken with anything in it, and so is wsp's own folder, as a leave takes it. */
 export function joinedAddWrites(place: DaemonPlace, unitPath: string): AddWrite[] {
   const home = place.root.replace(/\/+$/, "");
-  const at = placeDaemonPaths(home);
-  const own = [...placeOwnedPaths(home).filter(path => path !== at.wsp), placeFoundPart(home), `${posix.dirname(place.profileFile)}/wsp-preview.sh`, at.manifestPath, at.putDir, joinOf(place).codeFile];
+  const own = [...placeOwnedPaths(home), `${posix.dirname(place.profileFile)}/wsp-preview.sh`];
   const folders = [...new Set([...place.make, workFolderIn(home)].flatMap(path => underHome(home, path)))].filter(path => !own.includes(path)).sort((a, b) => b.split("/").length - a.split("/").length);
   return [
     { path: unitPath, as: "unit" },
