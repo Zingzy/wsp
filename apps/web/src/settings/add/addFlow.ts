@@ -11,7 +11,7 @@ import { noticeFailure } from "../../notices/store.js";
 import type { Api } from "../../protocol/client.js";
 import { useStore } from "../../protocol/store.js";
 import { failureOf, type Failure } from "../../protocol/failure.js";
-import { addOverSsh } from "../adds.js";
+import { addOverSsh, useAdds } from "../adds.js";
 import { ADD_COMPUTER_WORDS } from "../format.js";
 
 /** The steps a person walks, in the order they run. Start from stands only where a recipe is saved. */
@@ -140,19 +140,40 @@ export function openAdd(): void {
   useAddFlow.setState({ ...fresh(), open: true });
 }
 
-/** A pending add opened again: where it was left, with its picks. An add that never joined opens at Where. */
+/** A pending add opened again where it stands: an install still going, or one closed on its checks before a pick, on
+ * its checks (the add's id is the pending add's); a computer whose setup started, on its running steps; else where it
+ * was left, with its picks. An add the host holds no install for opens at Where. */
 export function openPending(pending: PendingComputer, recipes: number): void {
-  if (pending.placeId === undefined) {
-    useAddFlow.setState({ ...fresh(), open: true, address: pending.address, pendingId: pending.id });
+  const job = useAdds.getState().jobs[pending.id];
+  if (pending.placeId === undefined && job?.placeId === undefined) {
+    useAddFlow.setState({ ...fresh(), open: true, address: pending.address, pendingId: pending.id, ...(job === undefined ? {} : { addId: pending.id, step: "checks" as const }) });
     return;
   }
-  const step = reachedSteps()[pending.id] ?? firstPick(recipes);
-  useAddFlow.setState({ ...fresh(), open: true, address: pending.address, placeId: pending.placeId, pendingId: pending.id, picks: pending.choices, from: pending.recipe ?? "here", step: step === "startfrom" && recipes === 0 ? "agents" : step });
+  const placeId = pending.placeId ?? job!.placeId!;
+  if (useStore.getState().places.find(p => p.id === placeId)?.setup !== undefined) return openSetup(placeId);
+  const reached = reachedSteps()[pending.id];
+  // Closed on its checks, it opens on them again, where Continue goes on to the picks.
+  if (reached === undefined && job !== undefined) {
+    useAddFlow.setState({ ...fresh(), open: true, address: pending.address, addId: pending.id, placeId, pendingId: pending.id, picks: pending.choices, from: pending.recipe ?? "here", step: "checks" });
+    return;
+  }
+  const step = reached ?? firstPick(recipes);
+  useAddFlow.setState({ ...fresh(), open: true, address: pending.address, placeId, pendingId: pending.id, picks: pending.choices, from: pending.recipe ?? "here", step: step === "startfrom" && recipes === 0 ? "agents" : step });
 }
 
 /** A computer being set up, opened on its running steps. */
 export function openSetup(placeId: string): void {
   useAddFlow.setState({ ...fresh(), open: true, placeId, step: "running" });
+}
+
+/** The setups whose close was already said to keep going, by the run's id: said once a setup, not on every close. */
+const toldGoing = new Set<string>();
+
+/** Whether a close of a running setup says it keeps going: the first close of that run alone. */
+export function firstCloseOf(addId: string): boolean {
+  if (toldGoing.has(addId)) return false;
+  toldGoing.add(addId);
+  return true;
 }
 
 /** Closes the dialog: picks not yet kept are kept now, and the next open starts from what it opens on. */

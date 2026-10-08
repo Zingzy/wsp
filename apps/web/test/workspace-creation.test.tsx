@@ -106,9 +106,10 @@ describe("the creation page", () => {
     const rows = steps(view);
     expect(rows.map(row => words(row))).toEqual([CREATE_STEP_WORDS["fork-requested"], CREATE_STEP_WORDS["hostname-set"], CREATE_STEP_WORDS["preview-route"], CREATE_STEP_WORDS["daemon-answering"]]);
     expect(rows.map(row => row.getAttribute("data-state"))).toEqual(["done", "done", "done", "working"]);
-    // Done is the check, the step under way the crab, as in the dialog.
+    // Done is the check, the step under way the plain spinner, as in the dialog: the crab is an agent at work.
     expect(rows[0]!.querySelector("[data-state-mark=done]")).not.toBeNull();
-    expect(rows[3]!.querySelector("canvas")).not.toBeNull();
+    expect(rows[3]!.querySelector("[data-state-mark=working] .animate-spin")).not.toBeNull();
+    expect(card.querySelector("[data-crab], canvas")).toBeNull();
     // How long each ended step took, off the gap to the next one, in the step list's own spelling.
     expect(rows.slice(0, 3).map(row => row.querySelector("[data-step-time]")!.textContent)).toEqual(["6 s", "0.6 s", "58 s"]);
     for (const row of rows) expect(row.querySelector("[data-step-time]")!.className).toContain("tabular-nums");

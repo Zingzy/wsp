@@ -32,7 +32,7 @@ import {
   type TarEntry,
   type ToolInstall,
 } from "@wsp/engine";
-import { agentOfRow, MCP_ID_PREFIX, probePath, toolRowId, type Recipe, type RecipeFile, type RecipeKind } from "@wsp/protocol";
+import { agentOfRow, GITHUB_CLI as GH, GITHUB_ROW, signInRowId, MCP_ID_PREFIX, probePath, toolRowId, type Recipe, type RecipeFile, type RecipeKind } from "@wsp/protocol";
 import type { PlaceProvisioner, PlaceUndo } from "@wsp/runtime";
 import { serverVault } from "./env-keys.js";
 import { brewTableFor, copyRows, planImport } from "./image-recipe.js";
@@ -187,17 +187,15 @@ function shellPackage(picks: RecipeFile, manifest: Manifest, path: string, prefi
   return "cmd" in step ? [{ id: `configs/shell/${login}`, label: login, manager: "apt", ...step, bin: login }] : undefined;
 }
 
-/** gh, where the GitHub row signs it in and the picks carry no gh among their CLIs: the catalog's own road. */
+/** gh, where the GitHub row signs it in and the picks carry no gh among their CLIs: the catalog's own road. A row set
+ * aside takes none: its Sign in puts gh on first. */
 function githubTools(picks: RecipeFile, path: string, prefix: string): ProvisionPlan["github"] {
-  const signin = picks.configs.github?.signin;
-  if (picks.configs.github === undefined || signin === "skip" || picks.clis[GH] !== undefined) return undefined;
+  if (picks.configs.github === undefined || picks.configs.github.signin === "skip" || picks.clis[GH] !== undefined) return undefined;
   const entry = catalogEntry(GH);
   if (entry === undefined) return undefined;
   const step = viaRoad(entry.installRoad, entry.bin, path, prefix);
   return "cmd" in step ? [{ id: `github/${GH}`, label: entry.name, manager: entry.installRoad.road, ...step, bin: entry.bin }] : undefined;
 }
-const GH = "gh";
-const GITHUB_ROW = "github";
 
 /** The CLIs of a plan the kept servers need on first, read off this computer's copy of each config they travel in
  * (`serverNeeds`): the servers wait on these alone, so they land beside the rest of the CLIs. A kept server that copy
@@ -295,7 +293,7 @@ export async function undoPlan(before: RecipeFile, removed: readonly { kind: Rec
       case "agents": {
         // Its own files wsp landed come off with it; a file it rewrites as it runs was never wsp's to keep.
         const dests = agentOwnPaths(name).map(p => p.replace(/^~\//, ""));
-        out.push({ key, label: CATALOG_AGENTS.find(a => a.id === name)?.name ?? name, ids: [`agents/${name}`, `signins/${name}`, ...dests.map(d => `files/${d}`)], owner: `agents/${name}`, dests, ...catalogUninstall(name, path, prefix) });
+        out.push({ key, label: CATALOG_AGENTS.find(a => a.id === name)?.name ?? name, ids: [`agents/${name}`, signInRowId(name), ...dests.map(d => `files/${d}`)], owner: `agents/${name}`, dests, ...catalogUninstall(name, path, prefix) });
         break;
       }
       case "plugins": {

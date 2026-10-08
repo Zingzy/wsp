@@ -44,9 +44,14 @@ export function isTypingTarget(target: { closest(selectors: string): unknown } |
 export function keyBelongsElsewhere(target: EventTarget | null, key: string): boolean {
   if (document.querySelector(OPEN_LAYERS) !== null) return true;
   if (!(target instanceof Element)) return false;
-  const taker = target.closest(KEY_TAKER);
-  if (taker !== null && (taker.getAttribute("data-owns-keys") ?? "").split(" ").includes(keyName(key))) return true;
-  return isTypingTarget(target) || target.closest(LETTER_READERS) !== null;
+  return keyTakenAt(target, key) || isTypingTarget(target) || target.closest(LETTER_READERS) !== null;
+}
+
+/** Whether a key taker around `target` named the key as its own: the one question a layer asks before it acts on a key
+ * pressed inside it, since every key there belongs to that layer otherwise. */
+export function keyTakenAt(target: EventTarget | null, key: string): boolean {
+  const taker = target instanceof Element ? target.closest(KEY_TAKER) : null;
+  return taker !== null && (taker.getAttribute("data-owns-keys") ?? "").split(" ").includes(keyName(key));
 }
 
 /** The value a key taker names its keys with. */

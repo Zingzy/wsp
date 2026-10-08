@@ -18,6 +18,8 @@ import {
   controlSignInRefusal,
   hasControlChar,
   callbackPortOf,
+  closedBeforeSignInLine,
+  signInUncheckedLine,
   lastLine,
   noVaultKeyRefusal,
   notTokenRefusal,
@@ -43,6 +45,8 @@ import { runQuiet, watchPty, type WatchOutcome } from "./signin-relay.js";
 export interface SignInPlan {
   /** The computer it runs on, as the person reads it, where the line runs a step before its command. */
   where?: string;
+  /** The tool's own name, which a sign-in that ended says what happened with. */
+  name: string;
   line: SignInLine;
   questions: readonly Question[];
   code?: RegExp;
@@ -105,7 +109,7 @@ export async function planSignIn(on: AgentsOn, ask: SignInAsk, o: { terminal?: b
     const shim: Record<string, string> = login === undefined ? {} : { BROWSER: placeDaemonPaths(login.home).openShim };
     const env: Record<string, string> | undefined = reach === "here" ? { BROWSER: process.env["BROWSER"] || openerCommand() } : road.finish === "callback" ? { ...signInEnv("callback"), ...shim } : undefined;
     const command = reach === "relay" ? pagesOnPty(road.command) : road.command;
-    return { line: { command: wrap(command), ...(env !== undefined ? { env } : {}) }, questions: [], paste: () => road.finish === "code" };
+    return { name: entry.name, line: { command: wrap(command), ...(env !== undefined ? { env } : {}) }, questions: [], paste: () => road.finish === "code" };
   }
   const row = entry.signIn;
   if (!hasLogin(row)) throw new Error(signInVaultRefusal(entry.name));
@@ -114,7 +118,7 @@ export async function planSignIn(on: AgentsOn, ask: SignInAsk, o: { terminal?: b
   const status = row.status?.typed ?? row.status?.command;
   const shared = sharedLoginOf(row);
   const byCode = signInRoadOf(row) === "code";
-  const plan = { questions: questionsOf(row), ...(row.code !== undefined ? { code: row.code } : {}), ...(row.status !== undefined ? { status: row.status } : {}), paste: (url: string) => byCode && !(on.kind === "here" && redirectsToMachine(url)) };
+  const plan = { name: entry.name, questions: questionsOf(row), ...(row.code !== undefined ? { code: row.code } : {}), ...(row.status !== undefined ? { status: row.status } : {}), paste: (url: string) => byCode && !(on.kind === "here" && redirectsToMachine(url)) };
   if (shared !== undefined && on.kind === "box") {
     if (on.logins === undefined) throw new Error("this computer has not said where it keeps the logins its workspaces share, so there is nowhere to sign one in");
     const home = loginHomeIn(on.logins, shared);
@@ -234,6 +238,50 @@ export async function watchSignIn(plan: SignInPlan, run: SignInRun, o: { pollMs?
   run.emit({ state: "failed", said: lastSaid(said, codes) ?? `it ended with exit ${outcome.exitCode}` });
 }
 
+/** How a pty the person's own terminal attaches to opens: about a terminal's size, which the page resizes it from. */
+const TERMINAL_COLS = 100;
+const TERMINAL_ROWS = 24;
+
+/** Runs the plan's line in a pty there that the person's own terminal in the app attaches to, for a sign-in that asks
+ * them to pick: the first step names the pty, and once the tool ends its own status says whether it signed in. */
+export async function terminalSignIn(plan: SignInPlan, run: SignInRun, o: { capMs?: number } = {}): Promise<void> {
+  const { link } = run;
+  const { line } = plan;
+  const failed = line.prepare === undefined ? undefined : await prepareFailed(link, line.prepare);
+  if (failed !== undefined) return void run.emit({ state: "failed", said: signInPrepareLine(plan.where ?? "that computer", failed) });
+  // The line goes in as the pty's own command, never typed, so nothing of how it is run reaches the person's screen.
+  const created = await link.op("pty.create", { cols: TERMINAL_COLS, rows: TERMINAL_ROWS, shell: "bash", run: line.command, ...(line.env !== undefined ? { env: line.env } : {}) });
+  const ptyId = created["ok"] === true && typeof created["ptyId"] === "string" ? created["ptyId"] : undefined;
+  if (ptyId === undefined) return void run.emit({ state: "failed", said: `the computer opened no terminal: ${typeof created["error"] === "string" ? created["error"] : "no reason given"}` });
+  type End = { exitCode: number } | { said: string };
+  let settle: (end: End) => void = () => {};
+  const ended = new Promise<End>(r => (settle = r));
+  const off = link.onEvent(e => {
+    if (e["ptyId"] === ptyId && e["type"] === "pty.exit") settle({ exitCode: Number(e["exitCode"]) });
+  });
+  void link.closed?.then(() => settle({ said: "the computer's terminal link dropped" }));
+  void run.stop.then(() => settle({ said: STOPPED_NOTE }));
+  const timer = setTimeout(() => settle({ said: "the sign-in was not finished in time" }), o.capMs ?? BOX_SIGN_IN_MS);
+  timer.unref();
+  let end: End;
+  try {
+    await link.op("pty.attach", { ptyId });
+    run.emit({ state: "running", ptyId });
+    end = await ended;
+  } finally {
+    clearTimeout(timer);
+    off();
+    await link.op("pty.kill", { ptyId }).catch(() => {});
+  }
+  if ("said" in end) return void run.emit({ state: "failed", said: end.said });
+  const left = { state: "failed", said: closedBeforeSignInLine(plan.name) } as const;
+  if (plan.status === undefined) return void run.emit(end.exitCode === 0 ? { state: "signed-in" } : left);
+  if (line.status === undefined) return void run.emit(left);
+  const quiet = await runQuiet(link, line.status, STATUS_MS, line.env ?? {}).catch(() => undefined);
+  if (quiet === undefined || quiet.timedOut || quiet.dropped) return void run.emit({ state: "failed", said: signInUncheckedLine(plan.name) });
+  run.emit(plan.status.signedIn(quiet.output, quiet.exitCode) ? { state: "signed-in" } : left);
+}
+
 export interface HostActsOptions {
   /** The wsp home's .env, the vault every turn reads. */
   vaultFile: string;
@@ -248,8 +296,8 @@ export function hostActs(o: HostActsOptions): AgentsActs {
   return {
     signInLine: async (on, ask) => (await planSignIn(on, ask, { terminal: true })).line,
     signIn: async (on, ask) => {
-      const plan = await planSignIn(on, ask);
-      return run => watchSignIn(plan, run);
+      const plan = await planSignIn(on, ask, { terminal: ask.terminal === true });
+      return run => (ask.terminal === true ? terminalSignIn(plan, run) : watchSignIn(plan, run));
     },
     key: async (agent, key) => {
       const entry = agentOf(agent);

@@ -4,7 +4,7 @@
 // per frame, the pending adds kept off their own events, and the record drawn
 // as the rows every list of steps shows.
 import { afterEach, describe, expect, it } from "vitest";
-import { RecipeFile, type EventUnion, type PendingComputer, type PlaceAddJob, type PlaceProvisionRow, type PlaceSetup, type PlaceSetupStep, type PlaceView } from "@wsp/protocol";
+import { AT_ITS_TERMINAL, copiedFromLine, GITHUB_SKIPPED_LINE, waitsForInstallLine, RecipeFile, SIGNED_IN_THERE, SKIPPED_FOR_NOW, type EventUnion, type PendingComputer, type PlaceAddJob, type PlaceProvisionRow, type PlaceSetup, type PlaceSetupStep, type PlaceView } from "@wsp/protocol";
 import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { checkRows, foldSetup, runningMs, setupCount, setupRows, setupStanding } from "../src/settings/add/setup.js";
@@ -125,9 +125,9 @@ describe("a setup as rows", () => {
     expect(rows.filter(r => r.id === "signins/codex").map(r => [r.state, r.wait?.code])).toEqual([["needs-you", "NEW-CODE"]]);
   });
 
-  it("says the install landed and dialled back, never with an internal word", () => {
+  it("says the install landed and connected, never with an internal word", () => {
     const install = setupRows({ setup: RUNNING })[0]!;
-    expect([install.name, install.state, install.note]).toEqual(["Install wsp", "done", "Dialled back."]);
+    expect([install.name, install.state, install.note]).toEqual(["Install wsp", "done", "Installed and connected."]);
   });
 
   it("counts what a step put there, never naming its rows, whose labels may be paths on the box", () => {
@@ -155,6 +155,87 @@ describe("a setup as rows", () => {
     expect(setupStanding({ setup: { ...RUNNING, state: "done", waiting: [{ row: "signins/codex", label: "Codex", expiresAt: "x", state: "waiting" }] } })).toBe("needs-you");
     expect(setupStanding({ setup: { ...RUNNING, state: "done" }, applied: { hash: "h", at: "x", rows: [{ id: "f", label: "wsp", outcome: "failed", step: "folders" }] } })).toBe("needs-you");
     expect(setupStanding({ setup: { ...RUNNING, state: "done" } })).toBe("ready");
+    // What waits on nobody reads ready, as the computer's own row does: a sign-in that failed, a row set aside, a CLI.
+    const settled: PlaceProvisionRow[] = [
+      { id: "signins/codex", label: "Codex", outcome: "failed", step: "signins" },
+      { id: "github", label: "GitHub", outcome: "skipped", step: "github" },
+      { id: "clis/gh", label: "gh", outcome: "failed", step: "clis" },
+    ];
+    expect(setupStanding({ setup: { ...RUNNING, state: "done" }, applied: { hash: "h", at: "x", rows: settled } })).toBe("ready");
+  });
+
+  it("reads a skipped sign-in as skipped, a landed one by where it signed in, and counts a skipped step as through", () => {
+    const rows = setupRows(
+      {
+        setup: { ...RUNNING, state: "done", steps: [{ step: "floor", state: "done" }, { step: "signins", state: "done" }, { step: "github", state: "done" }] },
+        applied: {
+          hash: "h",
+          at: "x",
+          rows: [
+            { id: "signins/claude", label: "Claude Code", outcome: "present", step: "signins", note: copiedFromLine("zingzy's MacBook Pro") },
+            { id: "signins/codex", label: "Codex", outcome: "skipped", step: "signins", note: SKIPPED_FOR_NOW },
+            { id: "signins/gemini", label: "Gemini", outcome: "installed", step: "signins", note: SIGNED_IN_THERE },
+            { id: "github", label: "GitHub", outcome: "skipped", step: "github", note: GITHUB_SKIPPED_LINE },
+          ],
+        },
+      },
+      "studio",
+    );
+    const at = (id: string) => rows.find(r => r.id === id)!;
+    expect([at("signins/claude").note, at("signins/gemini").note]).toEqual(["Token copied.", "Signed in on studio."]);
+    expect([at("signins/codex").state, at("signins/codex").note, at("signins/codex").signIn]).toEqual(["skipped", "Skipped.", "codex"]);
+    expect([at("github").state, at("github").note, at("github").signIn]).toEqual(["skipped", "Skipped.", "gh"]);
+    expect(rows.filter(r => r.id === "github")).toHaveLength(1);
+    expect(setupCount(rows)).toEqual({ done: 3, of: 10 });
+  });
+
+  it("offers every sign-in row that did not land its sign-in, Claude Code's token and OpenCode's too, while the setup still runs", () => {
+    const rows = setupRows(
+      {
+        setup: { ...RUNNING, steps: [{ step: "floor", state: "done" }, { step: "signins", state: "done" }, { step: "github", state: "done" }, { step: "clis", state: "running" }] },
+        applied: {
+          hash: "h",
+          at: "x",
+          rows: [
+            { id: "signins/claude", label: "Claude Code", outcome: "failed", step: "signins" },
+            { id: "signins/opencode", label: "OpenCode", outcome: "skipped", step: "signins", note: SKIPPED_FOR_NOW },
+            { id: "signins/codex", label: "Codex", outcome: "installed", step: "signins", note: SIGNED_IN_THERE },
+            { id: "github", label: "GitHub", outcome: "skipped", step: "github", note: GITHUB_SKIPPED_LINE },
+          ],
+        },
+      },
+      "studio",
+    );
+    expect(rows.filter(r => r.signIn !== undefined).map(r => [r.id, r.signIn])).toEqual([
+      ["signins/claude", "claude"],
+      ["signins/opencode", "opencode"],
+      ["github", "gh"],
+    ]);
+  });
+
+  it("holds a sign-in that runs there while its agent did not install, and offers it once the agent is in", () => {
+    const at = (codex: PlaceProvisionRow["outcome"], signIn: PlaceProvisionRow) =>
+      setupRows(
+        {
+          setup: { ...RUNNING, state: "done", steps: [{ step: "floor", state: "done" }, { step: "agents", state: "done" }, { step: "signins", state: "done" }] },
+          applied: { hash: "h", at: "x", rows: [{ id: "agents/codex", label: "Codex", outcome: codex, step: "agents" }, signIn] },
+        },
+        "studio",
+      ).find(r => r.id === "signins/codex")!;
+    const failed: PlaceProvisionRow = { id: "signins/codex", label: "Codex", outcome: "failed", step: "signins", note: "codex" };
+    const waited: PlaceProvisionRow = { id: "signins/codex", label: "Codex", outcome: "skipped", step: "signins", note: waitsForInstallLine("Codex") };
+    // The install failed: the setup left the sign-in waiting on it, with nothing to press.
+    expect(at("failed", waited)).toMatchObject({ state: "waiting", note: "Waits for Codex to install." });
+    expect(at("failed", waited).signIn).toBeUndefined();
+    expect(at("failed", failed)).toMatchObject({ state: "waiting", note: "Waits for Codex to install." });
+    // Codex is in: the sign-in is the person's to start.
+    expect(at("installed", waited)).toMatchObject({ state: "skipped", note: "Not signed in yet.", signIn: "codex" });
+    expect(at("installed", failed)).toMatchObject({ state: "failed", signIn: "codex" });
+  });
+
+  it("reads a sign-in that asks the person to pick as theirs at its own terminal there, with its Sign in", () => {
+    const rows = setupRows({ setup: { ...RUNNING, state: "done", steps: [{ step: "signins", state: "done" }] }, applied: { hash: "h", at: "x", rows: [{ id: "signins/opencode", label: "OpenCode", outcome: "skipped", step: "signins", note: AT_ITS_TERMINAL }] } }, "studio");
+    expect(rows.find(r => r.id === "signins/opencode")).toMatchObject({ state: "skipped", note: "Signs in at its own terminal on studio.", signIn: "opencode" });
   });
 });
 
@@ -183,7 +264,7 @@ describe("an install as the checks", () => {
       ["Root", "done", undefined],
       ["System", "done", "systemd, cgroup v2"],
       ["Disk", "done", "61 GB free"],
-      ["Dials back", "done", undefined],
+      ["Connects back", "done", undefined],
       ["Install wsp", "working", undefined],
     ]);
     expect(checkRows(job({ state: "done", steps: [{ step: "connect", state: "done" }, { step: "chip", state: "done" }, { step: "root", state: "done" }, { step: "system", state: "done" }, { step: "disk", state: "done" }, { step: "reach", state: "done" }, { step: "wsp", state: "done" }, { step: "join", state: "done" }] })).at(-1)?.state).toBe("done");
