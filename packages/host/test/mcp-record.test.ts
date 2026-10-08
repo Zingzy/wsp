@@ -30,7 +30,7 @@ import { addressNotPairedLine, aliasOk, deviceRefusedLine, dialWindowMs, hostsDi
 import { GUEST_SERVED } from "../src/guest-mcp.js";
 import { mcpServer, type Dialer } from "../src/mcp.js";
 import { recipeCases, TURN_ANSWERED, turnWords, type TurnCase } from "./mcp-record-turns.js";
-import { absolutePath, DEFAULTS_LABELS, defaultsValueLine, noDefaultsAnsweredLine, RELEASE_WORDS, releaseRefusal, agentSetNothingLine, agentSetupNothingLine, defaultAgentLine, ENV_NAME_FIX, envNameLine, FROM_WORDS, newThreadsHeadLine, NOTHING_TO_SET_FIX, PICKER_WORDS, projectSetNothingLine, SETUP_WORDS, setupOnLine, startsOnLine, startsOnOwnLine, agentCopyWords, aimedBothLine, aimedUsage, c1Escaped, CLOSE_GRACE_MS, goneFromLine, hasTool, hostTokenMissingLine, isInAlsoLine, isInLine, noHostServingLine, noSkillHitsLine, notHeaderLine, otherVersion, PLACES_FIX, previewCutLine, projectOffComputerLine, projectScopeLine, projectUnnamedLine, SERVER_TOOL_COLUMNS, SKILL_HIT_COLUMNS, skillsShPlacelessLine, threadOf, toolLines, toolName, toolsAddedLine, toolsProjectBareLine, turnedInLine, turnedLine, UNAUTHORIZED_CLOSE, unsetVariableLine, VERBS, workspaceOf, type HostClient } from "../src/verbs.js";
+import { absolutePath, afterWorktreeLine, afterWorktreeBlankLine, AFTER_WORKTREE_BLANK_FIX, DEFAULTS_LABELS, defaultsValueLine, noDefaultsAnsweredLine, RELEASE_WORDS, releaseRefusal, agentSetNothingLine, agentSetupNothingLine, defaultAgentLine, ENV_NAME_FIX, envNameLine, FROM_WORDS, newThreadsHeadLine, NOTHING_TO_SET_FIX, PICKER_WORDS, projectSetNothingLine, SETUP_WORDS, setupOnLine, startsOnLine, startsOnOwnLine, agentCopyWords, aimedBothLine, aimedUsage, c1Escaped, CLOSE_GRACE_MS, goneFromLine, hasTool, hostTokenMissingLine, isInAlsoLine, isInLine, noHostServingLine, noSkillHitsLine, notHeaderLine, otherVersion, PLACES_FIX, previewCutLine, projectOffComputerLine, projectScopeLine, projectUnnamedLine, SERVER_TOOL_COLUMNS, SKILL_HIT_COLUMNS, skillsShPlacelessLine, threadOf, toolLines, toolName, toolsAddedLine, toolsProjectBareLine, turnedInLine, turnedLine, UNAUTHORIZED_CLOSE, unsetVariableLine, VERBS, workspaceOf, type HostClient } from "../src/verbs.js";
 import { VERSION } from "../src/version.js";
 import { releaseLineOf, roadOf } from "../src/daemon-fix.js";
 
@@ -281,6 +281,7 @@ async function words(): Promise<Record<string, unknown>> {
       agentSetNothing: refusalLine(agentSetNothingLine, NOTHING_TO_SET_FIX),
       agentSetupNothing: refusalLine(agentSetupNothingLine, NOTHING_TO_SET_FIX),
       projectSetNothing: refusalLine(projectSetNothingLine, NOTHING_TO_SET_FIX),
+      afterWorktreeBlank: refusalLine(afterWorktreeBlankLine, AFTER_WORKTREE_BLANK_FIX),
       defaultAgent: defaultAgentLine("{agent}"),
       startsOwn: startsOnOwnLine("{agent}"),
       startsOn: startsOnLine("{agent}", "{said}"),
@@ -294,6 +295,7 @@ async function words(): Promise<Record<string, unknown>> {
       setup: SETUP_WORDS,
       signInAgain: `${configDirSignInLine("{agent}")}.`,
       newThreadsHead: newThreadsHeadLine("{project}"),
+      afterWorktree: afterWorktreeLine("{command}"),
       from: FROM_WORDS,
       noDefaultsAnswered: noDefaultsAnsweredLine("{project}"),
       labels: DEFAULTS_LABELS,

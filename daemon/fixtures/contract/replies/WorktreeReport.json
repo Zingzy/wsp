@@ -11,13 +11,48 @@
     "plain": [
       "packages/host/node_modules"
     ],
+    "fresh": true,
+    "modules": [
+      {
+        "id": "pnpm",
+        "folder": ".",
+        "rebuild": false
+      }
+    ],
     "ms": 812
+  },
+  {
+    "path": "/root/.wsp/worktrees/pr_9eb41ab3/feat-uv",
+    "branch": "feat/uv",
+    "made": true,
+    "carried": [
+      "web/node_modules"
+    ],
+    "overlaid": [
+      "web/node_modules"
+    ],
+    "fresh": true,
+    "modules": [
+      {
+        "id": "uv",
+        "folder": "api",
+        "rebuild": true
+      },
+      {
+        "id": "pnpm",
+        "folder": "web",
+        "rebuild": true
+      }
+    ],
+    "ms": 31
   },
   {
     "path": "/Users/dev/wsp",
     "branch": "main",
     "made": false,
     "carried": [],
+    "fresh": false,
+    "modules": [],
     "ms": 76
   }
 ]

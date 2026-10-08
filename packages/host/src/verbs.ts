@@ -601,7 +601,8 @@ export const FLAG_WORDS: Readonly<Record<string, string>> = {
   "projects set model": "the model a new thread on it starts on, by the agent's own slug",
   "projects set effort": "the effort a new thread on it starts at, by the agent's own word",
   "projects set access": "how far a new thread on it may go without asking: ask, auto-edit, full or plan",
-  "projects set reset": "put a field back on the layer below: agent, model, effort or access; repeats",
+  "projects set after-worktree": "a shell line a new worktree of the project runs once at its top, after each ecosystem's own install",
+  "projects set reset": "put a field back on the layer below: agent, model, effort or access, or take the after-worktree command away with after-worktree; repeats",
 };
 
 /** The line one flag gets in one verb's own help: the verb's own row where the word means two things, else the

@@ -13,7 +13,7 @@ import { type AddressInfo } from "node:net";
 import { promisify } from "node:util";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { CLOUD_ENV, DAEMON_TOKEN_PATH, deniedLine, noSuchAccountLine, PERMISSION_DENY, pushedForChildLine, EXIT_CODES, SCOPED_MCP_ARG, scopedNoPairLine, HERE_PLACE_ID, shellQuote, TURN_TOKEN_ENV, VerbFailure, WS_PATH } from "@wsp/protocol";
+import { CLOUD_ENV, DAEMON_TOKEN_PATH, deniedLine, noSuchAccountLine, PERMISSION_DENY, pushedForChildLine, EXIT_CODES, refusalLine, SCOPED_MCP_ARG, scopedNoPairLine, HERE_PLACE_ID, shellQuote, TURN_TOKEN_ENV, VerbFailure, WS_PATH } from "@wsp/protocol";
 import { CLOUD_ON } from "../src/cloud.js";
 import { copyKey, createRuntime, DAEMON_TOKEN_SET, localExecStream, memoryStore, type Runtime, type Store } from "@wsp/runtime";
 import { fakeCopier, LocalBackend } from "@wsp/engine";
@@ -30,7 +30,7 @@ import { placeWiring } from "../src/places.js";
 import { hostTokenPath, lockPathFor } from "../src/host-lock.js";
 import { mcpServer } from "../src/mcp.js";
 import type { HostHandle } from "../src/server.js";
-import { CLI_VERBS, hasTool, noHostServingLine, type DialOpts, type HostClient } from "../src/verbs.js";
+import { AFTER_WORKTREE_BLANK_FIX, afterWorktreeBlankLine, CLI_VERBS, hasTool, noHostServingLine, type DialOpts, type HostClient } from "../src/verbs.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
 import { ASKS, EXPORT_SOURCE, PAGE, SCRIPTED_ASK, bornDeadAgent, captured, execGuest, exportGuest, scriptedAgent, type Captured } from "./verbs-fixture.js";
@@ -618,6 +618,11 @@ describe("the agent contract on the command line and the tool door", () => {
     expect(account.code).toBe(EXIT_CODES.usage);
     expect(account.io.lines).toEqual([]);
     expect(failure(account.io)).toEqual({ error: noSuchAccountLine("nope"), class: "usage", exit: 3 });
+
+    // A blank after-worktree command is the line's own refusal, never the host's parse of it.
+    const blank = await run("projects", "set", "alpha", "--after-worktree", "  ", "--json");
+    expect(blank.code).toBe(EXIT_CODES.usage);
+    expect(failure(blank.io)).toEqual({ error: refusalLine(afterWorktreeBlankLine, AFTER_WORKTREE_BLANK_FIX), class: "usage", exit: 3 });
   });
 
   it("an auth refusal exits 2: the host refusing the token, or no token file to read", async () => {
@@ -769,6 +774,8 @@ describe("the agent contract on the command line and the tool door", () => {
       const relative = await call("exec", { workspace: "alpha", argv: ["true"], cwd: "packages" });
       const cwdRefusal = '--cwd is a path on the machine, absolute, and got "packages". Give a path that opens with /, since whoever reads it works in a folder this line cannot see.';
       expect(relative).toEqual({ text: cwdRefusal, structured: { error: cwdRefusal, class: "usage", exit: 3 }, isError: true });
+      const blank = refusalLine(afterWorktreeBlankLine, AFTER_WORKTREE_BLANK_FIX);
+      expect(await call("projects_set", { project: "alpha", after_worktree: " " })).toEqual({ text: blank, structured: { error: blank, class: "usage", exit: 3 }, isError: true });
       writeFileSync(hostTokenPath(statePath), "not-the-token\n");
       const fresh = mcpServer(statePath, { env: {} });
       const [c2, s2] = InMemoryTransport.createLinkedPair();

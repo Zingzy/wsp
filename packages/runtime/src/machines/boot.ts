@@ -422,6 +422,8 @@ export function bootArea(ctx: RuntimeContext): BootArea {
       for (const entry of live.values()) {
         const id = entry.record.id;
         const work = (async () => {
+          // A worktree's dependency mounts went with a restart of this computer.
+          if (entry.record.worktree?.made === true) await ctx.worktreeMounted(entry);
           await reopen(left.filter(s => s.view.workspaceId === id));
           await ctx.sweepRuns(entry);
           if (toSync.includes(entry)) void ctx.syncDaemon(entry);
