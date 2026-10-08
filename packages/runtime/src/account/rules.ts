@@ -81,15 +81,18 @@ export function rulesArea(ctx: RuntimeContext): RulesArea {
   /** Whether a project is of the repository a thread works on, which is what a create demands of a child, since a
    * child starts on its lead's branch and lands its work back in it. A thread whose workspace this host no longer
    * holds works on none. */
-  const ofThreadsRepository = (scope: ThreadScope, project: string): boolean => {
-    const mine = projectOfScope(scope);
-    return mine !== undefined && (project === mine || ctx.sameRepository(ctx.projectHeld(mine), ctx.projectHeld(project)));
+  const ofThreadsRepository = (caller: Caller | undefined, project: string): boolean => {
+    const scope = scopeOf(caller);
+    const mine = scope === undefined ? undefined : projectOfScope(scope);
+    return mine !== undefined && (project === mine || ctx.sameRepository(ctx.projectHeld(mine), ctx.projectHeld(project), caller));
   };
   /** Whether a thread may name a project to start children on: its own, or one of its repository on a computer that
    * forks machines, where the child gets a machine of its own. Another folder of it on this computer is the
    * person's, and a thread started there would stand outside the tree. */
-  const projectReached = (scope: ThreadScope, project: string): boolean =>
-    ofThreadsRepository(scope, project) && (project === projectOfScope(scope) || !copiesFolder(kindForComputer(ctx.projectHeld(project).computer)));
+  const projectReached = (caller: Caller | undefined, project: string): boolean => {
+    const scope = scopeOf(caller);
+    return scope !== undefined && ofThreadsRepository(caller, project) && (project === projectOfScope(scope) || !copiesFolder(kindForComputer(ctx.projectHeld(project).computer)));
+  };
   /** The rule as a sentence: what this request is refused with for that record, or nothing when it may drive it.
    * A record this host does not hold, which a port forward's target may be since the host forwards a builder's
    * ports too, is nobody's to refuse for. The project rule is read before the tree rule and answers first: a
@@ -100,7 +103,7 @@ export function rulesArea(ctx: RuntimeContext): RulesArea {
     const scope = scopeOf(caller);
     if (scope === undefined) return undefined;
     const mine = projectOfScope(scope);
-    if (mine !== undefined && record.project !== undefined && !ofThreadsRepository(scope, record.project)) {
+    if (mine !== undefined && record.project !== undefined && !ofThreadsRepository(caller, record.project)) {
       return spawnRepositoryRefusal(scope.threadId, ctx.projectHeld(mine).name, ctx.projectHeld(record.project).name);
     }
     return !inTree(record, scope) ? spawnReachRefusal(scope.threadId, record.name) : undefined;
