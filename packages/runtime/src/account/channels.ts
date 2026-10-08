@@ -213,7 +213,7 @@ export function channelsArea(ctx: RuntimeContext): ChannelsArea {
   /** The ptys each channel's owner opened on a daemon several owners dial, a local workspace's by its id and this
    * computer's own terminal by the place's. The daemon tells these apart by no name, so without this every owner's
    * panes would list and drive every other's shells. Kept past a pty's exit, which a pane still shows, and emptied
-   * when that daemon is replaced, since the next one numbers its ptys from pty_1 again. */
+   * when that daemon is replaced, since its ptys go with it. */
   const ptyOwners = new Map<string, Set<string>>();
   /** A channel that answers only for the ptys its owner opened through a channel of its own: its pty.list holds no
    * other, and an op naming another's pty is told there is no such pty, as a box's daemon tells another machine,
@@ -225,6 +225,8 @@ export function channelsArea(ctx: RuntimeContext): ChannelsArea {
       async send(frame) {
         const asked = (frame as Record<string, unknown>)["ptyId"];
         if (asked !== undefined && !mine.has(String(asked))) return { id: frame.id, ok: false, error: `no such pty: ${String(asked)}` } as DaemonResponse;
+        // A list can land after another channel of this owner opened a shell, so only what was held when it was asked is dropped.
+        const listedFrom = frame.op === "pty.list" ? [...mine] : [];
         const reply = await channel.send(frame);
         const said = reply as Record<string, unknown>;
         if (said["ok"] !== true) return reply;
@@ -233,7 +235,7 @@ export function channelsArea(ctx: RuntimeContext): ChannelsArea {
         if (frame.op === "pty.list" && Array.isArray(said["ptys"])) {
           const rows = said["ptys"] as Record<string, unknown>[];
           const held = new Set(rows.map(row => String(row["id"])));
-          for (const id of mine) if (!held.has(id)) mine.delete(id);
+          for (const id of listedFrom) if (!held.has(id)) mine.delete(id);
           return { ...reply, ptys: rows.filter(row => mine.has(String(row["id"]))) };
         }
         return reply;

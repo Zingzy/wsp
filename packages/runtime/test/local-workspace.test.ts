@@ -306,6 +306,8 @@ describe("local workspace", () => {
     const held = new Map<string, boolean>();
     const heard: Record<string, unknown>[] = [];
     let made = 0;
+    // A list the test holds answers with the ptys the daemon held when it was asked, whenever the test lets it land.
+    let listGate: Promise<void> | null = null;
     const daemonChannel = async (): Promise<DaemonChannel> => ({
       send: async frame => {
         const said = frame as Record<string, unknown>;
@@ -315,7 +317,11 @@ describe("local workspace", () => {
           held.set(ptyId, false);
           return { id: null, ok: true, ptyId, pid: 4000 + made } as never;
         }
-        if (frame.op === "pty.list") return { id: null, ok: true, ptys: [...held].map(([id, exited], i) => ({ id, pid: 4001 + i, cols: 80, rows: 24, exited })) } as never;
+        if (frame.op === "pty.list") {
+          const ptys = [...held].map(([id, exited], i) => ({ id, pid: 4001 + i, cols: 80, rows: 24, exited }));
+          if (listGate !== null) await listGate;
+          return { id: null, ok: true, ptys } as never;
+        }
         if (said["ptyId"] !== undefined && !held.has(String(said["ptyId"]))) return { id: null, ok: false, error: `no such pty: ${String(said["ptyId"])}` } as never;
         if (frame.op === "pty.kill") held.delete(String(said["ptyId"]));
         return { id: null, ok: true } as never;
@@ -330,7 +336,15 @@ describe("local workspace", () => {
     const token = "cafef00d".repeat(3);
     const daemonRoad = async () => ({ url: "http://127.0.0.1:7070", expiresAt: Number.MAX_SAFE_INTEGER, daemonToken: token });
     const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: echoAdapter }, local: { ...localWiring, daemonRoad, restartDaemon }, daemonToken: token, daemonChannel });
-    return { rt, held, heard };
+    const holdLists = (): (() => void) => {
+      let release = (): void => {};
+      listGate = new Promise<void>(resolve => (release = resolve));
+      return () => {
+        listGate = null;
+        release();
+      };
+    };
+    return { rt, held, heard, holdLists };
   };
   const listed = async (channel: DaemonChannel): Promise<unknown[]> =>
     ((await channel.send({ id: null, op: "pty.list" } as never)) as unknown as { ptys: { id: string }[] }).ptys.map(p => p.id);
@@ -418,6 +432,21 @@ describe("local workspace", () => {
     expect(heard.slice(before)).toEqual([]);
     expect(await listed(chB)).toEqual(["pty_1"]);
     expect((await chB.send({ id: 4, op: "pty.attach", ptyId: "pty_1" } as never)).ok).toBe(true);
+  });
+
+  it("a list answered before another window of the folder opened a shell keeps that shell the folder's when it lands after it", async () => {
+    const { rt, holdLists } = sharedDaemon();
+    const a = await rt.workspaces.create({ project: (await projectOn(rt, HERE_PLACE_ID, repoIn(root, "one"))).id, name: "a" });
+    const windowOne = await rt.workspaces.daemonChannel(a.id, () => {});
+    const windowTwo = await rt.workspaces.daemonChannel(a.id, () => {});
+    const release = holdLists();
+    const late = listed(windowOne);
+    const shell = await opened(windowTwo);
+    release();
+    expect(await late).toEqual([]);
+
+    expect((await windowTwo.send({ id: 5, op: "pty.attach", ptyId: shell } as never)).ok).toBe(true);
+    expect(await listed(windowOne)).toEqual([shell]);
   });
 
   it("an ended turn's pid leaves the roots once its group is gone, with no channel watching, so a stranger leading a group of that number is never the workspace's", async () => {

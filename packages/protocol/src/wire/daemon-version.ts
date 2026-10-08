@@ -145,6 +145,7 @@ const DAEMON_CONTENTS = [
   "2fffa024e4e0dcf10bce9c6e88581cef388c2a6d66018c56cf859549133ef1b2",
   "55ddb7999b0cfdfc71b505a67752585dc97e1e74e47db1ab2d256573f577e5f3",
   "871dd3f376bcbde4e5f98c8d0777e75b0c36df1c81436b00c0749726d8122ccd",
+  "3ff1455b2f984751b2d64049b4f590e51bce2d3ab584dbe4f92a370ec9bbcfe5",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -517,7 +518,8 @@ const DAEMON_CONTENTS = [
  * and folder, and the newest plan reading a Codex rollout kept, for the host alone: the inbound socket of a daemon that
  * is no place and the link of one that is. What each file came to is kept for the daemon's life.
  * Version 135: An agent's version read tries its spawn again while the binary reads text file busy, inside the read's
- * own deadline, so a binary another process still holds open for writing gives its version line instead of none. */
+ * own deadline, so a binary another process still holds open for writing gives its version line instead of none.
+ * Version 136: shells read apart, panel ptys never reach the drawer. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
