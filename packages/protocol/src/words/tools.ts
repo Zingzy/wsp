@@ -49,6 +49,16 @@ export function serverTool(toolName: string): { server: string; tool: string } |
   return parts.length >= 3 && parts[0] === "mcp" && parts[1] !== "" ? { server: parts[1]!, tool: parts.slice(2).join("__") } : undefined;
 }
 
+/** What a call to a server's tool does, in words: `Use wsp's run`. Nothing for a tool no server lends. */
+export function serverToolWords(toolName: string): string | undefined {
+  const lent = serverTool(toolName);
+  return lent === undefined ? undefined : `Use ${lent.server}'s ${lent.tool.replace(/_/g, " ")}`;
+}
+
+/** The fields a server's tool row shows when the call names none of the usual ones: what the call is called, then
+ * what it says. */
+const SERVER_SHOWN_FIELDS: readonly string[] = ["title", "message"];
+
 function firstField(input: ToolInput, fields: readonly string[]): string | undefined {
   return fields.map(name => toolField(input, name)).find(value => value !== undefined);
 }
@@ -291,12 +301,13 @@ function toolInput(input: string): ToolInput | undefined {
 }
 
 /** The one line a tool call reads as while a turn runs: the shell line behind a prompt, the file behind the verb
- * that touched it, the search behind what it looked for, else the tool's own name. `input` is the delta's text,
- * the JSON the harness reported for the call; text that is not an object leaves the name alone. */
+ * that touched it, the search behind what it looked for, a server's tool in its words, else the tool's own name.
+ * `input` is the delta's text, the JSON the harness reported for the call; text that is not an object leaves the
+ * name alone. */
 export function toolActivityLine(toolName: string | undefined, input: string): string {
   const name = toolName ?? "tool";
   const row = TOOL_ROWS.get(name);
-  if (row === undefined) return name;
+  if (row === undefined) return serverToolWords(name) ?? name;
   const fields = toolInput(input);
   return fields === undefined ? name : row.line(fields, "asked") ?? name;
 }
@@ -328,15 +339,17 @@ export interface ToolCallFacts {
 
 export function toolCallFacts(toolName: string, input: string): ToolCallFacts {
   const row = TOOL_ROWS.get(toolName);
-  const itemType = row?.itemType ?? (serverTool(toolName) === undefined ? undefined : "mcp_tool_call");
+  const lent = row === undefined ? serverToolWords(toolName) : undefined;
+  const itemType = row?.itemType ?? (lent === undefined ? undefined : "mcp_tool_call");
   const kinds = {
     ...(itemType !== undefined ? { itemType } : {}),
     ...(row?.requestKind !== undefined ? { requestKind: row.requestKind } : {}),
   };
-  const titled = row?.title === undefined ? {} : { title: row.title };
+  const title = row?.title ?? lent;
+  const titled = title === undefined ? {} : { title };
   const fields = toolInput(input);
   if (fields === undefined) return { ...kinds, ...titled, ...(input.length > 0 ? { detail: input } : {}) };
-  const detail = row?.detail?.(fields) ?? firstField(fields, [...(row?.shows ?? []), ...SHOWN_FIELDS]);
+  const detail = row?.detail?.(fields) ?? firstField(fields, [...(row?.shows ?? []), ...SHOWN_FIELDS, ...(lent === undefined ? [] : SERVER_SHOWN_FIELDS)]);
   const shell = row?.requestKind === "command";
   const command = shell ? toolField(fields, "command") : undefined;
   const description = shell ? toolField(fields, "description") : undefined;
@@ -525,8 +538,8 @@ const skillAsk: PermissionWords = {
 
 const serverAsk: PermissionWords = {
   lead: (_input, toolName) => {
-    const lent = serverTool(toolName);
-    return lent === undefined ? undefined : { says: `Use ${lent.server}'s ${lent.tool.replace(/_/g, " ")}` };
+    const says = serverToolWords(toolName);
+    return says === undefined ? undefined : { says };
   },
   named: [],
 };

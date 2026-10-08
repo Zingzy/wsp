@@ -58,13 +58,13 @@ export function foldServers(rows: readonly McpRow[]): ServerEntry[] {
 
 /** A command server of the person's own on a computer other than this one, which a check would start there: it waits
  * for Check, since a joined computer may run more than the person's agents. */
-const heldCommand = (row: McpRow, ctx: RowsContext): boolean => row.transport.kind === "stdio" && row.scope !== "project" && (ctx.where === "box" || ctx.where === "box-task" || ctx.where === "fork");
+const heldCommand = (row: McpRow, ctx: RowsContext): boolean => row.launch !== true && row.transport.kind === "stdio" && row.scope !== "project" && (ctx.where === "box" || ctx.where === "box-task" || ctx.where === "fork");
 
 /** Whether a row's tools connect is asked the moment the tab shows it: the person's own servers that are on and take no
  * key from the environment, wherever the report is live, a command only on this computer. A project's are what a repo
  * names, asked on List tools. */
 export const checksOnShow = (row: McpRow, ctx: RowsContext): boolean =>
-  ctx.tools !== undefined && ctx.where !== "provider" && (ctx.heldWhy ?? null) === null && row.enabled && row.scope !== "project" && row.auth !== "env-key" && !heldCommand(row, ctx);
+  ctx.tools !== undefined && ctx.where !== "provider" && (ctx.heldWhy ?? null) === null && row.launch !== true && row.enabled && row.scope !== "project" && row.auth !== "env-key" && !heldCommand(row, ctx);
 
 /** One agent's state for a server: off, then what its connect answered, `checking` while that answer is on its way,
  * and the config's own word for a server nothing asked. */
@@ -104,6 +104,7 @@ const askedOf = (all: readonly Standing[]): Standing | undefined => all.find(s =
 
 export function statusOf(s: Standing): Status {
   const { state } = s;
+  if (s.row.launch === true) return { state, tone: "quiet", words: W.everyThread };
   const tools = s.answer?.tools;
   switch (state) {
     case "connected":
@@ -133,7 +134,8 @@ function actsOf(entry: ServerEntry, ctx: RowsContext) {
   const all = standings(entry, ctx);
   const worst = worstOf(all);
   const asked = askedOf(all);
-  if (ctx.where === "provider") return { all, worst, asked, acts: [] as RowAct[], signIns: new Map<string, RowAct>(), flow: undefined as FlowView | undefined };
+  // A server every launch hands over is in no file, so nothing here turns it off or takes it away.
+  if (ctx.where === "provider" || entry.rows.every(r => r.launch === true)) return { all, worst, asked, acts: [] as RowAct[], signIns: new Map<string, RowAct>(), flow: undefined as FlowView | undefined };
   const tools = ctx.tools;
   const check: RowAct = {
     id: "check",
@@ -160,7 +162,7 @@ function actsOf(entry: ServerEntry, ctx: RowsContext) {
   };
   const turnOff = turn(false);
   const turnOn = turn(true);
-  const files = [...new Set(entry.rows.map(r => r.file))];
+  const files = [...new Set(entry.rows.flatMap(r => r.file ?? []))];
   const remove: RowAct =
     servers === undefined
       ? notYet("remove", W.remove, Trash2Icon, { destructive: true })
@@ -207,7 +209,7 @@ export const SERVERS_KIND: KindModule<ServerEntry> = {
   add: "Add a tool server",
   items: (report: AgentsReport) => foldServers(report.servers).sort(byName),
   key: entry => entry.key,
-  matches: (entry, q) => matchesAny(q, entry.name, entry.reach, entry.project?.name, ...entry.rows.flatMap(r => [agentName(r.agent), r.file])),
+  matches: (entry, q) => matchesAny(q, entry.name, entry.reach, entry.project?.name, ...entry.rows.flatMap(r => [agentName(r.agent), r.file ?? ""])),
   groups: scopeGroups,
   row: (entry, ctx) => {
     const { worst, acts, flow } = actsOf(entry, ctx);
@@ -243,6 +245,7 @@ export const SERVERS_KIND: KindModule<ServerEntry> = {
           ? { id: "tools", label: W.tools, value: W.keepsSignIn(agentName(holder)), muted: true }
           : { id: "tools", label: W.tools, value: worst.state === "needs-sign-in" ? W.signInToSee : W.notListed, muted: true };
     const recipe = entry.rows.find(r => r.inRecipe !== undefined)?.inRecipe;
+    const launched = entry.rows.every(r => r.launch === true);
     const facts: Fact[] = [
       { id: "status", label: W.status, status, ...(status.state === "failed" && status.hover !== undefined ? { fact: status.hover } : {}) },
       { id: "reach", label: entry.stdio ? W.command : W.url, value: entry.reach, copy: true },
@@ -252,19 +255,18 @@ export const SERVERS_KIND: KindModule<ServerEntry> = {
         return {
           id: `config-${s.row.agent}`,
           label: at === 0 ? W.configLocation : "",
-          value: s.row.file,
           agent: s.row.agent,
-          copy: true,
+          ...(s.row.file === undefined ? { value: W.onEveryLaunch, muted: true } : { value: s.row.file, copy: true }),
           ...(disagree ? { fact: statusOf(s) } : {}),
           ...(act === undefined ? {} : { act: heldReason(ctx) === undefined ? act : { ...act, hover: heldReason(ctx)! } }),
         } satisfies Fact;
       }),
-      toolsFact,
+      ...(launched ? [] : [toolsFact]),
       ...(recipe === undefined ? [] : [{ id: "recipe", label: W.recipe, value: recipe ? W.inRecipe : W.notInRecipe, muted: !recipe }]),
     ];
     const tools = asked?.row ?? first;
-    const refresh = ctx.tools === undefined || heldReason(ctx) !== undefined || onImage(ctx) ? undefined : () => ctx.tools!.list(tools, true);
-    const quiet = refused !== undefined || listed !== undefined ? undefined : holder !== undefined ? W.keepsSignIn(agentName(holder)) : worst.state === "needs-sign-in" ? W.signInToSee : undefined;
+    const refresh = launched || ctx.tools === undefined || heldReason(ctx) !== undefined || onImage(ctx) ? undefined : () => ctx.tools!.list(tools, true);
+    const quiet = launched ? W.toolsEveryTurn : refused !== undefined || listed !== undefined ? undefined : holder !== undefined ? W.keepsSignIn(agentName(holder)) : worst.state === "needs-sign-in" ? W.signInToSee : undefined;
     return {
       title: entry.name,
       lead: leadOf(entry),

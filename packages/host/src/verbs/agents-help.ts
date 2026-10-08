@@ -141,8 +141,8 @@ export function skillRowLines(r: AgentsReport): string[] {
 
 export function serverRowLines(r: AgentsReport): string[] {
   const reach = (s: McpRow): string => (s.transport.kind === "stdio" ? `stdio ${s.transport.line}` : `http ${s.transport.host}`);
-  const state = (s: McpRow): string => [s.enabled ? s.auth : "disabled", ...(s.inRecipe === false ? ["not in recipe"] : [])].join(", ");
-  return [...(r.servers.length === 0 ? ["no MCP servers"] : table([["SERVER", "AGENT", "SCOPE", "REACHED BY", "FILE", "STATE"], ...r.servers.map(s => [s.name, agentName(s.agent), scopeWord(s), reach(s), s.file, state(s)])])), ...reportTail(r)];
+  const state = (s: McpRow): string => (s.launch === true ? "on every thread" : [s.enabled ? s.auth : "disabled", ...(s.inRecipe === false ? ["not in recipe"] : [])].join(", "));
+  return [...(r.servers.length === 0 ? ["no MCP servers"] : table([["SERVER", "AGENT", "SCOPE", "REACHED BY", "FILE", "STATE"], ...r.servers.map(s => [s.name, agentName(s.agent), scopeWord(s), reach(s), s.file ?? "every launch", state(s)])])), ...reportTail(r)];
 }
 
 export const SERVER_TOOL_COLUMNS = ["TOOL", "DESCRIPTION"];

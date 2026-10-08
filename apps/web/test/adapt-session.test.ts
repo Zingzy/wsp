@@ -321,7 +321,7 @@ describe("deriveSession: tool classification", () => {
     ["WebSearch", { query: "vitest snapshots" }, { itemType: "web_search", detail: "vitest snapshots" }],
     ["WebFetch", { url: "https://example.com" }, { itemType: "web_search", detail: "https://example.com" }],
     ["Task", { description: "scan repo", prompt: "..." }, { itemType: "collab_agent_tool_call", detail: "scan repo" }],
-    ["mcp__gh__issue", { number: 5 }, { itemType: "mcp_tool_call" }],
+    ["mcp__gh__issue", { number: 5 }, { itemType: "mcp_tool_call", label: "Use gh's issue", toolTitle: "Use gh's issue" }],
   ])("%s", (toolName, input, expected) => {
     const m = deriveSession([start, tool(toolName, input)]);
     expect(m.workEntries[0]).toMatchObject({ label: toolName, ...expected });

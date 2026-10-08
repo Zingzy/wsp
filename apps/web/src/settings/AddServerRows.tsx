@@ -44,7 +44,7 @@ function fileOf(agent: string, project: AgentsProject | undefined, report: Agent
     const first = entry.mcp.projectFiles?.[0];
     return own ?? (first === undefined ? undefined : `${project.path}/${first}`);
   }
-  return report?.servers.find(r => r.agent === agent && r.scope === "user")?.file ?? entry.mcp.files[0];
+  return report?.servers.find(r => r.agent === agent && r.scope === "user" && r.file !== undefined)?.file ?? entry.mcp.files[0];
 }
 
 /** What an add has typed so far, the file it lands in, and the one submit that hands it to the host: shared by every

@@ -41,7 +41,8 @@ export function workEntryDisplayLabel(entry: WorkLogEntry, workspaceRoot: string
   if (entry.preview) return prose(entry.preview);
   if (entry.description) return prose(entry.description);
   if (entry.command?.trim()) return { verb: null, text: commandFirstLine(entry.command), mono: true };
-  if (entry.detail) return prose(entry.detail);
+  // A server's tool keeps its words ahead of what the call names or answered, so a call never reads as its code name.
+  if (entry.detail) return entry.itemType === "mcp_tool_call" && entry.toolTitle ? { verb: entry.toolTitle, text: entry.detail, mono: false } : prose(entry.detail);
   const [firstPath] = entry.changedFiles ?? [];
   if (firstPath) {
     const path = formatWorkspaceRelativePath(firstPath, workspaceRoot);
