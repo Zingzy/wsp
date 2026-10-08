@@ -142,6 +142,13 @@
                     "type": "string",
                     "minLength": 1
                   },
+                  "arch": {
+                    "type": "string",
+                    "enum": [
+                      "x86_64",
+                      "aarch64"
+                    ]
+                  },
                   "latest": {
                     "type": "boolean",
                     "const": true
@@ -423,6 +430,13 @@
                   "sha256": {
                     "type": "string",
                     "minLength": 1
+                  },
+                  "arch": {
+                    "type": "string",
+                    "enum": [
+                      "x86_64",
+                      "aarch64"
+                    ]
                   },
                   "latest": {
                     "type": "boolean",

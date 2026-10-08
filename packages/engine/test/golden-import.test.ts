@@ -1252,7 +1252,7 @@ describe("tap formulae on the release road", () => {
     const table: BrewTable = new Map([["zingzy/tap/diskbloom", { name: "diskbloom", fullName: "zingzy/tap/diskbloom", deps: [], macosOnly: false, source: { repo: "Zingzy/diskbloom", tag: "v0.1.0" } }]]);
     const id = "tools/brew/zingzy/tap/diskbloom";
     const tap = (over: Partial<RecipeEntry> = {}) => row({ rung: "tools", id, label: "diskbloom", linux: "unknown", ...over });
-    const pin = { tag: "v0.1.0", sha256: "a".repeat(64) };
+    const pin = { tag: "v0.1.0", sha256: "a".repeat(64), arch: "x86_64" as const };
     // The plan installs the row from its release with the check; the tick says the same road and carries the same pin.
     expect(toolInstallsFor([tap({ pin })], table).installs.at(-1)!.cmd).toContain('[ "$sum" = ');
     // The tick's version is the release the road installs at: the Mac's tag, which a Homebrew row does not carry itself.
