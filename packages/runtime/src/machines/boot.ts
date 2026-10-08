@@ -325,7 +325,7 @@ export function bootArea(ctx: RuntimeContext): BootArea {
           console.warn(`sessions document for ${index.workspaceId} has no rows array, read as empty`);
           continue;
         }
-        for (const { turnId, notify, notifyBy, notifyRoad, reply, run, from, asked: storedAsked, turnToken, scopeDeviceId, snapshot, ...view } of index.sessions) {
+        for (const { turnId, notify, notifyBy, notifyRoad, reply, told, toldLast, run, from, asked: storedAsked, turnToken, scopeDeviceId, snapshot, ...view } of index.sessions) {
           const by = readScope(notifyBy);
           const asked = readAsked(storedAsked);
           const road = readRoad(notifyRoad);
@@ -353,7 +353,7 @@ export function bootArea(ctx: RuntimeContext): BootArea {
             // went then, as the person's; one that does not read as a scope is no scope at all.
             ...(by !== undefined ? { notifyBy: by } : {}),
             ...(road !== undefined ? { notifyRoad: road } : {}),
-            ...(reply !== undefined ? { turnLive: { reply } } : {}),
+            ...(reply !== undefined || typeof told === "number" ? { turnLive: { ...(reply !== undefined ? { reply } : {}), ...(typeof told === "number" ? { told } : {}), ...(toldLast === true ? { toldLast } : {}) } } : {}),
             ...(run !== undefined ? { run } : {}),
             ...(typeof from === "number" && Number.isSafeInteger(from) && from >= 0 ? { from } : {}),
             ...(asked !== undefined ? { asked } : {}),
@@ -430,6 +430,8 @@ export function bootArea(ctx: RuntimeContext): BootArea {
         if (thread !== undefined && !ctx.threadRuns(thread)) await deviceDoor.revoke(device.id);
       }
       await deviceDoor.revokeAsides();
+      // Each start waits for its thread's workspace to settle its turns, so a line meets the turn re-opened there.
+      void ctx.deliverOwed().catch((e: unknown) => console.warn(`the lines owed to threads were not sent: ${e instanceof Error ? e.message : String(e)}`));
       for (const raw of await store.list(BUILDERS)) await admit(raw as StoredBuilder);
       // Not waited on: a fetch of a big copy's branches takes seconds, and the records it drops leave as they go.
       ctx.state.copiesMoving = ctx.moveOldCopies().catch((e: unknown) => console.warn(`the move off old copies stopped: ${e instanceof Error ? e.message : String(e)}`));

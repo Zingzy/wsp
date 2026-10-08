@@ -512,6 +512,8 @@ export function transcriptsArea(ctx: RuntimeContext): TranscriptsArea {
         ...(s.notifyBy !== undefined ? { notifyBy: s.notifyBy } : {}),
         ...(s.notifyRoad !== undefined ? { notifyRoad: s.notifyRoad } : {}),
         ...(s.view.status === "running" && s.turnLive?.reply !== undefined ? { reply: s.turnLive.reply } : {}),
+        ...(s.view.status === "running" && s.turnLive?.told !== undefined ? { told: s.turnLive.told } : {}),
+        ...(s.view.status === "running" && s.turnLive?.toldLast === true ? { toldLast: true as const } : {}),
         ...(s.view.status === "running" && s.run !== undefined ? { run: s.run } : {}),
         ...(s.view.status === "running" && s.from !== undefined ? { from: s.from } : {}),
         ...(s.view.status === "running" && s.asked !== undefined ? { asked: s.asked } : {}),

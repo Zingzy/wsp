@@ -103,4 +103,17 @@ describe("what holds a turn's idle clock", () => {
     emit({ type: "turn.tasks", running: 0 } as AdapterEvent);
     expect(waiting?.()).toBe(false);
   });
+
+  it("a task the harness still lists under its agent's final reply holds the turn as before it", async () => {
+    const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
+    await rt.sessions.start(ws.id, { prompt: "start the server and say where it is" });
+    await vi.waitFor(() => expect(said).toHaveLength(1));
+    const emit = said[0]!;
+
+    emit({ type: "turn.tasks", running: 1 } as AdapterEvent);
+    emit({ type: "turn.tasks", running: 1, replied: { status: "completed", text: "It is on port 3000." } } as AdapterEvent);
+    expect(waiting?.()).toBe(true);
+    emit({ type: "turn.tasks", running: 0 } as AdapterEvent);
+    expect(waiting?.()).toBe(false);
+  });
 });

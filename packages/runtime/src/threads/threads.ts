@@ -11,10 +11,22 @@ import { PLAN_RESETS, secretsOf } from "../adapters.js";
 import { accountOf, accountOnComputer, resetDetailsDue, type Vaulted } from "../usage.js";
 import type { WorkspaceRecord, LiveWorkspace, SessionHandle } from "../types/wiring.js";
 import {
-  RESTARTED_REASON, noCheckpointLogLine, type Taken, type TurnLive, type KeptProcess, type KeptLaunch, launchesAs,
+  RESTARTED_REASON, NOTIFY_OWED, readRoad, readScope, noCheckpointLogLine, type Taken, type TurnLive, type KeptProcess, type KeptLaunch, launchesAs,
   stampSessionFile, sameSessionFile, DaemonRefusal, type LiveSession,
 } from "../types/internal.js";
 import type { RuntimeContext, ThreadsArea } from "../context.js";
+
+/** A child's finished line into one thread, as the store keeps it until that thread takes it. */
+type Owed = { id: string; from: string; notify: string; text: string; by?: ThreadScope; road?: WorkspaceOrigin };
+/** A line on its way, with the road that tells the person where its thread's door refuses it. */
+type Line = Owed & { fell?: () => void };
+const readOwed = (raw: unknown): Owed | undefined => {
+  const r = raw as Partial<Record<keyof Owed, unknown>> | undefined;
+  if (typeof r?.id !== "string" || typeof r.from !== "string" || typeof r.notify !== "string" || typeof r.text !== "string") return undefined;
+  const by = readScope(r.by);
+  const road = readRoad(r.road);
+  return { id: r.id, from: r.from, notify: r.notify, text: r.text, ...(by !== undefined ? { by } : {}), ...(road !== undefined ? { road } : {}) };
+};
 
 export function threadsArea(ctx: RuntimeContext): ThreadsArea {
   const { opts, bus, clock, deviceDoor, live, threadRecords, sessions } = ctx;
@@ -243,8 +255,15 @@ export function threadsArea(ctx: RuntimeContext): ThreadsArea {
     return seen;
   };
   /** Lines for a parent whose workspace could not take a start when the child ended (napping, or the nap that ended
-   * the child), sent when that workspace wakes; in memory only, so a host restart during the nap drops them. */
-  const heldLines = new Map<string, { from: string; notify: string; text: string; by?: ThreadScope; road?: WorkspaceOrigin; fell?: () => void }[]>();
+   * the child), sent when that workspace wakes; a host restart during the nap holds them again from the store. */
+  const heldLines = new Map<string, Line[]>();
+  /** The lines this host is carrying, by id, which the boot's pass over the store leaves to the road already on them. */
+  const sending = new Set<string>();
+  /** A line leaves the store once a turn of its thread took it, or once it fell to the person. */
+  const owedTaken = (line: Line): void => {
+    sending.delete(line.id);
+    void ctx.store.delete(NOTIFY_OWED, line.id).catch((e: unknown) => console.warn(`the line of thread ${line.from.slice(0, 8)} into thread ${line.notify.slice(0, 8)} stays owed: ${e instanceof Error ? e.message : String(e)}`));
+  };
   /** Who the lines off a row are delivered as: the thread that registered its targets and the road it registered
    * them from, read off the row that holds both so the two never drift apart. */
   const tellAs = (s: { notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin }): { by?: ThreadScope; road?: WorkspaceOrigin } => ({
@@ -258,21 +277,28 @@ export function threadsArea(ctx: RuntimeContext): ThreadsArea {
    * which is what every row written before the scope rode beside the targets carries. A parent with no session to
    * resume, and a start that door refuses, drop the line with a warning and call the line's own `fell`, which tells
    * the person the report is there; the child's end must not fail on either. */
-  const deliver = (line: { from: string; notify: string; text: string; by?: ThreadScope; road?: WorkspaceOrigin; fell?: () => void }): void => {
-    const { from, notify, text, by, road, fell = () => {} } = line;
+  const deliver = (line: Line): void => {
+    const { from, notify, text, by, road } = line;
+    sending.add(line.id);
+    const fell = (): void => {
+      owedTaken(line);
+      line.fell?.();
+    };
     const parent = latestOn(notify);
     if (!tellable(parent)) {
       console.warn(`thread ${from.slice(0, 8)} ended, but thread ${notify.slice(0, 8)} has no session to tell`);
       fell();
       return;
     }
-    const phase = live.get(parent.workspaceId)?.record.phase;
-    if (phase !== undefined && sendRefusal(workspaceState({ phase })) !== null) {
-      // The line keeps the road that tells the person: a wake is minutes or hours later, and one the door refuses
-      // then falls away exactly as one refused now does, once for the turn that ended.
+    // The line keeps the road that tells the person: a wake is minutes or hours later, and one the door refuses
+    // then falls away exactly as one refused now does, once for the turn that ended.
+    const holdForWake = (): boolean => {
+      const phase = live.get(parent.workspaceId)?.record.phase;
+      if (phase === undefined || sendRefusal(workspaceState({ phase })) === null) return false;
       heldLines.set(parent.workspaceId, [...(heldLines.get(parent.workspaceId) ?? []), line]);
-      return;
-    }
+      return true;
+    };
+    if (holdForWake()) return;
     // The road the targets were named from is read again here, where the line starts a turn: a device the person
     // paired may not start one, by the same list both doors read, so a row an older host wrote under that road
     // falls away to the person rather than starting a turn a paired socket could not.
@@ -285,7 +311,10 @@ export function threadsArea(ctx: RuntimeContext): ThreadsArea {
     // registered them from. A line nobody but the person registered carries neither and goes as theirs, which is
     // what every row written before the road rode beside the targets holds.
     const asWho: Caller | undefined = by === undefined ? road : { origin: road ?? "here", by };
-    ctx.sessionsApi.start(parent.workspaceId, { prompt: text, harness: parent.harness, thread: notify, startedBy: "agent" }, asWho).catch((e: unknown) => {
+    // A start answers once the line steered the running turn or launched one of its own, which is when it is taken.
+    ctx.sessionsApi.start(parent.workspaceId, { prompt: text, harness: parent.harness, thread: notify, startedBy: "agent" }, asWho).then(() => owedTaken(line), (e: unknown) => {
+      // A line queued behind the parent's turn meets the nap that ended that turn: it waits for the wake as well.
+      if (holdForWake()) return;
       console.warn(`thread ${from.slice(0, 8)} ended, but its line did not reach thread ${notify.slice(0, 8)}: ${e instanceof Error ? e.message : String(e)}`);
       fell();
     });
@@ -302,7 +331,7 @@ export function threadsArea(ctx: RuntimeContext): ThreadsArea {
   /** The one line an ending turn sends where its thread's start said: into a thread, or nowhere further for me, whom
    * the recorded event reaches. Recorded before the turn's session.done, since a follower ends there; the person's
    * own row for a line the target's door refused is the exception, since that answer comes after the start it made. */
-  const notifyEnd = (s: { view: SessionView; turnId: string }, notify: readonly string[], named: { by?: ThreadScope; road?: WorkspaceOrigin }, result: TurnResult): void => {
+  const notifyEnd = (s: { view: SessionView; turnId: string; turnLive?: TurnLive }, notify: readonly string[], named: { by?: ThreadScope; road?: WorkspaceOrigin }, result: TurnResult): void => {
     const threadId = s.view.threadId;
     if (threadId === undefined) return;
     // A target whose thread has gone by now cannot be told, and its report must not go with it: the person is told
@@ -322,11 +351,23 @@ export function threadsArea(ctx: RuntimeContext): ThreadsArea {
       // it as a row beside every other, so theirs stays one line.
       const text = notifyLine(threadId, result, target === NOTIFY_ME ? "tail" : "whole");
       ctx.record({ type: "session.notify", workspaceId: s.view.workspaceId, sessionId: s.view.claudeSessionId ?? s.view.id, turnId: s.turnId, threadId, notify: target, text });
-      if (target !== NOTIFY_ME) deliver({ from: threadId, notify: target, text, ...named, fell });
+      if (target === NOTIFY_ME) continue;
+      // A turn whose agent replied over background work sends a line per reply, each kept apart.
+      const line: Owed = { id: `${s.turnId}:${s.turnLive?.told ?? 0}:${target}`, from: threadId, notify: target, text, ...named };
+      void ctx.store.put(NOTIFY_OWED, line.id, line).catch((e: unknown) => console.warn(`the line of thread ${threadId.slice(0, 8)} into thread ${target.slice(0, 8)} was not kept: ${e instanceof Error ? e.message : String(e)}`));
+      deliver({ ...line, fell });
+    }
+  };
+  /** Every line a host that stopped had not seen taken, sent again once this one has read its rows. */
+  const deliverOwed = async (): Promise<void> => {
+    for (const raw of await ctx.store.list(NOTIFY_OWED)) {
+      const line = readOwed(raw);
+      if (line !== undefined && !sending.has(line.id)) deliver(line);
     }
   };
   /** Settles a running row whose process the runtime ended or lost before the harness's own session.end: to the reply
-   * it held, whose line already went, or failed with `cutLine` as the parent's word when it never replied. The
+   * it held, whose line already went, or failed with `cutLine` as the parent's word when it never replied. A reply held
+   * over background work whose line went, with nothing waking the agent since, is the turn's last word: no line. The
    * session.end carries `reason` either way. The one rule for both roads, the runtime's end() and the restart load. */
   const settleCut = (s: { view: SessionView; turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin; turnLive?: TurnLive; snapshot?: string }, reason: string, cutLine: (endedAt: number) => string): void => {
     const reply = s.turnLive?.reply;
@@ -340,7 +381,7 @@ export function threadsArea(ctx: RuntimeContext): ThreadsArea {
     // one whose process is gone, and a settled row still carrying it would read as waiting on a person forever.
     delete s.view.asking;
     if (s.view.threadId !== undefined) leadAsks.delete(s.view.threadId);
-    if (reply === undefined && s.notify !== undefined) notifyEnd(s, s.notify, tellAs(s), { status: "failed", error: cutLine(endedAt) });
+    if (reply === undefined && s.turnLive?.toldLast !== true && s.notify !== undefined) notifyEnd(s, s.notify, tellAs(s), { status: "failed", error: cutLine(endedAt) });
     ctx.record({ type: "session.end", workspaceId: s.view.workspaceId, sessionId: s.view.claudeSessionId ?? s.view.id, turnId: s.turnId, threadId: s.view.threadId, exitCode: null, sawResult: reply !== undefined, reason });
   };
   /** A folder on this computer git holds no repo in: it keeps no checkpoint and no rewind moves its files. */
@@ -517,7 +558,7 @@ export function threadsArea(ctx: RuntimeContext): ThreadsArea {
   return {
     threadRuns, launchingOn, runningOn, latestOn, keptAgents, reapKept, endKept, hostWrites, writeSession, takeKept,
     holdKept, threadOfToken, treeUnder, drivesThread, leadAsks, stoppedBehind, stopUnder, notifyOn, notifyReach, tellAs,
-    notifyEnd, settleCut, notARepo, checkpointsLanding, keepCheckpoint, takenTurn, recordSteer, snapshotOf,
+    notifyEnd, deliverOwed, settleCut, notARepo, checkpointsLanding, keepCheckpoint, takenTurn, recordSteer, snapshotOf,
     readTurnChanges, usageComputerOf, vaultedFor, usageAccountOf, limitDetailsDue,
   };
 }

@@ -80,7 +80,14 @@ export type AdapterEvent =
       /** The agent's tool shell folder after this tool_use, present only when the call moved it. */
       cwd?: string;
     }
-  | { type: "turn.done"; sessionId: string; result: TurnResult }
+  | {
+      type: "turn.done";
+      sessionId: string;
+      result: TurnResult;
+      /** The reply is one the agent gave over background work, which `turn.tasks` already carried as `replied`, with
+       * no reply of the agent's since: its finished line went then. */
+      held?: true;
+    }
   /** The agent compacted its own context, sent once per compaction: what the model held before and after it, each
    * where the harness said. */
   | { type: "turn.compacted"; sessionId: string; before?: number; after?: number }
@@ -89,12 +96,15 @@ export type AdapterEvent =
   | { type: "turn.plan"; sessionId: string; steps?: PlanStep[]; text?: string }
   | {
       /** How many commands and subagents the harness reports running in the background right now, sent every time
-       * that set changes. The turn is still working while the count is above zero, whatever its agent has said, so
-       * this is what holds its idle clock the way an open permission prompt does. Read by the runtime alone: no
-       * client sees it and nothing folds it into a wire event. */
+       * that set changes and once as its agent replies over it. The turn is still working while the count is above
+       * zero, whatever its agent has said, so this is what holds its idle clock the way an open permission prompt
+       * does. Read by the runtime alone: no client sees it and nothing folds it into a wire event. */
       type: "turn.tasks";
       sessionId: string;
       running: number;
+      /** The final reply the agent just gave with these still running, sent once as it gives it: the turn goes on
+       * while they run, and the reply is the one its finished line carries now. */
+      replied?: TurnResult;
     }
   | {
       /** The harness's own name for the point this turn ended at, sent once per turn: what cutting the thread's
