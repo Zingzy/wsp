@@ -117,6 +117,7 @@ export { leadAsk, openAsk, THREAD_SEED_CHARS, ThreadMessage, threadMarkdown, thr
 export { escapeRegExp } from "./regexp.js";
 export { ENV_FROM_INPUT, inFolder, shellLine, shellQuote } from "./shell-quote.js";
 export { cgroupEndScript, cgroupJoinLine, inCgroup, threadCgroup, threadCgroupsEndScript } from "./thread-cgroup.js";
+export { threadShellFiles, threadShellVars } from "./thread-shell.js";
 export {
   DEFAULT_THEME,
   INK_FLOOR,

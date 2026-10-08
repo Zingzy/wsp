@@ -163,8 +163,9 @@ export const OLD_APPEND_MARKS = ".a[0-9a-f]*";
  * larger one goes up first in numbered pieces, each written whole to its own file so a retried exec lands it once, and
  * the last exec joins them under pipefail so a missing piece fails the write instead of landing a spliced file. An
  * append lands once behind the marker above, which its key is written into after it; the marker, and the pieces of an
- * append that `before` turned away, stay beside the file until the run's cleanup removes them. */
-function uploadSequence(files: GuestWrite[], before: string[], after: string[], upload: string): string[] {
+ * append that `before` turned away, stay beside the file until the run's cleanup removes them. Every body is
+ * measured as `framed` wraps it, the command the machine's exec sends. */
+function uploadSequence(files: GuestWrite[], before: string[], after: string[], upload: string, framed: (cmd: string) => string): string[] {
   const head = `mkdir -p ${[...new Set(files.map(f => posix.dirname(f.path)))].map(shellQuote).join(" ")}`;
   // A key per file of the upload, so two appends to one path in one call each land rather than the second reading
   // the first's marker as its own.
@@ -183,11 +184,11 @@ function uploadSequence(files: GuestWrite[], before: string[], after: string[], 
   // script cut into pieces carries the same bytes as one that fits, the caller's environment among them.
   const piece = (path: string, i: number, part: string): string => [head, "umask 077", `printf %s ${shellQuote(part)} > ${shellQuote(path)}.${i} || exit 1`, `echo ${HANDSHAKE.piece}`].join("\n");
   const execs: string[] = [];
-  while (!execFits(last())) {
+  while (!execFits(framed(last()))) {
     const f = plan.filter(f => f.pieces === 0).sort((a, b) => b.b64.length - a.b64.length)[0];
     if (f === undefined) throw new Error("the lines around the upload do not fit one exec body");
     // Base64 decodes in groups of four, so a piece boundary on a multiple of four keeps the joined text decodable.
-    const size = Math.floor((EXEC_BODY_MAX - EXEC_ENVELOPE_BYTES - Buffer.byteLength(piece(f.path, f.b64.length, ""))) / 4) * 4;
+    const size = Math.floor((EXEC_BODY_MAX - EXEC_ENVELOPE_BYTES - Buffer.byteLength(framed(piece(f.path, f.b64.length, "")))) / 4) * 4;
     f.pieces = Math.max(1, Math.ceil(f.b64.length / size));
     for (let i = 0; i < f.pieces; i++) execs.push(piece(f.path, i, f.b64.slice(i * size, (i + 1) * size)));
   }
@@ -210,7 +211,7 @@ export interface UploadResult extends ExecResult {
 export async function putFiles(machine: Machine, files: GuestWrite[], opts: PutFilesOptions = {}): Promise<UploadResult> {
   const timeoutMs = opts.timeoutMs ?? INLINE_EXEC_MS;
   const upload = randomBytes(6).toString("hex");
-  const execs = uploadSequence(files, opts.before ?? [], opts.after ?? [], upload);
+  const execs = uploadSequence(files, opts.before ?? [], opts.after ?? [], upload, (await machine.framed?.()) ?? (cmd => cmd));
   for (const [at, cmd] of execs.slice(0, -1).entries()) {
     const res = await machine.exec(cmd, { timeoutMs, idempotencyKey: `${upload}/${at}` });
     if (res.exitCode !== 0 || !res.stdout.includes(HANDSHAKE.piece)) {

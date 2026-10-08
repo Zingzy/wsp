@@ -98,6 +98,9 @@ export interface Machine {
   exec(cmd: string, opts?: { timeoutMs?: number; idempotencyKey?: string; stdin?: Uint8Array }): Promise<ExecResult>; // always REST path
   /** Set on a machine whose exec hands `stdin` to the command; absent where the backend drops it. */
   readonly takesStdin?: true;
+  /** The command exec sends for the one it is handed, on a machine that wraps it: what an upload pages against the
+   * exec body cap, so the wrapper never takes a frame past it. Absent where exec sends the command as it is. */
+  framed?(): Promise<(cmd: string) => string>;
   /** A command that may run for minutes: started detached on the guest and read until it exits or the deadline
    * kills it; the result is shaped like exec's. */
   run(script: string, opts: RunOptions): Promise<ExecResult>;
