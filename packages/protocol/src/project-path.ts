@@ -175,6 +175,15 @@ export function placeDaemonPaths(home: string): {
   /** What stood before the add at the paths outside the home it or its setup writes, so a leave takes back only what
    * wsp made: each path NUL-terminated, written by the add's deploy before anything of wsp's lands. */
   placeFound: string;
+  /** That record while the deploy is still writing it, renamed onto it once whole. */
+  placeFoundPart: string;
+  /** The join code the add lands for the join to spend, which the join deletes before it dials. */
+  joinCode: string;
+  /** Where the install a project's landing runs there writes its output, one log per project (`placeInstallLog`). */
+  installLogs: string;
+  /** Beside the token: the daemon's minute readings, and the folder of the sshd it starts for a workspace. */
+  readings: string;
+  sshDir: string;
 } {
   const at = home.replace(/\/+$/, "");
   const wsp = `${at}/.wsp`;
@@ -200,8 +209,16 @@ export function placeDaemonPaths(home: string): {
     placeKey: `${wsp}/place-key.pem`,
     placeLog: `${wsp}/place.log`,
     placeFound: `${wsp}/place-found`,
+    placeFoundPart: `${wsp}/place-found.part`,
+    joinCode: `${wsp}/join-code`,
+    installLogs: `${wsp}/install-logs`,
+    readings: `${wsp}/readings`,
+    sshDir: `${wsp}/ssh`,
   };
 }
+
+/** The log a project's landing on that computer writes its install's output to, which a leave takes with its folder. */
+export const placeInstallLog = (home: string, projectId: string): string => `${placeDaemonPaths(home).installLogs}/${projectId}.log`;
 
 /** How much of a box's place file is read: a real one is well under a kilobyte, and the box is the untrusted side. */
 const HELD_PLACE_READ_BYTES = 65_536;
@@ -226,11 +243,10 @@ export function placeProvisionPaths(home: string): { dir: string; runDir: string
 
 /** Every path a leave takes off a computer joined as a place, in the order they go: the place file, its key and the
  * agent's log, then everything the daemon, an installer over ssh and the recipe's job put under wsp's own folder,
- * then the browser shim and its xdg-open name, and that folder itself last. The folder is named whole as well as
- * by its parts so a leave takes what no row above names, the parts still being named for the line each one puts in
- * front of a person reading the leave. The work folder is not here: what the person's threads wrote there is
- * theirs. The daemon sweeps by this list when its host asks over the link and wsp leave sweeps by it at the
- * terminal. */
+ * then the browser shim and its xdg-open name. That folder itself is not here: the app and the install line keep
+ * the person's own wsp in it and a host on the same login keeps its state there, so a leave takes it only once it
+ * is empty, and every write under it, the daemon's or the host's over the link, needs its own row here. The work folder is not here either: what the person's threads wrote there is theirs. The daemon sweeps
+ * by this list when its host asks over the link and wsp leave sweeps by it at the terminal. */
 export function placeOwnedPaths(home: string): string[] {
   const at = placeDaemonPaths(home);
   return [
@@ -238,6 +254,8 @@ export function placeOwnedPaths(home: string): string[] {
     at.placeKey,
     at.placeLog,
     at.placeFound,
+    at.placeFoundPart,
+    at.joinCode,
     at.dir,
     placeProvisionPaths(home).dir,
     at.bundle,
@@ -251,9 +269,13 @@ export function placeOwnedPaths(home: string): string[] {
     at.guestBin,
     at.runDir,
     at.portFile,
+    at.manifestPath,
+    at.putDir,
+    at.installLogs,
+    at.readings,
+    at.sshDir,
     at.openShim,
     `${at.binDir}/xdg-open`,
-    at.wsp,
   ];
 }
 

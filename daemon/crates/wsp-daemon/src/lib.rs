@@ -318,10 +318,12 @@ impl Ctx {
         #[cfg(target_os = "linux")]
         let (runtime, runtime_refusal) = open_runtime(&options, &log, daemon_port);
         // Beside the token, in the daemon's own folder: a box keeps them under /root/.wsp/readings.
-        let readings_dir = options
-            .readings_dir
-            .clone()
-            .unwrap_or_else(|| options.token_path.parent().map_or_else(|| PathBuf::from("readings"), |dir| dir.join("readings")));
+        let readings_dir = options.readings_dir.clone().unwrap_or_else(|| {
+            options
+                .token_path
+                .parent()
+                .map_or_else(|| PathBuf::from(wsp_frames::READINGS_FOLDER), |dir| dir.join(wsp_frames::READINGS_FOLDER))
+        });
         let history = Arc::new(readings_history::History::new(readings_dir, numbers::READINGS_KEPT_DAYS, numbers::READINGS_CAP_BYTES));
         let sshd = Arc::new(ssh::Servers::new(
             options.ssh_programs.clone().unwrap_or_default(),

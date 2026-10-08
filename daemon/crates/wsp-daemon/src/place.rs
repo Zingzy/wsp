@@ -15,7 +15,7 @@ use wsp_frames::{
     words, Base64Bytes, PlaceFile, PlacePublicKey, PlaceReport, PlaceSignature, Platform, WorkspaceSize,
 };
 
-use crate::under_home::{prune_empty, remove_under_home, Removed};
+use crate::under_home::{prune_empty, remove_empty_under_home, remove_under_home, Removed};
 
 /// The place file as it stands, or nothing when this computer is no place: a file that is there and is not one
 /// reads the same as none, since the one road that writes it is wsp join.
@@ -415,9 +415,10 @@ fn sh_stdout_within(script: &str, within: Duration) -> String {
 
 /// Takes wsp off this computer and answers what went: first every file wsp itself landed in the agents' homes here
 /// whose bytes are still the ones wsp left, read by the one ownership script, then the paths the protocol names, in
-/// its order. The read comes first because the list it reads sits in the provision folder that walk takes. A path
-/// is there when it exists as a link or a file, since the browser name is a symlink whose target may already be
-/// gone. A file the person has written since is on no line of that read and stays.
+/// its order, then wsp's own folder where nothing of the person's or a host's is left in it. The read comes first
+/// because the list it reads sits in the provision folder that walk takes. A path is there when it exists as a link
+/// or a file, since the browser name is a symlink whose target may already be gone. A file the person has written
+/// since is on no line of that read and stays.
 pub(crate) fn sweep_place_home(home: &Path, read: &dyn Fn(&str) -> String) -> Vec<String> {
     let mut removed = Vec::new();
     for rel in own_marks(&read(&landed_files_script(home))) {
@@ -442,6 +443,10 @@ pub(crate) fn sweep_place_home(home: &Path, read: &dyn Fn(&str) -> String) -> Ve
             Removed::TooDeep => removed.push(words::place_kept_too_deep(path.to_string_lossy())),
             Removed::Absent => {}
         }
+    }
+    let wsp = place_daemon_paths(home).wsp;
+    if wsp.strip_prefix(home).is_ok_and(|rel| remove_empty_under_home(home, rel)) {
+        removed.push(wsp.to_string_lossy().into_owned());
     }
     removed
 }
@@ -1114,7 +1119,7 @@ mod tests {
         // The list's server line named no path, so the leave took nothing for it and made nothing at its name.
         assert!(!home.path().join("agents").exists());
         assert!(!swept.iter().any(|took| took.contains("agents/mcp")), "{swept:?}");
-        // And wsp's own folder is gone whole, the provision folder and the ledger inside it with it.
+        // And wsp's own folder goes too, since the sweep left it empty, the provision folder and the ledger with it.
         assert!(!place_daemon_paths(home.path()).wsp.exists());
         assert!(swept.contains(&place_daemon_paths(home.path()).wsp.to_string_lossy().into_owned()));
     }
@@ -1186,7 +1191,7 @@ mod tests {
             assert!(swept.contains(&said), "{swept:?} does not say {said}");
             assert!(!swept.contains(&path.to_string_lossy().into_owned()), "{swept:?} took a path through a link");
         }
-        // Wsp's own folder is under no link and goes as it always did.
+        // Wsp's own folder is under no link and goes once the sweep has left it empty.
         assert!(!at.wsp.exists());
         assert!(swept.contains(&at.wsp.to_string_lossy().into_owned()));
     }
@@ -1201,11 +1206,12 @@ mod tests {
 
         let swept = sweep_place_home(home.path(), &|_| String::new());
 
+        let said = words::place_kept_too_deep(provision.to_string_lossy());
+        assert!(swept.contains(&said), "{swept:?} does not say {said}");
+        // Wsp's own folder still holds the provision folder, so it stays and is not said to have gone.
         let wsp = place_daemon_paths(home.path()).wsp;
-        for stayed in [&provision, &wsp] {
-            let said = words::place_kept_too_deep(stayed.to_string_lossy());
-            assert!(swept.contains(&said), "{swept:?} does not say {said}");
-        }
+        assert!(wsp.exists());
+        assert!(!swept.contains(&wsp.to_string_lossy().into_owned()), "{swept:?}");
         assert!(!provision.join("files").exists(), "what lay above the depth stayed too");
     }
 
@@ -1232,13 +1238,10 @@ mod tests {
         std::os::unix::fs::symlink("/nonexistent/wsp-open", at.bin_dir.join("xdg-open")).unwrap();
         let work = home.path().join("wsp-work");
         std::fs::create_dir_all(&work).unwrap();
-        // A stray file under wsp's own folder that no row above names, as two boxes were found holding: the
-        // folder goes whole, last, so a leave leaves no .wsp at all.
-        std::fs::write(at.wsp.join("place.json.bak-747"), "old").unwrap();
         std::fs::create_dir_all(&at.put_dir).unwrap();
         std::fs::write(at.put_dir.join("797"), "half an update").unwrap();
         let swept = sweep_place_home(home.path(), &|_| String::new());
-        let names: Vec<_> = [&at.place_file, &at.place_key, &at.dir, &at.token_path, &at.bin_dir.join("xdg-open"), &at.wsp]
+        let names: Vec<_> = [&at.place_file, &at.place_key, &at.dir, &at.token_path, &at.put_dir, &at.bin_dir.join("xdg-open"), &at.wsp]
             .iter()
             .map(|p| p.to_string_lossy().into_owned())
             .collect();
@@ -1250,6 +1253,44 @@ mod tests {
         assert!(std::fs::symlink_metadata(at.bin_dir.join("xdg-open")).is_err());
         assert!(work.exists());
         assert!(sweep_place_home(home.path(), &|_| String::new()).is_empty());
+    }
+
+    #[test]
+    fn a_landings_install_log_and_what_a_killed_add_left_go_and_wsps_folder_with_them() {
+        let home = tempfile::tempdir().unwrap();
+        let at = place_daemon_paths(home.path());
+        std::fs::create_dir_all(&at.wsp).unwrap();
+        std::fs::write(&at.token_path, "t\n").unwrap();
+        std::fs::create_dir_all(&at.install_logs).unwrap();
+        for left in [at.install_logs.join("p_abc123.log"), at.place_found_part.clone(), at.join_code.clone()] {
+            std::fs::write(&left, "left").unwrap();
+        }
+        let swept = sweep_place_home(home.path(), &|_| String::new());
+        let left: Vec<_> = std::fs::read_dir(&at.wsp).map(|d| d.map(|e| e.unwrap().file_name()).collect()).unwrap_or_default();
+        assert!(left.is_empty(), "left under ~/.wsp: {left:?}");
+        assert_eq!(swept.last(), Some(&at.wsp.to_string_lossy().into_owned()));
+    }
+
+    #[test]
+    fn the_persons_own_wsp_and_a_hosts_state_stay_byte_for_byte_with_wsps_folder_around_them() {
+        let home = tempfile::tempdir().unwrap();
+        let at = place_daemon_paths(home.path());
+        std::fs::create_dir_all(at.wsp.join("bin")).unwrap();
+        let theirs =
+            [(at.wsp.join("bin/wsp"), "#!/bin/sh\necho the install line's wsp\n"), (at.wsp.join("state.json"), "{\"workspaces\":[]}\n")];
+        for (path, text) in &theirs {
+            std::fs::write(path, text).unwrap();
+        }
+        std::fs::write(&at.place_file, "{}").unwrap();
+        std::fs::create_dir_all(at.wsp.join("readings")).unwrap();
+        let swept = sweep_place_home(home.path(), &|_| String::new());
+        for (path, text) in &theirs {
+            assert_eq!(std::fs::read_to_string(path).unwrap(), *text, "{}", path.display());
+        }
+        assert!(!swept.contains(&at.wsp.to_string_lossy().into_owned()), "{swept:?}");
+        let mut left: Vec<_> = std::fs::read_dir(&at.wsp).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        left.sort();
+        assert_eq!(left, ["bin", "state.json"]);
     }
 
     #[test]

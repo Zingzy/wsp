@@ -905,8 +905,8 @@ describe("the words and numbers are what this package exports", () => {
   for (const [name, regenerate] of [
     ["words.json", words],
     ["numbers.json", numbers],
-    // The order a leave walks, which the daemon's own list is held to: the provision folder after the daemon's
-    // and wsp's own folder last, so nothing under it is left on a computer the person joined.
+    // The order a leave walks, which the daemon's own list is held to: the provision folder after the daemon's,
+    // and never wsp's own folder, which holds the person's own wsp and a host's state on the same login.
     ["place-paths.json", () => placeOwnedPaths(FIXTURE_HOME)],
   ] as const) {
     it(`${name} equals its regeneration`, () => {
