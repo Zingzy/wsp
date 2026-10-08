@@ -11,7 +11,7 @@ import { randomBytes } from "node:crypto";
 import { posix } from "node:path";
 import { EXEC_BODY_MAX, EXEC_CHUNK_BYTES, EXEC_DEADLINE_EXIT, shellQuote } from "@wsp/protocol";
 import { GuestUnusableError, isMissing } from "./errors.js";
-import type { ExecResult, Machine, RunOptions } from "./machine.js";
+import type { ExecResult, Framing, Machine, RunOptions } from "./machine.js";
 
 /** The longest one plain exec may take. The provider cuts any exec still running at about 29 s with a 502
  * (measured 2026-09-05), whatever its timeoutMs says; anything that can run longer goes through run(). */
@@ -164,8 +164,11 @@ export const OLD_APPEND_MARKS = ".a[0-9a-f]*";
  * the last exec joins them under pipefail so a missing piece fails the write instead of landing a spliced file. An
  * append lands once behind the marker above, which its key is written into after it; the marker, and the pieces of an
  * append that `before` turned away, stay beside the file until the run's cleanup removes them. Every body is
- * measured as `framed` wraps it, the command the machine's exec sends. */
-function uploadSequence(files: GuestWrite[], before: string[], after: string[], upload: string, framed: (cmd: string) => string): string[] {
+ * measured as `framing` wraps it, the command the machine's exec sends, and an upload the wrapper leaves no room for
+ * is refused before anything is sent, in the machine's own words where the bare command would have fit. */
+function uploadSequence(files: GuestWrite[], before: string[], after: string[], upload: string, framing: Framing | undefined): string[] {
+  const framed = framing?.wrap ?? ((cmd: string) => cmd);
+  const refusal = (bare: string): Error => new Error(framing?.noRoom !== undefined && execFits(bare) ? framing.noRoom : "the lines around the upload do not fit one exec body");
   const head = `mkdir -p ${[...new Set(files.map(f => posix.dirname(f.path)))].map(shellQuote).join(" ")}`;
   // A key per file of the upload, so two appends to one path in one call each land rather than the second reading
   // the first's marker as its own.
@@ -186,9 +189,10 @@ function uploadSequence(files: GuestWrite[], before: string[], after: string[], 
   const execs: string[] = [];
   while (!execFits(framed(last()))) {
     const f = plan.filter(f => f.pieces === 0).sort((a, b) => b.b64.length - a.b64.length)[0];
-    if (f === undefined) throw new Error("the lines around the upload do not fit one exec body");
+    if (f === undefined) throw refusal(last());
     // Base64 decodes in groups of four, so a piece boundary on a multiple of four keeps the joined text decodable.
     const size = Math.floor((EXEC_BODY_MAX - EXEC_ENVELOPE_BYTES - Buffer.byteLength(framed(piece(f.path, f.b64.length, "")))) / 4) * 4;
+    if (size < 4) throw refusal(piece(f.path, f.b64.length, "AAAA"));
     f.pieces = Math.max(1, Math.ceil(f.b64.length / size));
     for (let i = 0; i < f.pieces; i++) execs.push(piece(f.path, i, f.b64.slice(i * size, (i + 1) * size)));
   }
@@ -211,7 +215,7 @@ export interface UploadResult extends ExecResult {
 export async function putFiles(machine: Machine, files: GuestWrite[], opts: PutFilesOptions = {}): Promise<UploadResult> {
   const timeoutMs = opts.timeoutMs ?? INLINE_EXEC_MS;
   const upload = randomBytes(6).toString("hex");
-  const execs = uploadSequence(files, opts.before ?? [], opts.after ?? [], upload, (await machine.framed?.()) ?? (cmd => cmd));
+  const execs = uploadSequence(files, opts.before ?? [], opts.after ?? [], upload, await machine.framed?.());
   for (const [at, cmd] of execs.slice(0, -1).entries()) {
     const res = await machine.exec(cmd, { timeoutMs, idempotencyKey: `${upload}/${at}` });
     if (res.exitCode !== 0 || !res.stdout.includes(HANDSHAKE.piece)) {

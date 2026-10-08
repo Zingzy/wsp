@@ -5,10 +5,10 @@ import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { EXEC_TIMEOUT_MAX_MS, placeProvisionPaths } from "@wsp/protocol";
-import { INLINE_EXEC_MS, execFits } from "../src/exec-detached.js";
+import { EXEC_BODY_MAX, EXEC_TIMEOUT_MAX_MS, loginPathRefusal, placeDaemonPaths, placeProvisionPaths, threadCgroup } from "@wsp/protocol";
+import { INLINE_EXEC_MS, execFits, putFiles } from "../src/exec-detached.js";
 import { LINK_MARGIN_MS } from "../src/link-backend.js";
-import { NOT_A_WORKSPACE, PLACE_PART_BYTES, PlaceMachine, placePartBoundMs } from "../src/place-machine.js";
+import { NOT_A_WORKSPACE, PLACE_PART_BYTES, PlaceFolderMachine, PlaceMachine, placePartBoundMs } from "../src/place-machine.js";
 import { spawnSyncFed } from "../src/spawn-fed.js";
 
 const HOME = "/root";
@@ -168,5 +168,61 @@ describe("the calls that belong to a workspace", () => {
     // It is the computer, so it is running: nothing is asked and nothing waits on an answer.
     expect(await machine.state()).toBe("running");
     expect(l.frames).toEqual([]);
+  });
+});
+
+describe("a login PATH that leaves no room in a frame", () => {
+  /** A login PATH of `chars` characters, which every line on the computer carries in front of it. */
+  const pathOf = (chars: number): string => `/opt/${"a".repeat(chars - "/opt/:/usr/bin:/bin".length)}:/usr/bin:/bin`;
+  /** The computer as the daemon's root login reaches it, with that PATH, every upload frame answered as landed. */
+  const folderOn = (chars: number) => {
+    const path = pathOf(chars);
+    const l = link(cmd => {
+      if (cmd.startsWith("uname -s")) return { exitCode: 0, stdout: `Linux\n0\nroot\nroot\n1\n${HOME}\n${path}\n`, stderr: "" };
+      if (cmd.includes("-ilc ")) return { exitCode: 1, stdout: "", stderr: "" };
+      return cmd.includes("echo WSP_PIECE") ? { exitCode: 0, stdout: "WSP_PIECE\n", stderr: "" } : undefined;
+    });
+    return { l, machine: new PlaceFolderMachine(l, { id: "spoo", home: HOME, path }) };
+  };
+  const uploads = (l: ReturnType<typeof link>): string[] => l.frames.map(f => String(f.params["cmd"])).filter(cmd => /WSP_(PIECE|LAUNCHED|OK)/.test(cmd));
+  const at = placeDaemonPaths(HOME);
+  const text = "x".repeat(20_000);
+  const roads = [
+    { road: "a message written into a running turn", go: (m: PlaceFolderMachine) => putFiles(m, [{ path: `${at.runDir}/0123456789ab.in`, text, append: true }], { after: ["echo WSP_OK"] }) },
+    { road: "a step run for minutes", go: (m: PlaceFolderMachine) => m.run(text, { deadlineMs: 60_000, pollMs: 1 }) },
+    { road: "a turn's launch", go: (m: PlaceFolderMachine) => putFiles(m.inCgroup(threadCgroup("thread-1"), at.guestBin), [{ path: `${at.runDir}/0123456789ab.sh`, text }], { after: ["echo WSP_LAUNCHED"] }) },
+  ];
+  /** The longest command that fits one exec body, read off the rule every road pages against. */
+  const longest = (): number => {
+    let n = EXEC_BODY_MAX;
+    while (!execFits("x".repeat(n))) n--;
+    return n;
+  };
+  /** The PATH at which a piece of the road's upload has no character left over: read off the first piece it sends with
+   * a PATH of 10,000, less its part, the length of the piece number it is measured with standing in for the first's. */
+  const zeroRoomOf = async (go: (m: PlaceFolderMachine) => Promise<unknown>): Promise<number> => {
+    const { l, machine } = folderOn(10_000);
+    await go(machine);
+    const first = uploads(l).find(cmd => cmd.includes("WSP_PIECE"))!;
+    const part = /printf %s '([A-Za-z0-9+/=]*)'/.exec(first)![1]!;
+    const measured = first.length - part.length - "0".length + String(Buffer.from(text).toString("base64").length).length;
+    return 10_000 + longest() - measured;
+  };
+
+  for (const { road, go } of roads) {
+    for (const off of [-1, 0, 1]) {
+      it(`refuses ${road} at ${off === 0 ? "the zero-room length" : `${off > 0 ? "one over" : "one under"} the zero-room length`} in one sentence naming the PATH, before any of it is sent`, async () => {
+        const chars = (await zeroRoomOf(go)) + off;
+        const { l, machine } = folderOn(chars);
+        await expect(go(machine)).rejects.toThrow(loginPathRefusal(chars));
+        expect(uploads(l)).toEqual([]);
+      });
+    }
+  }
+
+  it("names the PATH where it is merely too long for the lines around the upload", async () => {
+    const { l, machine } = folderOn(16_000);
+    await expect(putFiles(machine, [{ path: `${at.runDir}/0123456789ab.in`, text: "x" }])).rejects.toThrow(loginPathRefusal(16_000));
+    expect(uploads(l)).toEqual([]);
   });
 });
