@@ -474,6 +474,7 @@ export interface BootArea {
   readonly endSnoozeFor: (row: Pick<SessionView, "threadId" | "rootThreadId">) => void;
   readonly armResume: (threadIds: readonly string[], on: boolean, origin: Caller | undefined) => Promise<void>;
   readonly resumeAfterLimit: (threadId: string) => Promise<void>;
+  readonly treeRecords: (caller: Caller | undefined, talk: TreeTalk | undefined, workspaceId?: string) => [string, ThreadRecord & { workspaceId: string }][];
   readonly treeStandsOn: (workspaceId: string, caller: Caller | undefined, talk?: TreeTalk) => boolean;
   readonly talksToTreeOn: (workspaceId: string, caller: Caller | undefined) => boolean;
   readonly computerRows: () => Promise<{ id: string; name: string }[]>;

@@ -2,7 +2,7 @@
 import { randomBytes } from "node:crypto";
 import { hostname } from "node:os";
 import { OWNER_LABEL, goldenHead, isMissing, readGone, sightMachine, type Machine, type MachineBackend, isNoProvider, isPlaceAbsent } from "@wsp/engine";
-import { type ProjectView, type SessionView, type Caller, type WorkspacePhase, ThreadPlacement, ThreadScope, WorkspaceOrigin, notTheLeadsChildRefusal, foldThreads, threadKeyOf, threadWord, scopeOf, goneWords, NO_IMAGE_YET, noWorkspaceRefusal, notFoundRefusal, goneUnconfirmedLine, type GoneSeenBy, copiesFolder, kindForComputer, RUN_GONE_LINE, HERE_PLACE_ID, workspaceLands, type ThreadFacts, refusal, LIMIT_RESUME_PROMPT, heldUntil, capRestartedLine } from "@wsp/protocol";
+import { type ProjectView, type SessionView, type Caller, type WorkspacePhase, ThreadPlacement, ThreadScope, TurnStatus, WorkspaceOrigin, notTheLeadsChildRefusal, foldThreads, threadKeyOf, threadWord, scopeOf, goneWords, NO_IMAGE_YET, noWorkspaceRefusal, notFoundRefusal, goneUnconfirmedLine, type GoneSeenBy, copiesFolder, kindForComputer, RUN_GONE_LINE, HERE_PLACE_ID, workspaceLands, type ThreadFacts, refusal, LIMIT_RESUME_PROMPT, heldUntil, capRestartedLine } from "@wsp/protocol";
 import { keyOf } from "../agent-setup.js";
 import { harnessCatalog } from "../harness-catalog.js";
 import { accountOnComputer } from "../usage.js";
@@ -303,6 +303,7 @@ export function bootArea(ctx: RuntimeContext): BootArea {
         for (const [threadId, held] of Object.entries(index.threads ?? {})) {
           if (typeof held?.harness !== "string") continue;
           const placed = ThreadPlacement.safeParse(held.section);
+          const ended = TurnStatus.safeParse(held.ended);
           threadRecords.set(threadId, {
             workspaceId: index.workspaceId,
             harness: held.harness,
@@ -318,6 +319,7 @@ export function bootArea(ctx: RuntimeContext): BootArea {
             ...(typeof held.limitResume?.at === "number" && typeof held.limitResume.turnId === "string" ? { limitResume: { at: held.limitResume.at, turnId: held.limitResume.turnId } } : {}),
             ...(typeof held.rewound?.before === "string" && typeof held.rewound.at === "number" ? { rewound: { before: held.rewound.before, at: held.rewound.at } } : {}),
             ...(typeof held.worked === "boolean" ? { worked: held.worked } : {}),
+            ...(ended.success ? { ended: ended.data } : {}),
           });
           if (typeof held.snoozedUntil === "number") wakeAt(threadId, held.snoozedUntil);
           const armed = threadRecords.get(threadId)?.limitResume;
@@ -655,10 +657,19 @@ export function bootArea(ctx: RuntimeContext): BootArea {
     const { key } = accountOnComputer({ agent: harness, agentName: harnessCatalog(harness)?.label ?? harness, computer: { id: ctx.usageComputerOf(entry.record), name: ctx.computerOf(entry) }, limits, vaulted });
     return heldUntil(limits.find(l => l.key === key)?.windows ?? [], clock.now());
   };
-  /** Whether a thread of the caller's tree stands on that workspace, which is what lets a child list and read the
-   * transcript of the workspace its lead runs on; a caller that is no thread reads workspaces by their own rule. */
+  /** The threads of the caller's tree by their records, which the cap on a workspace's rows never trims, on one
+   * workspace or on every one this host holds. A record names its root, read before the row rule, so a host of many
+   * threads walks no rows for each record outside the tree. */
+  const treeRecords = (caller: Caller | undefined, talk: TreeTalk | undefined, workspaceId?: string): [string, ThreadRecord & { workspaceId: string }][] => {
+    const root = scopeOf(caller)?.rootThreadId;
+    if (root === undefined) return [];
+    return [...threadRecords].filter(([threadId, r]) => (r.rootThreadId ?? threadId) === root && (workspaceId ?? r.workspaceId) === r.workspaceId && live.has(r.workspaceId) && reachesRow({ threadId, workspaceId: r.workspaceId }, caller, talk));
+  };
+  /** Whether a thread of the caller's tree stands on that workspace, by a row or by a record whose rows the cap took,
+   * which is what lets a child list and read the transcript of the workspace its lead runs on; a caller that is no
+   * thread reads workspaces by their own rule. */
   const treeStandsOn = (workspaceId: string, caller: Caller | undefined, talk?: TreeTalk): boolean =>
-    scopeOf(caller) !== undefined && [...sessions.values()].some(s => s.view.workspaceId === workspaceId && reachesRow(s.view, caller, talk));
+    scopeOf(caller) !== undefined && ([...sessions.values()].some(s => s.view.workspaceId === workspaceId && reachesRow(s.view, caller, talk)) || treeRecords(caller, talk, workspaceId).length > 0);
   /** Whether a thread on a computer the person joined names, by its id, a workspace a thread of its own tree stands
    * on: what a message to its lead on this computer reads on the way, the workspace's agents and its state. A thread
    * on a machine reaches its tree by the thread alone. */
@@ -701,7 +712,7 @@ export function bootArea(ctx: RuntimeContext): BootArea {
   };
   return {
     refreshBuilders, isHeldAway, rereadHeld, hydrateWorkspace, ready, entryOf, childOf, reachesRow, entryOfRow,
-    listedRows, threadFacts, pushHead, mark, endSnoozeFor, armResume, resumeAfterLimit, treeStandsOn, talksToTreeOn, computerRows, nameOfComputer, imageHeadOrNone,
+    listedRows, threadFacts, pushHead, mark, endSnoozeFor, armResume, resumeAfterLimit, treeRecords, treeStandsOn, talksToTreeOn, computerRows, nameOfComputer, imageHeadOrNone,
     imageHead, landingPlace,
   };
 }

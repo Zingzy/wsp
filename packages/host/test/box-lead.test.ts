@@ -13,9 +13,10 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { childToLeadsComputerLine, EXIT_CODES, HERE_PLACE_ID, HOST_TOKEN_ENV, refusalLine, sendFilesAcrossLine, SEND_FILES_ACROSS_FIX, TURN_TOKEN_ENV, threadOpenedLine, waitAcrossLine, WAIT_ACROSS_FIX, type ThreadView } from "@wsp/protocol";
 import { ctx, sockets, placesOf } from "../../runtime/test/places-fixture.js";
-import { HOLD, leadAndBox } from "../../runtime/test/box-fixture.js";
+import { FAIL, HOLD, leadAndBox } from "../../runtime/test/box-fixture.js";
 import { WsClient } from "../../runtime/test/ws-client.js";
 import { CLI_VERBS, runVerb, type HostClient } from "../src/verbs.js";
+import type { ThreadRow } from "../src/verbs/workspaces-help.js";
 import { mcpServer } from "../src/mcp.js";
 import { captured } from "./verbs-fixture.js";
 
@@ -153,6 +154,81 @@ describe("a lead thread on this computer starting a child on a computer the pers
     expect(filed.code).toBe(EXIT_CODES.usage);
     expect(filed.errors.join("\n")).toBe(`wsp send: ${refusalLine(sendFilesAcrossLine("hetzner", here, threadId), SEND_FILES_ACROSS_FIX)}`);
     expect(starts).toHaveLength(turns);
+    starts[1]!.answer("asked the lead");
+  });
+});
+
+/** The send tool's own server as a thread's launch dials it. */
+async function toolsOf(launch: Readonly<Record<string, string>>): Promise<Client> {
+  const env = { [HOST_TOKEN_ENV]: launch[HOST_TOKEN_ENV]!, [TURN_TOKEN_ENV]: launch[TURN_TOKEN_ENV]! };
+  const client = await asToken(env[HOST_TOKEN_ENV]);
+  const [toClient, toServer] = InMemoryTransport.createLinkedPair();
+  await mcpServer(join(root!, "state.json"), { env, scoped: true, dial: Object.assign(async () => client, { close: async () => {} }) }).connect(toServer);
+  mcp = new Client({ name: "child", version: "0.0.0" });
+  await mcp.connect(toClient);
+  return mcp;
+}
+
+/** 205 turns of the person's in the folder, past the cap of 200 rows a workspace keeps. */
+async function pastTheCap(rt: Awaited<ReturnType<typeof lead>>["rt"], folderId: string): Promise<void> {
+  for (let i = 0; i < 205; i++) await (await rt.sessions.start(folderId, { prompt: `the person's ${i}`, harness: "claude" })).finished;
+}
+
+describe("a lead's tree, once the folder's rows of the lead and a child fell off the cap", () => {
+  it("a child in the folder lists both, with how each last turn ended, and reaches the lead with wsp send and its sibling with the send tool", { timeout: 240_000 }, async () => {
+    const { rt, folder, starts, threadId, launch, turn } = await lead();
+    expect((await wsp(launch, "run", "lab", "--detach", `${HOLD}build it`)).code).toBe(0);
+    const sibling = (await wsp(launch, "run", "lab", "--detach", `${FAIL}write the docs`, "--json")).json<{ threadId: string }>().threadId;
+    const child = starts.find(s => s.o.prompt === `${HOLD}build it`)!.env;
+    await expect.poll(async () => (await rt.sessions.list()).find(r => r.threadId === sibling)?.status).toBe("failed");
+    starts[0]!.answer("waiting on the children");
+    await turn.finished;
+    await pastTheCap(rt, folder.id);
+    expect((await rt.sessions.list()).filter(r => r.threadId === threadId || r.threadId === sibling)).toEqual([]);
+    const listed = (await wsp(child, "threads", "--json")).json<{ threads: ThreadRow[] }>().threads;
+    expect(listed.find(t => t.threadId === threadId)).toMatchObject({ projectName: "lab", workspaceId: folder.id, status: "completed" });
+    expect(listed.find(t => t.threadId === sibling)).toMatchObject({ projectName: "lab", parentThreadId: threadId, rootThreadId: threadId, status: "failed" });
+    const sent = await wsp(child, "send", threadId, "--detach", "which branch do I push to?");
+    expect(sent.errors).toEqual([]);
+    expect(sent.code).toBe(0);
+    await expect.poll(() => starts.at(-1)!.o.prompt).toBe("which branch do I push to?");
+    const tool = await (await toolsOf(child)).callTool({ name: "send", arguments: { thread: sibling, message: "add the changelog", detach: true } });
+    expect(tool.isError).not.toBe(true);
+    await expect.poll(() => starts.at(-1)!.o.prompt).toBe("add the changelog");
+    starts.find(s => s.o.prompt === `${HOLD}build it`)!.answer("built");
+  });
+
+  it("a child in the folder stops the lead as it would with the lead's rows there: not running, and the running threads under it stopped", { timeout: 240_000 }, async () => {
+    const { rt, folder, starts, threadId, launch, turn } = await lead();
+    const sender = (await wsp(launch, "run", "lab", "--detach", `${HOLD}build it`, "--json")).json<{ threadId: string }>().threadId;
+    const child = starts.find(s => s.o.prompt === `${HOLD}build it`)!.env;
+    starts[0]!.answer("waiting on the child");
+    await turn.finished;
+    await pastTheCap(rt, folder.id);
+    expect((await rt.sessions.list()).filter(r => r.threadId === threadId)).toEqual([]);
+    const stopped = await wsp(child, "stop", threadId, "--json");
+    expect(stopped.errors).toEqual([]);
+    expect(stopped.json<{ outcome: string; under?: string[] }>()).toMatchObject({ outcome: "not-running", under: [sender] });
+    await expect.poll(async () => (await rt.sessions.list()).find(r => r.threadId === sender)?.status).not.toBe("running");
+  });
+
+  it("a child on the box lists the lead and reaches it with wsp send and the send tool", { timeout: 240_000 }, async () => {
+    const { rt, folder, starts, threadId, launch, turn } = await lead();
+    const ran = await wsp(launch, "run", "lab-box", "--detach", `${HOLD}build it`, "--json");
+    expect(ran.code).toBe(0);
+    const child = starts[1]!.env;
+    starts[0]!.answer("waiting on the child");
+    await turn.finished;
+    await pastTheCap(rt, folder.id);
+    expect((await rt.sessions.list()).filter(r => r.threadId === threadId)).toEqual([]);
+    expect((await wsp(child, "threads", "--json")).json<{ threads: ThreadRow[] }>().threads.map(t => t.threadId)).toContain(threadId);
+    const sent = await wsp(child, "send", threadId, "--detach", "which branch do I push to?");
+    expect(sent.errors).toEqual([]);
+    expect(sent.code).toBe(0);
+    await expect.poll(() => starts.at(-1)!.o.prompt).toBe("which branch do I push to?");
+    const tool = await (await toolsOf(child)).callTool({ name: "send", arguments: { thread: threadId, message: "and which tag?", detach: true } });
+    expect(tool.isError, JSON.stringify(tool.content)).not.toBe(true);
+    await expect.poll(() => starts.at(-1)!.o.prompt).toBe("and which tag?");
     starts[1]!.answer("asked the lead");
   });
 });
