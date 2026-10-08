@@ -91,16 +91,29 @@ const SETUP = {
 };
 
 const SESSIONS = [
-  { id: "s-1", workspaceId: "ws-1", harness: "claude", status: "completed", threadId: "t-1111aaaa", prompt: "Fix the flaky \u0085test in the parser module and then tidy the imports around it. Then ship.", startedAt: 1727431200000, endedAt: 1727431260000, claudeSessionId: "c-1", costUsd: 0.1, startedBy: "agent", parentThreadId: "t-0", rootThreadId: "t-0" },
-  { id: "s-2", workspaceId: "ws-2", harness: "codex", status: "running", prompt: "look", startedAt: 1727431300000.25, pid: 4242 },
-  { id: "s-3", workspaceId: "ws-1", harness: "claude", status: "running", threadId: "t-1111aaaa", harnessTitle: "  Parser\n fix  🧪", costUsd: 0.2, asking: "ask-1", readAt: 1727431270000, settledAt: 1727431265000, cwd: "/w/é", waitingOn: { title: "other", threadId: "t-2", workspaceId: "ws-1", sessionId: "s-9", prompt: { askId: "a", toolName: "Bash", input: "{}", options: [] } } },
+  { id: "s-1", workspaceId: "ws-1", harness: "claude", status: "completed", threadId: "t-1111aaaa", prompt: "Fix the flaky \u0085test in the parser module and then tidy the imports around it. Then ship.", startedAt: 1727431200000, endedAt: 1727431260000, claudeSessionId: "c-1", costUsd: 0.1, startedBy: "agent", parentThreadId: "t-0", rootThreadId: "t-0", project: { id: "proj-1", name: "wsp" }, computerName: "attic" },
+  { id: "s-2", workspaceId: "ws-2", harness: "codex", status: "running", prompt: "look", startedAt: 1727431300000.25, pid: 4242, project: { id: "proj-2", name: "site" }, computerName: "place-unnamed" },
+  { id: "s-3", workspaceId: "ws-1", harness: "claude", status: "running", threadId: "t-1111aaaa", harnessTitle: "  Parser\n fix  🧪", costUsd: 0.2, asking: "ask-1", readAt: 1727431270000, settledAt: 1727431265000, cwd: "/w/é", waitingOn: { title: "other", threadId: "t-2", workspaceId: "ws-1", sessionId: "s-9", prompt: { askId: "a", toolName: "Bash", input: "{}", options: [] } }, project: { id: "proj-1", name: "wsp" }, computerName: "attic" },
   { id: "s-4", workspaceId: "ws-gone", harness: "claude", status: "failed", threadId: "t-4", refusal: "sign-in", claudeSessionId: "c-4" },
-  { id: "s-5", workspaceId: "ws-3", harness: "claude", status: "completed", threadId: "t-5" },
-  { id: "s-6", workspaceId: "ws-3", harness: "codex", status: "completed", threadId: "t-6" },
-  { id: "s-7", workspaceId: "ws-4", harness: "claude", status: "completed", threadId: "t-7" },
-  { id: "s-8", workspaceId: "ws-5", harness: "claude", status: "completed", threadId: "t-8", cwd: "/nowhere/worktrees/proj-1/old/src" },
-  { id: "s-9", workspaceId: "ws-6", harness: "claude", status: "completed", threadId: "t-9" },
+  { id: "s-5", workspaceId: "ws-3", harness: "claude", status: "completed", threadId: "t-5", project: { id: "proj-1", name: "wsp" }, computerName: "this mac" },
+  { id: "s-6", workspaceId: "ws-3", harness: "codex", status: "completed", threadId: "t-6", project: { id: "proj-1", name: "wsp" }, computerName: "this mac" },
+  { id: "s-7", workspaceId: "ws-4", harness: "claude", status: "completed", threadId: "t-7", project: { id: "proj-1", name: "wsp" }, computerName: "this mac" },
+  { id: "s-8", workspaceId: "ws-5", harness: "claude", status: "completed", threadId: "t-8", cwd: "/nowhere/worktrees/proj-1/old/src", project: { id: "proj-1", name: "wsp" }, computerName: "this mac" },
+  { id: "s-9", workspaceId: "ws-6", harness: "claude", status: "completed", threadId: "t-9", project: { id: "proj-1", name: "wsp" }, computerName: "this mac" },
 ];
+
+/** A lead's child in a box folder: the listing names its project and computer, and the lead's workspaces hold none of it. */
+const BOX_CHILD = [
+  ...SESSIONS.slice(0, 1),
+  { id: "s-10", workspaceId: "ws-box", harness: "claude", status: "running", threadId: "t-10", prompt: "build it", startedBy: "agent", parentThreadId: "t-1111aaaa", rootThreadId: "t-0", cwd: "/root/lab-box", project: { id: "proj-3", name: "lab-box" }, computerName: "hetzner" },
+];
+
+/** A thread on a cloud project: the workspace's record names the provider by its id, and the listing by the name a
+ * person reads, which both tool servers print. */
+const ON_CLOUD = [
+  { id: "s-11", workspaceId: "ws-cloud", harness: "claude", status: "completed", threadId: "t-11", prompt: "look", project: { id: "proj-4", name: "cloud-api" }, computerName: "Solari" },
+];
+const WITH_CLOUD = reply({ workspaces: [{ id: "ws-cloud", name: "cloudwork", kind: "cloud", project: { id: "proj-4", name: "cloud-api", computer: "solari" } }] });
 
 /** A thread whose marks and picks moved between its turns: the latest turn's stand, and the opening turn's attempt. */
 const PLACED = [
@@ -276,12 +289,15 @@ export const READS: Record<string, Case[]> = {
     { case: "refused", arguments: {}, replies: { "init.get": refused("init.get failed", "auth") } },
   ],
   threads: [
-    { case: "rows", arguments: {}, replies: { "workspaces.list": WORKSPACES, "sessions.list": reply({ sessions: SESSIONS }), "places.list": PLACES } },
-    { case: "within a project", arguments: { project: "wsp" }, replies: { "workspaces.list": WORKSPACES, "sessions.list": reply({ sessions: SESSIONS }), "places.list": PLACES } },
-    { case: "within a project by id", arguments: { project: "proj-2" }, replies: { "workspaces.list": WORKSPACES, "sessions.list": reply({ sessions: SESSIONS }), "places.list": PLACES } },
-    { case: "computers refused", arguments: {}, replies: { "workspaces.list": WORKSPACES, "sessions.list": reply({ sessions: SESSIONS }), "places.list": refused("a thread may not list computers", "auth") } },
+    { case: "rows", arguments: {}, replies: { "workspaces.list": WORKSPACES, "sessions.list": reply({ sessions: SESSIONS }) } },
+    { case: "within a project", arguments: { project: "wsp" }, replies: { "workspaces.list": WORKSPACES, "sessions.list": reply({ sessions: SESSIONS }) } },
+    { case: "within a project by id", arguments: { project: "proj-2" }, replies: { "workspaces.list": WORKSPACES, "sessions.list": reply({ sessions: SESSIONS }) } },
+    { case: "within a workspace by name", arguments: { project: "wsp@feat" }, replies: { "workspaces.list": WORKSPACES, "sessions.list": reply({ sessions: SESSIONS }) } },
+    { case: "a lead's child in a box folder", arguments: {}, replies: { "workspaces.list": WORKSPACES, "sessions.list": reply({ sessions: BOX_CHILD }) } },
+    { case: "a thread on a cloud project", arguments: {}, replies: { "workspaces.list": WITH_CLOUD, "sessions.list": reply({ sessions: ON_CLOUD }) } },
+    { case: "within a box folder's project", arguments: { project: "lab-box" }, replies: { "workspaces.list": WORKSPACES, "sessions.list": reply({ sessions: BOX_CHILD }) } },
     { case: "empty", arguments: {}, replies: { "workspaces.list": WORKSPACES, "sessions.list": reply({ sessions: [] }) } },
-    { case: "pinned, snoozed and in a section", arguments: {}, replies: { "workspaces.list": WORKSPACES, "sessions.list": reply({ sessions: PLACED }), "places.list": PLACES } },
+    { case: "pinned, snoozed and in a section", arguments: {}, replies: { "workspaces.list": WORKSPACES, "sessions.list": reply({ sessions: PLACED }) } },
     { case: "no such project", arguments: { project: "nope" }, replies: { "workspaces.list": WORKSPACES, "sessions.list": reply({ sessions: SESSIONS }) } },
   ],
   thread_read: [

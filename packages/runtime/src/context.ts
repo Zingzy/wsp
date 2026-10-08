@@ -17,7 +17,7 @@ import type {
   ReapedMachine,
   VaultOptions,
 } from "@wsp/engine";
-import type { DaemonFrame } from "@wsp/protocol";
+import type { DaemonFrame, PlaceKind } from "@wsp/protocol";
 import type {
   AdapterEvent,
   SessionOrigin,
@@ -476,7 +476,7 @@ export interface BootArea {
   readonly resumeAfterLimit: (threadId: string) => Promise<void>;
   readonly treeStandsOn: (workspaceId: string, caller: Caller | undefined, talk?: TreeTalk) => boolean;
   readonly talksToTreeOn: (workspaceId: string, caller: Caller | undefined) => boolean;
-  readonly computerRows: () => Promise<{ id: string; name: string }[]>;
+  readonly computerRows: () => Promise<{ id: string; name: string; kind: PlaceKind }[]>;
   readonly nameOfComputer: (computer: string, rows: readonly { id: string; name: string }[]) => string;
   readonly imageHeadOrNone: () => Promise<string | undefined>;
   readonly imageHead: () => Promise<string>;

@@ -7,7 +7,7 @@ import { harnessExec } from "@wsp/engine";
 import {
   type SessionEvent, type SessionInterruptOutcome, type SessionInterruptResult, type SessionStartOutcome,
   type SessionSearchResult, type SessionView, type StartPicks, type TurnImage, type TurnResult, foldThreads,
-  MCP_SERVER_NAME, threadForgetRefusal, threadKeyOf, threadRan, threadWord, SCOPED_MCP_ARG, roadOf, scopeOf,
+  MCP_SERVER_NAME, threadForgetRefusal, threadKeyOf, threadRan, threadWord, SCOPED_MCP_ARG, roadOf, scopeOf, tableName,
   RUN_PERSONS_LINE, runOutputTail, type SessionRunEvent, NO_SLATE_MCP_ARG, ASIDE_NO_SESSION_LINE, BLANK_ASIDE_LINE,
   asideUnsupportedLine, isLocalWorkspace, mcpServersBlocked, actionRefusal, homeShortened, EMPTY_TITLE_LINE,
   threadRunsOnLine, keptPicks, listedPick, notFoundRefusal, NOTIFY_ME, noCwdLine,
@@ -763,7 +763,14 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
       // after a restart may answer nothing for minutes, so its rows wait for a later listing.
       const asked = ctx.titleRows(rows.filter(view => !ctx.bootWork.has(view.workspaceId))).map(view => ({ first: view.harnessTitle === undefined, done: ctx.refreshTitle(view, false) }));
       await Promise.all(asked.filter(a => a.first).map(a => a.done));
-      return ctx.listedRows(held);
+      const listed = ctx.listedRows(held);
+      const computers = listed.length === 0 ? [] : await ctx.computerRows();
+      return listed.map(view => {
+        const id = ctx.live.get(view.workspaceId)?.record.project;
+        const project = id === undefined ? undefined : ctx.projectsHeld.get(id);
+        const computer = computers.find(r => r.id === project?.computer);
+        return project === undefined ? view : { ...view, project: { id: project.id, name: project.name }, computerName: computer === undefined ? project.computer : tableName(computer) };
+      });
     },
 
     async history(workspaceId, origin) {

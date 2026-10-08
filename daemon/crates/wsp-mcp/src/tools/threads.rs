@@ -103,6 +103,17 @@ struct Session {
     fast: Option<bool>,
     #[serde(default)]
     subagents: Option<Box<RawValue>>,
+    #[serde(default)]
+    project: Option<Stood>,
+    #[serde(default)]
+    computer_name: Option<String>,
+}
+
+/// The project a row's workspace holds, as the listing stamps it on the row.
+#[derive(Clone, Deserialize)]
+struct Stood {
+    id: String,
+    name: String,
 }
 
 /// A thread as `foldThreads` builds it, its fields in that object's order.
@@ -363,9 +374,6 @@ async fn threads_of(client: &Client, workspace: Option<String>) -> Result<Vec<Th
 
 #[derive(Deserialize)]
 struct Project {
-    id: String,
-    name: String,
-    computer: String,
     #[serde(default)]
     path: Option<String>,
 }
@@ -412,42 +420,23 @@ struct Workspaces {
     workspaces: Vec<Workspace>,
 }
 
-#[derive(Deserialize)]
-struct Place {
-    id: String,
-    name: String,
-}
-
-#[derive(Deserialize)]
-struct Places {
-    places: Vec<Place>,
-}
-
 /// `threadRows`: the rows within one project when one is named, each with its project, the folder it works in, that
-/// folder's branch as git reads it now, and the computer it is on. A caller the host refuses the list of computers
-/// reads each computer by its id.
+/// folder's branch as git reads it now, and the computer it is on. The project and the computer ride the session
+/// rows, since a lead's tree reaches rows whose workspace it may not read.
 async fn rows(client: &Client, within: Option<&str>) -> Result<Vec<Row>, Failure> {
     let all = client.request::<Workspaces>("workspaces.list", Map::new()).await?.workspaces;
-    let threads: Vec<Thread> = threads_of(client, None)
-        .await?
+    let sessions = client.request::<Sessions>("sessions.list", Map::new()).await?.sessions;
+    let stood: HashMap<String, (Option<Stood>, Option<String>)> =
+        sessions.iter().map(|s| (s.workspace_id.clone(), (s.project.clone(), s.computer_name.clone()))).collect();
+    let threads: Vec<Thread> = fold(sessions)
         .into_iter()
         .filter(|t| {
             within.is_none_or(|within| {
-                all.iter()
-                    .find(|w| w.id == t.workspace_id)
-                    .is_some_and(|w| w.project.id == within || w.project.name == within || w.id == within || w.name == within)
+                stood.get(&t.workspace_id).and_then(|(p, _)| p.as_ref()).is_some_and(|p| p.id == within || p.name == within)
+                    || all.iter().find(|w| w.id == t.workspace_id).is_some_and(|w| w.id == within || w.name == within)
             })
         })
         .collect();
-    let named: HashMap<String, String> = if threads.is_empty() {
-        HashMap::new()
-    } else {
-        client
-            .request::<Places>("places.list", Map::new())
-            .await
-            .map(|p| p.places.into_iter().map(|p| (p.id, p.name)).collect())
-            .unwrap_or_default()
-    };
     let mut branches: HashMap<String, String> = HashMap::new();
     Ok(threads
         .into_iter()
@@ -474,11 +463,10 @@ async fn rows(client: &Client, within: Option<&str>) -> Result<Vec<Row>, Failure
                 })
                 .clone();
             Row {
-                project_name: workspace.map_or_else(String::new, |w| w.project.name.clone()),
+                project_name: stood.get(&thread.workspace_id).and_then(|(p, _)| p.as_ref()).map_or_else(String::new, |p| p.name.clone()),
                 folder,
                 branch,
-                computer_name: workspace
-                    .map_or_else(String::new, |w| named.get(&w.project.computer).cloned().unwrap_or_else(|| w.project.computer.clone())),
+                computer_name: stood.get(&thread.workspace_id).and_then(|(_, c)| c.clone()).unwrap_or_default(),
                 thread,
             }
         })

@@ -64,8 +64,7 @@ import {
   escapeC1,
   jsonLine,
   withoutControlChars,
-  isProviderPlace,
-  providerKeyName,
+  tableName,
   AccountRow,
   UsageRange,
   UsageSplit,
@@ -961,10 +960,6 @@ export const SEND_OPTIONS = optionsFor(SEND_FLAGS);
 
 export const flag = (flags: Flags, name: string): string | undefined => (typeof flags[name] === "string" ? (flags[name] as string) : undefined);
 export const flagList = (flags: Flags, name: string): string[] => (Array.isArray(flags[name]) ? (flags[name] as string[]) : []);
-
-/** What a table calls a computer: the name a person types for it, and a provider by the name the app gives it, never
- * the id stored state holds; either one names it after --on. */
-export const tableName = (p: PlaceView): string => (isProviderPlace(p) ? providerKeyName(p.name) : p.name);
 
 export const PLACES_FIX = "Run wsp places.";
 
