@@ -205,6 +205,9 @@ export const SessionQueuedEvent = z.object({
   prompt: z.string(),
   /** The id the client minted for the sessions.start that waits. */
   requestId: z.string().optional(),
+  /** The computer the message waits on to connect, by name, where a stop that could not reach it owes it the end of
+   * the thread's group: the message runs once that end has run there. Absent for a wait behind a running turn. */
+  waitsFor: z.string().optional(),
 });
 export type SessionQueuedEvent = z.infer<typeof SessionQueuedEvent>;
 

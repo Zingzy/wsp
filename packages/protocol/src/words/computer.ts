@@ -648,6 +648,21 @@ export function threadLeftLine(name: string, pids: readonly number[]): string {
   return `${one ? "a process" : `${pids.length} processes`} this thread started on ${name} still ${one ? "runs" : "run"} after Stop (${pids.join(", ")}); end ${one ? "it" : "them"} in Processes, or restart ${name}`;
 }
 
+/** What a stop of a running turn on a computer the person joined says when that computer is away or has not answered:
+ * the thread reads stopped here, and the end of what it runs there is owed to that computer's next link. */
+export const threadEndAwayLine = (name: string): string => `${name} is not answering, so the turn ends there, with what this thread started, once ${name} connects again`;
+
+/** The same where that computer's link still stands but it did not answer a ping in time: it may only be slow, and the
+ * end runs the moment it answers. */
+export const threadEndLateLine = (name: string, seconds: number): string => `${name} did not answer within ${seconds} s, so the turn ends there, with what this thread started, once ${name} answers`;
+
+/** What a send says while it waits on the end a stop owed a computer that was away, in the app and on the command line. */
+export const sendWaitsForLine = (name: string): string => `waiting for ${name} to connect; this message runs once the stopped turn has ended there`;
+
+/** What a Stop or a delete of a thread says of a message it gave up while that message waited on such an end, and what
+ * the send itself is answered. */
+export const sendGivenUpLine = (name: string): string => `the message waiting for ${name} to connect was given up and never ran`;
+
 /** What a delete of a thread on a computer the person joined says when what the thread started there did not all end:
  * the delete goes on, and that computer's next link ends it. */
 export const threadEndOwedLine = (name: string): string => `what this thread started on ${name} did not all end; wsp ends it when ${name} next connects`;

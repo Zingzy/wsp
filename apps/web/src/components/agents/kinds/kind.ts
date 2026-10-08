@@ -205,7 +205,7 @@ export const byName = <T extends { readonly name: string }>(a: T, b: T): number 
 
 /** A row's key: its words, the project's id where it is a project's row, then its name, so two projects' rows of one
  * name never share one. */
-export const rowKey = (head: readonly string[], project: AgentsProject | undefined, name: string): string => [...head, ...(project === undefined ? [] : [project.id]), name].join("-");
+export const rowKey = (head: readonly string[], project: Pick<AgentsProject, "id"> | undefined, name: string): string => [...head, ...(project === undefined ? [] : [project.id]), name].join("-");
 
 /** One group per project the items live in, by the project's name with its folder beside it, by name. Every project
  * row carries its project; one that does not is a reader's bug, and it stands in a group with no label. */

@@ -17,11 +17,13 @@ import {
   ThreadDefaults,
   AgentsReport,
   AgentsSignInEvent,
+  AgentsSignInRun,
   ServerToolsAnswer,
   SkillAdded,
   SkillHit,
   SkillPreview,
   type AgentsTarget,
+  type McpScope,
   type ServerAdd,
   type ServerAsk,
   BringBackResult,
@@ -462,6 +464,12 @@ export interface SshLogin {
   sudoPassword?: string;
 }
 
+/** Where a server's config sits, which names the row its sign-in was started from. */
+export interface ServerRowAt {
+  scope: McpScope;
+  project?: string;
+}
+
 export interface Api {
   listWorkspaces(): Promise<WorkspaceView[]>;
   getWorkspace(id: string): Promise<WorkspaceView>;
@@ -576,7 +584,12 @@ export interface Api {
   /** Runs an agent's sign-in there, or one server's with `server`, in a watched pty, or joins the one running; each
    * step reaches `onStep`. `stop` ends it on the host and stops listening; `off` only stops listening, once the last
    * step has come. A client without it holds Sign in. */
-  agentsSignIn?(target: AgentsTarget, agent: string, server: string | undefined, onStep: (step: AgentsSignInEvent) => void, terminal?: boolean): Promise<{ signInId: string; stop(): void; off(): void }>;
+  agentsSignIn?(target: AgentsTarget, agent: string, server: string | undefined, onStep: (step: AgentsSignInEvent) => void, terminal?: boolean, row?: ServerRowAt): Promise<{ signInId: string; stop(): void; off(): void }>;
+  /** Every sign-in the host runs and every one that ended in the last ten minutes, each with its last step; this socket
+   * follows each running one from the answer on, so a window whose socket came back, or one opened since, hears it. */
+  agentsSignIns?(): Promise<AgentsSignInRun[]>;
+  /** Hears one sign-in this socket follows, by its id, as agentsSignIn's answer does. */
+  agentsSignInWatch?(signInId: string, onStep: (step: AgentsSignInEvent) => void): { signInId: string; stop(): void; off(): void };
   /** Types what a sign-in's page handed back into that sign-in's pty. */
   agentsSignInCode?(signInId: string, code: string): Promise<void>;
   /** Puts an agent's token or key into the host's vault; refused off the host's own socket. */
@@ -1122,7 +1135,7 @@ export function makeApi(c: ProtocolClient): Api {
       const icon = (await c.request<{ icon?: unknown }>("servers.icon", { host, ...(refresh === true ? { refresh } : {}) })).icon;
       return typeof icon === "string" && ICON_DATA_URL.test(icon) ? icon : null;
     },
-    agentsSignIn: async (target, agent, server, onStep, terminal) => {
+    agentsSignIn: async (target, agent, server, onStep, terminal, row) => {
       // The host answers before it pushes a step, but a step that lands first is kept for the id it names.
       let signInId: string | undefined;
       const early: AgentsSignInEvent[] = [];
@@ -1133,7 +1146,7 @@ export function makeApi(c: ProtocolClient): Api {
         else if (step.data.signInId === signInId) onStep(step.data);
       });
       try {
-        const started = await c.request<{ signInId?: unknown }>(server === undefined ? "agents.signIn" : "servers.signIn", { target, agent, ...(server === undefined ? {} : { name: server }), ...(terminal === true ? { terminal: true } : {}) });
+        const started = await c.request<{ signInId?: unknown }>(server === undefined ? "agents.signIn" : "servers.signIn", { target, agent, ...(server === undefined ? {} : { name: server, ...row }), ...(terminal === true ? { terminal: true } : {}) });
         signInId = String(started.signInId);
         for (const step of early) if (step.signInId === signInId) onStep(step);
         const id = signInId;
@@ -1149,6 +1162,21 @@ export function makeApi(c: ProtocolClient): Api {
         off();
         throw e;
       }
+    },
+    agentsSignIns: async () => AgentsSignInRun.array().parse((await c.request<{ runs?: unknown }>("agents.signIns")).runs),
+    agentsSignInWatch: (signInId, onStep) => {
+      const off = c.subscribe(event => {
+        const step = AgentsSignInEvent.safeParse(event);
+        if (step.success && step.data.signInId === signInId) onStep(step.data);
+      });
+      return {
+        signInId,
+        off,
+        stop: () => {
+          off();
+          c.request("agents.signInStop", { signInId }).catch(() => undefined);
+        },
+      };
     },
     agentsSignInCode: async (signInId, code) => void (await c.request("agents.signInCode", { signInId, code })),
     agentsKey: async (agent, key) => void (await c.request("agents.key", { agent, key })),

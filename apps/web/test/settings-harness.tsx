@@ -3,6 +3,7 @@
 // settings sidebar stands in the app sidebar's place and the page in the
 // centre, over a fake api that answers only what a case names. The settings
 // store starts fresh on every mount, the way a first window opens.
+import { forgetSignIns } from "../src/components/agents/useAgentActs.js";
 import { act, render, type RenderResult } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { DEFAULT_PREFERENCES, applyPreferencesPatch, type EventUnion, type Preferences, type PreferencesPatch } from "@wsp/protocol";
@@ -57,6 +58,7 @@ export const settle = async (): Promise<void> => {
 export function resetSettings(): void {
   window.localStorage.clear();
   forgetHeld();
+  forgetSignIns();
   useSettingsStore.setState({ at: FIRST_PAGE, search: "", reads: NO_READS, addProjectAt: null, devicesAsked: 0, buildShown: null, recipeAsked: null, addAsked: null, usageTab: "used", agentsTab: "agents", agentsPlace: null, agentsLevel: null });
   useRightPanelStore.setState({ byWorkspaceId: {} });
   useNotices.getState().clear();

@@ -85,8 +85,9 @@ export function rulesArea(ctx: RuntimeContext): RulesArea {
   /** Whether a thread may name a project to start children on: its own, one of its repository on a cloud, where the
    * child gets a machine of its own, and, for a thread on this computer, one of its repository on a box, where the
    * child runs in the project's folder in the tree of the thread that started it. Another folder of it on this
-   * computer is the person's, and a thread on a machine or a box reaches no box: a thread started there would stand
-   * outside the tree, or run as the person on a computer of theirs at a machine's word. */
+   * computer is the person's, a thread on a machine reaches no box, and a thread on a box starts threads on that box
+   * alone, which `elsewhereRefusal` says: a thread started elsewhere would stand outside the tree, or run as the
+   * person on a computer of theirs at a machine's word. */
   const projectReached = (caller: Caller | undefined, project: string): boolean => {
     const scope = scopeOf(caller);
     if (scope === undefined || !ofThreadsRepository(caller, project)) return false;
@@ -94,17 +95,18 @@ export function rulesArea(ctx: RuntimeContext): RulesArea {
     const there = ctx.kindOf(ctx.projectHeld(project).computer);
     if (copiesFolder(there)) return false;
     const asking = live.get(scope.workspaceId)?.record;
-    return !runsInFolder(there) || (asking !== undefined && copiesFolder(asking.kind));
+    return asking !== undefined && (copiesFolder(asking.kind) || (!runsInFolder(asking.kind) && !runsInFolder(there)));
   };
   /** Where a thread may open a thread beyond its tree: the project folder of a project it may start children on, which
    * every thread of that project shares. Every other act there stays its tree's. */
   const opensIn = (record: WorkspaceRecord, caller: Caller | undefined): boolean =>
     scopeOf(caller) !== undefined && runsInFolder(record.kind) && record.worktree === undefined && projectReached(caller, record.project);
-  /** Why a thread on a computer the person joined may not start a child on a project another computer holds, `word`
-   * being what it typed, in the order the project rule reads: another repository's is refused by the repository
-   * rule; where the thread that started it runs on that computer, a message to that thread is the road when that
-   * thread reaches the project itself, and the folder rule answers when it does not; otherwise the person is the
-   * road. Nothing for a thread on no joined computer, or a project on its own. */
+  /** Why a thread on a computer the person joined may not start a child on a project another computer holds, a
+   * cloud's included, `word` being what it typed, in the order the project rule reads: another repository's is
+   * refused by the repository rule; where the thread that started it runs on that computer, a message to that thread
+   * is the road when that thread reaches the project itself, and the folder rule answers when it does not; otherwise
+   * the person is the road. Nothing for a thread on no joined computer, or a project on its own, so every door
+   * asks it whatever kind the project's computer is. */
   const elsewhereRefusal = (caller: Caller | undefined, project: ProjectView, word: string): Error | undefined => {
     const scope = scopeOf(caller);
     if (scope === undefined) return undefined;

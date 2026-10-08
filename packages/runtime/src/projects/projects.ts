@@ -359,7 +359,7 @@ export function projectsArea(ctx: RuntimeContext): ProjectsArea {
         if (own !== undefined && (own.id === ref || own.name === ref)) return own;
         if (found === undefined) throw notFoundRefusal(bareNoSuchProjectLine(ref));
         if (ctx.projectReached(origin, found.id)) return found;
-        const away = runsInFolder(ctx.kindOf(found.computer)) ? ctx.elsewhereRefusal(origin, found, ref) : undefined;
+        const away = ctx.elsewhereRefusal(origin, found, ref);
         if (away !== undefined) throw away;
         if (ctx.ofThreadsRepository(origin, found.id)) throw refusal(spawnFolderRefusal(scope.threadId, ref), SPAWN_FOLDER_FIX, "usage");
         throw refusal(spawnRepositoryRefusal(scope.threadId, ctx.projectHeld(mine).name, ref), SPAWN_REPOSITORY_FIX, "usage");

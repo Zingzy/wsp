@@ -13,7 +13,7 @@ import type { Store } from "../src/store.js";
 import type { ServersActs } from "../src/agents-read.js";
 import { MCP_READ_END } from "@wsp/engine";
 import { ctx, sockets, serving, code, join, KEEPS_NO_IMAGE } from "./places-fixture.js";
-import { fakeLocal } from "./stub-backend.js";
+import { branchDaemons, fakeLocal } from "./stub-backend.js";
 import { report } from "./place-join.js";
 import type { WsClient } from "./ws-client.js";
 
@@ -38,6 +38,14 @@ export interface Box {
   configs: Map<string, string>;
   /** How the configs read answers, given what it printed: as printed and exiting 0 unless a test says otherwise. */
   readAs?: (stdout: string) => { stdout: string; exitCode: number; stderr?: string };
+  /** The computer answers no frame, a ping included, as one whose network was cut while its socket still stands. */
+  quiet?: boolean;
+  /** A turn's launch and a thread's end, in the order they reached the computer and it answered them. */
+  order: string[];
+  /** How long the computer takes to answer a thread's end, given its command; at once unless a test says otherwise. */
+  endMs?: (cmd: string) => number;
+  /** A thread's end there leaves pid 4242 standing, as a process stuck in the kernel does. */
+  endFails?: boolean;
 }
 
 export interface BoxLogin {
@@ -55,12 +63,14 @@ export const handedLine = (cmd: string): string => {
 
 export function box(client: WsClient, login: BoxLogin, o: { failClone?: boolean; logins?: string } = {}): Box {
   let ptys = 0;
-  const seen: Box = { ops: [], execs: [], frames: [], taken: new Set(), kills: [], push: event => client.say(event), configs: new Map() };
-  let stopped = false;
+  const seen: Box = { ops: [], execs: [], frames: [], taken: new Set(), kills: [], push: event => client.say(event), configs: new Map(), order: [] };
+  /** The runs a signal reached, by the run's own path off the command. */
+  const stopped = new Set<string>();
+  const runOf = (cmd: string): string | undefined => /cat (\S+)\.pid/.exec(cmd)?.[1];
   client.onFrame(raw => {
     const frame = raw as unknown as Record<string, unknown>;
     const op = typeof frame["op"] === "string" ? frame["op"] : undefined;
-    if (op === undefined) return;
+    if (op === undefined || seen.quiet === true) return;
     const say = (payload: Record<string, unknown>): void => client.say({ id: frame["id"], ok: true, ...payload });
     seen.ops.push(op);
     if (op === "machine.backend") return say(o.logins === undefined ? KEEPS_NO_IMAGE : { ...KEEPS_NO_IMAGE, logins: o.logins });
@@ -94,12 +104,24 @@ export function box(client: WsClient, login: BoxLogin, o: { failClone?: boolean;
       const read = seen.readAs?.(printed) ?? { stdout: printed, exitCode: 0 };
       return say({ exitCode: read.exitCode, stdout: read.stdout, stderr: read.stderr ?? "", truncated: false });
     }
-    if (cmd.includes("WSP_LAUNCHED")) return out("WSP_LAUNCHED\n");
+    if (cmd.includes("WSP_LAUNCHED")) {
+      seen.order.push("launch");
+      return out("WSP_LAUNCHED\n");
+    }
+    if (cmd.includes("wsp_end()")) {
+      seen.order.push("end starts");
+      setTimeout(() => {
+        seen.order.push("end answers");
+        if (seen.endFails === true) say({ exitCode: 1, stdout: "", stderr: `processes 4242 of ${/wsp_end '([^']+)'/.exec(cmd)?.[1] ?? ""} did not end\n`, truncated: false });
+        else out("");
+      }, seen.endMs?.(cmd) ?? 0);
+      return;
+    }
     const sentinel = /(__WSP_EOF_[0-9a-f]+__)/.exec(cmd)?.[1];
-    if (sentinel !== undefined) return out(stopped ? `\n${sentinel} 143 down \n` : `\n${sentinel}  up \n`);
+    if (sentinel !== undefined) return out(stopped.has(runOf(cmd) ?? "") ? `\n${sentinel} 143 down \n` : `\n${sentinel}  up \n`);
     if (cmd.includes("kill -TERM -- -$P") || cmd.includes("kill -KILL -- -$P")) {
       seen.kills.push(cmd);
-      stopped = true;
+      stopped.add(runOf(cmd) ?? "");
     }
     return out("");
   });
@@ -182,8 +204,9 @@ export function leading(starts: Held[]): HarnessAdapterFactory {
 
 /** A host holding this computer's folder of acme/lab in `root`, with a lead thread running on it, hetzner joined as
  * root, the same repository added there and another repository there. With `reach`, the lead's launch carries the
- * host's address and its own token, as a launch on this computer does under the host. */
-export async function leadAndBox(root: string, o: { agents?: { spawn: boolean; maxDepth?: number }; reach?: true } = {}) {
+ * host's address and its own token, as a launch on this computer does under the host. With `forks`, a daemon answers
+ * the lead's folder on main, so the lead forks a cloud machine of its repository the way it does on this computer. */
+export async function leadAndBox(root: string, o: { agents?: { spawn: boolean; maxDepth?: number }; reach?: true; forks?: true } = {}) {
   const repo = joinPath(root, "lab");
   mkdirSync(repo);
   execFileSync("git", ["init", "-q", "-b", "main", repo]);
@@ -191,7 +214,9 @@ export async function leadAndBox(root: string, o: { agents?: { spawn: boolean; m
   execFileSync("git", ["-C", repo, "remote", "add", "origin", "git@github.com:acme/lab.git"]);
   const starts: Held[] = [];
   const here: { url?: string } = {};
-  const { hostKey, store } = await serving({ adapters: { claude: leading(starts) }, local: fakeLocal(joinPath(root, "home")), ...(o.reach === true ? { agents: { here, wspMcp: { command: "wsp", args: ["mcp"] } } } : {}) });
+  const local = fakeLocal(joinPath(root, "home"));
+  const daemon = o.forks === true ? { local: { ...local, daemonRoad: async () => ({ url: "http://127.0.0.1:1", expiresAt: Number.MAX_SAFE_INTEGER, daemonToken: "t" }) }, daemonChannel: branchDaemons({ branchOf: () => "main" }).open } : { local };
+  const { hostKey, store } = await serving({ adapters: { claude: leading(starts) }, ...daemon, ...(o.reach === true ? { agents: { here, wspMcp: { command: "wsp", args: ["mcp"] } } } : {}) });
   here.url = `ws://127.0.0.1:${ctx.srv!.port}`;
   let seen!: Box;
   const { client, placeId } = await join(hostKey, {

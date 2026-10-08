@@ -883,8 +883,12 @@ export interface KindModule {
   memoryKey: (entry: LiveWorkspace, agentId: string) => string | undefined;
   /** Ends every process a thread left on this kind's computer, a server it detached included, and with remove takes
    * the thread's group away too: a stop and a delete of the thread. Absent on a kind that keeps no group per
-   * thread, whose turns end with their own process group. Answers what a stop could not end there, in words. */
-  endThread?: (entry: LiveWorkspace, threadId: string, o: { remove?: boolean }) => Promise<string | undefined>;
+   * thread, whose turns end with their own process group. Answers what a stop could not end there, in words. With
+   * away, a stop that could not reach the computer in time, the end is owed to that computer's next link. */
+  endThread?: (entry: LiveWorkspace, threadId: string, o: { remove?: boolean; away?: boolean }) => Promise<string | undefined>;
+  /** The end of the thread the computer is owed, with `paid` resolving once it ran there or the computer was removed;
+   * nothing where none is owed. Present beside endThread. */
+  endOwed?: (entry: LiveWorkspace, threadId: string) => Promise<{ paid: Promise<void> } | undefined>;
   /** Where a pane reaches one port of this kind's machine, where the kind answers it itself rather than through its
    * machine's preview route: a computer the person joined forwards the port to this computer on demand. */
   portReach?: (entry: LiveWorkspace, port: number) => Promise<{ url: string; expiresAt: number }>;
@@ -992,4 +996,4 @@ export type LiveSession = { view: SessionView; turnId: string; handle: SessionHa
  * run this host has no road to at all, and the row reads as a turn the restart cut. */
 export type Reopened = "attached" | "gone" | "unreached" | "cannot";
 
-export type SessionEntry = { view: SessionView; turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin; turnToken?: string; scopeDeviceId?: string; handle?: SessionHandle; end?: (reason: string) => void; turnLive?: TurnLive; run?: string; from?: number; asked?: TurnAsked; snapshot?: string; pid?: number; launch?: Promise<void>; calls?: Map<string, { toolName: string; input: string }> };
+export type SessionEntry = { view: SessionView; turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin; turnToken?: string; scopeDeviceId?: string; handle?: SessionHandle; end?: (reason: string, stopped?: boolean) => void; turnLive?: TurnLive; run?: string; from?: number; asked?: TurnAsked; snapshot?: string; pid?: number; launch?: Promise<void>; calls?: Map<string, { toolName: string; input: string }> };

@@ -385,7 +385,7 @@ describe("the agents on a computer you own", () => {
     expect(asked).toHaveLength(4);
   });
 
-  it("run a sign-in over that computer's link, push its steps to the asking socket alone, type its code, stop it when that socket goes, and keep keys to the host's own socket", async () => {
+  it("run a sign-in over that computer's link, push its steps to the asking socket alone, type its code, keep it going when that socket goes, and keep keys to the host's own socket", async () => {
     const typed: string[] = [];
     const keys: string[] = [];
     let ended = 0;
@@ -475,10 +475,43 @@ describe("the agents on a computer you own", () => {
     expect(await browser.request("agents.key", { agent: "claude", key: "sk-ant-oat01-z" })).toMatchObject({ ok: false, error: AGENTS_KEY_REFUSAL });
     expect(keys).toEqual(["claude sk-ant-oat01-x"]);
     expect((await c.request("agents.signInLine", { target: { placeId }, agent: "codex" }))["line"]).toEqual({ command: "codex login --device-auth" });
-    // A window that goes stops what it alone followed.
-    expect((await c.request("agents.signIn", { target: { placeId }, agent: "codex" })).ok).toBe(true);
+    // A window that goes leaves what it alone followed running, and another window joins it where it stands.
+    const left = await c.request("agents.signIn", { target: { placeId }, agent: "codex" });
+    expect(left.ok).toBe(true);
     c.close();
+    await new Promise(r => setTimeout(r, 50));
+    expect(ended).toBe(1);
+    // A window that comes back lists the run with the step it missed and follows it from the list alone, and the
+    // stopped one is listed as ended; a ticket's socket lists nothing.
+    const back = await WsClient.connect(ctx.srv!.port, { token: "host-token" });
+    sockets.push(back.ws);
+    const missed = { type: "agents.signIn", signInId: left["signInId"], state: "waiting", url: "https://auth.openai.com/codex/device", code: "pty_7", paste: false };
+    expect(await back.request("agents.signIns")).toMatchObject({
+      ok: true,
+      runs: [
+        { signInId: left["signInId"], target: { placeId }, agent: "codex", last: missed },
+        { signInId, target: { placeId }, agent: "codex", ended: true },
+      ],
+    });
+    await until(() => back.events.some(e => e.type === "agents.signIn"));
+    expect(back.events.filter(e => e.type === "agents.signIn")).toEqual([missed]);
+    expect((await back.request("agents.signInCode", { signInId: left["signInId"], code: "EFGH-5678" })).ok).toBe(true);
+    expect(typed.at(-1)).toBe("EFGH-5678");
+    expect((await back.request("agents.signIns"))["runs"]).toHaveLength(2);
+    // Listing again follows nothing twice: the one step it holds came once.
+    await new Promise(r => setTimeout(r, 20));
+    expect(back.events.filter(e => e.type === "agents.signIn")).toHaveLength(1);
+    expect(await ticketed.request("agents.signIns")).toMatchObject({ ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
+    expect(await other.request("agents.signIn", { target: { placeId }, agent: "codex" })).toMatchObject({ ok: true, signInId: left["signInId"] });
+    expect((await other.request("agents.signInStop", { signInId: left["signInId"] })).ok).toBe(true);
     await until(() => ended === 2);
+    expect((await back.request("agents.signIns"))["runs"]).toMatchObject([{ signInId, ended: true }, { signInId: left["signInId"], ended: true }]);
+    // A server's sign-in is listed with the row it was started from: where that server's config sits.
+    const server = await back.request("servers.signIn", { target: { placeId }, agent: "codex", name: "notion", scope: "project", project: "pr_1" });
+    expect(server.ok, String(server["error"])).toBe(true);
+    expect(await other.request("agents.signIns")).toMatchObject({ ok: true, runs: [{ signInId: server["signInId"], target: { placeId }, agent: "codex", server: "notion", scope: "project", project: "pr_1" }, {}, {}] });
+    expect((await back.request("agents.signInStop", { signInId: server["signInId"] })).ok).toBe(true);
+    await until(() => ended === 3);
   });
 
   it("read an agent whose login lives on that computer as signed in once its sign-in there lands, on the row and the next read, without waiting for a redial", async () => {

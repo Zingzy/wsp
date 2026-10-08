@@ -292,6 +292,19 @@ describe("composer slash menu", () => {
     await waitFor(() => expect(menuItem("compact")).not.toBeNull());
   });
 
+  it("reads a box thread's skills off that box for its project, and again when the host says that box's agents changed", async () => {
+    const reads: unknown[] = [];
+    const onBox: WorkspaceView = { ...workspace, kind: "place", place: "p_2", machineId: "p_2" };
+    const { api, emit } = fixtureApi([onBox], { [WS]: CHAT_STREAM.slice() }, [], { agentsRead: async target => (reads.push(target), { target, home: "", user: "", readAt: "2026-09-01T00:00:00.000Z", agents: [], skills: [], servers: [], refused: [] }) });
+    useStore.setState({ places: [{ id: "p_2", kind: "computer", name: "hetzner", default: false, present: true }] });
+    await setup(api);
+    await screen.findByText(/Server is live at :3000\./);
+    await typeInto(composerEditor(), "/");
+    await waitFor(() => expect(reads).toEqual([{ placeId: "p_2", project: "pr_1" }]));
+    emit({ type: "agents.changed", target: { placeId: "p_2" }, seq: 1 } as EventUnion);
+    await waitFor(() => expect(reads).toHaveLength(2));
+  });
+
   it("offers what the session announced less the commands that work only in the CLI's own terminal, and every custom one", async () => {
     const { api } = fixtureApi([workspace], { [WS]: STREAM_WITH_SCREENS });
     await setup(api);

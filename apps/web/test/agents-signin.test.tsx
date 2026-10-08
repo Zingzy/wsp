@@ -12,7 +12,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AgentsReport, AgentsSignInEvent, AgentsTarget } from "@wsp/protocol";
 import { AgentsPanel } from "../src/components/agents/AgentsPanel.js";
 import { AGENTS_LIST_WORDS, serverSignInStart, type AgentsWhere } from "../src/components/agents/agentsRows.js";
-import { useAgentActs } from "../src/components/agents/useAgentActs.js";
+import { forgetSignIns, useAgentActs } from "../src/components/agents/useAgentActs.js";
 import { forgetAgentsReports, useAgentsReport } from "../src/components/agents/useAgentsReport.js";
 import { makeApi, type Api, type ProtocolClient } from "../src/protocol/client.js";
 import type { ProtocolEvent } from "../src/protocol/client.js";
@@ -77,6 +77,7 @@ const NOTION = "server-global-notion-http-mcp.notion.com";
 
 afterEach(() => {
   cleanup();
+  forgetSignIns();
   useStore.setState({ api: null });
   forgetAgentsReports();
   vi.restoreAllMocks();
@@ -169,7 +170,7 @@ describe("signing an agent in from its row", () => {
     expect(stepOf("codex", "sign-in")).not.toBeNull();
   });
 
-  it("stops the sign-in on the host when the target changes or the panel closes, and only stops listening to one that ended", async () => {
+  it("keeps the sign-in going on the host when the target changes or the panel closes, draws it again where it stood, and only stops listening to one that ended", async () => {
     const h = host();
     const { rerender, unmount } = render(<List />);
     const press = async (): Promise<void> => {
@@ -183,11 +184,15 @@ describe("signing an agent in from its row", () => {
     await press();
     expect(h.started).toHaveLength(2);
     rerender(<List report={{ ...AGENTS_REPORT, target: { placeId: "p_other" } }} />);
-    expect(h.stopped).toEqual(["si_2"]);
+    expect(stepOf("codex", "sign-in")).not.toBeNull();
     rerender(<List />);
-    await press();
+    expect(stepOf("codex", "cancel")).not.toBeNull();
     unmount();
-    expect(h.stopped).toEqual(["si_2", "si_3"]);
+    render(<List />);
+    expect(stepOf("codex", "cancel")).not.toBeNull();
+    expect([h.started.length, h.stopped]).toEqual([2, []]);
+    fireEvent.click(stepOf("codex", "cancel")!);
+    expect(h.stopped).toEqual(["si_2"]);
   });
 
   it("types a code the page handed back into the tool, and a failure says what the tool said", async () => {
@@ -252,6 +257,7 @@ describe("signing an agent in from its row", () => {
     expect(flow()?.querySelector("[data-k=sign-in-terminal]")).not.toBeNull();
     expect(flow()?.querySelector("[data-k=sign-in-line]")).toBeNull();
     unmount();
+    forgetSignIns();
     render(<List where="here" />);
     openRow("opencode");
     fireEvent.click(actIn("sign-in"));
@@ -328,9 +334,9 @@ describe("signing an agent in from its row", () => {
 describe("a server's sign-in road", () => {
   it("is the one the host said the report's page reaches, never worked out again from where the list stands", () => {
     const linear = AGENTS_REPORT.servers.find(r => r.name === "linear")!;
-    expect(serverSignInStart(linear, { where: "here", reach: "relay" })).toEqual({ kind: "run", agent: "claude", server: "linear", finish: "callback", pastes: true });
-    expect(serverSignInStart(linear, { where: "here", reach: "none" })).toEqual({ kind: "run", agent: "claude", server: "linear", finish: "address", pastes: true });
-    expect(serverSignInStart(linear, { where: "here" })).toEqual({ kind: "run", agent: "claude", server: "linear", finish: "address", pastes: true });
+    expect(serverSignInStart(linear, { where: "here", reach: "relay" })).toEqual({ kind: "run", agent: "claude", server: "linear", scope: "user", finish: "callback", pastes: true });
+    expect(serverSignInStart(linear, { where: "here", reach: "none" })).toEqual({ kind: "run", agent: "claude", server: "linear", scope: "user", finish: "address", pastes: true });
+    expect(serverSignInStart(linear, { where: "here" })).toEqual({ kind: "run", agent: "claude", server: "linear", scope: "user", finish: "address", pastes: true });
   });
 });
 

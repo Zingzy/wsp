@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { z } from "zod";
-import { AgentsTarget, ServerAdd, ServerAsk } from "../agents-report.js";
+import { AgentsTarget, McpScope, ServerAdd, ServerAsk } from "../agents-report.js";
 import { Attachment } from "../attachments.js";
 import { threadWord } from "../format.js";
 import { InitRoad, InitScreenId, SIGN_IN_CODE_MAX } from "../init-job.js";
@@ -691,15 +691,21 @@ const RuntimeOp = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("servers.icon"), host: z.string().min(1).max(260), refresh: z.boolean().optional() }),
   /** Replies with { signInId } once the agent's own sign-in runs in a pty there, as that computer's login, or joins
    * the one already running for that agent there, one per agent per target; its progress is pushed as agents.signIn
-   * events to the sockets following it alone, which is what a page and its code are for, and the sign-in stops when
-   * the last of them goes. Refused for a row that asks the person to pick, which runs in their terminal, for a row
-   * whose login is a token or key this host keeps, and for a name holding a control character. With `terminal`, a
-   * row that asks the person to pick runs too, in a pty there the page attaches to, whose id the first frame names. */
+   * events to the sockets following it alone, which is what a page and its code are for, and the sign-in goes on when
+   * the last of them goes, until it lands, fails, passes its cap or agents.signInStop ends it. Refused for a row that
+   * asks the person to pick, which runs in their terminal, for a row whose login is a token or key this host keeps, and
+   * for a name holding a control character. With `terminal`, a row that asks the person to pick runs too, in a pty
+   * there the page attaches to, whose id the first frame names. */
   z.object({ id: reqId, op: z.literal("agents.signIn"), target: AgentsTarget, agent: z.string(), terminal: z.boolean().optional() }),
-  /** The same for one MCP server of that agent's config, by the harness's own command for it. */
-  z.object({ id: reqId, op: z.literal("servers.signIn"), target: AgentsTarget, agent: z.string(), name: z.string() }),
+  /** The same for one MCP server of that agent's config, by the harness's own command for it; `scope` and `project`
+   * name the row it was started from, which agents.signIns hands back. */
+  z.object({ id: reqId, op: z.literal("servers.signIn"), target: AgentsTarget, agent: z.string(), name: z.string(), scope: McpScope.optional(), project: z.string().optional() }),
   /** Types what a sign-in's page handed back into that sign-in's own pty, with the Enter the person would press. */
   z.object({ id: reqId, op: z.literal("agents.signInCode"), signInId: z.string(), code: z.string().min(1) }),
+  /** Replies with { runs: AgentsSignInRun[] }: every sign-in running and every one that ended in the last ten minutes,
+   * and this socket follows each running one from then on as if it had joined it, which is how a window whose socket
+   * dropped, or a window opened since, hears a run it did not start. */
+  z.object({ id: reqId, op: z.literal("agents.signIns") }),
   /** Stops a sign-in this socket started or joined, killing its pty for everyone following it. */
   z.object({ id: reqId, op: z.literal("agents.signInStop"), signInId: z.string() }),
   /** Replies with { line: SignInLine }: the sign-in, or one server's with `name`, as the line the person's own
@@ -1134,7 +1140,9 @@ export const SessionInterruptResult = z.object({
   /** The words for a refused or unsupported stop of a subagent. */
   error: z.string().optional(),
   /** What the stop could not end on a computer the person joined, in words: processes the thread started there that
-   * still run. Absent where everything it started ended, or the thread keeps no group of its own. */
+   * still run, or that computer not answering, so the turn reads stopped here and its end is owed to that computer's
+   * next link, or a message waiting on such an end that the stop gave up. Absent where everything it started ended,
+   * or the thread keeps no group of its own. */
   left: z.string().optional(),
 });
 export type SessionInterruptResult = z.infer<typeof SessionInterruptResult>;

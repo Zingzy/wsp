@@ -17,8 +17,8 @@
 import { isProjectHomeKey } from "../../protocol/store";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { agentName } from "@wsp/catalog";
-import { agentStartingLine, isSessionEvent, threadKeyOf } from "@wsp/protocol";
-import type { AttachmentRecord, SessionEvent, SessionHarness, SessionHeldEvent, SessionStartingEvent, SessionRunEvent, SessionView } from "@wsp/protocol";
+import { agentStartingLine, isSessionEvent, sendWaitsForLine, threadKeyOf } from "@wsp/protocol";
+import type { AttachmentRecord, SessionEvent, SessionHarness, SessionHeldEvent, SessionStartingEvent, SessionQueuedEvent, SessionRunEvent, SessionView } from "@wsp/protocol";
 import { useProtocolEvents, useStore } from "../../protocol/store";
 import type { Api, ProtocolEvent } from "../../protocol/client";
 import { createSessionFold } from "../../adapt/session";
@@ -139,6 +139,9 @@ export interface ThreadState {
    * the person's words nowhere: this view is their only home, and it keeps them rather than letting the next send
    * write over the slot they sat in. */
   readonly refused: ReadonlyArray<Kept>;
+  /** What the host said of a send another client made into this thread while it holds that send on a computer that is
+   * away, until the thread's next turn starts or ends. */
+  readonly waiting?: { readonly line: string; readonly at: string };
 }
 
 const EMPTY: ThreadState = { events: [], arrivals: [], pendingPrompt: null, localErrors: [], fresh: false, sending: null, known: [], named: null, handed: null, stray: null, refused: [] };
@@ -463,8 +466,10 @@ function inHeldThread(state: ThreadState, e: SessionEvent, pinned: string | null
  * it began: that turn's own end still trails its done, and only the end opens the composer, while a harness
  * that dies before init produces only a done and an end under a new turn id.
  */
-export function reduceEvent(state: ThreadState, e: SessionEvent, at: string, pinned: string | null = null): ThreadState {
-  if (!inHeldThread(state, e, pinned)) return dropEvent(state, e);
+export function reduceEvent(held: ThreadState, e: SessionEvent, at: string, pinned: string | null = null): ThreadState {
+  if (!inHeldThread(held, e, pinned)) return dropEvent(held, e);
+  const { waiting, ...rest } = held;
+  const state = waiting !== undefined && (e.type === "session.start" || e.type === "session.end") ? rest : held;
   const next = append(state, e, at);
   if (state.sending === null) return state.stray !== null && startsStray(state, e) ? { ...next, stray: null, named: nameOf(state.stray.key, e) } : next;
   const starts = e.type === "session.start";
@@ -548,6 +553,23 @@ export function startingSaid(state: ThreadState, e: SessionStartingEvent): Threa
   return { ...state, pendingPrompt: { ...sent, starting: agentStartingLine(agentName(e.harness), e.installs === true) } };
 }
 
+/** A send the host holds until a computer that is away has run the end a stop owed it: the line goes under the send it
+ * is for where this view made it, and at the thread's tail where another client did. */
+export function heldSaid(state: ThreadState, e: SessionQueuedEvent, thread: string | null, at: string): ThreadState {
+  if (e.waitsFor === undefined) return state;
+  const line = sendWaitsForLine(e.waitsFor);
+  const sent = state.pendingPrompt;
+  if (sent !== null && sent.requestId === e.requestId) return { ...state, pendingPrompt: { ...sent, starting: line } };
+  return thread !== null && e.threadId === thread ? { ...state, waiting: { line, at } } : state;
+}
+
+/** The same line off the thread's row, for a window that was not open when the host said it: drawn only where nothing
+ * this window heard says it already. */
+export function waitingOffRow(state: ThreadState, row: SessionView | undefined): ThreadState {
+  if (state.waiting !== undefined || state.pendingPrompt?.starting !== undefined || row?.status !== "running" || row.waitsFor === undefined) return state;
+  return { ...state, waiting: { line: sendWaitsForLine(row.waitsFor), at: new Date(row.startedAt ?? Date.now()).toISOString() } };
+}
+
 /** Whether a fold already holds the first of these events, the same objects in the same places, so only the rest are
  * folded on. A row the wire left unstamped is placed by when this client took it, so that has to match too. */
 function foldHolds(held: HeldFold, events: ReadonlyArray<SessionEvent>, arrivals: ReadonlyArray<string>): boolean {
@@ -592,6 +614,11 @@ export function deriveChatView(state: ThreadState, previous: ReadonlyArray<Timel
       const id = `starting:${requestId}`;
       entries.push({ id, kind: "work", createdAt: at, entry: { id, createdAt: at, turnId: null, label: starting, tone: "notice", sourceActivityKind: "runtime.starting" } });
     }
+  }
+  if (state.waiting !== undefined) {
+    const { line, at } = state.waiting;
+    const id = `waiting:${at}`;
+    entries.push({ id, kind: "work", createdAt: at, entry: { id, createdAt: at, turnId: null, label: line, tone: "notice", sourceActivityKind: "runtime.starting" } });
   }
   state.localErrors.forEach(({ message, at }, index) => {
     const id = `local-error:${index}`;
@@ -816,6 +843,10 @@ export function useChatThread(workspaceId: string, threadId: string | null = nul
         setState(s => startingSaid(s, e));
         return;
       }
+      if (e.type === "session.queued" && e.workspaceId === workspaceId) {
+        setState(s => heldSaid(s, e, threadId, now()));
+        return;
+      }
       if (!isSessionEvent(e) || e.workspaceId !== workspaceId) return;
       if (heldRef.current && transcripts.dropped(e)) return;
       const at = (heldRef.current ? transcripts.arrivedAt(e) : undefined) ?? now();
@@ -842,7 +873,7 @@ export function useChatThread(workspaceId: string, threadId: string | null = nul
   const fromRow = !state.fresh && startedSession(state.events) === undefined && (threadId !== null || state.events.length === 0);
   const view = useMemo(() => {
     const carried = (held ? transcripts.fold(threadId) : undefined) ?? foldRef.current;
-    const { view: derived, fold } = deriveChatView(state, previousEntries.current, carried);
+    const { view: derived, fold } = deriveChatView(waitingOffRow(state, latestRow), previousEntries.current, carried);
     const next = turnFromRow(derived, latestRow, ownThread(state) ?? threadId ?? undefined);
     foldRef.current = fold;
     if (held) transcripts.keepFold(threadId, fold);
