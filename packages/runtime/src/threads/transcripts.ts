@@ -485,7 +485,11 @@ export function transcriptsArea(ctx: RuntimeContext): TranscriptsArea {
     const excess = rows.length - SESSION_INDEX_CAP;
     if (excess <= 0) return;
     const finished = rows.filter(([, s]) => s.view.status !== "running").sort(([, a], [, b]) => (a.view.startedAt ?? 0) - (b.view.startedAt ?? 0));
-    for (const [id] of finished.slice(0, excess)) sessions.delete(id);
+    for (const [id, s] of finished.slice(0, excess)) {
+      sessions.delete(id);
+      const record = s.view.threadId === undefined ? undefined : threadRecords.get(s.view.threadId);
+      if (record !== undefined && s.view.status !== "running") threadRecords.set(s.view.threadId!, { ...record, ended: s.view.status });
+    }
   };
 
   // Rows are copied at queue time, like the transcript: the store may serialise after it returns. A harness that
