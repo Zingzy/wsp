@@ -2,9 +2,9 @@
 import { CATALOG_AGENTS, type ThreadAgent } from "@wsp/catalog";
 import {
   AGENT_KEEP_MS, AGENTS_KEPT, type PermissionAsk, type SessionRenameWrite, type SessionView, type TurnResult,
-  type Caller, ThreadScope, WorkspaceOrigin, GitDiffReply, GitWorktreesReply, repoPathOf, worktreeOf, foldThreads, threadWord, threadsFollowed, scopeOf,
+  type Caller, SessionOrigin, ThreadScope, WorkspaceOrigin, GitDiffReply, GitWorktreesReply, repoPathOf, worktreeOf, foldThreads, threadWord, threadsFollowed, scopeOf,
   type ThreadWaitingOn, isLocalWorkspace, NO_SUCH_TURN, NOTIFY_ME, notifyLine, runsInFolder, DEVICE_OPS, sendRefusal,
-  workspaceState, HERE_PLACE_ID, runningOn as runningOnPlace, type ThreadCapWait,
+  workspaceState, HERE_PLACE_ID, runningOn as runningOnPlace, type ThreadCapWait, roadOf, unreadLine,
 } from "@wsp/protocol";
 import { harnessCatalog } from "../harness-catalog.js";
 import { PLAN_RESETS, secretsOf } from "../adapters.js";
@@ -16,16 +16,31 @@ import {
 } from "../types/internal.js";
 import type { CapHeld, RuntimeContext, ThreadsArea } from "../context.js";
 
-/** A child's finished line into one thread, as the store keeps it until that thread takes it. */
-type Owed = { id: string; from: string; notify: string; text: string; by?: ThreadScope; road?: WorkspaceOrigin };
+/** The row the person is told where a line falls, kept with the line so a host that restarts tells it too. */
+type PersonRow = { workspaceId: string; sessionId: string; turnId: string; text: string };
+/** A line into one thread, as the store keeps it until that thread takes it: a child's finished line, or a message
+ * steered into the thread's turn that its agent never read, which goes as whoever opened it. */
+type Owed = { id: string; from: string; notify: string; text: string; by?: ThreadScope; road?: WorkspaceOrigin; startedBy?: SessionOrigin; toPerson?: PersonRow };
 /** A line on its way, with the road that tells the person where its thread's door refuses it. */
 type Line = Owed & { fell?: () => void };
+const readPersonRow = (raw: unknown): PersonRow | undefined => {
+  const r = raw as Partial<Record<keyof PersonRow, unknown>> | undefined;
+  return typeof r?.workspaceId === "string" && typeof r.sessionId === "string" && typeof r.turnId === "string" && typeof r.text === "string"
+    ? { workspaceId: r.workspaceId, sessionId: r.sessionId, turnId: r.turnId, text: r.text }
+    : undefined;
+};
 const readOwed = (raw: unknown): Owed | undefined => {
   const r = raw as Partial<Record<keyof Owed, unknown>> | undefined;
   if (typeof r?.id !== "string" || typeof r.from !== "string" || typeof r.notify !== "string" || typeof r.text !== "string") return undefined;
   const by = readScope(r.by);
   const road = readRoad(r.road);
-  return { id: r.id, from: r.from, notify: r.notify, text: r.text, ...(by !== undefined ? { by } : {}), ...(road !== undefined ? { road } : {}) };
+  const startedBy = SessionOrigin.safeParse(r.startedBy);
+  const toPerson = readPersonRow(r.toPerson);
+  return {
+    id: r.id, from: r.from, notify: r.notify, text: r.text,
+    ...(by !== undefined ? { by } : {}), ...(road !== undefined ? { road } : {}),
+    ...(startedBy.success ? { startedBy: startedBy.data } : {}), ...(toPerson !== undefined ? { toPerson } : {}),
+  };
 };
 
 export function threadsArea(ctx: RuntimeContext): ThreadsArea {
@@ -429,7 +444,8 @@ export function threadsArea(ctx: RuntimeContext): ThreadsArea {
     sending.add(line.id);
     const fell = (): void => {
       owedTaken(line);
-      line.fell?.();
+      if (line.fell !== undefined) line.fell();
+      else if (line.toPerson !== undefined) ctx.record({ type: "session.notify", ...line.toPerson, threadId: from, notify: NOTIFY_ME });
     };
     const parent = latestOn(notify);
     if (!tellable(parent)) {
@@ -459,12 +475,34 @@ export function threadsArea(ctx: RuntimeContext): ThreadsArea {
     // what every row written before the road rode beside the targets holds.
     const asWho: Caller | undefined = by === undefined ? road : { origin: road ?? "here", by };
     // A start answers once the line steered the running turn or launched one of its own, which is when it is taken.
-    ctx.sessionsApi.start(parent.workspaceId, { prompt: text, harness: parent.harness, thread: notify, startedBy: "agent", wakesLead: true }, asWho).then(() => owedTaken(line), (e: unknown) => {
+    ctx.sessionsApi.start(parent.workspaceId, { prompt: text, harness: parent.harness, thread: notify, startedBy: line.startedBy ?? "agent", ...(line.startedBy === undefined ? { wakesLead: true as const } : {}) }, asWho).then(() => owedTaken(line), (e: unknown) => {
       // A line queued behind the parent's turn meets the nap that ended that turn: it waits for the wake as well.
       if (holdForWake()) return;
       console.warn(`thread ${from.slice(0, 8)} ended, but its line did not reach thread ${notify.slice(0, 8)}: ${e instanceof Error ? e.message : String(e)}`);
       fell();
     });
+  };
+  /** The messages steered into a turn that its agent never read, once the turn is over: each goes into the thread
+   * again as its next message, in the words the row kept when it was steered, kept in the store as a child's line is,
+   * under the caller that steered it and opened by whoever opened it, so the doors read it as a fresh steer and a nap
+   * or a host restart keeps it. A turn the person stopped tells the person instead. An id the row does not hold is a
+   * line on the run's input this host never wrote, and goes nowhere. */
+  const sendBack = (s: { view: SessionView; turnId: string; turnLive?: TurnLive }, ids: readonly string[], stopped: boolean): void => {
+    const threadId = s.view.threadId;
+    if (threadId === undefined) return;
+    for (const id of ids) {
+      const steered = s.turnLive?.steered?.[id];
+      if (steered === undefined) continue;
+      const { prompt, ...as } = steered;
+      const toPerson: PersonRow = { workspaceId: s.view.workspaceId, sessionId: s.view.claudeSessionId ?? s.view.id, turnId: s.turnId, text: unreadLine(prompt) };
+      if (stopped) {
+        ctx.record({ type: "session.notify", ...toPerson, threadId, notify: NOTIFY_ME });
+        continue;
+      }
+      const line: Owed = { id: `${s.turnId}:unread:${id}`, from: threadId, notify: threadId, text: prompt, ...as, toPerson };
+      void ctx.store.put(NOTIFY_OWED, line.id, line).catch((e: unknown) => console.warn(`the message steered into thread ${threadId.slice(0, 8)} was not kept: ${e instanceof Error ? e.message : String(e)}`));
+      deliver(line);
+    }
   };
   // A wake or a rebuild (of a gone or zombie machine) puts the workspace back to running: the held lines go now.
   for (const type of ["workspace.woken", "workspace.upgraded"] as const) {
@@ -566,7 +604,13 @@ export function threadsArea(ctx: RuntimeContext): ThreadsArea {
     return { id: taken.sessionId, workspaceId, turnId: taken.turnId, outcome: taken.outcome, finished: Promise.resolve(result), view: () => sessions.get(taken.sessionId)?.view ?? held.view, interrupt: async () => {} };
   };
 
-  const recordSteer = (s: { view: SessionView; turnId: string }, handleId: string, o: { prompt: string; requestId?: string; via?: "slate" }): void => {
+  const recordSteer = (s: { view: SessionView; turnId: string; turnLive?: TurnLive }, handleId: string, o: { prompt: string; requestId?: string; via?: "slate"; startedBy?: SessionOrigin }, caller: Caller | undefined, steerId: string): void => {
+    if (s.turnLive !== undefined) {
+      const by = scopeOf(caller);
+      const road = roadOf(caller);
+      s.turnLive.steered = { ...s.turnLive.steered, [steerId]: { prompt: o.prompt, startedBy: o.startedBy ?? "person", ...(by !== undefined ? { by } : {}), ...(road !== undefined ? { road } : {}) } };
+      void ctx.persistSessions(s.view.workspaceId);
+    }
     ctx.record({
       type: "session.steer",
       workspaceId: s.view.workspaceId,
@@ -705,7 +749,7 @@ export function threadsArea(ctx: RuntimeContext): ThreadsArea {
   return {
     threadRuns, launchingOn, runningOn, latestOn, keptAgents, reapKept, endKept, hostWrites, writeSession, takeKept,
     holdKept, threadOfToken, treeUnder, drivesThread, leadAsks, capHeld, capHold, capLend, capFull, capWait, capStop, capStopping, capLeft, stoppedBehind, stopUnder, notifyOn, notifyReach, tellAs,
-    notifyEnd, deliverOwed, settleCut, notARepo, checkpointsLanding, keepCheckpoint, takenTurn, recordSteer, snapshotOf,
+    notifyEnd, deliverOwed, sendBack, settleCut, notARepo, checkpointsLanding, keepCheckpoint, takenTurn, recordSteer, snapshotOf,
     readTurnChanges, usageComputerOf, vaultedFor, usageAccountOf, limitDetailsDue,
   };
 }

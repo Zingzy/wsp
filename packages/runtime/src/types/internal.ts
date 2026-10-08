@@ -30,7 +30,7 @@ import type {
   WorkspaceKind,
   WorkspaceSize,
 } from "@wsp/protocol";
-import { type ThreadPlacement, ThreadScope, WorkspaceOrigin } from "@wsp/protocol";
+import { type ThreadPlacement, SessionOrigin, ThreadScope, WorkspaceOrigin } from "@wsp/protocol";
 import { EXEC_OUTPUT_MAX, fmtBytes, fmtDuration, type WorktreeFolder } from "@wsp/protocol";
 import type { MachineExecOptions, TurnWaiting } from "../machine-exec.js";
 import type { SubagentView } from "@wsp/protocol";
@@ -402,6 +402,35 @@ export interface TurnLive {
   /** The outcome and the words the last of those lines carried, set again as a re-opened run replays its reply: an end
    * that says nothing new is not told again. In memory alone. */
   toldAs?: { status: TurnStatus; body?: string };
+  /** Each message steered into the turn, by the id the harness was handed it under: one its agent never read goes back
+   * with these words and as its steerer, past a host restart too, and an id missing here is a line this host never
+   * wrote, which goes nowhere. */
+  steered?: Record<string, Steered>;
+}
+
+/** A message steered into a turn: its words as the host wrote them, the thread scope and road of the caller, as a
+ * start runs under them, and who opened it. */
+export interface Steered {
+  prompt: string;
+  by?: ThreadScope;
+  road?: WorkspaceOrigin;
+  startedBy: SessionOrigin;
+}
+
+/** The steered messages a row kept, read back entry by entry: one whose words, scope, road or opener do not read is
+ * dropped, so its message goes nowhere rather than start a turn under a caller nobody wrote. */
+export function readSteered(raw: unknown): Record<string, Steered> | undefined {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return undefined;
+  const steered: Record<string, Steered> = {};
+  for (const [id, entry] of Object.entries(raw as Record<string, unknown>)) {
+    const e = entry as Partial<Record<keyof Steered, unknown>> | undefined;
+    const startedBy = SessionOrigin.safeParse(e?.startedBy);
+    const by = readScope(e?.by);
+    const road = readRoad(e?.road);
+    if (typeof e?.prompt !== "string" || !startedBy.success || (e.by !== undefined && by === undefined) || (e.road !== undefined && road === undefined)) continue;
+    steered[id] = { prompt: e.prompt, startedBy: startedBy.data, ...(by !== undefined ? { by } : {}), ...(road !== undefined ? { road } : {}) };
+  }
+  return steered;
 }
 
 /** The message a turn's agent was handed and the effort it ran at, kept beside its run while it runs: the row's own
@@ -561,8 +590,8 @@ export interface SessionIndexRecord {
    * for it; from is where the turn starts in that run's log, on a process that served the thread's earlier turns. All
    * of these are written for a running row alone. snapshot is the commit the turn's launch took of its
    * folder, which the turn's changes are read against wherever it ends; written while the turn runs and until that
-   * read is in. told and toldLast are a running row's `TurnLive` fields of the same names. */
-  sessions: (SessionView & { turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin; reply?: TurnStatus; told?: number; toldLast?: true; run?: string; from?: number; asked?: TurnAsked; turnToken?: string; scopeDeviceId?: string; snapshot?: string })[];
+   * read is in. told, toldLast and steered are a running row's `TurnLive` fields of the same names. */
+  sessions: (SessionView & { turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin; reply?: TurnStatus; told?: number; toldLast?: true; steered?: Record<string, Steered>; run?: string; from?: number; asked?: TurnAsked; turnToken?: string; scopeDeviceId?: string; snapshot?: string })[];
   /** Every thread of the workspace by its runtime id; absent on a document from before threads had a record. */
   threads?: Record<string, ThreadRecord>;
 }

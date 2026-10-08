@@ -7,7 +7,7 @@
 // sentence rather than sending a frame nothing on the far side would take.
 import { randomBytes } from "node:crypto";
 import { posix } from "node:path";
-import { DaemonExecReply, EXEC_TIMEOUT_MAX_MS, base64Length, cgroupJoinLine, placeProvisionPaths, shellQuote, type Capabilities } from "@wsp/protocol";
+import { DaemonExecReply, EXEC_TIMEOUT_MAX_MS, base64Length, cgroupJoinLine, placeProvisionPaths, shellQuote, threadShellFiles, threadShellVars, type Capabilities } from "@wsp/protocol";
 import { INLINE_EXEC_MS, execDetached, machineAnswer } from "./exec-detached.js";
 import { LINK_MARGIN_MS, type MachineLink } from "./link-backend.js";
 import type { BackendPricing, BytesLanded, ExecResult, Machine, MachineBackend, MachineKind, MachineListRow, MachineState, RunOptions } from "./machine.js";
@@ -32,6 +32,18 @@ const LINK_BYTES_PER_MS = 213;
  * own timer to. */
 export function placePartBoundMs(bytes: number, floorMs: number = INLINE_EXEC_MS): number {
   return Math.min(Math.max(2 * Math.ceil(base64Length(bytes) / LINK_BYTES_PER_MS), floorMs), EXEC_TIMEOUT_MAX_MS);
+}
+
+/** The line that writes a folder's shell startup files and names them in the launch's environment once they are
+ * written: a login that cannot write the folder keeps its own startup files, since zsh pointed at a folder without
+ * them reads none of the person's. */
+function shellStartLine(dir: string): string {
+  const files = threadShellFiles(dir).map(([name, text]) => {
+    const at = shellQuote(`${dir}/${name}`);
+    return `printf %s ${shellQuote(text)} > ${at}.$$ && mv -f ${at}.$$ ${at}`;
+  });
+  const vars = Object.entries(threadShellVars(dir)).map(([k, v]) => `${k}=${shellQuote(v)}`);
+  return `{ mkdir -p ${shellQuote(dir)} && ${files.join(" && ")}; } 2>/dev/null && export ${vars.join(" ")}; `;
 }
 
 /** One computer you own, driven over the link its daemon holds to this host: one exec frame per command, a
@@ -178,12 +190,18 @@ export class PlaceFolderMachine extends PlaceMachine {
 
   /** This computer as a turn's launch reaches it: each line still runs as the login, from a shell that first stands
    * itself in the thread's cgroup as the daemon's root, so the run and everything it starts stand there too; a
-   * folder named goes in front of the login's PATH for those lines alone. */
+   * folder named goes in front of the login's PATH for those lines alone, and its shells' startup files, written
+   * again at each launch as each one moves into place whole, put it back in front after a login shell's profile. */
   inCgroup(cgroup: string, pathFirst?: string): Machine {
     const join = cgroupJoinLine(cgroup);
-    const path = pathFirst === undefined ? "" : `export PATH=${shellQuote(pathFirst)}:"$PATH"; `;
-    const grouped = Object.create(this) as PlaceFolderMachine;
-    grouped.exec = async (cmd, opts) => PlaceMachine.prototype.exec.call(this, `${join}\n${asLogin(await this.loginOf(), `${path}${cmd}`)}`, opts);
+    const path = pathFirst === undefined ? "" : `${shellStartLine(pathFirst)}export PATH=${shellQuote(pathFirst)}:"$PATH"; `;
+    const framed = async (): Promise<(cmd: string) => string> => {
+      const login = await this.loginOf();
+      return cmd => `${join}\n${asLogin(login, `${path}${cmd}`)}`;
+    };
+    const grouped: Machine = Object.create(this);
+    grouped.framed = framed;
+    grouped.exec = async (cmd, opts) => PlaceMachine.prototype.exec.call(this, (await framed())(cmd), opts);
     return grouped;
   }
 
