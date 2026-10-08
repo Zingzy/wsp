@@ -34,6 +34,7 @@ import { storedPicks, underPicks } from "../sidebar/picks.js";
 import { workspaceOrHere } from "../terminal/computer.js";
 import { useTerminalDrawerStore } from "../terminal/drawerStore.js";
 import { resetTerminalZoom, stepTerminalZoom } from "../terminal/fontSetting.js";
+import { MAX_TERMINALS_PER_GROUP } from "../terminal/groups.js";
 import { getTerminals, type WorkspaceTerminals } from "../terminal/link.js";
 import { openNewThread } from "./NewThreadPicks.js";
 import { requestComposerFocus } from "./shellRequests.js";
@@ -99,26 +100,32 @@ export function splitDrawerTerminal(workspaceId: string, direction: SplitDirecti
 
 /** A fresh pty in its own right-panel surface. */
 export function openPanelTerminal(workspaceId: string): Promise<void> {
-  return withTerminals(workspaceId, terminals =>
-    terminals.open(ptyStartFolder(workspaceId)).then(tab => useRightPanelStore.getState().openTerminal(workspaceId, tab.ptyId)),
-  );
+  return withTerminals(workspaceId, terminals => terminals.open(ptyStartFolder(workspaceId), id => useRightPanelStore.getState().openTerminal(workspaceId, id)));
 }
 
 /** A fresh pty in its own right-panel surface with a line typed at its prompt and left for the person to run. */
 export function openPanelTerminalWith(workspaceId: string, line: string): Promise<void> {
   return withTerminals(workspaceId, terminals =>
-    terminals.open(ptyStartFolder(workspaceId)).then(tab => {
-      useRightPanelStore.getState().openTerminal(workspaceId, tab.ptyId);
-      terminals.write(tab.ptyId, line);
-    }),
+    terminals.open(ptyStartFolder(workspaceId), id => useRightPanelStore.getState().openTerminal(workspaceId, id)).then(tab => terminals.write(tab.ptyId, line)),
   );
 }
 
 /** A fresh pty split into one right-panel terminal surface. */
 export function splitPanelTerminal(workspaceId: string, surfaceId: string, direction: SplitDirection = "horizontal"): Promise<void> {
   return withTerminals(workspaceId, terminals =>
-    terminals.open(ptyStartFolder(workspaceId)).then(tab => useRightPanelStore.getState().splitTerminal(workspaceId, surfaceId, tab.ptyId, direction)),
+    terminals.open(ptyStartFolder(workspaceId), id => useRightPanelStore.getState().splitTerminal(workspaceId, surfaceId, id, direction)),
   );
+}
+
+/** A new terminal from the panel, by its + or its key: it joins the surface while that surface's side list shows,
+ * and opens a tab of its own from a lone terminal or a full list. */
+export function newPanelTerminal(workspaceId: string, surfaceId?: string): Promise<void> {
+  const state = selectWorkspaceRightPanelState(useRightPanelStore.getState().byWorkspaceId, workspaceId);
+  const surface = state.surfaces.find(s => s.id === (surfaceId ?? state.activeSurfaceId));
+  if (surface?.kind === "terminal" && surface.terminalIds.length > 1 && surface.terminalIds.length < MAX_TERMINALS_PER_GROUP) {
+    return splitPanelTerminal(workspaceId, surface.id, surface.splitDirection ?? "horizontal");
+  }
+  return openPanelTerminal(workspaceId);
 }
 
 /** A fresh pty split into the panel's active terminal surface, or a new surface when none is active. */
@@ -325,7 +332,7 @@ export function runShellCommand(command: KeybindingCommand, target: ShellCommand
       return;
     case "terminal.new":
       if (!workspaceId) return;
-      void (getTerminalFocusOwner() === "right-panel" ? openPanelTerminal(workspaceId) : openDrawerTerminal(workspaceId));
+      void (getTerminalFocusOwner() === "right-panel" ? newPanelTerminal(workspaceId) : openDrawerTerminal(workspaceId));
       return;
     case "terminal.split":
       if (!workspaceId) return;

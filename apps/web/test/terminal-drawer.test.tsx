@@ -15,7 +15,7 @@ import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { selectWorkspaceRightPanelState, useRightPanelStore } from "../src/rightPanelStore.js";
 import { RightPanel } from "../src/shell/RightPanel.js";
-import { openDrawerTerminal, openPanelTerminal, splitActivePanelTerminal, splitDrawerTerminal } from "../src/shell/shellCommands.js";
+import { openDrawerTerminal, openPanelTerminal, runShellCommand, splitActivePanelTerminal, splitDrawerTerminal } from "../src/shell/shellCommands.js";
 import { useTerminalDrawerStore } from "../src/terminal/drawerStore.js";
 import { provideTerminals, WorkspaceTerminals, type TerminalWire } from "../src/terminal/link.js";
 import { caps } from "./caps.js";
@@ -132,7 +132,7 @@ describe("WorkspaceTerminalDrawer", () => {
     expect(ui.activeTerminalId).toBe("p2");
     expect(ui.terminalGroups.map(g => g.terminalIds)).toEqual([["p1"], ["p2"]]);
     // Two terminals: the tab list appears with the link's titles, one surface shown.
-    expect(screen.getAllByText("shell")).toHaveLength(2);
+    expect(rowsOf("drawer")).toEqual(["shell 1", "shell 2"]);
     await waitFor(() => expect(canvases("drawer")).toHaveLength(1));
     fireEvent.click(screen.getByLabelText(/^Split terminal horizontally/));
     await waitFor(() => expect(count("pty.create")).toBe(3));
@@ -244,12 +244,12 @@ describe("terminal as a right-panel surface", () => {
     render(<Panel />);
     await waitFor(() => expect(document.querySelector('[data-terminal-owner="right-panel"]')).not.toBeNull());
     await waitFor(() => expect(inputs("right-panel")).toHaveLength(1), { timeout: 15_000 });
-    expect(screen.getAllByText("shell").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("shell 1").length).toBeGreaterThan(0);
     act(() => wt.feedEvent({ type: "pty.data", ptyId: tab.ptyId, data: "\x1b[6n" }));
     await waitFor(() => expect(writes().join("")).toContain("\x1b[1;1R"));
   }, 20_000);
 
-  it("split in the panel adds the new pty to the surface's group; new opens a second surface", async () => {
+  it("split in the panel adds the new pty to the surface's group", async () => {
     const { wt, count } = fakeLink();
     const tab = await wt.open();
     useRightPanelStore.getState().openTerminal(WS, tab.ptyId);
@@ -263,10 +263,6 @@ describe("terminal as a right-panel surface", () => {
       expect(s?.kind === "terminal" ? s.terminalIds : []).toEqual(["p1", "p2"]);
     });
     await waitFor(() => expect(canvases("right-panel")).toHaveLength(2));
-
-    fireEvent.click(screen.getByLabelText(/^New terminal/));
-    await waitFor(() => expect(count("pty.create")).toBe(3));
-    await waitFor(() => expect(selectWorkspaceRightPanelState(useRightPanelStore.getState().byWorkspaceId, WS).surfaces.map(s => s.id)).toEqual(["terminal:p1", "terminal:p3"]));
   }, 30_000);
 });
 
@@ -336,7 +332,7 @@ describe("one owner per pty", () => {
 
     const drawerSaw: string[][] = [];
     const unsubscribe = useTerminalDrawerStore.subscribe(s => drawerSaw.push([...(s.byWorkspaceId[WS]?.terminalIds ?? [])]));
-    fireEvent.click(screen.getByLabelText(/^Close shell$/));
+    fireEvent.click(screen.getByLabelText(/^Close shell 2$/));
     await waitFor(() => expect(count("pty.kill")).toBe(1));
     unsubscribe();
     expect(ops.find(o => o.op === "pty.kill")?.params["ptyId"]).toBe("p2");
@@ -362,6 +358,122 @@ describe("one owner per pty", () => {
     expect(count("pty.create")).toBe(1);
     unmount();
   });
+});
+
+/** The terminals one owner's side list names, top to bottom. */
+const rowsOf = (owner: string): string[] =>
+  [...document.querySelectorAll<HTMLElement>(`[data-terminal-owner="${owner}"] .group\\/tab [aria-label^="Close "]`)].map(b => b.getAttribute("aria-label")!.replace(/^Close /, ""));
+
+/** The group headers one owner's side list shows, each as its label and any count after it. */
+const headersOf = (owner: string): string[] =>
+  [...document.querySelectorAll<HTMLElement>(`[data-terminal-owner="${owner}"] [data-terminal-tabs] button`)].map(b => b.textContent ?? "").filter(t => /^(Single|Side by side|Stacked)/.test(t));
+
+describe("each terminal reads as its own", () => {
+  beforeEach(() => {
+    useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [view], statuses: {}, costs: {}, spending: {}, selectedId: WS, sessions: {}, ready: true });
+    clearNotices();
+  });
+
+  it("two shells in the drawer and two in the panel each read under a name of their own", async () => {
+    fakeLink();
+    useTerminalDrawerStore.getState().setOpen(WS, true);
+    render(
+      <>
+        <WorkspaceTerminalDrawer workspaceId={WS} />
+        <Panel />
+      </>,
+    );
+    await waitFor(() => expect(inputs("drawer")).toHaveLength(1), { timeout: 15_000 });
+    await act(() => openDrawerTerminal(WS));
+    await waitFor(() => expect(rowsOf("drawer")).toEqual(["shell 1", "shell 2"]));
+    await act(() => openPanelTerminal(WS));
+    await act(() => splitActivePanelTerminal(WS));
+    await waitFor(() => expect(rowsOf("right-panel")).toEqual(["shell 3", "shell 4"]));
+    expect(rowsOf("drawer")).toEqual(["shell 1", "shell 2"]);
+  }, 30_000);
+
+  it("a group's count shows only on a split group, so a lone shell's group reads no number", async () => {
+    fakeLink();
+    useTerminalDrawerStore.getState().setOpen(WS, true);
+    render(<WorkspaceTerminalDrawer workspaceId={WS} />);
+    await waitFor(() => expect(inputs("drawer")).toHaveLength(1), { timeout: 15_000 });
+    await act(() => openDrawerTerminal(WS));
+    await waitFor(() => expect(rowsOf("drawer")).toEqual(["shell 1", "shell 2"]));
+    expect(headersOf("drawer")).toEqual(["Single", "Single"]);
+    await act(() => splitDrawerTerminal(WS));
+    await waitFor(() => expect(headersOf("drawer")).toEqual(["Single", "Side by side2"]));
+  }, 30_000);
+
+  it("the new-terminal key in a panel whose side list shows adds to that list, as its + does; on a lone terminal it opens a tab", async () => {
+    const { wt, count } = fakeLink();
+    const tab = await wt.open();
+    useRightPanelStore.getState().openTerminal(WS, tab.ptyId);
+    render(<Panel />);
+    await waitFor(() => expect(inputs("right-panel")).toHaveLength(1), { timeout: 15_000 });
+    const surfaces = () => selectWorkspaceRightPanelState(useRightPanelStore.getState().byWorkspaceId, WS).surfaces.map(s => (s.kind === "terminal" ? [s.id, s.terminalIds] : s.id));
+    const pressNew = () => {
+      document.querySelector<HTMLElement>('[data-terminal-owner="right-panel"] button')!.focus();
+      runShellCommand("terminal.new", { workspaceId: WS, toggleSidebar: () => {} }, []);
+    };
+
+    pressNew();
+    await waitFor(() => expect(surfaces()).toEqual([["terminal:p1", ["p1"]], ["terminal:p2", ["p2"]]]));
+    await act(() => splitActivePanelTerminal(WS));
+    await waitFor(() => expect(rowsOf("right-panel")).toHaveLength(2));
+    pressNew();
+    await waitFor(() => expect(count("pty.create")).toBe(4));
+    await waitFor(() => expect(surfaces()).toEqual([["terminal:p1", ["p1"]], ["terminal:p2", ["p2", "p3", "p4"]]]));
+  }, 30_000);
+
+  it("a terminal opened from the panel never reaches the drawer, not even for one render", async () => {
+    const { count } = fakeLink();
+    useTerminalDrawerStore.getState().setOpen(WS, true);
+    render(
+      <>
+        <WorkspaceTerminalDrawer workspaceId={WS} />
+        <Panel />
+      </>,
+    );
+    await waitFor(() => expect(inputs("drawer")).toHaveLength(1), { timeout: 15_000 });
+    // The drawer draws only ids its store holds, so a store that never held the panel's pty is a drawer that never drew it.
+    const drawerSaw: string[][] = [];
+    const unsubscribe = useTerminalDrawerStore.subscribe(s => drawerSaw.push([...(s.byWorkspaceId[WS]?.terminalIds ?? [])]));
+    await openPanelTerminal(WS);
+    await waitFor(() => expect(inputs("right-panel")).toHaveLength(1), { timeout: 15_000 });
+    unsubscribe();
+    expect(count("pty.create")).toBe(2);
+    expect(drawerSaw.some(ids => ids.includes("p2"))).toBe(false);
+    expect(canvases("drawer")).toHaveLength(1);
+  }, 30_000);
+
+  it("+ in the panel's side list adds a terminal to that list; a lone terminal's + and a full list's open a tab of their own", async () => {
+    const { wt, count } = fakeLink();
+    const tab = await wt.open();
+    useRightPanelStore.getState().openTerminal(WS, tab.ptyId);
+    render(<Panel />);
+    await waitFor(() => expect(inputs("right-panel")).toHaveLength(1), { timeout: 15_000 });
+    const surfaces = () =>
+      selectWorkspaceRightPanelState(useRightPanelStore.getState().byWorkspaceId, WS).surfaces.map(s => (s.kind === "terminal" ? [s.id, s.terminalIds, s.splitDirection] : s.id));
+    const plusInList = () => within(document.querySelector<HTMLElement>('[data-terminal-owner="right-panel"] [data-terminal-tabs]')!).getByLabelText(/^New terminal/);
+
+    // A lone terminal has no list, so its + opens a second tab.
+    fireEvent.click(screen.getByLabelText(/^New terminal/));
+    await waitFor(() => expect(surfaces()).toEqual([["terminal:p1", ["p1"], undefined], ["terminal:p2", ["p2"], undefined]]));
+
+    await act(() => splitActivePanelTerminal(WS, "vertical"));
+    await waitFor(() => expect(rowsOf("right-panel")).toHaveLength(2));
+    fireEvent.click(plusInList());
+    await waitFor(() => expect(count("pty.create")).toBe(4));
+    await waitFor(() => expect(rowsOf("right-panel")).toHaveLength(3));
+    expect(surfaces()).toEqual([["terminal:p1", ["p1"], undefined], ["terminal:p2", ["p2", "p3", "p4"], "vertical"]]);
+
+    fireEvent.click(plusInList());
+    await waitFor(() => expect(rowsOf("right-panel")).toHaveLength(4));
+    // Four is as many as one surface splits into, so the next + opens a tab of its own.
+    fireEvent.click(plusInList());
+    await waitFor(() => expect(count("pty.create")).toBe(6));
+    await waitFor(() => expect(surfaces()).toEqual([["terminal:p1", ["p1"], undefined], ["terminal:p2", ["p2", "p3", "p4", "p5"], "vertical"], ["terminal:p6", ["p6"], undefined]]));
+  }, 60_000);
 });
 
 describe("reload adopts the daemon's ptys", () => {

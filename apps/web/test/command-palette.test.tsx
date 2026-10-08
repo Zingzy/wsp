@@ -648,8 +648,13 @@ describe("default shortcuts", () => {
       const surface = panel("ws_a")?.surfaces[0];
       expect(surface?.kind === "terminal" && surface.terminalIds).toEqual(["pty1", "pty2"]);
     });
+    // Two terminals show the surface's side list, so a new one joins that list rather than opening a tab.
     mod("n", {}, ta);
-    await waitFor(() => expect(panel("ws_a")?.activeSurfaceId).toBe("terminal:pty3"));
+    await waitFor(() => {
+      const surface = panel("ws_a")?.surfaces[0];
+      expect(surface?.kind === "terminal" && surface.terminalIds).toEqual(["pty1", "pty2", "pty3"]);
+    });
+    expect(panel("ws_a")?.surfaces.map(s => s.id)).toEqual(["terminal:pty1"]);
     expect(drawer("ws_a")).toBeUndefined();
     term.remove();
   });
