@@ -1166,6 +1166,7 @@ mod tests {
         assert_eq!(read.rows.iter().map(|r| r.session.as_str()).collect::<Vec<_>>(), vec!["s2"]);
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn as_root_the_stores_are_read_as_the_homes_owner_so_a_root_only_file_reads_nothing() {
         if !nix::unistd::geteuid().is_root() {

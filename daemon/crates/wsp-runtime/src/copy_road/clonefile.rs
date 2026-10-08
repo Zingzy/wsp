@@ -244,14 +244,8 @@ mod tests {
             "/Volumes/stick/work-other is on another volume; a directory clone needs the same one"
         );
         assert_eq!(said(clonable(to, &apfs, &apfs, false, &small, u64::MAX)), "/ cannot clone directories");
-        assert_eq!(
-            said(clonable(to, &apfs, &apfs, true, &small, 1024)),
-            "the folder is 4096 bytes and a clone above 1024 bytes is not taken"
-        );
-        assert_eq!(
-            said(clonable(to, &full, &full, true, &small, u64::MAX)),
-            "the volume has 1024 bytes free and the copy could grow to 4096 bytes"
-        );
+        assert_eq!(said(clonable(to, &apfs, &apfs, true, &small, 1024)), "the folder is 4 KB and a clone above 1 KB is not taken");
+        assert_eq!(said(clonable(to, &full, &full, true, &small, u64::MAX)), "the volume has 1 KB free and the copy could grow to 4 KB");
         assert!(matches!(clonable(to, &apfs, &apfs, true, &small, u64::MAX), Availability::Yes));
     }
 }

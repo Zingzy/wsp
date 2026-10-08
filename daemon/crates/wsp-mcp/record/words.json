@@ -294,7 +294,7 @@
     "servers_enable": "wsp servers enable <name> [<workspace>] [--on <computer>] --agent <id> [--scope <user|home|project>] [--project [<name>]]",
     "projects": "wsp projects",
     "projects_remove": "wsp projects remove <project>",
-    "projects_set": "wsp projects set <project> [--agent <id>] [--model <slug>] [--effort <word>] [--access <word>] [--reset <field>]...",
+    "projects_set": "wsp projects set <project> [--agent <id>] [--model <slug>] [--effort <word>] [--access <word>] [--after-worktree <command>] [--reset <field>]...",
     "threads": "wsp threads [<project>] [--tree] [--watch]",
     "threads_wait": "wsp threads wait <thread>... [--timeout <s>] [--tail]",
     "recipe_scan": "wsp recipe scan [--project <folder>]",
@@ -340,7 +340,8 @@
   "defaults": {
     "agentSetNothing": "wsp agents set takes --model, --effort, --access, a model to --hide, --show, --add-model or --drop-model, --order or --reset. Name at least one; with none of them there is nothing to change.",
     "agentSetupNothing": "wsp agents setup takes --enable or --disable, --program, --config, --arg, --env, --unset-env or --reset. Name at least one; with none of them there is nothing to change.",
-    "projectSetNothing": "wsp projects set takes --agent, --model, --effort, --access or --reset. Name at least one; with none of them there is nothing to change.",
+    "projectSetNothing": "wsp projects set takes --agent, --model, --effort, --access, --after-worktree or --reset. Name at least one; with none of them there is nothing to change.",
+    "afterWorktreeBlank": "--after-worktree was given a blank command, which a new worktree cannot run. Name the shell line a new worktree runs, or take the command away with --reset after-worktree.",
     "defaultAgent": "A new thread that names no agent runs {agent}, where its project names none.",
     "startsOwn": "{agent} starts on its own defaults.",
     "startsOn": "{agent} starts on {said}.",
@@ -359,6 +360,7 @@
     },
     "signInAgain": "{agent} keeps its sign-in under its config folder, so sign it in again there before its next thread.",
     "newThreadsHead": "A new thread on {project} starts on:",
+    "afterWorktree": "after a new worktree: {command}",
     "from": {
       "named": "named on the start",
       "project": "this project's",

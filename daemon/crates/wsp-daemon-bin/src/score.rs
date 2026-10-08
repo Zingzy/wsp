@@ -16,8 +16,8 @@ pub(crate) fn apply() {
 }
 
 /// The kernel's defaults, for the helpers whose children are a workspace's.
+#[cfg(target_os = "linux")]
 pub(crate) fn for_workspace() {
-    #[cfg(target_os = "linux")]
     set(0, 0);
 }
 

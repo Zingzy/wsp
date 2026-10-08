@@ -119,7 +119,46 @@ pub struct WorktreeReport {
     /// The carried directories a clone could not take, so every byte of them was copied.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub plain: Vec<String>,
+    /// The carried directories mounted as an overlay of a frozen copy of the folder's own, on a Linux disk that
+    /// shares no blocks.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub overlaid: Vec<String>,
+    /// Whether this call made the worktree, so what runs once in a new worktree runs now.
+    pub fresh: bool,
+    /// Every folder of the new worktree holding a lockfile of a module, one row per module there; empty where the
+    /// worktree was already there.
+    pub modules: Vec<FoundModule>,
     pub ms: u64,
+}
+
+/// One module whose lockfile a folder of a new worktree holds.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct FoundModule {
+    pub id: String,
+    /// The folder holding the lockfile, relative to the worktree, `.` for its top; where the rebuild runs.
+    pub folder: String,
+    /// Whether its rebuild runs there: always for a module that carries nothing in, and for one that does unless
+    /// what came in records that it was installed from the very lockfile the branch holds there.
+    pub rebuild: bool,
+}
+
+/// One ecosystem as `copy worktree` is handed it: the lockfiles that pick it in whatever folder holds one, the
+/// ignored directories under that folder a new worktree takes from the project folder, the ones it never takes
+/// because they hold the path they were built at, and where its install leaves a copy of the lockfile it installed
+/// from, relative to the lockfile's folder.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct CarryModule {
+    pub id: String,
+    pub lockfiles: Vec<String>,
+    pub carry: Vec<String>,
+    pub never: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub installed: Option<String>,
 }
 
 /// The one JSON line `wsp-daemon copy worktree-remove` prints once the worktree is gone.

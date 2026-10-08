@@ -387,6 +387,7 @@ impl Ctx {
     /// that workspace's mount namespace and in no other's, and a process inside reaches the two guest ops through
     /// it and no more. A door already held for this workspace is replaced, which is what a boot after a daemon
     /// restart finds.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     pub(crate) fn open_workspace_door(self: &Arc<Self>, id: &str, at: &Path) {
         let at = at.to_path_buf();
         let listener = match relay::listen_open_socket(&at) {
@@ -442,6 +443,7 @@ impl Ctx {
     /// The door goes with the workspace it was inside: this ends the loop, and the file it was bound on is the
     /// runtime's to take off, since the folder it sits in is the workspace's own and a workspace may be stopped
     /// by something other than the daemon that bound it.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     pub(crate) fn close_workspace_door(&self, id: &str) {
         let held = self.workspace_doors.lock().unwrap_or_else(|e| e.into_inner()).remove(id);
         if let Some(door) = held {

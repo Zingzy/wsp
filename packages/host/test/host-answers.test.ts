@@ -155,7 +155,7 @@ function bigTree(home: string): { folder: string; verb: string } {
   for (let i = 0; i < TREE_LARGE; i++) execFileSync("sh", ["-c", `head -c 104857600 /dev/urandom > ${join(folder, `blob${i}.bin`)}`]);
   execFileSync("git", ["init", "-q", folder]);
   const verb = join(home, "worktree-verb");
-  const report = '{"path":"%s","branch":"%s","made":true,"carried":[],"ms":1}\\n';
+  const report = '{"path":"%s","branch":"%s","made":true,"carried":[],"fresh":true,"modules":[],"rebuild":[],"ms":1}\\n';
   writeStub(verb, ["#!/bin/sh", "while [ $# -gt 0 ]; do case $1 in --from) from=$2; shift 2;; --home) at=$2; shift 2;; --project) project=$2; shift 2;; --branch) branch=$2; shift 2;; *) shift;; esac; done", 'to="$at/worktrees/$project/$branch"', 'mkdir -p "$at/worktrees/$project"', 'cp -a "$from" "$to" || exit 1', `printf '${report}' "$to" "$branch"`, ""].join("\n"));
   return { folder, verb };
 }

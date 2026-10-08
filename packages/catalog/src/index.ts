@@ -16,6 +16,7 @@ export * from "./context.js";
 export * from "./hooks.js";
 export * from "./codex-hooks.js";
 export * from "./catalog.js";
+export * from "./ecosystems/index.js";
 export * from "./thread-agents.js";
 export * from "./first-run.js";
 export * from "./base-image.js";

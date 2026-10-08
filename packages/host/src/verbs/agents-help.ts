@@ -326,7 +326,7 @@ export const SKILL_CHANGE_WORDS =
 
 /** Each field a --reset puts back on the layer below, by the verb that takes it. */
 export const AGENT_SET_RESETS = ["model", "effort", "access", "models"] as const;
-export const PROJECT_SET_RESETS = ["agent", "model", "effort", "access"] as const;
+export const PROJECT_SET_RESETS = ["agent", "model", "effort", "access", "after-worktree"] as const;
 export const AGENT_SETUP_RESETS = ["program", "config", "args"] as const;
 
 /** The fields a --reset names, each one of the verb's own; a word outside them is refused naming them. */
@@ -465,27 +465,35 @@ interface ProjectSetAsk {
   model?: string;
   effort?: string;
   access?: string;
+  afterWorktree?: string;
   reset?: readonly string[];
 }
 
-export const projectSetNothingLine = "wsp projects set takes --agent, --model, --effort, --access or --reset.";
+export const projectSetNothingLine = "wsp projects set takes --agent, --model, --effort, --access, --after-worktree or --reset.";
+export const afterWorktreeBlankLine = "--after-worktree was given a blank command, which a new worktree cannot run.";
+export const AFTER_WORKTREE_BLANK_FIX = "Name the shell line a new worktree runs, or take the command away with --reset after-worktree.";
+/** The project's own after-worktree command, as a line under what a new thread there starts on. */
+export const afterWorktreeLine = (command: string): string => `after a new worktree: ${command}`;
 export const noDefaultsAnsweredLine = (project: string): string => `the host answered no defaults for ${project}`;
 
 /** One project's overrides moved, and what a new thread on it now starts on. */
-export async function projectDefaultsSet(client: HostClient, ref: string, ask: ProjectSetAsk): Promise<{ project: ProjectView; defaults: ThreadDefaults }> {
+export async function projectDefaultsSet(client: HostClient, ref: string, ask: ProjectSetAsk): Promise<{ project: ProjectView; defaults: ThreadDefaults; afterWorktree?: string }> {
+  if (ask.afterWorktree !== undefined && ask.afterWorktree.trim() === "") throw usageRefusal(afterWorktreeBlankLine, AFTER_WORKTREE_BLANK_FIX);
   const resets = resetsOf(PROJECT_SET_RESETS, ask.reset ?? []);
   const patch: ProjectOverridesPatch = {
     ...patched("agent", ask.agent, resets.includes("agent")),
     ...patched("model", ask.model, resets.includes("model")),
     ...patched("effort", ask.effort, resets.includes("effort")),
     ...patched("access", ask.access === undefined ? undefined : accessWordOf(ask.access), resets.includes("access")),
+    ...patched("afterWorktree", ask.afterWorktree, resets.includes("after-worktree")),
   };
   if (Object.keys(patch).length === 0) throw usageRefusal(projectSetNothingLine, NOTHING_TO_SET_FIX);
   const project = await projectOf(client, ref);
-  await client.request("preferences.set", { patch: { projectDefaults: { [project.id]: patch } } });
+  const { preferences } = await client.request<{ preferences: unknown }>("preferences.set", { patch: { projectDefaults: { [project.id]: patch } } });
   const defaults = (await projectDefaultsOf(client))[project.id];
   if (defaults === undefined) throw new Error(noDefaultsAnsweredLine(project.name));
-  return { project, defaults };
+  const afterWorktree = Preferences.parse(preferences).projectDefaults[project.id]?.afterWorktree;
+  return { project, defaults, ...(afterWorktree !== undefined ? { afterWorktree } : {}) };
 }
 
 /** Where a resolved value came from, as a person reads it. */

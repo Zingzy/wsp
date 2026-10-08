@@ -102,6 +102,7 @@ pub(crate) fn read_named(path: &Path) -> Result<String, String> {
 /// The filesystem under a folder as statfs reads it, in bytes.
 pub(crate) fn disk_under(path: &Path) -> Result<Usage, String> {
     let fs = nix::sys::statfs::statfs(path).map_err(|e| format!("statfs {}: {e}", path.display()))?;
+    #[cfg_attr(target_os = "macos", allow(clippy::unnecessary_fallible_conversions))]
     let bsize = u64::try_from(fs.block_size()).unwrap_or(0);
     Ok(Usage { used: fs.blocks().saturating_sub(fs.blocks_free()) * bsize, total: fs.blocks() * bsize })
 }

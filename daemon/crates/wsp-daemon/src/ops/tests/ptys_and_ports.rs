@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 //! The op switch's ptys and port watches, as a socket asks for them.
 
-use serde_json::{json, Value};
+use serde_json::json;
 
 use super::{bench, conn, reply};
 #[cfg(target_os = "linux")]
@@ -17,7 +17,9 @@ async fn named_port_watches_on_one_socket_keep_their_own_roots_beside_its_own_wa
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
     let group = nix::unistd::getpgrp().as_raw();
-    let ports_of = |reply: &Value| -> Vec<u64> { reply["ports"].as_array().unwrap().iter().map(|p| p["port"].as_u64().unwrap()).collect() };
+    let ports_of = |reply: &serde_json::Value| -> Vec<u64> {
+        reply["ports"].as_array().unwrap().iter().map(|p| p["port"].as_u64().unwrap()).collect()
+    };
     let mine = reply(&b, &c, json!({"id": 1, "op": "ports.watch", "roots": [group], "watch": "ws_a"})).await;
     assert!(ports_of(&mine).contains(&u64::from(port)), "{mine}");
     let theirs = reply(&b, &c, json!({"id": 2, "op": "ports.watch", "roots": [999_999], "watch": "ws_b"})).await;

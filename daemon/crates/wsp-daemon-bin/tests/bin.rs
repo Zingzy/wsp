@@ -722,8 +722,9 @@ fn git_in(at: &std::path::Path, args: &[&str]) -> String {
 async fn the_worktree_verb_makes_a_worktree_on_a_branch_and_removes_it_only_when_nothing_is_uncommitted() {
     let dir = tempfile::tempdir().unwrap();
     let from = repo_in(dir.path());
-    std::fs::write(from.join(".gitignore"), b"node_modules/\n*.local\n").unwrap();
-    git_in(&from, &["add", ".gitignore"]);
+    std::fs::write(from.join(".gitignore"), b"node_modules/\n.venv/\n*.local\n").unwrap();
+    std::fs::write(from.join("pnpm-lock.yaml"), b"lockfileVersion: '9.0'\n").unwrap();
+    git_in(&from, &["add", ".gitignore", "pnpm-lock.yaml"]);
     git_in(&from, &["commit", "--quiet", "-m", "ignore"]);
     git_in(&from, &["checkout", "--quiet", "-b", "feat/ahead"]);
     for n in 0..20 {
@@ -734,6 +735,7 @@ async fn the_worktree_verb_makes_a_worktree_on_a_branch_and_removes_it_only_when
     git_in(&from, &["checkout", "--quiet", "main"]);
     std::fs::create_dir_all(from.join("node_modules/pkg")).unwrap();
     std::fs::write(from.join("node_modules/pkg/index.js"), b"dep\n").unwrap();
+    std::fs::create_dir_all(from.join(".venv/bin")).unwrap();
     std::fs::write(from.join(".env.local"), b"KEY=1\n").unwrap();
     let home = dir.path().join("home");
     std::fs::create_dir_all(&home).unwrap();
@@ -743,7 +745,9 @@ async fn the_worktree_verb_makes_a_worktree_on_a_branch_and_removes_it_only_when
         .arg(&from)
         .arg("--home")
         .arg(&home)
-        .args(["--project", "prj_1", "--branch", "feat/ahead", "--carry", "node_modules", "--carry", ".venv"])
+        .args(["--project", "prj_1", "--branch", "feat/ahead"])
+        .args(["--module", r#"{"id":"pnpm","lockfiles":["pnpm-lock.yaml"],"carry":["node_modules"],"never":[]}"#])
+        .args(["--module", r#"{"id":"uv","lockfiles":["uv.lock"],"carry":[".venv"],"never":[]}"#])
         .output()
         .unwrap();
     assert!(made.status.success(), "{}", String::from_utf8_lossy(&made.stderr));
@@ -754,10 +758,35 @@ async fn the_worktree_verb_makes_a_worktree_on_a_branch_and_removes_it_only_when
     assert_eq!(report["path"], at.display().to_string());
     assert_eq!(report["branch"], "feat/ahead");
     assert_eq!(report["made"], true);
-    assert_eq!(report["carried"], json!([".env.local", "node_modules"]));
+    assert_eq!(report["carried"], json!([".env.local", "node_modules"]), "a module whose lockfile the branch lacks carried");
+    assert_eq!(report["fresh"], true);
+    assert_eq!(report["modules"], json!([{ "id": "pnpm", "folder": ".", "rebuild": true }]));
     assert_eq!(git_in(&from, &["rev-parse", "feat/ahead"]), tip, "the branch moved");
     assert_eq!(git_in(&at, &["rev-parse", "HEAD"]), tip);
     assert_eq!(std::fs::read_to_string(at.join("node_modules/pkg/index.js")).unwrap(), "dep\n");
+
+    let mounted = std::process::Command::new(BIN)
+        .args(["copy", "worktree-mount", "--from"])
+        .arg(&from)
+        .arg("--home")
+        .arg(&home)
+        .arg("--path")
+        .arg(&at)
+        .output()
+        .unwrap();
+    assert!(mounted.status.success() && mounted.stdout.is_empty(), "{}", String::from_utf8_lossy(&mounted.stderr));
+    let refused = std::process::Command::new(BIN)
+        .args(["copy", "worktree-mount", "--from"])
+        .arg(&from)
+        .arg("--home")
+        .arg(&home)
+        .arg("--path")
+        .arg(&from)
+        .output()
+        .unwrap();
+    assert_eq!(refused.status.code(), Some(1), "the project folder is no worktree wsp made");
+    let said = String::from_utf8_lossy(&refused.stderr);
+    assert!(said.contains("so nothing was mounted; wsp mounts only its own"), "{said}");
 
     let remove = || {
         std::process::Command::new(BIN)
@@ -785,6 +814,21 @@ async fn the_worktree_verb_makes_a_worktree_on_a_branch_and_removes_it_only_when
     assert_eq!(gone, json!({ "path": at.display().to_string() }));
     assert!(!at.exists());
     assert_eq!(git_in(&from, &["rev-parse", "feat/ahead"]), tip);
+
+    let forget = |project: &str| {
+        std::process::Command::new(BIN)
+            .args(["copy", "worktree-forget", "--from"])
+            .arg(&from)
+            .arg("--home")
+            .arg(&home)
+            .args(["--project", project])
+            .output()
+            .unwrap()
+    };
+    let forgot = forget("prj_1");
+    assert!(forgot.status.success() && forgot.stdout.is_empty(), "{}", String::from_utf8_lossy(&forgot.stderr));
+    assert!(!at.with_file_name(".wsp-frozen").exists(), "the project's frozen copies outlived it");
+    assert_eq!(forget("../out").status.code(), Some(1), "a project id that climbs is refused");
 }
 
 /// What the tool server holds resident, off the kernel's own count: VmRSS on Linux, ps's rss column on the Mac.

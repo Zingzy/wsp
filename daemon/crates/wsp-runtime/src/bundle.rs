@@ -892,7 +892,7 @@ fn open_step(dir: &OwnedFd, name: &str, want: Want) -> Result<OwnedFd, Errno> {
 
 /// What a descriptor is named by where a call takes a path: the kernel resolves it to the file as it was opened,
 /// which is why a mount lands on the inode held rather than on whatever a path leads to now.
-fn by_fd(fd: BorrowedFd<'_>) -> PathBuf {
+pub(crate) fn by_fd(fd: BorrowedFd<'_>) -> PathBuf {
     PathBuf::from(format!("/proc/self/fd/{}", fd.as_raw_fd()))
 }
 
