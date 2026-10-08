@@ -7,7 +7,7 @@
 // module and its row.
 import { CLAUDE_CONFIG_DIR, GUEST_HOME } from "@wsp/catalog";
 import { envInput, INSTALL_MS, installScript, projectInstalls, withEnvFromInput, type Machine } from "@wsp/engine";
-import { claudeMemoryDir, claudeProjectKey, NO_IMAGE_FOR_SEED, placeDaemonPaths, projectLeftOnComputerLine, projectPathOn, projectRemovedAtProviderLine, projectRemovedHereLine, seedBytes, seedCommitsLandedLine, seedCommitsLostLine, SEED_DIR, SEED_MEMORY_DIR, SEED_PATCH, seedingLine, seedMemoryKeptLine, shellLine, shellQuote, type MachineBind, type ProjectAddStage, type ProjectSource, type ProjectView, type SeedChoice, type SeedPlan } from "@wsp/protocol";
+import { claudeMemoryDir, claudeProjectKey, NO_IMAGE_FOR_SEED, placeDaemonPaths, placeInstallLog, projectLeftOnComputerLine, projectPathOn, projectRemovedAtProviderLine, projectRemovedHereLine, seedBytes, seedCommitsLandedLine, seedCommitsLostLine, SEED_DIR, SEED_MEMORY_DIR, SEED_PATCH, seedingLine, seedMemoryKeptLine, shellLine, shellQuote, type MachineBind, type ProjectAddStage, type ProjectSource, type ProjectView, type SeedChoice, type SeedPlan } from "@wsp/protocol";
 import type { ProjectSourceModule } from "./project-sources.js";
 
 /** How far the add has got, as the door turns each one into an event. */
@@ -416,7 +416,7 @@ const boxLanding: ProjectLanding = {
     const memoryDir = claudeMemoryDir(underLoginHome(home, CLAUDE_CONFIG_DIR), memoryKey);
     const wsp = placeDaemonPaths(home);
     try {
-      const landed = await cloneSeedInstall({ ...o, project: { ...o.project, path, memoryKey, memoryDir } }, { ...deps, scratch: () => wsp.putDir }, machine, { checkout: path, holds: path, memoryDir, log: `${wsp.wsp}/install-${o.project.id}.log` }, { env: deps.cloneEnv?.() ?? {} });
+      const landed = await cloneSeedInstall({ ...o, project: { ...o.project, path, memoryKey, memoryDir } }, { ...deps, scratch: () => wsp.putDir }, machine, { checkout: path, holds: path, memoryDir, log: placeInstallLog(home, o.project.id) }, { env: deps.cloneEnv?.() ?? {} });
       return { ...landed, path, memoryKey, memoryDir, git: { top: path } };
     } catch (e) {
       // Nothing of a project that was not recorded is left in the home: the folder this add made goes, so the add

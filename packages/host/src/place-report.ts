@@ -365,6 +365,15 @@ export async function sweepPlace(opts: PlaceSweepOptions = {}): Promise<PlaceSwe
     rmSync(path, { recursive: true, force: true });
     removed.push(path);
   }
+  const wsp = placeDaemonPaths(home).wsp;
+  if (lstatSync(wsp, { throwIfNoEntry: false })?.isDirectory() === true) {
+    try {
+      rmdirSync(wsp);
+      removed.push(wsp);
+    } catch {
+      // Not empty: the person's own wsp or a host's state is in it.
+    }
+  }
   // The workspace profile only root's install loaded, unloaded before its file goes, as the host's remove does it.
   const profile = opts.apparmorProfile ?? WSP_WORKSPACE_APPARMOR_PATH;
   const tools = opts.tools ?? { prefix: TOOL_PREFIX, links: TOOL_LINKS_DIR };

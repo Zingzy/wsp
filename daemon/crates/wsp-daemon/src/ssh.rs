@@ -298,7 +298,7 @@ impl Servers {
     fn files(&self, machine: &Machine<'_>) -> Result<Files, OpError> {
         match machine {
             Machine::Here => {
-                let dir = self.programs.dir.clone().unwrap_or_else(|| self.token_dir.join("ssh"));
+                let dir = self.programs.dir.clone().unwrap_or_else(|| self.token_dir.join(wsp_frames::SSH_FOLDER));
                 make_private_dir(&dir)?;
                 Ok(Files { dir })
             }

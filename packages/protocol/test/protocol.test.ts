@@ -1320,6 +1320,12 @@ describe("daemon files and diff ops", () => {
       placeKey: "/home/maya/.wsp/place-key.pem",
       placeLog: "/home/maya/.wsp/place.log",
       placeFound: "/home/maya/.wsp/place-found",
+      // A leave takes ~/.wsp only once it is empty, so every write under it has its own name here.
+      placeFoundPart: "/home/maya/.wsp/place-found.part",
+      joinCode: "/home/maya/.wsp/join-code",
+      installLogs: "/home/maya/.wsp/install-logs",
+      readings: "/home/maya/.wsp/readings",
+      sshDir: "/home/maya/.wsp/ssh",
     });
     // The deploy on the host writes these and the runtime reads the token and the port back off them, which is
     // why the rule sits here and in neither of them.

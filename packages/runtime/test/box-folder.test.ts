@@ -5,7 +5,7 @@
 // runs on the computer itself as that login. The computer is a fake on the
 // link, answering the frames the host sends it and keeping every one.
 import { describe, expect, it } from "vitest";
-import { cgroupJoinLine, childOnAnotherComputerLine, claudeMemoryDir, claudeProjectKey, HERE_PLACE_ID, placeLoginNotRootLine, rootsPathIn, threadCgroup, type AsideQuestion, type ThreadScope, type TurnResult } from "@wsp/protocol";
+import { cgroupJoinLine, childOnAnotherComputerLine, claudeMemoryDir, claudeProjectKey, HERE_PLACE_ID, placeLoginNotRootLine, placeOwnedPaths, rootsPathIn, threadCgroup, type AsideQuestion, type ThreadScope, type TurnResult } from "@wsp/protocol";
 import type { HarnessAdapterFactory, HarnessStartOptions } from "../src/runtime.js";
 import type { ServersActs } from "../src/agents-read.js";
 import { freeFolderScript, projectLanding } from "../src/project-landing.js";
@@ -499,6 +499,19 @@ describe("the road a project on a joined computer lands by", () => {
     const landed = await road.land({ project: { id: "pr_1", name: "legacy", computer: "p", source, path: "/srv/legacy", remote: "", defaultBranch: "", memoryKey: "-srv-legacy", memoryDir: "/root/.claude-cfg/projects/-srv-legacy/memory", createdAt: "" }, source: {} as never, report: () => {} }, deps);
     expect(landed).toEqual({ git: { top: "/srv/legacy" } });
     expect(ran).toEqual([]);
+  });
+
+  it("writes the install's log under a path a leave takes, so a leave leaves nothing of the landing's in wsp's folder", async () => {
+    const ran: string[] = [];
+    const answer = (cmd: string): string => (cmd.includes("mkdir '/root/spoo-ts'") ? "/root/spoo-ts\n" : cmd.startsWith("ls -A") ? "package-lock.json\n" : "");
+    const machine = { id: "p", exec: async (cmd: string) => (ran.push(cmd), { exitCode: 0, stdout: answer(cmd), stderr: "" }) } as unknown as import("@wsp/engine").Machine;
+    const deps = { computer: { machine, home: "/root" }, computerName: "hetzner", now: () => 0 } as unknown as import("../src/project-landing.js").LandingDeps;
+    const source = { kind: "git" as const, url: "https://github.com/acme/lab.git" };
+    const project = { id: "pr_1", name: "spoo-ts", computer: "p", source, path: "", remote: "https://github.com/acme/lab.git", defaultBranch: "main", memoryKey: "", memoryDir: "", createdAt: "" };
+    await projectLanding("box").land({ project, source: { cloneCommand: () => "git clone" } as never, report: () => {} }, deps);
+    const log = /npm ci >> '([^']+)' 2>&1/.exec(ran.join("\n"))?.[1];
+    expect(log, ran.join("\n")).toBeDefined();
+    expect(placeOwnedPaths("/root").some(row => log!.startsWith(`${row}/`)), log).toBe(true);
   });
 
   it("claims the first free name in the home in one command", () => {
