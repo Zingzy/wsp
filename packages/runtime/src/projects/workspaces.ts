@@ -5,7 +5,7 @@ import { GUEST_HOME, remoteHost } from "@wsp/catalog";
 import { NotFirstLifeError, RestoreUnfinishedError, ResumeUnansweredError, goldenHead, isMissing, readGone, MachineAliveError, answerOf, diskUse, projectSnapshotName, syncDisk } from "@wsp/engine";
 import type { ProjectGolden, ProjectView, WorkspaceProject } from "@wsp/protocol";
 import { noParentWorkspaceLine, parentProjectRefusal, BringBackResult, GitPrReply, GitPushReply, GitCommitReply, GitDiscardReply, GitDiffReply, GitRunLogReply, GitPrMergeReply, GitMergeInReply, DETACHED_HEAD, leadBusyRefusal, FIX_CHECK_OR_CHILD, childOnNoBranchRefusal, mergeChildPrompt, mergeIntoOwnRefusal, noRemoteForTreeLine, type TreeRecord, GitPrReplyReply, GitPrResolveReply, GitPrReactReply, REPLY_EMPTY_LINE, type PullRequestItem, GIT_DIFF_CAP_BYTES, pullRequestSendPrompt, checkFailedPrompt, conflictsPrompt, checkNotFailedRefusal, childPushedLine, isPullRequestFact, mergeMethodRefusal, noPullRequestRefusal, noSuchCheckRefusal, notOpenRefusal, AUTO_MERGE_OFF_LINE, DRAFT_NOTES, cleanCheckoutLine, commitMessage, cutDiff, draftPrompt, agentsFrom, agentsKindRefusal, agentsMayDrive, askerOf, scopeOf, spawnActRefusal, spawnGoldenRefusal, workspaceIdOf } from "@wsp/protocol";
-import { isLocalWorkspace, kindWords, noCommandsYetLine, readingRoad, forgetUndrivenRefusal, goneRefusal, goneWords, imageMoveRefusal, inFolder, machineWord, deleteRefusedLine, snapshotRefusedLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, refusalLine, notOnThisComputerLine, noBranchesLine, notMadeWorktreeLine, WORKTREE_FORCE_LINE, copiesFolder, copyTakesNone, kindForComputer, shellQuote, WAKE_STOPPED, wakeAsksIn, wakeGaveUpLine, workspaceState, HERE_PLACE_ID, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, refusal, execOutsideFix, execOutsideRefusal, spawnFolderRefusal, spawnReachFix, spawnReachRefusal, spawnRepositoryWorkspaceRefusal, SPAWN_FOLDER_FIX, SPAWN_REPOSITORY_WORKSPACE_FIX } from "@wsp/protocol";
+import { isLocalWorkspace, kindWords, noCommandsYetLine, readingRoad, forgetUndrivenRefusal, goneRefusal, goneWords, imageMoveRefusal, inFolder, machineWord, deleteRefusedLine, snapshotRefusedLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, refusalLine, notOnThisComputerLine, noBranchesLine, notMadeWorktreeLine, WORKTREE_FORCE_LINE, copiesFolder, copyTakesNone, placeBranchLine, runsInFolder, workspaceLands, shellQuote, WAKE_STOPPED, wakeAsksIn, wakeGaveUpLine, workspaceState, HERE_PLACE_ID, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, refusal, execOutsideFix, execOutsideRefusal, spawnFolderRefusal, spawnReachFix, spawnReachRefusal, spawnRepositoryWorkspaceRefusal, SPAWN_FOLDER_FIX, SPAWN_REPOSITORY_WORKSPACE_FIX } from "@wsp/protocol";
 import { harnessExec, putFiles } from "@wsp/engine";
 import { ownerRepoOf } from "@wsp/protocol";
 import { providerSaid } from "../status.js";
@@ -27,11 +27,15 @@ export function workspacesArea(ctx: RuntimeContext): WorkspacesArea {
       await ctx.ready();
       const project = await ctx.projectsDoor.resolve(o.project, origin);
       const computer = project.computer;
-      const kind = kindForComputer(computer);
-      if (copiesFolder(kind)) return { name: ctx.placeName(HERE_PLACE_ID), capabilities: ctx.backendOfKind(kind).capabilities };
+      const kind = ctx.kindOf(computer);
+      if (runsInFolder(kind)) {
+        const lands = workspaceLands(computer, undefined);
+        const place = lands.at === "place" ? lands.place : undefined;
+        return { ...(place !== undefined ? { place } : {}), name: ctx.placeName(place ?? HERE_PLACE_ID), capabilities: ctx.backendOfKind(kind, place).capabilities, kind };
+      }
       const { placeId } = await ctx.landingPlace(computer);
       const at = await ctx.landingBackend(placeId);
-      return { ...(placeId !== undefined ? { place: placeId } : {}), name: ctx.placeName(placeId ?? places.wired), capabilities: at.capabilities };
+      return { ...(placeId !== undefined ? { place: placeId } : {}), name: ctx.placeName(placeId ?? places.wired), capabilities: at.capabilities, kind };
     },
 
     async create(opts, origin) {
@@ -45,27 +49,26 @@ export function workspacesArea(ctx: RuntimeContext): WorkspacesArea {
       const bornOf = asked === undefined ? opts.parent : asked.workspaceId;
       const o = { ...opts, name: ctx.nameGiven(opts.name), ...(bornOf !== undefined ? { parent: bornOf } : {}) };
       const project = await ctx.projectsDoor.resolve(o.project, origin);
-      // The project's computer decides which road this create takes, off the one table that says whether a kind
-      // copies a folder on this computer or forks an image; the origin rule is then read on that kind.
-      const kind = kindForComputer(project.computer);
+      // The project's computer decides which road this create takes, off the one table that says whether a thread
+      // of a kind runs in its project's folder or on a fork of an image; the origin rule is then read on that kind.
+      const kind = ctx.kindOf(project.computer);
       // The same rule and the same sentence the verb that sets the switch on a workspace that exists reads, so a
       // create on a computer whose agents could not drive this host is refused rather than given a dead switch.
       if (o.agents?.spawn === true && !agentsMayDrive(kind)) throw Object.assign(new Error(agentsKindRefusal(kind)), { kind: "invalid" });
       // Read before anything is asked of a machine: the project rule refuses a thread naming another project here,
       // as the same reading refuses it every workspace of one. A computer that copies its folders takes no relayed
       // request at all and says so in its own words below.
-      const copies = copiesFolder(kind);
-      // A project on this computer is its folder: a create there names the folder's record, the one every thread in
-      // that folder shares, and makes nothing.
-      if (copies) {
+      // A project on this computer or on one the person joined is its folder: a create there names the folder's
+      // record, the one every thread in that folder shares, and makes nothing.
+      if (runsInFolder(kind)) {
         ctx.refuseRecording(o.name, origin);
         // The folder is not forked, so the words a fork takes have nothing to act on: refused rather than ignored.
         const forkWords = [o.golden !== undefined ? "--from" : "", o.cpu !== undefined || o.memMb !== undefined ? "--size" : "", o.engine === true ? "--engine" : ""].filter(w => w !== "");
-        if (forkWords.length > 0) throw Object.assign(new Error(copyTakesNone(project.name, forkWords)), { kind: "invalid" });
+        if (forkWords.length > 0) throw Object.assign(new Error(copyTakesNone(project.name, forkWords, ...(copiesFolder(kind) ? [] : [ctx.placeName(project.computer)]))), { kind: "invalid" });
         if (asked !== undefined && o.agents !== undefined) throw new Error(spawnActRefusal(asked.threadId, "agents"));
         const folder = await ctx.projectFolder(project);
         if (o.agents !== undefined) {
-          folder.record.agents = agentsFrom(ctx.spawnAt(HERE_PLACE_ID), o.agents);
+          folder.record.agents = agentsFrom(ctx.spawnAt(folder.record.place ?? HERE_PLACE_ID), o.agents);
           await ctx.persist(folder.record);
         }
         return ctx.view(folder.record);
@@ -193,7 +196,7 @@ export function workspacesArea(ctx: RuntimeContext): WorkspacesArea {
             const project = ctx.projectHeld(theirs.record.project);
             if (!ctx.ofThreadsRepository(scope, project.id)) throw execFix !== undefined ? outside("workspace", execFix) : refusal(spawnRepositoryWorkspaceRefusal(scope.threadId, ctx.projectHeld(mine).name, ref), SPAWN_REPOSITORY_WORKSPACE_FIX, "usage");
             if (!ctx.projectReached(scope, project.id)) throw execFix !== undefined ? outside("folder", execFix) : refusal(spawnFolderRefusal(scope.threadId, ref), SPAWN_FOLDER_FIX, "usage");
-            throw refusal(spawnReachRefusal(scope.threadId, ref), execFix ?? spawnReachFix(project.name, !copiesFolder(kindForComputer(project.computer))), "usage");
+            throw refusal(spawnReachRefusal(scope.threadId, ref), execFix ?? spawnReachFix(project.name, !runsInFolder(ctx.kindOf(project.computer))), "usage");
           }
           if (execFix !== undefined) {
             const held = [...ctx.projectsHeld.values()];
@@ -519,7 +522,7 @@ export function workspacesArea(ctx: RuntimeContext): WorkspacesArea {
           ctx.endSessions(id, DELETED_REASON);
           const threads = new Set([...threadRecords].flatMap(([threadId, held]) => (held.workspaceId === id ? [threadId] : [])));
           for (const s of sessions.values()) if (s.view.workspaceId === id && s.view.threadId !== undefined) threads.add(s.view.threadId);
-          if (copiesFolder(entry.record.kind)) for (const threadId of threads) await ctx.dropCheckpoints(entry, threadId);
+          if (runsInFolder(entry.record.kind)) for (const threadId of threads) await ctx.dropCheckpoints(entry, threadId);
           if (takes) await ctx.removeWorktree(entry, false, { ending: true });
           // Before the machine goes: on a computer somebody owns the folders the files landed in outlive the workspace.
           await ctx.dropThreadFiles(entry, [...threadRecords].flatMap(([threadId, held]) => (held.workspaceId === id ? [threadId] : [])));
@@ -683,7 +686,7 @@ export function workspacesArea(ctx: RuntimeContext): WorkspacesArea {
     async folder({ project: named }, origin) {
       await ctx.ready();
       const project = await ctx.projectsDoor.resolve(named, origin);
-      if (!copiesFolder(kindForComputer(project.computer))) throw Object.assign(new Error(notOnThisComputerLine(project.name)), { kind: "usage" });
+      if (!runsInFolder(ctx.kindOf(project.computer))) throw Object.assign(new Error(notOnThisComputerLine(project.name)), { kind: "usage" });
       ctx.refuseRecording(project.name, origin);
       return ctx.view((await ctx.projectFolder(project)).record);
     },
@@ -692,7 +695,9 @@ export function workspacesArea(ctx: RuntimeContext): WorkspacesArea {
       await ctx.ready();
       const project = await ctx.projectsDoor.resolve(named, origin);
       const top = project.git?.top;
-      if (!copiesFolder(kindForComputer(project.computer))) throw Object.assign(new Error(notOnThisComputerLine(project.name)), { kind: "usage" });
+      const kind = ctx.kindOf(project.computer);
+      if (!runsInFolder(kind)) throw Object.assign(new Error(notOnThisComputerLine(project.name)), { kind: "usage" });
+      if (!copiesFolder(kind)) throw Object.assign(new Error(placeBranchLine(ctx.placeName(project.computer))), { kind: "usage" });
       if (top === undefined) throw Object.assign(new Error(noBranchesLine(project.name)), { kind: "usage" });
       const entry = await ctx.worktreeFolder(project, top, branch, undefined, scopeOf(origin)?.rootThreadId);
       const tree = entry.record.worktree;

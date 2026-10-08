@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { killUntilGone, type Machine, type WspError } from "@wsp/engine";
-import { type ProjectView, type WorkspaceKind, type WorkspaceView, type WorkspaceCreatingEvent, ThreadScope, agentsFrom, copyFirstLine, namesSize, BLANK_NAME_REFUSAL, CREATE_READY, machineCapRefusal, nameDeletingRefusal, nameTakenRefusal, offeredSize, refusalLine, copiesFolder, SIZE_PICK_FIX, sizeGotLine, sizeRefusal, sizeWord, startingLine } from "@wsp/protocol";
+import { type ProjectView, type WorkspaceKind, type WorkspaceView, type WorkspaceCreatingEvent, ThreadScope, agentsFrom, copyFirstLine, namesSize, BLANK_NAME_REFUSAL, CREATE_READY, machineCapRefusal, nameDeletingRefusal, nameTakenRefusal, offeredSize, refusalLine, runsInFolder, SIZE_PICK_FIX, sizeGotLine, sizeRefusal, sizeWord, startingLine } from "@wsp/protocol";
 import { projectLanding } from "../project-landing.js";
 import { type CreatedWorkspace, type CreateWorkspaceOptions, type WorkspaceRecord, type LiveWorkspace, type StageReport, until } from "../types/wiring.js";
 import { isCapRefusal } from "../types/internal.js";
@@ -258,7 +258,7 @@ export function createArea(ctx: RuntimeContext): CreateArea {
   };
 
   /** The records of one project's folders on this computer: the project folder's own and one per worktree. */
-  const foldersOf = (projectId: string): LiveWorkspace[] => [...live.values()].filter(e => copiesFolder(e.record.kind) && e.record.project === projectId);
+  const foldersOf = (projectId: string): LiveWorkspace[] => [...live.values()].filter(e => runsInFolder(e.record.kind) && e.record.project === projectId);
   /** The folder records being made, by project and branch, so two starts asking for the same folder at once get the
    * one record rather than two. */
   const folderMaking = new Map<string, Promise<LiveWorkspace>>();

@@ -187,6 +187,7 @@ pub enum Phase {
 pub enum Kind {
     Cloud,
     Local,
+    Place,
 }
 
 impl Kind {
@@ -194,7 +195,13 @@ impl Kind {
         match self {
             Kind::Cloud => "cloud",
             Kind::Local => "local",
+            Kind::Place => "place",
         }
+    }
+
+    /// A thread of this kind runs in its project's folder, so the folder's record is never deleted or forgotten.
+    pub fn in_folder(self) -> bool {
+        matches!(self, Kind::Local | Kind::Place)
     }
 }
 

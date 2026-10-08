@@ -433,7 +433,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
     const link = places().channel(row.id, () => {});
     if (link === undefined) throw new Error(absentComputer(row.name, null).sentence);
     try {
-      const projects = (await rt.projects.list(origin)).filter(p => p.computer === row.id).flatMap(p => (p.checkout === undefined ? [] : [p.checkout]));
+      const projects = (await rt.projects.list(origin)).filter(p => p.computer === row.id).map(p => p.checkout ?? p.path);
       const reply = await link.send({ op: "fs.folders", ...asked, projects });
       if (reply.ok !== true) throw new Error(reply.error);
       return HostFolderListing.parse(reply);

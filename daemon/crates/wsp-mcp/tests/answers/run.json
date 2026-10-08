@@ -27,6 +27,10 @@
       "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"previous turn was cut; resuming\\nFixed \\\"it\\\" \\u0085 é\\n\\nlast   line of the reply  \\n\"}],\"structuredContent\":{\"threadId\":\"thread-9d8c7b6a5f4e\",\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"text\":\"Fixed \\\"it\\\" \\u0085 é\\n\\nlast   line of the reply  \\n\",\"outcome\":\"started\",\"afterCut\":true}},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
         {
+          "op": "projects.resolve",
+          "ref": "attic-work"
+        },
+        {
           "op": "projects.list"
         },
         {
@@ -74,6 +78,10 @@
       },
       "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"thread thread-9d8c7b6a5f4e\"}],\"structuredContent\":{\"threadId\":\"thread-9d8c7b6a5f4e\",\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"outcome\":\"started\"}},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
+        {
+          "op": "projects.resolve",
+          "ref": "attic-work"
+        },
         {
           "op": "projects.list"
         },
@@ -129,6 +137,10 @@
       "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"the agent crashed \\u0085\\nattic-work is asleep again\"}],\"structuredContent\":{\"error\":\"the agent crashed \\u0085\\nattic-work is asleep again\",\"class\":\"provider\",\"exit\":1},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
         {
+          "op": "projects.resolve",
+          "ref": "attic-work"
+        },
+        {
           "op": "projects.list"
         },
         {
@@ -183,6 +195,10 @@
       "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"turn ended without a result\\nattic-work stays awake\"}],\"structuredContent\":{\"error\":\"turn ended without a result\\nattic-work stays awake\",\"class\":\"provider\",\"exit\":1},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
         {
+          "op": "projects.resolve",
+          "ref": "attic-work"
+        },
+        {
           "op": "projects.list"
         },
         {
@@ -234,6 +250,10 @@
       "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"claude is not signed in\"}],\"structuredContent\":{\"error\":\"claude is not signed in\",\"class\":\"auth\",\"exit\":2},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
         {
+          "op": "projects.resolve",
+          "ref": "attic-work"
+        },
+        {
           "op": "projects.list"
         },
         {
@@ -275,6 +295,10 @@
       "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"after the restart\"}],\"structuredContent\":{\"threadId\":\"thread-9d8c7b6a5f4e\",\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"text\":\"after the restart\",\"outcome\":\"started\"}},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
         {
+          "op": "projects.resolve",
+          "ref": "attic-work"
+        },
+        {
           "op": "projects.list"
         },
         {
@@ -315,6 +339,10 @@
       "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"the message is empty; say what the thread is to do. Put it in quotes after the flags.\"}],\"structuredContent\":{\"error\":\"the message is empty; say what the thread is to do. Put it in quotes after the flags.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
         {
+          "op": "projects.resolve",
+          "ref": "attic-work"
+        },
+        {
           "op": "projects.list"
         },
         {
@@ -337,6 +365,10 @@
       },
       "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"model \\\"gpt-9\\\" is not one claude takes; one of: Sonnet 5 (claude-sonnet-5), Opus 5.5 (claude-opus-5-5), Haiku (claude-haiku); legacy: Claude 3 (claude-3). Drop the flag, or give it a value the agent offers.\"}],\"structuredContent\":{\"error\":\"model \\\"gpt-9\\\" is not one claude takes; one of: Sonnet 5 (claude-sonnet-5), Opus 5.5 (claude-opus-5-5), Haiku (claude-haiku); legacy: Claude 3 (claude-3). Drop the flag, or give it a value the agent offers.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
+        {
+          "op": "projects.resolve",
+          "ref": "attic-work"
+        },
         {
           "op": "projects.list"
         },
@@ -366,6 +398,10 @@
       "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"Haiku takes no effort. Drop the flag, or give it a value the agent offers.\"}],\"structuredContent\":{\"error\":\"Haiku takes no effort. Drop the flag, or give it a value the agent offers.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
         {
+          "op": "projects.resolve",
+          "ref": "attic-work"
+        },
+        {
           "op": "projects.list"
         },
         {
@@ -393,6 +429,10 @@
       },
       "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"effort \\\"low\\\" is not one Opus 5.5 takes; one of: High (high), Max (max). Drop the flag, or give it a value the agent offers.\"}],\"structuredContent\":{\"error\":\"effort \\\"low\\\" is not one Opus 5.5 takes; one of: High (high), Max (max). Drop the flag, or give it a value the agent offers.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
+        {
+          "op": "projects.resolve",
+          "ref": "attic-work"
+        },
         {
           "op": "projects.list"
         },
@@ -422,6 +462,10 @@
       "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"--access takes ask, auto-edit, full or plan, and got yolo. Name one of those; which of its own modes each one is, is the agent's row's to say.\"}],\"structuredContent\":{\"error\":\"--access takes ask, auto-edit, full or plan, and got yolo. Name one of those; which of its own modes each one is, is the agent's row's to say.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
         {
+          "op": "projects.resolve",
+          "ref": "attic-work"
+        },
+        {
           "op": "projects.list"
         },
         {
@@ -448,6 +492,10 @@
       },
       "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"Claude Code takes no plan access; it takes auto-edit, full. Name one it takes, or drop --access.\"}],\"structuredContent\":{\"error\":\"Claude Code takes no plan access; it takes auto-edit, full. Name one it takes, or drop --access.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
+        {
+          "op": "projects.resolve",
+          "ref": "attic-work"
+        },
         {
           "op": "projects.list"
         },
@@ -482,6 +530,10 @@
       },
       "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"edited\"}],\"structuredContent\":{\"threadId\":\"thread-9d8c7b6a5f4e\",\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"text\":\"edited\",\"outcome\":\"started\"}},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
+        {
+          "op": "projects.resolve",
+          "ref": "attic-work"
+        },
         {
           "op": "projects.list"
         },
@@ -522,6 +574,10 @@
       "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"no adapter registered for harness \\\"nope\\\"; agents on this host: claude, codex. Name one of those with --agent.\"}],\"structuredContent\":{\"error\":\"no adapter registered for harness \\\"nope\\\"; agents on this host: claude, codex. Name one of those with --agent.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
         {
+          "op": "projects.resolve",
+          "ref": "attic-work"
+        },
+        {
           "op": "projects.list"
         },
         {
@@ -551,6 +607,10 @@
       },
       "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"no adapter registered for harness \\\"nope\\\"; agents on this host: none. Name one of those with --agent.\"}],\"structuredContent\":{\"error\":\"no adapter registered for harness \\\"nope\\\"; agents on this host: none. Name one of those with --agent.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
+        {
+          "op": "projects.resolve",
+          "ref": "attic-work"
+        },
         {
           "op": "projects.list"
         },
@@ -583,6 +643,10 @@
       "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"--cwd is a path on the machine, absolute, and got \\\"src\\\". Give a path that opens with /, since whoever reads it works in a folder this line cannot see.\"}],\"structuredContent\":{\"error\":\"--cwd is a path on the machine, absolute, and got \\\"src\\\". Give a path that opens with /, since whoever reads it works in a folder this line cannot see.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
         {
+          "op": "projects.resolve",
+          "ref": "attic-work"
+        },
+        {
           "op": "projects.list"
         },
         {
@@ -613,6 +677,10 @@
       "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"there is no file at no-such-shot.png on this computer. Name a file that is already here.\"}],\"structuredContent\":{\"error\":\"there is no file at no-such-shot.png on this computer. Name a file that is already here.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
         {
+          "op": "projects.resolve",
+          "ref": "attic-work"
+        },
+        {
           "op": "projects.list"
         },
         {
@@ -627,6 +695,10 @@
       "guest": {
         "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"a path on this line would be read on the person's computer, not on the machine the line was typed on. Name a file on the machine the line runs on, or none.\"}],\"structuredContent\":{\"error\":\"a path on this line would be read on the person's computer, not on the machine the line was typed on. Name a file on the machine the line runs on, or none.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
         "asked": [
+          {
+            "op": "projects.resolve",
+            "ref": "attic-work"
+          },
           {
             "op": "projects.list"
           },
@@ -655,6 +727,10 @@
       },
       "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"Sonnet 5 has no fast mode; pick a model that offers it, or send without it. Drop the flag, or give it a value the agent offers.\"}],\"structuredContent\":{\"error\":\"Sonnet 5 has no fast mode; pick a model that offers it, or send without it. Drop the flag, or give it a value the agent offers.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
+        {
+          "op": "projects.resolve",
+          "ref": "attic-work"
+        },
         {
           "op": "projects.list"
         },
@@ -701,7 +777,8 @@
       "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"thread thread-9d8c7b6a5f4e on wsp in /Users/me/wsp\"}],\"structuredContent\":{\"threadId\":\"thread-9d8c7b6a5f4e\",\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"outcome\":\"started\"}},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
         {
-          "op": "projects.list"
+          "op": "projects.resolve",
+          "ref": "wsp"
         },
         {
           "op": "projects.resolve",
@@ -744,7 +821,8 @@
       "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"thread thread-9d8c7b6a5f4e on wsp in /Users/me/.wsp/worktrees/p-1/feat-x-\\nprevious turn was cut; resuming\\nFixed \\\"it\\\" \\u0085 é\\n\\nlast   line of the reply  \\n\"}],\"structuredContent\":{\"threadId\":\"thread-9d8c7b6a5f4e\",\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"text\":\"Fixed \\\"it\\\" \\u0085 é\\n\\nlast   line of the reply  \\n\",\"outcome\":\"started\",\"afterCut\":true}},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
         {
-          "op": "projects.list"
+          "op": "projects.resolve",
+          "ref": "p-1"
         },
         {
           "op": "projects.resolve",
@@ -781,7 +859,8 @@
       "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"thread thread-9d8c7b6a5f4e on wsp in /Users/me/wsp/src\"}],\"structuredContent\":{\"threadId\":\"thread-9d8c7b6a5f4e\",\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"outcome\":\"started\"}},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
         {
-          "op": "projects.list"
+          "op": "projects.resolve",
+          "ref": "wsp"
         },
         {
           "op": "projects.resolve",
@@ -815,7 +894,8 @@
       "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"--cwd is a path on the machine, absolute, and got \\\"src\\\". Give a path that opens with /, since whoever reads it works in a folder this line cannot see.\"}],\"structuredContent\":{\"error\":\"--cwd is a path on the machine, absolute, and got \\\"src\\\". Give a path that opens with /, since whoever reads it works in a folder this line cannot see.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
         {
-          "op": "projects.list"
+          "op": "projects.resolve",
+          "ref": "wsp"
         },
         {
           "op": "projects.resolve",
@@ -860,6 +940,10 @@
       },
       "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"--branch takes a project on this computer, where wsp makes worktrees. Name a project on this computer.\"}],\"structuredContent\":{\"error\":\"--branch takes a project on this computer, where wsp makes worktrees. Name a project on this computer.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
+        {
+          "op": "projects.resolve",
+          "ref": "attic-work"
+        },
         {
           "op": "projects.list"
         }
@@ -907,7 +991,15 @@
       "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"thread thread-9d8c7b6a5f4e\"}],\"structuredContent\":{\"threadId\":\"thread-9d8c7b6a5f4e\",\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"outcome\":\"started\"}},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
         {
+          "op": "projects.resolve",
+          "ref": "site"
+        },
+        {
           "op": "projects.list"
+        },
+        {
+          "op": "workspaces.landing",
+          "project": "p-2"
         },
         {
           "op": "workspaces.list"
@@ -959,7 +1051,15 @@
       "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"model \\\"claude-opus-5-5\\\" is not one codex takes; one of: GPT-5 (gpt-5); that list is wsp's built-in one, since no agent there described itself, and the agent on that computer may take more. Drop the flag, or give it a value the agent offers.\"}],\"structuredContent\":{\"error\":\"model \\\"claude-opus-5-5\\\" is not one codex takes; one of: GPT-5 (gpt-5); that list is wsp's built-in one, since no agent there described itself, and the agent on that computer may take more. Drop the flag, or give it a value the agent offers.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
         {
+          "op": "projects.resolve",
+          "ref": "site"
+        },
+        {
           "op": "projects.list"
+        },
+        {
+          "op": "workspaces.landing",
+          "project": "p-2"
         },
         {
           "op": "workspaces.list"
@@ -990,7 +1090,15 @@
       "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"there is no file at no-such-shot.png on this computer. Name a file that is already here.\"}],\"structuredContent\":{\"error\":\"there is no file at no-such-shot.png on this computer. Name a file that is already here.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
         {
+          "op": "projects.resolve",
+          "ref": "site"
+        },
+        {
           "op": "projects.list"
+        },
+        {
+          "op": "workspaces.landing",
+          "project": "p-2"
         },
         {
           "op": "workspaces.list"
@@ -1006,7 +1114,15 @@
         "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"a path on this line would be read on the person's computer, not on the machine the line was typed on. Name a file on the machine the line runs on, or none.\"}],\"structuredContent\":{\"error\":\"a path on this line would be read on the person's computer, not on the machine the line was typed on. Name a file on the machine the line runs on, or none.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
         "asked": [
           {
+            "op": "projects.resolve",
+            "ref": "site"
+          },
+          {
             "op": "projects.list"
+          },
+          {
+            "op": "workspaces.landing",
+            "project": "p-2"
           },
           {
             "op": "workspaces.list"
@@ -1038,7 +1154,15 @@
       "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"thread thread-9d8c7b6a5f4e\"}],\"structuredContent\":{\"threadId\":\"thread-9d8c7b6a5f4e\",\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"outcome\":\"started\"}},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
         {
+          "op": "projects.resolve",
+          "ref": "site"
+        },
+        {
           "op": "projects.list"
+        },
+        {
+          "op": "workspaces.landing",
+          "project": "p-2"
         },
         {
           "op": "workspaces.list"
@@ -1080,6 +1204,10 @@
       },
       "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"thread thread-9d8c7b6a5f4e\"}],\"structuredContent\":{\"threadId\":\"thread-9d8c7b6a5f4e\",\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"outcome\":\"started\"}},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
+        {
+          "op": "projects.resolve",
+          "ref": "attic-work"
+        },
         {
           "op": "projects.list"
         },
@@ -1123,10 +1251,8 @@
       "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"thread thread-9d8c7b6a5f4e on wsp in /Users/me/wsp\"}],\"structuredContent\":{\"threadId\":\"thread-9d8c7b6a5f4e\",\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"outcome\":\"started\"}},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
         {
-          "op": "projects.list"
-        },
-        {
-          "op": "workspaces.list"
+          "op": "projects.resolve",
+          "ref": "wsp"
         },
         {
           "op": "projects.resolve",
@@ -1169,11 +1295,7 @@
           "startedBy": "agent",
           "requestId": "<request id>"
         }
-      ],
-      "guest": {
-        "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"a line from a workspace names the workspace it means, since the folder it was typed in is not one this host can read. Name the workspace on the line.\"}],\"structuredContent\":{\"error\":\"a line from a workspace names the workspace it means, since the folder it was typed in is not one this host can read. Name the workspace on the line.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
-        "asked": []
-      }
+      ]
     },
     {
       "case": "beside the thread with a branch",
@@ -1206,11 +1328,7 @@
           "startedBy": "agent",
           "requestId": "<request id>"
         }
-      ],
-      "guest": {
-        "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"a line from a workspace names the workspace it means, since the folder it was typed in is not one this host can read. Name the workspace on the line.\"}],\"structuredContent\":{\"error\":\"a line from a workspace names the workspace it means, since the folder it was typed in is not one this host can read. Name the workspace on the line.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
-        "asked": []
-      }
+      ]
     },
     {
       "case": "no thread stamped",
@@ -1228,6 +1346,10 @@
       },
       "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"the runtime stamped no thread on the session\"}],\"structuredContent\":{\"error\":\"the runtime stamped no thread on the session\",\"class\":\"provider\",\"exit\":1},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
+        {
+          "op": "projects.resolve",
+          "ref": "attic-work"
+        },
         {
           "op": "projects.list"
         },
@@ -1268,6 +1390,10 @@
       },
       "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"the host answered sessions.start in a shape this wsp does not read; it runs another version of wsp, restart it with wsp restart\"}],\"structuredContent\":{\"error\":\"the host answered sessions.start in a shape this wsp does not read; it runs another version of wsp, restart it with wsp restart\",\"class\":\"provider\",\"exit\":1},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
+        {
+          "op": "projects.resolve",
+          "ref": "attic-work"
+        },
         {
           "op": "projects.list"
         },

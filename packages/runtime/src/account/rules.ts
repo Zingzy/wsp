@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { type Capabilities, type PreferencesPatch, type ProjectView, type McpServerSpec, type Caller, type WorkspaceAgents, type WorkspaceKind, ThreadScope, phaseHoldsSlot, SPAWN_ACTS_ALLOWED, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnDepthRefusal, spawnRepositoryRefusal, spawnReachRefusal, type SpawnAct, forksNoMachines, kindWords, NO_PROVIDER_LINE, providerCannotRefusal, machineWord, noWorkspaceRefusal, notFoundRefusal, type WorktreeFolder, copiesFolder, kindForComputer, relayedRecordRefusal, relayedRefusal, undrivenRefusal, workspaceState, HERE_PLACE_ID } from "@wsp/protocol";
+import { type Capabilities, type PreferencesPatch, type ProjectView, type McpServerSpec, type Caller, type WorkspaceAgents, type WorkspaceKind, ThreadScope, phaseHoldsSlot, SPAWN_ACTS_ALLOWED, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnDepthRefusal, spawnRepositoryRefusal, spawnReachRefusal, type SpawnAct, forksNoMachines, kindWords, NO_PROVIDER_LINE, providerCannotRefusal, machineWord, noWorkspaceRefusal, notFoundRefusal, type WorktreeFolder, runsInFolder, relayedRecordRefusal, relayedRefusal, undrivenRefusal, workspaceState, HERE_PLACE_ID } from "@wsp/protocol";
 import type { WorkspaceRecord, LiveWorkspace } from "../types/wiring.js";
 import { PROJECTS, type WorkspaceLike } from "../types/internal.js";
 import type { RuntimeContext, RulesArea } from "../context.js";
@@ -74,7 +74,7 @@ export function rulesArea(ctx: RuntimeContext): RulesArea {
   /** Where a thread may open a thread beyond its tree: the project folder of its own project, which every thread
    * of the project shares. Every other act there stays its tree's. */
   const opensIn = (record: WorkspaceRecord, scope: ThreadScope | undefined): boolean =>
-    scope !== undefined && copiesFolder(record.kind) && record.worktree === undefined && record.project === projectOfScope(scope);
+    scope !== undefined && runsInFolder(record.kind) && record.worktree === undefined && record.project === projectOfScope(scope);
   /** Which project a thread works on: the one its own workspace holds. A thread whose workspace this host no longer
    * holds works on none, and the project rule then has nothing to compare and leaves the tree rule to refuse. */
   const projectOfScope = (scope: ThreadScope): string | undefined => live.get(scope.workspaceId)?.record.project;
@@ -86,10 +86,10 @@ export function rulesArea(ctx: RuntimeContext): RulesArea {
     return mine !== undefined && (project === mine || ctx.sameRepository(ctx.projectHeld(mine), ctx.projectHeld(project)));
   };
   /** Whether a thread may name a project to start children on: its own, or one of its repository on a computer that
-   * forks machines, where the child gets a machine of its own. Another folder of it on this computer is the
+   * forks machines, where the child gets a machine of its own. Another folder of it, on this computer or a box, is the
    * person's, and a thread started there would stand outside the tree. */
   const projectReached = (scope: ThreadScope, project: string): boolean =>
-    ofThreadsRepository(scope, project) && (project === projectOfScope(scope) || !copiesFolder(kindForComputer(ctx.projectHeld(project).computer)));
+    ofThreadsRepository(scope, project) && (project === projectOfScope(scope) || !runsInFolder(ctx.kindOf(ctx.projectHeld(project).computer)));
   /** The rule as a sentence: what this request is refused with for that record, or nothing when it may drive it.
    * A record this host does not hold, which a port forward's target may be since the host forwards a builder's
    * ports too, is nobody's to refuse for. The project rule is read before the tree rule and answers first: a

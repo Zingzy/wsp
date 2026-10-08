@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { randomUUID } from "node:crypto";
 import { landsBytes } from "@wsp/engine";
-import { type ReachState, type Caller, type WorkspaceStatus, threadWord, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, machineLacksLine, machineNeverAnswered } from "@wsp/protocol";
+import { type ReachState, type Caller, type WorkspaceStatus, threadWord, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, machineLacksLine, machineNeverAnswered, runsInFolder } from "@wsp/protocol";
 import { type LiveWorkspace, DAEMON_REVIVE_AGAIN_MS, DAEMON_LACKS_AGAIN_MS } from "../types/wiring.js";
 import type { MachineMoment } from "../types/internal.js";
 import type { RuntimeContext, DaemonArea } from "../context.js";
@@ -86,7 +86,7 @@ export function daemonArea(ctx: RuntimeContext): DaemonArea {
       if (ctx.state.closed) return;
       // And nothing is written inside a workspace whose computer serves its daemon: that daemon reads the path off
       // the frame and browses the workspace's own rootfs, so a list of folders inside it says nothing to anybody.
-      if (ctx.servedByItsComputer(entry) !== undefined) return;
+      if (ctx.servedByItsComputer(entry) !== undefined && !runsInFolder(entry.record.kind)) return;
       // Every checkout the daemon serving this machine has to browse, not this workspace's alone: the file is that
       // daemon's one list and is written whole, and on the computer the host runs on one daemon serves every
       // workspace here, each in a copy of the project folder at a path of its own. Read once the write before has
@@ -185,8 +185,11 @@ export function daemonArea(ctx: RuntimeContext): DaemonArea {
       const module = ctx.moduleOf(entry.record.kind);
       // Nothing is deployed into a workspace whose computer serves its daemon, and no roots file is written in it:
       // the daemon answering for it is that computer's own, which the update road moves as a computer and not as a
-      // workspace.
-      if (ctx.servedByItsComputer(entry) !== undefined) return;
+      // workspace. A folder there is that daemon's to browse, so its roots file is written again from the records.
+      if (ctx.servedByItsComputer(entry) !== undefined) {
+        if (runsInFolder(entry.record.kind)) await writeDaemonRoots(entry);
+        return;
+      }
       // A machine that answered with what it lacks is left alone until its window is out, whether it is being
       // given a first daemon or having one replaced: the thing it has not got stops both roads, and only a person
       // can change that answer. Read off the record above every round trip below, so a tick that finds the window

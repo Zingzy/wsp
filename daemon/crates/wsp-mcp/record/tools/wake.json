@@ -45,7 +45,8 @@
               "type": "string",
               "enum": [
                 "cloud",
-                "local"
+                "local",
+                "place"
               ]
             },
             "golden": {
@@ -572,7 +573,8 @@
               "type": "string",
               "enum": [
                 "cloud",
-                "local"
+                "local",
+                "place"
               ]
             },
             "golden": {

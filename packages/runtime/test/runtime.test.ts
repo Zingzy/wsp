@@ -6,7 +6,7 @@ import type { AddressInfo } from "node:net";
 import { hostname } from "node:os";
 import { gunzipSync } from "node:zlib";
 import { catalogProbeCommand, createClaudeAdapter, parseCatalogProbe } from "@wsp/adapter-claude";
-import { diskFullLine, execFailedLine, imageServedWaitLine, machineUnreachableLine, projectNeedsReaddLine, STATE_SHAPE, type StateShape } from "@wsp/protocol";
+import { diskFullLine, execFailedLine, imageServedWaitLine, machineUnreachableLine, STATE_SHAPE, type StateShape } from "@wsp/protocol";
 import { HOST_TOKEN_ENV, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, NO_SUCH_TURN, NOTIFY_ME, PERMISSION_ALLOW, RUN_GONE_LINE, SessionEvent, TURN_TOKEN_ENV, foldThreads, notifyLine, stillWorkingLine, threadMessages, threadReplyRows, threadResult, threadWordOf, type AdapterEvent, type ExecStream, type EventUnion, type PermissionAsk, type RecipeDigest, type SessionView, type TurnResult, type WorkspaceStatus } from "@wsp/protocol";
 import { BUILDER_IDLE_MS, DISK_SYNC_CMD, DISK_USE_CMD, ExecFailedError, GuestUnusableError, KILL_ASKS, MachineUnreachableError, TOOLS_PATH, type ExecResult, type GoldenDelta, type GoldenImport } from "@wsp/engine";
 import { DAEMON_TOKEN_PATH } from "@wsp/protocol";

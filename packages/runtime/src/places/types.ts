@@ -43,7 +43,7 @@ import {
   type WorkspaceSize,
   type PlaceProveRequest,
 } from "@wsp/protocol";
-import type { EngineStep, ExecResult, Machine, MachineBackend, ProvisionPlan, ProvisionStage, SetupRun } from "@wsp/engine";
+import type { EngineStep, ExecResult, Machine, MachineBackend, PlaceFolderMachine, ProvisionPlan, ProvisionStage, SetupRun } from "@wsp/engine";
 import type { WebSocket } from "ws";
 import type { DeviceDoor } from "../devices.js";
 import type { HereDaemon, PlaceBackends } from "../runtime.js";
@@ -474,6 +474,13 @@ export interface PlaceDoor {
    * place that is not connected the backend is still answered, so a record standing on it can be held without a
    * round trip, and every call on it rejects with PlaceAbsentError. */
   backendOf(placeId: string): MachineBackend | undefined;
+  /** A computer the person joined as the threads in a folder on it run on: one machine that is always there, every
+   * command run as the owner of the home it was joined with, and that home. Answered without a read, from the
+   * record, so a thread's record is held while the computer is away and every call on it then rejects with
+   * PlaceAbsentError. Nothing for a place that is no computer this host holds. */
+  folderComputer(placeId: string): { machine: PlaceFolderMachine; home: string; shape: { cpu: number; memMb: number } } | undefined;
+  /** Whether a place is a computer the person joined, which is what makes a project on it a folder there. */
+  joined(placeId: string): boolean;
   /** The same, asked of the place itself where this host has not heard yet: one frame, remembered on the record, so
    * every road after it is answered without one. Refuses with placeForksNowhereLine on a computer that offers no
    * backend at all. */

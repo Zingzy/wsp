@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { PLACES_TICKET_REFUSAL, DAEMON_VERSION, FS_FOLDERS_DAEMON_VERSION, PLACE_WORKSPACE_PATH, placeBehindLine, placeDaemonBehind, absentComputer, HERE_PLACE_ID, noSuchPlaceRefusal, providerFoldersRefusal, type HostFolderListing } from "@wsp/protocol";
-import { TOOL_PREFIX, installEnv, installHomes } from "@wsp/catalog";
-import { removeScript } from "../src/project-landing.js";
+import { PLACES_TICKET_REFUSAL, DAEMON_VERSION, FS_FOLDERS_DAEMON_VERSION, projectLeftOnComputerLine, placeBehindLine, placeDaemonBehind, absentComputer, HERE_PLACE_ID, noSuchPlaceRefusal, providerFoldersRefusal, type HostFolderListing } from "@wsp/protocol";
 import { until } from "./until.js";
 import { WsClient } from "./ws-client.js";
 import { report } from "./place-join.js";
@@ -19,33 +17,21 @@ describe("a project on a computer you joined", () => {
     return ran;
   };
 
-  it("is cloned by the add into the folder that computer keeps checkouts in, and that folder goes when the record does", async () => {
+  it("is cloned by the add into the home of the login that computer was joined with, as that login, and the folder stays when the record goes", async () => {
     const { hostKey } = await serving();
     let place!: ForkingPlace;
     const { client } = await join(hostKey, { code: await code(), name: "srv", answers: c => (place = forks(c, undefined, undefined, HOLDS_PROJECTS)) });
     sockets.push(client.ws);
     const ran = onItself(client);
     const project = await ctx.runtime!.projects.add({ source: "https://github.com/spoo-me/spoo-ts", on: "srv", name: "landing-906" });
-    // The checkout is wsp's own folder on that computer, and what a workspace of it reads is outside the
-    // computer's own home.
-    expect(project.checkout).toBe(`/wsp/projects/${project.id}/checkout`);
-    expect(project.path).toBe("/srv/landing-906");
-    // One workspace of that computer did the work and was stopped; the clone ran inside it.
-    expect(place.created).toHaveLength(1);
-    expect(place.killed).toHaveLength(1);
-    // And it read what a workspace there reads: a computer that keeps no image is worked in a copy of its own
-    // directories with the shared home bound in, so the install runs on the prefix's order and its knobs rather
-    // than finding whatever stands under that home.
-    const envs = place.created[0]!["envs"] as Record<string, string>;
-    expect(envs["PATH"]).toBe(PLACE_WORKSPACE_PATH);
-    expect(envs).toMatchObject(installEnv(installHomes(TOOL_PREFIX)));
-    // The remove runs one command on the computer itself, over the same link, and says what went.
+    expect(project.path).toBe("/home/maya/landing-906");
+    expect(project.checkout).toBeUndefined();
+    // Nothing was made there: the clone ran on the computer itself, in the login's home.
+    expect(place.created).toEqual([]);
+    expect(ran.find(cmd => cmd.includes("git clone"))).toContain("export HOME='/home/maya'");
     const { said } = await ctx.runtime!.projects.remove(project.id);
-    // That one command reads whether the agent there kept memory for this project and then takes wsp's own
-    // folder; this computer answered nothing, so the sentence ends at the checkout rather than naming a folder
-    // that is not there.
-    expect(ran.filter(cmd => cmd.includes("rm -rf"))).toEqual([removeScript({ dir: `/wsp/projects/${project.id}`, memoryDir: project.memoryDir })]);
-    expect(said).toBe(`landing-906 is no longer a project on srv; the folder wsp kept for it there, /wsp/projects/${project.id}, is gone with its checkout`);
+    expect(said).toBe(projectLeftOnComputerLine("landing-906", "srv", "/home/maya/landing-906"));
+    expect(ran.filter(cmd => cmd.includes("rm -rf"))).toEqual([]);
     expect(await ctx.runtime!.projects.list()).toEqual([]);
   });
 
@@ -104,8 +90,8 @@ describe("the folders of a computer you own", () => {
     // The repos listing is that computer's too, over the same frame.
     expect((await c.request("host.folders", { on: placeId, repos: true })).ok).toBe(true);
     expect(asked).toEqual([
-      { id: expect.anything(), op: "fs.folders", dir: "/home/maya", hidden: true, projects: [project.checkout] },
-      { id: expect.anything(), op: "fs.folders", repos: true, projects: [project.checkout] },
+      { id: expect.anything(), op: "fs.folders", dir: "/home/maya", hidden: true, projects: [project.path] },
+      { id: expect.anything(), op: "fs.folders", repos: true, projects: [project.path] },
     ]);
   });
 
