@@ -9,7 +9,7 @@
 // values a person typed go into this computer's own file as typed; another
 // computer's file names a variable for each, and the value goes to the vault.
 import { posix } from "node:path";
-import { CONFIG_LINK_EXIT, MCP_AGENTS, agentName, rowVariableLine, catalogEntry, configRefusal, configWriteLine, insideBase, stillStands, type McpAgent, type McpTransport } from "@wsp/catalog";
+import { CONFIG_LINK_EXIT, MCP_AGENTS, agentName, ownServerConfig, rowVariableLine, catalogEntry, configRefusal, configWriteLine, insideBase, stillStands, type McpAgent, type McpTransport } from "@wsp/catalog";
 import { nodeHost, tilde, type Host } from "@wsp/collect";
 import { configLanded } from "@wsp/engine";
 import {
@@ -27,7 +27,7 @@ import {
 } from "@wsp/protocol";
 import { projectOf, type AgentsOn, type ServersActs } from "@wsp/runtime";
 import type { ServerVault } from "./env-keys.js";
-import { ownServerFiles, serverListedHere } from "./agents-here.js";
+import { serverListedHere } from "./agents-here.js";
 import { keyOwner } from "./providers.js";
 import { firstLine, roadOf, type Road } from "./target-road.js";
 
@@ -85,12 +85,14 @@ const checkName = (name: string): void => {
 
 /** The agent's MCP config the act is for, by the scope: the files it reads in the home (the first that is there is the
  * config), or the project's, and the folder the file must stay inside. `folder` names Claude Code's servers kept for
- * the home folder itself inside its user file. */
+ * the home folder itself inside its user file. `store` is a store outside the home, which the write makes where it is
+ * not there yet. */
 interface Config {
   agent: McpAgent;
   files: string[];
   base: string;
   folder?: string;
+  store?: string;
 }
 
 function mcpAgent(agentId: string): McpAgent {
@@ -108,7 +110,10 @@ function checkNameKept(agent: McpAgent, name: string, transport: McpTransport): 
 function configOf(road: Road, on: AgentsOn, agentId: string, scope: McpScope): Config {
   const agent = mcpAgent(agentId);
   const home = road.host.home;
-  if (scope !== "project") return { agent, files: ownServerFiles(road.host, agent), base: home, ...(scope === "home" ? { folder: home } : {}) };
+  if (scope !== "project") {
+    const own = ownServerConfig(agent, home, road.host.stores?.[agentId]);
+    return { agent, ...own, ...(own.base !== home ? { store: own.base } : {}), ...(scope === "home" ? { folder: home } : {}) };
+  }
   const project = projectOf(on);
   if (project === undefined) throw usage("A project's server is changed from a workspace of that project, or from its computer's page.");
   const files = (agent.mcp.projectFiles ?? []).map(f => posix.join(project, f));
@@ -126,6 +131,8 @@ interface Read {
 async function readConfig(road: Road, config: Config): Promise<Read> {
   const q = shellQuote;
   const line = [
+    // A store not made yet holds no config; macOS's realpath refuses a missing folder where GNU's answers it.
+    `[ -e ${q(config.base)} ] || { echo none; exit 0; }`,
     `b=$(realpath ${q(config.base)}) || exit 1`,
     `for f in ${config.files.map(q).join(" ")}; do`,
     '  if [ -e "$f" ] || [ -L "$f" ]; then',
@@ -154,7 +161,10 @@ async function readConfig(road: Road, config: Config): Promise<Read> {
 /** Writes the text over what was read, as the login, by the one config write. */
 async function writeConfig(road: Road, config: Config, read: Read, text: string): Promise<void> {
   const bytes = new TextEncoder().encode(text);
-  const res = await road.run(configWriteLine({ file: read.file, base: config.base, bytes: bytes.length, ...(read.sum !== undefined ? { sum: read.sum } : {}) }), bytes);
+  // A store outside the home is made by its agent's sign-in there, a box's logins folder among them: one not made yet
+  // is made as that sign-in makes it, the folder alone, so nothing above it is.
+  const make = config.store === undefined ? "" : `[ -d ${shellQuote(config.store)} ] || mkdir ${shellQuote(config.store)} || exit 1\n`;
+  const res = await road.run(`${make}${configWriteLine({ file: read.file, base: config.base, bytes: bytes.length, ...(read.sum !== undefined ? { sum: read.sum } : {}) })}`, bytes);
   configLanded(res, read.file, p => tilde(road.host.home, p));
 }
 

@@ -377,6 +377,9 @@ export interface PlaceRecording {
   /** The line an agent's sign-in on that computer runs, its status command and that command's environment among
    * it, as the hand sign-in plans it. */
   signInLine?(placeId: string, agent: string): Promise<SignInLine>;
+  /** The folder each agent's threads on that computer keep their config in, by agent id, which the servers step
+   * merges into and the remove takes wsp's servers back out of. Absent, the catalog's files under the home. */
+  storesOn?(placeId: string, home: string): Readonly<Record<string, string>>;
   /** Records one folder of this computer's as a project on that computer, seeded with what its pick keeps, by the
    * add's own road. With a move, under that project's id, the project standing there taken off first by the
    * remove's own road once the seed is read. Answers the folder's row. Absent, a folder fails its row. */

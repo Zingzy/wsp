@@ -619,6 +619,7 @@ function runtimeCore(ctx: RuntimeContext, opts: RuntimeOptions): RuntimeCore {
           return runningOnPlace(placeId, rows, standing, foldThreads([...sessions.values()].filter(s => !ctx.capHeld.has(s.turnId)).map(s => s.view)));
         },
         signInLine: (placeId, agent) => ctx.agentsRead.signInLine({ placeId }, { agent }),
+        storesOn: (placeId, home) => ctx.placeStores(placeId, home),
         // The app's own sign-in road on that computer, read as a setup's row waiting on the person.
         signIn: async (placeId, agent, emit) => {
           const handle = await ctx.agentsRead.signIn({ placeId }, { agent }, emit);

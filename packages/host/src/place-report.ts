@@ -530,8 +530,8 @@ function hereServerPort(sh: (script: string) => string): ServerPort {
           }
         })[0],
       ),
-    write: (file, text, home) => {
-      writeConfigHere(file.path, home, file.sum, text);
+    write: (file, text, base) => {
+      writeConfigHere(file.path, base, file.sum, text);
       return Promise.resolve();
     },
   };

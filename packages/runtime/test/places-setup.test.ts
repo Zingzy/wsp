@@ -101,7 +101,7 @@ type Checkouts = { created?: Promise<void>; answers?: () => boolean };
 
 /** What the computer answers on its link: what it forks with, the machine an add clones in, and every command as
  * its daemon's exec would. */
-function answersFor(cmds: string[], answer?: (cmd: string) => { exitCode: number; stdout?: string } | undefined, checkouts?: Checkouts) {
+function answersFor(cmds: string[], answer?: (cmd: string) => { exitCode: number; stdout?: string } | undefined, checkouts?: Checkouts, logins?: string) {
   return (c: WsClient): void => {
     let killed = false;
     c.onFrame(async raw => {
@@ -109,7 +109,7 @@ function answersFor(cmds: string[], answer?: (cmd: string) => { exitCode: number
       const say = (payload: Record<string, unknown>): void => c.say({ id: frame["id"], ok: true, ...payload });
       if (frame["op"] === "machine.backend") {
         if (checkouts?.answers?.() === false) return void c.say({ id: frame["id"], ok: false, error: "not now" });
-        return say(checkouts === undefined ? FACTS : { ...FACTS, projects: "/wsp/projects" });
+        return say({ ...FACTS, ...(checkouts === undefined ? {} : { projects: "/wsp/projects" }), ...(logins === undefined ? {} : { logins }) });
       }
       if (frame["op"] === "machine.capacity") return say({ cores: 2, memMb: 7600, memRoomMb: 6000, machineMemMb: 4096, diskFreeBytes: 19 * 1024 ** 3, images: [], machines: { running: 0, paused: 0 } });
       if (checkouts !== undefined) {
@@ -273,11 +273,11 @@ function signIns(o: { status?: boolean } = {}) {
 }
 
 /** A host with the setup wired, serving, and the road an add takes onto a computer that joins over the link. */
-async function hosting(o: { provision: PlaceProvisioner; checkouts?: Checkouts; seed?: SeedWiring; recipes?: RecipeShelf; store?: Store; cmds?: string[]; answer?: (cmd: string) => { exitCode: number; stdout?: string } | undefined; local?: boolean; acts?: AgentsActs; vault?: Record<string, string>; report?: PlaceReport; install?: PlaceWiring["install"]; undo?: PlaceWiring["undo"]; leave?: PlaceWiring["leave"]; runOver?: PlaceWiring["runOver"]; hostKey?: PlaceKeyPair; clock?: Clock; update?: PlaceUpdater; adapters?: Record<string, HarnessAdapterFactory> }): Promise<{ hostKey: PlaceKeyPair; store: Store; frames: PlaceSetupEvent[]; joined: { placeId: string; pair: PlaceKeyPair }[] }> {
+async function hosting(o: { provision: PlaceProvisioner; checkouts?: Checkouts; seed?: SeedWiring; recipes?: RecipeShelf; store?: Store; cmds?: string[]; answer?: (cmd: string) => { exitCode: number; stdout?: string } | undefined; local?: boolean; acts?: AgentsActs; vault?: Record<string, string>; report?: PlaceReport; install?: PlaceWiring["install"]; undo?: PlaceWiring["undo"]; leave?: PlaceWiring["leave"]; runOver?: PlaceWiring["runOver"]; hostKey?: PlaceKeyPair; clock?: Clock; update?: PlaceUpdater; adapters?: Record<string, HarnessAdapterFactory>; logins?: string }): Promise<{ hostKey: PlaceKeyPair; store: Store; frames: PlaceSetupEvent[]; joined: { placeId: string; pair: PlaceKeyPair }[] }> {
   const hostKey = o.hostKey ?? newPlaceKeyPair();
   const joined: { placeId: string; pair: PlaceKeyPair }[] = [];
   const store = o.store ?? memoryStore();
-  const answers = answersFor(o.cmds ?? [], o.answer, o.checkouts);
+  const answers = answersFor(o.cmds ?? [], o.answer, o.checkouts, o.logins);
   runtime = createRuntime({
     backend: stubBackend(),
     store,
@@ -411,6 +411,25 @@ describe("the servers step of an add", () => {
     await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: LAPTOP }, Date.now());
     await until(() => p.ons.has("mcp"));
     expect(p.ons.get("mcp")?.held).toEqual(new Set(["LINEAR_TOKEN"]));
+  });
+
+  /** The computer's answer to who its lines run as: a root daemon, and a home `owner` owns. */
+  const linesAs = (owner: string, home: string) => (cmd: string) => (cmd.startsWith("uname -s;") ? { exitCode: 0, stdout: ["Linux", "0", "root", owner, "1", home, "/usr/bin", ""].join("\n") } : undefined);
+
+  it("hands the engine the folder each agent's threads there read their servers from, Codex's being the box's logins folder its turns' CODEX_HOME names", async () => {
+    const p = provisioner();
+    await hosting({ provision: p.wired, logins: "/var/lib/wsp/logins", report: report("spoo", { daemonVersion: DAEMON_VERSION, login: { HOME: "/root", USER: "root", PATH: "/usr/bin" } }), answer: linesAs("root", "/root") });
+    await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: LAPTOP }, Date.now());
+    await until(() => p.ons.has("mcp"));
+    expect(p.ons.get("mcp")?.stores).toMatchObject({ claude: "/root/.claude-cfg", codex: "/var/lib/wsp/logins/codex" });
+  });
+
+  it("hands a login that is not root no folder outside its home, which only root reaches, so its servers go where the catalog keeps them", async () => {
+    const p = provisioner();
+    await hosting({ provision: p.wired, logins: "/var/lib/wsp/logins", report: report("spoo", { daemonVersion: DAEMON_VERSION }), answer: linesAs("maya", "/home/maya") });
+    await runtime!.places!.add({ address: "maya@10.0.0.9", hostUrls: DOOR, choices: LAPTOP }, Date.now());
+    await until(() => p.ons.has("mcp"));
+    expect(p.ons.get("mcp")?.stores).toEqual({ claude: "/home/maya/.claude-cfg" });
   });
 });
 

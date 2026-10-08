@@ -8,7 +8,7 @@
 // knows its own hand from the agent's and from the person's; a name it planned
 // and wrote nowhere is written down as one it no longer owns.
 import { placeProvisionPaths, type PlaceProvisionRow } from "@wsp/protocol";
-import { launchMisses, type McpEditLib, type McpMergeResult } from "@wsp/catalog";
+import { MCP_AGENTS, launchMisses, ownServerConfig, type McpEditLib, type McpMergeResult } from "@wsp/catalog";
 import {
   READ_MS,
   absentCommands,
@@ -65,7 +65,7 @@ export const keyUnreachedLine = (agent: string, names: readonly string[]): strin
 export const noCopyLine = (path: string): string => `nothing of this computer's copy of ${path} arrived this run`;
 
 /** Where the copy of one of an agent's own files sits while the job runs: under the job's own folder on that
- * computer, in the tree that travelled off this one. Nothing for a path outside the home, which no agent's is. */
+ * computer, in the tree that travelled off this one. Nothing for a path outside the home, which no catalog file is. */
 const travelledPath = (home: string, file: string): string | undefined => (file.startsWith(`${home}/`) ? `${placeProvisionPaths(home).staging}/${file.slice(home.length + 1)}` : undefined);
 
 /** One of a scope's files, on that computer and in the tree that travelled. */
@@ -111,19 +111,28 @@ interface Merged {
 /** Writes the recipe's servers into the files the agents keep their own servers in on that computer, and answers
  * one row each. `home` is the home the computer's own login keeps, which every path of the plan hangs off;
  * `landed` is what the files round put there this run, so a server already in a file that arrived whole with this
- * run reads as installed rather than as one that was there before. */
+ * run reads as installed rather than as one that was there before; `stores` is the folder each agent's threads there
+ * are pointed at, by agent id. */
 export async function provisionMcp(
   machine: Machine,
   planned: McpPlan,
-  o: { home: string; landed: OwnedPaths; tools: readonly ToolResult[]; stage: StageListener; path: string; held?: ReadonlySet<string> },
+  o: { home: string; landed: OwnedPaths; tools: readonly ToolResult[]; stage: StageListener; path: string; held?: ReadonlySet<string>; stores?: Readonly<Record<string, string>> },
 ): Promise<PlaceProvisionRow[]> {
   const plan = atHome(planned, o.home);
   o.stage("installing-mcp", mcpOpening(plan.agents));
   const scopes = plan.agents.flatMap(a => a.scopes);
-  const candidates: Candidate[][] = scopes.map(s =>
-    s.files.flatMap(own => {
-      const travelled = travelledPath(o.home, own);
-      return travelled === undefined ? [] : [{ own, travelled }];
+  /** Each scope's agent's own file there by the catalog's one rule, where that agent's threads read a store: the
+   * copy that travelled still sits where the catalog's file would. */
+  const configs = plan.agents.flatMap(a => {
+    const agent = MCP_AGENTS.find(m => m.id === a.id);
+    const store = o.stores?.[a.id];
+    return a.scopes.map(() => (agent === undefined || store === undefined ? undefined : ownServerConfig(agent, o.home, store)));
+  });
+  const bases = new Map(configs.flatMap(c => (c === undefined ? [] : c.files.map(f => [f, c.base] as const))));
+  const candidates: Candidate[][] = scopes.map((s, at) =>
+    s.files.flatMap(file => {
+      const travelled = travelledPath(o.home, file);
+      return travelled === undefined ? [] : [{ own: configs[at]?.files[0] ?? file, travelled }];
     }),
   );
   // Both sides in one read, the agents' own files first and the copies that travelled after them. The answer is
@@ -249,7 +258,7 @@ export async function provisionMcp(
     for (const command of await absentCommands(machine, plan, first.outcomes, o.path)) missing.add(command);
     agents = withoutAbsent(plan, agents, first.outcomes, missing, o.tools);
     merged = mergeAll(agents);
-    failure = await landConfigs(machine, o.home, own, merged.texts);
+    failure = await landConfigs(machine, path => bases.get(path) ?? o.home, own, merged.texts);
   }
   // A server is present where its entry was already the one that travelled and the file it sits in did not arrive
   // whole with this run: it was there as the recipe asks, so a second run installs nothing and says so. Read before

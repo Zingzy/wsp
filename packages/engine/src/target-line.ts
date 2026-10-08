@@ -5,7 +5,7 @@
 // on a computer comes through here and runs as the owner of the home instead.
 import { randomBytes } from "node:crypto";
 import { posix } from "node:path";
-import { noHomeRefusal, noRunuserRefusal, shellQuote } from "@wsp/protocol";
+import { noHomeRefusal, noRunuserRefusal, shellQuote, underProject } from "@wsp/protocol";
 import { platformOfSystem } from "./daemon-targets.js";
 import { landBytes } from "./land-bytes.js";
 import type { Machine } from "./machine.js";
@@ -50,6 +50,13 @@ export async function targetLogin(machine: Pick<Machine, "exec">, given: { HOME?
   if (user === "root") return at;
   if (runuser !== "1") throw new Error(noRunuserRefusal(user));
   return { ...at, runAs: user };
+}
+
+/** The stores each agent's threads are pointed at, by agent id, that this login's lines reach. A store outside the home
+ * is whatever folder the agent's own variable names, a box's logins folder among them, which only root reads: where
+ * the lines are handed to another login, such a store is dropped and its agent keeps the catalog's files. */
+export function storesReached(t: TargetLogin, stores: Readonly<Record<string, string>>): Record<string, string> {
+  return Object.fromEntries(Object.entries(stores).filter(([, store]) => t.runAs === undefined || underProject(store, t.home)));
 }
 
 /** The line as that login runs it: its HOME and PATH exported, in its home, and handed to the home's owner where

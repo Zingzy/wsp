@@ -48,7 +48,7 @@ export const handedLine = (cmd: string): string => {
   return handed === null ? cmd : handed[1]!.replaceAll("'\\''", "'");
 };
 
-export function box(client: WsClient, login: BoxLogin, o: { failClone?: boolean } = {}): Box {
+export function box(client: WsClient, login: BoxLogin, o: { failClone?: boolean; logins?: string } = {}): Box {
   let ptys = 0;
   const seen: Box = { ops: [], execs: [], frames: [], taken: new Set(), kills: [], push: event => client.say(event), configs: new Map() };
   let stopped = false;
@@ -58,7 +58,7 @@ export function box(client: WsClient, login: BoxLogin, o: { failClone?: boolean 
     if (op === undefined) return;
     const say = (payload: Record<string, unknown>): void => client.say({ id: frame["id"], ok: true, ...payload });
     seen.ops.push(op);
-    if (op === "machine.backend") return say(KEEPS_NO_IMAGE);
+    if (op === "machine.backend") return say(o.logins === undefined ? KEEPS_NO_IMAGE : { ...KEEPS_NO_IMAGE, logins: o.logins });
     if (op === "machine.capacity") return say({ cores: 4, memMb: 8192, memRoomMb: 4096, machineMemMb: 4096, diskFreeBytes: 10 * 1024 ** 3, images: [], machines: { running: 0, paused: 0 } });
     if (op !== "exec") {
       seen.frames.push(frame);
@@ -122,7 +122,7 @@ export function answering(starts: Started[]): HarnessAdapterFactory {
 export const HETZNER: BoxLogin = { home: "/root", owner: "root" };
 
 /** A host holding one joined computer, hetzner, its login root unless named, and a project added there by url. */
-export async function joined(o: { login?: BoxLogin; adapters?: Record<string, HarnessAdapterFactory>; taken?: string[]; store?: Store; vault?: Record<string, string>; failClone?: boolean; serversActs?: ServersActs } = {}) {
+export async function joined(o: { login?: BoxLogin; adapters?: Record<string, HarnessAdapterFactory>; taken?: string[]; store?: Store; vault?: Record<string, string>; failClone?: boolean; serversActs?: ServersActs; logins?: string } = {}) {
   const login = o.login ?? HETZNER;
   const { hostKey } = await serving({ adapters: o.adapters ?? {}, ...(o.store !== undefined ? { store: o.store } : {}), ...(o.vault !== undefined ? { vault: o.vault } : {}), ...(o.serversActs !== undefined ? { serversActs: o.serversActs } : {}) });
   let seen!: Box;
@@ -130,7 +130,7 @@ export async function joined(o: { login?: BoxLogin; adapters?: Record<string, Ha
     code: await code(),
     report: report("hetzner", { login: { HOME: login.home, USER: "root", PATH: "/usr/bin" } }),
     answers: c => {
-      seen = box(c, login, o.failClone === true ? { failClone: true } : {});
+      seen = box(c, login, { ...(o.failClone === true ? { failClone: true } : {}), ...(o.logins !== undefined ? { logins: o.logins } : {}) });
       for (const path of o.taken ?? []) seen.taken.add(path);
     },
   });

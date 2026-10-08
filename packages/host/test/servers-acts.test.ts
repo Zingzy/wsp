@@ -123,9 +123,57 @@ describe("adding an MCP server", () => {
     const host: Host = { ...here(at), exec: { which: async () => false, run: async () => undefined }, stores: { claude: store } };
     expect((await readAgents(host, { user: "ada", vault: {} })).servers.filter(s => s.name === "acme").map(s => s.file)).toEqual(["~/.claude-cfg/.claude.json"]);
     expect((await resolveServer(host, "claude", "acme", { values: { ACME_TOKEN: "sk_acme_TESTONLY" } })).transport).toMatchObject({ kind: "stdio", command: "acme-mcp" });
-    // A store outside the login's home is not one an act writes in, so Codex's server stays where it was.
-    await serversActs({ vault: memVault(vaulted) }).add(on, { agent: "codex", name: "acme", command: "acme-mcp" });
+  });
+
+  it("on a box, writes Codex's server into config.toml under the box's logins folder a thread's Codex there reads, outside the home, where the list and the tools find it", async () => {
+    const at = fixture();
+    // The box's shared logins folder, which its own Codex sign-in made: outside the login's home.
+    const logins = join(at.root, "var/lib/wsp/logins/codex");
+    mkdirSync(logins, { recursive: true });
+    writeFileSync(join(logins, "config.toml"), 'model = "gpt-5"\n');
+    const before = readFileSync(join(at.home, ".codex/config.toml"), "utf8");
+    const on: AgentsOn = { kind: "box", machine: road(at).machine, login: { HOME: at.home, PATH: `${at.bin}:/usr/bin:/bin` }, stores: { claude: join(at.home, ".claude-cfg"), codex: logins } };
+    const vaulted: Record<string, string>[] = [];
+    const added = await serversActs({ vault: memVault(vaulted) }).add(on, { agent: "codex", name: "acme", command: "acme-mcp", env: { ACME_TOKEN: "sk_acme_TESTONLY" } });
+    expect(added).toEqual({ file: join(logins, "config.toml") });
+    const written = readFileSync(join(logins, "config.toml"), "utf8");
+    expect(written.startsWith('model = "gpt-5"\n')).toBe(true);
+    expect(CODEX_TOML.read(written, at.home).find(s => s.name === "acme")?.transport).toMatchObject({ kind: "stdio", command: "acme-mcp" });
+    expect(written).not.toContain("sk_acme_TESTONLY");
+    expect(readFileSync(join(at.home, ".codex/config.toml"), "utf8")).toBe(before);
+    const host: Host = { ...here(at), exec: { which: async () => false, run: async () => undefined }, stores: { codex: logins } };
+    expect((await readAgents(host, { user: "ada", vault: {} })).servers.filter(s => s.name === "acme").map(s => s.file)).toEqual([join(logins, "config.toml")]);
+    expect((await resolveServer(host, "codex", "acme", { values: { ACME_TOKEN: "sk_acme_TESTONLY" } })).transport).toMatchObject({ kind: "stdio", command: "acme-mcp" });
+    // A link out of that folder is not written through, as one out of the home is not.
+    rmSync(join(logins, "config.toml"));
+    symlinkSync(join(at.home, ".codex/config.toml"), join(logins, "config.toml"));
+    await expect(serversActs({ vault: memVault(vaulted) }).add(on, { agent: "codex", name: "other", command: "other-mcp" })).rejects.toThrow();
+    expect(readFileSync(join(at.home, ".codex/config.toml"), "utf8")).toBe(before);
+  });
+
+  it("on a box whose Codex has not signed in yet, makes its folder in the logins folder as the sign-in would and writes the server there, never a parent of it", async () => {
+    const at = fixture();
+    const shared = join(at.root, "var/lib/wsp/logins");
+    mkdirSync(shared, { recursive: true });
+    const logins = join(shared, "codex");
+    const on: AgentsOn = { kind: "box", machine: road(at).machine, login: { HOME: at.home, PATH: `${at.bin}:/usr/bin:/bin` }, stores: { codex: logins } };
+    const added = await serversActs({ vault: memVault([]) }).add(on, { agent: "codex", name: "acme", command: "acme-mcp" });
+    expect(added).toEqual({ file: join(logins, "config.toml") });
+    expect(CODEX_TOML.read(readFileSync(join(logins, "config.toml"), "utf8"), at.home).map(s => s.name)).toEqual(["acme"]);
+    // A store whose own parent is not there is no folder a sign-in made either: nothing above it is made.
+    const nowhere = join(at.root, "nowhere/logins/codex");
+    await expect(serversActs({ vault: memVault([]) }).add({ ...on, stores: { codex: nowhere } }, { agent: "codex", name: "acme", command: "acme-mcp" })).rejects.toThrow();
+    expect(existsSync(join(at.root, "nowhere"))).toBe(false);
+  });
+
+  it("on a box joined with a login that is not root, writes Codex's server into the catalog's file, since that login reaches no logins folder of root's", async () => {
+    const at = fixture();
+    const logins = join(at.root, "var/lib/wsp/logins/codex");
+    const on: AgentsOn = { kind: "box", machine: road(at, { root: true }).machine, login: { HOME: at.home, PATH: `${at.bin}:/usr/bin:/bin` }, stores: { codex: logins } };
+    const added = await serversActs({ vault: memVault([]) }).add(on, { agent: "codex", name: "acme", command: "acme-mcp" });
+    expect(added).toEqual({ file: "~/.codex/config.toml" });
     expect(CODEX_TOML.read(readFileSync(join(at.home, ".codex/config.toml"), "utf8"), at.home).map(s => s.name)).toContain("acme");
+    expect(existsSync(logins)).toBe(false);
   });
 
   it("writes names into another computer's files and hands each value to the vault, never to the file", async () => {
