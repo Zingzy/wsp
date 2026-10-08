@@ -111,12 +111,16 @@ export const madeBySetup = (held: PlaceRecord, kind: "plugins"): string[] =>
   Object.keys(held.picks?.[kind] ?? {}).filter(key => held.applied?.rows.some(r => r.id === `${kind}/${key}` && r.outcome === "installed") === true);
 
 /** A row as the record keeps it: a folder's carries the pick its project was made from, which a later setup holds the
- * recipe's against and no answer carries, since the picks already name the folder once. */
-export type HeldRow = PlaceProvisionRow & { pick?: RecipeFile["folders"][string] };
+ * recipe's against and no answer carries, since the picks already name the folder once, and when that project was
+ * made, which a move keeps after its record went. */
+export type HeldRow = PlaceProvisionRow & { pick?: RecipeFile["folders"][string]; createdAt?: string };
 export type HeldApplied = Omit<PlaceApplied, "rows"> & { rows: HeldRow[] };
+/** The project an earlier setup made from a folder and the pick it was made from: a folder added again lands under
+ * its id, so what the person set under that id stays theirs, and the project still standing there goes first. */
+export type FolderMove = { id: string; pick: RecipeFile["folders"][string]; createdAt?: string };
 
 /** What the setup came to as a client is told it, each row less what only the record keeps. */
-export const appliedView = (applied: HeldApplied): PlaceApplied => ({ ...applied, rows: applied.rows.map(({ pick: _pick, ...row }) => row) });
+export const appliedView = (applied: HeldApplied): PlaceApplied => ({ ...applied, rows: applied.rows.map(({ pick: _pick, createdAt: _made, ...row }) => row) });
 
 /** The ids of the projects the folders step made on that computer, off the folder rows that name one, which only
  * wsp's own add writes: a project the person recorded there, under the same name and from the same folder, is never
@@ -374,13 +378,14 @@ export interface PlaceRecording {
    * it, as the hand sign-in plans it. */
   signInLine?(placeId: string, agent: string): Promise<SignInLine>;
   /** Records one folder of this computer's as a project on that computer, seeded with what its pick keeps, by the
-   * add's own road. Answers the folder's row. Absent, a folder fails its row. */
-  addFolder?(placeId: string, key: string, folder: RecipeFile["folders"][string]): Promise<HeldRow>;
+   * add's own road. With a move, under that project's id, the project standing there taken off first by the
+   * remove's own road once the seed is read. Answers the folder's row. Absent, a folder fails its row. */
+  addFolder?(placeId: string, key: string, folder: RecipeFile["folders"][string], move?: FolderMove): Promise<HeldRow>;
   /** The remote a folder of this computer's clones from, read here; nothing where it has none. */
   folderRemote?(folder: RecipeFile["folders"][string]): Promise<string | undefined>;
   /** Takes the project a folder became on that computer off this host's list, by its id, the folder itself left
    * where it is. */
-  removeFolder?(placeId: string, projectId: string): Promise<void>;
+  removeFolder(placeId: string, projectId: string): Promise<void>;
   /** Puts the icon and the hue a recipe moved from `was` to `now` on a project, the rest of its look left as the
    * person set it. */
   folderLook(projectId: string, was: RecipeFile["folders"][string], now: RecipeFile["folders"][string]): Promise<void>;

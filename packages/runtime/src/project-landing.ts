@@ -99,6 +99,11 @@ export interface ProjectLanding {
    * add itself made there ever goes; nothing of the code is asked of a remote and nothing else on the computer is
    * touched. Run before the record goes, so a computer that cannot be reached keeps both. */
   remove(project: ProjectView, deps: LandingDeps): Promise<string>;
+  /** Whether the folder the project lives in still stands on the computer, on a road where that folder is the
+   * person's own; absent where wsp keeps the project for itself. */
+  folderStands?(project: ProjectView, deps: LandingDeps): Promise<boolean>;
+  /** Puts the files of a seed archive into the folder the project stands in, leaving a file already there as it is. */
+  seedInto?(project: ProjectView, tar: Buffer, deps: LandingDeps): Promise<void>;
   /** The folders of the computer's own every workspace of this project mounts. */
   workspaceBinds(project: ProjectView): MachineBind[];
 }
@@ -348,6 +353,13 @@ async function cloneBranch(o: { seed: { plan: SeedPlan }; checkout: string; base
   return on ?? o.base ?? o.seed.plan.defaultBranch ?? o.seed.plan.branch;
 }
 
+/** The files of a seed archive put into a standing checkout: a file already there is the person's and stays, wsp's
+ * own folder of the archive is never unpacked, and the archive goes either way. */
+export function seedIntoScript(o: { checkout: string; seedTar: string }): string {
+  const tar = shellQuote(o.seedTar);
+  return [`tar -xzf ${tar} -C ${shellQuote(o.checkout)} --skip-old-files --exclude=${shellQuote(SEED_DIR)} || { rc=$?; rm -f ${tar}; exit $rc; }`, `rm -f ${tar}`].join("\n");
+}
+
 /** A path under the guest's home moved under the home a computer was joined with: where an agent keeps its store on
  * that computer is the same folder under its own login's home. */
 export const underLoginHome = (home: string, path: string): string => (path === GUEST_HOME || path.startsWith(`${GUEST_HOME}/`) ? `${home.replace(/\/+$/, "")}${path.slice(GUEST_HOME.length)}` : path);
@@ -380,6 +392,18 @@ const boxLanding: ProjectLanding = {
   // The folder is the person's own from the add on: they and their threads work in it, so it stays as it is.
   async remove(project, deps) {
     return projectLeftOnComputerLine(project.name, deps.computerName, project.path);
+  },
+  async folderStands(project, deps) {
+    const read = await computerOf(deps).machine.exec(`test -e ${shellQuote(project.path)}`, { timeoutMs: STEP_MS });
+    if (read.exitCode > 1) throw new Error(lastLine(read.stderr) ?? `reading ${project.path} on ${deps.computerName} exited ${read.exitCode}`);
+    return read.exitCode === 0;
+  },
+  async seedInto(project, tar, deps) {
+    const { machine, home } = computerOf(deps);
+    const seedTar = `${placeDaemonPaths(home).putDir}/seed-${project.id}.tgz`;
+    await deps.land(machine, seedTar, tar);
+    const ran = await machine.exec(seedIntoScript({ checkout: project.path, seedTar }), { timeoutMs: STEP_MS });
+    if (ran.exitCode !== 0) throw new Error(lastLine(ran.stderr) ?? lastLine(ran.stdout) ?? `putting the kept files into ${project.path} exited ${ran.exitCode}`);
   },
   async land(o, deps) {
     const { machine, home } = computerOf(deps);
