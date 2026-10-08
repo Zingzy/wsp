@@ -769,7 +769,8 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
       // A gone record's stretch is over and its end unknown (the host may have been down when the provider lost the
       // machine): the mark goes without folding, so no tick after a rebuild bills the gap.
       else if (view.phase === "gone") m.mark = undefined;
-      const running = view.phase === "running" && m.mark !== undefined;
+      // A pausing machine runs until the provider has paused it, and only workspace.napped closes its stretch.
+      const running = (view.phase === "running" || view.phase === "pausing") && m.mark !== undefined;
       const rate = view.rateUsdPerHour;
       const awakeMs = m.awakeMs + (running ? now - m.mark! : 0);
       const before = histories.get(view.id) ?? [];
@@ -867,16 +868,16 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
     const day = dayStart(at);
     const month = monthStart(at);
     const zero = (place: string): PlaceSpend => ({ place, todayUsd: 0, monthUsd: 0, rateUsdPerHour: 0 });
-    const running = new Set((await o.records()).filter(r => r.phase === "running").map(r => r.id));
+    const running = new Set((await o.records()).filter(r => r.phase === "running" || r.phase === "pausing").map(r => r.id));
     const rows = new Map(places.filter(place => placeSpendLimit(place) !== undefined).map(place => [place.id, zero(place.id)]));
     for (const [id, points] of histories) {
       const where = stood.get(id);
       const place = where === undefined ? undefined : workspacePlaceId(where, places);
       if (place === undefined) continue;
       const row = rows.get(place) ?? zero(place);
-      // Only a machine whose record says running goes on past its newest tick: a deleted one's series ends where it
-      // went, and a napping record whose stored newest tick still runs (the host died before the nap's tick was
-      // written) reads nothing past that tick.
+      // Only a machine whose record says running or pausing goes on past its newest tick: a deleted one's series ends
+      // where it went, and a napping record whose stored newest tick still runs (the host died before the nap's tick
+      // was written) reads nothing past that tick.
       const until = running.has(id) ? at : undefined;
       row.todayUsd += spentSince(points, day, until);
       row.monthUsd += spentSince(points, month, until);

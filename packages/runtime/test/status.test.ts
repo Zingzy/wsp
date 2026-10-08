@@ -447,6 +447,33 @@ describe("status.watch cost events", () => {
     expect(costs.length).toBe(0); // unwatched = no timers running
   });
 
+  it("keeps the total and keeps ticking through a pause the provider takes 100 ms over", async () => {
+    const { rt, backend } = testRuntime({ costIntervalMs: 15, pollIntervalMs: 60_000 });
+    const ws = await createOn(rt, { golden: "snap_g", name: "alpha" });
+    const m = backend.machines[0]!;
+    const pause = m.pause.bind(m);
+    m.pause = async () => {
+      await new Promise(r => setTimeout(r, 100));
+      await pause();
+    };
+    const costs: Cost[] = [];
+    rt.events.on("workspace.cost", e => costs.push(e as Cost));
+    const stop = rt.status.watch();
+    try {
+      await until(() => costs.some(c => c.accruedUsd > 0));
+      await rt.workspaces.nap(ws.id);
+      await until(() => costs.at(-1)?.phase === "napping");
+    } finally {
+      stop();
+    }
+    const pausing = costs.filter(c => c.phase === "pausing");
+    expect(pausing.length).toBeGreaterThan(2);
+    expect(pausing.every(c => c.rateUsdPerHour > 0)).toBe(true);
+    const totals = costs.map(c => c.accruedUsd);
+    expect(totals).toEqual([...totals].sort((a, b) => a - b));
+    expect(costs.at(-1)!.accruedUsd).toBeGreaterThan(costs.filter(c => c.phase === "running").at(-1)!.accruedUsd);
+  });
+
   it("sends a folder nobody bills once, and none of the timer's ticks after", async () => {
     const stub = stubBackend();
     const backend = Object.assign(stub, { pricing: { ...stub.pricing, rateUsdPerHour: () => 0 } });
@@ -850,6 +877,53 @@ describe("accrued cost", () => {
     expect(after.at(-1)!.accruedUsd).toBeCloseTo(billed + usd(small, 3_600_000 + TICK_MS), 10);
     expect((await second.status.history(ws.id)).at(-1)!.accruedUsd).toBeCloseTo(after.at(-1)!.accruedUsd, 10);
     await second.close();
+  });
+
+  it("bills a pause until the provider has it, and the history and the place's spend read that total", async () => {
+    const backend = stubBackend();
+    const fc = fakeClock();
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, clock: fc.clock, status: ticking, idle });
+    const ws = await createOn(rt, { golden: "snap_g", name: "alpha" });
+    const rate = backend.pricing.rateUsdPerHour(backend.pricing.defaultSize);
+    const costs: Cost[] = [];
+    rt.events.on("workspace.cost", e => costs.push(e as Cost));
+    const stop = rt.status.watch();
+    try {
+      await tickCost(fc, costs);
+      await tickCost(fc, costs);
+      const m = backend.machines[0]!;
+      const pause = m.pause.bind(m);
+      let land = (): void => {};
+      const landed = new Promise<void>(r => { land = r; });
+      m.pause = async () => {
+        await landed;
+        await pause();
+      };
+      const napping = rt.workspaces.nap(ws.id);
+      await until(async () => (await rt.workspaces.get(ws.id)).phase === "pausing");
+      await tickCost(fc, costs);
+      expect(costs.at(-1)).toMatchObject({ phase: "pausing", rateUsdPerHour: rate, awakeMs: 3 * TICK_MS });
+      expect(costs.at(-1)!.accruedUsd).toBeCloseTo(usd(rate, 3 * TICK_MS), 10);
+      fc.advance(TICK_MS / 2);
+      const midPause = await spendOn(rt, "default");
+      expect(midPause.rateUsdPerHour).toBe(rate);
+      expect(midPause.monthUsd).toBeCloseTo(usd(rate, 3.5 * TICK_MS), 10);
+      land();
+      await napping;
+      await until(async () => (await rt.status.history(ws.id)).at(-1)?.phase === "napping");
+    } finally {
+      stop();
+    }
+    const billed = usd(rate, 3.5 * TICK_MS);
+    const last = (await rt.status.history(ws.id)).at(-1)!;
+    expect(last).toMatchObject({ rateUsdPerHour: 0, awakeMs: 3.5 * TICK_MS });
+    expect(last.accruedUsd).toBeCloseTo(billed, 10);
+    expect(costs.at(-1)).toMatchObject({ phase: "napping", rateUsdPerHour: 0 });
+    expect(costs.at(-1)!.accruedUsd).toBeCloseTo(billed, 10);
+    const spent = await spendOn(rt, "default");
+    expect(spent.todayUsd).toBeCloseTo(billed, 10);
+    expect(spent.monthUsd).toBeCloseTo(billed, 10);
+    expect(spent.rateUsdPerHour).toBe(0);
   });
 
   it("a rebuild at an unchanged rate lands no cost event: an event's tick rides the bus only when it changed the series", async () => {
