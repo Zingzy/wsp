@@ -2,7 +2,7 @@
 import { randomBytes } from "node:crypto";
 import { hostname } from "node:os";
 import { OWNER_LABEL, goldenHead, isMissing, readGone, sightMachine, type Machine, type MachineBackend, isNoProvider, isPlaceAbsent } from "@wsp/engine";
-import { type ProjectView, type SessionView, type Caller, type WorkspacePhase, ThreadPlacement, ThreadScope, WorkspaceOrigin, notTheLeadsChildRefusal, foldThreads, threadKeyOf, threadWord, scopeOf, goneWords, NO_IMAGE_YET, noWorkspaceRefusal, notFoundRefusal, goneUnconfirmedLine, type GoneSeenBy, copiesFolder, kindForComputer, RUN_GONE_LINE, HERE_PLACE_ID, workspaceLands, type ThreadFacts, refusal, LIMIT_RESUME_PROMPT, heldUntil, capRestartedLine } from "@wsp/protocol";
+import { type PlaceKind, type ProjectView, type SessionView, type Caller, type WorkspacePhase, ThreadPlacement, ThreadScope, WorkspaceOrigin, notTheLeadsChildRefusal, foldThreads, threadKeyOf, threadWord, scopeOf, goneWords, NO_IMAGE_YET, noWorkspaceRefusal, notFoundRefusal, goneUnconfirmedLine, type GoneSeenBy, copiesFolder, kindForComputer, RUN_GONE_LINE, HERE_PLACE_ID, workspaceLands, type ThreadFacts, refusal, LIMIT_RESUME_PROMPT, heldUntil, capRestartedLine } from "@wsp/protocol";
 import { keyOf } from "../agent-setup.js";
 import { harnessCatalog } from "../harness-catalog.js";
 import { accountOnComputer } from "../usage.js";
@@ -671,12 +671,12 @@ export function bootArea(ctx: RuntimeContext): BootArea {
   /** The computers a project can live on, by the row each carries in the places table: this computer, the ones
    * joined to it and the providers. A host wired without places holds the two it has anyway, so a project can be
    * recorded before anybody joins a computer. */
-  const computerRows = async (): Promise<{ id: string; name: string }[]> => {
-    const rows = placeDoor === undefined ? [{ id: HERE_PLACE_ID, name: hostname() }] : (await placeDoor.list(clock.now())).map(p => ({ id: p.id, name: p.name }));
+  const computerRows = async (): Promise<{ id: string; name: string; kind: PlaceKind }[]> => {
+    const rows = placeDoor === undefined ? [{ id: HERE_PLACE_ID, name: hostname(), kind: "computer" as const }] : (await placeDoor.rows()).map(p => ({ id: p.id, name: p.name, kind: p.kind }));
     // The provider this host forks on is a computer a project can live on whether or not the places table lists it:
     // a host wired without places holds no table at all, and one whose door has not heard of its provider yet
     // still forks there.
-    return rows.some(r => r.id === places.wired) ? rows : [...rows, { id: places.wired, name: places.wired }];
+    return rows.some(r => r.id === places.wired) ? rows : [...rows, { id: places.wired, name: places.wired, kind: "provider" as const }];
   };
 
   /** What a sentence calls a computer: the name its row carries, the id where this host holds no row for it. */

@@ -171,6 +171,11 @@ export const SessionView = z.object({
    * read leading out of that computer's home, onto it, or into wsp's own. Rides the answer and never the row, as
    * waitingOn does. */
   setupRefusal: z.string().optional(),
+  /** The project this row's workspace holds and the name a person reads for the computer it is on, as wsp projects
+   * prints it, stamped on the answer off the records, never written down: a lead lists a child in a box folder whose
+   * workspace its tree does not reach. */
+  project: z.object({ id: z.string(), name: z.string() }).optional(),
+  computerName: z.string().optional(),
   /** The computer's threads at once this turn waits on before it starts; absent on every turn that is not held. */
   capped: ThreadCapWait.optional(),
   /** The computer this send waits on to connect, by name, while a stop that could not reach it owes it the end of
