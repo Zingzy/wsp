@@ -500,6 +500,9 @@
                       "ms": {
                         "type": "integer",
                         "minimum": 0
+                      },
+                      "earlier": {
+                        "type": "boolean"
                       }
                     },
                     "required": [
@@ -1454,6 +1457,9 @@
                       "ms": {
                         "type": "integer",
                         "minimum": 0
+                      },
+                      "earlier": {
+                        "type": "boolean"
                       }
                     },
                     "required": [
