@@ -9,7 +9,7 @@ import type { HarnessCatalog, ProjectAddStage, ProjectExportStage, ProjectSource
 import { projectLanding, type Landed, type LandingDeps, type ProjectLanding } from "../project-landing.js";
 import { projectSource } from "../project-sources.js";
 import { refusal, scopeOf, spawnFolderRefusal, spawnRepositoryRefusal, SPAWN_FOLDER_FIX, SPAWN_REPOSITORY_FIX } from "@wsp/protocol";
-import { addedProjectOn, addingProjectLine, actionRefusal, kindWords, fmtBytes, notFoundRefusal, claudeProjectKey, folderOnCopyRefusal, cloneIntoNeeded, intoIsHereLine, INTO_TAKES_A_REPO_LINE, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, leftBehindLine, projectInUseRefusal, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, bareFolder, copiesFolder, kindForComputer, shellQuote, underProject, workspaceState, HERE_PLACE_ID, noSuchPlaceRefusal } from "@wsp/protocol";
+import { addedProjectOn, addingProjectLine, actionRefusal, kindWords, fmtBytes, notFoundRefusal, claudeProjectKey, folderOnCopyRefusal, cloneIntoNeeded, intoIsHereLine, INTO_TAKES_A_REPO_LINE, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, leftBehindLine, projectInUseRefusal, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, bareFolder, copiesFolder, kindForComputer, runsInFolder, shellQuote, underProject, workspaceState, HERE_PLACE_ID, noSuchPlaceRefusal } from "@wsp/protocol";
 import { GITHUB_TOKEN_ENV } from "@wsp/engine";
 import { resolveThreadDefaults, withCustomModels } from "@wsp/protocol";
 import { harnessCatalog } from "../harness-catalog.js";
@@ -20,7 +20,7 @@ import { PROJECTS, SEED_CHOICES, NO_SEED_WIRING, type ImportReport, type ImportL
 import type { RuntimeContext, ProjectsArea } from "../context.js";
 
 export function projectsArea(ctx: RuntimeContext): ProjectsArea {
-  const { opts, store, adapters, local, bus, clock, live, projectsHeld, gone } = ctx;
+  const { opts, store, adapters, local, bus, clock, live, projectsHeld, gone, placeDoor } = ctx;
   /** The import road onto a fork: the plan, what was consented, the pack, the upload in parts, the landing at the
    * path and the agents' state keyed to it there. */
   const copyImport = async (entry: LiveWorkspace, o: ProjectImportOptions, report: ImportReport): Promise<ImportLanded> => {
@@ -110,11 +110,13 @@ export function projectsArea(ctx: RuntimeContext): ProjectsArea {
     return opts.seed;
   };
 
-  /** Which landing road a computer takes, off what the computer is rather than off its id: the computer the app
-   * runs on copies the folder beside itself, a computer whose daemon says where it keeps checkouts clones onto
-   * that disk, and everything else is a provider, where a project lives in an image. */
-  const landingKind = (computer: string, at: MachineBackend | undefined): ProjectLanding["kind"] =>
-    copiesFolder(kindForComputer(computer)) ? "mac" : at?.projects !== undefined ? "box" : "provider";
+  /** Which landing road a computer takes, off the kind of workspace it makes rather than off its id: the computer
+   * the app runs on works the folder beside itself, a computer the person joined holds the project as a folder in
+   * its login's home, and everything else is a provider, where a project lives in an image. */
+  const landingKind = (computer: string, _at?: MachineBackend): ProjectLanding["kind"] => {
+    const kind = ctx.kindOf(computer);
+    return copiesFolder(kind) ? "mac" : runsInFolder(kind) ? "box" : "provider";
+  };
 
   /** What a landing road may ask of this runtime, for one computer: a short-lived machine of that computer's image
    * to clone, seed and install in, the road that puts the seed archive on it, the snapshot a project image is, and
@@ -124,6 +126,7 @@ export function projectsArea(ctx: RuntimeContext): ProjectsArea {
     // A computer this host cannot read a backend for holds nothing of a project: the record still stands, as it
     // did before this road existed, and the road that would have to fork there says so itself when it is asked.
     const at = await ctx.forkingAt(placeId).catch(() => undefined);
+    const joined = placeId === undefined ? undefined : placeDoor?.folderComputer(placeId);
     const deps: LandingDeps = {
       async worker(o) {
         const forking = await ctx.landingBackend(placeId);
@@ -154,11 +157,7 @@ export function projectsArea(ctx: RuntimeContext): ProjectsArea {
         return machine.snapshot(name, { firstLife: true });
       },
       scratch: () => GUEST_TMP,
-      ...(at?.projects !== undefined ? { projectsDir: at.projects } : {}),
-      // One command on the computer itself, where that computer runs any: how the folder wsp keeps for a project
-      // there is taken away again. A provider answers none, and this Mac's own road runs nothing outside a
-      // workspace, so both leave it absent and the roads there never ask.
-      ...(at?.onComputer === undefined ? {} : { onComputer: at.onComputer.bind(at) }),
+      ...(joined !== undefined ? { computer: { machine: joined.machine, home: joined.home } } : {}),
       imageHead: () => ctx.imageHeadOrNone(),
       cloneEnv: (): Record<string, string> => {
         const token = opts.vault?.()[GITHUB_TOKEN_ENV];
@@ -252,7 +251,7 @@ export function projectsArea(ctx: RuntimeContext): ProjectsArea {
       if (seeding && o.seed === undefined) throw Object.assign(new Error(seedChoiceNeeded(source.kind === "folder" ? source.path : o.source)), { kind: "invalid" });
       const name = o.name ?? resolved.name;
       const id = `pr_${randomBytes(4).toString("hex")}`;
-      const path = road.path({ name, source });
+      const path = road.path({ name, source, deps });
       // The key the agent's memory sits under, fixed here and never recomputed: the folder's own key where a folder
       // on this computer seeded the project, so the memory it already has is the memory it keeps, else the key of
       // the path on the computer holding it.
@@ -349,8 +348,12 @@ export function projectsArea(ctx: RuntimeContext): ProjectsArea {
       // for a thread whose workspace this host no longer holds, read as absent.
       const scope = scopeOf(origin);
       if (scope !== undefined) {
+        // Its own project by id or by name first, so another computer's project of the same name never stands in.
         const mine = ctx.projectOfScope(scope);
-        if (found === undefined || mine === undefined) throw notFoundRefusal(bareNoSuchProjectLine(ref));
+        if (mine === undefined) throw notFoundRefusal(bareNoSuchProjectLine(ref));
+        const own = projectsHeld.get(mine);
+        if (own !== undefined && (own.id === ref || own.name === ref)) return own;
+        if (found === undefined) throw notFoundRefusal(bareNoSuchProjectLine(ref));
         if (ctx.projectReached(scope, found.id)) return found;
         if (ctx.ofThreadsRepository(scope, found.id)) throw refusal(spawnFolderRefusal(scope.threadId, ref), SPAWN_FOLDER_FIX, "usage");
         throw refusal(spawnRepositoryRefusal(scope.threadId, ctx.projectHeld(mine).name, ref), SPAWN_REPOSITORY_FIX, "usage");

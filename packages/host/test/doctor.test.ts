@@ -13,7 +13,7 @@ import { daemonUnderTest, type DaemonUnderTest } from "../../daemon/test/harness
 import { assetDir, assetProof, daemonBinaryHere } from "../src/assets.js";
 import { hostPlatform } from "../src/verbs.js";
 import { DAEMON_TARGETS, daemonBinaryIn, daemonTargetHere, GUEST_DAEMON_TARGETS } from "../src/daemon-binary.js";
-import { agentSignInWord, agentVersionWord, probePath, doctorRowRefusal, EXIT_CODES, noSuchPlaceRefusal, noSuchProjectLine, plural, projectNeedsReaddLine, THIS_COMPUTER, type PlaceApplied, type ProjectView, HERE_PLACE_ID, HOMEBREW_PREFIX, DAEMON_MEMORY_MAX_PERCENT, DAEMON_UNIT, DAEMON_VERSION, GUEST_DAEMON_DIR, GUEST_WSP_BIN, GUEST_WSP_PATH, guestWspShim, machineLacksShort, NO_SYSTEMD_LINE, placeUpdateLine, signInRefusalLine, wspBinIn, type HarnessCatalogAnswer, type PlaceCapacity, type PlaceView } from "@wsp/protocol";
+import { agentSignInWord, agentVersionWord, probePath, doctorRowRefusal, EXIT_CODES, noSuchPlaceRefusal, noSuchProjectLine, plural, THIS_COMPUTER, type PlaceApplied, type ProjectView, HERE_PLACE_ID, HOMEBREW_PREFIX, DAEMON_MEMORY_MAX_PERCENT, DAEMON_UNIT, DAEMON_VERSION, GUEST_DAEMON_DIR, GUEST_WSP_BIN, GUEST_WSP_PATH, guestWspShim, machineLacksShort, NO_SYSTEMD_LINE, placeUpdateLine, signInRefusalLine, wspBinIn, type HarnessCatalogAnswer, type PlaceCapacity, type PlaceView } from "@wsp/protocol";
 import { copyKey, createRuntime, localExecStream, rotateDaemonTokenScript, writeDaemonTokenScript, type HarnessAdapterFactory, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { isReserved, LocalBackend, NoProviderBackend } from "@wsp/engine";
@@ -673,7 +673,7 @@ describe("the doctor's computer road", () => {
   });
 
   /** A host holding one computer, some projects on it and a workspace road that records what it was asked for. */
-  function fakeHost(o: { projects: readonly ProjectView[]; places?: readonly PlaceView[]; inside?: (cmd: string) => { exitCode: number; stdout: string; stderr: string } }) {
+  function fakeHost(o: { projects: readonly ProjectView[]; places?: readonly PlaceView[]; inside?: (cmd: string) => { exitCode: number; stdout: string; stderr: string }; kind?: "cloud" | "place" }) {
     const created: { project: string; name: string; size?: unknown }[] = [];
     const deleted: string[] = [];
     const execs: string[] = [];
@@ -683,7 +683,7 @@ describe("the doctor's computer road", () => {
       workspaces: {
         create: async (spec: { project: string; name: string; size?: unknown }) => {
           created.push(spec);
-          return { id: "w_1", name: spec.name };
+          return { id: "w_1", name: spec.name, ...(o.kind !== undefined ? { kind: o.kind } : {}) };
         },
         exec: async (_id: string, cmd: string) => {
           execs.push(cmd);
@@ -699,8 +699,8 @@ describe("the doctor's computer road", () => {
   const onePlan: ProvisionPlan = { recipeAt: "2026-09-18T09:00:00.000Z", path: probePath(GUEST_HOME), skipped: [], agents: 0, compiler: false, steps: [{ id: "tools/npm/agent-browser", label: "agent-browser", manager: "npm", cmd: "install", bin: "agent-browser" }] };
   const answering = () => ({ exitCode: 0, stdout: "wsp-present 0 /usr/local/bin/agent-browser\n", stderr: "" });
 
-  it("proves the computer in order: it answers, the vault, the agents there, a workspace of a project whose checkout stands, the tools inside and the delete", async () => {
-    const host = fakeHost({ projects: [project({ id: "pr_old", name: "old-one" }), project({ checkout: "/root/.wsp/projects/pr_1/checkout" })], inside: answering });
+  it("proves the computer in order: it answers, the vault, the agents there, a workspace of its first project, the tools inside and the delete", async () => {
+    const host = fakeHost({ projects: [project(), project({ id: "pr_2", name: "two" })], inside: answering });
     const io = captured();
     expect(await computerDoctor(host.rt, io, computer(), { vault: () => ({}), plan: async () => onePlan }, 7)).toBe(0);
     // Every step of the road, in the order the run took them.
@@ -712,7 +712,7 @@ describe("the doctor's computer road", () => {
       "the recipe's tools inside",
       "deleted",
     ]);
-    // The workspace is made of the project whose checkout stands, at the size anybody gets there without asking.
+    // The workspace is made of the first project there, at the size anybody gets there without asking.
     expect(host.created).toEqual([{ project: "pr_1", name: `doctor-${(7).toString(36)}` }]);
     // The tools were read inside that workspace, on the order a workspace there boots with.
     expect(host.execs.some(cmd => cmd.includes(`export PATH=${PLACE_WORKSPACE_PATH}`) && cmd.includes("agent-browser"))).toBe(true);
@@ -720,6 +720,16 @@ describe("the doctor's computer road", () => {
     // Each agent the computer reported, by its catalog name. This one reported no version and no sign-in, which
     // is a daemon older than those fields, so the name is the whole of the line.
     for (const id of ["claude", "codex"]) expect(io.lines).toContain(`${agentName(id)} on spoo`);
+    expect(io.lines.at(-1)).toContain("DOCTOR PASS");
+  });
+
+  it("reads the tools in a project's folder on a computer whose threads run in it, and takes nothing away", async () => {
+    const host = fakeHost({ projects: [project()], inside: answering, kind: "place" });
+    const io = captured();
+    expect(await computerDoctor(host.rt, io, computer(), { vault: () => ({}), plan: async () => onePlan }, 7)).toBe(0);
+    expect(host.execs.some(cmd => cmd.includes("agent-browser"))).toBe(true);
+    expect(host.deleted).toEqual([]);
+    expect(io.lines.some(l => /^deleted\b/.test(l))).toBe(false);
     expect(io.lines.at(-1)).toContain("DOCTOR PASS");
   });
 
@@ -756,17 +766,12 @@ describe("the doctor's computer road", () => {
     expect(host.deleted).toEqual(["w_1"]);
   });
 
-  it("fails the workspace step with the line that records the project again where no project there has a checkout, and with the line that adds one where there is no project at all", async () => {
-    const one = fakeHost({ projects: [project()] });
-    const io = captured();
-    expect(await computerDoctor(one.rt, io, computer(), { vault: () => ({}) })).toBe(1);
-    expect(io.errors.join("\n")).toContain(projectNeedsReaddLine("spoo-landing", "spoo", { kind: "git", url: "https://github.com/wsp-labs/wsp.git" }));
-    expect(one.created).toEqual([]);
-
+  it("fails the workspace step with the line that adds a project where there is none at all", async () => {
     const none = fakeHost({ projects: [] });
     const empty = captured();
     expect(await computerDoctor(none.rt, empty, computer(), { vault: () => ({}) })).toBe(1);
-    expect(empty.errors.join("\n")).toContain("spoo holds no project, and a workspace is a copy of one; wsp add <url> --on spoo records one");
+    expect(empty.errors.join("\n")).toContain("spoo holds no project, and a thread runs in one; wsp add <url> --on spoo records one");
+    expect(none.created).toEqual([]);
   });
 
   it("makes its workspace of the project --project names, and refuses a word that names none there", async () => {

@@ -22,7 +22,7 @@
 import { openProjectSettings } from "../settings/openAt.js";
 import { ChevronDownIcon, CopyIcon, PlusIcon, SquarePenIcon, Trash2Icon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type ReactNode } from "react";
-import { HOST_ASLEEP_LINE, SETTLE_MS, copiesFolder, kindForComputer, modelOf, modelPicks, workspaceKind, workspaceState, type WorkspaceState, type WorkspaceView } from "@wsp/protocol";
+import { HOST_ASLEEP_LINE, SETTLE_MS, copiesFolder, kindForComputer, modelOf, runsInFolder, modelPicks, workspaceKind, workspaceState, type WorkspaceState, type WorkspaceView } from "@wsp/protocol";
 import { openContextMenu, runAction } from "../actions/contextMenu.js";
 import { THREAD_TREE_WORKING, rebuildRefusedLine } from "../actions/format.js";
 import { CREATE_ASKED, CREATE_STEP_WORDS, currentStep, stepWords, stoppedStep } from "../shell/creationLog.js";
@@ -290,7 +290,7 @@ export function WorkspaceSidebar() {
   const projectActionsOf = (group: ProjectGroup): ResolvedAction[] => {
     const { project } = group;
     const own = resolveActions(projectActions, { id: project.id, name: project.name, workspaces: group.workspaces.map(w => w.displayName) }, projectVerbs);
-    const held = workspaces.find(w => w.project.id === project.id && w.worktree === undefined && copiesFolder(workspaceKind(w)));
+    const held = workspaces.find(w => w.project.id === project.id && w.worktree === undefined && runsInFolder(workspaceKind(w)));
     const make = api?.projectFolder;
     const here = project.computer !== undefined && copiesFolder(kindForComputer(project.computer));
     const folder = held ?? (make !== undefined && here ? unmadeFolder(project.id, project.name, project.computer!) : undefined);

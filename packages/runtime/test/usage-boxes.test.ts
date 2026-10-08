@@ -9,7 +9,7 @@ import { serveRuntime } from "../src/serve.js";
 import { memoryStore } from "../src/store.js";
 import { createOn, projectOn, stubBackend } from "./stub-backend.js";
 import { report, wiring } from "./place-join.js";
-import { ctx, sockets, code, join, forks, KEEPS_NO_IMAGE } from "./places-fixture.js";
+import { ctx, sockets, code, join, forks, asRoot, KEEPS_NO_IMAGE, ROOT_LOGIN } from "./places-fixture.js";
 import { until } from "./until.js";
 import type { WsClient } from "./ws-client.js";
 
@@ -85,9 +85,9 @@ describe("work on a joined computer outside wsp", () => {
     const asked: Record<string, unknown>[] = [];
     const { client } = await join(hostKey, {
       code: await code(),
-      report: report("srv", { agents: ["claude"] }),
+      report: report("srv", { agents: ["claude"], login: ROOT_LOGIN }),
       answers: c => {
-        forks(c, undefined, undefined, KEEPS_NO_IMAGE);
+        forks(c, undefined, asRoot, KEEPS_NO_IMAGE);
         readsLogs(c, () => ({ rows: [{ agent: "claude", session: "sess-box", at: Date.now(), model: "claude-opus-5", tokens: tokens(10) }, { agent: "claude", session: "s-term", at: Date.now(), model: "claude-opus-5", tokens: tokens(7) }], limits: [] }), asked);
       },
     });

@@ -11,7 +11,7 @@ import {
   RUN_PERSONS_LINE, runOutputTail, type SessionRunEvent, NO_SLATE_MCP_ARG, ASIDE_NO_SESSION_LINE, BLANK_ASIDE_LINE,
   asideUnsupportedLine, isLocalWorkspace, mcpServersBlocked, actionRefusal, homeShortened, EMPTY_TITLE_LINE,
   threadRunsOnLine, keptPicks, listedPick, notFoundRefusal, NOTIFY_ME, noCwdLine,
-  THREAD_WORKING_LINE, threadOnMachineLine, WORKTREE_BUSY_LINE, copiesFolder, sendRefusal, startPicks, titleLine,
+  THREAD_WORKING_LINE, threadOnMachineLine, WORKTREE_BUSY_LINE, copiesFolder, runsInFolder, sendRefusal, startPicks, titleLine,
   TURN_TOKEN_ENV, turnImagesDir, workspaceState, REWIND_LATEST_LINE, REWIND_NO_CHECKPOINT_LINE, REWIND_NO_UNDO_LINE,
   REWIND_SHARED_LINE, REWIND_WORKING_LINE, rewindBesideLine, rewindChildrenLine, rewindKeptLine, rewindNoAnchorLine,
   attachmentRecord, attachmentKey, filesBlocked, isImage, sendFilesDir, attachedFilesPrompt, threadMessages,
@@ -919,7 +919,7 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
       if (workspaceId === undefined) throw notFoundRefusal(`no thread ${threadWord(threadId)}`);
       const entry = await ctx.entryOfRow({ threadId, workspaceId }, origin);
       if (entry === undefined) throw notFoundRefusal(`no thread ${threadWord(threadId)}`);
-      if (!copiesFolder(entry.record.kind)) throw Object.assign(new Error(threadOnMachineLine(entry.record.name)), { kind: "usage" });
+      if (!runsInFolder(entry.record.kind)) throw Object.assign(new Error(threadOnMachineLine(entry.record.name)), { kind: "usage" });
       const tree = entry.record.worktree;
       if (tree?.made === true && tree.gone !== true) {
         // Every thread in it goes with the worktree, so none may be working, and none can land a checkpoint after

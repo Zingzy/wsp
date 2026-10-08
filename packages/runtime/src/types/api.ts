@@ -46,7 +46,7 @@ import type {
   WorkspaceCreatingEvent,
 } from "@wsp/protocol";
 import type { BringBackResult, GitCommitReply, GitDiscardReply, GitUpdateReply, MergeInResult, PullRequestPage, GitPrReplyReply, GitPrResolveReply, GitPrReactReply, ReactionContent, PullRequestItem, PullRequestSendResult, FixResult, MergeMethod, MergeResult, CheckoutReply, CommitDraft, ViewedMarks, RunStep, SessionRunEvent } from "@wsp/protocol";
-import type { WorktreeMade, KeptAttachment } from "@wsp/protocol";
+import type { WorktreeMade, KeptAttachment, WorkspaceKind } from "@wsp/protocol";
 import type { CallbackForwards, SignInAsk, SkillAsk } from "../agents-read.js";
 import type { DaemonChannel } from "../daemon-channel.js";
 import type { AccessChoice, AgentRow, AgentSetupSet, ThreadDefaults } from "@wsp/protocol";
@@ -127,7 +127,7 @@ export interface Runtime {
     /** Where a workspace of this project would land and what that computer offers, gated as a create is; `place` is
      * absent where the landing is this computer or the provider this host forks on. Read ahead of a create so the
      * refusal for a computer that forks nothing comes in one sentence before any stage is streamed. */
-    landing(o: { project: string }, origin?: Caller): Promise<{ place?: string; name: string; capabilities: Capabilities }>;
+    landing(o: { project: string }, origin?: Caller): Promise<{ place?: string; name: string; capabilities: Capabilities; kind?: WorkspaceKind }>;
     get(id: string, origin?: Caller): Promise<WorkspaceView>;
     /** Every workspace this host holds, less the ones the caller's origin may not drive. */
     list(origin?: Caller): Promise<WorkspaceView[]>;

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { unpushedLine, actionRefusal, workspaceStateLine, whereWord, agentsMayDrive, type CopyToDelete, deleteCopiesNotice, deleteNotice, onDeleteOf, screenCommandLine, screenCommandTyped, screenCommandsOf, goneRefusal, isBilling, isLocalWorkspace, kindWords, MACHINE_WSP_FORKS, machineWord, needsRebuild, goneRoadRefusal, NOT_ON_THIS_KIND, providerCannotRefusal, reachShown, readingRoad, relayedRefusal, sendRefusal, servesReading, signInRefusalLine, signInRoad, stillWorkingLine, THIS_COMPUTER, undrivenRefusal, WORKSPACE_KIND_WORDS, workspaceKind, workspaceState, workspaceStateOf, workspaceWord, type ReachState, type SendBlock, type WorkspaceState } from "../src/index.js";
+import { unpushedLine, actionRefusal, workspaceStateLine, whereWord, agentsMayDrive, type CopyToDelete, deleteCopiesNotice, deleteNotice, onDeleteOf, screenCommandLine, screenCommandTyped, screenCommandsOf, goneRefusal, isBilling, isLocalWorkspace, kindWords, MACHINE_WSP_FORKS, machineWord, needsRebuild, goneRoadRefusal, NOT_ON_THIS_KIND, providerCannotRefusal, reachShown, readingRoad, relayedRefusal, sendRefusal, servesReading, signInRefusalLine, signInRoad, stillWorkingLine, THIS_COMPUTER, JOINED_COMPUTER, undrivenRefusal, WORKSPACE_KIND_WORDS, workspaceKind, workspaceState, workspaceStateOf, workspaceWord, type ReachState, type SendBlock, type WorkspaceState } from "../src/index.js";
 
 describe("workspaceState", () => {
   it("phase alone: running, pausing, napping and waking each have one word", () => {
@@ -183,16 +183,21 @@ describe("what a workspace's kind changes about its words", () => {
   it("a machine wsp drives has a state, a bill and an image; this computer has none of the three and its row reads its own size", () => {
     // access is what a thread here runs at when nobody names one: a fork costs a rebuild and nothing else, and this
     // computer is the person's own, so both run every action; the computers somebody owns and works on ask first.
-    expect(kindWords("cloud")).toEqual({ machine: MACHINE_WSP_FORKS, rowReadsMachine: true, cpu: "vCPU", where: "a provider", driven: true, daemon: true, metrics: "daemon", processes: "daemon", projectSources: ["git", "github", "gitlab", "folder"], copiesFolder: false, agents: true, onDelete: { asked: "computer is deleted in the cloud", done: expect.any(Function) } });
+    expect(kindWords("cloud")).toEqual({ machine: MACHINE_WSP_FORKS, rowReadsMachine: true, cpu: "vCPU", where: "a provider", driven: true, daemon: true, metrics: "daemon", processes: "daemon", projectSources: ["git", "github", "gitlab", "folder"], copiesFolder: false, inFolder: false, agents: true, onDelete: { asked: "computer is deleted in the cloud", done: expect.any(Function) } });
     // This computer's load is read where it runs, in the host's own process, so its Live rows stand whether or not
     // the daemon its terminal and its processes ride ever started. A folder is
     // already on this computer, so an import registers its path and copies nothing, and a repo is cloned into a
     // folder the person names and worked there. Its row's second line is its
     // cores and memory in the size line a fork's row reads, in its own word for a cpu, since its cores are not virtual.
-    expect(kindWords("local")).toEqual({ machine: THIS_COMPUTER, rowReadsMachine: true, cpu: "cores", where: THIS_COMPUTER, driven: false, daemon: true, metrics: "host", processes: "daemon", projectSources: ["git", "github", "gitlab", "folder"], copiesFolder: true, agents: true, onDelete: { asked: "computer is left as it is", done: expect.any(Function) } });
+    expect(kindWords("local")).toEqual({ machine: THIS_COMPUTER, rowReadsMachine: true, cpu: "cores", where: THIS_COMPUTER, driven: false, daemon: true, metrics: "host", processes: "daemon", projectSources: ["git", "github", "gitlab", "folder"], copiesFolder: true, inFolder: true, agents: true, onDelete: { asked: "computer is left as it is", done: expect.any(Function) } });
+    // A folder on a computer the person joined: its threads run in it as they do here, and nothing is driven, copied
+    // or billed; its row reads the computer's own name, since its size is that computer's.
+    expect(kindWords("place")).toEqual({ machine: JOINED_COMPUTER, rowReadsMachine: false, cpu: "cores", where: null, driven: false, daemon: true, metrics: "daemon", processes: "daemon", projectSources: ["git", "github", "gitlab", "folder"], copiesFolder: false, inFolder: true, agents: false, onDelete: { asked: "computer is left as it is", done: expect.any(Function) } });
     // The machines wsp forks and this computer run agents that drive this host, each over its own road.
     expect(agentsMayDrive("cloud")).toBe(true);
     expect(agentsMayDrive("local")).toBe(true);
+    // A thread in a folder on a joined computer is handed no wsp tools, so a switch there would open nothing.
+    expect(agentsMayDrive("place")).toBe(false);
     // Which kind of source a computer's projects come from: this computer copies a folder of yours beside itself and
     // clones a repo into a folder you name first, and a machine wsp forks takes a repo any of the three ways it can be
     // named and a folder here it clones and seeds from. Whether the folder is copied here is its own word, since a
@@ -224,7 +229,7 @@ describe("what a workspace's kind changes about its words", () => {
   });
 
   it("every kind has a row in the table, so adding one is a row here and nothing else", () => {
-    expect(Object.keys(WORKSPACE_KIND_WORDS).sort()).toEqual(["cloud", "local"]);
+    expect(Object.keys(WORKSPACE_KIND_WORDS).sort()).toEqual(["cloud", "local", "place"]);
   });
 
   it("the delete sentence says what the delete does to this kind's computer", () => {

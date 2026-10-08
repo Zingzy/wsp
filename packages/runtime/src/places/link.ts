@@ -20,7 +20,7 @@ import {
   placeBehindLine,
   placeDaemonBehind,
 } from "@wsp/protocol";
-import { LinkBackend, PlaceAbsentError, keyFingerprint } from "@wsp/engine";
+import { LinkBackend, PlaceAbsentError, PlaceFolderMachine, keyFingerprint } from "@wsp/engine";
 import { connectDaemon } from "../reach.js";
 import { verifyPlaceBytes } from "@wsp/keys";
 import { CAPS, DEFAULT_COLLECTION, DEFAULT_ID, type PlaceRecord, type PlaceDoor, PlaceForksNowhereError, PlaceProvisioningError } from "./types.js";
@@ -31,13 +31,14 @@ import type { PlaceSetupArea } from "./setup.js";
 import type { PlaceViewsArea } from "./views.js";
 
 /** The door's half that joins, proves and holds each computer's link, and answers what a link and a place say. */
-export function linkDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, setupArea: PlaceSetupArea, viewArea: PlaceViewsArea): Pick<PlaceDoor, "answerChallenge" | "join" | "auth" | "hostKey" | "prove" | "attach" | "link" | "channel" | "load" | "nameOf" | "settingsAt" | "turnLimitAt" | "signInsAt" | "loginLanded" | "offerOf" | "backendOf" | "forkingBackend" | "forward" | "placeFor" | "defaultPlace" | "markUsed" | "markDefaultIfNone"> {
+export function linkDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, setupArea: PlaceSetupArea, viewArea: PlaceViewsArea): Pick<PlaceDoor, "answerChallenge" | "join" | "auth" | "hostKey" | "prove" | "attach" | "link" | "channel" | "load" | "nameOf" | "settingsAt" | "turnLimitAt" | "signInsAt" | "loginLanded" | "offerOf" | "backendOf" | "forkingBackend" | "joined" | "folderComputer" | "forward" | "placeFor" | "defaultPlace" | "markUsed" | "markDefaultIfNone"> {
   const { opts, store, wiring, clockNow, seenEveryMs, live, kept, signInsHere, backends, forwards, asking, emit } = ctx;
   const {
     records, wiredProvider, providerIds, providerBackend, recordOf, settingsOf, settingsHeld, awaiting, holdBack,
     defaultId, inTurn, markDefault, markHeld, challenge, signedRefusal, writeSeen, change,
   } = recordArea;
   const { channels, waiting, closedAt, woken, setting, settingNow, foldersOf, syncSoon, startedOrSaid, linkTo } = setupArea;
+  const folderMachines = new Map<string, { key: string; machine: PlaceFolderMachine }>();
   const { pendingRecords, putPending, flooring, floorOnce, takenBack, backendFrom, tunnelled, cut, joining, joined, forget } = viewArea;
   let tunnelSeq = 0;
 
@@ -282,6 +283,21 @@ export function linkDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, se
       // No record and no facts: the word names a provider row rather than a computer, and its backend is the one
       // the host built for that provider.
       return kept.has(placeId) ? undefined : providerBackend(placeId);
+    },
+
+    joined: placeId => kept.has(placeId),
+
+    folderComputer(placeId) {
+      const record = kept.get(placeId);
+      const home = record?.report.login["HOME"];
+      if (record === undefined || home === undefined) return undefined;
+      const path = record.report.login["PATH"];
+      // One machine per computer while its home and PATH stand, so who its lines run as is read once there.
+      const key = `${home}\0${path ?? ""}`;
+      const held = folderMachines.get(placeId);
+      const machine = held?.key === key ? held.machine : new PlaceFolderMachine(linkTo(placeId), { id: placeId, home, ...(path !== undefined && path !== "" ? { path } : {}) });
+      if (held?.machine !== machine) folderMachines.set(placeId, { key, machine });
+      return { machine, home, shape: record.report.shape };
     },
 
     async forkingBackend(placeId) {

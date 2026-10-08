@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { ProjectView, Caller } from "@wsp/protocol";
 import { GitPrReadReply, GitUpdateReply, GitStartOnReply, isPullRequestFact } from "@wsp/protocol";
-import { noBranchesLine, PR_BEHIND_WORDS, copiesFolder, kindForComputer, startPicks, HERE_PLACE_ID } from "@wsp/protocol";
+import { noBranchesLine, PR_BEHIND_WORDS, copiesFolder, kindForComputer, placeBranchLine, runsInFolder, startPicks, HERE_PLACE_ID } from "@wsp/protocol";
 import { holdsRepo, projectForRepo } from "@wsp/protocol";
 import { accessWordRefusal, type AccessChoice, pickRefusal } from "@wsp/protocol";
 import { HARNESS_CATALOGS, harnessCatalog } from "../harness-catalog.js";
@@ -49,7 +49,14 @@ export function startFromArea(ctx: RuntimeContext): StartFromArea {
    * record, and for a pull request its base, its pull request and its head, the copy put on the head branch through
    * its own daemon. A checkout that is refused takes the half-made workspace with it and answers its own sentence. */
   const workspaceFrom = async (project: ProjectView, from: WorkspaceFrom, fact: PullRequest | undefined, kind: "start" | "review", origin: Caller | undefined): Promise<LiveWorkspace> => {
-    if (copiesFolder(kindForComputer(project.computer))) return folderFrom(project, from, fact);
+    const at = ctx.kindOf(project.computer);
+    if (copiesFolder(at)) return folderFrom(project, from, fact);
+    // A folder on a computer the person joined: an issue runs in the project folder, and a pull request's head waits
+    // on a worktree there, which wsp does not make yet.
+    if (runsInFolder(at)) {
+      if (fact !== undefined) throw Object.assign(new Error(placeBranchLine(ctx.placeName(project.computer))), { kind: "usage" });
+      return ctx.projectFolder(project);
+    }
     const taken = new Set([...live.values()].map(e => e.record.name));
     const name = takenNameAfter(startName(kind, from.number, from.title), taken);
     const made = await ctx.workspaces.create({ project: project.id, name }, origin);

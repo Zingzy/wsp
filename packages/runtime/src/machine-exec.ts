@@ -59,7 +59,17 @@ export interface MachineExecOptions {
    * turns themselves go on running on their machines, and whatever opens them next reads their logs from the
    * first byte. The wiring that made this factory owns the set and empties it when it closes. */
   reading?: Set<() => void>;
+  /** Words the run's setsid is started under, read off the run's base path; absent starts it as it is. */
+  launchUnder?: (base: string) => string;
 }
+
+/** The systemd unit a run started under turnScope stands in: its cgroup is `/sys/fs/cgroup/wsp.slice/<unit>`. */
+const turnScopeUnit = (base: string): string => `wsp-run-${base.slice(base.lastIndexOf("/") + 1)}.scope`;
+
+/** A run in a scope of its own under wsp.slice, outside the unit the daemon that started it runs in, so stopping or
+ * restarting that unit, which takes every process in its cgroup whatever session it is in, leaves the run going.
+ * The scope runs the command in place, so the pid the launch records is still the run's own. */
+export const turnScope = (base: string): string => `systemd-run --scope --quiet --collect --slice=wsp.slice --unit=${shellQuote(turnScopeUnit(base))} -- `;
 
 /** The two limits a turn runs under on every kind of machine, and what ends one: the wall since it started, else the
  * idle stretch since it last did anything, which is its last byte, the person's last message, or work in the
@@ -502,7 +512,7 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
           // and the log carry the person's messages and the agent's output, and a machine somebody owns may carry
           // other logins that can read a folder wsp did not make.
           before: ["umask 077", `mkdir ${q(claim(base))} 2>/dev/null || { [ -d ${q(claim(base))} ] && { echo ${HANDSHAKE.launched}; exit 0; }; echo ${q(`no run folder on this machine: ${claim(base)}`)} >&2; exit 1; }`],
-          after: [...(input === undefined ? [] : [`mkfifo ${q(base)}.fifo`]), ...envLines, `setsid bash ${q(base)}.sh > ${q(base)}.log 2>&1 & echo $! > ${q(base)}.pid; echo ${HANDSHAKE.launched}`],
+          after: [...(input === undefined ? [] : [`mkfifo ${q(base)}.fifo`]), ...envLines, `${opts.launchUnder?.(base) ?? ""}setsid bash ${q(base)}.sh > ${q(base)}.log 2>&1 & echo $! > ${q(base)}.pid; echo ${HANDSHAKE.launched}`],
           timeoutMs: execTimeoutMs,
           ...(machine.takesStdin === true ? { stdin: envInput(named) } : {}),
         }),

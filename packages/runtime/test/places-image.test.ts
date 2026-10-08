@@ -7,7 +7,7 @@ import { NoProviderBackend } from "@wsp/engine";
 import { newPlaceKeyPair, type PlaceKeyPair } from "../src/places.js";
 import { serveRuntime } from "../src/serve.js";
 import { memoryStore, type Store } from "../src/store.js";
-import { stubBackend, createOn, projectOn } from "./stub-backend.js";
+import { stubBackend, projectOn } from "./stub-backend.js";
 import { until } from "./until.js";
 import { WsClient } from "./ws-client.js";
 import { HERE, report, wiring } from "./place-join.js";
@@ -158,25 +158,6 @@ describe("a computer joining a host that holds a sealed image", () => {
     expect(place.killed).toHaveLength(1);
     expect((await ctx.runtime!.image.get()).copies.map(c => c.place)).toEqual(["solari"]);
     expect(place.asked["machine.create"]).toBe(1);
-  });
-
-  it("a fork there builds that computer's copy first, saying so with no rate since the computer charges nothing, and never forks the image it holds no copy of", async () => {
-    const { hostKey } = await imageHost({ sealed: true });
-    let place!: ForkingPlace;
-    const { placeId } = await join(hostKey, { code: await code(), name: "srv", answers: answering(p => (place = p)) });
-    await until(async () => (await rowOf(placeId)).present === true);
-    const lines: string[] = [];
-    ctx.runtime!.events.on("workspace.creating", e => {
-      if (e.type === "workspace.creating" && e.name === "x") lines.push(e.message);
-    });
-    const head = (await ctx.runtime!.image.get()).copies.find(c => c.place === "solari")!.snapshotId;
-    // The fake computer runs no builder's tool install, so the copy's build stops there and the fork with it; a
-    // fork that forked the image anyway would have asked this computer for a second machine.
-    await expect(createOn(ctx.runtime!, { golden: head, name: "x", on: "srv" })).rejects.toThrow(/launch failed/);
-    expect(lines[0]).toBe("building your image on srv first, about ten minutes, then x forks from it");
-    expect(place.created).toHaveLength(1);
-    expect((place.created[0]!["labels"] as Record<string, string>)["wsp-builder"]).toBe("1");
-    expect(place.killed).toHaveLength(1);
   });
 
   it("a link that drops under a stage and dials back finishes the stage: the create is asked again on the socket that computer opens next, the build goes on to the stage after it, and the stage reads the wait while the gap lasts", async () => {

@@ -207,6 +207,12 @@ export const SEALED = {
  * so the work of an add there runs in a copy of its own directories. */
 export const HOLDS_PROJECTS = { ...KEEPS_NO_IMAGE, projects: "/wsp/projects" };
 
+/** The login a computer joined as root reports, the one login a thread in a folder there runs as. */
+export const ROOT_LOGIN = { HOME: "/root", USER: "root", PATH: "/usr/bin" };
+
+/** What a computer joined as root answers a command on itself with: who its lines run as, and nothing else. */
+export const asRoot = (cmd: string): { exitCode: number; stdout: string; stderr: string } => ({ exitCode: 0, stdout: cmd.includes("command -v runuser") ? "Linux\n0\nroot\nroot\n1\n/root\n/usr/bin\n" : "", stderr: "" });
+
 export function forks(
   client: WsClient,
   capacity: {
@@ -332,8 +338,12 @@ export function forks(
       case "ssh.start":
         seen.frames.push(frame);
         return say({ port: 40022, hostKey: "ssh-ed25519 AAAAC3Nz the-fork" });
-      case "exec":
-        return say({ exitCode: 0, stdout: "", stderr: "", truncated: false });
+      // A command on the computer itself: the claim an add makes in the login's home takes the name it asks for, and
+      // every other command answers as the case says.
+      case "exec": {
+        const claim = /mkdir '([^']+)'"\$n"/.exec(String(frame["cmd"]));
+        return say({ ...(claim === null ? exec(String(frame["cmd"])) : { exitCode: 0, stdout: `${claim[1]}\n`, stderr: "" }), truncated: false });
+      }
       // The workspace's own git, answered by this computer's daemon for the workspace the frame names, which is
       // what a workspace with no daemon of its own is served by.
       case "git.status":

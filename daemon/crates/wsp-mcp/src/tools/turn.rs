@@ -432,7 +432,7 @@ struct GitTop {
     top: String,
 }
 
-/// Where a run goes: a folder the host picks on this computer, or a workspace on a box.
+/// Where a run goes: a folder the host picks, or a workspace on a machine.
 enum Target {
     /// The project's folder, a worktree for the branch, or with no project the folder of the thread asking.
     Here {
@@ -441,7 +441,7 @@ enum Target {
         cwd: Option<String>,
     },
     Box(Workspace),
-    /// A project on a box or a cloud account: a machine forked for it once the rest of the call is read.
+    /// A project on a cloud account: a machine forked for it once the rest of the call is read.
     Fork(ProjectRow),
 }
 
@@ -487,11 +487,11 @@ fn project_of_folder(projects: Vec<ProjectRow>, folder: &Path, here: &str) -> Op
     mine.into_iter().find(|p| p.git.as_ref().is_some_and(|g| g.top == main))
 }
 
-/// Where a run goes, as packages/host/src/verbs.ts `runTarget` decides: the project named when it is on this
-/// computer, a new machine of the project named when it lives elsewhere and no machine carries its name, else the
-/// workspace the word names; with no word, beside the thread asking, or the project whose
-/// folder, or a worktree of whose repo, the server's own folder is in. A guest's folder is on its machine, so a guest
-/// names what it means.
+/// Where a run goes, as packages/host/src/verbs.ts `runTarget` decides: the project named when a thread of it runs in
+/// its folder, here or on a computer the person joined, a new machine of the project named when it lives elsewhere and
+/// no machine carries its name, else the workspace the word names; with no word, beside the thread asking wherever it
+/// runs, or the project whose folder, or a worktree of whose repo, the server's own folder is in. A guest that is no
+/// thread names what it means, since its folder is on its machine.
 async fn run_target(
     host: &Host,
     client: &Client,
@@ -502,9 +502,22 @@ async fn run_target(
     let words = turns();
     let here = super::workspace::words().here_place_id;
     if let Some(named) = named {
-        let listed = projects_here(client).await.unwrap_or_default();
-        let project = listed.into_iter().find(|p| p.id == named || p.name == named);
-        if let Some(project) = project.clone().filter(|p| p.computer == here) {
+        #[derive(Deserialize)]
+        struct Owned {
+            project: ProjectRow,
+        }
+        // The host's own reading first: a thread's word is its own project's, whatever another computer's is called.
+        let owned = client.request::<Owned>("projects.resolve", params([("ref", Value::from(named))])).await.ok().map(|o| o.project);
+        let project = match owned {
+            Some(project) => Some(project),
+            None => projects_here(client).await.unwrap_or_default().into_iter().find(|p| p.id == named || p.name == named),
+        };
+        let in_folder = match &project {
+            Some(p) if p.computer == here => true,
+            Some(p) => threads_in_folder(client, &p.id).await,
+            None => false,
+        };
+        if let Some(project) = project.clone().filter(|_| in_folder) {
             #[derive(Deserialize)]
             struct Resolved {
                 #[allow(dead_code)]
@@ -532,7 +545,7 @@ async fn run_target(
     let env = host.env();
     let set = |name: &str| env.get(name).is_some_and(|v| !v.is_empty());
     let guest = host.args().guest;
-    if (set(&words.turn_token_env) || set(&record::host().env.token)) && !guest {
+    if set(&words.turn_token_env) || set(&record::host().env.token) {
         return Ok(Target::Here { project: None, branch, cwd });
     }
     if guest {
@@ -557,6 +570,20 @@ async fn run_target(
         (cwd, _) => cwd,
     };
     Ok(Target::Here { project: Some(project), branch, cwd })
+}
+
+/// Whether a thread of this project runs in its folder on the computer holding it, as a project on a computer the
+/// person joined does: the host answers off the project's landing, since only it holds which computers are joined.
+async fn threads_in_folder(client: &Client, project: &str) -> bool {
+    #[derive(Deserialize)]
+    struct Landing {
+        #[serde(default)]
+        kind: Option<super::workspace::Kind>,
+    }
+    client
+        .request::<Landing>("workspaces.landing", params([("project", Value::from(project))]))
+        .await
+        .is_ok_and(|l| l.kind.is_some_and(super::workspace::Kind::in_folder))
 }
 
 /// The names of every workspace the caller can see.

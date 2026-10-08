@@ -1,13 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { randomUUID } from "node:crypto";
-import { projectNeedsReaddLine } from "@wsp/protocol";
 import type { EventUnion, TurnResult } from "@wsp/protocol";
 import { copyKey, createRuntime, type HarnessAdapterFactory } from "../src/runtime.js";
 import { memoryStore } from "../src/store.js";
 import { droppingPort } from "./held-port.js";
 import { until } from "./until.js";
-import { stubBackend, type StubMachine, createOn, projectOn } from "./stub-backend.js";
+import { stubBackend, type StubMachine, createOn } from "./stub-backend.js";
 
 describe("gone machines", () => {
   /** A turn that announces itself and never settles on its own: only the runtime ending it ends it. */
@@ -415,23 +414,5 @@ describe("a create on a computer that names its own machines", () => {
     const forking = createRuntime({ backend: provider, store: memoryStore(), adapters: {} });
     await createOn(forking, { golden: "snap_g", name: "at-a-provider" });
     expect(provider.machines[0]!.execLog.filter(cmd => cmd.startsWith("hostname "))).toEqual(["hostname at-a-provider && echo at-a-provider > /etc/hostname"]);
-  });
-});
-
-describe("a project on a computer that clones at the add, recorded before it did", () => {
-  it("is refused at the create in the doctor's own sentence, before any machine is asked for", async () => {
-    const backend = stubBackend();
-    const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
-    // A project recorded when its computer kept no checkout of its own, which is every project added before the
-    // add cloned once on the computer.
-    const project = await projectOn(rt);
-    expect(project.checkout).toBeUndefined();
-    // The computer keeps project checkouts now, which is what puts this create on the road that reads one.
-    (backend as { projects?: string }).projects = "/wsp/projects";
-    const computer = (await rt.projects.computers()).find(row => row.id === project.computer)!.name;
-    const forked = backend.machines.length;
-    await expect(rt.workspaces.create({ project: project.id, name: "probe" })).rejects.toThrow(projectNeedsReaddLine(project.name, computer, project.source));
-    expect(backend.machines).toHaveLength(forked);
-    expect(await rt.workspaces.list()).toEqual([]);
   });
 });
