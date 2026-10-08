@@ -125,6 +125,7 @@ import type {
   KeptProcess,
   KeptLaunch,
   ThreadRecord,
+  TreeTalk,
   BuilderRecord,
   LiveBuilder,
   KindModule,
@@ -266,10 +267,12 @@ export interface RulesArea {
   readonly refusePauseless: (entry: LiveWorkspace, action: string) => void;
   readonly holdsSlot: (record: WorkspaceRecord) => boolean;
   readonly drives: (record: { kind: WorkspaceKind; machineId?: string }, caller: Caller | undefined) => boolean;
-  readonly opensIn: (record: WorkspaceRecord, scope: ThreadScope | undefined) => boolean;
+  readonly opensIn: (record: WorkspaceRecord, caller: Caller | undefined) => boolean;
   readonly projectOfScope: (scope: ThreadScope) => string | undefined;
   readonly ofThreadsRepository: (caller: Caller | undefined, project: string) => boolean;
   readonly projectReached: (caller: Caller | undefined, project: string) => boolean;
+  readonly elsewhereRefusal: (caller: Caller | undefined, project: ProjectView, word: string) => Error | undefined;
+  readonly talksToItsTree: (caller: Caller | undefined) => boolean;
   readonly refusalFor: (record: WorkspaceLike | undefined, caller: Caller | undefined) => string | undefined;
   readonly refuseRelayed: (record: WorkspaceLike | undefined, caller: Caller | undefined) => void;
   readonly refuseNamed: (workspaceId: string, caller: Caller | undefined) => void;
@@ -462,8 +465,8 @@ export interface BootArea {
   readonly ready: () => Promise<void>;
   readonly entryOf: (id: string, origin?: Caller, o?: { now?: true }) => Promise<LiveWorkspace>;
   readonly childOf: (lead: LiveWorkspace, ref: string, origin?: Caller) => Promise<LiveWorkspace>;
-  readonly reachesRow: (row: { threadId?: string; workspaceId: string }, caller: Caller | undefined) => boolean;
-  readonly entryOfRow: (row: { threadId?: string; workspaceId: string }, origin: Caller | undefined) => Promise<LiveWorkspace | undefined>;
+  readonly reachesRow: (row: { threadId?: string; workspaceId: string }, caller: Caller | undefined, talk?: TreeTalk) => boolean;
+  readonly entryOfRow: (row: { threadId?: string; workspaceId: string }, origin: Caller | undefined, talk?: TreeTalk) => Promise<LiveWorkspace | undefined>;
   readonly listedRows: (held: readonly (Map<string, SessionEntry> extends Map<string, infer V> ? V : never)[]) => SessionView[];
   readonly threadFacts: (threadId: string) => ThreadFacts | undefined;
   readonly pushHead: (threadId: string) => void;
@@ -471,7 +474,8 @@ export interface BootArea {
   readonly endSnoozeFor: (row: Pick<SessionView, "threadId" | "rootThreadId">) => void;
   readonly armResume: (threadIds: readonly string[], on: boolean, origin: Caller | undefined) => Promise<void>;
   readonly resumeAfterLimit: (threadId: string) => Promise<void>;
-  readonly treeStandsOn: (workspaceId: string, caller: Caller | undefined) => boolean;
+  readonly treeStandsOn: (workspaceId: string, caller: Caller | undefined, talk?: TreeTalk) => boolean;
+  readonly talksToTreeOn: (workspaceId: string, caller: Caller | undefined) => boolean;
   readonly computerRows: () => Promise<{ id: string; name: string }[]>;
   readonly nameOfComputer: (computer: string, rows: readonly { id: string; name: string }[]) => string;
   readonly imageHeadOrNone: () => Promise<string | undefined>;

@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // A lead thread on a folder here whose repository moved: the cloud projects recorded under the old name and the new
 // both read as its repository, at the listing, at the name and at the create, and no saved remote is written. On a
-// computer the person joined a project of that repository is a folder there, the person's, so under either name it
-// is refused as one rather than read as another repository.
+// computer the person joined a project of that repository is read the same way under either name, a folder there
+// the lead starts children in rather than another repository.
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join as joinPath } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { HERE_PLACE_ID, refusalLine, spawnFolderRefusal, SPAWN_FOLDER_FIX, type Caller } from "@wsp/protocol";
+import { HERE_PLACE_ID, type Caller } from "@wsp/protocol";
 import { copyKey, createRuntime } from "../src/runtime.js";
 import { newPlaceKeyPair } from "../src/places.js";
 import { serveRuntime } from "../src/serve.js";
@@ -28,7 +28,7 @@ describe("a lead on a folder here whose repository moved", () => {
     root = undefined;
   });
 
-  it("lists, names and starts children on the cloud projects recorded under the old name and the new, refuses a box folder of it under either, and no other", async () => {
+  it("lists and names the cloud and box projects recorded under the old name and the new, starts children on the cloud ones, and no other", async () => {
     root = mkdtempSync(joinPath(tmpdir(), "wsp-box-repo-"));
     const repo = joinPath(root, "wsp");
     mkdirSync(repo);
@@ -68,13 +68,11 @@ describe("a lead on a folder here whose repository moved", () => {
     const lead = await rt.workspaces.create({ project: wsp.id, name: "lead", agents: { spawn: true } });
     const asLead: Caller = { origin: "here", by: { kind: "thread", threadId: "lead-thread", workspaceId: lead.id, rootThreadId: "lead-thread" } };
 
-    expect((await rt.projects.list(asLead)).map(p => p.name)).toEqual(["wsp", "wsp-boat", "wsp-hertzner"]);
+    expect((await rt.projects.list(asLead)).map(p => p.name)).toEqual(["wsp", "wsp-boat", "wsp-hertzner", "box-old", "box-new"]);
     expect((await rt.projects.resolve("wsp-boat", asLead)).name).toBe("wsp-boat");
     expect((await rt.projects.resolve("wsp-hertzner", asLead)).name).toBe("wsp-hertzner");
     await expect(rt.projects.resolve("else", asLead)).rejects.toThrow("another repository");
-    for (const project of ["box-old", "box-new"]) {
-      await expect(rt.projects.resolve(project, asLead)).rejects.toThrow(refusalLine(spawnFolderRefusal("lead-thread", project), SPAWN_FOLDER_FIX));
-    }
+    for (const project of ["box-old", "box-new"]) expect((await rt.projects.resolve(project, asLead)).name).toBe(project);
     for (const project of ["wsp-boat", "wsp-hertzner"]) {
       const child = await rt.workspaces.create({ project, name: `on-${project}` }, asLead);
       expect(child).toMatchObject({ project: { name: project }, parentWorkspaceId: lead.id });

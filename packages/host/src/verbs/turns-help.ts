@@ -225,14 +225,15 @@ export async function runTarget(
   where: { branch?: string | undefined; cwd?: string | undefined },
 ): Promise<RunTarget> {
   const asked = { ...(where.branch !== undefined ? { branch: where.branch } : {}), ...(where.cwd !== undefined ? { cwd: where.cwd } : {}) };
-  const said = (name: string | undefined) => (threadId: string, folder?: string): string =>
-    folder === undefined ? `thread ${threadId}` : threadOpenedLine(threadId, name, homeShortened(folder, homedir()));
+  // A folder on another computer is never shortened against this one's home.
+  const said = (name: string | undefined, here = true) => (threadId: string, folder?: string): string =>
+    folder === undefined ? `thread ${threadId}` : threadOpenedLine(threadId, name, here ? homeShortened(folder, homedir()) : folder);
   if (ref !== undefined) {
     // The host's own reading first: a thread's word is its own project's, whatever another computer's is called.
     const project = (await projectOf(client, ref).catch(() => undefined)) ?? ((await projectsHere(client).catch(() => undefined)) ?? []).find(p => p.id === ref || p.name === ref);
     if (project !== undefined && (copiesFolder(kindForComputer(project.computer)) || (await threadsInFolder(client, project.id)))) {
       const full = await projectOf(client, project.id).catch(() => undefined);
-      return { here: { project: { id: project.id, name: project.name, path: full?.path ?? "" }, ...asked }, opened: said(project.name) };
+      return { here: { project: { id: project.id, name: project.name, path: full?.path ?? "" }, ...asked }, opened: said(project.name, copiesFolder(kindForComputer(project.computer))) };
     }
     const branchRefused = () => usageRefusal(BRANCH_HERE_ONLY_LINE, "Name a project on this computer.");
     if (project !== undefined) {

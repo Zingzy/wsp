@@ -918,8 +918,8 @@ export const THREAD_OPS: readonly string[] = [
   "capabilities.get",
   "workspaces.landing",
   "workspaces.create",
-  // The projects a thread may start children on, its own and its repository's on every computer that forks
-  // machines, and what a thread there starts on; the host answers a thread those and no other.
+  // The projects a thread may start children on, its own and its repository's on a box or a cloud, and what a
+  // thread there starts on; the host answers a thread those and no other.
   "projects.list",
   "projects.defaults",
   "workspaces.list",

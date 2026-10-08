@@ -17,7 +17,7 @@ import {
   attachmentRecord, attachmentKey, filesBlocked, isImage, sendFilesDir, attachedFilesPrompt, threadMessages,
   threadSeed, taskStopRefusedLine, taskStopUnsupportedLine, agentOffLine, HEAD_BYTES, HISTORY_PAGE_BYTES,
   HISTORY_PAGE_EVENTS, AGENT_STARTING_MS, ASIDE_EMPTY_LINE, capStoppedLine, deletedBeforeStartLine, type AsideQuestion,
-  type McpServerSpec, type SessionAsker,
+  type McpServerSpec, type SessionAsker, refusal, sendFilesAcrossLine, SEND_FILES_ACROSS_FIX, waitAcrossLine, WAIT_ACROSS_FIX,
 } from "@wsp/protocol";
 import { harnessCatalog } from "../harness-catalog.js";
 import { headShape } from "../transcript-reader.js";
@@ -119,7 +119,7 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
       // the host that took it answers with the turn it opened or joined, on a thread the caller reaches, and starts
       // nothing. The one rule every client's road back reads, so a restart neither drops a message nor runs it twice.
       const taken = opened.requestId === undefined ? undefined : transcriptIndex.get(workspaceId)?.taken.get(opened.requestId);
-      if (taken !== undefined && (await ctx.entryOfRow({ threadId: taken.threadId, workspaceId }, origin)) !== undefined) {
+      if (taken !== undefined && (await ctx.entryOfRow({ threadId: taken.threadId, workspaceId }, origin, "send")) !== undefined) {
         const answered = await ctx.takenTurn(workspaceId, taken);
         if (answered !== undefined) return answered;
       }
@@ -140,9 +140,24 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
       const opens = !threadRecords.has(threadId) && ctx.rowsOn(threadId).length === 0;
       // A send goes into a thread the caller drives, read on the thread it lands in.
       const opening = live.get(workspaceId)?.record;
-      const reached = opens ? await ctx.entryOf(workspaceId, opening !== undefined && ctx.opensIn(opening, scopeOf(origin)) ? undefined : origin) : await ctx.entryOfRow({ threadId, workspaceId }, origin);
+      const opensThere = opening !== undefined && ctx.opensIn(opening, origin);
+      // A folder of its repository on another computer than the asking thread's is refused in the words the run road
+      // refuses it in, whatever id named it; one of another repository reads as absent, as every record outside a tree.
+      if (opens && opening !== undefined && !opensThere && runsInFolder(opening.kind) && ctx.ofThreadsRepository(origin, opening.project)) {
+        const away = ctx.elsewhereRefusal(origin, ctx.projectHeld(opening.project), opening.name);
+        if (away !== undefined) throw away;
+      }
+      const reached = opens ? await ctx.entryOf(workspaceId, opensThere ? undefined : origin) : await ctx.entryOfRow({ threadId, workspaceId }, origin, "send");
       if (reached === undefined) throw new Error(`no thread ${opened.thread} on this workspace`);
       const entry = reached;
+      // A send a thread on a computer the person joined makes into its tree on another computer carries its words
+      // alone: no file of its lands in that folder, and nothing of the turn it starts comes back to wait on.
+      const asking = scopeOf(origin) === undefined || opens || ctx.drives(entry.record, origin) ? undefined : live.get(scopeOf(origin)!.workspaceId)?.record;
+      if (asking !== undefined) {
+        const [from, to] = [asking, entry.record].map(r => ctx.placeName(ctx.projectHeld(r.project).computer)) as [string, string];
+        if ((opened.attachments ?? []).length > 0) throw refusal(sendFilesAcrossLine(from, to, threadId), SEND_FILES_ACROSS_FIX, "usage");
+        if (opened.followed === true) throw refusal(waitAcrossLine(from, to, threadId), WAIT_ACROSS_FIX, "usage");
+      }
       // A worktree somebody removed by hand reads as gone the moment a thread asks for it, so the turn runs in the
       // project folder rather than in a folder that is not there.
       const worktree = entry.record.worktree;
@@ -180,8 +195,8 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
       const title = o.title === undefined ? undefined : titleLine(o.title);
       if (title === "") throw new Error(EMPTY_TITLE_LINE);
       ctx.spawnGuard(opens ? "thread_new" : "send", origin);
-      // The tree this thread sits in, written on its first row and read off it by every later turn: a thread a
-      // person opened is its own root, and one a thread opened hangs under that thread's root.
+      // The tree this thread sits in, written on its first row and its record and read off them by every later turn:
+      // a thread a person opened is its own root, and one a thread opened hangs under that thread's root.
       const spawnedBy = opens ? scopeOf(origin) : undefined;
       const tree = opens
         ? ctx.treeOf(spawnedBy)
@@ -566,7 +581,7 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
         // launch that never opened leaves none; a thread from before the record existed gets one here too, off what
         // its rows said this turn runs at, so it is read the one way from now on. Persisted with the row as the turn
         // announces itself and at its end.
-        if (!threadRecords.has(threadId)) threadRecords.set(threadId, { workspaceId, harness, ...(picks.permissionMode !== undefined ? { permissionMode: picks.permissionMode } : {}), worked: threadRan(ctx.rowsOn(threadId).filter(r => r.status !== "running")) });
+        if (!threadRecords.has(threadId)) threadRecords.set(threadId, { workspaceId, harness, ...tree, ...(picks.permissionMode !== undefined ? { permissionMode: picks.permissionMode } : {}), worked: threadRan(ctx.rowsOn(threadId).filter(r => r.status !== "running")) });
         const thread = threadRecords.get(threadId)!;
         // A newer turn leaves Resume at reset nothing to resume.
         if (thread.limitResume !== undefined) {
@@ -619,8 +634,8 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
       // A listing that names a workspace refuses like any other verb naming one, unless a thread of the caller's
       // tree stands there; a listing of them all leaves out the rows the caller may not reach, as workspaces.list
       // leaves out the workspaces.
-      if (workspaceId !== undefined && !ctx.treeStandsOn(workspaceId, origin)) ctx.refuseNamed(workspaceId, origin);
-      const all = [...sessions.values()].filter(s => ctx.reachesRow(s.view, origin));
+      if (workspaceId !== undefined && !ctx.treeStandsOn(workspaceId, origin, "list")) ctx.refuseNamed(workspaceId, origin);
+      const all = [...sessions.values()].filter(s => ctx.reachesRow(s.view, origin, "list"));
       const held = workspaceId === undefined ? all : all.filter(s => s.view.workspaceId === workspaceId);
       const rows = held.map(s => s.view);
       // A refresh is where a rename made inside the harness reaches us: nothing on this side changed. A row that

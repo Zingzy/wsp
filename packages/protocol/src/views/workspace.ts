@@ -522,6 +522,12 @@ const WORKSPACE_OUT = {
 export const WorkspaceOut = WorkspaceView.pick(WORKSPACE_OUT);
 export type WorkspaceOut = z.infer<typeof WorkspaceOut>;
 
+/** A workspace as a thread on a computer the person joined is told it when it names one its tree stands on elsewhere,
+ * on the way to a message into that thread: what the send reads to name and wake it, and nothing of the folder, the
+ * home or the sessions there, which are the person's. Picked as WORKSPACE_OUT is, and a WorkspaceOut still. */
+export const WorkspaceTalked = WorkspaceView.pick({ id: true, name: true, machineId: true, phase: true, kind: true, golden: true, createdAt: true, project: true, gone: true });
+export type WorkspaceTalked = z.infer<typeof WorkspaceTalked>;
+
 /** A workspace as the command line and the MCP tool list it: the same fields with what the rail reads live beside
  * them, and the reach without the route it carries, since a table needs the state word and nothing that opens a
  * machine. Parsing a status through it is what drops the routes; the app's own socket still gets both. */

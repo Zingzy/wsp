@@ -118,6 +118,7 @@ const SHARED_STARTERS = new Set([
   "fakeAppServer",
   "fakeStty",
   "gitCopier",
+  "leadAndBox",
   "loginShell",
   "mcpBinNamed",
   "projectOn",

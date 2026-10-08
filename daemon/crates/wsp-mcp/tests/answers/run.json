@@ -954,6 +954,59 @@
       ]
     },
     {
+      "case": "a project of the thread's repository on a box opens in its folder there",
+      "arguments": {
+        "project": "site",
+        "message": "build it",
+        "notify": [
+          "me"
+        ],
+        "detach": true
+      },
+      "env": {
+        "WSP_TURN": "turn-token-1"
+      },
+      "replies": {
+        "projects.list": "{\"id\":1,\"ok\":true,\"projects\":[{\"id\":\"p-1\",\"name\":\"wsp\",\"computer\":\"here\",\"source\":{\"kind\":\"folder\",\"path\":\"/Users/me/wsp\"},\"path\":\"/Users/me/wsp\",\"git\":{\"top\":\"/Users/me/wsp\"}},{\"id\":\"p-2\",\"name\":\"site\",\"computer\":\"pl-attic\",\"source\":{\"kind\":\"folder\",\"path\":\"/Users/me/wsp\"},\"path\":\"/root/site\",\"git\":{\"top\":\"/Users/me/wsp\"}}]}",
+        "workspaces.landing": "{\"id\":1,\"ok\":true,\"kind\":\"place\",\"place\":\"pl-attic\",\"name\":\"attic\",\"capabilities\":{\"sizes\":[]}}",
+        "harnesses.list": "{\"id\":1,\"ok\":true,\"harnesses\":[{\"harness\":\"claude\",\"label\":\"Claude Code\",\"source\":\"harness\",\"version\":\"2.1.0\",\"models\":[{\"value\":\"claude-sonnet-5\",\"label\":\"Sonnet 5\",\"isDefault\":true},{\"value\":\"claude-opus-5-5\",\"label\":\"Opus 5.5\",\"efforts\":[\"high\",\"max\"]},{\"value\":\"claude-haiku\",\"label\":\"Haiku\",\"efforts\":[]}],\"legacyModels\":[{\"value\":\"claude-3\",\"label\":\"Claude 3\"}],\"efforts\":[{\"value\":\"low\",\"label\":\"Low\"},{\"value\":\"high\",\"label\":\"High\",\"isDefault\":true},{\"value\":\"max\",\"label\":\"Max\"}],\"contextWindows\":[],\"permissionModes\":[{\"value\":\"acceptEdits\",\"label\":\"Accept edits\"},{\"value\":\"bypassPermissions\",\"label\":\"Bypass \u0085\",\"isDefault\":true}],\"access\":{\"auto-edit\":\"acceptEdits\",\"full\":\"bypassPermissions\"},\"steers\":true,\"renames\":true,\"images\":true,\"isDefault\":true},{\"harness\":\"codex\",\"label\":\"Codex\",\"source\":\"table\",\"version\":\"2.1.0\",\"models\":[{\"value\":\"gpt-5\",\"label\":\"GPT-5\",\"isDefault\":true}],\"efforts\":[{\"value\":\"low\",\"label\":\"Low\"},{\"value\":\"high\",\"label\":\"High\",\"isDefault\":true},{\"value\":\"max\",\"label\":\"Max\"}],\"contextWindows\":[],\"permissionModes\":[{\"value\":\"acceptEdits\",\"label\":\"Accept edits\"},{\"value\":\"bypassPermissions\",\"label\":\"Bypass \u0085\",\"isDefault\":true}],\"access\":{\"auto-edit\":\"acceptEdits\",\"full\":\"bypassPermissions\"},\"steers\":true,\"renames\":true,\"images\":true,\"isDefault\":false}]}",
+        "sessions.start": "{\"id\":1,\"ok\":true,\"session\":{\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"running\",\"id\":\"sess-9\",\"threadId\":\"thread-9d8c7b6a5f4e\",\"startedBy\":\"agent\",\"cwd\":\"/root/site\"},\"outcome\":\"started\",\"turnId\":\"turn-9\"}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"thread thread-9d8c7b6a5f4e on site in /root/site\"}],\"structuredContent\":{\"threadId\":\"thread-9d8c7b6a5f4e\",\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"outcome\":\"started\"}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "projects.resolve",
+          "ref": "site"
+        },
+        {
+          "op": "projects.list"
+        },
+        {
+          "op": "workspaces.landing",
+          "project": "p-2"
+        },
+        {
+          "op": "projects.resolve",
+          "ref": "p-2"
+        },
+        {
+          "op": "harnesses.list"
+        },
+        {
+          "op": "sessions.start",
+          "project": "p-2",
+          "prompt": "build it",
+          "notify": [
+            "me"
+          ],
+          "turnToken": "turn-token-1",
+          "startedBy": "agent",
+          "requestId": "<request id>",
+          "answerHeld": true
+        }
+      ]
+    },
+    {
       "case": "a branch for a project on another computer",
       "arguments": {
         "project": "site",

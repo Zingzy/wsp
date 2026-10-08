@@ -171,12 +171,16 @@ export function threadsArea(ctx: RuntimeContext): ThreadsArea {
     throw new Error(NO_SUCH_TURN);
   };
   /** Every thread the tree under this one holds, whether or not anything on it is running: read off the parent each
-   * row carries, level by level, so a thread that spawned a thread that spawned a thread is all of it. */
+   * thread's record and rows carry, level by level, so a thread that spawned a thread that spawned a thread is all of
+   * it, one whose rows fell off a folder's cap included. */
   const treeUnder = (threadId: string): string[] => {
+    const parents = new Map<string, string>();
+    for (const { view } of sessions.values()) if (view.threadId !== undefined && view.parentThreadId !== undefined) parents.set(view.threadId, view.parentThreadId);
+    for (const [id, record] of threadRecords) if (record.parentThreadId !== undefined) parents.set(id, record.parentThreadId);
     const found: string[] = [];
     let front = [threadId];
-    for (let steps = sessions.size + 1; steps > 0 && front.length > 0; steps--) {
-      const next = [...new Set([...sessions.values()].map(x => x.view).filter(v => v.threadId !== undefined && v.parentThreadId !== undefined && front.includes(v.parentThreadId)).map(v => v.threadId!))].filter(id => !found.includes(id) && id !== threadId);
+    for (let steps = parents.size + 1; steps > 0 && front.length > 0; steps--) {
+      const next = [...parents].filter(([id, parent]) => front.includes(parent) && !found.includes(id) && id !== threadId).map(([id]) => id);
       found.push(...next);
       front = next;
     }
