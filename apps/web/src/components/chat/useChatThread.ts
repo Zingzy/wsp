@@ -17,7 +17,7 @@
 import { isProjectHomeKey } from "../../protocol/store";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { agentName } from "@wsp/catalog";
-import { agentStartingLine, isSessionEvent } from "@wsp/protocol";
+import { agentStartingLine, isSessionEvent, threadKeyOf } from "@wsp/protocol";
 import type { AttachmentRecord, SessionEvent, SessionHarness, SessionHeldEvent, SessionStartingEvent, SessionRunEvent, SessionView } from "@wsp/protocol";
 import { useProtocolEvents, useStore } from "../../protocol/store";
 import type { Api, ProtocolEvent } from "../../protocol/client";
@@ -76,6 +76,8 @@ export interface ChatThreadHandle {
   readonly threadKey: string;
   /** The last send's start, once it landed: the key its rows waited under (the thread id the view held or was pinned to, or the workspace id before the thread had one) and the thread that start carried. Null while a send is in flight, after one that settled without a start, and before any. */
   readonly named: NamedStart | null;
+  /** The last send's thread once the host held it, with the key its rows and picks waited under until then. */
+  readonly handed: NamedStart | null;
   /** Optimistic user message for a send, with the request id the send carries; the session.start stamped with it replaces it. */
   readonly appendUserTurn: (prompt: string, requestId: string, attachments?: ReadonlyArray<AttachmentRecord>) => void;
   /** A send that failed before the runtime emitted anything. */
@@ -127,6 +129,9 @@ export interface ThreadState {
   readonly known: ReadonlyArray<string>;
   /** The last send's start once it landed: the key its rows waited under (the thread id the view held or was pinned to, or the workspace id without one) and the thread the start carried. Null from the send until then, and after a send that settled without a start. */
   readonly named: NamedStart | null;
+  /** The last send's thread once the host held it: the key its rows and picks waited under and the thread they move
+   * onto, known before its start so a pin landing in between never strands them. */
+  readonly handed: NamedStart | null;
   /** A send from a view without a start, left in flight by a view change: the key its rows wait under (the pin, or the workspace id from the latest view), the thread the view showed, which its start comes under (none from an empty view, whose start opens a thread the view never knew), and the send itself, whose start still names those rows from whichever view sees it. */
   readonly stray: (Sent & { readonly key: string; readonly thread?: string }) | null;
   /** The sends of this view that ended without a turn of their own, each under the turn whose end refused it. The
@@ -136,7 +141,7 @@ export interface ThreadState {
   readonly refused: ReadonlyArray<Kept>;
 }
 
-const EMPTY: ThreadState = { events: [], arrivals: [], pendingPrompt: null, localErrors: [], fresh: false, sending: null, known: [], named: null, stray: null, refused: [] };
+const EMPTY: ThreadState = { events: [], arrivals: [], pendingPrompt: null, localErrors: [], fresh: false, sending: null, known: [], named: null, handed: null, stray: null, refused: [] };
 const now = () => new Date().toISOString();
 
 /** One row as the view holds it: the event and when this client saw it, which stamps a row the wire left unstamped. */
@@ -361,6 +366,12 @@ function heldThreadId(state: ThreadState): string | undefined {
   return lastStart(state.events)?.threadId;
 }
 
+/** The thread the view is on: its last start's, else the one the host held for its send, whose row is listed
+ * before its agent is up. */
+function ownThread(state: ThreadState): string | undefined {
+  return heldThreadId(state) ?? state.sending?.thread;
+}
+
 /**
  * The thread a view shows: the one its events carry, started or dead before its start, else the pin. A send from
  * it resumes its session or, without one, names it for a first turn, so every event of that send comes under it.
@@ -408,9 +419,9 @@ function sentEvent(state: ThreadState, e: SessionEvent): boolean {
 }
 
 /** The thread the host held for the send in flight, by the request id the send carried; any other hold is another send's. */
-export function heldForSend(state: ThreadState, e: SessionHeldEvent): ThreadState {
+export function heldForSend(state: ThreadState, e: SessionHeldEvent, pinned: string | null = null): ThreadState {
   if (state.sending === null || e.requestId === undefined || state.pendingPrompt?.requestId !== e.requestId) return state;
-  return { ...state, sending: { ...state.sending, thread: e.threadId } };
+  return { ...state, sending: { ...state.sending, thread: e.threadId }, handed: { key: ownThread(state) ?? pinned ?? e.workspaceId, thread: e.threadId } };
 }
 
 /**
@@ -456,7 +467,7 @@ export function reduceEvent(state: ThreadState, e: SessionEvent, at: string, pin
   if (state.sending === null) return state.stray !== null && startsStray(state, e) ? { ...next, stray: null, named: nameOf(state.stray.key, e) } : next;
   const starts = e.type === "session.start";
   const settles = starts || (e.type === "session.end" && e.turnId !== state.sending.after);
-  const named = starts ? nameOf(heldThreadId(state) ?? pinned ?? e.workspaceId, e) : state.named;
+  const named = starts ? nameOf(ownThread(state) ?? pinned ?? e.workspaceId, e) : state.named;
   if (!settles) return next;
   return { ...next, sending: null, named, ...(starts ? {} : keeping(next, e.turnId)) };
 }
@@ -505,6 +516,26 @@ function sentEntry(sent: Kept): TimelineEntry {
     createdAt: at,
     message: { id, role: "user", text, turnId: null, streaming: false, createdAt: at, updatedAt: at, requestId, ...(attachments !== undefined ? { attachments } : {}) },
   };
+}
+
+/** The running row a view with no event and no send of its own is drawn off: the host lists a thread's row before its
+ * first event, and one this window did not send (an agent's, the command line's, another window's) shows from it. */
+function drawnOffRow(state: ThreadState, row: SessionView | undefined): SessionView | undefined {
+  return !state.fresh && state.events.length === 0 && state.pendingPrompt === null && row?.status === "running" ? row : undefined;
+}
+
+/** A view with no event yet, drawn off its running row: the row's prompt as the person's message, and the turn working. */
+function runningOffRow(view: ChatThreadView, row: SessionView): ChatThreadView {
+  const at = new Date(row.startedAt ?? Date.now()).toISOString();
+  const entries = row.prompt === undefined ? view.entries : [...view.entries, sentEntry({ text: row.prompt, requestId: row.id, at })];
+  return { ...view, entries, running: true, activeTurnStartedAt: at };
+}
+
+/** A running turn counts from its row's start, the host's hold, which comes before the turn's first event: the
+ * Working line drawn off the row before that event keeps its time when the event lands. */
+function turnFromRow(view: ChatThreadView, row: SessionView | undefined, thread: string | undefined): ChatThreadView {
+  if (!view.running || view.activeTurnStartedAt === null || row?.status !== "running" || row.startedAt === undefined || threadKeyOf(row) !== thread) return view;
+  return row.startedAt < Date.parse(view.activeTurnStartedAt) ? { ...view, activeTurnStartedAt: new Date(row.startedAt).toISOString() } : view;
 }
 
 /** A start that has waited on its agent: the line goes under the send it is for, and only that one, and leaves with
@@ -648,7 +679,7 @@ export function useChatThread(workspaceId: string, threadId: string | null = nul
   // The runtime stamps a row only once the harness announced its session, so a capped pinned thread resumes by its row and a dead one resumes nothing.
   const rowThread = useStore(s => resumedRow(s.sessions[workspaceId], threadId, remembered)?.threadId);
   const rowCwd = useStore(s => resumedRow(s.sessions[workspaceId], threadId, remembered)?.cwd);
-  const latestRow = useStore(s => (threadId === null ? undefined : s.sessions[workspaceId]?.findLast(r => (r.threadId ?? r.id) === threadId)));
+  const latestRow = useStore(s => (threadId === null ? s.sessions[workspaceId]?.at(-1) : s.sessions[workspaceId]?.findLast(r => (r.threadId ?? r.id) === threadId)));
   const viewKey = threadId === null ? workspaceId : `${workspaceId}/${threadId}`;
   // A host whose head refused this thread is read the old way, off the workspace's whole history.
   const [readsWhole, setReadsWhole] = useState<string | null>(null);
@@ -679,7 +710,7 @@ export function useChatThread(workspaceId: string, threadId: string | null = nul
     const next = held ? heldRowsOf(threadId) : undefined;
     // A pin landing on the thread this view already holds is the same reading under a new name: the transcript
     // stays, so a view whose own first turn opened the thread it is now pinned to never blinks through loading.
-    if (from.workspaceId === workspaceId && from.threadId === null && threadId !== null && heldThreadId(state) === threadId) {
+    if (from.workspaceId === workspaceId && from.threadId === null && threadId !== null && (ownThread(state) === threadId || (hydratedFor === workspaceId && drawnOffRow(state, latestRow) !== undefined))) {
       carriedRef.current = viewKey;
       setHydratedFor(viewKey);
     } else if (fresh && from.workspaceId === workspaceId && threadId === null) {
@@ -775,7 +806,7 @@ export function useChatThread(workspaceId: string, threadId: string | null = nul
       }
       // Taken before the reply is in: a hold is no row, and no reply carries one.
       if (e.type === "session.held") {
-        if (e.workspaceId === workspaceId) setState(s => heldForSend(s, e));
+        if (e.workspaceId === workspaceId) setState(s => heldForSend(s, e, threadId));
         return;
       }
       if (hydratedRef.current !== viewKey) return;
@@ -802,28 +833,33 @@ export function useChatThread(workspaceId: string, threadId: string | null = nul
     return latestRow === undefined ? null : { harness: latestRow.harness, model: latestRow.model, permissionMode: latestRow.permissionMode, cwd: latestRow.cwd };
   }, [heldFacts, latestRow, state.fresh, threadId]);
 
+  // With no thread picked, the row drawn names the thread, so the view is pinned to it and holds it when another
+  // thread on the workspace starts first.
+  const listed = drawnOffRow(state, latestRow);
   // A view without a start resumes its row: pinned, always; on the latest view, only while it is empty.
   const fromRow = !state.fresh && startedSession(state.events) === undefined && (threadId !== null || state.events.length === 0);
   const view = useMemo(() => {
     const carried = (held ? transcripts.fold(threadId) : undefined) ?? foldRef.current;
-    const { view: next, fold } = deriveChatView(state, previousEntries.current, carried);
+    const { view: derived, fold } = deriveChatView(state, previousEntries.current, carried);
+    const next = turnFromRow(derived, latestRow, ownThread(state) ?? threadId ?? undefined);
     foldRef.current = fold;
     if (held) transcripts.keepFold(threadId, fold);
     previousEntries.current = next.entries;
     if (!fromRow) return next;
+    const shown = listed === undefined ? next : runningOffRow(next, listed);
     // Before a start is in view, the thread's head or row says what it runs on, so the composer draws the thread's own
     // agent, model and access rather than the project's defaults.
-    const cwd = next.cwd ?? rowCwd ?? facts?.cwd ?? null;
-    if (facts === null) return cwd === next.cwd ? next : { ...next, cwd };
-    return { ...next, cwd, agent: next.agent ?? facts.harness, model: next.model ?? facts.model ?? null, permissionMode: next.permissionMode ?? facts.permissionMode ?? null };
-  }, [state, fromRow, rowCwd, facts, held, threadId]);
+    const cwd = shown.cwd ?? rowCwd ?? facts?.cwd ?? null;
+    if (facts === null) return cwd === shown.cwd ? shown : { ...shown, cwd };
+    return { ...shown, cwd, agent: shown.agent ?? facts.harness, model: shown.model ?? facts.model ?? null, permissionMode: shown.permissionMode ?? facts.permissionMode ?? null };
+  }, [state, fromRow, rowCwd, facts, held, threadId, listed, latestRow]);
   const older = useCallback(() => {
     if (heldRef.current && threadId !== null) void transcripts.older(threadId).catch(() => {});
   }, [threadId]);
   const setSending = useCallback(
     (sending: boolean) =>
       setState(s => {
-        if (sending) return s.sending === null ? { ...s, sending: { after: s.events.at(-1)?.turnId }, named: null } : s;
+        if (sending) return s.sending === null ? { ...s, sending: { after: s.events.at(-1)?.turnId }, named: null, handed: null } : s;
         return s.sending === null && s.stray === null ? s : { ...s, sending: null, named: null, stray: null };
       }),
     [],
@@ -855,8 +891,9 @@ export function useChatThread(workspaceId: string, threadId: string | null = nul
     sending: state.sending !== null,
     fresh: state.fresh,
     thread,
-    threadKey: heldThreadId(state) ?? threadId ?? workspaceId,
+    threadKey: ownThread(state) ?? threadId ?? (listed === undefined ? workspaceId : threadKeyOf(listed)),
     named: state.named,
+    handed: state.handed,
     appendUserTurn,
     appendLocalError,
     setSending,

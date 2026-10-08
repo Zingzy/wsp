@@ -4,8 +4,8 @@
 // host's door, made again whenever it ends for as long as it is held.
 
 import { randomInt } from "node:crypto";
-import { PLACE_FILE_MODE, backUrl, heldPlaceScript, isLoopback, parsePlaceFile, placeDaemonPaths, placeFileText, shellQuote, type PlaceBack } from "@wsp/protocol";
-import { MissingKnownHostsError, SSH_DIAL_MS, SSH_LINE_CAP, boxWord, carriedSshValues, holdBackForward, keyFingerprint, parseSshAddress, sshClient, type BackForward, type SshCarried, type SshReach, type SshSpawn, type SshTransport } from "@wsp/engine";
+import { PLACE_FILE_MODE, backUrl, heldPlaceScript, isLoopback, lastLine, parsePlaceFile, placeDaemonPaths, placeFileNames, placeFileText, placeLoginElsewhere, shellQuote, type PlaceBack } from "@wsp/protocol";
+import { CHILD_TIMED_OUT, MissingKnownHostsError, SSH_DIAL_MS, SSH_LINE_CAP, SUDO_ASKS_LINE, boxWord, carriedSshValues, holdBackForward, parseSshAddress, sshClient, type BackForward, type SshCarried, type SshReach, type SshSpawn, type SshTransport } from "@wsp/engine";
 import type { PlaceBackHolder, PlaceLogin } from "@wsp/runtime";
 
 /** How long the child gets to stand the forward: the dial, the login and sshd's answer to the forward. */
@@ -98,8 +98,8 @@ const letGoLine = (login: string): string => `the forward back from ${login} was
 export class BackCutError extends Error {}
 
 export interface PlaceBackDeps {
-  /** The fingerprint of this host's own key: a place file naming any other is another wsp's and is never written. */
-  hostKey: string;
+  /** This host's own public key: a place file naming any other is another wsp's and is never written. */
+  hostPublicKey: string;
   carry?: (reach: SshReach) => Promise<SshCarried>;
   spawn?: SshSpawn;
   transport?: SshTransport;
@@ -132,6 +132,9 @@ interface Held {
   login: PlaceLogin;
   back: PlaceBack;
   home: string;
+  /** Every computer held on this login by id, with its name: one box answers one login, and a failed add tried
+   * again leaves a stale record beside the live one, so the place file passes where it names any of them. */
+  computers: Map<string, string>;
   moved?: (back: PlaceBack) => void;
   child?: BackForward;
   released: boolean;
@@ -184,13 +187,29 @@ export function placeBackHolder(deps: PlaceBackDeps): PlaceBackHolder {
     const path = placeDaemonPaths(h.home).placeFile;
     const file = parsePlaceFile((await transport(reach, heldPlaceScript(h.home), { timeoutMs: SSH_DIAL_MS })).stdout);
     stillHeld(h);
-    if (file === undefined || keyFingerprint(file.hostPublicKey) !== deps.hostKey) return;
+    if (!placeFileNames(file, [...h.computers.keys()], deps.hostPublicKey)) return;
     const from = backUrl(h.back.boxPort);
     const hostUrls = file.hostUrls.includes(from) ? file.hostUrls.map(url => (url === from ? backUrl(boxPort) : url)) : [...file.hostUrls, backUrl(boxPort)];
     const next = `${path}.wsp-back`;
     const script = `umask 077 && cat > ${shellQuote(next)} && chmod ${PLACE_FILE_MODE.toString(8)} ${shellQuote(next)} && mv -f ${shellQuote(next)} ${shellQuote(path)}`;
     const landed = await transport(reach, script, { timeoutMs: SSH_DIAL_MS, stdin: new TextEncoder().encode(placeFileText({ ...file, hostUrls })) });
     if (landed.exitCode !== 0) throw new Error(`${h.login.ssh} did not take the forward's new port into its place file: ${landed.stderr.trim().slice(-SSH_LINE_CAP)}`);
+  };
+
+  /** Cuts the forward where the login reaches a place file naming none of the computers held on it, before anything
+   * stands there. Only a sudo that asks for a password lets an unread file through, since the read runs with none:
+   * the forward only listens on that machine's loopback, and the door takes nobody without this host's handshake.
+   * Any other failed read is a try that failed, made again. */
+  const sameComputer = async (reach: SshReach, h: Held): Promise<void> => {
+    const read = await transport(reach, heldPlaceScript(h.home), { timeoutMs: SSH_DIAL_MS });
+    stillHeld(h);
+    if (read.exitCode !== 0) {
+      if (read.stderr.includes(SUDO_ASKS_LINE)) return;
+      throw new Error(`${h.login.ssh} did not let wsp read its place file: ${read.exitCode === CHILD_TIMED_OUT ? `the read timed out after ${Math.round(SSH_DIAL_MS / 1000)}s` : (lastLine(read.stderr) ?? `the read exited ${read.exitCode}`)}`);
+    }
+    if (!placeFileNames(parsePlaceFile(read.stdout), [...h.computers.keys()], deps.hostPublicKey)) {
+      throw new BackCutError(`${placeLoginElsewhere(h.login.ssh, [...new Set(h.computers.values())].join(" or "))}, so the forward back to this computer was cut`);
+    }
   };
 
   /** One standing of the forward, onto the door as the host holds it now: the port it was asked at, a fresh one
@@ -208,6 +227,7 @@ export function placeBackHolder(deps: PlaceBackDeps): PlaceBackHolder {
     stillHeld(h);
     if (doorPort === undefined) throw new BackCutError(backNoDoorLine(h.login.ssh));
     const reach = reachOf(h.login);
+    if (h.computers.size > 0) await sameComputer(reach, h);
     const carried = await carry(reach);
     let taken: Error | undefined;
     for (const boxPort of [h.back.boxPort, undefined]) {
@@ -338,11 +358,12 @@ export function placeBackHolder(deps: PlaceBackDeps): PlaceBackHolder {
       const standing = held.get(login.ssh);
       if (standing !== undefined) {
         if (moved !== undefined) standing.moved = moved;
+        if (on.computer !== undefined) standing.computers.set(on.computer.id, on.computer.name);
         // A loop waiting out a failure tries again now, so this caller hears a fresh try rather than the old one.
         standing.wake?.();
         return bounded(login, standing.now.done);
       }
-      const h: Held = { login, back, home: on.home, ...(moved !== undefined ? { moved } : {}), released: false, now: freshTry(), said: new Set() };
+      const h: Held = { login, back, home: on.home, computers: new Map(on.computer === undefined ? [] : [[on.computer.id, on.computer.name]]), ...(moved !== undefined ? { moved } : {}), released: false, now: freshTry(), said: new Set() };
       held.set(login.ssh, h);
       const first = h.now.done;
       void keep(h);

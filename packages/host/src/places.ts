@@ -13,7 +13,6 @@
 // the one the person typed.
 
 import { homedir } from "node:os";
-import { keyFingerprint } from "@wsp/engine";
 import type { PlaceWiring } from "@wsp/runtime";
 import { placeBackHolder } from "./place-back.js";
 import { hostPlatform } from "./verbs.js";
@@ -33,7 +32,7 @@ export * from "./places/join.js";
 export function placeWiring(statePath: string, advertise?: string): PlaceWiring {
   const hostKey = hostPlaceKey(statePath);
   // One holder for the installer and the records: the forward an add stood is the one the record keeps.
-  const back = placeBackHolder({ hostKey: keyFingerprint(hostKey.publicKey) });
+  const back = placeBackHolder({ hostPublicKey: hostKey.publicKey });
   return {
     hostKey,
     back,

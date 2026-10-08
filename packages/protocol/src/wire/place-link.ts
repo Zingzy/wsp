@@ -404,6 +404,11 @@ export function parsePlaceFile(text: string): PlaceFile | undefined {
   return ok ? f : undefined;
 }
 
+/** Whether a place file names one of these computers and this host's key: the one test every road over a computer's
+ * ssh login holds the machine it reached to before it changes anything there. */
+export const placeFileNames = (file: PlaceFile | undefined, placeIds: readonly string[], hostPublicKey: string): file is PlaceFile =>
+  file !== undefined && placeIds.includes(file.placeId) && file.hostPublicKey === hostPublicKey;
+
 /** The text the file holds, which parsePlaceFile reads back. */
 export const placeFileText = (file: PlaceFile): string => `${JSON.stringify(file, null, 2)}\n`;
 

@@ -23,7 +23,7 @@ export {
   type PlaceUpdateRequest, type PlaceUpdateLanded, type PlaceUpdater, type PlaceLeaveRequest, type PlaceLeaver,
   type PlaceInstallRequest, type PlaceInstalled, type PlaceStaging, type PlaceInstaller, type PlaceRecording,
   type PlaceDoorOptions, type RecipeResolver, type PlaceChallenge, type PlaceDoor, NO_PLACE_DOOR, NO_PLACE_UPDATER,
-  placeUpdateSlowLine, placeSweptOverSshLine, placeLoginRoadLine, placeSweptOverLinkLine, PlaceLoginRefusedError,
+  placeUpdateSlowLine, placeSweptOverSshLine, placeLoginRoadLine, placeSweptOverLinkLine, placeElsewhereSweptOverLinkLine, PlaceLoginRefusedError, PlaceHostKeyChangedError,
   PlaceForksNowhereError, PlaceAddTakenBackError, PlaceProvisioningError, type PlaceAdded, type PlaceSetUp,
   type PlaceRemoved,
 } from "./places/types.js";

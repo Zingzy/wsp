@@ -4,7 +4,7 @@ import { z } from "zod";
 import { AgentSignInState } from "../agents-report.js";
 import { KNOWN_HOSTS, PLACE_INSTALL, plural, thisComputer } from "../format.js";
 import { RecipeFile } from "../recipe-file.js";
-import { HERE_PLACE_ID, namesPlace, placeRenameRefusal, placeSshRefusal, placeSshOtherRefusal, placeSshUncheckedRefusal, type RefusalHalves } from "../place-word.js";
+import { HERE_PLACE_ID, namesPlace, placeRenameRefusal, placeSshRefusal, placeSshOtherRefusal, placeSshUncheckedRefusal, placeLoginOtherRefusal, placeLoginUncheckedRefusal, placeLoginElsewhere, placeLoginElsewhereRemovedLine, type RefusalHalves } from "../place-word.js";
 import { NAP_AFTER_MAX_MS, TURN_LIMIT_MAX_MS } from "../place-state.js";
 import { isPlainPath, PortForward, RelayPort } from "../wire/limits.js";
 import { MachineSizeOffer, WorkspaceSize } from "../wire/capabilities.js";
@@ -614,7 +614,7 @@ export const PlaceUpdateReply = z.object({
 });
 export type PlaceUpdateReply = z.infer<typeof PlaceUpdateReply>;
 
-export { HERE_PLACE_ID, namesPlace, placeRenameRefusal, placeSshRefusal, placeSshOtherRefusal, placeSshUncheckedRefusal, type RefusalHalves };
+export { HERE_PLACE_ID, namesPlace, placeRenameRefusal, placeSshRefusal, placeSshOtherRefusal, placeSshUncheckedRefusal, placeLoginOtherRefusal, placeLoginUncheckedRefusal, placeLoginElsewhere, placeLoginElsewhereRemovedLine, type RefusalHalves };
 
 /** What one row of the places list holds of the person's money: the spend it has taken since midnight and since
  * the first of the month, over every workspace that stood on it then, deleted ones included, and what it is burning

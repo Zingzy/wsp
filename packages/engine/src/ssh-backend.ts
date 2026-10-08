@@ -614,6 +614,9 @@ export async function sshDial(reach: SshReach, transport: SshTransport = sshClie
  * watching the button they pressed. */
 export const SSH_DIAL_MS = 15_000;
 
+/** What sudo writes where it asks for a password and was given none. */
+export const SUDO_ASKS_LINE = "a password is required";
+
 /** How a login reaches root there: it is root, its sudo asks for nothing, its sudo took the password it was given,
  * its sudo asks for a password nobody gave or took a wrong one, or it has no sudo that will run anything as root. */
 export type SshSudo = "root" | "free" | "taken" | "asks" | "wrong" | "tty" | "none";

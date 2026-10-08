@@ -64,3 +64,32 @@ export const placeSshUncheckedRefusal = (ssh: string, name: string, why: string)
   happened: `${ssh} could not be checked as ${name}, so nothing was saved: ${why}`,
   fix: `Check that ssh ${ssh} logs in as root, or through a sudo that asks no password, and try again.`,
 });
+
+/** Where a computer's own ssh login reaches, once its place file did not name that computer: another computer added
+ * here, by the name its record has, or a machine that is not the one added under this name. Said without the two
+ * names reading as one where an alias and the computer share a name. */
+export const placeLoginElsewhere = (ssh: string, name: string, other?: string): string =>
+  other === undefined ? `${ssh} no longer reaches the computer added here as ${name}` : `${ssh} reaches the other computer added here as ${other}`;
+
+/** What an update over a computer's own ssh login is refused with before it changes anything there: the place file
+ * that login reaches does not name this computer, or it could not be read. Where it names another computer added
+ * here, this record is the stale one beside it, named by its id since the two may share a name. */
+export const placeLoginOtherRefusal = (ssh: string, place: { id: string; name: string }, other?: string): RefusalHalves => ({
+  happened: `${placeLoginElsewhere(ssh, place.name, other)}, so nothing was changed there`,
+  fix:
+    other === undefined
+      ? `Give ${place.name} the login that reaches it with wsp computers set ${place.name} --ssh <user@host>, then try again.`
+      : `This record of ${place.name} stands beside that one; take it away with wsp remove ${place.id}.`,
+});
+export const placeLoginUncheckedRefusal = (ssh: string, name: string, why: string): RefusalHalves => ({
+  happened: `${ssh} could not be checked as ${name}, so nothing was changed there: ${why}`,
+  fix: `Check that ssh ${ssh} logs in as root, or through a sudo that takes the password you typed, and try again.`,
+});
+
+/** What a remove says where the computer's own login reaches another machine: nothing ran there, the record is gone
+ * from here all the same, and what wsp left on the computer itself stays. Where that machine is another computer
+ * added here, it stays added and no leave is named, since one there would take that computer off. */
+export const placeLoginElsewhereRemovedLine = (ssh: string, name: string, other?: string): string =>
+  other === undefined
+    ? `${placeLoginElsewhere(ssh, name)}, so nothing was changed on the machine it reaches; ${name} is off this host, and whatever wsp left on ${name} itself stays until wsp leave runs there`
+    : `${placeLoginElsewhere(ssh, name, other)}, which stays added, so nothing was changed there; this record of ${name} is off this host`;

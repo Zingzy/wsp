@@ -16,7 +16,7 @@ import { answerPrompt } from "./answerPrompt.js";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ArrowDownIcon } from "lucide-react";
 import type { LegendListRef } from "@legendapp/list/react";
-import { USAGE_WORDS, workspaceWord } from "@wsp/protocol";
+import { threadKeyOf, USAGE_WORDS, workspaceWord } from "@wsp/protocol";
 import { Button } from "../ui/button";
 import { useCapabilities, useHarnessCatalog, usePlaces, useSidebarProjects, useStatus, useStore, useThreadSessions, useWorkspace, useWorkspaceState } from "../../protocol/store";
 import { TreeRows } from "../../tree/TreeRows.js";
@@ -78,6 +78,18 @@ export function ChatView({
   const listRef = useRef<LegendListRef | null>(null);
   const { view } = thread;
   const empty = view.entries.length === 0 && !view.running;
+  // A workspace an agent forked out of a thread stands before its thread's row is listed. The fork opens that thread
+  // inside the parent's own turn, so it is on its way while that turn runs; after it, nothing is coming. The host
+  // stamps the fork's createdAt and each row's startedAt off one clock, so a later turn of the parent never counts.
+  const forkWaits = useStore(s => {
+    const parent = workspace?.parentThreadId;
+    if (workspace == null || parent === undefined || threadId !== null || thread.fresh || (s.sessions[workspaceId]?.length ?? 0) > 0) return false;
+    const made = Date.parse(workspace.createdAt);
+    return Object.values(s.sessions).some(rows => {
+      const opener = rows.findLast(row => threadKeyOf(row) === parent);
+      return opener?.status === "running" && (opener.startedAt ?? 0) <= made;
+    });
+  });
   // A create asked with no message that landed here keeps its setup as the thread's first content, the composer
   // where it stood, until the first message: a page that moved as the create ended read as a fault.
   const landed = useStore(s => (s.landed?.workspaceId === workspaceId ? s.landed : null));
@@ -175,8 +187,8 @@ export function ChatView({
   }, [hydrated, newThread, startNewThread, threadId, workspaceId]);
   // With nothing picked, the thread this view settled on is what the person is reading, whether the transcript
   // carried it or its own first turn opened it: the store records it in the address, and the header reads the same
-  // pick the body does. The key is the workspace's own until a session.start gives the view a thread, and a view
-  // about to clear itself for a new thread still holds the one it is leaving.
+  // pick the body does. The key is the workspace's own until the host holds a thread for the view's send or a
+  // session.start gives it one, and a view about to clear itself for a new thread still holds the one it is leaving.
   useEffect(() => {
     if (!hydrated || asked || threadId !== null || threadKey === workspaceId) return;
     readingThread(workspaceId, threadKey);
@@ -298,7 +310,7 @@ export function ChatView({
           <SetupRoom>
             <SetupCard creation={landed.creation} landedAt={landed.at} />
           </SetupRoom>
-        ) : !thread.hydrated ? (
+        ) : !thread.hydrated || (empty && forkWaits) ? (
           <div className="flex h-full items-center justify-center pb-(--chat-composer-inset) text-sm text-muted-foreground">{TRANSCRIPT_LOADING}</div>
         ) : empty ? (
           // A fresh thread centres the headline and the composer as one stack; the composer glides to its dock
@@ -326,7 +338,7 @@ export function ChatView({
         ref={composerRef}
         data-chat-composer-dock
         data-at-end={!showTranscript || atEnd || undefined}
-        data-centred={(thread.hydrated && empty && !setupStands) || undefined}
+        data-centred={(thread.hydrated && empty && !setupStands && !forkWaits) || undefined}
         className="pointer-events-none absolute inset-x-0 bottom-0 z-10 *:pointer-events-auto transition-[bottom] duration-300 ease-out data-centred:bottom-(--empty-lift) motion-reduce:transition-none"
       >
         <ScrollToEnd hidden={!showTranscript || atEnd} onClick={() => void listRef.current?.scrollToEnd({ animated: true })} />

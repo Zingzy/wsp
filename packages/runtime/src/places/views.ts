@@ -98,7 +98,7 @@ export function placeViews(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, 
     const said =
       ssh === undefined || pending.undo === undefined || wiring.undo === undefined
         ? ADD_NOT_TAKEN_BACK_LINE
-        : await wiring.undo({ ssh, ...(pending.keyPath !== undefined ? { keyPath: pending.keyPath } : {}) }, pending.undo).then(
+        : await wiring.undo({ ssh, ...(pending.keyPath !== undefined ? { keyPath: pending.keyPath } : {}), ...(pending.hostKey !== undefined ? { hostKey: pending.hostKey } : {}) }, pending.undo).then(
             () => ADD_STOPPED_LINE,
             (e: unknown) => `${ADD_NOT_TAKEN_BACK_LINE}: ${firstLineOf(e)}`,
           );

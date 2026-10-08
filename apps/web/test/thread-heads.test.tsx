@@ -42,15 +42,17 @@ const ROWS: SessionView[] = [
 ];
 
 /** A host that records each event with its transcript position and answers heads and pages off that transcript. */
-function hostApi() {
+function hostApi(more: { workspaces?: WorkspaceView[]; rows?: SessionView[] } = {}) {
+  const workspaces = [workspace, ...(more.workspaces ?? [])];
+  const rows = [...ROWS, ...(more.rows ?? [])];
   const history: SessionEvent[] = TRANSCRIPT.map((e, i) => ({ ...e, pos: i + 1 }));
   const asked: string[] = [];
   const listeners = new Set<(e: ProtocolEvent) => void>();
   const newest = () => history.at(-1)?.pos ?? 0;
-  const row = (threadId: string) => ROWS.find(r => r.threadId === threadId)!;
+  const row = (threadId: string) => rows.find(r => r.threadId === threadId)!;
   const api: Api = {
-    listWorkspaces: async () => [workspace],
-    getWorkspace: async () => workspace,
+    listWorkspaces: async () => workspaces,
+    getWorkspace: async id => workspaces.find(w => w.id === id)!,
     createWorkspace: async () => workspace,
     watchStatuses: async () => [],
     nap: async () => workspace,
@@ -59,15 +61,15 @@ function hostApi() {
     startSession: async o => ({ id: "s_x", workspaceId: o.workspaceId, harness: "claude", status: "running" }),
     portReach: async (_id, port) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, expiresAt: Date.now() + 3_600_000 }),
     daemon: noDaemonApi,
-    sessionHistory: async () => {
+    sessionHistory: async id => {
       asked.push("history");
-      return [...history];
+      return history.filter(e => e.workspaceId === id);
     },
     sessionHead: async (threadId): Promise<ThreadHead> => {
       asked.push(`head ${threadId}`);
       const own = history.filter(e => e.threadId === threadId);
       const r = row(threadId);
-      return { facts: { id: r.id, threadId, workspaceId: WS, harness: r.harness, startedBy: "person", status: r.status, title: r.prompt ?? "", sessionId: r.id, turns: 1, ran: true }, events: own, pos: newest(), total: own.length };
+      return { facts: { id: r.id, threadId, workspaceId: r.workspaceId, harness: r.harness, startedBy: "person", status: r.status, title: r.prompt ?? "", sessionId: r.id, turns: 1, ran: true }, events: own, pos: newest(), total: own.length };
     },
     sessionPage: async (_workspaceId, threadId, window = {}): Promise<HistoryPage> => {
       asked.push(`page ${threadId}${window.before === undefined ? "" : ` before ${window.before}`}`);
@@ -77,7 +79,7 @@ function hostApi() {
     listSnapshots: async () => ({ name: "default", head: null, versions: [] }),
     snapshotStorage: async () => null,
     rollbackSnapshot: async () => ({ lineage: { name: "default", head: null, versions: [] }, existingWorkspaces: "untouched" }),
-    listSessions: async () => ROWS,
+    listSessions: async id => rows.filter(r => id === undefined || r.workspaceId === id),
     listHarnesses: async () => [TABLE_CATALOG],
     workspaceCheckout: async id => {
       asked.push(`checkout ${id}`);
@@ -138,14 +140,17 @@ beforeEach(() => {
 });
 afterEach(() => cleanup());
 
-async function mount() {
-  const host = hostApi();
+async function mount(more: Parameters<typeof hostApi>[0] = {}) {
+  const host = hostApi(more);
   useStore.getState().bind(host.api);
   await whenAgentsAnswered();
   const { container } = render(<Shell />);
   const sidebar = () => within(container.querySelector<HTMLElement>("[data-app-sidebar]")!);
   const center = () => within(container.querySelector<HTMLElement>("[data-shell-center]")!);
   const threadRow = (title: string): HTMLElement => sidebar().getByText(title).closest<HTMLElement>("[data-sidebar-row]")!;
+  // The window opens on the first workspace by id, so with more than one it is put on this one.
+  await waitFor(() => expect(useStore.getState().ready).toBe(true));
+  if (more.workspaces !== undefined) act(() => useStore.getState().select(WS));
   await waitFor(() => expect(center().getByText("Checking the keychain.")).toBeDefined());
   await waitFor(() => expect(sidebar().getByText("make me a simple server")).toBeDefined());
   return { ...host, sidebar, center, threadRow };
@@ -214,5 +219,99 @@ describe("a thread the page holds", () => {
     await act(async () => await new Promise(r => setTimeout(r, 50)));
     expect(asked.slice(before)).toHaveLength(2);
     expect(center().getByText(/Added GET \/health\./)).toBeDefined();
+  });
+});
+
+describe("a thread listed before its first event", () => {
+  const SUB = "check the fable tests";
+  const running = (threadId: string, workspaceId: string): SessionView => ({ id: `s_${threadId}`, workspaceId, harness: "claude", status: "running", prompt: SUB, startedAt: Date.now() - 5_000, threadId, parentThreadId: "thr_b" });
+  const neverNew = (center: () => ReturnType<typeof within>) => expect(center().queryByRole("heading", { level: 1 })).toBeNull();
+  const chat = () => within(document.querySelector<HTMLElement>("[data-shell-center] [data-chat-view]")!);
+
+  it("a sub-thread on its opener's workspace shows its prompt and a Working line, never the new-thread page", async () => {
+    const { center, threadRow } = await mount({ rows: [running("thr_c", WS)] });
+    fireEvent.click(threadRow(SUB));
+    await waitFor(() => expect(useStore.getState().selectedThreadId).toBe("thr_c"));
+    await waitFor(() => expect(chat().getByText(SUB)).toBeDefined());
+    expect(chat().getByText(/^Working/)).toBeDefined();
+    neverNew(center);
+  });
+
+  it("a sub-thread on a workspace of its own shows its prompt and a Working line, never the new-thread page", async () => {
+    const other: WorkspaceView = { ...workspace, id: "ws_fable", name: "fable", machineId: "m_fable" };
+    const { center, threadRow } = await mount({ workspaces: [other], rows: [running("thr_d", other.id)] });
+    fireEvent.click(threadRow(SUB));
+    await waitFor(() => expect(useStore.getState()).toMatchObject({ selectedId: other.id, selectedThreadId: "thr_d" }));
+    await waitFor(() => expect(chat().getByText(SUB)).toBeDefined());
+    expect(chat().getByText(/^Working/)).toBeDefined();
+    neverNew(center);
+  });
+
+  it("with no thread picked, the view holds the thread it first drew off its row when another thread on the workspace starts first", async () => {
+    const other: WorkspaceView = { ...workspace, id: "ws_fable", name: "fable", machineId: "m_fable" };
+    const row = (id: string, prompt: string, ago: number): SessionView => ({ id: `s_${id}`, workspaceId: other.id, harness: "claude", status: "running", prompt, startedAt: Date.now() - ago, threadId: id });
+    const { emit } = await mount({ workspaces: [other], rows: [row("thr_alpha", "alpha task", 3_000), row("thr_beta", "beta task", 1_000)] });
+    act(() => useStore.getState().select(other.id));
+    await waitFor(() => expect(chat().getByText("beta task")).toBeDefined());
+    await waitFor(() => expect(useStore.getState().selectedThreadId).toBe("thr_beta"));
+    emit({ type: "session.start", workspaceId: other.id, sessionId: "sess_alpha", turnId: "turn_alpha", threadId: "thr_alpha", at: Date.now(), prompt: "alpha task" });
+    await act(async () => await new Promise(r => setTimeout(r, 50)));
+    expect(useStore.getState().selectedThreadId).toBe("thr_beta");
+    expect(chat().getByText("beta task")).toBeDefined();
+    expect(chat().queryByText("alpha task")).toBeNull();
+  });
+
+  it("the Working line drawn off the row keeps counting from the row's start when the first event lands", async () => {
+    const seconds = () => Number(/Working for (\d+)s/.exec(chat().getByText(/^Working for/).textContent ?? "")?.[1]);
+    const { emit, threadRow } = await mount({ rows: [{ ...running("thr_c", WS), startedAt: Date.now() - 6_000 }] });
+    fireEvent.click(threadRow(SUB));
+    await waitFor(() => expect(chat().getByText(SUB)).toBeDefined());
+    expect(seconds()).toBeGreaterThanOrEqual(6);
+    emit({ type: "session.start", workspaceId: WS, sessionId: "s_thr_c", turnId: "turn_c", threadId: "thr_c", at: Date.now(), prompt: SUB });
+    await waitFor(() => expect(chat().queryAllByText(SUB)).toHaveLength(1));
+    expect(seconds()).toBeGreaterThanOrEqual(6);
+  });
+
+  const FORK: WorkspaceView = { ...workspace, id: "ws_fork", name: "fable", machineId: "m_fork", parentThreadId: "thr_b", rootThreadId: "thr_b", parentWorkspaceId: WS };
+  // The opener's turn started 5 s back and forked the workspace 4 s back, inside it.
+  const forkedNow = (): WorkspaceView => ({ ...FORK, createdAt: new Date(Date.now() - 4_000).toISOString() });
+
+  it("a workspace an agent forked out of a thread, with no row yet, shows the loading line while its opener's turn runs, and its empty page once that turn ends", async () => {
+    const opening: SessionView = { id: "s_b2", workspaceId: WS, harness: "claude", status: "running", prompt: "fork one for the tests", startedAt: Date.now() - 5_000, threadId: "thr_b" };
+    const { center } = await mount({ workspaces: [forkedNow()], rows: [opening] });
+    act(() => useStore.getState().select(FORK.id));
+    await waitFor(() => expect(center().getByText(TRANSCRIPT_LOADING)).toBeDefined());
+    neverNew(center);
+    act(() => useStore.setState(s => ({ sessions: { ...s.sessions, [WS]: s.sessions[WS]!.map(r => (r.id === "s_b2" ? { ...r, status: "completed" as const } : r)) } })));
+    await waitFor(() => expect(center().getByRole("heading", { level: 1 }).textContent).toBe("What should we build in the-project?"));
+  });
+
+  it("a workspace forked with no task reads as its empty page during its opener's later turns", async () => {
+    const opening: SessionView = { id: "s_b2", workspaceId: WS, harness: "claude", status: "running", prompt: "fork one for the tests", startedAt: Date.now() - 5_000, threadId: "thr_b" };
+    const { center } = await mount({ workspaces: [forkedNow()], rows: [opening] });
+    act(() => useStore.getState().select(FORK.id));
+    await waitFor(() => expect(center().getByText(TRANSCRIPT_LOADING)).toBeDefined());
+    act(() => useStore.setState(s => ({ sessions: { ...s.sessions, [WS]: s.sessions[WS]!.map(r => (r.id === "s_b2" ? { ...r, status: "completed" as const } : r)) } })));
+    await waitFor(() => expect(center().getByRole("heading", { level: 1 }).textContent).toBe("What should we build in the-project?"));
+    const next: SessionView = { ...opening, id: "s_b3", prompt: "a child reported", startedAt: Date.now() };
+    act(() => useStore.setState(s => ({ sessions: { ...s.sessions, [WS]: [...s.sessions[WS]!, next] } })));
+    await act(async () => await new Promise(r => setTimeout(r, 50)));
+    expect(center().queryByText(TRANSCRIPT_LOADING)).toBeNull();
+    expect(center().getByRole("heading", { level: 1 }).textContent).toBe("What should we build in the-project?");
+  });
+
+  it("a New thread the person opens on such a workspace is the empty page as anywhere else", async () => {
+    const opening: SessionView = { id: "s_b2", workspaceId: WS, harness: "claude", status: "running", prompt: "fork one for the tests", startedAt: Date.now() - 5_000, threadId: "thr_b" };
+    const { center } = await mount({ workspaces: [forkedNow()], rows: [opening] });
+    act(() => useStore.getState().select(FORK.id));
+    await waitFor(() => expect(center().getByText(TRANSCRIPT_LOADING)).toBeDefined());
+    act(() => useStore.getState().newThread(FORK.id));
+    await waitFor(() => expect(center().getByRole("heading", { level: 1 }).textContent).toBe("What should we build in the-project?"));
+  });
+
+  it("a workspace an agent forked out of a thread whose turn has ended, with no row, is its empty page at once", async () => {
+    const { center } = await mount({ workspaces: [FORK] });
+    act(() => useStore.getState().select(FORK.id));
+    await waitFor(() => expect(center().getByRole("heading", { level: 1 }).textContent).toBe("What should we build in the-project?"));
   });
 });
