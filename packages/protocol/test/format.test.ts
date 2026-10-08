@@ -602,9 +602,10 @@ describe("a turn's activity in one line each", () => {
     expect(toolDoneLine("Write", "{\"file_pa")).toBeUndefined();
   });
 
-  it("falls back to the tool's own name when there is no row for it, when its input carries nothing the row needs, and when the input is not an object", () => {
+  it("falls back to a server tool's words, else the tool's own name, when there is no row for it, when its input carries nothing the row needs, and when the input is not an object", () => {
     expect(toolActivityLine("TodoWrite", JSON.stringify({ todos: [] }))).toBe("TodoWrite");
-    expect(toolActivityLine("mcp__wsp__send", JSON.stringify({ id: "t1" }))).toBe("mcp__wsp__send");
+    expect(toolActivityLine("mcp__wsp__send", JSON.stringify({ id: "t1" }))).toBe("Use wsp's send");
+    expect(toolActivityLine("mcp__wsp__run", JSON.stringify({ message: "go", title: "Login test" }))).toBe("Use wsp's run");
     expect(toolActivityLine("Bash", JSON.stringify({ description: "list them" }))).toBe("Bash");
     expect(toolActivityLine("Bash", "{\"comm")).toBe("Bash");
     expect(toolActivityLine("Bash", JSON.stringify(null))).toBe("Bash");
@@ -701,7 +702,9 @@ describe("the one registry every client reads a tool call from", () => {
 
   it("reads a name with no row by the general field order, and an mcp call by its name", () => {
     expect(toolCallFacts("TodoWrite", JSON.stringify({ todos: [] }))).toEqual({});
-    expect(toolCallFacts("mcp__wsp__send", JSON.stringify({ prompt: "hello" }))).toEqual({ itemType: "mcp_tool_call", detail: "hello" });
+    expect(toolCallFacts("mcp__wsp__send", JSON.stringify({ prompt: "hello" }))).toEqual({ itemType: "mcp_tool_call", title: "Use wsp's send", detail: "hello" });
+    expect(toolCallFacts("mcp__wsp__run", JSON.stringify({ message: "go on", title: "Login test" }))).toEqual({ itemType: "mcp_tool_call", title: "Use wsp's run", detail: "Login test" });
+    expect(toolCallFacts("mcp__wsp__run", JSON.stringify({ message: "go on" }))).toEqual({ itemType: "mcp_tool_call", title: "Use wsp's run", detail: "go on" });
     expect(toolCallFacts("Wombat", JSON.stringify({ query: "grey fur" }))).toEqual({ detail: "grey fur" });
   });
 

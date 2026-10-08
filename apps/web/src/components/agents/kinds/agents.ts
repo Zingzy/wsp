@@ -13,6 +13,8 @@ export interface AgentItem {
   readonly row: AgentRow;
   /** The file that names the wsp tools for it, where one does. */
   readonly toolsFile?: string;
+  /** Every turn's launch there hands it the wsp tools, which no file names. */
+  readonly toolsLaunched?: true;
 }
 
 /** Whether a turn there needs no sign-in first: its own login stands, or the key this host keeps for it. */
@@ -65,7 +67,7 @@ function actsOf(item: AgentItem, ctx: RowsContext) {
   const adding = ctx.acts?.adding(row.id) === true;
   const addTools: RowAct =
     ctx.where !== "here"
-      ? { id: "add-tools", label: W.addTools, add: true, hover: W.toolsHereOnly }
+      ? { id: "add-tools", label: W.addTools, add: true, hover: W.addToolsHereOnly }
       : { id: "add-tools", label: W.addTools, add: true, ...(adding ? { busy: true } : ctx.acts === undefined ? {} : { run: () => ctx.acts!.addTools(row.id) }) };
   const update = notYet("update", W.update, CircleArrowUpIcon, hold === undefined ? {} : { hover: hold });
   const uninstall = notYet("uninstall", W.uninstall, Trash2Icon, { destructive: true, ...(hold === undefined ? {} : { hover: hold }) });
@@ -111,8 +113,8 @@ export const AGENTS_KIND: KindModule<AgentItem> = {
   id: "agents",
   items: (report: AgentsReport) =>
     report.agents.map(row => {
-      const toolsFile = report.servers.find(s => s.agent === row.id && s.name === MCP_SERVER_NAME)?.file;
-      return { row, ...(toolsFile === undefined ? {} : { toolsFile }) };
+      const tools = report.servers.find(s => s.agent === row.id && s.name === MCP_SERVER_NAME);
+      return { row, ...(tools?.file !== undefined ? { toolsFile: tools.file } : tools?.launch === true ? { toolsLaunched: true as const } : {}) };
     }),
   key: item => rowId(item.row),
   matches: (item, q) => matchesAny(q, item.row.name, item.row.version),
@@ -150,7 +152,7 @@ export const AGENTS_KIND: KindModule<AgentItem> = {
           { id: "status", label: W.status, status: signInStatus(row), ...(row.signInRoad !== "none" ? { fact: W.roads[row.signInRoad] } : {}) },
           ...(row.version === undefined ? [] : [{ id: "version", label: W.version, value: row.version, ...(versionFact === "" ? {} : { fact: versionFact }) }]),
           { id: "installed-at", label: W.installedAt, ...(row.path === undefined ? {} : { value: row.path, copy: true }), ...(installedNote === "" ? {} : { fact: installedNote }) },
-          { id: "wsp-tools", label: W.wspTools, ...(item.toolsFile === undefined ? { value: W.notAdded, muted: true } : { value: item.toolsFile, copy: true }) },
+          { id: "wsp-tools", label: W.wspTools, ...(item.toolsFile !== undefined ? { value: item.toolsFile, copy: true } : item.toolsLaunched === true ? { value: W.toolsEveryTurn, muted: true } : { value: W.notAdded, muted: true }) },
           threadsFact(row),
           ...aboutFacts(entry),
         ]

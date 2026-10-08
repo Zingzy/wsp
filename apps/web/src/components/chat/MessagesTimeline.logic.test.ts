@@ -3,6 +3,7 @@
 import { describe, expect, it } from "vitest";
 import {
   deriveMessagesTimelineRows,
+  deriveSession,
   type ChatMessage,
   type TimelineEntry,
   type TurnSummary,
@@ -77,14 +78,26 @@ describe("work entry labels", () => {
     sourceActivityKind: "tool.completed",
   };
 
+  it("heads a server's tool with its words, never its code name, and shows the call's title or message after them", () => {
+    const scope = { workspaceId: "ws_t", sessionId: "sess_t" };
+    const running = (toolName: string, input: unknown): WorkLogEntry =>
+      deriveSession([
+        { type: "session.start", ...scope, prompt: "go" },
+        { type: "session.delta", ...scope, kind: "tool_use", toolName, toolUseId: "tu_1", text: JSON.stringify(input) },
+      ]).workEntries[0]!;
+    const run = running("mcp__wsp__run", { message: "Fix the login test and push", model: "claude-sonnet-5", title: "Login test" });
+    expect(liveWorkEntryLabel(run, undefined, true)).toEqual({ verb: "Use wsp's run", text: "Login test", mono: false });
+    const untitled = running("mcp__wsp__run", { message: "Fix the login test and push" });
+    expect(liveWorkEntryLabel(untitled, undefined, true)).toEqual({ verb: "Use wsp's run", text: "Fix the login test and push", mono: false });
+    const bare = running("mcp__github__search_issues", {});
+    expect(liveWorkEntryLabel(bare, undefined, true)).toEqual({ verb: null, text: "Use github's search issues", mono: false });
+    expect(workEntryDisplayLabel({ ...bare, detail: "Found 3 issues" }, undefined)).toEqual({ verb: "Use github's search issues", text: "Found 3 issues", mono: false });
+  });
+
   it("keeps custom titles and output for unrecognized tools", () => {
-    const unknownEntry = { ...entry, toolTitle: "mcp__github__search_issues" };
-    expect(liveWorkEntryLabel(unknownEntry, undefined, true)).toEqual(
-      { verb: null, text: "Mcp__github__search_issues", mono: false },
-    );
-    expect(workEntryDisplayLabel({ ...unknownEntry, detail: "Found 3 issues" }, undefined)).toEqual(
-      { verb: null, text: "Found 3 issues", mono: false },
-    );
+    const unknownEntry = { ...entry, toolTitle: "some_tool" };
+    expect(liveWorkEntryLabel(unknownEntry, undefined, true)).toEqual({ verb: null, text: "Some_tool", mono: false });
+    expect(workEntryDisplayLabel({ ...unknownEntry, detail: "Found 3 issues" }, undefined)).toEqual({ verb: null, text: "Found 3 issues", mono: false });
   });
 
   it("shows the whole command line in mono, with the state word only on the live row", () => {

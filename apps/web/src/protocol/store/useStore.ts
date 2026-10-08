@@ -937,7 +937,8 @@ export const useStore = create<State>((set, get) => {
           });
           return;
         case "project.added":
-          set(s => ({ projects: [...s.projects.filter(p => p.id !== e.project.id), e.project] }));
+          // In the host's own order, so a project a recipe moved under its id and age lands back where it stood.
+          set(s => ({ projects: [...s.projects.filter(p => p.id !== e.project.id), e.project].sort((a, b) => a.createdAt.localeCompare(b.createdAt)) }));
           return;
         case "project.removed":
           set(s => {

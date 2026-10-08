@@ -24,11 +24,11 @@ export function ActivityShimmerOverlay({ children }: { children: ReactNode }) {
 
 export const THINKING_LABEL: WorkEntryLabel = { verb: null, text: "Thinking", mono: false };
 
-function WorkEntryLabelText({ label }: { label: WorkEntryLabel }) {
+function WorkEntryLabelText({ label, highlighted = false }: { label: WorkEntryLabel; highlighted?: boolean }) {
   return (
     <>
       {label.verb !== null ? `${label.verb} ` : null}
-      <span className={label.mono ? "font-mono" : undefined}>{label.text}</span>
+      <span className={label.mono ? "font-mono" : label.verb !== null && !highlighted ? "text-muted-foreground" : undefined}>{label.text}</span>
     </>
   );
 }
@@ -94,7 +94,7 @@ export function LiveActivityContent({
       >
         <Glyph className={cn("block size-4 shrink-0 stroke-[1.8]", !highlighted && "opacity-70")} aria-hidden />
       </span>
-      <span className="min-w-0 flex-1 truncate"><WorkEntryLabelText label={label} /></span>
+      <span className="min-w-0 flex-1 truncate"><WorkEntryLabelText label={label} highlighted={highlighted} /></span>
     </span>
   );
 }

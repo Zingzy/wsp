@@ -179,13 +179,23 @@ export const nothingToSkipLine = (row: string, name: string): string => `nothing
 export const GITHUB_SKIPPED_LINE = "skipped; gh is not signed in there";
 export const NEEDS_GITHUB_LINE = "private; needs GitHub to clone";
 export const WAITS_ON_GITHUB_LINE = "private; waits on the GitHub sign-in to clone";
+/** What a folder's row says where the recipe moved its source or name and the project wsp made from it could not
+ * go first, the reason being the project remove's own. */
+export const folderMoveHeldLine = (why: string): string => `${why}, then retry to move it to the recipe's folder`;
+/** What a folder's row says where the recipe moved its source or name and the folder the project wsp made from it
+ * lives in still stands on that computer, which holds the person's work and is never taken. */
+export const folderMoveStandsLine = (folder: string, computer: string): string =>
+  `${folder} still stands on ${computer}; remove or rename it there, then sync again to move the project to the recipe's folder`;
+/** What a folder's row says where the recipe names a folder this computer does not have. */
+export const recipeFolderGoneLine = (folder: string): string => `there is no folder at ${folder} on this computer; point the recipe at one that exists`;
 
 /** What to do about a row of the setup that did not land, beside what happened: the reason's own fix where the
  * reason is one wsp knows, else its step's. `box` is the computer's name. */
 export function setupRowFix(row: Pick<PlaceProvisionRow, "step" | "note">, box: string): string | undefined {
   if (row.note === NEEDS_GITHUB_LINE) return `Sign GitHub in on ${box}, then retry.`;
-  if (row.step === undefined) return undefined;
-  const fixes: Record<PlaceSetupStep, string> = {
+  // A folder's own line is the add's, and already says what stopped it.
+  if (row.step === undefined || row.step === "folders") return undefined;
+  const fixes: Record<Exclude<PlaceSetupStep, "folders">, string> = {
     floor: `Check that ${box} can reach its package mirrors, then retry.`,
     agents: `Retry, or install it on ${box} yourself and skip it here.`,
     signins: "Retry for a fresh code, or sign in later in Settings.",
@@ -194,7 +204,6 @@ export function setupRowFix(row: Pick<PlaceProvisionRow, "step" | "note">, box: 
     mcp: "Check the server's entry in the agent's settings here, then retry.",
     plugins: `Retry, or add it on ${box} yourself and skip it here.`,
     configs: "Check the file here, then retry.",
-    folders: "Check that the folder is still where it was, then retry.",
     github: "Retry for a fresh sign-in, or sign in later in Settings.",
     context: "Retry; nothing else waits on it.",
   };

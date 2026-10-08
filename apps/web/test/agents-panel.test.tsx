@@ -11,6 +11,7 @@ import { act, cleanup, fireEvent, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AgentsReport, SealedImage, ServerToolsAnswer } from "@wsp/protocol";
 import { AGENTS_LIST_WORDS as W, imageAgentsReport, NOT_ANSWERING_AFTER_MS, refusedLines, saysNotAnswering, type RowsContext, type ServerTools, type ToolsState } from "../src/components/agents/agentsRows.js";
+import { AGENTS_KIND } from "../src/components/agents/kinds/agents.js";
 import { foldServers, rowState } from "../src/components/agents/kinds/servers.js";
 import { AGENTS_REPORT, SERVER_TOOLS } from "./fixtures/agents-report.js";
 import { back, descriptionOf, drawPanel, factOf, factsOf, head, headAct, headActs, headsOf, headTitle, panel, panelOf, rowIds, rowOf, slotOf, stateOf, stepOf, tab, titleOf, openRow } from "./agents-panel-harness.js";
@@ -192,6 +193,39 @@ describe("the tool servers and the skills", () => {
     // A project's server is what a repo names: never asked when the tab shows it, it keeps its config's word.
     expect(stateOf(METRICS)).toEqual(["No sign-in needed", "quiet"]);
     expect(tools.asks.map(a => a[1]).sort()).toEqual(["linear", "notion", "notion", "wsp"]);
+  });
+
+  it("lists the wsp server every launch hands over as one row for each agent, saying every thread gets it, never checked and with no act", () => {
+    const launch = (agent: string): AgentsReport["servers"][number] => ({ agent, name: "wsp", scope: "user", launch: true, transport: { kind: "stdio", line: "wsp mcp" }, envNames: [], auth: "open", enabled: true });
+    const report: AgentsReport = { ...AGENTS_REPORT, servers: [launch("claude"), launch("codex"), ...AGENTS_REPORT.servers.filter(s => s.name !== "wsp")] };
+    for (const where of ["box", "box-task", "fork"] as const) {
+      const tools = fakeTools();
+      drawPanel({ report, ctx: { where, computer: "spoo", tools, ...(where === "fork" ? { editImage: () => {} } : {}) } });
+      tab("Tool servers");
+      expect(stateOf(SERVER.wsp), where).toEqual(["Every thread gets it", "quiet"]);
+      expect(slotOf(SERVER.wsp), where).toEqual([]);
+      expect(tools.asks.filter(a => a[1] === "wsp"), where).toEqual([]);
+      openRow(SERVER.wsp);
+      expect(factsOf(), where).toEqual([
+        ["Command", "wsp mcp"],
+        ["Config location", W.onEveryLaunch],
+        ["", W.onEveryLaunch],
+      ]);
+      expect(headActs(), where).toEqual([]);
+      expect(panel().querySelector("[data-k=act-remove]"), where).toBeNull();
+      cleanup();
+    }
+    drawPanel({ report, ctx: { where: "box", computer: "spoo" } });
+    openRow("codex");
+    expect(factsOf()).toContainEqual(["wsp tools", W.toolsEveryTurn]);
+    expect(headActs()).not.toContain(W.addTools);
+    // OpenCode takes no server on its launch, so its held Add tools says why it is held, not the launch sentence.
+    const onBox: RowsContext = { where: "box", computer: "spoo" };
+    const opencode = AGENTS_KIND.items(report, onBox).find(i => i.row.id === "opencode")!;
+    expect(AGENTS_KIND.detail(opencode, onBox).acts.find(a => a.id === "add-tools")?.hover).toBe(W.addToolsHereOnly);
+    back();
+    openRow("opencode");
+    expect(factsOf()).toContainEqual(["wsp tools", W.notAdded]);
   });
 
   it("reads a server whose token comes from the environment as the environment's key, with no Sign in", () => {

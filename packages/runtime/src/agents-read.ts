@@ -4,7 +4,7 @@
 // reading the agents, skills and servers off it is the host's, since the
 // catalog's readers live there. A read never wakes a machine.
 import { randomBytes } from "node:crypto";
-import { AgentsReport, HERE_PLACE_ID, ptyBareOn, type AgentRow, type AgentSetupSet, type AgentSetupView, THIS_COMPUTER, noSuchAgentsProjectRefusal, sharedAgentsProjectRefusal, ServerToolsAnswer, SignInLine, SkillAdded, SkillHit, SkillPreview, isJoinedComputer, nappingAgentsRefusal, nappingServersRefusal, nappingSignInRefusal, nappingSkillsRefusal, nappingToolsRefusal, noSignInRefusal, noSuchPlaceRefusal, providerAgentsRefusal, type AgentSignInState, type AgentsProject, type AgentsSignInEvent, type AgentsTarget, type DaemonFrame, type PageReach, type ServerAdd, type ServerAsk, type WorkspacePhase, withoutControlChars } from "@wsp/protocol";
+import { AgentsReport, HERE_PLACE_ID, type McpServerSpec as LaunchServer, type PlaceProvisionRow, ptyBareOn, type AgentRow, type AgentSetupSet, type AgentSetupView, THIS_COMPUTER, noSuchAgentsProjectRefusal, sharedAgentsProjectRefusal, ServerToolsAnswer, SignInLine, SkillAdded, SkillHit, SkillPreview, isJoinedComputer, nappingAgentsRefusal, nappingServersRefusal, nappingSignInRefusal, nappingSkillsRefusal, nappingToolsRefusal, noSignInRefusal, noSuchPlaceRefusal, providerAgentsRefusal, type AgentSignInState, type AgentsProject, type AgentsSignInEvent, type AgentsTarget, type DaemonFrame, type PageReach, type ServerAdd, type ServerAsk, type WorkspacePhase, withoutControlChars } from "@wsp/protocol";
 import type { Machine } from "@wsp/engine";
 import type { DaemonChannel } from "./daemon-channel.js";
 import type { McpServerSpec } from "./slate-mcp.js";
@@ -14,6 +14,9 @@ import { NO_PLACE_DOOR, type PlaceDoor } from "./places.js";
  * to where the road runs as root and the home is somebody else's. */
 export type AgentsRead = Omit<AgentsReport, "target" | "readAt" | "stale" | "reach"> & { runAs?: string };
 
+/** The wsp server a turn's launch on a fork hands its agent, which the agents report lists there too. */
+export const GUEST_WSP_MCP: LaunchServer = { command: "wsp", args: ["mcp"] };
+
 /** Where a read runs: this computer; a computer you joined, over its link, with the login and the sign-ins and
  * versions its own report carries; or any other machine. `projects` are the projects whose folders it covers, each
  * folder absolute on that machine: every one a computer holds for a read of it, the one a target names, or a
@@ -22,8 +25,9 @@ export type AgentsRead = Omit<AgentsReport, "target" | "readAt" | "stale" | "rea
  * reads its own servers. */
 export type AgentsOn =
   | { kind: "here"; projects?: readonly AgentsProject[] }
-  /** `relayed`: this host forwards that computer's sign-in callback port from this computer. */
-  | { kind: "box"; name?: string; machine: Pick<Machine, "exec">; login: { HOME?: string; PATH?: string }; signIns?: Record<string, AgentSignInState>; versions?: Record<string, string>; logins?: string; relayed?: boolean; projects?: readonly AgentsProject[]; stores?: Readonly<Record<string, string>> }
+  /** `relayed`: this host forwards that computer's sign-in callback port from this computer. `setupRows`: every row
+   * the computer's last setup came to, which says the agents it installed there. */
+  | { kind: "box"; name?: string; machine: Pick<Machine, "exec">; login: { HOME?: string; PATH?: string }; signIns?: Record<string, AgentSignInState>; versions?: Record<string, string>; setupRows?: readonly PlaceProvisionRow[]; logins?: string; relayed?: boolean; projects?: readonly AgentsProject[]; stores?: Readonly<Record<string, string>> }
   /** `relayed`: this host forwards the workspace's sign-in callback port from this computer. */
   | { kind: "machine"; machine: Pick<Machine, "exec" | "id" | "putBytes" | "uploadUrl">; projects?: readonly AgentsProject[]; relayed?: boolean; stores?: Readonly<Record<string, string>> };
 
@@ -336,6 +340,7 @@ export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): {
         login,
         ...(signIns !== undefined ? { signIns } : {}),
         ...(report?.agentVersions !== undefined ? { versions: report.agentVersions } : {}),
+        ...(row.applied !== undefined ? { setupRows: row.applied.rows } : {}),
         ...(row.logins !== undefined ? { logins: row.logins } : {}),
         ...(login.HOME !== undefined && o.placeStores !== undefined ? { stores: o.placeStores(row.id, login.HOME) } : {}),
         ...(reached(target) ? { relayed: true } : {}),

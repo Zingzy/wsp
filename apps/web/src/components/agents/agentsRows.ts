@@ -72,7 +72,11 @@ export const AGENTS_LIST_WORDS = {
   pasteToken: "Paste the token",
   pasteKey: "Paste the key",
   save: "Save",
-  toolsHereOnly: "a thread there is handed the wsp tools with every turn",
+  toolsEveryTurn: "a thread there is handed the wsp tools with every turn",
+  /** Why Add tools is held off the computer the app runs on, for an agent whose launch takes no server. */
+  addToolsHereOnly: "wsp adds its tools to an agent's config only on the computer the app runs on",
+  everyThread: "Every thread gets it",
+  onEveryLaunch: "handed to every thread there, in no file",
   /** Why an act whose road is a later build stands held. */
   notYet: "not in this wsp yet",
   status: "Status",

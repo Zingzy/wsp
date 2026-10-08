@@ -375,9 +375,20 @@ fn tool_input(input: &str) -> Option<Value> {
     serde_json::from_str::<Value>(input).ok().filter(Value::is_object)
 }
 
+/// `serverToolWords`: what a call to a server's tool does, in words, `Use wsp's run`.
+fn server_tool_words(name: &str) -> Option<String> {
+    let mut parts = name.split("__");
+    let server = parts.next().filter(|p| *p == "mcp").and_then(|_| parts.next()).filter(|s| !s.is_empty())?;
+    let tool: Vec<&str> = parts.collect();
+    (!tool.is_empty()).then(|| format!("Use {server}'s {}", tool.join("__").replace('_', " ")))
+}
+
 /// `toolActivityLine`.
 pub fn tool_activity_line(tool_name: Option<&str>, input: &str) -> String {
     let name = tool_name.unwrap_or("tool");
+    if row_line(name, &Value::Object(Default::default()), Moment::Asked).is_none() {
+        return server_tool_words(name).unwrap_or_else(|| name.to_owned());
+    }
     let Some(fields) = tool_input(input) else { return name.to_owned() };
     row_line(name, &fields, Moment::Asked).flatten().unwrap_or_else(|| name.to_owned())
 }

@@ -243,7 +243,7 @@ import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions, type TurnWaiting } from "./machine-exec.js";
 import { GITHUB_TOKEN_ENV, isNoProvider, isPlaceAbsent, projectStateKey, putFiles, type Copier } from "@wsp/engine";
 import { baseModel, boxFullLine, DISK_FULL_PCT, diskFullLine, stopRefusedLine, threadMessages, threadSeed, workspaceMemMb } from "@wsp/protocol";
-import { holdsRepo, ownerRepoOf, projectForRepo, seedChoiceFrom } from "@wsp/protocol";
+import { folderMoveHeldLine, folderMoveStandsLine, holdsRepo, noRemoteLine, ownerRepoOf, projectForRepo, recipeFolderGoneLine, seedChoiceFrom } from "@wsp/protocol";
 import { taskStopRefusedLine, taskStopUnsupportedLine, type SubagentView, type TaskStop } from "@wsp/protocol";
 import { accessMode, accessRefusal, accessWordRefusal, agentOffLine, configDirLaunchRefusal, configDirRefusal, markedFor, modelIdRefusal, openDefaults, resolveThreadDefaults, setupView, shapeModels, withCustomModels, type AccessChoice, type AgentLaunch, type AgentRow, type AgentSetupSet, type ProjectOverrides, pickRefusal, type ResolvedFolder, type ThreadDefaults } from "@wsp/protocol";
 import { agentSetups, keyOf, realFolderHere, realFolderScript } from "./agent-setup.js";
@@ -561,6 +561,14 @@ function runtimeCore(ctx: RuntimeContext, opts: RuntimeOptions): RuntimeCore {
       ...(reach.wsp !== undefined ? { wsp: reach.wsp } : {}),
     };
   };
+  /** Puts the icon and the hue a recipe moved from `was` to `now` on a project, the rest of its look left as the
+   * person set it. */
+  const folderLook = async (projectId: string, was: RecipeFile["folders"][string], now: RecipeFile["folders"][string]): Promise<void> => {
+    const held = (await ctx.preferences.get()).projectLook[projectId];
+    const icon = was.icon !== now.icon ? now.icon : held?.icon;
+    const hue = was.hue !== now.hue ? now.hue : held?.hue;
+    await ctx.preferences.set({ projectLook: { [projectId]: icon === undefined && hue === undefined ? null : { ...(icon !== undefined ? { icon } : {}), ...(hue !== undefined ? { hue } : {}) } } });
+  };
   // The places joined to this host, over the one code store every code is spent from: the door holds the records
   // and the links, and the two roads into the runtime it needs are the ordinary record and delete roads below.
   if (opts.placeLinks !== undefined) {
@@ -626,16 +634,37 @@ function runtimeCore(ctx: RuntimeContext, opts: RuntimeOptions): RuntimeCore {
             },
           };
         },
-        // The add's own road for a folder seeding a project on that computer, with what the pick keeps.
-        addFolder: async (placeId, key, folder) => {
+        // The add's own road for a folder seeding a project on that computer, with what the pick keeps. A pick that
+        // moved its kept files alone puts the newly kept ones into the folder that stands and moves nothing. One that
+        // moved its source or name keeps the project's id and age, so what the person set under it carries and its
+        // place in the list stays; the old one goes by the remove's own road only once every refusal the add would
+        // read here has passed and its folder there is gone, since that folder holds the person's work.
+        addFolder: async (placeId, key, folder, move) => {
           const source = folder.from.replace(/^~(?=\/|$)/, homedir());
+          if (!existsSync(source)) throw new Error(recipeFolderGoneLine(source));
           const plan = await ctx.projectsDoor.seedPlan(source);
+          if (plan.remote === null) throw new Error(noRemoteLine(source));
           const seed = seedChoiceFrom(plan, folder.keep, []);
-          const project = await ctx.projectsDoor.add({ source, on: placeId, ...(folder.name !== undefined ? { name: folder.name } : {}), seed });
-          if (folder.icon !== undefined || folder.hue !== undefined) {
+          const old = move === undefined ? undefined : projectsHeld.get(move.id);
+          if (move !== undefined && old !== undefined && move.pick.from === folder.from && move.pick.name === folder.name) {
+            const kept = folder.keep.filter(path => !move.pick.keep.includes(path));
+            if (kept.length > 0) await ctx.projectsDoor.seedInto(old.id, plan, kept);
+            await folderLook(old.id, move.pick, folder);
+            return { id: `folders/${key}`, label: old.name, outcome: "installed", project: { id: old.id }, pick: folder, createdAt: old.createdAt };
+          }
+          if (old !== undefined) {
+            if (await ctx.projectsDoor.folderStands(old.id)) throw new Error(folderMoveStandsLine(old.path, placeDoor!.nameOf(placeId)));
+            await ctx.projectsDoor.remove(old.id).catch((e: unknown) => {
+              throw new Error(folderMoveHeldLine((e instanceof Error ? e.message : String(e)).split("\n")[0]!));
+            });
+          }
+          const createdAt = old?.createdAt ?? move?.createdAt;
+          const project = await ctx.projectsDoor.add({ source, on: placeId, ...(folder.name !== undefined ? { name: folder.name } : {}), seed, ...(move !== undefined ? { id: move.id } : {}), ...(createdAt !== undefined ? { createdAt } : {}) });
+          if (move !== undefined) await folderLook(project.id, move.pick, folder);
+          else if (folder.icon !== undefined || folder.hue !== undefined) {
             await ctx.preferences.set({ projectLook: { [project.id]: { ...(folder.icon !== undefined ? { icon: folder.icon } : {}), ...(folder.hue !== undefined ? { hue: folder.hue } : {}) } } });
           }
-          return { id: `folders/${key}`, label: project.name, outcome: "installed", project: { id: project.id }, pick: folder, ...(project.notice !== undefined ? { note: project.notice } : {}) };
+          return { id: `folders/${key}`, label: project.name, outcome: "installed", project: { id: project.id }, pick: folder, createdAt: project.createdAt, ...(project.notice !== undefined ? { note: project.notice } : {}) };
         },
         folderRemote: async folder => (await ctx.remoteHere(folder.from.replace(/^~(?=\/|$)/, homedir()))).remote || undefined,
         // A folder the recipe took out leaves this host's list; its checkout there is the person's and stays.
@@ -648,12 +677,7 @@ function runtimeCore(ctx: RuntimeContext, opts: RuntimeOptions): RuntimeCore {
           await store.delete(PROJECTS, project.id);
           bus.emit({ type: "project.removed", projectId: project.id });
         },
-        folderLook: async (projectId, was, now) => {
-          const held = (await ctx.preferences.get()).projectLook[projectId];
-          const icon = was.icon !== now.icon ? now.icon : held?.icon;
-          const hue = was.hue !== now.hue ? now.hue : held?.hue;
-          await ctx.preferences.set({ projectLook: { [projectId]: icon === undefined && hue === undefined ? null : { ...(icon !== undefined ? { icon } : {}), ...(hue !== undefined ? { hue } : {}) } } });
-        },
+        folderLook,
       },
     });
     // The door's four events ride the one stream every other event rides, so the app follows a computer joining

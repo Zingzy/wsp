@@ -11,6 +11,7 @@
 import { randomUUID } from "node:crypto";
 import {
   INTERRUPT_GRACE_MS,
+  MCP_SERVER_NAME,
   PERMISSION_ALLOW,
   PERMISSION_DENY,
   ASIDE_WALL_MS,
@@ -27,6 +28,7 @@ import {
   keepRun,
   limitKindOfMinutes,
   RESET_CREDIT_STATUSES,
+  SLATE_SERVER_NAME,
   titlePrompt,
 } from "@wsp/protocol";
 import type {
@@ -404,7 +406,9 @@ function itemDeltas(done: boolean, item: Item, sessionId: string): AdapterEvent[
         ? [delta({ kind: "tool_result", text: changeLines(item.changes), toolUseId: item.id, isError: failed() })]
         : [delta({ kind: "tool_use", text: JSON.stringify({ changes: changesOf(item.changes) }), toolName: "file_change", toolUseId: item.id })];
     case "mcpToolCall": {
-      if (!done) return [delta({ kind: "tool_use", text: JSON.stringify(item.arguments ?? {}), toolName: `${str(item.server) ?? "mcp"}.${str(item.tool) ?? "tool"}`, toolUseId: item.id })];
+      // The slate's second server exists only for Codex's tool listing; its tools are wsp's, so they are named as wsp's.
+      const server = str(item.server) === SLATE_SERVER_NAME ? MCP_SERVER_NAME : (str(item.server) ?? "mcp");
+      if (!done) return [delta({ kind: "tool_use", text: JSON.stringify(item.arguments ?? {}), toolName: `mcp__${server}__${str(item.tool) ?? "tool"}`, toolUseId: item.id })];
       // A tool that answers isError fails the call with its words in the result and no error message.
       const said = str(rec(item.error)?.message);
       const content = rec(item.result)?.content;

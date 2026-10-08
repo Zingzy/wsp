@@ -10,8 +10,8 @@ import { posix } from "node:path";
 import { CATALOG_AGENTS, MCP_AGENTS, TOOL_PREFIX, installsOnFirstRun, serverValuesOf, signInRoadOf, versionOf, type AgentEntry, type McpAgent, type McpServer } from "@wsp/catalog";
 import { detectSkills, nodeHost, skillRoots, stdioLine, tilde, type Host } from "@wsp/collect";
 import { landedServersScript, mcpRowId, NO_DIGEST, parseLandedServers, targetLogin } from "@wsp/engine";
-import { MCP_SERVER_NAME, agentVersionWord, compareVersions, controlNameRefusal, hasControlChar, shellQuote, strictVersion, type AgentRow, type AgentSignInState, type AgentsProject, type McpRow } from "@wsp/protocol";
-import { projectOf, vaultSignIn, type AgentsOn, type AgentsRead, type AgentsReader } from "@wsp/runtime";
+import { MCP_SERVER_NAME, agentVersionWord, compareVersions, controlNameRefusal, hasControlChar, shellQuote, strictVersion, takesMcpServers, type AgentRow, type AgentSignInState, type AgentsProject, type McpRow, type PlaceProvisionRow } from "@wsp/protocol";
+import { GUEST_WSP_MCP, harnessCatalog, projectOf, vaultSignIn, type AgentsOn, type AgentsRead, type AgentsReader } from "@wsp/runtime";
 import { ownServerFiles } from "./agents-here.js";
 import { machineHost, type MachineHost } from "./machine-host.js";
 import { resolveServer, serverTools } from "./server-tools.js";
@@ -96,6 +96,9 @@ const authOf = (server: McpServer): McpRow["auth"] =>
  * written to read like a reference. */
 const envNamesOf = (server: McpServer, held: ReadonlySet<string>): string[] => [...new Set([...(server.transport.kind === "stdio" ? Object.keys(server.transport.env) : []), ...server.envRefs.filter(n => held.has(n))])].sort();
 
+const MCP_ORDER = new Map(MCP_AGENTS.map((a, i) => [a.id, i]));
+const byAgent = (a: Pick<McpRow, "agent">, b: Pick<McpRow, "agent">): number => MCP_ORDER.get(a.agent)! - MCP_ORDER.get(b.agent)!;
+
 interface Servers {
   rows: McpRow[];
   wsp: Set<string>;
@@ -143,8 +146,7 @@ async function serversOf(host: Host, projects: readonly AgentsProject[], held: R
       theirs.forEach((f, i) => f !== undefined && push(agent, f.file, read(f, true), projects[i]));
     }),
   );
-  const order = new Map(MCP_AGENTS.map((a, i) => [a.id, i]));
-  return { rows: rows.sort((a, b) => order.get(a.agent)! - order.get(b.agent)! || a.scope.localeCompare(b.scope) || (a.project?.name ?? "").localeCompare(b.project?.name ?? "") || a.name.localeCompare(b.name)), wsp, refused };
+  return { rows: rows.sort((a, b) => byAgent(a, b) || a.scope.localeCompare(b.scope) || (a.project?.name ?? "").localeCompare(b.project?.name ?? "") || a.name.localeCompare(b.name)), wsp, refused };
 }
 
 /** What wsp's recipe job put into the agents' files on a computer you own, off the list it keeps beside the job;
@@ -163,6 +165,20 @@ export function updateOf(row: Pick<AgentRow, "id" | "version">, latest: string |
   return command !== undefined && have !== undefined && to !== undefined && compareVersions(have, to) < 0 ? { to, command } : undefined;
 }
 
+/** The wsp server a turn's launch hands each installed agent whose adapter takes servers on its launch, where no
+ * config of that agent names wsp already: a config's own row stays as it is, since the launch's server replaces it
+ * under the same name. */
+function launchRows(agents: readonly AgentEntry[], configured: ReadonlySet<string>): McpRow[] {
+  const line = [GUEST_WSP_MCP.command, ...GUEST_WSP_MCP.args].join(" ");
+  return agents
+    .filter(a => !configured.has(a.id) && takesMcpServers(harnessCatalog(a.id)))
+    .map(a => ({ agent: a.id, name: MCP_SERVER_NAME, scope: "user", launch: true, transport: { kind: "stdio", line }, envNames: [], auth: "open", enabled: true }));
+}
+
+/** The agents a computer's setup installed there itself, off its rows: one it found already there reads present. */
+const setupInstalled = (rows: readonly PlaceProvisionRow[] | undefined): Set<string> =>
+  new Set((rows ?? []).flatMap(r => (r.outcome === "installed" && r.id.startsWith("agents/") ? [r.id.slice("agents/".length)] : [])));
+
 /** A version read whose command exited non-zero. */
 const UNREAD = Symbol("unread");
 
@@ -170,11 +186,14 @@ const UNREAD = Symbol("unread");
 interface BoxSaid {
   signIns?: Record<string, AgentSignInState>;
   versions?: Record<string, string>;
+  setupRows?: readonly PlaceProvisionRow[];
 }
 
 /** The report off one Host. `box` carries what a computer you joined reported, which stands in for the version
- * and sign-in reads; everywhere else each agent's own version flag and status command answer, run side by side. */
-export async function readAgents(host: Host, o: { user: string; vault: Readonly<Record<string, string>>; projects?: readonly AgentsProject[]; box?: BoxSaid }): Promise<AgentsRead> {
+ * and sign-in reads; everywhere else each agent's own version flag and status command answer, run side by side.
+ * `launched` is a target whose turns are launched with the wsp server: any but this computer, where a session the
+ * person starts outside wsp reads only the config. */
+export async function readAgents(host: Host, o: { user: string; vault: Readonly<Record<string, string>>; projects?: readonly AgentsProject[]; box?: BoxSaid; launched?: boolean }): Promise<AgentsRead> {
   const projects = o.projects ?? [];
   const refused: string[] = [];
   const agents: readonly AgentEntry[] = CATALOG_AGENTS;
@@ -195,6 +214,8 @@ export async function readAgents(host: Host, o: { user: string; vault: Readonly<
   const installs = new Set(onPath.filter((_, i) => firstRun[i]).map(a => a.id));
   const installed = onPath.filter(a => !installs.has(a.id));
   const box = o.box;
+  const ours = setupInstalled(box?.setupRows);
+  const launch = o.launched === true ? launchRows(onPath, servers.wsp) : [];
   const [versions, statuses] = await Promise.all([
     box?.versions !== undefined ? Promise.resolve(installed.map(a => box.versions?.[a.id])) : each(host, installed.map(a => `${shellQuote(a.bin)} --version`)).then(r => r.map(s => (s === undefined ? undefined : s.code !== 0 ? UNREAD : s.output.split("\n")[0]))),
     box !== undefined ? Promise.resolve([]) : each(host, installed.map(a => a.signIn.status?.typed ?? a.signIn.status?.command ?? "false")),
@@ -219,20 +240,21 @@ export async function readAgents(host: Host, o: { user: string; vault: Readonly<
       installed: found,
       ...(version !== undefined ? { version } : {}),
       ...(pinned !== undefined ? { pinned } : {}),
-      road: !found ? "none" : path === undefined ? "shim" : path.startsWith(`${TOOL_PREFIX}/`) ? "wsp" : "own",
+      road: !found ? "none" : ours.has(a.id) ? "wsp" : path === undefined ? "shim" : path.startsWith(`${TOOL_PREFIX}/`) ? "wsp" : "own",
       ...(installs.has(a.id) ? { installsOnFirstRun: true as const } : {}),
       ...(said === UNREAD ? { versionUnread: true as const } : {}),
       ...(path !== undefined ? { path: tilde(host.home, path) } : {}),
       ...(via !== undefined ? { via } : {}),
       signIn: !found ? "none" : signIn,
       signInRoad: signInRoadOf(a.signIn),
-      wspTools: servers.wsp.has(a.id),
+      wspTools: servers.wsp.has(a.id) || launch.some(r => r.agent === a.id),
       ...(found && signInDetail !== undefined ? { signInDetail } : {}),
       ...(found && signInKind !== undefined ? { signInKind } : {}),
       ...(found && signInPlan !== undefined ? { signInPlan } : {}),
     };
   });
-  const serverRows = recipe === undefined ? servers.rows : servers.rows.map(r => (r.scope === "project" ? r : { ...r, inRecipe: recipe.has(mcpRowId(r.agent, r.scope === "home", r.name)) }));
+  const all = [...launch, ...servers.rows].sort(byAgent);
+  const serverRows = recipe === undefined ? all : all.map(r => (r.scope === "project" || r.launch === true ? r : { ...r, inRecipe: recipe.has(mcpRowId(r.agent, r.scope === "home", r.name)) }));
   return {
     home: host.home,
     user: o.user,
@@ -282,8 +304,8 @@ export function agentsReader(o: {
       return readAgents(host, { user: userInfo().username, vault: o.vault(), ...(on.projects !== undefined ? { projects: on.projects } : {}) });
     }
     const { host, user, runAs } = await hostOf(on);
-    const box = on.kind === "box" ? { ...(on.signIns !== undefined ? { signIns: on.signIns } : {}), ...(on.versions !== undefined ? { versions: on.versions } : {}) } : undefined;
-    const read = await readAgents(host, { user, vault: o.vault(), ...(on.projects !== undefined ? { projects: on.projects } : {}), ...(box !== undefined ? { box } : {}) });
+    const box = on.kind === "box" ? { ...(on.signIns !== undefined ? { signIns: on.signIns } : {}), ...(on.versions !== undefined ? { versions: on.versions } : {}), ...(on.setupRows !== undefined ? { setupRows: on.setupRows } : {}) } : undefined;
+    const read = await readAgents(host, { user, vault: o.vault(), launched: true, ...(on.projects !== undefined ? { projects: on.projects } : {}), ...(box !== undefined ? { box } : {}) });
     return { ...read, refused: [...read.refused, ...host.refused], ...(runAs !== undefined ? { runAs } : {}) };
   };
   return {

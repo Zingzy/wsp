@@ -853,6 +853,43 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain("live-activity-focus");
   });
 
+  it("mutes a live server call's title after its words at rest, and lights both in the sweep", () => {
+    const turnId = "turn-live";
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        isWorking
+        activeTurnStartedAt={MESSAGE_CREATED_AT}
+        turns={[buildTurn(turnId, "running", MESSAGE_CREATED_AT, null)]}
+        timelineEntries={[
+          {
+            id: "entry-live",
+            kind: "work",
+            createdAt: MESSAGE_CREATED_AT,
+            entry: {
+              id: "work-live",
+              createdAt: MESSAGE_CREATED_AT,
+              turnId,
+              toolCallId: "call-live",
+              label: "Use wsp's run",
+              toolTitle: "Use wsp's run",
+              detail: "Login test",
+              tone: "tool",
+              itemType: "mcp_tool_call",
+              toolLifecycleStatus: "inProgress",
+              sourceActivityKind: "tool.started",
+            },
+          },
+        ]}
+      />,
+    );
+
+    const at = markup.indexOf("live-activity-focus");
+    const [resting, sweep] = [markup.slice(0, at), markup.slice(at)];
+    expect(resting).toContain(`Use wsp&#x27;s run <span class="text-muted-foreground">Login test</span>`);
+    expect(sweep).toContain(`Use wsp&#x27;s run <span>Login test</span>`);
+  });
+
   const promptEntry = (id: string, turnId: string, outcome: "allowed" | null): TimelineEntry => ({
     id,
     kind: "permission",
