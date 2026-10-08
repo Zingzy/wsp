@@ -10,6 +10,7 @@ import { randomUUID } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   AUTO_MERGE_OFF_LINE,
+  HERE_PLACE_ID,
   GIT_DIFF_CAP_BYTES,
   PR_POLL_IDLE_MS,
   PR_POLL_MS,
@@ -37,8 +38,11 @@ import type { DaemonChannel, DaemonChannelOptions } from "../src/daemon-channel.
 import { localExecStream } from "../src/local-exec.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { fakeClock } from "./fake-clock.js";
-import { copyingFake, createOn, projectOn, stubBackend, testPlatform, tokenGuest, withDaemonRoads, type StubBackend } from "./stub-backend.js";
+import { copyingFake, createOn, projectOn, stubBackend, tempRepo, testPlatform, tokenGuest, withDaemonRoads, type StubBackend } from "./stub-backend.js";
 import { until } from "./until.js";
+import { wiring } from "./place-join.js";
+import { newPlaceKeyPair } from "../src/places.js";
+import { execFileSync } from "node:child_process";
 
 const DAEMON_TOKEN = "cafef00d".repeat(3);
 /** Where this computer's own daemon answers, and where the copy's does: every frame is told apart by the road it came on. */
@@ -589,6 +593,32 @@ describe("the acts on a pull request", () => {
     expect(agent.prompts[2]).toBe(pullRequestSendPrompt(PAGE, [twice], 12));
     await expect(rt!.workspaces.pullRequestSend({ workspaceId: id, items: [{ kind: "review", id: 1 }] })).rejects.toThrow(noSuchItemRefusal({ kind: "review", id: 1 }));
     expect(agent.prompts).toHaveLength(3);
+    agent.end(2);
+  });
+
+  it("answers a send held by its computer's threads at once the moment it is held, with the wait, and the turn starts once a slot frees", async () => {
+    const daemons = fakeDaemons({ here: { "git.status": () => STATUS, "git.prView": () => ({ id: 1, ok: true, ...PAGE }), "git.repoRead": () => ({ id: 1, ok: false, error: "no" }) as DaemonResponse } });
+    const agent = heldAgent();
+    rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: agent.factory }, daemonToken: DAEMON_TOKEN, daemonChannel: daemons.open, local: localOn(), placeLinks: wiring(newPlaceKeyPair()) });
+    const repo = tempRepo();
+    execFileSync("git", ["-C", repo, "remote", "add", "origin", "https://github.com/wsp/pr-lab.git"]);
+    const project = await projectOn(rt, HERE_PLACE_ID, repo, { name: "pr-lab" });
+    const ws = await rt.workspaces.create({ project: project.id, name: "pr-lab" });
+    const first = await rt.sessions.start(ws.id, { prompt: "set .ci-status to 1" });
+    agent.end(0);
+    await first.finished;
+    await rt.workspaces.checkout(ws.id);
+    await until(async () => (await rt!.workspaces.pullRequestView({ workspaceId: ws.id }).then(() => true, () => false)));
+    await rt.places!.set(HERE_PLACE_ID, { threads: 1 });
+    const busy = await rt.workspaces.create({ project: (await projectOn(rt, HERE_PLACE_ID, undefined, { name: "busy" })).id, name: "busy" });
+    await rt.sessions.start(busy.id, { prompt: "busy" });
+    const items = [{ kind: "comment", id: 5841958969 }] as const;
+    const sent = await rt.workspaces.pullRequestSend({ workspaceId: ws.id, items: [...items] });
+    expect(sent).toMatchObject({ outcome: "held", threadId: first.view().threadId, agent: "claude", capped: { placeId: HERE_PLACE_ID, running: 1, atOnce: 1 } });
+    expect(agent.prompts).toHaveLength(2);
+    agent.end(1);
+    await until(() => agent.prompts.length === 3);
+    expect(agent.prompts[2]).toBe(pullRequestSendPrompt(PAGE, items, 12));
     agent.end(2);
   });
 

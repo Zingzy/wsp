@@ -8,6 +8,7 @@ use serde_json::{Number, Value};
 
 use super::named::other_version;
 use super::said::turns;
+use super::turn::CapWait;
 use super::workspace::{self, awake, counted_number, params, read, workspace_of};
 use super::{input, Answer, Refused, Tool};
 use crate::failure::Failure;
@@ -41,6 +42,8 @@ pub struct FixOut {
     base: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     agent: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    capped: Option<CapWait>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -143,6 +146,10 @@ async fn fix(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
         fill(&words.fix_asked, &[("name", &name), ("agent", &agent), ("check", check)])
     } else {
         fill(&words.fix_conflicts, &[("name", &name), ("agent", &agent), ("base", &done.base)])
+    };
+    let said = match &done.capped {
+        Some(capped) if done.outcome == "held" => format!("{said}\n{}", capped.line()),
+        _ => said,
     };
     Ok(Answer::text(said, &done))
 }

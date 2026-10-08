@@ -11,6 +11,14 @@ import type { McpServerSpec } from "./index.js";
  * config on this computer and the launch a turn on a machine gets name one server and not two. */
 export const MCP_SERVER_NAME = "wsp";
 
+/** The wsp tools that start a thread or a machine for the caller, which a cap can refuse: a lead reads that refusal as
+ * its call's answer, and the person reads it on the lead's transcript as an error row rather than a folded call. */
+export const SPAWN_TOOLS: readonly string[] = ["run", "fork"];
+export const spawnsThread = (toolName: string): boolean => {
+  const named = serverTool(toolName);
+  return named !== undefined && named.server === MCP_SERVER_NAME && SPAWN_TOOLS.includes(named.tool);
+};
+
 /** The slate's tools, and the name a launch serves them under again for a harness that keeps a server's tools behind
  * a search until asked: Codex lists tools up front only per server (omit_tools_from, codex-rs/core/src/tools/
  * spec_plan.rs at rust-v0.155.1), and an agent that never searched never found the slate. */

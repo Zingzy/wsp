@@ -137,6 +137,12 @@ export function threadMessages(events: ReadonlyArray<SessionEvent>, threadId: st
         turn(event.at, event.result);
         continue;
       case "session.end":
+        // A turn that never launched has no start of its own, so its end carries what was sent and is a turn of its own.
+        if (event.unstarted === true) {
+          if (event.prompt !== undefined) say("person", event.at, event.prompt);
+          turn(event.at, { status: "failed", error: event.reason ?? NO_RESULT_LINE });
+          continue;
+        }
         // A turn the runtime ended before the harness replied: the read says so where the transcript has no result.
         if (!replied) turn(event.at, { status: "failed", error: event.reason ?? NO_RESULT_LINE });
         continue;

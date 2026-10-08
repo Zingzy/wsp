@@ -5,7 +5,7 @@
 // one computer two ways. One rule per kind of place, so a third kind is one
 // entry in the table below.
 import { agentsLine, fmtCost, fmtDuration, fmtLimit, plural, SPEND_LIMIT_LINE } from "./format.js";
-import type { CloudCap, PlaceCap, PlaceCapSet, PlaceKind, PlaceSettings, PlaceSettingsAsk, PlaceSettingWord, PlaceView, ThreadView, WorkspaceAgents, WorkspaceSize, WorkspaceView } from "./index.js";
+import type { CloudCap, PlaceCap, PlaceCapSet, PlaceKind, PlaceSettings, PlaceSettingsAsk, PlaceSettingWord, PlaceView, ThreadCapWait, ThreadView, WorkspaceAgents, WorkspaceSize, WorkspaceView } from "./index.js";
 import { HERE_PLACE_ID } from "./place-word.js";
 import { isLocalWorkspace, workspaceState } from "./workspace-state.js";
 
@@ -35,12 +35,13 @@ export function workspacePlaceId(view: Pick<WorkspaceView, "kind" | "machineId" 
 }
 
 /** The memory one running thread is given room for by default: an agent process and whatever it runs. A 4 GB box
- * held two threads and lost every turn at three; a 16 GB Mac held six and stopped answering at eight. */
-export const THREAD_MEM_MB = 2560;
+ * held two threads and lost every turn at three; a 16 GB Mac held six and stopped answering at eight, and the owner
+ * keeps it at eight (#1823). */
+export const THREAD_MEM_MB = 2048;
 
-/** Threads at once on a computer of this shape until the person sets a number: one per THREAD_MEM_MB, rounded to
- * the nearest, at least one, and never more than its cores, since two agents on one core wait on each other. */
-export const threadsAtOnce = (s: WorkspaceSize): number => Math.max(1, Math.min(Math.floor(s.cpu), Math.round(s.memMb / THREAD_MEM_MB)));
+/** Threads at once on a computer of this shape until the person sets a number: one per THREAD_MEM_MB, rounded,
+ * at least one, and never more than twice its cores. */
+export const threadsAtOnce = (s: WorkspaceSize): number => Math.max(1, Math.min(2 * Math.floor(s.cpu), Math.round(s.memMb / THREAD_MEM_MB)));
 
 export const CLOUD_CAP_DEFAULT: CloudCap = { machines: 3, spendPerDayUsd: 10 };
 
@@ -294,6 +295,31 @@ export function placeFullLine(place: Pick<PlaceView, "kind" | "name" | "cap" | "
   if (room !== undefined && room.running >= room.atOnce) return `full: ${room.running} of ${plural(room.atOnce, room.noun)} running`;
   return place.forks?.room === 0 ? `no room on ${place.name}` : undefined;
 }
+
+/** What holds a turn back while its computer's threads at once is met: the computer and what runs there against its
+ * cap. Threads and never machines, since a thread on a box or on this computer makes none. */
+export const capRunningLine = (w: ThreadCapWait): string => `${w.place} is running ${w.running} of ${plural(w.atOnce, "thread")}`;
+
+/** The line a held turn says where nothing beside it says it waits: the chat's working row and the command line. */
+export const capWaitLine = (w: ThreadCapWait): string => `waiting while ${capRunningLine(w)}`;
+
+/** Why a held turn ended with nothing started: the person or its lead stopped it while it waited, or before it had
+ * looked at its computer's threads at once and had no count to say. */
+export const capStoppedLine = (w: ThreadCapWait | undefined): string =>
+  w === undefined ? "stopped before it started" : `stopped before it started, while ${w.place} was running ${w.running} of ${plural(w.atOnce, "thread")}`;
+
+/** Why a start ended with nothing started: its workspace was deleted while the start was on its way, held or not. */
+export const deletedBeforeStartLine = (name: string): string => `${name} was deleted before this turn started`;
+
+/** Why a held turn ended with nothing started: the host restarted while it waited, and a held start lives in the
+ * host's memory alone. */
+export const capRestartedLine = (place: string): string => `the host restarted while this turn waited for a slot on ${place}; nothing started, so send it again`;
+
+/** The act that ends the wait without one of those threads ending, as the app's button and a tile's card name it. */
+export const CAP_RAISE_ACT = "Raise threads at once";
+
+/** The act that wakes a napping machine, as the chat's working row names it beside the line that it naps. */
+export const WAKE_ACT = "Wake";
 
 /** The spend a day stops new work on this place at: nothing on a kind with no spend limit or a row with no cap. */
 export function placeSpendLimit(place: Pick<PlaceView, "kind" | "cap">): number | undefined {

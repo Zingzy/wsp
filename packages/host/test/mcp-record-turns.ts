@@ -53,6 +53,7 @@ import {
   spawnFolderRefusal,
   SPAWN_FOLDER_FIX,
   threadLeftLine,
+  capWaitLine,
 } from "@wsp/protocol";
 import { BASE_GROUP, FLOOR_LINE, GROUP_LABEL, tableLines, totalsLine, type TableRow } from "../src/init-table.js";
 import { GUTTER } from "../src/init-layout.js";
@@ -291,6 +292,7 @@ export async function turnWords(): Promise<Record<string, unknown>> {
     moved: threadMovedLine("{from}", "{to}", false),
     movedFresh: threadMovedLine("{from}", "{to}", true),
     openedThread: openedThreadLine("{thread}", undefined),
+    capWait: capWaitLine({ placeId: "p", place: "{place}", running: "{running}" as unknown as number, atOnce: 2 }).replace("2 threads", "{threads}"),
     noResult: threadResult([{ type: "session.end", workspaceId: "w", sessionId: "s", threadId: "t", exitCode: null, sawResult: false }], "t")?.error,
     noThreadStamped: unstamped,
     turnFailed: turnFailure({ result: { status: "{status}" } } as unknown as Turn),
@@ -375,6 +377,7 @@ const HARNESSES = ok({ harnesses: [CLAUDE, CODEX] });
 
 const scope = { workspaceId: "ws-1", sessionId: "sess-9", threadId: STARTED };
 const START = ok({ session: sessionRow({ id: "sess-9", threadId: STARTED, status: "running", startedBy: "agent" }), outcome: "started", turnId: "turn-9" });
+const HELD = ok({ session: sessionRow({ id: "turn-9", threadId: STARTED, status: "running", startedBy: "agent", capped: { placeId: "p-hetzner", place: "hetzner", running: 2, atOnce: 2 } }), outcome: "held", turnId: "turn-9" });
 const done = (result: Record<string, unknown>, turnId = "turn-9"): string => frame({ type: "session.done", ...scope, turnId, result });
 const REPLY = { status: "completed", durationMs: 83_456, waitedMs: 2_000, costUsd: 0.1 + 0.2, text: "Fixed \"it\" \u0085 é\n\nlast   line of the reply  \n" };
 const TURN = [
@@ -534,9 +537,12 @@ export const TURN_ANSWERED: Record<string, TurnCase[]> = {
     { case: "beside the thread with a branch", arguments: { message: "look", branch: "feat/y" }, env: { [TURN_TOKEN_ENV]: "turn-token-1" }, replies: { "harnesses.list": HARNESSES, "sessions.start": startIn("/Users/me/.wsp/worktrees/p-1/feat-y") }, pushed: { "sessions.start": [done({ status: "completed", text: "ok" })] } },
     { case: "no thread stamped", arguments: { project: "attic-work", message: "t", detach: true }, replies: { ...PROJECTS, "workspaces.resolve": resolved(), "harnesses.list": HARNESSES, "workspaces.wake": resolved(), "sessions.start": ok({ session: sessionRow({ id: "sess-9", status: "running" }), outcome: "started", turnId: "turn-9" }) } },
     { case: "another version", arguments: { project: "attic-work", message: "t", detach: true }, replies: { ...PROJECTS, "workspaces.resolve": resolved(), "harnesses.list": HARNESSES, "workspaces.wake": resolved(), "sessions.start": ok({ outcome: "started" }) } },
+    { case: "held by its computer's threads at once", arguments: { project: "wsp", message: "t", detach: true }, replies: { ...PROJECTS, "projects.resolve": ok({ project: HERE_PROJECT }), "harnesses.list": HARNESSES, "sessions.start": HELD } },
   ],
   send: [
     { case: "followed to its reply", arguments: { thread: "thread-7f", message: "and the tests", effort: "low" }, replies: { "sessions.list": listed(), "harnesses.list": HARNESSES, "workspaces.resolve": resolved(), "workspaces.wake": resolved(), "sessions.start": START }, pushed: { "sessions.start": TURN } },
+    { case: "held, detached", arguments: { thread: THREAD, message: "also this", detach: true }, replies: { "sessions.list": listed(), "harnesses.list": HARNESSES, "workspaces.resolve": resolved(), "workspaces.wake": resolved(), "sessions.start": HELD } },
+    { case: "held, then followed to its reply", arguments: { thread: THREAD, message: "and the tests" }, replies: { "sessions.list": listed(), "harnesses.list": HARNESSES, "workspaces.resolve": resolved(), "workspaces.wake": resolved(), "sessions.start": HELD }, pushed: { "sessions.start": TURN } },
     { case: "steered, detached", arguments: { thread: THREAD, message: "also this", detach: true }, replies: { "sessions.list": listed(), "harnesses.list": HARNESSES, "workspaces.resolve": resolved(), "workspaces.wake": resolved(), "sessions.start": ok({ session: sessionRow({ id: "sess-2", threadId: THREAD, status: "running" }), outcome: "steered", turnId: "turn-2" }) } },
     { case: "an empty message", arguments: { thread: THREAD, message: "" }, replies: { "sessions.list": listed() } },
     { case: "a model off the list", arguments: { thread: OTHER, message: "m", model: "o3" }, replies: { "sessions.list": listed(), "harnesses.list": HARNESSES } },

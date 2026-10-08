@@ -462,6 +462,14 @@ const RuntimeOp = z.discriminatedUnion("op", [
     startedBy: SessionOrigin.optional(),
     /** Minted by the client per send and echoed on the turn's session.start, so the client knows which start is its own. */
     requestId: z.string().optional(),
+    /** Answer the moment the computer's threads at once holds the turn back, with outcome held, rather than once it
+     * starts: the turn starts on its own when a slot frees, as its events say. The app leaves it out, so a send that
+     * a host restart drops while it waits hands its words back. */
+    answerHeld: z.boolean().optional(),
+    /** The caller follows this turn to its end: a thread whose running turn asks for it lends the turn its own slot,
+     * since it waits on the turn rather than working. A start without answerHeld is followed whatever this says, as
+     * its answer waits for the launch. */
+    followed: z.boolean().optional(),
     /** Minted by the client once for a send that opens the same message on several models, one copy each, and stamped
      * on each thread's row as SessionView.attempt. */
     attempt: z.string().optional(),
@@ -1205,10 +1213,12 @@ export type SessionRewindResult = z.infer<typeof SessionRewindResult>;
 
 /** started: a turn of its own began. steered: the thread's turn was running and took the message mid-way, so
  * session is that turn and a session.steer event carries the message. queued: the thread's turn was running and could
- * not take a message, so this start waited for it to end and then began. The reply comes back once the turn began.
+ * not take a message, so this start waited for it to end and then began. The reply comes back once the turn began,
+ * but for held: a start that asked with answerHeld, answered as its computer's threads at once holds it back, its
+ * session carrying capped; the turn starts when a slot frees.
  * turnId is the turn's, as its events carry it: a follower keys on it, since the thread's earlier turns share the
  * session row. */
-export const SessionStartOutcome = z.enum(["started", "steered", "queued"]);
+export const SessionStartOutcome = z.enum(["started", "steered", "queued", "held"]);
 export type SessionStartOutcome = z.infer<typeof SessionStartOutcome>;
 export const SessionStartResult = z.object({ session: SessionView, outcome: SessionStartOutcome, turnId: z.string() });
 export type SessionStartResult = z.infer<typeof SessionStartResult>;

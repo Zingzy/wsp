@@ -16,7 +16,8 @@ import { answerPrompt } from "./answerPrompt.js";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ArrowDownIcon } from "lucide-react";
 import type { LegendListRef } from "@legendapp/list/react";
-import { threadKeyOf, USAGE_WORDS, folderOnJoined, workspaceKind, workspaceWord } from "@wsp/protocol";
+import { CAP_RAISE_ACT, threadKeyOf, USAGE_WORDS, WAKE_ACT, capWaitLine, folderOnJoined, workspaceKind, workspaceWord } from "@wsp/protocol";
+import { openComputerSettings } from "../../settings/openAt";
 import { Button } from "../ui/button";
 import { useCapabilities, useHarnessCatalog, usePlaces, useSidebarProjects, useStatus, useStore, useThreadSessions, useWorkspace, useWorkspaceState } from "../../protocol/store";
 import { TreeRows } from "../../tree/TreeRows.js";
@@ -79,7 +80,12 @@ export function ChatView({
   const api = useStore(s => s.api);
   const listRef = useRef<LegendListRef | null>(null);
   const { view } = thread;
-  const empty = view.entries.length === 0 && !view.running;
+  const turnRows = useThreadSessions(workspaceId, thread.threadKey);
+  // A turn its computer's threads at once holds back has no start in the transcript yet, and still reads as working:
+  // the timeline's working row says what holds it, with the setting that lets it start.
+  const capped = turnRows.at(-1)?.capped;
+  const working = view.running || capped !== undefined;
+  const empty = view.entries.length === 0 && !working;
   // A workspace an agent forked out of a thread stands before its thread's row is listed. The fork opens that thread
   // inside the parent's own turn, so it is on its way while that turn runs; after it, nothing is coming. The host
   // stamps the fork's createdAt and each row's startedAt off one clock, so a later turn of the parent never counts.
@@ -122,14 +128,15 @@ export function ChatView({
   const where = useComputerName(workspaceId);
   const runs = useMemo(() => ({ name: workspace?.name ?? workspaceId, where }), [workspace, workspaceId, where]);
   const machineWait = useMemo<MachineWait | null>(() => {
-    if (state === null || !view.running) return null;
+    if (state === null || !working) return null;
     const wait = turnWait(state, runs);
-    if (wait === null) return null;
-    return { label: wait.label, elapsed: wait.elapsed, onWake: wait.wake ? () => void wake(workspaceId) : null };
-  }, [state, view.running, wake, workspaceId, runs]);
+    if (wait !== null) return { label: wait.label, elapsed: wait.elapsed, act: wait.wake ? { label: WAKE_ACT, run: () => void wake(workspaceId) } : null };
+    if (capped === undefined) return null;
+    return { label: capWaitLine(capped), elapsed: true, act: { label: CAP_RAISE_ACT, run: () => openComputerSettings(capped.placeId) } };
+  }, [state, working, wake, workspaceId, runs, capped]);
   // Nothing is running and the workspace is paused, which is no fault: a machine naps when its work is done. One quiet
   // word under the transcript in the timeline's own rule grammar, with the wake beside it, never a dialog.
-  const paused = state === "paused" && !view.running ? workspaceWord(state, capabilities?.pauseMode) : null;
+  const paused = state === "paused" && !working ? workspaceWord(state, capabilities?.pauseMode) : null;
   const { startNewThread, hydrated, threadKey } = thread;
   // A reply's shell blocks run in the thread the view holds, in its folder: the one its start named, else the
   // workspace's thread folder, as a file named in the transcript opens. Neither known, or no thread yet, offers no Run.
@@ -137,7 +144,6 @@ export function ChatView({
     const folder = cwd ?? threadFolderOf(workspaceId);
     return thread.thread === undefined || folder === null ? null : { workspaceId, threadId: thread.thread, cwd: folder, runs: view.runs };
   }, [cwd, thread.thread, view.runs, workspaceId]);
-  const turnRows = useThreadSessions(workspaceId, threadKey);
   useReadStamp(turnRows);
   // The agent this thread ran on, which a rewind names; a thread with no turn has none.
   const agent = turnRows.at(-1)?.harness ?? view.agent;
@@ -274,7 +280,7 @@ export function ChatView({
           key: thread.drawKey,
           node: (
             <MessagesTimeline
-              isWorking={view.running}
+              isWorking={working}
               machineWait={machineWait}
               activeTurnStartedAt={view.activeTurnStartedAt}
               waitingOn={turnRows.at(-1)?.waitingOn ?? null}

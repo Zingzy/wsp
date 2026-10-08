@@ -1049,6 +1049,10 @@ export const useStore = create<State>((set, get) => {
             costs: { ...s.costs, [e.workspaceId]: { rateUsdPerHour: e.rateUsdPerHour, accruedUsd: e.accruedUsd, at: e.at } },
           }));
           return;
+        case "session.capped":
+          // The row says what holds its turn back, and the event that says so is the moment that changed.
+          void get().reloadSessions(e.workspaceId);
+          return;
         case "session.held":
           // A thread is spoken for before its harness is up, from this window or any other client: its row is read
           // now, and the send it answers, by its request id, has its own tile go once the row is in.

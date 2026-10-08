@@ -4,6 +4,7 @@
 // messages that ask the agent to fix a failed check or a conflict.
 import { z } from "zod";
 import { fenceFor, oneLine } from "./quote.js";
+import { ThreadCapWait } from "./views/session.js";
 
 /** Where a pull request stands, in the three words every host of them has. */
 export const PullRequestState = z.enum(["open", "merged", "closed"]);
@@ -299,11 +300,11 @@ export function pullRequestSendPrompt(
   return [sentLeadLine(number), "", ...quoted, "Make the changes that hold up, then commit and push."].join("\n");
 }
 
-/** What a fix answers: the message joined the turn running, waits as the thread's next turn, started a turn, or was
- * not sent since an update from the base left nothing to fix. */
-export const FixOutcome = z.enum(["steered", "queued", "started", "updated"]);
+/** What a fix answers: the message joined the turn running, waits as the thread's next turn, started a turn, waits for
+ * a slot on its computer (with the wait), or was not sent since an update from the base left nothing to fix. */
+export const FixOutcome = z.enum(["steered", "queued", "started", "held", "updated"]);
 export type FixOutcome = z.infer<typeof FixOutcome>;
-const FixSent = z.object({ outcome: FixOutcome.exclude(["updated"]), threadId: z.string(), check: z.string().optional(), child: z.string().optional(), base: z.string(), agent: z.string() });
+const FixSent = z.object({ outcome: FixOutcome.exclude(["updated"]), threadId: z.string(), check: z.string().optional(), child: z.string().optional(), base: z.string(), agent: z.string(), capped: ThreadCapWait.optional() });
 export const FixResult = z.discriminatedUnion("outcome", [FixSent, z.object({ outcome: z.literal("updated"), base: z.string() })]);
 export type FixResult = z.infer<typeof FixResult>;
 /** Every field either answer carries, for a tool's output schema, which is one object. */
@@ -542,12 +543,14 @@ export const PullRequestPage = GitPrViewReply.extend({
 });
 export type PullRequestPage = z.infer<typeof PullRequestPage>;
 
-/** What a send answers: the message joined the turn running, waits as the thread's next turn, or started one; the
- * thread and its agent; and every item the workspace has sent, these included. */
+/** What a send answers: the message joined the turn running, waits as the thread's next turn, started one, or waits for
+ * a slot on its computer (with the wait); the thread and its agent; and every item the workspace has sent, these
+ * included. */
 export const PullRequestSendResult = z.object({
-  outcome: z.enum(["steered", "queued", "started"]),
+  outcome: z.enum(["steered", "queued", "started", "held"]),
   threadId: text,
   agent: text,
+  capped: ThreadCapWait.optional(),
   sent: z.array(PullRequestSent),
 });
 export type PullRequestSendResult = z.infer<typeof PullRequestSendResult>;

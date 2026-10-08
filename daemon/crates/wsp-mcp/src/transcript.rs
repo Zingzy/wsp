@@ -76,6 +76,8 @@ struct Event {
     to: Option<String>,
     #[serde(default)]
     fresh: Option<bool>,
+    #[serde(default)]
+    unstarted: Option<bool>,
 }
 
 const NO_RESULT_LINE: &str = "turn ended without a result";
@@ -215,6 +217,12 @@ pub fn messages(events: &[Box<RawValue>], thread_id: &str) -> Vec<Message> {
                 replied = true;
                 let result = event.result.clone().unwrap_or_default();
                 turn(&mut rows, &mut open, &mut calls, &mut saw_text, at, &result);
+            }
+            "session.end" if event.unstarted == Some(true) => {
+                if let Some(prompt) = event.prompt {
+                    say(&mut rows, &mut open, "person", at, prompt);
+                }
+                turn(&mut rows, &mut open, &mut calls, &mut saw_text, at, &failed(event.reason.as_ref()));
             }
             "session.end" if !replied => {
                 turn(&mut rows, &mut open, &mut calls, &mut saw_text, at, &failed(event.reason.as_ref()));
@@ -437,6 +445,21 @@ mod tests {
         ]);
         let rows: Vec<(String, String)> = messages(&e, "t").into_iter().map(|m| (m.who, m.text)).collect();
         let want = [("person", "go"), ("agent", "Looking"), ("tool", "read /a"), ("turn", "completed  Worked for 1.3s  $0.13")];
+        assert_eq!(rows, want.map(|(a, b)| (a.to_owned(), b.to_owned())));
+    }
+
+    #[test]
+    fn a_turn_that_never_started_reads_as_its_own_turn_after_one_that_replied() {
+        let e = events(&[
+            r#"{"type":"session.start","threadId":"t","turnId":"1","prompt":"first"}"#,
+            r#"{"type":"session.done","threadId":"t","turnId":"1","result":{"status":"completed","text":"ok"}}"#,
+            r#"{"type":"session.end","threadId":"t","turnId":"1","exitCode":0,"sawResult":true}"#,
+            r#"{"type":"session.capped","threadId":"t","turnId":"2"}"#,
+            r#"{"type":"session.end","threadId":"t","turnId":"2","exitCode":null,"sawResult":false,"reason":"the host restarted","unstarted":true,"prompt":"second"}"#,
+        ]);
+        let rows: Vec<(String, String)> = messages(&e, "t").into_iter().map(|m| (m.who, m.text)).collect();
+        let want =
+            [("person", "first"), ("agent", "ok"), ("turn", "completed"), ("person", "second"), ("turn", "failed: the host restarted")];
         assert_eq!(rows, want.map(|(a, b)| (a.to_owned(), b.to_owned())));
     }
 

@@ -51,8 +51,10 @@
           "prompt": "fix it",
           "model": "claude-opus-5-5",
           "effort": "max",
+          "followed": true,
           "startedBy": "agent",
-          "requestId": "<request id>"
+          "requestId": "<request id>",
+          "answerHeld": true
         }
       ]
     },
@@ -110,7 +112,8 @@
             "thread-7f3a9c21e4b5"
           ],
           "startedBy": "agent",
-          "requestId": "<request id>"
+          "requestId": "<request id>",
+          "answerHeld": true
         }
       ]
     },
@@ -159,8 +162,10 @@
           "op": "sessions.start",
           "workspaceId": "ws-1",
           "prompt": "fix it",
+          "followed": true,
           "startedBy": "agent",
-          "requestId": "<request id>"
+          "requestId": "<request id>",
+          "answerHeld": true
         },
         {
           "op": "sessions.list",
@@ -217,8 +222,10 @@
           "op": "sessions.start",
           "workspaceId": "ws-1",
           "prompt": "fix it",
+          "followed": true,
           "startedBy": "agent",
-          "requestId": "<request id>"
+          "requestId": "<request id>",
+          "answerHeld": true
         },
         {
           "op": "sessions.list",
@@ -272,8 +279,10 @@
           "op": "sessions.start",
           "workspaceId": "ws-1",
           "prompt": "fix it",
+          "followed": true,
           "startedBy": "agent",
-          "requestId": "<request id>"
+          "requestId": "<request id>",
+          "answerHeld": true
         }
       ]
     },
@@ -317,8 +326,10 @@
           "op": "sessions.start",
           "workspaceId": "ws-1",
           "prompt": "fix it",
+          "followed": true,
           "startedBy": "agent",
-          "requestId": "<request id>"
+          "requestId": "<request id>",
+          "answerHeld": true
         },
         {
           "op": "sessions.history",
@@ -554,8 +565,10 @@
           "workspaceId": "ws-1",
           "prompt": "t",
           "access": "auto-edit",
+          "followed": true,
           "startedBy": "agent",
-          "requestId": "<request id>"
+          "requestId": "<request id>",
+          "answerHeld": true
         }
       ]
     },
@@ -796,7 +809,8 @@
           "project": "p-1",
           "prompt": "fix it",
           "startedBy": "agent",
-          "requestId": "<request id>"
+          "requestId": "<request id>",
+          "answerHeld": true
         }
       ]
     },
@@ -841,8 +855,10 @@
           "branch": "feat/x \u0085",
           "prompt": "fix it",
           "harness": "codex",
+          "followed": true,
           "startedBy": "agent",
-          "requestId": "<request id>"
+          "requestId": "<request id>",
+          "answerHeld": true
         }
       ]
     },
@@ -879,7 +895,8 @@
           "prompt": "t",
           "cwd": "/Users/me/wsp/src",
           "startedBy": "agent",
-          "requestId": "<request id>"
+          "requestId": "<request id>",
+          "answerHeld": true
         }
       ]
     },
@@ -1047,7 +1064,8 @@
           "prompt": "fix the login page now please",
           "workspaceId": "ws-5",
           "startedBy": "agent",
-          "requestId": "<request id>"
+          "requestId": "<request id>",
+          "answerHeld": true
         }
       ]
     },
@@ -1200,7 +1218,8 @@
           "workspaceId": "ws-1",
           "prompt": "t",
           "startedBy": "agent",
-          "requestId": "<request id>"
+          "requestId": "<request id>",
+          "answerHeld": true
         }
       ]
     },
@@ -1247,7 +1266,8 @@
           "workspaceId": "ws-1",
           "prompt": "t",
           "startedBy": "agent",
-          "requestId": "<request id>"
+          "requestId": "<request id>",
+          "answerHeld": true
         }
       ]
     },
@@ -1282,7 +1302,8 @@
           "project": "p-1",
           "prompt": "t",
           "startedBy": "agent",
-          "requestId": "<request id>"
+          "requestId": "<request id>",
+          "answerHeld": true
         }
       ]
     },
@@ -1309,7 +1330,8 @@
           "prompt": "look",
           "turnToken": "turn-token-1",
           "startedBy": "agent",
-          "requestId": "<request id>"
+          "requestId": "<request id>",
+          "answerHeld": true
         }
       ]
     },
@@ -1341,8 +1363,10 @@
           "branch": "feat/y",
           "prompt": "look",
           "turnToken": "turn-token-1",
+          "followed": true,
           "startedBy": "agent",
-          "requestId": "<request id>"
+          "requestId": "<request id>",
+          "answerHeld": true
         }
       ]
     },
@@ -1386,7 +1410,8 @@
           "workspaceId": "ws-1",
           "prompt": "t",
           "startedBy": "agent",
-          "requestId": "<request id>"
+          "requestId": "<request id>",
+          "answerHeld": true
         }
       ]
     },
@@ -1430,7 +1455,44 @@
           "workspaceId": "ws-1",
           "prompt": "t",
           "startedBy": "agent",
-          "requestId": "<request id>"
+          "requestId": "<request id>",
+          "answerHeld": true
+        }
+      ]
+    },
+    {
+      "case": "held by its computer's threads at once",
+      "arguments": {
+        "project": "wsp",
+        "message": "t",
+        "detach": true
+      },
+      "replies": {
+        "projects.list": "{\"id\":1,\"ok\":true,\"projects\":[{\"id\":\"p-1\",\"name\":\"wsp\",\"computer\":\"here\",\"source\":{\"kind\":\"folder\",\"path\":\"/Users/me/wsp\"},\"path\":\"/Users/me/wsp\",\"git\":{\"top\":\"/Users/me/wsp\"}},{\"id\":\"p-2\",\"name\":\"site\",\"computer\":\"pl-attic\",\"source\":{\"kind\":\"folder\",\"path\":\"/Users/me/wsp\"},\"path\":\"/root/site\",\"git\":{\"top\":\"/Users/me/wsp\"}}]}",
+        "projects.resolve": "{\"id\":1,\"ok\":true,\"project\":{\"id\":\"p-1\",\"name\":\"wsp\",\"computer\":\"here\",\"source\":{\"kind\":\"folder\",\"path\":\"/Users/me/wsp\"},\"path\":\"/Users/me/wsp\",\"git\":{\"top\":\"/Users/me/wsp\"}}}",
+        "harnesses.list": "{\"id\":1,\"ok\":true,\"harnesses\":[{\"harness\":\"claude\",\"label\":\"Claude Code\",\"source\":\"harness\",\"version\":\"2.1.0\",\"models\":[{\"value\":\"claude-sonnet-5\",\"label\":\"Sonnet 5\",\"isDefault\":true},{\"value\":\"claude-opus-5-5\",\"label\":\"Opus 5.5\",\"efforts\":[\"high\",\"max\"]},{\"value\":\"claude-haiku\",\"label\":\"Haiku\",\"efforts\":[]}],\"legacyModels\":[{\"value\":\"claude-3\",\"label\":\"Claude 3\"}],\"efforts\":[{\"value\":\"low\",\"label\":\"Low\"},{\"value\":\"high\",\"label\":\"High\",\"isDefault\":true},{\"value\":\"max\",\"label\":\"Max\"}],\"contextWindows\":[],\"permissionModes\":[{\"value\":\"acceptEdits\",\"label\":\"Accept edits\"},{\"value\":\"bypassPermissions\",\"label\":\"Bypass \u0085\",\"isDefault\":true}],\"access\":{\"auto-edit\":\"acceptEdits\",\"full\":\"bypassPermissions\"},\"steers\":true,\"renames\":true,\"images\":true,\"isDefault\":true},{\"harness\":\"codex\",\"label\":\"Codex\",\"source\":\"table\",\"version\":\"2.1.0\",\"models\":[{\"value\":\"gpt-5\",\"label\":\"GPT-5\",\"isDefault\":true}],\"efforts\":[{\"value\":\"low\",\"label\":\"Low\"},{\"value\":\"high\",\"label\":\"High\",\"isDefault\":true},{\"value\":\"max\",\"label\":\"Max\"}],\"contextWindows\":[],\"permissionModes\":[{\"value\":\"acceptEdits\",\"label\":\"Accept edits\"},{\"value\":\"bypassPermissions\",\"label\":\"Bypass \u0085\",\"isDefault\":true}],\"access\":{\"auto-edit\":\"acceptEdits\",\"full\":\"bypassPermissions\"},\"steers\":true,\"renames\":true,\"images\":true,\"isDefault\":false}]}",
+        "sessions.start": "{\"id\":1,\"ok\":true,\"session\":{\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"running\",\"id\":\"turn-9\",\"threadId\":\"thread-9d8c7b6a5f4e\",\"startedBy\":\"agent\",\"capped\":{\"placeId\":\"p-hetzner\",\"place\":\"hetzner\",\"running\":2,\"atOnce\":2}},\"outcome\":\"held\",\"turnId\":\"turn-9\"}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"thread thread-9d8c7b6a5f4e\\nwaiting while hetzner is running 2 of 2 threads\"}],\"structuredContent\":{\"threadId\":\"thread-9d8c7b6a5f4e\",\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"outcome\":\"held\",\"capped\":{\"placeId\":\"p-hetzner\",\"place\":\"hetzner\",\"running\":2,\"atOnce\":2}}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "projects.resolve",
+          "ref": "wsp"
+        },
+        {
+          "op": "projects.resolve",
+          "ref": "p-1"
+        },
+        {
+          "op": "harnesses.list"
+        },
+        {
+          "op": "sessions.start",
+          "project": "p-1",
+          "prompt": "t",
+          "startedBy": "agent",
+          "requestId": "<request id>",
+          "answerHeld": true
         }
       ]
     }

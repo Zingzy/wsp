@@ -5,7 +5,7 @@
 // useDiscoveredLocalServers.ts and contracts (commit 57a66608). Fields the
 // wsp wire cannot fill today are kept when a copied component reads them and
 // dropped when nothing does. Everything here is data: no React, no schemas.
-import type { AttachmentRecord, MachineState, PermissionOption, PermissionOutcome, ReachState, SessionOrigin, SessionStatus, ThreadPlacement, TurnLimit, WorkspacePhase, WorkspaceState, WorkspaceStatus, WorkspaceView, PlanStep, TurnChangedFile, TurnTokens } from "@wsp/protocol";
+import type { AttachmentRecord, MachineState, PermissionOption, PermissionOutcome, ReachState, SessionOrigin, SessionStatus, ThreadCapWait, ThreadPlacement, TurnLimit, WorkspacePhase, WorkspaceState, WorkspaceStatus, WorkspaceView, PlanStep, TurnChangedFile, TurnTokens } from "@wsp/protocol";
 
 // --- chat -------------------------------------------------------------------
 
@@ -384,6 +384,8 @@ export interface SidebarThreadSnapshot {
   /** Why the thread's agent cannot start or read its own store on that computer now, in the host's words; absent while
    * nothing stops it. */
   readonly setupRefusal?: string;
+  /** The computer's threads at once the latest turn waits on before it starts; absent on a turn not held. */
+  readonly capped?: ThreadCapWait;
   /** The usage limit that stopped the latest turn, as the protocol's fold reads it; null on a turn that ended another
    * way. resumeAt is the reset the turn is armed to go on at, null while nobody pressed Resume at reset. */
   readonly limit?: TurnLimit | null;

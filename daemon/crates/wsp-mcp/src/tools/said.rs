@@ -51,6 +51,7 @@ pub struct Turns {
     pub moved: String,
     pub moved_fresh: String,
     pub opened_thread: String,
+    pub cap_wait: String,
     pub no_result: String,
     pub no_thread_stamped: String,
     pub turn_failed: String,

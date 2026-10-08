@@ -48,11 +48,12 @@ export interface ReplyRuns {
   readonly runs: ReadonlyMap<string, SessionRunEvent>;
 }
 
-/** The workspace cannot run the turn right now: what the working row says instead, the wake to offer where one
- * applies, and whether the line counts the seconds beside it, which the wake a send started does. */
+/** The turn cannot run right now, its workspace asleep or its computer running as many threads as it takes: what the
+ * working row says instead, the one act that ends the wait where one applies, and whether the line counts the
+ * seconds beside it. */
 export interface MachineWait {
   readonly label: string;
-  readonly onWake: (() => void) | null;
+  readonly act: { readonly label: string; readonly run: () => void } | null;
   readonly elapsed: boolean;
 }
 

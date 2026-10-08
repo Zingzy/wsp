@@ -516,6 +516,10 @@ export interface PlaceDoor {
    * set there, null being no limit: answered without a read, since every turn's launch asks it. Nothing for a place
    * this door lists no row for. */
   turnLimitAt(placeId: string): number | null | undefined;
+  /** How many threads may run at once on a computer: the number the person set there, else its shape's default.
+   * Nothing for a cloud, whose cap counts machines, and for a computer whose shape this host has not heard yet.
+   * Answered without a read, since every turn's launch asks it. */
+  threadsAt(placeId: string): number | undefined;
   /** The sign-in word per agent on one computer, off the report it last sent and the vault this host holds: the
    * same reading its row carries, so what a turn is handed and what the screen says cannot part ways. Answered
    * without a read of the store, since every launch on that computer asks it. Nothing for a place this host holds
