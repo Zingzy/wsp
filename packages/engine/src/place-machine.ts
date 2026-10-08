@@ -7,10 +7,10 @@
 // sentence rather than sending a frame nothing on the far side would take.
 import { randomBytes } from "node:crypto";
 import { posix } from "node:path";
-import { DaemonExecReply, EXEC_TIMEOUT_MAX_MS, base64Length, cgroupJoinLine, placeProvisionPaths, shellQuote, threadShellFiles, threadShellVars, type Capabilities } from "@wsp/protocol";
+import { DaemonExecReply, EXEC_TIMEOUT_MAX_MS, base64Length, cgroupJoinLine, loginPathRefusal, placeProvisionPaths, shellQuote, threadShellFiles, threadShellVars, type Capabilities } from "@wsp/protocol";
 import { INLINE_EXEC_MS, execDetached, machineAnswer } from "./exec-detached.js";
 import { LINK_MARGIN_MS, type MachineLink } from "./link-backend.js";
-import type { BackendPricing, BytesLanded, ExecResult, Machine, MachineBackend, MachineKind, MachineListRow, MachineState, RunOptions } from "./machine.js";
+import type { BackendPricing, BytesLanded, ExecResult, Framing, Machine, MachineBackend, MachineKind, MachineListRow, MachineState, RunOptions } from "./machine.js";
 import { asLogin, loginShellPath, targetLogin, type TargetLogin } from "./target-line.js";
 
 /** What every call that belongs to a workspace refuses with on the computer itself. */
@@ -44,6 +44,12 @@ function shellStartLine(dir: string): string {
   });
   const vars = Object.entries(threadShellVars(dir)).map(([k, v]) => `${k}=${shellQuote(v)}`);
   return `{ mkdir -p ${shellQuote(dir)} && ${files.join(" && ")}; } 2>/dev/null && export ${vars.join(" ")}; `;
+}
+
+/** What every command on a computer carries in front of it, and what an upload is refused with where the login's
+ * PATH inside that leaves no room for it. */
+function loginFraming(login: TargetLogin, wrap: (cmd: string) => string): Framing {
+  return { wrap, ...(login.path !== undefined ? { noRoom: loginPathRefusal(login.path.length) } : {}) };
 }
 
 /** One computer you own, driven over the link its daemon holds to this host: one exec frame per command, a
@@ -184,8 +190,15 @@ export class PlaceFolderMachine extends PlaceMachine {
     return Promise.resolve();
   }
 
+  /** Every command as the login runs it, its HOME and PATH in front: what an upload pages against the daemon's cap,
+   * since a login's PATH can run to hundreds of characters on every frame. */
+  async framed(): Promise<Framing> {
+    const login = await this.loginOf();
+    return loginFraming(login, cmd => asLogin(login, cmd));
+  }
+
   override async exec(cmd: string, opts?: { timeoutMs?: number; idempotencyKey?: string; stdin?: Uint8Array }): Promise<ExecResult> {
-    return super.exec(asLogin(await this.loginOf(), cmd), opts);
+    return super.exec((await this.framed()).wrap(cmd), opts);
   }
 
   /** This computer as a turn's launch reaches it: each line still runs as the login, from a shell that first stands
@@ -195,13 +208,13 @@ export class PlaceFolderMachine extends PlaceMachine {
   inCgroup(cgroup: string, pathFirst?: string): Machine {
     const join = cgroupJoinLine(cgroup);
     const path = pathFirst === undefined ? "" : `${shellStartLine(pathFirst)}export PATH=${shellQuote(pathFirst)}:"$PATH"; `;
-    const framed = async (): Promise<(cmd: string) => string> => {
+    const framed = async (): Promise<Framing> => {
       const login = await this.loginOf();
-      return cmd => `${join}\n${asLogin(login, `${path}${cmd}`)}`;
+      return loginFraming(login, cmd => `${join}\n${asLogin(login, `${path}${cmd}`)}`);
     };
     const grouped: Machine = Object.create(this);
     grouped.framed = framed;
-    grouped.exec = async (cmd, opts) => PlaceMachine.prototype.exec.call(this, (await framed())(cmd), opts);
+    grouped.exec = async (cmd, opts) => PlaceMachine.prototype.exec.call(this, (await framed()).wrap(cmd), opts);
     return grouped;
   }
 
