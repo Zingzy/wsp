@@ -1,7 +1,9 @@
 // Adapted from pingdotgg/t3code apps/web/src/components/chat/ChatComposer.tsx (ComposerCommandMenuLayer, lines 202 to 296) at 57a66608 (MIT).
-// Differs from upstream: lifted out of the composer container into its own module and exported; the code is unchanged.
+// Differs from upstream: lifted out of the composer container into its own module and exported, and portaled into the
+// tree's portal host rather than body.
 import { createPortal } from "react-dom";
 import { useLayoutEffect, useState, type ReactNode } from "react";
+import { usePortalHost } from "../ui/portal-host";
 
 type ComposerCommandMenuPosition = {
   bottom: number;
@@ -21,6 +23,7 @@ function composerCommandMenuPositionsEqual(
 
 export function ComposerCommandMenuLayer(props: { anchor: HTMLElement | null; children: ReactNode }) {
   const [position, setPosition] = useState<ComposerCommandMenuPosition | null>(null);
+  const host = usePortalHost();
 
   useLayoutEffect(() => {
     const anchor = props.anchor;
@@ -95,6 +98,6 @@ export function ComposerCommandMenuLayer(props: { anchor: HTMLElement | null; ch
     >
       {props.children}
     </div>,
-    document.body,
+    host ?? document.body,
   );
 }

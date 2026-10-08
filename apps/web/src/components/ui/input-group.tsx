@@ -2,6 +2,7 @@
 "use client";
 
 import { cva, type VariantProps } from "class-variance-authority";
+import { Children, isValidElement } from "react";
 import type * as React from "react";
 
 import { cn } from "../../lib/utils";
@@ -9,7 +10,7 @@ import { Input, type InputProps } from "./input";
 import { Textarea, type TextareaProps } from "./textarea";
 
 const inputGroupVariants = cva(
-  "relative inline-flex w-full min-w-0 items-center rounded-[var(--control-radius)] border text-base text-foreground transition-[border-color,box-shadow] duration-150 has-[input:focus-visible,textarea:focus-visible]:has-[input[aria-invalid],textarea[aria-invalid]]:border-destructive/64 has-[textarea]:h-auto has-data-[align=block-end]:h-auto has-data-[align=block-start]:h-auto has-data-[align=block-end]:flex-col has-data-[align=block-start]:flex-col has-[input:focus-visible,textarea:focus-visible]:border-ring has-[input[aria-invalid],textarea[aria-invalid]]:border-destructive/36 has-autofill:bg-foreground/4 has-[input:disabled,textarea:disabled]:opacity-64 has-[input:disabled,textarea:disabled,input:focus-visible,textarea:focus-visible,input[aria-invalid],textarea[aria-invalid]]:shadow-none sm:text-sm dark:has-autofill:bg-foreground/8 has-data-[align=inline-start]:**:[[data-size=sm]_input]:ps-1.5 has-data-[align=inline-end]:**:[[data-size=sm]_input]:pe-1.5 *:[[data-slot=input-control],[data-slot=textarea-control]]:contents *:[[data-slot=input-control],[data-slot=textarea-control]]:before:hidden has-[[data-align=block-start],[data-align=block-end]]:**:[input]:h-auto has-data-[align=inline-start]:**:[input]:ps-2 has-data-[align=inline-end]:**:[input]:pe-2 has-data-[align=block-end]:**:[input]:pt-1.5 has-data-[align=block-start]:**:[input]:pb-1.5 **:[textarea]:min-h-20.5 **:[textarea]:resize-none **:[textarea]:py-[calc(--spacing(3)-1px)] **:[textarea]:max-sm:min-h-23.5 **:[textarea_button]:rounded-[calc(var(--control-radius)-1px)]",
+  "relative inline-flex w-full min-w-0 items-center rounded-[var(--control-radius)] border text-base text-foreground transition-[border-color,box-shadow] duration-150 has-[input:focus-visible,textarea:focus-visible]:has-[input[aria-invalid],textarea[aria-invalid]]:border-destructive/64 has-[textarea]:h-auto data-[addons~=block-end]:h-auto data-[addons~=block-start]:h-auto data-[addons~=block-end]:flex-col data-[addons~=block-start]:flex-col has-[input:focus-visible,textarea:focus-visible]:border-ring has-[input[aria-invalid],textarea[aria-invalid]]:border-destructive/36 has-autofill:bg-foreground/4 has-[input:disabled,textarea:disabled]:opacity-64 has-[input:disabled,textarea:disabled,input:focus-visible,textarea:focus-visible,input[aria-invalid],textarea[aria-invalid]]:shadow-none sm:text-sm dark:has-autofill:bg-foreground/8 data-[addons~=inline-start]:**:[[data-size=sm]_input]:ps-1.5 data-[addons~=inline-end]:**:[[data-size=sm]_input]:pe-1.5 *:[[data-slot=input-control],[data-slot=textarea-control]]:contents *:[[data-slot=input-control],[data-slot=textarea-control]]:before:hidden data-[addons~=block-start]:**:[input]:h-auto data-[addons~=block-end]:**:[input]:h-auto data-[addons~=inline-start]:**:[input]:ps-2 data-[addons~=inline-end]:**:[input]:pe-2 data-[addons~=block-end]:**:[input]:pt-1.5 data-[addons~=block-start]:**:[input]:pb-1.5 **:[textarea]:min-h-20.5 **:[textarea]:resize-none **:[textarea]:py-[calc(--spacing(3)-1px)] **:[textarea]:max-sm:min-h-23.5 **:[textarea_button]:rounded-[calc(var(--control-radius)-1px)]",
   {
     defaultVariants: {
       variant: "default",
@@ -25,23 +26,38 @@ const inputGroupVariants = cva(
   },
 );
 
+/** The aligns of the addons among a group's own children, which the group's classes read off data-addons: a :has()
+ * asking the group restyles every element under it on each change. An addon is a direct child of its group. */
+function addonAligns(children: React.ReactNode): string | undefined {
+  const aligns = new Set(
+    Children.toArray(children).flatMap(child =>
+      isValidElement<{ align?: string | null }>(child) && child.type === InputGroupAddon ? [child.props.align ?? "inline-start"] : [],
+    ),
+  );
+  return aligns.size === 0 ? undefined : [...aligns].join(" ");
+}
+
 function InputGroup({
   className,
   variant,
+  children,
   ...props
 }: React.ComponentProps<"div"> & VariantProps<typeof inputGroupVariants>) {
   return (
     <div
       className={cn(inputGroupVariants({ variant }), className)}
       data-slot="input-group"
+      data-addons={addonAligns(children)}
       role="group"
       {...props}
-    />
+    >
+      {children}
+    </div>
   );
 }
 
 const inputGroupAddonVariants = cva(
-  "[&_svg]:-mx-0.5 flex h-auto cursor-text items-center justify-center gap-2 leading-none [&>kbd]:rounded-[calc(var(--radius)-5px)] in-[[data-slot=input-group]:has([data-slot=input-control],[data-slot=textarea-control])]:[&_svg:not([class*='size-'])]:size-4.5 sm:in-[[data-slot=input-group]:has([data-slot=input-control],[data-slot=textarea-control])]:[&_svg:not([class*='size-'])]:size-4 not-has-[button]:**:[svg:not([class*='opacity-'])]:opacity-80",
+  "[&_svg]:-mx-0.5 flex h-auto cursor-text items-center justify-center gap-2 leading-none [&>kbd]:rounded-[calc(var(--radius)-5px)] in-data-[slot=input-group]:[&_svg:not([class*='size-'])]:size-4.5 sm:in-data-[slot=input-group]:[&_svg:not([class*='size-'])]:size-4 **:[svg:not([class*='opacity-']):not(button_svg)]:opacity-80",
   {
     defaultVariants: {
       align: "inline-start",
@@ -95,7 +111,7 @@ function InputGroupText({ className, ...props }: React.ComponentProps<"span">) {
   return (
     <span
       className={cn(
-        "[&_svg]:-mx-0.5 line-clamp-1 flex items-center gap-2 text-muted-foreground leading-none in-[[data-slot=input-group]:has([data-slot=input-control],[data-slot=textarea-control])]:[&_svg:not([class*='size-'])]:size-4.5 sm:in-[[data-slot=input-group]:has([data-slot=input-control],[data-slot=textarea-control])]:[&_svg:not([class*='size-'])]:size-4 [&_svg]:pointer-events-none",
+        "[&_svg]:-mx-0.5 line-clamp-1 flex items-center gap-2 text-muted-foreground leading-none in-data-[slot=input-group]:[&_svg:not([class*='size-'])]:size-4.5 sm:in-data-[slot=input-group]:[&_svg:not([class*='size-'])]:size-4 [&_svg]:pointer-events-none",
         className,
       )}
       {...props}

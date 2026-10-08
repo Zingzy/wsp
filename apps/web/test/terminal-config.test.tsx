@@ -78,9 +78,15 @@ describe("the viewport with the person's Ghostty config", () => {
     useStore.setState(s => ({ preferences: { ...s.preferences, transparency: true } }));
     await vi.waitFor(() => expect(opacity).toHaveBeenLastCalledWith(0.85));
     await vi.waitFor(() => expect(mount.hasAttribute("data-terminal-translucent")).toBe(true));
+    // Every element above a translucent viewport is marked for the stylesheet to clear, the document's root with them,
+    // and the marks go with the translucency; a :has() asking each element restyled the page on every keystroke.
+    const above = (): boolean[] => { const at: boolean[] = []; for (let n = mount.parentElement; n !== null; n = n.parentElement) at.push(n.hasAttribute("data-terminal-ground")); return at; };
+    expect(above().every(Boolean)).toBe(true);
+    expect(mount.hasAttribute("data-terminal-ground")).toBe(false);
     useStore.setState(s => ({ preferences: { ...s.preferences, transparency: false } }));
     await vi.waitFor(() => expect(opacity).toHaveBeenLastCalledWith(1));
     await vi.waitFor(() => expect(mount.hasAttribute("data-terminal-translucent")).toBe(false));
+    expect(document.querySelectorAll("[data-terminal-ground]")).toHaveLength(0);
   });
 
   it("a file naming a size draws at the app's own text size while the preference says the app's; with the file as the source the pane takes the file's, and the flip reaches the surface without a remount", async () => {

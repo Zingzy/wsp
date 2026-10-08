@@ -111,7 +111,6 @@ import { DAEMON_VERSION, DEFAULT_PREFERENCES, copyFirstLine, hostnameSetLine, ty
 import { AppShell } from "../../src/shell/AppShell";
 import { FirstRun } from "../../src/shell/FirstRun";
 import { AgentsSurface } from "../../src/components/agents/AgentsSurface";
-import { SettingsPage } from "../../src/settings/SettingsPage";
 import { HARNESS_DEFAULTS, HARNESSES } from "../fixtures/harnesses";
 import { AGENTS_PAGE_REPORT, AGENTS_REPORT, AGENTS_SETUP_REPORT, AGENTS_TOOLS_REPORT, HOSTILE_SKILL_MD, SERVER_TOOLS, SKILL_HITS, SKILL_PREVIEWS } from "../fixtures/agents-report";
 import { useSettingsStore, type SettingsAt } from "../../src/settings/settingsStore";
@@ -829,18 +828,14 @@ function CreatingCentre() {
   );
 }
 
-function Centre() {
-  // Settings opened from a screen that is not one of its own, as a door into it does, draws it as the app does.
+/** Settings, opened on its own screen or from a door on another, applies the theme as the app does. */
+function SettingsTheme() {
   const settingsOpen = useStore(s => s.settingsOpen);
+  return settings || settingsOpen ? <ThemeRule /> : null;
+}
+
+function Centre() {
   if (creatingScreen) return <CreatingCentre />;
-  if (settings || settingsOpen) {
-    return (
-      <>
-        <ThemeRule />
-        <SettingsPage />
-      </>
-    );
-  }
   // With no project the first run is the whole centre, as the app draws it, beside the sidebar's one row.
   if (emptyScreen) return <FirstRun />;
   return <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">center content</div>;
@@ -860,10 +855,15 @@ createRoot(document.getElementById("root")!).render(
         <FirstRun />
       </div>
     ) : (
-      <AppShell>
-        {params.get("notices") === "1" ? <HostNotices /> : null}
-        <Centre />
-      </AppShell>
+      <>
+        {/* The shell draws Settings, over the centre it keeps hidden, and the theme rule stands outside that centre as
+            App's does, since a hidden tree runs no effect. */}
+        <SettingsTheme />
+        <AppShell>
+          {params.get("notices") === "1" ? <HostNotices /> : null}
+          <Centre />
+        </AppShell>
+      </>
     )}
   </>,
 );

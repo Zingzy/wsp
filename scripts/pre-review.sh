@@ -49,6 +49,7 @@ LAWS=(
   packages/host/test/file-size-check.test.ts
   apps/web/test/design-literals.test.ts
   apps/web/test/design-pieces.test.ts
+  apps/web/test/has-selectors.test.ts
   packages/protocol/test/law-list.test.ts
 )
 

@@ -13,7 +13,6 @@ import { useAdds } from "../src/settings/adds.js";
 import { useNotices } from "../src/notices/store.js";
 import { useStore } from "../src/protocol/store.js";
 import { useRightPanelStore } from "../src/rightPanelStore.js";
-import { SettingsPage } from "../src/settings/SettingsPage.js";
 import { FIRST_PAGE, NO_READS, useSettingsStore, type SettingsAt } from "../src/settings/settingsStore.js";
 import { AppShell } from "../src/shell/AppShell.js";
 import { forgetHeld } from "../src/protocol/held.js";
@@ -67,7 +66,8 @@ export function resetSettings(): void {
   useStore.setState({ api: null, conn: "live", places: [], pending: [], projects: [], placesRefused: null, projectsRefused: null, landings: {}, workspaces: [], statuses: {}, sessions: {}, addComputerOpen: false, settingsOpen: false, selectedId: null, selectedThreadId: null, ready: true, projectsRead: true, release: null, preferences: { ...DEFAULT_PREFERENCES, labs: false } });
 }
 
-/** Mounts the shell with Settings open on a page, the store already holding what the case named. */
+/** Mounts the shell with Settings open on a page, the store already holding what the case named. The shell draws the
+ * page itself, over the centre it keeps. */
 export function mountSettings({ api, at, children }: { api?: Api; at?: SettingsAt; children?: ReactNode } = {}): RenderResult {
   if (api !== undefined) useStore.setState({ api });
   if (at !== undefined) useSettingsStore.getState().go(at);
@@ -76,7 +76,7 @@ export function mountSettings({ api, at, children }: { api?: Api; at?: SettingsA
     <TooltipProvider>
       {children}
       <AppShell>
-        <SettingsPage />
+        <div />
       </AppShell>
     </TooltipProvider>,
   );
@@ -89,9 +89,7 @@ export function mountImageCard({ api, at }: { api: Api; at: SettingsAt }): Rende
   useSettingsStore.getState().go(at);
   return render(
     <TooltipProvider>
-      <AppShell>
-        <ImageCardHost />
-      </AppShell>
+      <ImageCardHost />
     </TooltipProvider>,
   );
 }

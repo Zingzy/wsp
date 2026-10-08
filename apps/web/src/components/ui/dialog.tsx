@@ -9,6 +9,7 @@ import {
   DIALOG_POPUP_CLASS,
 } from "./dialog-styles";
 import { Kbd } from "./kbd";
+import { usePortalHost } from "./portal-host";
 import { ScrollArea } from "./scroll-area";
 
 const DialogCreateHandle = DialogPrimitive.createHandle;
@@ -58,7 +59,7 @@ function DialogPopup({
   bottomStickOnMobile?: boolean;
 }) {
   return (
-    <DialogPortal>
+    <DialogPortal container={usePortalHost()}>
       <DialogBackdrop />
       <DialogViewport
         className={cn(bottomStickOnMobile && "max-sm:grid-rows-[1fr_auto] max-sm:p-0 max-sm:pt-12")}

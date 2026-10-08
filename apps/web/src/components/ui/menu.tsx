@@ -7,6 +7,7 @@ import type * as React from "react";
 
 import { GROUP_LABEL } from "../../lib/microLabel";
 import { cn } from "../../lib/utils";
+import { usePortalHost } from "./portal-host";
 
 const MenuCreateHandle = MenuPrimitive.createHandle;
 
@@ -46,7 +47,7 @@ function MenuPopup({
     });
 
   return (
-    <MenuPrimitive.Portal>
+    <MenuPrimitive.Portal container={usePortalHost()}>
       <MenuPrimitive.Positioner
         align={align}
         alignOffset={alignOffset}

@@ -18,6 +18,8 @@ vi.mock("../src/files/OpenSplit.js", async importOriginal => ({ ...(await import
 
 import { DEFAULT_PREFERENCES, HOST_ASLEEP_LINE, type WorkspaceView } from "@wsp/protocol";
 import { App } from "../src/App.js";
+import { Dialog, DialogPopup } from "../src/components/ui/dialog.js";
+import { Popover, PopoverPopup, PopoverTrigger } from "../src/components/ui/popover.js";
 import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { sidebarMaxWidthBeside } from "../src/rightPanelLayout.js";
@@ -149,6 +151,39 @@ describe("app shell", () => {
     expect(screen.getByRole("button", { name: "Toggle right panel" })).toBeTruthy();
     expect(document.querySelector("[data-settings-groups]")).toBeNull();
     expect(useRightPanelStore.getState().byWorkspaceId["ws_a"]).toEqual(before);
+  });
+
+  it("puts the thread's and the sidebar's popups and dialogs in a host on body that Settings hides with them, so none stands over its page", async () => {
+    useStore.getState().bind(fakeApi([view("ws_a", "api")]));
+    render(
+      <AppShell>
+        <Popover open>
+          <PopoverTrigger>model</PopoverTrigger>
+          <PopoverPopup>the thread's popup</PopoverPopup>
+        </Popover>
+        <Dialog open modal={false}>
+          <DialogPopup>the thread's dialog</DialogPopup>
+        </Dialog>
+      </AppShell>,
+    );
+    await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_a"));
+    fireEvent.click(document.querySelector<HTMLElement>("[data-k=project-switcher]")!);
+    const hostOf = (el: Element | null): HTMLElement | null => el?.closest<HTMLElement>("body > [data-portal-host]") ?? null;
+    const sidebarHost = await waitFor(() => {
+      const found = hostOf(document.querySelector("[data-project-switcher-menu]"));
+      expect(found).not.toBeNull();
+      return found!;
+    });
+    const centreHost = hostOf(screen.getByText("the thread's popup"));
+    expect(centreHost).not.toBeNull();
+    expect(hostOf(screen.getByText("the thread's dialog"))).toBe(centreHost);
+    const hosts = [sidebarHost, centreHost!];
+    expect(hosts.map(host => host.hidden)).toEqual([false, false]);
+    act(() => useStore.setState({ settingsOpen: true }));
+    expect(hosts.map(host => host.hidden)).toEqual([true, true]);
+    expect(centreHost!.contains(screen.getByText("the thread's popup"))).toBe(true);
+    act(() => useStore.setState({ settingsOpen: false }));
+    await waitFor(() => expect(hosts.map(host => host.hidden)).toEqual([false, false]));
   });
 
   it("resizes the right panel by its handle and persists the width", async () => {

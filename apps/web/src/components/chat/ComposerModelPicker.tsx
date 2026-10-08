@@ -128,6 +128,7 @@ export function ComposerModelPicker({ catalogs, catalog, model, pinned, where, a
   // stands, and so does a computer that is not answering, where no agent was asked at all.
   const foot = notice ?? away ?? shown.refusal ?? (multi !== undefined ? ADD_MODEL_LINE : null);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
   const favourites = useComposerFavouritesStore(s => s.keys);
   const toggle = useComposerFavouritesStore(s => s.toggle);
   const items = useMemo(() => {
@@ -251,6 +252,7 @@ export function ComposerModelPicker({ catalogs, catalog, model, pinned, where, a
       }}
     >
       <PopoverTrigger
+        ref={triggerRef}
         render={<Button type="button" variant="ghost" size="xs" />}
         className="h-8 shrink-0 gap-2 px-2 text-[15px] font-normal text-muted-foreground hover:text-foreground sm:h-8 sm:text-[15px] [&_svg]:mx-0"
         aria-label={agentAndModelLine(catalog, model)}
@@ -264,7 +266,9 @@ export function ComposerModelPicker({ catalogs, catalog, model, pinned, where, a
         <span className="truncate">{agentAndModelLine(catalog, model)}</span>
         <ChevronDownIcon className="size-3.5 shrink-0 opacity-60" />
       </PopoverTrigger>
-      <PopoverPopup align="start" side="top" className="w-[25rem] p-0" viewportClassName="p-0 [--viewport-inline-padding:0]">
+      {/* Named, not left to Base UI's default: open across Settings and back, the default is whatever held focus at the
+          reveal, the right panel's launcher, whose letters then open panels. */}
+      <PopoverPopup align="start" side="top" className="w-[25rem] p-0" viewportClassName="p-0 [--viewport-inline-padding:0]" finalFocus={triggerRef}>
         <div className="flex max-h-[26rem] min-h-0" data-composer-model-menu onKeyDown={onKeyDown}>
           <div className="flex w-12 shrink-0 flex-col gap-1 border-e border-border p-1.5" role="tablist" aria-label="Agents">
             <button

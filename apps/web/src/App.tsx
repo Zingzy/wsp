@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { useEffect, useSyncExternalStore } from "react";
 import { makeApi, ProtocolClient } from "./protocol/client.js";
-import { useCreation, useFirstRun, useProjectsRead, useProjectsRefused, useReady, useSelectedId, useSelectedThreadId, useSettingsOpen, useStore } from "./protocol/store.js";
+import { useCreation, useFirstRun, useProjectsRead, useProjectsRefused, useReady, useSelectedId, useSelectedThreadId, useStore } from "./protocol/store.js";
 import { ComputerTerminalDrawer, WorkspaceTerminalDrawer } from "./components/WorkspaceTerminalDrawer.js";
-import { SettingsPage } from "./settings/SettingsPage.js";
 import { useFontEffect, useThemeEffect, useTransparencyEffect } from "./settings/theme.js";
 import { AppShell } from "./shell/AppShell.js";
 import { MaterialTuner } from "./dev/MaterialTuner.js";
@@ -67,20 +66,18 @@ export function App({ wsUrl, token, onUnauthorized }: AppProps) {
   return <Shell />;
 }
 
-/** The center slot: the settings page while it is open, the first run while this wsp holds no project, else the
+/** The center slot, which the shell hides under Settings: the first run while this wsp holds no project, else the
  * selected workspace's thread with the terminal drawer under it, or the creation in progress. With no workspace on
  * screen the drawer is this computer's own terminal. */
 function WorkspaceCenter() {
   const workspaceId = useSelectedId();
   const threadId = useSelectedThreadId();
   const creation = useCreation(workspaceId);
-  const settingsOpen = useSettingsOpen();
   const firstRun = useFirstRun();
   const projectsRead = useProjectsRead();
   const projectsRefused = useProjectsRefused();
   // With nothing picked the centre is a project's home, the one picked or the first, never a screen that asks to pick.
   const projectHome = useStore(s => s.projectHome ?? s.projects[0]?.id ?? null);
-  if (settingsOpen) return <SettingsPage />;
   if (creation) return <WorkspaceCreation creation={creation} />;
   // Nothing recorded and nothing standing, both answered for: the first run is the whole centre, and it is the one
   // screen that records a project. A host that holds either says the rest, since a workspace with no project record

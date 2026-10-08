@@ -567,7 +567,7 @@ export const GALLERY_SECTIONS: ReadonlyArray<{
               </SidebarGroupAction>
               <SidebarGroupContent>
                 <SidebarMenu>
-                  <SidebarMenuItem>
+                  <SidebarMenuItem data-has-action="">
                     <SidebarMenuButton isActive tooltip="api">
                       <FolderIcon /> api
                     </SidebarMenuButton>

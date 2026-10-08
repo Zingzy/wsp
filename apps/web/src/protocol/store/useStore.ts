@@ -771,6 +771,9 @@ export const useStore = create<State>((set, get) => {
       if (!api?.listHarnesses) return;
       try {
         const harnesses = await api.listHarnesses(workspaceId);
+        // The composer asks at every thread it opens; an answer that reads the same keeps the record, which the
+        // sidebar reads, so its tiles do not all draw again.
+        if (JSON.stringify(get().harnessesByWorkspace[workspaceId]) === JSON.stringify(harnesses)) return;
         set(s => ({ harnessesByWorkspace: { ...s.harnessesByWorkspace, [workspaceId]: harnesses } }));
       } catch {
         // the table's catalogs stand

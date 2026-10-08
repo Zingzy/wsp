@@ -6,6 +6,7 @@ import { ChevronsUpDownIcon, XIcon } from "lucide-react";
 
 import { GROUP_LABEL } from "../../lib/microLabel";
 import { cn } from "../../lib/utils";
+import { usePortalHost } from "./portal-host";
 import { Input } from "./input";
 import { ScrollArea } from "./scroll-area";
 
@@ -42,9 +43,7 @@ function AutocompleteInput({
         className={cn(
           startAddon &&
             "data-[size=sm]:*:data-[slot=autocomplete-input]:ps-[calc(--spacing(7.5)-1px)] *:data-[slot=autocomplete-input]:ps-[calc(--spacing(8.5)-1px)] sm:data-[size=sm]:*:data-[slot=autocomplete-input]:ps-[calc(--spacing(7)-1px)] sm:*:data-[slot=autocomplete-input]:ps-[calc(--spacing(8)-1px)]",
-          sizeValue === "sm"
-            ? "has-[+[data-slot=autocomplete-trigger],+[data-slot=autocomplete-clear]]:*:data-[slot=autocomplete-input]:pe-6.5"
-            : "has-[+[data-slot=autocomplete-trigger],+[data-slot=autocomplete-clear]]:*:data-[slot=autocomplete-input]:pe-7",
+          (showTrigger || showClear) && (sizeValue === "sm" ? "*:data-[slot=autocomplete-input]:pe-6.5" : "*:data-[slot=autocomplete-input]:pe-7"),
           className,
         )}
         data-slot="autocomplete-input"
@@ -94,7 +93,7 @@ function AutocompletePopup({
   anchor?: AutocompletePrimitive.Positioner.Props["anchor"];
 }) {
   return (
-    <AutocompletePrimitive.Portal>
+    <AutocompletePrimitive.Portal container={usePortalHost()}>
       <AutocompletePrimitive.Positioner
         align={align}
         alignOffset={alignOffset}

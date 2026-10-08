@@ -4,7 +4,7 @@
 // agents panel: the mark its catalog module carries, bare, in its own colours
 // or its inks where it has them and otherwise in the colour of whatever it sits
 // in, like the initials it falls back to.
-import { useId, type ComponentProps, type CSSProperties } from "react";
+import { useId, useMemo, type ComponentProps, type CSSProperties } from "react";
 import { agentMark, type AgentMark } from "@wsp/catalog";
 import { cn } from "../../lib/utils";
 
@@ -35,10 +35,16 @@ export function MarkSvg({ mark, className, ...rest }: { mark: Pick<AgentMark, "s
   const inks = mark.inks ?? [];
   if (inks.length > INK_SWITCH.length) throw new Error(`a mark has at most ${INK_SWITCH.length} inks`);
   // Ids are per document: a second copy of a gradient paints from the first, and from nothing once the first is hidden.
-  const inner = body
-    .replace(/<title>[\s\S]*?<\/title>/g, "")
-    .replace(/\bid="([^"]+)"/g, `id="${scope}-$1"`)
-    .replace(/url\(#([^)]+)\)/g, `url(#${scope}-$1)`);
+  // One object per mark, since React 19 writes innerHTML again for every new one.
+  const inner = useMemo(
+    () => ({
+      __html: body
+        .replace(/<title>[\s\S]*?<\/title>/g, "")
+        .replace(/\bid="([^"]+)"/g, `id="${scope}-$1"`)
+        .replace(/url\(#([^)]+)\)/g, `url(#${scope}-$1)`),
+    }),
+    [body, scope],
+  );
   const style = inks.length === 0 ? undefined : (Object.fromEntries(inks.flatMap((ink, at) => [[`--ink-${at}-light`, ink.light], [`--ink-${at}-dark`, ink.dark]])) as CSSProperties);
   return (
     <svg
@@ -48,7 +54,7 @@ export function MarkSvg({ mark, className, ...rest }: { mark: Pick<AgentMark, "s
       className={cn("shrink-0 fill-current", inks.length > 0 && "text-(--ink-0)", inks.map((_, at) => INK_SWITCH[at]), className)}
       style={style}
       aria-hidden
-      dangerouslySetInnerHTML={{ __html: inner }}
+      dangerouslySetInnerHTML={inner}
     />
   );
 }

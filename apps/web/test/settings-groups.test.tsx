@@ -52,7 +52,7 @@ describe("Projects", () => {
     useStore.setState({ projects: [], projectsRefused: { said: "projects.json is not valid JSON", fix: "Restore it from projects.json.bak.", kind: undefined, disconnected: false } });
     await mount({}, "projects");
     expect(rowOf("none")).toBeNull();
-    expect(document.querySelector("[data-k='projects-refused']")?.textContent).toBe("Projects not read: projects.json is not valid JSON Restore it from projects.json.bak.");
+    expect(document.querySelector("[data-settings-page] [data-k='projects-refused']")?.textContent).toBe("Projects not read: projects.json is not valid JSON Restore it from projects.json.bak.");
   });
 
   it("a refused remove is an error notice with the host's fix, and a lost socket says nothing", async () => {
