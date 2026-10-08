@@ -3,18 +3,16 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { App } from "../src/App";
 import { INSTALL } from "../src/links";
+import { QUESTIONS } from "../src/sections/close";
 
 describe("the landing page", () => {
-  it("renders the promise, the install command and the three verbs", () => {
+  it("says what wsp is, then shows the install", () => {
     render(<App />);
-    expect(screen.getByRole("heading", { level: 1 }).textContent).toContain("Give every agent");
-    expect(screen.getAllByText(INSTALL).length).toBeGreaterThanOrEqual(2);
-    for (const verb of ["wsp init", "wsp fork", "wsp thread"]) {
-      expect(screen.getAllByText(verb).length).toBeGreaterThanOrEqual(1);
-    }
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Coding agents on every computer you own.");
+    expect(screen.getAllByRole("button", { name: `Copy ${INSTALL}` }).length).toBeGreaterThanOrEqual(1);
   });
 
-  it("copies the install command to the clipboard and says so", async () => {
+  it("copies the whole install command, not the short one it shows, and says so", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
     render(<App />);
@@ -24,22 +22,21 @@ describe("the landing page", () => {
     await waitFor(() => expect(screen.getAllByRole("button", { name: "Copied" }).length).toBe(1));
   });
 
-  it("describes every question to search engines from the same list the accordion shows", () => {
+  it("describes every question to search engines from the same list the page shows", () => {
     const { container } = render(<App />);
     const script = container.querySelector('script[type="application/ld+json"]');
     const data = JSON.parse(script?.textContent ?? "{}") as { "@type"?: string; mainEntity?: { name: string }[] };
     expect(data["@type"]).toBe("FAQPage");
-    expect(data.mainEntity?.length).toBe(screen.getAllByRole("button", { name: /\?$/ }).length);
-    for (const entry of data.mainEntity ?? []) expect(screen.getByRole("button", { name: entry.name })).toBeTruthy();
+    expect(data.mainEntity?.map(e => e.name)).toEqual(QUESTIONS.map(q => q.q));
+    for (const { q } of QUESTIONS) expect(screen.getByText(q)).toBeTruthy();
   });
 
-  it("prints what the host costs beside the line about keys, as one measured fact", () => {
+  it("switches the Slate example when a tab is pressed", () => {
     render(<App />);
-    const [line] = screen.getAllByText(/never touch your RAM/);
-    // The budget itself has one home, packages/host/test/memory.test.ts, which is what holds the page to the number.
-    expect(line?.textContent).toMatch(/holds more than \d+ MB/);
-    expect(line?.textContent).toContain("wsp up");
-    expect(line?.className).toContain("font-mono");
+    const tab = screen.getByRole("tab", { name: "Deploy setup" });
+    fireEvent.click(tab);
+    expect(tab.getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByText(/never sees/)).toBeTruthy();
   });
 
   it("carries no em-dash anywhere a visitor reads", () => {

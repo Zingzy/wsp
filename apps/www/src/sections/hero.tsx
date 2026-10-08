@@ -1,65 +1,39 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { ArrowUpRight } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { CopyCommand } from "@/components/copy-command";
-import clouds from "@/assets/clouds.webp";
-import { Dither } from "@/components/dither";
-import { Download } from "@/components/download";
-import { DOCS, INSTALL } from "@/links";
-
-const HERO_FADE = [0.2, 0.14] as const;
+import { Install } from "@/components/download";
+import { Field } from "@/components/field";
+import hero from "@/assets/shots/w-hero.webp";
+import wall from "@/assets/wall/wall.webp";
 
 export function Hero() {
   return (
-    <section id="top" className="relative isolate overflow-hidden">
-      <Dither src={clouds} fade={HERO_FADE} hole={0.98} className="absolute top-0 left-0 -z-10" />
-      <div className="hero-out mx-auto flex min-h-svh max-w-7xl flex-col items-center justify-center px-5 pt-48 pb-16 text-center sm:px-8">
-        <h1
-          className="dither-in font-display text-[clamp(2.6rem,8.6vw,6rem)] leading-[1.04] text-foreground"
-          style={{ "--delay": "80ms" } as React.CSSProperties}
-        >
-          Give every agent{" "}
-          <br className="hidden sm:inline" />
-          its own copy{" "}
-          <br className="hidden sm:inline" />
-          of your machine.
-        </h1>
-        <p
-          className="dither-in mt-16 max-w-[36rem] text-lg leading-[1.6] text-foreground/85 sm:text-xl"
-          style={{ "--delay": "260ms" } as React.CSSProperties}
-        >
-          Your agents, tools and sign-ins, sealed into one image. Cloud machines forked from it in about twenty
-          seconds, with Claude Code and Codex working inside as threads.
+    <section id="top" className="relative isolate overflow-x-clip pt-32 pb-8 sm:pt-40">
+      <div className="absolute inset-x-0 top-0 -z-10 h-[1100px] [mask-image:radial-gradient(110%_60%_at_50%_52%,black_25%,transparent_70%)] sm:h-[1240px]">
+        <Field className="opacity-[0.85]" />
+        <div className="absolute inset-0 bg-[radial-gradient(60%_42%_at_30%_22%,var(--background)_35%,transparent_100%)]" />
+      </div>
+
+      <div className="mx-auto max-w-[1200px] px-4 sm:px-6">
+        <h1 className="display rise max-w-[15ch] text-[44px] sm:text-[64px] lg:text-[76px]">Coding agents on every computer you own.</h1>
+        <p className="lede rise mt-6 max-w-[560px] text-[17px] [animation-delay:80ms] sm:text-[19px]">
+          Run Claude Code, Codex and more on your Mac, an old laptop or a server you rent, all from one window. They can start each other on any of them.
         </p>
-        <div
-          className="dither-in mt-16 flex flex-col items-center gap-5 sm:flex-row"
-          style={{ "--delay": "420ms" } as React.CSSProperties}
-        >
-          <Download />
-          <Button
-            render={<a href={DOCS} />}
-            nativeButton={false}
-            variant="ghost"
-            size="lg"
-            className="h-12 gap-1.5 rounded-none px-4 text-base text-muted-foreground hover:bg-transparent hover:text-foreground"
-          >
-            Read the docs
-            <ArrowUpRight data-icon="inline-end" />
-          </Button>
+        <Install className="rise mt-9 [animation-delay:160ms]" />
+      </div>
+
+      <div className="rise mx-auto mt-16 max-w-[1320px] px-3 [animation-delay:260ms] sm:mt-20 sm:px-6">
+        <div className="relative isolate overflow-hidden rounded-[20px] border border-white/[0.08] px-[4%] pt-[4%] pb-[4%] sm:rounded-[24px]">
+          <img src={wall} alt="" aria-hidden decoding="async" draggable={false} className="absolute inset-0 -z-10 size-full object-cover select-none" />
+          <img
+            src={hero}
+            width={1440}
+            height={900}
+            alt="The wsp app: a coordinator thread on a MacBook Pro has handed its tickets to Claude Code and Codex threads on five computers, with its board of the night's landings in the slate beside it."
+            fetchPriority="high"
+            decoding="async"
+            draggable={false}
+            className="block h-auto w-full rounded-[1.2%/1.9%] shadow-[0_40px_90px_-20px_rgb(0_0_0/0.7),0_0_0_1px_rgb(0_0_0/0.45)] select-none"
+          />
         </div>
-        <div className="dither-in mt-6" style={{ "--delay": "500ms" } as React.CSSProperties}>
-          <CopyCommand command={INSTALL} size="lg" />
-        </div>
-        <p
-          className="dither-in mt-12 font-mono text-[12px] tracking-wide text-muted-foreground/80 uppercase"
-          style={{ "--delay": "560ms" } as React.CSSProperties}
-        >
-          <span className="inline-flex flex-wrap justify-center gap-x-5 gap-y-1">
-            <span>macOS and Linux</span>
-            <span>AGPL-3.0</span>
-            <span>no hosted service in between</span>
-          </span>
-        </p>
       </div>
     </section>
   );

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// jsdom has no WebGL, IntersectionObserver or matchMedia; the dither canvas asks for all three and stays blank without them.
+// jsdom has no canvas, IntersectionObserver, ResizeObserver or matchMedia; the field asks for all four and stays blank without them.
 HTMLCanvasElement.prototype.getContext = (() => null) as typeof HTMLCanvasElement.prototype.getContext;
 
 if (typeof IntersectionObserver === "undefined") {
@@ -9,6 +9,15 @@ if (typeof IntersectionObserver === "undefined") {
     disconnect(): void {}
   }
   globalThis.IntersectionObserver = InertIntersectionObserver as unknown as typeof IntersectionObserver;
+}
+
+if (typeof ResizeObserver === "undefined") {
+  class InertResizeObserver {
+    observe(): void {}
+    unobserve(): void {}
+    disconnect(): void {}
+  }
+  globalThis.ResizeObserver = InertResizeObserver as unknown as typeof ResizeObserver;
 }
 
 if (typeof window.matchMedia !== "function") {
