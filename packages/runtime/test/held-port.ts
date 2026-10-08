@@ -73,3 +73,22 @@ export async function pinnedDroppingPort(): Promise<HeldPort & { bound: boolean 
     },
   };
 }
+
+/** count ports nothing on this computer listens on now, each held until the last is picked: a port closed before the
+ * next pick can be handed out again. */
+export async function freePorts(count: number): Promise<number[]> {
+  const servers: Server[] = [];
+  try {
+    for (let i = 0; i < count; i++) {
+      const server = createServer();
+      servers.push(server);
+      await new Promise<void>(r => server.listen(0, "127.0.0.1", r));
+    }
+    return servers.map(s => (s.address() as AddressInfo).port);
+  } finally {
+    await Promise.all(servers.map(closed));
+  }
+}
+
+/** A port nothing on this computer listens on now; a test that needs more than one picks them with freePorts. */
+export const freePort = async (): Promise<number> => (await freePorts(1))[0]!;
