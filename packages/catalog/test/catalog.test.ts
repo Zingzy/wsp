@@ -1057,7 +1057,7 @@ describe("catalog", () => {
     expect(catalogToolFor("swiftc")?.id).toBe("swift");
     // The browser: Playwright's own Chromium at the Playwright the render tests import, on the node its npm road
     // brings; the row answers to the package names a project depends on.
-    expect(installLine(catalogEntry("playwright")!)).toBe("export DEBIAN_FRONTEND=noninteractive\nnpm install -g playwright@1.62.1\nplaywright install --with-deps chromium");
+    expect(installLine(catalogEntry("playwright")!)).toBe('export DEBIAN_FRONTEND=noninteractive\nnpm install -g playwright@1.62.1\ncommand -v playwright >/dev/null || { b="$(npm prefix -g)/bin"; case "$b" in /root/*) ;; *) PATH="$b:$PATH" ;; esac; }\nplaywright install --with-deps chromium');
     expect(installAfter(catalogEntry("playwright") as ToolEntry)).toBe("node");
     expect(catalogToolFor("chromium")?.id).toBe("playwright");
     // A project's npm dependency lands on a row only through the names the row lists for it: the browser's packages

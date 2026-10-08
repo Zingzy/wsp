@@ -1,17 +1,18 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { UNMEASURED_ROAD, customInstallsFor, recipeDigest, toolInstallsFor, type BrewTable, type RecipeEntry } from "../src/golden-import.js";
 import { diffRecipes, retiredBy, rowsToApply } from "../src/golden-diff.js";
-import { BUILDER_IDLE_MS, CredentialOnBuilderError, MachineAliveError, SnapshotFailedError, applyDelta, applyGoldenImport, buildGolden, forkGolden, nextLeftBehind, nextSetupSha, nextMissing, nextSmoke, prepareBuilder, QUIET_LOGS, rollback, promoteVersion, sealGolden, smokeTally, snapshotUntilGone, templatesOf, upgradeBuilder, type GoldenDelta, type GoldenImport, type GoldenStage, type GoldenVersion, type ImportResult, type PackedFiles } from "../src/golden.js";
+import { BUILDER_IDLE_MS, CredentialOnBuilderError, MachineAliveError, SnapshotFailedError, applyDelta, applyGoldenImport, buildGolden, forkGolden, nextLeftBehind, nextSetupSha, nextMissing, nextSmoke, prepareBuilder, QUIET_LOGS, rollback, CLAUDE_LINK_LINE, npmBinOf, promoteVersion, sealGolden, smokeTally, snapshotUntilGone, templatesOf, upgradeBuilder, type GoldenDelta, type GoldenImport, type GoldenStage, type GoldenVersion, type ImportResult, type PackedFiles } from "../src/golden.js";
 import { BUILDER_DISK_GB } from "../src/tool-sizes.js";
 import { CLAUDE_INSTALL, CURL_NET, GOLDEN_SETUP, MCP_SERVERS_JSON, NEVER_IN_IMAGE, NODE_RELEASES, ROAD_STEPS, nodeInstallScript } from "@wsp/catalog";
-import { credentialOnBuilderLine, diskSyncFailedLine, shellQuote, type RecipeDigest } from "@wsp/protocol";
+import { AGENTS_BIN, credentialOnBuilderLine, diskSyncFailedLine, shellQuote, type RecipeDigest } from "@wsp/protocol";
 import { NotFirstLifeError } from "../src/errors.js";
 import { AGENT_INSTALLERS, HOMEBREW, NODE_PATH_LINE, TOOLS_PATH, type ToolInstall } from "../src/golden-import.js";
+import { PROFILE_PATH_FILE, profilePathLine } from "../src/golden-base.js";
 import { INLINE_EXEC_MS, machineAnswer } from "../src/exec-detached.js";
 import { DISK_SYNC_CMD, DiskSyncError } from "../src/disk-sync.js";
 import { MIB, USED_KB_CMD, installTools } from "../src/golden-tools.js";
@@ -410,7 +411,9 @@ describe("interactive golden: prepare then seal", () => {
   it.each([
     ["true", "no agent to check; the fork booted"],
     ["codex --version", "1 agent answers: Codex"],
-    ["aider --version && node --version", "2 agents answer: Aider, node --version"],
+    ["aider --version && node --version", "1 agent answers: Aider; node runs"],
+    ["pnpm --version", "no agent to check; pnpm runs"],
+    ["claude --version && pnpm --version && bun --version", "1 agent answers: Claude Code; pnpm, bun run"],
   ])("smokeTally(%j) is %j", (smoke, want) => {
     expect(smokeTally(smoke)).toBe(want);
   });
@@ -423,6 +426,129 @@ describe("interactive golden: prepare then seal", () => {
     const without = recordingBackend({}, { exec: cmd => (cmd === "test -x /usr/local/bin/wsp-open" ? { exitCode: 1, stdout: "", stderr: "" } : { exitCode: 0, stdout: "", stderr: "" }) });
     const b2 = await prepareBuilder({ backend: without.backend, setup: "true" });
     expect((await sealGolden(b2, { backend: without.backend, hostId: "h1", smoke: "true" })).version.browserShim).toBe(false);
+  });
+
+  it("seal reads npm's own folder once on the builder and puts it first on the image's profile and its forks' PATH, where the tools PATH names no such folder", async () => {
+    const nvm = "/opt/nvm/versions/node/v24.18.1/bin";
+    const sealed = async (bin: string) => {
+      const rb = recordingBackend({}, { exec: cmd => (cmd.includes("npm prefix -g") ? { exitCode: 0, stdout: `${bin}\n`, stderr: "" } : { exitCode: 0, stdout: "", stderr: "" }) });
+      const b = await prepareBuilder({ backend: rb.backend, setup: "true" });
+      const { version } = await sealGolden(b, { backend: rb.backend, hostId: "h1", smoke: "pnpm --version" });
+      return { version, rb, builder: b.machine.id };
+    };
+    const off = await sealed(nvm);
+    expect(off.version.npmBin).toBe(nvm);
+    const read = off.rb.inline.find(i => i.cmd.includes("npm prefix -g"))!;
+    // Read once, on the builder, with no user npmrc and outside any project folder.
+    expect(off.rb.inline.filter(i => i.cmd.includes("npm prefix -g"))).toHaveLength(1);
+    expect(read.id).toBe(off.builder);
+    expect(read.cmd).toContain('cd / && b="$(npm_config_userconfig=/dev/null npm prefix -g 2>/dev/null)/bin"');
+    expect(off.rb.inline.filter(i => i.id === off.builder).map(i => i.cmd)).toContain(`${CLAUDE_LINK_LINE} && ${profilePathLine(`${AGENTS_BIN}:${nvm}:${TOOLS_PATH}`)}`);
+    // The smoke runs on the PATH a fork of this version hands a thread, so its pnpm is the one npm installed.
+    expect(off.rb.created.at(-1)!.envs?.["PATH"]).toBe(`${AGENTS_BIN}:${nvm}:${TOOLS_PATH}`);
+    // A folder the tools PATH already names, and one under the home a box shares with its workspaces, are not taken.
+    for (const bin of ["/usr/local/bin", "/root/.p/bin", ""]) {
+      const on = await sealed(bin);
+      expect(on.version.npmBin, bin).toBeUndefined();
+      expect(on.rb.inline.some(i => i.cmd.includes(PROFILE_PATH_FILE)), bin).toBe(false);
+      expect(on.rb.created.at(-1)!.envs?.["PATH"], bin).toBeUndefined();
+    }
+  });
+
+  it("the image's PATH answers the pinned claude ahead of npm's and npm's pnpm ahead of the provider's, outside any checkout", async () => {
+    const root = mkdtempSync(join(tmpdir(), "wsp-image-path-"));
+    try {
+      const npm = join(root, "nvm/bin");
+      const here = (cmd: string) => cmd.replaceAll(AGENTS_BIN, join(root, AGENTS_BIN)).replaceAll("/usr/local/bin", join(root, "usr/local/bin")).replaceAll(PROFILE_PATH_FILE, join(root, PROFILE_PATH_FILE));
+      // Written by a shell and not through writeStub: the runner finds its script beside the link it was started
+      // through, and the pinned agents' folder holds links.
+      const say = (dir: string, bin: string, words: string) => execFileSync("sh", ["-c", `printf '#!/bin/sh\\necho "%s"\\n' "$2" > "$1" && chmod 755 "$1"`, "sh", join(dir, bin), words]);
+      mkdirSync(join(root, "usr/local/bin"), { recursive: true });
+      mkdirSync(npm, { recursive: true });
+      mkdirSync(dirname(join(root, PROFILE_PATH_FILE)), { recursive: true });
+      // The provider's pnpm and the agents stage's native claude share /usr/local/bin; npm's folder holds a newer npm
+      // claude-code the recipe asked for and the pnpm the tools stage installed.
+      say(join(root, "usr/local/bin"), "claude", "2.1.280 (Claude Code)");
+      say(join(root, "usr/local/bin"), "pnpm", "10.34.5");
+      say(npm, "claude", "2.1.293 (Claude Code)");
+      say(npm, "pnpm", "11.9.0");
+      const rb = recordingBackend({}, {
+        exec: cmd => {
+          if (cmd.includes("npm prefix -g")) return { exitCode: 0, stdout: `${npm}\n`, stderr: "" };
+          if (!cmd.includes(AGENTS_BIN)) return { exitCode: 0, stdout: "", stderr: "" };
+          const res = spawnSync("bash", ["-c", here(cmd)], { encoding: "utf8" });
+          return { exitCode: res.status ?? 1, stdout: res.stdout, stderr: res.stderr };
+        },
+      });
+      const b = await prepareBuilder({ backend: rb.backend, setup: "true" });
+      await sealGolden(b, { backend: rb.backend, hostId: "h1", smoke: "claude --version" });
+      const outside = (pre: string, env: NodeJS.ProcessEnv) => spawnSync("bash", ["-c", `${pre}cd / && claude --version && pnpm --version`], { env, encoding: "utf8" }).stdout;
+      // A login shell reads the profile the seal wrote; a thread gets the PATH its fork was created with.
+      expect(outside(`. ${join(root, PROFILE_PATH_FILE)} && `, {})).toBe("2.1.280 (Claude Code)\n11.9.0\n");
+      const forkPath = here(rb.created.at(-1)!.envs!["PATH"]!);
+      expect(forkPath.split(":").slice(0, 3)).toEqual([join(root, AGENTS_BIN), npm, "/root/.local/bin"]);
+      expect(outside("", { PATH: forkPath })).toBe("2.1.280 (Claude Code)\n11.9.0\n");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("a ticked Cursor or Hermes gets no link in the pinned agents' folder, so the provider's shim at its name never finds itself first on a fork's PATH", async () => {
+    const root = mkdtempSync(join(tmpdir(), "wsp-agent-shim-"));
+    try {
+      const bin = join(root, "usr/local/bin");
+      const here = (cmd: string) => cmd.replaceAll(AGENTS_BIN, join(root, AGENTS_BIN)).replaceAll("/usr/local/bin", bin).replaceAll(PROFILE_PATH_FILE, join(root, PROFILE_PATH_FILE));
+      mkdirSync(bin, { recursive: true });
+      mkdirSync(join(root, "adopted"), { recursive: true });
+      mkdirSync(dirname(join(root, PROFILE_PATH_FILE)), { recursive: true });
+      const write = (path: string, script: string) => execFileSync("sh", ["-c", `printf '%s' "$2" > "$1" && chmod 755 "$1"`, "sh", path, script]);
+      write(join(bin, "claude"), `#!/bin/sh\necho "2.1.280 (Claude Code)"\n`);
+      // The provider's boot shim: it looks its name up on the caller's PATH past /usr/local/bin, else runs the
+      // install it adopted.
+      for (const name of ["cursor-agent", "hermes"]) {
+        write(join(root, "adopted", name), `#!/bin/sh\necho "wsp install of ${name}"\n`);
+        write(join(bin, name), `#!/bin/bash\np=$(printf %s "$PATH" | tr : '\\n' | grep -vx '${bin}' | paste -sd:)\nif t=$(PATH="$p" command -v ${name}); then exec "$t" "$@"; fi\nexec '${join(root, "adopted", name)}' "$@"\n`);
+      }
+      const rb = recordingBackend({}, {
+        exec: cmd => {
+          if (cmd.includes("npm prefix -g")) return { exitCode: 0, stdout: `${join(root, "nvm/bin")}\n`, stderr: "" };
+          if (cmd === "echo ok") return REACH_OK;
+          if (!cmd.includes(AGENTS_BIN)) return { exitCode: 0, stdout: "", stderr: "" };
+          const res = spawnSync("bash", ["-c", here(cmd)], { encoding: "utf8" });
+          return { exitCode: res.status ?? 1, stdout: res.stdout, stderr: res.stderr };
+        },
+      });
+      const recipe: RecipeDigest = { ticks: [{ id: "agents/claude" }, { id: "agents/cursor" }, { id: "agents/hermes" }], files: [] };
+      const b = await prepareBuilder({ backend: rb.backend, setup: "true", import: { recipeHash: "h1", recipe, tools: [], agents: [] } });
+      await sealGolden(b, { backend: rb.backend, hostId: "h1", smoke: "claude --version" });
+      const forkPath = here(rb.created.at(-1)!.envs!["PATH"]!);
+      const run = (cmd: string) => spawnSync("bash", ["-c", `cd / && ${cmd}`], { env: { PATH: forkPath }, encoding: "utf8", timeout: 4000 });
+      expect(run("claude --version").stdout).toBe("2.1.280 (Claude Code)\n");
+      for (const name of ["cursor-agent", "hermes"]) expect(run(`${name} --version`), name).toMatchObject({ status: 0, stdout: `wsp install of ${name}\n` });
+      expect(execFileSync("ls", [join(root, AGENTS_BIN)], { encoding: "utf8" })).toBe("claude\n");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("npm's folder is read past a prefix an npmrc in the home names: a workspace planting one there moves nothing", async () => {
+    const home = mkdtempSync(join(tmpdir(), "wsp-npmrc-"));
+    try {
+      execFileSync("sh", ["-c", `mkdir -p "$1/.p/bin" && printf 'prefix=%s\\n' "$1/.p" > "$1/.npmrc"`, "sh", home]);
+      const node = dirname(process.execPath);
+      const machine = {
+        exec: async (cmd: string) => {
+          const res = spawnSync("bash", ["-c", cmd.replace(/^export PATH=/, `export PATH=${node}:`)], { env: { HOME: home }, encoding: "utf8" });
+          return { exitCode: res.status ?? 1, stdout: res.stdout, stderr: res.stderr };
+        },
+      };
+      // The real npm does take the planted prefix when its user npmrc is read.
+      expect(spawnSync("bash", ["-c", `export PATH=${node}:$PATH; cd / && npm prefix -g`], { env: { HOME: home }, encoding: "utf8" }).stdout.trim()).toBe(join(home, ".p"));
+      const bin = await npmBinOf(machine);
+      expect(bin === undefined || !bin.startsWith(home), String(bin)).toBe(true);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 
   it("seal reads the vault off the builder before it asks for the snapshot, and hands it back with the version", async () => {
@@ -1198,7 +1324,7 @@ describe("golden import stages", () => {
     expect(cmds.indexOf(agent)).toBeLessThan(cmds.indexOf(tool));
     // The reach check is the last thing on the machine before the hand-off.
     expect(cmds.at(-1)).toBe("echo ok");
-    expect(builder.import).toEqual({ recipeHash: "h1", applied: ["applying-setup", "uploading-files", "installing-harness", "installing-tools", "installing-mcp"], smoke: "claude --version && codex --version" });
+    expect(builder.import).toEqual({ recipeHash: "h1", applied: ["applying-setup", "uploading-files", "installing-harness", "installing-tools", "installing-mcp"], smoke: "claude --version && codex --version && bun --version" });
     expect(builder.setupSha).toBe(createHash("sha256").update("true\nclaude-install\ncodex-install").digest("hex"));
     expect(results).toEqual([{
       recipeHash: "h1",
@@ -1245,7 +1371,7 @@ describe("golden import stages", () => {
     expect(oneOf("flock -w 600")).toContain("/home/linuxbrew/.linuxbrew/var/homebrew/locks/*.lock");
     expect(scripts.filter(s => s.includes("tar xzf"))).toHaveLength(2);
     expect(scripts).toContain('export PATH="/usr/local/bin:$PATH"\nclaude --version');
-    expect(ran.filter(r => r.id === "m2").map(r => r.script)).toEqual(["claude --version && codex --version"]);
+    expect(ran.filter(r => r.id === "m2").map(r => r.script)).toEqual(["claude --version && codex --version && bun --version"]);
     const inlineCmds = inline.map(i => i.cmd);
     expect(inlineCmds).toContain(FREE_KB_CMD);
     expect(inlineCmds).toContain("rm -f /tmp/wsp-vault-*.tgz");
@@ -1364,7 +1490,7 @@ describe("golden import stages", () => {
     expect(stages).toContain("installing-tools:2 installed, 1 failed: gh (Error: gh: no bottle available!); caches swept; 2.9 GB free");
     expect(results[0]!.tools[1]).toEqual({ id: "tools/brew/gh", label: "gh", outcome: "failed", note: "Error: gh: no bottle available!", ms: expect.any(Number) });
     const { version } = await sealGolden(builder, { backend, hostId: "h1", smoke: "should-not-run" });
-    expect(version.smoke.cmd).toBe("claude --version && codex --version");
+    expect(version.smoke.cmd).toBe("claude --version && codex --version && bun --version");
   });
 
   it("a row outside the catalog that fails is listed as failed with its reason, and the golden still seals", async () => {
@@ -1766,7 +1892,7 @@ describe("golden import stages", () => {
     const b = await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf({ skippedAgents: aside, onResult: r => void results.push(r) }) });
     expect(results[0]!.agents[0]).toEqual({ id: "agents/zed", name: "Zed", outcome: "skipped", note: "no installer known" });
     expect(stages).toContain("installing-harness:Claude Code, Codex installed; Zed skipped (no installer known); caches swept; 2.9 GB free");
-    expect(b.import?.smoke).toBe("claude --version && codex --version");
+    expect(b.import?.smoke).toBe("claude --version && codex --version && bun --version");
 
     const only = backendFor();
     const rec = stageRecorder();
@@ -1880,6 +2006,51 @@ describe("golden import stages", () => {
     expect(frames).toContainEqual({ detail: "bun@1.4.0 (2/2)", step: { label: "bun@1.4.0", command: "npm install -g bun@1.4.0" } });
     expect(frames.at(-1)!.step).toBeUndefined();
     expect(frames.at(-1)!.detail).toMatch(/^2 installed/);
+  });
+
+  it("an image whose pnpm does not run seals nothing: the version check of a manager a project install runs rides the fork's smoke", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "wsp-pnpm-check-"));
+    try {
+      // pnpm as npm leaves it: the command loads the package's dist, which this one has lost.
+      const pkg = join(dir, "lib", "node_modules", "pnpm");
+      const bin = join(dir, "bin");
+      mkdirSync(pkg, { recursive: true });
+      mkdirSync(bin);
+      writeStub(join(bin, "pnpm"), `#!${process.execPath}\nimport(${JSON.stringify(join(pkg, "dist", "pnpm.mjs"))});\n`);
+      const onFork = (cmd: string): ExecResult | undefined => {
+        if (!cmd.includes("pnpm --version")) return undefined;
+        const res = spawnSync("bash", ["-c", cmd], { env: { PATH: `${bin}:/usr/bin:/bin` }, encoding: "utf8" });
+        return { exitCode: res.status ?? 1, stdout: res.stdout, stderr: res.stderr };
+      };
+      // The row the Mac's own pnpm becomes, planned by the catalog's road.
+      const plan = toolInstallsFor([{ rung: "tools", id: "tools/npm/pnpm", label: "pnpm", version: "10.34.5", paths: [], bytes: 0, default: "skip", bring: true, linux: "yes" }]);
+      const seal = async () => {
+        const rb = recordingBackend({}, { exec: cmd => onFork(cmd) ?? (cmd === FREE_KB_CMD ? { exitCode: 0, stdout: `${mb(3000)}\n`, stderr: "" } : cmd.includes("echo WSP_CTX") ? { exitCode: 0, stdout: "WSP_CTX\nWSP_CTX_END\n", stderr: "" } : cmd === "echo ok" ? REACH_OK : ok) });
+        const builder = await prepareBuilder({ backend: rb.backend, setup: "true", fetch: async () => new Response(null, { status: 200 }), import: importOf({ tools: plan.installs, agents: [] }) });
+        return { rb, sealed: sealGolden(builder, { backend: rb.backend, hostId: "h1", smoke: "true" }) };
+      };
+
+      const broken = await seal();
+      await expect(broken.sealed).rejects.toThrow(/golden smoke failed .*"pnpm --version".*ERR_MODULE_NOT_FOUND/s);
+      expect(broken.rb.deletedSnapshots).toEqual(["snap_wsp-h1-default-v1"]);
+
+      mkdirSync(join(pkg, "dist"));
+      writeFileSync(join(pkg, "dist", "pnpm.mjs"), 'console.log("10.34.5");\n');
+      const { version } = await (await seal()).sealed;
+      expect(version.smoke).toEqual({ cmd: "pnpm --version", exitCode: 0 });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("a tool a project's install runs with no version check of its own on its install row adds nothing to the smoke: go and cargo seal as before", async () => {
+    // `go --version` exits 2; only the install rows that name their manager's check are checked.
+    const rows = ["go", "rust"].map(name => ({ rung: "tools" as const, id: `tools/catalog/${name}`, label: name, paths: [], bytes: 0, default: "skip" as const, bring: true, linux: "yes" as const }));
+    const plan = toolInstallsFor(rows);
+    expect(plan.installs.map(i => i.id)).toEqual(expect.arrayContaining(["tools/catalog/go", "tools/catalog/rust"]));
+    const rb = recordingBackend({}, { exec: cmd => (cmd === FREE_KB_CMD ? { exitCode: 0, stdout: `${mb(3000)}\n`, stderr: "" } : cmd.includes("echo WSP_CTX") ? { exitCode: 0, stdout: "WSP_CTX\nWSP_CTX_END\n", stderr: "" } : cmd === "echo ok" ? REACH_OK : ok) });
+    const builder = await prepareBuilder({ backend: rb.backend, setup: "true", fetch: async () => new Response(null, { status: 200 }), import: importOf({ tools: plan.installs, agents: [] }) });
+    expect(builder.import?.smoke).toBe("true");
   });
 
   it("a cellar lock error waits once for every Homebrew lock to clear, then tries the tool once more", async () => {
@@ -2446,6 +2617,14 @@ describe("golden import stages", () => {
         { id: "agents/claude", name: "Claude Code" },
       ],
       ...over,
+    });
+
+    it("applyDelta takes a retired tool's version check out of the smoke, as it does a retired agent's", async () => {
+      const { backend, fetch } = backendFor();
+      const machine = await backend.create({ kind: "sandbox", template: "base" });
+      const delta = deltaOf({ import: importOf({ recipeHash: "h2", recipe: SNAPSHOT, tools: [], agents: [] }), retired: [{ id: "tools/npm/pnpm", name: "pnpm" }], retiredOnImage: [{ id: "tools/npm/pnpm", name: "pnpm" }] });
+      const { ledger } = await applyDelta(machine, delta, { setup: "true", previousSmoke: "claude --version && pnpm --version", previousBase: head.base, fetch });
+      expect(ledger.smoke).toBe("claude --version");
     });
 
     it("a seal that keeps the builder snapshots it, boots and kills the fork, and leaves the builder running", async () => {

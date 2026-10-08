@@ -329,6 +329,9 @@ export interface WorkspaceRecord extends Omit<WorkspaceView, "project"> {
   firstLife: boolean;
   /** The provider's view of the current machine when it was created; a wake compares against it. */
   shape?: MachineShape;
+  /** The folder npm's global installs went to on the image this machine was forked from, which leads the PATH a turn
+   * there runs on (`GoldenVersion.npmBin`); absent where that image read none. */
+  npmBin?: string;
   /** The branch this workspace's copy started from: the branch its parent was on at the fork for a child, and the
    * branch the project starts from for every other workspace. A fact of the fork and not a reading of the parent,
    * since it is the code this copy was cut from, which is where its work goes back however the parent moves on;

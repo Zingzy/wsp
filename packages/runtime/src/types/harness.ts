@@ -21,7 +21,7 @@ import type {
   TurnResult,
 } from "@wsp/protocol";
 import type { CommitDrafter } from "@wsp/protocol";
-import { PLACE_WORKSPACE_PATH } from "@wsp/protocol";
+import { PLACE_WORKSPACE_PATH, onNpmBin } from "@wsp/protocol";
 import type { TaskStop } from "@wsp/protocol";
 import type { AccessChoice, AgentLaunch } from "@wsp/protocol";
 
@@ -85,8 +85,12 @@ export const PLACE_LOGIN_ENV: Readonly<Record<string, string>> = {
   ...installEnv(installHomes(TOOL_PREFIX)),
 };
 
-/** Which of the two a workspace runs on: where it stands, and nothing else. */
-export const loginEnvOn = (place: string | undefined): Readonly<Record<string, string>> => (place === undefined ? GUEST_LOGIN_ENV : PLACE_LOGIN_ENV);
+/** Which of the two a workspace runs on: where it stands, with the folder npm's global installs went to ahead of its
+ * PATH where the image it was forked from read one at the seal. */
+export const loginEnvOn = (place: string | undefined, npmBin?: string): Readonly<Record<string, string>> => {
+  const login = place === undefined ? GUEST_LOGIN_ENV : PLACE_LOGIN_ENV;
+  return npmBin === undefined ? login : { ...login, PATH: onNpmBin(npmBin, login["PATH"]!) };
+};
 
 export interface HarnessStartOptions {
   prompt: string;

@@ -28,6 +28,10 @@ export interface SeedInstall {
    * never a subvolume of its own, which a snapshot of the checkout would not carry. `dir` is relative to the
    * project folder. Absent where the road links nothing out of a store. */
   store?: { flag: string; dir: string };
+  /** The manager's own version command, run in the project folder: it starts the copy of the manager the project
+   * resolves to, which for a pnpm that switches itself to the version the folder pins is the copy it keeps under
+   * PNPM_HOME. Absent where no command is known to exit 0 on a manager that works (`go --version` exits 2). */
+  check?: string;
 }
 
 export interface SeedRow {
@@ -83,12 +87,12 @@ export const SEED_ROWS: readonly SeedRow[] = [
     except: [".env.example", ".env.sample"],
     examples: { config: [".env", ".env.production", "apps/web/.npmrc"], rebuilt: ["node_modules", "packages/host/dist", "tsconfig.tsbuildinfo"] },
     installs: [
-      { lockfile: "package-lock.json", run: "npm ci" },
-      { lockfile: "pnpm-lock.yaml", run: "pnpm install --frozen-lockfile", store: { flag: "--store-dir", dir: ".pnpm-store" } },
-      { lockfile: "yarn.lock", run: "yarn install --frozen-lockfile" },
+      { lockfile: "package-lock.json", run: "npm ci", check: "npm --version" },
+      { lockfile: "pnpm-lock.yaml", run: "pnpm install --frozen-lockfile", check: "pnpm --version", store: { flag: "--store-dir", dir: ".pnpm-store" } },
+      { lockfile: "yarn.lock", run: "yarn install --frozen-lockfile", check: "yarn --version" },
       // The text lockfile bun writes since 1.2, before the binary one: a repo carrying both is one bun wrote today.
-      { lockfile: "bun.lock", run: "bun install --frozen-lockfile" },
-      { lockfile: "bun.lockb", run: "bun install --frozen-lockfile" },
+      { lockfile: "bun.lock", run: "bun install --frozen-lockfile", check: "bun --version" },
+      { lockfile: "bun.lockb", run: "bun install --frozen-lockfile", check: "bun --version" },
     ],
   },
   {

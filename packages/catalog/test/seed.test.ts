@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
+import { catalogToolFor, smokeOf } from "../src/catalog.js";
 import { SEED_ROWS, seedInstallsFor, seedRowFor } from "../src/seed.js";
 
 describe("the row a path git ignores lands on", () => {
@@ -82,5 +83,17 @@ describe("the install a project's own root picks", () => {
 
   it("answers nothing for a root with no lockfile on any row", () => {
     expect(seedInstallsFor(["package.json", "README.md"])).toEqual([]);
+  });
+});
+
+describe("a manager's check on its install row", () => {
+  it("is the version line its catalog entry answers to, the command's own or the one the entry that brings it names", () => {
+    const checks = [...new Set(SEED_ROWS.flatMap(row => row.installs ?? []).flatMap(i => i.check ?? []))];
+    expect(checks).toEqual(["npm --version", "pnpm --version", "yarn --version", "bun --version"]);
+    for (const check of checks) {
+      const bin = check.split(" ")[0]!;
+      const entry = catalogToolFor(bin)!;
+      expect(entry.bin === bin ? smokeOf(entry) : entry.brings?.find(b => b.bin === bin)?.version).toBe(check);
+    }
   });
 });

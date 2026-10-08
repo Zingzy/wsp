@@ -7,15 +7,15 @@
 // long as they like, as long as nobody pauses it (snapshot-fresh rule).
 
 import { createHash } from "node:crypto";
-import { NEVER_IN_IMAGE, ROAD_STEPS } from "@wsp/catalog";
-import { ALREADY_APPLIED, DISK_SYNC_LINE, MCP_ID_PREFIX, credentialOnBuilderLine, diskUnsettledLine, SAVING_IMAGE_LINE, SNAPSHOT_GONE_REASON, fmtBytes, goldenHead, goldenImage, machineLeftLine, snapshotAttemptLine, snapshotFailedLine, snapshotProgressLine, snapshotStageLine, templateFailedLine, templateStatusLine, templateWaitedLine, pinsReadLine, type GoldenBaseTool, type GoldenLeftBehind, type GoldenLogin, type GoldenManifest, type GoldenMissingTool, type GoldenRetired, type GoldenStage, type GoldenStep, type GoldenVersion, type BuilderReading, type ProviderAnswer, type RecipeDigest, type ToolPin } from "@wsp/protocol";
+import { GUEST_HOME, NEVER_IN_IMAGE, ROAD_STEPS, SEED_ROWS, catalogEntry, catalogIdOfRow, smokeOf } from "@wsp/catalog";
+import { AGENTS_BIN, ALREADY_APPLIED, DISK_SYNC_LINE, TOOL_LINKS_DIR, onNpmBin, MCP_ID_PREFIX, credentialOnBuilderLine, diskUnsettledLine, SAVING_IMAGE_LINE, SNAPSHOT_GONE_REASON, fmtBytes, goldenHead, goldenImage, machineLeftLine, snapshotAttemptLine, snapshotFailedLine, snapshotProgressLine, snapshotStageLine, templateFailedLine, templateStatusLine, templateWaitedLine, pinsReadLine, type GoldenBaseTool, type GoldenLeftBehind, type GoldenLogin, type GoldenManifest, type GoldenMissingTool, type GoldenRetired, type GoldenStage, type GoldenStep, type GoldenVersion, type BuilderReading, type ProviderAnswer, type RecipeDigest, type ToolPin } from "@wsp/protocol";
 import { nameOf, rungOf } from "./golden-diff.js";
-import { AGENT_INSTALLERS, NODE_PATH_LINE, TOOLS_PATH, type AgentInstall, type LoginShell, type NodeInstall, type ShellInstall, type SkippedPath, type ToolInstall } from "./golden-import.js";
+import { AGENT_INSTALLERS, NODE_PATH_LINE, PATH_LINE, TOOLS_PATH, type AgentInstall, type LoginShell, type NodeInstall, type ShellInstall, type SkippedPath, type ToolInstall } from "./golden-import.js";
 import { PRELUDE } from "./dotfiles-presets.js";
 import { INLINE_EXEC_MS, machineAnswer } from "./exec-detached.js";
 import { DiskSyncError, diskUnsettled, syncDisk } from "./disk-sync.js";
 import { MIB, closing, freeBytes, freeNote, guardDeadlineMs, guarded, installTools, pinRead, plural, reasonOf, sweepCaches, usedBytes, withRecordedPins, type ToolResult } from "./golden-tools.js";
-import { installBase } from "./golden-base.js";
+import { PROFILE_PATH_FILE, installBase, profilePathLine } from "./golden-base.js";
 import { applyMcp, mcpTally, type McpPlan, type McpResult } from "./golden-mcp.js";
 import { BROWSER_SHIM_PATH, applyMachineContext, boundedCommand, type ContextResult } from "./machine-context.js";
 import type { Machine, MachineBackend, MachineKind, MachineState, TemplateRow } from "./machine.js";
@@ -763,6 +763,7 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
         result.tools.push(...tools.tools);
         if (tools.homebrew !== undefined) result.homebrew = tools.homebrew;
         if (ledger.recipe !== undefined) ledger.recipe = withRecordedPins(ledger.recipe, tools.tools);
+        ledger.smoke = nextSmoke(ledger.smoke, [], joinSmoke(tools.tools.flatMap(t => (t.outcome === "installed" ? (managerCheckOf(t) ?? []) : []))));
       }
       const missing = missingToolsOf([...(result.base ?? []), ...result.tools]);
       if (missing.length > 0) ledger.missingTools = missing;
@@ -1051,6 +1052,21 @@ export async function prepareBuilder(opts: PrepareBuilderOptions): Promise<Build
   }
 }
 
+/** The folder npm's global installs put their commands in on a builder, where the tools PATH names no such folder: a
+ * provider's Node under nvm keeps its prefix there, so nothing the recipe installed by npm would answer. Read with no
+ * user npmrc and never taken from under the home, since on a computer somebody owns every workspace writes that home. */
+export async function npmBinOf(machine: Pick<Machine, "exec">): Promise<string | undefined> {
+  const res = await machine.exec(`${PATH_LINE}\ncd / && b="$(npm_config_userconfig=/dev/null npm prefix -g 2>/dev/null)/bin" && [ -d "$b" ] && readlink -f "$b"`, { timeoutMs: INLINE_EXEC_MS });
+  const bin = res.exitCode === 0 ? res.stdout.trim() : "";
+  if (!bin.startsWith("/") || /[\s:]/.test(bin) || TOOLS_PATH.split(":").includes(bin) || bin === GUEST_HOME || bin.startsWith(`${GUEST_HOME}/`)) return undefined;
+  return bin;
+}
+
+/** Makes the pinned agents' folder afresh with a link to the native claude the agents stage installed, which npm's
+ * folder may also hold an npm copy of. No other agent goes there: the provider's boot shim at /usr/local/bin/<bin>
+ * looks its name up past /usr/local/bin alone, so a link to it ahead of that folder finds itself forever. */
+export const CLAUDE_LINK_LINE = `rm -rf ${AGENTS_BIN} && mkdir -p ${AGENTS_BIN} && { [ ! -x ${TOOL_LINKS_DIR}/claude ] || ln -s ${TOOL_LINKS_DIR}/claude ${AGENTS_BIN}/claude; }`;
+
 const isCapRefusal = (e: unknown): boolean => (e as { kind?: unknown }).kind === "concurrency";
 
 // Sequenced for a two-machine cap: unless the builder is kept, it dies before
@@ -1070,12 +1086,13 @@ export async function sealGolden(builder: Builder, opts: SealGoldenOptions): Pro
   let fork: Machine | undefined;
   const templates = templatesOf(opts.backend);
   const kill = (m: Machine) => killUntilGone(opts.backend, m, opts.killConfirm);
+  let npmBin: string | undefined;
   const forkSpec = () => ({
     kind: builder.kind,
     ...goldenImage({ snapshotId: snapshotId!, ...(templateId !== undefined ? { templateId } : {}) }).spec,
     ...diskAsked(opts.backend),
     ...sizeAsked(opts.backend, opts, builder.size),
-    ...envSpec(opts),
+    ...envSpec(npmBin === undefined ? opts : { ...opts, envs: { ...opts.envs, PATH: onNpmBin(npmBin, opts.envs?.PATH ?? TOOLS_PATH) } }),
   });
   const retryMs = opts.snapshotRetryMs ?? SNAPSHOT_RETRY_MS;
   // Read before the snapshot is asked for, off the disk the snapshot takes, and before the try: a builder whose
@@ -1085,6 +1102,11 @@ export async function sealGolden(builder: Builder, opts: SealGoldenOptions): Pro
   // so a builder that holds one is left exactly as the person set it up.
   const held = await presentPaths(builder.machine, NEVER_IN_IMAGE);
   if (held.length > 0) throw new CredentialOnBuilderError(held);
+  npmBin = await npmBinOf(builder.machine);
+  if (npmBin !== undefined) {
+    const wrote = await builder.machine.exec(`${CLAUDE_LINK_LINE} && ${profilePathLine(onNpmBin(npmBin, TOOLS_PATH))}`, { timeoutMs: INLINE_EXEC_MS });
+    if (wrote.exitCode !== 0) throw new Error(`could not put ${AGENTS_BIN} and ${npmBin} on the PATH in ${PROFILE_PATH_FILE}: ${wrote.stderr.trim()}`);
+  }
   const owned = builder.import?.recipe === undefined ? undefined : await recipeOwnedFiles(builder.machine, builder.import.recipe);
   // The person's logins as the sign-in and secrets stages left them, read off the same disk the snapshot takes and
   // under the same rule as the owned files: a builder whose vault cannot be read is left as the person set it up.
@@ -1172,6 +1194,7 @@ export async function sealGolden(builder: Builder, opts: SealGoldenOptions): Pro
       smoke: { cmd: smoke, exitCode: smokeRes.exitCode },
       size: builder.size,
       browserShim,
+      ...(npmBin !== undefined ? { npmBin } : {}),
       ...(opts.logins !== undefined ? { logins: opts.logins } : {}),
       ...(builder.import?.missingTools !== undefined ? { missingTools: builder.import.missingTools } : {}),
       ...(builder.import?.silenced !== undefined ? { silenced: builder.import.silenced } : {}),
@@ -1251,6 +1274,15 @@ const SMOKE_JOIN = " && ";
 function joinSmoke(checks: readonly string[]): string {
   return checks.length === 0 ? "true" : checks.join(SMOKE_JOIN);
 }
+/** The version checks the catalog's install rows name for the managers a project's install runs. */
+const PROJECT_CHECKS = new Set(SEED_ROWS.flatMap(row => (row.installs ?? []).flatMap(i => i.check ?? [])));
+
+/** A tools row's version check where its tool is a manager a project's install runs: one on the image that does not
+ * start fails every project there, and command -v reads a command whose package lost its files as present. */
+function managerCheckOf(row: { id: string }): string | undefined {
+  const entry = catalogEntry(catalogIdOfRow(row) ?? "");
+  return entry !== undefined && PROJECT_CHECKS.has(smokeOf(entry)) ? smokeOf(entry) : undefined;
+}
 function smokeChecks(smoke: string): string[] {
   return smoke.split(SMOKE_JOIN).filter(p => p !== "true");
 }
@@ -1263,13 +1295,15 @@ export function nextSmoke(previous: string, removed: readonly string[], added: s
   return joinSmoke(parts);
 }
 
-/** What a passed smoke proved, for the stage's end line: each check's agent, named by the installer table the
- * check came from; a check the table does not know is shown as itself. */
+/** What a passed smoke proved, for the stage's end line: each agent named by the installer table its check came from,
+ * then every other check by the command it ran. */
 export function smokeTally(smoke: string): string {
   const checks = smokeChecks(smoke);
   if (checks.length === 0) return "no agent to check; the fork booted";
-  const names = checks.map(c => Object.values(AGENT_INSTALLERS).find(i => i.smoke === c)?.name ?? c);
-  return `${plural(checks.length, "agent")} ${checks.length === 1 ? "answers" : "answer"}: ${names.join(", ")}`;
+  const agents = checks.flatMap(c => Object.values(AGENT_INSTALLERS).find(i => i.smoke === c)?.name ?? []);
+  const tools = checks.filter(c => !Object.values(AGENT_INSTALLERS).some(i => i.smoke === c)).map(c => c.split(" ")[0]!);
+  const answered = agents.length === 0 ? "no agent to check" : `${plural(agents.length, "agent")} ${agents.length === 1 ? "answers" : "answer"}: ${agents.join(", ")}`;
+  return tools.length === 0 ? answered : `${answered}; ${tools.join(", ")} ${tools.length === 1 ? "runs" : "run"}`;
 }
 
 /** The recipe rows a delta addresses: what it retires and what it plans again, tools and agents alike. */
@@ -1322,10 +1356,11 @@ export async function applyDelta(machine: Machine, delta: GoldenDelta, opts: App
   });
   const result = applied.result;
   if (!reported && retired.length > 0) report?.(result);
-  // A retired agent is still on the image, but the recipe stopped asking for it, so its check leaves the smoke:
-  // the next version is only ever held to what its own recipe claims. The rung decides, never the id's last
+  // A retired agent or tool is still on the image, but the recipe stopped asking for it, so its check leaves the
+  // smoke: the next version is only ever held to what its own recipe claims. The rung decides, never the id's last
   // segment: a tools row may end in an agent's name and must not take that agent's check with it.
   const gone = retired.flatMap(r => {
+    if (rungOf(r.id) === "tools") return managerCheckOf(r) ?? [];
     const installer = rungOf(r.id) === "agents" && !r.id.startsWith(MCP_ID_PREFIX) ? AGENT_INSTALLERS[nameOf(r.id)] : undefined;
     return installer !== undefined ? [installer.smoke] : [];
   });

@@ -136,7 +136,7 @@ export function projectsArea(ctx: RuntimeContext): ProjectsArea {
           // On a computer somebody joined this machine clones and installs with that computer's shared home
           // bound in, as a workspace there does, so it reads the same order and the same knobs; this Mac and the
           // provider this host forks on answer no place and keep the order an image is sealed with.
-          envs: { ...loginEnvOn(placeId) },
+          envs: { ...loginEnvOn(placeId, golden === undefined ? undefined : (await ctx.imageOf(o.from)).version?.npmBin) },
           // A machine whose disk becomes an image is a builder, which is what keeps the computer's own logins out
           // of it; one that only clones onto the computer is not, since the clone reads those logins.
           labels: { [WSP_LABEL]: "1", [OWNER_LABEL]: ctx.state.owner, [CREATED_AT_LABEL]: new Date().toISOString(), ...(o.image ? { [BUILDER_LABEL]: "1" } : {}) },

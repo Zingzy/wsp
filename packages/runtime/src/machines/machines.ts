@@ -18,7 +18,7 @@ export function machinesArea(ctx: RuntimeContext): MachinesArea {
   } = ctx;
   /** Size is always explicit: a create that names none gets the provider's own
    * default (2048 MB on Solari), not the size the record and the rate assume. */
-  const forkSpec = (r: WorkspaceRecord, kind: MachineKind, image: ReturnType<typeof goldenImage>["spec"] | undefined, engine: boolean, override?: WorkspaceSpec): MachineSpec & WorkspaceSize => ({
+  const forkSpec = (r: WorkspaceRecord, kind: MachineKind, image: ReturnType<typeof goldenImage>["spec"] | undefined, engine: boolean, override?: WorkspaceSpec, npmBin?: string): MachineSpec & WorkspaceSize => ({
     ...image,
     kind,
     ...(engine ? { engine: true } : {}),
@@ -29,7 +29,7 @@ export function machinesArea(ctx: RuntimeContext): MachinesArea {
     // The view's size rather than the row's: the row carries the guest's count, which no offer need match.
     cpu: override?.cpu ?? r.shape?.cpu ?? r.size.cpu,
     memMb: override?.memMb ?? r.shape?.memMb ?? r.size.memMb,
-    envs: { ...loginEnvOn(r.place), ...r.spec.envs, ...override?.envs },
+    envs: { ...loginEnvOn(r.place, npmBin), ...r.spec.envs, ...override?.envs },
     labels: { ...r.spec.labels, [WSP_LABEL]: "1", [OWNER_LABEL]: ctx.state.owner, [WORKSPACE_LABEL]: r.id, [NAME_LABEL]: r.name, [GOLDEN_LABEL]: r.golden, [CREATED_AT_LABEL]: new Date().toISOString() },
     onIdle: "pause",
     idleTimeoutMs: backstopMs(idleWindowOf(r)),
@@ -186,7 +186,7 @@ export function machinesArea(ctx: RuntimeContext): MachinesArea {
         const image = ctx.keepsImages(b) ? await ctx.imageOf(record.golden) : undefined;
         const golden = image?.version;
         // A project golden's snapshot is the image; only a version's own snapshot may stand behind a template.
-        const spec = forkSpec(record, golden?.kind ?? "sandbox", image === undefined ? undefined : goldenImage(image.projects === undefined && golden !== undefined ? golden : { snapshotId: record.golden }).spec, record.spec.engine === true || (golden !== undefined && (await ctx.recipeAsksEngine(golden))), override);
+        const spec = forkSpec(record, golden?.kind ?? "sandbox", image === undefined ? undefined : goldenImage(image.projects === undefined && golden !== undefined ? golden : { snapshotId: record.golden }).spec, record.spec.engine === true || (golden !== undefined && (await ctx.recipeAsksEngine(golden))), override, golden?.npmBin);
         // A place that has never held this image says missing about a reference no registry has: the fork lands
         // nowhere and the sentence says where it would land until that place holds a copy.
         const machine = await b.create(spec, report === undefined ? undefined : line => report("fork-requested", line, { waiting: true })).catch((e: unknown) => {
@@ -208,6 +208,8 @@ export function machinesArea(ctx: RuntimeContext): MachinesArea {
         // The fork carries the golden's copy; this one names the workspace and reads the disk and secrets as they are now.
         const context = await applyMachineContext(machine, { workspace: { name: record.name }, ...(golden !== undefined ? { golden } : {}) });
         if (context.failure !== undefined) console.warn(`machine context for ${record.id} on ${machine.id} ${context.summary}`);
+        if (golden?.npmBin !== undefined) record.npmBin = golden.npmBin;
+        else delete record.npmBin;
         const shape = await ctx.shapeOf(machine);
         if (shape !== undefined) record.shape = shape;
         else delete record.shape;
