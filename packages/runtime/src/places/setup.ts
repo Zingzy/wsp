@@ -45,7 +45,7 @@ import {
   shellQuote,
   toolRowId,
 } from "@wsp/protocol";
-import { GITHUB_TOKEN_ENV, unlandFiles, PlaceAbsentError, PlaceMachine, envInput, hookOf, newSetupRun, pathLine, putFiles, withEnvFromInput, type EngineStep, type ExecResult, type Machine, type MachineLink, type ProvisionPlan, type ProvisionStage } from "@wsp/engine";
+import { GITHUB_TOKEN_ENV, unlandFiles, PlaceAbsentError, PlaceMachine, envInput, hookOf, newSetupRun, pathLine, putFiles, storesReached, withEnvFromInput, type EngineStep, type ExecResult, type Machine, type MachineLink, type ProvisionPlan, type ProvisionStage } from "@wsp/engine";
 import { CATALOG_AGENTS, loginSignIn, serverValuesOf } from "@wsp/catalog";
 import { runGraph, type GraphStep } from "../setup-graph.js";
 import { recipeChanges, stepsFor, type RecipeChange } from "../recipe-sync.js";
@@ -588,7 +588,12 @@ export function placeSetup(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea) 
         if (w.row === GITHUB_ROW) await githubSignIn(plan);
         else await agentSignIn(w.row.slice("signins/".length), plan);
       }
-      const engine = (s: EngineStep) => async () => ours(await provisioner.step(machine, plan, s, run, stageOf(s), { home, held: new Set(Object.keys(serverValuesOf(vault()))) }));
+      const stores = recording.storesOn?.(placeId, home);
+      const engine = (s: EngineStep) => async () => {
+        const login = stores === undefined || s !== "mcp" ? undefined : await ctx.door.folderComputer(placeId)?.machine.loginOf();
+        const reached = stores === undefined || login === undefined ? {} : { stores: storesReached(login, stores) };
+        return ours(await provisioner.step(machine, plan, s, run, stageOf(s), { home, held: new Set(Object.keys(serverValuesOf(vault()))), ...reached }));
+      };
       const floor = await step("floor", engine("floor"));
       if (floor?.failed === true) return await end(floorFailedLine(floor.rows));
       let stopped: string | undefined;

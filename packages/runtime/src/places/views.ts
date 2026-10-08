@@ -22,7 +22,7 @@ import {
   type PlaceProveRequest,
   macKindOf,
 } from "@wsp/protocol";
-import { LinkBackend, PlaceMachine, machineServerPort, serversOutLines, unmergeServers, type MachineBackend } from "@wsp/engine";
+import { LinkBackend, PlaceMachine, machineServerPort, serversOutLines, storesReached, unmergeServers, type MachineBackend } from "@wsp/engine";
 import { verifyPlaceBytes } from "@wsp/keys";
 import { PLACES, CAPS, DEFAULT_COLLECTION, DEFAULT_ID, type PlaceRecord, madeBySetup, appliedView, type PlaceLogin } from "./types.js";
 import {
@@ -113,7 +113,12 @@ export function placeViews(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, 
     const home = held.report.login["HOME"];
     if (home === undefined) return [];
     const machine = new PlaceMachine(linkTo(placeId), { id: held.name, home });
-    const took = await bounded(unmergeServers(machineServerPort(machine), home), UNMERGE_MS, `the servers wsp merged into the agents' files on ${held.name}`).catch(() => []);
+    const stores = ctx.recording.storesOn?.(placeId, home);
+    const unmerged = async () => {
+      const login = stores === undefined ? undefined : await ctx.door.folderComputer(placeId)?.machine.loginOf();
+      return unmergeServers(machineServerPort(machine), home, stores === undefined || login === undefined ? {} : storesReached(login, stores));
+    };
+    const took = await bounded(unmerged(), UNMERGE_MS, `the servers wsp merged into the agents' files on ${held.name}`).catch(() => []);
     return took.flatMap(serversOutLines);
   };
 

@@ -240,6 +240,8 @@ export interface ProvisionOn {
   /** The names this host's vault holds a server's value under, names only, so a server's row can say where its
    * agent's launch there hands it none. */
   held?: ReadonlySet<string>;
+  /** The folder each agent's threads there are pointed at, by agent id, where its own servers live. */
+  stores?: Readonly<Record<string, string>>;
 }
 
 /** The steps of a setup the engine runs on the computer itself; the sign-ins, the folders and the GitHub check are
@@ -419,6 +421,7 @@ async function stepRows(machine: Machine, plan: ProvisionPlan, step: EngineStep,
           tools: run.tools,
           path: plan.path,
           ...(on.held !== undefined ? { held: on.held } : {}),
+          ...(on.stores !== undefined ? { stores: on.stores } : {}),
           stage: (_which, detail) => {
             if (detail !== undefined) stage(detail);
           },

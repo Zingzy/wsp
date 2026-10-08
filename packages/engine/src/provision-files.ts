@@ -23,7 +23,7 @@ import {
   TOOL_PREFIX,
   type PlaceProvisionRow,
 } from "@wsp/protocol";
-import { CATALOG_AGENTS, MCP_AGENTS, skillsDirOf } from "@wsp/catalog";
+import { CATALOG_AGENTS, MCP_AGENTS, ownServerConfig, skillsDirOf } from "@wsp/catalog";
 import { INLINE_EXEC_MS, OLD_APPEND_MARKS } from "./exec-detached.js";
 import type { SkippedPath } from "./golden-import.js";
 import type { PackFiles } from "./golden.js";
@@ -477,8 +477,8 @@ export interface ServerPort {
   run(script: string): Promise<string>;
   /** The first of an agent's files that is there, with its text; nothing where none of them is. */
   read(files: readonly string[]): Promise<ScopeFile | undefined>;
-  /** That file, as it was read, with this text by the one config write inside `home`. */
-  write(file: ScopeFile, text: string, home: string): Promise<void>;
+  /** That file, as it was read, with this text by the one config write inside `base`. */
+  write(file: ScopeFile, text: string, base: string): Promise<void>;
 }
 
 /** The port over a machine: the same read of a config off it and the same landing and write the servers round puts
@@ -496,8 +496,8 @@ export function machineServerPort(machine: Machine): ServerPort {
       const res = await machine.run(readConfigsCmd(asked), { deadlineMs: READ_MS, unlogged: true }).catch(() => undefined);
       return res === undefined || res.exitCode !== 0 ? undefined : parseConfigs(res.stdout, asked)?.[0];
     },
-    write: async (file, text, home) => {
-      const failure = await landConfigs(machine, home, [file], new Map([[file.path, text]]));
+    write: async (file, text, base) => {
+      const failure = await landConfigs(machine, base, [file], new Map([[file.path, text]]));
       if (failure !== undefined) throw new Error(failure);
     },
   };
@@ -517,8 +517,9 @@ export const serversOutLines = (out: ServersOut): string[] => [`${out.names.join
  * beside the job says which keys those are and what wsp left under each, and a key whose entry there still reads
  * as that is wsp's to take; one the agent or the person has written since reads differently and stays, the same
  * rule by which the merge never writes over one. Nothing else in the file moves. A file that will not parse or
- * will not be written keeps its servers and the agents beside it still lose theirs. */
-export async function unmergeServers(port: ServerPort, home: string): Promise<ServersOut[]> {
+ * will not be written keeps its servers and the agents beside it still lose theirs. `stores` is the folder each
+ * agent's threads there are pointed at, where the merge wrote. */
+export async function unmergeServers(port: ServerPort, home: string, stores: Readonly<Record<string, string>> = {}): Promise<ServersOut[]> {
   const keys = parseLandedServers(await port.run(landedServersScript(home)));
   const out: ServersOut[] = [];
   for (const agent of MCP_AGENTS) {
@@ -528,7 +529,8 @@ export async function unmergeServers(port: ServerPort, home: string): Promise<Se
     });
     if (mine.length === 0) continue;
     try {
-      const file = await port.read(agent.mcp.files.map(f => `${home}/${f.slice(2)}`));
+      const config = ownServerConfig(agent, home, stores[agent.id]);
+      const file = await port.read(config.files);
       if (file === undefined) continue;
       let text = file.text;
       const took: string[] = [];
@@ -542,7 +544,7 @@ export async function unmergeServers(port: ServerPort, home: string): Promise<Se
         took.push(...names);
       }
       if (took.length === 0 || text === file.text) continue;
-      await port.write(file, text, home);
+      await port.write(file, text, config.base);
       out.push({ path: file.path, names: took });
     } catch {
       continue;

@@ -426,6 +426,42 @@ describe("the MCP servers a thread on a computer you joined starts", () => {
       expect(JSON.parse(inputOf(launch.stdin)["WSP_LAND_0"]!)).toEqual({ mcpServers: { acme: { command: "acme-mcp", args: [], env: { ACME_TOKEN: "sk_acme_TESTONLY" } } } });
       expect(commandsCarry(seen, "sk_acme_TESTONLY")).toBe(false);
     });
+
+    it(`hands a server added from the computer's ${from} to the next turn's Codex, from config.toml under the box's logins folder that turn's CODEX_HOME names`, async () => {
+      const vault: Record<string, string> = { OPENAI_API_KEY: "sk-openai-fake" };
+      let box: Box | undefined;
+      const handed: (string | undefined)[] = [];
+      // The host's acts as they run there: the server by name into config.toml under the store it is handed, and its
+      // value into the vault.
+      const serversActs: ServersActs = {
+        add: async (on, ask) => {
+          if (on.kind === "here") throw new Error("not this computer");
+          handed.push(on.stores?.["codex"]);
+          const file = `${on.stores?.["codex"] ?? "/root/.codex"}/config.toml`;
+          box!.configs.set(file, [`[mcp_servers.${ask.name}]`, `command = "${ask.command}"`, 'env_vars = ["ACME_TOKEN"]', ""].join("\n"));
+          Object.assign(vault, ask.env);
+          return { file };
+        },
+        remove: async () => ({ file: "" }),
+        toggle: async () => ({ file: "" }),
+      };
+      const { HARNESS_ADAPTERS } = await import("../src/adapters.js");
+      const { rt, project, seen, placeId } = await joined({ adapters: { codex: HARNESS_ADAPTERS.codex }, vault, serversActs, logins: "/var/lib/wsp/logins" });
+      box = seen;
+      const at = await rt.workspaces.folderFor({ project: project.id });
+      await rt.agents.serversAdd(from === "thread" ? { workspaceId: at.workspace.id } : { placeId }, { agent: "codex", name: "acme", command: "acme-mcp", env: { ACME_TOKEN: "sk_acme_TESTONLY" } });
+      const run = await rt.sessions.start(at.workspace.id, { prompt: "hello", harness: "codex" });
+      await expect.poll(() => seen.execs.some(e => e.cmd.includes("WSP_LAUNCHED")), { timeout: 10_000 }).toBe(true);
+      const launch = seen.execs.find(e => e.cmd.includes("WSP_LAUNCHED"))!;
+      await rt.sessions.interrupt(run.view().id);
+      await run.finished.catch(() => undefined);
+      const input = inputOf(launch.stdin);
+      expect(handed).toEqual(["/var/lib/wsp/logins/codex"]);
+      expect(input["CODEX_HOME"]).toBe("/var/lib/wsp/logins/codex");
+      const start = input["WSP_LAND_IN"]!.split("\n").map(l => (l === "" ? undefined : (JSON.parse(l) as { method?: string; params?: { config?: unknown } }))).find(m => m?.method === "thread/start");
+      expect(start?.params?.config).toEqual({ "mcp_servers.acme.env.ACME_TOKEN": "sk_acme_TESTONLY" });
+      expect(commandsCarry(seen, "sk_acme_TESTONLY")).toBe(false);
+    });
   }
 });
 

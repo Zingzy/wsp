@@ -2,7 +2,7 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { readJoinToken, placeNoLinkLine, MCP_ID_PREFIX, placeStillInstalledLine, PLACE_SUDO_KIND, heldPlaceScript, placeFileText, placeLoginOtherRefusal, placeLoginUncheckedRefusal, placeLoginElsewhere, placeLoginElsewhereRemovedLine } from "@wsp/protocol";
-import { CODEX_TOML } from "@wsp/catalog";
+import { CODEX_TOML, MCP_SERVERS_JSON } from "@wsp/catalog";
 import { createRuntime } from "../src/runtime.js";
 import { HANDSHAKE, MCP_READ_MARK, SERVER_MARK } from "@wsp/engine";
 import { PlaceHostKeyChangedError, PlaceLoginRefusedError, newPlaceKeyPair, placeLoginRoadLine, placeSweptOverLinkLine, placeElsewhereSweptOverLinkLine, placeSweptOverSshLine, type PlaceDialler, type PlaceKeyPair, type PlaceLeaveRequest, type PlaceLeaver, type PlaceLogin, type PlaceUpdateRequest, type PlaceWiring } from "../src/places.js";
@@ -12,7 +12,7 @@ import { stubBackend } from "./stub-backend.js";
 import { until } from "./until.js";
 import { WsClient } from "./ws-client.js";
 import { DOOR, report, wiring } from "./place-join.js";
-import { ctx, sockets, serving, code, join, placesOf, answersLeave, remove } from "./places-fixture.js";
+import { ctx, sockets, serving, code, join, placesOf, answersLeave, remove, saysItsFacts, PLACE_FACTS } from "./places-fixture.js";
 
 describe("taking a place back out", () => {
   it("asks the linked place to sweep itself, drops the workspace standing on it, and answers what came off", async () => {
@@ -65,6 +65,39 @@ describe("taking a place back out", () => {
     expect(wrote, order.join("\n")).toBeGreaterThanOrEqual(0);
     expect(wrote).toBeLessThan(order.indexOf("place.leave"));
   });
+
+  for (const login of [{ user: "root", home: "/root", codex: "/var/lib/wsp/logins/codex/config.toml" }, { user: "maya", home: "/home/maya", codex: "/home/maya/.codex/config.toml" }]) {
+    it(`takes wsp's servers out of the files a box's threads read on a computer joined as ${login.user}, its logins folder only where root reaches it`, async () => {
+      const { hostKey } = await serving();
+      const sent = report("vps", { login: { HOME: login.home, USER: "root", PATH: "/usr/bin" } });
+      const { client, placeId } = await join(hostKey, { code: await code(), report: sent, answers: saysItsFacts(() => ({ ...PLACE_FACTS, logins: "/var/lib/wsp/logins" }), { count: 0 }) });
+      sockets.push(client.ws);
+      await until(async () => (await placesOf()).find(p => p.id === placeId)?.logins === "/var/lib/wsp/logins");
+      const claude = JSON.stringify({ mcpServers: { gsc: { command: "npx", args: ["gsc-mcp"] } } });
+      const codex = ["[mcp_servers.context7]", 'command = "npx"', ""].join("\n");
+      const sha = (entry: string): string => createHash("sha256").update(entry).digest("hex");
+      const keys = [`${SERVER_MARK}\t${sha(MCP_SERVERS_JSON.entryOf(claude, "gsc")!)}\t${MCP_ID_PREFIX}claude/gsc`, `${SERVER_MARK}\t${sha(CODEX_TOML.entryOf(codex, "context7")!)}\t${MCP_ID_PREFIX}codex/context7`].join("\n");
+      const reads = [keys, `${MCP_READ_MARK} 0 0 ${Buffer.from(claude).toString("base64")}`, `${MCP_READ_MARK} 0 0 ${Buffer.from(codex).toString("base64")}`];
+      const polled = (out: string): string => ["WSP_POLL", "0", Buffer.from(`${out}\n`).toString("base64"), "", "down", "WSP_POLL_END"].join("\n");
+      const order: string[] = [];
+      client.onFrame(raw => {
+        const frame = raw as unknown as { id?: number; op?: string; cmd?: string };
+        const say = (body: Record<string, unknown>): void => client.say({ id: frame.id, ok: true, ...body });
+        if (frame.op === "exec") {
+          const cmd = String(frame.cmd);
+          order.push(cmd);
+          // Who the box's lines run as: its daemon is root, and the home is the login's.
+          if (cmd.includes("command -v runuser")) return say({ exitCode: 0, stdout: `Linux\n0\nroot\n${login.user}\n1\n${login.home}\n/usr/bin\n`, stderr: "", truncated: false });
+          const stdout = cmd.includes(HANDSHAKE.launched) ? `${HANDSHAKE.launched}\n` : cmd.includes("WSP_POLL") ? polled(reads.shift() ?? "") : "";
+          return say({ exitCode: 0, stdout, stderr: "", truncated: false });
+        }
+        if (frame.op === "place.leave") say({ swept: [] });
+      });
+      const answer = await remove(placeId);
+      expect(answer["swept"]).toEqual([`gsc (out of ${login.home}/.claude-cfg/.claude.json)`, `context7 (out of ${login.codex})`]);
+      for (const file of [`${login.home}/.claude-cfg/.claude.json`, login.codex]) expect(order.some(cmd => cmd.includes(`f='${file}'`) && cmd.includes('mv -f "$n" "$r"')), file).toBe(true);
+    });
+  }
 
   it("says the agent is still installed when the place was not connected to sweep", async () => {
     const { hostKey } = await serving();
