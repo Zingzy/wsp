@@ -18,6 +18,7 @@ import { makeApi, type Api, type ProtocolClient } from "../src/protocol/client.j
 import type { ProtocolEvent } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { AGENTS_REPORT } from "./fixtures/agents-report.js";
+import { noDaemonApi } from "./fake-daemon-api.js";
 import { back, flow, head, headAct, NOW, openRow, panel, rowOf, stateOf, stepOf } from "./agents-panel-harness.js";
 
 function List({ where = "box", report = AGENTS_REPORT, typeInTerminal }: { where?: AgentsWhere; report?: AgentsReport; typeInTerminal?: (line: string) => void }) {
@@ -36,6 +37,7 @@ interface Started {
   target: AgentsTarget;
   agent: string;
   server: string | undefined;
+  terminal?: boolean;
   step(e: Omit<AgentsSignInEvent, "type" | "signInId">): void;
 }
 
@@ -46,13 +48,14 @@ function host(o: { key?: (agent: string, key: string) => Promise<void> } = {}) {
   const added: [AgentsTarget, string][] = [];
   const stopped: string[] = [];
   const offs: string[] = [];
-  const agentsSignIn = async (target: AgentsTarget, agent: string, server: string | undefined, onStep: (e: AgentsSignInEvent) => void) => {
+  const agentsSignIn = async (target: AgentsTarget, agent: string, server: string | undefined, onStep: (e: AgentsSignInEvent) => void, terminal?: boolean) => {
     const signInId = `si_${started.length + 1}`;
-    started.push({ target, agent, server, step: e => onStep({ type: "agents.signIn", signInId, ...e }) });
+    started.push({ target, agent, server, ...(terminal === undefined ? {} : { terminal }), step: e => onStep({ type: "agents.signIn", signInId, ...e }) });
     return { signInId, stop: () => void stopped.push(signInId), off: () => void offs.push(signInId) };
   };
   useStore.setState({
     api: {
+      daemon: noDaemonApi,
       agentsSignIn,
       agentsSignInCode: async (id: string, code: string) => void codes.push([id, code]),
       agentsKey: o.key ?? (async (agent: string, key: string) => void keys.push([agent, key])),
@@ -238,12 +241,16 @@ describe("signing an agent in from its row", () => {
     expect(flow()).toBeNull();
   });
 
-  it("hands a row that asks the person to pick the line for their terminal, and types it into a task's own terminal", async () => {
+  it("runs a row that asks the person to pick in a terminal drawn in place on a computer, hands the line here, and types it into a task's own terminal", async () => {
     const h = host();
     const { unmount } = render(<List />);
     openRow("opencode");
     fireEvent.click(actIn("sign-in"));
-    expect(flow()?.querySelector("[data-k=sign-in-line]")?.textContent).toBe("wsp add spoo --sign-in opencode");
+    await settle();
+    expect(h.started.map(s => [s.target, s.agent, s.terminal])).toEqual([[AGENTS_REPORT.target, "opencode", true]]);
+    act(() => h.started[0]!.step({ state: "running", ptyId: "pty_3" }));
+    expect(flow()?.querySelector("[data-k=sign-in-terminal]")).not.toBeNull();
+    expect(flow()?.querySelector("[data-k=sign-in-line]")).toBeNull();
     unmount();
     render(<List where="here" />);
     openRow("opencode");
@@ -259,7 +266,7 @@ describe("signing an agent in from its row", () => {
     expect(button.textContent).toBe(AGENTS_LIST_WORDS.signIn);
     fireEvent.click(button);
     expect(typed).toEqual(["opencode auth login"]);
-    expect(h.started).toEqual([]);
+    expect(h.started).toHaveLength(1);
   });
 
   it("waits on the browser on this computer, where the harness opens the page and takes the redirect, with the page as a fallback and Cancel", async () => {

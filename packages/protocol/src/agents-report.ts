@@ -321,7 +321,8 @@ export const noHomeRefusal = (home: string): string => `this computer runs wsp a
 /** Where one sign-in started from the app stands, pushed to the socket that started it and no other: `running` until
  * the tool prints a page, `waiting` once it has, with that page, the code the tool printed beside it where it prints
  * one, and `paste` where what the page hands back is typed into the tool; then `signed-in`, or `failed` with the
- * tool's own last words. */
+ * tool's own last words. A sign-in run in the person's own terminal names the pty it runs in there, `ptyId`, which
+ * the page attaches to and types into. */
 export const AgentsSignInEvent = z.object({
   type: z.literal("agents.signIn"),
   signInId: z.string(),
@@ -330,6 +331,7 @@ export const AgentsSignInEvent = z.object({
   code: z.string().optional(),
   paste: z.boolean().optional(),
   said: z.string().optional(),
+  ptyId: z.string().optional(),
 });
 export type AgentsSignInEvent = z.infer<typeof AgentsSignInEvent>;
 
@@ -381,6 +383,21 @@ export const noSignInRefusal = "That sign-in is not running any more.";
 
 /** Why a napping workspace ran no sign-in: nothing here wakes a machine. */
 export const nappingSignInRefusal = (name: string): string => `${name} is napping, and a sign-in runs there only while it runs; wake it to sign in`;
+
+/** What a sign-in on a computer says while the tool its login runs goes on there first. */
+export const installingFirstLine = (name: string): string => `Installing ${name} first.`;
+
+/** A sign-in run in a terminal that the person left (Esc, Ctrl-C, quitting the tool) before it signed in. */
+export const closedBeforeSignInLine = (name: string): string => `${name} closed before it signed in.`;
+
+/** A sign-in run in a terminal that ended where its status could not be read after, a dropped link say: the person
+ * may well have signed in, so it is not said they left. */
+export const signInUncheckedLine = (name: string): string => `${name} ended, but its sign-in could not be checked.`;
+
+/** Why a sign-in on a computer did not start: the tool its login runs would not go on there, in that install's own last
+ * words; the fix is the command line's, where the person reads it after `wsp add <computer> --sign-in`. */
+export const toolNotInstalledLine = (name: string, said: string): string => `${name} would not install there, so its sign-in did not start: ${said.replace(/\.$/, "")}.`;
+export const toolNotInstalledFix = (name: string): string => `Put ${name} on there yourself, then sign in again.`;
 
 /** Why agents.signInLine was refused: the line is for the host's own command line, which runs it in the person's
  * terminal. */

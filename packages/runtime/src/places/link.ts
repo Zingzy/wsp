@@ -19,27 +19,55 @@ import {
   twoPlacesRefusal,
   placeBehindLine,
   placeDaemonBehind,
+  SIGNED_IN_THERE,
+  copiedFromLine,
+  GITHUB_CLI,
+  GITHUB_ROW,
+  signInRowId,
+  RecipeFile,
+  type PlaceProvisionRow,
 } from "@wsp/protocol";
-import { LinkBackend, PlaceAbsentError, keyFingerprint } from "@wsp/engine";
+import { LinkBackend, PlaceAbsentError, PlaceMachine, keyFingerprint, newSetupRun } from "@wsp/engine";
 import { connectDaemon } from "../reach.js";
 import { verifyPlaceBytes } from "@wsp/keys";
 import { CAPS, DEFAULT_COLLECTION, DEFAULT_ID, type PlaceRecord, type PlaceDoor, PlaceForksNowhereError, PlaceProvisioningError } from "./types.js";
-import { bounded, readsAsEd25519, JOIN_PROVE_MS, PLACE_BAD_KEY_REFUSAL, takenReport, sharedLoginFile, REPLACED, BACKEND_FACTS_MS } from "./helpers.js";
+import { vaultSignIn, landedOn, type LandedRow, bounded, readsAsEd25519, JOIN_PROVE_MS, PLACE_BAD_KEY_REFUSAL, takenReport, sharedLoginFile, REPLACED, BACKEND_FACTS_MS } from "./helpers.js";
 import type { PlaceDoorContext } from "./context.js";
 import type { PlaceRecordsArea } from "./records.js";
 import type { PlaceSetupArea } from "./setup.js";
 import type { PlaceViewsArea } from "./views.js";
 
 /** The door's half that joins, proves and holds each computer's link, and answers what a link and a place say. */
-export function linkDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, setupArea: PlaceSetupArea, viewArea: PlaceViewsArea): Pick<PlaceDoor, "answerChallenge" | "join" | "auth" | "hostKey" | "prove" | "attach" | "link" | "channel" | "load" | "nameOf" | "settingsAt" | "turnLimitAt" | "signInsAt" | "loginLanded" | "offerOf" | "backendOf" | "forkingBackend" | "forward" | "placeFor" | "defaultPlace" | "markUsed" | "markDefaultIfNone"> {
+export function linkDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, setupArea: PlaceSetupArea, viewArea: PlaceViewsArea): Pick<PlaceDoor, "answerChallenge" | "join" | "auth" | "hostKey" | "prove" | "attach" | "link" | "channel" | "load" | "nameOf" | "settingsAt" | "turnLimitAt" | "signInsAt" | "loginLanded" | "keyLanded" | "ghThere" | "offerOf" | "backendOf" | "forkingBackend" | "forward" | "placeFor" | "defaultPlace" | "markUsed" | "markDefaultIfNone"> {
   const { opts, store, wiring, clockNow, seenEveryMs, live, kept, signInsHere, backends, forwards, asking, emit } = ctx;
   const {
     records, wiredProvider, providerIds, providerBackend, recordOf, settingsOf, settingsHeld, awaiting, holdBack,
-    defaultId, inTurn, markDefault, markHeld, challenge, signedRefusal, writeSeen, change,
+    defaultId, inTurn, markDefault, markHeld, challenge, signedRefusal, writeSeen, change, withCap, rowIds,
   } = recordArea;
-  const { channels, waiting, closedAt, woken, setting, settingNow, foldersOf, syncSoon, startedOrSaid, linkTo } = setupArea;
-  const { pendingRecords, putPending, flooring, floorOnce, takenBack, backendFrom, tunnelled, cut, joining, joined, forget } = viewArea;
+  const { channels, waiting, closedAt, woken, setting, settingNow, foldersOf, syncSoon, startedOrSaid, linkTo, landers, here } = setupArea;
+  const { pendingRecords, putPending, flooring, floorOnce, takenBack, backendFrom, tunnelled, cut, joining, joined, forget, joinedRow } = viewArea;
   let tunnelSeq = 0;
+
+  /** A sign-in finished outside the setup lands the setup's own row for it, one set aside or failed, under the label
+   * it had. A setup or a sync still writing that computer's rows lands it among them, since it writes them over the
+   * record whole. */
+  const landSignIn = async (placeId: string, row: LandedRow): Promise<void> => {
+    const run = landers.get(placeId);
+    let landed = false;
+    const moved =
+      run !== undefined
+        ? (landed = await run(row))
+          ? await recordOf(placeId)
+          : undefined
+        : await change(placeId, now => {
+            if (now.applied === undefined) return undefined;
+            const rows = landedOn(now.applied.rows, row);
+            if (rows === undefined) return undefined;
+            landed = true;
+            return { ...now, applied: { ...now.applied, rows } };
+          });
+    if (moved !== undefined && landed) emit({ type: "place.changed", place: await withCap(joinedRow(moved, (await markHeld()) ?? HERE_PLACE_ID), await rowIds()) });
+  };
 
   return {
     answerChallenge: challenge,
@@ -265,11 +293,31 @@ export function linkDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, se
 
     async loginLanded(placeId, agent) {
       const file = sharedLoginFile(agent);
-      if (file === undefined) return;
       await change(placeId, now => {
         const listed = now.report.logins;
-        return listed === undefined || listed.includes(file) ? undefined : { ...now, report: { ...now.report, logins: [...listed, file].sort() } };
+        return file === undefined || listed === undefined || listed.includes(file) ? undefined : { ...now, report: { ...now.report, logins: [...listed, file].sort() } };
       });
+      await landSignIn(placeId, { id: agent === GITHUB_CLI ? GITHUB_ROW : signInRowId(agent), outcome: "installed", note: SIGNED_IN_THERE });
+    },
+
+    async keyLanded(agent) {
+      if (vaultSignIn(agent, opts.vault?.() ?? {}) !== "vault-key") return;
+      for (const record of await records()) await landSignIn(record.id, { id: signInRowId(agent), outcome: "present", note: copiedFromLine(here()) });
+    },
+
+    async ghThere(placeId, stage) {
+      const provisioner = wiring.provision;
+      const record = await recordOf(placeId);
+      const home = record?.report.login["HOME"];
+      if (provisioner === undefined || record === undefined || home === undefined) return [];
+      // The GitHub step's own road, planned alone: picks naming gh among their CLIs plan it there instead.
+      const picks = { ...(record.picks ?? RecipeFile.parse({ name: record.name })), clis: {}, configs: { github: { signin: "machine" as const } } };
+      const plan = await provisioner.setup(picks, { home }, new Set(["github"]));
+      const rows = await provisioner.step(new PlaceMachine(linkTo(placeId), { id: record.name, home }), plan, "github", newSetupRun(), stage, { home });
+      // On the record as the setup's own gh would be, so the undo of a recipe that drops GitHub takes it off again; the
+      // engine stamps no step, and a later run keeps only the rows of the steps that ended.
+      for (const row of rows) if (row.outcome === "installed") await landSignIn(placeId, { ...row, step: "github" });
+      return rows;
     },
 
     offerOf: placeId => kept.get(placeId)?.backendFacts?.offer ?? (providerIds().includes(placeId) ? placeId : undefined),

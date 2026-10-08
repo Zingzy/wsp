@@ -254,6 +254,7 @@ import { backstopMs, createIdlePolicy } from "./idle.js";
 import { connectDaemon, type DaemonReach } from "./reach.js";
 import { POLL_INTERVAL_MS, createStatusTracker, machineStateOf, phaseLeavingGone, providerSaid, type StatusApi, type StatusListOptions, type StatusWatchOptions } from "./status.js";
 import { makeDevices, type DeviceDoor, type ScopedRoad } from "./devices.js";
+import { servableOptions } from "./places/helpers.js";
 import { makePlaceDoor, NO_PLACE_DOOR, PlaceForksNowhereError, PlaceProvisioningError, type PlaceDoor, type PlaceRecord, type PlaceWiring } from "./places.js";
 import type { BlobMark, Store } from "./store.js";
 import { memoryGitHubCache, type GitHubCache } from "./github-cache.js";
@@ -610,7 +611,7 @@ function runtimeCore(ctx: RuntimeContext, opts: RuntimeOptions): RuntimeCore {
         signInLine: (placeId, agent) => ctx.agentsRead.signInLine({ placeId }, { agent }),
         // The app's own sign-in road on that computer, read as a setup's row waiting on the person.
         signIn: async (placeId, agent, emit) => {
-          const handle = await ctx.agentsRead.signIn({ placeId }, { agent }, emit);
+          const handle = await ctx.agentsRead.signIn({ placeId }, { agent, toolThere: true }, emit);
           return {
             leave: () => handle.leave(),
             stop: () => {
@@ -624,11 +625,11 @@ function runtimeCore(ctx: RuntimeContext, opts: RuntimeOptions): RuntimeCore {
           };
         },
         // The add's own road for a folder seeding a project on that computer, with what the pick keeps.
-        addFolder: async (placeId, key, folder) => {
+        addFolder: async (placeId, key, folder, stage) => {
           const source = folder.from.replace(/^~(?=\/|$)/, homedir());
           const plan = await ctx.projectsDoor.seedPlan(source);
           const seed = seedChoiceFrom(plan, folder.keep, []);
-          const project = await ctx.projectsDoor.add({ source, on: placeId, ...(folder.name !== undefined ? { name: folder.name } : {}), seed });
+          const project = await ctx.projectsDoor.add({ source, on: placeId, ...(folder.name !== undefined ? { name: folder.name } : {}), seed, ...(stage !== undefined ? { report: stage } : {}) });
           if (folder.icon !== undefined || folder.hue !== undefined) {
             await ctx.preferences.set({ projectLook: { [project.id]: { ...(folder.icon !== undefined ? { icon: folder.icon } : {}), ...(folder.hue !== undefined ? { hue: folder.hue } : {}) } } });
           }
@@ -883,7 +884,8 @@ function runtimeOf(ctx: RuntimeContext): Runtime {
     slates: ctx.slates,
     devices: deviceDoor,
     ...(placeDoor !== undefined ? { places: placeDoor } : {}),
-    ...(opts.recipes !== undefined ? { recipes: opts.recipes } : {}),
+    // An agent's sign-in from the vault is offered only where the vault can serve it, read at every ask.
+    ...(opts.recipes !== undefined ? { recipes: { ...opts.recipes, options: async folders => servableOptions(await opts.recipes!.options(folders), opts.vault?.() ?? {}) } } : {}),
     hereChannel: async onEvent => ctx.heldToOwner(HERE_PLACE_ID, await ctx.channelOver(await ctx.localRoad(), THIS_COMPUTER, onEvent)),
     agents: { ...ctx.agentsRead, homesHere: ctx.homesHere },
     preferences: ctx.preferences,

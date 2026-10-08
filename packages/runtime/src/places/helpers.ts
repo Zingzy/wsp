@@ -9,6 +9,7 @@ import {
   importantFailures,
   waitLine,
   plural,
+  GITHUB_ROW,
   type PlaceApplied,
   type PlaceSetup,
   type PlaceProvisionRow,
@@ -17,6 +18,7 @@ import {
   type SetupEnd,
   type AgentSignInState,
   type PlaceReport,
+  type RecipeOptions,
 } from "@wsp/protocol";
 import { SSH_STORE_VARS, plainPath, type ProvisionPlan, type ToolInstall } from "@wsp/engine";
 import { CATALOG_AGENTS, keyEnvOf, mintsToken, sharedFileIn, sharedOn } from "@wsp/catalog";
@@ -25,6 +27,18 @@ import type { PlaceForward } from "../place-forward.js";
 import type { DaemonReach } from "../reach.js";
 import type { RecipeChange } from "../recipe-sync.js";
 import type { PlaceWiring, PlaceInstalled } from "./types.js";
+
+/** A row landed from outside a run. A sign-in the person finished takes the place of the skipped or failed row under its
+ * id, keeping that row's label and step; a row carrying its own label, a tool a sign-in put on, goes on where none stood. */
+export type LandedRow = Omit<PlaceProvisionRow, "label"> & { label?: string };
+
+/** The rows with that one landed, or undefined where it lands nothing. */
+export function landedOn(rows: readonly PlaceProvisionRow[], row: LandedRow): PlaceProvisionRow[] | undefined {
+  const stood = rows.find(r => r.id === row.id);
+  if (stood === undefined) return row.label === undefined ? undefined : [...rows, { ...row, label: row.label }];
+  if (stood.outcome !== "skipped" && stood.outcome !== "failed") return undefined;
+  return rows.map(r => (r === stood ? { ...row, label: stood.label, ...(stood.step === undefined ? {} : { step: stood.step }) } : r));
+}
 
 /** One promise with a bound of its own: a place that took a frame and went quiet fails the call rather than
  * leaving a road waiting on a socket nothing is coming back on. */
@@ -133,6 +147,13 @@ export function vaultSignIn(agentId: string, vault: Readonly<Record<string, stri
   const keyEnv = signIn === undefined ? undefined : keyEnvOf(signIn);
   return token !== undefined || (keyEnv !== undefined && vault[keyEnv] !== undefined) ? "vault-key" : "none";
 }
+
+/** The picks a computer can be set up from, as this host can serve them: an agent's sign-in copied from the vault is
+ * offered only where the vault holds its token or key, since a setup that picks it with none fails at that row. */
+export const servableOptions = (options: RecipeOptions, vault: Readonly<Record<string, string>>): RecipeOptions => ({
+  ...options,
+  agents: options.agents.map(a => (a.signins.includes("vault") && vaultSignIn(a.id, vault) !== "vault-key" ? { ...a, signins: a.signins.filter(w => w !== "vault") } : a)),
+});
 
 /** How long between writes of a linked place's last seen. */
 export const SEEN_EVERY_MS = 60_000;
@@ -253,10 +274,6 @@ export const UNDO_MS = 300_000;
 export const SIGN_IN_SLACK_MS = 5_000;
 /** How long gh's own status gets on that computer. */
 export const GITHUB_MS = 30_000;
-/** The row the GitHub sign-in stands on, and the command its sign-in on that computer runs: gh's own. */
-export const GITHUB_ROW = "github";
-export const GITHUB_CLI = "gh";
-
 /** The plan with some CLIs first among them, in the order given, each behind the steps it needs so every step still
  * comes after its own: gh, which GitHub and the folders behind it wait on, a CLI whose hook the folders wait on, and
  * the CLIs the servers run, so none of them waits on every CLI. */

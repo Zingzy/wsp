@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // A machine's or a step's state as one icon in its ink with the sentence on
-// its tooltip, never a word in a cell: the thread tiles' marks (the crab while
-// it works, the check once done, the question while it needs the person, the
-// alert once it failed) and two quiet ones of its own for a machine that is
-// pending or offline. Ready draws nothing, as a resting thread does.
+// its tooltip, never a word in a cell: the plain spinner while it works (the
+// crab is an agent at work, and a machine or a setup step is not one), the
+// check once done, the question while it needs the person, the alert once it
+// failed, and two quiet ones of its own for a machine that is pending or
+// offline. Ready draws nothing, as a resting thread does.
 import { CircleAlertIcon, CircleCheckIcon, CircleDashedIcon, MessageCircleQuestionIcon, UnplugIcon, type LucideIcon } from "lucide-react";
-import { Crab } from "./Crab.js";
+import { Spinner } from "../ui/spinner.js";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip.js";
 import { cn } from "../../lib/utils.js";
 import type { MarkState } from "./markState.js";
@@ -38,7 +39,7 @@ export function StateMark({ state, why, className }: { state: MarkState; why?: s
   const label = why ?? MARK_WORDS[state];
   const inner =
     state === "working" ? (
-      <Crab className="text-status-working" />
+      <Spinner aria-hidden aria-label={undefined} role={undefined} className="size-3.5 shrink-0 text-muted-foreground" />
     ) : (
       (() => {
         const Glyph = MARKS[state].glyph;

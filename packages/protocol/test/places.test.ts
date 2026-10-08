@@ -530,6 +530,19 @@ describe("the setup on a computer you own", () => {
     expect(setupLines("spoo", { ...done, state: "failed", said: "spoo is not connected" }, applied([])).at(-1)).toBe("spoo: spoo is not connected");
   });
 
+  it("prints under a row that did not land what to do about it, then the command line's own line for it", () => {
+    const failed = row({ id: "signins/codex", label: "Codex", outcome: "failed", note: "zingzy's MacBook Pro has no Codex sign-in to copy", fix: "Sign in on spoo instead." });
+    const skipped = row({ id: "github", label: "GitHub", outcome: "skipped", note: "skipped; gh is not signed in there" });
+    const lines = setupLines("spoo", done, applied([failed, skipped]), r => (r.id === "signins/codex" ? "wsp add spoo --sign-in codex" : r.id === "github" ? "wsp add spoo --sign-in gh" : undefined));
+    expect(lines.slice(1)).toEqual([
+      "  x Codex: zingzy's MacBook Pro has no Codex sign-in to copy",
+      "    Sign in on spoo instead.",
+      "    wsp add spoo --sign-in codex",
+      "  - GitHub: skipped; gh is not signed in there",
+      "    wsp add spoo --sign-in gh",
+    ]);
+  });
+
   it("says in one sentence why a workspace cannot be made there yet, naming the step it is on", () => {
     expect(placeProvisioningLine("spoo", "clis")).toBe("spoo is still being set up (the CLIs); wsp computers shows it, and a workspace there can be made once it is done");
     expect(placeProvisioningLine("spoo")).toBe("spoo is still being set up; wsp computers shows it, and a workspace there can be made once it is done");

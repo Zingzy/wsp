@@ -4,7 +4,7 @@
 // sign-in roads, and the lines under the list. Each kind's own rows, detail
 // and acts are its module under kinds/.
 import { LogInIcon, PencilIcon, XIcon, type LucideIcon } from "lucide-react";
-import { agentName, catalogEntry, hasLogin, loginIdOf, mintsToken, serverSignInRoad } from "@wsp/catalog";
+import { agentName, catalogEntry, hasLogin, loginIdOf, mintsToken, serverSignInRoad, signInRoadOf } from "@wsp/catalog";
 import { outcomeWord } from "../../settings/places.js";
 import { agentOfRow, type AgentRow, type AgentsProject, type AgentsReport, type AgentsTarget, type McpRow, type PageReach, type PlaceProvisionRow, type SealedImage, type ServerAdd, type ServerToolsAnswer, type SignInRoad, type SkillHit, type SkillPreview, type SkillRow } from "@wsp/protocol";
 
@@ -201,11 +201,12 @@ export interface ServerTools {
   list(row: McpRow, refresh?: boolean): void;
 }
 
-/** How a Sign in goes where it was pressed: run in a watched pty on that computer, a token or key pasted into this
- * host's vault under the line that mints it, a line the person runs in their terminal, or typed into a task's own
- * terminal on this computer. Worked out here off the report and the catalog, so every row reads one rule. */
+/** How a Sign in goes where it was pressed: run in a watched pty on that computer, or in one the person's own
+ * terminal attaches to in place (`terminal`), a token or key pasted into this host's vault under the line that mints
+ * it, a line the person runs in their terminal, or typed into a task's own terminal on this computer. Worked out here
+ * off the report and the catalog, so every row reads one rule. */
 export type SignInStart =
-  | { readonly kind: "run"; readonly agent: string; readonly server?: string; readonly finish?: ServerFinish; readonly pastes?: boolean }
+  | { readonly kind: "run"; readonly agent: string; readonly server?: string; readonly finish?: ServerFinish; readonly pastes?: boolean; readonly terminal?: boolean }
   | { readonly kind: "vault"; readonly agent: string; readonly mint?: string; readonly word: "token" | "key" }
   | { readonly kind: "copy"; readonly line: string; readonly why?: string }
   | { readonly kind: "terminal"; readonly line: string };
@@ -214,9 +215,9 @@ export type SignInStart =
  * over the host's callback relay, or by the address the browser landed on pasted back. */
 export type ServerFinish = "callback" | "address";
 
-/** A sign-in as its detail draws it while it stands. */
+/** A sign-in as its detail draws it while it stands; `pty` is the terminal on that computer one run in place is in. */
 export type SignInFlow =
-  | { readonly kind: "run"; readonly state: "running" | "waiting" | "failed"; readonly finish?: ServerFinish; readonly pastes?: boolean; readonly url?: string; readonly code?: string; readonly paste?: boolean; readonly said?: string }
+  | { readonly kind: "run"; readonly state: "running" | "waiting" | "failed"; readonly finish?: ServerFinish; readonly pastes?: boolean; readonly url?: string; readonly code?: string; readonly paste?: boolean; readonly said?: string; readonly pty?: { readonly placeId: string; readonly ptyId: string } }
   | { readonly kind: "vault"; readonly agent: string; readonly mint?: string; readonly word: "token" | "key"; readonly saving?: boolean; readonly refused?: string }
   | { readonly kind: "copy"; readonly line: string; readonly why?: string };
 
@@ -378,14 +379,22 @@ export const editImageAct = (ctx: RowsContext): RowAct => ({ id: "edit-image", l
 /** An act whose road is a later build: drawn where it will stand, held with the reason. */
 export const notYet = (id: string, label: string, icon: LucideIcon, over: Partial<RowAct> = {}): RowAct => ({ id, label, icon, hover: AGENTS_LIST_WORDS.notYet, ...over });
 
+/** The sign-in road of a catalog row no report has read there, such as gh, by the rule the host's reader words it. */
+export const catalogSignInRow = (id: string): Pick<AgentRow, "id" | "signInRoad"> | undefined => {
+  const signIn = catalogEntry(id)?.signIn;
+  return signIn === undefined ? undefined : { id, signInRoad: signInRoadOf(signIn) };
+};
+
 /** How an agent's Sign in goes where the list stands; nothing for an agent with no sign-in. */
-export function agentSignInStart(row: AgentRow, ctx: RowsContext): SignInStart | undefined {
+export function agentSignInStart(row: Pick<AgentRow, "id" | "signInRoad">, ctx: RowsContext): SignInStart | undefined {
   const signIn = catalogEntry(row.id)?.signIn;
   if (row.signInRoad === "token") return { kind: "vault", agent: row.id, word: "token", ...(signIn !== undefined && mintsToken(signIn) ? { mint: signIn.mint } : {}) };
   if (row.signInRoad === "key") return { kind: "vault", agent: row.id, word: "key" };
   if (row.signInRoad === "terminal") {
     if (ctx.typeInTerminal !== undefined && signIn !== undefined && hasLogin(signIn)) return { kind: "terminal", line: signIn.login };
-    return { kind: "copy", line: ctx.where === "box" && ctx.computer !== undefined ? `wsp add ${ctx.computer} --sign-in ${row.id}` : `wsp agents signin ${row.id}` };
+    // On a computer the person added, its login runs there in a terminal drawn in place.
+    if (ctx.where === "box") return { kind: "run", agent: row.id, terminal: true };
+    return { kind: "copy", line: `wsp agents signin ${row.id}` };
   }
   return row.signInRoad === "none" ? undefined : { kind: "run", agent: row.id, ...(row.signInRoad === "code" ? { pastes: true } : {}) };
 }

@@ -373,8 +373,8 @@ export interface PlaceRecording {
    * it, as the hand sign-in plans it. */
   signInLine?(placeId: string, agent: string): Promise<SignInLine>;
   /** Records one folder of this computer's as a project on that computer, seeded with what its pick keeps, by the
-   * add's own road. Answers the folder's row. Absent, a folder fails its row. */
-  addFolder?(placeId: string, key: string, folder: RecipeFile["folders"][string]): Promise<HeldRow>;
+   * add's own road, each line it says as it goes to `stage`. Answers the folder's row. Absent, a folder fails its row. */
+  addFolder?(placeId: string, key: string, folder: RecipeFile["folders"][string], stage?: (line: string) => void): Promise<HeldRow>;
   /** The remote a folder of this computer's clones from, read here; nothing where it has none. */
   folderRemote?(folder: RecipeFile["folders"][string]): Promise<string | undefined>;
   /** Takes the project a folder became on that computer off this host's list, by its id, the folder itself left
@@ -514,6 +514,13 @@ export interface PlaceDoor {
   /** An agent's own sign-in on that computer landed, as the tool's status there said: the file its shared login
    * writes is taken as listed, so every word read before that computer's next report says signed in. */
   loginLanded(placeId: string, agent: string): Promise<void>;
+  /** An agent's token or key landed in this host's vault: every computer whose sign-in row for that agent had
+   * nothing to copy now reads it copied, since every turn there is handed it. */
+  keyLanded(agent: string): Promise<void>;
+  /** gh put on that computer for a GitHub sign-in started from its row, where the setup put none, by the GitHub
+   * step's own road; one already there reads present. Answers the rows, which go on no record, so a failed install
+   * is said on that sign-in alone. */
+  ghThere(placeId: string, stage: ProvisionStage): Promise<PlaceProvisionRow[]>;
   /** Which backend that computer offers, by the id of the row it serves; nothing until it has said. What a fork
    * standing there was forked by, so a row names a real provider and not the one this host happens to be wired
    * for. Answered without a read, since every view of every workspace asks it. */
