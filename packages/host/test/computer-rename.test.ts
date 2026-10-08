@@ -16,6 +16,8 @@ import { report } from "../../runtime/test/place-join.js";
 import { projectOn } from "../../runtime/test/stub-backend.js";
 import { WsClient } from "../../runtime/test/ws-client.js";
 import { CLI_VERBS, runVerb, type HostClient } from "../src/verbs.js";
+import { copyKey } from "../../runtime/src/runtime.js";
+import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { captured } from "./verbs-fixture.js";
 
 const dir = mkdtempSync(join(tmpdir(), "wsp-rename-"));
@@ -240,5 +242,20 @@ describe("wsp computers set --ssh", () => {
     expect(run.errors.join("\n")).toContain(refusalLine(said.happened, said.fix));
     expect(road.asked.map(a => a.ssh)).toEqual(["root@silent"]);
     expect(await roadOf(store, spoo.placeId)).toEqual({ ssh: "root@spoo", back: { boxPort: 13758 } });
+  });
+});
+
+describe("the computer a thread row names", () => {
+  it("is the name wsp projects prints, a cloud's included", async () => {
+    const { store } = await hostWithSpoo();
+    await store.put("goldens", copyKey("solari", "default"), SEALED_GOLDEN);
+    const project = await projectOn(ctx.runtime!, "solari", undefined, { name: "cloud-api" });
+    const made = await ctx.runtime!.workspaces.create({ project: project.id, name: "cloudwork", golden: "snap_g" });
+    await (await ctx.runtime!.sessions.start(made.id, { prompt: "look", harness: "claude" })).finished;
+    const threads = (await wsp("threads", "--json")).json()["threads"] as { workspaceId: string; computerName: string }[];
+    const row = (await wsp("projects")).lines.join("\n").split("\n").find(l => l.includes(project.id))!.split(/ {2,}/);
+    expect(row[2]).toBe("Solari");
+    expect(threads.filter(t => t.workspaceId === made.id).map(t => t.computerName)).toEqual(["Solari"]);
+    expect((await ctx.runtime!.sessions.list()).find(r => r.workspaceId === made.id)).toMatchObject({ project: { id: project.id, name: "cloud-api" }, computerName: "Solari" });
   });
 });

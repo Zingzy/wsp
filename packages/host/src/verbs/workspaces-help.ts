@@ -105,9 +105,10 @@ import {
   START_WORDS,
   StartResult,
   type ReviewVerdict,
+  tableName,
 } from "@wsp/protocol";
 import { gitRootOf } from "../repo-root.js";
-import { type HostClient, pushedFrames, type Out, hostPlatform, flagFor, type SshAsked, type VerbContext, tableName, absolutePath, accessWordOf, under, otherVersion, threadIdOf, openedThreadSaid } from "./client.js";
+import { type HostClient, pushedFrames, type Out, hostPlatform, flagFor, type SshAsked, type VerbContext, absolutePath, accessWordOf, under, otherVersion, threadIdOf, openedThreadSaid } from "./client.js";
 import type { Turn } from "./turns-help.js";
 
 export async function workspaces(client: HostClient): Promise<WorkspaceOut[]> {
@@ -162,17 +163,17 @@ export type ThreadRow = ThreadView & { projectName: string; folder: string; bran
 /** The sidebar's rows with the project, the folder, the branch and the computer each thread is on, within one
  * project when named, as every director lists them. The folder is where the thread's latest turn ran; its branch is
  * read off git where that folder is on this computer, since an agent may switch it, else off the worktree's record.
- * The names come off one reading of the records and one of the computers, so a table is never half of two. */
+ * The project and the computer ride the session rows, since a lead's tree reaches rows whose workspace it may not read. */
 export async function threadRows(client: HostClient, within?: string): Promise<ThreadRow[]> {
   const all = await workspaces(client);
-  const rows = (await threads(client)).filter(t => {
+  const { sessions } = await client.request<{ sessions: SessionView[] }>("sessions.list", {});
+  const stood = new Map(sessions.map(s => [s.workspaceId, s] as const));
+  const rows = foldThreads(sessions).filter(t => {
     if (within === undefined) return true;
     const w = all.find(x => x.id === t.workspaceId);
-    return w !== undefined && (w.project.id === within || w.project.name === within || w.id === within || w.name === within);
+    const project = stood.get(t.workspaceId)?.project;
+    return project?.id === within || project?.name === within || (w !== undefined && (w.id === within || w.name === within));
   });
-  // The names a person gave their computers are the person's to read: a caller the host answers as a thread is
-  // refused that list, and its rows carry the computer's id instead of falling over.
-  const named = rows.length === 0 ? new Map<string, string>() : await placeNames(client).catch(() => new Map<string, string>());
   const branches = new Map<string, string>();
   return rows.map(t => {
     const workspace = all.find(w => w.id === t.workspaceId);
@@ -182,10 +183,10 @@ export async function threadRows(client: HostClient, within?: string): Promise<T
     if (!branches.has(folder)) branches.set(folder, (isLocalWorkspace(workspace ?? {}) ? branchHere(folder) : undefined) ?? (workspace?.worktree?.gone === true ? undefined : workspace?.worktree?.branch) ?? "");
     return {
       ...t,
-      projectName: workspace?.project.name ?? "",
+      projectName: stood.get(t.workspaceId)?.project?.name ?? "",
       folder,
       branch: branches.get(folder)!,
-      computerName: workspace === undefined ? "" : (named.get(workspace.project.computer) ?? workspace.project.computer),
+      computerName: stood.get(t.workspaceId)?.computerName ?? "",
     };
   });
 }
