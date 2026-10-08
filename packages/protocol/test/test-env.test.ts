@@ -5,10 +5,11 @@
 // exported saw unrelated cases fail. So a test hands the environment it means
 // into the code under test, and the only wsp variables a test may read off its
 // own process are the gates that decide whether the file runs at all.
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import * as protocol from "../src/index.js";
 import { ROOT, sourceFiles, testFiles } from "./source-files.js";
 import { GATES, RUN_HOME, RUN_TMPDIR, TEST_ENV } from "../../../vitest.env.js";
@@ -133,5 +134,24 @@ describe("the environment every test runs under", () => {
     // reads the process's own environment would dial that host as that thread.
     const own = new Set([...Object.keys(GATES), ...Object.keys(TEST_ENV)]);
     expect(Object.keys(process.env).filter(name => name.startsWith("WSP_") && !own.has(name))).toEqual([]);
+  });
+
+  it.skipIf(process.env.WSP_LIVE === "1" || process.env.WSP_RENDER === "1")("fails the run naming an agent's own command a case ran off the PATH it inherits", async () => {
+    // The guard loaded again for a run of its own, under a temp folder no run is named for, so the call it fails over
+    // is never this run's.
+    const outer = mkdtempSync(join(tmpdir(), "agent-guard-"));
+    vi.stubEnv("TMPDIR", outer);
+    vi.stubEnv("PATH", process.env["PATH"]);
+    try {
+      vi.resetModules();
+      const { default: setup } = await import("../../../vitest.agent-store.js");
+      const teardown = setup();
+      expect(spawnSync("codex", ["--version"], { encoding: "utf8" }).status).toBe(127);
+      expect(teardown).toThrow(/this run ran 1 agent command off the suite's PATH, .*\n  codex --version  \(HOME /);
+    } finally {
+      vi.unstubAllEnvs();
+      vi.resetModules();
+      rmSync(outer, { recursive: true, force: true });
+    }
   });
 });
