@@ -84,7 +84,7 @@ import { useComputerName } from "../../sidebar/workspaceRows";
 import { useThreadFolder, useThreadStart } from "../../files/root";
 import { useDaemonWire } from "../../files/wire";
 import { DaemonOpError, fsFiles, gitPrList } from "../../terminal/daemon-fs";
-import { useAgentsReport } from "../agents/useAgentsReport";
+import { threadAgentsTarget, useAgentsReport } from "../agents/useAgentsReport";
 import { RefusalSlot } from "../../settings/sheetParts";
 import { addNotice } from "../../notices/store";
 import { collapseExpandedComposerCursor, detectComposerTrigger, enterSends, expandCollapsedComposerCursor, insertComposerBlock, isCollapsedCursorAdjacentToInlineToken, replaceTextRange } from "../../composer-logic";
@@ -431,7 +431,8 @@ export function ChatComposer({
   const checkout = useComposerList(wire, listed && trigger?.kind === "path" ? `${workspaceId}\0files\0${folder}` : null, session, () => inPersonsWords(fsFiles(wire!, folder!), computer));
   const references = useComposerList(api, trigger?.kind === "pull-request" ? itemsKey : null, session, readItems, HOST_LIST_HOLD_MS);
   const skillsWanted = onStart === undefined && (trigger?.kind === "slash-command" || trigger?.kind === "skill");
-  const skills = useAgentsReport(skillsWanted ? { workspaceId } : null).report?.skills;
+  const places = useStore(s => s.places);
+  const skills = useAgentsReport(skillsWanted && workspace !== null ? threadAgentsTarget(workspace, places) : null).report?.skills;
   const groups = useMemo<ComposerCommandGroup[]>(() => {
     if (trigger === null || unavailable !== null) return [];
     switch (trigger.kind) {

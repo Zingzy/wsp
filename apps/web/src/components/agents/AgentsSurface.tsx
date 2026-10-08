@@ -2,10 +2,10 @@
 // The right panel's Agents tab: what a task can use, read on its own machine,
 // drawn by the agents panel. The first card names the computer, whose name
 // opens that computer's page where everything on it is managed. A task on a
-// box offers no act of its own, since what is installed is that box's; a fork
-// at a cloud is a copy of the image, so its one act is Edit image.
+// box reads that box for its project and acts on the box as its page does; a
+// fork at a cloud is a copy of the image, so its one act is Edit image.
 import { useEffect, useState } from "react";
-import { HERE_PLACE_ID, isLocalWorkspace, type AbsentComputer } from "@wsp/protocol";
+import { HERE_PLACE_ID, isLocalWorkspace, type AbsentComputer, type AgentsTarget } from "@wsp/protocol";
 import { useAbsentComputer, useStore, useWorkspace } from "../../protocol/store.js";
 import { openImageRecipe } from "../../settings/openAt.js";
 import { hereName, placeName, placeOf } from "../../settings/places.js";
@@ -14,7 +14,7 @@ import { openPanelTerminalWith } from "../../shell/shellCommands.js";
 import { NOT_ANSWERING_AFTER_MS, saysNotAnswering, type AgentsWhere } from "./agentsRows.js";
 import { AgentsPanel } from "./AgentsPanel.js";
 import { useAgentActs } from "./useAgentActs.js";
-import { useAgentsReport } from "./useAgentsReport.js";
+import { threadAgentsTarget, useAgentsReport } from "./useAgentsReport.js";
 import { useServerTools } from "./useServerTools.js";
 import { useServerActs } from "./useServerActs.js";
 import { useSkillActs } from "./useSkillActs.js";
@@ -49,14 +49,17 @@ export function AgentsSurface({ workspaceId }: { workspaceId: string }) {
   const places = useStore(s => s.places);
   const lastSeenAt = workspace === null ? undefined : placeOf(places, workspace)?.lastSeenAt;
   const absent = useLastingAbsence(workspaceId, lastSeenAt);
-  const target = workspace === null ? null : { workspaceId };
-  const read = useAgentsReport(target);
-  const tools = useServerTools(target);
-  const acts = useAgentActs(target);
-  const skills = useSkillActs(target);
-  const servers = useServerActs(target);
   const place = workspace === null ? undefined : placeOf(places, workspace);
-  const where: AgentsWhere = workspace === null || isLocalWorkspace(workspace) ? "here" : place?.kind === "computer" ? "box-task" : "fork";
+  const readOn = workspace === null ? null : threadAgentsTarget(workspace, places);
+  const box = readOn !== null && "placeId" in readOn ? readOn.placeId : undefined;
+  const where: AgentsWhere = workspace === null || isLocalWorkspace(workspace) ? "here" : box !== undefined ? "box" : "fork";
+  // A box's own target, the one its page acts on, so a sign-in started here is the one that page shows.
+  const actsAt: AgentsTarget | null = readOn === null || box === undefined ? readOn : { placeId: box };
+  const read = useAgentsReport(readOn);
+  const tools = useServerTools(actsAt);
+  const acts = useAgentActs(actsAt);
+  const skills = useSkillActs(actsAt);
+  const servers = useServerActs(actsAt);
   const cloud = place === undefined ? undefined : placeName(place);
   const computer = where === "here" ? hereName(places) : where === "fork" && workspace !== null ? PANEL_WORDS.fork(workspace.name, cloud ?? "") : (cloud ?? "");
   const placeId = place?.id ?? (where === "here" ? HERE_PLACE_ID : undefined);
@@ -74,7 +77,7 @@ export function AgentsSurface({ workspaceId }: { workspaceId: string }) {
         read={read}
         ctx={{
           where,
-          ...(where === "box-task" && cloud !== undefined ? { computer: cloud } : {}),
+          ...(where === "box" && cloud !== undefined ? { computer: cloud } : {}),
           heldWhy: absent?.away ?? null,
           ...(where === "fork" && placeId !== undefined ? { editImage: () => openImageRecipe(placeId) } : {}),
           ...(tools === undefined ? {} : { tools }),

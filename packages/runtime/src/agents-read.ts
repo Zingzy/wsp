@@ -283,9 +283,8 @@ export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): {
     }
     return {
       signInId,
-      leave: () => {
-        if (run.followers.delete(emit) && run.followers.size === 0) run.stop();
-      },
+      // A view closing is no answer to the sign-in: the run goes on to its cap, and a later start joins it.
+      leave: () => void run.followers.delete(emit),
     };
   };
   /** Where a skill or a server there is read or written; a napping workspace is never woken for one. */

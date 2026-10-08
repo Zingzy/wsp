@@ -306,7 +306,7 @@ describe("the sign-ins on a computer or a workspace", () => {
     expect(changed).toEqual([{ placeId: "pl_1" }, { placeId: "pl_1" }, { workspaceId: "ws_1" }]);
   });
 
-  it("refuse a sign-in the host will not plan before any channel opens, never wake a napping workspace, and stop one whose asker went", async () => {
+  it("refuse a sign-in the host will not plan before any channel opens, never wake a napping workspace, and keep one whose asker went going until it ends", async () => {
     const t = acting({ now: "running" });
     await expect(t.api.signIn({ workspaceId: "ws_1" }, { agent: "opencode" }, () => {})).rejects.toThrow(/asks you to pick/);
     expect(t.ch.frames).toEqual([]);
@@ -317,10 +317,13 @@ describe("the sign-ins on a computer or a workspace", () => {
     const { leave } = await t.api.signIn({ workspaceId: "ws_1" }, { agent: "codex" }, e => void seen.push(e));
     leave();
     await tick();
+    expect(t.ch.shut).toBe(0);
+    t.finish();
+    await tick();
     expect(t.ch.shut).toBe(1);
   });
 
-  it("run one sign-in per agent or server on a target: a second start joins the running one, which ends once nobody follows it", async () => {
+  it("run one sign-in per agent or server on a target: a second start joins the running one, which goes on with nobody following it until it ends or is stopped", async () => {
     const t = acting({ now: "running" });
     const a: Record<string, unknown>[] = [];
     const b: Record<string, unknown>[] = [];
@@ -341,12 +344,17 @@ describe("the sign-ins on a computer or a workspace", () => {
     // Another server, or another target, is a sign-in of its own.
     const other = await t.api.signIn({ workspaceId: "ws_1" }, { agent: "claude", server: "notion" }, () => {});
     expect(other.signInId).not.toBe(first.signInId);
-    other.leave();
-    first.leave();
-    second.leave();
+    for (const left of [other, first, second, third]) left.leave();
     await tick();
-    expect(t.ch.shut).toBe(1);
-    third.leave();
+    expect(t.ch.shut).toBe(0);
+    // A start after everyone left joins the run still going, shown where it stands.
+    const d: Record<string, unknown>[] = [];
+    const fourth = await t.api.signIn({ workspaceId: "ws_1" }, { agent: "codex" }, e => void d.push(e));
+    expect(fourth.signInId).toBe(first.signInId);
+    expect(t.planned).toHaveLength(2);
+    expect(d).toEqual([{ type: "agents.signIn", signInId: first.signInId, state: "waiting", url: "https://auth.openai.com/codex/device" }]);
+    t.api.signInStop(first.signInId);
+    t.api.signInStop(other.signInId);
     await tick();
     expect(t.ch.shut).toBe(2);
   });

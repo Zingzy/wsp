@@ -8,10 +8,9 @@ import { agentName, catalogEntry, hasLogin, loginIdOf, mintsToken, serverSignInR
 import { outcomeWord } from "../../settings/places.js";
 import { agentOfRow, type AgentRow, type AgentsProject, type AgentsReport, type AgentsTarget, type McpRow, type PageReach, type PlaceProvisionRow, type SealedImage, type ServerAdd, type ServerToolsAnswer, type SignInRoad, type SkillHit, type SkillPreview, type SkillRow } from "@wsp/protocol";
 
-/** Where the report was read, which decides which acts a row offers: this computer, a joined box, a fork at a cloud
- * (a copy, so every act is the image's), a cloud's own page (the image's rows), or a task standing on a box, whose
- * acts are that box's page's. */
-export type AgentsWhere = "here" | "box" | "fork" | "provider" | "box-task";
+/** Where the report was read, which decides which acts a row offers: this computer, a joined box (its page, or a task
+ * standing on it), a fork at a cloud (a copy, so every act is the image's), or a cloud's own page (the image's rows). */
+export type AgentsWhere = "here" | "box" | "fork" | "provider";
 
 /** How long a computer is silent before the panel calls it not answering: a link that drops and comes straight back
  * never reads as one. */
@@ -122,7 +121,6 @@ export const AGENTS_LIST_WORDS = {
   shim: "through a shim",
   ownHold: "installed by you, not by wsp",
   shimHold: "runs through a shim wsp does not touch",
-  onPage: (computer: string): string => `on ${computer}'s page`,
   startsOnce: "starts the server once",
   on: "on",
   alwaysOn: "always on",
@@ -346,7 +344,7 @@ export interface AgentActs {
   adding(agent: string): boolean;
 }
 
-/** What decides the acts: where the report was read, the computer a task on a box defers to, the away word every act
+/** What decides the acts: where the report was read, the box it was read on, the away word every act
  * is held with while the computer is not answering or the task is paused, and the one road that exists before the
  * acts' own builds: Edit image. */
 export interface RowsContext {
@@ -366,8 +364,8 @@ export interface RowsContext {
   readonly reach?: PageReach;
 }
 
-/** Why no act on the list can be taken: the computer is away, the task is paused, or the acts are another page's. */
-export const heldReason = (ctx: RowsContext): string | undefined => ctx.heldWhy ?? (ctx.where === "box-task" && ctx.computer !== undefined ? AGENTS_LIST_WORDS.onPage(ctx.computer) : undefined);
+/** Why no act on the list can be taken: the computer is away or the task is paused. */
+export const heldReason = (ctx: RowsContext): string | undefined => ctx.heldWhy ?? undefined;
 
 export const holdAll = (acts: RowAct[], ctx: RowsContext): RowAct[] => {
   const why = heldReason(ctx);

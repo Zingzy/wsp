@@ -19,6 +19,7 @@ import { fromRecipe, githubPick } from "../src/settings/add/choices.js";
 import { useAdds } from "../src/settings/adds.js";
 import { useRecipes } from "../src/settings/recipesStore.js";
 import { stepLogs } from "../src/settings/add/setup.js";
+import { forgetSignIns } from "../src/components/agents/useAgentActs.js";
 import { AGENTS_REPORT } from "./fixtures/agents-report.js";
 import { mountSettings, resetSettings, settingsApi, settle } from "./settings-harness.js";
 import { noDaemonApi } from "./fake-daemon-api.js";
@@ -111,6 +112,7 @@ beforeEach(() => {
 afterEach(() => {
   act(() => closeAdd());
   cleanup();
+  forgetSignIns();
 });
 
 describe("Add a computer, from the address to Set up", () => {
@@ -1202,7 +1204,7 @@ describe("Add a computer, the running sheet as the host has it", () => {
     expect(dialog()).toBeNull();
   });
 
-  it("stops a sign-in the host answers only after the sheet closed, rather than leave it waiting on that computer", async () => {
+  it("keeps a sign-in the host answers only after the sheet closed, drawn with Cancel when the sheet opens again", async () => {
     const fake = signInHost({ agentsRead: async () => boxReport() } as Partial<Api>, { late: true });
     const run: PlaceView["applied"] = { hash: "h", at: "x", rows: [{ id: "signins/opencode", label: "OpenCode", outcome: "skipped", step: "signins", note: AT_ITS_TERMINAL }] };
     useStore.setState({ places: [here, placed(DONE, run)] });
@@ -1215,6 +1217,15 @@ describe("Add a computer, the running sheet as the host has it", () => {
     expect(fake.stopped).toEqual([]);
     fake.answer();
     await settle();
+    // A run belongs to the window, not to the sheet that started it: nothing stops it, and the sheet opened again
+    // draws it with the Cancel that does.
+    expect(fake.stopped).toEqual([]);
+    act(() => openSetup(studio.id));
+    await settle();
+    const opencode = (): HTMLElement => dialog()!.querySelector<HTMLElement>("[data-step-row='signins/opencode']")!;
+    expect(opencode().querySelector("[data-k=sign-in-terminal]")).not.toBeNull();
+    expect([...opencode().querySelectorAll("button")].map(b => b.textContent)).toEqual(["Cancel"]);
+    await press(opencode().querySelector("[data-k=sign-in]"));
     expect(fake.stopped).toEqual(["opencode"]);
   });
 

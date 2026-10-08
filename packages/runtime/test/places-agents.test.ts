@@ -385,7 +385,7 @@ describe("the agents on a computer you own", () => {
     expect(asked).toHaveLength(4);
   });
 
-  it("run a sign-in over that computer's link, push its steps to the asking socket alone, type its code, stop it when that socket goes, and keep keys to the host's own socket", async () => {
+  it("run a sign-in over that computer's link, push its steps to the asking socket alone, type its code, keep it going when that socket goes, and keep keys to the host's own socket", async () => {
     const typed: string[] = [];
     const keys: string[] = [];
     let ended = 0;
@@ -475,9 +475,14 @@ describe("the agents on a computer you own", () => {
     expect(await browser.request("agents.key", { agent: "claude", key: "sk-ant-oat01-z" })).toMatchObject({ ok: false, error: AGENTS_KEY_REFUSAL });
     expect(keys).toEqual(["claude sk-ant-oat01-x"]);
     expect((await c.request("agents.signInLine", { target: { placeId }, agent: "codex" }))["line"]).toEqual({ command: "codex login --device-auth" });
-    // A window that goes stops what it alone followed.
-    expect((await c.request("agents.signIn", { target: { placeId }, agent: "codex" })).ok).toBe(true);
+    // A window that goes leaves what it alone followed running, and another window joins it where it stands.
+    const left = await c.request("agents.signIn", { target: { placeId }, agent: "codex" });
+    expect(left.ok).toBe(true);
     c.close();
+    await new Promise(r => setTimeout(r, 50));
+    expect(ended).toBe(1);
+    expect(await other.request("agents.signIn", { target: { placeId }, agent: "codex" })).toMatchObject({ ok: true, signInId: left["signInId"] });
+    expect((await other.request("agents.signInStop", { signInId: left["signInId"] })).ok).toBe(true);
     await until(() => ended === 2);
   });
 

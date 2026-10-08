@@ -58,7 +58,7 @@ export function foldServers(rows: readonly McpRow[]): ServerEntry[] {
 
 /** A command server of the person's own on a computer other than this one, which a check would start there: it waits
  * for Check, since a joined computer may run more than the person's agents. */
-const heldCommand = (row: McpRow, ctx: RowsContext): boolean => row.launch !== true && row.transport.kind === "stdio" && row.scope !== "project" && (ctx.where === "box" || ctx.where === "box-task" || ctx.where === "fork");
+const heldCommand = (row: McpRow, ctx: RowsContext): boolean => row.launch !== true && row.transport.kind === "stdio" && row.scope !== "project" && (ctx.where === "box" || ctx.where === "fork");
 
 /** Whether a row's tools connect is asked the moment the tab shows it: the person's own servers that are on and take no
  * key from the environment, wherever the report is live, a command only on this computer. A project's are what a repo

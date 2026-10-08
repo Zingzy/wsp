@@ -2,50 +2,66 @@
 // The sign-ins and writes one list takes on its target: each row's sign-in
 // as it stands, fed by the host's steps for a watched run, the paste for a
 // token or key, and the line for the person's terminal; the wsp tools being
-// written into an agent's config. A signed-in run leaves its row, since the
-// report read again after it says so; a cancelled one stops on the host and
-// leaves its row at once. A new target starts from nothing.
-import { useCallback, useEffect, useRef, useState } from "react";
+// written into an agent's config. A watched run belongs to the window, not to
+// the view that started it: closing a view never ends it, and any view of the
+// same target draws it, until it lands, fails or Cancel stops it on the host.
+// A signed-in run leaves its row, since the report read again after it says
+// so; a cancelled one stops on the host and leaves its row at once.
+import { useCallback, useEffect, useState } from "react";
 import type { AgentsSignInEvent, AgentsTarget } from "@wsp/protocol";
 import { useStore } from "../../protocol/store.js";
 import type { AgentActs, SignInFlow, SignInStart } from "./agentsRows.js";
 import { agentRowId } from "./kinds/agents.js";
 
-interface Running {
+interface Handle {
   readonly signInId?: string;
   readonly stop?: () => void;
   readonly off?: () => void;
 }
+
+/** One watched run this window started, by its target and row. */
+interface Watched {
+  flow: SignInFlow;
+  handle?: Handle;
+  /** Cancel was pressed, or a new run took its row: a handle that answers late is stopped. */
+  ended?: true;
+}
+
+const watched = new Map<string, Watched>();
+const watchers = new Set<() => void>();
+const changed = (): void => watchers.forEach(redraw => redraw());
+const watchKey = (targetKey: string, rowId: string): string => `${targetKey}\0${rowId}`;
+
+const end = (run: Watched): void => {
+  run.ended = true;
+  run.handle?.stop?.();
+};
+
+/** Ends every run this window watches, for a test that starts from a first window. */
+export const forgetSignIns = (): void => {
+  for (const run of watched.values()) end(run);
+  watched.clear();
+};
 
 const said = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
 export function useAgentActs(target: AgentsTarget | null): AgentActs | undefined {
   const api = useStore(s => s.api);
   const targetKey = target === null ? null : JSON.stringify(target);
-  const [flows, setFlows] = useState<{ targetKey: string | null; of: Record<string, SignInFlow> }>({ targetKey, of: {} });
+  // A paste or a line stands in the view that opened it; a watched run stands in `watched`.
+  const [local, setLocal] = useState<{ targetKey: string | null; of: Record<string, SignInFlow> }>({ targetKey, of: {} });
   const [adding, setAdding] = useState<ReadonlySet<string>>(new Set());
-  const running = useRef(new Map<string, Running>());
-  // The run each row's steps belong to: a step or a start answered for a run that was cancelled or replaced is dropped.
-  const runs = useRef(new Map<string, object>());
-  const current = useRef(targetKey);
+  const [, redraw] = useState(0);
   useEffect(() => {
-    current.current = targetKey;
-    setFlows(f => (f.targetKey === targetKey ? f : { targetKey, of: {} }));
-    const held = running.current;
-    const begun = runs.current;
-    return () => {
-      for (const run of held.values()) run.stop?.();
-      held.clear();
-      // A start the host answers after this is no run of anything shown, so its answer stops it.
-      begun.clear();
-    };
-  }, [targetKey]);
-  const shown = flows.targetKey === targetKey ? flows.of : {};
+    const watcher = (): void => redraw(n => n + 1);
+    watchers.add(watcher);
+    return () => void watchers.delete(watcher);
+  }, []);
+  const shown = local.targetKey === targetKey ? local.of : {};
 
   const put = useCallback(
     (rowId: string, next: ((was: SignInFlow | undefined) => SignInFlow) | undefined): void =>
-      setFlows(f => {
-        if (current.current !== targetKey) return f;
+      setLocal(f => {
         const of: Record<string, SignInFlow> = { ...(f.targetKey === targetKey ? f.of : {}) };
         if (next === undefined) delete of[rowId];
         else of[rowId] = next(of[rowId]);
@@ -61,43 +77,51 @@ export function useAgentActs(target: AgentsTarget | null): AgentActs | undefined
       if (begin.kind === "copy") return put(rowId, () => ({ kind: "copy", line: begin.line, ...(begin.why !== undefined ? { why: begin.why } : {}) }));
       if (begin.kind === "vault") return put(rowId, () => ({ kind: "vault", agent: begin.agent, word: begin.word, ...(begin.mint !== undefined ? { mint: begin.mint } : {}) }));
       if (api?.agentsSignIn === undefined) return;
-      running.current.get(rowId)?.stop?.();
-      const run = {};
-      runs.current.set(rowId, run);
+      const key = watchKey(targetKey, rowId);
+      const was = watched.get(key);
+      if (was !== undefined) end(was);
+      put(rowId, undefined);
       // What the flow reserves room for rides every step, so its height holds whatever state the host reports.
       const finish = { ...(begin.finish === undefined ? {} : { finish: begin.finish }), ...(begin.pastes === true ? { pastes: true } : {}) };
-      put(rowId, () => ({ kind: "run", state: "running", ...finish }));
+      const run: Watched = { flow: { kind: "run", state: "running", ...finish } };
+      watched.set(key, run);
+      changed();
+      const live = (): boolean => watched.get(key) === run;
       const target = JSON.parse(targetKey) as AgentsTarget;
       const step = (e: AgentsSignInEvent): void => {
-        if (runs.current.get(rowId) !== run) return;
+        if (!live()) return;
         if (e.state === "signed-in") {
-          running.current.get(rowId)?.off?.();
-          running.current.delete(rowId);
-          return put(rowId, undefined);
+          run.handle?.off?.();
+          watched.delete(key);
+          return changed();
         }
-        const state = e.state;
-        if (state === "failed") {
-          running.current.get(rowId)?.off?.();
-          running.current.delete(rowId);
+        if (e.state === "failed") {
+          run.handle?.off?.();
+          delete run.handle;
         }
-        put(rowId, was => ({
+        const before = run.flow;
+        run.flow = {
           kind: "run",
-          state,
+          state: e.state,
           ...finish,
-          ...(e.url !== undefined ? { url: e.url } : was?.kind === "run" && was.url !== undefined ? { url: was.url } : {}),
+          ...(e.url !== undefined ? { url: e.url } : before.kind === "run" && before.url !== undefined ? { url: before.url } : {}),
           ...(e.code !== undefined ? { code: e.code } : {}),
-          ...(e.paste !== undefined ? { paste: e.paste } : was?.kind === "run" && was.paste !== undefined ? { paste: was.paste } : {}),
+          ...(e.paste !== undefined ? { paste: e.paste } : before.kind === "run" && before.paste !== undefined ? { paste: before.paste } : {}),
           ...(e.said !== undefined ? { said: e.said } : {}),
-          ...(e.ptyId !== undefined && "placeId" in target ? { pty: { placeId: target.placeId, ptyId: e.ptyId } } : was?.kind === "run" && was.pty !== undefined && state !== "failed" ? { pty: was.pty } : {}),
-        }));
+          ...(e.ptyId !== undefined && "placeId" in target ? { pty: { placeId: target.placeId, ptyId: e.ptyId } } : before.kind === "run" && before.pty !== undefined && e.state !== "failed" ? { pty: before.pty } : {}),
+        };
+        changed();
       };
       api.agentsSignIn(target, begin.agent, begin.server, step, begin.terminal).then(
         handle => {
-          if (current.current !== targetKey || runs.current.get(rowId) !== run) return handle.stop();
-          running.current.set(rowId, handle);
+          if (run.ended === true) return handle.stop();
+          if (!live() || (run.flow.kind === "run" && run.flow.state === "failed")) return handle.off();
+          run.handle = handle;
         },
         (e: unknown) => {
-          if (runs.current.get(rowId) === run) put(rowId, () => ({ kind: "run", state: "failed", ...finish, said: said(e) }));
+          if (!live()) return;
+          run.flow = { kind: "run", state: "failed", ...finish, said: said(e) };
+          changed();
         },
       );
     },
@@ -106,21 +130,29 @@ export function useAgentActs(target: AgentsTarget | null): AgentActs | undefined
 
   const cancel = useCallback(
     (rowId: string): void => {
-      runs.current.delete(rowId);
-      running.current.get(rowId)?.stop?.();
-      running.current.delete(rowId);
       put(rowId, undefined);
+      if (targetKey === null) return;
+      const key = watchKey(targetKey, rowId);
+      const run = watched.get(key);
+      if (run === undefined) return;
+      end(run);
+      watched.delete(key);
+      changed();
     },
-    [put],
+    [put, targetKey],
   );
 
   const code = useCallback(
     (rowId: string, typed: string): void => {
-      const signInId = running.current.get(rowId)?.signInId;
-      if (signInId === undefined || api?.agentsSignInCode === undefined) return;
-      api.agentsSignInCode(signInId, typed).catch((e: unknown) => put(rowId, was => ({ ...(was?.kind === "run" ? was : { kind: "run" as const }), state: "failed", said: said(e) })));
+      const run = targetKey === null ? undefined : watched.get(watchKey(targetKey, rowId));
+      const signInId = run?.handle?.signInId;
+      if (run === undefined || signInId === undefined || api?.agentsSignInCode === undefined) return;
+      api.agentsSignInCode(signInId, typed).catch((e: unknown) => {
+        run.flow = { ...(run.flow.kind === "run" ? run.flow : { kind: "run" as const }), state: "failed", said: said(e) };
+        changed();
+      });
     },
-    [api, put],
+    [api, targetKey],
   );
 
   const save = useCallback(
@@ -153,5 +185,5 @@ export function useAgentActs(target: AgentsTarget | null): AgentActs | undefined
   );
 
   if (targetKey === null || api === null) return undefined;
-  return { flowOf: rowId => shown[rowId], start, cancel, code, save, addTools, adding: agent => adding.has(agent) };
+  return { flowOf: rowId => watched.get(watchKey(targetKey, rowId))?.flow ?? shown[rowId], start, cancel, code, save, addTools, adding: agent => adding.has(agent) };
 }
