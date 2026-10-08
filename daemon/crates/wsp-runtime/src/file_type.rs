@@ -48,6 +48,7 @@ mod tests {
 
     /// A socket a project holds is no folder, though its type bits hold a folder's: it is staged as a file, since a
     /// bind wants the same kind at both ends and a folder staged for it fails the create.
+    #[cfg(target_os = "linux")]
     #[test]
     fn a_socket_in_a_project_folder_is_staged_as_a_file() {
         let dir = tempfile::tempdir().unwrap();

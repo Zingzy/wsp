@@ -147,6 +147,7 @@ const DAEMON_CONTENTS = [
   "871dd3f376bcbde4e5f98c8d0777e75b0c36df1c81436b00c0749726d8122ccd",
   "664b32a5e3b463b18771d6a9f6938ea3f1312c96898a9951cb32a1ed15185ed0",
   "9790029ce878d8248fe04d470b8da1e4060b686480f088f0d9d79c7b76e7064d",
+  "c0f9ef1243bcb3b80767ae6543a96f7ca020e0f4ddc64453d734657bfd5f98e0",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -530,7 +531,18 @@ const DAEMON_CONTENTS = [
  * leave or by a container's bind staging. ports.watch takes a name, so one socket holds a watch per name with roots, a
  * folder and cgroups of its own, and each port event says which watch it is for; a process row carries the cgroup v2
  * path it stands in.
- * Version 137: shells read apart, panel ptys never reach the drawer. */
+ * Version 137: shells read apart, panel ptys never reach the drawer.
+ * Version 138: copy worktree takes each ecosystem as a --module (its lockfiles, what it carries, what it never does and
+ * where its install records the lockfile it installed from), counts a module in each folder of a new worktree holding
+ * its lockfile where the project folder holds one of its directories there, and at the top for a module that carries
+ * nothing, carries its directories in, mounts on a Linux disk that shares no blocks an overlay of a frozen copy of the
+ * folder's directory made once per install where the daemon may mount and copies plainly once where it may not, and a
+ * reflink copy on a disk that does, and answers fresh and each module it found with its folder and whether its install
+ * runs; copy worktree-mount mounts a worktree's overlays again after a restart, one remount at a time, never over a
+ * folder that holds anything and never through a link, every folder handed to the kernel opened with no link followed;
+ * copy worktree-remove takes every mount inside a worktree down before git forgets it and refuses over one it did not
+ * make; copy worktree-forget takes a project's frozen copies and its folder away, under the host's folder where the
+ * project folder is gone, and a removal drops every set but the newest once no worktree sits on it. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary

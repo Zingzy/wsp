@@ -609,12 +609,14 @@ export function workspacesArea(ctx: RuntimeContext): WorkspacesArea {
     async exec(id, cmd, o, origin) {
       const entry = await ctx.entryOf(id, origin);
       await ctx.copyBlocked(entry);
+      await ctx.worktreeMounted(entry);
       return entry.machine.exec(cmd, o);
     },
 
     async execStream(id, argv, cwd, origin) {
       const entry = await ctx.entryOf(id, origin);
       await ctx.copyBlocked(entry);
+      await ctx.worktreeMounted(entry);
       const { adapter } = await ctx.launchAdapterFor(entry);
       // Only the socket or the machine going away ends a command; a build may outlive the deadline a harness turn gets.
       const ranIn = await ctx.threadFolder(entry, { cwd });

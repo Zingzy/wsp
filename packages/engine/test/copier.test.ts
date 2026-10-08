@@ -94,6 +94,38 @@ describe("the copy verb as a child of this host", () => {
     await expect(copier.make({ from: "/a", to: "/b", exclude: [], sizeLineBytes: 1 })).rejects.toThrow("the copy verb answered something this host does not read");
   });
 
+  it("hands the worktree verb each module as one JSON word and reads back the modules a new worktree holds", async () => {
+    const printed = { path: "/w/feat-x", branch: "feat/x", made: true, carried: ["web/node_modules"], overlaid: ["web/node_modules"], fresh: true, modules: [{ id: "pnpm", folder: "web", rebuild: false }], ms: 12 };
+    const asked = runner({ stdout: `${JSON.stringify(printed)}\n` });
+    const modules = [
+      { id: "pnpm", lockfiles: ["pnpm-lock.yaml"], carry: ["node_modules"], never: [".next"], installed: "node_modules/.pnpm/lock.yaml" },
+      { id: "uv", lockfiles: ["uv.lock"], carry: [], never: [".venv"] },
+    ];
+    const made = await verbCopier(BIN, asked.run as never).worktree({ from: "/repo", home: "/h", project: "prj_1", branch: "feat/x", modules });
+    expect(made).toEqual(printed);
+    expect(asked.calls[0]!.args).toEqual([
+      "copy", "worktree", "--from", "/repo", "--home", "/h", "--project", "prj_1", "--branch", "feat/x",
+      "--module", '{"id":"pnpm","lockfiles":["pnpm-lock.yaml"],"carry":["node_modules"],"never":[".next"],"installed":"node_modules/.pnpm/lock.yaml"}',
+      "--module", '{"id":"uv","lockfiles":["uv.lock"],"carry":[],"never":[".venv"]}',
+    ]);
+  });
+
+  it("mounts a worktree's overlays again by its path, and throws the verb's own sentence where it refused", async () => {
+    const asked = runner({});
+    await verbCopier(BIN, asked.run as never).worktreeMount({ from: "/repo", home: "/h", path: "/h/worktrees/prj_1/feat-x" });
+    expect(asked.calls[0]!.args).toEqual(["copy", "worktree-mount", "--from", "/repo", "--home", "/h", "--path", "/h/worktrees/prj_1/feat-x"]);
+    const refused = runner({ exitCode: 1, stderr: "/repo is not a worktree wsp made for this project\n" });
+    await expect(verbCopier(BIN, refused.run as never).worktreeMount({ from: "/repo", home: "/h", path: "/repo" })).rejects.toThrow("/repo is not a worktree wsp made for this project");
+  });
+
+  it("takes a project's frozen copies away by its id, and throws the verb's own sentence where it refused", async () => {
+    const asked = runner({});
+    await verbCopier(BIN, asked.run as never).worktreeForget({ from: "/repo", home: "/h", project: "prj_1" });
+    expect(asked.calls[0]!.args).toEqual(["copy", "worktree-forget", "--from", "/repo", "--home", "/h", "--project", "prj_1"]);
+    const refused = runner({ exitCode: 1, stderr: "/h/repo is not the top of a git repository\n" });
+    await expect(verbCopier(BIN, refused.run as never).worktreeForget({ from: "/h/repo", home: "/h", project: "prj_1" })).rejects.toThrow("/h/repo is not the top of a git repository");
+  });
+
   it("takes a copy away by the road that made it", async () => {
     const asked = runner({});
     const copier = verbCopier(BIN, asked.run as never);

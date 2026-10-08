@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { z } from "zod";
+import type { CarryModule as WireCarryModule } from "../generated/CarryModule.js";
+import type { FoundModule as WireFoundModule } from "../generated/FoundModule.js";
 import { WorkspaceKind } from "./workspace-kind.js";
 import type { WorktreeReport as WireWorktreeReport } from "../generated/WorktreeReport.js";
 import type { WorktreeRemoval as WireWorktreeRemoval } from "../generated/WorktreeRemoval.js";
@@ -317,15 +319,23 @@ export const CopyReport = z.object({
 });
 export type CopyReport = z.infer<typeof CopyReport>;
 
+/** One ecosystem as the worktree verb is handed it: the lockfiles that pick it in whatever folder of a new worktree
+ * holds one, the ignored directories under that folder it then takes from the project folder, the ones it never
+ * takes, which hold the path they were built at, and where its install leaves a copy of the lockfile it installed
+ * from, relative to the lockfile's folder. */
+export const CarryModule = z.object({ id: z.string(), lockfiles: z.array(z.string()), carry: z.array(z.string()), never: z.array(z.string()), installed: z.string().optional() });
+export type CarryModule = WireCarryModule;
+type CarryModuleHeld = Held<Same<z.infer<typeof CarryModule>, CarryModule>>;
+
 /** A wsp worktree as the daemon binary's worktree verb is asked for it: the project's repo, the host's own folder its
- * worktrees live under, the project's id the path is keyed by, the branch, and the ignored directories carried in
- * beside the config files. */
+ * worktrees live under, the project's id the path is keyed by, the branch, and the ecosystems whose directories a new
+ * worktree carries in beside the config files. */
 export const WorktreeAsk = z.object({
   from: z.string(),
   home: z.string(),
   project: z.string(),
   branch: z.string(),
-  carry: z.array(z.string()),
+  modules: z.array(CarryModule),
 });
 export type WorktreeAsk = z.infer<typeof WorktreeAsk>;
 
@@ -361,15 +371,25 @@ export const WorktreeFolder = z.object({
 });
 export type WorktreeFolder = z.infer<typeof WorktreeFolder>;
 
+/** One module whose lockfile a folder of a new worktree holds: the folder, `.` for the worktree's top, and whether its
+ * install runs there. */
+export const FoundModule = z.object({ id: z.string(), folder: z.string(), rebuild: z.boolean() });
+export type FoundModule = WireFoundModule;
+type FoundModuleHeld = Held<Same<z.infer<typeof FoundModule>, FoundModule>>;
+
 /** What the daemon binary's `copy worktree` printed: the worktree a thread on the branch works in, whether wsp made
- * it (under the host's folder or a volume's own `.wsp`), what was carried in when this call made it, and which carried
- * directories a clone could not take. */
+ * it (under the host's folder or a volume's own `.wsp`), what was carried in when this call made it, which carried
+ * directories a clone could not take and which are overlays, whether this call made it, and each folder of it
+ * holding a module's lockfile. */
 export const WorktreeReport = z.object({
   path: z.string(),
   branch: z.string(),
   made: z.boolean(),
   carried: z.array(z.string()),
   plain: z.array(z.string()).optional(),
+  overlaid: z.array(z.string()).optional(),
+  fresh: z.boolean(),
+  modules: z.array(FoundModule),
   ms: z.number().int().nonnegative(),
 });
 export type WorktreeReport = WireWorktreeReport;

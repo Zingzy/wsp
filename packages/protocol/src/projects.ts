@@ -258,6 +258,29 @@ export const keptChangedLine = (files: number): string => `${files} ${files === 
 export const KEPT_RUNNING_LINE = "a thread is running";
 export const KEPT_ABANDONED_LINE = "kept 7 days; remove it by hand";
 
+/** A command a new worktree runs once before its threads start, a module's install or the project's own, said as it
+ * starts, since a thread waits on it. */
+export const worktreeCommandRunningLine = (command: string, path: string): string => `${command} runs in the new worktree at ${path} before its threads start`;
+
+/** How one such command ended where it did not end well: its exit code and its last line, or the minutes it ran
+ * before it was stopped. */
+export type WorktreeCommandEnd = { exitCode: number; said: string } | { stoppedAfterMin: number };
+const endWords = (end: WorktreeCommandEnd): string =>
+  "stoppedAfterMin" in end ? `was stopped after ${end.stoppedAfterMin} minutes` : `exited ${end.exitCode}${end.said === "" ? "" : `: ${end.said}`}`;
+
+/** One that did not end well; the threads there start all the same. */
+export const worktreeCommandFailedLine = (command: string, path: string, end: WorktreeCommandEnd): string =>
+  `${command} in the new worktree at ${path} ${endWords(end)}; threads there start without it`;
+
+/** One command as the first thread in a new worktree reads it: where it ran when not at the top, and how it ended
+ * when not well. */
+export const worktreeStepWords = (command: string, folder: string, end?: WorktreeCommandEnd): string =>
+  `${command}${folder === "." ? "" : ` in ${folder}`}${end === undefined ? "" : ` (${endWords(end)})`}`;
+
+/** The line the first thread in a new worktree opens with: what the worktree ran before the thread started, one
+ * command to a line, since a command can hold any separator a joined sentence would use. */
+export const worktreeSetupLine = (steps: readonly string[]): string => ["Before this thread started, its new worktree ran:", ...steps.map(step => `- ${step}`)].join("\n");
+
 /** A removal asked of a branch with no worktree wsp made: a worktree the person or an agent made is theirs to remove. */
 export const notMadeWorktreeLine = (branch: string): string => `wsp made no worktree for ${branch}; git worktree remove takes one wsp did not make`;
 

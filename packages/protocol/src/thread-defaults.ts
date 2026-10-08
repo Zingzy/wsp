@@ -29,12 +29,14 @@ export type AgentDefaults = z.infer<typeof AgentDefaults>;
 export const AgentDefaultsPatch = z.object({ model: z.string().nullable().optional(), effort: z.string().nullable().optional(), access: AccessChoice.nullable().optional(), models: ModelPicker.nullable().optional() }).strict();
 export type AgentDefaultsPatch = z.infer<typeof AgentDefaultsPatch>;
 
-/** What one project overrides for the threads opened on it. Strict and short on purpose: anything that is about a
+/** What one project overrides for the threads opened on it, and the shell line a new worktree of it runs once at its
+ * top after each module's rebuild, for what no module knows. Strict and short on purpose: anything that is about a
  * computer (threads at once, the program, its folder, arguments, environment, on or off) stays the computer's, and a
  * field added here is a change to this shape. */
-export const ProjectOverrides = z.object({ agent: z.string().optional(), model: z.string().optional(), effort: z.string().optional(), access: AccessChoice.optional() }).strict();
+const AfterWorktree = z.string().trim().min(1, "the after-worktree command is a shell line; --reset after-worktree takes it away");
+export const ProjectOverrides = z.object({ agent: z.string().optional(), model: z.string().optional(), effort: z.string().optional(), access: AccessChoice.optional(), afterWorktree: AfterWorktree.optional() }).strict();
 export type ProjectOverrides = z.infer<typeof ProjectOverrides>;
-export const ProjectOverridesPatch = z.object({ agent: z.string().nullable().optional(), model: z.string().nullable().optional(), effort: z.string().nullable().optional(), access: AccessChoice.nullable().optional() }).strict();
+export const ProjectOverridesPatch = z.object({ agent: z.string().nullable().optional(), model: z.string().nullable().optional(), effort: z.string().nullable().optional(), access: AccessChoice.nullable().optional(), afterWorktree: AfterWorktree.nullable().optional() }).strict();
 export type ProjectOverridesPatch = z.infer<typeof ProjectOverridesPatch>;
 
 /** A record with a patch's fields over it: null takes a field away, absent keeps it. Nothing when no field is left,

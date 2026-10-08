@@ -1,7 +1,7 @@
 {
   "cloudOff": {
     "name": "projects_set",
-    "description": "Sets what a new thread on one project starts on, over each agent's own defaults and under what a start names: its agent, model, effort and access. Nothing about a computer is a project's to set (threads at once, an agent's program, config folder, launch words, variables, or whether it is on); agents_setup sets those per computer. A model or effort kept for the project's agent drops to the agent's own on a thread that runs another agent, and an access word the project's agent maps to none of its modes is refused naming the ones it takes. Answers what a new thread there now starts on, each value with where it came from. reset puts a field back on the layer below: agent, model, effort or access.",
+    "description": "Sets what a new thread on one project starts on, over each agent's own defaults and under what a start names: its agent, model, effort and access. Nothing about a computer is a project's to set (threads at once, an agent's program, config folder, launch words, variables, or whether it is on); agents_setup sets those per computer. A model or effort kept for the project's agent drops to the agent's own on a thread that runs another agent, and an access word the project's agent maps to none of its modes is refused naming the ones it takes. after_worktree is a shell line a new worktree of the project runs once at its top, after the locked install of each ecosystem whose lockfile it holds, each run in the folder holding that lockfile (uv sync --locked, cargo fetch --locked, go list -mod=readonly -deps -test ./..., npm install --no-save, pnpm install --frozen-lockfile where the node_modules carried in were installed from another lockfile, and the like), for what none of them knows. Answers what a new thread there now starts on, each value with where it came from, and the after-worktree command. reset puts a field back on the layer below: agent, model, effort or access, and after-worktree takes the command away.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -25,6 +25,10 @@
           "type": "string",
           "description": "how far the agent may go without asking, in wsp's words: ask (asks about each action that needs permission), auto-edit (edits files without asking), full (every action without asking) or plan (reads and proposes, changes nothing); each is mapped to the agent's own mode and refused where the agent has none, and a harness's own spelling is refused. Absent means the project's access, else the one set for that agent, else full"
         },
+        "after_worktree": {
+          "type": "string",
+          "description": "a shell line a new worktree of the project runs once at its top, after each ecosystem's own install"
+        },
         "reset": {
           "type": "array",
           "items": {
@@ -33,10 +37,11 @@
               "agent",
               "model",
               "effort",
-              "access"
+              "access",
+              "after-worktree"
             ]
           },
-          "description": "fields to put back on the layer below: agent, model, effort, access"
+          "description": "fields to put back on the layer below: agent, model, effort, access, or after-worktree to take the command away"
         }
       },
       "required": [
@@ -324,6 +329,9 @@
             "agent"
           ],
           "additionalProperties": false
+        },
+        "afterWorktree": {
+          "type": "string"
         }
       },
       "required": [
@@ -342,7 +350,7 @@
   },
   "cloudOn": {
     "name": "projects_set",
-    "description": "Sets what a new thread on one project starts on, over each agent's own defaults and under what a start names: its agent, model, effort and access. Nothing about a computer is a project's to set (threads at once, an agent's program, config folder, launch words, variables, or whether it is on); agents_setup sets those per computer. A model or effort kept for the project's agent drops to the agent's own on a thread that runs another agent, and an access word the project's agent maps to none of its modes is refused naming the ones it takes. Answers what a new thread there now starts on, each value with where it came from. reset puts a field back on the layer below: agent, model, effort or access.",
+    "description": "Sets what a new thread on one project starts on, over each agent's own defaults and under what a start names: its agent, model, effort and access. Nothing about a computer is a project's to set (threads at once, an agent's program, config folder, launch words, variables, or whether it is on); agents_setup sets those per computer. A model or effort kept for the project's agent drops to the agent's own on a thread that runs another agent, and an access word the project's agent maps to none of its modes is refused naming the ones it takes. after_worktree is a shell line a new worktree of the project runs once at its top, after the locked install of each ecosystem whose lockfile it holds, each run in the folder holding that lockfile (uv sync --locked, cargo fetch --locked, go list -mod=readonly -deps -test ./..., npm install --no-save, pnpm install --frozen-lockfile where the node_modules carried in were installed from another lockfile, and the like), for what none of them knows. Answers what a new thread there now starts on, each value with where it came from, and the after-worktree command. reset puts a field back on the layer below: agent, model, effort or access, and after-worktree takes the command away.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -366,6 +374,10 @@
           "type": "string",
           "description": "how far the agent may go without asking, in wsp's words: ask (asks about each action that needs permission), auto-edit (edits files without asking), full (every action without asking) or plan (reads and proposes, changes nothing); each is mapped to the agent's own mode and refused where the agent has none, and a harness's own spelling is refused. Absent means the project's access, else the one set for that agent, else full"
         },
+        "after_worktree": {
+          "type": "string",
+          "description": "a shell line a new worktree of the project runs once at its top, after each ecosystem's own install"
+        },
         "reset": {
           "type": "array",
           "items": {
@@ -374,10 +386,11 @@
               "agent",
               "model",
               "effort",
-              "access"
+              "access",
+              "after-worktree"
             ]
           },
-          "description": "fields to put back on the layer below: agent, model, effort, access"
+          "description": "fields to put back on the layer below: agent, model, effort, access, or after-worktree to take the command away"
         }
       },
       "required": [
@@ -665,6 +678,9 @@
             "agent"
           ],
           "additionalProperties": false
+        },
+        "afterWorktree": {
+          "type": "string"
         }
       },
       "required": [
