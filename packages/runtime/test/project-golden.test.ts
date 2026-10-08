@@ -1,8 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // A workspace with its project loaded is snapshotted as a project golden, and forks of that snapshot start with the
 // project in place: the record the snapshot keeps, the refusals, what a fork inherits, and the two ops over the wire.
+import { spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { gunzipSync } from "node:zlib";
-import { DISK_SYNC_CMD, DiskSyncError, MachineUnreachableError, machineAnswer, tarOf } from "@wsp/engine";
+import { CHECK_MS, DISK_SYNC_CMD, DiskSyncError, MachineUnreachableError, machineAnswer, tarOf } from "@wsp/engine";
 import { DEVICE_OPS, THREAD_OPS, diskSyncFailedLine, machineUnreachableLine, noProjectImageLine, projectImageInUseRefusal, type GoldenManifest, type ProjectGolden, type ProjectPlan } from "@wsp/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { copyKey, createRuntime, type PackedProject, type ProjectBundler, type Runtime } from "../src/runtime.js";
@@ -12,6 +16,7 @@ import { fakeClock } from "./fake-clock.js";
 import { ownedStore, stubBackend, type StubBackend, createOn, projectOn } from "./stub-backend.js";
 import { WsClient } from "./ws-client.js";
 import { until } from "./until.js";
+import { writeStub } from "../../protocol/test/stub-script.js";
 
 let srv: RuntimeServer | undefined;
 afterEach(async () => {
@@ -103,6 +108,107 @@ describe("a project golden", () => {
     // The mark is what tells a later doctor run this host took it, since a snapshot carries no provider metadata.
     expect(backend.snapshots.map(r => r.name)).toEqual(["wsp-h1s1-project-proj-2026-09-06T10-06-00-000Z", "wsp-h1s1-project-proj-2026-09-06T10-07-00-000Z"]);
     expect((await rt.golden.projects()).map(p => p.snapshotId)).toEqual([expected.snapshotId, second.snapshotId]);
+  });
+
+  it("a project whose pnpm does not start in its folder is not snapshotted: the check runs there through run(), under the thread's PNPM_HOME and a login shell's, before the disk is copied", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "wsp-snapshot-pnpm-"));
+    try {
+      // A global pnpm older than the folder's pin hands the call to the copy it switched to under PNPM_HOME, as pnpm 10
+      // lays it out: the version's link to its stage, whose command loads dist. A broken copy has lost its dist.
+      const proj = join(dir, "proj");
+      const bin = join(dir, "bin");
+      const threadHome = join(dir, "opt-pnpm");
+      const loginHome = join(dir, "login-pnpm");
+      for (const d of [proj, bin]) mkdirSync(d, { recursive: true });
+      writeStub(join(bin, "pnpm"), '#!/bin/sh\nexec "$PNPM_HOME/.tools/pnpm/11.9.0/bin/pnpm" "$@"\n');
+      const lay = (home: string, whole: boolean): void => {
+        const stage = join(home, ".tools", "pnpm", "11.9.0_tmp_1_0");
+        mkdirSync(join(stage, "bin"), { recursive: true });
+        mkdirSync(join(stage, "node_modules", "pnpm"), { recursive: true });
+        writeStub(join(stage, "bin", "pnpm"), `#!${process.execPath}\nimport(${JSON.stringify(join(stage, "node_modules", "pnpm", "dist", "pnpm.mjs"))});\n`);
+        if (whole) {
+          mkdirSync(join(stage, "node_modules", "pnpm", "dist"));
+          writeFileSync(join(stage, "node_modules", "pnpm", "dist", "pnpm.mjs"), 'console.log("11.9.0");\n');
+        }
+        symlinkSync("11.9.0_tmp_1_0", join(home, ".tools", "pnpm", "11.9.0"));
+      };
+      const repair = (home: string): void => {
+        rmSync(join(home, ".tools"), { recursive: true, force: true });
+        lay(home, true);
+      };
+      lay(threadHome, false);
+      lay(loginHome, false);
+
+      const { rt, advance, backend } = await setup();
+      const ws = await loaded(rt, advance);
+      const plain = backend.execImpl;
+      backend.execImpl = (m, cmd) => {
+        if (cmd.startsWith("ls -A ") && cmd.includes(PROJECT.dest)) return { exitCode: 0, stdout: "package.json\npnpm-lock.yaml\nsrc\n", stderr: "" };
+        if (!cmd.includes("pnpm --version")) return plain(m, cmd);
+        const home = cmd.includes("bash -lc") ? loginHome : threadHome;
+        const res = spawnSync("bash", ["-c", 'cd "$1" && pnpm --version', "check", proj], { env: { PATH: `${bin}:/usr/bin:/bin`, PNPM_HOME: home }, encoding: "utf8" });
+        return { exitCode: res.status ?? 1, stdout: res.stdout, stderr: res.stderr };
+      };
+      const machine = backend.machines[0]!;
+      const refusal = (home: string): RegExp => {
+        const copy = `${home}/.tools/pnpm/11.9.0`;
+        return new RegExp(`^task was not snapshotted: pnpm --version fails in /root/proj \\(Error \\[ERR_MODULE_NOT_FOUND\\]: .*${copy}_tmp_1_0/node_modules/pnpm/dist/pnpm\\.mjs.*\\), so every fork of it would fail the same way; remove ${copy} and ${copy}_tmp_\\*, run pnpm --version in /root/proj to fetch it again, then snapshot again$`);
+      };
+
+      await expect(rt.workspaces.snapshot(ws.id)).rejects.toThrow(refusal(threadHome));
+      expect(backend.snapshots).toEqual([]);
+      // The check outlives one plain exec when the switch downloads, so it goes through run() with its own deadline.
+      const thread = machine.runLog.find(c => c.includes("pnpm --version"))!;
+      expect(thread).toMatch(/^export PATH=/m);
+      expect(thread.split("\n").at(-1)).toBe("cd '/root/proj' && pnpm --version");
+      expect(machine.runOptions[machine.runLog.indexOf(thread)]).toMatchObject({ deadlineMs: CHECK_MS });
+
+      // The thread's copy repaired, a login shell still reads its own, and the snapshot names that one.
+      repair(threadHome);
+      await expect(rt.workspaces.snapshot(ws.id)).rejects.toThrow(refusal(loginHome));
+      expect(backend.snapshots).toEqual([]);
+      expect(machine.runLog.at(-1)).toBe("cd '/root/proj' && env -i HOME='/root' bash -lc 'pnpm --version'");
+
+      repair(loginHome);
+      const from = machine.execLog.length;
+      const golden = await rt.workspaces.snapshot(ws.id);
+      expect(backend.snapshots.map(s => s.id)).toEqual([golden.snapshotId]);
+      const after = machine.execLog.slice(from);
+      const sync = after.indexOf(DISK_SYNC_CMD);
+      expect(after.map((c, i) => [c.includes("pnpm --version"), i < sync]).filter(([check]) => check)).toEqual([[true, true], [true, true]]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("names the repair for pnpm 11's switched copy too, which sits in its store's links and shows only in the stack below the error", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "wsp-snapshot-pnpm11-"));
+    try {
+      // A global pnpm 11 hands a folder that pins another version to the copy it switched to in its store, as pnpm 11
+      // lays it out; that copy's command requires its dist, which is gone.
+      const proj = join(dir, "proj");
+      const bin = join(dir, "bin");
+      const home = join(dir, "pnpm-home");
+      const version = join(home, "store", "v11", "links", "@", "pnpm", "10.34.5");
+      const copy = join(version, "c9362fa3", "node_modules", "pnpm");
+      for (const d of [proj, bin, join(copy, "bin")]) mkdirSync(d, { recursive: true });
+      writeStub(join(copy, "bin", "pnpm.cjs"), `#!${process.execPath}\nrequire("../dist/pnpm.cjs");\n`);
+      writeStub(join(bin, "pnpm"), `#!/bin/sh\nexec ${JSON.stringify(join(copy, "bin", "pnpm.cjs"))} "$@"\n`);
+
+      const { rt, advance, backend } = await setup();
+      const ws = await loaded(rt, advance);
+      const plain = backend.execImpl;
+      backend.execImpl = (m, cmd) => {
+        if (cmd.startsWith("ls -A ") && cmd.includes(PROJECT.dest)) return { exitCode: 0, stdout: "package.json\npnpm-lock.yaml\n", stderr: "" };
+        if (!cmd.includes("pnpm --version")) return plain(m, cmd);
+        const res = spawnSync("bash", ["-c", 'cd "$1" && pnpm --version', "check", proj], { env: { PATH: `${bin}:/usr/bin:/bin`, PNPM_HOME: home }, encoding: "utf8" });
+        return { exitCode: res.status ?? 1, stdout: res.stdout, stderr: res.stderr };
+      };
+      await expect(rt.workspaces.snapshot(ws.id)).rejects.toThrow(`; remove ${version}, run pnpm --version in /root/proj to fetch it again, then snapshot again`);
+      expect(backend.snapshots).toEqual([]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("snapshot syncs the machine's disk before the provider is asked for the copy", async () => {

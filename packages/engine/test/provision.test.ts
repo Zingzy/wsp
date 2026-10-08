@@ -26,7 +26,8 @@ import {
   type PlaceProvisionRow,
 } from "@wsp/protocol";
 import { baseInstalls, baseVersionsCmd } from "../src/golden-base.js";
-import { PROFILE_PATH_FILE, TOOLS_PATH, agentInstallsFor, pathLine, toolInstallsFor, type RecipeEntry, type ToolInstall } from "../src/golden-import.js";
+import { PROFILE_PATH_FILE } from "../src/golden-base.js";
+import { TOOLS_PATH, agentInstallsFor, pathLine, toolInstallsFor, type RecipeEntry, type ToolInstall } from "../src/golden-import.js";
 import { FREE_KB_CMD } from "../src/golden-tools.js";
 import { MCP_SERVERS_JSON } from "@wsp/catalog";
 import { newSetupRun, presentByWhatWaits, presentElsewhere, presentSteps, provisionCountsOf, provisionPlanOf, provisionStep, type EngineStep, type ProvisionPlan, type ProvisionStage } from "../src/provision.js";

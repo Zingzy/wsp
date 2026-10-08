@@ -4,12 +4,18 @@
 // once they are on. It runs under the base stage ahead of the daemon, so the
 // daemon deploy finds the tools its own steps type.
 import { APT_INDEX, APT_UPDATE, BASE_FLOOR, installAfter, smokeOf } from "@wsp/catalog";
-import { fmtBytes, type GoldenBaseTool, type GoldenStage } from "@wsp/protocol";
+import { fmtBytes, shellQuote, type GoldenBaseTool, type GoldenStage } from "@wsp/protocol";
 import { PRELUDE } from "./dotfiles-presets.js";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
-import { PATH_LINE, PROFILE_PATH_FILE, PROFILE_PATH_LINE, TOOLS_PATH, aptIndexStep, pathLine, viaRoad, type ToolInstall } from "./golden-import.js";
+import { PATH_LINE, TOOLS_PATH, aptIndexStep, pathLine, viaRoad, type ToolInstall } from "./golden-import.js";
 import { ALREADY_ON_MACHINE, installTools, type InstallToolsOptions, type ToolResult } from "./golden-tools.js";
 import type { Machine } from "./machine.js";
+
+/** Where a login shell reads the tools PATH: a thread's terminal is one, and it inherits nothing from the stages. */
+export const PROFILE_PATH_FILE = "/etc/profile.d/wsp-golden.sh";
+/** The base stage writes it on every golden, so a machine that never bootstraps Homebrew still answers `cargo`. */
+export const profilePathLine = (path: string): string => `printf '%s\\n' ${shellQuote(pathLine(path))} > ${PROFILE_PATH_FILE}`;
+export const PROFILE_PATH_LINE = profilePathLine(TOOLS_PATH);
 
 const BASE_STAGE: GoldenStage = "deploying-daemon";
 

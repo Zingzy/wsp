@@ -136,7 +136,7 @@ export function projectsArea(ctx: RuntimeContext): ProjectsArea {
           // On a computer somebody joined this machine clones and installs with that computer's shared home
           // bound in, as a workspace there does, so it reads the same order and the same knobs; this Mac and the
           // provider this host forks on answer no place and keep the order an image is sealed with.
-          envs: { ...loginEnvOn(placeId) },
+          envs: { ...loginEnvOn(placeId, golden === undefined ? undefined : (await ctx.imageOf(o.from)).version?.npmBin) },
           // A machine whose disk becomes an image is a builder, which is what keeps the computer's own logins out
           // of it; one that only clones onto the computer is not, since the clone reads those logins.
           labels: { [WSP_LABEL]: "1", [OWNER_LABEL]: ctx.state.owner, [CREATED_AT_LABEL]: new Date().toISOString(), ...(o.image ? { [BUILDER_LABEL]: "1" } : {}) },
@@ -331,7 +331,7 @@ export function projectsArea(ctx: RuntimeContext): ProjectsArea {
       await ctx.ready();
       // A thread is served the projects it may start children on, so the listing and the start read one rule.
       const scope = scopeOf(origin);
-      return [...projectsHeld.values()].filter(p => scope === undefined || ctx.projectReached(scope, p.id)).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+      return [...projectsHeld.values()].filter(p => scope === undefined || ctx.projectReached(origin, p.id)).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     },
 
     async computers(): Promise<{ id: string; name: string }[]> {
@@ -351,8 +351,8 @@ export function projectsArea(ctx: RuntimeContext): ProjectsArea {
       if (scope !== undefined) {
         const mine = ctx.projectOfScope(scope);
         if (found === undefined || mine === undefined) throw notFoundRefusal(bareNoSuchProjectLine(ref));
-        if (ctx.projectReached(scope, found.id)) return found;
-        if (ctx.ofThreadsRepository(scope, found.id)) throw refusal(spawnFolderRefusal(scope.threadId, ref), SPAWN_FOLDER_FIX, "usage");
+        if (ctx.projectReached(origin, found.id)) return found;
+        if (ctx.ofThreadsRepository(origin, found.id)) throw refusal(spawnFolderRefusal(scope.threadId, ref), SPAWN_FOLDER_FIX, "usage");
         throw refusal(spawnRepositoryRefusal(scope.threadId, ctx.projectHeld(mine).name, ref), SPAWN_REPOSITORY_FIX, "usage");
       }
       if (found === undefined) throw notFoundRefusal(noSuchProjectLine(ref, all.map(p => p.name)));

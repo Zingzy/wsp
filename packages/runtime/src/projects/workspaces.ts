@@ -2,17 +2,18 @@
 import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import { GUEST_HOME, remoteHost } from "@wsp/catalog";
-import { NotFirstLifeError, RestoreUnfinishedError, ResumeUnansweredError, goldenHead, isMissing, readGone, MachineAliveError, answerOf, diskUse, projectSnapshotName, syncDisk } from "@wsp/engine";
+import { NotFirstLifeError, RestoreUnfinishedError, ResumeUnansweredError, goldenHead, isMissing, readGone, MachineAliveError, answerOf, diskUse, projectSnapshotName, syncDisk, CHECK_MS, INLINE_EXEC_MS, checkScripts, projectInstalls } from "@wsp/engine";
 import type { ProjectGolden, ProjectView, WorkspaceProject } from "@wsp/protocol";
 import { noParentWorkspaceLine, parentProjectRefusal, BringBackResult, GitPrReply, GitPushReply, GitCommitReply, GitDiscardReply, GitDiffReply, GitRunLogReply, GitPrMergeReply, GitMergeInReply, DETACHED_HEAD, leadBusyRefusal, FIX_CHECK_OR_CHILD, childOnNoBranchRefusal, mergeChildPrompt, mergeIntoOwnRefusal, noRemoteForTreeLine, type TreeRecord, GitPrReplyReply, GitPrResolveReply, GitPrReactReply, REPLY_EMPTY_LINE, type PullRequestItem, GIT_DIFF_CAP_BYTES, pullRequestSendPrompt, checkFailedPrompt, conflictsPrompt, checkNotFailedRefusal, childPushedLine, isPullRequestFact, mergeMethodRefusal, noPullRequestRefusal, noSuchCheckRefusal, notOpenRefusal, AUTO_MERGE_OFF_LINE, DRAFT_NOTES, cleanCheckoutLine, commitMessage, cutDiff, draftPrompt, agentsFrom, agentsKindRefusal, agentsMayDrive, askerOf, scopeOf, spawnActRefusal, spawnGoldenRefusal, workspaceIdOf } from "@wsp/protocol";
-import { isLocalWorkspace, kindWords, noCommandsYetLine, readingRoad, forgetUndrivenRefusal, goneRefusal, goneWords, imageMoveRefusal, inFolder, machineWord, deleteRefusedLine, snapshotRefusedLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, refusalLine, notOnThisComputerLine, noBranchesLine, notMadeWorktreeLine, WORKTREE_FORCE_LINE, copiesFolder, copyTakesNone, kindForComputer, shellQuote, WAKE_STOPPED, wakeAsksIn, wakeGaveUpLine, workspaceState, HERE_PLACE_ID, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, refusal, execOutsideFix, execOutsideRefusal, spawnFolderRefusal, spawnReachFix, spawnReachRefusal, spawnRepositoryWorkspaceRefusal, SPAWN_FOLDER_FIX, SPAWN_REPOSITORY_WORKSPACE_FIX } from "@wsp/protocol";
+import { isLocalWorkspace, kindWords, noCommandsYetLine, readingRoad, forgetUndrivenRefusal, goneRefusal, goneWords, imageMoveRefusal, inFolder, machineWord, deleteRefusedLine, snapshotRefusedLine, snapshotManagerLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, refusalLine, notOnThisComputerLine, noBranchesLine, notMadeWorktreeLine, WORKTREE_FORCE_LINE, copiesFolder, copyTakesNone, kindForComputer, shellQuote, WAKE_STOPPED, wakeAsksIn, wakeGaveUpLine, workspaceState, HERE_PLACE_ID, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, refusal, execOutsideFix, execOutsideRefusal, spawnFolderRefusal, spawnReachFix, spawnReachRefusal, spawnRepositoryWorkspaceRefusal, SPAWN_FOLDER_FIX, SPAWN_REPOSITORY_WORKSPACE_FIX } from "@wsp/protocol";
 import { harnessExec, putFiles } from "@wsp/engine";
 import { ownerRepoOf } from "@wsp/protocol";
 import { providerSaid } from "../status.js";
 import { harnessCatalog, smallestModel } from "../harness-catalog.js";
 import { GitPrDiffReply, GitPrReviewReply, START_WORDS, fromTaskPrompt, githubLinkOf, isReviewRead, reviewTaskPrompt, withCloses } from "@wsp/protocol";
 import { TITLE_MAKE_TIMEOUT_MS } from "../types/events.js";
-import { type LiveWorkspace, settled, PORT_PROBE_TIMEOUT_MS, PORT_PROBE_BODY_CAP, VAULTS } from "../types/wiring.js";
+import { type LiveWorkspace, settled, lastLineOf, PORT_PROBE_TIMEOUT_MS, PORT_PROBE_BODY_CAP, VAULTS } from "../types/wiring.js";
+import { loginEnvOn } from "../types/harness.js";
 import type { Runtime } from "../types/api.js";
 import { PROJECT_GOLDENS, WORKSPACE_NAMES, DELETED_REASON, type NamedWorkspace, CREATES, readBodyUpTo, isNoHostCli, isNoGitCredential } from "../types/internal.js";
 import type { RuntimeContext, WorkspacesArea } from "../context.js";
@@ -80,7 +81,7 @@ export function workspacesArea(ctx: RuntimeContext): WorkspacesArea {
       // A child is a second checkout of its parent's repository on the branch that parent is on, so a parent holding
       // another repository has no branch this child could start from and land its work back in. The same repository
       // added on another computer is the same code, which is how a lead on this computer starts a child on a box.
-      if (parent !== undefined && parent.record.project !== project.id && !ctx.sameRepository(ctx.projectHeld(parent.record.project), project)) {
+      if (parent !== undefined && parent.record.project !== project.id && !ctx.sameRepository(ctx.projectHeld(parent.record.project), project, origin)) {
         throw Object.assign(new Error(parentProjectRefusal(parent.record.name, ctx.projectHeld(parent.record.project).name, project.name)), { kind: "invalid" });
       }
       await ctx.placeGuard((await ctx.landingPlace(project.computer)).placeId ?? places.wired);
@@ -191,14 +192,14 @@ export function workspacesArea(ctx: RuntimeContext): WorkspacesArea {
           const theirs = ctx.held().find(e => e.record.id === ref) ?? ctx.held().find(e => e.record.name === ref);
           if (theirs !== undefined && mine !== undefined && ctx.refusalFor(theirs.record, origin) !== undefined) {
             const project = ctx.projectHeld(theirs.record.project);
-            if (!ctx.ofThreadsRepository(scope, project.id)) throw execFix !== undefined ? outside("workspace", execFix) : refusal(spawnRepositoryWorkspaceRefusal(scope.threadId, ctx.projectHeld(mine).name, ref), SPAWN_REPOSITORY_WORKSPACE_FIX, "usage");
-            if (!ctx.projectReached(scope, project.id)) throw execFix !== undefined ? outside("folder", execFix) : refusal(spawnFolderRefusal(scope.threadId, ref), SPAWN_FOLDER_FIX, "usage");
+            if (!ctx.ofThreadsRepository(origin, project.id)) throw execFix !== undefined ? outside("workspace", execFix) : refusal(spawnRepositoryWorkspaceRefusal(scope.threadId, ctx.projectHeld(mine).name, ref), SPAWN_REPOSITORY_WORKSPACE_FIX, "usage");
+            if (!ctx.projectReached(origin, project.id)) throw execFix !== undefined ? outside("folder", execFix) : refusal(spawnFolderRefusal(scope.threadId, ref), SPAWN_FOLDER_FIX, "usage");
             throw refusal(spawnReachRefusal(scope.threadId, ref), execFix ?? spawnReachFix(project.name, !copiesFolder(kindForComputer(project.computer))), "usage");
           }
           if (execFix !== undefined) {
             const held = [...ctx.projectsHeld.values()];
             const project = held.find(p => p.id === ref) ?? held.find(p => p.name === ref);
-            if (project !== undefined && !ctx.projectReached(scope, project.id)) throw outside(ctx.ofThreadsRepository(scope, project.id) ? "folder" : "project", execFix);
+            if (project !== undefined && !ctx.projectReached(origin, project.id)) throw outside(ctx.ofThreadsRepository(origin, project.id) ? "folder" : "project", execFix);
           }
           await ctx.projectsDoor.resolve(ref, origin).catch((e: unknown) => {
             if ((e as { kind?: unknown }).kind !== "not-found") throw e;
@@ -464,6 +465,19 @@ export function workspacesArea(ctx: RuntimeContext): WorkspacesArea {
       const project: WorkspaceProject = { name: held.name, dest: held.path, importedAt: held.createdAt };
       const projects = [project];
       if (entry.record.phase !== "running") throw new Error(`${name} is ${entry.record.phase}; only a running machine can be snapshotted`);
+      // A manager that does not start in the project folder, under a thread's environment or a login shell's, never
+      // reaches an image; and a pnpm other than the folder's pin, which switches itself into a copy under PNPM_HOME on
+      // its first call there and never fetches that copy again, switches here before the disk is copied.
+      const root = await entry.machine.exec(`ls -A ${shellQuote(project.dest)}`, { timeoutMs: INLINE_EXEC_MS });
+      for (const { check } of projectInstalls(root.stdout.split("\n").map(line => line.trim()), project.dest)) {
+        if (check === undefined) continue;
+        for (const script of checkScripts(check, { dir: project.dest, env: loginEnvOn(entry.record.place, entry.record.npmBin) })) {
+          const ran = await entry.machine.run(script, { deadlineMs: CHECK_MS });
+          if (ran.exitCode === 0) continue;
+          const said = ran.stderr.split("\n").find(line => /\berror\b/i.test(line))?.trim() || lastLineOf(ran.stderr) || lastLineOf(ran.stdout) || `exit ${ran.exitCode}`;
+          throw new Error(snapshotManagerLine(name, check, project.dest, said, `${ran.stderr}\n${ran.stdout}`));
+        }
+      }
       await syncDisk(entry.machine);
       const disk = await diskUse(entry.machine);
       const createdAt = new Date(clock.now()).toISOString();

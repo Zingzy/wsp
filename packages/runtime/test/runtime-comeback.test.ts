@@ -11,7 +11,8 @@ import { execDetached, type ExecResult } from "@wsp/engine";
 /** The detached launch starts its run under setsid, which macOS lacks; detached runs only start on Linux machines. */
 const noSetsid = spawnSync("sh", ["-c", "command -v setsid"]).status !== 0;
 import { DAEMON_VERSION, PERMISSION_ALLOW, RUN_GONE_LINE, TURN_TOKEN_ENV, foldThreads, threadWordOf, type AdapterEvent, type Caller, type ExecStream, type SessionView, type TurnResult } from "@wsp/protocol";
-import { TRANSCRIPTS_HELD, createRuntime, type HarnessAdapterFactory, type HarnessSession, type ProjectLander } from "../src/runtime.js";
+import { TRANSCRIPTS_HELD, createRuntime, type HarnessAdapterFactory, type HarnessSession, type ProjectLander, type Runtime } from "../src/runtime.js";
+import { TRANSCRIPT_CAP } from "../src/types/internal.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { until } from "./until.js";
 import { stubBackend, tokenGuest, type StubBackend, createOn } from "./stub-backend.js";
@@ -62,6 +63,8 @@ describe("a turn the host comes back to", () => {
     const reopenedWith: { prompt?: string; effort?: string }[] = [];
     /** The launch environment of each turn this fixture started, in order; an attach after a restart adds none. */
     const envs: Readonly<Record<string, string>>[] = [];
+    /** The message each turn this fixture started was handed, in order. */
+    const prompts: string[] = [];
     const adapter: HarnessAdapterFactory = ctx => ({
       steers: false,
       // Answering nothing leaves the row on its seed, so the only thing that can stop a second question after the
@@ -72,6 +75,7 @@ describe("a turn the host comes back to", () => {
       },
       start: o => {
         envs.push({ ...ctx.env });
+        prompts.push(o.prompt);
         // The shape a handle the guest's run directory reports has to have to be one of this host's.
         const handle = `/tmp/wsp-run/${(++minted).toString(16).padStart(12, "0")}`;
         // The CLI keys the session by its own id, not by the one the launch minted, so the row and the harness
@@ -101,6 +105,7 @@ describe("a turn the host comes back to", () => {
       adapter,
       emit,
       envs,
+      prompts,
       handles: () => [...runs.keys()],
       sweep: (handle: string) => runs.delete(handle),
       unreach: (e: Error) => (unreachable = e),
@@ -910,6 +915,147 @@ describe("a turn the host comes back to", () => {
     await until(async () => (await rt2.sessions.list(ws.id))[0]!.status === "completed");
     expect((await rt2.sessions.history(ws.id)).map(e => e.type)).toEqual(["session.start", "session.notify", "session.done", "session.end"]);
     await rt2.close();
+  });
+
+  it("a reply held over background work has its line sent once, not again on the replay, and the held end sends none", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const h = machineRuns();
+    const rt1 = createRuntime({ backend, store, adapters: { claude: h.adapter } });
+    const ws = await createOn(rt1, { golden: "snap_g", name: "a" });
+    await rt1.sessions.start(ws.id, { prompt: "build it", notify: ["me"] });
+    await until(async () => (await rt1.sessions.history(ws.id)).some(e => e.type === "session.start"));
+    const run = h.handles()[0]!;
+    const reply: TurnResult = { status: "completed", text: "Pushed; the tests run in the background." };
+    h.emit(run, { type: "turn.tasks", sessionId: "sess-1", running: 1, replied: reply });
+    await until(async () => (await rt1.sessions.history(ws.id)).some(e => e.type === "session.notify"));
+    await rt1.close();
+
+    const rt2 = createRuntime({ backend, store, adapters: { claude: h.adapter } });
+    expect((await rt2.sessions.list(ws.id)).map(s => s.status)).toEqual(["running"]);
+    h.emit(run, { type: "turn.done", sessionId: "sess-1", result: reply, held: true });
+    h.emit(run, { type: "session.end", sessionId: "sess-1", exitCode: 0, sawResult: true });
+    await until(async () => (await rt2.sessions.list(ws.id))[0]!.status === "completed");
+    expect((await rt2.sessions.history(ws.id)).map(e => e.type)).toEqual(["session.start", "session.notify", "session.done", "session.end"]);
+    await rt2.close();
+  });
+
+  /** A turn told to `notify`, its agent's reply held over a background task and its line sent: the runtime and the run. */
+  const heldLineSent = async (h: ReturnType<typeof machineRuns>, store: Store, backend: StubBackend, notify: string[] = ["me"]) => {
+    const rt = createRuntime({ backend, store, adapters: { claude: h.adapter } });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
+    await rt.sessions.start(ws.id, { prompt: "build it", notify });
+    await until(async () => (await rt.sessions.history(ws.id)).some(e => e.type === "session.start"));
+    const run = h.handles().at(-1)!;
+    h.emit(run, { type: "turn.tasks", sessionId: "sess-1", running: 1, replied: { status: "completed", text: "Pushed; CI runs in the background." } });
+    await until(async () => (await rt.sessions.history(ws.id)).some(e => e.type === "session.notify"));
+    return { rt, ws, run };
+  };
+  const notifies = async (rt: Runtime, workspaceId: string) => (await rt.sessions.history(workspaceId)).flatMap(e => (e.type === "session.notify" ? [e.text] : []));
+
+  it("a held reply's line and the woken agent's line into a napping lead both outlive a host restart", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const h = machineRuns();
+    const rt1 = createRuntime({ backend, store, adapters: { claude: h.adapter } });
+    const lead = await createOn(rt1, { golden: "snap_g", name: "lead" });
+    const kidWs = await createOn(rt1, { golden: "snap_g", name: "kid" });
+    const leadTurn = await rt1.sessions.start(lead.id, { prompt: "orchestrate" });
+    await until(async () => (await rt1.sessions.history(lead.id)).some(e => e.type === "session.start"));
+    const leadRun = h.handles()[0]!;
+    h.emit(leadRun, { type: "turn.done", sessionId: "sess-1", result: { status: "completed", text: "waiting" } });
+    h.emit(leadRun, { type: "session.end", sessionId: "sess-1", exitCode: 0, sawResult: true });
+    await leadTurn.finished;
+    await rt1.workspaces.nap(lead.id);
+    await rt1.sessions.start(kidWs.id, { prompt: "build it", notify: [leadTurn.view().threadId!] });
+    await until(async () => (await rt1.sessions.history(kidWs.id)).some(e => e.type === "session.start"));
+    const kidRun = h.handles()[1]!;
+    h.emit(kidRun, { type: "turn.tasks", sessionId: "sess-2", running: 1, replied: { status: "completed", text: "first reply: pushed, CI in the background" } });
+    h.emit(kidRun, { type: "session.start", sessionId: "sess-2" });
+    h.emit(kidRun, { type: "turn.done", sessionId: "sess-2", result: { status: "completed", text: "second reply: CI passed" } });
+    h.emit(kidRun, { type: "session.end", sessionId: "sess-2", exitCode: 0, sawResult: true });
+    await until(async () => (await rt1.sessions.list(kidWs.id))[0]!.status === "completed");
+    await rt1.close();
+
+    const rt2 = createRuntime({ backend, store, adapters: { claude: h.adapter } });
+    await rt2.sessions.list(lead.id);
+    await rt2.workspaces.wake(lead.id);
+    await until(() => h.prompts.length === 3);
+    h.emit(h.handles()[2]!, { type: "turn.done", sessionId: "sess-1", result: { status: "completed", text: "read it" } });
+    h.emit(h.handles()[2]!, { type: "session.end", sessionId: "sess-1", exitCode: 0, sawResult: true });
+    await until(() => h.prompts.length === 4).catch(() => {});
+    expect(h.prompts.slice(2).map(p => p.replace(/^thread \w+ finished \(completed\): /, "")).sort()).toEqual(["first reply: pushed, CI in the background", "second reply: CI passed"]);
+    await rt2.close();
+  });
+
+  it("a woken agent's own end goes out after a held reply's line, and the woken reply only once on a replay", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const h = machineRuns();
+    const { rt: rt1, ws, run } = await heldLineSent(h, store, backend);
+    h.emit(run, { type: "session.start", sessionId: "sess-1" });
+    h.emit(run, { type: "turn.done", sessionId: "sess-1", result: { status: "completed", text: "CI passed." } });
+    await until(async () => (await notifies(rt1, ws.id)).length === 2);
+    await rt1.close();
+
+    const rt2 = createRuntime({ backend, store, adapters: { claude: h.adapter } });
+    expect((await rt2.sessions.list(ws.id)).map(s => s.status)).toEqual(["running"]);
+    h.emit(run, { type: "session.end", sessionId: "sess-1", exitCode: 0, sawResult: true });
+    await until(async () => (await rt2.sessions.list(ws.id))[0]!.status === "completed");
+    expect((await notifies(rt2, ws.id)).map(t => t.replace(/^thread \w+ finished \(completed\): /, ""))).toEqual(["Pushed; CI runs in the background.", "CI passed."]);
+    await rt2.close();
+  });
+
+  it("a held reply's line is not sent again by a restarted host whose transcript the cap trimmed past that line", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const h = machineRuns();
+    const { rt: rt1, ws, run } = await heldLineSent(h, store, backend);
+    for (let i = 0; i < TRANSCRIPT_CAP + 100; i++) h.emit(run, { type: "turn.delta", sessionId: "sess-1", kind: "text", text: `working ${i}` });
+    await until(async () => (await notifies(rt1, ws.id)).length === 0);
+    await rt1.close();
+
+    const rt2 = createRuntime({ backend, store, adapters: { claude: h.adapter } });
+    const told: string[] = [];
+    rt2.events.on("session.notify", e => told.push((e as { text: string }).text));
+    expect((await rt2.sessions.list(ws.id)).map(s => s.status)).toEqual(["running"]);
+    h.emit(run, { type: "turn.done", sessionId: "sess-1", result: { status: "completed", text: "Pushed; CI runs in the background." }, held: true });
+    h.emit(run, { type: "session.end", sessionId: "sess-1", exitCode: 0, sawResult: true });
+    await until(async () => (await rt2.sessions.list(ws.id))[0]!.status === "completed");
+    expect(told).toEqual([]);
+    await rt2.close();
+  });
+
+  it("a host cut after a held reply's line sends no second line: a nap, and a restart that finds the run gone", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const h = machineRuns();
+    const napped = await heldLineSent(h, store, backend);
+    await napped.rt.workspaces.nap(napped.ws.id);
+    await until(async () => (await napped.rt.sessions.list(napped.ws.id))[0]!.status !== "running");
+    expect(await notifies(napped.rt, napped.ws.id)).toHaveLength(1);
+    await napped.rt.close();
+
+    const store2 = memoryStore();
+    const gone = await heldLineSent(h, store2, backend);
+    await gone.rt.close();
+    h.sweep(gone.run);
+    const rt2 = createRuntime({ backend, store: store2, adapters: { claude: h.adapter } });
+    expect((await rt2.sessions.list(gone.ws.id)).map(s => s.status)).not.toContain("running");
+    expect((await rt2.sessions.history(gone.ws.id)).map(e => e.type)).toEqual(["session.start", "session.notify", "session.end"]);
+    await rt2.close();
+  });
+
+  it("a host cut after the agent was woken under a held reply sends the cut's line", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const h = machineRuns();
+    const { rt, ws, run } = await heldLineSent(h, store, backend);
+    h.emit(run, { type: "session.start", sessionId: "sess-1" });
+    await rt.workspaces.nap(ws.id);
+    await until(async () => (await notifies(rt, ws.id)).length === 2);
+    expect((await notifies(rt, ws.id))[1]).toContain("finished (failed)");
+    await rt.close();
   });
 });
 

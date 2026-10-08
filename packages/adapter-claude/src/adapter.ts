@@ -836,7 +836,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
       onEvent({ type: "turn.anchor", sessionId, anchor });
     };
 
-    const deliver = (reply: TurnResult, sessionId = claudeSessionId): void => {
+    const deliver = (reply: TurnResult, sessionId = claudeSessionId, held = false): void => {
       const result = withLimit(reply, rejected);
       if (settleTimer !== undefined) clearTimeout(settleTimer);
       settleTimer = undefined;
@@ -855,7 +855,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
       }
       turnResult = result;
       anchorOnce(sessionId);
-      onEvent({ type: "turn.done", sessionId, result });
+      onEvent({ type: "turn.done", sessionId, result, ...(held ? { held } : {}) });
     };
 
     /** A held reply with one line under it per task that finished after it: the road where the CLI reported the
@@ -885,7 +885,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
       if (settleTimer !== undefined) clearTimeout(settleTimer);
       settleTimer = setTimeout(() => {
         settleTimer = undefined;
-        if (heldReply !== undefined && backgroundTasks === 0) deliver(heldWithFinished(heldReply));
+        if (heldReply !== undefined && backgroundTasks === 0) deliver(heldWithFinished(heldReply), claudeSessionId, true);
       }, exitMs);
     };
 
@@ -1058,6 +1058,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
                 heldReply = result;
                 heldAt = Date.now();
                 finishedAfter.length = 0;
+                onEvent({ type: "turn.tasks", sessionId: claudeSessionId, running: backgroundTasks, replied: result });
                 continue;
               }
               deliver(result, normalized.sessionId);
@@ -1091,7 +1092,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
             ? { ...withCallsAfter(heldReply), status: "failed", error: exitLine() }
             : heldWithFinished(heldReply, backgroundTasks);
         anchorOnce(claudeSessionId);
-        onEvent({ type: "turn.done", sessionId: claudeSessionId, result: turnResult });
+        onEvent({ type: "turn.done", sessionId: claudeSessionId, result: turnResult, ...(woken ? {} : { held: true as const }) });
       }
       if (turnResult === undefined) {
         turnResult =

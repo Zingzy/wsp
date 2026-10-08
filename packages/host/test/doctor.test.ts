@@ -8,7 +8,7 @@ import { promisify } from "node:util";
 import { gunzipSync } from "node:zlib";
 import { WebSocketServer } from "ws";
 import { GUEST_USER_ENV, TOOLS_PATH, DAEMON_ENV_FILE, type ProvisionPlan, type ToolInstall } from "@wsp/engine";
-import { PLACE_WORKSPACE_PATH } from "@wsp/protocol";
+import { AGENTS_BIN, PLACE_WORKSPACE_PATH } from "@wsp/protocol";
 import { daemonUnderTest, type DaemonUnderTest } from "../../daemon/test/harness.js";
 import { assetDir, assetProof, daemonBinaryHere } from "../src/assets.js";
 import { hostPlatform } from "../src/verbs.js";
@@ -615,6 +615,17 @@ describe("the recipe's tools read from inside the workspace", () => {
     expect(machine.asked[0]).not.toContain("command -v 'gh'");
   });
 
+  it("passes a tool that answers at another version than the plan asks, and still reads a version from every row that pins one: a pnpm whose package lost its files did not answer", async () => {
+    const machine = workspaceWith(scratch(["pnpm"]));
+    const read = { fixed: true, words: "as an npm global" };
+    // A row by its package name alone, and a catalog or Homebrew row that names the command it puts on PATH.
+    const rows = [step({ id: "tools/npm/pnpm", label: "pnpm", manager: "npm", asks: "11.9.0", pin: { ...read, read: "echo 10.34.5" } }), step({ id: "tools/brew/pnpm", label: "pnpm", manager: "npm", bin: "pnpm", asks: "11.9.0", pin: { ...read, read: "echo 10.34.5" } })];
+    for (const row of rows) {
+      expect(await toolsInside(machine, { steps: [row] }), row.id).toBe("1 answered inside");
+      await expect(toolsInside(machine, { steps: [{ ...row, pin: { ...read, read: "true" } }] }), row.id).rejects.toThrow("pnpm did not answer inside the workspace");
+    }
+  });
+
   it("fails naming the rows that did not answer, which is a tool the recipe installed and no workspace can run", async () => {
     const machine = workspaceWith(scratch(["node"]));
     await expect(toolsInside(machine, plan)).rejects.toThrow("agent-browser did not answer inside the workspace, though the recipe installed it on the machine");
@@ -1116,6 +1127,11 @@ describe("the word wsp doctor takes", () => {
 });
 
 describe("browser shim in the guest", () => {
+  it("a workspace made from a version whose seal read npm's own folder is created with that folder first on its PATH", () => {
+    expect(claudeEnvs({ npmBin: "/opt/nvm/bin" })["PATH"]).toBe(`${AGENTS_BIN}:/opt/nvm/bin:${TOOLS_PATH}`);
+    expect(claudeEnvs({})["PATH"]).toBe(TOOLS_PATH);
+  });
+
   it("is installed as BROWSER and as xdg-open, first on PATH, and login shells lose the image's DISPLAY", () => {
     const script = deployScript(CLOUD_PLACE, "aabbcc");
     // Not in every machine's envs: an old golden without the shim would otherwise point tools at a missing file.
