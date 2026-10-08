@@ -14,7 +14,7 @@ import { promisify } from "node:util";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { CLOUD_ENV, EXIT_CODES, execOutsideFix, execOutsideRefusal, HERE_PLACE_ID, HOST_TOKEN_ENV, HOST_URL_ENV, jsonLine, refusalLine, scopedNoPairLine, spawnRepositoryRefusal, SPAWN_REPOSITORY_FIX, TURN_TOKEN_ENV } from "@wsp/protocol";
+import { CLOUD_ENV, EXIT_CODES, execOutsideFix, execOutsideRefusal, HERE_PLACE_ID, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, jsonLine, refusalLine, scopedNoPairLine, spawnRepositoryRefusal, SPAWN_REPOSITORY_FIX, TURN_TOKEN_ENV } from "@wsp/protocol";
 import { copyKey, createRuntime, memoryStore, type PlaceWiring } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cli, localWiring, serve } from "../src/cli.js";
@@ -33,6 +33,8 @@ import { WORKSPACE_CALLED } from "./mcp-binary-workspaces.js";
 import { mcpBinNamed, ownEnv, served } from "./stdio-session.js";
 import { stubBackend, withDaemonRoads } from "./stub-backend.js";
 import { branchDaemons } from "../../runtime/test/stub-backend.js";
+import { HOLD, leadAndBox } from "../../runtime/test/box-fixture.js";
+import { HERE } from "../../runtime/test/place-join.js";
 import { captured, copyingFake, fakeDaemonStart, heldAgent, PAGE } from "./verbs-fixture.js";
 
 const MCP_BIN = mcpBinNamed(process.env["WSP_MCP_BIN"]);
@@ -494,6 +496,67 @@ suite(`the tool server in the daemon binary${MCP_BIN === undefined ? " (set WSP_
       await vi.waitFor(() => expect(held.steered).toEqual([`thread ${child.slice(0, 8)} finished (completed): Built it.`]));
       held.release(0, "read it");
       await turn.finished;
+    });
+
+    it("lists and sends to the lead and a sibling whose rows all fell off the folder's cap", { timeout: 240_000 }, async () => {
+      const repo = join(dir, "repo");
+      mkdirSync(repo, { recursive: true });
+      execFileSync("git", ["init", "-q", "-b", "main", repo]);
+      const mac = await runtime.projects.add({ source: repo, on: HERE_PLACE_ID, name: "lab" });
+      const folder = await runtime.workspaces.create({ project: mac.id, name: "lab", agents: { spawn: true } });
+      const turn = await runtime.sessions.start(folder.id, { prompt: "coordinate" });
+      const lead = turn.view().threadId!;
+      const asLead = { origin: "here" as const, by: { kind: "thread" as const, threadId: lead, workspaceId: folder.id, rootThreadId: lead } };
+      await runtime.sessions.start(folder.id, { prompt: "build it" }, asLead);
+      const sibling = (await runtime.sessions.start(folder.id, { prompt: "write the docs" }, asLead)).view().threadId!;
+      await vi.waitFor(() => expect(held.starts).toHaveLength(3));
+      held.release(2, "wrote them");
+      held.release(0, "waiting on the children");
+      await turn.finished;
+      for (let i = 0; i < 205; i++) {
+        const person = await runtime.sessions.start(folder.id, { prompt: `the person's ${i}` });
+        await vi.waitFor(() => expect(held.starts).toHaveLength(4 + i));
+        held.release(3 + i, "done");
+        await person.finished;
+      }
+      expect((await runtime.sessions.list()).filter(r => r.threadId === lead || r.threadId === sibling)).toEqual([]);
+      const launch = held.envs[1]!;
+      const pair = { [HOST_URL_ENV]: launch[HOST_URL_ENV]!, [HOST_TOKEN_ENV]: launch[HOST_TOKEN_ENV]!, [TURN_TOKEN_ENV]: launch[TURN_TOKEN_ENV]! };
+      const { out, code } = await served([MCP_BIN!, "mcp", "--state", statePath], { ...env, ...pair }, [
+        callOf(1, "threads"),
+        callOf(2, "send", { thread: lead, message: "which branch do I push to?", detach: true }),
+        callOf(3, "send", { thread: sibling, message: "add the changelog", detach: true }),
+      ]);
+      expect(code).toBe(0);
+      const [listed, toLead, toSibling] = out.map(line => (JSON.parse(line) as { result: { structuredContent: Record<string, unknown>; isError?: boolean } }).result);
+      expect((listed!.structuredContent["threads"] as { threadId?: string }[]).map(t => t.threadId)).toEqual(expect.arrayContaining([lead, sibling]));
+      expect(toLead!.isError).toBeUndefined();
+      expect(toSibling!.isError).toBeUndefined();
+      await vi.waitFor(() => expect(held.starts.slice(208).map(s => s.prompt)).toEqual(["which branch do I push to?", "add the changelog"]));
+      for (const at of [1, 208, 209]) held.release(at, "done");
+    });
+  });
+
+  describe("a child on a computer the person joined whose tool server is the binary", () => {
+    it("lists and sends to its lead once the lead's rows all fell off the cap of its folder here", { timeout: 240_000 }, async () => {
+      const { rt, folder, starts, threadId, launch, turn } = await leadAndBox(dir, { reach: true });
+      const asLead = { [HOST_URL_ENV]: launch[HOST_URL_ENV]!, [HOST_KEY_ENV]: launch[HOST_KEY_ENV]!, [HOST_TOKEN_ENV]: launch[HOST_TOKEN_ENV]!, [TURN_TOKEN_ENV]: launch[TURN_TOKEN_ENV]! };
+      const ran = await served([MCP_BIN!, "mcp", "--state", statePath], { ...env, ...asLead }, [callOf(1, "run", { project: "lab-box", message: `${HOLD}build it`, detach: true })]);
+      expect(ran.code).toBe(0);
+      expect(starts[1]!.o.cwd).toBe("/root/lab-box");
+      starts[0]!.answer("waiting on the child");
+      await turn.finished;
+      for (let i = 0; i < 205; i++) await (await rt.sessions.start(folder.id, { prompt: `the person's ${i}`, harness: "claude" })).finished;
+      expect((await rt.sessions.list()).filter(r => r.threadId === threadId)).toEqual([]);
+      const child = starts[1]!.env;
+      const pair = { [HOST_URL_ENV]: launch[HOST_URL_ENV]!, [HOST_KEY_ENV]: launch[HOST_KEY_ENV]!, [HOST_TOKEN_ENV]: child[HOST_TOKEN_ENV]!, [TURN_TOKEN_ENV]: child[TURN_TOKEN_ENV]! };
+      const { out, code } = await served([MCP_BIN!, "mcp", "--state", statePath], { ...env, ...pair }, [callOf(1, "threads"), callOf(2, "send", { thread: threadId, message: "which branch do I push to?", detach: true })]);
+      expect(code).toBe(0);
+      const [listed, sent] = out.map(line => (JSON.parse(line) as { result: { structuredContent: Record<string, unknown>; content: unknown; isError?: boolean } }).result);
+      expect((listed!.structuredContent["threads"] as { threadId?: string }[]).find(t => t.threadId === threadId)).toMatchObject({ projectName: "lab", computerName: HERE.name });
+      expect(sent!.isError, JSON.stringify(sent!.content)).toBeUndefined();
+      await expect.poll(() => starts.at(-1)!.o.prompt).toBe("which branch do I push to?");
+      starts[1]!.answer("asked the lead");
     });
   });
 });

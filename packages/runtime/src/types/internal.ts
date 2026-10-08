@@ -584,6 +584,9 @@ export interface ThreadRecord {
   /** Whether a turn of the thread did work, by threadRan's rule, kept here because the rows that say so fall off the
    * cap. Absent reads as worked, so a record that never said is never taken for a thread that ran nothing. */
   worked?: boolean;
+  /** How the thread's newest turn ended, kept as the cap drops a row of it, so a listing that names the thread off
+   * this record once its rows are all gone says that end. */
+  ended?: TurnStatus;
 }
 
 export interface SessionIndexRecord {

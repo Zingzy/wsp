@@ -18,7 +18,7 @@ import {
   threadSeed, taskStopRefusedLine, taskStopUnsupportedLine, agentOffLine, HEAD_BYTES, HISTORY_PAGE_BYTES,
   HISTORY_PAGE_EVENTS, AGENT_STARTING_MS, ASIDE_EMPTY_LINE, capStoppedLine, deletedBeforeStartLine, type AsideQuestion,
   type McpServerSpec, type SessionAsker, refusal, sendFilesAcrossLine, SEND_FILES_ACROSS_FIX, waitAcrossLine, WAIT_ACROSS_FIX,
-  TURN_STOPPED_LINE, workspacePlace, STOP_REACH_MS, sendGivenUpLine,
+  TURN_STOPPED_LINE, workspacePlace, STOP_REACH_MS, sendGivenUpLine, threadResult,
 } from "@wsp/protocol";
 import { harnessCatalog } from "../harness-catalog.js";
 import { headShape } from "../transcript-reader.js";
@@ -100,13 +100,34 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
       void stopping?.then(() => settle(ctx.placeAway(place)), () => settle(ctx.placeAway(place)));
     });
   };
+  /** The row a thread whose rows all fell off the cap is named by, built off its record and the transcript: its id is
+   * the thread's, and no turn of it runs, since the cap never drops a running row. */
+  const trimmedRow = (threadId: string, r: ThreadRecord & { workspaceId: string }, ended = r.ended): SessionView => {
+    const resume = ctx.startedAs(r.workspaceId, threadId);
+    const cwd = resume === undefined ? undefined : ctx.folderOf(r.workspaceId, resume);
+    return {
+      id: threadId,
+      threadId,
+      workspaceId: r.workspaceId,
+      harness: r.harness,
+      status: ended ?? "completed",
+      ...(r.parentThreadId !== undefined ? { startedBy: "agent" as const, parentThreadId: r.parentThreadId } : {}),
+      ...(r.rootThreadId !== undefined ? { rootThreadId: r.rootThreadId } : {}),
+      ...(resume !== undefined ? { claudeSessionId: resume } : {}),
+      ...(cwd !== undefined ? { cwd } : {}),
+      ...(r.permissionMode !== undefined ? { permissionMode: r.permissionMode } : {}),
+    };
+  };
   /** A stop on one turn; `marked` lets a held turn's next look go on once the stop has marked it, or will not. */
   const stopTurn = async (marked: () => void, ...[sessionId, origin, task]: Parameters<Runtime["sessions"]["interrupt"]>): ReturnType<Runtime["sessions"]["interrupt"]> => {
     await ctx.ready();
     // A turn held back is named by its turn id, and its row goes under its launch's id once it starts, so a stop sent
     // off the waiting line finds the turn it became.
     const rowOf = (): SessionEntry | undefined => sessions.get(sessionId) ?? [...sessions.values()].find(r => r.turnId === sessionId);
-    let s = rowOf();
+    // A thread whose rows all fell off the cap is stopped by the row its listing names, so its tree stops under it as
+    // under a thread whose rows are there.
+    const trimmed = rowOf() === undefined ? threadRecords.get(sessionId) : undefined;
+    let s = trimmed === undefined ? rowOf() : { view: trimmedRow(sessionId, trimmed), turnId: sessionId };
     if (!s) return { outcome: "not-found" };
     // One absence for every row a thread cannot reach, wherever it stands: a sentence about the workspace would
     // tell a thread which of the two rules hid the row.
@@ -770,7 +791,13 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
       // after a restart may answer nothing for minutes, so its rows wait for a later listing.
       const asked = ctx.titleRows(rows.filter(view => !ctx.bootWork.has(view.workspaceId))).map(view => ({ first: view.harnessTitle === undefined, done: ctx.refreshTitle(view, false) }));
       await Promise.all(asked.filter(a => a.first).map(a => a.done));
-      const listed = ctx.listedRows(held);
+      // A thread of the caller's tree whose rows all fell off the cap is still one it names and sends to: it is listed
+      // off its record, which the cap never drops, so a child still reaches the lead it waits on. A record kept from
+      // before it held its end reads that end off the transcript while the transcript still holds it.
+      const rowed = new Set([...sessions.values()].map(s => threadKeyOf(s.view)));
+      const trimmed = ctx.treeRecords(origin, "list", workspaceId).filter(([threadId]) => !rowed.has(threadId));
+      const ends = await Promise.all(trimmed.map(async ([threadId, r]) => r.ended ?? threadResult(await ctx.openTranscript(r.workspaceId), threadId)?.status));
+      const listed = [...ctx.listedRows(held), ...trimmed.map(([threadId, r], i) => trimmedRow(threadId, r, ends[i]))];
       const computers = listed.length === 0 ? [] : await ctx.computerRows();
       return listed.map(view => {
         const id = ctx.live.get(view.workspaceId)?.record.project;
