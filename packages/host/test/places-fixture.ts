@@ -3,7 +3,7 @@
 // and the cleanup after each case. Its hooks register at the top of the file that imports it, before that file's own.
 import { execFileSync } from "node:child_process";
 import { createHash, createPrivateKey, generateKeyPairSync, sign } from "node:crypto";
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { PassThrough } from "node:stream";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -14,7 +14,7 @@ import WebSocket from "ws";
 import { joinToken, MCP_ID_PREFIX, placeDaemonPaths, placeLinkTranscript, placeProvisionPaths, wsUrlOf } from "@wsp/protocol";
 import { freshEphemeral, makeSeal, sealKeys, sharedSecret, type Seal } from "@wsp/runtime";
 import { keyFingerprint, sshWordReach, type SshLocalRun } from "@wsp/engine";
-import { PLACE_FOUND_END, WSP_WORKSPACE_APPARMOR_PATH } from "@wsp/protocol";
+import { PLACE_FOUND_END, RUNTIME_ROOT, WSP_WORKSPACE_APPARMOR_PATH } from "@wsp/protocol";
 import { addCommand, joinCommand, leaveCommand as leaveCommandHere } from "../src/places.js";
 import { sweepPlace as sweepPlaceHere, type PlaceSweepOptions } from "../src/place-report.js";
 import { SERVICE_MANAGERS, type RunResult, type ServiceManager, type ServiceRunner, type ServiceUnit } from "../src/service.js";
@@ -32,8 +32,8 @@ const sweepPlace = (opts: PlaceSweepOptions = {}): ReturnType<typeof sweepPlaceH
 const toolsUnder = (home: string): { prefix: string; links: string } => ({ prefix: join(home, "opt-wsp"), links: join(home, "usr-local-bin") });
 
 /** `wsp leave` as a case runs it, with the same profile under the case's own home. */
-const leaveCommand = (io: Parameters<typeof leaveCommandHere>[0], args: readonly string[], deps: NonNullable<Parameters<typeof leaveCommandHere>[2]>): ReturnType<typeof leaveCommandHere> =>
-  leaveCommandHere(io, args, { apparmorProfile: join(deps.home, "etc-apparmor.d", "wsp-workspace"), tools: toolsUnder(deps.home), systemRoot: join(deps.home, "system"), ...deps });
+const leaveCommand = (io: Parameters<typeof leaveCommandHere>[0], args: readonly string[], deps: NonNullable<Parameters<typeof leaveCommandHere>[2]>, flags?: Parameters<typeof leaveCommandHere>[3]): ReturnType<typeof leaveCommandHere> =>
+  leaveCommandHere(io, args, { apparmorProfile: join(deps.home, "etc-apparmor.d", "wsp-workspace"), tools: toolsUnder(deps.home), systemRoot: join(deps.home, "system"), ...deps }, flags);
 
 /** The record an add leaves where nothing it would take stood before it: whole, and naming nothing. */
 function addFoundNothing(home: string): void {
@@ -43,8 +43,11 @@ function addFoundNothing(home: string): void {
 
 /** The machine's own profile as the file found it, which every case leaves exactly as it was. */
 const MACHINES_PROFILE = existsSync(WSP_WORKSPACE_APPARMOR_PATH) ? readFileSync(WSP_WORKSPACE_APPARMOR_PATH) : undefined;
+/** The machine's own runtime folder as the file found it: a leave run as root here takes it unless a case names another. */
+const MACHINES_RUNTIME = existsSync(RUNTIME_ROOT) ? readdirSync(RUNTIME_ROOT).sort() : undefined;
 afterAll(() => {
   expect(existsSync(WSP_WORKSPACE_APPARMOR_PATH) ? readFileSync(WSP_WORKSPACE_APPARMOR_PATH) : undefined, "a case touched this machine's own workspace profile").toEqual(MACHINES_PROFILE);
+  expect(existsSync(RUNTIME_ROOT) ? readdirSync(RUNTIME_ROOT).sort() : undefined, "a case took this machine's own runtime folder").toEqual(MACHINES_RUNTIME);
 });
 
 const dirs: string[] = [];

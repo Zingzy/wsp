@@ -88,6 +88,14 @@ export const PlaceReport = z.object({
   /** The systemd unit its daemon runs under, the one the join wrote, read off its own cgroup: what the person
    * restarts to open the door again. Absent where the daemon runs under no unit. */
   daemonUnit: z.string().max(256).regex(/^[\w@.:-]+\.service$/).optional(),
+  /** Whether a leave run there takes the runtime's folder, and the copy of the image in it: only as root, with the
+   * add's whole record not naming it as there before. Absent from a daemon older than this field, whose leave never
+   * takes it. */
+  takesRuntime: z.boolean().optional(),
+  /** The daemon version the wsp in `wsp` was built with, as it said it: which `wsp leave` that computer runs, which an
+   * update of its daemon alone does not move. Absent where that wsp said none, which every wsp older than this field
+   * does. */
+  wspDaemonVersion: z.number().int().optional(),
   /** Which of the host's addresses this link reached; the address a turn on the place is told to dial back. */
   dialed: z.string().refine(isHttpUrl, "http or https URL"),
 });
@@ -249,10 +257,6 @@ export const pluginOffLine = (name: string): string => `plugin ${name}`;
 /** What a remove says of the plugins the setup put on that computer and could not take off: they stay there. */
 export const pluginsKeptLine = (name: string, plugins: readonly string[]): string =>
   `${plugins.join(", ")} ${plugins.length === 1 ? "is" : "are"} still on ${name}: wsp could not take ${plugins.length === 1 ? "it" : "them"} off`;
-
-/** What a remove took off this host's list with that computer: a project the recipe's folders step made there. The
- * checkout on that computer is the person's and stays. */
-export const projectLeftLine = (name: string): string => `project ${name}, its folder there left as it is`;
 
 /** What a place that is connected but has never said which port its daemon bound is refused with: a pane needs
  * that port to carry to, and only that computer knows it. */

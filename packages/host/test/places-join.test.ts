@@ -9,7 +9,7 @@ import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSy
 import { basename, dirname, join, relative } from "node:path";
 import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import WebSocket from "ws";
-import { ALREADY_JOINED_LINE, JOIN_NO_KEY_REFUSAL, PLACE_LEAVE_LINE, PLACE_CODE_REFUSAL, PLACE_NEEDS_ROOT_LINE, joinKeyRefusal, placeFileText, MCP_ID_PREFIX, placeDaemonPaths, placeInstallLog, placeKeptForLinkLine, placeProvisionPaths, shellQuote, wsUrlOf } from "@wsp/protocol";
+import { placeKeptMountedLine, placeKeptMountsUnreadLine, placeLeaveUnsavedLine, placeRuntimeStandsLine, placeUnreadLine, placeStoodBeforeLine, ALREADY_JOINED_LINE, JOIN_NO_KEY_REFUSAL, PLACE_LEAVE_LINE, PLACE_CODE_REFUSAL, PLACE_NEEDS_ROOT_LINE, joinKeyRefusal, placeFileText, MCP_ID_PREFIX, placeDaemonPaths, placeInstallLog, placeKeptForLinkLine, placeProvisionPaths, shellQuote, wsUrlOf } from "@wsp/protocol";
 import { CODEX_TOML } from "@wsp/catalog";
 import { OWN_MARK, outsideAfterScript, outsideBeforeScript, keyFingerprint } from "@wsp/engine";
 import { daemonBinaryHere } from "../src/assets.js";
@@ -18,7 +18,7 @@ import { apparmorStep, apparmorStoodLine, joinedPlace, placeFoundSkippedLine, pl
 import { PLACE_FOUND_END, threadCgroupsEndScript, placeOutsideLeftLine, placeOwnersUnknownLine, TOOL_PREFIX } from "@wsp/protocol";
 import { pinnedDroppingPort } from "../../runtime/test/held-port.js";
 import { NOTHING_TO_LEAVE_LINE, brokenJoinLine, brokenPlaceLeftLine, joinCutByLeaveLine, joinCommand } from "../src/places.js";
-import { placeFilePath, placeKeyPath, placeLogPath, readPlaceFile, sweptLine, sweptSaid, writePlaceFile } from "../src/place-report.js";
+import { mountsUnder, placeFilePath, placeKeyPath, placeLogPath, readPlaceFile, sweepRuntime, sweptLine, sweptSaid, writePlaceFile } from "../src/place-report.js";
 import { captured } from "./verbs-fixture.js";
 import { SERVICE_MANAGERS, type ServiceAddress, type ServiceRunner } from "../src/service.js";
 import { writeStub } from "../../protocol/test/stub-script.js";
@@ -200,7 +200,7 @@ describe("a computer joining a wsp", () => {
     expect(io.errors).toEqual([brokenJoinLine(key)]);
     expect(host.frames).toEqual([]);
     const left = captured();
-    expect(await leaveCommand(left, [], { home, run: fakeRunner().run, platform: "linux" })).toBe(0);
+    expect(await leaveCommand(left, [], { home, run: fakeRunner().run, platform: "linux" }, { yes: true })).toBe(0);
     expect(existsSync(key)).toBe(false);
     expect(left.lines[0]).toBe(brokenPlaceLeftLine(key));
   });
@@ -215,7 +215,7 @@ describe("a computer joining a wsp", () => {
     expect(await joinCommand(io, [host.url], { code: codeFor(host, "A") }, joinDepsFor(home, fakeRunner().run))).toBe(1);
     expect(io.errors).toEqual([brokenJoinLine(file)]);
     expect(host.frames).toEqual([]);
-    expect(await leaveCommand(captured(), [], { home, run: fakeRunner().run, platform: "linux" })).toBe(0);
+    expect(await leaveCommand(captured(), [], { home, run: fakeRunner().run, platform: "linux" }, { yes: true })).toBe(0);
     expect(() => lstatSync(file)).toThrow();
   });
 
@@ -361,7 +361,7 @@ describe("taking wsp off the computer it is typed on", () => {
     writeFileSync(join(work, "a-thread-wrote-this"), "mine");
     const runner = fakeRunner();
     const io = captured();
-    expect(await leaveCommand(io, [], { home, run: runner.run, platform: "linux" })).toBe(0);
+    expect(await leaveCommand(io, [], { home, run: runner.run, platform: "linux" }, { yes: true })).toBe(0);
     for (const path of [placeFilePath(home), placeKeyPath(home), placeLogPath(home), at.tokenPath, at.portFile, at.inbox, at.runDir]) expect(existsSync(path)).toBe(false);
     // The work folder is the person's own: a place that left a wsp keeps what its threads wrote.
     expect(readFileSync(join(work, "a-thread-wrote-this"), "utf8")).toBe("mine");
@@ -436,7 +436,7 @@ describe("taking wsp off the computer it is typed on", () => {
     const log = placeInstallLog(home, "p_abc123");
     mkdirSync(dirname(log), { recursive: true });
     writeFileSync(log, "added 812 packages\n");
-    expect(await leaveCommand(captured(), [], { home, run: fakeRunner().run, platform: "linux" })).toBe(0);
+    expect(await leaveCommand(captured(), [], { home, run: fakeRunner().run, platform: "linux" }, { yes: true })).toBe(0);
     expect(existsSync(placeDaemonPaths(home).wsp) ? readdirSync(placeDaemonPaths(home).wsp) : []).toEqual([]);
   });
 
@@ -462,7 +462,7 @@ describe("taking wsp off the computer it is typed on", () => {
     const host = await fakeHost();
     expect(await joinCommand(captured(), [host.url], { code: codeFor(host, "7QK3M2VD"), name: "box" }, joinDepsFor(home, fakeRunner().run))).toBe(0);
     for (const folder of ["readings", "ssh"]) mkdirSync(join(at.wsp, folder), { recursive: true });
-    expect(await leaveCommand(captured(), [], { home, run: fakeRunner().run, platform: "linux" })).toBe(0);
+    expect(await leaveCommand(captured(), [], { home, run: fakeRunner().run, platform: "linux" }, { yes: true })).toBe(0);
     for (const [path, text] of Object.entries(theirs)) expect(readFileSync(path, "utf8"), path).toBe(text);
     expect(readdirSync(at.wsp).sort()).toEqual(["bin", "state.json"]);
   });
@@ -518,7 +518,7 @@ describe("taking wsp off the computer it is typed on", () => {
     mkdirSync(dirname(file), { recursive: true });
     writeFileSync(file, "not json");
     const io = captured();
-    expect(await leaveCommand(io, [], { home, run: fakeRunner().run, platform: "linux" })).toBe(0);
+    expect(await leaveCommand(io, [], { home, run: fakeRunner().run, platform: "linux" }, { yes: true })).toBe(0);
     expect(existsSync(file)).toBe(false);
     expect(io.lines[0]).toBe(brokenPlaceLeftLine(file));
     expect(io.lines.join("\n")).toContain(file);
@@ -603,6 +603,132 @@ describe("taking wsp off the computer it is typed on", () => {
     expect(existsSync(tools.prefix)).toBe(false);
     expect(readdirSync(tools.links).sort()).toEqual(["env2", "jq", "old"]);
     expect(existsSync(`${tools.prefix}-old`)).toBe(true);
+  });
+
+  // A box's leave: only Linux reads a mount table off /proc and keeps workspaces under the runtime's folder.
+  it.runIf(process.platform === "linux")("takes the runtime folder whole where the leave runs as root, keeps one the add found standing, and keeps one with a mount under it", async () => {
+    const home = tmp("leave-runtime");
+    writePlaceFile(placeFilePath(home), { placeId: "p_1", name: "box", hostName: "zingzy-mbp", hostUrls: ["http://x"], hostPublicKey: "k", keyPath: placeKeyPath(home), joinedAt: new Date(0).toISOString() });
+    addFoundNothing(home);
+    // What a remove left there before: the runtime's own folders, and a sign-in's log and lock beside the login.
+    const runtime = join(home, "system", "wsp");
+    for (const folder of ["run", "state", "copies", "projects/p_1/checkout", "put"]) mkdirSync(join(runtime, folder), { recursive: true });
+    mkdirSync(join(runtime, "logins", "codex"), { recursive: true });
+    writeFileSync(join(runtime, "logins", "codex", "login.log"), "signed in\n");
+    writeFileSync(join(runtime, "logins", "codex", "auth.json.lock"), "");
+    const io = captured();
+    expect(await leaveCommand(io, [], { home, run: fakeRunner().run, platform: "linux", uid: 0, unsaved: () => [] }, { yes: true })).toBe(0);
+    expect(existsSync(runtime)).toBe(false);
+    expect(io.lines).toContain(sweptLine(runtime));
+
+    const stood = join(tmp("leave-runtime-stood"), "wsp");
+    mkdirSync(join(stood, "theirs"), { recursive: true });
+    expect(sweepRuntime(stood, new Set([stood]), () => "")).toEqual([placeStoodBeforeLine(stood)]);
+    expect(existsSync(join(stood, "theirs"))).toBe(true);
+    // A workspace still running there reads through its mounts, so nothing under them is reached for.
+    const table = `36 25 0:32 / ${stood}/run/wsp-a/rootfs rw - overlay overlay rw\n`;
+    expect(sweepRuntime(stood, new Set(), () => table)).toEqual([placeKeptMountedLine(stood, `${stood}/run/wsp-a/rootfs`)]);
+    expect(existsSync(join(stood, "theirs"))).toBe(true);
+  });
+
+  it.runIf(process.platform === "linux")("stops a leave as root over a checkout holding work no remote has before anything goes, naming it, and takes it only when forced", async () => {
+    const home = tmp("leave-unsaved");
+    writePlaceFile(placeFilePath(home), { placeId: "p_1", name: "box", hostName: "zingzy-mbp", hostUrls: ["http://x"], hostPublicKey: "k", keyPath: placeKeyPath(home), joinedAt: new Date(0).toISOString() });
+    addFoundNothing(home);
+    const runtime = join(home, "system", "wsp");
+    const copy = join(runtime, "copies", "w1");
+    mkdirSync(join(runtime, "run", "w1"), { recursive: true });
+    mkdirSync(copy, { recursive: true });
+    // The line the daemon's read gives a stopped workspace's copy with one commit and no remote, which it is asked for
+    // by the runtime folder the leave would take.
+    const held = `${copy} holds 1 commit not pushed and edits it could not read`;
+    const asked: string[] = [];
+    const unsaved = (at: string): string[] => (asked.push(at), [held]);
+    const deps = { home, run: fakeRunner().run, platform: "linux", uid: 0, unsaved };
+    const refused = await leaveCommand(captured(), [], deps, { yes: true }).then(
+      () => undefined,
+      (e: unknown) => e as Error & { fix?: string },
+    );
+    expect(asked).toEqual([runtime]);
+    expect(refused?.message.startsWith(`${placeLeaveUnsavedLine([held])}.`)).toBe(true);
+    expect(refused?.fix).toContain("wsp leave --force");
+    expect(existsSync(copy) && existsSync(placeFilePath(home))).toBe(true);
+    // Off a terminal the one question is refused even when forced, with nothing taken.
+    await expect(leaveCommand(captured(), [], deps, { force: true })).rejects.toThrow("There is no terminal to answer on.");
+    expect(existsSync(copy) && existsSync(placeFilePath(home))).toBe(true);
+    // A read that did not answer stops it too: nothing says the folder holds nothing.
+    await expect(leaveCommand(captured(), [], { ...deps, unsaved: () => undefined }, { yes: true })).rejects.toThrow(placeLeaveUnsavedLine([placeUnreadLine(runtime)]));
+    expect(existsSync(copy)).toBe(true);
+    const io = captured();
+    expect(await leaveCommand(io, [], deps, { yes: true, force: true })).toBe(0);
+    expect(existsSync(runtime)).toBe(false);
+    expect(io.lines).toContain(sweptLine(runtime));
+  });
+
+  it.runIf(process.platform === "linux")("stops on a runtime folder the daemon's own read cannot list, which hides what it holds rather than holding nothing", async () => {
+    const home = tmp("leave-unlisted");
+    writePlaceFile(placeFilePath(home), { placeId: "p_1", name: "box", hostName: "zingzy-mbp", hostUrls: ["http://x"], hostPublicKey: "k", keyPath: placeKeyPath(home), joinedAt: new Date(0).toISOString() });
+    addFoundNothing(home);
+    const runtime = join(home, "system", "wsp");
+    mkdirSync(runtime, { recursive: true });
+    writeFileSync(join(runtime, "copies"), "not a folder");
+    await expect(leaveCommand(captured(), [], { home, run: fakeRunner().run, platform: "linux", uid: 0 }, { yes: true })).rejects.toThrow(placeLeaveUnsavedLine([placeUnreadLine(runtime)]));
+    expect(existsSync(join(runtime, "copies")) && existsSync(placeFilePath(home))).toBe(true);
+  });
+
+  it("asks once at a terminal, naming the work a forced leave takes, and keeps everything on anything but yes", async () => {
+    const home = tmp("leave-asked");
+    writePlaceFile(placeFilePath(home), { placeId: "p_1", name: "box", hostName: "zingzy-mbp", hostUrls: ["http://x"], hostPublicKey: "k", keyPath: placeKeyPath(home), joinedAt: new Date(0).toISOString() });
+    addFoundNothing(home);
+    const runtime = join(home, "system", "wsp");
+    mkdirSync(join(runtime, "copies", "w1"), { recursive: true });
+    const held = `${join(runtime, "copies", "w1")} holds edits it could not read`;
+    const questions: string[] = [];
+    const io = { ...captured(), isTTY: true, ask: async (q: string) => (questions.push(q), "no") };
+    expect(await leaveCommand(io, [], { home, run: fakeRunner().run, platform: "linux", uid: 0, unsaved: () => [held] }, { force: true })).toBe(1);
+    expect(questions).toHaveLength(1);
+    expect(questions[0]).toContain(held);
+    expect(existsSync(runtime) && existsSync(placeFilePath(home))).toBe(true);
+  });
+
+  it("keeps the runtime folder and says why where the mount table cannot be read, or something in it would not go", () => {
+    const stood = join(tmp("leave-runtime-kept"), "wsp");
+    mkdirSync(join(stood, "run", "wsp-a", "rootfs"), { recursive: true });
+    const unread = (): string => {
+      throw new Error("/proc/self/mountinfo: EACCES");
+    };
+    expect(sweepRuntime(stood, new Set(), unread)).toEqual([placeKeptMountsUnreadLine(stood, "/proc/self/mountinfo: EACCES")]);
+    expect(existsSync(join(stood, "run", "wsp-a", "rootfs"))).toBe(true);
+    // A mount point elsewhere on the computer whose name holds a byte that is not UTF-8 reads as itself, never as a
+    // table that says nothing is mounted.
+    const table = Buffer.concat([Buffer.from("40 1 0:40 / /mnt/a"), Buffer.from([0xff]), Buffer.from(` rw - tmpfs tmpfs rw\n41 1 0:41 / ${stood}/run/wsp-a/rootfs rw - overlay overlay rw\n`)]).toString("latin1");
+    expect(mountsUnder(stood, table)).toEqual([`${stood}/run/wsp-a/rootfs`]);
+    // An immutable file is one even root cannot unlink; where it cannot be set there is nothing to hold the folder up.
+    const file = join(stood, "state", "held");
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, "kept\n");
+    const set = (flag: string): boolean => {
+      try {
+        execFileSync("chattr", [flag, file], { stdio: "ignore" });
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    if (!set("+i")) return;
+    let said: string[];
+    try {
+      said = sweepRuntime(stood, new Set(), () => "");
+    } finally {
+      set("-i");
+    }
+    expect(said).toEqual([placeRuntimeStandsLine(stood)]);
+    expect(existsSync(file)).toBe(true);
+  });
+
+  it("reads mount points off the kernel's table with their escapes undone, and only the ones under the folder", () => {
+    const table = ["22 1 0:21 / /wsp rw - ext4 /dev/sda1 rw", "23 22 0:22 / /wsp/run/a\\040b rw - overlay overlay rw", "24 1 0:23 / /wspx rw - tmpfs tmpfs rw"].join("\n");
+    expect(mountsUnder("/wsp", table)).toEqual(["/wsp", "/wsp/run/a b"]);
   });
 
   /** A box as it stood before a joined add: a profile of its own and an install folder holding a file and a toolchain. */

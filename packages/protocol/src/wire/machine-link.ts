@@ -2,6 +2,7 @@
 
 import { z } from "zod";
 import { THIS_COMPUTER } from "../format.js";
+import { plural } from "../words/base.js";
 import type { SysHistoryReply as WireSysHistoryReply } from "../generated/SysHistoryReply.js";
 import type { SysPoint as WireSysPoint } from "../generated/SysPoint.js";
 import type { UsageLogsReply as WireUsageLogsReply } from "../generated/UsageLogsReply.js";
@@ -290,16 +291,50 @@ export const NO_IMAGES_HERE = "this computer keeps no images: a workspace here i
 export const placeHoldsNoImageLine = (place: string, image: string): string =>
   `${place} holds no copy of ${image}; a fork there builds a copy first only of your image's current version`;
 
-/** What a remove of a place that still holds forks is refused with: the machines are the person's to delete, and a
- * place taken out from under them would leave containers nothing here can name. */
-export const placeHoldsForksRefusal = (place: string, names: readonly string[]): string =>
-  `${place} still holds ${names.length === 1 ? "a fork" : `${names.length} forks`} (${names.join(", ")}); delete them first, then wsp remove ${place}`;
+/** What a remove of a computer is refused with while a fork or a project there holds work no remote has, each named
+ * with what it holds, a project folder by its checkout's path there: the roads that keep it, and the flag that takes
+ * it anyway. */
+export const placeUnsavedRefusal = (place: string, unsaved: readonly string[]): { said: string; fix: string } => ({
+  said: `${place} holds work no remote has, which a remove would lose: ${unsaved.join("; ")}`,
+  fix: `Keep a fork's work with wsp export or by pushing its branch, and copy a project folder's off ${place} from the path named; then remove ${place} again, or wsp remove ${place} --force removes it anyway.`,
+});
 
-/** What a remove of a place that still holds projects is refused with: a project is one computer's, so taking the
- * computer out would leave records standing on a place nothing here can name again. The forks go first, since a
- * workspace of a project is a machine on that computer, and the projects themselves after. */
-export const placeHoldsProjectsRefusal = (place: string, names: readonly string[]): string =>
-  `${place} still holds ${names.length === 1 ? "a project" : `${names.length} projects`} (${names.join(", ")}); wsp projects remove each of them first, then wsp remove ${place}`;
+/** What a remove of a computer is refused with while a fork or a project stands on it and its link is down: the forks
+ * are deleted and the project folders read over that link, so nothing about them can be done or known until it is back. */
+export const placeAwayRefusal = (place: string, sentence: string): { said: string; fix: string } => ({
+  said: `${sentence}, and its forks and projects go over its link`,
+  fix: `Turn ${place} on and remove it again once it answers.`,
+});
+
+/** What a remove that stopped part way through the forks and projects on a computer says: why, and which of them had
+ * already gone, since those are not coming back. */
+export const placeDropStoppedLine = (why: string, went: readonly string[]): string => (went.length === 0 ? why : `${why}; ${went.join(", ")} had already gone with the remove`);
+
+/** What a remove of a project is refused with while its checkout on a computer of the person's holds work no remote
+ * has, named by its path there. */
+export const projectUnsavedRefusal = (project: string, unsaved: string): { said: string; fix: string } => ({
+  said: `${unsaved}, which removing ${project} would lose`,
+  fix: `Copy that work off its computer from the path named or push its branches, then remove ${project} again; wsp projects remove ${project} --force removes it anyway.`,
+});
+
+/** How an unsaved read names a project folder: by its project and the checkout's path on the computer holding it,
+ * which is where a person goes to keep what is there. */
+export const projectFolderNamed = (project: string, checkout: string): string => `${project} at ${checkout}`;
+
+/** What goes with a computer, the one sentence its remove asks with and answers with: its forks deleted, its projects
+ * out of this wsp, each with its threads. Nothing where it holds neither. */
+export function placeHoldsLine(held: { forks: readonly { name: string; threads: number }[]; projects: readonly { name: string; threads: number }[] }): string | undefined {
+  const part = (rows: readonly { name: string; threads: number }[], noun: string): string | undefined => {
+    if (rows.length === 0) return undefined;
+    const threads = rows.reduce((sum, r) => sum + r.threads, 0);
+    const named = `${rows.length === 1 ? noun : `${rows.length} ${noun}s`} ${rows.map(r => r.name).join(", ")}`;
+    return threads === 0 ? named : `${named} with ${plural(threads, "thread")}`;
+  };
+  const forks = part(held.forks, "fork");
+  const projects = part(held.projects, "project");
+  if (forks === undefined && projects === undefined) return undefined;
+  return [forks === undefined ? undefined : `its ${forks} deleted`, projects === undefined ? undefined : `its ${projects} out of this wsp`].filter(p => p !== undefined).join(", and ");
+}
 
 /** What a fork aimed at a place this host no longer holds a record for is refused with. Every computer on the
  * list forks, so the only way to reach this is a record that went between the word being read and the fork being

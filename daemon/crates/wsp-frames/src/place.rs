@@ -161,6 +161,18 @@ pub struct PlaceReport {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub daemon_unit: Option<String>,
+    /// Whether a leave run here takes the runtime's folder, and the copy of the image in it, by the leave's own rule:
+    /// run as root, with the add's whole record, which does not name the folder as standing before. Absent from a
+    /// daemon older than this field, whose leave never takes it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub takes_runtime: Option<bool>,
+    /// The daemon version the wsp named above was built with, as `<wsp> --version --json` said it: which `wsp leave`
+    /// this computer runs, which an update of the daemon alone does not move. Absent where that wsp said none, which
+    /// every wsp older than this field and one that would not answer does.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub wsp_daemon_version: Option<u32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

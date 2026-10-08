@@ -1,13 +1,17 @@
 {
   "cloudOff": {
     "name": "projects_remove",
-    "description": "Takes a project's record out of this wsp. Its folder stays exactly where it is, on this computer or on a computer you joined, the memory its agent keeps on that computer stays, and no repo is ever asked for anything. Refused in one line while a machine of it stands, naming them; delete those first.",
+    "description": "Takes a project's record out of this wsp. Its folder stays exactly where it is, on this computer or on a computer you joined, the memory its agent keeps on that computer stays, and no repo is ever asked for anything. Refused in one line while a machine of it stands, naming them; delete those first. Refused in one line too while its checkout on a computer of yours holds work no remote has, naming it by its path there, unless force.",
     "inputSchema": {
       "type": "object",
       "properties": {
         "project": {
           "type": "string",
           "description": "the project's name, or its id when two share a name"
+        },
+        "force": {
+          "type": "boolean",
+          "description": "remove it even where its checkout on a computer of yours holds work no remote has"
         }
       },
       "required": [
@@ -253,13 +257,17 @@
   },
   "cloudOn": {
     "name": "projects_remove",
-    "description": "Takes a project's record out of this wsp. Its folder stays exactly where it is, on this computer or on a computer you joined, the memory its agent keeps on that computer stays, and no repo is ever asked for anything. Refused in one line while a machine of it stands, naming them; delete those first.",
+    "description": "Takes a project's record out of this wsp. Its folder stays exactly where it is, on this computer or on a computer you joined, the memory its agent keeps on that computer stays, and no repo is ever asked for anything. Refused in one line while a machine of it stands, naming them; delete those first. Refused in one line too while its checkout on a computer of yours holds work no remote has, naming it by its path there, unless force.",
     "inputSchema": {
       "type": "object",
       "properties": {
         "project": {
           "type": "string",
           "description": "the project's name, or its id when two share a name"
+        },
+        "force": {
+          "type": "boolean",
+          "description": "remove it even where its checkout on a computer of yours holds work no remote has"
         }
       },
       "required": [

@@ -76,6 +76,59 @@ pub fn place_outside_left(prefix: impl std::fmt::Display) -> String {
     format!("nothing was removed at {prefix}: the leave did not finish taking what the setup wrote outside the home, which {prefix}/landed still lists")
 }
 
+/// Why the runtime's folder is still there after a leave: something is mounted under it, which only a workspace still
+/// running there holds, and taking the folder would reach through that mount. Said on both roads a leave runs on, and
+/// pinned to one text by the contract fixture.
+pub fn place_kept_mounted(path: impl std::fmt::Display, mount: impl std::fmt::Display) -> String {
+    format!("nothing was removed at {path}: {mount} is mounted under it; stop what runs there and leave again")
+}
+
+/// Why the runtime's folder is still there after a leave: the mount table could not be read, so whether a workspace
+/// still running there reads through a mount under it is not known, and taking the folder could reach through one.
+/// Said on both roads a leave runs on, and pinned to one text by the contract fixture.
+pub fn place_kept_mounts_unread(path: impl std::fmt::Display, why: impl std::fmt::Display) -> String {
+    format!("nothing was removed at {path}: the mount table could not be read ({why}), so what is mounted under it is not known")
+}
+
+/// Why the runtime's folder is still there after a leave that tried to take it: something in it would not go. Said on
+/// both roads a leave runs on, and pinned to one text by the contract fixture.
+pub fn place_runtime_stands(path: impl std::fmt::Display) -> String {
+    format!("{path} still stands: the leave could not remove all of it; remove what is left there by hand")
+}
+
+/// Why a leave stopped before it removed anything: checkouts under the runtime's folder hold work no remote has, which
+/// the leave would take with it. Said on both roads a leave runs on, and pinned to one text by the contract fixture.
+pub fn place_leave_unsaved(lines: &[impl AsRef<str>]) -> String {
+    let lines: Vec<&str> = lines.iter().map(AsRef::as_ref).collect();
+    format!("nothing was removed: {}; that work is on this computer alone", lines.join("; "))
+}
+
+/// One checkout under the runtime's folder as a leave names it: the commits on it no remote has, its stashes, and its
+/// uncommitted files, which nothing reads while it is stopped without running git as root over what an agent wrote.
+/// None counts commits past the walk's budget.
+pub fn place_holds_unsaved(path: impl std::fmt::Display, commits: Option<u64>, stashes: u64) -> String {
+    let count = |n: u64, one: &str, many: &str| format!("{n} {}", if n == 1 { one } else { many });
+    let mut parts = Vec::new();
+    match commits {
+        None => parts.push("commits it could not count".to_owned()),
+        Some(0) => {}
+        Some(n) => parts.push(format!("{} not pushed", count(n, "commit", "commits"))),
+    }
+    parts.push("edits it could not read".to_owned());
+    if stashes > 0 {
+        parts.push(count(stashes, "stash", "stashes"));
+    }
+    let last = parts.pop().unwrap_or_default();
+    let listed = if parts.is_empty() { last } else { format!("{} and {last}", parts.join(", ")) };
+    format!("{path} holds {listed}")
+}
+
+/// A checkout or a workspace under the runtime's folder a leave could not read at all. Said on both roads a leave runs
+/// on, and pinned to one text by the contract fixture.
+pub fn place_unread(path: impl std::fmt::Display) -> String {
+    format!("{path}: could not read what is not pushed")
+}
+
 /// Why a path outside the home a leave would have taken is still there: it stood before wsp was added, as the add
 /// wrote down, so it is the computer's own. Said on both roads a leave runs on, and pinned to one text by the
 /// contract fixture.

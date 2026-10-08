@@ -27,6 +27,7 @@ pub mod git_line;
 pub mod hardening;
 #[cfg(target_os = "linux")]
 pub mod init;
+pub mod mount_table;
 #[cfg(target_os = "linux")]
 pub mod net;
 #[cfg(target_os = "linux")]
@@ -52,7 +53,7 @@ const LIVE_REASON: &str = "drives the kernel as root: run the live executable on
 /// checkouts those are made from. Not under any directory a workspace's overlay takes as a lower: a workspace's
 /// upper would sit inside the tree it reads through the overlay, and the open refuses such a root rather than
 /// serving workspaces that read their own uppers.
-pub const DEFAULT_ROOT: &str = "/wsp";
+pub const DEFAULT_ROOT: &str = wsp_frames::numbers::RUNTIME_ROOT;
 
 /// What any op naming a workspace this computer does not run is refused with, wherever it is asked: a machine op
 /// on the link, and a files or git frame that names one. One sentence, so a workspace that is gone and a computer

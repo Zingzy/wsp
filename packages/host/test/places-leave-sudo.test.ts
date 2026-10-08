@@ -7,18 +7,21 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSy
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import WebSocket from "ws";
-import { DAEMON_VERSION, PLACE_SUDO_KIND, threadCgroupsEndScript, hostKeyMismatchRefusal, PLACE_LEAVE_VERB, PlaceReport, placeDaemonPaths, shellQuote, workFolderIn, wsUrlOf } from "@wsp/protocol";
+import { DAEMON_VERSION, LEAVE_ASKS_DAEMON_VERSION, PLACE_SUDO_KIND, threadCgroupsEndScript, hostKeyMismatchRefusal, type PlaceHolds, PLACE_LEAVE_VERB, PlaceReport, placeDaemonPaths, shellQuote, workFolderIn, wsUrlOf } from "@wsp/protocol";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { PlaceHostKeyChangedError, PlaceLoginRefusedError } from "@wsp/runtime";
 import { SSH_SUDO_READ, keyFingerprint, type SshReach, type SshTransport } from "@wsp/engine";
 import { daemonBinaryHere } from "../src/assets.js";
 import { noPlaceSystemLine } from "../src/daemon-binary.js";
 import { DAEMON_GONE_LINE, daemonFlags, sshDaemonPlace } from "../src/doctor.js";
-import { deviceLeftLine, joinCommand, placeDaemonFlags, preparePlaceHome, joinPlace, placeNameHere, removeCommand, placeLeaver, placeRunner, placeLeaveFailedLine, placeNoKeyForSudoLine, placeSudoReader, placeUndoer, placeUndoNeedsSudoLine, placeUndoNoKeyLine, placeUndoOtherKeyLine, sudoPasswordAsk } from "../src/places.js";
+import { REMOVE_LINES_MAX, sweptSummary, deviceLeftLine, joinCommand, placeDaemonFlags, preparePlaceHome, joinPlace, placeNameHere, removeCommand, placeLeaver, placeRunner, placeLeaveFailedLine, placeNoKeyForSudoLine, placeSudoReader, placeUndoer, placeUndoNeedsSudoLine, placeUndoNoKeyLine, placeUndoOtherKeyLine, sudoPasswordAsk } from "../src/places.js";
 import { placeFilePath, placeKeyPath, readPlaceFile, sweptLine, writePlaceFile } from "../src/place-report.js";
 import { captured } from "./verbs-fixture.js";
 import { type ServiceRunner } from "../src/service.js";
 import { codeFor, fakeHost, fakeRunner, joinDepsFor, leaveCommand, noBoxSignIn, NOWHERE_CODE, opts, sweepPlace, tmp, unitsUnder } from "./places-fixture.js";
+
+/** What a computer that holds no fork and no project answers a remove's first read with. */
+const NOTHING_HELD = { forks: [], projects: [], unsaved: [] };
 
 describe("the leave over the ssh road, which a remove takes wherever this host holds a login", () => {
   /** One ssh child, as the transport sees it: the dial it was given and the line it was asked to run. */
@@ -46,6 +49,7 @@ describe("the leave over the ssh road, which a remove takes wherever this host h
     daemonVersion: DAEMON_VERSION,
     agents: [],
     wsp: WSP,
+    wspDaemonVersion: DAEMON_VERSION,
     dialed: "http://192.168.1.20:4400",
     ...over,
   });
@@ -63,7 +67,8 @@ describe("the leave over the ssh road, which a remove takes wherever this host h
     expect(asked).toHaveLength(1);
     expect(asked[0]!.reach).toMatchObject({ user: "root", host: "65.21.4.12", port: 2222, keyPath: "/Users/lena/.ssh/hetzner" });
     // The line the box itself reported for running wsp there, word for word, with the verb off its one spelling.
-    expect(asked[0]!.script).toBe(`${WSP.join(" ")} ${PLACE_LEAVE_VERB}`);
+    // It was asked once on this side, so the leave there takes that answer.
+    expect(asked[0]!.script).toBe(`${WSP.join(" ")} ${PLACE_LEAVE_VERB} --yes`);
     // What comes off that computer and in what order is its own leave's: a manager command or a path written from
     // here would be a second copy of the sweep, one that ages the day the unit scheme or the path list moves.
     expect(asked[0]!.script).not.toContain("systemctl");
@@ -95,7 +100,7 @@ describe("the leave over the ssh road, which a remove takes wherever this host h
     writeFileSync(at.tokenPath, "token");
     mkdirSync(at.inbox, { recursive: true });
     const io = captured();
-    expect(await leaveCommand(io, [], { home, run: fakeRunner().run, platform: "linux" })).toBe(0);
+    expect(await leaveCommand(io, [], { home, run: fakeRunner().run, platform: "linux" }, { yes: true })).toBe(0);
     // The box's own leave, printed as that computer would print it: this road reads it back by the one rule that
     // leave marks what it took with, so the two cannot drift apart.
     const { leave } = leaver({ exitCode: 0, stdout: `${io.lines.join("\n")}\n` });
@@ -136,7 +141,18 @@ describe("the leave over the ssh road, which a remove takes wherever this host h
   it("runs whatever line that computer said starts its wsp, including the bare word a box with none falls back to", async () => {
     const { asked, leave } = leaver({ exitCode: 0 });
     await leave(asking(reportOf({ wsp: ["wsp"] })));
-    expect(asked[0]!.script).toBe(`wsp ${PLACE_LEAVE_VERB}`);
+    expect(asked[0]!.script).toBe(`wsp ${PLACE_LEAVE_VERB} --yes`);
+  });
+
+  it("carries a forced remove's --force to that leave, and hands a wsp older than the leave that asks no flag it does not take", async () => {
+    const { asked, leave } = leaver({ exitCode: 0 });
+    await leave({ ...asking(reportOf({ wsp: ["wsp"] })), force: true });
+    expect(asked[0]!.script).toBe(`wsp ${PLACE_LEAVE_VERB} --yes --force`);
+    await leave({ ...asking(reportOf({ wsp: ["wsp"], wspDaemonVersion: LEAVE_ASKS_DAEMON_VERSION - 1 })), force: true });
+    expect(asked[1]!.script).toBe(`wsp ${PLACE_LEAVE_VERB}`);
+    // A wsp built after this one asks too.
+    await leave(asking(reportOf({ wsp: ["wsp"], wspDaemonVersion: LEAVE_ASKS_DAEMON_VERSION + 1 })));
+    expect(asked[2]!.script).toBe(`wsp ${PLACE_LEAVE_VERB} --yes`);
   });
 
   it("brings back a sweep that stopped the agent and disabled it while its unit file stood, and reloaded once it had gone", async () => {
@@ -264,6 +280,7 @@ describe("root over a login whose sudo asks for a password, for a remove and an 
       Promise.resolve({
         request: (op: string, params?: Record<string, unknown>) => {
           if (op === "places.list") return Promise.resolve({ places: [{ id: "p_1", kind: "computer", name: "vps", default: true, joinedAt: new Date(0).toISOString(), road: { ssh: "maya@box" } }] } as never);
+          if (op === "places.holds") return Promise.resolve(NOTHING_HELD as never);
           if (op === "places.remove") {
             removes.push(params?.["sudoPassword"] as string | undefined);
             if (params?.["sudoPassword"] === undefined) return Promise.reject(Object.assign(new Error("maya@box runs sudo only with maya's password. Type it at wsp remove vps in a terminal."), { kind: PLACE_SUDO_KIND }));
@@ -280,7 +297,7 @@ describe("root over a login whose sudo asks for a password, for a remove and an 
         drop: () => {},
       } as never);
     const opts = { statePath: join(home, "state.json"), home, env: { HOME: home, WSP_HOME: home } };
-    expect(await removeCommand(io, opts, ["vps"], { dial, now: () => 0, run: fakeRunner().run, platform: "linux", checkKey: async () => ({ state: "taken" }), ...noBoxSignIn })).toBe(0);
+    expect(await removeCommand(io, opts, ["vps"], { yes: true }, { dial, now: () => 0, run: fakeRunner().run, platform: "linux", checkKey: async () => ({ state: "taken" }), ...noBoxSignIn })).toBe(0);
     expect(asked).toEqual([sudoPasswordAsk("maya@box", false)]);
     expect(removes).toEqual([undefined, "Tq-not-a-real-pw"]);
     expect(io.screen).not.toContain("Tq-not-a-real-pw");
@@ -288,11 +305,12 @@ describe("root over a login whose sudo asks for a password, for a remove and an 
 });
 
 describe("what a remove says about the device the join bought", () => {
-  const removeClient = (devices: { id: string; name: string }[]): NonNullable<Parameters<typeof removeCommand>[3]>["dial"] => () =>
+  const removeClient = (devices: { id: string; name: string }[]): NonNullable<Parameters<typeof removeCommand>[4]>["dial"] => () =>
     Promise.resolve({
       request: (op: string) => {
         if (op === "places.list") return Promise.resolve({ places: [{ id: "p_1", kind: "computer", name: "old-macbook", default: true, joinedAt: new Date(0).toISOString() }] } as never);
-        if (op === "places.remove") return Promise.resolve({ removed: true, swept: ["/Users/maya/.wsp/place.json"], dropped: [] } as never);
+        if (op === "places.holds") return Promise.resolve(NOTHING_HELD as never);
+        if (op === "places.remove") return Promise.resolve({ removed: true, swept: ["/Users/maya/.wsp/place.json"] } as never);
         if (op === "devices.list") return Promise.resolve({ devices } as never);
         return Promise.reject(new Error(`unexpected op ${op}`));
       },
@@ -304,7 +322,7 @@ describe("what a remove says about the device the join bought", () => {
       drop: () => {},
     } as never);
 
-  const removeDeps = (dial: NonNullable<Parameters<typeof removeCommand>[3]>["dial"]): Parameters<typeof removeCommand>[3] => ({
+  const removeDeps = (dial: NonNullable<Parameters<typeof removeCommand>[4]>["dial"]): Parameters<typeof removeCommand>[4] => ({
     dial,
     now: () => 0,
     run: fakeRunner().run,
@@ -317,7 +335,7 @@ describe("what a remove says about the device the join bought", () => {
     const home = tmp("remove-device");
     const io = captured();
     const opts = { statePath: join(home, "state.json"), home, env: { HOME: home, WSP_HOME: home } };
-    expect(await removeCommand(io, opts, ["old-macbook"], removeDeps(removeClient([{ id: "d_1", name: "old-macbook" }])))).toBe(0);
+    expect(await removeCommand(io, opts, ["old-macbook"], { yes: true }, removeDeps(removeClient([{ id: "d_1", name: "old-macbook" }])))).toBe(0);
     const said = io.lines.join("\n");
     expect(said).toContain(deviceLeftLine("old-macbook", ["d_1"]));
     expect(said).toContain("wsp host devices revoke d_1 takes it back.");
@@ -331,8 +349,119 @@ describe("what a remove says about the device the join bought", () => {
     const home = tmp("remove-no-device");
     const io = captured();
     const opts = { statePath: join(home, "state.json"), home, env: { HOME: home, WSP_HOME: home } };
-    expect(await removeCommand(io, opts, ["old-macbook"], removeDeps(removeClient([{ id: "d_2", name: "a browser tab" }])))).toBe(0);
+    expect(await removeCommand(io, opts, ["old-macbook"], { yes: true }, removeDeps(removeClient([{ id: "d_2", name: "a browser tab" }])))).toBe(0);
     expect(io.lines.join("\n")).not.toContain("wsp host devices revoke");
+  });
+});
+
+describe("wsp remove, asked once", () => {
+  const HELD: PlaceHolds = { forks: [{ name: "yoo", threads: 3 }], projects: [{ name: "wsp-vm", threads: 0 }], unsaved: [] };
+  /** One computer named hetzner, holding what the case says, whose remove answers the lines a case hands it. */
+  const hetzner = (holds: typeof HELD, swept: string[] = [], asked: { op: string; params?: Record<string, unknown> }[] = []): NonNullable<Parameters<typeof removeCommand>[4]>["dial"] => () =>
+    Promise.resolve({
+      request: (op: string, params?: Record<string, unknown>) => {
+        asked.push({ op, ...(params === undefined ? {} : { params }) });
+        if (op === "places.list") return Promise.resolve({ places: [{ id: "p_1", kind: "computer", name: "hetzner", default: true, joinedAt: new Date(0).toISOString() }] } as never);
+        if (op === "places.holds") return Promise.resolve(holds as never);
+        if (op === "places.remove") return Promise.resolve({ removed: true, took: { forks: holds.forks, projects: holds.projects }, swept } as never);
+        if (op === "devices.list") return Promise.resolve({ devices: [] } as never);
+        return Promise.reject(new Error(`unexpected op ${op}`));
+      },
+      events: () => Promise.resolve(),
+      onFrame: () => () => {},
+      closed: Promise.resolve(),
+      closeWords: () => "",
+      close: () => {},
+      drop: () => {},
+    } as never);
+  const deps = (dial: NonNullable<Parameters<typeof removeCommand>[4]>["dial"]): Parameters<typeof removeCommand>[4] => ({ dial, now: () => 0, run: fakeRunner().run, platform: "linux", checkKey: async () => ({ state: "taken" }), ...noBoxSignIn });
+  const optsIn = (home: string) => ({ statePath: join(home, "state.json"), home, env: { HOME: home, WSP_HOME: home } });
+
+  it("asks one question naming the forks and projects that go with the computer, and removes them on yes", async () => {
+    const home = tmp("remove-once");
+    const questions: string[] = [];
+    const asked: { op: string; params?: Record<string, unknown> }[] = [];
+    const io = { ...captured(), isTTY: true, ask: async (q: string) => (questions.push(q), "yes" as const) };
+    expect(await removeCommand(io, optsIn(home), ["hetzner"], {}, deps(hetzner(HELD, [], asked)))).toBe(0);
+    expect(questions).toEqual(["Remove hetzner?\nIts fork yoo with 3 threads deleted, and its project wsp-vm out of this wsp; wsp comes off hetzner, which is otherwise left as wsp found it."]);
+    expect(asked.filter(a => a.op === "places.remove")).toEqual([{ op: "places.remove", params: { placeId: "p_1" } }]);
+    expect(io.lines[0]).toBe("hetzner: its fork yoo with 3 threads deleted, and its project wsp-vm out of this wsp.");
+  });
+
+  it("refuses off a terminal without --yes, before anything goes, and removes with it", async () => {
+    const home = tmp("remove-yes");
+    const asked: { op: string; params?: Record<string, unknown> }[] = [];
+    await expect(removeCommand(captured(), optsIn(home), ["hetzner"], {}, deps(hetzner(HELD, [], asked)))).rejects.toThrow("Remove hetzner? There is no terminal to answer on. Pass --yes to say yes.");
+    expect(asked.map(a => a.op)).not.toContain("places.remove");
+    expect(await removeCommand(captured(), optsIn(home), ["hetzner"], { yes: true }, deps(hetzner(HELD, [], asked)))).toBe(0);
+    expect(asked.map(a => a.op)).toContain("places.remove");
+  });
+
+  it("stops on work no remote has, naming each, before it asks, and --force removes it anyway", async () => {
+    const home = tmp("remove-unsaved");
+    const asked: { op: string; params?: Record<string, unknown> }[] = [];
+    const unsaved = { ...HELD, unsaved: ["yoo holds 1 commit not pushed"] };
+    const io = { ...captured(), isTTY: true, ask: async () => "yes" as const };
+    await expect(removeCommand(io, optsIn(home), ["hetzner"], { yes: true }, deps(hetzner(unsaved, [], asked)))).rejects.toThrow(
+      "hetzner holds work no remote has, which a remove would lose: yoo holds 1 commit not pushed. Keep a fork's work with wsp export or by pushing its branch, and copy a project folder's off hetzner from the path named; then remove hetzner again, or wsp remove hetzner --force removes it anyway.",
+    );
+    expect(asked.map(a => a.op)).not.toContain("places.remove");
+    expect(await removeCommand(io, optsIn(home), ["hetzner"], { yes: true, force: true }, deps(hetzner(unsaved, [], asked)))).toBe(0);
+    expect(asked.find(a => a.op === "places.remove")?.params).toEqual({ placeId: "p_1", force: true });
+  });
+
+  it("names the work a forced remove takes in its one question", async () => {
+    const home = tmp("remove-forced-asked");
+    const questions: string[] = [];
+    const unsaved = { ...HELD, unsaved: ["yoo holds 1 commit not pushed", "wsp-vm at /wsp/projects/p_1/checkout holds 2 uncommitted files"] };
+    const io = { ...captured(), isTTY: true, ask: async (q: string) => (questions.push(q), "no") };
+    expect(await removeCommand(io, optsIn(home), ["hetzner"], { force: true }, deps(hetzner(unsaved)))).toBe(1);
+    expect(questions).toHaveLength(1);
+    expect(questions[0]).toContain("\nWith it goes work no remote has: yoo holds 1 commit not pushed; wsp-vm at /wsp/projects/p_1/checkout holds 2 uncommitted files.");
+  });
+
+  it("answers with what came off counted by folder, at most a screen, and --json carries every line", async () => {
+    const home = tmp("remove-summary");
+    // What the remove of the Hetzner box answered: a plugin per line, every skill file in two folders, a whole
+    // oh-my-zsh, the service and wsp's own folders.
+    const swept = [
+      ...Array.from({ length: 16 }, (_, i) => `plugin p${i}@market`),
+      "systemd system unit wsp-place.service (stopped)",
+      ...["/root/.claude/skills", "/root/.agents/skills"].flatMap(folder => Array.from({ length: 1457 }, (_, i) => `${folder}/s${i}/SKILL.md`)),
+      ...Array.from({ length: 413 }, (_, i) => `/root/.oh-my-zsh/plugins/z${i}.zsh`),
+      "/root/.claude/settings.json",
+      "/root/.wsp",
+      "/opt/wsp",
+      "/wsp",
+    ];
+    const io = captured();
+    expect(await removeCommand(io, optsIn(home), ["hetzner"], { yes: true }, deps(hetzner(HELD, swept)))).toBe(0);
+    expect(io.lines.length).toBeLessThanOrEqual(24);
+    expect(io.lines).toEqual([
+      "hetzner: its fork yoo with 3 threads deleted, and its project wsp-vm out of this wsp.",
+      "removed from hetzner:",
+      sweptLine(`16 plugins: ${Array.from({ length: 16 }, (_, i) => `p${i}@market`).join(", ")}`),
+      sweptLine("systemd system unit wsp-place.service (stopped)"),
+      sweptLine("1457 files under /root/.claude/skills"),
+      sweptLine("1457 files under /root/.agents/skills"),
+      sweptLine("413 files under /root/.oh-my-zsh/plugins"),
+      sweptLine("/root/.claude/settings.json"),
+      sweptLine("/root/.wsp"),
+      sweptLine("/opt/wsp"),
+      sweptLine("/wsp"),
+      "hetzner is no longer a place in this wsp.",
+    ]);
+    const json = captured();
+    expect(await removeCommand(json, optsIn(home), ["hetzner"], { yes: true, json: true }, deps(hetzner(HELD, swept)))).toBe(0);
+    expect(json.lines).toHaveLength(1);
+    expect(JSON.parse(json.lines[0]!)).toEqual({ removed: true, took: { forks: HELD.forks, projects: HELD.projects }, swept });
+  });
+
+  it("cuts a list that would still run past a screen and says how many lines it left to --json", () => {
+    const many = Array.from({ length: 30 }, (_, i) => `/root/f${i}`);
+    const lines = sweptSummary(many);
+    expect(lines).toHaveLength(REMOVE_LINES_MAX);
+    expect(lines.at(-1)).toBe("and 11 more; --json lists each one");
   });
 });
 

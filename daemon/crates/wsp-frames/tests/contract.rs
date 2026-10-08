@@ -406,6 +406,12 @@ fn rendered_words() -> BTreeMap<&'static str, String> {
     m.insert("placeKeptForLink", words::place_kept_for_link("{path}"));
     m.insert("placeOutsideLeft", words::place_outside_left("{prefix}"));
     m.insert("placeStoodBefore", words::place_stood_before("{path}"));
+    m.insert("placeKeptMounted", words::place_kept_mounted("{path}", "{mount}"));
+    m.insert("placeKeptMountsUnread", words::place_kept_mounts_unread("{path}", "{why}"));
+    m.insert("placeRuntimeStands", words::place_runtime_stands("{path}"));
+    m.insert("placeLeaveUnsaved", words::place_leave_unsaved(&["{lines}"]));
+    m.insert("placeUnread", words::place_unread("{path}"));
+    m.insert("noChange", words::no_change("{path}"));
     m.insert("placeOwnersUnknown", words::place_owners_unknown(&["{paths}"]));
     m.insert("onBase", words::on_base_refusal("{base}"));
     m.insert("notOnABranch", words::NOT_ON_A_BRANCH.to_owned());
@@ -497,6 +503,8 @@ fn rendered_numbers() -> BTreeMap<&'static str, Value> {
     m.insert("xdgOpenPath", Value::from(numbers::XDG_OPEN_PATH));
     m.insert("workspaceApparmorPath", Value::from(numbers::WORKSPACE_APPARMOR_PATH));
     m.insert("toolPrefix", Value::from(numbers::TOOL_PREFIX));
+    m.insert("runtimeRoot", Value::from(numbers::RUNTIME_ROOT));
+    m.insert("seededRefs", Value::from(numbers::SEEDED_REFS));
     m.insert("toolLinksDir", Value::from(numbers::TOOL_LINKS_DIR));
     m.insert("placeFoundEnd", Value::from(numbers::PLACE_FOUND_END));
     m.insert("placeFoundMaxBytes", Value::from(numbers::PLACE_FOUND_MAX_BYTES));

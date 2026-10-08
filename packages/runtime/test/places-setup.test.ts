@@ -27,7 +27,6 @@ import {
   noAgentLine,
   pendingHeldLine,
   noPendingRefusal,
-  placeHoldsProjectsRefusal,
   projectInUseRefusal,
   folderMoveHeldLine,
   folderMoveStandsLine,
@@ -155,7 +154,9 @@ function answersFor(cmds: string[], answer?: (cmd: string) => { exitCode: number
       // gh with no token on its input reads its own login there, and this computer has none.
       if (cmd.includes("gh auth status") && !input.includes("GH_TOKEN=")) return void c.say({ id: frame["id"], ok: true, exitCode: 1, stdout: "You are not logged into any GitHub hosts. To log in, run: gh auth login\n", stderr: "", truncated: false });
       const gh = cmd.includes("gh auth status") ? "github.com\n  - Logged in to github.com account dev (GH_TOKEN)\n  - Token scopes: 'gist', 'read:org', 'repo'\n" : "";
-      c.say({ id: frame["id"], ok: true, exitCode: 0, stdout: gh, stderr: "", truncated: false });
+      // A project folder's unsaved read, as a clean checkout answers it.
+      const unsaved = cmd.includes("rev-list") ? "0 0 0\n" : "";
+      c.say({ id: frame["id"], ok: true, exitCode: 0, stdout: gh + unsaved, stderr: "", truncated: false });
     });
   };
 }
@@ -444,7 +445,7 @@ describe("the servers step of an add", () => {
 });
 
 describe("a remove of a computer set up with picks", () => {
-  it("takes the plugins wsp put on off before the sweep and the projects its folders made with it, the folders left", async () => {
+  it("takes the plugins wsp put on off before the sweep, and the projects its folders made with it", async () => {
     const cmds: string[] = [];
     const p = provisioner({
       rows: { plugins: [{ id: "plugins/superpowers@market", label: "superpowers@market", outcome: "installed" }, { id: "plugins/had@market", label: "had@market", outcome: "present" }] },
@@ -466,7 +467,8 @@ describe("a remove of a computer set up with picks", () => {
     expect(p.undone.at(-1)?.removed).toEqual(["plugins/superpowers@market"]);
     expect(cmds.filter(c => c.startsWith("take-off-") || c === "place.leave")).toEqual(["take-off-superpowers@market", "place.leave"]);
     expect(await runtime!.projects.list()).toEqual([]);
-    expect(removed.swept).toEqual(["plugin superpowers@market", "/root/.wsp", "project app, its folder there left as it is"]);
+    expect(removed.took).toEqual({ forks: [], projects: [{ name: "app", threads: 0 }] });
+    expect(removed.swept).toEqual(["plugin superpowers@market", "/root/.wsp"]);
   });
 
   it("takes the plugins off over the login where the link is down, and names each one it could not take off", async () => {
@@ -561,13 +563,13 @@ describe("a remove of a computer set up with picks", () => {
   });
 
   /** The person takes the project a setup made off this host and records the same folder there by hand, under its
-   * name: theirs, and no later setup or remove may take it. */
+   * name: theirs, which no later setup takes as wsp's, and which a remove takes with the computer as it takes any. */
   const theirsInItsPlace = async (folder: string, seed: SeedWiring, placeId: string): Promise<string> => {
     await runtime!.projects.remove((await runtime!.projects.list()).find(p => p.name === "app")!.id);
     return (await runtime!.projects.add({ source: folder, on: placeId, name: "app", seed: seedChoiceFrom(await seed.plan(folder, {}), [], []) })).id;
   };
 
-  it("leaves a project the person recorded by hand where a setup's stood, through a second setup and the remove", async () => {
+  it("leaves a project the person recorded by hand where a setup's stood through a second setup, and the remove takes it with the computer", async () => {
     const { folder, seed } = seededFolder();
     await hosting({ provision: provisioner().wired, checkouts: {}, seed });
     const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: appPicks(folder) }, Date.now());
@@ -576,18 +578,20 @@ describe("a remove of a computer set up with picks", () => {
     const again = await runtime!.places!.setUp(place.id, {});
     await until(async () => (await rowOf(place.id)).setup?.addId === again.addId && (await rowOf(place.id)).setup?.state === "done");
     expect((await rowOf(place.id)).applied?.rows.find(r => r.id === "folders/app")?.outcome).toBe("failed");
-    await expect(runtime!.places!.remove(place.id)).rejects.toThrow(placeHoldsProjectsRefusal("spoo", ["app"]));
     expect((await runtime!.projects.list()).map(p => p.id)).toEqual([theirs]);
+    expect((await runtime!.places!.remove(place.id)).took).toEqual({ forks: [], projects: [{ name: "app", threads: 0 }] });
+    expect(await runtime!.projects.list()).toEqual([]);
   });
 
-  it("leaves a project the person recorded by hand where a setup's stood when the remove comes straight after", async () => {
+  it("takes a project the person recorded by hand where a setup's stood when the remove comes straight after", async () => {
     const { folder, seed } = seededFolder();
     await hosting({ provision: provisioner().wired, checkouts: {}, seed });
     const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: appPicks(folder) }, Date.now());
     await until(async () => (await rowOf(place.id)).setup?.state === "done");
     const theirs = await theirsInItsPlace(folder, seed, place.id);
-    await expect(runtime!.places!.remove(place.id)).rejects.toThrow(placeHoldsProjectsRefusal("spoo", ["app"]));
     expect((await runtime!.projects.list()).map(p => p.id)).toEqual([theirs]);
+    expect((await runtime!.places!.remove(place.id)).took).toEqual({ forks: [], projects: [{ name: "app", threads: 0 }] });
+    expect(await runtime!.projects.list()).toEqual([]);
   });
 
   it("keeps a folder with no name of its own wsp's through a second setup cut at its floor, and the remove after a third takes it off", async () => {
@@ -656,7 +660,7 @@ describe("a remove of a computer set up with picks", () => {
     });
   }
 
-  it("still refuses a project the person recorded there by hand, and takes nothing off for it", async () => {
+  it("takes a project the person recorded there by hand with it too, in the same remove", async () => {
     const cmds: string[] = [];
     const p = provisioner({ rows: { plugins: [{ id: "plugins/superpowers@market", label: "superpowers@market", outcome: "installed" }] }, undo: removed => removed.map(c => ({ key: `${c.kind}/${c.name}`, label: c.name, ids: [`${c.kind}/${c.name}`], owner: `${c.kind}/${c.name}`, cmd: `take-off-${c.name}` })) });
     await hosting({ provision: p.wired, cmds });
@@ -664,9 +668,10 @@ describe("a remove of a computer set up with picks", () => {
     const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: picks }, Date.now());
     await until(async () => (await rowOf(place.id)).setup?.state === "done");
     await runtime!.projects.add({ source: "https://github.com/acme/theirs.git", on: place.id, name: "theirs" });
-    cmds.length = 0;
-    await expect(runtime!.places!.remove(place.id)).rejects.toThrow(placeHoldsProjectsRefusal("spoo", ["theirs"]));
-    expect(cmds).toEqual([]);
+    const removed = await runtime!.places!.remove(place.id);
+    expect(removed.took).toEqual({ forks: [], projects: [{ name: "theirs", threads: 0 }] });
+    expect(await runtime!.projects.list()).toEqual([]);
+    expect(cmds).toContain("place.leave");
   });
 });
 

@@ -101,6 +101,7 @@ export interface SharedFlags {
   advertise?: string;
   state?: string;
   yes?: boolean;
+  force?: boolean;
   "non-interactive"?: boolean;
   json?: boolean;
   recipe?: string;
@@ -144,6 +145,7 @@ export const SHARED_OPTIONS: Options = {
   help: { type: "boolean", short: "h" },
   ...SERVE_OPTIONS,
   yes: { type: "boolean", short: "y" },
+  force: { type: "boolean" },
   "non-interactive": { type: "boolean" },
   json: { type: "boolean" },
   recipe: { type: "string" },

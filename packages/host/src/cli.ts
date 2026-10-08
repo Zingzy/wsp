@@ -4,7 +4,7 @@
 // and used only for direct calls from this process to the machine API.
 
 import { parseArgs } from "node:util";
-import { cloudOffRefusal, runForTheList, unknownWordLine, usageRefusal, foreignFlagLine } from "@wsp/protocol";
+import { DAEMON_VERSION, cloudOffRefusal, jsonLine, runForTheList, unknownWordLine, usageRefusal, foreignFlagLine } from "@wsp/protocol";
 import { CLOUD_BUILT, CLOUD_ON } from "./cloud.js";
 // The writer of a host's own .env now sits beside its reader; the name stays exported here for every caller
 // that already had it from this module.
@@ -93,7 +93,9 @@ export async function cli(
     return failed(io, jsonAsked(argv), usageRefusal(e instanceof Error ? e.message : String(e), runForTheList("wsp --help")));
   }
   if (values.version) {
-    io.log(`wsp ${VERSION}`);
+    // Under --json with the daemon version this build is: a computer's daemon asks the wsp it runs, and the host reads
+    // off that answer which `wsp leave` the computer has.
+    io.log(values.json === true ? jsonLine({ version: VERSION, daemon: DAEMON_VERSION }) : `wsp ${VERSION}`);
     return 0;
   }
   // `help` is the word for the flag: a person reaching for it types one as readily as the other, and answering the
