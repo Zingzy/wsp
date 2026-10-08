@@ -9,6 +9,7 @@ import type { DaemonResponse } from "@wsp/protocol";
 import type { CallbackForwards, DaemonChannel, EventUnion, Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it } from "vitest";
 import { CALLBACK_HOLD_MAX_BYTES, startCallbackRelay, type CallbackRelay } from "../src/relay.js";
+import { freePorts } from "../../runtime/test/held-port.js";
 
 const AUTH = (port: number): string => `https://mcp.example.com/authorize?client_id=c&redirect_uri=http%3A%2F%2Flocalhost%3A${port}%2Fcallback&state=S`;
 
@@ -18,14 +19,6 @@ async function until(cond: () => boolean, ms = 3000): Promise<void> {
     if (Date.now() > deadline) throw new Error(`waited ${ms}ms and this never came true: ${cond.toString()}`);
     await new Promise(r => setTimeout(r, 10));
   }
-}
-
-async function freePort(): Promise<number> {
-  const s = createServer();
-  await new Promise<void>(r => s.listen(0, "127.0.0.1", r));
-  const port = (s.address() as { port: number }).port;
-  await new Promise<void>(r => s.close(() => r()));
-  return port;
 }
 
 /** A harness on the box listening for its one callback: what it was sent, and a page that says it landed. */
@@ -144,8 +137,7 @@ describe("the callback relay on a joined computer", () => {
   async function setup(h?: Awaited<ReturnType<typeof harness>>) {
     h ??= await harness();
     servers.push(h.server);
-    const port = await freePort();
-    const second = await freePort();
+    const [port, second, other] = (await freePorts(3)) as [number, number, number];
     const box = joinedComputer([port, second], h.port);
     const { rt, emit, forwards } = placeRuntime(box);
     const lines: string[] = [];
@@ -160,7 +152,7 @@ describe("the callback relay on a joined computer", () => {
       guest: { event: (l: (typeof guestLinks)[number], e: { type: string }) => void (guestLinks.push(l), guestEvents.push(e.type)), closeAll: () => {} } as never,
     });
     await until(() => box.ops.some(o => o.op === "ports.watch"));
-    return { h, port, second, box, emit, forwards, lines, guestEvents, guestLinks };
+    return { h, port, second, other, box, emit, forwards, lines, guestEvents, guestLinks };
   }
 
   it("listens on this computer for the port a page opened there names and carries the one callback to the harness there, logging no address", async () => {
@@ -177,8 +169,7 @@ describe("the callback relay on a joined computer", () => {
   });
 
   it("watches the sessions of the threads running on that computer itself, and takes none of a workspace it runs and no printed local URL", async () => {
-    const { box, guestEvents, guestLinks } = await setup();
-    const other = await freePort();
+    const { box, guestEvents, guestLinks, other } = await setup();
     await until(() => box.ops.some(o => o.op === "guest.watch"));
     box.push({ type: "guest.opened", session: "g1", life: "life-1", kind: "cli", token: "dev-1.tok", argv: ["threads"], cwd: "/root", machineId: "k1" });
     box.push({ type: "localhost.url", port: other });

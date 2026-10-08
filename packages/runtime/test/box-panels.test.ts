@@ -18,6 +18,7 @@ import type { DaemonChannel } from "../src/daemon-channel.js";
 import { namedWatchRefusal } from "../src/account/box-panels.js";
 import { ctx, sockets, serving, code, join, relink, placesOf, answersLeave, KEEPS_NO_IMAGE } from "./places-fixture.js";
 import { until } from "./until.js";
+import { freePort, freePorts } from "./held-port.js";
 import { report } from "./place-join.js";
 import { fakeClock } from "./fake-clock.js";
 import { WsClient } from "./ws-client.js";
@@ -176,15 +177,6 @@ async function joined(o: { login?: { home: string; owner: string }; adapters: Re
   return { rt, seen, store, project, placeId, back, workspaceId: at.workspace.id, folder: at.workspace.folder ?? project.path };
 }
 
-/** A port nothing on this computer listens on now. */
-async function freePort(): Promise<number> {
-  const server = createServer();
-  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
-  const { port } = server.address() as { port: number };
-  await new Promise<void>(resolve => server.close(() => resolve()));
-  return port;
-}
-
 const opened: (DaemonChannel | Server)[] = [];
 afterEach(() => {
   for (const held of opened.splice(0)) held.close();
@@ -310,8 +302,7 @@ describe("a port a Browser pane opens for a thread in a folder on a computer the
   it("takes no port below 1024 and no more than the relay's cap for one workspace, and shows in the Ports list, which stops it", async () => {
     const { rt, workspaceId } = await joined({ adapters: { claude: answering([]) } });
     await expect(rt.workspaces.portReach(workspaceId, 80)).rejects.toThrow(paneForwardFloorLine(80));
-    const ports: number[] = [];
-    for (let i = 0; i < FORWARD_MAX_PER_TARGET + 1; i++) ports.push(await freePort());
+    const ports = await freePorts(FORWARD_MAX_PER_TARGET + 1);
     for (const port of ports.slice(0, FORWARD_MAX_PER_TARGET)) await rt.workspaces.portReach(workspaceId, port);
     await expect(rt.workspaces.portReach(workspaceId, ports.at(-1)!)).rejects.toThrow(paneForwardCapLine("spoo-ts", FORWARD_MAX_PER_TARGET));
     const listed = await portsList();
