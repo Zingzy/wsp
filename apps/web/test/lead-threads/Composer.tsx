@@ -17,11 +17,12 @@ import { QUEUE_WORDS } from "../../src/components/chat/ComposerQueue";
 import { composerTasks } from "../../src/components/chat/composerTasks.logic";
 import type { ChatThreadHandle } from "../../src/components/chat/useChatThread";
 import { Button } from "../../src/components/ui/button";
+import { SCROLL_FADE } from "../../src/components/ui/scroll-area";
 import { cn } from "../../src/lib/utils";
 import { Grid } from "../../src/settings/grid";
 import { GLYPH, NOTE } from "../../src/settings/layout";
 import { Row } from "../../src/settings/rows";
-import { Dock } from "./Dock";
+import { DRAWER_FACT, Dock } from "./Dock";
 import { ThreadsTree, TreeSummary, useSettleFinished, useSubtree, useTranscriptTree } from "./LeadThreads";
 
 export type BarKind = "question" | "usage" | "threads" | "tasks" | "queue";
@@ -62,7 +63,7 @@ function DrawerRow({ kind, glyph, tone, name, line, fact }: { kind: BarKind; gly
       <Glyph aria-hidden className={cn("size-3.5 shrink-0", tone ?? "text-muted-foreground")} />
       <span className="shrink-0 text-muted-foreground">{name}</span>
       {line === undefined ? <span className="flex-1" /> : <span className="min-w-0 flex-1 truncate text-foreground/80">{line}</span>}
-      {fact === undefined ? null : <span className="shrink-0 font-mono tabular-nums text-muted-foreground">{fact}</span>}
+      {fact === undefined ? null : <span className={cn("shrink-0", DRAWER_FACT)}>{fact}</span>}
       <ChevronDownIcon aria-hidden className="size-3.5 shrink-0 rotate-180 text-muted-foreground" />
     </button>
   );
@@ -98,31 +99,63 @@ export function ComposerDrawer({ thread, threadKey }: { thread: ChatThreadHandle
 /** The share of the window the Threads bar's card may take before it scrolls. */
 const THREADS_CARD_SHARE = 0.46;
 
+const CARD_ROWS = "[data-child-row], button[data-child-fold]";
+
 /** Holds a scrolling card to the bottom of the last row that fits its share of the window, so its edge never slices a
- * row: the next row is either in or out. Read again when the window or the rows change size (a fold opening). */
-function useWholeRows(card: RefObject<HTMLDivElement | null>): void {
+ * row: the next row is either in or out. Read again when the window or the rows change size (a fold opening), keeping
+ * where the person had scrolled. A fold opened inside scrolls the rows it opened into view, by the least that shows
+ * them and never past the fold's own row, clear of the fades. The edges with more beyond them fade as the scroll area's do (`SCROLL_FADE`),
+ * from the overflow lengths that Base UI sets on its own viewports and this card sets on itself. */
+function useCardRows(card: RefObject<HTMLDivElement | null>): void {
   useLayoutEffect(() => {
     const el = card.current;
     if (el === null) return;
+    const edges = (): void => {
+      el.style.setProperty("--scroll-area-overflow-y-start", `${el.scrollTop}px`);
+      el.style.setProperty("--scroll-area-overflow-y-end", `${Math.max(0, el.scrollHeight - el.clientHeight - el.scrollTop)}px`);
+    };
     const fit = (): void => {
+      const kept = el.scrollTop;
       el.style.maxHeight = "";
       const budget = window.innerHeight * THREADS_CARD_SHARE;
-      if (el.scrollHeight <= budget) return;
-      const top = el.getBoundingClientRect().top - el.scrollTop;
-      let cut = 0;
-      for (const row of el.querySelectorAll("[data-child-row], button[data-child-fold]")) {
-        const bottom = row.getBoundingClientRect().bottom - top;
-        if (bottom <= budget && bottom > cut) cut = bottom;
+      if (el.scrollHeight > budget) {
+        const top = el.getBoundingClientRect().top;
+        let cut = 0;
+        for (const row of el.querySelectorAll(CARD_ROWS)) {
+          const bottom = row.getBoundingClientRect().bottom - top;
+          if (bottom <= budget && bottom > cut) cut = bottom;
+        }
+        el.style.maxHeight = `${Math.round(cut)}px`;
+        el.scrollTop = kept;
       }
-      el.style.maxHeight = `${Math.round(cut)}px`;
+      edges();
+    };
+    const opened = (event: MouseEvent): void => {
+      const fold = event.target instanceof Element ? event.target.closest("button[data-child-fold]") : null;
+      if (fold === null) return;
+      const before = new Set(el.querySelectorAll(CARD_ROWS));
+      requestAnimationFrame(() => {
+        const fresh = [...el.querySelectorAll(CARD_ROWS)].filter(row => !before.has(row));
+        if (fresh.length === 0) return;
+        const at = (node: Element, edge: "top" | "bottom"): number => node.getBoundingClientRect()[edge] - el.getBoundingClientRect().top + el.scrollTop;
+        const ceiling = at(fold.isConnected ? fold : fresh[0]!, "top");
+        const floor = Math.max(...fresh.map(row => at(row, "bottom")));
+        const pad = parseFloat(getComputedStyle(el).scrollPaddingTop) || 0;
+        const smooth = !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        el.scrollTo({ top: Math.min(ceiling - pad, Math.max(el.scrollTop, floor + pad - el.clientHeight)), behavior: smooth ? "smooth" : "auto" });
+      });
     };
     fit();
     const rows = new ResizeObserver(fit);
     if (el.firstElementChild !== null) rows.observe(el.firstElementChild);
     window.addEventListener("resize", fit);
+    el.addEventListener("scroll", edges, { passive: true });
+    el.addEventListener("click", opened, true);
     return () => {
       rows.disconnect();
       window.removeEventListener("resize", fit);
+      el.removeEventListener("scroll", edges);
+      el.removeEventListener("click", opened, true);
     };
   }, [card]);
 }
@@ -134,14 +167,18 @@ export function ThreadsDock({ threadKey }: { threadKey: string }) {
   const tree = useTranscriptTree(threadKey);
   const settle = useSettleFinished(threadKey);
   const card = useRef<HTMLDivElement>(null);
-  useWholeRows(card);
+  useCardRows(card);
   const any = settle.title !== "Settle 0 finished";
   return (
     <Dock
       k="threads"
       mark={<ListTreeIcon aria-hidden className={cn(GLYPH, "shrink-0")} />}
       title={DRAWER_WORDS.threads}
-      aside={<TreeSummary counts={under.counts} quiet />}
+      aside={
+        <span className={DRAWER_FACT}>
+          <TreeSummary counts={under.counts} quiet />
+        </span>
+      }
       foot={<WriteMessage />}
       acts={
         any ? (
@@ -152,7 +189,7 @@ export function ThreadsDock({ threadKey }: { threadKey: string }) {
       }
     >
       <Grid id="threads">
-        <div ref={card} data-threads-card className="overflow-y-auto px-3 py-1">
+        <div ref={card} data-threads-card className={cn("scroll-p-[var(--fade-size)] overflow-y-auto px-3 py-1 [--scroll-area-overflow-x-end:0px] [--scroll-area-overflow-x-start:0px]", SCROLL_FADE)}>
           {tree.lead === undefined ? null : <ThreadsTree lead={tree.lead} leadPlace={tree.leadPlace} nodes={tree.nodes} byKey={tree.byKey} />}
         </div>
       </Grid>

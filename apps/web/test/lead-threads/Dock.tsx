@@ -21,7 +21,6 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../../src/components/ui/t
 import { STEP_BODY, STEP_HEAD, StepFoot } from "../../src/settings/add/StepDialog";
 import { StepRow } from "../../src/settings/add/StepRow";
 import type { StepLine } from "../../src/settings/add/setup";
-import { FACT } from "../../src/settings/format";
 import { Grid } from "../../src/settings/grid";
 import { GLYPH, NOTE } from "../../src/settings/layout";
 import { CHILD_FACTS } from "./fixtures";
@@ -29,6 +28,10 @@ import { CHILD_FACTS } from "./fixtures";
 /** PromptDock's own title and foot, read off it: the build exports them with the frame. */
 const TITLE_CLASS = "text-base leading-6 font-semibold text-foreground";
 const DOCK_FOOT = "pt-0 pb-5";
+
+/** A count as the shipped task drawer writes it ("2/6"): the mono at the drawer's 12 px, muted. The drawer's rows and
+ * the heads of the bars they open both write theirs in it, so a count reads the same one press apart. */
+export const DRAWER_FACT = "font-mono text-xs tabular-nums text-muted-foreground";
 
 export const DOCK_WORDS = {
   back: "Back to lead",
@@ -189,7 +192,7 @@ export function TaskDock({ steps, onWrite }: { steps: ReadonlyArray<StepLine>; o
       k="tasks"
       mark={<ListTodoIcon aria-hidden className={cn(GLYPH, "shrink-0")} />}
       title={DOCK_WORDS.tasks}
-      aside={<span className={FACT}>{DOCK_WORDS.tasksDone(done, steps.length)}</span>}
+      aside={<span className={DRAWER_FACT}>{DOCK_WORDS.tasksDone(done, steps.length)}</span>}
       foot={
         <Button size="xs" variant="ghost" data-dock-write className="px-0 [:hover,[data-pressed]]:bg-transparent" onClick={onWrite}>
           {DOCK_WORDS.write}

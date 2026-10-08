@@ -4,8 +4,8 @@
 // working crab among them at the end of the first row, a thread at rest keeping its age; the card leads with a status row, the
 // icon, the word, the reason and the time; on hover the slot gives way to Settle where a settle can run; and a tile
 // with threads under it folds them away, its agent mark turning into the fold's chevron on hover and staying the
-// chevron while folded, the folded tile carrying beside its status the glyph of the most pressing thing under it that
-// needs the person, every count on its card. ?tile=before draws the shipped tile, for the owner to compare.
+// chevron while folded, the folded tile carrying over that chevron, in the project glyph's place, the glyph of the
+// most pressing thing under it that needs the person and that its own status does not show, every count on its card. ?tile=before draws the shipped tile, for the owner to compare.
 // A thread in the sidebar as one tile of two rows: the project and the
 // computer it runs on with the thread's status at the right, then the agent's
 // mark and the title, with an open pull request's icon and the crab at the
@@ -42,7 +42,7 @@ import { CAP_WAIT_WORDS, SNOOZE_WORDS } from "../../src/sidebar/words.js";
 import { LINK_DOWN_WORDS } from "../../src/adapt/terminal-pane.js";
 import { ONE_LINE_ROW_CLASS, TILE_CLASS, TILE_ROW_ONE_CLASS, TILE_ROW_TWO_CLASS, TILE_TITLE_CLASS, threadRowId } from "../../src/sidebar/rowGrammar.js";
 import { useStore } from "../../src/protocol/store.js";
-import { Rollup, StatusIcon, StatusLine, isSubagent, kindOf, partOf, rollupWords, subtreeKeys, toggleFolded, foldedKey, useLeadUi, useSubtree } from "./LeadThreads";
+import { StatusIcon, StatusLine, isSubagent, kindOf, partOf, rollupMark, rollupWords, subtreeKeys, toggleFolded, foldedKey, useLeadUi, useSubtree } from "./LeadThreads";
 
 const BEFORE = new URLSearchParams(window.location.search).get("tile") === "before";
 const TILE_WORDS = { settle: "Settle thread", fold: "Fold its threads", unfold: "Show its threads" } as const;
@@ -111,11 +111,11 @@ function TileFrame({ card, place, harness, renaming, status, children, ...button
 
 /** The two rows every tile draws. Row two is the agent's mark and the title, then an open pull request's icon and
  * the crab while the thread works. */
-function TileRows({ place, status, title, harness, pr, crab, mark }: { place: TilePlace; status: ReactNode; title: ReactNode; harness: string | null; pr?: TileCheckout["pr"]; crab: boolean; mark?: ReactNode }) {
+function TileRows({ place, status, title, harness, pr, crab, mark, lead }: { place: TilePlace; status: ReactNode; title: ReactNode; harness: string | null; pr?: TileCheckout["pr"]; crab: boolean; mark?: ReactNode; lead?: ReactNode }) {
   return (
     <>
       <span className={TILE_ROW_ONE_CLASS}>
-        <ProjectGlyph projectId={place.projectId} className="size-3" />
+        {lead ?? <ProjectGlyph projectId={place.projectId} className="size-3" />}
         <span data-tile-where className="min-w-0 flex-1 truncate">
           {whereWords(place)}
         </span>
@@ -342,8 +342,7 @@ export function ThreadTile({
           BEFORE ? (
             <ThreadStatus thread={thread} age={time} settled={settled} />
           ) : (
-            <span className="relative flex shrink-0 items-center gap-1.5">
-              {folds && folded ? <Rollup counts={under.counts} /> : null}
+            <span className="relative flex shrink-0 items-center gap-2">
               <span className={cn("flex items-center", settleHere && "group-hover/tile:invisible")}>
                 {snoozed ? <SnoozedWorking count={snoozedWorking} /> : setupRefused !== undefined ? <span data-thread-status="setup-refused" title={setupRefused}>{LINK_DOWN_WORDS.refused}</span> : <StatusIcon thread={thread} kind={kind} tip={false} />}
               </span>
@@ -355,6 +354,7 @@ export function ThreadTile({
         harness={thread.harness}
         pr={checkout.pr}
         crab={BEFORE && status.crab === true}
+        {...(folds && folded ? { lead: rollupMark(under.counts, kind.id) } : {})}
       />
     </TileFrame>
   );

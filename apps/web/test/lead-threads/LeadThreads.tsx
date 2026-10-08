@@ -111,6 +111,7 @@ export const LEAD_WORDS = {
   stopSubagent: "Stop subagent",
   runsOn: (computer: string) => `Runs on ${computer}`,
   needsYou: (n: number) => `${n} ${n === 1 ? "thread needs" : "threads need"} you`,
+  under: (words: string) => `Under it: ${words}`,
   failed: (n: number) => `${n} failed`,
   working: (n: number, threads: number, subagents: number) => (subagents === 0 ? `${n} working` : `${n} working: ${plural(threads, "thread")} and ${plural(subagents, "subagent")}`),
   waiting: (n: number) => `${n} waiting for a slot`,
@@ -670,31 +671,20 @@ export function StatusLine({ thread, kind }: { thread: Thread; kind: StatusKind 
   );
 }
 
-/** What a folded tile says of everything under it, at any depth, in its first row beside its own status: the glyph of
- * the most pressing thing under it that needs the person, asking before failed, in its own ink, with no number. One
- * glyph costs the row 18 px, which the computer's name spares; two would cut it. Every kind and its count is on the
- * tile's card, and the glyph's name for a screen reader says them all. */
-export function Rollup({ counts }: { counts: TreeCounts }) {
-  const marks: Array<{ id: string; n: number; ink: string; glyph: ReactNode }> = [
+/** What a folded tile says of everything under it, at any depth: the glyph of the most pressing thing under it that
+ * needs the person and that the tile's own status does not already show, asking before failed, in its own ink, with no
+ * number. It stands in row one's leading slot, over the fold's chevron, in the project glyph's place: the fold's column,
+ * which never holds a tile's own state, so it cannot be read as the tile's. Every kind and its count is on the card,
+ * and the glyph's name for a screen reader says them all. Undefined when nothing under it needs the person. */
+export function rollupMark(counts: TreeCounts, own: string): ReactNode | undefined {
+  const mark = [
     { id: "needs-you", n: counts.needsYou, ink: "text-status-input", glyph: <MessageCircleQuestionIcon aria-hidden className="size-3" /> },
     { id: "failed", n: counts.failed, ink: "text-status-failed", glyph: <CircleAlertIcon aria-hidden className="size-3" /> },
-  ]
-    .filter(mark => mark.n > 0)
-    .slice(0, 1);
-  const said = [
-    counts.needsYou > 0 ? LEAD_WORDS.needsYou(counts.needsYou) : null,
-    counts.failed > 0 ? LEAD_WORDS.failed(counts.failed) : null,
-    counts.working > 0 ? LEAD_WORDS.working(counts.working, counts.working - counts.workingSubagents, counts.workingSubagents) : null,
-    counts.waiting > 0 ? LEAD_WORDS.waiting(counts.waiting) : null,
-  ].filter(Boolean).join(", ");
-  if (marks.length === 0) return null;
+  ].find(kind => kind.n > 0 && kind.id !== own);
+  if (mark === undefined) return undefined;
   return (
-    <span data-rollup role="img" aria-label={said} className="inline-flex shrink-0 items-center">
-      {marks.map(mark => (
-        <span key={mark.id} data-rollup-count={mark.id} className={cn("inline-flex", mark.ink)}>
-          {mark.glyph}
-        </span>
-      ))}
+    <span data-rollup={mark.id} role="img" aria-label={LEAD_WORDS.under(rollupWords(counts))} className={cn("inline-flex size-3 shrink-0", mark.ink)}>
+      {mark.glyph}
     </span>
   );
 }
