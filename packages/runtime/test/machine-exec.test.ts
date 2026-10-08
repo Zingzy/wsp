@@ -8,6 +8,7 @@ import { EXEC_ENV, ExecFailedError, INLINE_EXEC_MS, MachineUnreachableError, Mac
 import { EXEC_BODY_MAX, EXEC_CHUNK_BYTES, LINK_RETRY_WINDOW_MS, absentComputer, execFailedLine, machineUnreachableLine, machineUnreachedLine, TURN_IDLE_MS, shellQuote, workScoreLine } from "@wsp/protocol";
 import { endRun, type ExecStream } from "@wsp/protocol";
 import { GROUP_WORK_AWK, machineExecStream } from "../src/machine-exec.js";
+import { LINUX_SHELL_PRELUDE } from "./linux-shell.js";
 import { scriptGuest, type Step } from "./script-guest.js";
 import { stubBackend, type StubBackend, type StubMachine } from "./stub-backend.js";
 
@@ -749,7 +750,7 @@ afterEach(() => {
   }
 });
 
-/** This machine's bash as the guest; setsid is perl's setpgrp where the OS has none and base64 loses -w0. */
+/** This machine's bash as the guest, given what a Linux machine has (`LINUX_SHELL_PRELUDE`). */
 /** `stdin` makes it a machine whose exec hands the command its input, as a computer you own does; without it the
  * input is dropped, as a provider's exec drops it. `calls` is the text of every exec, in order. */
 function localGuest(o: { stdin?: boolean } = {}): { machine: Machine; runDir: string; calls: string[] } {
@@ -757,9 +758,7 @@ function localGuest(o: { stdin?: boolean } = {}): { machine: Machine; runDir: st
   dirs.push(dir);
   const calls: string[] = [];
   // Functions, not shim files: macOS assesses a freshly written executable at its first exec, 110 ms idle, seconds under load.
-  const prelude = existsSync("/proc/1/stat")
-    ? ""
-    : `setsid() { exec perl -e 'setpgrp(0, 0); exec @ARGV or die $!' -- "$@"; }\nbase64() { local a=(); for x in "$@"; do [ "$x" = "-w0" ] || a+=("$x"); done; /usr/bin/base64 "\${a[@]}"; }\n`;
+  const prelude = LINUX_SHELL_PRELUDE;
   const machine = {
     id: "local",
     ...(o.stdin === true ? { takesStdin: true } : {}),
