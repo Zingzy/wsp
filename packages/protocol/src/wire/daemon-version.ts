@@ -145,6 +145,7 @@ const DAEMON_CONTENTS = [
   "2fffa024e4e0dcf10bce9c6e88581cef388c2a6d66018c56cf859549133ef1b2",
   "55ddb7999b0cfdfc71b505a67752585dc97e1e74e47db1ab2d256573f577e5f3",
   "871dd3f376bcbde4e5f98c8d0777e75b0c36df1c81436b00c0749726d8122ccd",
+  "04280f3be536d6887e416739d24f2a767f547eec8968ac9ab8cc3ed8e1aa7866",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -517,7 +518,18 @@ const DAEMON_CONTENTS = [
  * and folder, and the newest plan reading a Codex rollout kept, for the host alone: the inbound socket of a daemon that
  * is no place and the link of one that is. What each file came to is kept for the daemon's life.
  * Version 135: An agent's version read tries its spawn again while the binary reads text file busy, inside the read's
- * own deadline, so a binary another process still holds open for writing gives its version line instead of none. */
+ * own deadline, so a binary another process still holds open for writing gives its version line instead of none.
+ * Version 136: copy worktree takes each ecosystem as a --module (its lockfiles, what it carries, what it never does and
+ * where its install records the lockfile it installed from), counts a module in each folder of a new worktree holding
+ * its lockfile where the project folder holds one of its directories there, and at the top for a module that carries
+ * nothing, carries its directories in, mounts on a Linux disk that shares no blocks an overlay of a frozen copy of the
+ * folder's directory made once per install where the daemon may mount and copies plainly once where it may not, and a
+ * reflink copy on a disk that does, and answers fresh and each module it found with its folder and whether its install
+ * runs; copy worktree-mount mounts a worktree's overlays again after a restart, one remount at a time, never over a
+ * folder that holds anything and never through a link, every folder handed to the kernel opened with no link followed;
+ * copy worktree-remove takes every mount inside a worktree down before git forgets it and refuses over one it did not
+ * make; copy worktree-forget takes a project's frozen copies and its folder away, under the host's folder where the
+ * project folder is gone, and a removal drops every set but the newest once no worktree sits on it. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary

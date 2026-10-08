@@ -106,7 +106,11 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
       refuse();
       // A blocked computer refuses a new turn but never a message joining one still running there, so a busy thread asks once it frees.
       let cleared = !ctx.threadRuns(threadId);
-      if (cleared) await ctx.copyBlocked(entry);
+      if (cleared) {
+        await ctx.copyBlocked(entry);
+        // A restart of this computer took a worktree's dependency mounts; they are back before the agent runs.
+        await ctx.worktreeMounted(entry);
+      }
       const title = o.title === undefined ? undefined : titleLine(o.title);
       if (title === "") throw new Error(EMPTY_TITLE_LINE);
       ctx.spawnGuard(opens ? "thread_new" : "send", origin);
@@ -318,6 +322,7 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
             if (!cleared) {
               cleared = true;
               await ctx.copyBlocked(entry);
+              await ctx.worktreeMounted(entry);
               continue;
             }
             const writing = resume === undefined ? undefined : ctx.hostWrites.get(resume);
@@ -357,6 +362,8 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
         const ranIn = resume === undefined ? undefined : ctx.folderOf(workspaceId, resume);
         const cwd = ctx.runsIn(entry, ranIn, folder);
         if (o.behind !== undefined) ctx.record({ type: "session.behind", workspaceId, sessionId: resume ?? turnId, turnId, threadId, text: o.behind });
+        const setup = ctx.takeSetupLine(workspaceId);
+        if (setup !== undefined) ctx.record({ type: "session.behind", workspaceId, sessionId: resume ?? turnId, turnId, threadId, text: setup });
         const movedFrom = ranIn ?? goneNow;
         if (movedFrom !== undefined && cwd !== movedFrom && entry.record.worktree?.gone === true) {
           const fresh = ranIn !== undefined && CATALOG_AGENTS.find(a => a.id === harness)?.projectKeyEnv === undefined;

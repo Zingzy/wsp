@@ -18,8 +18,14 @@ export interface Copier {
   /** Takes a copy away by the road that made it, which is the road the record carries. */
   remove(from: string, to: string, road: CopyRoad): Promise<void>;
   /** The worktree holding the branch: one of the repo's own where git already has the branch checked out, else one
-   * made under the ask's root with the carried files clonefiled in. Throws the verb's own sentence when refused. */
+   * made under the ask's root with the config files and the directories of each module whose lockfile it holds
+   * carried in. Throws the verb's own sentence when refused. */
   worktree(ask: WorktreeAsk): Promise<WorktreeReport>;
+  /** Mounts again the dependency overlays of a worktree wsp made where a restart of the computer took them, before a
+   * turn or a command runs there; refused for any worktree wsp did not make. */
+  worktreeMount(o: { from: string; home: string; path: string }): Promise<void>;
+  /** Takes away the frozen copies a project's worktrees sat on, the project going; one a worktree still sits on stays. */
+  worktreeForget(o: { from: string; home: string; project: string }): Promise<void>;
   /** Takes a worktree wsp made away with git, a detached one's commit kept under refs/rescue first; refused over files
    * no commit holds unless forced, and for any worktree wsp did not make. */
   worktreeRemove(o: { from: string; home: string; path: string; force: boolean }): Promise<WorktreeRemoval>;
@@ -31,6 +37,8 @@ export interface Copier {
 /** How long one copy has. A six gigabyte checkout clones in about five seconds and a worktree of one writes every
  * tracked file, so the bound is generous: what it is here for is a git call wedged on a lock, never a slow disk. */
 export const COPY_TIMEOUT_MS = 10 * 60_000;
+/** A mount again is a few mount calls; what it is bounded for is a disk that stopped answering. */
+const MOUNT_TIMEOUT_MS = 30_000;
 
 const argvFor = (ask: CopyAsk): string[] => [
   "copy",
@@ -102,8 +110,16 @@ export function verbCopier(binary: string, run: typeof runChild = runChild): Cop
       if (res.exitCode !== 0) throw new Error(line(res));
     },
     async worktree(ask) {
-      const argv = ["copy", "worktree", "--from", ask.from, "--home", ask.home, "--project", ask.project, "--branch", ask.branch, ...ask.carry.flatMap(dir => ["--carry", dir])];
+      const argv = ["copy", "worktree", "--from", ask.from, "--home", ask.home, "--project", ask.project, "--branch", ask.branch, ...ask.modules.flatMap(m => ["--module", JSON.stringify(m)])];
       return printed(WorktreeReport, "worktree", await run(binary, argv, { timeoutMs: COPY_TIMEOUT_MS }));
+    },
+    async worktreeMount(o) {
+      const res = await run(binary, ["copy", "worktree-mount", "--from", o.from, "--home", o.home, "--path", o.path], { timeoutMs: MOUNT_TIMEOUT_MS });
+      if (res.exitCode !== 0) throw new Error(line(res));
+    },
+    async worktreeForget(o) {
+      const res = await run(binary, ["copy", "worktree-forget", "--from", o.from, "--home", o.home, "--project", o.project], { timeoutMs: COPY_TIMEOUT_MS });
+      if (res.exitCode !== 0) throw new Error(line(res));
     },
     async worktreeRemove(o) {
       const argv = ["copy", "worktree-remove", "--from", o.from, "--home", o.home, "--path", o.path, ...(o.force ? ["--force"] : [])];
@@ -119,22 +135,32 @@ export function verbCopier(binary: string, run: typeof runChild = runChild): Cop
 export function fakeCopier(
   script?: (ask: CopyAsk) => CopyReport,
   room?: () => Promise<MemoryHere | undefined>,
-): Copier & { asks: CopyAsk[]; removed: { from: string; to: string; road: CopyRoad }[]; worktrees: WorktreeAsk[]; worktreesRemoved: { from: string; home: string; path: string; force: boolean }[] } {
+): Copier & { asks: CopyAsk[]; removed: { from: string; to: string; road: CopyRoad }[]; worktrees: WorktreeAsk[]; worktreesMounted: string[]; worktreesForgotten: string[]; worktreesRemoved: { from: string; home: string; path: string; force: boolean }[] } {
   const asks: CopyAsk[] = [];
   const removed: { from: string; to: string; road: CopyRoad }[] = [];
   const worktrees: WorktreeAsk[] = [];
+  const worktreesMounted: string[] = [];
+  const worktreesForgotten: string[] = [];
   const worktreesRemoved: { from: string; home: string; path: string; force: boolean }[] = [];
   return {
     asks,
     removed,
     worktrees,
+    worktreesMounted,
+    worktreesForgotten,
     worktreesRemoved,
     ...(room !== undefined ? { room } : {}),
     async worktree(ask) {
       worktrees.push(ask);
       const path = join(ask.home, "worktrees", ask.project, ask.branch.replace(/[^A-Za-z0-9._-]/g, "-"));
       mkdirSync(path, { recursive: true });
-      return { path, branch: ask.branch, made: true, carried: [], ms: 1 };
+      return { path, branch: ask.branch, made: true, carried: [], fresh: true, modules: [], ms: 1 };
+    },
+    async worktreeMount(o) {
+      worktreesMounted.push(o.path);
+    },
+    async worktreeForget(o) {
+      worktreesForgotten.push(o.project);
     },
     async worktreeRemove(o) {
       worktreesRemoved.push(o);

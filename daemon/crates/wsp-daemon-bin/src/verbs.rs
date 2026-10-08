@@ -11,7 +11,7 @@ use std::net::{Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 
 use clap::Subcommand;
-use wsp_frames::{numbers, CopyAsk, CopyRoadName};
+use wsp_frames::{numbers, CarryModule, CopyAsk, CopyRoadName};
 use wsp_runtime::copy_road::branch;
 
 #[derive(Debug, Subcommand)]
@@ -182,9 +182,31 @@ pub(crate) enum CopyVerb {
         /// The branch: checked out as it stands when it exists, made at the folder's HEAD when it does not.
         #[arg(long, value_name = "name")]
         branch: String,
-        /// An ignored directory name carried in by one clone wherever it sits, once per name.
-        #[arg(long, value_name = "name")]
-        carry: Vec<String>,
+        /// One ecosystem as JSON (id, lockfiles, carry, never, installed): each folder of a new worktree holding one
+        /// of its lockfiles carries its directories under that folder in by one clone each, once per module.
+        #[arg(long, value_name = "json", value_parser = module_of)]
+        module: Vec<CarryModule>,
+    },
+    /// Mounts again the overlays of a worktree wsp made where a restart took them, before a turn or a command runs
+    /// there; one whose folder holds anything now is left as it stands.
+    WorktreeMount {
+        #[arg(long, value_name = "dir")]
+        from: PathBuf,
+        #[arg(long, value_name = "dir")]
+        home: PathBuf,
+        /// The worktree's path, as `copy worktree` answered it.
+        #[arg(long, value_name = "dir")]
+        path: PathBuf,
+    },
+    /// Takes away the frozen copies a project's worktrees sat on, the project going; one a worktree still sits on stays.
+    WorktreeForget {
+        #[arg(long, value_name = "dir")]
+        from: PathBuf,
+        #[arg(long, value_name = "dir")]
+        home: PathBuf,
+        /// The project's id, which names the folder its worktrees sit in.
+        #[arg(long, value_name = "id")]
+        project: String,
     },
     /// Takes away a worktree wsp made; refused while it holds uncommitted files, unless forced.
     WorktreeRemove {
@@ -199,6 +221,11 @@ pub(crate) enum CopyVerb {
         #[arg(long)]
         force: bool,
     },
+}
+
+/// One module as the host writes it on the line.
+fn module_of(json: &str) -> Result<CarryModule, String> {
+    serde_json::from_str(json).map_err(|e| format!("{json} is not a module: {e}"))
 }
 
 /// The road a person or a host names on the line, read through the words the wire carries and nothing of its own.
@@ -222,10 +249,12 @@ fn copy(verb: CopyVerb) -> i32 {
             wsp_runtime::copy_road::make(&ask).and_then(|report| serde_json::to_string(&report).map_err(|e| e.to_string()))
         }
         CopyVerb::Remove { from, to, road } => wsp_runtime::copy_road::remove(&from, &to, road).map(|()| String::new()),
-        CopyVerb::Worktree { from, home, project, branch, carry } => {
-            let ask = branch::Ask { from: &from, home: &home, project: &project, branch: &branch, carry: &carry };
+        CopyVerb::Worktree { from, home, project, branch, module } => {
+            let ask = branch::Ask { from: &from, home: &home, project: &project, branch: &branch, modules: &module };
             branch::make(&ask).and_then(|report| serde_json::to_string(&report).map_err(|e| e.to_string()))
         }
+        CopyVerb::WorktreeMount { from, home, path } => branch::mount(&from, &home, &path).map(|()| String::new()),
+        CopyVerb::WorktreeForget { from, home, project } => branch::forget(&from, &home, &project).map(|()| String::new()),
         CopyVerb::WorktreeRemove { from, home, path, force } => {
             branch::remove(&from, &home, &path, force).and_then(|gone| serde_json::to_string(&gone).map_err(|e| e.to_string()))
         }

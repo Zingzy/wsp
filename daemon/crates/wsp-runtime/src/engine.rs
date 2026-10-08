@@ -558,7 +558,7 @@ pub fn filtered_query(query: Option<&str>, workspace: &str) -> Result<String, St
 /// component is a link or a magic link and where the path would leave the directory, so what the descriptor
 /// holds is the inode at that path under that directory and nothing else. Opened for its path alone, which is
 /// what a bind mounts through and what a stat reads.
-fn open_beneath(dir: &Path, at: &str) -> io::Result<std::os::fd::OwnedFd> {
+pub(crate) fn open_beneath(dir: &Path, at: &str) -> io::Result<std::os::fd::OwnedFd> {
     let under = at.trim_start_matches('/');
     let under = if under.is_empty() { "." } else { under };
     let how = nix::fcntl::OpenHow::new().flags(nix::fcntl::OFlag::O_PATH | nix::fcntl::OFlag::O_CLOEXEC).resolve(

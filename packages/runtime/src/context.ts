@@ -504,6 +504,9 @@ export interface FoldersArea {
   readonly moveOldCopies: () => Promise<void>;
   readonly gitSaid: (res: { stdout: string; stderr: string }) => string;
   readonly worktreesOf: (top: string) => Promise<{ path: string; branch?: string }[]>;
+  readonly worktreeMounted: (entry: LiveWorkspace) => Promise<void>;
+  /** What a new worktree ran before its first thread, once, for the first turn there to open with. */
+  readonly takeSetupLine: (workspaceId: string) => string | undefined;
 }
 
 export interface StartFromArea {

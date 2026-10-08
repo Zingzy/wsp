@@ -369,6 +369,11 @@ export function projectsArea(ctx: RuntimeContext): ProjectsArea {
       const { deps, at, placeId } = await landingDeps(project.computer);
       await readableComputer(at, placeId);
       for (const entry of held) await ctx.workspaces.delete(entry.record.id, origin);
+      // The frozen copies its worktrees' overlays sat on go with it: no later worktree of this id reuses or drops them.
+      const top = project.git?.top;
+      if (top !== undefined && local?.copier !== undefined && copiesFolder(kindForComputer(project.computer))) {
+        await local.copier.worktreeForget({ from: top, home: ctx.stateFolder(), project: project.id }).catch((e: unknown) => console.warn(`the frozen copies of ${project.name}'s worktrees stayed: ${e instanceof Error ? e.message : String(e)}`));
+      }
       // What the add made on that computer goes before the record does, so a computer that cannot be reached
       // keeps both and the person can say it again when it is back. The sentence is the road's: it is true
       // differently on a computer of theirs, at a provider and here.
