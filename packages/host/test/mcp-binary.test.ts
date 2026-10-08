@@ -476,9 +476,10 @@ suite(`the tool server in the daemon binary${MCP_BIN === undefined ? " (set WSP_
         callOf(2, "run", { project: "lab-cloud", message: "build it", notify: ["me"], detach: true }),
         callOf(3, "run", { project: "other-cloud", message: "build it", detach: true }),
         callOf(4, "exec", { workspace: "other-cloud", argv: ["true"] }),
+        callOf(5, "run", { project: "other-cloud", branch: "kid", message: "build it", detach: true }),
       ]);
       expect(code).toBe(0);
-      const [listed, ran, refused, execRefused] = out.map(line => (JSON.parse(line) as { result: { structuredContent: Record<string, unknown>; isError?: boolean } }).result);
+      const [listed, ran, refused, execRefused, branchRefused] = out.map(line => (JSON.parse(line) as { result: { structuredContent: Record<string, unknown>; isError?: boolean } }).result);
       expect((listed!.structuredContent["projects"] as { name: string }[]).map(p => p.name)).toEqual(["lab", "lab-cloud"]);
       expect(ran!.isError).toBeUndefined();
       const child = ran!.structuredContent["threadId"] as string;
@@ -486,6 +487,7 @@ suite(`the tool server in the daemon binary${MCP_BIN === undefined ? " (set WSP_
       expect(row).toMatchObject({ parentThreadId: lead, rootThreadId: lead });
       expect((await runtime.workspaces.list()).find(w => w.id === row.workspaceId)?.project.id).toBe(cloud.id);
       expect(refused).toMatchObject({ isError: true, structuredContent: { error: refusalLine(spawnRepositoryRefusal(lead, "lab", "other-cloud"), SPAWN_REPOSITORY_FIX), class: "usage" } });
+      expect(branchRefused).toMatchObject({ isError: true, structuredContent: { error: refusalLine(spawnRepositoryRefusal(lead, "lab", "other-cloud"), SPAWN_REPOSITORY_FIX), class: "usage" } });
       // Exec starts nothing, so the binary's exec tool is refused in exec's words with the road on the lead's own machine.
       expect(execRefused).toMatchObject({ isError: true, structuredContent: { error: refusalLine(execOutsideRefusal(lead, "other-cloud", "project"), execOutsideFix("lab")), class: "usage" } });
       held.release(1, "Built it.");

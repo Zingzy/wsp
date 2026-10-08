@@ -331,7 +331,7 @@ describe("a lead thread on this computer starting children on a cloud computer",
   });
 
   it("a lead on a cloud machine reads the person's folder of its repository here as theirs: unlisted and refused by that rule", async () => {
-    const { finished } = await lead();
+    const { launch, finished } = await lead();
     const cloud = (await rt.projects.list()).find(p => p.name === "lab-cloud")!;
     const ws = await rt.workspaces.create({ project: cloud.id, name: "cloud-lead", agents: { spawn: true } });
     const turn = await rt.sessions.start(ws.id, { prompt: "coordinate from the cloud" });
@@ -342,6 +342,17 @@ describe("a lead thread on this computer starting children on a cloud computer",
     await expect(rt.projects.resolve("lab", asLead)).rejects.toThrow(folder);
     await expect(rt.workspaces.resolve("lab", asLead)).rejects.toThrow(folder);
     await expect(rt.workspaces.resolve("lab", asLead, "exec")).rejects.toThrow(refusalLine(execOutsideRefusal(threadId, "lab", "folder"), execOutsideFix("cloud-lead")));
+    // --branch on that folder is refused by the same rule, from the command line and from the lead's tool server.
+    const cloudLaunch = { [HOST_URL_ENV]: launch[HOST_URL_ENV]!, [HOST_TOKEN_ENV]: held.envs[1]![HOST_TOKEN_ENV]!, [TURN_TOKEN_ENV]: held.envs[1]![TURN_TOKEN_ENV]! };
+    const branched = await thread(cloudLaunch, "run", "lab", "--branch", "kid", "--detach", "build it");
+    expect(branched.code).toBe(EXIT_CODES.usage);
+    expect(branched.io.errors.join("\n")).toBe(`wsp run: ${folder}`);
+    const [toClient, toServer] = InMemoryTransport.createLinkedPair();
+    await mcpServer(statePath, { env: { ...cloudLaunch, HOME: join(dir, "agent"), WSP_HOME: join(dir, "agent", ".wsp") }, scoped: true }).connect(toServer);
+    mcp = new Client({ name: "cloud-lead", version: "0.0.0" });
+    await mcp.connect(toClient);
+    const tool = await mcp.callTool({ name: "run", arguments: { project: "lab", branch: "kid", message: "build it", detach: true } });
+    expect(tool).toMatchObject({ isError: true, structuredContent: { error: folder, class: "usage" } });
     held.release(1, "done");
     await turn.finished;
     held.release(0, "read it");
@@ -394,6 +405,7 @@ describe("a lead thread on this computer starting children on a cloud computer",
     await rt.projects.add({ source: sibling, on: HERE_PLACE_ID, name: "lab-two" });
     expect(json<{ projects: { name: string }[] }>((await thread(launch, "projects", "--json")).io).projects.map(p => p.name)).toEqual(["lab", "lab-cloud"]);
     expect(await says("run", "lab-two", "--detach", "build it")).toBe(`wsp run: ${refusalLine(spawnFolderRefusal(threadId, "lab-two"), SPAWN_FOLDER_FIX)}`);
+    expect(await says("run", "lab-two", "--branch", "kid", "--detach", "build it")).toBe(`wsp run: ${refusalLine(spawnFolderRefusal(threadId, "lab-two"), SPAWN_FOLDER_FIX)}`);
     expect(await says("exec", "lab-two", "--", "true")).toBe(execs("lab-two", "folder"));
     const worktree = await thread(launch, "worktree", "lab-two", "kid");
     expect(worktree.code).toBe(EXIT_CODES.usage);

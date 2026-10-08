@@ -230,9 +230,15 @@ export async function runTarget(
       const full = await projectOf(client, project.id).catch(() => undefined);
       return { here: { project: { id: project.id, name: project.name, path: full?.path ?? "" }, ...asked }, opened: said(project.name) };
     }
-    if (where.branch !== undefined) throw usageRefusal(BRANCH_HERE_ONLY_LINE, "Name a project on this computer.");
-    if (project !== undefined && !(await workspaces(client)).some(w => w.name === ref)) return { fork: project };
-    return { workspace: await workspaceOf(client, ref) };
+    const branchRefused = () => usageRefusal(BRANCH_HERE_ONLY_LINE, "Name a project on this computer.");
+    if (project !== undefined) {
+      if (where.branch !== undefined) throw branchRefused();
+      if (!(await workspaces(client)).some(w => w.name === ref)) return { fork: project };
+    }
+    // The host answers a word the listing lacks first (a workspace, a typo, a project hidden from a thread), then the branch line.
+    const workspace = await workspaceOf(client, ref);
+    if (where.branch !== undefined) throw branchRefused();
+    return { workspace };
   }
   // A line out of a thread carries the thread's own token, and with no project named it runs beside that thread.
   const fromThread = turnTokenOf(env) !== undefined || (env[HOST_TOKEN_ENV] ?? "") !== "";

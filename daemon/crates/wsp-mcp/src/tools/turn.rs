@@ -513,15 +513,21 @@ async fn run_target(
             let _ = client.request::<Resolved>("projects.resolve", params([("ref", Value::from(project.id.as_str()))])).await;
             return Ok(Target::Here { project: Some(project), branch, cwd });
         }
-        if branch.is_some() {
-            return Err(Failure::usage(words.branch_here_only.clone()));
-        }
+        let branch_refused = || Err(Failure::usage(words.branch_here_only.clone()));
         if let Some(project) = project {
+            if branch.is_some() {
+                return branch_refused();
+            }
             if !workspace_names(client).await?.iter().any(|n| n == named) {
                 return Ok(Target::Fork(project));
             }
         }
-        return Ok(Target::Box(workspace_of(client, named).await?));
+        // The host answers a word the listing lacks first (a workspace, a typo, a project hidden from a thread), then the branch line.
+        let workspace = workspace_of(client, named).await?;
+        if branch.is_some() {
+            return branch_refused();
+        }
+        return Ok(Target::Box(workspace));
     }
     let env = host.env();
     let set = |name: &str| env.get(name).is_some_and(|v| !v.is_empty());

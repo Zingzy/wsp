@@ -74,15 +74,23 @@ export function scriptGuest(backend: StubBackend, steps: Step[], otherwise?: Stu
       return { exitCode: 0, stdout: claimed ? "WSP_RUN\n" : "WSP_GONE\n", stderr: "" };
     }
     // The machine-context probe kills the group its own alias scan ran in; that is not a signal to the run.
-    if (!cmd.includes("echo WSP_CTX") && (cmd.includes("kill -KILL") || cmd.includes("kill -TERM"))) {
-      kills.push(cmd);
+    const signals = !cmd.includes("echo WSP_CTX") && (cmd.includes("kill -KILL") || cmd.includes("kill -TERM"));
+    const rm = /rm -rf '([^']+)'\.\*/.exec(cmd);
+    if (signals || rm) {
+      if (signals) kills.push(cmd);
       // A signal to the group takes the leader and what it spawned; one to a pid takes that pid alone.
-      if (cmd.includes("-- -$P")) child = false;
-      if (!cmd.includes(".tail")) alive = false;
-      const rm = /rm -rf '([^']+)'\.\*/.exec(cmd);
+      if (signals && cmd.includes("-- -$P")) child = false;
+      if (signals && !cmd.includes(".tail")) alive = false;
       if (rm) {
         claimed = false;
         for (const path of [...disk.keys()]) if (path.startsWith(`${rm[1]}.`)) disk.delete(path);
+      }
+      // A reader's reap answers what the log holds past its offset, a chunk at most, and the log's size, as the guest's shell does.
+      const reaped = cmd.match(/(__WSP_REAPED_[a-z0-9]+__)/)?.[1];
+      if (reaped) {
+        const from = Number(cmd.match(/tail -c \+(\d+)/)?.[1] ?? "1") - 1;
+        const chunk = log.subarray(from, from + 262144);
+        return { exitCode: 0, stdout: `${chunk.toString("base64")}\n${reaped} ${log.length}\n`, stderr: "" };
       }
       return { exitCode: 0, stdout: "", stderr: "" };
     }
