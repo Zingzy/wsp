@@ -6,6 +6,7 @@
 // lines named below.
 import type { AgentSignInKind, SignInFinish, SignInRoad } from "@wsp/protocol";
 import { CLAUDE_CONFIG_REL, CLAUDE_KEY_FILE, GUEST_HOME } from "./roads.js";
+import { withBearerVariables } from "./mcp-bearer.js";
 
 export interface StatusCheck {
   /** The command as the row and the golden's notes show it. */
@@ -555,8 +556,9 @@ const rowVariables = (s: SignIn): string[] => {
 
 export const VAULT_VARIABLES: ReadonlySet<string> = new Set(Object.values(SIGN_IN_ROWS as Record<string, SignIn>).flatMap(rowVariables));
 
-/** The part of a record no catalog row declares: the values MCP servers' definitions read by name. */
-export const serverValuesOf = (record: Readonly<Record<string, string>>): Record<string, string> => Object.fromEntries(Object.entries(record).filter(([name]) => !VAULT_VARIABLES.has(name)));
+/** The part of a record no catalog row declares: the values MCP servers' definitions read by name, each header token's
+ * bearer name among them. */
+export const serverValuesOf = (record: Readonly<Record<string, string>>): Record<string, string> => withBearerVariables(Object.fromEntries(Object.entries(record).filter(([name]) => !VAULT_VARIABLES.has(name))));
 
 /** The id of the row that keeps its token or key under `name`; nothing for a name no row declares. */
 export const vaultVariableRow = (name: string): string | undefined => Object.entries(SIGN_IN_ROWS as Record<string, SignIn>).find(([, s]) => rowVariables(s).includes(name))?.[0];

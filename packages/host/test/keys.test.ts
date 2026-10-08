@@ -165,14 +165,15 @@ describe("a host's own keys, the ones the app's setup reads", () => {
       expect(vaultNow(state)).toEqual({});
       writeFileSync(join(home, ".env"), `CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-TESTONLYfromthefile\nSOLARI_API_KEY=${SOLARI}\n`);
       expect(vaultNow(state)).toEqual({ CLAUDE_CODE_OAUTH_TOKEN: "sk-ant-oat01-TESTONLYfromthefile" });
-      // The servers' values beside it come whole, under the names their definitions on other computers read; a
-      // row's own variable there never outranks the row's.
+      // The servers' values beside it come whole, under the names their definitions on other computers read, a header
+      // token's bearer name among them, which a Codex copy reads; a row's own variable there never outranks the row's.
       writeFileSync(join(home, "servers.env"), "WSP_MCP_CONTEXT7_AUTHORIZATION=c7_TESTONLY\nnotion_token=ntn_TESTONLY\nCLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-TESTONLYstale\n");
-      expect(vaultNow(state)).toEqual({ CLAUDE_CODE_OAUTH_TOKEN: "sk-ant-oat01-TESTONLYfromthefile", WSP_MCP_CONTEXT7_AUTHORIZATION: "c7_TESTONLY", notion_token: "ntn_TESTONLY" });
+      const servers = { WSP_MCP_CONTEXT7_AUTHORIZATION: "c7_TESTONLY", WSP_MCP_CONTEXT7_AUTHORIZATION_BEARER: "Bearer c7_TESTONLY", notion_token: "ntn_TESTONLY" };
+      expect(vaultNow(state)).toEqual({ CLAUDE_CODE_OAUTH_TOKEN: "sk-ant-oat01-TESTONLYfromthefile", ...servers });
       // What a copy may write back as a server's reference is the servers' own values, never a row's variable.
-      expect(serverVault(state).held()).toEqual({ WSP_MCP_CONTEXT7_AUTHORIZATION: "c7_TESTONLY", notion_token: "ntn_TESTONLY" });
+      expect(serverVault(state).held()).toEqual(servers);
       writeFileSync(join(home, ".env"), `SOLARI_API_KEY=${SOLARI}\n`);
-      expect(vaultNow(state)).toEqual({ WSP_MCP_CONTEXT7_AUTHORIZATION: "c7_TESTONLY", notion_token: "ntn_TESTONLY" });
+      expect(vaultNow(state)).toEqual(servers);
     } finally {
       process.chdir(here);
       delete process.env["CLAUDE_CODE_OAUTH_TOKEN"];
