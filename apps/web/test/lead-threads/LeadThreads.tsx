@@ -6,8 +6,8 @@
 // acts it takes. The row is the place's own: ThreadRow's one-line row in the transcript, ThreadTile in the sidebar,
 // and a subagent's one-line row in both, led by the glyph the timeline gives the call that launched it.
 //
-// Live children always draw, first, each with its live children indented under it on the connector, two levels
-// deep and flat after that. Finished ones sit behind a fold that starts shut; settled ones behind a second fold at the
+// Live children always draw, first, each with its live children indented under it on the connector, every level
+// one step in; in the sidebar any tile folds its tree away. Finished ones sit behind a fold that starts shut; settled ones behind a second fold at the
 // top of the transcript and nowhere else. A shut fold mounts nothing, and an open one mounts twenty rows and a row
 // that mounts twenty more. A subagent is live while it runs and finished once it ends while its lead's turn goes
 // on; when that turn ends it is settled, folded away like a settled thread. The transcript's whole block shuts to
@@ -26,11 +26,13 @@ import {
   BotIcon,
   ChevronDownIcon,
   ChevronRightIcon,
+  ChevronsDownIcon,
   CircleAlertIcon,
   CircleCheckIcon,
   CircleStopIcon,
   EllipsisIcon,
   HourglassIcon,
+  ListTreeIcon,
   MessageCircleQuestionIcon,
   MessageSquareIcon,
   SquareIcon,
@@ -46,7 +48,10 @@ import { HarnessMark } from "../../src/components/chat/HarnessMark";
 import { Crab } from "../../src/components/status/Crab";
 import type { StatusKind } from "../../src/components/status/kinds/index";
 import { restingAge } from "../../src/components/status/restingAge";
+import { RESTING } from "../../src/components/status/kinds/resting";
 import { LINE_SLOT_CLASS, ThreadStatus } from "../../src/components/status/ThreadStatus";
+import { threadStatusOf } from "../../src/components/status/threadStatusOf";
+import { WorkingSince } from "../../src/components/status/WorkingSince";
 import { ThreadLink } from "../../src/components/ThreadLink";
 import { Button } from "../../src/components/ui/button";
 import { SidebarMenuButton } from "../../src/components/ui/sidebar";
@@ -73,8 +78,6 @@ export const STOPPED: StatusKind = { id: "stopped", is: () => false, glyph: Circ
 
 /** How many rows an open fold mounts at a time. */
 const PAGE = 20;
-/** How many levels under the lead indent; deeper threads stand at the last indent, their opener on the card. */
-const INDENTS = 2;
 /** How long the pointer rests on a subagent's row before its card opens, the tile card's own delay. */
 const CARD_DELAY_MS = 450;
 
@@ -84,9 +87,9 @@ const params = new URLSearchParams(window.location.search);
 const SHUT_SHAPE: "peek" | "peek2" | "line" = params.get("shut-shape") === "line" ? "line" : params.get("shut-shape") === "peek2" ? "peek2" : "peek";
 const COUNT_DRAWS = params.has("renders");
 
-const keyOf = (thread: Pick<Thread, "id" | "threadId">): string => thread.threadId ?? thread.id;
+export const keyOf = (thread: Pick<Thread, "id" | "threadId">): string => thread.threadId ?? thread.id;
 const factsOf = (thread: Thread): ChildFacts => CHILD_FACTS[keyOf(thread)] ?? {};
-const isSubagent = (thread: Thread): boolean => factsOf(thread).subagentOf !== undefined;
+export const isSubagent = (thread: Thread): boolean => factsOf(thread).subagentOf !== undefined;
 const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 export const LEAD_WORDS = {
@@ -119,7 +122,7 @@ export const LEAD_WORDS = {
 
 /** A child in the tree as either place holds it: the thread, null for a workspace that holds none yet, and its
  * children. The sidebar's TileNode and the transcript's node both read through this. */
-interface Tree<N> {
+export interface Tree<N> {
   readonly threadOf: (node: N) => Thread | null;
   readonly kidsOf: (node: N) => ReadonlyArray<N>;
   /** A thread anywhere in the tree or over it, by key: what a subagent's lead and a restart's link are read off. */
@@ -191,7 +194,7 @@ export interface TreeCounts {
   readonly waiting: number;
   readonly finished: number;
 }
-function countTree<N>(nodes: ReadonlyArray<N>, tree: Tree<N>): TreeCounts {
+export function countTree<N>(nodes: ReadonlyArray<N>, tree: Tree<N>): TreeCounts {
   const c = { needsYou: 0, failed: 0, working: 0, workingSubagents: 0, waiting: 0, finished: 0 };
   const walk = (node: N, top: boolean): void => {
     const thread = tree.threadOf(node);
@@ -286,7 +289,7 @@ const sendTo = (thread: Thread, prompt: string): void => {
 
 /** The fold keys of a thread and every thread under it, what a settle of it takes; subagents fold with their turn
  * and are never settled by hand. */
-function subtreeKeys<N>(node: N, tree: Tree<N>): string[] {
+export function subtreeKeys<N>(node: N, tree: Tree<N>): string[] {
   const thread = tree.threadOf(node);
   const own = thread === null || isSubagent(thread) ? [] : [thread.id];
   return [...own, ...tree.kidsOf(node).flatMap(kid => subtreeKeys(kid, tree))];
@@ -507,14 +510,9 @@ const ChildRow = memo(function ChildRow({ thread, part, place, at, note, byKey, 
         ) : null}
       </span>
       <span className="relative flex shrink-0 items-center">
-        <ThreadStatus
-          thread={thread}
-          age={restingAge(thread)}
-          crab
-          settled={part === "settled"}
-          {...(kind !== undefined ? { kind } : {})}
-          className={cn(LINE_SLOT_CLASS, yields && "group-hover/child:invisible group-focus-within/child:invisible group-data-[acts=shown]/child:invisible")}
-        />
+        <span className={cn(LINE_SLOT_CLASS, "inline-flex items-center", yields && "group-hover/child:invisible group-focus-within/child:invisible group-data-[acts=shown]/child:invisible")}>
+          <StatusIcon thread={thread} kind={kind ?? kindOf(thread, part === "settled")} tip={!peek} />
+        </span>
         {yields ? (
           <span data-child-acts className="invisible absolute inset-y-0 right-0 flex items-center justify-end gap-1 group-hover/child:visible group-focus-within/child:visible group-data-[acts=shown]/child:visible">
             {acts.slice(0, 2).map(act => (
@@ -528,9 +526,11 @@ const ChildRow = memo(function ChildRow({ thread, part, place, at, note, byKey, 
   );
 }, sameRow);
 
-/** A fold in the transcript: ThreadRow's box, the transcript fold's chevron where the mark stands, the part's word,
- * and its count in the status slot. */
+/** A fold in the transcript, the sidebar fold row's shape in ThreadRow's box: the part's icon in the mark column
+ * (the check the sidebar's Finished row wears, the archive Settle wears), the part's word, then its count with the
+ * chevron beside it at the right, turning as the sidebar's does. A row that mounts more rows wears the double chevron. */
 function FoldRow({ part, label, count, open: isOpen, onToggle, onContextMenu }: { part: ChildPart | "more"; label: string; count?: number; open?: boolean; onToggle: () => void; onContextMenu?: (event: MouseEvent<HTMLElement>) => void }) {
+  const Icon = part === "settled" ? ArchiveIcon : part === "more" ? ChevronsDownIcon : CircleCheckIcon;
   return (
     <button
       type="button"
@@ -541,17 +541,22 @@ function FoldRow({ part, label, count, open: isOpen, onToggle, onContextMenu }: 
       className="flex h-9 w-full min-w-0 items-center gap-2.5 rounded-[var(--control-radius)] px-2 text-left text-sm text-muted-foreground outline-none transition-colors duration-150 hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
     >
       <span className="inline-flex size-[13px] shrink-0 items-center justify-center">
-        {isOpen === undefined ? null : <ChevronRightIcon aria-hidden className={cn("size-3 transition-transform duration-150", isOpen && "rotate-90")} />}
+        <Icon aria-hidden className="size-3" />
       </span>
       <span className="min-w-0 flex-1 truncate">{label}</span>
-      {count === undefined ? null : <span className={cn(LINE_SLOT_CLASS, "inline-flex")}>{count}</span>}
+      {count === undefined && isOpen === undefined ? null : (
+        <span className={cn(LINE_SLOT_CLASS, "inline-flex items-center gap-1")}>
+          {count}
+          {isOpen === undefined ? null : <ChevronDownIcon aria-hidden className={cn("size-3.5 shrink-0 transition-transform duration-150", !isOpen && "-rotate-90")} />}
+        </span>
+      )}
     </button>
   );
 }
 
 /** The shut block's count of the tree, in the status marks' own glyphs and inks, each word on its hover: asks,
  * failed, works, waits; with nothing live, how many finished, in the row's ink. */
-function TreeSummary({ counts }: { counts: TreeCounts }) {
+export function TreeSummary({ counts }: { counts: TreeCounts }) {
   const marks: Array<{ id: string; n: number; ink: string; glyph: ReactNode; word: string }> = [
     { id: "needs-you", n: counts.needsYou, ink: "text-status-input", glyph: <MessageCircleQuestionIcon aria-hidden className="size-3" />, word: LEAD_WORDS.needsYou(counts.needsYou) },
     { id: "failed", n: counts.failed, ink: "text-status-failed", glyph: <CircleAlertIcon aria-hidden className="size-3" />, word: LEAD_WORDS.failed(counts.failed) },
@@ -583,6 +588,170 @@ function TreeSummary({ counts }: { counts: TreeCounts }) {
   );
 }
 
+/** The status a thread reads as, the registry's, with Stopped for a turn a stop ended once nothing else is news. */
+export function kindOf(thread: Thread, settled = false): StatusKind {
+  if (settled) return RESTING;
+  const kind = threadStatusOf(thread);
+  return thread.status === "interrupted" && (kind.id === "resting" || kind.id === "done") ? STOPPED : kind;
+}
+
+/** A status's one word, the hover and the screen reader's: the kind's own, or for a thread at rest how it ended. */
+export function statusWord(thread: Thread, kind: StatusKind): string {
+  if (kind.word !== undefined) return kind.word;
+  if (kind.wordOf !== undefined) return kind.wordOf(thread, Date.now());
+  return thread.status === "failed" ? "Failed" : "Done";
+}
+
+/** Why a thread stands where it does, in one line: what it asks, why it failed, what holds it, or its last line. */
+export function statusReason(thread: Thread, kind: StatusKind): string | undefined {
+  const facts = factsOf(thread);
+  if (thread.asking !== null) return thread.asking;
+  if (kind.id === "failed") return facts.why;
+  if (thread.capped !== undefined) return capRunningLine(thread.capped);
+  if (kind.id === "working" || kind.id === "resuming" || kind.id === "limited") return undefined;
+  return facts.lastLine;
+}
+
+/** A status as its icon alone, its word on the hover (where the surface has no card of its own) and to a screen
+ * reader: the transcript's row and the tile's first row. Working is the crab; a thread at rest with nothing to say
+ * keeps its age, the one figure that tells it apart. */
+export function StatusIcon({ thread, kind, tip = true, crab = true }: { thread: Thread; kind: StatusKind; tip?: boolean; crab?: boolean }) {
+  const word = statusWord(thread, kind);
+  const working = kind.id === "working" || kind.id === "starting";
+  if (working && !crab) return null;
+  if (!working && kind.glyph === undefined) return <span data-thread-status={kind.id} className="tabular-nums">{restingAge(thread)}</span>;
+  const Glyph = kind.glyph;
+  const mark = (
+    <span data-thread-status={kind.id} role="img" aria-label={word} className={cn("inline-flex shrink-0 items-center", working ? "text-status-working" : (kind.ink ?? "text-muted-foreground"))}>
+      {working || Glyph === undefined ? <Crab /> : <Glyph aria-hidden className="size-3" />}
+    </span>
+  );
+  if (!tip) return mark;
+  return (
+    <Tooltip>
+      <TooltipTrigger render={<span className="inline-flex" />}>{mark}</TooltipTrigger>
+      <TooltipPopup side="top">
+        <span className="inline-flex items-center gap-1.5">
+          {word}
+          {working ? <WorkingSince since={thread.startedAt} /> : kind.glyph !== undefined && thread.status !== "running" ? <span className="text-muted-foreground">{restingAge(thread)}</span> : null}
+        </span>
+      </TooltipPopup>
+    </Tooltip>
+  );
+}
+
+/** The status row a tile's card leads with: the icon, the word in its tone, the reason cut to one line, and the
+ * time, ticking while it works. */
+export function StatusLine({ thread, kind }: { thread: Thread; kind: StatusKind }) {
+  const working = kind.id === "working";
+  const reason = statusReason(thread, kind);
+  const Glyph = kind.glyph;
+  const ink = working ? "text-status-working" : kind.ink;
+  return (
+    <li data-tile-card-line="status" className="flex min-w-0 items-center gap-2">
+      <span className={cn("flex w-3 shrink-0 justify-center", ink ?? "text-muted-foreground")}>{working ? <Crab /> : Glyph === undefined ? <CircleCheckIcon aria-hidden className="size-3" /> : <Glyph aria-hidden className="size-3" />}</span>
+      <span className={cn("shrink-0", ink !== undefined && "font-medium", ink ?? "text-foreground")}>{statusWord(thread, kind)}</span>
+      {reason === undefined ? null : <span className="min-w-0 flex-1 truncate">{reason}</span>}
+      <span className="ms-auto shrink-0 tabular-nums">{working ? <WorkingSince since={thread.startedAt} /> : thread.status === "running" ? null : restingAge(thread)}</span>
+    </li>
+  );
+}
+
+/** What a folded tile says of everything under it, at any depth: each status's icon and how many, most pressing
+ * first, in its own ink; with nothing live, how many finished. One line of the tile's first row. */
+export function Rollup({ counts }: { counts: TreeCounts }) {
+  const marks: Array<{ id: string; n: number; ink: string; glyph: ReactNode }> = [
+    { id: "needs-you", n: counts.needsYou, ink: "text-status-input", glyph: <MessageCircleQuestionIcon aria-hidden className="size-3" /> },
+    { id: "failed", n: counts.failed, ink: "text-status-failed", glyph: <CircleAlertIcon aria-hidden className="size-3" /> },
+    { id: "working", n: counts.working, ink: "text-status-working", glyph: <Crab /> },
+    { id: "waiting", n: counts.waiting, ink: "text-sidebar-muted-foreground", glyph: <HourglassIcon aria-hidden className="size-3" /> },
+  ].filter(mark => mark.n > 0);
+  const said = [
+    counts.needsYou > 0 ? LEAD_WORDS.needsYou(counts.needsYou) : null,
+    counts.failed > 0 ? LEAD_WORDS.failed(counts.failed) : null,
+    counts.working > 0 ? LEAD_WORDS.working(counts.working, counts.working - counts.workingSubagents, counts.workingSubagents) : null,
+    counts.waiting > 0 ? LEAD_WORDS.waiting(counts.waiting) : null,
+  ].filter(Boolean).join(", ");
+  if (marks.length === 0)
+    return counts.finished === 0 ? null : (
+      <span data-rollup className="inline-flex shrink-0 items-center gap-1 text-sidebar-muted-foreground tabular-nums" aria-label={LEAD_WORDS.allFinished(counts.finished)}>
+        <CircleCheckIcon aria-hidden className="size-3" />
+        {counts.finished}
+      </span>
+    );
+  return (
+    <span data-rollup aria-label={said} className="inline-flex shrink-0 items-center gap-2 tabular-nums">
+      {marks.map(mark => (
+        <span key={mark.id} data-rollup-count={mark.id} className={cn("inline-flex items-center gap-0.5 font-medium", mark.ink)}>
+          {mark.glyph}
+          {mark.n}
+        </span>
+      ))}
+    </span>
+  );
+}
+
+/** A thread as the sidebar's fleet holds it, with every thread and subagent under it. */
+export interface FleetNode {
+  readonly thread: Thread;
+  readonly kids: ReadonlyArray<FleetNode>;
+}
+
+/** Everything under one thread off the fleet the sidebar reads, its counts, and what a settle of it takes. */
+export function useSubtree(key: string): { nodes: FleetNode[]; tree: Tree<FleetNode>; counts: TreeCounts; drawn: boolean } {
+  const fleet = useSidebarProjects();
+  const settleMs = useSettleMs();
+  const all = fleet.flatMap(project => project.threads);
+  const byKey = new Map(all.map(thread => [keyOf(thread), thread] as const));
+  const build = (at: string, seen: ReadonlySet<string>): FleetNode[] =>
+    all.filter(thread => thread.parentThreadId === at && !seen.has(keyOf(thread))).map(thread => ({ thread, kids: build(keyOf(thread), new Set([...seen, keyOf(thread)])) }));
+  const nodes = build(key, new Set([key]));
+  const tree: Tree<FleetNode> = { threadOf: node => node.thread, kidsOf: node => node.kids, byKey, nowMs: Date.now(), settleMs };
+  return { nodes, tree, counts: countTree(nodes, tree), drawn: nodes.some(node => partOf(node, tree) !== "settled") };
+}
+
+/** Whether a tile's tree under it stands folded in the sidebar, and the toggle; each tile folds on its own. */
+export const foldedKey = (thread: string): string => `fold:${thread}`;
+export const toggleFolded = (thread: string): void => toggleFold(foldedKey(thread));
+
+/** How many tiles a root draws, itself and every live child down the tree it shows, none under a folded tile: what
+ * a sidebar section's head counts. */
+export function drawnCount(node: TileNode): number {
+  if (node.thread.groupTitle !== undefined) return node.children.reduce((sum, child) => sum + drawnCount(child), 0);
+  const thread = node.thread.thread;
+  if (thread === null) return 1;
+  if (useLeadUi.getState().open[foldedKey(thread.id)] === true) return 1;
+  const all = useStore.getState();
+  const byKey = new Map(Object.values(all.sessions).flat().map(row => [row.threadId ?? row.id, row as unknown as Thread] as const));
+  const tree: Tree<TileNode> = { threadOf: n => n.thread.thread, kidsOf: n => n.children, byKey, nowMs: Date.now(), settleMs: SETTLE_MS[all.preferences.settleAfter] };
+  return 1 + node.children.filter(child => partOf(child, tree) === "live").reduce((sum, child) => sum + drawnCount(child), 0);
+}
+
+/** Whether the page open is a subagent's: it has no folder, terminal or changes of its own, so the lead's panels and
+ * the header's buttons that open them stand hidden while it is open, mounted as they were. */
+export const useSubagentPage = (): boolean => useStore(s => s.selectedThreadId !== null && CHILD_FACTS[s.selectedThreadId]?.subagentOf !== undefined);
+
+/** A child where its lead started it, in the lead's transcript: its own row from the Threads block, live, its status
+ * moving in place, at the point of the call that started it (a wsp run or fork, or the Agent call of a subagent). */
+export function SpawnTile({ childKey }: { childKey: string }) {
+  const fleet = useSidebarProjects();
+  const places = usePlaces();
+  const settleMs = useSettleMs();
+  const all = fleet.flatMap(runs => runs.threads.map(thread => ({ thread, runs })));
+  const found = all.find(({ thread }) => keyOf(thread) === childKey);
+  if (found === undefined) return null;
+  const byKey = new Map(all.map(({ thread }) => [keyOf(thread), thread] as const));
+  const lead = found.thread.parentThreadId === null ? undefined : all.find(({ thread }) => keyOf(thread) === found.thread.parentThreadId);
+  const part = ownPart(found.thread, { byKey, nowMs: Date.now(), settleMs });
+  const place = computerName(places, found.runs);
+  const leadPlace = lead === undefined ? place : computerName(places, lead.runs);
+  return (
+    <div data-spawn-tile={childKey} className="min-w-0 px-1">
+      <ChildRow thread={found.thread} part={part === "settled" ? "finished" : part} place={place === leadPlace ? "" : place} at={computerOf(places, found.runs)} note={noteOf(found.thread, part === "settled" ? "finished" : part, byKey)} byKey={byKey} subtree={() => [found.thread.id]} />
+    </div>
+  );
+}
+
 /** A child in the transcript: the thread, where it runs, and its children. */
 interface TranscriptNode {
   readonly thread: Thread;
@@ -599,12 +768,12 @@ export function LeadThreads(props: TranscriptProps | SidebarProps) {
   return props.in === "transcript" ? <TranscriptThreads {...props} /> : <SidebarThreads {...props} />;
 }
 
-function useSettleMs(): number | null {
+export function useSettleMs(): number | null {
   return SETTLE_MS[useStore(s => s.preferences.settleAfter)];
 }
 
 /** One level of the transcript's tree: live children, each with its own level under it, then the level's Finished
- * fold; the top level adds Settled. Under the second level the tree stops indenting. */
+ * fold; the top level adds Settled. */
 function TranscriptLevel({ parent, nodes, depth, tree, leadPlace, top }: { parent: string; nodes: ReadonlyArray<TranscriptNode>; depth: number; tree: Tree<TranscriptNode>; leadPlace: string; top: boolean }) {
   const parts = childParts(nodes, tree);
   const finishedOpen = useLeadUi(s => s.open[foldKey("transcript", parent, "finished")] ?? false);
@@ -635,8 +804,6 @@ function TranscriptItem({ node, part, depth, tree, leadPlace, railed }: { node: 
   const sending = useLeadUi(s => s.sending === keyOf(thread));
   const row = <ChildRow thread={thread} part={part} place={place} at={node.at} note={note} byKey={tree.byKey} subtree={() => subtreeKeys(node, tree)} />;
   const kids = node.children.length === 0 || part === "settled" ? null : <TranscriptLevel parent={keyOf(thread)} nodes={node.children} depth={depth + 1} tree={tree} leadPlace={leadPlace} top={false} />;
-  // Past the last indent a child's children stand beside it on its own level rather than under it.
-  const flat = depth >= INDENTS;
   const two = twoLinesOf(note, place, sending);
   if (!railed)
     return (
@@ -649,9 +816,8 @@ function TranscriptItem({ node, part, depth, tree, leadPlace, railed }: { node: 
     <>
       <li data-child-item className={TRANSCRIPT_ITEM} {...(two ? { "data-two": "" } : {})}>
         {row}
-        {kids === null || flat ? null : <ul className={TRANSCRIPT_LIST}>{kids}</ul>}
+        {kids === null ? null : <ul className={TRANSCRIPT_LIST}>{kids}</ul>}
       </li>
-      {flat ? kids : null}
     </>
   );
 }
@@ -662,24 +828,29 @@ function TranscriptThreads({ lead, leadPlace, nodes, byKey, className }: Transcr
   const tree: Tree<TranscriptNode> = { threadOf: n => n.thread, kidsOf: n => n.children, byKey, nowMs: Date.now(), settleMs };
   const shut = useLeadShut(s => s.shut[leadKey] ?? false);
   const settleAll = settleFinished(lead.title, finishedKeys(nodes, tree));
-  const toggle = (
-    <button type="button" data-threads-toggle aria-expanded={!shut} aria-label={shut ? LEAD_WORDS.shut : LEAD_WORDS.open} onClick={() => toggleShut(leadKey)} className="flex min-w-0 flex-1 items-center gap-2.5 self-stretch text-left outline-none transition-colors duration-150 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
-      <span className="inline-flex size-[13px] shrink-0 items-center justify-center">
-        <ChevronRightIcon aria-hidden className={cn("size-3 transition-transform duration-150", !shut && "rotate-90")} />
-      </span>
-      <span className="min-w-0 flex-1">{LEAD_WORDS.threads}</span>
-      {shut ? <TreeSummary counts={countTree(nodes, tree)} /> : null}
+  // The head takes the fold rows' shape: its icon in the mark column, its word, what it says at the right, and the
+  // chevron last, turning as theirs does; the word and the chevron both shut and open the block.
+  const chevron = (
+    <button type="button" data-threads-chevron aria-hidden tabIndex={-1} onClick={() => toggleShut(leadKey)} className="inline-flex shrink-0 items-center outline-none transition-colors duration-150 hover:text-foreground">
+      <ChevronDownIcon className={cn("size-3.5 transition-transform duration-150", shut && "-rotate-90")} />
     </button>
   );
   const head = (
     <div data-thread-rows-head className={cn(GROUP_LABEL, "flex h-8 items-center gap-2 px-2 text-muted-foreground")}>
-      {toggle}
+      <button type="button" data-threads-toggle aria-expanded={!shut} aria-label={shut ? LEAD_WORDS.shut : LEAD_WORDS.open} onClick={() => toggleShut(leadKey)} className="flex min-w-0 flex-1 items-center gap-2.5 self-stretch text-left outline-none transition-colors duration-150 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
+        <span className="inline-flex size-[13px] shrink-0 items-center justify-center">
+          <ListTreeIcon aria-hidden className="size-3" />
+        </span>
+        <span className="min-w-0 flex-1">{LEAD_WORDS.threads}</span>
+        {shut ? <TreeSummary counts={countTree(nodes, tree)} /> : null}
+      </button>
       {!shut && settleAll.title !== LEAD_WORDS.settleFinished(0) ? (
         <Button type="button" size="xs" variant="outline" data-settle-finished onClick={() => void settleAll.run()}>
           <ArchiveIcon aria-hidden />
           {settleAll.title}
         </Button>
       ) : null}
+      {chevron}
     </div>
   );
   if (shut) {
@@ -744,7 +915,7 @@ function SubagentSidebarRow({ thread, part, depth, tree }: { thread: Thread; par
               data-row-id={threadRowId(thread.id)}
               data-depth={depth}
               data-subagent
-              className={ONE_LINE_ROW_CLASS}
+              className={cn(ONE_LINE_ROW_CLASS, "group/tile")}
               onClick={() => open(thread)}
               {...(acts.length > 0 ? { onContextMenu: (event: MouseEvent<HTMLElement>) => void openContextMenu(event, acts) } : {})}
             />
@@ -752,8 +923,28 @@ function SubagentSidebarRow({ thread, part, depth, tree }: { thread: Thread; par
         >
           <BotIcon aria-hidden data-subagent-mark className="size-3 shrink-0 text-sidebar-muted-foreground" />
           <span className={cn("min-w-0 flex-1 truncate", active ? "font-medium text-sidebar-foreground" : "text-sidebar-muted-foreground")}>{thread.title}</span>
-          <span className={cn("shrink-0 text-xs", !working && "text-sidebar-muted-foreground")}>
-            <ThreadStatus thread={thread} age={restingAge(thread)} crab={working} />
+          <span className={cn("relative flex shrink-0 items-center text-xs", !working && "text-sidebar-muted-foreground")}>
+            <span className={cn("flex", working && "group-hover/tile:invisible")}>
+              <ThreadStatus thread={thread} age={restingAge(thread)} crab={working} />
+            </span>
+            {working ? (
+              // A subagent's one act, on hover where its status stood, as T3 Code puts Stop on a subagent's row: it
+              // takes no message, and its page holds no Stop of its own.
+              <span
+                role="button"
+                tabIndex={-1}
+                data-subagent-stop
+                aria-label={LEAD_WORDS.stopSubagent}
+                title={LEAD_WORDS.stopSubagent}
+                className="invisible absolute top-1/2 right-[-4px] flex size-5 -translate-y-1/2 items-center justify-center rounded-[6px] text-sidebar-muted-foreground transition-colors duration-150 hover:bg-sidebar-row-selected hover:text-sidebar-foreground group-hover/tile:visible"
+                onClick={event => {
+                  event.stopPropagation();
+                  stop(thread);
+                }}
+              >
+                <SquareIcon aria-hidden className="size-3" />
+              </span>
+            ) : null}
           </span>
         </TooltipTrigger>
         <SubagentCard thread={thread} />
@@ -763,6 +954,11 @@ function SubagentSidebarRow({ thread, part, depth, tree }: { thread: Thread; par
 }
 
 function SidebarThreads({ lead, depth, nodes, tile }: SidebarProps) {
+  const folded = useLeadUi(s => s.open[foldedKey(lead)] ?? false);
+  return folded ? null : <SidebarTree lead={lead} depth={depth} nodes={nodes} tile={tile} />;
+}
+
+function SidebarTree({ lead, depth, nodes, tile }: Omit<SidebarProps, "in">) {
   const settleMs = useSettleMs();
   const fleet = useSidebarProjects();
   const byKey = new Map(fleet.flatMap(p => p.threads.map(t => [keyOf(t), t] as const)));

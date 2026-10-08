@@ -1,9 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The lead threads prototype's own dev server: the web app's config with three seams swapped for the prototype.
-// ChatView's import of src/tree/TreeRows.tsx resolves to LeadThreads.tsx; the one line in WorkspaceSidebar.tsx that
-// draws a tile's children becomes LeadThreads, and the item around a tile says whether its row is one line; and the
-// sidebar's two connector classes in rowGrammar.ts come from rail.ts, so every tree in the sidebar takes the new
-// connector. Everything else on the page is the app.
+// The lead threads prototype's own dev server: the web app's config with these seams swapped for the prototype.
+// ChatView's import of src/tree/TreeRows.tsx resolves to LeadThreads.tsx, and every import of
+// src/sidebar/ThreadTile.tsx to the prototype's copy of it; the one line in WorkspaceSidebar.tsx that draws a tile's
+// children becomes LeadThreads, the item around a tile says whether its row is one line, and a section's head counts
+// the tiles it draws; and the sidebar's two connector classes in rowGrammar.ts come from rail.ts, so every tree in
+// the sidebar takes the new connector; AppShell hides the lead's panels and the header's buttons that open them while
+// a subagent's page is open, keeping them mounted; the headless
+// list loses the gap above it; and under ?around=proposed the timeline draws a child as a live tile where its lead
+// started it, ChatView leaves the Threads block out, and ChatComposer draws the one drawer in place of its queue cards
+// and its task drawer. Everything else on the page is the app.
 // Serve from apps/web: vite --config test/lead-threads/vite.config.ts --host 127.0.0.1 --port <free>
 import { fileURLToPath } from "node:url";
 import type { ConfigEnv, Plugin, UserConfig } from "vite";
@@ -11,8 +16,17 @@ import base from "../../vite.config";
 
 const at = (path: string): string => fileURLToPath(new URL(path, import.meta.url));
 const TREE_ROWS = at("../../src/tree/TreeRows.tsx");
+const THREAD_TILE = at("../../src/sidebar/ThreadTile.tsx");
+const PROTO_TILE = at("./ThreadTile.tsx");
 const SIDEBAR = at("../../src/sidebar/WorkspaceSidebar.tsx");
 const ROW_GRAMMAR = at("../../src/sidebar/rowGrammar.ts");
+const APP_SHELL = at("../../src/shell/AppShell.tsx");
+const TIMELINE_ROWS = at("../../src/components/chat/timeline/rows.tsx");
+const TIMELINE_BUILD = at("../../src/adapt/timeline-rows.ts");
+const CHAT_COMPOSER = at("../../src/components/chat/ChatComposer.tsx");
+const CHAT_VIEW = at("../../src/components/chat/ChatView.tsx");
+const MODE = at("./mode.ts");
+const COMPOSER = at("./Composer.tsx");
 const PROTO = at("./LeadThreads.tsx");
 const RAIL = at("./rail.ts");
 
@@ -24,10 +38,40 @@ const SWAPS: Record<string, ReadonlyArray<readonly [string, string]>> = {
       '{children.length > 0 ? <LeadThreads in="sidebar" lead={item.id} depth={depth + 1} nodes={children} tile={(child, slim) => tileItem(child, depth + 1, runs.id, settled || slim)} /> : null}',
     ],
     [
+      "const tileCount = (node: TileNode): number => (node.thread.groupTitle === undefined ? 1 : 0) + node.children.reduce((sum, child) => sum + tileCount(child), 0);",
+      "const tileCount = (node: TileNode): number => drawnCount(node);",
+    ],
+    ["export function WorkspaceSidebar() {", "export function WorkspaceSidebar() {\n  useLeadUi(s => s.open);"],
+    ['index > 0 && "mt-3"', 'index > 0 && section.id !== "threads" && "mt-3"'],
+    [
       '<li key={item.id} data-thread-item data-workspace-id={runs.id} className={cn("min-w-0", depth > 0 && RAIL_ITEM_CLASS)}>',
       '<li key={item.id} data-thread-item data-workspace-id={runs.id} {...(settled ? { "data-slim": "" } : {})} className={cn("min-w-0", depth > 0 && RAIL_ITEM_CLASS)}>',
     ],
   ],
+  [APP_SHELL]: [
+    ["  const settingsOpen = useSettingsOpen();\n", "  const settingsOpen = useSettingsOpen();\n  const subagentPage = useSubagentPage();\n"],
+    ["{workspaceId !== null ? <ContextRing", "{workspaceId !== null && !subagentPage ? <ContextRing"],
+    ["{workspaceId !== null ? <GitSplit", "{workspaceId !== null && !subagentPage ? <GitSplit"],
+    ["{workspaceId !== null ? <OpenSplit", "{workspaceId !== null && !subagentPage ? <OpenSplit"],
+    ["{panelInline ? null : layoutControls}", "{panelInline || subagentPage ? null : layoutControls}"],
+    [
+      '<RightPanel workspaceId={terminalKey} state={panel} mode={useSheet ? "sheet" : "inline"} {...(useSheet ? {} : { layoutControls })} />',
+      '<div data-lead-panels className={subagentPage ? "hidden" : "contents"}><RightPanel workspaceId={terminalKey} state={panel} mode={useSheet ? "sheet" : "inline"} {...(useSheet ? {} : { layoutControls })} /></div>',
+    ],
+  ],
+  [TIMELINE_ROWS]: [
+    ['{row.kind === "subagent" ? <SubagentTimelineRow row={row} /> : null}', '{row.kind === "subagent" ? <SubagentTimelineRow row={row} /> : null}\n      {(row as { kind: string }).kind === "spawn" ? <SpawnTile childKey={(row as unknown as { childKey: string }).childKey} /> : null}'],
+    ["return <SubagentFoldRow onAnswer={ctx.onAnswerPermission} subagent={row.subagent} />;", "return launchedBy(row.subagent.parentToolUseId) !== null ? <SpawnTile childKey={launchedBy(row.subagent.parentToolUseId)!} /> : <SubagentFoldRow onAnswer={ctx.onAnswerPermission} subagent={row.subagent} />;"],
+  ],
+  [TIMELINE_BUILD]: [
+    ['    if (entry.kind === "work") {\n      if (standsAlone(entry.entry)) {', '    if (entry.kind === "work" && spawnedBy(entry.entry) !== null) {\n      rows.push({ kind: "spawn", id: entry.id, createdAt: entry.createdAt, childKey: spawnedBy(entry.entry) } as never);\n      continue;\n    }\n    if (entry.kind === "work") {\n      if (standsAlone(entry.entry)) {'],
+    ['if (next.kind !== "work" || standsAlone(next.entry) ||', 'if (next.kind !== "work" || standsAlone(next.entry) || spawnedBy(next.entry) !== null ||'],
+  ],
+  [CHAT_COMPOSER]: [
+    ["<ComposerQueue rows={queue} files={queuedFiles} next={next} waiting={waiting?.line ?? null} onEdit={editCard} onRemove={removeCard} />", "{proposedComposer() ? null : <ComposerQueue rows={queue} files={queuedFiles} next={next} waiting={waiting?.line ?? null} onEdit={editCard} onRemove={removeCard} />}"],
+    ["{tasks !== null ? <ComposerTasks tasks={tasks} /> : null}", "{proposedComposer() ? <ComposerDrawer thread={thread} threadKey={threadKey} /> : tasks !== null ? <ComposerTasks tasks={tasks} /> : null}"],
+  ],
+  [CHAT_VIEW]: [["{opened.length > 0 ? <OpenedThreads workspaceId={workspaceId} opened={opened} /> : null}", "{opened.length > 0 && !proposedComposer() ? <OpenedThreads workspaceId={workspaceId} opened={opened} /> : null}"]],
   [ROW_GRAMMAR]: [
     ['export const CHILD_LIST_CLASS = "ml-3 flex min-w-0 flex-col";', "export { CHILD_LIST as CHILD_LIST_CLASS } from " + JSON.stringify(RAIL) + ";"],
     [
@@ -42,9 +86,9 @@ function swapLeadThreads(): Plugin {
     name: "lead-threads-swap",
     enforce: "pre",
     async resolveId(source, importer, options) {
-      if (importer === undefined || importer === PROTO) return null;
+      if (importer === undefined || importer === PROTO || importer === PROTO_TILE) return null;
       const resolved = await this.resolve(source, importer, { ...options, skipSelf: true });
-      return resolved?.id === TREE_ROWS ? PROTO : null;
+      return resolved?.id === TREE_ROWS ? PROTO : resolved?.id === THREAD_TILE ? PROTO_TILE : null;
     },
     transform(code, id) {
       const swaps = SWAPS[id];
@@ -54,7 +98,14 @@ function swapLeadThreads(): Plugin {
         if (!out.includes(from)) throw new Error(`${id} no longer holds the text this prototype swaps: ${from.slice(0, 80)}`);
         out = out.replace(from, to);
       }
-      return id === SIDEBAR ? `import { LeadThreads } from ${JSON.stringify(PROTO)};\n${out}` : out;
+      const lead = JSON.stringify(PROTO);
+      if (id === SIDEBAR) return `import { LeadThreads, drawnCount, useLeadUi } from ${lead};\n${out}`;
+      if (id === APP_SHELL) return `import { useSubagentPage } from ${lead};\n${out}`;
+      if (id === TIMELINE_ROWS) return `import { SpawnTile } from ${lead};\nimport { launchedBy } from ${JSON.stringify(MODE)};\n${out}`;
+      if (id === TIMELINE_BUILD) return `import { spawnedBy } from ${JSON.stringify(MODE)};\n${out}`;
+      if (id === CHAT_COMPOSER) return `import { proposedComposer } from ${JSON.stringify(MODE)};\nimport { ComposerDrawer } from ${JSON.stringify(COMPOSER)};\n${out}`;
+      if (id === CHAT_VIEW) return `import { proposedComposer } from ${JSON.stringify(MODE)};\n${out}`;
+      return out;
     },
   };
 }

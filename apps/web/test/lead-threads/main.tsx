@@ -7,12 +7,18 @@
 // and ?nested=1 open those folds; ?shut=1 shuts the Threads block, ?shut-shape=peek2 or line draws it shut another
 // way; ?rail=guide draws the connector with no elbows; ?acts=<thread> shows that row's acts as its hover does;
 // ?send=<thread> opens its message field; ?dock=subagent, subagent-done, question or tasks shows the bar in the
-// composer's place in each use; ?renders=1 stamps each transcript row with how many times it drew; ?bar=0 hides the
-// state bar for a shot.
-import { useState } from "react";
+// composer's place in each use (subagent-stopped and subagent-failed too, tasks-a for today's drawer); ?panels=1 opens
+// the lead's changes and a terminal in the right panel; ?tile=before draws the shipped tile; ?renders=1 stamps each
+// transcript row with how many times it drew; ?busy=1 gives the lead a question, a task list and two queued messages
+// as well, for the page around the composer; ?around=proposed draws the proposed composer and ?open=<bar> opens one
+// of its bars; ?fold=<thread> folds that tile's tree in the sidebar; ?bar=0 hides the state bar for a shot.
+import { useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { DEFAULT_PREFERENCES, type HarnessCatalog, type SessionEvent, type SessionView, type SettleAfter } from "@wsp/protocol";
+import { answerPrompt } from "../../src/components/chat/answerPrompt";
 import { ChatComposer } from "../../src/components/chat/ChatComposer";
+import { useComposerDraftStore } from "../../src/components/chat/composerDraftStore";
+import { PromptDock } from "../../src/components/chat/PromptDock";
 import { ChatView } from "../../src/components/chat/ChatView";
 import { Button } from "../../src/components/ui/button";
 import { TooltipProvider } from "../../src/components/ui/tooltip";
@@ -24,13 +30,17 @@ import { useRightPanelStore } from "../../src/rightPanelStore";
 import { AppShell } from "../../src/shell/AppShell";
 import { WorkspaceThread } from "../../src/shell/WorkspaceThread";
 import { applyTheme } from "../../src/settings/theme";
+import { openPanelTerminal } from "../../src/shell/shellCommands";
+import { provideTerminals, WorkspaceTerminals, type TerminalWire } from "../../src/terminal/link";
 import { statusOf } from "../workspace-status";
 import { caps } from "../caps.js";
 import { noDaemonApi } from "../fake-daemon-api.js";
 import { ACCESS_MODES } from "../fixtures/access-modes";
 import "../../src/index.css";
 import "../../src/themes/index";
-import { SubagentDock, TaskDock } from "./Dock";
+import { openBar, openPrompt, QueueDock, ThreadsDock, UsageDock, useBar } from "./Composer";
+import { SubagentBar, TaskDock } from "./Dock";
+import { PROPOSED } from "./mode";
 import { BOX, CHILD_FACTS, HERE, HETZNER, LEAD, LEAD_SAID, MAC, OTHERS, PROJECT, childrenOf, leadSession, type LeadSize } from "./fixtures";
 import { useLeadShut, useLeadUi } from "./LeadThreads";
 
@@ -41,6 +51,7 @@ applyTheme({ theme, ...picks }, theme === "dark");
 const size: LeadSize = params.get("lead") === "small" ? "small" : "marathon";
 const settleAfter = (params.get("quiet") ?? "never") as SettleAfter;
 const dock = params.get("dock");
+const busy = params.get("busy") === "1";
 
 const children = childrenOf(size);
 if (params.get("after") === "settle") {
@@ -49,7 +60,7 @@ if (params.get("after") === "settle") {
 }
 const QUESTION = "Which ticket should the next free builder take?";
 const lead = leadSession(size);
-if (dock === "question") lead.asking = QUESTION;
+if (dock === "question" || busy) lead.asking = QUESTION;
 const sessions: SessionView[] = [lead, ...OTHERS, ...children];
 const workspaces = [MAC, BOX];
 
@@ -90,12 +101,23 @@ const SUBAGENT_WORK: Record<string, ReadonlyArray<{ say?: string; tool?: string;
     { say: "34 open. Reading each one for the files it names." },
     { tool: "Bash", input: { command: "gh issue view 1830 -R wsp-labs/wsp-map --json body", description: "Read ticket 1830" } },
   ],
+  thr_sa_hdr: [
+    { say: "Fetching the landing page to read its headers." },
+    { tool: "WebFetch", input: { url: "https://spoo.me", prompt: "List the Content-Security-Policy header" }, result: "connect ETIMEDOUT" },
+  ],
+  thr_sa_csp: [
+    { say: "Running the CSP gate." },
+    { tool: "Bash", input: { command: "pnpm gate:csp", description: "Run the CSP gate" } },
+  ],
   thr_sa_prs: [{ say: "11 open, 4 approved, 7 waiting on a reviewer." }],
   thr_sa_gate: [{ say: "Main is green at 4c5d84d." }],
 };
 const workOf = (sub: string, scope: Scope, parent?: string): SessionEvent[] =>
   (SUBAGENT_WORK[sub] ?? []).flatMap((step, i) => (step.say !== undefined ? [said(scope, step.say, parent)] : call(scope, `${sub}_t${i}`, step.tool!, step.input ?? {}, step.result, parent)));
 const subagentsOf = (threadId: string): SessionView[] => sessions.filter(row => CHILD_FACTS[row.threadId!]?.subagentOf === threadId);
+
+/** The threads the lead started in this turn, whose calls stand in its transcript. */
+const STARTED_NOW = new Set(["thr_c_ask", "thr_c_fail", "thr_c_sec2", "thr_c_sheet", "thr_c_ssh", "thr_c_rev", "thr_c_cap1", "thr_c_cap2"]);
 
 /** The lead's transcript: an earlier turn that ran two subagents, then this turn, held by its own running subagent,
  * with the question it asks or its task list where the page shows those. */
@@ -115,10 +137,14 @@ function leadHistory(): SessionEvent[] {
     { type: "session.done", ...before, result: { status: "completed", durationMs: 96_000, costUsd: 0.6 } } as SessionEvent,
     { type: "session.end", ...before, exitCode: 0, sawResult: true } as SessionEvent,
     { type: "session.start", ...now, agent: "claude", model: "claude-opus-5-5", cwd: "/Users/zingzy/wsp", prompt: LEAD_SAID.ask } as SessionEvent,
+    // The lead's own calls that started each of its threads this turn, where the proposed transcript stands each child.
+    ...sessions
+      .filter(row => STARTED_NOW.has(row.threadId!))
+      .flatMap(row => call(now, `spawn_${row.threadId}`, "mcp__wsp__run", { project: "wsp", title: row.prompt, message: row.prompt, notify: "me" }, `Started ${row.threadId}`)),
     said(now, LEAD_SAID.said),
-    ...(dock === "tasks" ? [{ type: "session.plan", ...now, steps: TASKS.map(step => ({ text: step.name, state: step.state === "done" ? "done" : step.state === "working" ? "working" : "pending" })) } as SessionEvent] : []),
+    ...(dock === "tasks" || dock === "tasks-a" || busy ? [{ type: "session.plan", ...now, steps: TASKS.map(step => ({ text: step.name, state: step.state === "done" ? "done" : step.state === "working" ? "working" : "pending" })) } as SessionEvent] : []),
     ...current.flatMap(row => [...launch(now, `launch_${row.threadId}`, row.threadId!), ...workOf(row.threadId!, now, `launch_${row.threadId}`)]),
-    ...(dock === "question"
+    ...(dock === "question" || busy
       ? [
           {
             type: "session.permission",
@@ -136,11 +162,11 @@ function leadHistory(): SessionEvent[] {
 }
 
 /** Every other thread's transcript: its ask, its subagents' launches and lines, what it said last, how it ended. A
- * subagent's own page reads its lines alone, with no ask of its own: its prompt stands in its bar. */
+ * subagent's page reads its lead's prompt as its first item, then its own lines alone. */
 function historyOf(row: SessionView): SessionEvent[] {
   const scope = scopeOf(row);
   const facts = CHILD_FACTS[row.threadId!] ?? {};
-  if (facts.subagentOf !== undefined) return [{ type: "session.start", ...scope, agent: row.harness, model: "claude-haiku-4-5", cwd: "/Users/zingzy/wsp", prompt: "" } as SessionEvent, ...workOf(row.threadId!, scope), ...ended(scope, row)];
+  if (facts.subagentOf !== undefined) return [{ type: "session.start", ...scope, agent: row.harness, model: "claude-haiku-4-5", cwd: "/Users/zingzy/wsp", prompt: facts.prompt ?? "" } as SessionEvent, ...workOf(row.threadId!, scope), ...ended(scope, row)];
   const subs = subagentsOf(row.threadId!);
   return [
     { type: "session.start", ...scope, agent: row.harness, model: row.harness === "codex" ? "gpt-5.5" : "claude-opus-5-5", cwd: "/Users/zingzy/wsp", prompt: row.prompt ?? "" } as SessionEvent,
@@ -254,14 +280,48 @@ useStore.setState({
   preferences: { ...DEFAULT_PREFERENCES, theme, ...picks, settleAfter, labs: false, projectLook: { pr_wsp: { icon: "terminal" as const, hue: "amber" as const } } },
 });
 useStore.getState().bind(api);
-useStore.getState().select(MAC.id, dock === "subagent" ? "thr_sa_steps" : dock === "subagent-done" ? "thr_sa_order" : LEAD);
+const OPEN_SUBAGENT: Record<string, string> = { subagent: "thr_sa_steps", "subagent-done": "thr_sa_order", "subagent-stopped": "thr_sa_csp", "subagent-failed": "thr_sa_hdr" };
+useStore.getState().select(MAC.id, OPEN_SUBAGENT[dock ?? ""] ?? LEAD);
 useRightPanelStore.setState({ byWorkspaceId: {} });
 useRightPanelStore.getState().close(MAC.id);
 
+/** A daemon that holds the ptys the page opens and answers nothing else, as test/shell's does. */
+function fakeWire(): TerminalWire {
+  const held = new Set<string>();
+  return {
+    request: async (op, req = {}) => {
+      if (op === "pty.create") {
+        const ptyId = `p${held.size + 1}`;
+        held.add(ptyId);
+        return { ok: true, ptyId };
+      }
+      if (op === "pty.kill") held.delete(String(req["ptyId"]));
+      if (op === "pty.list") return { ok: true, ptys: [...held].map(id => ({ id, pid: 1, cols: 80, rows: 24, exited: false })) };
+      return { ok: true };
+    },
+  };
+}
+// ?panels=1: the lead's changes and a terminal open in the right panel, to watch them hide on a subagent's page and
+// come back as they were.
+if (params.get("panels") === "1") {
+  const terminals = new WorkspaceTerminals(fakeWire());
+  terminals.feedStatus("live");
+  provideTerminals(MAC.id, terminals);
+  useRightPanelStore.getState().open(MAC.id, "diff");
+  void openPanelTerminal(MAC.id);
+}
+
 const folds = ["finished", "settled"].filter(part => params.get(part) === "1");
+// ?busy=1: two messages wait behind the lead's running turn, put fresh on every load.
+if (busy) {
+  useComposerDraftStore.setState(s => ({ queues: { ...s.queues, [LEAD]: [] } }));
+  useComposerDraftStore.getState().enqueue(LEAD, "When 1811 lands, rebase 1866 onto it before its review.");
+  useComposerDraftStore.getState().enqueue(LEAD, "Skip 1830's build until the owner locks the design.");
+}
 useLeadUi.setState({
   open: Object.fromEntries([
     ...folds.flatMap(part => [[`transcript:${LEAD}:${part}`, true], [`sidebar:${LEAD}:${part}`, true]]),
+    ...(params.get("fold") !== null ? [[`fold:${params.get("fold")}`, true]] : []),
     ...(params.get("nested") === "1" ? [["transcript:thr_c_ssh:finished", true], ["sidebar:thr_c_ssh:finished", true], ["sidebar:thr_c_sheet:finished", true], ["transcript:thr_c_sheet:finished", true]] : []),
   ]),
   sending: params.get("send"),
@@ -282,10 +342,22 @@ const STATES: ReadonlyArray<readonly [string, string]> = [
   ["A row's acts", "acts=thr_c_sheet"],
   ["A subagent's acts", "acts=thr_sa_steps"],
   ["Send a message", "send=thr_c_sheet"],
-  ["Bar: a subagent's page", "dock=subagent"],
-  ["Bar: a subagent that ended", "dock=subagent-done"],
+  ["Tile: before (shipped)", "tile=before"],
+  ["Subagent page: running", "dock=subagent"],
+  ["Subagent page: finished", "dock=subagent-done"],
+  ["Subagent page: stopped", "dock=subagent-stopped"],
+  ["Subagent page: failed", "dock=subagent-failed"],
+  ["Lead's panels open (go to a subagent and back)", "panels=1"],
+  ["Subtree folded: the lead", "fold=thr_lead"],
+  ["Subtree folded: a child three levels deep", "fold=thr_c_ssh"],
+  ["Around the composer: today", "busy=1"],
+  ["Around the composer: proposed", "busy=1&around=proposed"],
+  ["Around the composer: proposed, Threads open", "busy=1&around=proposed&open=threads"],
+  ["Around the composer: proposed, question open", "busy=1&around=proposed&open=question"],
+  ["Marathon with the proposed composer", "around=proposed"],
   ["Bar: a question", "dock=question"],
-  ["Bar: the task list", "dock=tasks"],
+  ["A: task list stays in today's drawer", "dock=tasks-a"],
+  ["B: task list opens in the bar", "dock=tasks"],
   ["After Settle all", "after=settle"],
   ["Quiet rule at 2h", "quiet=2h"],
   ["Small lead", "lead=small"],
@@ -338,18 +410,40 @@ function StateBar() {
   );
 }
 
-/** A subagent's page: its own lines through the real ChatView, its bar in the composer's place. */
-function SubagentPage({ workspaceId, threadId, leadKey }: { workspaceId: string; threadId: string; leadKey: string }) {
-  const threads = useSidebarProjects().flatMap(project => project.threads);
-  const me = threads.find(t => (t.threadId ?? t.id) === threadId);
-  const leadThread = threads.find(t => (t.threadId ?? t.id) === leadKey);
-  return <ChatView workspaceId={workspaceId} threadId={threadId}>{() => (me === undefined ? null : <SubagentDock subagent={me} lead={leadThread} />)}</ChatView>;
+/** A subagent's page: its lead's prompt as the first message, as a thread a lead started shows it, then its own lines,
+ * through the real ChatView; its bar in the composer's own shell. */
+function SubagentPage({ workspaceId, threadId }: { workspaceId: string; threadId: string }) {
+  const me = useSidebarProjects()
+    .flatMap(project => project.threads)
+    .find(t => (t.threadId ?? t.id) === threadId);
+  return <ChatView workspaceId={workspaceId} threadId={threadId}>{() => (me === undefined ? null : <SubagentBar subagent={me} />)}</ChatView>;
 }
 
 /** The lead with its task list opened from the composer's drawer into the composer's place, and back. */
 function TasksPage({ workspaceId }: { workspaceId: string }) {
   const [open, setOpen] = useState(true);
   return <ChatView workspaceId={workspaceId} threadId={LEAD}>{thread => (open ? <TaskDock steps={TASKS} onWrite={() => setOpen(false)} /> : <ChatComposer key={workspaceId} workspaceId={workspaceId} thread={thread} />)}</ChatView>;
+}
+
+/** A thread under the proposed composer: the real ChatView, the one drawer inside the real composer, and a bar in
+ * the composer's place while one of the drawer's rows is open. */
+function ProposedPage({ workspaceId, threadId }: { workspaceId: string; threadId: string }) {
+  const bar = useBar(s => s.open);
+  const api = useStore(s => s.api);
+  const answer = useMemo(() => answerPrompt(api), [api]);
+  return (
+    <ChatView workspaceId={workspaceId} threadId={threadId} docked={thread => (bar === "question" ? (openPrompt(thread)?.askId ?? null) : null)}>
+      {thread => {
+        const prompt = openPrompt(thread);
+        if (bar === "question" && prompt !== null) return <PromptDock key={prompt.askId} permission={prompt} agent={thread.view.agent} onAnswer={answer} onWriteInstead={() => openBar(null)} />;
+        if (bar === "threads") return <ThreadsDock workspaceId={workspaceId} threadKey={threadId} />;
+        if (bar === "tasks") return <TaskDock steps={TASKS} onWrite={() => openBar(null)} />;
+        if (bar === "queue") return <QueueDock threadKey={threadId} />;
+        if (bar === "usage") return <UsageDock />;
+        return <ChatComposer key={workspaceId} workspaceId={workspaceId} thread={thread} />;
+      }}
+    </ChatView>
+  );
 }
 
 /** The thread the person opened, the lead until they open one of its children or subagents; Settings while it is
@@ -360,8 +454,9 @@ function Center() {
   const threadId = useStore(s => s.selectedThreadId) ?? LEAD;
   if (settingsOpen) return <SettingsPage />;
   const of = CHILD_FACTS[threadId]?.subagentOf;
-  if (of !== undefined) return <SubagentPage key={threadId} workspaceId={workspaceId} threadId={threadId} leadKey={of} />;
+  if (of !== undefined) return <SubagentPage key={threadId} workspaceId={workspaceId} threadId={threadId} />;
   if (dock === "tasks" && threadId === LEAD) return <TasksPage key={threadId} workspaceId={workspaceId} />;
+  if (PROPOSED) return <ProposedPage key={threadId} workspaceId={workspaceId} threadId={threadId} />;
   return <WorkspaceThread key={threadId} workspaceId={workspaceId} threadId={threadId} />;
 }
 

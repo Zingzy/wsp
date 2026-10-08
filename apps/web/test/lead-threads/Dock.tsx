@@ -7,40 +7,39 @@
 // relay one), the agent's task list opened from the composer's drawer, and the question, which is PromptDock itself.
 // The build pulls this frame out of PromptDock so all three are one component.
 import { agentName } from "@wsp/catalog";
-import { ListTodoIcon } from "lucide-react";
+import { fmtDuration } from "@wsp/protocol";
+import { ArrowUpLeftIcon, ListTodoIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import type { SidebarThreadSnapshot } from "../../src/adapt/index";
 import { ComposerSurface } from "../../src/components/chat/ComposerSurface";
 import { HarnessMark } from "../../src/components/chat/HarnessMark";
-import { restingAge } from "../../src/components/status/restingAge";
-import { ThreadStatus } from "../../src/components/status/ThreadStatus";
-import { ThreadLink } from "../../src/components/ThreadLink";
+import { WorkingTimer } from "../../src/components/chat/timeline/working";
 import { Button } from "../../src/components/ui/button";
-import { Input } from "../../src/components/ui/input";
 import { cn } from "../../src/lib/utils";
-import { useStore } from "../../src/protocol/store";
+import { useSidebarProjects, useStore } from "../../src/protocol/store";
 import { STEP_BODY, STEP_HEAD, StepFoot } from "../../src/settings/add/StepDialog";
 import { StepRow } from "../../src/settings/add/StepRow";
 import type { StepLine } from "../../src/settings/add/setup";
 import { FACT } from "../../src/settings/format";
 import { Grid } from "../../src/settings/grid";
 import { GLYPH, NOTE } from "../../src/settings/layout";
-import { Row } from "../../src/settings/rows";
 import { CHILD_FACTS } from "./fixtures";
-import { STOPPED } from "./LeadThreads";
 
 /** PromptDock's own title and foot, read off it: the build exports them with the frame. */
 const TITLE_CLASS = "text-base leading-6 font-semibold text-foreground";
 const DOCK_FOOT = "pt-0 pb-5";
 
 export const DOCK_WORDS = {
-  subagentOf: "Subagent of",
   agent: "Agent",
   asked: "Asked",
   said: "Said",
-  message: "Message this subagent",
-  noMessage: "A message reaches a subagent through its lead, and wsp cannot relay one yet.",
-  stop: "Stop",
+  back: "Back to lead",
+  working: "Working",
+  workingFor: "Working for",
+  workedFor: "Worked for",
+  done: "Done",
+  stopped: "Stopped",
+  failed: "Failed",
   tasks: "Tasks",
   tasksDone: (done: number, all: number) => `${done} of ${all} done`,
   write: "Write a message instead",
@@ -84,44 +83,69 @@ export function Dock({ k, mark, title, aside, note, foot, acts, children }: { k:
   );
 }
 
-/** A subagent's page bar: its task and status with the time it has run, its lead as the way back and its model,
- * what it was asked and what it said, the message box held with the reason, and Stop while it runs. */
-export function SubagentDock({ subagent, lead }: { subagent: SidebarThreadSnapshot; lead: SidebarThreadSnapshot | undefined }) {
+/** A subagent's page bar, after T3 Code's ProviderSubagentBar, on our composer's own grid: one row inside the
+ * composer's shell, host and surface, at its height and padding, since nobody can write to a subagent and none of the
+ * composer's strips belong to it. Where the composer's words stand, its status in the transcript's own words in the
+ * placeholder's type and ink, the timer written straight to the page once a second by the timeline's own WorkingTimer
+ * so a running subagent never draws the chat again; where the model picker stands, the agent's mark in its colour and
+ * the model in the picker's own box, a label and not a menu; where the send button stands, the way back to its lead.
+ * Stop is on its row in the tree, on hover, not here. A screen reader hears the state once each time it changes. */
+export function SubagentBar({ subagent }: { subagent: SidebarThreadSnapshot }) {
   const facts = CHILD_FACTS[subagent.threadId ?? subagent.id] ?? {};
+  const fleet = useSidebarProjects();
+  const lead = facts.subagentOf === undefined ? undefined : fleet.flatMap(project => project.threads).find(thread => (thread.threadId ?? thread.id) === facts.subagentOf);
   const running = subagent.status === "running";
-  const stop = (): void => void useStore.getState().api?.interruptSession?.(subagent.sessionId);
+  const ran = subagent.startedAt !== null && subagent.endedAt !== null ? fmtDuration(Date.parse(subagent.endedAt) - Date.parse(subagent.startedAt)) : null;
+  const word = running ? DOCK_WORDS.working : subagent.status === "failed" ? DOCK_WORDS.failed : subagent.status === "interrupted" ? DOCK_WORDS.stopped : DOCK_WORDS.done;
+  const back = (): void => {
+    if (lead?.threadId != null) useStore.getState().select(lead.workspaceId, lead.threadId);
+  };
   return (
-    <Dock
-      k="subagent"
-      mark={<HarnessMark harness={subagent.harness} label={agentName(subagent.harness)} className={cn(GLYPH, "shrink-0")} />}
-      title={subagent.title}
-      aside={<ThreadStatus thread={subagent} age={restingAge(subagent)} crab {...(subagent.status === "interrupted" ? { kind: STOPPED } : {})} className="text-xs" />}
-      note={
-        <>
-          {lead === undefined ? null : (
-            <span className="inline-flex min-w-0 items-center gap-1">
-              {DOCK_WORDS.subagentOf}
-              <ThreadLink data-dock-lead thread={lead} className="min-w-0 truncate text-foreground" />
-            </span>
-          )}
-          {facts.model === undefined ? null : <span>{facts.model}</span>}
-        </>
-      }
-      foot={<span className={NOTE}>{DOCK_WORDS.noMessage}</span>}
-      acts={
-        running ? (
-          <Button variant="outline" data-dock-stop className="[:hover,[data-pressed]]:text-destructive-foreground" onClick={stop}>
-            {DOCK_WORDS.stop}
-          </Button>
-        ) : null
-      }
-    >
-      <Grid id="subagent-facts">
-        {facts.prompt === undefined ? null : <Row id="asked" title={DOCK_WORDS.asked} description={facts.prompt} />}
-        {facts.summary === undefined ? null : <Row id="said" title={DOCK_WORDS.said} description={facts.summary} />}
-      </Grid>
-      <Input nativeInput disabled size="lg" placeholder={DOCK_WORDS.message} aria-label={DOCK_WORDS.message} data-dock-message />
-    </Dock>
+    <div className="relative w-full px-3 pt-1.5 pb-4 sm:px-5 sm:pt-2 sm:pb-5" data-subagent-composer>
+      <ComposerSurface.Shell>
+        <ComposerSurface.Host>
+          <div className="mx-auto w-full min-w-0 max-w-3xl">
+            <ComposerSurface.Main>
+              <div className="overflow-hidden rounded-[20px]">
+                <div data-subagent-bar className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-x-1 py-2 ps-4 pe-2 sm:ps-5">
+                  <span
+                    data-subagent-state
+                    className="min-w-0 truncate leading-relaxed text-placeholder tabular-nums [font-family:var(--font-composer,var(--font-sans))] [font-size:var(--font-size-prompt,0.875rem)]"
+                  >
+                    {running ? (
+                      <>
+                        {DOCK_WORDS.workingFor} <WorkingTimer createdAt={subagent.startedAt ?? new Date().toISOString()} />
+                      </>
+                    ) : word === DOCK_WORDS.done && ran !== null ? (
+                      `${DOCK_WORDS.workedFor} ${ran}`
+                    ) : (
+                      word
+                    )}
+                  </span>
+                  <span role="status" className="sr-only">
+                    {word}
+                  </span>
+                  <span data-composer-picker="model" data-subagent-model className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-[var(--control-radius)] px-2 text-[13px] font-normal text-muted-foreground">
+                    <span className="inline-flex text-foreground">
+                      <HarnessMark harness={subagent.harness} label={agentName(subagent.harness)} className="size-4" />
+                    </span>
+                    {facts.model === undefined ? agentName(subagent.harness) : facts.model}
+                  </span>
+                  <span className="flex shrink-0 items-center justify-self-end">
+                    {lead === undefined ? null : (
+                      <Button type="button" variant="ghost" data-subagent-back onClick={back}>
+                        <ArrowUpLeftIcon aria-hidden />
+                        {DOCK_WORDS.back}
+                      </Button>
+                    )}
+                  </span>
+                </div>
+              </div>
+            </ComposerSurface.Main>
+          </div>
+        </ComposerSurface.Host>
+      </ComposerSurface.Shell>
+    </div>
   );
 }
 

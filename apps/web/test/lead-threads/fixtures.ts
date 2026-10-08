@@ -152,6 +152,7 @@ const NESTED: Child[] = [
   { key: "g_rev", parent: "thr_c_ssh", title: "Review 1811: ssh same-computer check", status: "running", started: 2, harness: "codex" },
   { key: "g_rebase", parent: "thr_c_ssh", title: "Rebase: ticket/1811-ssh-check onto main", status: "completed", started: 3, ended: 2, facts: { lastLine: "Rebased onto main at 4c5d84d, no conflicts." } },
   { key: "g_probe", parent: "thr_c_rev", title: "Probe: the worktree carry on a box", status: "failed", started: 8, ended: 5, harness: "codex", on: BOX, facts: { why: "git worktree add exited 128: /root/wsp is not a git repository" } },
+  { key: "gg_ssh", parent: "thr_g_rev", title: "Probe: the same-computer check from hetzner", status: "running", started: 1, on: BOX },
 ];
 
 /** An agent's own subagents: two of the add sheet's fix round, one running and one done; the lead's own running
@@ -169,6 +170,8 @@ const SUBAGENTS: Child[] = [
   subagent("sa_steps", "thr_c_sheet", "Find where the add sheet reads its steps", "running", 4, { model: "Haiku 4.5", prompt: "Find every place the add sheet reads its list of steps: the component, the logic file and any test that pins the order. Report the files and lines, and nothing else." }),
   subagent("sa_order", "thr_c_sheet", "Check the sheet's tests for the step order", "done", 9, { model: "Haiku 4.5", prompt: "Read the add sheet's tests and say whether any of them pins the order of the steps.", summary: "add-sheet.test.tsx:41 pins the order in three cases, all green.", lastLine: "add-sheet.test.tsx:41 pins the order in three cases, all green." }, 6),
   subagent("sa_map", LEAD, "Read the open tickets on the map", "running", 1, { model: "Opus 5.5", prompt: "Read every open ticket on wsp-labs/wsp-map with no branch yet, and list them with the files each one names." }),
+  subagent("sa_hdr", LEAD, "Check the landing's CSP headers", "failed", 3, { model: "Haiku 4.5", prompt: "Fetch the landing page and list its Content-Security-Policy header, directive by directive.", why: "WebFetch could not reach https://spoo.me: connect ETIMEDOUT" }, 2),
+  subagent("sa_csp", "thr_c_sec2", "Rerun the CSP gate", "stopped", 6, { model: "Haiku 4.5", prompt: "Run pnpm gate:csp and report each failing rule with its file.", lastLine: "Running pnpm gate:csp" }, 4),
   subagent("sa_prs", LEAD, "List the open pull requests", "done", 60, { model: "Haiku 4.5", earlierTurn: true, prompt: "List the open pull requests on wsp-labs/wsp with their review state.", summary: "11 open, 4 approved, 7 waiting on a reviewer.", lastLine: "11 open, 4 approved, 7 waiting on a reviewer." }, 58),
   subagent("sa_gate", LEAD, "Check main's gate", "done", 62, { model: "Haiku 4.5", earlierTurn: true, prompt: "Run the gate on main and report what fails.", summary: "Main is green at 4c5d84d.", lastLine: "Main is green at 4c5d84d." }, 57),
 ];
