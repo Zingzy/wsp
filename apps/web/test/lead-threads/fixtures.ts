@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The lead and its children the prototype draws, as the host would list them: a coordinator thread on the wsp
 // project that opened 77 threads in one day, 8 of them live, 60 finished and 9 settled, the size the owner's own
-// marathon reached. ?lead=small is a lead with three children, the common case. CHILD_FACTS holds the three facts
-// a child's row reads that the thread row does not carry yet: its reply's last line, why it failed, and the thread
-// a restart replaced. The build adds them to the row; the host already has the first for `threads wait`.
+// marathon reached, three of them with threads of their own, and subagents of the lead's own agent and of one child.
+// ?lead=small is a lead with three children, the common case. CHILD_FACTS holds what a child's row reads that the
+// thread row does not carry yet: its reply's last line, why it failed, the thread a restart replaced, and for a
+// subagent its prompt, summary and model. The build adds the first three to the row (the host already has the last
+// line for `threads wait`) and reads a subagent off its lead's `subagents`; here a subagent rides a session row of
+// its own so the page can draw its lines through the real ChatView, and CHILD_FACTS marks it with `subagentOf`.
 import type { PlaceView, ProjectView, SessionView, WorkspaceView } from "@wsp/protocol";
 
 export const HERE: PlaceView = { id: "here", kind: "computer", name: "zingzy-mbp", label: "zingzy's MacBook Pro", mac: "macbook", default: true, present: true, shape: { cpu: 10, memMb: 16384 }, takesForks: false, agentVersions: { claude: "2.1.286", codex: "0.47.0" } };
@@ -24,6 +27,13 @@ export interface ChildFacts {
   readonly replaces?: string;
   /** The restart that took this one's place. */
   readonly replacedBy?: string;
+  /** Set on a subagent: the thread whose agent runs it, and what it carries on its hover card and its page. */
+  readonly subagentOf?: string;
+  readonly prompt?: string;
+  readonly summary?: string;
+  readonly model?: string;
+  /** A subagent of a turn of its lead that is over, however its lead stands now. */
+  readonly earlierTurn?: boolean;
 }
 export const CHILD_FACTS: Record<string, ChildFacts> = {};
 
@@ -40,6 +50,8 @@ interface Child {
   capped?: SessionView["capped"];
   on?: WorkspaceView;
   facts?: ChildFacts;
+  /** The thread that opened it, the lead when absent. */
+  parent?: string;
 }
 
 const child = (c: Child): SessionView => {
@@ -49,7 +61,7 @@ const child = (c: Child): SessionView => {
     id: `s_${c.key}`,
     threadId: `thr_${c.key}`,
     workspaceId: (c.on ?? MAC).id,
-    parentThreadId: LEAD,
+    parentThreadId: c.parent ?? LEAD,
     rootThreadId: LEAD,
     harness: c.harness ?? "claude",
     status: c.status,
@@ -135,6 +147,32 @@ const SETTLED: Child[] = [
   ),
 ];
 
+/** Threads two of the children opened themselves: a builder's reviewer and its rebase, and a reviewer's probe. */
+const NESTED: Child[] = [
+  { key: "g_rev", parent: "thr_c_ssh", title: "Review 1811: ssh same-computer check", status: "running", started: 2, harness: "codex" },
+  { key: "g_rebase", parent: "thr_c_ssh", title: "Rebase: ticket/1811-ssh-check onto main", status: "completed", started: 3, ended: 2, facts: { lastLine: "Rebased onto main at 4c5d84d, no conflicts." } },
+  { key: "g_probe", parent: "thr_c_rev", title: "Probe: the worktree carry on a box", status: "failed", started: 8, ended: 5, harness: "codex", on: BOX, facts: { why: "git worktree add exited 128: /root/wsp is not a git repository" } },
+];
+
+/** An agent's own subagents: two of the add sheet's fix round, one running and one done; the lead's own running
+ * one; and two of the lead's earlier turn, which have folded away with that turn. */
+const subagent = (key: string, of: string, title: string, state: "running" | "done" | "failed" | "stopped", started: number, facts: Omit<ChildFacts, "subagentOf">, ended?: number): Child => ({
+  key,
+  parent: of,
+  title,
+  status: state === "running" ? "running" : state === "done" ? "completed" : state === "failed" ? "failed" : "interrupted",
+  started,
+  ...(ended !== undefined ? { ended, read: true } : {}),
+  facts: { ...facts, subagentOf: of },
+});
+const SUBAGENTS: Child[] = [
+  subagent("sa_steps", "thr_c_sheet", "Find where the add sheet reads its steps", "running", 4, { model: "Haiku 4.5", prompt: "Find every place the add sheet reads its list of steps: the component, the logic file and any test that pins the order. Report the files and lines, and nothing else." }),
+  subagent("sa_order", "thr_c_sheet", "Check the sheet's tests for the step order", "done", 9, { model: "Haiku 4.5", prompt: "Read the add sheet's tests and say whether any of them pins the order of the steps.", summary: "add-sheet.test.tsx:41 pins the order in three cases, all green.", lastLine: "add-sheet.test.tsx:41 pins the order in three cases, all green." }, 6),
+  subagent("sa_map", LEAD, "Read the open tickets on the map", "running", 1, { model: "Opus 5.5", prompt: "Read every open ticket on wsp-labs/wsp-map with no branch yet, and list them with the files each one names." }),
+  subagent("sa_prs", LEAD, "List the open pull requests", "done", 60, { model: "Haiku 4.5", earlierTurn: true, prompt: "List the open pull requests on wsp-labs/wsp with their review state.", summary: "11 open, 4 approved, 7 waiting on a reviewer.", lastLine: "11 open, 4 approved, 7 waiting on a reviewer." }, 58),
+  subagent("sa_gate", LEAD, "Check main's gate", "done", 62, { model: "Haiku 4.5", earlierTurn: true, prompt: "Run the gate on main and report what fails.", summary: "Main is green at 4c5d84d.", lastLine: "Main is green at 4c5d84d." }, 57),
+];
+
 const SMALL: Child[] = [
   { key: "m_work", title: "Build: the reset words on the Usage page (#1841)", status: "running", started: 6 },
   { key: "m_ask", title: "Review 1841: the reset words", status: "running", started: 4, harness: "codex", asking: "Run gh pr view 1153 --comments" },
@@ -144,22 +182,22 @@ const SMALL: Child[] = [
 export type LeadSize = "marathon" | "small";
 
 /** Every child of the lead at that size, as the host lists them. */
-export const childrenOf = (size: LeadSize): SessionView[] => (size === "small" ? SMALL : [...LIVE, ...FINISHED, ...SETTLED]).map(child);
+export const childrenOf = (size: LeadSize): SessionView[] => (size === "small" ? SMALL : [...LIVE, ...NESTED, ...SUBAGENTS, ...FINISHED, ...SETTLED]).map(child);
 
-/** The lead itself: its turn over, waiting on its children's finished lines. */
+/** The lead itself. The marathon's turn is still going, held by its own subagent; the small lead's is over, waiting on
+ * its children's finished lines. */
 export const leadSession = (size: LeadSize): SessionView =>
   ({
     id: "s_lead",
     threadId: LEAD,
     workspaceId: MAC.id,
     harness: "claude",
-    status: "completed",
+    status: size === "small" ? "completed" : "running",
     prompt: size === "small" ? "Land 1841" : "Coordinator: the marathon",
     harnessTitle: size === "small" ? "Land 1841" : "Coordinator: the marathon",
     startedBy: "person",
-    startedAt: ago(size === "small" ? 12 : 640),
-    endedAt: ago(1),
-    readAt: ago(0.5),
+    startedAt: ago(size === "small" ? 12 : 2),
+    ...(size === "small" ? { endedAt: ago(1), readAt: ago(0.5) } : {}),
   }) as SessionView;
 
 /** The other trees in the sidebar, so the lead is drawn among the work it sits beside. */
@@ -170,6 +208,6 @@ export const OTHERS: SessionView[] = [
 
 export const LEAD_SAID = {
   ask: "Run the marathon: build, review and land every open ticket on the map, a builder per ticket, a reviewer per pull request, fix rounds until the reviewer passes it. Tell me when a thing needs me.",
-  said: "Eight threads are out. 1805's builder hung on the CSP gate, so I stopped it and started it again; 1827 failed on the desktop smoke and I'll read its log next. 1615 is waiting on you to allow its install, and two builds are waiting for a slot on your MacBook.\n\nI'll take each report as it lands.",
+  said: "Eight threads are out. 1805's builder hung on the CSP gate, so I stopped it and started it again; 1827 failed on the desktop smoke and I'll read its log next. 1615 is waiting on you to allow its install, and two builds are waiting for a slot on your MacBook. A subagent is reading the rest of the map's open tickets.\n\nI'll take each report as it lands.",
   small: "Started a builder and a reviewer for 1841; the rebase is done. I'll merge once the review passes.",
 };

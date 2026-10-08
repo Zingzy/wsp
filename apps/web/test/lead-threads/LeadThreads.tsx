@@ -1,19 +1,41 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// A lead's children, one component for its transcript's Threads block and its tree in the sidebar. One reading of
-// each child decides everything both places draw: which part it stands in (live, finished, settled), its order
-// there, the line under its title, and the acts it takes. The row is the place's own: ThreadRow's one-line row in
-// the transcript, ThreadTile in the sidebar. Live children always draw, first. Finished ones sit behind a fold
-// that starts shut, and settled ones behind a second fold in the transcript and nowhere in the sidebar; a shut fold
-// mounts nothing, and an open one mounts twenty rows and a row that mounts twenty more. A fold opens downward, so
-// the live rows above it never move; the transcript's folds shut again when the person opens another thread, so a
-// lead is always opened on its live rows.
+// A lead's tree, one component for its transcript's Threads block and its tree in the sidebar: the threads its agent
+// started, the threads those started, and the subagents its own agent and its children's agents run. One reading
+// decides everything both places draw: the part each child stands in (live, finished, settled) and its order there,
+// read off its whole subtree so trouble deep in the tree is never folded away; the line under its title; and the
+// acts it takes. The row is the place's own: ThreadRow's one-line row in the transcript, ThreadTile in the sidebar,
+// and a subagent's one-line row in both, led by the glyph the timeline gives the call that launched it.
 //
-// Prototype only. ChildRow is ThreadRow with the two things the build adds to ThreadRow itself: the acts the status
-// slot yields to on hover, and the message field that takes the note's place. The page's vite config puts
-// TreeRows below in place of src/tree/TreeRows.tsx and LeadThreads in place of the sidebar's child list.
+// Live children always draw, first, each with its live children indented under it on the connector, two levels
+// deep and flat after that. Finished ones sit behind a fold that starts shut; settled ones behind a second fold at the
+// top of the transcript and nowhere else. A shut fold mounts nothing, and an open one mounts twenty rows and a row
+// that mounts twenty more. A subagent is live while it runs and finished once it ends while its lead's turn goes
+// on; when that turn ends it is settled, folded away like a settled thread. The transcript's whole block shuts to
+// its head, which then counts what the tree holds in the status marks, over its first live row fading out; shut or
+// open is remembered per lead.
+//
+// Prototype only. ChildRow is ThreadRow with what the build adds to ThreadRow itself: the acts the status slot
+// yields to on hover, the message field that takes the note's place, the computer leading the note, and a
+// subagent's glyph and card. The page's vite config puts TreeRows below in place of src/tree/TreeRows.tsx and
+// LeadThreads in place of the sidebar's child list.
 import { agentName } from "@wsp/catalog";
-import { capRunningLine, SETTLE_MS, type TreeFact } from "@wsp/protocol";
-import { ArchiveIcon, ArchiveRestoreIcon, ChevronDownIcon, ChevronRightIcon, CircleCheckIcon, CircleStopIcon, EllipsisIcon, MessageSquareIcon, SquareIcon, type LucideIcon } from "lucide-react";
+import { capRunningLine, SETTLE_MS, type PlaceView, type TreeFact } from "@wsp/protocol";
+import {
+  ArchiveIcon,
+  ArchiveRestoreIcon,
+  BotIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
+  CircleAlertIcon,
+  CircleCheckIcon,
+  CircleStopIcon,
+  EllipsisIcon,
+  HourglassIcon,
+  MessageCircleQuestionIcon,
+  MessageSquareIcon,
+  SquareIcon,
+  type LucideIcon,
+} from "lucide-react";
 import { cloneElement, memo, useRef, useState, type MouseEvent, type ReactElement, type ReactNode } from "react";
 import { create } from "zustand";
 import { openContextMenu } from "../../src/actions/contextMenu";
@@ -21,6 +43,7 @@ import { THREAD_WORDS } from "../../src/actions/format";
 import type { ResolvedAction } from "../../src/actions/registry";
 import type { SidebarThreadSnapshot } from "../../src/adapt/index";
 import { HarnessMark } from "../../src/components/chat/HarnessMark";
+import { Crab } from "../../src/components/status/Crab";
 import type { StatusKind } from "../../src/components/status/kinds/index";
 import { restingAge } from "../../src/components/status/restingAge";
 import { LINE_SLOT_CLASS, ThreadStatus } from "../../src/components/status/ThreadStatus";
@@ -32,26 +55,42 @@ import { GROUP_LABEL } from "../../src/lib/microLabel";
 import { cn } from "../../src/lib/utils";
 import { addNotice } from "../../src/notices/store";
 import { usePlaces, useSidebarProjects, useStore } from "../../src/protocol/store";
+import { ComputerGlyph } from "../../src/settings/ComputerGlyph";
 import { requestComposerFocus } from "../../src/shell/shellRequests";
 import { isThreadSettled, isThreadWorking } from "../../src/sidebar/Sidebar.logic";
 import { CHILD_LIST_CLASS, ONE_LINE_ROW_CLASS, RAIL_ITEM_CLASS, ROW_META_CLASS, threadRowId } from "../../src/sidebar/rowGrammar";
 import { RowNameInput } from "../../src/sidebar/RowNameInput";
 import type { TileNode } from "../../src/sidebar/threadTree";
-import { computerName } from "../../src/sidebar/workspaceRows";
-import { CHILD_FACTS } from "./fixtures";
+import { computerName, computerOf } from "../../src/sidebar/workspaceRows";
+import { CHILD_FACTS, type ChildFacts } from "./fixtures";
+import { TRANSCRIPT_ITEM, TRANSCRIPT_LIST } from "./rail";
 
 type Thread = SidebarThreadSnapshot;
 export type ChildPart = "live" | "finished" | "settled";
 
 /** Ended by a stop: the glyph, its word on the hover, and the age beside it, in the row's own ink. */
-const STOPPED: StatusKind = { id: "stopped", is: () => false, glyph: CircleStopIcon, word: "Stopped", glyphOnly: true, aged: true };
+export const STOPPED: StatusKind = { id: "stopped", is: () => false, glyph: CircleStopIcon, word: "Stopped", glyphOnly: true, aged: true };
 
 /** How many rows an open fold mounts at a time. */
 const PAGE = 20;
+/** How many levels under the lead indent; deeper threads stand at the last indent, their opener on the card. */
+const INDENTS = 2;
+/** How long the pointer rests on a subagent's row before its card opens, the tile card's own delay. */
+const CARD_DELAY_MS = 450;
+
+const params = new URLSearchParams(window.location.search);
+/** The shut block's three shapes, for the owner to compare: its head over the first live row fading out (the pick),
+ * over two, or its head alone. */
+const SHUT_SHAPE: "peek" | "peek2" | "line" = params.get("shut-shape") === "line" ? "line" : params.get("shut-shape") === "peek2" ? "peek2" : "peek";
+const COUNT_DRAWS = params.has("renders");
 
 const keyOf = (thread: Pick<Thread, "id" | "threadId">): string => thread.threadId ?? thread.id;
+const factsOf = (thread: Thread): ChildFacts => CHILD_FACTS[keyOf(thread)] ?? {};
+const isSubagent = (thread: Thread): boolean => factsOf(thread).subagentOf !== undefined;
 const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? "" : "s"}`;
+
 export const LEAD_WORDS = {
+  threads: "Threads",
   finished: "Finished",
   settled: "Settled",
   send: "Send a message",
@@ -64,49 +103,124 @@ export const LEAD_WORDS = {
   openRestart: "Open its restart",
   messageTo: (title: string) => `Message to ${title}`,
   more: (n: number) => `${n} more`,
+  stopSubagent: "Stop subagent",
+  runsOn: (computer: string) => `Runs on ${computer}`,
+  needsYou: (n: number) => `${n} ${n === 1 ? "thread needs" : "threads need"} you`,
+  failed: (n: number) => `${n} failed`,
+  working: (n: number, threads: number, subagents: number) => (subagents === 0 ? `${n} working` : `${n} working: ${plural(threads, "thread")} and ${plural(subagents, "subagent")}`),
+  waiting: (n: number) => `${n} waiting for a slot`,
+  allFinished: (n: number) => `${n} finished`,
+  shut: "Show the threads",
+  open: "Hide the threads",
+  asked: "Asked",
+  said: "Said",
+  lead: "Lead",
 } as const;
 
-/** Which part a child stands in: settled by hand or by the quiet rule the sidebar folds by, live while it asks,
- * works, waits or failed, and finished once it ended any other way. */
-export function partOf(thread: Thread, nowMs: number, settleMs: number | null): ChildPart {
-  if (isThreadSettled(thread, nowMs, false, settleMs)) return "settled";
+/** A child in the tree as either place holds it: the thread, null for a workspace that holds none yet, and its
+ * children. The sidebar's TileNode and the transcript's node both read through this. */
+interface Tree<N> {
+  readonly threadOf: (node: N) => Thread | null;
+  readonly kidsOf: (node: N) => ReadonlyArray<N>;
+  /** A thread anywhere in the tree or over it, by key: what a subagent's lead and a restart's link are read off. */
+  readonly byKey: ReadonlyMap<string, Thread>;
+  readonly nowMs: number;
+  readonly settleMs: number | null;
+}
+
+/** A child's own part, read off it alone. A subagent is live while it runs, finished once it ends while its lead's
+ * turn runs, and settled once that turn is over. */
+function ownPart(thread: Thread, tree: Pick<Tree<unknown>, "byKey" | "nowMs" | "settleMs">): ChildPart {
+  const facts = factsOf(thread);
+  if (facts.subagentOf !== undefined) {
+    if (thread.status === "running") return "live";
+    const lead = tree.byKey.get(facts.subagentOf);
+    return facts.earlierTurn === true || lead === undefined || lead.status !== "running" ? "settled" : "finished";
+  }
+  if (isThreadSettled(thread, tree.nowMs, false, tree.settleMs)) return "settled";
   if (thread.asking !== null || isThreadWorking(thread) || thread.status === "failed") return "live";
   return "finished";
 }
 
-/** A live child's place in its part: what asks for the person, then what failed, then what works, then what waits. */
-const liveRank = (t: Thread): number => (t.asking !== null || (t.status === "failed" && (t.limit ?? null) !== null) ? 0 : t.status === "failed" ? 1 : t.capped !== undefined ? 3 : 2);
+/** How pressing a child is on its own: asks, failed, works, waits, then everything quiet. A failed subagent is its
+ * lead agent's to handle, so it ranks as quiet. */
+function ownRank(thread: Thread, part: ChildPart): number {
+  if (part !== "live") return 4;
+  if (thread.asking !== null || (thread.status === "failed" && (thread.limit ?? null) !== null)) return 0;
+  if (thread.status === "failed") return 1;
+  return thread.capped !== undefined ? 3 : 2;
+}
+
+/** The most pressing rank in a child's subtree, itself included. */
+function treeRank<N>(node: N, tree: Tree<N>): number {
+  const thread = tree.threadOf(node);
+  const own = thread === null ? 2 : ownRank(thread, ownPart(thread, tree));
+  return tree.kidsOf(node).reduce((best, kid) => Math.min(best, treeRank(kid, tree)), own);
+}
+
+/** The part a child's whole subtree stands in: live while anything in it is live, else its own. */
+export function partOf<N>(node: N, tree: Tree<N>): ChildPart {
+  const thread = tree.threadOf(node);
+  if (thread === null) return "live";
+  return treeRank(node, tree) < 4 ? "live" : ownPart(thread, tree);
+}
+
 const at = (iso: string | null): number => (iso === null ? 0 : Date.parse(iso));
 
-/** Every child in its part and in the part's order: live by rank then newest, finished by newest end, settled by
- * newest settle. */
-export function childParts<T>(items: ReadonlyArray<T>, threadOf: (item: T) => Thread | null, nowMs: number, settleMs: number | null): Record<ChildPart, T[]> {
-  const parts: Record<ChildPart, T[]> = { live: [], finished: [], settled: [] };
-  for (const item of items) {
-    const thread = threadOf(item);
-    parts[thread === null ? "live" : partOf(thread, nowMs, settleMs)].push(item);
-  }
-  const by = (score: (t: Thread) => number) => (a: T, b: T) => score(threadOf(b)!) - score(threadOf(a)!);
-  parts.live.sort((a, b) => {
-    const ta = threadOf(a);
-    const tb = threadOf(b);
-    if (ta === null || tb === null) return ta === null ? 1 : -1;
-    return liveRank(ta) - liveRank(tb) || at(tb.startedAt) - at(ta.startedAt);
-  });
-  parts.finished.sort(by(t => at(t.endedAt)));
-  parts.settled.sort(by(t => at(t.settledAt ?? t.endedAt)));
+/** Children in their parts and in each part's order: live by the most pressing of their subtrees, then newest;
+ * finished by newest end; settled by newest settle. */
+export function childParts<N>(nodes: ReadonlyArray<N>, tree: Tree<N>): Record<ChildPart, N[]> {
+  const parts: Record<ChildPart, N[]> = { live: [], finished: [], settled: [] };
+  for (const node of nodes) parts[partOf(node, tree)].push(node);
+  const time = (node: N, of: (t: Thread) => string | null): number => {
+    const thread = tree.threadOf(node);
+    return thread === null ? 0 : at(of(thread));
+  };
+  parts.live.sort((a, b) => treeRank(a, tree) - treeRank(b, tree) || time(b, t => t.startedAt) - time(a, t => t.startedAt));
+  parts.finished.sort((a, b) => time(b, t => t.endedAt) - time(a, t => t.endedAt));
+  parts.settled.sort((a, b) => time(b, t => t.settledAt ?? t.endedAt) - time(a, t => t.settledAt ?? t.endedAt));
   return parts;
+}
+
+/** What the shut block counts: every live thread and subagent in the tree at any depth, by what it is doing. */
+export interface TreeCounts {
+  readonly needsYou: number;
+  readonly failed: number;
+  readonly working: number;
+  readonly workingSubagents: number;
+  readonly waiting: number;
+  readonly finished: number;
+}
+function countTree<N>(nodes: ReadonlyArray<N>, tree: Tree<N>): TreeCounts {
+  const c = { needsYou: 0, failed: 0, working: 0, workingSubagents: 0, waiting: 0, finished: 0 };
+  const walk = (node: N, top: boolean): void => {
+    const thread = tree.threadOf(node);
+    if (thread !== null) {
+      const part = ownPart(thread, tree);
+      if (part === "live") {
+        const rank = ownRank(thread, part);
+        if (rank === 0) c.needsYou++;
+        else if (rank === 1) c.failed++;
+        else if (rank === 3) c.waiting++;
+        else if (isSubagent(thread)) c.workingSubagents++;
+        else c.working++;
+      } else if (top && part === "finished") c.finished++;
+    }
+    for (const kid of tree.kidsOf(node)) walk(kid, false);
+  };
+  for (const node of nodes) walk(node, true);
+  return { ...c, working: c.working + c.workingSubagents };
 }
 
 /** The line under a child's title: what it asks, why it failed, what holds it, the thread it restarts, or the last
  * line of its reply. A settled child keeps one line. */
 export function noteOf(thread: Thread, part: ChildPart, byKey: ReadonlyMap<string, Thread>): string | undefined {
   if (part === "settled") return undefined;
-  const facts = CHILD_FACTS[keyOf(thread)] ?? {};
+  const facts = factsOf(thread);
   if (thread.asking !== null) return thread.asking;
   if (thread.status === "failed") return facts.why;
   if (thread.capped !== undefined) return capRunningLine(thread.capped);
-  if (part === "finished") return facts.lastLine;
+  if (thread.status !== "running") return facts.lastLine;
   const old = facts.replaces === undefined ? undefined : byKey.get(facts.replaces);
   return old === undefined ? undefined : LEAD_WORDS.restartOf(old);
 }
@@ -120,13 +234,30 @@ interface LeadUi {
   readonly shown: string | null;
 }
 export const useLeadUi = create<LeadUi>(() => ({ open: {}, sending: null, shown: null }));
-const foldKey = (place: "transcript" | "sidebar", lead: string, part: ChildPart): string => `${place}:${lead}:${part}`;
+const foldKey = (place: "transcript" | "sidebar", parent: string, part: ChildPart): string => `${place}:${parent}:${part}`;
 const toggleFold = (key: string): void => useLeadUi.setState(s => ({ open: { ...s.open, [key]: !(s.open[key] ?? false) } }));
 // Leaving a thread shuts the transcript's folds and closes a message field; the sidebar's folds stay as they were.
 useStore.subscribe((now, before) => {
   if (now.selectedThreadId === before.selectedThreadId) return;
   useLeadUi.setState(s => ({ open: Object.fromEntries(Object.entries(s.open).filter(([key]) => !key.startsWith("transcript:"))), sending: null, shown: null }));
 });
+
+/** Which leads' blocks the person shut, kept in the window, so a lead opens the way it was left. The build keeps it
+ * with the lead's other marks on the host, so every window agrees. */
+const SHUT_KEY = "wsp-proto:lead-threads-shut";
+const readShut = (): Record<string, boolean> => {
+  try {
+    return JSON.parse(localStorage.getItem(SHUT_KEY) ?? "{}") as Record<string, boolean>;
+  } catch {
+    return {};
+  }
+};
+export const useLeadShut = create<{ shut: Record<string, boolean> }>(() => ({ shut: readShut() }));
+const toggleShut = (lead: string): void => {
+  const shut = { ...useLeadShut.getState().shut, [lead]: !(useLeadShut.getState().shut[lead] ?? false) };
+  localStorage.setItem(SHUT_KEY, JSON.stringify(shut));
+  useLeadShut.setState({ shut });
+};
 
 const action = (id: string, title: string, icon: LucideIcon | undefined, run: () => void | Promise<void>, group = "state"): ResolvedAction => ({
   id,
@@ -153,11 +284,21 @@ const sendTo = (thread: Thread, prompt: string): void => {
   void useStore.getState().api?.startSession({ workspaceId: thread.workspaceId, harness: thread.harness, prompt, ...(thread.threadId !== null ? { thread: thread.threadId } : {}) });
 };
 
+/** The fold keys of a thread and every thread under it, what a settle of it takes; subagents fold with their turn
+ * and are never settled by hand. */
+function subtreeKeys<N>(node: N, tree: Tree<N>): string[] {
+  const thread = tree.threadOf(node);
+  const own = thread === null || isSubagent(thread) ? [] : [thread.id];
+  return [...own, ...tree.kidsOf(node).flatMap(kid => subtreeKeys(kid, tree))];
+}
+
 /** Every act a child takes, in the order its menu lists them; the transcript's row puts the first two on its hover.
- * A message is typed in the transcript's row, and in the sidebar in the child's own composer. */
-export function childActs(thread: Thread, part: ChildPart, place: "transcript" | "sidebar", byKey: ReadonlyMap<string, Thread>): ResolvedAction[] {
+ * A message is typed in the transcript's row, and in the sidebar in the child's own composer. A subagent takes Stop
+ * while it runs and nothing after: no message reaches it until its lead can relay one (#1613 step 2). */
+export function childActs(thread: Thread, part: ChildPart, place: "transcript" | "sidebar", byKey: ReadonlyMap<string, Thread>, subtree: () => string[]): ResolvedAction[] {
   const key = keyOf(thread);
-  const facts = CHILD_FACTS[key] ?? {};
+  const facts = factsOf(thread);
+  if (facts.subagentOf !== undefined) return thread.status === "running" ? [action("stop", LEAD_WORDS.stopSubagent, SquareIcon, () => stop(thread))] : [];
   const send = action("send", LEAD_WORDS.send, MessageSquareIcon, () => {
     if (place === "transcript") useLeadUi.setState({ sending: key });
     else {
@@ -167,10 +308,10 @@ export function childActs(thread: Thread, part: ChildPart, place: "transcript" |
   }, "talk");
   const state =
     part === "settled"
-      ? action("restore", THREAD_WORDS.restore, ArchiveRestoreIcon, () => restore([thread.id]))
+      ? action("restore", THREAD_WORDS.restore, ArchiveRestoreIcon, () => restore(subtree()))
       : isThreadWorking(thread) || thread.asking !== null
         ? action("stop", THREAD_WORDS.stop, SquareIcon, () => stop(thread))
-        : action("settle", THREAD_WORDS.settle, ArchiveIcon, () => settle([thread.id]));
+        : action("settle", THREAD_WORDS.settle, ArchiveIcon, () => settle(subtree()));
   const replaced = facts.replaces === undefined ? undefined : byKey.get(facts.replaces);
   const restart = facts.replacedBy === undefined ? undefined : byKey.get(facts.replacedBy);
   return [
@@ -181,9 +322,17 @@ export function childActs(thread: Thread, part: ChildPart, place: "transcript" |
   ];
 }
 
-/** Settles every finished child at once, with the way back on the toast. */
-function settleFinished(lead: string, finished: ReadonlyArray<Thread>): ResolvedAction {
-  const keys = finished.map(thread => thread.id);
+/** Every finished thread anywhere in the tree with all it holds, each once: what Settle finished takes. */
+function finishedKeys<N>(nodes: ReadonlyArray<N>, tree: Tree<N>): string[] {
+  return nodes.flatMap(node => {
+    const thread = tree.threadOf(node);
+    if (thread !== null && !isSubagent(thread) && partOf(node, tree) === "finished") return subtreeKeys(node, tree);
+    return finishedKeys(tree.kidsOf(node), tree);
+  });
+}
+
+/** Settles every finished thread at once, with the way back on the toast. */
+function settleFinished(lead: string, keys: string[]): ResolvedAction {
   return action("settle-finished", LEAD_WORDS.settleFinished(keys.length), ArchiveIcon, async () => {
     await useStore.getState().settleThreads(keys);
     addNotice({ kind: "done", text: LEAD_WORDS.settledLine(keys.length), where: lead, action: { word: LEAD_WORDS.undo, run: () => restore(keys) } });
@@ -228,74 +377,135 @@ function Act({ icon: Icon, label, run }: { icon: LucideIcon; label: string; run:
   );
 }
 
+/** A subagent's card, the tile card's skin: its task, what it was asked, what it said once it ended, its model and
+ * how long it ran. The build exports TileCard from ThreadTile and gives it these lines. */
+function SubagentCard({ thread }: { thread: Thread }) {
+  const facts = factsOf(thread);
+  const lines = [
+    facts.prompt === undefined ? null : `${LEAD_WORDS.asked}: ${facts.prompt}`,
+    facts.summary === undefined ? null : `${LEAD_WORDS.said}: ${facts.summary}`,
+    facts.model ?? null,
+  ].filter((line): line is string => line !== null);
+  return (
+    <TooltipPopup side="right" align="start" sideOffset={6} data-subagent-card className="max-w-72 text-left whitespace-normal">
+      <div className="flex min-w-0 flex-col gap-1.5 py-1">
+        <p className="font-medium text-foreground">{thread.title}</p>
+        <ul className="flex min-w-0 flex-col gap-1 text-muted-foreground">
+          {lines.map(line => (
+            <li key={line} className="min-w-0 break-words">
+              {line}
+            </li>
+          ))}
+        </ul>
+      </div>
+    </TooltipPopup>
+  );
+}
+
+/** The computer a child runs on, where that is not its lead's: its glyph and its name, the first fact of the row's
+ * second line, as a tile's first row names it. */
+function RunsOn({ at, name }: { at: PlaceView | undefined; name: string }) {
+  return (
+    <span data-child-runs-on className="inline-flex shrink-0 items-center gap-1" title={LEAD_WORDS.runsOn(name)}>
+      {at === undefined ? null : <ComputerGlyph place={at} className="size-3" />}
+      {name}
+    </span>
+  );
+}
+
 interface ChildRowProps {
   readonly thread: Thread;
   readonly part: ChildPart;
   /** The computer it runs on, empty where that is the lead's own. */
   readonly place: string;
+  readonly at: PlaceView | undefined;
   readonly note: string | undefined;
   readonly byKey: ReadonlyMap<string, Thread>;
+  readonly subtree: () => string[];
+  /** Drawn as the shut block's peek: no acts, no menu, no card. */
+  readonly peek?: boolean;
 }
 
 const DRAWN = ["title", "status", "asking", "startedAt", "endedAt", "readAt", "settledAt", "unread", "harness", "threadId", "resumeAt"] as const;
 /** A row draws again only when something it draws moved, so a status change elsewhere in the list leaves it alone. */
 const sameRow = (a: ChildRowProps, b: ChildRowProps): boolean =>
-  a.part === b.part && a.place === b.place && a.note === b.note && DRAWN.every(field => a.thread[field] === b.thread[field]) && a.thread.capped?.running === b.thread.capped?.running;
+  a.part === b.part && a.place === b.place && a.note === b.note && a.peek === b.peek && DRAWN.every(field => a.thread[field] === b.thread[field]) && a.thread.capped?.running === b.thread.capped?.running;
 
-const COUNT_DRAWS = new URLSearchParams(window.location.search).has("renders");
+/** Whether a row stands two lines high: a note, a computer that is not the lead's, or the message field open. */
+const twoLinesOf = (note: string | undefined, place: string, sending: boolean): boolean => sending || note !== undefined || place !== "";
 
-/** ThreadRow, with the acts its status slot yields to on hover and the message field that takes its note's place. */
-const ChildRow = memo(function ChildRow({ thread, part, place, note, byKey }: ChildRowProps) {
+/** ThreadRow, with the acts its status slot yields to on hover, the message field that takes its note's place, the
+ * computer leading its second line, and for a subagent the launching call's glyph and the card on rest. */
+const ChildRow = memo(function ChildRow({ thread, part, place, at, note, byKey, subtree, peek = false }: ChildRowProps) {
   const key = keyOf(thread);
-  const sending = useLeadUi(s => s.sending === key);
-  const shown = useLeadUi(s => s.shown === key);
+  const sending = useLeadUi(s => !peek && s.sending === key);
+  const shown = useLeadUi(s => !peek && s.shown === key);
   const draws = useRef(0);
   draws.current += 1;
-  const acts = childActs(thread, part, "transcript", byKey);
+  const subagent = isSubagent(thread);
+  const acts = peek ? [] : childActs(thread, part, "transcript", byKey, subtree);
   const menu = (event: MouseEvent<HTMLElement>): void => {
+    if (acts.length === 0) return;
     useLeadUi.setState({ shown: key });
     void openContextMenu(event, acts).finally(() => useLeadUi.setState(s => (s.shown === key ? { shown: null } : s)));
   };
   const kind = part !== "settled" && thread.status === "interrupted" ? STOPPED : undefined;
-  const twoLines = sending || note !== undefined;
-  // The slot's status gives way to the acts while the pointer or the focus is on the row, or its menu is open.
-  const yields = !sending;
+  const twoLines = twoLinesOf(note, place, sending);
+  // The slot's status gives way to the acts while the pointer or the focus is on the row, or its menu is open; a row
+  // with no act to take keeps its status.
+  const yields = !sending && acts.length > 0;
+  const title = <ThreadLink thread={thread} className={cn("min-w-0 truncate", part === "settled" ? "text-muted-foreground" : "text-foreground")} />;
   return (
     <div
       data-child-row={key}
       data-child-part={part}
+      {...(subagent ? { "data-subagent": "" } : {})}
       {...(shown ? { "data-acts": "shown" } : {})}
       {...(COUNT_DRAWS ? { "data-draws": draws.current } : {})}
       className={cn(
-        "group/child flex min-w-0 items-center gap-2.5 rounded-[var(--control-radius)] px-2 text-sm transition-colors duration-150 hover:bg-accent data-[acts=shown]:bg-accent",
+        "group/child flex min-w-0 items-center gap-2.5 rounded-[var(--control-radius)] px-2 text-sm transition-colors duration-150",
+        !peek && "hover:bg-accent data-[acts=shown]:bg-accent",
         twoLines ? "min-h-12 py-1.5" : "h-9",
-        thread.threadId !== null && "cursor-pointer",
+        !peek && thread.threadId !== null && "cursor-pointer",
       )}
-      onClick={event => {
-        if (!(event.target instanceof Element) || event.target.closest("a, button, input") === null) open(thread);
-      }}
-      onContextMenu={menu}
+      {...(peek
+        ? {}
+        : {
+            onClick: (event: MouseEvent<HTMLDivElement>) => {
+              if (!(event.target instanceof Element) || event.target.closest("a, button, input") === null) open(thread);
+            },
+            onContextMenu: menu,
+          })}
     >
       <span className="inline-flex shrink-0 text-muted-foreground">
-        <HarnessMark harness={thread.harness} label={agentName(thread.harness)} className="size-[13px]" />
+        {subagent ? <BotIcon aria-hidden data-subagent-mark className="size-[13px]" /> : <HarnessMark harness={thread.harness} label={agentName(thread.harness)} className="size-[13px]" />}
       </span>
       <span className="flex min-w-28 flex-1 flex-col">
-        <ThreadLink thread={thread} className={cn("min-w-0 truncate", part === "settled" ? "text-muted-foreground" : "text-foreground")} />
+        {subagent && !peek ? (
+          <Tooltip>
+            <TooltipTrigger delay={CARD_DELAY_MS} render={<span className="flex min-w-0" />}>
+              {title}
+            </TooltipTrigger>
+            <SubagentCard thread={thread} />
+          </Tooltip>
+        ) : (
+          title
+        )}
         {sending ? (
           <span className="flex h-[18px] min-w-0 text-[13px]" ref={el => el?.querySelector("input")?.setAttribute("placeholder", LEAD_WORDS.send)}>
             <RowNameInput name="" label={LEAD_WORDS.messageTo(thread.title)} saving={false} onRename={text => sendTo(thread, text)} onCancel={() => useLeadUi.setState({ sending: null })} />
           </span>
-        ) : note !== undefined ? (
-          <span data-child-note className="truncate text-[11px] leading-[14px] text-muted-foreground" title={note}>
-            {note}
+        ) : twoLines ? (
+          <span data-child-note className="flex min-w-0 items-center gap-3 text-[11px] leading-[14px] text-muted-foreground">
+            {place === "" ? null : <RunsOn at={at} name={place} />}
+            {note === undefined ? null : (
+              <span className="min-w-0 truncate" title={note}>
+                {note}
+              </span>
+            )}
           </span>
         ) : null}
       </span>
-      {place === "" ? null : (
-        <span data-thread-place className="max-w-[220px] shrink-0 truncate text-muted-foreground text-xs">
-          {place}
-        </span>
-      )}
       <span className="relative flex shrink-0 items-center">
         <ThreadStatus
           thread={thread}
@@ -306,11 +516,11 @@ const ChildRow = memo(function ChildRow({ thread, part, place, note, byKey }: Ch
           className={cn(LINE_SLOT_CLASS, yields && "group-hover/child:invisible group-focus-within/child:invisible group-data-[acts=shown]/child:invisible")}
         />
         {yields ? (
-          <span data-child-acts className="invisible absolute inset-y-0 right-0 flex items-center gap-1 group-hover/child:visible group-focus-within/child:visible group-data-[acts=shown]/child:visible">
+          <span data-child-acts className="invisible absolute inset-y-0 right-0 flex items-center justify-end gap-1 group-hover/child:visible group-focus-within/child:visible group-data-[acts=shown]/child:visible">
             {acts.slice(0, 2).map(act => (
               <Act key={act.id} icon={act.icon!} label={act.title} run={() => void act.run()} />
             ))}
-            <Act icon={EllipsisIcon} label={LEAD_WORDS.menu} run={menu} />
+            {acts.length > 1 ? <Act icon={EllipsisIcon} label={LEAD_WORDS.menu} run={menu} /> : null}
           </span>
         ) : null}
       </span>
@@ -339,10 +549,52 @@ function FoldRow({ part, label, count, open: isOpen, onToggle, onContextMenu }: 
   );
 }
 
-type TranscriptProps = { readonly in: "transcript"; readonly leadName: string; readonly leadPlace: string; readonly threads: ReadonlyArray<{ thread: Thread; place: string }>; readonly className?: string };
-type SidebarProps = { readonly in: "sidebar"; readonly lead: string; readonly nodes: ReadonlyArray<TileNode>; readonly tile: (node: TileNode, slim: boolean) => ReactNode };
+/** The shut block's count of the tree, in the status marks' own glyphs and inks, each word on its hover: asks,
+ * failed, works, waits; with nothing live, how many finished, in the row's ink. */
+function TreeSummary({ counts }: { counts: TreeCounts }) {
+  const marks: Array<{ id: string; n: number; ink: string; glyph: ReactNode; word: string }> = [
+    { id: "needs-you", n: counts.needsYou, ink: "text-status-input", glyph: <MessageCircleQuestionIcon aria-hidden className="size-3" />, word: LEAD_WORDS.needsYou(counts.needsYou) },
+    { id: "failed", n: counts.failed, ink: "text-status-failed", glyph: <CircleAlertIcon aria-hidden className="size-3" />, word: LEAD_WORDS.failed(counts.failed) },
+    { id: "working", n: counts.working, ink: "text-status-working", glyph: <Crab />, word: LEAD_WORDS.working(counts.working, counts.working - counts.workingSubagents, counts.workingSubagents) },
+    { id: "waiting", n: counts.waiting, ink: "text-muted-foreground", glyph: <HourglassIcon aria-hidden className="size-3" />, word: LEAD_WORDS.waiting(counts.waiting) },
+  ].filter(mark => mark.n > 0);
+  if (marks.length === 0) return <span className="text-xs text-muted-foreground tabular-nums">{counts.finished > 0 ? LEAD_WORDS.allFinished(counts.finished) : null}</span>;
+  return (
+    <span data-tree-summary className="inline-flex items-center gap-3 text-xs tabular-nums">
+      {marks.map(mark => (
+        <Tooltip key={mark.id}>
+          <TooltipTrigger render={<span data-tree-count={mark.id} className={cn("inline-flex items-center gap-1 font-medium", mark.ink)} />}>
+            {mark.id === "working" ? (
+              <>
+                {mark.n}
+                {mark.glyph}
+              </>
+            ) : (
+              <>
+                {mark.glyph}
+                {mark.n}
+              </>
+            )}
+          </TooltipTrigger>
+          <TooltipPopup side="top">{mark.word}</TooltipPopup>
+        </Tooltip>
+      ))}
+    </span>
+  );
+}
 
-/** A lead's children, in its transcript or under its tile. */
+/** A child in the transcript: the thread, where it runs, and its children. */
+interface TranscriptNode {
+  readonly thread: Thread;
+  readonly place: string;
+  readonly at: PlaceView | undefined;
+  readonly children: ReadonlyArray<TranscriptNode>;
+}
+
+type TranscriptProps = { readonly in: "transcript"; readonly lead: Thread; readonly leadPlace: string; readonly nodes: ReadonlyArray<TranscriptNode>; readonly byKey: ReadonlyMap<string, Thread>; readonly className?: string };
+type SidebarProps = { readonly in: "sidebar"; readonly lead: string; readonly depth: number; readonly nodes: ReadonlyArray<TileNode>; readonly tile: (node: TileNode, slim: boolean) => ReactNode };
+
+/** A lead's tree, in its transcript or under its tile. */
 export function LeadThreads(props: TranscriptProps | SidebarProps) {
   return props.in === "transcript" ? <TranscriptThreads {...props} /> : <SidebarThreads {...props} />;
 }
@@ -351,87 +603,198 @@ function useSettleMs(): number | null {
   return SETTLE_MS[useStore(s => s.preferences.settleAfter)];
 }
 
-function TranscriptThreads({ leadName, leadPlace, threads, className }: TranscriptProps) {
-  const settleMs = useSettleMs();
-  const lead = threads[0]?.thread.parentThreadId ?? "";
-  const byKey = new Map(threads.map(({ thread }) => [keyOf(thread), thread]));
-  const parts = childParts(threads, row => row.thread, Date.now(), settleMs);
-  const finishedOpen = useLeadUi(s => s.open[foldKey("transcript", lead, "finished")] ?? false);
-  const settledOpen = useLeadUi(s => s.open[foldKey("transcript", lead, "settled")] ?? false);
-  const settleAll = settleFinished(leadName, parts.finished.map(row => row.thread));
-  const moreRow = (rest: number, show: () => void) => <FoldRow part="more" label={LEAD_WORDS.more(rest)} onToggle={show} />;
-  const row = ({ thread, place }: { thread: Thread; place: string }, part: ChildPart) => (
-    <ChildRow key={thread.id} thread={thread} part={part} place={place === leadPlace ? "" : place} note={noteOf(thread, part, byKey)} byKey={byKey} />
+/** One level of the transcript's tree: live children, each with its own level under it, then the level's Finished
+ * fold; the top level adds Settled. Under the second level the tree stops indenting. */
+function TranscriptLevel({ parent, nodes, depth, tree, leadPlace, top }: { parent: string; nodes: ReadonlyArray<TranscriptNode>; depth: number; tree: Tree<TranscriptNode>; leadPlace: string; top: boolean }) {
+  const parts = childParts(nodes, tree);
+  const finishedOpen = useLeadUi(s => s.open[foldKey("transcript", parent, "finished")] ?? false);
+  const settledOpen = useLeadUi(s => s.open[foldKey("transcript", parent, "settled")] ?? false);
+  const railed = depth > 1;
+  const item = (node: TranscriptNode, part: ChildPart) => <TranscriptItem key={node.thread.id} node={node} part={part} depth={depth} tree={tree} leadPlace={leadPlace} railed={railed} />;
+  const wrap = (child: ReactNode, key: string) => (railed ? <li key={key} className={TRANSCRIPT_ITEM}>{child}</li> : <div key={key}>{child}</div>);
+  const moreRow = (rest: number, show: () => void) => wrap(<FoldRow part="more" label={LEAD_WORDS.more(rest)} onToggle={show} />, "more");
+  return (
+    <>
+      {parts.live.map(node => item(node, "live"))}
+      {parts.finished.length > 0
+        ? wrap(<FoldRow part="finished" label={LEAD_WORDS.finished} count={parts.finished.length} open={finishedOpen} onToggle={() => toggleFold(foldKey("transcript", parent, "finished"))} />, "fold-finished")
+        : null}
+      {finishedOpen ? <Paged items={parts.finished} render={node => item(node, "finished")} more={moreRow} /> : null}
+      {top && parts.settled.length > 0
+        ? wrap(<FoldRow part="settled" label={LEAD_WORDS.settled} count={parts.settled.length} open={settledOpen} onToggle={() => toggleFold(foldKey("transcript", parent, "settled"))} />, "fold-settled")
+        : null}
+      {top && settledOpen ? <Paged items={parts.settled} render={node => item(node, "settled")} more={moreRow} /> : null}
+    </>
   );
+}
+
+function TranscriptItem({ node, part, depth, tree, leadPlace, railed }: { node: TranscriptNode; part: ChildPart; depth: number; tree: Tree<TranscriptNode>; leadPlace: string; railed: boolean }) {
+  const { thread } = node;
+  const place = node.place === leadPlace ? "" : node.place;
+  const note = noteOf(thread, part, tree.byKey);
+  const sending = useLeadUi(s => s.sending === keyOf(thread));
+  const row = <ChildRow thread={thread} part={part} place={place} at={node.at} note={note} byKey={tree.byKey} subtree={() => subtreeKeys(node, tree)} />;
+  const kids = node.children.length === 0 || part === "settled" ? null : <TranscriptLevel parent={keyOf(thread)} nodes={node.children} depth={depth + 1} tree={tree} leadPlace={leadPlace} top={false} />;
+  // Past the last indent a child's children stand beside it on its own level rather than under it.
+  const flat = depth >= INDENTS;
+  const two = twoLinesOf(note, place, sending);
+  if (!railed)
+    return (
+      <div data-child-item>
+        {row}
+        {kids === null ? null : <ul className={TRANSCRIPT_LIST}>{kids}</ul>}
+      </div>
+    );
+  return (
+    <>
+      <li data-child-item className={TRANSCRIPT_ITEM} {...(two ? { "data-two": "" } : {})}>
+        {row}
+        {kids === null || flat ? null : <ul className={TRANSCRIPT_LIST}>{kids}</ul>}
+      </li>
+      {flat ? kids : null}
+    </>
+  );
+}
+
+function TranscriptThreads({ lead, leadPlace, nodes, byKey, className }: TranscriptProps) {
+  const settleMs = useSettleMs();
+  const leadKey = keyOf(lead);
+  const tree: Tree<TranscriptNode> = { threadOf: n => n.thread, kidsOf: n => n.children, byKey, nowMs: Date.now(), settleMs };
+  const shut = useLeadShut(s => s.shut[leadKey] ?? false);
+  const settleAll = settleFinished(lead.title, finishedKeys(nodes, tree));
+  const toggle = (
+    <button type="button" data-threads-toggle aria-expanded={!shut} aria-label={shut ? LEAD_WORDS.shut : LEAD_WORDS.open} onClick={() => toggleShut(leadKey)} className="flex min-w-0 flex-1 items-center gap-2.5 self-stretch text-left outline-none transition-colors duration-150 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
+      <span className="inline-flex size-[13px] shrink-0 items-center justify-center">
+        <ChevronRightIcon aria-hidden className={cn("size-3 transition-transform duration-150", !shut && "rotate-90")} />
+      </span>
+      <span className="min-w-0 flex-1">{LEAD_WORDS.threads}</span>
+      {shut ? <TreeSummary counts={countTree(nodes, tree)} /> : null}
+    </button>
+  );
+  const head = (
+    <div data-thread-rows-head className={cn(GROUP_LABEL, "flex h-8 items-center gap-2 px-2 text-muted-foreground")}>
+      {toggle}
+      {!shut && settleAll.title !== LEAD_WORDS.settleFinished(0) ? (
+        <Button type="button" size="xs" variant="outline" data-settle-finished onClick={() => void settleAll.run()}>
+          <ArchiveIcon aria-hidden />
+          {settleAll.title}
+        </Button>
+      ) : null}
+    </div>
+  );
+  if (shut) {
+    const peek = SHUT_SHAPE === "line" ? [] : childParts(nodes, tree).live.slice(0, SHUT_SHAPE === "peek2" ? 2 : 1);
+    return (
+      <div data-lead-threads="transcript" data-shut className={cn("flex flex-col", className)}>
+        {head}
+        {peek.length === 0 ? null : (
+          // The live rows fade into the page under one mask on one element: a cue that more is here, which mounts
+          // only the rows it shows and opens the block on a press.
+          <div data-threads-peek aria-hidden className="cursor-pointer [mask-image:linear-gradient(to_bottom,black,transparent)]" onClick={() => toggleShut(leadKey)}>
+            <div inert className="pointer-events-none">
+              {peek.map(node => (
+                <ChildRow key={node.thread.id} thread={node.thread} part="live" place={node.place === leadPlace ? "" : node.place} at={node.at} note={noteOf(node.thread, "live", byKey)} byKey={byKey} subtree={() => []} peek />
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
   return (
     <div data-lead-threads="transcript" className={cn("flex flex-col", className)}>
-      <div data-thread-rows-head className={cn(GROUP_LABEL, "flex h-8 items-center gap-2 px-2 text-muted-foreground")}>
-        <span className="min-w-0 flex-1">Threads</span>
-        {parts.finished.length > 0 ? (
-          <Button type="button" size="xs" variant="outline" data-settle-finished onClick={() => void settleAll.run()}>
-            <ArchiveIcon aria-hidden />
-            {settleAll.title}
-          </Button>
-        ) : null}
-      </div>
-      {parts.live.map(item => row(item, "live"))}
-      {parts.finished.length > 0 ? (
-        <FoldRow
-          part="finished"
-          label={LEAD_WORDS.finished}
-          count={parts.finished.length}
-          open={finishedOpen}
-          onToggle={() => toggleFold(foldKey("transcript", lead, "finished"))}
-          onContextMenu={event => void openContextMenu(event, [settleAll])}
-        />
-      ) : null}
-      {finishedOpen ? <Paged items={parts.finished} render={item => row(item, "finished")} more={moreRow} /> : null}
-      {parts.settled.length > 0 ? <FoldRow part="settled" label={LEAD_WORDS.settled} count={parts.settled.length} open={settledOpen} onToggle={() => toggleFold(foldKey("transcript", lead, "settled"))} /> : null}
-      {settledOpen ? <Paged items={parts.settled} render={item => row(item, "settled")} more={moreRow} /> : null}
+      {head}
+      <TranscriptLevel parent={leadKey} nodes={nodes} depth={1} tree={tree} leadPlace={leadPlace} top />
     </div>
   );
 }
 
 /** A child's item as the sidebar draws it, with the child's own menu over the tile's: the menu a child takes is the
  * transcript row's, and a press inside the child's own children is theirs. */
-function withMenu(item: ReactNode, node: TileNode, part: ChildPart, byKey: ReadonlyMap<string, Thread>): ReactNode {
+function withMenu(item: ReactNode, node: TileNode, part: ChildPart, tree: Tree<TileNode>): ReactNode {
   const thread = node.thread.thread;
   if (thread === null || item === null || typeof item !== "object" || !("props" in item)) return item;
   return cloneElement(item as ReactElement<{ onContextMenuCapture?: (event: MouseEvent<HTMLElement>) => void }>, {
     onContextMenuCapture: (event: MouseEvent<HTMLElement>) => {
       const row = event.target instanceof Element ? event.target.closest("[data-row-id]") : null;
       if (row?.getAttribute("data-row-id") !== threadRowId(thread.id)) return;
-      void openContextMenu(event, childActs(thread, part, "sidebar", byKey));
+      void openContextMenu(event, childActs(thread, part, "sidebar", tree.byKey, () => subtreeKeys(node, tree)));
     },
   });
 }
 
-function SidebarThreads({ lead, nodes, tile }: SidebarProps) {
+/** A subagent in the sidebar: the slim row a tile becomes in the Settled fold, since a subagent has no project or
+ * computer of its own for a tile's first row to name, led by the launching call's glyph, its card on rest, and Stop
+ * alone in its menu while it runs. */
+function SubagentSidebarRow({ thread, part, depth, tree }: { thread: Thread; part: ChildPart; depth: number; tree: Tree<TileNode> }) {
+  const key = keyOf(thread);
+  const active = useStore(s => s.selectedThreadId === key);
+  const acts = childActs(thread, part, "sidebar", tree.byKey, () => []);
+  const working = thread.status === "running";
+  return (
+    <li data-thread-item data-slim className={RAIL_ITEM_CLASS}>
+      <Tooltip>
+        <TooltipTrigger
+          delay={CARD_DELAY_MS}
+          render={
+            <SidebarMenuButton
+              size="sm"
+              isActive={active}
+              data-sidebar-row
+              data-row-id={threadRowId(thread.id)}
+              data-depth={depth}
+              data-subagent
+              className={ONE_LINE_ROW_CLASS}
+              onClick={() => open(thread)}
+              {...(acts.length > 0 ? { onContextMenu: (event: MouseEvent<HTMLElement>) => void openContextMenu(event, acts) } : {})}
+            />
+          }
+        >
+          <BotIcon aria-hidden data-subagent-mark className="size-3 shrink-0 text-sidebar-muted-foreground" />
+          <span className={cn("min-w-0 flex-1 truncate", active ? "font-medium text-sidebar-foreground" : "text-sidebar-muted-foreground")}>{thread.title}</span>
+          <span className={cn("shrink-0 text-xs", !working && "text-sidebar-muted-foreground")}>
+            <ThreadStatus thread={thread} age={restingAge(thread)} crab={working} />
+          </span>
+        </TooltipTrigger>
+        <SubagentCard thread={thread} />
+      </Tooltip>
+    </li>
+  );
+}
+
+function SidebarThreads({ lead, depth, nodes, tile }: SidebarProps) {
   const settleMs = useSettleMs();
-  const byKey = new Map(nodes.flatMap(node => (node.thread.thread === null ? [] : [[keyOf(node.thread.thread), node.thread.thread] as const])));
-  const parts = childParts(nodes, node => node.thread.thread, Date.now(), settleMs);
+  const fleet = useSidebarProjects();
+  const byKey = new Map(fleet.flatMap(p => p.threads.map(t => [keyOf(t), t] as const)));
+  const tree: Tree<TileNode> = { threadOf: n => n.thread.thread, kidsOf: n => n.children, byKey, nowMs: Date.now(), settleMs };
+  const parts = childParts(nodes, tree);
   const key = foldKey("sidebar", lead, "finished");
   const finishedOpen = useLeadUi(s => s.open[key] ?? false);
-  const leadName = useSidebarProjects().flatMap(p => p.threads).find(t => t.id === lead)?.title ?? "";
-  const settleAll = settleFinished(leadName, parts.finished.map(node => node.thread.thread!));
+  const leadName = byKey.get(lead)?.title ?? fleet.flatMap(p => p.threads).find(t => t.id === lead)?.title ?? "";
+  const settleAll = settleFinished(leadName, finishedKeys(nodes, tree));
+  const row = (node: TileNode, part: ChildPart, slim: boolean, at: number) => {
+    const thread = node.thread.thread;
+    if (thread !== null && isSubagent(thread)) return <SubagentSidebarRow key={node.thread.id} thread={thread} part={part} depth={at} tree={tree} />;
+    return withMenu(tile(node, slim), node, part, tree);
+  };
   return (
     <ul data-lead-threads="sidebar" className={CHILD_LIST_CLASS}>
-      {parts.live.map(node => withMenu(tile(node, false), node, "live", byKey))}
+      {parts.live.map(node => row(node, "live", false, depth))}
       {parts.finished.length > 0 ? (
-        <li data-child-fold="finished" className={cn("min-w-0", RAIL_ITEM_CLASS, "after:top-[18px] last:before:h-[18px]")}>
-          <SidebarMenuButton size="sm" aria-expanded={finishedOpen} className={ONE_LINE_ROW_CLASS} onClick={() => toggleFold(key)} onContextMenu={event => void openContextMenu(event, [settleAll])}>
-            <CircleCheckIcon aria-hidden className="size-4 shrink-0 text-sidebar-muted-foreground" />
+        <li data-child-fold="finished" data-slim className={RAIL_ITEM_CLASS}>
+          <SidebarMenuButton size="sm" aria-expanded={finishedOpen} data-sidebar-row data-row-id={`fold:${lead}`} data-depth={depth} className={ONE_LINE_ROW_CLASS} onClick={() => toggleFold(key)} onContextMenu={event => void openContextMenu(event, [settleAll])}>
+            <CircleCheckIcon aria-hidden className="size-3 shrink-0 text-sidebar-muted-foreground" />
             <span className="min-w-0 flex-1 truncate text-sidebar-muted-foreground">{LEAD_WORDS.finished}</span>
             <span className={cn(ROW_META_CLASS, "shrink-0")}>{parts.finished.length}</span>
-            <ChevronDownIcon aria-hidden className={cn("size-4 shrink-0 text-sidebar-muted-foreground transition-transform duration-150", !finishedOpen && "-rotate-90")} />
+            <ChevronDownIcon aria-hidden className={cn("size-3.5 shrink-0 text-sidebar-muted-foreground transition-transform duration-150", !finishedOpen && "-rotate-90")} />
           </SidebarMenuButton>
           {finishedOpen ? (
             <ul className={CHILD_LIST_CLASS}>
               <Paged
                 items={parts.finished}
-                render={node => withMenu(tile(node, true), node, "finished", byKey)}
+                render={node => row(node, "finished", true, depth + 1)}
                 more={(rest, show) => (
-                  <li data-child-fold="more" className={cn("min-w-0", RAIL_ITEM_CLASS, "after:top-[18px] last:before:h-[18px]")}>
+                  <li key="more" data-child-fold="more" data-slim className={RAIL_ITEM_CLASS}>
                     <SidebarMenuButton size="sm" className={ONE_LINE_ROW_CLASS} onClick={show}>
                       <span className="min-w-0 flex-1 truncate text-sidebar-muted-foreground">{LEAD_WORDS.more(rest)}</span>
                     </SidebarMenuButton>
@@ -447,11 +810,28 @@ function SidebarThreads({ lead, nodes, tile }: SidebarProps) {
 }
 
 /** The transcript's Threads block, put in place of src/tree/TreeRows.tsx by this page's vite config: the same props
- * ChatView hands the shipped one. */
+ * ChatView hands the shipped one. It reads the whole tree under the lead, not the lead's own children alone. */
 export function TreeRows({ lead, rows, className }: { lead: { id: string; name: string }; tree: TreeFact | undefined; rows: ReadonlyArray<{ thread: Thread; place: string }>; className?: string }) {
   const places = usePlaces();
-  const runs = useSidebarProjects().find(project => project.id === lead.id);
-  const leadPlace = runs === undefined ? "" : computerName(places, runs);
-  const leadName = rows[0] === undefined ? lead.name : (runs?.threads.find(t => keyOf(t) === rows[0]!.thread.parentThreadId)?.title ?? lead.name);
-  return <LeadThreads in="transcript" leadName={leadName} leadPlace={leadPlace} threads={rows} {...(className !== undefined ? { className } : {})} />;
+  const fleet = useSidebarProjects();
+  const leadKey = rows[0]?.thread.parentThreadId ?? null;
+  const all = fleet.flatMap(runs => runs.threads.map(thread => ({ thread, runs })));
+  const byKey = new Map(all.map(({ thread }) => [keyOf(thread), thread] as const));
+  const leadThread = leadKey === null ? undefined : byKey.get(leadKey);
+  const leadRuns = fleet.find(project => project.id === lead.id);
+  if (leadKey === null || leadThread === undefined) return null;
+  const build = (key: string, seen: ReadonlySet<string>): TranscriptNode[] =>
+    all
+      .filter(({ thread }) => thread.parentThreadId === key && !seen.has(keyOf(thread)))
+      .map(({ thread, runs }) => ({ thread, place: computerName(places, runs), at: computerOf(places, runs), children: build(keyOf(thread), new Set([...seen, keyOf(thread)])) }));
+  return (
+    <LeadThreads
+      in="transcript"
+      lead={leadThread}
+      leadPlace={leadRuns === undefined ? "" : computerName(places, leadRuns)}
+      nodes={build(leadKey, new Set([leadKey]))}
+      byKey={byKey}
+      {...(className !== undefined ? { className } : {})}
+    />
+  );
 }
