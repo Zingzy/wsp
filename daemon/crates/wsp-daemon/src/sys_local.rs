@@ -4,7 +4,9 @@
 //! honestly on, one module per system below. On Linux that is the host's own /proc; on a Mac the mach counters,
 //! getloadavg, and vm_stat for the memory the kernel would hand out without taking it from anything running.
 
-use std::path::{Path, PathBuf};
+#[cfg(not(target_os = "macos"))]
+use std::path::Path;
+use std::path::PathBuf;
 use std::process::Command;
 
 use wsp_frames::Usage;
@@ -74,8 +76,10 @@ pub(crate) trait HostMachine: Send + Sync {
 
 /// The Linux host reads its own /proc, which is what the guest's road reads too; the two modules differ only in
 /// the disk, which here is the volume the work folder is on.
+#[cfg(not(target_os = "macos"))]
 pub(crate) struct LinuxHost;
 
+#[cfg(not(target_os = "macos"))]
 impl HostMachine for LinuxHost {
     fn cpu(&self) -> Result<CpuTimes, String> {
         crate::sys::parse_proc_stat(&crate::sys::read_named(Path::new("/proc/stat"))?)

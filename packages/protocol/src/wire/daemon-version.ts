@@ -149,6 +149,7 @@ const DAEMON_CONTENTS = [
   "9790029ce878d8248fe04d470b8da1e4060b686480f088f0d9d79c7b76e7064d",
   "b97e864f4fecee0ea1c25a13b912025977cea507255a19045937e92ec826199c",
   "a536c66dad64f36710861cc4d1f377e4af59ec51ef4d982b89d67a5e0ccac65b",
+  "5d6d78c548416aae6c65876d3499f0462c47fe2203c534982501a2eab32e7f94",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -546,7 +547,8 @@ const DAEMON_CONTENTS = [
  * folder that holds anything and never through a link, every folder handed to the kernel opened with no link followed;
  * copy worktree-remove takes every mount inside a worktree down before git forgets it and refuses over one it did not
  * make; copy worktree-forget takes a project's frozen copies and its folder away, under the host's folder where the
- * project folder is gone, and a removal drops every set but the newest once no worktree sits on it. */
+ * project folder is gone, and a removal drops every set but the newest once no worktree sits on it.
+ * Version 140: the daemon's tests and clippy pass on a Mac. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary

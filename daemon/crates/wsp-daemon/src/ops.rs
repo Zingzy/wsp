@@ -528,6 +528,7 @@ fn in_copy(root: &str, cwd: &str) -> bool {
 }
 
 /// What a frame asks of a pty inside a workspace: its size, a shell it names, the folder, and a reply's command.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 struct InsideAsk {
     cols: Option<NonZeroU16>,
     rows: Option<NonZeroU16>,
