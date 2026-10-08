@@ -131,6 +131,66 @@ describe("a stop on a running box turn while the box is away", () => {
     expect(cmds.indexOf(END(threadId))).toBeLessThan(cmds.findIndex(cmd => cmd.includes("WSP_LAUNCHED")));
   }, 15_000);
 
+  it("tells every send behind the stopped turn that it waits for the box, by name, the one queued before the Stop too", async () => {
+    const { rt, placeId, workspaceId, turn, threadId } = await running();
+    await away(placeId);
+    const events: EventUnion[] = [];
+    rt.events.on("*", e => events.push(e));
+    await heldSend(workspaceId, threadId, "req_before");
+    expect(await within(rt.sessions.interrupt(turn.id), 2000)).toEqual({ outcome: "accepted", left: threadEndAwayLine("hetzner") });
+    // Its row says so too, for a window opened after, and is the one a Stop gives up.
+    expect((await heldRow(workspaceId, threadId))?.waitsFor).toBe("hetzner");
+    await heldSend(workspaceId, threadId, "req_first");
+    await heldSend(workspaceId, threadId, "req_second");
+
+    expect(events.filter(e => e.type === "session.queued").map(e => (e.type === "session.queued" ? { requestId: e.requestId, waitsFor: e.waitsFor } : undefined))).toEqual([
+      { requestId: "req_before", waitsFor: undefined },
+      { requestId: "req_before", waitsFor: "hetzner" },
+      { requestId: "req_first", waitsFor: "hetzner" },
+      { requestId: "req_second", waitsFor: "hetzner" },
+    ]);
+  }, 15_000);
+
+  it("hands the row to the next send waiting on the box when a Stop gives the holder up, so a second Stop gives that one up too", async () => {
+    const { rt, placeId, workspaceId, turn, threadId } = await running();
+    await away(placeId);
+    expect(await within(rt.sessions.interrupt(turn.id), 2000)).toEqual({ outcome: "accepted", left: threadEndAwayLine("hetzner") });
+    const { send: first } = await heldSend(workspaceId, threadId, "req_first");
+    const { send: second } = await heldSend(workspaceId, threadId, "req_second");
+    const firstRow = (await heldRow(workspaceId, threadId))!;
+
+    expect(await within(rt.sessions.interrupt(firstRow.id), 2000)).toEqual({ outcome: "accepted", left: sendGivenUpLine("hetzner") });
+    expect(await within(first, 2000)).toBe(sendGivenUpLine("hetzner"));
+    await until(async () => (await heldRow(workspaceId, threadId)) !== undefined);
+    const secondRow = (await heldRow(workspaceId, threadId))!;
+    expect(secondRow.id).not.toBe(firstRow.id);
+    expect(secondRow.waitsFor).toBe("hetzner");
+
+    expect(await within(rt.sessions.interrupt(secondRow.id), 2000)).toEqual({ outcome: "accepted", left: sendGivenUpLine("hetzner") });
+    expect(await within(second, 2000)).toBe(sendGivenUpLine("hetzner"));
+    expect(await heldRow(workspaceId, threadId)).toBeUndefined();
+  }, 15_000);
+
+  it("tells a send that waited on the box it waits behind the turn that launched at the box's return", async () => {
+    const { rt, placeId, workspaceId, turn, threadId, back } = await running();
+    await away(placeId);
+    expect(await within(rt.sessions.interrupt(turn.id), 2000)).toEqual({ outcome: "accepted", left: threadEndAwayLine("hetzner") });
+    const events: EventUnion[] = [];
+    rt.events.on("*", e => events.push(e));
+    const { send: first } = await heldSend(workspaceId, threadId, "req_first");
+    await heldSend(workspaceId, threadId, "req_second");
+
+    const again = await back();
+    expect(await within(first, 5000)).toBe("launched");
+    await until(() => again.order.includes("launch"));
+    await until(() => events.filter(e => e.type === "session.queued" && e.requestId === "req_second").length === 2);
+    expect(events.filter(e => e.type === "session.queued").map(e => (e.type === "session.queued" ? { requestId: e.requestId, waitsFor: e.waitsFor } : undefined))).toEqual([
+      { requestId: "req_first", waitsFor: "hetzner" },
+      { requestId: "req_second", waitsFor: "hetzner" },
+      { requestId: "req_second", waitsFor: undefined },
+    ]);
+  }, 15_000);
+
   it("leaves a stop on a box that answers as it was: the agent's own stop, then the thread's end there, nothing owed", async () => {
     const { rt, seen, store, placeId, workspaceId, turn, threadId } = await running();
     expect(await rt.sessions.interrupt(turn.id)).toEqual({ outcome: "accepted" });
