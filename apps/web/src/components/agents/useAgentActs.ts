@@ -6,12 +6,17 @@
 // the view that started it: closing a view never ends it, and any view of the
 // same target draws it, until it lands, fails or Cancel stops it on the host.
 // A signed-in run leaves its row, since the report read again after it says
-// so; a cancelled one stops on the host and leaves its row at once.
+// so; a cancelled one stops on the host and leaves its row at once. Each time
+// the socket goes live the window lists the host's runs and follows them, so
+// a socket that came back draws the steps it missed and a window opened since
+// draws an agent's run already going.
 import { useCallback, useEffect, useState } from "react";
-import type { AgentsSignInEvent, AgentsTarget } from "@wsp/protocol";
+import type { AgentsSignInEvent, AgentsSignInRun, AgentsTarget } from "@wsp/protocol";
+import type { Api } from "../../protocol/client.js";
 import { useStore } from "../../protocol/store.js";
 import type { AgentActs, SignInFlow, SignInStart } from "./agentsRows.js";
 import { agentRowId } from "./kinds/agents.js";
+import { serverRowId } from "./kinds/servers.js";
 
 interface Handle {
   readonly signInId?: string;
@@ -25,12 +30,89 @@ interface Watched {
   handle?: Handle;
   /** Cancel was pressed, or a new run took its row: a handle that answers late is stopped. */
   ended?: true;
+  /** Takes one of the host's steps for this run, off the socket or off the list a socket that came back reads. */
+  hear?: (e: AgentsSignInEvent) => void;
 }
 
 const watched = new Map<string, Watched>();
 const watchers = new Set<() => void>();
 const changed = (): void => watchers.forEach(redraw => redraw());
 const watchKey = (targetKey: string, rowId: string): string => `${targetKey}\0${rowId}`;
+/** One key per target whatever order its fields came in, since the host's list names targets too. */
+const targetKeyOf = (t: AgentsTarget): string => JSON.stringify("workspaceId" in t ? { workspaceId: t.workspaceId } : { placeId: t.placeId, ...(t.project !== undefined ? { project: t.project } : {}) });
+/** What a run's flow reserves room for comes from its row, so its height holds whatever state the host reports, from
+ * its first frame, whether this window started it or picked it up off the list. */
+const withRoom = (flow: SignInFlow, start: SignInStart | undefined): SignInFlow =>
+  flow.kind !== "run" || start?.kind !== "run" ? flow : { ...flow, ...(start.finish !== undefined ? { finish: start.finish } : {}), ...(start.pastes === true ? { pastes: true } : {}) };
+
+/** How a watched run takes a step: a signed-in run leaves its row, a failed one stops listening and stays drawn. */
+const hearing =
+  (key: string, run: Watched, target: AgentsTarget) =>
+  (e: AgentsSignInEvent): void => {
+    if (watched.get(key) !== run) return;
+    if (e.state === "signed-in") {
+      run.handle?.off?.();
+      watched.delete(key);
+      return changed();
+    }
+    if (e.state === "failed") {
+      run.handle?.off?.();
+      delete run.handle;
+    }
+    const before = run.flow;
+    run.flow = {
+      kind: "run",
+      state: e.state,
+      ...(e.url !== undefined ? { url: e.url } : before.kind === "run" && before.url !== undefined ? { url: before.url } : {}),
+      ...(e.code !== undefined ? { code: e.code } : {}),
+      ...(e.paste !== undefined ? { paste: e.paste } : before.kind === "run" && before.paste !== undefined ? { paste: before.paste } : {}),
+      ...(e.said !== undefined ? { said: e.said } : {}),
+      ...(e.ptyId !== undefined && "placeId" in target ? { pty: { placeId: target.placeId, ptyId: e.ptyId } } : before.kind === "run" && before.pty !== undefined && e.state !== "failed" ? { pty: before.pty } : {}),
+    };
+    changed();
+  };
+
+/** Follows the host's runs on a socket that just went live. A watched run draws the step it missed, or its end; one
+ * the host no longer holds, or that was stopped, leaves its row to the report. A run this window does not watch is
+ * drawn as it stands on its row: an agent's by its id, a server's by where its config sits, as the list says. */
+async function rejoin(api: Api): Promise<void> {
+  if (api.agentsSignIns === undefined || api.agentsSignInWatch === undefined) return;
+  let runs: AgentsSignInRun[];
+  try {
+    runs = await api.agentsSignIns();
+  } catch {
+    return;
+  }
+  const byId = new Map(runs.map(r => [r.signInId, r]));
+  for (const [key, run] of watched) {
+    const signInId = run.handle?.signInId;
+    if (signInId === undefined) continue;
+    const now = byId.get(signInId);
+    if (now?.last !== undefined) run.hear?.(now.last);
+    if (watched.get(key) === run && (now === undefined || (now.ended === true && now.last?.state !== "failed"))) {
+      run.handle?.off?.();
+      watched.delete(key);
+    }
+  }
+  for (const r of runs) {
+    if (r.ended === true) continue;
+    const rowId = r.server === undefined ? agentRowId(r.agent) : r.scope === undefined ? undefined : serverRowId(r.agent, r.scope, r.project, r.server);
+    if (rowId === undefined) continue;
+    const key = watchKey(targetKeyOf(r.target), rowId);
+    const was = watched.get(key);
+    if (was !== undefined && !(was.flow.kind === "run" && was.flow.state === "failed")) continue;
+    const run: Watched = { flow: { kind: "run", state: "running" } };
+    run.hear = hearing(key, run, r.target);
+    watched.set(key, run);
+    run.handle = api.agentsSignInWatch(r.signInId, run.hear);
+    if (r.last !== undefined) run.hear(r.last);
+  }
+  changed();
+}
+
+useStore.subscribe((s, prev) => {
+  if (s.conn === "live" && s.api !== null && (prev.conn !== "live" || prev.api !== s.api)) void rejoin(s.api);
+});
 
 const end = (run: Watched): void => {
   run.ended = true;
@@ -47,7 +129,7 @@ const said = (e: unknown): string => (e instanceof Error ? e.message : String(e)
 
 export function useAgentActs(target: AgentsTarget | null): AgentActs | undefined {
   const api = useStore(s => s.api);
-  const targetKey = target === null ? null : JSON.stringify(target);
+  const targetKey = target === null ? null : targetKeyOf(target);
   // A paste or a line stands in the view that opened it; a watched run stands in `watched`.
   const [local, setLocal] = useState<{ targetKey: string | null; of: Record<string, SignInFlow> }>({ targetKey, of: {} });
   const [adding, setAdding] = useState<ReadonlySet<string>>(new Set());
@@ -81,38 +163,13 @@ export function useAgentActs(target: AgentsTarget | null): AgentActs | undefined
       const was = watched.get(key);
       if (was !== undefined) end(was);
       put(rowId, undefined);
-      // What the flow reserves room for rides every step, so its height holds whatever state the host reports.
-      const finish = { ...(begin.finish === undefined ? {} : { finish: begin.finish }), ...(begin.pastes === true ? { pastes: true } : {}) };
-      const run: Watched = { flow: { kind: "run", state: "running", ...finish } };
+      const run: Watched = { flow: { kind: "run", state: "running" } };
+      run.hear = hearing(key, run, JSON.parse(targetKey) as AgentsTarget);
       watched.set(key, run);
       changed();
       const live = (): boolean => watched.get(key) === run;
-      const target = JSON.parse(targetKey) as AgentsTarget;
-      const step = (e: AgentsSignInEvent): void => {
-        if (!live()) return;
-        if (e.state === "signed-in") {
-          run.handle?.off?.();
-          watched.delete(key);
-          return changed();
-        }
-        if (e.state === "failed") {
-          run.handle?.off?.();
-          delete run.handle;
-        }
-        const before = run.flow;
-        run.flow = {
-          kind: "run",
-          state: e.state,
-          ...finish,
-          ...(e.url !== undefined ? { url: e.url } : before.kind === "run" && before.url !== undefined ? { url: before.url } : {}),
-          ...(e.code !== undefined ? { code: e.code } : {}),
-          ...(e.paste !== undefined ? { paste: e.paste } : before.kind === "run" && before.paste !== undefined ? { paste: before.paste } : {}),
-          ...(e.said !== undefined ? { said: e.said } : {}),
-          ...(e.ptyId !== undefined && "placeId" in target ? { pty: { placeId: target.placeId, ptyId: e.ptyId } } : before.kind === "run" && before.pty !== undefined && e.state !== "failed" ? { pty: before.pty } : {}),
-        };
-        changed();
-      };
-      api.agentsSignIn(target, begin.agent, begin.server, step, begin.terminal).then(
+      const row = begin.scope === undefined ? undefined : { scope: begin.scope, ...(begin.project !== undefined ? { project: begin.project } : {}) };
+      api.agentsSignIn(JSON.parse(targetKey) as AgentsTarget, begin.agent, begin.server, run.hear, begin.terminal, row).then(
         handle => {
           if (run.ended === true) return handle.stop();
           if (!live() || (run.flow.kind === "run" && run.flow.state === "failed")) return handle.off();
@@ -120,7 +177,7 @@ export function useAgentActs(target: AgentsTarget | null): AgentActs | undefined
         },
         (e: unknown) => {
           if (!live()) return;
-          run.flow = { kind: "run", state: "failed", ...finish, said: said(e) };
+          run.flow = { kind: "run", state: "failed", said: said(e) };
           changed();
         },
       );
@@ -185,5 +242,9 @@ export function useAgentActs(target: AgentsTarget | null): AgentActs | undefined
   );
 
   if (targetKey === null || api === null) return undefined;
-  return { flowOf: rowId => watched.get(watchKey(targetKey, rowId))?.flow ?? shown[rowId], start, cancel, code, save, addTools, adding: agent => adding.has(agent) };
+  const flowOf = (rowId: string, begin?: SignInStart): SignInFlow | undefined => {
+    const run = watched.get(watchKey(targetKey, rowId));
+    return run === undefined ? shown[rowId] : withRoom(run.flow, begin);
+  };
+  return { flowOf, start, cancel, code, save, addTools, adding: agent => adding.has(agent) };
 }

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { z } from "zod";
-import { AgentsTarget, ServerAdd, ServerAsk } from "../agents-report.js";
+import { AgentsTarget, McpScope, ServerAdd, ServerAsk } from "../agents-report.js";
 import { Attachment } from "../attachments.js";
 import { threadWord } from "../format.js";
 import { InitRoad, InitScreenId, SIGN_IN_CODE_MAX } from "../init-job.js";
@@ -697,10 +697,15 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * for a name holding a control character. With `terminal`, a row that asks the person to pick runs too, in a pty
    * there the page attaches to, whose id the first frame names. */
   z.object({ id: reqId, op: z.literal("agents.signIn"), target: AgentsTarget, agent: z.string(), terminal: z.boolean().optional() }),
-  /** The same for one MCP server of that agent's config, by the harness's own command for it. */
-  z.object({ id: reqId, op: z.literal("servers.signIn"), target: AgentsTarget, agent: z.string(), name: z.string() }),
+  /** The same for one MCP server of that agent's config, by the harness's own command for it; `scope` and `project`
+   * name the row it was started from, which agents.signIns hands back. */
+  z.object({ id: reqId, op: z.literal("servers.signIn"), target: AgentsTarget, agent: z.string(), name: z.string(), scope: McpScope.optional(), project: z.string().optional() }),
   /** Types what a sign-in's page handed back into that sign-in's own pty, with the Enter the person would press. */
   z.object({ id: reqId, op: z.literal("agents.signInCode"), signInId: z.string(), code: z.string().min(1) }),
+  /** Replies with { runs: AgentsSignInRun[] }: every sign-in running and every one that ended in the last ten minutes,
+   * and this socket follows each running one from then on as if it had joined it, which is how a window whose socket
+   * dropped, or a window opened since, hears a run it did not start. */
+  z.object({ id: reqId, op: z.literal("agents.signIns") }),
   /** Stops a sign-in this socket started or joined, killing its pty for everyone following it. */
   z.object({ id: reqId, op: z.literal("agents.signInStop"), signInId: z.string() }),
   /** Replies with { line: SignInLine }: the sign-in, or one server's with `name`, as the line the person's own

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { Machine } from "@wsp/engine";
-import { noSuchAgentsProjectRefusal, sharedAgentsProjectRefusal, nappingAgentsRefusal, nappingServersRefusal, nappingSignInRefusal, nappingSkillsRefusal, nappingToolsRefusal, noSignInRefusal, type AgentsTarget, type WorkspacePhase } from "@wsp/protocol";
+import { noSuchAgentsProjectRefusal, sharedAgentsProjectRefusal, nappingAgentsRefusal, nappingServersRefusal, nappingSignInRefusal, nappingSkillsRefusal, nappingToolsRefusal, noSignInRefusal, SIGN_IN_ENDED_KEPT_MS, type AgentsTarget, type WorkspacePhase } from "@wsp/protocol";
 import { describe, expect, it } from "vitest";
 import { NO_AGENTS_READER, agentsReads, pageReachOf, projectOf, type AgentsActs, type AgentsOn, type AgentsRead, type AgentsWorkspace, type ServerToolsAsk, type SignInAsk, type ServersActs, type SignInForward, type SkillsActs } from "../src/agents-read.js";
 import type { PlaceDoor } from "../src/places.js";
@@ -151,6 +151,7 @@ describe("the sign-ins on a computer or a workspace", () => {
     const machine = { exec: async () => ({ exitCode: 0, stdout: "", stderr: "" }) } as unknown as Machine;
     const forgot: string[] = [];
     const logged: string[] = [];
+    const clock = { at: Date.parse("2026-09-24T12:00:00Z") };
     const api = agentsReads<undefined>({
       reader: { read: async () => read, tools: async () => ({ auth: "open", readAt: "2026-09-24T12:00:00.000Z" }), forget: key => void forgot.push(key) },
       log: line => void logged.push(line),
@@ -160,9 +161,9 @@ describe("the sign-ins on a computer or a workspace", () => {
       workspace: async (): Promise<AgentsWorkspace> => ({ name: "landing", phase: phase.now, local: false, machine, project: LANDING }),
       channel: async (_target, onEvent) => ch.open(onEvent),
       changed: target => void changed.push(target),
-      now: () => Date.parse("2026-09-24T12:00:00Z"),
+      now: () => clock.at,
     });
-    return { api, ch, planned, handed, changed, codes, forgot, logged, finish: () => finish() };
+    return { api, ch, planned, handed, changed, codes, forgot, logged, clock, finish: () => finish() };
   }
 
   it("tell the host a workspace's callback port is forwarded from here where the relay does, and nothing where it does not", async () => {
@@ -357,6 +358,29 @@ describe("the sign-ins on a computer or a workspace", () => {
     t.api.signInStop(other.signInId);
     await tick();
     expect(t.ch.shut).toBe(2);
+  });
+
+  it("list each sign-in with its last step, follow a running one by its id, and keep an ended one's last step ten minutes", async () => {
+    const t = acting({ now: "running" });
+    const first = await t.api.signIn({ workspaceId: "ws_1" }, { agent: "claude", server: "notion", scope: "project", project: "pr_1" }, () => {});
+    await tick();
+    t.ch.push({ url: "https://mcp.notion.com/authorize" });
+    const waiting = { type: "agents.signIn", signInId: first.signInId, state: "waiting", url: "https://mcp.notion.com/authorize" };
+    const heard: Record<string, unknown>[] = [];
+    const followed = t.api.signInFollow(first.signInId, e => void heard.push(e));
+    expect(heard).toEqual([waiting]);
+    expect(t.api.signIns()).toEqual([{ signInId: first.signInId, target: { workspaceId: "ws_1" }, agent: "claude", server: "notion", scope: "project", project: "pr_1", last: waiting }]);
+    t.finish();
+    await tick();
+    const signedIn = { type: "agents.signIn", signInId: first.signInId, state: "signed-in" };
+    expect(heard.at(-1)).toEqual(signedIn);
+    expect(t.api.signIns()).toEqual([{ signInId: first.signInId, target: { workspaceId: "ws_1" }, agent: "claude", server: "notion", scope: "project", project: "pr_1", last: signedIn, ended: true }]);
+    expect(() => t.api.signInFollow(first.signInId, () => {})).toThrow(noSignInRefusal);
+    t.clock.at += SIGN_IN_ENDED_KEPT_MS;
+    expect(t.api.signIns()).toHaveLength(1);
+    t.clock.at += 1;
+    expect(t.api.signIns()).toEqual([]);
+    followed.leave();
   });
 
   it("stop a sign-in by its id for everyone following it, so the next start runs fresh, and refuse an id that is not running", async () => {

@@ -334,9 +334,9 @@ describe("signing an agent in from its row", () => {
 describe("a server's sign-in road", () => {
   it("is the one the host said the report's page reaches, never worked out again from where the list stands", () => {
     const linear = AGENTS_REPORT.servers.find(r => r.name === "linear")!;
-    expect(serverSignInStart(linear, { where: "here", reach: "relay" })).toEqual({ kind: "run", agent: "claude", server: "linear", finish: "callback", pastes: true });
-    expect(serverSignInStart(linear, { where: "here", reach: "none" })).toEqual({ kind: "run", agent: "claude", server: "linear", finish: "address", pastes: true });
-    expect(serverSignInStart(linear, { where: "here" })).toEqual({ kind: "run", agent: "claude", server: "linear", finish: "address", pastes: true });
+    expect(serverSignInStart(linear, { where: "here", reach: "relay" })).toEqual({ kind: "run", agent: "claude", server: "linear", scope: "user", finish: "callback", pastes: true });
+    expect(serverSignInStart(linear, { where: "here", reach: "none" })).toEqual({ kind: "run", agent: "claude", server: "linear", scope: "user", finish: "address", pastes: true });
+    expect(serverSignInStart(linear, { where: "here" })).toEqual({ kind: "run", agent: "claude", server: "linear", scope: "user", finish: "address", pastes: true });
   });
 });
 

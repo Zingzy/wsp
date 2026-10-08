@@ -11,7 +11,7 @@
 // on every agent the entry is set up for, and Add a tool server is a form.
 import { ActivityIcon, PowerIcon, PowerOffIcon, RefreshCwIcon, ServerIcon, Trash2Icon } from "lucide-react";
 import { agentName, mcpSwitch, serverMark } from "@wsp/catalog";
-import type { AgentsProject, AgentsReport, McpRow, McpTool, ServerToolsAnswer } from "@wsp/protocol";
+import type { AgentsProject, AgentsReport, McpRow, McpScope, McpTool, ServerToolsAnswer } from "@wsp/protocol";
 import { AGENTS_LIST_WORDS as W, editImageAct, heldReason, holdAll, notYet, onImage, serverSignInStart, signInAct, waitingFlow, type FlowView, type RowAct, type RowsContext, type ToolsState } from "../agentsRows.js";
 import { AddServerRows } from "../../../settings/AddServerRows.js";
 import { byName, kind, matchesAny, projectGroups, rowKey, type Fact, type GroupView, type KindModule, type Lead, type ServerState, type Status, type UnderRow } from "./kind.js";
@@ -41,7 +41,10 @@ const leadOf = (entry: ServerEntry): Lead => {
   if (mark !== undefined) return { kind: "box", icon: ServerIcon, mark };
   return { kind: "box", icon: ServerIcon, ...(entry.stdio || entry.reach === "" ? {} : { host: entry.reach }) };
 };
-const rowId = (row: McpRow): string => rowKey(["server", row.agent, row.scope], row.project, row.name);
+/** A server's row by where its config sits, which its sign-in's flow is kept under wherever the row is drawn. */
+export const serverRowId = (agent: string, scope: McpScope, project: string | undefined, name: string): string =>
+  rowKey(["server", agent, scope], project === undefined ? undefined : { id: project }, name);
+const rowId = (row: McpRow): string => serverRowId(row.agent, row.scope, row.project?.id, row.name);
 
 /** One entry per server: the same name reached the same way in the same scope, and the same project, is one server
  * set up for each agent. */

@@ -6,7 +6,7 @@
 import { LogInIcon, PencilIcon, XIcon, type LucideIcon } from "lucide-react";
 import { agentName, catalogEntry, hasLogin, loginIdOf, mintsToken, serverSignInRoad, signInRoadOf } from "@wsp/catalog";
 import { outcomeWord } from "../../settings/places.js";
-import { agentOfRow, type AgentRow, type AgentsProject, type AgentsReport, type AgentsTarget, type McpRow, type PageReach, type PlaceProvisionRow, type SealedImage, type ServerAdd, type ServerToolsAnswer, type SignInRoad, type SkillHit, type SkillPreview, type SkillRow } from "@wsp/protocol";
+import { agentOfRow, type AgentRow, type AgentsProject, type AgentsReport, type AgentsTarget, type McpRow, type McpScope, type PageReach, type PlaceProvisionRow, type SealedImage, type ServerAdd, type ServerToolsAnswer, type SignInRoad, type SkillHit, type SkillPreview, type SkillRow } from "@wsp/protocol";
 
 /** Where the report was read, which decides which acts a row offers: this computer, a joined box (its page, or a task
  * standing on it), a fork at a cloud (a copy, so every act is the image's), or a cloud's own page (the image's rows). */
@@ -208,7 +208,7 @@ export interface ServerTools {
  * it, a line the person runs in their terminal, or typed into a task's own terminal on this computer. Worked out here
  * off the report and the catalog, so every row reads one rule. */
 export type SignInStart =
-  | { readonly kind: "run"; readonly agent: string; readonly server?: string; readonly finish?: ServerFinish; readonly pastes?: boolean; readonly terminal?: boolean }
+  | { readonly kind: "run"; readonly agent: string; readonly server?: string; readonly scope?: McpScope; readonly project?: string; readonly finish?: ServerFinish; readonly pastes?: boolean; readonly terminal?: boolean }
   | { readonly kind: "vault"; readonly agent: string; readonly mint?: string; readonly word: "token" | "key" }
   | { readonly kind: "copy"; readonly line: string; readonly why?: string }
   | { readonly kind: "terminal"; readonly line: string };
@@ -334,7 +334,8 @@ export interface PickOption {
 
 /** The sign-ins and writes a list on one target takes, by the row's id. */
 export interface AgentActs {
-  flowOf(rowId: string): SignInFlow | undefined;
+  /** The row's flow; a run takes the room its row's start reserves, however the window came to watch it. */
+  flowOf(rowId: string, start?: SignInStart): SignInFlow | undefined;
   start(rowId: string, start: SignInStart): void;
   /** Ends a running sign-in on the host and drops what it drew. */
   cancel(rowId: string): void;
@@ -406,7 +407,7 @@ export function agentSignInStart(row: Pick<AgentRow, "id" | "signInRoad">, ctx: 
 export function serverSignInStart(row: McpRow, ctx: RowsContext): SignInStart | undefined {
   const road = serverSignInRoad(row.agent, row.name, ctx.reach ?? "none");
   if (road === undefined) return undefined;
-  if (road.kind === "pty") return { kind: "run", agent: row.agent, server: row.name, finish: road.finish === "callback" ? "callback" : "address", pastes: true };
+  if (road.kind === "pty") return { kind: "run", agent: row.agent, server: row.name, scope: row.scope, ...(row.project !== undefined ? { project: row.project.id } : {}), finish: road.finish === "callback" ? "callback" : "address", pastes: true };
   return { kind: "copy", line: road.line, ...(road.why === "callback" ? { why: AGENTS_LIST_WORDS.pageStaysHere(ctx.computer ?? "that computer") } : {}) };
 }
 
@@ -416,7 +417,7 @@ const runningFlow = (flow: SignInFlow | undefined): boolean => flow?.kind === "r
 /** The Sign in act for one row, Cancel while its run goes, and the flow it drew while one stands. */
 export function signInAct(id: string, start: SignInStart | undefined, ctx: RowsContext): { act: RowAct; flow?: FlowView } {
   const acts = ctx.acts;
-  const flow = acts?.flowOf(id);
+  const flow = acts?.flowOf(id, start);
   const view = flow === undefined || acts === undefined ? {} : { flow: { flow, code: (code: string) => acts.code(id, code), save: (key: string) => acts.save(id, key) } };
   if (runningFlow(flow) && acts !== undefined) return { act: { id: "cancel", label: AGENTS_LIST_WORDS.cancel, icon: XIcon, run: () => acts.cancel(id) }, ...view };
   const run = start === undefined ? undefined : start.kind === "terminal" ? (ctx.typeInTerminal === undefined ? undefined : () => ctx.typeInTerminal!(start.line)) : acts === undefined ? undefined : () => acts.start(id, start);

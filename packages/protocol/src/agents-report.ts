@@ -339,6 +339,24 @@ export const AgentsSignInEvent = z.object({
 });
 export type AgentsSignInEvent = z.infer<typeof AgentsSignInEvent>;
 
+/** One sign-in the host runs, or ended within SIGN_IN_ENDED_KEPT_MS, as agents.signIns lists it: what it signs in and
+ * where, for a server the row it was started from (its scope, and the project's id for a project's), and the last
+ * step it took, which a window that missed its steps draws. */
+export const AgentsSignInRun = z.object({
+  signInId: z.string(),
+  target: AgentsTarget,
+  agent: z.string(),
+  server: z.string().optional(),
+  scope: McpScope.optional(),
+  project: z.string().optional(),
+  last: AgentsSignInEvent.optional(),
+  ended: z.literal(true).optional(),
+});
+export type AgentsSignInRun = z.infer<typeof AgentsSignInRun>;
+
+/** How long the host keeps an ended sign-in's last step for a window whose socket dropped before it heard it. */
+export const SIGN_IN_ENDED_KEPT_MS = 10 * 60_000;
+
 /** Something written changed what a report there reads: a sign-in, a key in the vault, the wsp tools in a config.
  * No target: every report, which is what a key in this host's vault changes. */
 export const AgentsChangedEvent = z.object({ type: z.literal("agents.changed"), target: AgentsTarget.optional() });

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { GoldenDelta, ExecResult, GoldenManifest, GoldenVersion, MachineBackend, MachineKind, RetentionPlan, SnapshotRow, TemplateRow } from "@wsp/engine";
-import type { ThreadCapWait, AgentsReport, AgentsSignInEvent, AgentsTarget, ServerAdd, ServerAsk, ServerToolsAnswer, SignInLine, SkillAdded, SkillHit, SkillPreview } from "@wsp/protocol";
+import type { ThreadCapWait, AgentsReport, AgentsSignInEvent, AgentsSignInRun, AgentsTarget, ServerAdd, ServerAsk, ServerToolsAnswer, SignInLine, SkillAdded, SkillHit, SkillPreview } from "@wsp/protocol";
 import type {
   Capabilities,
   DaemonReachView,
@@ -81,6 +81,10 @@ export interface Runtime {
      * it, which never ends it: it runs until it lands, fails, passes its cap or is stopped. A napping workspace is
      * refused. */
     signIn(target: AgentsTarget, ask: SignInAsk, emit: (event: AgentsSignInEvent) => void, origin?: Caller): Promise<{ signInId: string; leave(): void }>;
+    /** Every sign-in running and every one that ended in the last ten minutes, each with its last step. */
+    signIns(): AgentsSignInRun[];
+    /** Follows a running sign-in by its id, as signIn joins one: its last step goes to `emit` at once. */
+    signInFollow(signInId: string, emit: (event: AgentsSignInEvent) => void): { signInId: string; leave(): void };
     /** Types what a page handed back into that sign-in's pty. */
     signInCode(signInId: string, code: string): Promise<void>;
     /** Ends that sign-in and kills its pty, for everyone following it. */
