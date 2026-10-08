@@ -44,4 +44,52 @@ describe("pagePreviews", () => {
     expect(previews.get("ws_b")).toBeUndefined();
     expect(previews.get("ws_a")).toBe("data:image/png;base64,a2@240");
   });
+
+  it("answers at its ceiling when the page never hands a picture back, and keeps the one it held", async () => {
+    const previews = pagePreviews(480, 12, 50);
+    await previews.capture("ws_a", fakePage("held"));
+    vi.useFakeTimers();
+    try {
+      let answered = false;
+      const asked = previews.capture("ws_a", { capturePage: () => new Promise<PageImage>(() => {}) }, true).then(() => (answered = true));
+      await vi.advanceTimersByTimeAsync(49);
+      expect(answered).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      await asked;
+      expect(answered).toBe(true);
+      expect(previews.get("ws_a")).toBe("data:image/png;base64,held@480");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("files nothing from a picture that lands after its ceiling, since the page has painted over it by then", async () => {
+    const previews = pagePreviews(480, 12, 50);
+    await previews.capture("ws_a", fakePage("held"));
+    vi.useFakeTimers();
+    try {
+      let land: (image: PageImage) => void = () => {};
+      const asked = previews.capture("ws_a", { capturePage: () => new Promise<PageImage>(resolve => (land = resolve)) }, true);
+      await vi.advanceTimersByTimeAsync(50);
+      await asked;
+      land(fakeImage("late"));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(previews.get("ws_a")).toBe("data:image/png;base64,held@480");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("files a picture the page does not wait on whenever it lands, however long the copy takes", async () => {
+    const previews = pagePreviews(480, 12, 50);
+    vi.useFakeTimers();
+    try {
+      const asked = previews.capture("ws_a", { capturePage: () => new Promise<PageImage>(resolve => setTimeout(() => resolve(fakeImage("slow")), 2000)) });
+      await vi.advanceTimersByTimeAsync(2000);
+      await asked;
+      expect(previews.get("ws_a")).toBe("data:image/png;base64,slow@480");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

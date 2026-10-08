@@ -150,8 +150,9 @@ export interface DesktopBridge {
   /** The native context menu at the pointer, built from the items; resolves with the chosen item's id, or null when it was dismissed. */
   contextMenu(items: ContextMenuItem[]): Promise<string | null>;
   /** Photographs the page as it is now and keeps it under this workspace, replacing what that workspace held. Asked
-   * for as the person leaves a workspace, while the page still shows it. */
-  capturePreview(workspaceId: string): Promise<void>;
+   * for as the person leaves a workspace, while the page still shows it. Bounded, it answers within the shell's
+   * ceiling and files nothing that lands later, for a page that holds a paint on it. */
+  capturePreview(workspaceId: string, bounded?: boolean): Promise<void>;
   /** The last photograph taken of this workspace, as a data url, or nothing when none was taken. */
   workspacePreview(workspaceId: string): Promise<string | undefined>;
   /** Whether a terminal holds focus, so the chords the shell's menu would zoom the window on stand aside for it. */

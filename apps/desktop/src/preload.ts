@@ -57,7 +57,7 @@ const bridge: DesktopBridge & OnboardingBridge = {
   // shell is asked first, so a page served by a host somewhere else is handed nothing from this computer.
   droppedPath: (file: File): string | undefined => (ipcRenderer.sendSync("drop:allowed") === true ? webUtils.getPathForFile(file) : undefined),
   contextMenu: (items: ContextMenuItem[]): Promise<string | null> => ipcRenderer.invoke("menu:context", items),
-  capturePreview: (workspaceId: string): Promise<void> => ipcRenderer.invoke("preview:capture", workspaceId),
+  capturePreview: (workspaceId: string, bounded?: boolean): Promise<void> => ipcRenderer.invoke("preview:capture", workspaceId, bounded === true),
   workspacePreview: (workspaceId: string): Promise<string | undefined> => ipcRenderer.invoke("preview:read", workspaceId),
   setTerminalFocus: (focused: boolean): void => ipcRenderer.send("terminal:focus", focused),
   onShellChord: (handler: (chord: ShellChord) => void): (() => void) => {

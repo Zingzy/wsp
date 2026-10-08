@@ -42,7 +42,9 @@ describe("the preload's bridge", () => {
   it("carries the picture calls the switcher's cards need, each on its own channel", async () => {
     const wsp = await bridge();
     await wsp.capturePreview("ws_a");
-    expect(invoke).toHaveBeenLastCalledWith("preview:capture", "ws_a");
+    expect(invoke).toHaveBeenLastCalledWith("preview:capture", "ws_a", false);
+    await wsp.capturePreview("ws_a", true);
+    expect(invoke).toHaveBeenLastCalledWith("preview:capture", "ws_a", true);
     await wsp.workspacePreview("ws_b");
     expect(invoke).toHaveBeenLastCalledWith("preview:read", "ws_b");
     await wsp.localFonts("Berkeley Mono");

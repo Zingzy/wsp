@@ -55,6 +55,18 @@ export function threadRows(sessions: ReadonlyArray<SessionView>, workspaceId: st
   return latest === undefined ? NO_SESSIONS : [latest];
 }
 
+/** Whether the centre of this state draws a thread: neither Settings nor a new thread's page over it, its workspace
+ * selected, and the thread selected or, with none selected, the workspace's latest row. A thread with no row read
+ * yet counts where it is the one selected. */
+export function threadOnScreen(
+  s: Pick<State, "settingsOpen" | "freshThread" | "selectedId" | "selectedThreadId" | "sessions">,
+  at: { workspaceId: string; threadId?: string | undefined; sessionId?: string | undefined },
+): boolean {
+  if (s.settingsOpen || s.freshThread || s.selectedId !== at.workspaceId) return false;
+  const shown = threadRows(s.sessions[at.workspaceId] ?? [], at.workspaceId, s.selectedThreadId ?? at.workspaceId).at(-1);
+  return shown === undefined ? s.selectedThreadId === null || s.selectedThreadId === at.threadId : threadKeyOf(shown) === (at.threadId ?? at.sessionId);
+}
+
 /** The workspace whose rows hold a thread, where its composer keeps its draft. */
 export function threadWorkspaceIn(sessions: Readonly<Record<string, ReadonlyArray<SessionView>>>, threadId: string): string | null {
   for (const [workspaceId, rows] of Object.entries(sessions)) if (rows.some(row => threadKeyOf(row) === threadId)) return workspaceId;
