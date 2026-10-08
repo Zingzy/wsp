@@ -97,7 +97,7 @@ export * from "./wire/place-link.js";
 export * from "./wire/runtime.js";
 export * from "./views/snapshot-lineage.js";
 
-export { hereName, isHere, isProviderPlace, placeName, placeOf, workspaceComputerName } from "./place-name.js";
+export { hereName, isHere, isProviderPlace, placeName, placeOf, tableName, workspaceComputerName } from "./place-name.js";
 export { needsYouLine, subagentStateWord, threadNeedsYou, threadSeen, threadSettled, threadState, threadStateWord, threadUnread, threadUnseenAt, threadWordOf, waitingLine, type SettleFacts, type ThreadState } from "./thread-state.js";
 export { AGENTS_ON, CAP_RAISE_ACT, capRunningLine, capRestartedLine, capStoppedLine, capWaitLine, deletedBeforeStartLine, WAKE_ACT, CLOUD_CAP_DEFAULT, NAP_AFTER_MAX_MS, NAP_AFTER_MS, phaseHoldsSlot, placeAtLimitLine, placeCapOf, placeFullLine, placeSetRefusal, placeSettingDropped, placeSettingNamed, placeSettingsLine, placeTakes, settingFor, napMsOf, placeRoom, placeSpendLimit, runningOn, THREAD_MEM_MB, threadsAtOnce, workspacePlace, workspacePlaceId, type PlacedThread, type PlacedWorkspace, placeTurnLimit, TURN_LIMIT_MAX_MS, TURN_WALL_MS, turnLimitMsOf } from "./place-state.js";
 export { launchHasSlate, MCP_SERVER_NAME, SPAWN_TOOLS, spawnsThread, SLATE_BRIEF, SLATE_SERVER_NAME, SLATE_TOOLS, threadsFollowed, WSP_TOOL_TIMEOUT_SEC } from "./wsp-tools.js";
@@ -157,7 +157,7 @@ export {
   type Rgb,
   type ThemePreset,
 } from "./workspace-look.js";
-export { claudeMemoryDir, claudeProjectKey, folderName, folderSlug, heldPlaceScript, hiddenFolder, parentFolderName, placeDaemonPaths, placeOwnedPaths, placeProvisionPaths, probePath, repoPathOf, rootsPathIn, worktreeOf, SSH_ALIAS_PREFIX, sshAlias, standInMachinePath, standInRecordsPath, underProject, workFolderIn, type FolderMachine } from "./project-path.js";
+export { claudeMemoryDir, claudeProjectKey, folderName, folderSlug, heldPlaceScript, hiddenFolder, parentFolderName, placeDaemonPaths, placeInstallLog, placeOwnedPaths, placeProvisionPaths, probePath, repoPathOf, rootsPathIn, worktreeOf, SSH_ALIAS_PREFIX, sshAlias, standInMachinePath, standInRecordsPath, underProject, workFolderIn, type FolderMachine } from "./project-path.js";
 export * from "./bring-back.js";
 export * from "./changes.js";
 export * from "./usage.js";

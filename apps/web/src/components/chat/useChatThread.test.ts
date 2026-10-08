@@ -1147,6 +1147,18 @@ describe("a send the host holds until a computer that is away has run the end a 
     expect(notices(heldSaid(sent, queued(), "thr_a", T0))).toEqual([sendWaitsForLine("hetzner")]);
   });
 
+  it("says it for this view's send that waited behind a turn a Stop then ended, once the host names that computer", () => {
+    const turn = { workspaceId: CHAT_WS, sessionId: "sess_a", turnId: "turn_a", threadId: "thr_a" };
+    const running = reduceEvent(state([]), { type: "session.start", ...turn, prompt: "work" }, T0, "thr_a");
+    const behind: ThreadState = { ...running, sending: { after: "turn_a" }, pendingPrompt: { text: "and then", at: T0, requestId: REQ } };
+    const stop: SessionEvent[] = [
+      { type: "session.done", ...turn, result: { status: "interrupted", error: "stopped" } },
+      { type: "session.end", ...turn, exitCode: null, sawResult: true, reason: "stopped" },
+    ];
+    const stopped = stop.reduce((s, e) => reduceEvent(s, e, T0, "thr_a"), behind);
+    expect(notices(heldSaid(stopped, queued(), "thr_a", T0))).toEqual([sendWaitsForLine("hetzner")]);
+  });
+
   it("says it at the thread's tail for a send another client made, and drops it once the thread's next turn starts or ends", () => {
     const shown = heldSaid(state([]), queued({ requestId: "req_cli" }), "thr_a", T0);
     expect(notices(shown)).toEqual([sendWaitsForLine("hetzner")]);
@@ -1154,6 +1166,14 @@ describe("a send the host holds until a computer that is away has run the end a 
     expect(notices(started)).toEqual([]);
     const ended = reduceEvent(shown, { type: "session.end", workspaceId: CHAT_WS, sessionId: "sess_n", turnId: "turn_n", threadId: "thr_a", exitCode: null, sawResult: false, reason: "given up" }, T0, "thr_a");
     expect(notices(ended)).toEqual([]);
+  });
+
+  it("drops the line once the computer is back and the send waits behind the turn that launched instead", () => {
+    const { waitsFor: _waitsFor, ...behindTurn } = queued();
+    const sent = state([], { pendingPrompt: { text: "and then", at: T0, requestId: REQ } });
+    expect(notices(heldSaid(heldSaid(sent, queued(), "thr_a", T0), behindTurn, "thr_a", T0))).toEqual([]);
+    const other = heldSaid(state([]), queued({ requestId: "req_cli" }), "thr_a", T0);
+    expect(notices(heldSaid(other, { ...behindTurn, requestId: "req_cli" }, "thr_a", T0))).toEqual([]);
   });
 
   it("says nothing for a wait behind a running turn, nor for another thread", () => {

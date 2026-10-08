@@ -147,6 +147,7 @@ const DAEMON_CONTENTS = [
   "871dd3f376bcbde4e5f98c8d0777e75b0c36df1c81436b00c0749726d8122ccd",
   "664b32a5e3b463b18771d6a9f6938ea3f1312c96898a9951cb32a1ed15185ed0",
   "9790029ce878d8248fe04d470b8da1e4060b686480f088f0d9d79c7b76e7064d",
+  "b97e864f4fecee0ea1c25a13b912025977cea507255a19045937e92ec826199c",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -530,7 +531,10 @@ const DAEMON_CONTENTS = [
  * leave or by a container's bind staging. ports.watch takes a name, so one socket holds a watch per name with roots, a
  * folder and cgroups of its own, and each port event says which watch it is for; a process row carries the cgroup v2
  * path it stands in.
- * Version 137: shells read apart, panel ptys never reach the drawer. */
+ * Version 137: shells read apart, panel ptys never reach the drawer.
+ * Version 138: A leave takes wsp's own folder only once it is empty, and names the manifest, the put folder, the
+ * readings, the sshd folder, the add's place-found.part and join code, and the folder a project's install logs go to
+ * instead, so the person's own wsp and a host's state on the same login stay. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary

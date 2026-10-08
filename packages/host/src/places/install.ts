@@ -205,7 +205,7 @@ export function placeInstaller(deps: { backend?: SshBackend; sshWord?: SshWordRe
     }
     const joinUrls = back === undefined ? reached : [...reached, backUrl(back.boxPort)];
     const at = placeDaemonPaths(login.HOME);
-    const place = joinedPlace({ home: login.HOME, path: login.PATH }, { hostUrls: joinUrls, codeFile: `${at.wsp}/join-code`, name });
+    const place = joinedPlace({ home: login.HOME, path: login.PATH }, { hostUrls: joinUrls, codeFile: at.joinCode, name });
     stage("wsp", "running", target.uname);
     // What the box already holds of the add's list, read before anything lands: a failed add takes back only what
     // it wrote, and a box that would not say keeps everything.

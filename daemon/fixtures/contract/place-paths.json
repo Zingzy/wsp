@@ -3,6 +3,8 @@
   "/h/.wsp/place-key.pem",
   "/h/.wsp/place.log",
   "/h/.wsp/place-found",
+  "/h/.wsp/place-found.part",
+  "/h/.wsp/join-code",
   "/h/.wsp/daemon",
   "/h/.wsp/provision",
   "/h/.wsp/daemon.tgz",
@@ -16,7 +18,11 @@
   "/h/.wsp/place-bin",
   "/h/.wsp/run",
   "/h/.wsp/daemon.port",
+  "/h/.wsp/manifest.json",
+  "/h/.wsp/put",
+  "/h/.wsp/install-logs",
+  "/h/.wsp/readings",
+  "/h/.wsp/ssh",
   "/h/.local/bin/wsp-open",
-  "/h/.local/bin/xdg-open",
-  "/h/.wsp"
+  "/h/.local/bin/xdg-open"
 ]

@@ -14,6 +14,10 @@ export const isHere = (place: PlaceView | undefined): boolean => place?.id === H
 /** Whether this row is the provider this host forks on rather than a computer somebody owns. */
 export const isProviderPlace = (place: PlaceView): boolean => place.kind === "provider";
 
+/** What a table calls a computer: the name a person types for it, and a provider by the name the app gives it, never
+ * the id stored state holds; either one names it after --on. */
+export const tableName = (place: Pick<PlaceView, "kind" | "name">): string => (place.kind === "provider" ? providerKeyName(place.name) : place.name);
+
 /** What a person reads a row as: the name its owner gave the computer where it keeps one, a Mac's own "zingzy's
  * MacBook Pro"; a provider carries the name its own row in the provider table gives it, since the host words it by
  * the id WSP_PROVIDER holds and nobody types that; every other computer carries the name it reported. */

@@ -126,6 +126,12 @@ fn walk_under_home(home: &Path, rel: &Path) -> Under {
     Under::At(at, leaf.to_os_string())
 }
 
+/// One folder under the home, removed only where it is empty, through the same walk. Answers whether it went.
+pub(crate) fn remove_empty_under_home(home: &Path, rel: &Path) -> bool {
+    let Under::At(parent, name) = walk_under_home(home, rel) else { return false };
+    nix::unistd::unlinkat(&parent, name.as_os_str(), nix::unistd::UnlinkatFlags::RemoveDir).is_ok()
+}
+
 /// The folders wsp's own files left empty, taken from the file's own upwards, each through the same walk and
 /// removed on its parent's descriptor. Never the first folder under the home: ~/.claude-cfg and ~/.codex are the
 /// agents' own to make and to keep, whatever wsp put inside them.

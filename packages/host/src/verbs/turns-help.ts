@@ -20,6 +20,7 @@ import {
   type SessionStartingEvent,
   agentStartingLine,
   sendWaitsForLine,
+  sendWaitedForLine,
   type SessionQueuedEvent,
   ThreadMessage,
   ThreadHead,
@@ -695,12 +696,13 @@ export function turnRefusal(turn: Turn): Error | undefined {
 const WAITING = "waiting behind the running turn";
 /** The line for one wait: behind the running turn, or on a computer that is away to run the end a stop owed it. */
 const waitingLine = (e: SessionQueuedEvent): string => (e.waitsFor !== undefined ? sendWaitsForLine(e.waitsFor) : WAITING);
-const JOINED: Record<Exclude<SessionStartOutcome, "started" | "held">, (picks: Picks) => string> = {
+/** `waitedFor` is the computer the send's last wait was on, where that wait was for an end a stop owed it. */
+const JOINED: Record<Exclude<SessionStartOutcome, "started" | "held">, (picks: Picks, waitedFor?: string) => string> = {
   steered: picks => {
     const dropped = [...PICK_FLAGS.filter(name => picks[name] !== undefined), ...(picks.fast === true ? ["fast"] : [])].map(name => `--${name}`);
     return `joined the running turn${dropped.length === 0 ? "" : `; ${dropped.join(", ")} dropped, it keeps its own model, effort and access`}`;
   },
-  queued: () => "queued behind the running turn; it has ended and this turn started",
+  queued: (_picks, waitedFor) => (waitedFor !== undefined ? sendWaitedForLine(waitedFor) : "queued behind the running turn; it has ended and this turn started"),
 };
 
 /** What a message that joined a turn stopped on a prompt says under the join: the turn takes it up when the person
@@ -899,13 +901,17 @@ export async function followVerb(ctx: VerbContext, client: HostClient, start: Re
   // What the runtime said about the turn this message joined, kept for the line under the join: the steer is
   // recorded as the harness takes the message, which is before the start this follow is waiting on is answered.
   let joinedWaiting = false;
+  let waitedFor: string | undefined;
   // Set once the host stopped under the turn: the stream on the screen has a gap where it went, so it is no copy of
   // the reply and the reply is printed whole.
   let redialed = false;
   let turn: Turn;
   try {
     turn = await follow(client, start, "cli", {
-      queued: e => ctx.io.error(waitingLine(e)),
+      queued: e => {
+        waitedFor = e.waitsFor;
+        ctx.io.error(waitingLine(e));
+      },
       starting: event => ctx.io.error(agentStartingLine(agentName(event.harness), event.installs === true)),
       steered: event => {
         joinedWaiting = event.waiting === true;
@@ -914,7 +920,7 @@ export async function followVerb(ctx: VerbContext, client: HostClient, start: Re
         // The live turn, which follow fills in as its events land: whoever waited on it reads its end off this.
         onTurn?.(t);
         if (announce) ctx.out.emit({ type: "thread", id: t.threadId, workspaceId: t.session.workspaceId, harness: t.session.harness, startedBy: t.session.startedBy }, openedThreadSaid(t.threadId, opened, t.session.cwd));
-        if (t.outcome !== "started" && t.outcome !== "held") ctx.io.error(JOINED[t.outcome](picks));
+        if (t.outcome !== "started" && t.outcome !== "held") ctx.io.error(JOINED[t.outcome](picks, waitedFor));
         if (joinedWaiting) ctx.io.error(WAITING_ON_A_PERSON);
       },
       redialed: () => {
@@ -977,9 +983,13 @@ export async function beforeSending<T>(client: HostClient, read: () => Promise<T
  * thread's id on stdout the moment the runtime names it, and nothing of the reply, which the thread's finished line
  * carries to whoever its start named. */
 export async function detachVerb(ctx: VerbContext, client: HostClient, start: Record<string, unknown>, picks: Picks = {}, opened?: (threadId: string, folder?: string) => string): Promise<void> {
-  const turn = await startDetached(client, start, "cli", e => ctx.io.error(waitingLine(e)), () => hostBack(ctx));
+  let waitedFor: string | undefined;
+  const turn = await startDetached(client, start, "cli", e => {
+    waitedFor = e.waitsFor;
+    ctx.io.error(waitingLine(e));
+  }, () => hostBack(ctx));
   if (turn.outcome === "held" && turn.session.capped !== undefined) ctx.io.error(capWaitLine(turn.session.capped));
-  else if (turn.outcome !== "started" && turn.outcome !== "held") ctx.io.error(JOINED[turn.outcome](picks));
+  else if (turn.outcome !== "started" && turn.outcome !== "held") ctx.io.error(JOINED[turn.outcome](picks, waitedFor));
   ctx.out.emit(turnView(turn), openedThreadSaid(turn.threadId, opened, turn.session.cwd));
 }
 

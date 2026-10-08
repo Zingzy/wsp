@@ -17,6 +17,7 @@ import { HOLD, leadAndBox } from "../../runtime/test/box-fixture.js";
 import { WsClient } from "../../runtime/test/ws-client.js";
 import { CLI_VERBS, runVerb, type HostClient } from "../src/verbs.js";
 import { mcpServer } from "../src/mcp.js";
+import type { ThreadRow } from "../src/verbs/workspaces-help.js";
 import { captured } from "./verbs-fixture.js";
 
 let root: string | undefined;
@@ -103,6 +104,25 @@ describe("a lead thread on this computer starting a child on a computer the pers
     expect((await rt.workspaces.list()).find(w => w.id === row.workspaceId)?.project.id).toBe(onBox.id);
     expect(starts[1]!.o.cwd).toBe("/root/lab-box");
     expect(ran.content).toEqual([{ type: "text", text: threadOpenedLine(child, "lab-box", "/root/lab-box") }]);
+  });
+
+  it("the lead's wsp threads and threads tool name the child's project and computer, which its workspaces do not hold", async () => {
+    const { starts, launch } = await lead();
+    const ran = await wsp(launch, "run", "lab-box", "--detach", `${HOLD}build it`, "--json");
+    const child = ran.json<{ threadId: string }>().threadId;
+    const env = { [HOST_TOKEN_ENV]: launch[HOST_TOKEN_ENV]!, [TURN_TOKEN_ENV]: launch[TURN_TOKEN_ENV]! };
+    const client = await asToken(env[HOST_TOKEN_ENV]);
+    expect((await client.request<{ workspaces: { project: { name: string } }[] }>("workspaces.list")).workspaces.map(w => w.project.name)).not.toContain("lab-box");
+    const listed = (await wsp(launch, "threads", "--json")).json<{ threads: ThreadRow[] }>();
+    expect(listed.threads.find(t => t.threadId === child)).toMatchObject({ projectName: "lab-box", computerName: "hetzner" });
+    expect((await wsp(launch, "threads", "lab-box", "--json")).json<{ threads: ThreadRow[] }>().threads.map(t => t.threadId)).toEqual([child]);
+    const [toClient, toServer] = InMemoryTransport.createLinkedPair();
+    await mcpServer(join(root!, "state.json"), { env, scoped: true, dial: Object.assign(async () => client, { close: async () => {} }) }).connect(toServer);
+    mcp = new Client({ name: "lead", version: "0.0.0" });
+    await mcp.connect(toClient);
+    const tool = (await mcp.callTool({ name: "threads", arguments: {} })).structuredContent as { threads: ThreadRow[] };
+    expect(tool.threads.find(t => t.threadId === child)).toMatchObject({ projectName: "lab-box", computerName: "hetzner" });
+    starts[1]!.answer("built");
   });
 
   it("a child there naming the lead's project here is refused with the road back to its lead, from the command line", async () => {

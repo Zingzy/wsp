@@ -167,8 +167,9 @@ describe("what a failed add takes back off a box, run by a real shell", () => {
     const at = placeDaemonPaths(home);
     const writes = joinedAddWrites(joinedPlace({ home, path: "/usr/bin" }, { hostUrls: [], codeFile: `${at.wsp}/join-code`, name: "box" }), placeUnit(home).path);
     const own = writes.filter(w => w.as === "own").map(w => w.path);
-    for (const path of placeOwnedPaths(home).filter(path => path !== at.wsp)) expect(own).toContain(path);
+    for (const path of placeOwnedPaths(home)) expect(own).toContain(path);
     expect(own).not.toContain(at.wsp);
+    expect(writes).toContainEqual({ path: at.wsp, as: "folder" });
     const root = joinedAddWrites(joinedPlace({ home: "/", path: "/usr/bin" }, { hostUrls: [], codeFile: "/.wsp/join-code", name: "box" }), placeUnit("/").path);
     expect(root.filter(w => w.as === "folder").map(w => w.path)).not.toContain("/");
   });
