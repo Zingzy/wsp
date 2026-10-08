@@ -49,6 +49,9 @@ import {
   BUILT_IN_LIST_CLAUSE,
   BUILT_IN_TABLE_CLAUSE,
   ANSWER_WORDS,
+  refusalLine,
+  spawnFolderRefusal,
+  SPAWN_FOLDER_FIX,
 } from "@wsp/protocol";
 import { BASE_GROUP, FLOOR_LINE, GROUP_LABEL, tableLines, totalsLine, type TableRow } from "../src/init-table.js";
 import { GUTTER } from "../src/init-layout.js";
@@ -280,7 +283,7 @@ export async function turnWords(): Promise<Record<string, unknown>> {
     picks: await pickWords(),
     noThreadTarget: await refused(() => runTarget(answering({}), undefined, "/", {}, false, {})),
     guestNamesWorkspace: await refused(() => runTarget(answering({}), undefined, "/", {}, true, {})),
-    branchHereOnly: await refused(() => runTarget(answering({ "projects.list": { projects: [] } }), "{ref}", undefined, {}, false, { branch: "b" })),
+    branchHereOnly: await refused(() => runTarget(answering({ "projects.list": { projects: [] }, "workspaces.resolve": { workspace: WORKSPACE } }), "{ref}", undefined, {}, false, { branch: "b" })),
     threadOpened: threadOpenedLine("{thread}", "{project}", "{folder}"),
     threadOpenedIn: threadOpenedLine("{thread}", undefined, "{folder}"),
     moved: threadMovedLine("{from}", "{to}", false),
@@ -498,7 +501,9 @@ export const TURN_ANSWERED: Record<string, TurnCase[]> = {
     { case: "on a branch", arguments: { project: "p-1", branch: "feat/x \u0085", message: "fix it", agent: "codex" }, replies: { ...PROJECTS, "projects.resolve": ok({ project: HERE_PROJECT }), "harnesses.list": HARNESSES, "sessions.start": startIn("/Users/me/.wsp/worktrees/p-1/feat-x-") }, pushed: { "sessions.start": TURN } },
     { case: "in a folder of the project", arguments: { project: "wsp", cwd: "/Users/me/wsp/src", message: "t", detach: true }, replies: { ...PROJECTS, "projects.resolve": ok({ project: HERE_PROJECT }), "harnesses.list": HARNESSES, "sessions.start": startIn("/Users/me/wsp/src") } },
     { case: "a relative folder of the project", arguments: { project: "wsp", cwd: "src", message: "t" }, replies: { ...PROJECTS, "projects.resolve": ok({ project: HERE_PROJECT }), "harnesses.list": HARNESSES } },
-    { case: "a branch for a box", arguments: { project: "attic-work", branch: "x", message: "t" }, replies: PROJECTS },
+    { case: "a branch for a box", arguments: { project: "attic-work", branch: "x", message: "t" }, replies: { ...PROJECTS, "workspaces.resolve": resolved() } },
+    { case: "a branch for a project on another computer", arguments: { project: "site", branch: "x", message: "t" }, replies: PROJECTS },
+    { case: "a branch for a project the thread may not use", arguments: { project: "lab-two", branch: "x", message: "t" }, replies: { ...PROJECTS, "workspaces.resolve": no(refusalLine(spawnFolderRefusal("thread-7f", "lab-two"), SPAWN_FOLDER_FIX), "usage") } },
     {
       case: "a project on another computer forks a machine named off the task",
       arguments: { project: "site", message: "fix the login page now please", detach: true },
