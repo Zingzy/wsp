@@ -23,7 +23,7 @@ import {
   TOOL_PREFIX,
   type PlaceProvisionRow,
 } from "@wsp/protocol";
-import { CATALOG_AGENTS, MCP_AGENTS, ownServerConfig, skillsDirOf } from "@wsp/catalog";
+import { CATALOG_AGENTS, MCP_AGENTS, ownServerConfig, rewrittenRel, skillsDirOf } from "@wsp/catalog";
 import { INLINE_EXEC_MS, OLD_APPEND_MARKS } from "./exec-detached.js";
 import type { SkippedPath } from "./golden-import.js";
 import type { PackFiles } from "./golden.js";
@@ -104,6 +104,48 @@ function keyTest(): string[] {
 function onceTest(once: readonly string[]): string[] {
   const patterns = once.flatMap(dest => [shellQuote(dest), `${shellQuote(dest)}/*`]);
   return ["wsp_once() {", ...(patterns.length === 0 ? [] : [`  case "$1" in (${patterns.join("|")}) return 0 ;; esac`]), "  return 1", "}"];
+}
+
+/** The folder under the home the plan names an agent's own files under, by its home-relative path, and the store
+ * elsewhere they land in instead on a computer whose threads point that agent there: Codex's `.codex` and the box's
+ * logins folder its turns' CODEX_HOME names. */
+export type StoreRoots = readonly (readonly [string, string])[];
+
+/** The folders that move, off the store each agent's threads there are pointed at, by agent id. A store that is the
+ * folder the plan already lands the agent's files in, as Claude Code's is, moves nothing, and nothing else under the
+ * home moves with it: a skill lands where the skills step put it. */
+export const storeRoots = (home: string, stores: Readonly<Record<string, string>> = {}): StoreRoots =>
+  CATALOG_AGENTS.flatMap(a => {
+    const store = stores[a.id];
+    const from = rewrittenRel(a.stateHome);
+    return store === undefined || store === `${home}/${from}` ? [] : [[from, store] as const];
+  });
+
+/** Where one home-relative path of the round lands: the folder it hangs under and the path below that, empty for the
+ * agent's own folder itself, and whether its agent's folder moved to a store. */
+function rootOf(home: string, roots: StoreRoots, rel: string): { root: string; sub: string; moved: boolean } {
+  const moved = roots.find(([from]) => rel === from || rel.startsWith(`${from}/`));
+  return moved === undefined ? { root: home, sub: rel, moved: false } : { root: moved[1], sub: rel.slice(moved[0].length + 1), moved: true };
+}
+
+/** Where one home-relative path of the round stands on that computer, absolute. */
+export const landedAt = (home: string, roots: StoreRoots, rel: string): string => {
+  const { root, sub } = rootOf(home, roots, rel);
+  return sub === "" ? root : `${root}/${sub}`;
+};
+
+/** The shell twin of rootOf, setting `root`, `sub` and `dest` for one path, and `top`, the folder under the home its
+ * agent's own copies stood in before: one spelling for every script here. */
+function destTest(roots: StoreRoots): string[] {
+  return [
+    "wsp_dest() {",
+    '  case "$1" in',
+    ...roots.map(([from, store]) => `    (${shellQuote(from)}/*) root=${shellQuote(store)}; sub=\${1#${shellQuote(from)}/}; top="$home"/${shellQuote(from)} ;;`),
+    '    (*) root=$home; sub=$1; top=$home ;;',
+    "  esac",
+    '  dest="$root/$sub"',
+    "}",
+  ];
 }
 
 /** Which of a plan's landings land once, as the scripts take them. */
@@ -204,19 +246,21 @@ export async function standingDigests(machine: Machine, home: string, paths: rea
  * the person's own file differs, unless that file is the one wsp landed last time and has not been touched since.
  * Each path prints its outcome; the ones wsp owns are written down with what travelled for them, and the run that
  * closes the job turns that list into what it left there. */
-export function landFilesScript(home: string, once: readonly string[] = []): string {
+export function landFilesScript(home: string, once: readonly string[] = [], roots: StoreRoots = []): string {
   const at = placeProvisionPaths(home);
   const q = (s: string): string => shellQuote(s);
   return [
     "set -u",
     ...onceTest(once),
+    ...destTest(roots),
     `home=${q(home)}; stage=${q(at.staging)}; ledger=${q(at.landed)}; landing=${q(at.landing)}`,
+    'canon=$(readlink -f -- "$home") || exit 1',
     'mkdir -p "$(dirname "$landing")" || exit 1',
     ': > "$landing" || exit 1',
     'cd "$stage" || exit 1',
     'find . -type f -print | while IFS= read -r p; do',
     '  rel=${p#./}',
-    '  src="$stage/$rel"; dest="$home/$rel"',
+    '  src="$stage/$rel"; wsp_dest "$rel"',
     '  s=$(sha256sum "$src" | cut -d" " -f1)',
     '  if [ ! -e "$dest" ]; then act=installed',
     // A file its agent writes for itself stands as it is from its first landing on: the agent rewrites it at every
@@ -236,6 +280,15 @@ export function landFilesScript(home: string, once: readonly string[] = []): str
     "  fi",
     '  if [ "$act" = installed ]; then',
     '    mkdir -p "$(dirname "$dest")" && cp -p "$src" "$dest" || act=failed',
+    "  fi",
+    // A path whose agent's folder moved to a store: the copy an earlier run left under the home goes once this one
+    // stands in the store, where its bytes are still the ones the list says wsp left there.
+    '  old="$home/$rel"',
+    '  if [ "$dest" != "$old" ] && [ "$act" != failed ] && [ -f "$old" ] && [ "$(readlink -f -- "$old")" = "$canon/$rel" ]; then',
+    `    was=$(wsp_rel="$rel" awk -F"${TAB}" '$1==ENVIRON["wsp_rel"] { print $3; exit }' "$ledger" 2>/dev/null)`,
+    '    if [ -n "$was" ] && [ "$(sha256sum "$old" | cut -d" " -f1)" = "$was" ] && rm -f -- "$old"; then',
+    '      d=$(dirname "$old"); while [ "$d" != "$top" ] && rmdir -- "$d" 2>/dev/null; do d=$(dirname "$d"); done',
+    "    fi",
     "  fi",
     `  printf '${LAND_MARK}${TAB}%s${TAB}%s${TAB}%s${NL}' "$act" "$s" "$rel"`,
     `  if [ "$act" != kept ] && [ "$act" != failed ] && ! wsp_once "$rel"; then printf "%s${TAB}%s${NL}" "$rel" "$s" >> "$landing"; fi`,
@@ -298,13 +351,14 @@ export function landedFilesScript(home: string): string {
  * left at those is still what it left. A round that landed nothing writes no landing, and this run then leaves the
  * list exactly as it was rather than emptying it. The tree that travelled goes with it, so nothing of the person's
  * is left lying in wsp's folder. */
-export function closeFilesScript(home: string, once: readonly string[] = []): string {
+export function closeFilesScript(home: string, once: readonly string[] = [], roots: StoreRoots = []): string {
   const at = placeProvisionPaths(home);
   const q = (s: string): string => shellQuote(s);
   return [
     "set -u",
     ...onceTest(once),
     ...keyTest(),
+    ...destTest(roots),
     `home=${q(home)}; stage=${q(at.staging)}; ledger=${q(at.landed)}; landing=${q(at.landing)}; log=${q(at.log)}`,
     // A path an older road appended to carries one marker per append and nothing swept them: a hundred and
     // seventeen stood beside one job's log on a box after two updates. The sweep is the first thing here, so a
@@ -320,7 +374,7 @@ export function closeFilesScript(home: string, once: readonly string[] = []): st
     // under that name: it goes through as it is, since no file on that computer holds those bytes alone. A
     // tombstone rides the same road and is taken out below, once it has shadowed the lines before it.
     `  if wsp_key "$rel"; then printf "%s${TAB}%s${TAB}%s${NL}" "$rel" "$from" "$at" >> "$ledger.new"; continue; fi`,
-    '  dest="$home/$rel"',
+    '  wsp_dest "$rel"',
     '  [ -f "$dest" ] || continue',
     `  printf "%s${TAB}%s${TAB}%s${NL}" "$rel" "$from" "$(sha256sum "$dest" | cut -d" " -f1)" >> "$ledger.new"`,
     'done < "$landing"',
@@ -369,12 +423,12 @@ const listOf = (paths: readonly string[]): string => (paths.length <= NAMED ? pa
 /** How a file's row reads: the name of the recipe row that carries it, where one does, and the path it lands at on
  * that computer. The rows the landing answers with and the rows a round that never landed answers with read the
  * same way. */
-const fileLabel = (label: string | undefined, home: string, dest: string): string => (label === undefined ? `${home}/${dest}` : `${label} ${home}/${dest}`);
+const fileLabel = (label: string | undefined, home: string, dest: string, roots: StoreRoots = []): string => (label === undefined ? landedAt(home, roots, dest) : `${label} ${landedAt(home, roots, dest)}`);
 
 /** One row per planned entry, in plan order, with what became of the paths under it: installed where anything
  * landed, present where every path was already the same, kept in the person's own words where their files stand
  * and nothing of theirs was touched, failed where a path could not be written. */
-export function filesRows(lands: readonly ProvisionLanding[], landed: readonly Landed[], home: string): PlaceProvisionRow[] {
+export function filesRows(lands: readonly ProvisionLanding[], landed: readonly Landed[], home: string, roots: StoreRoots = []): PlaceProvisionRow[] {
   const byOwner = new Map<string, Landed[]>();
   const loose: Landed[] = [];
   for (const l of landed) {
@@ -394,7 +448,7 @@ export function filesRows(lands: readonly ProvisionLanding[], landed: readonly L
     const outcome: PlaceProvisionRow["outcome"] =
       failed.length > 0 ? "failed" : installed.length > 0 ? "installed" : rows.length === 0 || kept.length === rows.length ? "skipped" : "present";
     const note = failed.length > 0 ? `could not be written: ${listOf(failed)}` : rows.length === 0 ? "nothing of it travelled" : notes.join("; ");
-    return { id, label: fileLabel(label, home, dest), outcome, kind: "file", ...(note !== "" ? { note } : {}) };
+    return { id, label: fileLabel(label, home, dest, roots), outcome, kind: "file", ...(note !== "" ? { note } : {}) };
   };
   return [
     ...lands.map(l => rowOf(`files/${l.dest}`, l.label, l.dest, byOwner.get(l.dest) ?? [])),
@@ -422,13 +476,14 @@ const LAND_MS = 300_000;
 /** Lands the person's agent files on the computer itself: the archive extracted into wsp's own folder there, then
  * one run that puts each file in its agent's home under the rules above, then the rows. The staging tree stays
  * until the job closes, since the servers step reads the configs that travelled out of it. */
-export async function landAgentFiles(machine: Machine, o: { home: string; tar: Buffer; lands: readonly ProvisionLanding[]; stood?: readonly string[]; say: FilesSay }): Promise<LandFilesResult> {
+export async function landAgentFiles(machine: Machine, o: { home: string; tar: Buffer; lands: readonly ProvisionLanding[]; stood?: readonly string[]; say: FilesSay; roots?: StoreRoots }): Promise<LandFilesResult> {
+  const roots = o.roots ?? [];
   const at = placeProvisionPaths(o.home);
   await machine.exec(`rm -rf ${shellQuote(at.staging)}`, { timeoutMs: INLINE_EXEC_MS });
   // Under wsp's own folder there, never the shared temporary one: on a computer somebody owns, another account
   // could be sitting in /tmp first, and what travels is the person's own configuration.
   await importInto(machine, o.tar, at.staging, { overlay: true, timeoutMs: LAND_MS, tmpDir: at.dir, onPart: p => o.say(provisionShippedLine(p)) });
-  const res = await machine.run(landFilesScript(o.home, oncePathsOf(o.lands)), { deadlineMs: LAND_MS });
+  const res = await machine.run(landFilesScript(o.home, oncePathsOf(o.lands), roots), { deadlineMs: LAND_MS });
   if (res.exitCode !== 0) throw new Error(`the agents' files did not land on ${machine.id} (exit ${res.exitCode}): ${res.stderr.slice(-300)}`);
   const walked = parseLanded(res.stdout);
   o.say(provisionLandedLine(walked.length));
@@ -437,9 +492,9 @@ export async function landAgentFiles(machine: Machine, o: { home: string; tar: B
   // that the copy there is wsp's own.
   const landed = [...walked, ...(o.stood ?? []).map(rel => ({ rel, outcome: "present" as const }))];
   return {
-    rows: filesRows(o.lands, landed, o.home),
-    owned: new Map(landed.flatMap(l => (l.outcome === "installed" || l.outcome === "present" ? [[`${o.home}/${l.rel}`, l.outcome] as const] : []))),
-    skipped: landed.filter(l => l.outcome === "kept").map(l => ({ id: ownerOf(l.rel, o.lands)?.id ?? `files/${l.rel}`, path: `${o.home}/${l.rel}`, note: "already there with other content; wsp did not write over it" })),
+    rows: filesRows(o.lands, landed, o.home, roots),
+    owned: new Map(landed.flatMap(l => (l.outcome === "installed" || l.outcome === "present" ? [[landedAt(o.home, roots, l.rel), l.outcome] as const] : []))),
+    skipped: landed.filter(l => l.outcome === "kept").map(l => ({ id: ownerOf(l.rel, o.lands)?.id ?? `files/${l.rel}`, path: landedAt(o.home, roots, l.rel), note: "already there with other content; wsp did not write over it" })),
   };
 }
 
@@ -730,13 +785,15 @@ export async function appendLanding(machine: Machine, home: string, lines: reado
  * path and what this run itself put there. A pack or a landing that throws is one failed row per planned path
  * with the reason, since the archive is the person's whole set of agent files and one row of it cannot fail
  * alone, and the round then says it put nothing there rather than anything about whose the files are. */
-export async function provisionFiles(machine: Machine, o: { home: string; lands: readonly ProvisionLanding[]; pack: PackFiles; say?: FilesSay }): Promise<LandFilesResult> {
+export async function provisionFiles(machine: Machine, o: { home: string; lands: readonly ProvisionLanding[]; pack: PackFiles; say?: FilesSay; stores?: Readonly<Record<string, string>> }): Promise<LandFilesResult> {
   // The one place the stages may go unsaid, so every step below takes a say and none of them asks whether it has one.
   const say = o.say ?? ((): void => {});
   const once = oncePathsOf(o.lands);
+  const roots = storeRoots(o.home, o.stores);
   try {
     const packed = await o.pack(async staged => {
-      const standing = await standingDigests(machine, o.home, staged.map(f => f.dest));
+      // The read hashes under the home alone, so a file whose agent's folder moved to a store always travels.
+      const standing = await standingDigests(machine, o.home, staged.filter(f => rootOf(o.home, roots, f.dest).root === o.home).map(f => f.dest));
       if (standing === undefined) return [];
       // Three digests have to agree before a file stays home: the bytes staged here, the bytes standing there, and
       // the line the list beside the job holds for that path. A line older than the bytes, or none at all, sends
@@ -745,14 +802,14 @@ export async function provisionFiles(machine: Machine, o: { home: string; lands:
       return staged.filter(f => !landsOnce(f.dest, once) && standing.at.get(f.dest) === f.digest && standing.listed.get(f.dest) === f.digest).map(f => f.dest);
     });
     say(provisionPackedLine(o.lands.length, { bytes: packed.bytes, ...(packed.files !== undefined ? { files: packed.files } : {}), ...(packed.stood !== undefined ? { stood: packed.stood.length } : {}) }));
-    const landed = await landAgentFiles(machine, { home: o.home, tar: packed.tar, lands: o.lands, ...(packed.stood !== undefined ? { stood: packed.stood } : {}), say });
+    const landed = await landAgentFiles(machine, { home: o.home, tar: packed.tar, lands: o.lands, ...(packed.stood !== undefined ? { stood: packed.stood } : {}), say, roots });
     // What the pack left out never reaches that computer, so only a row of the job can say why: the app reads rows.
     const left = packed.skipped.map((s, i): PlaceProvisionRow => ({ id: `left-out/${i}`, label: s.path, outcome: "skipped", kind: "file", note: s.note }));
     return { ...landed, rows: [...landed.rows, ...left], skipped: [...packed.skipped, ...landed.skipped] };
   } catch (e) {
     const note = (e instanceof Error ? e.message : String(e)).split("\n")[0]!;
     return {
-      rows: o.lands.map(l => ({ id: `files/${l.dest}`, label: fileLabel(l.label, o.home, l.dest), outcome: "failed" as const, kind: "file" as const, note })),
+      rows: o.lands.map(l => ({ id: `files/${l.dest}`, label: fileLabel(l.label, o.home, l.dest, roots), outcome: "failed" as const, kind: "file" as const, note })),
       owned: new Map(),
       skipped: [],
     };
@@ -766,39 +823,46 @@ export const UNLAND_MARK = "wsp-unland";
  * the ones wsp left goes, a path the person has written since stays and is named, and every line of the list for
  * those destinations goes either way, since an edited file is no longer wsp's to manage. A path that climbs out with
  * `..`, or that a link on the way would carry elsewhere, is never touched. Emptied folders under a destination go. */
-export function unlandScript(home: string, dests: readonly string[]): string {
+export function unlandScript(home: string, dests: readonly string[], roots: StoreRoots = []): string {
   const at = placeProvisionPaths(home);
   const q = (s: string): string => shellQuote(s);
   const patterns = dests.flatMap(d => [q(d), `${q(d)}/*`]);
   return [
     "set -u",
+    ...destTest(roots),
     `home=${q(home)}; ledger=${q(at.landed)}`,
     '[ -f "$ledger" ] || exit 0',
-    'canon=$(readlink -f -- "$home") || exit 1',
     `tab=$(printf "${TAB}")`,
     ': > "$ledger.new" || exit 1',
     'while IFS="$tab" read -r rel from at; do',
     `  case "$rel" in (${patterns.join("|")}) ;; (*) printf "%s${TAB}%s${TAB}%s${NL}" "$rel" "$from" "$at" >> "$ledger.new"; continue ;; esac`,
     '  case "/$rel/" in (*/../*) continue ;; esac',
-    '  dest="$home/$rel"',
+    '  wsp_dest "$rel"',
+    // A copy an earlier run left under the home that no land has moved yet goes by the same rule as the store's.
+    '  if [ ! -e "$dest" ] && [ "$dest" != "$home/$rel" ]; then root=$home; sub=$rel; dest="$home/$rel"; fi',
     '  [ -e "$dest" ] || continue',
-    '  if [ "$(readlink -f -- "$dest")" = "$canon/$rel" ] && [ -f "$dest" ] && [ "$(sha256sum "$dest" | cut -d" " -f1)" = "$at" ]; then',
+    '  if [ "$(readlink -f -- "$dest")" = "$(readlink -f -- "$root")/$sub" ] && [ -f "$dest" ] && [ "$(sha256sum "$dest" | cut -d" " -f1)" = "$at" ]; then',
     `    rm -f -- "$dest" && printf '${UNLAND_MARK}${TAB}gone${TAB}%s${NL}' "$rel"`,
     "  else",
     `    printf '${UNLAND_MARK}${TAB}kept${TAB}%s${NL}' "$rel"`,
     "  fi",
     'done < "$ledger"',
     'mv "$ledger.new" "$ledger" || exit 1',
-    ...dests.map(d => `[ "$(readlink -f -- "$home/"${q(d)} 2>/dev/null)" = "$canon/"${q(d)} ] && find "$home/"${q(d)} -depth -type d -empty -delete 2>/dev/null`),
+    ...dests.flatMap(d => {
+      const { root, sub, moved } = rootOf(home, roots, d);
+      // Never a store itself, nor the agent's own folder under the home.
+      const under: [string, string][] = sub === "" ? [] : moved ? [[root, sub], [home, d]] : [[root, sub]];
+      return under.map(([r, s]) => `[ "$(readlink -f -- ${q(`${r}/${s}`)} 2>/dev/null)" = "$(readlink -f -- ${q(r)})/"${q(s)} ] && find ${q(`${r}/${s}`)} -depth -type d -empty -delete 2>/dev/null`);
+    }),
     "exit 0",
   ].join("\n");
 }
 
 /** Takes the files wsp landed under some destinations off that computer, answering the paths that went and the
  * paths the person had written since, which stay. Nothing at all where the run did not happen. */
-export async function unlandFiles(machine: Machine, home: string, dests: readonly string[]): Promise<{ gone: string[]; kept: string[] } | undefined> {
+export async function unlandFiles(machine: Machine, home: string, dests: readonly string[], stores: Readonly<Record<string, string>> = {}): Promise<{ gone: string[]; kept: string[] } | undefined> {
   if (dests.length === 0) return { gone: [], kept: [] };
-  const res = await machine.exec(unlandScript(home, dests), { timeoutMs: LAND_MS }).catch(() => undefined);
+  const res = await machine.exec(unlandScript(home, dests, storeRoots(home, stores)), { timeoutMs: LAND_MS }).catch(() => undefined);
   if (res === undefined || res.exitCode !== 0) return undefined;
   const out = { gone: [] as string[], kept: [] as string[] };
   for (const line of res.stdout.split("\n")) {
@@ -807,12 +871,13 @@ export async function unlandFiles(machine: Machine, home: string, dests: readonl
     if (how === "gone") out.gone.push(rest.join("\t"));
     if (how === "kept") out.kept.push(rest.join("\t"));
   }
-  return out;
+  // The script lists in the file system's own order, which differs between a Mac and a Linux box.
+  return { gone: out.gone.sort(), kept: out.kept.sort() };
 }
 
 /** Writes down what wsp owns on that computer and takes the tree that travelled away again. Nothing here fails
  * the job: a computer that would not keep the list is one whose files landed all the same, and the next run reads
  * its own copies as the person's, which keeps them rather than writing over them. */
-export async function closeAgentFiles(machine: Machine, home: string, once: readonly string[] = []): Promise<void> {
-  await machine.run(closeFilesScript(home, once), { deadlineMs: LAND_MS }).catch(() => undefined);
+export async function closeAgentFiles(machine: Machine, home: string, once: readonly string[] = [], stores: Readonly<Record<string, string>> = {}): Promise<void> {
+  await machine.run(closeFilesScript(home, once, storeRoots(home, stores)), { deadlineMs: LAND_MS }).catch(() => undefined);
 }
