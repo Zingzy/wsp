@@ -49,7 +49,6 @@ import {
   recipeSummary,
   type RecipeFile,
   type RecipeView,
-  noSignInRefusal,
   SIGN_IN_LINE_REFUSAL,
   HOST_RESTART_TICKET_REFUSAL,
   HOST_NO_RESTART_LINE,
@@ -118,6 +117,7 @@ import {
 import type { DaemonChannel } from "./daemon-channel.js";
 import { NO_DEVICE_DOOR, safeEqual, threadOf, type DeviceDoor, type HeldDevice } from "./devices.js";
 import { NO_PLACE_DOOR, type PlaceDoor } from "./places.js";
+import { signInSocket } from "./sign-in-socket.js";
 import { keyFingerprint, openFrame, verifyPlaceBytes, type Seal } from "@wsp/keys";
 import { answeredStart } from "./threads/answered-start.js";
 import type { HostEditor, HostFolders, HostSsh, HostTerminalConfig, InitDoor, ProjectBundler, ProjectLander, RecipeShelf, Runtime } from "./runtime.js";
@@ -560,8 +560,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
     const channels = new Map<string, DaemonChannel>();
     /** The workspaces this socket reads this computer's own figures for, each with what stops it. */
     const watchedSys = new Map<string, () => void>();
-    /** The sign-ins this socket started or joined: the only ones it may type a code into or stop. */
-    const signIns = new Set<string>();
+    const signInOps = signInSocket(rt.agents, { open: () => ws.readyState === ws.OPEN, detach: leave => void detaches.push(leave) });
     detaches.push(() => {
       for (const ch of channels.values()) ch.close();
       channels.clear();
@@ -1927,50 +1926,17 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               send({ id: msg.id, ok: true, icon: await rt.agents.serversIcon(msg.host, msg.refresh) });
               return;
             case "agents.signIn":
-            case "servers.signIn": {
+            case "servers.signIn":
+            case "agents.signIns":
+            case "agents.signInCode":
+            case "agents.signInStop":
               // A sign-in on one of the person's computers is theirs alone, and its page and code go to the sockets
               // following it and to no other: they are what finishes that login.
               if (!ownRoad()) {
                 send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
                 return;
               }
-              let queued: Record<string, unknown>[] | null = [];
-              const emit = (event: Record<string, unknown>): void => {
-                if (queued !== null) queued.push(event);
-                else if (ws.readyState === ws.OPEN) send(event);
-              };
-              const ask = msg.op === "servers.signIn" ? { agent: msg.agent, server: msg.name } : { agent: msg.agent, ...(msg.terminal === true ? { terminal: true } : {}) };
-              const { signInId, leave } = await rt.agents.signIn(msg.target, ask, emit, origin);
-              if (signIns.has(signInId)) {
-                leave();
-                send({ id: msg.id, ok: true, signInId });
-                return;
-              }
-              signIns.add(signInId);
-              detaches.push(leave);
-              if (ws.readyState !== ws.OPEN) {
-                leave();
-                return;
-              }
-              send({ id: msg.id, ok: true, signInId });
-              const held = queued;
-              queued = null;
-              for (const event of held) send(event);
-              return;
-            }
-            case "agents.signInCode":
-            case "agents.signInStop":
-              if (!ownRoad()) {
-                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
-                return;
-              }
-              if (!signIns.has(msg.signInId)) {
-                send({ id: msg.id, ok: false, error: noSignInRefusal, kind: "usage" });
-                return;
-              }
-              if (msg.op === "agents.signInCode") await rt.agents.signInCode(msg.signInId, msg.code);
-              else rt.agents.signInStop(msg.signInId);
-              send({ id: msg.id, ok: true });
+              await signInOps(msg, send, origin);
               return;
             case "agents.signInLine":
               // It carries paths and commands only, and only the host's own command line runs one.

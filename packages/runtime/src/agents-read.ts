@@ -4,7 +4,7 @@
 // reading the agents, skills and servers off it is the host's, since the
 // catalog's readers live there. A read never wakes a machine.
 import { randomBytes } from "node:crypto";
-import { AgentsReport, GITHUB_CLI, HERE_PLACE_ID, installingFirstLine, refusal, toolNotInstalledFix, toolNotInstalledLine, lastLine, type McpServerSpec as LaunchServer, type PlaceProvisionRow, ptyBareOn, type AgentRow, type AgentSetupSet, type AgentSetupView, THIS_COMPUTER, noSuchAgentsProjectRefusal, sharedAgentsProjectRefusal, ServerToolsAnswer, SignInLine, SkillAdded, SkillHit, SkillPreview, isJoinedComputer, nappingAgentsRefusal, nappingServersRefusal, nappingSignInRefusal, nappingSkillsRefusal, nappingToolsRefusal, noSignInRefusal, noSuchPlaceRefusal, providerAgentsRefusal, type AgentSignInState, type AgentsProject, type AgentsSignInEvent, type AgentsTarget, type DaemonFrame, type PageReach, type ServerAdd, type ServerAsk, type WorkspacePhase, withoutControlChars } from "@wsp/protocol";
+import { AgentsReport, GITHUB_CLI, HERE_PLACE_ID, installingFirstLine, refusal, toolNotInstalledFix, toolNotInstalledLine, lastLine, type McpServerSpec as LaunchServer, type PlaceProvisionRow, ptyBareOn, type AgentRow, type AgentSetupSet, type AgentSetupView, THIS_COMPUTER, noSuchAgentsProjectRefusal, sharedAgentsProjectRefusal, ServerToolsAnswer, SignInLine, SkillAdded, SkillHit, SkillPreview, isJoinedComputer, nappingAgentsRefusal, nappingServersRefusal, nappingSignInRefusal, nappingSkillsRefusal, nappingToolsRefusal, noSignInRefusal, noSuchPlaceRefusal, providerAgentsRefusal, type AgentSignInState, type AgentsProject, type AgentsSignInEvent, type AgentsTarget, type DaemonFrame, type PageReach, type ServerAdd, type ServerAsk, type WorkspacePhase, withoutControlChars, SIGN_IN_ENDED_KEPT_MS, type AgentsSignInRun, type McpScope } from "@wsp/protocol";
 import type { Machine } from "@wsp/engine";
 import { catalogEntry } from "@wsp/catalog";
 import type { DaemonChannel } from "./daemon-channel.js";
@@ -82,6 +82,9 @@ export interface SignInAsk {
   terminal?: boolean;
   /** The caller put the login's tool on that computer itself, as a setup's own step does: nothing goes on first. */
   toolThere?: boolean;
+  /** The row a server's sign-in was started from, which the list of sign-ins hands back. */
+  scope?: McpScope;
+  project?: string;
 }
 
 /** What one watched sign-in is handed: the link its pty runs over, where its steps go, where it hands the writer a
@@ -219,6 +222,8 @@ export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): {
   tools(target: AgentsTarget, ask: { agent: string; name: string; refresh?: boolean }, origin?: Caller): Promise<ServerToolsAnswer>;
   forget(workspaceId: string): void;
   signIn(target: AgentsTarget, ask: SignInAsk, emit: (event: AgentsSignInEvent) => void, origin?: Caller): Promise<{ signInId: string; leave(): void }>;
+  signIns(): AgentsSignInRun[];
+  signInFollow(signInId: string, emit: (event: AgentsSignInEvent) => void): { signInId: string; leave(): void };
   signInCode(signInId: string, code: string): Promise<void>;
   signInStop(signInId: string): void;
   signInLine(target: AgentsTarget, ask: SignInAsk, origin?: Caller): Promise<SignInLine>;
@@ -264,15 +269,31 @@ export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): {
     if (o.skills === undefined) throw new Error(NO_AGENTS_READER);
     return o.skills;
   };
-  /** Each sign-in running, by its id: its code writer, who follows its steps, the last step for one who joins, and
-   * its stop. */
+  /** Each sign-in running, by its id: what it signs in where, its code writer, who follows its steps, the last step
+   * for one who joins, and its stop. */
   interface Running {
+    readonly target: AgentsTarget;
+    readonly ask: SignInAsk;
     type?: (code: string) => Promise<void>;
     readonly followers: Set<(event: AgentsSignInEvent) => void>;
     last?: AgentsSignInEvent;
     stop(): void;
   }
   const running = new Map<string, Running>();
+  /** Each sign-in that ended in the last SIGN_IN_ENDED_KEPT_MS, as listed, with when it ended. */
+  const ended = new Map<string, { run: AgentsSignInRun; at: number }>();
+  const listed = (signInId: string, run: Pick<Running, "target" | "ask" | "last">): AgentsSignInRun => ({
+    signInId,
+    target: run.target,
+    agent: run.ask.agent,
+    ...(run.ask.server !== undefined ? { server: run.ask.server } : {}),
+    ...(run.ask.scope !== undefined ? { scope: run.ask.scope } : {}),
+    ...(run.ask.project !== undefined ? { project: run.ask.project } : {}),
+    ...(run.last !== undefined ? { last: run.last } : {}),
+  });
+  const pruneEnded = (): void => {
+    for (const [signInId, gone] of ended) if (o.now() - gone.at > SIGN_IN_ENDED_KEPT_MS) ended.delete(signInId);
+  };
   /** The one sign-in of an agent, or of one server, on a target, by that pair: a second start joins it. */
   const starting = new Map<string, Promise<{ signInId: string; run: Running }>>();
   const keyOf = (target: AgentsTarget, ask: SignInAsk): string => JSON.stringify([target, ask.agent, ask.server ?? null, ask.terminal === true]);
@@ -283,9 +304,8 @@ export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): {
     }
     return {
       signInId,
-      leave: () => {
-        if (run.followers.delete(emit) && run.followers.size === 0) run.stop();
-      },
+      // A view closing is no answer to the sign-in: the run goes on to its cap, and a later start joins it.
+      leave: () => void run.followers.delete(emit),
     };
   };
   /** Where a skill or a server there is read or written; a napping workspace is never woken for one. */
@@ -434,6 +454,8 @@ export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): {
         let settle: () => void = () => {};
         const stopped = new Promise<void>(r => (settle = r));
         const run: Running = {
+          target,
+          ask,
           followers: new Set([emit]),
           stop: () => {
             if (starting.get(key) === begun) starting.delete(key);
@@ -468,6 +490,8 @@ export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): {
           .finally(async () => {
             forward?.close();
             running.delete(signInId);
+            pruneEnded();
+            ended.set(signInId, { run: { ...listed(signInId, run), ended: true }, at: o.now() });
             if (starting.get(key) === begun) starting.delete(key);
             channel.close();
             log(`sign-in ${signInId} ended: ${what}: ${stoppedBy ? "stopped" : (run.last?.state ?? "failed")}`);
@@ -493,6 +517,15 @@ export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): {
         if (starting.get(key) === begun) starting.delete(key);
         throw e;
       }
+    },
+    signIns() {
+      pruneEnded();
+      return [...[...running].map(([signInId, run]) => listed(signInId, run)), ...[...ended.values()].map(gone => gone.run)];
+    },
+    signInFollow(signInId, emit) {
+      const run = running.get(signInId);
+      if (run === undefined) throw usage(noSignInRefusal);
+      return follow(signInId, run, emit);
     },
     async signInCode(signInId, code) {
       const type = running.get(signInId)?.type;

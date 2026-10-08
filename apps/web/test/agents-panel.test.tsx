@@ -198,7 +198,7 @@ describe("the tool servers and the skills", () => {
   it("lists the wsp server every launch hands over as one row for each agent, saying every thread gets it, never checked and with no act", () => {
     const launch = (agent: string): AgentsReport["servers"][number] => ({ agent, name: "wsp", scope: "user", launch: true, transport: { kind: "stdio", line: "wsp mcp" }, envNames: [], auth: "open", enabled: true });
     const report: AgentsReport = { ...AGENTS_REPORT, servers: [launch("claude"), launch("codex"), ...AGENTS_REPORT.servers.filter(s => s.name !== "wsp")] };
-    for (const where of ["box", "box-task", "fork"] as const) {
+    for (const where of ["box", "fork"] as const) {
       const tools = fakeTools();
       drawPanel({ report, ctx: { where, computer: "spoo", tools, ...(where === "fork" ? { editImage: () => {} } : {}) } });
       tab("Tool servers");
@@ -598,18 +598,6 @@ describe("the states", () => {
     expect(add.textContent).toBe("Edit image");
     fireEvent.click(add);
     expect(editImage).toHaveBeenCalledTimes(2);
-  });
-
-  it("shows a task on a box no act of its own: states in place of steps, no Install, and Add held for that box's page", () => {
-    drawPanel({ ctx: { where: "box-task", computer: "spoo", typeInTerminal: () => {} } });
-    expect(stateOf("codex")).toEqual(["Needs sign-in", "waiting"]);
-    expect(slotOf("pi")).toEqual([]);
-    openRow("claude");
-    expect(headActs()).toEqual([]);
-    back();
-    tab("Tool servers");
-    expect(panel().querySelectorAll("[data-settings-card] [data-settings-control] [data-k^=act-]")).toHaveLength(0);
-    expect(panel().querySelector("[data-k=kind-add]")?.closest("[title]")?.getAttribute("title")).toBe("on spoo's page");
   });
 });
 

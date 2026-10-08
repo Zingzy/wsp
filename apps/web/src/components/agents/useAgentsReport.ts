@@ -7,7 +7,7 @@
 // and every panel showing one target draws one read. The host saying the
 // agents there changed reads it again.
 import { useCallback, useEffect, useState } from "react";
-import type { AgentsReport, AgentsTarget } from "@wsp/protocol";
+import { isLocalWorkspace, placeOf, type AgentsReport, type AgentsTarget, type PlaceView, type WorkspaceView } from "@wsp/protocol";
 import { forgetHeld, heldValue, useHeld } from "../../protocol/held.js";
 import { useStore } from "../../protocol/store.js";
 import { AGENTS_LIST_WORDS } from "./agentsRows.js";
@@ -22,6 +22,16 @@ export const keptAgentsReport = (target: AgentsTarget): AgentsReport | undefined
 
 /** Forgets every report this window kept, for a test that starts from a first window. */
 export const forgetAgentsReports = (): void => forgetHeld(KEY);
+
+/** What a thread's agents, skills and servers are read off: a thread on a box reads that box for its project, the
+ * report the box's page and its acts share, and any other thread reads its own workspace. */
+export function threadAgentsTarget(workspace: WorkspaceView, places: readonly PlaceView[]): AgentsTarget {
+  const place = placeOf(places, workspace);
+  return !isLocalWorkspace(workspace) && place?.kind === "computer" ? { placeId: place.id, project: workspace.project.id } : { workspaceId: workspace.id };
+}
+
+/** The host names a computer that changed by its id alone, which is news to a read of one project there too. */
+const sameComputer = (changed: AgentsTarget, read: AgentsTarget): boolean => "placeId" in changed && "placeId" in read && changed.placeId === read.placeId;
 
 interface ReportState {
   readonly key: string | null;
@@ -45,7 +55,7 @@ export function useAgentsReport(target: AgentsTarget | null): ReportState & { re
     if (key === null || api?.subscribe === undefined) return;
     return api.subscribe(event => {
       if (event.type !== "agents.changed") return;
-      if (event.target === undefined || JSON.stringify(event.target) === key) refresh();
+      if (event.target === undefined || JSON.stringify(event.target) === key || sameComputer(event.target, JSON.parse(key) as AgentsTarget)) refresh();
     });
   }, [api, key, refresh]);
   const shown: ReportState = { key, report: held.value ?? null, reading: held.reading, error: held.error?.message ?? null, readAt: held.answeredAt ?? null };

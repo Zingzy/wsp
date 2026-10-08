@@ -271,16 +271,10 @@ describe("Add a skill", () => {
     expect(headAct("install")).toBeNull();
   });
 
-  it("holds Add where the client carries no skills road, and a task on a box holds it for that box's page", () => {
+  it("holds Add where the client carries no skills road", () => {
     useStore.setState({ api: {} as unknown as Api });
     render(<List />);
     tab("Skills");
     expect(add().disabled).toBe(true);
-    cleanup();
-    host();
-    render(<List ctx={{ where: "box-task", computer: "spoo" }} />);
-    tab("Skills");
-    expect(add().disabled).toBe(true);
-    expect(add().closest("[title]")?.getAttribute("title")).toBe("on spoo's page");
   });
 });
