@@ -25,7 +25,7 @@ import { absenceOf } from "../../settings/places.js";
 import { threadWalk } from "../../shell/shellCommands.js";
 import { searchSidebarThreadsByTitle } from "../../sidebar/Sidebar.logic.js";
 import { currentWorkspaceId } from "../../adapt/workspaces.js";
-import { inProjectOrder, threadTree, workspaceOf } from "../../sidebar/threadTree.js";
+import { threadTree, workspaceOf } from "../../sidebar/threadTree.js";
 import { computerName, placeNames } from "../../sidebar/workspaceRows.js";
 import { NEW_WORKSPACE, PROJECT_WORDS, SWITCHER_WORDS } from "../../sidebar/words.js";
 import { RowComputer } from "../chat/ComposerCheckoutRow.js";
@@ -66,9 +66,10 @@ export interface PaletteItemsInput {
   /** The threads whose messages the host found the query in, for that query. */
   readonly messageHits: ReadonlyArray<SessionSearchHit>;
   readonly canCreate: boolean;
-  /** Every project this host holds, in the person's order, which the page New thread picks from lists. */
+  /** Every project this host holds, which the page New thread picks from lists. */
   readonly recorded: readonly ProjectView[];
-  readonly projectOrder: readonly string[];
+  /** The same projects in the order New thread offers them. */
+  readonly picks: readonly ProjectView[];
   /** Whether New thread asks for the project every time, so its row opens the page rather than leaving. */
   readonly asks: boolean;
   readonly handlers: PaletteHandlers;
@@ -140,11 +141,11 @@ function projectWhere(project: ProjectView, places: readonly PlaceView[], named:
   return <Facts parts={[at, project.path]} className="overflow-hidden" />;
 }
 
-/** The page New thread picks a project from: every project in the person's order, the first nine on a pick key. */
+/** The page New thread picks a project from: every project in pick order, the first nine on a pick key. */
 function newThreadPage(input: PaletteItemsInput): CommandPaletteSubmenuItem {
   const named = placeNames(input.places);
   const keyed = pickKeysReach();
-  const items = inProjectOrder(input.recorded, project => project.id, input.projectOrder).map((project, index): CommandPaletteActionItem => ({
+  const items = input.picks.map((project, index): CommandPaletteActionItem => ({
     kind: "action",
     value: `project:${project.id}`,
     searchTerms: [project.name, named.get(project.computer) ?? "", project.path],

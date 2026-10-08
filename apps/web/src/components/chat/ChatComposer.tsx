@@ -81,7 +81,6 @@ import type { ConnStatus } from "../../protocol/client";
 import { hostAsleep } from "../../boot";
 import { projectHomeKey, useAbsentComputer, useHarnessCatalogs, useStore, useWorkspace, useWorkspaceState } from "../../protocol/store";
 import { useComputerName } from "../../sidebar/workspaceRows";
-import { onComposerFocusRequest } from "../../shell/shellRequests";
 import { useThreadFolder, useThreadStart } from "../../files/root";
 import { useDaemonWire } from "../../files/wire";
 import { DaemonOpError, fsFiles, gitPrList } from "../../terminal/daemon-fs";
@@ -111,6 +110,7 @@ import { useTypeToFocus } from "./composerTypeToFocus";
 import { useComposerModesStore } from "./composerModesStore";
 import { nextPastedTextName, pastesAsFile } from "./pastedText";
 import { buildComposerPromptHistoryEntries, stepComposerPromptHistory, type ComposerPromptHistoryPosition } from "./composerPromptHistory";
+import { useComposerFocusRequest } from "./composerFocus";
 import { EMPTY_DRAFT, newId, useComposerDraft, useComposerDraftStore, useComposerQueue, useComposerQueueHeld, type QueuedMessage } from "./composerDraftStore";
 import { BarRule, ComposerAccessPicker, ComposerOptionPickers, useAccessPick, useComposerPicks, type AccessTarget } from "./ComposerOptionPickers";
 import { useComposerOptionsStore } from "./composerOptionsStore";
@@ -254,7 +254,7 @@ export function ChatComposer({
   // The message a send during a turn put at the head while its steer or its stop is out.
   const [next, setNext] = useState<string | null>(null);
   const draft = useComposerDraft(workspaceId);
-  const { threadKey, named } = thread;
+  const { threadKey, named, handed } = thread;
   const queue = useComposerQueue(threadKey);
   const held = useComposerQueueHeld(threadKey);
   const nextStart = useThreadStart(workspaceId);
@@ -277,6 +277,15 @@ export function ChatComposer({
   const release = useComposerDraftStore(s => s.release);
   const rekeyQueue = useComposerDraftStore(s => s.rekeyQueue);
   const rekeyModes = useComposerModesStore(s => s.rekey);
+  // The view's key moves onto the thread at its hold, before its start: what waited under the old key goes with it,
+  // still held until that start.
+  useEffect(() => {
+    if (handed === null || handed.key === handed.thread) return;
+    const wasHeld = useComposerDraftStore.getState().held[handed.key] === true;
+    rekeyQueue(handed.key, handed.thread);
+    rekeyModes(handed.key, handed.thread);
+    if (wasHeld) hold(handed.thread);
+  }, [handed, hold, rekeyModes, rekeyQueue]);
   useEffect(() => {
     if (named === null) return;
     if (named.key !== named.thread) {
@@ -462,7 +471,7 @@ export function ChatComposer({
     if (thread.fresh) editorRef.current?.focus();
   }, [thread.fresh]);
 
-  useEffect(() => onComposerFocusRequest(workspaceId, () => editorRef.current?.focus()), [workspaceId]);
+  useComposerFocusRequest(workspaceId, editorRef);
 
   const onChange = useCallback((value: string, cursor: number) => setDraft(workspaceId, { prompt: value, cursor }), [setDraft, workspaceId]);
 

@@ -7,6 +7,8 @@ import type { SessionView } from "@wsp/protocol";
 import type { Api, ProtocolEvent } from "../protocol/client";
 import { useStore } from "../protocol/store";
 import { useRightPanelStore } from "../rightPanelStore";
+import { useComposerDraftStore } from "../components/chat/composerDraftStore";
+import { MountedComposer } from "../components/chat/testing";
 import { SlateSurface } from "./SlateSurface";
 import { useSlateStore } from "./store";
 import { slate } from "./testing";
@@ -69,6 +71,7 @@ const event = (e: Record<string, unknown>) => act(() => useStore.getState().appl
 beforeEach(() => {
   useSlateStore.setState({ byThread: {}, asking: {}, seen: {}, lastTurn: {}, linking: {} });
   useRightPanelStore.setState({ byWorkspaceId: {} });
+  useComposerDraftStore.setState({ drafts: {}, queues: {} });
 });
 afterEach(cleanup);
 
@@ -84,6 +87,34 @@ describe("the Slate tab", () => {
     render(<SlateSurface />);
     expect(await screen.findByText("Nothing here yet")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Ask for one" })).toBeTruthy();
+  });
+
+  it("Ask for one leaves its words in the composer beside it, focused once they have rendered", async () => {
+    select(host([null]), "t1");
+    render(
+      <>
+        <SlateSurface />
+        <MountedComposer workspaceId="ws" />
+      </>,
+    );
+    await act(async () => fireEvent.click(await screen.findByRole("button", { name: "Ask for one" })));
+    expect(useComposerDraftStore.getState().drafts["ws"]?.prompt).toBe("Build a slate for this thread that shows ");
+    expect(screen.getByTestId("composer-editor").textContent).toBe("Build a slate for this thread that shows ");
+    expect(document.activeElement).toBe(screen.getByTestId("composer-editor"));
+  });
+
+  it("a press that fills leaves its words in the composer beside it", async () => {
+    const doc = slate({ root: "fill", pieces: { fill: { type: "button", props: { label: "Draft it" }, on: { press: [{ do: "fill", text: "Look at this" }] } } } });
+    const row: SessionView = { ...ROW, id: "s2", threadId: "t2" };
+    useStore.setState({ api: { slates: host([record({ threadId: "t2", document: doc })]), subscribe: () => () => {} } as unknown as Api, selectedId: "ws", selectedThreadId: "t2", sessions: { ws: [row] } });
+    render(
+      <>
+        <SlateSurface />
+        <MountedComposer workspaceId="ws" />
+      </>,
+    );
+    await act(async () => fireEvent.click(await screen.findByRole("button", { name: "Draft it" })));
+    expect(useComposerDraftStore.getState().drafts["ws"]?.prompt).toBe("Look at this\n");
   });
 
   it("says a slate was cleared, and offers Undo while there is one", async () => {

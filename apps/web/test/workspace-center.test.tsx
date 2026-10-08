@@ -20,6 +20,7 @@ import { clearNotices } from "./notice-text.js";
 import { press, typeInto } from "./composer-harness.js";
 import { TABLE_CATALOG, whenAgentsAnswered } from "./agents.js";
 import { useComposerOptionsStore } from "../src/components/chat/composerOptionsStore.js";
+import { useComposerModesStore } from "../src/components/chat/composerModesStore.js";
 
 const WS = "ws_center";
 const workspace: WorkspaceView = { id: WS, name: "api", machineId: "m_api", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, phase: "running", golden: "snap_g", createdAt: "2026-09-01T00:00:00Z" };
@@ -175,6 +176,49 @@ describe("workspace creation view", () => {
     expect(useComposerDraftStore.getState().queues).toEqual({});
   });
 
+  it("the new thread's tile is selected from the moment its row is held, before its agent starts, and a click on it keeps the view", async () => {
+    let finish!: (w: WorkspaceView) => void;
+    const api = fakeApi([workspace]);
+    // The chat hears session.held off the bus, so the bus keeps its listeners.
+    const listeners = new Set<(e: EventUnion) => void>();
+    api.subscribe = fn => { listeners.add(fn as (e: EventUnion) => void); return () => void listeners.delete(fn as (e: EventUnion) => void); };
+    const bus = (e: EventUnion) => act(() => { for (const fn of [...listeners]) fn(e); });
+    let requestId: string | undefined;
+    const row = { id: "s1", workspaceId: "ws_beta", harness: "claude", status: "running" as const, threadId: "th_1", prompt: "yo", startedAt: Date.now() };
+    let held = false;
+    api.createWorkspace = () => new Promise<WorkspaceView>(resolve => { finish = resolve; });
+    api.startSession = async o => { requestId = o.requestId; return { id: "s1", workspaceId: o.workspaceId, harness: "claude", status: "running" }; };
+    api.listSessions = async id => (held && id === "ws_beta" ? [row] : []);
+    api.listHarnesses = async () => [TABLE_CATALOG];
+    useStore.getState().bind(api);
+    await whenAgentsAnswered();
+    render(<Shell />);
+    await screen.findByRole("heading", { level: 1 });
+    void useStore.getState().createWorkspace("pr_1", "beta");
+    const view = await screen.findByTestId("workspace-creation");
+    const editor = within(view).getByTestId("composer-editor");
+    await typeInto(editor, "yo");
+    await press(editor, "Enter");
+    const created: WorkspaceView = { ...workspace, id: "ws_beta", name: "beta" };
+    bus({ type: "workspace.created", workspace: created });
+    await act(async () => { finish(created); });
+    await waitFor(() => expect(requestId).toBeDefined());
+
+    held = true;
+    bus({ type: "session.held", workspaceId: "ws_beta", threadId: "th_1", requestId: requestId! });
+    bus({ type: "session.starting", workspaceId: "ws_beta", threadId: "th_1", harness: "claude", requestId: requestId! });
+    const activeTiles = () => [...document.querySelectorAll<HTMLElement>("[data-slot=sidebar] [data-sidebar-row][data-active=true]")].map(tile => tile.dataset["rowId"]);
+    await waitFor(() => expect(document.querySelector("[data-row-id='thread:th_1']")).not.toBeNull());
+    await waitFor(() => expect(activeTiles()).toEqual(["thread:th_1"]));
+
+    fireEvent.click(document.querySelector<HTMLElement>("[data-row-id='thread:th_1']")!);
+    await act(async () => {});
+    expect(useStore.getState()).toMatchObject({ selectedId: "ws_beta", selectedThreadId: "th_1" });
+    expect(activeTiles()).toEqual(["thread:th_1"]);
+    expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
+    expect(document.querySelector("[data-chat-view]")!.textContent).toContain("yo");
+  });
+
   it("with nothing typed the landed workspace keeps the finished setup as its first content and the composer at the foot, until the person leaves it", async () => {
     let finish!: (w: WorkspaceView) => void;
     const api = fakeApi([workspace]);
@@ -285,5 +329,75 @@ describe("workspace creation view", () => {
     expect(useComposerDraftStore.getState().drafts[key]).toBeUndefined();
     expect(useComposerOptionsStore.getState().byWorkspaceId[key]).toBeUndefined();
     expect((await screen.findByRole("heading", { level: 1 })).textContent).toContain("the-project");
+  });
+});
+
+describe("a new thread's first send", () => {
+  const FAST_CATALOG = { ...TABLE_CATALOG, models: [{ value: "opus", label: "Opus", isDefault: true, fast: true }] };
+
+  /** The Shell on one workspace with no thread, a bus that keeps its listeners, and every start it was asked for. */
+  async function onEmptyWorkspace() {
+    const api = fakeApi([workspace]);
+    const listeners = new Set<(e: EventUnion) => void>();
+    api.subscribe = fn => { listeners.add(fn as (e: EventUnion) => void); return () => void listeners.delete(fn as (e: EventUnion) => void); };
+    const bus = (e: EventUnion) => act(() => { for (const fn of [...listeners]) fn(e); });
+    const starts: Array<{ prompt: string; requestId?: string; fast?: boolean }> = [];
+    api.startSession = async o => { starts.push({ prompt: o.prompt, ...(o.requestId === undefined ? {} : { requestId: o.requestId }), ...(o.fast === undefined ? {} : { fast: o.fast }) }); return { id: `s${starts.length}`, workspaceId: o.workspaceId, harness: "claude", status: "running" }; };
+    api.listHarnesses = async () => [FAST_CATALOG];
+    useStore.getState().bind(api);
+    await whenAgentsAnswered();
+    render(<Shell />);
+    await screen.findByRole("heading", { level: 1 });
+    return { bus, starts };
+  }
+
+  beforeEach(() => {
+    useComposerModesStore.setState({ fast: {} });
+    useStore.setState({ selectedThreadId: null });
+  });
+
+  it("hands its Fast pick and its queue to the thread once the host holds it, so the next New thread starts with neither", async () => {
+    const { bus, starts } = await onEmptyWorkspace();
+    act(() => useComposerModesStore.getState().setFast(WS, true));
+    const editor = () => screen.getByTestId("composer-editor");
+    await typeInto(editor(), "alpha");
+    await press(editor(), "Enter");
+    await waitFor(() => expect(starts.map(s => s.prompt)).toEqual(["alpha"]));
+    expect(starts[0]!.fast).toBe(true);
+    const requestId = starts[0]!.requestId!;
+    const t = { workspaceId: WS, sessionId: "sess_1", turnId: "turn_1", threadId: "th_1" };
+    bus({ type: "session.held", workspaceId: WS, threadId: "th_1", requestId });
+    bus({ type: "session.start", ...t, at: Date.now(), prompt: "alpha", requestId });
+    bus({ type: "session.done", ...t, at: Date.now(), result: { status: "completed", durationMs: 10, costUsd: 0 } });
+    bus({ type: "session.end", ...t, at: Date.now(), exitCode: 0, sawResult: true });
+    expect(useComposerModesStore.getState().fast).toEqual({ th_1: true });
+    expect(useComposerDraftStore.getState().held).toEqual({});
+
+    act(() => useStore.getState().newThread(WS));
+    await waitFor(() => expect(screen.getByRole("heading", { level: 1 })).toBeDefined());
+    await typeInto(editor(), "beta");
+    await press(editor(), "Enter");
+    await waitFor(() => expect(starts.map(s => s.prompt)).toEqual(["alpha", "beta"]));
+    expect(starts[1]!.fast).toBeUndefined();
+  });
+
+  it("a message queued between the send and the host's hold stays in view and goes with the thread", async () => {
+    const { bus, starts } = await onEmptyWorkspace();
+    const editor = () => screen.getByTestId("composer-editor");
+    await typeInto(editor(), "alpha");
+    await press(editor(), "Enter");
+    await waitFor(() => expect(starts).toHaveLength(1));
+    await typeInto(editor(), "and then this");
+    await press(editor(), "Enter");
+    const queued = () => screen.getByRole("list", { name: "Queued messages" }).textContent;
+    expect(queued()).toContain("and then this");
+    bus({ type: "session.held", workspaceId: WS, threadId: "th_1", requestId: starts[0]!.requestId! });
+    await waitFor(() => expect(useStore.getState().selectedThreadId).toBe("th_1"));
+    expect(queued()).toContain("and then this");
+    expect(Object.keys(useComposerDraftStore.getState().queues)).toEqual(["th_1"]);
+    expect(useComposerDraftStore.getState().held).toEqual({ th_1: true });
+    act(() => useStore.getState().newThread(WS));
+    await waitFor(() => expect(screen.getByRole("heading", { level: 1 })).toBeDefined());
+    expect(screen.queryByRole("list", { name: "Queued messages" })).toBeNull();
   });
 });

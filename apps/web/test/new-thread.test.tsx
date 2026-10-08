@@ -360,6 +360,68 @@ describe("New thread from the palette", () => {
   });
 });
 
+describe("the projects New thread picks from", () => {
+  const BOAT = project("pr_boat", "wsp-boat", "here", "https://github.com/dev/wsp-boat.git");
+  const HETZNER = project("pr_hetzner", "wsp-hertzner", "here", "https://github.com/dev/wsp-hertzner.git");
+  const now = Date.now();
+  const on = (p: ProjectView): WorkspaceView => ({ id: `ws_${p.id}`, name: p.name, machineId: "local", project: { id: p.id, name: p.name, path: p.path, computer: "here" }, phase: "running", golden: "", createdAt: "2026-09-29T00:00:00Z" });
+  const ran = (p: ProjectView, minutesAgo: number) => [{ id: `s_${p.id}`, workspaceId: `ws_${p.id}`, harness: "claude", status: "completed" as const, threadId: `th_${p.id}`, prompt: "yo", startedAt: now - minutesAgo * 60_000 }];
+
+  // The host lists projects by when it recorded them, and the sidebar was dragged before wsp-hertzner was added.
+  async function inHetznerThread() {
+    await mount([WSP, SPOO, BOAT, HETZNER], { ...ASK, projectOrder: [WSP.id, SPOO.id, BOAT.id] });
+    act(() => useStore.setState({ workspaces: [on(BOAT), on(SPOO), on(HETZNER)], sessions: { [`ws_${BOAT.id}`]: ran(BOAT, 5), [`ws_${SPOO.id}`]: ran(SPOO, 30), [`ws_${HETZNER.id}`]: ran(HETZNER, 90) } }));
+    act(() => useStore.getState().select(`ws_${HETZNER.id}`, `th_${HETZNER.id}`));
+  }
+
+  it("the palette's page lists the open thread's project first, then by each project's newest thread", async () => {
+    await inHetznerThread();
+    cmdT();
+    await waitFor(() => expect(projectRows().map(rowTitle)).toEqual(["wsp-hertzner", "wsp-boat", "py_spoo_url", "wsp"]));
+  });
+
+  it("the heading's picker lists the page's project first, then by each project's newest thread, and the sidebar keeps the dragged order", async () => {
+    await inHetznerThread();
+    act(() => useStore.getState().openProjectHome(WSP.id));
+    fireEvent.click(await screen.findByRole("button", { name: "Project: wsp" }));
+    const menu = await screen.findByRole("menu");
+    expect(within(menu).getAllByRole("menuitemradio").map(item => item.textContent)).toEqual(["wsp", "wsp-boat", "py_spoo_url", "wsp-hertzner"]);
+    fireEvent.keyDown(menu, { key: "Escape" });
+    fireEvent.click(document.querySelector<HTMLButtonElement>("[data-k=project-switcher]")!);
+    const switcher = document.querySelector<HTMLElement>("[data-project-switcher-menu]")!;
+    expect(within(switcher).getAllByRole("option").slice(1).map(option => option.textContent)).toEqual(["wsp", "py_spoo_url", "wsp-boat", "wsp-hertzner"]);
+  });
+
+  it("holds its order while open: a turn starting in another project moves no row, so the digit opens the project shown, and a project added meanwhile joins at the end", async () => {
+    vi.spyOn(navigator, "platform", "get").mockReturnValue("MacIntel");
+    asDesktopShell();
+    await inHetznerThread();
+    cmdT();
+    await waitFor(() => expect(projectRows().map(rowTitle)).toEqual(["wsp-hertzner", "wsp-boat", "py_spoo_url", "wsp"]));
+    const LATE = project("pr_late", "late", "here", "https://github.com/dev/late.git");
+    act(() => useStore.setState(s => ({ sessions: { ...s.sessions, [`ws_${WSP.id}`]: ran(WSP, 0) }, workspaces: [...s.workspaces, on(WSP)], projects: [...s.projects, LATE] })));
+    await waitFor(() => expect(projectRows().map(rowTitle)).toEqual(["wsp-hertzner", "wsp-boat", "py_spoo_url", "wsp", "late"]));
+    modDigit(2);
+    await waitFor(() => expect(palette()).toBeNull());
+    expect(useStore.getState().projectHome).toBe(BOAT.id);
+    cmdT();
+    await waitFor(() => expect(projectRows().map(rowTitle)).toEqual(["wsp-boat", "wsp", "py_spoo_url", "wsp-hertzner", "late"]));
+  });
+
+  it("on a New thread page the palette's page and the heading's picker agree: the page's project first", async () => {
+    await inHetznerThread();
+    act(() => useStore.getState().openProjectHome(SPOO.id));
+    await screen.findByRole("button", { name: "Project: py_spoo_url" });
+    cmdT();
+    await waitFor(() => expect(projectRows().map(rowTitle)).toEqual(["py_spoo_url", "wsp-boat", "wsp-hertzner", "wsp"]));
+    fireEvent.keyDown(search(), { key: "Escape" });
+    await waitFor(() => expect(palette()).toBeNull());
+    fireEvent.click(screen.getByRole("button", { name: "Project: py_spoo_url" }));
+    const menu = await screen.findByRole("menu");
+    expect(within(menu).getAllByRole("menuitemradio").map(item => item.textContent)).toEqual(["py_spoo_url", "wsp-boat", "wsp-hertzner", "wsp"]);
+  });
+});
+
 describe("New thread's send", () => {
   const MADE: WorkspaceView = { id: "ws_new", name: "what do you think about yams", machineId: "local", project: { id: SPOO.id, name: SPOO.name, path: SPOO.path, computer: "here" }, phase: "running", golden: "", createdAt: "2026-10-03T00:00:00Z" };
 
