@@ -617,7 +617,7 @@ export interface ThreadsArea {
   readonly notifyEnd: (s: { view: SessionView; turnId: string; turnLive?: TurnLive }, notify: readonly string[], named: { by?: ThreadScope; road?: WorkspaceOrigin }, result: TurnResult) => void;
   readonly deliverOwed: () => Promise<void>;
   readonly sendBack: (s: { view: SessionView; turnId: string; turnLive?: TurnLive }, ids: readonly string[], stopped: boolean) => void;
-  readonly settleCut: (s: { view: SessionView; turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin; turnLive?: TurnLive; snapshot?: string }, reason: string, cutLine: (endedAt: number) => string) => void;
+  readonly settleCut: (s: { view: SessionView; turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin; turnLive?: TurnLive; snapshot?: string }, reason: string, cutLine: (endedAt: number) => string, stopped?: boolean) => void;
   readonly notARepo: (r: WorkspaceRecord) => boolean;
   readonly checkpointsLanding: Map<string, Promise<void>>;
   readonly keepCheckpoint: (entry: LiveWorkspace, turn: { sessionId: string; threadId: string; turnId: string; anchor?: string; kept?: string }) => Promise<void>;
@@ -689,6 +689,8 @@ export interface TurnsArea {
 
 export interface SessionsArea {
   readonly sessionsApi: Runtime["sessions"];
+  /** Whether a stop's end of the thread's group holds the thread's next turn, which has put nothing there yet. */
+  readonly stopHolds: (threadId: string) => boolean;
 }
 
 export interface BuildersArea {

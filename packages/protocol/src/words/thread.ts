@@ -107,6 +107,10 @@ export function loginPathLine(why: string): string {
  * holds it: the run's files were swept, so nothing the agent did while the host was away can be read back. */
 export const RUN_GONE_LINE = "the machine no longer holds this turn's run, so nothing of it can be read back";
 
+/** The end of a turn a stop settled itself, where no agent was there to say it stopped: a turn a restart left
+ * running with no road to its process, or one on a computer that did not answer. */
+export const TURN_STOPPED_LINE = "stopped";
+
 /** What a command waiting on a turn is told when the host it asked stops: the run is the machine's, not the host's,
  * so it goes on and its reply lands in the thread whether or not this command is still there to see it. */
 export const HOST_STOPPING_LINE = "the host is restarting; the turn goes on and its reply lands in the thread";

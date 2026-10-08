@@ -1134,7 +1134,9 @@ export const SessionInterruptResult = z.object({
   /** The words for a refused or unsupported stop of a subagent. */
   error: z.string().optional(),
   /** What the stop could not end on a computer the person joined, in words: processes the thread started there that
-   * still run. Absent where everything it started ended, or the thread keeps no group of its own. */
+   * still run, or that computer not answering, so the turn reads stopped here and its end is owed to that computer's
+   * next link, or a message waiting on such an end that the stop gave up. Absent where everything it started ended,
+   * or the thread keeps no group of its own. */
   left: z.string().optional(),
 });
 export type SessionInterruptResult = z.infer<typeof SessionInterruptResult>;

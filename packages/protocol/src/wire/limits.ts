@@ -52,6 +52,9 @@ export const ASIDE_WALL_MS = 3 * 60_000;
 export const RUN_STOP_MS = 2_000;
 /** How long an interrupted turn's harness gets on the graceful signal before it and its tree are killed. */
 export const INTERRUPT_GRACE_MS = 5_000;
+/** How long a stop waits for the computer a turn runs on to answer a ping before it reads that computer as away: the
+ * link's own heartbeat takes up to two beats, 20 s, to say so. */
+export const STOP_REACH_MS = 3_000;
 /** How long a road to a machine keeps being dialled while nothing answers before it is called down. The one rule
  * every link this project holds reads, which is why it lives here: the host's dial of a machine's daemon and its
  * re-dial after a drop, the post that launches or re-opens a turn's run, and the browser's link to a workspace.

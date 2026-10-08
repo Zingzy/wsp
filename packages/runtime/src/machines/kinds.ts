@@ -363,8 +363,9 @@ export function kindsArea(ctx: RuntimeContext): KindsArea {
               return { url: `http://localhost:${localPort}/`, expiresAt: clock.now() + PANE_HOLD_MS };
             },
             // As root on that computer, since a thread's cgroup is root's to empty and take away; a computer that is
-            // away is owed the end of a deleted thread's.
+            // away is owed the end of a deleted thread's, and of one whose running turn a stop could not reach.
             endThread: (entry, threadId, o) => ends!.end(entry.record.place!, threadId, o),
+            endOwed: (entry, threadId) => ends!.owed(entry.record.place!, threadId),
             folder: record => ctx.checkoutOf(record),
             home: (entry, id) => placeAgentHome(entry.record.place, placeOf(entry.record).home, id),
             homeDir: record => placeOf(record).home,

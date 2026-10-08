@@ -598,15 +598,16 @@ export function turnsArea(ctx: RuntimeContext): TurnsArea {
       ...(started.setAccess !== undefined ? { setAccess } : {}),
       ...(started.stopTask !== undefined ? { stopTask: (task: string) => started.stopTask!(task) } : {}),
     };
-    const end = (reason: string): void => {
+    const end = (reason: string, byStop = false): void => {
       if (ended || view.status !== "running") return;
+      if (byStop) stopped = true;
       // Before `ended` shuts the forward road: the interrupt below reaches the harness, whose own close would then
       // be dropped, so the rows and the waits are ended here.
       closeOpenAsks();
       ended = true;
       const row = sessions.get(rowId);
       if (row?.turnId === turnId) delete row.snapshot;
-      ctx.settleCut({ view, turnId, ...(notify !== undefined ? { notify } : {}), ...(notifyBy !== undefined ? { notifyBy } : {}), ...(notifyRoad !== undefined ? { notifyRoad } : {}), turnLive }, reason, () => reason);
+      ctx.settleCut({ view, turnId, ...(notify !== undefined ? { notify } : {}), ...(notifyBy !== undefined ? { notifyBy } : {}), ...(notifyRoad !== undefined ? { notifyRoad } : {}), turnLive }, reason, () => reason, byStop);
       void ctx.persistSessions(workspaceId);
       void started.interrupt().catch(() => {});
       turnOver();
