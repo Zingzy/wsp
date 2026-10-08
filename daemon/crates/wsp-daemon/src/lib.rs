@@ -43,6 +43,13 @@ mod usage_logs;
 
 pub use link::place_backoff_ms;
 
+/// What a leave of this computer would take that no remote holds, one line per checkout or workspace under the
+/// runtime's folder: the read the daemon's own leave makes, for the command line's leave to make the same way. An
+/// error where a folder of the runtime's could not be listed.
+pub fn leave_unsaved(runtime: &Path) -> Result<Vec<String>, String> {
+    place::unsaved_under(runtime)
+}
+
 use std::collections::HashMap;
 use std::io;
 use std::net::SocketAddr;

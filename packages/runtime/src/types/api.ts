@@ -215,13 +215,14 @@ export interface Runtime {
      * holds it. */
     worktree(o: { project: string; branch: string }, origin?: Caller): Promise<WorktreeMade>;
     /** Takes a worktree wsp made away with git: refused while a turn runs in it, and without force while it holds
-     * files no commit has. Its threads go on in the project folder. */
-    worktreeRemove(o: { project: string; branch: string; force?: boolean }, origin?: Caller): Promise<void>;
+     * files no commit has. Its threads go on in the project folder. With check, refuses as it would and takes nothing. */
+    worktreeRemove(o: { project: string; branch: string; force?: boolean; check?: boolean }, origin?: Caller): Promise<void>;
     /** The copy's checkout as the host holds it, read again through the copy's daemon unless it was read within
      * CHECKOUT_TTL_MS; a machine that is not running and whose computer does not answer for it keeps its last fact. */
     checkout(id: string, origin?: Caller): Promise<CheckoutReply>;
-    /** Puts one changed file of the copy back as HEAD has it, then reads the checkout again. */
-    discard(o: { workspaceId: string; path: string }, origin?: Caller): Promise<GitDiscardReply>;
+    /** Puts one changed file of the copy back as HEAD has it, then reads the checkout again. With check, refuses a file
+     * with no change as the discard would and puts nothing back. */
+    discard(o: { workspaceId: string; path: string; check?: boolean }, origin?: Caller): Promise<GitDiscardReply>;
     /** Commits the files named in the copy with the message given, then reads the checkout again; no paths is every
      * changed file. A thread commits under the same guard a bring back passes. */
     commit(o: { workspaceId: string; message: string; paths?: string[] }, origin?: Caller): Promise<GitCommitReply>;
@@ -331,8 +332,10 @@ export interface Runtime {
     /** The project a word names, by id or by name; refused naming the ones there are. */
     resolve(ref: string, origin?: Caller): Promise<ProjectView>;
     /** Drops a project's record and whatever the add made for it on the computer holding it, with the one
-     * sentence the person reads for that computer; refused while a workspace of it stands, naming them. */
-    remove(id: string, origin?: Caller): Promise<{ said: string }>;
+     * sentence the person reads for that computer; refused while a workspace of it stands, naming them, and while its
+     * folder on a computer of the person's holds work no remote has, unless force. With check, refuses as it would and
+     * answers with that work, taking nothing. */
+    remove(id: string, origin?: Caller, o?: { force?: boolean; check?: boolean }): Promise<{ said: string; unsaved?: string }>;
     /** Lands the host's bundle of a folder on the workspace's machine; progress rides project.import events. */
     import(opts: ProjectImportOptions, origin?: Caller): Promise<ProjectImportResult>;
     /** Brings a folder and the agent state keyed to it home from the workspace's machine; progress rides project.export events. */
@@ -470,8 +473,8 @@ export interface Runtime {
      * transcript rows go and nothing is asked of the machine. Takes the runtime's thread id, not a session id.
      * Refused (kind conflict) with threadForgetRefusal's sentence once a turn of it did work, which threadRan
      * decides: a turn the agent refused did none, however far its launch got. A thread of another tree reads the
-     * absence a name nothing holds reads, before any of that. */
-    forget(threadId: string, origin?: Caller): Promise<void>;
+     * absence a name nothing holds reads, before any of that. With check, refuses as it would and drops nothing. */
+    forget(threadId: string, origin?: Caller, o?: { check?: boolean }): Promise<void>;
     /** Takes a thread on this computer away with its turns and checkpoints, and a worktree wsp made with the thread
      * when the thread ran in one, every thread in it going too. Never the project folder. */
     delete(threadId: string, origin?: Caller): Promise<{ workspaceId: string; worktree?: string; threads: number }>;

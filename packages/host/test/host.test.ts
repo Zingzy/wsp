@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { probePath, RecipeFile, type AdapterEvent, type TurnResult } from "@wsp/protocol";
+import { DAEMON_VERSION, probePath, RecipeFile, type AdapterEvent, type TurnResult } from "@wsp/protocol";
 import { CATALOG, GUEST_HOME } from "@wsp/catalog";
 import { allRows, type RecipeAnswer } from "../src/recipe-answer.js";
 import { HERE } from "./recipe-fixture.js";
@@ -140,6 +140,12 @@ describe("wsp cli", () => {
     const code = await cli(["--version"], quietIO(lines));
     expect(code).toBe(0);
     expect(lines).toEqual([`wsp ${pkg.version}`]);
+  });
+
+  it("--version --json prints the version and the daemon version this build is, which a computer's daemon asks its wsp for", async () => {
+    const lines: string[] = [];
+    expect(await cli(["--version", "--json"], quietIO(lines))).toBe(0);
+    expect(lines.map(line => JSON.parse(line) as unknown)).toEqual([{ version: pkg.version, daemon: DAEMON_VERSION }]);
   });
 
   it("is wired as the wsp bin", () => {

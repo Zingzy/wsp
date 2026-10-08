@@ -607,6 +607,14 @@ export function placeDaemonBehind(place: { daemonVersion?: number }): string | u
 /** The first daemon that answers fs.folders. */
 export const FS_FOLDERS_DAEMON_VERSION = 73;
 
+/** The first build whose `wsp leave` takes --yes and --force, asks off a terminal without --yes, and takes the
+ * runtime's folder. A gate written as this build's own daemon is pinned to its number by the landing's cut. */
+export const LEAVE_ASKS_DAEMON_VERSION = DAEMON_VERSION;
+
+/** Whether the `wsp leave` a computer runs is that build or later, read off the version its own wsp says it was built
+ * with and never its daemon's: an update moves the daemon alone. A wsp that said none runs an older leave. */
+export const leaveAsks = (report: { wspDaemonVersion?: number }): boolean => (report.wspDaemonVersion ?? 0) >= LEAVE_ASKS_DAEMON_VERSION;
+
 /** The line that moves a place onto this wsp's daemon, which is the fix half of every sentence about a place that
  * is behind. */
 export const placeUpdateLine = (name: string): string => `wsp add ${name} --update`;

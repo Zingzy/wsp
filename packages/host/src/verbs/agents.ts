@@ -19,7 +19,7 @@ import {
 } from "@wsp/protocol";
 import { usageIs, tool, type Verb, flag, flagList } from "./client.js";
 import { HOST_SIDE_VAULT } from "./workspaces-help.js";
-import { asText, ACCESS_IN_WORDS } from "./io.js";
+import { asText, ACCESS_IN_WORDS, confirmed } from "./io.js";
 import { aimedUsage, agentsTarget, projectAsked, toolsProject, agentsReport, AGENTS_FRAME, reportFacts, agentRowLines, skillRowLines, serverRowLines, toolLines, serverToolsOf, serverChanged, serverValues, serverCommand, serverScope, ServerNameIn, ServerAgentIn, ServerScopeIn, ServerProjectIn, SERVER_CHANGE_WORDS, SERVER_TOOLS_WORDS, toolsAddedLine, addTools, signInHere, signedInLine, searchSkillsSh, skillHitLines, skillShown, shownText, skillAdded, isInLine, addedLine, goneFromLine, turnedInLine, removedLine, skillChanged, turnedLine, SkillNameIn, SkillProjectIn, SKILL_CHANGE_WORDS, AGENT_SET_RESETS, AGENT_SETUP_RESETS, agentDefaultsSet, agentDefaultsLine, defaultAgentSet, defaultAgentLine, envNameOf, agentSetupSet, agentSetupLines, AgentsWorkspaceIn, AgentsOnIn, AGENTS_READ_WORDS } from "./agents-help.js";
 
 export const AGENT_VERBS: readonly Verb[] = [
@@ -148,14 +148,16 @@ export const AGENT_VERBS: readonly Verb[] = [
   },
   {
     name: "skills remove",
-    usage: "wsp skills remove <name> [<workspace>] [--on <computer>] [--project [<name>]]",
+    usage: "wsp skills remove <name> [<workspace>] [--on <computer>] [--project [<name>]] [--yes]",
     about: "removes a skill by its name: every folder it lives in and every link to it, where a link's own folder elsewhere stays",
     page: "agent",
-    options: { on: { type: "string" }, project: { type: "string", valueWith: "on" } },
+    options: { on: { type: "string" }, project: { type: "string", valueWith: "on" }, yes: { type: "boolean" } },
     run: async ctx => {
       const [name, workspace, ...rest] = ctx.args;
       if (name === undefined || rest.length > 0) throw usageRefusal("wsp skills remove takes one skill's name and one workspace at most.", usageIs(ctx));
-      const removed = await skillChanged(await ctx.client(), "skills.remove", name, workspace, flag(ctx.flags, "on"), projectAsked(ctx.flags["project"] as string | undefined, workspace, flag(ctx.flags, "on"), usageIs(ctx)), undefined, usageIs(ctx));
+      const project = projectAsked(ctx.flags["project"] as string | undefined, workspace, flag(ctx.flags, "on"), usageIs(ctx));
+      if (!(await confirmed(ctx, `Remove the skill ${name}?\nEvery folder it lives in and every link to it go.`, name))) return 1;
+      const removed = await skillChanged(await ctx.client(), "skills.remove", name, workspace, flag(ctx.flags, "on"), project, undefined, usageIs(ctx));
       ctx.out.emit({ removed }, removedLine(name, removed));
       return 0;
     },
@@ -513,10 +515,10 @@ export const AGENT_VERBS: readonly Verb[] = [
   },
   {
     name: "servers remove",
-    usage: "wsp servers remove <name> [<workspace>] [--on <computer>] --agent <id> [--scope <user|home|project>] [--project [<name>]]",
+    usage: "wsp servers remove <name> [<workspace>] [--on <computer>] --agent <id> [--scope <user|home|project>] [--project [<name>]] [--yes]",
     about: "takes one MCP server's entry out of an agent's own config, every other line of the file as it was, and, once no agent's config on this computer lists that server, frees the vault's values kept for it that no other server holds",
     page: "agent",
-    options: { agent: { type: "string" }, on: { type: "string" }, scope: { type: "string" }, project: { type: "string", valueWith: "on" } },
+    options: { agent: { type: "string" }, on: { type: "string" }, scope: { type: "string" }, project: { type: "string", valueWith: "on" }, yes: { type: "boolean" } },
     run: async ctx => {
       const [name, workspace, ...rest] = ctx.args;
       const agent = flag(ctx.flags, "agent");
@@ -524,6 +526,7 @@ export const AGENT_VERBS: readonly Verb[] = [
       if (agent === undefined) throw usageRefusal("wsp servers remove needs --agent, the agent whose config names the server, as wsp servers shows it.", usageIs(ctx));
       const project = projectAsked(ctx.flags["project"] as string | undefined, workspace, flag(ctx.flags, "on"), usageIs(ctx));
       const scope = serverScope(flag(ctx.flags, "scope"), usageIs(ctx), project);
+      if (!(await confirmed(ctx, `Remove ${name} from the ${agent} config?\nEvery other line of the file stays.`, name))) return 1;
       const removed = await serverChanged(await ctx.client(), "servers.remove", { agent, name, ...scope }, workspace, flag(ctx.flags, "on"), usageIs(ctx), project.name);
       ctx.out.emit(removed, goneFromLine(name, removed.file));
       return 0;

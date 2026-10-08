@@ -36,7 +36,7 @@ describe("wsp verbs over the host: threads, projects and agent defaults", () => 
     const junk = (await h.rt.sessions.list())[0]!.threadId!;
     expect((await h.run("threads")).io.lines[0]).toContain(junk);
 
-    const forgot = await h.run("thread", "forget", junk.slice(0, 8));
+    const forgot = await h.run("thread", "forget", junk.slice(0, 8), "--yes");
     expect(forgot.code).toBe(0);
     expect(forgot.io.lines).toEqual([`forgot thread ${junk}: no turn ever ran on it, so nothing of its work is gone`]);
     expect((await h.run("threads")).io.lines[0]).not.toContain(junk);
@@ -45,6 +45,7 @@ describe("wsp verbs over the host: threads, projects and agent defaults", () => 
     // The next launch works, so its thread is one a turn ran on: the runtime's own sentence comes back.
     await h.run("run", "alpha", "build it");
     const ran = (await h.rt.sessions.list())[0]!.threadId!;
+    // Off a terminal with no --yes: the host's own refusal is what comes back, so nothing was asked first.
     const refused = await h.run("thread", "forget", ran);
     expect(refused.code).toBe(1);
     expect(refused.io.errors).toEqual([`wsp thread forget: ${threadForgetRefusal(ran)}`]);
@@ -58,12 +59,29 @@ describe("wsp verbs over the host: threads, projects and agent defaults", () => 
     const alpha = (await h.rt.workspaces.list())[0]!.id;
     await h.store.put("sessions", alpha, { workspaceId: alpha, sessions: [{ id: "s_old", workspaceId: alpha, harness: "claude", status: "failed", prompt: "from before threads" }] });
     await h.restartHost({ claude: agent.adapter });
-    const before = await h.run("thread", "forget", "s_old");
+    const before = await h.run("thread", "forget", "s_old", "--yes");
     expect(before.code).toBe(1);
     expect(before.io.errors).toEqual([`wsp thread forget: ${threadWithoutIdRefusal("s_old")}`]);
     const none = await h.run("thread", "forget");
     expect(none.code).toBe(3);
-    expect(none.io.errors).toEqual(["wsp thread forget takes one thread. usage: wsp thread forget <thread>"]);
+    expect(none.io.errors).toEqual(["wsp thread forget takes one thread. usage: wsp thread forget <thread> [--yes]"]);
+  });
+
+  it("a line that takes something away answers the host's own refusal before it asks anything", async () => {
+    await h.run("new", "alpha");
+    const [alpha] = await h.rt.workspaces.list();
+    // Each run off a terminal with no --yes: a question would refuse it with its own sentence, so the host's words
+    // coming back says the host refused before anything was asked.
+    const project = await h.run("projects", "remove", alpha!.project.name);
+    expect(project.code).not.toBe(0);
+    expect(project.io.errors.join("\n")).not.toContain("There is no terminal to answer on");
+    expect(project.io.errors.join("\n")).toContain(alpha!.name);
+    const worktree = await h.run("worktree", "remove", alpha!.project.name, "never-made");
+    expect(worktree.code).not.toBe(0);
+    expect(worktree.io.errors.join("\n")).not.toContain("There is no terminal to answer on");
+    const discard = await h.run("discard", "alpha", "nothing-changed.ts");
+    expect(discard.code).not.toBe(0);
+    expect(discard.io.errors.join("\n")).not.toContain("There is no terminal to answer on");
   });
 
   it("threads is the sidebar's data: one row per thread with its folder and branch, agent, state and who opened it, within one project or machine when named", async () => {

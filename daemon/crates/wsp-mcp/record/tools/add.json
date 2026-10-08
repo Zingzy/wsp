@@ -122,6 +122,9 @@
             "present": {
               "type": "boolean"
             },
+            "takesRuntime": {
+              "type": "boolean"
+            },
             "joinedAt": {
               "type": "string"
             },
@@ -1110,6 +1113,9 @@
               ]
             },
             "present": {
+              "type": "boolean"
+            },
+            "takesRuntime": {
               "type": "boolean"
             },
             "joinedAt": {

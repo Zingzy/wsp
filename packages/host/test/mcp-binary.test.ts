@@ -189,6 +189,7 @@ const CALLED: readonly Called[] = [
     argv: ["skills", "remove", "one"],
     arguments: { name: "two" },
     files: { ".agents/skills/one/SKILL.md": "---\nname: one\ndescription: one\n---\n", ".agents/skills/two/SKILL.md": "---\nname: two\ndescription: two\n---\n" },
+    after: ["--yes"],
     twin: ["one", "two"],
   },
   {
@@ -207,6 +208,7 @@ const CALLED: readonly Called[] = [
       ["servers", "add", "one", "--agent", "claude", "--command", "npx -y one"],
       ["servers", "add", "two", "--agent", "claude", "--command", "npx -y two"],
     ],
+    after: ["--yes"],
     twin: ["one", "two"],
   },
   {

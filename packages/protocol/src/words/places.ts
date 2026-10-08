@@ -329,13 +329,11 @@ export const PLACE_LEAVE_VERB = "leave";
 /** The one line that takes wsp off a computer it is typed on. */
 export const PLACE_LEAVE_LINE = `wsp ${PLACE_LEAVE_VERB}`;
 
-/** What becomes of the copy of the image on a computer of the person's own when wsp comes off it, in the words
- * every screen that mentions it says. The copy sits in that computer's own workspace store, which placeOwnedPaths
- * does not name, so neither the sweep the host asks for over the link nor wsp leave at the terminal takes it: the
- * sheet that adds a computer, the dialog that removes one and the line that dialog hands over all say it stays.
- * The size is the copy's where the host knows it; a screen that does not know it says the clause without a figure
- * rather than one it is guessing. */
-export const imageCopyStaysLine = (size?: string): string => `the copy of your image${size === undefined ? "" : ` (${size})`} stays where it is`;
+/** The copy of the image on a computer of the person's own, in the words every screen that mentions it says. It sits in
+ * the runtime's folder there, which a leave run as root takes whole, so it comes off with wsp: the dialog that removes
+ * a computer and the line that dialog hands over both say so. The size is the copy's where the host knows it; a
+ * screen that does not know it names the copy without a figure rather than one it is guessing. */
+export const imageCopyLine = (size?: string): string => `the copy of your image${size === undefined ? "" : ` (${size})`}`;
 
 /** Everything wsp puts on a computer it is installed on, named once. The Add sheet writes its lines and the note
  * under them from this list and the Remove dialog writes its sentence from the same, so what a person is told
@@ -383,10 +381,10 @@ export const PLACES_WORDS = {
      * agent's. */
     leaveLine: PLACE_LEAVE_LINE,
     /** What that line takes and what it leaves, off the one list a sweep reads (placeOwnedPaths), which names the
-     * files under wsp's folder and never the folder itself, and the unit the manager holds the agent up with. What
-     * it leaves is that list read the other way: the work folder is not on it, and neither is the workspace store
-     * the copy of the image sits in. */
-    leaveTakes: `It takes off ${PLACE_INSTALL.taken.service}, ${PLACE_INSTALL.taken.files}, and ${PLACE_INSTALL.taken.opener}. Your work folder stays, and ${imageCopyStaysLine()}.`,
+     * files under wsp's folder and never the folder itself, and the unit the manager holds the agent up with. Run as
+     * root on a computer added over ssh it takes the runtime's folder too, the copy of the image in it; one joined
+     * with a code has no record of what stood before, and keeps it. What it leaves is the work folder. */
+    leaveTakes: `It takes off ${PLACE_INSTALL.taken.service}, ${PLACE_INSTALL.taken.files}, ${PLACE_INSTALL.taken.opener}, and, on a computer added over ssh, ${imageCopyLine()}. Your work folder stays.`,
   },
 } as const;
 

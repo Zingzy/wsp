@@ -37,6 +37,13 @@ export const WSP_WORKSPACE_APPARMOR_PATH = "/etc/apparmor.d/wsp-workspace";
  * under the prefix, then the prefix whole, and nothing else of either; a prefix the add found standing keeps every
  * entry it held then, with the links into those. */
 export const TOOL_PREFIX = "/opt/wsp";
+/** Where the daemon of a computer somebody owns keeps everything its workspaces run on: their copies, their state,
+ * the project checkouts and the shared logins. A leave run as root takes it whole unless the add found it standing,
+ * and keeps it while anything is mounted under it, since a workspace still running there reads through those mounts. */
+export const RUNTIME_ROOT = "/wsp";
+/** The refs an add's seed leaves on a checkout at the tip of the commits it carried over from the person's own folder:
+ * those commits are on that person's computer, so an unsaved read counts none of them as work a remove would lose. */
+export const SEEDED_REFS = "refs/wsp/seeded";
 export const TOOL_LINKS_DIR = "/usr/local/bin";
 /** The last entry of the record a joined add writes of what stood before it outside the home, and the most bytes
  * that record may hold. A record that does not end on this entry was cut short and a leave reads it as none; a box
@@ -270,6 +277,27 @@ export const placeKeptForLinkLine = (path: string): string => `nothing was remov
  * still has lines, which only a leave cut short leaves, and the folder holds that list for a leave that finishes.
  * Said on both roads a leave runs on, and pinned to one text by the contract fixture. */
 export const placeOutsideLeftLine = (prefix: string): string => `nothing was removed at ${prefix}: the leave did not finish taking what the setup wrote outside the home, which ${prefix}/landed still lists`;
+/** Why the runtime's folder is still there after a leave: something is mounted under it, which only a workspace still
+ * running there holds, and taking the folder would reach through that mount. Said on both roads a leave runs on, and
+ * pinned to one text by the contract fixture. */
+export const placeKeptMountedLine = (path: string, mount: string): string => `nothing was removed at ${path}: ${mount} is mounted under it; stop what runs there and leave again`;
+/** Why the runtime's folder is still there after a leave: the mount table could not be read, so whether a workspace
+ * still running there reads through a mount under it is not known. Said on both roads a leave runs on, and pinned to
+ * one text by the contract fixture. */
+export const placeKeptMountsUnreadLine = (path: string, why: string): string => `nothing was removed at ${path}: the mount table could not be read (${why}), so what is mounted under it is not known`;
+/** Why the runtime's folder is still there after a leave that tried to take it: something in it would not go. Said on
+ * both roads a leave runs on, and pinned to one text by the contract fixture. */
+export const placeRuntimeStandsLine = (path: string): string => `${path} still stands: the leave could not remove all of it; remove what is left there by hand`;
+/** Why a leave stopped before it removed anything: checkouts under the runtime's folder hold work no remote has, one
+ * line each as the daemon's read names them. Said on both roads a leave runs on, and pinned to one text by the
+ * contract fixture. */
+export const placeLeaveUnsavedLine = (lines: readonly string[]): string => `nothing was removed: ${lines.join("; ")}; that work is on this computer alone`;
+/** A checkout or a workspace under the runtime's folder a leave could not read at all. Said on both roads a leave runs
+ * on, and pinned to one text by the contract fixture. */
+export const placeUnreadLine = (path: string): string => `${path}: could not read what is not pushed`;
+/** What a discard or a commit naming a file git sees no change in is refused with, by the daemon and by the host's own
+ * read before a question is asked. */
+export const noChangeLine = (path: string): string => `${path} has no change`;
 /** Why a path outside the home a leave would have taken is still there: it stood before wsp was added, as the add
  * wrote down, so it is the computer's own. Said on both roads a leave runs on, and pinned to one text by the
  * contract fixture. */

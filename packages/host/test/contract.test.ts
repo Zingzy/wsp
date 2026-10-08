@@ -214,7 +214,7 @@ describe("the agent contract on the command line and the tool door", () => {
               : frame.op === "git.discard"
                 ? { id: 1, ok: true, path: frame.path }
                 : frame.op === "git.status"
-                  ? { id: 1, ok: true, branch: { oid: "abc", head: "work", ahead: 1, behind: 0 }, entries: [], root: "/root/alpha" }
+                  ? { id: 1, ok: true, branch: { oid: "abc", head: "work", ahead: 1, behind: 0 }, entries: [{ xy: ".M", path: "a.ts" }], root: "/root/alpha" }
                   : prRefusal === undefined
               ? { id: 1, ok: true, pr: { number: 3, url: "https://github.com/dev/alpha/pull/3", state: "open", host: "github.com", ...PR_REST }, created: true }
               : { id: 1, ok: false as const, error: prRefusal },
@@ -290,10 +290,23 @@ describe("the agent contract on the command line and the tool door", () => {
   // It starts the command line once per verb in turn, so its time grows with the verb count; at a load near 30 it runs 3 to 5 s.
   it("with --json every command-line verb prints JSON alone on stdout and its last object is the one its MCP tool answers with", async () => {
     const covered = new Map<string, unknown>();
-    const last = async (verb: string, ...argv: string[]): Promise<unknown> => {
-      const cut = argv.indexOf("--");
-      const at = cut === -1 ? argv.length : cut;
-      const { code, io } = await run(...argv.slice(0, at), "--json", ...argv.slice(at));
+    // A line that takes something away is run first off a terminal without --yes, which refuses it in one sentence
+    // with nothing taken, and then with it.
+    const takesAway = (verb: string): boolean => /(^| )(remove|delete|forget|discard)$/.test(verb);
+    const refusedUnasked = new Set<string>();
+    const last = async (verb: string, ...given: string[]): Promise<unknown> => {
+      const cut = given.indexOf("--");
+      const at = cut === -1 ? given.length : cut;
+      const words = given.slice(0, at).filter(word => word !== "--yes");
+      if (takesAway(verb)) {
+        const unasked = await run(...words, "--json", ...given.slice(at));
+        expect(unasked.code, `wsp ${words.join(" ")} off a terminal without --yes`).toBe(EXIT_CODES.usage);
+        expect(failure(unasked.io).error).toMatch(/\? There is no terminal to answer on\. Pass --yes to say yes\.$/);
+        refusedUnasked.add(verb);
+      }
+      const head = takesAway(verb) ? [...words, "--yes"] : given.slice(0, at);
+      const argv = [...head, ...given.slice(at)];
+      const { code, io } = await run(...head, "--json", ...given.slice(at));
       expect(code, `wsp ${argv.join(" ")}: ${io.errors.join("\n")}`).toBe(0);
       const values = objects(io);
       expect(values.length, `wsp ${argv.join(" ")} printed nothing`).toBeGreaterThan(0);
@@ -565,6 +578,7 @@ describe("the agent contract on the command line and the tool door", () => {
       expect(parsed.success, `wsp ${verb.name} --json ends with ${JSON.stringify(value)}\n${parsed.success ? "" : parsed.error.message}`).toBe(true);
     }
     expect([...covered.keys()].sort()).toEqual(served.map(v => v.name).sort());
+    expect([...refusedUnasked].sort()).toEqual(served.filter(v => takesAway(v.name)).map(v => v.name).sort());
   }, 60_000);
 
   it("the lists of what stands on a computer refuse a workspace and a computer together, and a computer nobody holds, as usage", async () => {

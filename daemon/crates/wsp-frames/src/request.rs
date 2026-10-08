@@ -748,8 +748,14 @@ pub enum DaemonOp {
         #[ts(optional)]
         stdin: Option<String>,
     },
+    /// Takes wsp off this computer; refused before anything goes where a checkout under the runtime's folder holds work
+    /// no remote has, unless `force`.
     #[serde(rename = "place.leave")]
-    PlaceLeave,
+    PlaceLeave {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        force: Option<bool>,
+    },
     /// A process inside this machine opens its session; the token is the thread's, read by the host alone.
     #[serde(rename = "guest.open", rename_all = "camelCase")]
     GuestOpen {

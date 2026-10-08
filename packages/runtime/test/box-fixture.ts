@@ -104,6 +104,8 @@ export function box(client: WsClient, login: BoxLogin, o: { failClone?: boolean;
       const read = seen.readAs?.(printed) ?? { stdout: printed, exitCode: 0 };
       return say({ exitCode: read.exitCode, stdout: read.stdout, stderr: read.stderr ?? "", truncated: false });
     }
+    // A detached run's poll: it ended at once with nothing said, as a read over a home with nothing of wsp's in it does.
+    if (cmd.includes("echo WSP_POLL")) return out(["WSP_POLL", "0", "", "", "down", "WSP_POLL_END"].join("\n"));
     if (cmd.includes("WSP_LAUNCHED")) {
       seen.order.push("launch");
       return out("WSP_LAUNCHED\n");

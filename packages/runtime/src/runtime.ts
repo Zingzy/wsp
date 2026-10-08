@@ -125,7 +125,7 @@ import {
   DISK_USE_CMD,
   diskUsePct,
 } from "@wsp/engine";
-import { AGENT_KEEP_MS, AGENTS_KEPT, type KeptAgent } from "@wsp/protocol";
+import { AGENT_KEEP_MS, AGENTS_KEPT, placeDropStoppedLine, type KeptAgent } from "@wsp/protocol";
 import type { AgentsReport, AgentsSignInEvent, AgentsTarget, DaemonFrame, DaemonResponse, EditorChoice, EditorId, RecipeFile, RecipeOptions, ServerAdd, ServerAsk, ServerToolsAnswer, SignInLine, SkillAdded, SkillHit, SkillPreview } from "@wsp/protocol";
 import type {
   AdapterAttachOptions,
@@ -232,7 +232,7 @@ import type {
   WorkspaceView,
   WorkspaceCreatingEvent,
 } from "@wsp/protocol";
-import { cloneLines, PROJECT_LANDINGS, projectLanding, type Landed, type LandingDeps, type ProjectLanding } from "./project-landing.js";
+import { cloneLines, PROJECT_LANDINGS, projectLanding, readUnsaved, type Landed, type LandingDeps, type ProjectLanding } from "./project-landing.js";
 import { projectRemote, projectSource } from "./project-sources.js";
 import { vaultUnlistedRefusal, ThreadPlacement, ThreadScope, WorkspaceOrigin, branchUnreadRefusal, noParentWorkspaceLine, parentProjectRefusal, BringBackResult, GitPrReply, GitPushReply, GitCommitReply, GitDiscardReply, GitDiffReply, GitStatusReply, GitPrReadReply, GitPrViewReply, GitRunLogReply, GitPrMergeReply, GitRepoReadReply, GitUpdateReply, GitStartOnReply, GitBranchCompareReply, GitMergeInReply, DETACHED_HEAD, leadBusyRefusal, childStartedLine, forkNeedsPushLine, FIX_CHECK_OR_CHILD, childOnNoBranchRefusal, mergeChildPrompt, mergeIntoOwnRefusal, noRemoteForTreeLine, notTheLeadsChildRefusal, pushedForChildLine, uncommittedStayed, type MergeInResult, type TreeChild, type TreeFact, type TreeRecord, PR_POLL_MS, type PullRequestPage, GitPrReplyReply, GitPrResolveReply, GitPrReactReply, REPLY_EMPTY_LINE, pullRequestPostLine, type ReactionContent, type PullRequestItem, type PullRequestSendResult, type PullRequestSent, GIT_DIFF_CAP_BYTES, pullRequestSendPrompt, checkFailedPrompt, conflictsPrompt, checkNotFailedRefusal, childPushedLine, isPullRequestFact, mergeMethodRefusal, noPullRequestRefusal, noSuchCheckRefusal, notOpenRefusal, pullRequestStoppedLine, pullRequestUnreadLine, AUTO_MERGE_OFF_LINE, type FixResult, type MergeMethod, type MergeResult, type PullRequestFact, type PullRequestRecord, type PullRequestSeen, DRAFT_NOTES, cleanCheckoutLine, commitMessage, cutDiff, draftPrompt, type Checkout, type CheckoutReply, type CommitDraft, type CommitDrafter, type ViewedMarks, agentsFrom, foldThreads, NAP_AFTER_MS, settingFor, runningOn as runningOnPlace, phaseHoldsSlot, placeAtLimitLine, placeSpendLimit, spendCapRefusal, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadKeyOf, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, SCOPED_MCP_ARG, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnGoldenRefusal, spawnDepthRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn, RUN_PERSONS_LINE, runOutputTail, type RunStep, type SessionRunEvent, NO_SLATE_MCP_ARG, PR_POLL_IDLE_MS } from "@wsp/protocol";
 import { ASIDE_NO_SESSION_LINE, BLANK_ASIDE_LINE, asideUnsupportedLine, PLACE_WORKSPACE_PATH, THIS_COMPUTER, COPY_BUILD_FIX, copyAsksSignIns, refusal, copyFirstLine, isLocalWorkspace, imageCarriesCheckout, addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildOf, copyIsCurrent, type CopyBuild, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, serverIconsLeftLine, homeShortened, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, EMPTY_TITLE_LINE, threadRunsOnLine, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, inFolder, labsFromEnv, leadAsk, listedPick, everyModel, effortsFor, modelOf, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, napRefusedLine, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, deleteRefusedLine, snapshotRefusedLine, NO_SUCH_TURN, noAdapterLine, noKindLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, GONE_UNCHECKED, goneUnconfirmedLine, type GoneSeenBy, NOTIFY_ME, notifyLine, offeredSize, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, cloneFailedLine, cloneIntoNeeded, cloneIntoTakenLine, cloneUrlRefusal, intoIsHereLine, INTO_TAKES_A_REPO_LINE, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, NAME_A_PROJECT_LINE, BRANCH_OR_CWD_LINE, notOnThisComputerLine, cwdOutsideLine, noCwdLine, noBranchesLine, notMadeWorktreeLine, THREAD_WORKING_LINE, threadOnMachineLine, OLD_COPY_WORDS, ProjectCopy, WORKTREE_BUSY_LINE, WORKTREE_FORCE_LINE, PR_BEHIND_WORDS, worktreeChangedLine, keptChangedLine, KEPT_RUNNING_LINE, KEPT_ABANDONED_LINE, type WorktreeFolder, type WorktreeSettled, type WorktreeMade, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, bareFolder, copiesFolder, copyTakesNone, kindForComputer, runsInFolder, DEVICE_OPS, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeGotLine, sizeRefusal, sizeWord, startingLine, startPicks, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, noProjectImageLine, projectImageInUseRefusal, projectImageRefusedLine, projectImageStillListedLine, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBlocked, placeWatchesItselfLine, forkProcsUnreadLine, forkOpRefusedLine, placeDaemonPaths, placeDialBackLine, placeWentAwayLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspacePlace, workFolderIn, workspaceLands, REWIND_LATEST_LINE, REWIND_NO_CHECKPOINT_LINE, REWIND_NO_UNDO_LINE, REWIND_SHARED_LINE, REWIND_WORKING_LINE, rewindBesideLine, rewindChildrenLine, rewindKeptLine, rewindNoAnchorLine, attachmentRecord, attachmentKey, type KeptAttachment, filesBlocked, isImage, sendFilesDir, filePathIn, landFilesLine, filesNotLandedLine, attachedFilesPrompt, dropFilesLine, PERMISSION_DENIED_LINE, deniedLine } from "@wsp/protocol";
@@ -604,14 +604,47 @@ function runtimeCore(ctx: RuntimeContext, opts: RuntimeOptions): RuntimeCore {
       recording: {
         // Reads the live records, so it waits on the one hydration every other road waits on: a place that dials a
         // host nothing has asked a verb of yet would otherwise find no records at all.
-        forksOn: async placeId => {
-          await ctx.ready();
-          // A project folder there is the project's, which the projects check below names; only a machine is a fork.
-          return [...live.values()].filter(e => e.record.place === placeId && !runsInFolder(e.record.kind)).map(e => e.record.name);
+        holdsOn: async (placeId, read = true) => {
+          const { forks, projects, rows } = await standingOn(placeId);
+          const unsaved: string[] = [];
+          if (!read) return { ...rows, unsaved };
+          // Inside the fork, by the same read a project folder gets, woken first where it naps: the daemon's own read
+          // of a stopped copy counts only its checked-out branch and none of its edits.
+          for (const entry of forks) {
+            const run = async (cmd: string, o: { timeoutMs: number }): Promise<ExecResult> => {
+              if (entry.record.phase !== "running") await ctx.workspaces.wake(entry.record.id);
+              return ctx.workspaces.exec(entry.record.id, cmd, o);
+            };
+            const line = await readUnsaved(entry.record.name, ctx.checkoutOf(entry.record), run);
+            if (line !== undefined) unsaved.push(line);
+          }
+          for (const project of projects) {
+            const line = await ctx.projectsDoor.unsaved(project);
+            if (line !== undefined) unsaved.push(line);
+          }
+          return { ...rows, unsaved };
         },
         projectsOn: async placeId => {
           await ctx.ready();
           return [...projectsHeld.values()].filter(p => p.computer === placeId).map(p => ({ id: p.id, name: p.name }));
+        },
+        dropOn: async placeId => {
+          const { forks, folders, projects, rows } = await standingOn(placeId);
+          // Each goes by its own road, so one that refuses stops the rest, and the refusal names those already gone.
+          const went: string[] = [];
+          const each = async (name: string, drop: () => Promise<unknown>): Promise<void> => {
+            try {
+              await drop();
+            } catch (e) {
+              throw Object.assign(new Error(placeDropStoppedLine(e instanceof Error ? e.message : String(e), went)), e instanceof Error ? { ...e } : {});
+            }
+            went.push(name);
+          };
+          for (const entry of forks) await each(entry.record.name, () => ctx.workspaces.delete(entry.record.id));
+          // A project folder holding threads stops its project's remove, so its threads go with it first.
+          for (const entry of folders) await each(entry.record.name, () => ctx.workspaces.delete(entry.record.id));
+          for (const project of projects) await each(project.name, () => ctx.projectsDoor.remove(project.id, undefined, { force: true }));
+          return rows;
         },
         runningOn: async (placeId, rows) => {
           await ctx.ready();
@@ -821,6 +854,29 @@ function runtimeCore(ctx: RuntimeContext, opts: RuntimeOptions): RuntimeCore {
    * turn's harness holds the row or the start gave it up: a send behind such a row waits on it, and the file never
    * takes the row, since a restart could re-open nothing from it. */
   const sessions = new Map<string, SessionEntry>();
+  /** What stands on one computer that its remove takes: the forks wsp made there, the projects recorded on it, and
+   * the rows a remove names them by, each fork with its own threads and each project with those of its workspaces
+   * elsewhere. Read off the live records, so it waits on the one hydration every other road waits on. */
+  const standingOn = async (placeId: string): Promise<{ forks: LiveWorkspace[]; folders: LiveWorkspace[]; projects: ProjectView[]; rows: { forks: { name: string; threads: number }[]; projects: { name: string; threads: number }[] } }> => {
+    await ctx.ready();
+    const threadsOf = (workspaceId: string): number => {
+      const ids = new Set([...threadRecords].flatMap(([threadId, held]) => (held.workspaceId === workspaceId ? [threadId] : [])));
+      for (const s of sessions.values()) if (s.view.workspaceId === workspaceId && s.view.threadId !== undefined) ids.add(s.view.threadId);
+      return ids.size;
+    };
+    // A project folder there is the project's, whose threads its row counts; only a machine is a fork.
+    const standing = [...live.values()].filter(e => e.record.place === placeId);
+    const forks = standing.filter(e => !runsInFolder(e.record.kind));
+    const folders = standing.filter(e => runsInFolder(e.record.kind));
+    const projects = [...projectsHeld.values()].filter(p => p.computer === placeId);
+    const threadsOfProject = (projectId: string): number => [...live.values()].filter(e => e.record.project === projectId && !forks.includes(e)).reduce((n, e) => n + threadsOf(e.record.id), 0);
+    return {
+      forks,
+      folders,
+      projects,
+      rows: { forks: forks.map(e => ({ name: e.record.name, threads: threadsOf(e.record.id) })), projects: projects.map(p => ({ name: p.name, threads: threadsOfProject(p.id) })) },
+    };
+  };
   /** Every exec stream still running, so the machine going away ends it the way it ends a session. */
   const execs = new Set<{ workspaceId: string; end: (reason: string) => void }>();
   const heldAtClose = new Set<() => void>();

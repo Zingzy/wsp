@@ -62,4 +62,16 @@ wspDoorBlocked?: string,
  * The systemd unit this daemon runs under, the one the join wrote, read off its own cgroup: what the person
  * restarts to open the door again. Absent where the daemon runs under no unit.
  */
-daemonUnit?: string, };
+daemonUnit?: string, 
+/**
+ * Whether a leave run here takes the runtime's folder, and the copy of the image in it, by the leave's own rule:
+ * run as root, with the add's whole record, which does not name the folder as standing before. Absent from a
+ * daemon older than this field, whose leave never takes it.
+ */
+takesRuntime?: boolean, 
+/**
+ * The daemon version the wsp named above was built with, as `<wsp> --version --json` said it: which `wsp leave`
+ * this computer runs, which an update of the daemon alone does not move. Absent where that wsp said none, which
+ * every wsp older than this field and one that would not answer does.
+ */
+wspDaemonVersion?: number, };

@@ -81,9 +81,9 @@ describe("--project on the skills and servers lines", () => {
     const lines: [string[], string, Record<string, unknown>][] = [
       [["skills", "show", "deploy"], "skills.preview", { name: "deploy", project: true }],
       [["skills", "add", "acme/skills/pdf"], "skills.add", { skill: "acme/skills/pdf", project: true }],
-      [["skills", "remove", "deploy"], "skills.remove", { name: "deploy", project: true }],
+      [["skills", "remove", "deploy", "--yes"], "skills.remove", { name: "deploy", project: true }],
       [["servers", "add", "db", "--agent", "claude", "--command", "npx db-mcp"], "servers.add", { name: "db", project: true }],
-      [["servers", "remove", "db", "--agent", "claude"], "servers.remove", { name: "db", scope: "project" }],
+      [["servers", "remove", "db", "--agent", "claude", "--yes"], "servers.remove", { name: "db", scope: "project" }],
       [["servers", "disable", "db", "--agent", "opencode"], "servers.toggle", { name: "db", scope: "project", on: false }],
       [["servers", "enable", "db", "--agent", "opencode"], "servers.toggle", { name: "db", scope: "project", on: true }],
       [["servers", "tools", "db", "--agent", "claude"], "servers.tools", { name: "db" }],
@@ -97,14 +97,14 @@ describe("--project on the skills and servers lines", () => {
 
   it("stays the workspace's own project bare, before or after the workspace, and a word after it is still the workspace", async () => {
     for (const argv of [
-      ["skills", "remove", "deploy", "landing", "--project"],
-      ["skills", "remove", "deploy", "--project", "landing"],
+      ["skills", "remove", "deploy", "landing", "--project", "--yes"],
+      ["skills", "remove", "deploy", "--project", "landing", "--yes"],
     ]) {
       const { code, acts } = await run(argv);
       expect(code, argv.join(" ")).toBe(0);
       expect(acts).toEqual([{ op: "skills.remove", params: expect.objectContaining({ target: { workspaceId: "ws_1" }, name: "deploy", project: true }) }]);
     }
-    const scoped = await run(["servers", "remove", "db", "landing", "--agent", "claude", "--project"]);
+    const scoped = await run(["servers", "remove", "db", "landing", "--agent", "claude", "--project", "--yes"]);
     expect(scoped.acts).toEqual([{ op: "servers.remove", params: expect.objectContaining({ target: { workspaceId: "ws_1" }, scope: "project" }) }]);
   });
 

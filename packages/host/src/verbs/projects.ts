@@ -21,7 +21,7 @@ import { historyCache, smallRecipePath } from "../recipe-file.js";
 import { HOST_RESTARTING_LINE, hostPlatform, table, usageIs, tool, type Verb, flag, flagList, absolutePath } from "./client.js";
 import { workspaces, threads, threadsOf, threadRows, THREAD_HEAD, threadLines, threadTree, placeNames, projectsOf, projectOf, projectLine, NO_PROJECT_YET } from "./workspaces-help.js";
 import { projectDefaultsOf, waitThrough } from "./turns-help.js";
-import { WaitOut, ThreadRowOut, asJson, asText, waitAnswer, timeoutFlag, ACCESS_IN_WORDS, PROJECT_FOLDERS, WEIGH_BY_FOLDERS, projectFolders, projectsFlag, progress, printTable } from "./io.js";
+import { confirmed, WaitOut, ThreadRowOut, asJson, asText, waitAnswer, timeoutFlag, ACCESS_IN_WORDS, PROJECT_FOLDERS, WEIGH_BY_FOLDERS, projectFolders, projectsFlag, progress, printTable } from "./io.js";
 import { drawRows, PROJECT_SET_RESETS, projectDefaultsSet, newThreadsHeadLine, threadDefaultsLines, defaultsCell, afterWorktreeLine } from "./agents-help.js";
 
 /** What projects set answers in words: what a new thread there starts on, then the after-worktree command. */
@@ -96,29 +96,37 @@ export const PROJECT_VERBS: readonly Verb[] = [
   },
   {
     name: "projects remove",
-    usage: "wsp projects remove <project>",
-    about: "takes a project out of this wsp; its folder is left where it is, on this computer or on a computer you joined, and a project with a machine standing on it is refused naming them",
+    usage: "wsp projects remove <project> [--yes] [--force]",
+    about: "takes a project out of this wsp; its folder is left where it is, on this computer or on a computer you joined, a project with a machine standing on it is refused naming them, and one whose checkout on a computer of yours holds work no remote has is stopped naming it",
     page: "agent",
-    options: {},
+    options: { yes: { type: "boolean" }, force: { type: "boolean" } },
     run: async ctx => {
       const [ref] = ctx.args;
       if (ref === undefined || ctx.args.length !== 1) throw usageRefusal("wsp projects remove takes one project.", usageIs(ctx));
       const client = await ctx.client();
       const project = await projectOf(client, ref);
+      const force = ctx.flags["force"] === true ? { force: true } : {};
+      // The host's own refusals first, so the one question is asked only of a remove that would go.
+      const { unsaved } = await client.request<{ unsaved?: string }>("projects.remove", { projectId: project.id, check: true, ...force });
+      const losing = unsaved === undefined ? "" : `\nWith it goes work no remote has: ${unsaved}.`;
+      if (!(await confirmed(ctx, `Remove ${project.name}?\nIts record leaves this wsp, with the folder wsp made for it on the computer holding it; a folder of yours stays where it is.${losing}`, project.name))) return 1;
       // The sentence comes off the wire: what a remove took is true differently on a computer of the person's, at
       // a provider and on this computer, and the runtime's own road for that computer is what says which.
-      const { said } = await client.request<{ said: string }>("projects.remove", { projectId: project.id });
+      const { said } = await client.request<{ said: string }>("projects.remove", { projectId: project.id, ...force });
       ctx.out.emit({ project, said }, said);
       return 0;
     },
     tool: tool({
-      description: `Takes a project's record out of this wsp. Its folder stays exactly where it is, on this computer or on a computer you joined, ${MEMORY_KEPT_CLAUSE}, and no repo is ever asked for anything. Refused in one line while a machine of it stands, naming them; delete those first.`,
-      input: { project: z.string().describe("the project's name, or its id when two share a name") },
+      description: `Takes a project's record out of this wsp. Its folder stays exactly where it is, on this computer or on a computer you joined, ${MEMORY_KEPT_CLAUSE}, and no repo is ever asked for anything. Refused in one line while a machine of it stands, naming them; delete those first. Refused in one line too while its checkout on a computer of yours holds work no remote has, naming it by its path there, unless force.`,
+      input: {
+        project: z.string().describe("the project's name, or its id when two share a name"),
+        force: z.boolean().optional().describe("remove it even where its checkout on a computer of yours holds work no remote has"),
+      },
       output: { project: ProjectView, said: z.string() },
-      call: async ({ project: ref }, deps) => {
+      call: async ({ project: ref, force }, deps) => {
         const client = await deps.client();
         const project = await projectOf(client, ref);
-        const { said } = await client.request<{ said: string }>("projects.remove", { projectId: project.id });
+        const { said } = await client.request<{ said: string }>("projects.remove", { projectId: project.id, ...(force === true ? { force: true } : {}) });
         return asText(said, { project, said });
       },
     }),

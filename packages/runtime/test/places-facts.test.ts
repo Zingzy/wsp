@@ -158,6 +158,25 @@ describe("what stands for each agent on a computer you own", () => {
     client.close();
   });
 
+  it("says on its row whether that computer's leave takes the copy of the image, off what it reported", async () => {
+    const { hostKey } = await serving();
+    const added = await join(hostKey, { code: await code(), report: withAgents({ takesRuntime: true, wspDaemonVersion: DAEMON_VERSION }) });
+    expect((await placesOf()).find(p => p.name === "spoo")!.takesRuntime).toBe(true);
+    added.client.close();
+    const joined = await join(hostKey, { code: await code(), report: report("studio", { takesRuntime: false, wspDaemonVersion: DAEMON_VERSION }) });
+    expect((await placesOf()).find(p => p.name === "studio")!.takesRuntime).toBeUndefined();
+    joined.client.close();
+  });
+
+  it("says the copy stays where the computer's daemon would take it and the wsp whose leave the remove runs would not", async () => {
+    const { hostKey } = await serving();
+    // A box added before this build and then updated: its daemon is new and its wsp, which the update never moves,
+    // is main's, which says no build. The remove runs that wsp's leave, which leaves the runtime's folder alone.
+    const updated = await join(hostKey, { code: await code(), report: withAgents({ takesRuntime: true, daemonVersion: DAEMON_VERSION + 1 }) });
+    expect((await placesOf()).find(p => p.name === "spoo")!.takesRuntime).toBeUndefined();
+    updated.client.close();
+  });
+
   it("leaves both off the row of a computer running a daemon older than they are", async () => {
     const { hostKey } = await serving();
     const { client } = await join(hostKey, { code: await code(), report: withAgents() });

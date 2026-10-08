@@ -14,7 +14,8 @@
 // the sha as the next version, writes that version into numbers.rs and the
 // contract fixture, and adds one line to the version notes: the branch's own
 // daemon/version-note.md where it wrote one, which then goes, or the note it
-// was handed.
+// was handed. A gate the branch wrote as `= DAEMON_VERSION` is pinned to the
+// version cut, so a later cut does not move it.
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -35,6 +36,8 @@ const ENTRY = /^\s*(UNRECORDED|"[0-9a-f]{64}"),/;
 const VERSION_LINE = "\nexport const DAEMON_VERSION = DAEMON_CONTENTS.length;";
 const RUST = /pub const DAEMON_VERSION: u32 = (\d+);/;
 const FIXTURE = /"daemonVersion": (\d+)/;
+/** A gate a branch wrote as the daemon it ships, which moves with every later cut until this one pins its number. */
+const GATE = /^(export const \w+_DAEMON_VERSION = )DAEMON_VERSION;$/gm;
 /** The widest a line of the notes runs, its " * " included, as the rest of the file wraps. */
 const WIDTH = 120;
 
@@ -96,7 +99,11 @@ export function cutDaemonVersion(repo, { note } = {}) {
     if (version !== n) throw new Error(`${path} says daemon ${version} while the record holds ${n}; a branch carries no version, so take it back to ${n} and let the landing cut the next`);
   }
   const sha = daemonContentSha(at("daemon"));
-  if (entries.at(-1) === `"${sha}"`) return { cut: false, version: n };
+  if (entries.at(-1) === `"${sha}"`) {
+    const gates = [...record.matchAll(GATE)].map(m => m[0]);
+    if (gates.length > 0) throw new Error(`${CUT_PATHS.record} gates on this build's daemon while the daemon did not change, so no version holds what it asks for:\n${gates.join("\n")}`);
+    return { cut: false, version: n };
+  }
   const noteFile = at(CUT_PATHS.note);
   const said = existsSync(noteFile) ? readFileSync(noteFile, "utf8") : note;
   if (said === undefined || said.trim() === "") throw new Error(`the daemon changed, and a new version lands with a note: write ${CUT_PATHS.note} on the branch, or hand the cut --note`);
@@ -105,7 +112,7 @@ export function cutDaemonVersion(repo, { note } = {}) {
   let next = `${record.slice(0, close)}\n  "${sha}",${record.slice(close)}`;
   const end = next.indexOf(VERSION_LINE);
   if (end === -1 || !next.slice(0, end).endsWith(" */")) throw new Error(`${CUT_PATHS.record}: the version notes do not end right above DAEMON_VERSION`);
-  next = `${next.slice(0, end - " */".length)}\n${noteLine(version, said)} */${next.slice(end)}`;
+  next = `${next.slice(0, end - " */".length)}\n${noteLine(version, said)} */${next.slice(end)}`.replace(GATE, `$1${version};`);
   writeFileSync(at(CUT_PATHS.record), next);
   writeFileSync(at(CUT_PATHS.rust), rust.replace(RUST, `pub const DAEMON_VERSION: u32 = ${version};`));
   writeFileSync(at(CUT_PATHS.fixture), fixture.replace(FIXTURE, `"daemonVersion": ${version}`));

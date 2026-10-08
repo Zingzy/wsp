@@ -1,20 +1,22 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { lstatSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { platform } from "node:os";
 import { resolve } from "node:path";
-import { ALREADY_JOINED_LINE, JOIN_ADDRESS_LINE, PLACE_CODE_REFUSAL, JOIN_NO_KEY_REFUSAL, joinKeyRefusal, readJoinToken, PLACE_LINK_NONCE_BYTES, PlaceJoinDevice, PlaceJoinReply, type PlaceFile, type PlaceReport, placeDaemonPaths, workFolderIn, hostKeyRefusal, joinAddressOf, placeLinkTranscript, usageRefusal, wsUrlOf, PLACE_NEEDS_ROOT_LINE } from "@wsp/protocol";
+import { ALREADY_JOINED_LINE, RUNTIME_ROOT, JOIN_ADDRESS_LINE, PLACE_CODE_REFUSAL, JOIN_NO_KEY_REFUSAL, joinKeyRefusal, readJoinToken, PLACE_LINK_NONCE_BYTES, PlaceJoinDevice, PlaceJoinReply, type PlaceFile, type PlaceReport, placeDaemonPaths, workFolderIn, hostKeyRefusal, joinAddressOf, placeLinkTranscript, usageRefusal, wsUrlOf, PLACE_NEEDS_ROOT_LINE, placeLeaveUnsavedLine, placeUnreadLine } from "@wsp/protocol";
 import { keyFingerprint } from "@wsp/engine";
 import { freshEphemeral, makeSeal, newPlaceKeyPair, openFrame, sealKeys, sharedSecret, signPlaceBytes, verifyPlaceBytes, type Seal } from "@wsp/runtime";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { daemonFlags, joinedLine, sshDaemonPlace } from "../doctor.js";
+import { confirmedAt } from "../verbs.js";
 import { daemonBinaryHere } from "../assets.js";
 import { DAEMON_TARGETS, guestSystem, noPlaceSystemLine } from "../daemon-binary.js";
 import { runningWsp, type RunningWsp } from "../mcp-install.js";
 import { randomBytes } from "node:crypto";
 import WebSocket from "ws";
 import type { CliIO } from "../cli.js";
-import { joinStanding, placeFilePath, placeKeyPath, placeLogPath, placeLogin, placeReport, readPlaceFile, sweepPlace, sweptLine, writeExclusive, type ToolFolders, writePlaceFile, wspArgvOf } from "../place-report.js";
+import { joinStanding, placeFound, placeFilePath, placeKeyPath, placeLogPath, placeLogin, placeReport, readPlaceFile, sweepPlace, sweptLine, writeExclusive, type ToolFolders, writePlaceFile, wspArgvOf } from "../place-report.js";
 import { installService, runFailureLine, serviceEnv, serviceManagerFor, systemRunner, type ServiceAddress, type ServiceManager, type ServiceRunner } from "../service.js";
 import { JOIN_MS, NOTHING_TO_LEAVE_LINE, brokenPlaceLeftLine, joinCutByLeaveLine, joinRefusal, joinUnansweredLine, keyIs, noPlaceManagerLine } from "./add-words.js";
 import { placeNameHere } from "./this-computer.js";
@@ -426,8 +428,11 @@ export async function joinCommand(io: CliIO, args: readonly string[], flags: Joi
 export async function leaveCommand(
   io: CliIO,
   args: readonly string[],
-  /** The workspace profile the sweep takes off as root is the one every install writes unless a caller names another. */
-  deps: { home: string; run: ServiceRunner; platform: string; apparmorProfile?: string; tools?: ToolFolders; systemRoot?: string } = { home: process.env["HOME"] ?? "", run: systemRunner, platform: platform() },
+  /** The workspace profile the sweep takes off as root is the one every install writes unless a caller names another.
+   * `unsaved` reads what the runtime's folder holds that no remote has, one line each, the daemon's own read by
+   * default; nothing where it could not read it. */
+  deps: LeaveDeps = { home: process.env["HOME"] ?? "", run: systemRunner, platform: platform() },
+  flags: { yes?: boolean; force?: boolean } = {},
 ): Promise<number> {
   if (args.length !== 0) throw usageRefusal("wsp leave takes no positional arguments.", "Run wsp leave on its own; it takes wsp off the computer you are sitting at.");
   const home = deps.home;
@@ -438,13 +443,52 @@ export async function leaveCommand(
     return 1;
   }
   const held = "joined" in standing ? standing.joined : undefined;
+  const runtime = `${deps.systemRoot ?? ""}${RUNTIME_ROOT}`;
+  // Before anything goes, by the read the daemon's own leave makes: the runtime's folder holds the checkouts of the
+  // workspaces and the projects here, which the sweep takes whole where it runs as root and the add left a record.
+  const found = placeFound(home);
+  const takesRuntime = (deps.uid ?? process.getuid?.()) === 0 && found !== undefined && !found.has(runtime) && lstatSync(runtime, { throwIfNoEntry: false }) !== undefined;
+  const lost = takesRuntime ? ((deps.unsaved ?? unsavedHere)(runtime) ?? [placeUnreadLine(runtime)]) : [];
+  if (lost.length > 0 && flags.force !== true) throw usageRefusal(placeLeaveUnsavedLine(lost), LEAVE_UNSAVED_FIX);
+  const name = held?.name ?? "this computer";
+  const losing = lost.length > 0 ? `, and with it work no remote has: ${lost.join("; ")}` : "";
+  if (!(await confirmedAt(io, flags.yes === true, `Take ${name} out of its wsp?\nwsp comes off this computer: its service, its files${takesRuntime ? ` and ${runtime}` : ""}${losing}.`, name))) return 1;
   const manager = serviceManagerFor(deps.platform);
   // The agent is another process from this one, so the sweep stops it before taking its unit file, and the lines
   // below say so.
-  const swept = await sweepPlace({ home, ...(manager !== undefined ? { manager } : {}), run: deps.run, ...(deps.apparmorProfile === undefined ? {} : { apparmorProfile: deps.apparmorProfile }), ...(deps.tools === undefined ? {} : { tools: deps.tools }), ...(deps.systemRoot === undefined ? {} : { systemRoot: deps.systemRoot }) });
+  const swept = await sweepPlace({ home, ...(manager !== undefined ? { manager } : {}), run: deps.run, ...(deps.apparmorProfile === undefined ? {} : { apparmorProfile: deps.apparmorProfile }), ...(deps.tools === undefined ? {} : { tools: deps.tools }), ...(deps.systemRoot === undefined ? {} : { systemRoot: deps.systemRoot }), runtimeRoot: runtime, ...(deps.uid === undefined ? {} : { uid: deps.uid }) });
   io.log("broken" in standing ? brokenPlaceLeftLine(standing.broken) : `${standing.joined.name} left the wsp at ${standing.joined.hostUrls.join(", ")}; removed:`);
   for (const line of swept.removed) io.log(sweptLine(line));
   for (const line of swept.kept) io.log(line);
   if (held !== undefined) io.log("The host over there still lists it until somebody runs wsp remove on it.");
   return 0;
 }
+
+interface LeaveDeps {
+  home: string;
+  run: ServiceRunner;
+  platform: string;
+  apparmorProfile?: string;
+  tools?: ToolFolders;
+  systemRoot?: string;
+  uid?: number;
+  unsaved?: (runtime: string) => string[] | undefined;
+}
+
+/** The fix half of a leave stopped on work no remote has. */
+const LEAVE_UNSAVED_FIX = "Copy that work off this computer from the folders named, or push its branches, then run wsp leave again; wsp leave --force removes it anyway.";
+
+/** What the runtime's folder holds that no remote has, read by the daemon this wsp carries, which reads each checkout's
+ * git folder without running git over what an agent wrote. Nothing where that binary is missing or did not answer. */
+function unsavedHere(runtime: string): string[] | undefined {
+  try {
+    const ran = spawnSync(daemonBinaryHere(), ["unsaved", runtime], { encoding: "utf8", timeout: UNSAVED_READ_MS });
+    if (ran.status !== 0) return undefined;
+    return ran.stdout.split("\n").filter(line => line.trim() !== "");
+  } catch {
+    return undefined;
+  }
+}
+
+/** How long the read of the runtime's folder may take: each checkout's walk stops at two seconds. */
+const UNSAVED_READ_MS = 120_000;

@@ -38,6 +38,12 @@ pub const WORKSPACE_APPARMOR_PATH: &str = "/etc/apparmor.d/wsp-workspace";
 /// installed there is linked into: a leave run as root takes every link there pointing under the prefix, then the
 /// prefix whole, and nothing else of either; a prefix the add found standing keeps every entry it held then.
 pub const TOOL_PREFIX: &str = "/opt/wsp";
+/// Where the daemon of a computer somebody owns keeps everything its workspaces run on, which a leave run as root takes
+/// whole unless the add found it standing or something is still mounted under it.
+pub const RUNTIME_ROOT: &str = "/wsp";
+/// The refs an add's seed leaves on a checkout at the tip of the commits it carried over from the person's own folder:
+/// those commits are on that person's computer, so an unsaved read counts none of them as work a remove would lose.
+pub const SEEDED_REFS: &str = "refs/wsp/seeded";
 pub const TOOL_LINKS_DIR: &str = "/usr/local/bin";
 /// The last entry of the record a joined add writes of what stood before it outside the home, and the most bytes that
 /// record may hold: one that does not end on this entry was cut short, and a leave reads it as none.
