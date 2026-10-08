@@ -19,16 +19,19 @@ use crate::record::{self, fill};
 use crate::transcript::{self, Message};
 use crate::words::{opening_title, title_line};
 
-pub const THREADS: Tool =
-    Tool { name: "threads", listed: include_str!("../../record/tools/threads.json"), call: |host, args| Box::pin(threads(host, args)) };
+pub const THREADS: Tool = Tool {
+    name: "threads",
+    listed: include_str!(concat!(env!("OUT_DIR"), "/record/tools/threads.json")),
+    call: |host, args| Box::pin(threads(host, args)),
+};
 pub const THREAD_READ: Tool = Tool {
     name: "thread_read",
-    listed: include_str!("../../record/tools/thread_read.json"),
+    listed: include_str!(concat!(env!("OUT_DIR"), "/record/tools/thread_read.json")),
     call: |host, args| Box::pin(thread_read(host, args)),
 };
 pub const THREAD_HEAD: Tool = Tool {
     name: "thread_head",
-    listed: include_str!("../../record/tools/thread_head.json"),
+    listed: include_str!(concat!(env!("OUT_DIR"), "/record/tools/thread_head.json")),
     call: |host, args| Box::pin(thread_head(host, args)),
 };
 

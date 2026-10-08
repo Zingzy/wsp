@@ -75,13 +75,14 @@ const rateUsdPerHour = (size: { cpu: number; memMb: number }): number => size.cp
 /** Only the size a fork has been measured coming up at: a fork asked for 2 vCPU and 8 GB counted 4 GB in its guest
  * (fleet setup 2026-09-27), and the create's view echoes whatever was asked, so a row this table lists unmeasured is
  * a size the picker sells and the machine does not have. */
-const SIZES: readonly { cpu: number; memMb: number }[] = [{ cpu: 2, memMb: 4096 }];
+const DEFAULT_SIZE = { cpu: 2, memMb: 4096 };
+const SIZES: readonly { cpu: number; memMb: number }[] = [DEFAULT_SIZE];
 
 /** The price table, readable with no key: the Starter clamp doubles as the assumed shape for specs that never named a
  * size, and the setup screen says what a machine costs before any key is typed. */
 export const SOLARI_PRICING: BackendPricing = {
   rateUsdPerHour,
-  defaultSize: SIZES[0]!,
+  defaultSize: DEFAULT_SIZE,
   snapshotStorage: SNAPSHOT_STORAGE,
   builderDiskGb: BUILDER_DISK_GB,
 };
@@ -121,8 +122,9 @@ export const SNAPSHOT_LISTED_MS = 3 * 60_000;
 export const SNAPSHOT_LISTED_EVERY_MS = 15_000;
 
 // Frozen: one shared object every SolariBackend hands out, so nothing shrinks a budget for everyone by accident.
-export const SOLARI_LIFECYCLE: Lifecycle = Object.freeze({
-  budgets: Object.freeze({
+// No arithmetic, since esbuild keeps that, and marked pure, so a public build, which builds no SolariBackend, drops it whole.
+export const SOLARI_LIFECYCLE: Lifecycle = /* @__PURE__ */ Object.freeze({
+  budgets: /* @__PURE__ */ Object.freeze({
     // A resume can land a zombie on a fresh host at default size; one re-pause and resume clears it, a second never has.
     wakeAttempts: 2,
     // The daemon answers about a second after a wake and after a fork.
@@ -130,7 +132,7 @@ export const SOLARI_LIFECYCLE: Lifecycle = Object.freeze({
     // Thirty minutes of asking, once a minute, so a provider that comes back inside its own outage wakes the machine
     // with nobody watching. Both are wall time from the first ask: a resume that sits on its cap spends half of its
     // own minute, and counting the cadence after the cap made thirty asks span 45 minutes (seen live 2026-09-10).
-    resumeAsks: Object.freeze({ everyMs: 60_000, forMs: 30 * 60_000 }),
+    resumeAsks: /* @__PURE__ */ Object.freeze({ everyMs: 60_000, forMs: 1_800_000 }),
   }),
 });
 

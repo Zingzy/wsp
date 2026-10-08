@@ -32,7 +32,8 @@ function sources(): { pkg: string; repo: string; from: Record<string, string> } 
   writeFileSync(join(paths.from["cli"]!, "tsup.config.ts"), "// never travels");
   mkdirSync(paths.repo, { recursive: true });
   writeFileSync(join(paths.repo, "LICENSE"), "AGPL-3.0-only");
-  writeFileSync(join(paths.repo, "README.md"), "# wsp");
+  writeFileSync(join(paths.repo, "README.md"), "# wsp, the repo's");
+  writeFileSync(join(paths.pkg, "README.md"), "# wsp, the package's");
   return paths;
 }
 
@@ -64,11 +65,11 @@ describe("staging the published package", () => {
     expect(existsSync(join(stagedAsset(paths.pkg, "cli"), "tsup.config.ts"))).toBe(false);
   });
 
-  it("copies the licence and the readme in, because npm publishes only the package's own", () => {
+  it("copies the licence in, because npm publishes only the package's own, and keeps the package's own readme", () => {
     const paths = sources();
     stageAssets(paths);
     expect(readFileSync(join(paths.pkg, "LICENSE"), "utf8")).toBe("AGPL-3.0-only");
-    expect(readFileSync(join(paths.pkg, "README.md"), "utf8")).toBe("# wsp");
+    expect(readFileSync(join(paths.pkg, "README.md"), "utf8")).toBe("# wsp, the package's");
   });
 
   it("leaves the command executable", () => {

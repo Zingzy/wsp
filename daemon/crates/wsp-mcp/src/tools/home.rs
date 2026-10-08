@@ -44,8 +44,11 @@ struct ExportShape {
 
 const EXPORT_NAME: &str = "export";
 
-pub const EXPORT: Tool =
-    Tool { name: EXPORT_NAME, listed: include_str!("../../record/tools/export.json"), call: |host, args| Box::pin(export(host, args)) };
+pub const EXPORT: Tool = Tool {
+    name: EXPORT_NAME,
+    listed: include_str!(concat!(env!("OUT_DIR"), "/record/tools/export.json")),
+    call: |host, args| Box::pin(export(host, args)),
+};
 
 /// The text is the runtime's own line for the export's end, which it pushes as the last frame of that export: frames
 /// for another export to another folder are another call's.

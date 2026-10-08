@@ -216,7 +216,7 @@ mod tests {
 
     #[test]
     fn a_call_is_refused_before_its_tool_runs_as_the_sdk_refuses_it() {
-        let listed = tools::entry_in(include_str!("../record/tools/exec.json"), false).unwrap();
+        let listed = tools::entry_in(include_str!(concat!(env!("OUT_DIR"), "/record/tools/exec.json")), false).unwrap();
         let refused = refused_before_call("exec", listed, Some(json!({ "workspace": 5, "argv": [] }))).unwrap_err();
         assert_eq!(refused, "MCP error -32602: Input validation error: Invalid arguments for tool exec: Expected string, received number at workspace\nArray must contain at least 1 element(s) at argv");
         let refused = refused_before_call("exec", listed, None).unwrap_err();
@@ -256,7 +256,7 @@ mod tests {
 
     #[test]
     fn a_key_the_entry_does_not_list_reaches_no_tool() {
-        let set = include_str!("../record/tools/computers_set.json");
+        let set = include_str!(concat!(env!("OUT_DIR"), "/record/tools/computers_set.json"));
         let asked = json!({ "computer": "c", "machines": 2, "nothing": 1 });
         let off = refused_before_call("computers_set", tools::entry_in(set, false).unwrap(), Some(asked.clone()));
         assert_eq!(off, Ok(json!({ "computer": "c" })));

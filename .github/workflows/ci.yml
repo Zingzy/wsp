@@ -324,11 +324,20 @@ jobs:
       - run: pnpm install --frozen-lockfile
       # The release's road, bundled and laid out but not packaged, on a tree that built only what build:deps builds:
       # after the full build a package missing from the app's dependencies goes unseen until a tag fails.
+      # Built public, as the release builds it: no cloud provider, which the last step reads the build for.
       - name: Build what the desktop app depends on
+        env:
+          PUBLIC_BUILD: "1"
         run: pnpm --filter @wsp/desktop run build:deps
       - name: Stage the desktop app
+        env:
+          PUBLIC_BUILD: "1"
         run: pnpm --filter @wsp/desktop run build:app
       # A module that reads a value its import cycle has not set yet throws only when the bundle loads, which
       # building it never does; the command bundle shares its chunks with the window's main.
       - name: The staged bundle loads
         run: node apps/desktop/build/app/main/cli.mjs --version
+      - name: The packed command and the staged app carry no cloud provider
+        env:
+          PUBLIC_BUILD: "1"
+        run: pnpm exec vitest run --minWorkers=1 --maxWorkers=2 packages/wspx/test/public-check.test.ts

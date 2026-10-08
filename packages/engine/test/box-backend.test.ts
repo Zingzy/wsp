@@ -204,6 +204,7 @@ describe("BoxBackend declarations", () => {
     expect(BOX_PRICING.rateUsdPerHour({ cpu: 4, memMb: 8192 })).toBe(0.036);
     expect(BOX_PRICING.rateUsdPerHour({ cpu: 8, memMb: 16384 })).toBe(0.072);
     expect(BOX_PRICING.defaultSize).toEqual({ cpu: 2, memMb: 4096 });
+    expect(BOX_PRICING.defaultSize).toEqual({ cpu: BOX_CLASSES[0]!.cpu, memMb: BOX_CLASSES[0]!.memMb });
     expect(BOX_PRICING.snapshotStorage).toEqual({ freeGb: 0, usdPerGbMonth: 0, billedFrom: "" });
     expect(BOX_PRICING.builderDiskGb).toBeUndefined();
     for (const c of BOX_CLASSES) expect(BOX_PRICING.rateUsdPerHour(c)).toBe(c.rateUsdPerHour);

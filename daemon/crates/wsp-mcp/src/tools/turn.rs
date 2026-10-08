@@ -22,10 +22,16 @@ use crate::failure::Failure;
 use crate::host::Host;
 use crate::record::{self, fill};
 
-pub const RUN: Tool =
-    Tool { name: "run", listed: include_str!("../../record/tools/run.json"), call: |host, args| Box::pin(run(host, args)) };
-pub const SEND: Tool =
-    Tool { name: "send", listed: include_str!("../../record/tools/send.json"), call: |host, args| Box::pin(send(host, args)) };
+pub const RUN: Tool = Tool {
+    name: "run",
+    listed: include_str!(concat!(env!("OUT_DIR"), "/record/tools/run.json")),
+    call: |host, args| Box::pin(run(host, args)),
+};
+pub const SEND: Tool = Tool {
+    name: "send",
+    listed: include_str!(concat!(env!("OUT_DIR"), "/record/tools/send.json")),
+    call: |host, args| Box::pin(send(host, args)),
+};
 
 #[derive(Debug, Serialize, Deserialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]

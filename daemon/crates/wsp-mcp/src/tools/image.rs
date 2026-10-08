@@ -205,8 +205,11 @@ async fn image_view(client: &crate::client::Client) -> Result<ImageOut, Failure>
 
 const IMAGE_NAME: &str = "image";
 
-pub const IMAGE: Tool =
-    Tool { name: IMAGE_NAME, listed: include_str!("../../record/tools/image.json"), call: |host, args| Box::pin(image(host, args)) };
+pub const IMAGE: Tool = Tool {
+    name: IMAGE_NAME,
+    listed: include_str!(concat!(env!("OUT_DIR"), "/record/tools/image.json")),
+    call: |host, args| Box::pin(image(host, args)),
+};
 
 async fn image(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
     let ImageIn {} = input(IMAGE_NAME, arguments)?;
@@ -234,8 +237,11 @@ pub struct BuildOut {
 
 const BUILD_NAME: &str = "image_build";
 
-pub const BUILD: Tool =
-    Tool { name: BUILD_NAME, listed: include_str!("../../record/tools/image_build.json"), call: |host, args| Box::pin(build(host, args)) };
+pub const BUILD: Tool = Tool {
+    name: BUILD_NAME,
+    listed: include_str!(concat!(env!("OUT_DIR"), "/record/tools/image_build.json")),
+    call: |host, args| Box::pin(build(host, args)),
+};
 
 /// The build's frames carry the place's id whichever word named it; a word the list does not hold goes to the host
 /// as typed, since the host is the one judge of what it names.
@@ -291,7 +297,7 @@ const MOVE_NAME: &str = "image_move";
 
 pub const MOVE: Tool = Tool {
     name: MOVE_NAME,
-    listed: include_str!("../../record/tools/image_move.json"),
+    listed: include_str!(concat!(env!("OUT_DIR"), "/record/tools/image_move.json")),
     call: |host, args| Box::pin(move_image(host, args)),
 };
 
@@ -347,7 +353,7 @@ const REMOVE_NAME: &str = "image_remove";
 
 pub const REMOVE: Tool = Tool {
     name: REMOVE_NAME,
-    listed: include_str!("../../record/tools/image_remove.json"),
+    listed: include_str!(concat!(env!("OUT_DIR"), "/record/tools/image_remove.json")),
     call: |host, args| Box::pin(remove(host, args)),
 };
 

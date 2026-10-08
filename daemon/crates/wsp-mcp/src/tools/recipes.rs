@@ -12,21 +12,24 @@ use crate::host::Host;
 
 type Arc<T> = std::sync::Arc<T>;
 
-pub const LIST: Tool =
-    Tool { name: "recipes", listed: include_str!("../../record/tools/recipes.json"), call: |host, args| Box::pin(list(host, args)) };
+pub const LIST: Tool = Tool {
+    name: "recipes",
+    listed: include_str!(concat!(env!("OUT_DIR"), "/record/tools/recipes.json")),
+    call: |host, args| Box::pin(list(host, args)),
+};
 pub const SHOW: Tool = Tool {
     name: "recipes_show",
-    listed: include_str!("../../record/tools/recipes_show.json"),
+    listed: include_str!(concat!(env!("OUT_DIR"), "/record/tools/recipes_show.json")),
     call: |host, args| Box::pin(show(host, args)),
 };
 pub const SAVE: Tool = Tool {
     name: "recipes_save",
-    listed: include_str!("../../record/tools/recipes_save.json"),
+    listed: include_str!(concat!(env!("OUT_DIR"), "/record/tools/recipes_save.json")),
     call: |host, args| Box::pin(save(host, args)),
 };
 pub const REMOVE: Tool = Tool {
     name: "recipes_remove",
-    listed: include_str!("../../record/tools/recipes_remove.json"),
+    listed: include_str!(concat!(env!("OUT_DIR"), "/record/tools/recipes_remove.json")),
     call: |host, args| Box::pin(remove(host, args)),
 };
 

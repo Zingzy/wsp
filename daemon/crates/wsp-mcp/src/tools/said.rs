@@ -167,7 +167,8 @@ pub struct Recipe {
 pub fn turns() -> &'static Turns {
     static TURNS: OnceLock<Turns> = OnceLock::new();
     TURNS.get_or_init(|| {
-        serde_json::from_str(include_str!("../../record/turns.json")).unwrap_or_else(|e| panic!("record/turns.json does not read: {e}"))
+        serde_json::from_str(include_str!(concat!(env!("OUT_DIR"), "/record/turns.json")))
+            .unwrap_or_else(|e| panic!("record/turns.json does not read: {e}"))
     })
 }
 

@@ -95,13 +95,19 @@ const START_NAME: &str = "start";
 const REVIEW_NAME: &str = "review";
 const REVIEW_POST_NAME: &str = "review_post";
 
-pub const START: Tool =
-    Tool { name: START_NAME, listed: include_str!("../../record/tools/start.json"), call: |host, args| Box::pin(start(host, args)) };
-pub const REVIEW: Tool =
-    Tool { name: REVIEW_NAME, listed: include_str!("../../record/tools/review.json"), call: |host, args| Box::pin(review(host, args)) };
+pub const START: Tool = Tool {
+    name: START_NAME,
+    listed: include_str!(concat!(env!("OUT_DIR"), "/record/tools/start.json")),
+    call: |host, args| Box::pin(start(host, args)),
+};
+pub const REVIEW: Tool = Tool {
+    name: REVIEW_NAME,
+    listed: include_str!(concat!(env!("OUT_DIR"), "/record/tools/review.json")),
+    call: |host, args| Box::pin(review(host, args)),
+};
 pub const REVIEW_POST: Tool = Tool {
     name: REVIEW_POST_NAME,
-    listed: include_str!("../../record/tools/review_post.json"),
+    listed: include_str!(concat!(env!("OUT_DIR"), "/record/tools/review_post.json")),
     call: |host, args| Box::pin(review_post(host, args)),
 };
 

@@ -189,7 +189,7 @@ pub struct ForkOut {
 
 const FORK_NAME: &str = "fork";
 
-const FORK_LISTED: &str = include_str!("../../record/tools/fork.json");
+const FORK_LISTED: &str = include_str!(concat!(env!("OUT_DIR"), "/record/tools/fork.json"));
 
 pub const FORK: Tool = Tool { name: FORK_NAME, listed: FORK_LISTED, call: |host, args| Box::pin(fork(host, args)) };
 

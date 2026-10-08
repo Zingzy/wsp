@@ -5,4 +5,10 @@
 // table, whose rows build the engine's backends.
 import { cloudFromEnv } from "@wsp/protocol";
 
-export const CLOUD_ON: boolean = cloudFromEnv(process.env);
+/** False in a public build, which the bundler fills in where PUBLIC_BUILD=1; never filled in anywhere else. */
+declare const __WSP_CLOUD__: boolean | undefined;
+
+/** Whether this build carries the clouds at all: a public build carries none, so no variable turns them on there. */
+export const CLOUD_BUILT: boolean = typeof __WSP_CLOUD__ !== "boolean" || __WSP_CLOUD__;
+
+export const CLOUD_ON: boolean = CLOUD_BUILT && cloudFromEnv(process.env);

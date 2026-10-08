@@ -19,11 +19,14 @@ use crate::record::{self, fill};
 
 pub const WAIT: Tool = Tool {
     name: "threads_wait",
-    listed: include_str!("../../record/tools/threads_wait.json"),
+    listed: include_str!(concat!(env!("OUT_DIR"), "/record/tools/threads_wait.json")),
     call: |host, args| Box::pin(wait(host, args)),
 };
-pub const RESTART: Tool =
-    Tool { name: "restart", listed: include_str!("../../record/tools/restart.json"), call: |host, args| Box::pin(restart(host, args)) };
+pub const RESTART: Tool = Tool {
+    name: "restart",
+    listed: include_str!(concat!(env!("OUT_DIR"), "/record/tools/restart.json")),
+    call: |host, args| Box::pin(restart(host, args)),
+};
 
 #[derive(Debug, Serialize, Deserialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]

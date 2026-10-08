@@ -79,8 +79,11 @@ fn computer_named(computer: &str, named: &HashMap<String, String>) -> String {
 
 const ADD_NAME: &str = "projects_add";
 
-pub const ADD: Tool =
-    Tool { name: ADD_NAME, listed: include_str!("../../record/tools/projects_add.json"), call: |host, args| Box::pin(add(host, args)) };
+pub const ADD: Tool = Tool {
+    name: ADD_NAME,
+    listed: include_str!(concat!(env!("OUT_DIR"), "/record/tools/projects_add.json")),
+    call: |host, args| Box::pin(add(host, args)),
+};
 
 /// What landed and is not what was asked for rides the answer under the added line: an add that stands with the
 /// commits left behind reads as one that stands, and the caller has to be told which.
@@ -146,7 +149,7 @@ const REMOVE_NAME: &str = "projects_remove";
 
 pub const REMOVE: Tool = Tool {
     name: REMOVE_NAME,
-    listed: include_str!("../../record/tools/projects_remove.json"),
+    listed: include_str!(concat!(env!("OUT_DIR"), "/record/tools/projects_remove.json")),
     call: |host, args| Box::pin(remove(host, args)),
 };
 

@@ -360,7 +360,7 @@ import type { CliIO } from "./cli.js";
 import { relaySignIn, targetLink, type BoxSignedIn } from "./place-signin.js";
 import type { RelayTerminal } from "./signin-relay.js";
 import { gitRootOf, mainWorktreeOf } from "./repo-root.js";
-import { CLOUD_ON } from "./cloud.js";
+import { CLOUD_BUILT, CLOUD_ON } from "./cloud.js";
 import { cloudText } from "./skill.js";
 import { dialAddress, heldOrStarted, hostTokenFor, hostTokenPath, POLL_MS, SERVICE_WAIT_MS, servingHost } from "./host-lock.js";
 import type { HostStarter } from "./host-start.js";
@@ -420,9 +420,10 @@ function inCloudWords(v: Verb): Verb {
 export const VERBS: readonly Verb[] = (CLOUD_ON ? ALL_VERBS : ALL_VERBS.filter(v => !isCloudVerb(v)).map(withoutCloudFlags)).map(inCloudWords);
 
 /** The line a person typed, as the cloud line it is when no cloud is registered here: the verb it opens, or that
- * verb with the cloud flag it carries. Nothing where the line means something without one. */
+ * verb with the cloud flag it carries. Nothing where the line means something without one, and nothing in a public
+ * build, where no variable turns the cloud on and the line is a word like any other this wsp does not know. */
 export function cloudLineOf(argv: ReadonlyArray<string>): string | undefined {
-  if (CLOUD_ON) return undefined;
+  if (CLOUD_ON || !CLOUD_BUILT) return undefined;
   const opens = (v: Verb): boolean => v.name.split(" ").every((w, i) => argv[i] === w);
   const verb = [...ALL_VERBS].sort((a, b) => b.name.length - a.name.length).find(opens);
   if (verb === undefined) return undefined;

@@ -1,7 +1,7 @@
 {
   "name": "@wsp-labs/wsp",
   "version": "0.2.0",
-  "description": "Your setup, on cloud machines, for coding agents. Installs the wsp command.",
+  "description": "Your setup, on your computers, for coding agents. Installs the wsp command.",
   "type": "module",
   "bin": {
     "wsp": "./dist/bin.js"
