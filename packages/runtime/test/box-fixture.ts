@@ -171,6 +171,8 @@ export const asThread = (scope: ThreadScope): Caller => ({ origin: "relayed", by
 
 /** What a message starts with to hold its turn open until the case answers it. */
 export const HOLD = "hold: ";
+/** What a message starts with for a turn that fails at once. */
+export const FAIL = "fail: ";
 
 export interface Held {
   o: HarnessStartOptions;
@@ -188,7 +190,7 @@ export function leading(starts: Held[]): HarnessAdapterFactory {
       let answer = (_text: string): void => {};
       const finished = new Promise<TurnResult>(resolve => {
         answer = text => {
-          const result: TurnResult = { status: "completed", text };
+          const result: TurnResult = o.prompt.startsWith(FAIL) ? { status: "failed", error: text } : { status: "completed", text };
           o.onEvent({ type: "turn.done", sessionId, result });
           o.onEvent({ type: "session.end", sessionId, exitCode: 0, sawResult: true });
           resolve(result);
@@ -196,7 +198,7 @@ export function leading(starts: Held[]): HarnessAdapterFactory {
       });
       starts.push({ o, env: hctx.env, answer });
       o.onEvent({ type: "session.start", sessionId });
-      if (o.prompt !== "coordinate" && !o.prompt.startsWith(HOLD)) answer("built it");
+      if (o.prompt !== "coordinate" && !o.prompt.startsWith(HOLD)) answer(o.prompt.startsWith(FAIL) ? "the build broke" : "built it");
       return { localId: sessionId, finished, interrupt: async () => answer("stopped") };
     },
   });
