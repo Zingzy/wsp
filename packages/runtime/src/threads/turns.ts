@@ -37,7 +37,7 @@ export function turnsArea(ctx: RuntimeContext): TurnsArea {
     /** The device this turn's launch environment carries into the machine, taken away at the exit beside the turn
      * token: the two are one turn's identity and they end together. */
     scopeDeviceId?: string;
-    outcome: SessionStartOutcome;
+    outcome: Exclude<SessionStartOutcome, "held">;
     /** What this turn's own session.start row carries, for the road that still has to write it. */
     opening: { prompt: string; requestId?: string; via?: "slate"; afterCut?: boolean; afterLimit?: number; opensThread?: boolean; title?: string; attachments?: readonly AttachmentRecord[] };
     /** The message the agent is handed and the effort it runs at, kept beside the run while the turn runs. */

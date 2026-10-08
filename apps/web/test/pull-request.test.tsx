@@ -7,7 +7,7 @@
 import { cloneElement } from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
-import { fixAskedLine, updateConflictsLine, type Checkout, type PullRequestFact, type PullRequestKept, type PullRequestPage, type WorkspaceStatus } from "@wsp/protocol";
+import { capWaitLine, fixAskedLine, updateConflictsLine, type Checkout, type PullRequestFact, type PullRequestKept, type PullRequestPage, type WorkspaceStatus } from "@wsp/protocol";
 import { useNotices } from "../src/notices/store.js";
 import { useStore } from "../src/protocol/store.js";
 import { useDiffStore } from "../src/diffs/store.js";
@@ -396,6 +396,14 @@ describe("Status", () => {
     fireEvent.click(fix);
     await waitFor(() => expect(api.fix).toHaveBeenCalledWith(WS, "ci"));
     await waitFor(() => expect(useNotices.getState().notices[0]?.text).toBe(fixAskedLine("api", "Claude Code", "ci")));
+  });
+
+  it("says the wait under the fix's line when the workspace's computer holds the message back", async () => {
+    const { container, api } = await pane();
+    const capped = { placeId: "p_hetzner", place: "hetzner", running: 2, atOnce: 2 };
+    api.fix.mockResolvedValueOnce({ outcome: "held", threadId: "t1", base: "main", agent: "claude", check: "ci", capped } as never);
+    fireEvent.click(q(box(container), "[data-pr-fix='ci']"));
+    await waitFor(() => expect(useNotices.getState().notices[0]).toMatchObject({ text: fixAskedLine("api", "Claude Code", "ci"), detail: capWaitLine(capped) }));
   });
 
   it("says each reviewer's standing verdict beside their faces, and offers Review with an agent", async () => {

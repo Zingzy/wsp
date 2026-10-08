@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join as joinPath } from "node:path";
 import { describe, expect, it } from "vitest";
-import { AGENTS_ON, placeSettingsLine, dayStart, spendCapRefusal, absentComputer, HERE_PLACE_ID, noSuchPlaceRefusal, type PlaceView, type TurnResult, TURN_WALL_MS, turnCutLine } from "@wsp/protocol";
+import { AGENTS_ON, foldThreads, placeSettingsLine, dayStart, spendCapRefusal, absentComputer, HERE_PLACE_ID, noSuchPlaceRefusal, type PlaceView, type TurnResult, TURN_WALL_MS, turnCutLine } from "@wsp/protocol";
 import type { MachineExecOptions } from "../src/machine-exec.js";
 import { createRuntime, wiredPlace, type HarnessAdapterFactory } from "../src/runtime.js";
 import { newPlaceKeyPair } from "../src/places.js";
@@ -26,8 +26,8 @@ describe("a place's cap and what runs there", () => {
     const joined = await join(hostKey, { code: await code(), report: report("spoo", { shape: { cpu: 2, memMb: 7885 } }) });
     sockets.push(joined.client.ws);
     const places = await placesOf();
-    expect(places.find(p => p.id === HERE_PLACE_ID)).toMatchObject({ cap: { threads: 6 }, running: 0, mac: "mac-mini" });
-    expect(places.find(p => p.id === joined.placeId)).toMatchObject({ cap: { threads: 2 }, running: 0 });
+    expect(places.find(p => p.id === HERE_PLACE_ID)).toMatchObject({ cap: { threads: 8 }, running: 0, mac: "mac-mini" });
+    expect(places.find(p => p.id === joined.placeId)).toMatchObject({ cap: { threads: 4 }, running: 0 });
     expect(places.find(p => p.id === "solari")).toMatchObject({ cap: { machines: 3, spendPerDayUsd: 10 }, running: 0 });
   });
 
@@ -44,7 +44,7 @@ describe("a place's cap and what runs there", () => {
     const places = await placesOf();
     expect(places.find(p => p.id === joined.placeId)!.cap).toEqual({ threads: 1 });
     expect(places.find(p => p.id === "solari")!.cap).toEqual({ machines: 5, spendPerDayUsd: 0 });
-    expect(places.find(p => p.id === HERE_PLACE_ID)!.cap).toEqual({ threads: 6 });
+    expect(places.find(p => p.id === HERE_PLACE_ID)!.cap).toEqual({ threads: 8 });
     expect(await store.get("caps", "solari")).toEqual({ machines: 5, spendPerDayUsd: 0 });
     expect(await store.get("caps", joined.placeId)).toEqual({ threads: 1 });
     expect(await store.get("caps", HERE_PLACE_ID)).toBeUndefined();
@@ -72,13 +72,13 @@ describe("a place's cap and what runs there", () => {
     const joined = await join(hostKey, { code: await code(), report: report("spoo", { shape: { cpu: 4, memMb: 8192 } }) });
     sockets.push(joined.client.ws);
     const unset = (await placesOf()).find(p => p.id === joined.placeId)!;
-    expect(unset).toMatchObject({ cap: { threads: 3 }, capDefault: { threads: 3 } });
+    expect(unset).toMatchObject({ cap: { threads: 4 }, capDefault: { threads: 4 } });
     expect(unset.settings).toBeUndefined();
     const host = await WsClient.connect(ctx.srv!.port, { token: "host-token" });
-    expect(await capOf(host, joined.placeId, { threads: 1 })).toMatchObject({ ok: true, place: { cap: { threads: 1 }, capDefault: { threads: 3 }, settings: { threads: 1 } } });
+    expect(await capOf(host, joined.placeId, { threads: 1 })).toMatchObject({ ok: true, place: { cap: { threads: 1 }, capDefault: { threads: 4 }, settings: { threads: 1 } } });
     expect(await capOf(host, "solari", { machines: 5, spendPerDayUsd: 2 })).toMatchObject({ ok: true, place: { cap: { machines: 5, spendPerDayUsd: 2 }, capDefault: { machines: 3, spendPerDayUsd: 10 } } });
     const back = (await host.request("places.set", { placeId: joined.placeId, reset: ["threads"] })) as { ok: boolean; place: PlaceView };
-    expect(back).toMatchObject({ ok: true, place: { cap: { threads: 3 } } });
+    expect(back).toMatchObject({ ok: true, place: { cap: { threads: 4 } } });
     expect(back.place.settings).toBeUndefined();
     expect(await host.request("places.set", { placeId: "solari", reset: ["spend"] })).toMatchObject({ ok: true, place: { cap: { machines: 5, spendPerDayUsd: 10 }, settings: { machines: 5 } } });
     expect(await host.request("places.set", { placeId: joined.placeId, threads: 2, reset: ["threads"] })).toMatchObject({ ok: false, kind: "usage", error: "spoo: threads at once is both set and reset; name it once" });
@@ -141,6 +141,108 @@ describe("a place's cap and what runs there", () => {
       // A napping machine holds no slot on its cloud.
       await ctx.runtime.workspaces.nap(cloud.id);
       expect((await running())["solari"]).toBe(0);
+    } finally {
+      for (const end of ends.values()) end();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("a computer's threads at once", () => {
+  /** A harness whose turns run until the test ends them, by prompt, and say each start they were handed. */
+  const heldTurns = () => {
+    const ends = new Map<string, () => void>();
+    const adapter: HarnessAdapterFactory = () => ({
+      steers: false,
+      start: ({ onEvent, prompt }) => {
+        const sessionId = randomUUID();
+        onEvent({ type: "session.start", sessionId });
+        const result: TurnResult = { status: "completed", text: "ok" };
+        const finished = new Promise<TurnResult>(done =>
+          ends.set(prompt, () => {
+            onEvent({ type: "turn.done", sessionId, result });
+            onEvent({ type: "session.end", sessionId, exitCode: 0, sawResult: true });
+            done(result);
+          }),
+        );
+        return { localId: sessionId, finished, interrupt: async () => {} };
+      },
+    });
+    return { ends, adapter };
+  };
+  const onHere = async (root: string, adapter: HarnessAdapterFactory) => {
+    const backend = stubBackend();
+    ctx.runtime = createRuntime({ backend, places: wiredPlace("solari", backend), store: memoryStore(), adapters: { claude: adapter }, placeLinks: wiring(newPlaceKeyPair(), { id: "solari", rateUsdPerHour: 0.11 }), local: fakeLocal(root) });
+    ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices });
+    const host = await WsClient.connect(ctx.srv.port, { token: "host-token" });
+    const set = (threads: number) => host.request("places.set", { placeId: HERE_PLACE_ID, threads });
+    return { mac: await createOn(ctx.runtime, { on: HERE_PLACE_ID, name: "mac" }), set, host };
+  };
+  const rowsOf = async (workspaceId: string) => ctx.runtime!.sessions.list(workspaceId);
+
+  it("holds a thread past it, says so on its row and in its transcript, and starts it when a thread there ends", async () => {
+    const root = mkdtempSync(joinPath(tmpdir(), "wsp-cap-wait-"));
+    const { ends, adapter } = heldTurns();
+    try {
+      const { mac, set, host } = await onHere(root, adapter);
+      expect(await set(1)).toMatchObject({ ok: true });
+      const first = await ctx.runtime!.sessions.start(mac.id, { prompt: "one" });
+      const second = ctx.runtime!.sessions.start(mac.id, { prompt: "two", requestId: "req_2" });
+      const wait = { placeId: HERE_PLACE_ID, place: HERE.name, running: 1, atOnce: 1 };
+      await until(async () => (await rowsOf(mac.id)).some(r => r.capped !== undefined));
+      const held = (await rowsOf(mac.id)).find(r => r.capped !== undefined)!;
+      expect(held).toMatchObject({ status: "running", capped: wait });
+      expect(foldThreads(await rowsOf(mac.id)).find(t => t.threadId === held.threadId)).toMatchObject({ capped: wait });
+      expect([...ends.keys()]).toEqual(["one"]);
+      // The computer runs one thread, the one the held thread waits on.
+      expect((await placesOf()).find(p => p.id === HERE_PLACE_ID)).toMatchObject({ running: 1, cap: { threads: 1 } });
+      const said = (await ctx.runtime!.sessions.history(mac.id)).filter(e => e.type === "session.capped");
+      expect(said).toEqual([expect.objectContaining({ type: "session.capped", threadId: held.threadId, turnId: held.id, requestId: "req_2", ...wait })]);
+
+      ends.get("one")!();
+      await first.finished;
+      const started = await second;
+      await until(() => ends.has("two"));
+      expect((await rowsOf(mac.id)).find(r => r.id === started.id)?.capped).toBeUndefined();
+      expect((await placesOf()).find(p => p.id === HERE_PLACE_ID)).toMatchObject({ running: 1 });
+      ends.get("two")!();
+      await started.finished;
+      host.close();
+    } finally {
+      for (const end of ends.values()) end();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("starts the threads it holds in the order they came the moment the person raises it, and a stopped one never starts", async () => {
+    const root = mkdtempSync(joinPath(tmpdir(), "wsp-cap-raise-"));
+    const { ends, adapter } = heldTurns();
+    try {
+      const { mac, set, host } = await onHere(root, adapter);
+      await set(1);
+      await ctx.runtime!.sessions.start(mac.id, { prompt: "one" });
+      const second = ctx.runtime!.sessions.start(mac.id, { prompt: "two" });
+      await until(async () => (await rowsOf(mac.id)).filter(r => r.capped !== undefined).length === 1);
+      const third = ctx.runtime!.sessions.start(mac.id, { prompt: "three" });
+      const fourth = ctx.runtime!.sessions.start(mac.id, { prompt: "four" });
+      await until(async () => (await rowsOf(mac.id)).filter(r => r.capped !== undefined).length === 3);
+      const fourthRow = (await rowsOf(mac.id)).find(r => r.prompt === "four")!;
+      expect(await ctx.runtime!.sessions.interrupt(fourthRow.id)).toEqual({ outcome: "accepted" });
+      await expect(fourth).rejects.toThrow(`stopped before it started, while ${HERE.name} was running 1 of 1 thread`);
+      expect((await rowsOf(mac.id)).some(r => r.prompt === "four")).toBe(false);
+
+      // One more slot takes the thread that waited longest, and nothing that ended made room.
+      await set(2);
+      await second;
+      await until(() => ends.has("two"));
+      await new Promise(r => setTimeout(r, 50));
+      expect([...ends.keys()]).toEqual(["one", "two"]);
+      expect((await rowsOf(mac.id)).find(r => r.prompt === "three")).toMatchObject({ capped: { running: 2, atOnce: 2 } });
+      await set(3);
+      await third;
+      await until(() => ends.has("three"));
+      expect(ends.has("four")).toBe(false);
+      host.close();
     } finally {
       for (const end of ends.values()) end();
       rmSync(root, { recursive: true, force: true });

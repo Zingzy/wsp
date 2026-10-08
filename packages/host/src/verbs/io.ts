@@ -33,6 +33,8 @@ import {
   secretOffer,
   secretSignalsLine,
   stillWorkingLine,
+  capWaitLine,
+  ThreadCapWait,
   unknownAgentLine,
   usageRefusal,
   waitTimedOutLine,
@@ -221,8 +223,11 @@ export const Created = z.object({ workspace: WorkspaceOut, notice: z.string().op
 
 /** What a send meets on its thread, in the runtime's own words: the outcome it answers with on a free or a running
  * turn, and the line it says when the last turn replied but its agent process has not exited. */
-const { started, steered, queued } = SessionStartOutcome.enum;
+const { started, steered, queued, held } = SessionStartOutcome.enum;
 export const SEND_MEETS = `On a thread whose turn is not running the message starts a new turn (outcome \`${started}\`); when the turn is still running the message joins it (outcome \`${steered}\`) or waits for it and then runs (outcome \`${queued}\`), and the reply is that turn's. When the thread's turn has replied but its agent process is still running, the message waits for that process and runs as the thread's next turn (outcome \`${queued}\`), which the runtime says as \`${stillWorkingLine()}\`. A send is never refused for meeting a turn, and two sends keep the order they arrived in.`;
+
+/** What a start meets on a full computer, in the runtime's own words, for run, send and fork alike. */
+export const CAP_MEETS = `A start on a computer already running as many threads as its threads at once waits for a slot and starts on its own when one frees (outcome \`${held}\`), with capped beside it, the computer and what runs there against its number, which the thread's row in threads carries while it waits; a thread that follows a run or a send to its end, not detached, lends that thread's next turn its own slot, one turn at a time, a turn already held ahead of the message included, and every other start, a child started detached included, waits for a slot of its own`;
 
 /** outcome says how the message landed: its own turn, steered into the thread's running one, or queued behind it;
  * afterCut is set when the thread's previous turn ended without a result, so the reply may be missing context. */
@@ -232,6 +237,7 @@ export const TurnOut = z.object({
   harness: z.string(),
   text: z.string().optional().describe("the reply, complete; absent under detach, where the turn is still running and its end reaches whoever the start's notify named"),
   outcome: SessionStartOutcome,
+  capped: ThreadCapWait.optional().describe("what holds the start back while outcome is held: the computer and what runs there against its threads at once"),
   afterCut: z.literal(true).optional(),
 });
 /** What a wait answers with for the thread that left running: the turn's outcome and the facts the harness reported,
@@ -260,7 +266,10 @@ export const asText = (text: string, structured: Structured): CallToolResult => 
 export const turnText = (out: z.infer<typeof TurnOut>): string => (out.afterCut === true ? `${AFTER_CUT_LINE}\n${out.text ?? ""}` : out.text ?? "");
 
 /** A detached start's answer on the tool door: the thread's id, as the command line's first line prints it. */
-export const detachedOut = (turn: Turn, opened?: (threadId: string, folder?: string) => string): CallToolResult => asText(openedThreadLine(turn.threadId, opened, turn.session.cwd), turnView(turn));
+export const detachedOut = (turn: Turn, opened?: (threadId: string, folder?: string) => string): CallToolResult => {
+  const line = openedThreadLine(turn.threadId, opened, turn.session.cwd);
+  return asText(turn.outcome === "held" && turn.session.capped !== undefined ? `${line}\n${capWaitLine(turn.session.capped)}` : line, turnView(turn));
+};
 
 const endView = (ended: Ended): z.infer<typeof ThreadEndOut> => {
   const reply = notifyTail(ended.result);

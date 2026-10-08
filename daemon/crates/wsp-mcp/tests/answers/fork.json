@@ -159,8 +159,10 @@
           "model": "old",
           "effort": "low",
           "access": "full",
+          "followed": true,
           "startedBy": "agent",
-          "requestId": "<request id>"
+          "requestId": "<request id>",
+          "answerHeld": true
         }
       ]
     },
@@ -214,8 +216,10 @@
           "workspaceId": "ws-3",
           "prompt": "go",
           "harness": "codex",
+          "followed": true,
           "startedBy": "agent",
-          "requestId": "<request id>"
+          "requestId": "<request id>",
+          "answerHeld": true
         }
       ]
     },
@@ -267,8 +271,10 @@
           "op": "sessions.start",
           "workspaceId": "ws-3",
           "prompt": "go",
+          "followed": true,
           "startedBy": "agent",
-          "requestId": "<request id>"
+          "requestId": "<request id>",
+          "answerHeld": true
         }
       ]
     },
@@ -320,8 +326,10 @@
           "op": "sessions.start",
           "workspaceId": "ws-3",
           "prompt": "go",
+          "followed": true,
           "startedBy": "agent",
-          "requestId": "<request id>"
+          "requestId": "<request id>",
+          "answerHeld": true
         }
       ]
     },
@@ -373,8 +381,10 @@
           "op": "sessions.start",
           "workspaceId": "ws-3",
           "prompt": "go",
+          "followed": true,
           "startedBy": "agent",
-          "requestId": "<request id>"
+          "requestId": "<request id>",
+          "answerHeld": true
         }
       ]
     },
@@ -426,8 +436,10 @@
           "op": "sessions.start",
           "workspaceId": "ws-3",
           "prompt": "go",
+          "followed": true,
           "startedBy": "agent",
-          "requestId": "<request id>"
+          "requestId": "<request id>",
+          "answerHeld": true
         }
       ]
     },
@@ -474,8 +486,10 @@
           "op": "sessions.start",
           "workspaceId": "ws-3",
           "prompt": "go",
+          "followed": true,
           "startedBy": "agent",
-          "requestId": "<request id>"
+          "requestId": "<request id>",
+          "answerHeld": true
         }
       ]
     },
@@ -522,8 +536,10 @@
           "op": "sessions.start",
           "workspaceId": "ws-3",
           "prompt": "go",
+          "followed": true,
           "startedBy": "agent",
-          "requestId": "<request id>"
+          "requestId": "<request id>",
+          "answerHeld": true
         }
       ]
     },
@@ -570,8 +586,10 @@
           "op": "sessions.start",
           "workspaceId": "ws-3",
           "prompt": "go",
+          "followed": true,
           "startedBy": "agent",
-          "requestId": "<request id>"
+          "requestId": "<request id>",
+          "answerHeld": true
         }
       ]
     },
@@ -979,8 +997,10 @@
           "workspaceId": "ws-3",
           "prompt": "go",
           "model": "anything",
+          "followed": true,
           "startedBy": "agent",
-          "requestId": "<request id>"
+          "requestId": "<request id>",
+          "answerHeld": true
         }
       ]
     }

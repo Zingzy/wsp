@@ -2,7 +2,7 @@
 // Session events into the chat view models: messages, work rows, turn
 // summaries and the timeline rows the transplanted MessagesTimeline renders.
 import { describe, expect, expectTypeOf, it } from "vitest";
-import { fmtDuration, type SessionEvent } from "@wsp/protocol";
+import { fmtDuration, spawnDepthRefusal, type SessionEvent } from "@wsp/protocol";
 import { deriveMessagesTimelineRows, deriveSession, toolGroupSummaryKind, workEntryKind } from "../src/adapt/index.js";
 import { createSessionFold } from "../src/adapt/session.js";
 import type { ToolGroupAction, ToolGroupSummaryKind, WorkLogEntry } from "../src/adapt/index.js";
@@ -202,6 +202,19 @@ describe("deriveSession: streaming states", () => {
   it("an error result marks the row failed and carries the error text as detail", () => {
     const m = deriveSession([start, tool("Bash", { command: "false" }), result("exit 1: nope", true)]);
     expect(m.workEntries[0]).toMatchObject({ toolLifecycleStatus: "failed", detail: "exit 1: nope", command: "false" });
+  });
+
+  it("a thread or a machine the lead asked for and a cap refused stands as an error row with the refusal whole, on the settled turn too", () => {
+    const refusal = spawnDepthRefusal("1a2b3c4d-0000", 2, 2, { computer: "hetzner" });
+    const finished: SessionEvent = { type: "session.done", ...scope, result: { status: "completed", text: "The cap refused it." } };
+    for (const name of ["mcp__wsp__run", "mcp__wsp__fork"]) {
+      const m = deriveSession([start, tool(name, { message: "build it" }), result(refusal, true), { type: "session.delta", ...scope, kind: "text", text: "The cap refused it." }, finished, end]);
+      expect(m.workEntries[0]).toMatchObject({ tone: "error", label: refusal, toolLifecycleStatus: "failed" });
+      const shown = deriveMessagesTimelineRows({ timelineEntries: m.timeline, turns: m.turns, isWorking: false, activeTurnStartedAt: null });
+      expect(shown.filter(r => r.kind === "work").flatMap(r => (r.kind === "work" ? r.groupedEntries.map(e => e.label) : []))).toEqual([refusal]);
+    }
+    // Any other tool's failure folds as it did.
+    expect(deriveSession([start, tool("mcp__wsp__threads", {}), result(refusal, true)]).workEntries[0]).toMatchObject({ tone: "tool", toolLifecycleStatus: "failed" });
   });
 
   it("uses result.text as the assistant message when no text delta arrived (capped replay)", () => {

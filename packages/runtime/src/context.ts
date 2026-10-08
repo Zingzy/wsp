@@ -75,6 +75,7 @@ import type {
   Checkout,
   SpawnAct,
   ThreadWaitingOn,
+  ThreadCapWait,
 } from "@wsp/protocol";
 import type { CopyBuild, GoneSeenBy, WorktreeSettled } from "@wsp/protocol";
 import type { agentsReads } from "./agents-read.js";
@@ -410,8 +411,8 @@ export interface PullRequestsArea {
 }
 
 export interface DaemonArea {
-  readonly sendDetached: (workspaceId: string, o: { prompt: string; thread?: string }, origin: Caller | undefined) => Promise<{ outcome: "steered" | "queued" | "started"; threadId: string; harness: string }>;
-  readonly toFirstThread: (workspaceId: string, prompt: string, origin: Caller | undefined) => ReturnType<(workspaceId: string, o: { prompt: string; thread?: string; }, origin: Caller | undefined) => Promise<{ outcome: "steered" | "queued" | "started"; threadId: string; harness: string; }>>;
+  readonly sendDetached: (workspaceId: string, o: { prompt: string; thread?: string }, origin: Caller | undefined) => Promise<DetachedSend>;
+  readonly toFirstThread: (workspaceId: string, prompt: string, origin: Caller | undefined) => Promise<DetachedSend>;
   readonly writeDaemonRoots: (entry: LiveWorkspace, strict?: boolean) => Promise<void>;
   readonly turnRuns: (workspaceId: string) => boolean;
   readonly deployDaemonOn: (entry: LiveWorkspace, deploy: (e: LiveWorkspace) => Promise<void | string>) => Promise<void | string>;
@@ -559,6 +560,26 @@ export interface AgentsArea {
   readonly adapterFor: (entry: LiveWorkspace, named?: string, turnEnv?: Readonly<Record<string, string>>, waiting?: TurnWaiting, servers?: Readonly<Record<string, string>>, thread?: string) => { harness: string; adapter: HarnessAdapter };
 }
 
+/** What a message sent without its caller waiting answers: where it went, and the wait where its computer holds it. */
+export interface DetachedSend {
+  outcome: "steered" | "queued" | "started" | "held";
+  threadId: string;
+  harness: string;
+  capped?: ThreadCapWait;
+}
+
+/** A turn its computer's threads at once has not let through yet: the computer, the running turns that wait on it and
+ * so lend it a slot, the order it came in, the reason a stop gave it, and once it waits, what its row says and the two
+ * ways the wait ends. */
+export interface CapHeld {
+  placeId: string | undefined;
+  lenders: string[];
+  order: number;
+  stopped?: string;
+  stops?: Set<Promise<void>>;
+  waiting?: { wait: ThreadCapWait; wake: () => void; stop: (reason: string) => void };
+}
+
 export interface ThreadsArea {
   readonly threadRuns: (threadId: string) => boolean;
   readonly launchingOn: (threadId: string) => { turnId: string; launch: Promise<void> } | undefined;
@@ -575,6 +596,14 @@ export interface ThreadsArea {
   readonly treeUnder: (threadId: string) => string[];
   readonly drivesThread: (threadId: string | undefined, caller: Caller | undefined) => boolean;
   readonly leadAsks: Map<string, PermissionAsk>;
+  readonly capHeld: Map<string, CapHeld>;
+  readonly capHold: (record: WorkspaceRecord, turnId: string, lender: string | undefined) => void;
+  readonly capLend: (turnId: string, lender: string) => void;
+  readonly capFull: (record: WorkspaceRecord, turnId: string) => ThreadCapWait | undefined;
+  readonly capWait: (at: { workspaceId: string; threadId: string; turnId: string; sessionId: string; requestId?: string }, wait: ThreadCapWait) => Promise<void>;
+  readonly capStop: (turnId: string, reason: string) => boolean;
+  readonly capStopping: (turnId: string) => () => void;
+  readonly capLeft: (turnId: string) => void;
   readonly stoppedBehind: (s: { view: SessionView; calls?: Map<string, { toolName: string; input: string }> }) => ThreadWaitingOn | undefined;
   readonly stopUnder: (threadId: string, caller: Caller | undefined) => Promise<string[]>;
   readonly notifyOn: (threadId: string) => { notify: readonly string[]; by?: ThreadScope; road?: WorkspaceOrigin } | undefined;
@@ -618,7 +647,7 @@ export interface TurnsArea {
     /** The device this turn's launch environment carries into the machine, taken away at the exit beside the turn
      * token: the two are one turn's identity and they end together. */
     scopeDeviceId?: string;
-    outcome: SessionStartOutcome;
+    outcome: Exclude<SessionStartOutcome, "held">;
     /** What this turn's own session.start row carries, for the road that still has to write it. */
     opening: { prompt: string; requestId?: string; via?: "slate"; afterCut?: boolean; afterLimit?: number; opensThread?: boolean; title?: string; attachments?: readonly AttachmentRecord[] };
     /** The message the agent is handed and the effort it runs at, kept beside the run while the turn runs. */

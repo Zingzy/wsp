@@ -857,7 +857,7 @@ export function workspacesArea(ctx: RuntimeContext): WorkspacesArea {
       const at = clock.now();
       entry.record.prSent = [...(entry.record.prSent ?? []).filter(s => !asked.some(i => same(i, s))), ...asked.map(i => ({ kind: i.kind, id: i.id, at }))];
       await ctx.persist(entry.record);
-      return { outcome: said.outcome, threadId: said.threadId, agent: said.harness, sent: entry.record.prSent };
+      return { outcome: said.outcome, threadId: said.threadId, agent: said.harness, ...(said.capped !== undefined ? { capped: said.capped } : {}), sent: entry.record.prSent };
     },
 
     async fix({ workspaceId, check, child }, origin) {
@@ -900,7 +900,7 @@ export function workspacesArea(ctx: RuntimeContext): WorkspacesArea {
         base = fact.base;
       }
       const said = await ctx.toFirstThread(workspaceId, prompt, origin);
-      return { outcome: said.outcome, threadId: said.threadId, ...(check !== undefined ? { check } : {}), ...(child !== undefined ? { child } : {}), base, agent: said.harness };
+      return { outcome: said.outcome, threadId: said.threadId, ...(check !== undefined ? { check } : {}), ...(child !== undefined ? { child } : {}), base, agent: said.harness, ...(said.capped !== undefined ? { capped: said.capped } : {}) };
     },
 
     async merge({ workspaceId, method, whenChecksPass, head }, origin) {

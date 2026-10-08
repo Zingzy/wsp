@@ -22,6 +22,12 @@ describe("threadStatusOf", () => {
     expect(threadStatusOf(thread({ status: "interrupted" })).id).toBe("resting");
   });
 
+  it("a running turn its computer's threads at once holds back reads Waiting, below a question", () => {
+    const capped = { placeId: "p_hetzner", place: "hetzner", running: 2, atOnce: 2 };
+    expect(threadStatusOf(thread({ status: "running", capped })).id).toBe("waiting");
+    expect(threadStatusOf(thread({ status: "running", capped, asking: "Bash: ls" })).id).toBe("needs-you");
+  });
+
   it("a finish nobody has seen reads Done, below a question, a running turn and a failure", () => {
     expect(threadStatusOf(thread({ unread: true })).id).toBe("done");
     expect(threadStatusOf(thread({ unread: true, asking: "Bash: ls" })).id).toBe("needs-you");
@@ -30,7 +36,7 @@ describe("threadStatusOf", () => {
   });
 
   it("the registry ends on the kind every thread reads as, so no thread falls through it", () => {
-    expect(THREAD_STATUS_KINDS.map(k => k.id)).toEqual(["needs-you", "working", "limited", "resuming", "failed", "done", "resting"]);
+    expect(THREAD_STATUS_KINDS.map(k => k.id)).toEqual(["needs-you", "waiting", "working", "limited", "resuming", "failed", "done", "resting"]);
     expect(threadStatusOf(thread({ status: "failed", limit: { resetsAt: 1 } })).id).toBe("limited");
     expect(threadStatusOf(thread({ status: "failed", limit: { resetsAt: 1 }, resumeAt: 1 })).id).toBe("resuming");
     expect(THREAD_STATUS_KINDS.at(-1)!.is(thread({ status: "failed", asking: "x" }))).toBe(true);

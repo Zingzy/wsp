@@ -82,6 +82,7 @@ import {
   nameOfTask,
   takenNameAfter,
   ThreadDefaults,
+  capWaitLine,
 } from "@wsp/protocol";
 import { mainWorktreeOf } from "../repo-root.js";
 import { SERVICE_WAIT_MS } from "../host-lock.js";
@@ -402,7 +403,7 @@ async function begin(client: HostClient, start: Sent, startedBy: SessionOrigin, 
   });
   let answer: Record<string, unknown>;
   try {
-    answer = await client.request("sessions.start", { ...asked, startedBy, requestId });
+    answer = await client.request("sessions.start", { ...asked, startedBy, requestId, answerHeld: true });
   } catch (e) {
     offStarting();
     throw e;
@@ -476,7 +477,7 @@ export async function follow(
   on: { queued?(): void; starting?(event: SessionStartingEvent): void; steered?(event: SessionSteerEvent): void; started?(turn: Turn): void; redialed?(): void; event(e: SessionEvent, turn: Turn): void },
   redial?: () => Promise<HostClient>,
 ): Promise<Turn> {
-  const going = sent(start);
+  const going = sent({ ...start, followed: true });
   let named: { turn: Turn; turnId: string } | undefined;
   let over = false;
   const take = (f: Frame, turn: Turn): void => {
@@ -689,7 +690,7 @@ export function turnRefusal(turn: Turn): Error | undefined {
  * the rest once it answered. A steered message cannot change the running turn's picks, so the line names the flags
  * it dropped. */
 const WAITING = "waiting behind the running turn";
-const JOINED: Record<Exclude<SessionStartOutcome, "started">, (picks: Picks) => string> = {
+const JOINED: Record<Exclude<SessionStartOutcome, "started" | "held">, (picks: Picks) => string> = {
   steered: picks => {
     const dropped = [...PICK_FLAGS.filter(name => picks[name] !== undefined), ...(picks.fast === true ? ["fast"] : [])].map(name => `--${name}`);
     return `joined the running turn${dropped.length === 0 ? "" : `; ${dropped.join(", ")} dropped, it keeps its own model, effort and access`}`;
@@ -908,7 +909,7 @@ export async function followVerb(ctx: VerbContext, client: HostClient, start: Re
         // The live turn, which follow fills in as its events land: whoever waited on it reads its end off this.
         onTurn?.(t);
         if (announce) ctx.out.emit({ type: "thread", id: t.threadId, workspaceId: t.session.workspaceId, harness: t.session.harness, startedBy: t.session.startedBy }, openedThreadSaid(t.threadId, opened, t.session.cwd));
-        if (t.outcome !== "started") ctx.io.error(JOINED[t.outcome](picks));
+        if (t.outcome !== "started" && t.outcome !== "held") ctx.io.error(JOINED[t.outcome](picks));
         if (joinedWaiting) ctx.io.error(WAITING_ON_A_PERSON);
       },
       redialed: () => {
@@ -920,6 +921,7 @@ export async function followVerb(ctx: VerbContext, client: HostClient, start: Re
           const reply = stream.reply(e.result.text);
           ctx.out.emit(e, redialed ? e.result.text : reply);
         } else ctx.out.emit(e);
+        if (e.type === "session.capped") ctx.io.error(capWaitLine(e));
         if (e.type === "session.start" && e.afterCut === true) ctx.io.error(AFTER_CUT_LINE);
         // The person's turn as the transcript keeps it: one bracket per image, since a terminal draws no pixels.
         if (e.type === "session.start") for (const file of e.attachments ?? []) stream.line(attachmentLine(file));
@@ -971,7 +973,8 @@ export async function beforeSending<T>(client: HostClient, read: () => Promise<T
  * carries to whoever its start named. */
 export async function detachVerb(ctx: VerbContext, client: HostClient, start: Record<string, unknown>, picks: Picks = {}, opened?: (threadId: string, folder?: string) => string): Promise<void> {
   const turn = await startDetached(client, start, "cli", () => ctx.io.error(WAITING), () => hostBack(ctx));
-  if (turn.outcome !== "started") ctx.io.error(JOINED[turn.outcome](picks));
+  if (turn.outcome === "held" && turn.session.capped !== undefined) ctx.io.error(capWaitLine(turn.session.capped));
+  else if (turn.outcome !== "started" && turn.outcome !== "held") ctx.io.error(JOINED[turn.outcome](picks));
   ctx.out.emit(turnView(turn), openedThreadSaid(turn.threadId, opened, turn.session.cwd));
 }
 
@@ -981,5 +984,6 @@ export const turnView = (turn: Turn): z.infer<typeof TurnOut> => ({
   harness: turn.session.harness,
   ...(turn.result !== undefined ? { text: turn.result.text ?? "" } : {}),
   outcome: turn.outcome,
+  ...(turn.outcome === "held" && turn.session.capped !== undefined ? { capped: turn.session.capped } : {}),
   ...(turn.afterCut === true ? { afterCut: true as const } : {}),
 });

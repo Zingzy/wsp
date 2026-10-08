@@ -16,7 +16,7 @@ import { stripVTControlCharacters } from "node:util";
 import { catalogEntry, loginSignIn, mintsToken, tokenIn } from "@wsp/catalog";
 import { keyCheckLine, type BackendPricing, type KeyCheck, type MachineBackend } from "@wsp/engine";
 import { RUNGS } from "@wsp/collect";
-import { CLOUD_SETUP_WORDS, namesPlace, noSuchPlaceRefusal, FIRST_WORKSPACE, GOLDEN_STAGE_WORDS, INIT_BUILD_STEP, INIT_ROW_STATES, KEY_REFUSED, KEY_UNCHECKED, NEVER_REACHED, pasteHereLine, STOP_LEFT_MACHINE_LINE, SIGN_IN_NEVER_REACHED, LoginState, SignInFinish, startPicks, THIS_COMPUTER, initAgentNoRecipeLine, initAgentPrompt, initBuildRows, initJobBuilding, initJobOver, MACHINE_ROW_LABEL, initNeedWhat, initRowOver, initSignInOutcome, initFailedLine, initStageCount, initStoppedAt, isLocalWorkspace, isSessionEvent, noMcpServersLine, plural, takesMcpServers, threadWorkingLine, type GoldenStep, type InitJob, type InitJobEvent, type InitKeys, type InitNeedsYouEvent, type InitPhase, type InitRoad, type InitRow, type InitScreen, type InitScreenId, type InitSetup, type McpServerSpec, type TurnResult } from "@wsp/protocol";
+import { capWaitLine, CLOUD_SETUP_WORDS, namesPlace, noSuchPlaceRefusal, FIRST_WORKSPACE, GOLDEN_STAGE_WORDS, INIT_BUILD_STEP, INIT_ROW_STATES, KEY_REFUSED, KEY_UNCHECKED, NEVER_REACHED, pasteHereLine, STOP_LEFT_MACHINE_LINE, SIGN_IN_NEVER_REACHED, LoginState, SignInFinish, startPicks, THIS_COMPUTER, initAgentNoRecipeLine, initAgentPrompt, initBuildRows, initJobBuilding, initJobOver, MACHINE_ROW_LABEL, initNeedWhat, initRowOver, initSignInOutcome, initFailedLine, initStageCount, initStoppedAt, isLocalWorkspace, isSessionEvent, noMcpServersLine, plural, takesMcpServers, threadWorkingLine, type GoldenStep, type InitJob, type InitJobEvent, type InitKeys, type InitNeedsYouEvent, type InitPhase, type InitRoad, type InitRow, type InitScreen, type InitScreenId, type InitSetup, type McpServerSpec, type TurnResult } from "@wsp/protocol";
 import { harnessCatalog, type GoldenRecipe, type InitDoor, type Runtime, type SessionHandle } from "@wsp/runtime";
 import type { AgentHere } from "./agents-here.js";
 import { vaultOf } from "./env-keys.js";
@@ -694,6 +694,10 @@ export class InitJobs implements InitDoor {
       ...(table?.bypassMode !== undefined ? { permissionMode: table.bypassMode } : {}),
       mcpServers: { [MCP_SERVER_NAME]: this.deps.mcpServer() },
       title: CLOUD_SETUP_WORDS.agent.title,
+      onHeld: ({ wait }) => {
+        s.line = capWaitLine(wait);
+        this.emit();
+      },
     });
     s.handle = handle;
     const threadId = handle.view().threadId ?? handle.id;

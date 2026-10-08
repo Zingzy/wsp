@@ -5,6 +5,7 @@ import { agentName } from "@wsp/catalog";
 import { TREE_WORDS, fixMergeChildLine, mergeInLine } from "@wsp/protocol";
 import { addNotice, noticeFailure } from "../notices/store.js";
 import { useStore } from "../protocol/store.js";
+import { fixWait } from "../pull-request/acts.js";
 
 /** Merges the child's branch into the lead's copy; one that stops on conflicts says which files and offers the hand-over. */
 export async function mergeIntoLead(lead: { id: string; name: string }, childId: string): Promise<void> {
@@ -25,7 +26,7 @@ export async function askLeadToMerge(lead: { id: string; name: string }, childId
   if (fix === undefined) return;
   try {
     const asked = await fix(lead.id, undefined, childId);
-    if (asked.outcome !== "updated") addNotice({ kind: "done", text: fixMergeChildLine(lead.name, agentName(asked.agent), asked.child ?? childId), where: lead.name });
+    if (asked.outcome !== "updated") addNotice({ kind: "done", text: fixMergeChildLine(lead.name, agentName(asked.agent), asked.child ?? childId), where: lead.name, ...fixWait(asked) });
   } catch (e) {
     noticeFailure(e, said => said, { where: lead.name });
   }

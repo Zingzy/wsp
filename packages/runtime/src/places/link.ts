@@ -7,6 +7,7 @@ import {
   NO_RECIPE,
   PLACE_KEY_REFUSAL,
   PLACE_UNKNOWN_REFUSAL,
+  placeCapOf,
   placeTurnLimit,
   absentComputer,
   namesPlace,
@@ -32,7 +33,7 @@ import type { PlaceSetupArea } from "./setup.js";
 import type { PlaceViewsArea } from "./views.js";
 
 /** The door's half that joins, proves and holds each computer's link, and answers what a link and a place say. */
-export function linkDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, setupArea: PlaceSetupArea, viewArea: PlaceViewsArea): Pick<PlaceDoor, "answerChallenge" | "join" | "auth" | "hostKey" | "prove" | "attach" | "link" | "channel" | "load" | "nameOf" | "settingsAt" | "turnLimitAt" | "signInsAt" | "githubFromVault" | "loginLanded" | "offerOf" | "backendOf" | "forkingBackend" | "joined" | "folderComputer" | "forward" | "paneForwards" | "placeFor" | "defaultPlace" | "markUsed" | "markDefaultIfNone"> {
+export function linkDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, setupArea: PlaceSetupArea, viewArea: PlaceViewsArea): Pick<PlaceDoor, "answerChallenge" | "join" | "auth" | "hostKey" | "prove" | "attach" | "link" | "channel" | "load" | "nameOf" | "settingsAt" | "turnLimitAt" | "threadsAt" | "signInsAt" | "githubFromVault" | "loginLanded" | "offerOf" | "backendOf" | "forkingBackend" | "joined" | "folderComputer" | "forward" | "paneForwards" | "placeFor" | "defaultPlace" | "markUsed" | "markDefaultIfNone"> {
   const { opts, store, wiring, clockNow, seenEveryMs, live, kept, signInsHere, backends, forwards, asking, emit } = ctx;
   const panes = panePorts({ forwards, now: clockNow, schedule: ctx.schedule });
   const {
@@ -262,6 +263,13 @@ export function linkDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, se
     turnLimitAt: placeId => {
       const kind = placeId === HERE_PLACE_ID || kept.has(placeId) ? "computer" : providerIds().includes(placeId) ? "provider" : undefined;
       return kind === undefined ? undefined : placeTurnLimit(kind, settingsHeld.get(placeId) ?? {});
+    },
+
+    threadsAt: placeId => {
+      if (placeId !== HERE_PLACE_ID && !kept.has(placeId)) return undefined;
+      const shape = placeId === HERE_PLACE_ID ? wiring.here().shape : kept.get(placeId)?.report.shape;
+      const cap = placeCapOf({ kind: "computer", ...(shape !== undefined ? { shape } : {}) }, settingsHeld.get(placeId) ?? {});
+      return cap !== undefined && "threads" in cap ? cap.threads : undefined;
     },
 
     signInsAt: signInsHere,

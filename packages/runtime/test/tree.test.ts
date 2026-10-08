@@ -33,7 +33,7 @@ import {
   type TurnResult,
 } from "@wsp/protocol";
 import { LocalBackend } from "@wsp/engine";
-import { copyKey, createRuntime, type HarnessAdapterFactory, type LocalWiring, type Runtime } from "../src/runtime.js";
+import { copyKey, createRuntime, type HarnessAdapterFactory, type LocalWiring, type Runtime, type SessionHandle } from "../src/runtime.js";
 import type { DaemonChannel, DaemonChannelOptions } from "../src/daemon-channel.js";
 import { daemonTokenFor } from "../src/daemon-token.js";
 import { localExecStream } from "../src/local-exec.js";
@@ -41,6 +41,8 @@ import { memoryStore, type Store } from "../src/store.js";
 import { fakeClock } from "./fake-clock.js";
 import { copyingFake, createOn, projectOn, stubBackend, tempRepo, testPlatform, tokenGuest, type StubBackend, type StubMachine } from "./stub-backend.js";
 import { until } from "./until.js";
+import { wiring } from "./place-join.js";
+import { newPlaceKeyPair } from "../src/places.js";
 
 const DAEMON_TOKEN = "cafef00d".repeat(3);
 /** Where this computer's own daemon answers; every machine's copy answers at the one preview url below. */
@@ -529,5 +531,62 @@ describe("merge into lead with no remote", () => {
     daemons.answers["*"]!["git.status"] = () => status("child/one");
     await expect(rt.workspaces.mergeIn({ workspaceId: lead.id, child: child.id })).rejects.toThrow(noRemoteForTreeLine("lab-box"));
     expect(daemons.ops()).not.toContain("git.mergeIn");
+  });
+});
+
+describe("fix on a computer at its threads at once", () => {
+  /** A lead in a folder on this computer with a child on a branch whose merge stopped, the computer set to 1; the
+   * child opened by the thread the scope names, the lead's own turn when it names a thread there. */
+  async function fullHere(opener: (lead: string, agent: ReturnType<typeof heldAgent>) => Promise<ThreadScope> = async lead => ({ kind: "thread", threadId: "lead-thread", workspaceId: lead, rootThreadId: "lead-thread" })) {
+    const daemons = fakeDaemons({
+      here: {
+        "git.status": f => status(String(f["cwd"]).includes("child") ? "child/one" : "tree/lead"),
+        "git.mergeIn": f => ok({ branch: String(f["branch"]), merged: false, commits: 0, conflicts: ["lead.txt"] }),
+      },
+    });
+    const backend = stubBackend();
+    backend.execImpl = tokenGuest;
+    answeringAtOnce(backend);
+    const agent = heldAgent();
+    rt = createRuntime({ backend, store, adapters: { claude: agent.factory }, daemonToken: DAEMON_TOKEN, daemonChannel: daemons.open, local: localOn(), statePath: join(root, ".wsp", "state.json"), placeLinks: wiring(newPlaceKeyPair()) });
+    const here = await projectOn(rt, HERE_PLACE_ID, undefined, { name: "lab" });
+    const lead = await rt.workspaces.create({ project: here.id, name: "lead", agents: AGENTS_ON });
+    const by = await opener(lead.id, agent);
+    const child = (await rt.workspaces.folderFor({ project: here.id, branch: "child/one" }, { origin: "here", by })).workspace;
+    await rt.workspaces.mergeIn({ workspaceId: lead.id, child: child.id }, { origin: "here", by });
+    await rt.places!.set(HERE_PLACE_ID, { threads: 1 });
+    return { agent, here, lead, child, by };
+  }
+
+  it("answers held with the wait the moment the computer holds the message back, and the turn starts once a slot frees", async () => {
+    const { agent, lead, child } = await fullHere();
+    const elsewhere = await projectOn(rt!, HERE_PLACE_ID, undefined, { name: "elsewhere" });
+    const busy = await rt!.workspaces.create({ project: elsewhere.id, name: "busy" });
+    await rt!.sessions.start(busy.id, { prompt: "busy" });
+    const fixed = await rt!.workspaces.fix({ workspaceId: lead.id, child: child.id });
+    expect(fixed).toMatchObject({ outcome: "held", agent: "claude", child: child.id, capped: { placeId: HERE_PLACE_ID, running: 1, atOnce: 1 } });
+    expect(agent.prompts).toEqual(["busy"]);
+    agent.end(0);
+    await until(() => agent.prompts.length === 2);
+    expect(agent.prompts[1]).toBe(mergeChildPrompt({ leadBranch: "tree/lead", childBranch: "child/one", remote: child.folder!, conflicts: ["lead.txt"] }));
+  });
+
+  it("takes a slot of its own when a thread asks for it, never the asking thread's, since the asker does not wait on it", async () => {
+    let first: SessionHandle | undefined;
+    const { agent, lead, child, by } = await fullHere(async (leadId, agent) => {
+      first = await rt!.sessions.start(leadId, { prompt: "first" });
+      const root = first.view().threadId!;
+      // The lead's first thread opens a second there and ends; the second works on and asks for the fix, which goes
+      // to the lead's first thread.
+      const asker = await rt!.sessions.start(leadId, { prompt: "asker" }, { origin: "here", by: { kind: "thread", threadId: root, workspaceId: leadId, rootThreadId: root } });
+      agent.end(0);
+      await first.finished;
+      return { kind: "thread", threadId: asker.view().threadId!, workspaceId: leadId, rootThreadId: root };
+    });
+    const fixed = await rt!.workspaces.fix({ workspaceId: lead.id, child: child.id }, { origin: "here", by });
+    expect(fixed).toMatchObject({ outcome: "held", threadId: first!.view().threadId, capped: { running: 1, atOnce: 1 } });
+    expect(agent.prompts).toEqual(["first", "asker"]);
+    agent.end(1);
+    await until(() => agent.prompts.length === 3);
   });
 });

@@ -607,7 +607,8 @@ function runtimeCore(ctx: RuntimeContext, opts: RuntimeOptions): RuntimeCore {
         runningOn: async (placeId, rows) => {
           await ctx.ready();
           const standing = [...live.values()].map(e => ({ ...e.record, provider: ctx.providerOf(e.record) }));
-          return runningOnPlace(placeId, rows, standing, foldThreads([...sessions.values()].map(s => s.view)));
+          // A turn the cap holds back is no thread running there, so the row says the count it waits on.
+          return runningOnPlace(placeId, rows, standing, foldThreads([...sessions.values()].filter(s => !ctx.capHeld.has(s.turnId)).map(s => s.view)));
         },
         signInLine: (placeId, agent) => ctx.agentsRead.signInLine({ placeId }, { agent }),
         // The app's own sign-in road on that computer, read as a setup's row waiting on the person.

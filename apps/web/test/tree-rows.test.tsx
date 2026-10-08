@@ -4,7 +4,7 @@
 // in the state cell the thread's status while it works or waits, else the one act there is to take.
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { TREE_WORDS, cannotPushFromLine, mergedInLine, type TreeChild, type TreeFact } from "@wsp/protocol";
+import { TREE_WORDS, cannotPushFromLine, capWaitLine, fixMergeChildLine, mergedInLine, type TreeChild, type TreeFact } from "@wsp/protocol";
 import type { SidebarThreadSnapshot } from "../src/adapt/index.js";
 import { useNotices } from "../src/notices/store.js";
 import { useStore } from "../src/protocol/store.js";
@@ -161,5 +161,15 @@ describe("the lead's rows", () => {
     render(<TreeRows lead={LEAD} tree={tree([child("stuck", { conflicts: ["lead.txt"] })])} rows={[{ thread: thread("stuck", "stuck"), place: "Solari" }]} />);
     fireEvent.click(rowOf("stuck").querySelector("button")!);
     await waitFor(() => expect(fix).toHaveBeenCalledWith("ws_lead", undefined, "stuck"));
+  });
+
+  it("says the wait under the hand-over's line when the lead's computer holds the message back", async () => {
+    vi.useRealTimers();
+    const capped = { placeId: "p_hetzner", place: "hetzner", running: 2, atOnce: 2 };
+    const fix = vi.fn(async () => ({ outcome: "held" as const, threadId: "t1", base: "tree/lead", child: "stuck", agent: "claude", capped }));
+    useStore.setState({ api: { fix } } as never);
+    render(<TreeRows lead={LEAD} tree={tree([child("stuck", { conflicts: ["lead.txt"] })])} rows={[{ thread: thread("stuck", "stuck"), place: "Solari" }]} />);
+    fireEvent.click(rowOf("stuck").querySelector("button")!);
+    await waitFor(() => expect(useNotices.getState().notices[0]).toMatchObject({ text: fixMergeChildLine("lead", "Claude Code", "stuck"), detail: capWaitLine(capped) }));
   });
 });

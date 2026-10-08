@@ -2,10 +2,13 @@
 // The three acts on a workspace's pull request as the app runs them: each asks the host, and says what it did in a
 // toast with the command line's own line, or the host's refusal in its words.
 import { agentName } from "@wsp/catalog";
-import { fixAskedLine, fixConflictsLine, fixNothingLine, mergedLine, updateConflictsLine, updatedLine, type MergeMethod } from "@wsp/protocol";
+import { capWaitLine, fixAskedLine, fixConflictsLine, fixNothingLine, mergedLine, updateConflictsLine, updatedLine, type FixResult, type MergeMethod } from "@wsp/protocol";
 import { addNotice, noticeFailure } from "../notices/store.js";
 import { useStore } from "../protocol/store.js";
 import { PR_WORDS } from "./words.js";
+
+/** The wait a fix's message is held on, under its line, as `wsp fix` prints it. */
+export const fixWait = (asked: FixResult): { detail?: string } => (asked.outcome === "held" && asked.capped !== undefined ? { detail: capWaitLine(asked.capped) } : {});
 
 /** Sends a failed check, or with none the conflicts an update from the base found, to the workspace's agent. */
 export async function askToFix(workspaceId: string, name: string, check?: string): Promise<void> {
@@ -14,7 +17,7 @@ export async function askToFix(workspaceId: string, name: string, check?: string
   try {
     const asked = await fix(workspaceId, check);
     const text = asked.outcome === "updated" ? fixNothingLine(name, asked.base) : asked.check !== undefined ? fixAskedLine(name, agentName(asked.agent), asked.check) : fixConflictsLine(name, agentName(asked.agent), asked.base);
-    addNotice({ kind: "done", text, where: name });
+    addNotice({ kind: "done", text, where: name, ...fixWait(asked) });
   } catch (e) {
     noticeFailure(e, said => said, { where: name });
   }

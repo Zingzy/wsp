@@ -2,13 +2,13 @@
 import { randomBytes } from "node:crypto";
 import { hostname } from "node:os";
 import { OWNER_LABEL, goldenHead, isMissing, readGone, sightMachine, type Machine, type MachineBackend, isNoProvider, isPlaceAbsent } from "@wsp/engine";
-import { type ProjectView, type SessionView, type Caller, type WorkspacePhase, ThreadPlacement, ThreadScope, WorkspaceOrigin, notTheLeadsChildRefusal, foldThreads, threadKeyOf, threadWord, scopeOf, goneWords, NO_IMAGE_YET, noWorkspaceRefusal, notFoundRefusal, goneUnconfirmedLine, type GoneSeenBy, copiesFolder, kindForComputer, RUN_GONE_LINE, HERE_PLACE_ID, workspaceLands, type ThreadFacts, refusal, LIMIT_RESUME_PROMPT, heldUntil } from "@wsp/protocol";
+import { type ProjectView, type SessionView, type Caller, type WorkspacePhase, ThreadPlacement, ThreadScope, WorkspaceOrigin, notTheLeadsChildRefusal, foldThreads, threadKeyOf, threadWord, scopeOf, goneWords, NO_IMAGE_YET, noWorkspaceRefusal, notFoundRefusal, goneUnconfirmedLine, type GoneSeenBy, copiesFolder, kindForComputer, RUN_GONE_LINE, HERE_PLACE_ID, workspaceLands, type ThreadFacts, refusal, LIMIT_RESUME_PROMPT, heldUntil, capRestartedLine } from "@wsp/protocol";
 import { keyOf } from "../agent-setup.js";
 import { harnessCatalog } from "../harness-catalog.js";
 import { accountOnComputer } from "../usage.js";
 import { phaseLeavingGone, providerSaid } from "../status.js";
 import type { WorkspaceRecord, LiveWorkspace, FoundMachine } from "../types/wiring.js";
-import { WORKSPACES, PROJECTS, TRANSCRIPTS, SESSIONS, READS, READS_ID, RESTARTED_REASON, goneLogLine, restartCutLine, turnWritten, type TranscriptRecord, type TurnLive, type TurnAsked, readAsked, readScope, readRoad, type ThreadRecord, type SessionIndexRecord, BUILDERS, OWNER, HELD_TTL_MS, pidAlive, type BuilderRecord, type LiveBuilder, deadMachine, isAbsentMachine, absentMachine, type StoredBuilder } from "../types/internal.js";
+import { WORKSPACES, PROJECTS, TRANSCRIPTS, SESSIONS, HELD_STARTS, type HeldStartRecord, READS, READS_ID, RESTARTED_REASON, goneLogLine, restartCutLine, turnWritten, type TranscriptRecord, type TurnLive, type TurnAsked, readAsked, readScope, readRoad, type ThreadRecord, type SessionIndexRecord, BUILDERS, OWNER, HELD_TTL_MS, pidAlive, type BuilderRecord, type LiveBuilder, deadMachine, isAbsentMachine, absentMachine, type StoredBuilder } from "../types/internal.js";
 import type { RuntimeContext, BootArea } from "../context.js";
 
 export function bootArea(ctx: RuntimeContext): BootArea {
@@ -423,6 +423,19 @@ export function bootArea(ctx: RuntimeContext): BootArea {
         })();
         ctx.bootWork.set(id, work.catch((e: unknown) => console.warn(`the turns and runs on ${id} were not settled: ${e instanceof Error ? e.message : String(e)}`)).finally(() => ctx.bootWork.delete(id)));
       }
+      // A start a computer's threads at once held back lived in the old host's memory alone, so each ends here with the
+      // restart named: a follower reads its end off the transcript, and the thread it was to report to is told.
+      for (const raw of await store.list(HELD_STARTS)) {
+        const h = raw as HeldStartRecord;
+        await store.delete(HELD_STARTS, h.turnId);
+        if (!live.has(h.workspaceId)) continue;
+        const reason = capRestartedLine(h.place);
+        const view: SessionView = { id: h.turnId, workspaceId: h.workspaceId, harness: h.harness, status: "failed", threadId: h.threadId, ...(h.sessionId !== h.turnId ? { claudeSessionId: h.sessionId } : {}) };
+        const notifyBy = readScope(h.notifyBy);
+        const notifyRoad = readRoad(h.notifyRoad);
+        if (h.notify !== undefined) ctx.notifyEnd({ view, turnId: h.turnId }, h.notify, ctx.tellAs({ ...(notifyBy !== undefined ? { notifyBy } : {}), ...(notifyRoad !== undefined ? { notifyRoad } : {}) }), { status: "failed", error: reason });
+        ctx.record({ type: "session.end", workspaceId: h.workspaceId, sessionId: h.sessionId, turnId: h.turnId, threadId: h.threadId, exitCode: null, sawResult: false, reason, unstarted: true, ...(h.prompt !== undefined ? { prompt: h.prompt } : {}) });
+      }
       // A turn's token dies with the turn, and a host that went down under one never reached that exit: every scoped
       // device whose thread is not running now is taken away here, so a restart is not how a token outlives its turn.
       for (const device of await deviceDoor.list()) {
@@ -494,12 +507,14 @@ export function bootArea(ctx: RuntimeContext): BootArea {
     // written down outlives the question it was on.
     return held.map(s => {
       const behind = s.view.status === "running" ? ctx.stoppedBehind(s) : undefined;
+      const capped = ctx.capHeld.get(s.turnId)?.waiting?.wait;
       const marks = threadRecords.get(threadKeyOf(s.view));
       const children = latest.get(threadKeyOf(s.view)) === s && s.view.threadId !== undefined ? transcriptIndex.get(s.view.workspaceId)?.children.get(s.view.threadId) : undefined;
       return {
         ...s.view,
         ...(s.view.status === "running" && s.pid !== undefined ? { pid: s.pid } : {}),
         ...(behind !== undefined ? { waitingOn: behind } : {}),
+        ...(capped !== undefined ? { capped } : {}),
         ...(children !== undefined && children.size > 0 ? { subagents: [...children.values()].map(({ turnId: _turn, startRow: _row, ...child }) => child) } : {}),
         ...((): { setupRefusal?: string } => {
           const entry = live.get(s.view.workspaceId);

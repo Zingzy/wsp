@@ -90,6 +90,22 @@ export const SESSIONS = "sessions";
 /** A child's finished line into a thread, kept from the child's end until a turn of that thread takes it, so a host
  * that stops in between delivers it when it starts again. */
 export const NOTIFY_OWED = "notify-owed";
+/** The starts a computer's threads at once holds back, by turn id, written as each first waits and gone once it is let
+ * through or given up. The start itself lives in the host's memory, so the next host ends each one it finds here and
+ * tells whoever it was to report to. */
+export const HELD_STARTS = "held-starts";
+export interface HeldStartRecord {
+  workspaceId: string;
+  threadId: string;
+  turnId: string;
+  sessionId: string;
+  harness: string;
+  place: string;
+  prompt?: string;
+  notify?: readonly string[];
+  notifyBy?: unknown;
+  notifyRoad?: unknown;
+}
 /** The name a person gave a workspace, keyed by its id, which its machines carry as a label across every rebuild:
  * the sweep reads it when it records a machine whose workspace document this store lost, so a restored record keeps
  * that name rather than the one the fork stamped, which the provider takes at create and never updates. */
@@ -267,7 +283,7 @@ export function foldEvent(index: TranscriptIndex, e: SessionEvent): void {
     const facts = index.facts.get(e.sessionId) ?? {};
     for (const fact of SESSION_FACTS) if (e[fact] !== undefined) facts[fact] = e[fact];
     index.facts.set(e.sessionId, facts);
-  } else if (e.type === "session.end" && e.threadId !== undefined) {
+  } else if (e.type === "session.end" && e.threadId !== undefined && e.unstarted !== true) {
     index.cut.set(e.threadId, e.exitCode === null && !e.sawResult);
     endChildren(index, e.threadId, e.turnId, e.at);
   } else if (e.type === "session.subagent") foldChild(index, e);

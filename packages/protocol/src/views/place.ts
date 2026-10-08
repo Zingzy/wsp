@@ -570,7 +570,7 @@ export const PlaceView = z.object({
   sync: PlaceSync.optional(),
   /** The number set on this place, else its kind's default; absent only on a computer that has not said its shape. */
   cap: PlaceCap.optional(),
-  /** The cap this place takes when the person sets none: one thread per THREAD_MEM_MB of a computer's memory up to
+  /** The cap this place takes when the person sets none: one thread per THREAD_MEM_MB of a computer's memory up to twice
    * its cores, or a cloud's machines and spend. Absent where `cap` is. */
   capDefault: PlaceCap.optional(),
   /** What the person set on this place, which a reset takes back; absent while every setting is its default. */
