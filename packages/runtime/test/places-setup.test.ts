@@ -36,6 +36,9 @@ import {
   DAEMON_VERSION,
   SIGN_IN_WAIT_MS,
   SIGNED_IN_THERE,
+  FROM_THE_VAULT,
+  setupLines,
+  seedChoiceFrom,
   readJoinToken,
   type AgentsSignInEvent,
   type PlaceProvisionRow,
@@ -391,10 +394,10 @@ describe("a remove of a computer set up with picks", () => {
     const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: picks }, Date.now());
     await until(async () => (await rowOf(place.id)).setup?.state === "done");
     // The project the folders step made there, as its row reads once it landed.
-    await runtime!.projects.add({ source: "https://github.com/acme/app.git", on: place.id, name: "app" });
+    const made = await runtime!.projects.add({ source: "https://github.com/acme/app.git", on: place.id, name: "app" });
     const record = (await store.get("places", place.id)) as PlaceRecord;
     const rows = record.applied!.rows.filter(r => r.id !== "folders/app");
-    await store.put("places", place.id, { ...record, applied: { ...record.applied!, rows: [...rows, { id: "folders/app", label: "app", outcome: "installed", step: "folders" }] } });
+    await store.put("places", place.id, { ...record, applied: { ...record.applied!, rows: [...rows, { id: "folders/app", label: "app", outcome: "installed", step: "folders", project: { id: made.id }, pick: picks.folders["app"]! }] } });
     cmds.length = 0;
     const removed = await runtime!.places!.remove(place.id);
     expect(removed.removed).toBe(true);
@@ -461,6 +464,85 @@ describe("a remove of a computer set up with picks", () => {
     const removed = await runtime!.places!.remove(place.id);
     expect(removed.swept).toEqual(["/root/.wsp"]);
     expect(removed.note).toBe(pluginsKeptLine("spoo", ["stuck@market"]));
+  });
+
+  it("reads a folder a setup made as wsp's through a second setup, which ends ready, and the remove takes its project off", async () => {
+    const { folder, seed } = seededFolder();
+    const { frames } = await hosting({ provision: provisioner().wired, checkouts: {}, seed });
+    const picks = RecipeFile.parse({ name: "laptop", agents: { claude: { signin: "vault" } }, folders: { app: { from: folder, name: "app", keep: [] } } });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: picks }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    const again = await runtime!.places!.setUp(place.id, {});
+    await until(async () => (await rowOf(place.id)).setup?.addId === again.addId && (await rowOf(place.id)).setup?.state === "done");
+    expect((await rowOf(place.id)).applied?.rows.find(r => r.id === "folders/app")).toMatchObject({ outcome: "installed", step: "folders" });
+    expect(ended(frames).map(f => f.end)).toEqual(["ready", "ready"]);
+    const removed = await runtime!.places!.remove(place.id);
+    expect(removed.removed).toBe(true);
+    expect(await runtime!.projects.list()).toEqual([]);
+  });
+
+  const appPicks = (folder: string, pick: Record<string, unknown> = {}): RecipeFile => RecipeFile.parse({ name: "laptop", agents: { claude: { signin: "vault" } }, folders: { app: { from: folder, name: "app", keep: [], ...pick } } });
+
+  /** The person takes the project a setup made off this host and records the same folder there by hand, under its
+   * name: theirs, and no later setup or remove may take it. */
+  const theirsInItsPlace = async (folder: string, seed: SeedWiring, placeId: string): Promise<string> => {
+    await runtime!.projects.remove((await runtime!.projects.list()).find(p => p.name === "app")!.id);
+    return (await runtime!.projects.add({ source: folder, on: placeId, name: "app", seed: seedChoiceFrom(await seed.plan(folder, {}), [], []) })).id;
+  };
+
+  it("leaves a project the person recorded by hand where a setup's stood, through a second setup and the remove", async () => {
+    const { folder, seed } = seededFolder();
+    await hosting({ provision: provisioner().wired, checkouts: {}, seed });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: appPicks(folder) }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    const theirs = await theirsInItsPlace(folder, seed, place.id);
+    const again = await runtime!.places!.setUp(place.id, {});
+    await until(async () => (await rowOf(place.id)).setup?.addId === again.addId && (await rowOf(place.id)).setup?.state === "done");
+    expect((await rowOf(place.id)).applied?.rows.find(r => r.id === "folders/app")?.outcome).toBe("failed");
+    await expect(runtime!.places!.remove(place.id)).rejects.toThrow(placeHoldsProjectsRefusal("spoo", ["app"]));
+    expect((await runtime!.projects.list()).map(p => p.id)).toEqual([theirs]);
+  });
+
+  it("leaves a project the person recorded by hand where a setup's stood when the remove comes straight after", async () => {
+    const { folder, seed } = seededFolder();
+    await hosting({ provision: provisioner().wired, checkouts: {}, seed });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: appPicks(folder) }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    const theirs = await theirsInItsPlace(folder, seed, place.id);
+    await expect(runtime!.places!.remove(place.id)).rejects.toThrow(placeHoldsProjectsRefusal("spoo", ["app"]));
+    expect((await runtime!.projects.list()).map(p => p.id)).toEqual([theirs]);
+  });
+
+  it("keeps a folder with no name of its own wsp's through a second setup cut at its floor, and the remove after a third takes it off", async () => {
+    const { folder, seed } = seededFolder();
+    const floor: PlaceProvisionRow[] = [];
+    await hosting({ provision: provisioner({ rows: { floor } }).wired, checkouts: {}, seed });
+    const picks = RecipeFile.parse({ name: "laptop", agents: { claude: { signin: "vault" } }, folders: { app: { from: folder, keep: [] } } });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: picks }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    floor.push({ id: "floor/apt", label: "apt", outcome: "failed", note: "apt lock held" });
+    const second = await runtime!.places!.setUp(place.id, {});
+    await until(async () => (await rowOf(place.id)).setup?.addId === second.addId && (await rowOf(place.id)).setup?.state === "failed");
+    expect((await rowOf(place.id)).applied?.rows.find(r => r.id === "folders/app")).toMatchObject({ outcome: "installed", earlier: true });
+    floor.length = 0;
+    const third = await runtime!.places!.setUp(place.id, {});
+    await until(async () => (await rowOf(place.id)).setup?.addId === third.addId && (await rowOf(place.id)).setup?.state === "done");
+    const row = await rowOf(place.id);
+    expect(row.applied?.rows.find(r => r.id === "folders/app")).toMatchObject({ outcome: "installed", earlier: true, step: "folders" });
+    expect(placeWord(row, null).word).toBe("Ready");
+    expect((await runtime!.places!.remove(place.id)).removed).toBe(true);
+    expect(await runtime!.projects.list()).toEqual([]);
+  });
+
+  it("counts a folder an earlier setup made as already there in the second setup's lines", async () => {
+    const { folder, seed } = seededFolder();
+    await hosting({ provision: provisioner().wired, checkouts: {}, seed });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: appPicks(folder) }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    const again = await runtime!.places!.setUp(place.id, {});
+    await until(async () => (await rowOf(place.id)).setup?.addId === again.addId && (await rowOf(place.id)).setup?.state === "done");
+    const row = await rowOf(place.id);
+    expect(setupLines("spoo", row.setup!, row.applied)[0]).toBe("spoo: 2 installed: Claude Code, GitHub CLI, 2 already there");
   });
 
   it("still refuses a project the person recorded there by hand, and takes nothing off for it", async () => {
@@ -1365,7 +1447,8 @@ describe("a computer that follows a recipe", () => {
 
   /** A computer set up from the saved recipe and in step with it. */
   async function following(o: { undo?: (removed: readonly { kind: string; name: string }[]) => PlaceUndo[]; answer?: (cmd: string) => { exitCode: number; stdout?: string } | undefined; cmds?: string[]; rows?: Partial<Record<EngineStep, PlaceProvisionRow[]>> } = {}) {
-    const p = provisioner({ ...(o.undo !== undefined ? { undo: o.undo } : {}), ...(o.rows !== undefined ? { rows: o.rows } : {}) });
+    const opts: Parameters<typeof provisioner>[0] = { ...(o.undo !== undefined ? { undo: o.undo } : {}), ...(o.rows !== undefined ? { rows: o.rows } : {}) };
+    const p = provisioner(opts);
     const r = shelf(V1, ITEMS);
     const host = await hosting({ provision: p.wired, recipes: r.recipes, ...(o.answer !== undefined ? { answer: o.answer } : {}), ...(o.cmds !== undefined ? { cmds: o.cmds } : {}) });
     const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: V1, recipe: "laptop" }, Date.now());
@@ -1374,7 +1457,37 @@ describe("a computer that follows a recipe", () => {
     expect((await rowOf(place.id)).applied).toMatchObject({ hash: "h1", items: ITEMS });
     await new Promise(resolve => setTimeout(resolve, 20));
     p.ran.length = 0;
-    return { p, r, host, placeId: place.id };
+    return { p, r, host, opts, placeId: place.id };
+  }
+
+  /** A computer set up once where wsp put jq on, which the engine reads as present from then on, as it does a tool
+   * found there whoever put it on, and a recipe drop of jq that takes it off with its own command. */
+  async function jqPutOn() {
+    const cmds: string[] = [];
+    const clis: PlaceProvisionRow[] = [{ id: "tools/brew/jq", label: "jq", outcome: "installed" }];
+    const agents: PlaceProvisionRow[] = [{ id: "agents/claude", label: "Claude Code", outcome: "installed" }];
+    const set = await following({
+      cmds,
+      rows: { clis, agents },
+      undo: removed => removed.map(c => ({ key: `${c.kind}/${c.name}`, label: c.name, ids: ["tools/brew/jq"], owner: "tools/brew/jq", cmd: `take-off-${c.name}` })),
+    });
+    clis.splice(0, 1, { id: "tools/brew/jq", label: "jq", outcome: "present" });
+    agents.splice(0, 1, { id: "agents/claude", label: "Claude Code", outcome: "present" });
+    const setUpAgain = async (): Promise<void> => {
+      const before = (await rowOf(set.placeId)).setup?.startedAt;
+      await new Promise(resolve => setTimeout(resolve, 5));
+      await runtime!.places!.setUp(set.placeId, {});
+      await until(async () => (await rowOf(set.placeId)).setup?.startedAt !== before);
+    };
+    const settled = (): Promise<void> => until(async () => (await rowOf(set.placeId)).setup?.state === "done");
+    const jq = async (): Promise<PlaceProvisionRow["outcome"] | undefined> => (await rowOf(set.placeId)).applied?.rows.find(row => row.id === "tools/brew/jq")?.outcome;
+    const dropJq = async (): Promise<string[]> => {
+      set.r.move({ ...V1, clis: {} }, { "skills/unslop": "d1" }, "h12");
+      await runtime!.places!.recipeChanged("laptop");
+      await until(async () => (await rowOf(set.placeId)).applied?.hash === "h12");
+      return cmds.filter(c => c.startsWith("take-off-"));
+    };
+    return { ...set, cmds, clis, setUpAgain, settled, jq, dropJq };
   }
 
   it("never refuses a fork there as still being set up while a sync runs, and holds the daemon off it meanwhile", async () => {
@@ -1444,6 +1557,86 @@ describe("a computer that follows a recipe", () => {
     const rows = (await rowOf(placeId)).applied?.rows.map(r => r.id);
     expect(rows).not.toContain("tools/brew/jq");
     expect(rows).not.toContain("agents/claude");
+  });
+
+  it("keeps a tool wsp put on as wsp's through a setup run again, and takes it off once the recipe drops it", async () => {
+    const set = await jqPutOn();
+    await set.setUpAgain();
+    await set.settled();
+    expect(set.p.ran).toContain("clis");
+    expect(await set.jq()).toBe("installed");
+    // The line a terminal prints says what this run did, and this run found everything there.
+    const row = await rowOf(set.placeId);
+    expect(setupLines("spoo", row.setup!, row.applied)[0]).toBe("spoo: nothing installed, 3 already there");
+    expect(await set.dropJq()).toEqual(["take-off-jq"]);
+  });
+
+  it("keeps a tool wsp put on as wsp's through a setup run again that the link cut and the dial-back resumed", async () => {
+    const set = await jqPutOn();
+    set.p.arm("agents");
+    await set.setUpAgain();
+    await until(() => set.p.ran.includes("agents"));
+    // Whose jq is stands on the record while the second run has not reached its step yet.
+    expect(await set.jq()).toBe("installed");
+    for (const ws of sockets.splice(0)) ws.close();
+    await until(async () => (await rowOf(set.placeId)).present === false);
+    set.opts.throws = { step: "agents", error: new PlaceAbsentError("spoo is not connected") };
+    set.p.let("agents");
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect((await rowOf(set.placeId)).setup?.state).toBe("running");
+    expect(await set.jq()).toBe("installed");
+    delete set.opts.throws;
+    await dialsBack(set.host.hostKey, set.placeId, set.host.joined[0]!.pair, set.cmds);
+    await set.settled();
+    expect(set.p.ran.filter(s => s === "clis")).toEqual(["clis"]);
+    expect(await set.jq()).toBe("installed");
+    expect(await set.dropJq()).toEqual(["take-off-jq"]);
+  });
+
+  it("keeps a tool wsp put on as wsp's through a setup whose CLIs step threw, and a setup after it", async () => {
+    const set = await jqPutOn();
+    set.opts.throws = { step: "clis", error: new Error("brew: could not resolve host") };
+    await set.setUpAgain();
+    await set.settled();
+    const rows = (await rowOf(set.placeId)).applied?.rows ?? [];
+    expect(rows.find(r => r.id === "clis/stopped")).toMatchObject({ outcome: "failed", note: "brew: could not resolve host" });
+    expect(await set.jq()).toBe("installed");
+    delete set.opts.throws;
+    await set.setUpAgain();
+    await set.settled();
+    expect(await set.jq()).toBe("installed");
+    expect(await set.dropJq()).toEqual(["take-off-jq"]);
+  });
+
+  it("keeps a tool wsp put on as wsp's through a sync that runs its step again for a CLI the recipe added", async () => {
+    const set = await jqPutOn();
+    set.clis.push({ id: "tools/brew/rg", label: "ripgrep", outcome: "installed" });
+    set.r.move({ ...V1, clis: { ...V1.clis, rg: { via: "brew" } } }, { ...ITEMS, "clis/rg": "14" }, "h11");
+    await runtime!.places!.recipeChanged("laptop");
+    await until(async () => (await rowOf(set.placeId)).applied?.hash === "h11");
+    expect(set.p.ran).toEqual(["clis", "context"]);
+    const rows = (await rowOf(set.placeId)).applied?.rows ?? [];
+    expect(rows.filter(r => r.step === "clis").map(r => [r.id, r.outcome])).toEqual([
+      ["tools/brew/jq", "installed"],
+      ["tools/brew/rg", "installed"],
+    ]);
+    expect(await set.dropJq()).toEqual(["take-off-jq"]);
+  });
+
+  it("leaves a sign-in row as its own step reads it, though an earlier run signed it in there", async () => {
+    const s = signIns();
+    const there = RecipeFile.parse({ ...V1, agents: { ...V1.agents, codex: { signin: "machine" } } });
+    const r = shelf(there, ITEMS);
+    await hosting({ provision: provisioner().wired, recipes: r.recipes, acts: s.acts, vault: { CLAUDE_CODE_OAUTH_TOKEN: "sk-ant-oat01-x", OPENAI_API_KEY: "sk-x" } });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: there, recipe: "laptop" }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.waiting.some(w => w.url !== undefined) === true);
+    s.end("codex", { state: "signed-in" });
+    await until(async () => (await rowOf(place.id)).applied?.rows.find(row => row.id === "signins/codex")?.outcome === "installed");
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    r.move({ ...V1, agents: { ...V1.agents, codex: { signin: "vault" } } }, ITEMS, "h11");
+    await runtime!.places!.recipeChanged("laptop");
+    await until(async () => (await rowOf(place.id)).applied?.hash === "h11");
+    expect((await rowOf(place.id)).applied?.rows.find(row => row.id === "signins/codex")).toMatchObject({ outcome: "present", note: FROM_THE_VAULT });
   });
 
   it("never takes an agent the box had before wsp off, though wsp landed a file of its own for it, and says why on its row", async () => {
@@ -1579,6 +1772,86 @@ describe("a computer that follows a recipe", () => {
     expect((await rowOf(place.id)).applied?.rows.find(row => row.id === "folders/app")).toMatchObject({ outcome: "installed", step: "folders" });
     expect((await runtime!.projects.list()).map(p => p.computer)).toEqual([place.id]);
   });
+
+  it("puts a folder's hue the recipe moved on the project a setup made, and reads it installed", async () => {
+    const { folder, seed } = seededFolder();
+    const pick = (hue: string): RecipeFile => ({ ...V1, folders: { app: { from: folder, name: "app", keep: [], hue: hue as "red" } } });
+    const r = shelf(pick("red"), ITEMS);
+    await hosting({ provision: provisioner().wired, recipes: r.recipes, checkouts: {}, seed });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: pick("red"), recipe: "laptop" }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    const id = (await runtime!.projects.list()).find(p => p.name === "app")!.id;
+    r.move(pick("blue"), ITEMS, "h15");
+    await runtime!.places!.recipeChanged("laptop");
+    await until(async () => (await rowOf(place.id)).applied?.hash === "h15");
+    expect((await runtime!.preferences.get()).projectLook[id]).toEqual({ hue: "blue" });
+    expect((await rowOf(place.id)).applied?.rows.find(row => row.id === "folders/app")).toMatchObject({ outcome: "installed", step: "folders" });
+    expect((await runtime!.projects.list()).map(p => p.id)).toEqual([id]);
+  });
+
+  it("reads a folder whose kept files the recipe moved as failed, never as put on", async () => {
+    const { folder, seed } = seededFolder();
+    const pick = (keep: string[]): RecipeFile => ({ ...V1, folders: { app: { from: folder, name: "app", keep } } });
+    const r = shelf(pick([]), ITEMS);
+    await hosting({ provision: provisioner().wired, recipes: r.recipes, checkouts: {}, seed });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: pick([]), recipe: "laptop" }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    r.move(pick([".env"]), ITEMS, "h16");
+    await runtime!.places!.recipeChanged("laptop");
+    await until(async () => (await rowOf(place.id)).applied?.hash === "h16");
+    expect((await rowOf(place.id)).applied?.rows.find(row => row.id === "folders/app")?.outcome).toBe("failed");
+  });
+
+  it("answers a folder's row with the id of the project a setup made and none of the folder's pick", async () => {
+    const { folder, seed } = seededFolder();
+    await hosting({ provision: provisioner().wired, checkouts: {}, seed });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: { ...V1, folders: { app: { from: folder, name: "app", keep: [] } } } }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    const id = (await runtime!.projects.list()).find(p => p.name === "app")!.id;
+    const view = await rowOf(place.id);
+    expect(view.applied?.rows.find(row => row.id === "folders/app")?.project).toEqual({ id });
+    expect(JSON.stringify(view.applied)).not.toContain(folder);
+  });
+
+  it("answers one version of a folder whose moved hue could not be put on, in the picks alone", async () => {
+    const { folder, seed } = seededFolder();
+    const pick = (hue: string): RecipeFile => ({ ...V1, folders: { app: { from: folder, name: "app", keep: [], hue: hue as "red" } } });
+    const r = shelf(pick("red"), ITEMS);
+    await hosting({ provision: provisioner().wired, recipes: r.recipes, checkouts: {}, seed });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: pick("red"), recipe: "laptop" }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    const id = (await runtime!.projects.list()).find(p => p.name === "app")!.id;
+    const set = runtime!.preferences.set;
+    runtime!.preferences.set = () => Promise.reject(new Error("preferences locked"));
+    r.move(pick("blue"), ITEMS, "h17");
+    await runtime!.places!.recipeChanged("laptop");
+    await until(async () => (await rowOf(place.id)).applied?.hash === "h17");
+    runtime!.preferences.set = set;
+    const view = await rowOf(place.id);
+    expect(view.applied?.rows.find(row => row.id === "folders/app")).toMatchObject({ outcome: "failed", note: "preferences locked", project: { id } });
+    expect(view.picks?.folders["app"]?.hue).toBe("blue");
+    expect(JSON.stringify(view.applied)).not.toContain(folder);
+    expect(syncs.some(e => e.applied !== undefined)).toBe(true);
+    expect(JSON.stringify(syncs.map(e => e.applied))).not.toContain(folder);
+  });
+
+  for (const [moved, to] of [["kept files", { keep: [".env"] }], ["name", { name: "web" }]] as const) {
+    it(`keeps a project a setup made wsp's through a recipe that moved its ${moved}, and the remove takes it off`, async () => {
+      const { folder, seed } = seededFolder();
+      const pick = (more: object): RecipeFile => ({ ...V1, folders: { app: { from: folder, name: "app", keep: [], ...more } } });
+      const r = shelf(pick({}), ITEMS);
+      await hosting({ provision: provisioner().wired, recipes: r.recipes, checkouts: {}, seed });
+      const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: pick({}), recipe: "laptop" }, Date.now());
+      await until(async () => (await rowOf(place.id)).setup?.state === "done");
+      const id = (await runtime!.projects.list()).find(p => p.name === "app")!.id;
+      r.move(pick(to), ITEMS, "h18");
+      await runtime!.places!.recipeChanged("laptop");
+      await until(async () => (await rowOf(place.id)).applied?.hash === "h18");
+      expect((await rowOf(place.id)).applied?.rows.find(row => row.id === "folders/app")).toMatchObject({ outcome: "failed", project: { id } });
+      expect((await runtime!.places!.remove(place.id)).removed).toBe(true);
+      expect(await runtime!.projects.list()).toEqual([]);
+    });
+  }
 
   it("runs a change that landed mid-sync once more at its end", async () => {
     const { p, r, placeId } = await following();

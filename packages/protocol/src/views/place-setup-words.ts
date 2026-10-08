@@ -111,14 +111,14 @@ export function placeStateOf(place: PlaceView, absent: AbsentComputer | null, sp
   return setup;
 }
 
-/** The lines a terminal prints once a setup is over: what installed by name, how many rows were already there,
- * then every row that failed or was set aside with its reason, every sign-in still waiting, and what stopped the
- * job where one did. */
+/** The lines a terminal prints once a setup is over: what this run installed by name, how many rows it found
+ * already there, an earlier setup's included, then every row that failed or was set aside with its reason, every
+ * sign-in still waiting, and what stopped the job where one did. */
 export function setupLines(name: string, setup: PlaceSetup, applied: PlaceApplied | undefined): string[] {
   const rows = applied?.rows ?? [];
   const of = (outcome: PlaceProvisionRow["outcome"]): PlaceProvisionRow[] => rows.filter(r => r.outcome === outcome);
-  const installed = of("installed");
-  const present = of("present");
+  const installed = of("installed").filter(r => r.earlier !== true);
+  const present = rows.filter(r => r.outcome === "present" || (r.outcome === "installed" && r.earlier === true));
   const tally = [
     installed.length === 0 ? "nothing installed" : `${installed.length} installed: ${nameList(installed.map(r => r.label))}`,
     ...(present.length > 0 ? [`${present.length} already there`] : []),

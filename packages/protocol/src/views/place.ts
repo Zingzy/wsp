@@ -238,6 +238,11 @@ export const PlaceProvisionRow = z.object({
   /** On a row that did not land: what to do about it, beside the note that says what happened. */
   fix: z.string().optional(),
   ms: z.number().int().nonnegative().optional(),
+  /** On an installed row: an earlier setup put it on, and the run that wrote the row found it there. */
+  earlier: z.boolean().optional(),
+  /** On a folder's row: the project wsp's add made there, by id, which is how a later setup and a remove tell it from
+   * a project the person recorded there under the same name. */
+  project: z.object({ id: z.string().min(1) }).optional(),
 });
 export type PlaceProvisionRow = z.infer<typeof PlaceProvisionRow>;
 

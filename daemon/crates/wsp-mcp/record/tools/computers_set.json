@@ -500,6 +500,22 @@
                       "ms": {
                         "type": "integer",
                         "minimum": 0
+                      },
+                      "earlier": {
+                        "type": "boolean"
+                      },
+                      "project": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "required": [
+                          "id"
+                        ],
+                        "additionalProperties": false
                       }
                     },
                     "required": [
@@ -1454,6 +1470,22 @@
                       "ms": {
                         "type": "integer",
                         "minimum": 0
+                      },
+                      "earlier": {
+                        "type": "boolean"
+                      },
+                      "project": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "required": [
+                          "id"
+                        ],
+                        "additionalProperties": false
                       }
                     },
                     "required": [
