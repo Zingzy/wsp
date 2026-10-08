@@ -275,7 +275,16 @@ export function turnsArea(ctx: RuntimeContext): TurnsArea {
       return (await answerAsk(askId, { optionId: o.optionId, outcome, denyMessage: deniedLine(reason), ...(reason === undefined ? {} : { reason }) })) === "answered" ? "answered" : "gone";
     };
 
+    /** The messages steered into this turn that its agent never read, as the harness tells them at the turn's end, and
+     * whether the turn ends because someone stopped it: what decides where those messages go. Read past a cut too,
+     * since a nap's cut is a process that goes with its messages unread. */
+    let unread: readonly string[] = [];
+    let stopped = false;
     const forward = (event: AdapterEvent): void => {
+      if (event.type === "turn.unread") {
+        unread = event.ids;
+        return;
+      }
       if (ended) return;
       const sessionId = event.sessionId;
       switch (event.type) {
@@ -580,8 +589,11 @@ export function turnsArea(ctx: RuntimeContext): TurnsArea {
       turnId,
       outcome,
       view: () => ({ ...view }),
-      interrupt: () => started.interrupt(),
-      ...(started.steer !== undefined ? { steer: (prompt: string) => started.steer!(prompt) } : {}),
+      interrupt: () => {
+        stopped = true;
+        return started.interrupt();
+      },
+      ...(started.steer !== undefined ? { steer: (prompt: string, id?: string) => started.steer!(prompt, id) } : {}),
       ...(started.answer !== undefined ? { answer } : {}),
       ...(started.setAccess !== undefined ? { setAccess } : {}),
       ...(started.stopTask !== undefined ? { stopTask: (task: string) => started.stopTask!(task) } : {}),
@@ -673,9 +685,13 @@ export function turnsArea(ctx: RuntimeContext): TurnsArea {
     started.finished.then(
       result => {
         settled(result.status);
+        ctx.sendBack({ view, turnId, turnLive }, unread, stopped);
         if (!ended && result.status === "completed") void ctx.takeReview(entry, threadId, result.text ?? "").catch((e: unknown) => console.warn(`the review in ${entry.record.name} was not read: ${e instanceof Error ? e.message : String(e)}`));
       },
-      () => settled("failed"),
+      () => {
+        settled("failed");
+        ctx.sendBack({ view, turnId, turnLive }, unread, stopped);
+      },
     );
     return handle;
   };

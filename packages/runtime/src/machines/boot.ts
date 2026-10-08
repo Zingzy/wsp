@@ -8,7 +8,7 @@ import { harnessCatalog } from "../harness-catalog.js";
 import { accountOnComputer } from "../usage.js";
 import { phaseLeavingGone, providerSaid } from "../status.js";
 import type { WorkspaceRecord, LiveWorkspace, FoundMachine } from "../types/wiring.js";
-import { WORKSPACES, PROJECTS, TRANSCRIPTS, SESSIONS, HELD_STARTS, type HeldStartRecord, READS, READS_ID, RESTARTED_REASON, goneLogLine, restartCutLine, turnWritten, type TranscriptRecord, type TurnLive, type TurnAsked, readAsked, readScope, readRoad, type ThreadRecord, type SessionIndexRecord, BUILDERS, OWNER, HELD_TTL_MS, pidAlive, type BuilderRecord, type LiveBuilder, deadMachine, isAbsentMachine, absentMachine, type StoredBuilder } from "../types/internal.js";
+import { WORKSPACES, PROJECTS, TRANSCRIPTS, SESSIONS, HELD_STARTS, type HeldStartRecord, READS, READS_ID, RESTARTED_REASON, goneLogLine, restartCutLine, turnWritten, type TranscriptRecord, type TurnLive, type TurnAsked, readAsked, readScope, readRoad, readSteered, type ThreadRecord, type SessionIndexRecord, BUILDERS, OWNER, HELD_TTL_MS, pidAlive, type BuilderRecord, type LiveBuilder, deadMachine, isAbsentMachine, absentMachine, type StoredBuilder } from "../types/internal.js";
 import type { RuntimeContext, BootArea } from "../context.js";
 
 export function bootArea(ctx: RuntimeContext): BootArea {
@@ -325,10 +325,11 @@ export function bootArea(ctx: RuntimeContext): BootArea {
           console.warn(`sessions document for ${index.workspaceId} has no rows array, read as empty`);
           continue;
         }
-        for (const { turnId, notify, notifyBy, notifyRoad, reply, told, toldLast, run, from, asked: storedAsked, turnToken, scopeDeviceId, snapshot, ...view } of index.sessions) {
+        for (const { turnId, notify, notifyBy, notifyRoad, reply, told, toldLast, steered: storedSteered, run, from, asked: storedAsked, turnToken, scopeDeviceId, snapshot, ...view } of index.sessions) {
           const by = readScope(notifyBy);
           const asked = readAsked(storedAsked);
           const road = readRoad(notifyRoad);
+          const steered = readSteered(storedSteered);
           const row: {
             view: SessionView;
             turnId: string;
@@ -353,7 +354,9 @@ export function bootArea(ctx: RuntimeContext): BootArea {
             // went then, as the person's; one that does not read as a scope is no scope at all.
             ...(by !== undefined ? { notifyBy: by } : {}),
             ...(road !== undefined ? { notifyRoad: road } : {}),
-            ...(reply !== undefined || typeof told === "number" ? { turnLive: { ...(reply !== undefined ? { reply } : {}), ...(typeof told === "number" ? { told } : {}), ...(toldLast === true ? { toldLast } : {}) } } : {}),
+            ...(reply !== undefined || typeof told === "number" || steered !== undefined
+              ? { turnLive: { ...(reply !== undefined ? { reply } : {}), ...(typeof told === "number" ? { told } : {}), ...(toldLast === true ? { toldLast } : {}), ...(steered !== undefined ? { steered } : {}) } }
+              : {}),
             ...(run !== undefined ? { run } : {}),
             ...(typeof from === "number" && Number.isSafeInteger(from) && from >= 0 ? { from } : {}),
             ...(asked !== undefined ? { asked } : {}),

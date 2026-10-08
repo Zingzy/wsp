@@ -41,6 +41,13 @@ export function notifyLine(threadId: string, result: TurnResult, length: NotifyL
   return `thread ${threadId.slice(0, 8)} finished (${facts.join(", ")})${body !== undefined ? `: ${body}` : ""}`;
 }
 
+/** What the person is told of a message steered into a turn whose agent never read it, when it is not sent again:
+ * the turn was stopped, or the thread's door refused it. Its first line, as a row reads one. */
+export function unreadLine(prompt: string): string {
+  const first = prompt.split("\n").find(line => line.trim() !== "")?.trim() ?? "";
+  return `the agent never read this message: ${first}`;
+}
+
 /** The line a wait prints when its deadline passed with every named thread still running: one thread by its first
  * eight characters, more by their count. */
 export function waitTimedOutLine(threadIds: readonly string[], ms: number): string {

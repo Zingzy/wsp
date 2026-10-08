@@ -154,8 +154,9 @@ export interface HarnessSession {
    * none, and nothing where this turn's process went with it. */
   kept?(): KeptAgent<HarnessSession> | undefined;
   /** Present on a harness that takes a message mid-turn; absent means it cannot. not-running when the turn had not
-   * started or had ended when the message was offered. */
-  steer?(prompt: string): Promise<"accepted" | "not-running">;
+   * started or had ended when the message was offered. `id` is what a harness that tells unread messages tells this
+   * one by. */
+  steer?(prompt: string, id?: string): Promise<"accepted" | "not-running">;
   /** Answers a permission prompt this turn raised; absent on a harness that raises none this host can answer. The
    * caller names the outcome, since only it knows whether the answer is the person's or its own for a prompt nobody
    * came to, and the adapter emits the permission.close that carries it. `gone` when no such prompt is open. */

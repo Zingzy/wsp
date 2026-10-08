@@ -799,6 +799,22 @@ describe("machineExecStream attaching to a run its process did not launch", () =
     expect(await (stream as ExecStream).exited).toBe(0);
   });
 
+  it("hands over every line the run's channel took, the launch's own and each written since, so a re-opened turn knows what its harness was sent", async () => {
+    const { backend, machine } = await makeMachine();
+    const guest = scriptGuest(backend, [{ append: '{"type":"system","subtype":"init"}\n' }, { append: '{"type":"result"}\n', exit: 0 }]);
+    const launched = machineExecStream(machine, { pollMs: 5 })("claude -p hi", { env: {}, input: ["go"] });
+    await vi.waitFor(() => expect(guest.getLaunch()).not.toBe(""));
+    expect(await launched.write('{"type":"user","uuid":"u1"}')).toBe("written");
+    const stream = (await machineExecStream(machine, { pollMs: 5 }).attach!(launched.run!, { input: true, startedAt: Date.now() })) as ExecStream;
+    expect(stream.taken).toEqual(["go", '{"type":"user","uuid":"u1"}']);
+    for await (const line of stream.lines) void line;
+    // A reader that writes nothing is handed nothing.
+    const { factory, run } = await abandoned([{ append: '{"type":"result"}\n', exit: 0 }]);
+    const reader = (await factory.attach!(run, { input: false, startedAt: Date.now() })) as ExecStream;
+    expect(reader.taken).toBeUndefined();
+    for await (const line of reader.lines) void line;
+  });
+
   it("keeps the reply of a run that finished while no host read it, when it is re-opened past its wall", async () => {
     // Everything the run printed, and its exit, were on the machine before anything re-opened it.
     const { factory, run } = await abandoned([{ append: '{"type":"system","subtype":"init"}\n{"type":"assistant"}\n{"type":"result"}\n', exit: 0 }]);
@@ -950,6 +966,25 @@ describe("machineExecStream over this machine's bash", () => {
     expect(await stream.exited).toBe(0);
     expect(lines).toEqual(["hi"]);
     expect(readFileSync(marks, "utf8")).toBe("ran\n");
+  });
+
+  it("an attach reads back only the last EXEC_CHUNK_BYTES of the run's channel, whole lines alone, since the agent can write that file", async () => {
+    const { machine, runDir } = localGuest();
+    const gate = join(runDir, "..", "gate");
+    const factory = machineExecStream(machine, { pollMs: 20, runDir });
+    const launched = factory(`while [ ! -f ${gate} ]; do sleep 0.05; done; echo done`, { env: {}, input: ["go"] });
+    await vi.waitFor(() => expect(existsSync(`${launched.run}.in`)).toBe(true));
+    const takenNow = async (): Promise<readonly string[] | undefined> => {
+      const stream = (await factory.attach!(launched.run!, { input: true, startedAt: Date.now() })) as ExecStream;
+      stream.closeInput();
+      return stream.taken;
+    };
+    expect(await takenNow()).toEqual(["go"]);
+    // A line past the cap, the turn's opening with its images say, then two messages within it.
+    writeFileSync(`${launched.run}.in`, `${"x".repeat(EXEC_CHUNK_BYTES)}\n{"uuid":"u1"}\n{"uuid":"u2"}\n`, { flag: "a" });
+    expect(await takenNow()).toEqual(['{"uuid":"u1"}', '{"uuid":"u2"}']);
+    writeFileSync(gate, "");
+    for await (const line of launched.lines) void line;
   });
 });
 

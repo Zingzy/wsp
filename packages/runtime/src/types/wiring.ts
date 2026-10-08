@@ -430,7 +430,7 @@ export interface SessionHandle {
   readonly outcome: Exclude<SessionStartOutcome, "held">;
   view(): SessionView;
   interrupt(): Promise<void>;
-  steer?(prompt: string): Promise<"accepted" | "not-running">;
+  steer?(prompt: string, id?: string): Promise<"accepted" | "not-running">;
   /** Answers a permission prompt this turn raised, by the prompt's id and one of its options. Only a person answers
    * one: the prompt stands for as long as the turn does. Absent on a harness that raises none. */
   answer?(askId: string, opts: { optionId: string; reason?: string }): Promise<SessionAnswerResult["outcome"]>;

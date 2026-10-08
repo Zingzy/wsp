@@ -168,8 +168,10 @@ export function stopTaskLine(requestId: string, task: string): string {
 /** The request that stops the turn the CLI is running and leaves its process up for the next message: it answers with
  * the turn's result, stamped aborted (measured on 2.1.289 at 4 to 19 ms). To an idle process it answers success and
  * prints no result, so it goes only to a turn that is running. */
-export function interruptLine(requestId: string): string {
-  return JSON.stringify({ type: "control_request", request_id: requestId, request: { subtype: "interrupt" } });
+export function interruptLine(requestId: string, cancelQueued = false): string {
+  // cancel_queued also cancels the messages the CLI holds in its queue, which it would otherwise answer next as turns
+  // of their own; a CLI that declares interrupt_cancel_queued_v1 at init takes it.
+  return JSON.stringify({ type: "control_request", request_id: requestId, request: { subtype: "interrupt", ...(cancelQueued ? { cancel_queued: true } : {}) } });
 }
 
 /** The answer to a control_request this adapter cannot serve: the CLI stops waiting on it and says why in its log. */

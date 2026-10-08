@@ -238,7 +238,7 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
    * host process left behind. `opened` settles once the run is known to be on the machine and rejects with the words
    * the turn fails on when it is not. The log is read from its first byte either way, so a run that printed while no
    * host was listening is replayed to whoever attaches. */
-  const open = (base: string, hasInput: boolean, opened: Promise<void>, turnStartedAt?: number): ExecStream => {
+  const open = (base: string, hasInput: boolean, opened: Promise<void>, turnStartedAt?: number, taken?: readonly string[]): ExecStream => {
     const sentinel = `__WSP_EOF_${randomBytes(6).toString("hex")}__`;
     const reapMark = `__WSP_REAPED_${randomBytes(6).toString("hex")}__`;
 
@@ -471,6 +471,7 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
           .catch(() => undefined);
       },
       exited,
+      ...(taken !== undefined ? { taken } : {}),
     };
     return stream;
   };
@@ -536,11 +537,20 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
 
   factory.attach = async (run, { input, startedAt }) => {
     if (!minted(run)) throw new Error(`${run} is not a run this host could have launched`);
-    const res = await untilReached(() => machine.exec(`[ -d ${q(claim(run))} ] && echo ${HANDSHAKE.run} || echo ${HANDSHAKE.gone}`, { timeoutMs: execTimeoutMs }), { now, sleep });
+    // With the run's channel read back under the answer: the lines it took, which a re-opened turn reads for what its
+    // harness was handed before this host came up. The agent can write that file, so only its last EXEC_CHUNK_BYTES
+    // come back, whole lines alone: a line before them, most often a turn's opening with its images, is not read, and
+    // a message steered before them is neither waited on nor sent again.
+    const channel = input
+      ? ` n=$({ wc -c < ${q(run)}.in; } 2>/dev/null || echo 0); if [ "$n" -gt ${EXEC_CHUNK_BYTES} ]; then tail -c ${EXEC_CHUNK_BYTES + 1} ${q(run)}.in | sed 1d; else cat ${q(run)}.in 2>/dev/null; fi;`
+      : "";
+    const res = await untilReached(() => machine.exec(`if [ -d ${q(claim(run))} ]; then echo ${HANDSHAKE.run};${channel} else echo ${HANDSHAKE.gone}; fi`, { timeoutMs: execTimeoutMs }), { now, sleep });
     // Only these two answers say anything about the run. Anything else is the machine failing to answer the
     // question, which is the unreached road, not a run to end: the reader is built and the run swept on WSP_GONE
     // alone, so nothing here can take a live turn's process group with it.
-    if (res.stdout.includes(HANDSHAKE.run)) return open(run, input, Promise.resolve(), startedAt);
+    const said = res.stdout.split("\n");
+    const at = said.findIndex(line => line.includes(HANDSHAKE.run));
+    if (at >= 0) return open(run, input, Promise.resolve(), startedAt, input ? said.slice(at + 1).filter(line => line !== "") : undefined);
     if (res.stdout.includes(HANDSHAKE.gone)) return "gone";
     throw new Error(`the machine did not answer whether it still holds ${run}; ${machineAnswer(res)}`);
   };
