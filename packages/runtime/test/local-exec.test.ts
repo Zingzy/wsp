@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { shellQuote, turnCutLine, type ExecStream } from "@wsp/protocol";
+import { EXEC_CHUNK_BYTES, endRun, shellQuote, turnCutLine, type ExecStream } from "@wsp/protocol";
 import { groupExists, localExecStream, ownOrphans, type GroupWorkReader } from "../src/local-exec.js";
 import { alive, gone, grandchild, sweepStrays } from "./strays.js";
 
@@ -218,6 +218,18 @@ describe("local exec stream", () => {
     const stream = localExecStream({ root, runDir })("printf ok", { env: {} });
     expect(await collect(stream.lines)).toEqual(["ok"]);
     expect(await stream.exited).toBe(0);
+  });
+
+  it("a run that ignores TERM keeps what it printed after the last poll, past one chunk of it, once the KILL ends it", async () => {
+    // A poll slower than the grace, so no read falls between the TERM and the KILL: the lines are read at the end or never.
+    const stream = localExecStream({ root, runDir, pollMs: 1_500 })(`trap 'head -c ${EXEC_CHUNK_BYTES + 1000} /dev/zero | tr "\\0" x; echo; echo last words' TERM; echo ready; while :; do sleep 0.05; done`, { env: {} });
+    const lines = stream.lines[Symbol.asyncIterator]();
+    expect(await lines.next()).toEqual({ value: "ready", done: false });
+    await new Promise(resolve => setTimeout(resolve, 100));
+    await endRun(stream, 300);
+    const rest = await collect({ [Symbol.asyncIterator]: () => lines });
+    expect(rest).toContain("x".repeat(EXEC_CHUNK_BYTES + 1000));
+    expect(rest.at(-1)).toBe("last words");
   });
 
   it("kill ends the child", async () => {
@@ -574,6 +586,71 @@ describe("a real turn's process group", () => {
     launched.kill();
     await launched.exited;
   }, 90_000);
+
+  it("a stop that lands while an attach replays a long log lets the loop turn between the chunks of its last read", async () => {
+    const bytes = 200_000_000;
+    const reading = new Set<() => void>();
+    const launched = localExecStream({ root, runDir, reading })(`head -c ${bytes} /dev/zero | tr '\\0' x | fold -w 999; sleep 30`, { env: {} });
+    for (const drop of [...reading]) drop();
+    const run = launched.run!;
+    await vi.waitUntil(() => existsSync(`${run}.log`) && statSync(`${run}.log`).size > bytes, { timeout: 60_000, interval: 50 });
+    const attached = (await localExecStream({ root, runDir }).attach!(run, { input: false, startedAt: Date.now() })) as ExecStream;
+    // The poll has read its first chunk; the other 199 MB are the stop's to read.
+    attached.kill();
+    // Lines handed over between two turns of the loop: a counter rather than a clock, so a loaded computer moves nothing.
+    let sinceTurn = 0;
+    let mostInOneTurn = 0;
+    let turning = true;
+    const turn = (): void => {
+      sinceTurn = 0;
+      if (turning) setImmediate(turn);
+    };
+    setImmediate(turn);
+    let read = 0;
+    for await (const line of attached.lines) {
+      if (line.startsWith("x")) read++;
+      mostInOneTurn = Math.max(mostInOneTurn, ++sinceTurn);
+    }
+    turning = false;
+    expect(read).toBe(Math.ceil(bytes / 999));
+    // A chunk's lines and what the turn before it left: a read that held the loop hands over every line in one turn.
+    expect(mostInOneTurn).toBeLessThanOrEqual(Math.ceil((3 * EXEC_CHUNK_BYTES) / 1000));
+    expect(await attached.exited).toBeNull();
+  }, 90_000);
+
+  it("a character split across two chunks of the log comes back whole", async () => {
+    const reading = new Set<() => void>();
+    const launched = localExecStream({ root, runDir, reading })(`head -c ${EXEC_CHUNK_BYTES - 1} /dev/zero | tr '\\0' x; printf '\\303\\251\\n'`, { env: {} });
+    for (const drop of [...reading]) drop();
+    const run = launched.run!;
+    // Read from its first byte once it is whole, so the first chunk ends inside the é.
+    await vi.waitUntil(() => existsSync(`${run}.exit`) && readFileSync(`${run}.exit`, "utf8").trim() === "0", { timeout: 10_000, interval: 20 });
+    const attached = (await localExecStream({ root, runDir }).attach!(run, { input: false, startedAt: Date.now() })) as ExecStream;
+    const lines = await collect(attached.lines);
+    expect(lines).toEqual([`${"x".repeat(EXEC_CHUNK_BYTES - 1)}é`]);
+  }, 15_000);
+
+  it("a stop reads the log to the size it had at the KILL and ends, while a writer outside the group goes on printing", async () => {
+    const marker = join(root, "writer");
+    const stream = localExecStream({ root, runDir })(
+      `setsid sh -c 'end=$(($(date +%s) + 60)); while [ $(date +%s) -lt $end ]; do head -c 65536 /dev/zero | tr "\\0" y; echo; sleep 0.03; done' & echo $! > ${shellQuote(marker)}; echo ready; sleep 30`,
+      { env: {} },
+    );
+    let writer: number | undefined;
+    try {
+      const reading = collect(stream.lines);
+      await vi.waitFor(() => expect(readFileSync(marker, "utf8").trim()).not.toBe(""), { timeout: 5_000 });
+      writer = Number(readFileSync(marker, "utf8").trim());
+      await new Promise(resolve => setTimeout(resolve, 1_000));
+      stream.kill();
+      await reading;
+      await stream.exited;
+      // The stop ended while the writer still prints: a read to the end of the log ends only once the writer does.
+      expect(groupExists(writer)).toBe(true);
+    } finally {
+      if (writer !== undefined && groupExists(writer)) process.kill(-writer, "SIGKILL");
+    }
+  }, 30_000);
 
   it("an attach answers gone for a run this computer no longer holds, and refuses a handle it could not have minted", async () => {
     const factory = localExecStream({ root, runDir });

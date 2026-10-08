@@ -1,12 +1,12 @@
 import { randomBytes } from "node:crypto";
 import { execFile, execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { EXEC_ENV, ExecFailedError, INLINE_EXEC_MS, MachineUnreachableError, MachineUnreached, PlaceAbsentError, type ExecResult, type Machine } from "@wsp/engine";
-import { EXEC_BODY_MAX, LINK_RETRY_WINDOW_MS, absentComputer, execFailedLine, machineUnreachableLine, machineUnreachedLine, TURN_IDLE_MS, shellQuote, workScoreLine } from "@wsp/protocol";
-import type { ExecStream } from "@wsp/protocol";
+import { EXEC_BODY_MAX, EXEC_CHUNK_BYTES, LINK_RETRY_WINDOW_MS, absentComputer, execFailedLine, machineUnreachableLine, machineUnreachedLine, TURN_IDLE_MS, shellQuote, workScoreLine } from "@wsp/protocol";
+import { endRun, type ExecStream } from "@wsp/protocol";
 import { GROUP_WORK_AWK, machineExecStream } from "../src/machine-exec.js";
 import { scriptGuest, type Step } from "./script-guest.js";
 import { stubBackend, type StubBackend, type StubMachine } from "./stub-backend.js";
@@ -1048,6 +1048,89 @@ describe("machineExecStream reaping a real turn's process group", () => {
     children.push(childPid);
     expect(childPid).toBeGreaterThan(0);
     await vi.waitFor(() => expect(() => process.kill(childPid, 0)).toThrow(), { timeout: 5000 });
+    expect(readdirSync(runDir)).toEqual([]);
+  }, 15_000);
+});
+
+describe("machineExecStream ending a run that ignores TERM", () => {
+  it("what it printed after the last poll is read before the KILL's reap takes the log, past one chunk of it", async () => {
+    const { machine, runDir } = localGuest();
+    // A poll slower than the grace, so no read falls between the TERM and the KILL: the lines are read at the end or never.
+    const stream = machineExecStream(machine, { pollMs: 1_500, runDir })(`trap 'head -c ${EXEC_CHUNK_BYTES + 1000} /dev/zero | tr "\\0" x; echo; echo last words' TERM; echo ready; while :; do sleep 0.05; done`, { env: {} });
+    const lines = stream.lines[Symbol.asyncIterator]();
+    expect(await lines.next()).toEqual({ value: "ready", done: false });
+    await new Promise(resolve => setTimeout(resolve, 100));
+    const ended = endRun(stream, 300);
+    const rest: string[] = [];
+    for (let next = await lines.next(); next.done !== true; next = await lines.next()) rest.push(next.value);
+    await ended;
+    expect(rest).toContain("x".repeat(EXEC_CHUNK_BYTES + 1000));
+    expect(rest.at(-1)).toBe("last words");
+    expect(readdirSync(runDir)).toEqual([]);
+  }, 15_000);
+});
+
+describe("machineExecStream ending a run something outside its group still writes to", () => {
+  /** The guest at the far end of a link that takes `ms` each way round, as a cloud machine's exec does. */
+  const slowGuest = (ms: number): { machine: Machine; runDir: string } => {
+    const { machine, runDir } = localGuest();
+    return { machine: { ...machine, exec: async (cmd: string, o?: Parameters<Machine["exec"]>[1]) => (await new Promise(resolve => setTimeout(resolve, ms)), machine.exec(cmd, o)) } as Machine, runDir };
+  };
+  /** A command that starts a writer in a session of its own, holding the log at about 2 MB/s for `s` seconds, and
+   * writes the writer's group to `marker`. */
+  const leavesAWriter = (marker: string, s: number): string =>
+    `setsid sh -c 'end=$(($(date +%s) + ${s})); while [ $(date +%s) -lt $end ]; do head -c 65536 /dev/zero | tr "\\0" y; echo; sleep 0.03; done' & echo $! > ${shellQuote(marker)}; echo ready; sleep 30`;
+
+  it("a stop reads the log to the size it had at the KILL and ends, while the writer goes on printing", async () => {
+    const { machine, runDir } = slowGuest(200);
+    const marker = join(runDir, "..", "writer");
+    const stream = machineExecStream(machine, { pollMs: 100, runDir })(leavesAWriter(marker, 60), { env: {} });
+    let writer: number | undefined;
+    try {
+      const reading = (async () => {
+        for await (const _ of stream.lines) void _;
+      })();
+      await vi.waitFor(() => expect(readFileSync(marker, "utf8").trim()).not.toBe(""), { timeout: 5_000 });
+      writer = Number(readFileSync(marker, "utf8").trim());
+      await new Promise(resolve => setTimeout(resolve, 1_000));
+      stream.kill();
+      await reading;
+      await stream.exited;
+      // The stop ended while the writer still prints: on a link slower than the writer, a read to the end of the log
+      // ends only once the writer does.
+      expect(() => process.kill(-writer!, 0)).not.toThrow();
+      expect(readdirSync(runDir)).toEqual([]);
+    } finally {
+      if (writer !== undefined) {
+        try {
+          process.kill(-writer, "SIGKILL");
+        } catch {
+          // gone already
+        }
+      }
+    }
+  }, 30_000);
+
+  it("a launch read as failed takes the run's files and its claim, however much its log holds", async () => {
+    const { machine: guest, runDir } = localGuest();
+    const logged = (): number => readdirSync(runDir).filter(name => name.endsWith(".log")).reduce((sum, name) => sum + statSync(join(runDir, name)).size, 0);
+    // The run starts, and the launch's answer comes back without the word, once the log holds more than a chunk.
+    const machine = {
+      ...guest,
+      exec: async (cmd: string, o?: Parameters<Machine["exec"]>[1]) => {
+        const res = await guest.exec(cmd, o);
+        if (!cmd.includes("WSP_LAUNCHED")) return res;
+        await vi.waitFor(() => expect(logged()).toBeGreaterThan(EXEC_CHUNK_BYTES + 1000), { timeout: 5_000 });
+        return { ...res, stdout: "" };
+      },
+    } as Machine;
+    const stream = machineExecStream(machine, { pollMs: 20, runDir })(`head -c ${EXEC_CHUNK_BYTES + 2000} /dev/zero | tr '\\0' x; echo; sleep 30`, { env: {} });
+    await expect(
+      (async () => {
+        for await (const _ of stream.lines) void _;
+      })(),
+    ).rejects.toThrow(/remote launch failed/);
+    expect(await stream.exited).toBeNull();
     expect(readdirSync(runDir)).toEqual([]);
   }, 15_000);
 });
