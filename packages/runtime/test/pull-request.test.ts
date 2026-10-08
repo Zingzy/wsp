@@ -24,6 +24,7 @@ import {
   pullRequestStoppedLine,
   pullRequestUnreadLine,
   spawnActRefusal,
+  MACHINE_WSP_FORKS,
   type Caller,
   type DaemonFrame,
   type DaemonResponse,
@@ -843,7 +844,7 @@ describe("the acts on a pull request", () => {
     const lead = await rt!.sessions.start(id, { prompt: "lead" });
     const rootThread = lead.view().threadId!;
     const scope: ThreadScope = { kind: "thread", threadId: rootThread, workspaceId: id, rootThreadId: rootThread };
-    await expect(rt!.workspaces.merge({ workspaceId: id }, asThread(scope))).rejects.toThrow(spawnActRefusal(rootThread, "merge"));
+    await expect(rt!.workspaces.merge({ workspaceId: id }, asThread(scope))).rejects.toThrow(spawnActRefusal(rootThread, "merge", MACHINE_WSP_FORKS));
     expect(await rt!.workspaces.update({ workspaceId: id }, asThread(scope))).toEqual({ base: "main", merged: true, commits: 1, conflicts: [] });
     expect(daemons.ops()).not.toContain("git.prMerge");
     agent.end(0);

@@ -20,6 +20,8 @@ use crate::fs::utf8_text;
 use crate::paths::OpError;
 
 pub(crate) mod branches;
+mod default;
+pub(crate) use default::{by_own_name, default_branch, default_branch_name, DEFAULT_BRANCHES};
 pub(crate) mod checkpoint;
 pub(crate) mod here;
 pub(crate) mod untracked;
@@ -172,9 +174,10 @@ pub(crate) async fn git_status<R: Runs>(runner: &R, cwd: &Path) -> Result<GitSta
     let top = run_git(runner, cwd, &GitLine::new(&["rev-parse", "--show-toplevel"]), None, None).await?;
     check(&top, "rev-parse")?;
     let (mut branch, entries) = parse_porcelain_v2(&stdout_text(&res));
-    counted_without_upstream(runner, cwd, &mut branch).await?;
-    let stashes = stashes_in(&stdout_text(&res));
-    Ok(GitStatusReply { branch, entries, root: stdout_text(&top).trim().to_owned(), edits_unread: false, counts_unknown: false, stashes })
+    let default = default_branch(runner, cwd).await?;
+    counted_without_upstream(runner, cwd, &mut branch, default.as_deref()).await?;
+    let (stashes, root, default_branch) = (stashes_in(&stdout_text(&res)), stdout_text(&top).trim().to_owned(), default.map(by_own_name));
+    Ok(GitStatusReply { branch, entries, root, edits_unread: false, counts_unknown: false, stashes, default_branch })
 }
 
 /// The `# stash N` header --show-stash adds, where the repository holds any.
@@ -184,7 +187,7 @@ fn stashes_in(porcelain: &str) -> Option<u64> {
 
 /// A branch with no upstream, or one whose tracking ref is gone, is counted against the default branch, as a
 /// stopped copy's is: porcelain's 0 would read as nothing origin lacks.
-async fn counted_without_upstream<R: Runs>(runner: &R, cwd: &Path, branch: &mut GitBranch) -> Result<(), OpError> {
+async fn counted_without_upstream<R: Runs>(runner: &R, cwd: &Path, branch: &mut GitBranch, default: Option<&str>) -> Result<(), OpError> {
     if branch.oid == "(initial)" {
         return Ok(());
     }
@@ -194,7 +197,7 @@ async fn counted_without_upstream<R: Runs>(runner: &R, cwd: &Path, branch: &mut 
         }
         branch.upstream = None;
     }
-    let Some(base) = default_branch(runner, cwd).await? else { return Ok(()) };
+    let Some(base) = default else { return Ok(()) };
     let counted =
         run_git(runner, cwd, &GitLine::new(&["rev-list", "--left-right", "--count"]).revs(&[&format!("{base}...HEAD")]), None, None)
             .await?;
@@ -210,28 +213,6 @@ async fn counted_without_upstream<R: Runs>(runner: &R, cwd: &Path, branch: &mut 
 
 pub(crate) async fn rev_exists<R: Runs>(runner: &R, cwd: &Path, rev: &str) -> Result<bool, OpError> {
     Ok(run_git(runner, cwd, &GitLine::new(&["rev-parse", "--verify", "-q"]).revs(&[rev]), None, None).await?.code == Some(0))
-}
-
-/// Where a branch's base is looked for, in order: origin's HEAD where a remote set it, else a local main or master.
-/// Both roads read it, the running one through git and the stopped one off the files.
-pub(crate) const DEFAULT_BRANCHES: [&str; 3] = ["refs/remotes/origin/HEAD", "refs/heads/main", "refs/heads/master"];
-
-/// The first of those that names a commit here, by its short name. origin/HEAD counts only where the branch it
-/// names is still there: a remote that renamed its default branch and a prune leave it naming nothing.
-pub(crate) async fn default_branch<R: Runs>(runner: &R, cwd: &Path) -> Result<Option<String>, OpError> {
-    for name in DEFAULT_BRANCHES {
-        if name.ends_with("/HEAD") {
-            let named = run_git(runner, cwd, &GitLine::new(&["symbolic-ref", "-q", "--short", name]), None, None).await?;
-            check(&named, "symbolic-ref")?;
-            let target = stdout_text(&named).trim().to_owned();
-            if named.code == Some(0) && rev_exists(runner, cwd, &target).await? {
-                return Ok(Some(target));
-            }
-        } else if rev_exists(runner, cwd, name).await? {
-            return Ok(Some(name.trim_start_matches("refs/heads/").to_owned()));
-        }
-    }
-    Ok(None)
 }
 
 #[derive(Debug, PartialEq, Eq)]

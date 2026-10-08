@@ -10,17 +10,18 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { agentsOffRefusal, EXIT_CODES, execOutsideFix, execOutsideRefusal, noWorkspaceRefusal, refusalLine, spawnFolderRefusal, spawnReachFix, spawnReachRefusal, spawnRepositoryRefusal, spawnRepositoryWorkspaceRefusal, SPAWN_FOLDER_FIX, SPAWN_REPOSITORY_FIX, SPAWN_REPOSITORY_WORKSPACE_FIX, HERE_PLACE_ID, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, LOOPBACK, MCP_SERVER_NAME, SCOPED_MCP_ARG, TURN_TOKEN_ENV, type Caller, type ThreadView, type WorkspaceView } from "@wsp/protocol";
+import { agentsOffRefusal, EXIT_CODES, folderForkFix, folderForkRefusal, spawnActRefusal, execOutsideFix, execOutsideRefusal, noWorkspaceRefusal, refusalLine, spawnFolderRefusal, spawnReachFix, spawnReachRefusal, spawnRepositoryRefusal, spawnRepositoryWorkspaceRefusal, SPAWN_FOLDER_FIX, SPAWN_REPOSITORY_FIX, SPAWN_REPOSITORY_WORKSPACE_FIX, HERE_PLACE_ID, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, LOOPBACK, MCP_SERVER_NAME, SCOPED_MCP_ARG, TURN_TOKEN_ENV, type Caller, type ThreadView, type WorkspaceView } from "@wsp/protocol";
 import { copyKey, createRuntime, memoryStore, type Runtime } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cli, localWiring, serve } from "../src/cli.js";
 import { mcpServer } from "../src/mcp.js";
+import { CLOUD_ON } from "../src/cloud.js";
 import { guestKinds } from "../src/guest-tools.js";
 import { guestDoor, type GuestDoor, type GuestLink } from "../src/guest.js";
 import type { HostHandle } from "../src/server.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { stubBackend, withDaemonRoads } from "./stub-backend.js";
-import { branchDaemons } from "../../runtime/test/stub-backend.js";
+import { branchDaemons, GUEST_BRANCH } from "../../runtime/test/stub-backend.js";
 import { PAGE, captured, copyingFake, fakeDaemonStart, heldAgent, type Captured } from "./verbs-fixture.js";
 import { runsFromItsOwnFolder } from "./own-folder.js";
 
@@ -229,6 +230,9 @@ describe("a lead thread on this computer starting children on a cloud computer",
   let held: ReturnType<typeof heldAgent>;
   let mcp: Client | undefined;
   let restart: () => Runtime;
+  let daemons: ReturnType<typeof branchDaemons>;
+  /** The branch each machine's checkout reads as on, by machine id; the work branch where none is named. */
+  let branchOf: Map<string, string>;
 
   beforeEach(async () => {
     dir = mkdtempSync(join(tmpdir(), "wsp-lead-cloud-"));
@@ -245,10 +249,13 @@ describe("a lead thread on this computer starting children on a cloud computer",
     held = heldAgent(true);
     const here: { url?: string } = {};
     const backend = withDaemonRoads(stubBackend());
-    const daemons = branchDaemons();
+    branchOf = new Map();
+    const seed = "cafef00d".repeat(3);
+    daemons = branchDaemons({ seed, branchOf: machine => branchOf.get(machine) ?? GUEST_BRANCH });
     restart = () => createRuntime({
       statePath,
       backend,
+      daemonToken: seed,
       daemonChannel: daemons.open,
       store,
       adapters: { claude: held.adapter },
@@ -331,6 +338,91 @@ describe("a lead thread on this computer starting children on a cloud computer",
     const exec = await mcp.callTool({ name: "exec", arguments: { workspace: "other-cloud", argv: ["true"] } });
     expect(exec.isError).toBe(true);
     expect(JSON.stringify(exec.content)).toContain(refusalLine(execOutsideRefusal(threadId, "other-cloud", "project"), execOutsideFix("lab")));
+    held.release(0, "read it");
+    await finished;
+  });
+
+  /** The lead's own tool server, over the lead's launch. */
+  async function toolsOf(launch: Readonly<Record<string, string>>): Promise<Client> {
+    const [toClient, toServer] = InMemoryTransport.createLinkedPair();
+    await mcpServer(statePath, { env: { ...launch, HOME: join(dir, "agent"), WSP_HOME: join(dir, "agent", ".wsp") }, scoped: true }).connect(toServer);
+    mcp = new Client({ name: "lead", version: "0.0.0" });
+    await mcp.connect(toClient);
+    return mcp;
+  }
+
+  /** The lead and a child it ran on lab-cloud, the child's machine checked out on its own branch, kid. */
+  async function leadWithChild() {
+    const held = await lead();
+    const ran = await thread(held.launch, "run", "lab-cloud", "--detach", "build it", "--json");
+    expect(ran.code).toBe(0);
+    const child = json<{ threadId: string }>(ran.io).threadId;
+    const row = (await rt.sessions.list()).find(r => r.threadId === child)!;
+    const source = (await rt.workspaces.list()).find(w => w.id === row.workspaceId)!;
+    branchOf.set(source.machineId, "kid");
+    return { ...held, source };
+  }
+
+  it.runIf(CLOUD_ON)("wsp fork and the fork tool fork its child's machine from the child's branch, under the lead, and a workspace outside its tree is refused in run's words", async () => {
+    const { threadId, launch, cloud, finished, source } = await leadWithChild();
+    const forked = await thread(launch, "fork", source.name, "--name", "lab-twin");
+    expect(forked.code, forked.io.errors.join("\n")).toBe(0);
+    const tool = await (await toolsOf(launch)).callTool({ name: "fork", arguments: { workspace: source.name, name: "lab-triplet" } });
+    expect(tool.isError, JSON.stringify(tool.content)).not.toBe(true);
+    const rows = await rt.workspaces.list();
+    for (const name of ["lab-twin", "lab-triplet"]) {
+      const made = rows.find(w => w.name === name)!;
+      // A child of the machine it forks, so it starts where that machine's work is, and in the lead's tree.
+      expect(made).toMatchObject({ project: { id: cloud }, rootThreadId: threadId, parentWorkspaceId: source.id, kind: "cloud" });
+      expect(daemons.frames.filter(f => f.machine === made.machineId && f["op"] === "git.startOn").map(f => f["branch"])).toEqual(["kid"]);
+    }
+    const other = (await rt.projects.list()).find(p => p.name === "other-cloud")!;
+    await rt.workspaces.create({ project: other.id, name: "theirs" });
+    const run = await thread(launch, "run", "theirs", "--detach", "build it");
+    expect(run.code).toBe(EXIT_CODES.usage);
+    const fork = await thread(launch, "fork", "theirs");
+    expect(fork.code).toBe(EXIT_CODES.usage);
+    expect(fork.io.errors.join("\n")).toBe(run.io.errors.join("\n").replace(/^wsp run:/, "wsp fork:"));
+    held.release(1, "Built it.");
+    held.release(0, "read it");
+    await finished;
+  });
+
+  it.runIf(CLOUD_ON)("a lead's fork picks no size and no agents switch, from the command line or the tool, refused naming this computer, and its own folder is no machine to fork", async () => {
+    const { threadId, launch, finished, source } = await leadWithChild();
+    const here = (await rt.projects.computers()).find(c => c.id === HERE_PLACE_ID)!.name;
+    const before = (await rt.workspaces.list()).length;
+    const lines: [string[], string][] = [
+      [["--size", "2x4"], spawnActRefusal(threadId, "size", here)],
+      // A size no provider offers is the same refusal, said before the offered sizes are read.
+      [["--size", "96x768"], spawnActRefusal(threadId, "size", here)],
+      [["--max-depth", "5"], spawnActRefusal(threadId, "agents", here)],
+      [["--max-machines", "1"], spawnActRefusal(threadId, "agents", here)],
+      [["--spawn", "off"], spawnActRefusal(threadId, "agents", here)],
+    ];
+    for (const [flags, said] of lines) {
+      const refused = await thread(launch, "fork", source.name, ...flags);
+      expect(refused.code, flags.join(" ")).toBe(EXIT_CODES.usage);
+      expect(refused.io.errors.at(-1)).toBe(`wsp fork: ${said}`);
+    }
+    const tools = await toolsOf(launch);
+    const inputs: [Record<string, unknown>, string][] = [
+      [{ size: "2x4" }, spawnActRefusal(threadId, "size", here)],
+      [{ size: "96x768" }, spawnActRefusal(threadId, "size", here)],
+      [{ max_depth: 5 }, spawnActRefusal(threadId, "agents", here)],
+      [{ max_machines: 1 }, spawnActRefusal(threadId, "agents", here)],
+      [{ spawn: "off" }, spawnActRefusal(threadId, "agents", here)],
+    ];
+    for (const [input, said] of inputs) {
+      const refused = await tools.callTool({ name: "fork", arguments: { workspace: source.name, ...input } });
+      expect(refused, JSON.stringify(input)).toMatchObject({ isError: true, structuredContent: { error: said, class: "usage" } });
+    }
+    const folder = await thread(launch, "fork", "lab");
+    expect(folder.code).toBe(EXIT_CODES.usage);
+    expect(folder.io.errors.at(-1)).toBe(`wsp fork: ${refusalLine(folderForkRefusal("lab"), folderForkFix("lab"))}`);
+    expect(await tools.callTool({ name: "fork", arguments: { workspace: "lab" } })).toMatchObject({ isError: true, structuredContent: { error: refusalLine(folderForkRefusal("lab"), folderForkFix("lab")), class: "usage" } });
+    expect(await rt.workspaces.list()).toHaveLength(before);
+    held.release(1, "Built it.");
     held.release(0, "read it");
     await finished;
   });

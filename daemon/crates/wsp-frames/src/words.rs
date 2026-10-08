@@ -297,6 +297,12 @@ pub fn on_base_refusal(base: &str) -> String {
     format!("this workspace is on {base}, the branch it started from; move the commits onto a branch of their own and bring back again")
 }
 
+/// What a push from the remote's default branch is refused with when the caller measured it against another base:
+/// no push moves the branch every copy of the project starts from.
+pub fn on_default_refusal(branch: &str) -> String {
+    format!("this workspace is on {branch}, the project's default branch, and no push moves it; move the commits onto a branch of their own and push again")
+}
+
 /// What a bring back in a checkout that is on no branch at all is refused with.
 pub const NOT_ON_A_BRANCH: &str = "this workspace is not on a branch, so there is nothing to bring back yet";
 

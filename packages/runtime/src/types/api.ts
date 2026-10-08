@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { GoldenDelta, ExecResult, GoldenManifest, GoldenVersion, MachineBackend, MachineKind, RetentionPlan, SnapshotRow, TemplateRow } from "@wsp/engine";
-import type { ThreadCapWait, AgentsReport, AgentsSignInEvent, AgentsSignInRun, AgentsTarget, ServerAdd, ServerAsk, ServerToolsAnswer, SignInLine, SkillAdded, SkillHit, SkillPreview } from "@wsp/protocol";
+import type { ThreadCapWait, ThreadScope, AgentsReport, AgentsSignInEvent, AgentsSignInRun, AgentsTarget, ServerAdd, ServerAsk, ServerToolsAnswer, SignInLine, SkillAdded, SkillHit, SkillPreview } from "@wsp/protocol";
 import type {
   Capabilities,
   DaemonReachView,
@@ -131,9 +131,13 @@ export interface Runtime {
     create(opts: CreateWorkspaceOptions, origin?: Caller): Promise<CreatedWorkspace>;
     /** Where a workspace of this project would land and what that computer offers, gated as a create is; `place` is
      * absent where the landing is this computer or the provider this host forks on. Read ahead of a create so the
-     * refusal for a computer that forks nothing comes in one sentence before any stage is streamed. */
-    landing(o: { project: string }, origin?: Caller): Promise<{ place?: string; name: string; capabilities: Capabilities; kind?: WorkspaceKind }>;
+     * refusal for a computer that forks nothing comes in one sentence before any stage is streamed. `sized` says the
+     * create to follow names a size, which a thread is refused here, before the sizes are read. */
+    landing(o: { project: string; sized?: true }, origin?: Caller): Promise<{ place?: string; name: string; capabilities: Capabilities; kind?: WorkspaceKind }>;
     get(id: string, origin?: Caller): Promise<WorkspaceView>;
+    /** Where a thread runs, as every refusal to its own token names it: its computer by name where it runs in a
+     * folder, else its kind's machine; nothing for a thread whose workspace this host no longer holds. */
+    threadPlace(scope: ThreadScope): string | undefined;
     /** Every workspace this host holds, less the ones the caller's origin may not drive. */
     list(origin?: Caller): Promise<WorkspaceView[]>;
     /** The workspace a name or an id names, off the reading list() serves: every verb that takes a workspace from a

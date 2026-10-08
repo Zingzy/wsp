@@ -3,6 +3,7 @@
 // records, what a state file written before places boots as, and what a build
 // at a second place does and refuses.
 import { createHash } from "node:crypto";
+import { hostname } from "node:os";
 import { describe, expect, it } from "vitest";
 import { NoProviderBackend, imageHash, tarOf } from "@wsp/engine";
 import { COPY_BUILD_FIX, NO_BUILD_PLACE_LINE, NO_PROVIDER_LINE, RUNTIME_OPS, THREAD_OPS, SealedImageView, buildPlaceAskLine, placeBuildsNoImageLine, placeForksNothingPickLine, sealedCopyLine, vaultUnlistedRefusal, type Recipe, type RecipeDigest, type SealedImage } from "@wsp/protocol";
@@ -288,7 +289,7 @@ describe("building the image at a second place", () => {
     const { rt, composed } = started({ places });
     const b = await rt.golden.prepare();
     await rt.golden.seal(b.id);
-    await expect(rt.image.build({ place: "here" })).rejects.toMatchObject({ kind: "conflict", message: expect.stringContaining(placeBuildsNoImageLine("here")) });
+    await expect(rt.image.build({ place: "here" })).rejects.toMatchObject({ kind: "conflict", message: expect.stringContaining(placeBuildsNoImageLine(hostname())) });
     expect(composed.count).toBe(0);
     expect((await rt.image.get()).copies.map(c => c.place)).toEqual(["box"]);
     await rt.close();
@@ -325,7 +326,7 @@ describe("building the image at a second place", () => {
     await empty.rt.golden.seal(b.id);
     const cannot = await fixOf(empty.rt.image.build({ place: "here" }));
     expect(cannot).toMatchObject({ kind: "conflict", fix: COPY_BUILD_FIX.noCopy });
-    expect(cannot.message).toBe(`${placeBuildsNoImageLine("here")}. ${COPY_BUILD_FIX.noCopy}`);
+    expect(cannot.message).toBe(`${placeBuildsNoImageLine(hostname())}. ${COPY_BUILD_FIX.noCopy}`);
     await empty.rt.close();
 
     const store = memoryStore();

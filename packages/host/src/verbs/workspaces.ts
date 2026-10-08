@@ -123,7 +123,7 @@ export const WORKSPACE_VERBS: readonly Verb[] = [
     name: "fork",
     cloud: true,
     usage: 'wsp fork <workspace> [--name <n>] [--size <cpu>x<memGb>] [--send "<task>" [run\'s flags]]',
-    about: "a new machine from the source's image version, not a copy of its live disk; --size as new's",
+    about: "a new machine from the source's image version, on the source's branch with its commits pushed first, not a copy of its live disk; --size as new's, the person's alone",
     page: "agent",
     options: { name: { type: "string" }, size: { type: "string" }, send: { type: "string" }, agent: { type: "string" }, ...PICK_OPTIONS, cwd: { type: "string" }, notify: { type: "string", multiple: true }, spawn: { type: "string" }, "max-machines": { type: "string" }, "max-depth": { type: "string" } },
     run: async ctx => {
@@ -151,7 +151,7 @@ export const WORKSPACE_VERBS: readonly Verb[] = [
       return 0;
     },
     tool: tool({
-      description: "A sibling workspace from the source's image version (a new machine, not a copy of its live disk); with a task, its first thread is opened and the reply returned. When that first turn fails, the error still names the workspace, which exists: continue with run on it rather than forking again.",
+      description: "A new machine of the source's image version, a child of the source that starts on the source's branch with its commits pushed first (not a copy of its live disk); a thread's fork sits under that thread in its tree, and its size and agents switch are the person's to pick. A workspace in a project's folder is no machine to fork. With a task, its first thread is opened and the reply returned. When that first turn fails, the error still names the workspace, which exists: continue with run on it rather than forking again.",
       input: { workspace: WorkspaceIn, name: z.string().optional().describe("defaults to <source>-fork"), size: SizeIn, task: z.string().optional(), agent: AgentIn, ...PICK_INPUTS, cwd: CwdIn, notify: NotifyIn, spawn: SpawnIn, max_machines: MaxMachinesIn, max_depth: MaxDepthIn },
       output: Created.extend({ turn: TurnOut.optional(), failure: z.string().optional() }).shape,
       stream: ["workspace", "notice"],

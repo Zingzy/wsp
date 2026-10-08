@@ -20,6 +20,11 @@ import { HERE_PLACE_ID,
   SCOPED_TOKEN_ROAD_REFUSAL,
   THREAD_OPS,
   threadOpRefusal,
+  MACHINE_WSP_FORKS,
+  folderForkFix,
+  folderForkRefusal,
+  defaultBranchFix,
+  defaultBranchRefusal,
   workspaceIdOf,
   agentsOffRefusal,
   noMcpServersLine,
@@ -214,8 +219,8 @@ describe("agents spawning agents", () => {
     const rootThread = opener.view().threadId!;
     const scope: ThreadScope = { kind: "thread", threadId: rootThread, workspaceId: ws.id, rootThreadId: rootThread };
     const standing = backend.machines.length;
-    await expect(createOn(rt, { golden: "snap_image-v1", name: "mine" }, asThread(scope))).rejects.toThrow(spawnGoldenRefusal(rootThread));
-    await expect(createOn(rt, { golden: "snap_someone-else", name: "theirs" }, asThread(scope))).rejects.toThrow(spawnGoldenRefusal(rootThread));
+    await expect(createOn(rt, { golden: "snap_image-v1", name: "mine" }, asThread(scope))).rejects.toThrow(spawnGoldenRefusal(rootThread, MACHINE_WSP_FORKS));
+    await expect(createOn(rt, { golden: "snap_someone-else", name: "theirs" }, asThread(scope))).rejects.toThrow(spawnGoldenRefusal(rootThread, MACHINE_WSP_FORKS));
     expect(backend.machines).toHaveLength(standing);
     expect((await rt.workspaces.list()).map(w => w.name)).toEqual(["lead"]);
     // With none named it forks what this host holds at head, which is the image its own workspace's project runs.
@@ -225,7 +230,7 @@ describe("agents spawning agents", () => {
     await rt.close();
   });
 
-  it("a thread's fork is a child of its own workspace whatever parent it names, and no other machine is read", async () => {
+  it("a thread's fork is a child of the workspace of its tree it names, on that one's branch, and one outside its tree is refused unread", async () => {
     const held = heldAdapter();
     const backend = withDaemonRoads(stubBackend());
     // Each machine says which branch its checkout is on, so a read of the wrong one shows up in the child's base.
@@ -239,12 +244,110 @@ describe("agents spawning agents", () => {
     const scope: ThreadScope = { kind: "thread", threadId: rootThread, workspaceId: ws.id, rootThreadId: rootThread };
     const reads = (machine: string): number => daemons.frames.filter(f => f.op === "git.status" && f.machine === machine).length;
     const readsBefore = reads(theirs.machineId);
-    const child = await createOn(rt, { project: project.id, name: "ours", parent: theirs.id }, asThread(scope));
-    expect(child.parentWorkspaceId).toBe(ws.id);
-    // The branch the child starts on is its own workspace's, and the workspace it named was never asked.
-    expect(reads(ws.machineId)).toBeGreaterThan(0);
+    const standing = backend.machines.length;
+    await expect(createOn(rt, { project: project.id, name: "ours", parent: theirs.id }, asThread(scope))).rejects.toThrow(noWorkspaceRefusal());
     expect(reads(theirs.machineId)).toBe(readsBefore);
-    expect(daemons.frames.filter(f => f.op === "git.startOn").map(f => f["branch"])).toEqual([`${ws.machineId}-branch`]);
+    expect(backend.machines).toHaveLength(standing);
+    // Named or not, a thread's fork sits under it; named, it starts where the workspace it forks is.
+    const kid = await createOn(rt, { project: project.id, name: "kid" }, asThread(scope));
+    const twin = await createOn(rt, { project: project.id, name: "twin", parent: kid.id }, asThread(scope));
+    expect([kid, twin]).toMatchObject([{ parentWorkspaceId: ws.id, rootThreadId: rootThread }, { parentWorkspaceId: kid.id, rootThreadId: rootThread }]);
+    expect(daemons.frames.filter(f => f.op === "git.startOn").map(f => [f.machine, f["branch"]])).toEqual([
+      [kid.machineId, `${ws.machineId}-branch`],
+      [twin.machineId, `${kid.machineId}-branch`],
+    ]);
+    held.end(0);
+    await rt.close();
+  });
+
+  /** A lead thread on a cloud machine, a child machine it forked, and daemons whose branch, commits over the
+   * upstream and remote default each machine reads as the case sets them, main where it sets none. */
+  async function leadAndKid() {
+    const held = heldAdapter();
+    const backend = withDaemonRoads(stubBackend());
+    const branches = new Map<string, string>();
+    const ahead = new Map<string, number>();
+    const defaults = new Map<string, string>();
+    const daemons = branchDaemons({ branchOf: m => branches.get(m) ?? `${m}-branch`, aheadOf: m => ahead.get(m) ?? 0, defaultOf: m => defaults.get(m) ?? "main" });
+    const rt = runtimeWith({ claude: held.factory }, undefined, backend, daemons);
+    const project = await projectOn(rt, undefined, undefined, { base: "main" });
+    const ws = await createOn(rt, { project: project.id, golden: "snap_g", name: "lead", agents: AGENTS_ON });
+    const opener = await rt.sessions.start(ws.id, { prompt: "lead" });
+    const rootThread = opener.view().threadId!;
+    const scope: ThreadScope = { kind: "thread", threadId: rootThread, workspaceId: ws.id, rootThreadId: rootThread };
+    const kid = await createOn(rt, { project: project.id, name: "kid" }, asThread(scope));
+    return { held, backend, daemons, rt, project, ws, scope, kid, branches, ahead, defaults };
+  }
+
+  it("a fork never pushes the project's default branch: a copy with commits on it is refused, the person's fork and a thread's, and nothing is pushed or made", async () => {
+    const { held, backend, daemons, rt, project, scope, kid, branches, ahead } = await leadAndKid();
+    branches.set(kid.machineId, "main");
+    ahead.set(kid.machineId, 1);
+    const standing = backend.machines.length;
+    const refused = refusalLine(defaultBranchRefusal(kid.name, "main"), defaultBranchFix("fork", kid.name));
+    await expect(rt.workspaces.create({ project: project.id, name: "twin", parent: kid.id })).rejects.toMatchObject({ message: refused, kind: "usage" });
+    await expect(createOn(rt, { project: project.id, name: "twin", parent: kid.id }, asThread(scope))).rejects.toMatchObject({ message: refused, kind: "usage" });
+    expect(daemons.frames.filter(f => f.op === "git.push")).toEqual([]);
+    expect(backend.machines).toHaveLength(standing);
+    held.end(0);
+    await rt.close();
+  });
+
+  it("the default branch is the one the copy's remote starts on: master with commits is refused, and a branch called main there forks with its push", async () => {
+    const { held, backend, daemons, rt, project, scope, kid, branches, ahead, defaults } = await leadAndKid();
+    defaults.set(kid.machineId, "master");
+    branches.set(kid.machineId, "master");
+    ahead.set(kid.machineId, 1);
+    const standing = backend.machines.length;
+    await expect(createOn(rt, { project: project.id, name: "twin", parent: kid.id }, asThread(scope))).rejects.toMatchObject({ message: refusalLine(defaultBranchRefusal(kid.name, "master"), defaultBranchFix("fork", kid.name)), kind: "usage" });
+    expect(daemons.frames.filter(f => f.op === "git.push")).toEqual([]);
+    expect(backend.machines).toHaveLength(standing);
+    branches.set(kid.machineId, "main");
+    const twin = await createOn(rt, { project: project.id, name: "twin", parent: kid.id }, asThread(scope));
+    expect(daemons.frames.filter(f => f.op === "git.push" || (f.op === "git.startOn" && f.machine === twin.machineId)).map(f => [f.machine, f.op, f["branch"] ?? null])).toEqual([
+      [kid.machineId, "git.push", null],
+      [twin.machineId, "git.startOn", "main"],
+    ]);
+    held.end(0);
+    await rt.close();
+  });
+
+  it("a copy whose own base is the default branch and holds commits on it is refused too, the person's own workspace included, since its commits would not travel", async () => {
+    const { held, backend, daemons, rt, project, ws, branches, ahead } = await leadAndKid();
+    branches.set(ws.machineId, "main");
+    ahead.set(ws.machineId, 1);
+    const standing = backend.machines.length;
+    await expect(rt.workspaces.create({ project: project.id, name: "twin", parent: ws.id })).rejects.toMatchObject({ message: refusalLine(defaultBranchRefusal(ws.name, "main"), defaultBranchFix("fork", ws.name)), kind: "usage" });
+    expect(daemons.frames.filter(f => f.op === "git.push")).toEqual([]);
+    expect(backend.machines).toHaveLength(standing);
+    held.end(0);
+    await rt.close();
+  });
+
+  it("a thread's start from a copy with commits on the default branch is refused in a thread's words, and a bring back of it in a bring back's", async () => {
+    const { held, backend, rt, project, scope, kid, branches, ahead, defaults } = await leadAndKid();
+    defaults.set(kid.machineId, "master");
+    branches.set(kid.machineId, "master");
+    ahead.set(kid.machineId, 1);
+    const inside = await rt.sessions.start(kid.id, { prompt: "build" }, asThread(scope));
+    const kidScope: ThreadScope = { kind: "thread", threadId: inside.view().threadId!, workspaceId: kid.id, rootThreadId: scope.rootThreadId };
+    const standing = backend.machines.length;
+    await expect(createOn(rt, { project: project.id, name: "grandkid" }, asThread(kidScope))).rejects.toMatchObject({ message: refusalLine(defaultBranchRefusal(kid.name, "master"), defaultBranchFix("run", kid.name)), kind: "usage" });
+    expect(backend.machines).toHaveLength(standing);
+    await expect(rt.workspaces.bringBack({ workspaceId: kid.id })).rejects.toMatchObject({ message: refusalLine(defaultBranchRefusal(kid.name, "master"), defaultBranchFix("bring back", kid.name)), kind: "usage" });
+    for (let nth = 0; nth < 2; nth++) held.end(nth);
+    await rt.close();
+  });
+
+  it("a thread's fork of a copy ahead of its upstream pushes that copy's branch first and starts the new machine on it", async () => {
+    const { held, daemons, rt, project, scope, kid, ahead } = await leadAndKid();
+    ahead.set(kid.machineId, 2);
+    const twin = await createOn(rt, { project: project.id, name: "twin", parent: kid.id }, asThread(scope));
+    const asked = daemons.frames.filter(f => f.op === "git.push" || (f.op === "git.startOn" && f.machine === twin.machineId)).map(f => [f.machine, f.op, f["branch"] ?? null]);
+    expect(asked).toEqual([
+      [kid.machineId, "git.push", null],
+      [twin.machineId, "git.startOn", `${kid.machineId}-branch`],
+    ]);
     held.end(0);
     await rt.close();
   });
@@ -420,9 +523,9 @@ describe("agents spawning agents", () => {
     const rt = runtimeWith({ claude: heldAdapter().factory });
     const ws = await createOn(rt, { golden: "snap_g", name: "lead", agents: AGENTS_ON });
     const scope: ThreadScope = { kind: "thread", threadId: "t_root", workspaceId: ws.id, rootThreadId: "t_root" };
-    await expect(rt.workspaces.delete(ws.id, asThread(scope))).rejects.toThrow(spawnActRefusal("t_root", "delete"));
-    await expect(rt.workspaces.nap(ws.id, asThread(scope))).rejects.toThrow(spawnActRefusal("t_root", "pause"));
-    await expect(rt.workspaces.agents(ws.id, { spawn: false }, asThread(scope))).rejects.toThrow(spawnActRefusal("t_root", "agents"));
+    await expect(rt.workspaces.delete(ws.id, asThread(scope))).rejects.toThrow(spawnActRefusal("t_root", "delete", MACHINE_WSP_FORKS));
+    await expect(rt.workspaces.nap(ws.id, asThread(scope))).rejects.toThrow(spawnActRefusal("t_root", "pause", MACHINE_WSP_FORKS));
+    await expect(rt.workspaces.agents(ws.id, { spawn: false }, asThread(scope))).rejects.toThrow(spawnActRefusal("t_root", "agents", MACHINE_WSP_FORKS));
     await rt.close();
   });
 
@@ -710,7 +813,7 @@ describe("agents spawning agents", () => {
       expect((await client.request("workspaces.rename", { workspaceId: local.id, name: "mini" }))["ok"]).toBe(false);
       // Who may reach this host is never a machine's to hand out.
       // Refused at the door by name, before pair.issue's own refusal is reached: both say no, and this one first.
-      expect((await client.request("pair.issue"))["error"]).toBe(threadOpRefusal("pair.issue", threadId));
+      expect((await client.request("pair.issue"))["error"]).toBe(threadOpRefusal("pair.issue", threadId, MACHINE_WSP_FORKS));
       // A thread names a project it can already see; recording one is the person's own act, refused at the door.
       expect((await client.request("projects.add", { source: "https://github.com/wsp/x.git", on: "default" }))["ok"]).toBe(false);
       const forked = (await client.request("workspaces.create", { project: ws.project.id, name: "builder" }))["workspace"] as { rootThreadId?: string };
@@ -749,9 +852,9 @@ describe("agents spawning agents", () => {
     try {
       const client = await WsClient.connect(srv.port, { token });
       const thread = (await rt.devices.list())[0]!.scope!.threadId;
-      expect((await client.request("devices.list"))["error"]).toBe(threadOpRefusal("devices.list", thread));
-      expect((await client.request("devices.revoke", { deviceId: mine.id }))["error"]).toBe(threadOpRefusal("devices.revoke", thread));
-      expect((await client.request("ticket.issue", { purpose: "connect" }))["error"]).toBe(threadOpRefusal("ticket.issue", thread));
+      expect((await client.request("devices.list"))["error"]).toBe(threadOpRefusal("devices.list", thread, MACHINE_WSP_FORKS));
+      expect((await client.request("devices.revoke", { deviceId: mine.id }))["error"]).toBe(threadOpRefusal("devices.revoke", thread, MACHINE_WSP_FORKS));
+      expect((await client.request("ticket.issue", { purpose: "connect" }))["error"]).toBe(threadOpRefusal("ticket.issue", thread, MACHINE_WSP_FORKS));
       expect(await rt.devices.list()).toHaveLength(1);
       client.close();
     } finally {
@@ -893,7 +996,7 @@ describe("agents spawning agents", () => {
       for (const op of RUNTIME_OPS) {
         if (op === "auth" || op === "pair.redeem") continue;
         const reply = await client.request(op, {});
-        (reply["error"] === threadOpRefusal(op, threadId) ? refused : reached).push(op);
+        (reply["error"] === threadOpRefusal(op, threadId, MACHINE_WSP_FORKS) ? refused : reached).push(op);
       }
       // The door is shut and these are the openings: everything else answered the one sentence, whether or not the
       // op would have gone on to refuse it for a reason of its own.
@@ -967,10 +1070,18 @@ describe("agents spawning agents", () => {
     const srv = await serveRuntime(rt, { port: 0, authToken: "secret", devices: rt.devices });
     try {
       const client = await WsClient.connect(srv.port, { token });
+      const here = (await rt.projects.computers()).find(c => c.id === HERE_PLACE_ID)!.name;
       // A create of its own project names the folder it already runs in, and makes nothing.
       const made = await client.request("workspaces.create", { project: project.id, name: "kid" });
       expect((made["workspace"] as { id: string }).id).toBe(mac.id);
-      expect((await client.request("workspaces.create", { project: project.id, name: "wide", agents: { maxMachines: 50 } }))["error"]).toBe(spawnActRefusal(threadId, "agents"));
+      expect(await client.request("workspaces.create", { project: project.id, name: "wide", agents: { maxMachines: 50 } })).toMatchObject({ ok: false, error: spawnActRefusal(threadId, "agents", here), kind: "usage" });
+      // A fork names the workspace it forks, and a folder is the project itself, the person's fork and a thread's alike.
+      const folderFork = refusalLine(folderForkRefusal(project.name), folderForkFix(project.name));
+      expect(await client.request("workspaces.create", { project: project.id, name: "twin", parent: mac.id })).toMatchObject({ ok: false, error: folderFork, kind: "usage" });
+      await expect(rt.workspaces.create({ project: project.id, name: "twin", parent: mac.id })).rejects.toMatchObject({ message: folderFork, kind: "usage" });
+      // The project the create names is what is read: a folder project under a cloud parent is no machine either.
+      const cloud = await createOn(rt, { project: (await projectOn(rt)).id, golden: "snap_g", name: "cloudy" });
+      await expect(rt.workspaces.create({ project: project.id, name: "twin", parent: cloud.id })).rejects.toMatchObject({ message: folderFork, kind: "usage" });
       // Two starts naming nothing run beside it, in its folder, under it; no machine cap counts them.
       for (const prompt of ["one", "two"]) expect((await client.request("sessions.start", { prompt }))["error"]).toBeUndefined();
       await until(() => held.launches.length === 3);
@@ -990,10 +1101,13 @@ describe("agents spawning agents", () => {
       const deepest = await WsClient.connect(srv.port, { token: held.launches[3]!.env[HOST_TOKEN_ENV]! });
       expect((await deepest.request("sessions.start", { prompt: "deepest" }))["error"]).toBe(spawnDepthRefusal(grand.threadId!, 2, 2, { computer: "this-mac" }));
       deepest.close();
-      // The road a connect ticket is minted on is the person's, and so is every door that hands out access.
-      expect((await client.request("ticket.issue", { purpose: "connect" }))["error"]).toBe(threadOpRefusal("ticket.issue", threadId));
-      expect((await client.request("pair.issue"))["error"]).toBe(threadOpRefusal("pair.issue", threadId));
-      expect((await client.request("projects.add", { source: committedRepo(), on: HERE_PLACE_ID }))["error"]).toBe(threadOpRefusal("projects.add", threadId));
+      // The road a connect ticket is minted on is the person's, and so is every door that hands out access. The door
+      // names where the thread runs: this computer, by its own name, and no machine.
+      const ticket = (await client.request("ticket.issue", { purpose: "connect" }))["error"];
+      expect(ticket).toContain(`thread ${threadId.slice(0, 8)} on ${here}, and`);
+      expect(ticket).toBe(threadOpRefusal("ticket.issue", threadId, here));
+      expect((await client.request("pair.issue"))["error"]).toBe(threadOpRefusal("pair.issue", threadId, here));
+      expect((await client.request("projects.add", { source: committedRepo(), on: HERE_PLACE_ID }))["error"]).toBe(threadOpRefusal("projects.add", threadId, here));
       client.close();
     } finally {
       await srv.close();
@@ -1013,12 +1127,13 @@ describe("agents spawning agents", () => {
     const srv = await serveRuntime(rt, { port: 0, authToken: "secret", devices: rt.devices });
     try {
       const client = await WsClient.connect(srv.port, { token });
+      const here = (await rt.projects.computers()).find(c => c.id === HERE_PLACE_ID)!.name;
       const refused: string[] = [];
       const reached: string[] = [];
       for (const op of RUNTIME_OPS) {
         if (op === "auth" || op === "pair.redeem") continue;
         const reply = await client.request(op, {});
-        (reply["error"] === threadOpRefusal(op, threadId) ? refused : reached).push(op);
+        (reply["error"] === threadOpRefusal(op, threadId, here) ? refused : reached).push(op);
       }
       expect(reached.sort()).toEqual([...THREAD_OPS].filter(op => op !== "auth").sort());
       // The two roads out of a thread's own reach: a connect ticket is a socket with no scope, and a code is a device.
@@ -1413,7 +1528,7 @@ describe("agents spawning agents", () => {
     const opener = await rt.sessions.start(ws.id, { prompt: "lead" });
     const rootThread = opener.view().threadId!;
     const scope: ThreadScope = { kind: "thread", threadId: rootThread, workspaceId: ws.id, rootThreadId: rootThread };
-    await expect(createOn(rt, { name: "wide", agents: { maxMachines: 50, maxDepth: 9 } }, asThread(scope))).rejects.toThrow(spawnActRefusal(rootThread, "agents"));
+    await expect(createOn(rt, { name: "wide", agents: { maxMachines: 50, maxDepth: 9 } }, asThread(scope))).rejects.toThrow(spawnActRefusal(rootThread, "agents", MACHINE_WSP_FORKS));
     // The refused fork took no place with it, and the fork that lands answers with the tree's own switch.
     const forked = await createOn(rt, { name: "builder" }, asThread(scope));
     expect(forked.agents).toEqual(tight);

@@ -461,7 +461,8 @@ suite(`the tool server in the daemon binary${MCP_BIN === undefined ? " (set WSP_
       vi.unstubAllEnvs();
     });
 
-    it("lists its repository's projects, starts a child on a cloud one with notify me, and refuses another repository's by the rule, in exec's own words for exec", async () => {
+    /** A lead on this computer's folder of dev/lab, the same repository on the cloud as lab-cloud, and another one there. */
+    async function leadHere() {
       const repo = join(dir, "repo");
       mkdirSync(repo, { recursive: true });
       execFileSync("git", ["init", "-q", "-b", "main", repo]);
@@ -472,9 +473,13 @@ suite(`the tool server in the daemon binary${MCP_BIN === undefined ? " (set WSP_
       await runtime.projects.add({ source: "https://github.com/dev/other.git", on: "default", name: "other-cloud" });
       const folder = await runtime.workspaces.create({ project: mac.id, name: "lab", agents: { spawn: true } });
       const turn = await runtime.sessions.start(folder.id, { prompt: "coordinate" });
-      const lead = turn.view().threadId!;
       const launch = held.envs[0]!;
       const pair = { [HOST_URL_ENV]: launch[HOST_URL_ENV]!, [HOST_TOKEN_ENV]: launch[HOST_TOKEN_ENV]!, [TURN_TOKEN_ENV]: launch[TURN_TOKEN_ENV]! };
+      return { cloud, turn, lead: turn.view().threadId!, pair };
+    }
+
+    it("lists its repository's projects, starts a child on a cloud one with notify me, and refuses another repository's by the rule, in exec's own words for exec", async () => {
+      const { cloud, turn, lead, pair } = await leadHere();
       const { out, code } = await served([MCP_BIN!, "mcp", "--state", statePath], { ...env, ...pair }, [
         callOf(1, "projects"),
         callOf(2, "run", { project: "lab-cloud", message: "build it", notify: ["me"], detach: true }),
@@ -496,6 +501,22 @@ suite(`the tool server in the daemon binary${MCP_BIN === undefined ? " (set WSP_
       expect(execRefused).toMatchObject({ isError: true, structuredContent: { error: refusalLine(execOutsideRefusal(lead, "other-cloud", "project"), execOutsideFix("lab")), class: "usage" } });
       held.release(1, "Built it.");
       await vi.waitFor(() => expect(held.steered).toEqual([`thread ${child.slice(0, 8)} finished (completed): Built it.`]));
+      held.release(0, "read it");
+      await turn.finished;
+    });
+
+    it("forks its cloud child's machine with the fork tool, from that machine, under the lead", async () => {
+      const { cloud, turn, lead, pair } = await leadHere();
+      const started = await served([MCP_BIN!, "mcp", "--state", statePath], { ...env, ...pair }, [callOf(1, "run", { project: "lab-cloud", message: "build it", detach: true })]);
+      const child = (JSON.parse(started.out[0]!) as { result: { structuredContent: { threadId: string } } }).result.structuredContent.threadId;
+      const row = (await runtime.sessions.list()).find(r => r.threadId === child)!;
+      const source = (await runtime.workspaces.list()).find(w => w.id === row.workspaceId)!;
+      const { out, code } = await served([MCP_BIN!, "mcp", "--state", statePath], { ...env, ...pair, [CLOUD_ENV]: "1" }, [callOf(1, "fork", { workspace: source.name, name: "lab-twin" })]);
+      expect(code).toBe(0);
+      const forked = (JSON.parse(out[0]!) as { result: { structuredContent: Record<string, unknown>; isError?: boolean } }).result;
+      expect(forked.isError, JSON.stringify(forked.structuredContent)).toBeUndefined();
+      expect((await runtime.workspaces.list()).find(w => w.name === "lab-twin")).toMatchObject({ project: { id: cloud.id }, rootThreadId: lead, parentWorkspaceId: source.id, kind: "cloud" });
+      held.release(1, "Built it.");
       held.release(0, "read it");
       await turn.finished;
     });

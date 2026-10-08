@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { LocalBackend } from "@wsp/engine";
-import { HERE_PLACE_ID, inFolder, machineWord, undrivenRefusal, NO_SUCH_TURN, NOTIFY_ME, noWorkspaceRefusal, deviceHeldRefusal, registeredLine, REGISTERING_LINE, RELAY_TICKET_REFUSAL, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, THIS_COMPUTER, TICKET_ORIGIN, TURN_TOKEN_ENV, HOST_TOKEN_ENV, type AdapterAttachOptions, type AdapterEvent, type EventUnion, type ExecStream, type PortForward, type ProjectImportEvent, type TurnResult, type WorkspaceStatus } from "@wsp/protocol";
+import { HERE_PLACE_ID, folderForkFix, folderForkRefusal, refusalLine, inFolder, machineWord, undrivenRefusal, NO_SUCH_TURN, NOTIFY_ME, noWorkspaceRefusal, deviceHeldRefusal, registeredLine, REGISTERING_LINE, RELAY_TICKET_REFUSAL, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, THIS_COMPUTER, TICKET_ORIGIN, TURN_TOKEN_ENV, HOST_TOKEN_ENV, type AdapterAttachOptions, type AdapterEvent, type EventUnion, type ExecStream, type PortForward, type ProjectImportEvent, type TurnResult, type WorkspaceStatus } from "@wsp/protocol";
 import type { DaemonChannel } from "../src/daemon-channel.js";
 import type { MachineExecOptions } from "../src/machine-exec.js";
 import { createRuntime, type HarnessAdapterContext, type HarnessAdapterFactory, type HarnessSession, type LocalWiring, type ProjectExportOptions, type ProjectImportOptions, type Runtime } from "../src/runtime.js";
@@ -558,7 +558,7 @@ describe("local workspace", () => {
     // The folder the parent works in is gone, so a read of the branch it is on answers with git's own failure. A
     // create that reads it before its own refusals would answer about that read instead of about itself.
     rmSync(join(root, "work"), { recursive: true, force: true });
-    await expect(rt.workspaces.create({ project: project.id, name: "mac2", parent: parent.id }, "relayed")).rejects.toThrow(relayedRecordRefusal("mac2"));
+    await expect(rt.workspaces.create({ project: project.id, name: "mac2", parent: parent.id }, "relayed")).rejects.toThrow(refusalLine(folderForkRefusal(project.name), folderForkFix(project.name)));
   });
 
   it("a turn on this computer runs under the person's own login and no sandbox flag: this computer is not a machine", async () => {

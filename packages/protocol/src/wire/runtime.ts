@@ -3,7 +3,7 @@
 import { z } from "zod";
 import { AgentsTarget, McpScope, ServerAdd, ServerAsk } from "../agents-report.js";
 import { Attachment } from "../attachments.js";
-import { threadWord } from "../format.js";
+import { threadAt } from "../format.js";
 import { InitRoad, InitScreenId, SIGN_IN_CODE_MAX } from "../init-job.js";
 import { UsageRange, UsageSplit } from "../usage.js";
 import { AccessChoice, AgentSetupSet } from "../thread-defaults.js";
@@ -227,8 +227,10 @@ const RuntimeOp = z.discriminatedUnion("op", [
     idleWindowMs: z.number().nullable().optional(),
     /** The workspace this one is forked out of, by id: a child of it, holding the same project and starting on the
      * branch that workspace is on right now where the remote has that branch. A workspace of another project is
-     * refused, since a child starts on its parent's branch. A create a thread asked for is a child of the thread's
-     * own workspace whether or not this names one, and a workspace it names here is not read. */
+     * refused, since a child starts on its parent's branch. A create naming one on a project whose threads run in its
+     * folder is refused too, since that folder is no machine to fork; a parent in a folder stands for a child on
+     * another computer. A create a thread asked for names a workspace of its own tree here or none, and with none is
+     * a child of the thread's own workspace; either way it sits under that thread. */
     parent: z.string().optional(),
     /** The workspace gets the place's container engine through the fenced socket; absent takes the image's recipe. */
     engine: z.boolean().optional(),
@@ -238,7 +240,14 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * before any machine is asked for where that computer forks nothing: with NO_PROVIDER_LINE when no place here runs
    * workspaces, else naming the places that do. The one gate a create runs, read ahead so the refusal comes in one
    * sentence before any stage is streamed. */
-  z.object({ id: reqId, op: z.literal("workspaces.landing"), project: z.string() }),
+  z.object({
+    id: reqId,
+    op: z.literal("workspaces.landing"),
+    project: z.string(),
+    /** Set where the create to follow names a size: a thread's own token is refused here, before the sizes are read,
+     * since a machine's size is the person's to pick. */
+    sized: z.literal(true).optional(),
+  }),
   /** Every workspace this caller may drive. Replies with { workspaces }. */
   z.object({ id: reqId, op: z.literal("workspaces.list") }),
   /** The workspace a person's word names, by id or by name, off the same reading workspaces.list serves: a name no
@@ -929,9 +938,11 @@ export const THREAD_OPS: readonly string[] = [
   "workspaces.landing",
   "workspaces.create",
   // The projects a thread may start children on, its own and its repository's on a box or a cloud, and what a
-  // thread there starts on; the host answers a thread those and no other.
+  // thread there starts on; the host answers a thread those and no other, and refuses a name outside them by the
+  // rule a start reads, which is how a fork names the project of the workspace it forks.
   "projects.list",
   "projects.defaults",
+  "projects.resolve",
   "workspaces.list",
   // Every verb a thread runs names its workspace as a person does, so the door that reads a name is open to the
   // same tokens the list is: the tree rule refuses the names outside it here exactly as it hides them there.
@@ -1078,9 +1089,10 @@ export const DEVICE_OPS: readonly string[] = [
 ];
 
 /** The one sentence a thread's own token is refused an op with. It names the op rather than guessing why a caller
- * wanted it: the reasons are on the acts, and this is the door saying the op is not a thread's at all. */
-export function threadOpRefusal(op: string, threadId: string): string {
-  return `${op} is not a thread's to ask for; the token this request came in on is thread ${threadWord(threadId)} on a machine, which opens threads and forks machines under its own root and reads that tree`;
+ * wanted it: the reasons are on the acts, and this is the door saying the op is not a thread's at all. What a thread
+ * may start depends on where it runs, so the sentence claims none of it. */
+export function threadOpRefusal(op: string, threadId: string, on: string | undefined): string {
+  return `${op} is not a thread's to ask for; this request came in on the token of ${threadAt(threadId, on)}, and a thread's token starts work only under its own root and reads only that tree`;
 }
 
 /** The workspace an event is about, for the one reading every door that hides a workspace from a caller shares: the

@@ -475,6 +475,8 @@ export const DaemonErrorCode = z.enum([
   "no-git-credential",
   /** The git host's command line refused a read for the account's rate limit. */
   "rate-limited",
+  /** A push refused on the branch the copy's remote starts every copy on, which the caller words for its road. */
+  "on-default-branch",
 ]);
 export type DaemonErrorCode = z.infer<typeof DaemonErrorCode>;
 

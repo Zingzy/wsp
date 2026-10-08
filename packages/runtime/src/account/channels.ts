@@ -8,7 +8,7 @@ import { boxPanelsOpener } from "./box-panels.js";
 import type { DaemonChannel } from "../daemon-channel.js";
 import type { MachineExecOptions } from "../machine-exec.js";
 import type { WorkspaceRecord, LiveWorkspace } from "../types/wiring.js";
-import { DaemonRefusal, type ChildStart, type SESSION_FACTS } from "../types/internal.js";
+import { DaemonRefusal, defaultBranchRefused, isOnDefaultBranch, type ChildStart, type SESSION_FACTS } from "../types/internal.js";
 import type { RuntimeContext, ChannelsArea } from "../context.js";
 
 /** How long the rule's origin read may hold the host's one thread: a local git read answers in milliseconds. */
@@ -461,7 +461,7 @@ export function channelsArea(ctx: RuntimeContext): ChannelsArea {
    * its children start where it started. A copy that did not say which branch it is on refuses the fork, since a
    * child that quietly started elsewhere would land its work elsewhere; so does a push refused, in its own words.
    * Answers the child's base and the lines the lead reads: the push, and the changes it could not carry. */
-  const leadStart = async (lead: LiveWorkspace, child: string): Promise<ChildStart> => {
+  const leadStart = async (lead: LiveWorkspace, child: string, road: "fork" | "run"): Promise<ChildStart> => {
     await copyBlocked(lead);
     const project = projectHeld(lead.record.project);
     const started = lead.record.base ?? project.base ?? project.defaultBranch;
@@ -471,6 +471,12 @@ export function channelsArea(ctx: RuntimeContext): ChannelsArea {
     });
     const read = GitStatusReply.parse(said);
     const branch = read.branch.head;
+    // Commits on the branch the copy's remote starts every copy on, as its daemon reads that branch for its own push
+    // guard, would neither be pushed nor reach the new copy: refused before anything leaves the copy, on whatever
+    // base the copy started from.
+    if (read.defaultBranch !== undefined && branch === read.defaultBranch && (read.branch.ahead > 0 || read.countsUnknown === true)) {
+      throw defaultBranchRefused(road, lead.record.name, branch);
+    }
     const changed = read.entries.filter(e => e.xy !== "!!").length;
     const stayed = changed > 0 ? [uncommittedStayed(changed, lead.record.name)] : [];
     if (branch === "" || branch === DETACHED_HEAD || branch === started) return { base: started, onLeads: false, lines: stayed };
@@ -483,6 +489,7 @@ export function channelsArea(ctx: RuntimeContext): ChannelsArea {
     const holdsNew = read.branch.ahead > 0 || read.countsUnknown === true || (upstream !== undefined && !tracksItself && !tracksBase);
     if (!holdsNew) return tracksItself ? { base: branch, onLeads: true, lines: stayed } : { base: started, onLeads: false, lines: stayed };
     const pushed = await withDaemon(lead, ask => ask({ op: "git.push", cwd, ...(started !== undefined ? { base: started } : {}) })).catch((e: unknown) => {
+      if (isOnDefaultBranch(e)) throw defaultBranchRefused(road, lead.record.name, branch);
       throw new Error(forkNeedsPushLine(lead.record.name, e instanceof Error ? e.message : String(e)));
     });
     const push = GitPushReply.parse(pushed);

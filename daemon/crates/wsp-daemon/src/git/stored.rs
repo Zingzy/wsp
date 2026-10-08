@@ -56,7 +56,15 @@ pub(crate) fn status(copy: &Path, root: &str) -> Result<GitStatusReply, OpError>
     let mut repo = Repo::new(&dir).map_err(|why| unread(root, &why))?;
     let branch = repo.branch().map_err(|why| unread(root, &why))?;
     let stashes = stashes_of(&dir).map_err(|why| unread(root, &why))?;
-    Ok(GitStatusReply { branch, entries: Vec::new(), root: root.to_owned(), edits_unread: true, counts_unknown: repo.over_budget, stashes })
+    Ok(GitStatusReply {
+        branch,
+        entries: Vec::new(),
+        root: root.to_owned(),
+        edits_unread: true,
+        counts_unknown: repo.over_budget,
+        stashes,
+        default_branch: None,
+    })
 }
 
 /// What a stopped checkout holds that no remote does, off its git directory alone: the commits at every branch's tip,

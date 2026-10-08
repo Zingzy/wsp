@@ -151,6 +151,7 @@ const DAEMON_CONTENTS = [
   "a536c66dad64f36710861cc4d1f377e4af59ec51ef4d982b89d67a5e0ccac65b",
   "5d6d78c548416aae6c65876d3499f0462c47fe2203c534982501a2eab32e7f94",
   "df80acbb03e838c04d4d2de65181fbd28ed47015cd41058773a07249fe883af7",
+  "97757fce8a1af0f854aeebb94852334e4be7a749abd8b59d26482e51cb6f5f93",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -557,7 +558,11 @@ const DAEMON_CONTENTS = [
  * git folder that stays inside the checkout, and exits 1 where a folder of the runtime's cannot be listed, and reads
  * nothing on a computer that is not Linux, whose runtime boots no workspace; the place report says whether the leave
  * would take the runtime folder, and the daemon version the wsp it was started with says it was built with, read off
- * `<wsp> --version --json`. */
+ * `<wsp> --version --json`.
+ * Version 142: A push measured against a base the caller named, as a fork names its lead's branch, refuses the branch
+ * the copy's remote starts every copy on with the code on-default-branch, and git.status answers that branch as
+ * defaultBranch off the same read, origin/HEAD by the branch's own name, else a main or a master here, so the host and
+ * the daemon call one branch the default. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary

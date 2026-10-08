@@ -48,6 +48,9 @@ pub enum DaemonErrorCode {
     /// The git host's command line refused a read for the account's rate limit, which no retry within the hour
     /// lifts on its own.
     RateLimited,
+    /// A push refused because the branch is the one the copy's remote starts every copy on, which no push of wsp's
+    /// moves: the caller words it for its own road, a fork, a thread's start or a bring back.
+    OnDefaultBranch,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]

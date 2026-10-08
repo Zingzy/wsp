@@ -115,7 +115,12 @@ pub(super) async fn create_for(client: &Client, project: &Project, name: &str, a
     if project.computer == words.here_place_id && asked.size.is_some() {
         return Err(Failure::usage(fill(&words.copy_takes_none, &[("project", &project.name), ("words", "--size")])));
     }
-    let landing: Landing = client.request("workspaces.landing", params([("project", Value::from(project.id.as_str()))])).await?;
+    // A size named says so ahead of the sizes, so a thread is refused one before it reads which are offered.
+    let mut asking = params([("project", Value::from(project.id.as_str()))]);
+    if asked.size.is_some() {
+        asking.insert("sized".to_owned(), Value::Bool(true));
+    }
+    let landing: Landing = client.request("workspaces.landing", asking).await?;
     let chosen = match &asked.size {
         None => None,
         Some(word) => {
