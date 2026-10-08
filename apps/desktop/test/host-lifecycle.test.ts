@@ -457,13 +457,18 @@ describe("openHost", () => {
   });
 
   it("a host that holds the lock and never answers is given up on, once the longer wait for a starting host has run out, and says how long it waited", async () => {
-    const probe = createTcpServer();
-    const port = await listen(probe);
-    await closeServer(probe);
-    writeFileSync(join(home, "host.lock"), JSON.stringify({ pid: process.pid, port, startedAt: new Date().toISOString(), startedBy: "service" }));
-    const t0 = Date.now();
-    await expect(openHostReady({ statePath, home, shim, io: quietIO(), service: { ...launchd.road, waitMs: 200 } })).rejects.toThrow(/^after 1\.\ds of waiting, a host .* but no wsp host answers there/);
-    expect(Date.now() - t0).toBeLessThan(2_000);
+    // Held, dropping every connection: a port closed to free it is another file's to bind within the wait, and its
+    // answer reads as a host that is up, refused at once.
+    const silent = createTcpServer(socket => socket.destroy());
+    const port = await listen(silent);
+    try {
+      writeFileSync(join(home, "host.lock"), JSON.stringify({ pid: process.pid, port, startedAt: new Date().toISOString(), startedBy: "service" }));
+      const t0 = Date.now();
+      await expect(openHostReady({ statePath, home, shim, io: quietIO(), service: { ...launchd.road, waitMs: 200 } })).rejects.toThrow(/^after 1\.\ds of waiting, a host .* but no wsp host answers there/);
+      expect(Date.now() - t0).toBeLessThan(2_000);
+    } finally {
+      await closeServer(silent);
+    }
   });
 
   it("the service's host that takes the lock and never answers is waited on once, and the line names the whole wait", async () => {
