@@ -248,8 +248,21 @@ impl ProcFsSource {
             rss: st.rss_pages * state.page_size,
             started_at: state.btime.unwrap_or(0) * 1000 + st.starttime as i64 * numbers::STAT_TICK_MS as i64,
             pty: pty.cloned(),
+            cgroup: read_cgroup(&dir),
         })
     }
+}
+
+/// The longest cgroup path a row carries; a deeper one is left off rather than cut, since a cut path names
+/// another cgroup.
+const CGROUP_PATH_BYTES: u64 = 512;
+
+/// The cgroup v2 path a process stands in, off the `0::` line of /proc/[pid]/cgroup; nothing on a v1-only machine
+/// or where the file cannot be read. Read every tick, since a process moves cgroup without changing its image.
+pub(crate) fn read_cgroup(dir: &Path) -> Option<String> {
+    let mut text = String::new();
+    std::fs::File::open(dir.join("cgroup")).ok()?.take(CGROUP_PATH_BYTES + 4).read_to_string(&mut text).ok()?;
+    text.lines().find_map(|line| line.strip_prefix("0::")).map(str::to_owned)
 }
 
 /// The first CMDLINE_BYTES only, the NULs as spaces; nothing for a pid whose cmdline cannot be read.
@@ -567,6 +580,17 @@ mod tests {
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use tokio::io::{AsyncBufReadExt, BufReader};
     use tokio::sync::mpsc;
+
+    #[test]
+    fn a_rows_cgroup_is_the_v2_line_of_its_cgroup_file_and_nothing_where_there_is_none() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("cgroup"), "12:pids:/legacy\n0::/wsp-threads/t_abc\n").unwrap();
+        assert_eq!(read_cgroup(dir.path()).as_deref(), Some("/wsp-threads/t_abc"));
+        std::fs::write(dir.path().join("cgroup"), "1:name=systemd:/\n").unwrap();
+        assert_eq!(read_cgroup(dir.path()), None);
+        std::fs::remove_file(dir.path().join("cgroup")).unwrap();
+        assert_eq!(read_cgroup(dir.path()), None);
+    }
 
     #[test]
     fn reads_proc_pid_stat_around_a_comm_that_holds_spaces_and_parens() {

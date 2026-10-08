@@ -87,6 +87,7 @@ describe("the wsp command on a thread's machine", () => {
     const session = `g${++sessions}`;
     const link: GuestLink = {
       workspaceId: on,
+      name: on,
       request: async (op, params) => {
         if (params["session"] !== session) return {};
         if (op === "guest.reply") replies.push(params as (typeof replies)[number]);

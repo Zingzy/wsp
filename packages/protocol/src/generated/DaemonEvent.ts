@@ -8,7 +8,11 @@ import type { Usage } from "./Usage.js";
 /**
  * Every frame the daemon pushes without being asked, keyed on `type` as the zod union is.
  */
-export type DaemonEvent = { "type": "daemon.hello", root: string, version: number, } | { "type": "pty.data", ptyId: string, data: string, } | { "type": "pty.exit", ptyId: string, exitCode: number, signal?: number, } | { "type": "port.open", port: number, pid?: number, process?: string, loopback?: boolean, } | { "type": "port.close", port: number, pid?: number, process?: string, command?: string, exited?: boolean, 
+export type DaemonEvent = { "type": "daemon.hello", root: string, version: number, } | { "type": "pty.data", ptyId: string, data: string, } | { "type": "pty.exit", ptyId: string, exitCode: number, signal?: number, } | { "type": "port.open", port: number, pid?: number, process?: string, loopback?: boolean, 
+/**
+ * The watch this is for, where the socket named one: one socket carries a watch per folder there.
+ */
+watch?: string, } | { "type": "port.close", port: number, pid?: number, process?: string, command?: string, exited?: boolean, 
 /**
  * The port still listens, held by a process that is no longer the watching workspace's: it left the view
  * and did not stop.
@@ -17,7 +21,11 @@ left?: boolean,
 /**
  * When the close was seen, as the node daemon stamps it: an ISO date, never a number.
  */
-at?: string, } | { "type": "inbox.file", path: string, bytes: number, } | { "type": "pty.mode", ptyId: string, mode: PtyMode, echo: boolean, foreground: string, } | { "type": "browser.open", url: string, port?: RelayPort, } | { "type": "callback.port", port: RelayPort, } | { "type": "tunnel.data", tunnelId: string, data: string, machineId?: string, } | { "type": "tunnel.end", tunnelId: string, machineId?: string, } | { "type": "localhost.url", port: RelayPort, } | { "type": "sys.sample", cpu: number, load1: number, mem: Usage, disk: Usage, at: number, } | { "type": "proc.snapshot", at: number, daemon: number, total: number, procs: Array<ProcEntry>, seq?: number, } | { "type": "proc.changes", at: number, daemon: number, total: number, procs: Array<ProcEntry>, gone: Array<number>, seq: number, base: number, } | { "type": "guest.opened", session: string, 
+at?: string, 
+/**
+ * The watch this is for, as on port.open.
+ */
+watch?: string, } | { "type": "inbox.file", path: string, bytes: number, } | { "type": "pty.mode", ptyId: string, mode: PtyMode, echo: boolean, foreground: string, } | { "type": "browser.open", url: string, port?: RelayPort, } | { "type": "callback.port", port: RelayPort, } | { "type": "tunnel.data", tunnelId: string, data: string, machineId?: string, } | { "type": "tunnel.end", tunnelId: string, machineId?: string, } | { "type": "localhost.url", port: RelayPort, } | { "type": "sys.sample", cpu: number, load1: number, mem: Usage, disk: Usage, at: number, } | { "type": "proc.snapshot", at: number, daemon: number, total: number, procs: Array<ProcEntry>, seq?: number, } | { "type": "proc.changes", at: number, daemon: number, total: number, procs: Array<ProcEntry>, gone: Array<number>, seq: number, base: number, } | { "type": "guest.opened", session: string, 
 /**
  * The workspace the session was opened inside, on a daemon that runs workspaces: the listener the frame
  * arrived on is what names it, never anything the guest said. Absent on a daemon inside a machine, where

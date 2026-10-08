@@ -17,13 +17,15 @@ export type AgentsRead = Omit<AgentsReport, "target" | "readAt" | "stale" | "rea
 /** Where a read runs: this computer; a computer you joined, over its link, with the login and the sign-ins and
  * versions its own report carries; or any other machine. `projects` are the projects whose folders it covers, each
  * folder absolute on that machine: every one a computer holds for a read of it, the one a target names, or a
- * workspace's own. An act, or a server started for its tools, works in a project only where exactly one is named. */
+ * workspace's own. An act, or a server started for its tools, works in a project only where exactly one is named.
+ * `stores` is the folder each agent's store variable names for a thread there, by agent id, which is where that agent
+ * reads its own servers. */
 export type AgentsOn =
   | { kind: "here"; projects?: readonly AgentsProject[] }
   /** `relayed`: this host forwards that computer's sign-in callback port from this computer. */
-  | { kind: "box"; name?: string; machine: Pick<Machine, "exec">; login: { HOME?: string; PATH?: string }; signIns?: Record<string, AgentSignInState>; versions?: Record<string, string>; logins?: string; relayed?: boolean; projects?: readonly AgentsProject[] }
+  | { kind: "box"; name?: string; machine: Pick<Machine, "exec">; login: { HOME?: string; PATH?: string }; signIns?: Record<string, AgentSignInState>; versions?: Record<string, string>; logins?: string; relayed?: boolean; projects?: readonly AgentsProject[]; stores?: Readonly<Record<string, string>> }
   /** `relayed`: this host forwards the workspace's sign-in callback port from this computer. */
-  | { kind: "machine"; machine: Pick<Machine, "exec" | "id" | "putBytes" | "uploadUrl">; projects?: readonly AgentsProject[]; relayed?: boolean };
+  | { kind: "machine"; machine: Pick<Machine, "exec" | "id" | "putBytes" | "uploadUrl">; projects?: readonly AgentsProject[]; relayed?: boolean; stores?: Readonly<Record<string, string>> };
 
 /** The one project's folder an act there works in: the project its target named, or the workspace's own. */
 export const projectOf = (on: AgentsOn): string | undefined => (on.projects?.length === 1 ? on.projects[0]!.path : undefined);
@@ -158,12 +160,16 @@ export interface AgentsWorkspace {
   local: boolean;
   machine: Machine;
   project: AgentsProject;
+  /** The folder each agent's store variable names for a thread there, by agent id. */
+  stores?: Readonly<Record<string, string>>;
 }
 
 export interface AgentsReadOptions<Caller> {
   reader: AgentsReader | undefined;
   places: () => PlaceDoor | undefined;
   workspace: (id: string, origin?: Caller) => Promise<AgentsWorkspace>;
+  /** The folder each agent's store variable names for a thread on a computer you joined whose login's home is `home`. */
+  placeStores?: (placeId: string, home: string) => Readonly<Record<string, string>>;
   /** The projects this host holds on a computer, each with its folder there; none where it holds none. */
   projects?: (placeId: string) => Promise<readonly AgentsProject[]>;
   acts?: AgentsActs;
@@ -331,13 +337,14 @@ export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): {
         ...(signIns !== undefined ? { signIns } : {}),
         ...(report?.agentVersions !== undefined ? { versions: report.agentVersions } : {}),
         ...(row.logins !== undefined ? { logins: row.logins } : {}),
+        ...(login.HOME !== undefined && o.placeStores !== undefined ? { stores: o.placeStores(row.id, login.HOME) } : {}),
         ...(reached(target) ? { relayed: true } : {}),
         ...(await projectsAt(target, row.name, read)),
       };
     }
     const ws = await o.workspace(target.workspaceId, origin);
     if (ws.phase === "napping") return { napping: ws.name };
-    return ws.local ? { kind: "here", projects: [ws.project] } : { kind: "machine", machine: ws.machine, projects: [ws.project], ...(o.relayed?.() === true ? { relayed: true } : {}) };
+    return ws.local ? { kind: "here", projects: [ws.project] } : { kind: "machine", machine: ws.machine, projects: [ws.project], ...(o.relayed?.() === true ? { relayed: true } : {}), ...(ws.stores !== undefined ? { stores: ws.stores } : {}) };
   };
   const reads = {
     async read(target: AgentsTarget, origin?: Caller): Promise<AgentsReport> {

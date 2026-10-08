@@ -79,6 +79,15 @@ export const PlaceReport = z.object({
    * workspace on it shares. Absent from a report a daemon older than this field sent, which is unknown and not
    * none; a name that walks out of that folder is refused, since the host joins it onto a folder of its own. */
   logins: z.array(z.string().max(200).refine(isUnderPath, "a name under a folder")).max(64).optional(),
+  /** Whether a thread on that computer itself reaches the wsp tools: its daemon bound the socket for those threads
+   * under the login's home and wrote the wsp beside it that dials it. Absent from a daemon older than that door,
+   * whose threads are launched with no wsp tools. */
+  wspDoor: z.boolean().optional(),
+  /** When it does not, why, in the daemon's own words. */
+  wspDoorBlocked: z.string().optional(),
+  /** The systemd unit its daemon runs under, the one the join wrote, read off its own cgroup: what the person
+   * restarts to open the door again. Absent where the daemon runs under no unit. */
+  daemonUnit: z.string().max(256).regex(/^[\w@.:-]+\.service$/).optional(),
   /** Which of the host's addresses this link reached; the address a turn on the place is told to dial back. */
   dialed: z.string().refine(isHttpUrl, "http or https URL"),
 });
@@ -256,6 +265,18 @@ export const placeNoLinkLine = (name: string): string => `${name} took the agent
 /** What a stage reads while the computer it is running on has no link: the requests behind it are held until that
  * computer opens a socket again, and a stage with no line of its own reads as one that stopped. */
 export const placeDialBackLine = (name: string): string => `waiting for ${name} to dial back`;
+
+/** A Browser pane asking for a port of a computer the person joined that this computer would need root to open. */
+export const paneForwardFloorLine = (port: number): string => `localhost:${port} is below 1024, which this computer opens only as root; serve it on a port from 1024 up`;
+
+/** A Browser pane asking for one port more than a workspace may hold open on this computer. */
+export const paneForwardCapLine = (name: string, cap: number): string => `${name} already has ${cap} ports open on this computer; stop one in Ports first`;
+
+/** A Browser pane asking again for a port whose forward a quiet hour ended. */
+export const paneForwardQuietLine = (port: number): string => `localhost:${port} closed after an hour with nothing connecting to it; open the address again to forward it`;
+
+/** A Browser pane asking again for a port whose forward the person stopped in Ports. */
+export const paneForwardStoppedLine = (port: number): string => `localhost:${port} was stopped in Ports; open the address again to forward it`;
 
 /** Why a build on a joined computer stopped when that computer's link went and it never dialled back in time. */
 export const placeWentAwayLine = (name: string): string => `${name} went away before the build finished`;

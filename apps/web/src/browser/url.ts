@@ -66,7 +66,7 @@ export function frameSrc(route: string, path: string): string {
   const queryAt = beforeHash.indexOf("?");
   const pageQuery = queryAt === -1 ? [] : beforeHash.slice(queryAt + 1).split("&");
   src.pathname = queryAt === -1 ? beforeHash : beforeHash.slice(0, queryAt);
-  src.search = [src.search.slice(1), ...pageQuery.filter(pair => pair !== "" && pair.split("=")[0] !== TOKEN_PARAM)].join("&");
+  src.search = [src.search.slice(1), ...pageQuery.filter(pair => pair.split("=")[0] !== TOKEN_PARAM)].filter(pair => pair !== "").join("&");
   src.hash = hashAt === -1 ? "" : path.slice(hashAt);
   return src.toString();
 }

@@ -95,7 +95,6 @@ import {
 import { CODEX_TOML, MCP_SERVERS_JSON, TOOL_PREFIX, installEnv, installHomes } from "@wsp/catalog";
 import type { MachineExecOptions } from "../src/machine-exec.js";
 import { copyKey, createRuntime, GUEST_LOGIN_ENV, wiredPlace, type GoldenRecipe, type HarnessAdapterFactory, type HostFolders, type PlaceBackends, type Runtime } from "../src/runtime.js";
-import { removeScript } from "../src/project-landing.js";
 import { COPY_RECIPE, dfOk, recipeWith } from "./image-fixtures.js";
 import { HANDSHAKE, MCP_READ_MARK, NoProviderBackend, SERVER_MARK, keyFingerprint, type Machine, type MachineBackend, type ProvisionPlan } from "@wsp/engine";
 import { freshEphemeral, makeSeal, sealKeys, sharedSecret } from "@wsp/keys";

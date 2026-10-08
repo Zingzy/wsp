@@ -100,6 +100,10 @@ export interface CodexStartOptions {
   images?: readonly TurnImage[];
   /** MCP servers this turn gets besides the ones its config names, each rendered as a config override. */
   mcpServers?: Readonly<Record<string, McpServerSpec>>;
+  /** Config keys that hand the config's own servers the values the host holds, for this thread alone: they ride the
+   * thread's start in the run's seed, which lands in a file of the run's, never on the command line or in the
+   * server's environment. */
+  serverValues?: { config?: Readonly<Record<string, string>> };
   /** The turn reads each banked reset in full rather than their count alone. */
   limitDetails?: boolean;
   /** The server boots and opens the thread at once, and turn/start goes once this settles. */
@@ -1180,10 +1184,12 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
     const images = options.images?.map(imagePathOf);
     const access = accessParams(options.permissionMode);
     const localId = options.resume ?? randomUUID();
-    const thread = { ...(options.cwd !== undefined ? { cwd: options.cwd } : {}), ...(options.model !== undefined ? { model: options.model } : {}), ...(options.fast === true ? { serviceTier: "fast" as const } : {}), access };
+    const config = options.serverValues?.config ?? {};
+    const valued = Object.keys(config).length > 0;
+    const thread = { ...(options.cwd !== undefined ? { cwd: options.cwd } : {}), ...(options.model !== undefined ? { model: options.model } : {}), ...(options.fast === true ? { serviceTier: "fast" as const } : {}), access, ...(valued ? { config } : {}) };
     const threadLine = options.resume === undefined ? threadStartLine(thread) : threadResumeLine({ ...thread, threadId: options.resume });
     const command = buildCommand({ ...(options.cwd !== undefined ? { cwd: options.cwd } : {}), ...(options.mcpServers !== undefined ? { mcpServers: options.mcpServers } : {}), ...(deps.launch !== undefined ? { launch: deps.launch } : {}) });
-    const run = deps.exec(command, { env: { ...env }, input: [initializeLine(), INITIALIZED_LINE, ACCOUNT_READ_LINE, rateLimitsReadLine(options.limitDetails === true), threadLine] });
+    const run = deps.exec(command, { env: { ...env }, input: [initializeLine(), INITIALIZED_LINE, ACCOUNT_READ_LINE, rateLimitsReadLine(options.limitDetails === true), threadLine], ...(valued ? { secret: { input: true as const } } : {}) });
     const keeper = options.keep === true ? keepRun(run) : undefined;
     return follow({
       stream: keeper === undefined ? run : keeper.turn().stream,

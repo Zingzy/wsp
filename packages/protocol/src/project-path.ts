@@ -153,6 +153,12 @@ export function placeDaemonPaths(home: string): {
    * this computer holds. The same folder rule: wsp's own under the login's home, never one every account shares. */
   putDir: string;
   openSocket: string;
+  /** The socket the daemon binds for the threads running on that computer itself, the login's alone. */
+  guestSocket: string;
+  /** Where the wsp a thread running on that computer itself sits, first on its PATH: two lines onto the daemon,
+   * which dial the socket above for that thread's sessions and nothing else. The place's own folder, never
+   * `~/.wsp/bin`, where the app and the install line keep the person's wsp on the same login. */
+  guestBin: string;
   manifestPath: string;
   profileFile: string;
   unitDir: string;
@@ -182,6 +188,8 @@ export function placeDaemonPaths(home: string): {
     runDir: `${wsp}/run`,
     putDir: `${wsp}/put`,
     openSocket: `${wsp}/open.sock`,
+    guestSocket: `${wsp}/daemon.sock`,
+    guestBin: `${wsp}/place-bin`,
     manifestPath: `${wsp}/manifest.json`,
     profileFile: `${wsp}/profile.sh`,
     unitDir: `${at}/.config/systemd/user`,
@@ -238,6 +246,9 @@ export function placeOwnedPaths(home: string): string[] {
     at.rootsPath,
     at.profileFile,
     at.openSocket,
+    at.guestSocket,
+    `${at.guestBin}/wsp`,
+    at.guestBin,
     at.runDir,
     at.portFile,
     at.openShim,

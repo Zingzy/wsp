@@ -109,6 +109,10 @@ export function hostOf(url: string): string | undefined {
 
 /** A callback port the laptop can bind without root; the host refuses anything else before it listens. */
 export const RelayPort = z.number().int().min(1024).max(65535);
+/** Ports forwarded to this computer's loopback for one workspace at once, by the relay for the links it prints and by
+ * a Browser pane for a folder on a computer the person joined: the workspace names the ports, so its say over this
+ * computer's loopback is bounded. */
+export const FORWARD_MAX_PER_TARGET = 16;
 
 /** Hosts a sign-in's redirect comes back to on the machine itself; anything else is a page the person finishes. */
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);

@@ -132,7 +132,9 @@ export const GUEST_MESSAGE_CAP_BYTES = 4 * 1024 * 1024;
 export const GUEST_QUEUE_CAP_FRAMES = 256;
 /** Guest bytes one workspace may have waiting at once, queued in its sessions and written onto the watcher's
  * channel but not carried out of the socket yet. One count per workspace on a computer that runs them, and one for
- * the daemon itself inside a machine, where a session names no workspace and every session shares it. Four of one
+ * the daemon itself inside a machine, where a session names no workspace and every session shares it. A computer
+ * somebody joined counts the same way for the threads running on that computer itself: every one of them shares one
+ * count, as a machine's threads do. Four of one
  * message's cap, so the largest honest thing on this road is never what fills it; a send past the cap is refused
  * and its session stands. */
 export const GUEST_IN_FLIGHT_CAP_BYTES = 4 * GUEST_MESSAGE_CAP_BYTES;
@@ -140,7 +142,8 @@ export const GUEST_IN_FLIGHT_CAP_BYTES = 4 * GUEST_MESSAGE_CAP_BYTES;
  * whose socket went and whose close is waiting for a watcher counted among them. The door of a workspace on a
  * computer somebody owns needs no token, so what a process inside opens is what this bounds: past the cap a socket
  * is closed with no hello and an open is refused, while the workspaces beside it and the host link stand. One
- * count per workspace, and one for the daemon inside a machine, where a session names no workspace. */
+ * count per workspace, and one for the daemon inside a machine, where a session names no workspace. The threads
+ * running on a computer somebody joined, outside any workspace, share one count and one door, as a machine's do. */
 export const GUEST_SESSIONS_PER_WORKSPACE_CAP = 64;
 /** The largest frame a workspace's door reads, in place of the ceiling every other socket is opened with: one
  * guest message's cap and room for the envelope around it. A frame past this is refused by the framing before a

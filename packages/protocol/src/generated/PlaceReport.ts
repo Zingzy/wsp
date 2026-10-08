@@ -47,4 +47,19 @@ agentVersions?: { [key in string]: string },
  * workspace on it shares. Absent from a report a daemon older than this field sent, which reads as unknown
  * rather than as none.
  */
-logins?: Array<string>, };
+logins?: Array<string>, 
+/**
+ * Whether a thread on this computer itself reaches the wsp tools: the daemon bound the socket for those threads
+ * under the login's home and wrote the wsp beside it that dials it. Absent from a daemon older than that door,
+ * whose threads are launched with no wsp tools.
+ */
+wspDoor?: boolean, 
+/**
+ * When it does not, why, in the daemon's own words.
+ */
+wspDoorBlocked?: string, 
+/**
+ * The systemd unit this daemon runs under, the one the join wrote, read off its own cgroup: what the person
+ * restarts to open the door again. Absent where the daemon runs under no unit.
+ */
+daemonUnit?: string, };

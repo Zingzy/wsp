@@ -104,6 +104,12 @@ describe("workspace actions", () => {
     expect(actionIfAny(resolveActions(workspaceActions, workspace("running", { kind: "local" }), verbs), "phase")).toBeUndefined();
   });
 
+  it("a folder on a computer the person joined offers no machine verb, no bring back and no export: it is their own checkout there", () => {
+    const box = workspace("running", { kind: "place", displayName: "spoo-ts" });
+    const actions = resolveActions(workspaceActions, box, workspaceVerbs());
+    expect(titles(actions)).toEqual([WORKSPACE_WORDS.newThread, WORKSPACE_WORDS.openTerminal, WORKSPACE_WORDS.openBrowser, WORKSPACE_WORDS.rename, WORKSPACE_WORDS.copyId, WORKSPACE_WORDS.delete]);
+  });
+
   it("this computer offers neither the machine verbs nor the fork, and keeps every verb that is about the work", () => {
     const mac = workspace("running", { kind: "local", displayName: "zingzy-mac" });
     const actions = resolveActions(workspaceActions, mac, workspaceVerbs());

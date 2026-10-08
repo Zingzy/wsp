@@ -2,6 +2,7 @@
 //! The op switch behind the door: one request text in, one reply text out, with the events an op raises going out
 //! through the socket's own channel.
 
+use std::collections::HashMap;
 use std::num::NonZeroU16;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -26,22 +27,13 @@ use crate::proc::{kill_process, ProcSampler, ProtectedPids};
 use crate::pty::{passwd_row, process_env, pump, PtyCreateOpts};
 use crate::roads::guest_road_serves;
 use crate::tunnel::Tunnels;
+mod road;
 mod runner;
 use crate::{bring_back, frame_text as text, fs, git, hosts, paths, readings, ssh, tunnel, usage_logs, Ctx, Listener, Outbound, Outgoing};
+pub(crate) use road::Road;
 use runner::Runner;
 
 type Detach = Box<dyn FnOnce() + Send>;
-
-/// Which road a socket came in on: dialled by a client of this machine, opened outward by this place to its host,
-/// or opened inside one workspace this computer runs, on that workspace's own socket. The leave op and every
-/// machine op but the two read-only ones are the link's alone, and a socket inside a workspace reaches nothing of
-/// the computer that workspace sits on.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum Road {
-    Inbound,
-    Link,
-    Workspace(String),
-}
 
 /// What one authed socket holds between frames.
 pub(crate) struct Conn {
@@ -63,6 +55,8 @@ pub(crate) struct Conn {
     proc_watch: Mutex<Option<(u64, Arc<ProcSampler>)>>,
     /// The one guest session this socket opened, which ends with it.
     guest: Mutex<Option<String>>,
+    /// The port watches this socket named, each by the key it holds in the daemon's one port watch.
+    port_watches: Mutex<HashMap<String, u64>>,
 }
 
 impl Conn {
@@ -77,6 +71,7 @@ impl Conn {
             detaches: Mutex::new(Some(Vec::new())),
             proc_watch: Mutex::new(None),
             guest: Mutex::new(None),
+            port_watches: Mutex::new(HashMap::new()),
         }
     }
 
@@ -84,7 +79,7 @@ impl Conn {
     pub(crate) fn workspace(&self) -> Option<String> {
         match &self.road {
             Road::Workspace(id) => Some(id.clone()),
-            Road::Inbound | Road::Link => None,
+            Road::Inbound | Road::Link | Road::Computer => None,
         }
     }
 
@@ -204,7 +199,7 @@ pub(crate) async fn handle(conn: &Arc<Conn>, ctx: &Arc<Ctx>, raw: &str) -> Outgo
         }
     }
     let op = frame.get("op").and_then(Value::as_str);
-    if matches!(conn.road, Road::Workspace(_)) {
+    if conn.road.guests() {
         // A socket inside a workspace answers ping and the guest's own two ops and refuses every other op this
         // daemon knows, the machine ops and the two place ops among them: nothing inside a workspace reads the
         // computer it sits on, lists its neighbours or drives anything there.
@@ -1070,15 +1065,25 @@ async fn serve(conn: &Arc<Conn>, ctx: &Arc<Ctx>, id: Option<RequestId>, name: &s
             };
             answer(id, read.await)
         }
-        DaemonOp::PortsWatch { roots, folder } => {
+        DaemonOp::PortsWatch { roots, folder, cgroups, watch } => {
             let held = Arc::downgrade(ctx);
             let spot: crate::ports::OnChanges = Arc::new(move |events| {
                 if let Some(ctx) = held.upgrade() {
                     crate::relay::note_opens(&ctx, events);
                 }
             });
-            let key = conn.key;
-            let (ports, fresh) = ctx.ports.watch(key, conn.out.clone(), roots, folder, spot).await;
+            // An unnamed watch is the socket's own; a named one holds a key of its own, so one socket carries a watch
+            // per name and a second watch under a name only names its roots again.
+            let key = match &watch {
+                None => conn.key,
+                Some(name) => {
+                    *conn.port_watches.lock().unwrap_or_else(|e| e.into_inner()).entry(name.clone()).or_insert_with(|| ctx.next_key())
+                }
+            };
+            let (ports, fresh) = ctx
+                .ports
+                .watch(key, conn.out.clone(), crate::ports::Scope::of(roots, folder, cgroups.unwrap_or_default()), watch, spot)
+                .await;
             if fresh {
                 let ctx2 = Arc::clone(ctx);
                 conn.on_close(Box::new(move || ctx2.ports.unsubscribe(key)));
@@ -1218,19 +1223,20 @@ async fn serve(conn: &Arc<Conn>, ctx: &Arc<Ctx>, id: Option<RequestId>, name: &s
 
 #[cfg(test)]
 mod tests {
+    mod ptys_and_ports;
     use super::*;
     use crate::Options;
     use serde_json::json;
     use std::io::Write;
     use tokio::sync::mpsc;
 
-    struct Bench {
-        ctx: Arc<Ctx>,
+    pub(super) struct Bench {
+        pub(super) ctx: Arc<Ctx>,
         _token: tempfile::NamedTempFile,
         root: tempfile::TempDir,
     }
 
-    fn bench() -> Bench {
+    pub(super) fn bench() -> Bench {
         let mut token = tempfile::NamedTempFile::new().unwrap();
         writeln!(token, "t").unwrap();
         let root = tempfile::tempdir().unwrap();
@@ -1241,13 +1247,13 @@ mod tests {
         Bench { ctx: Arc::new(Ctx::new(options, Box::new(|_| {}), 0).unwrap()), _token: token, root }
     }
 
-    fn conn(scope: Option<u16>) -> (Arc<Conn>, mpsc::UnboundedReceiver<Outgoing>) {
+    pub(super) fn conn(scope: Option<u16>) -> (Arc<Conn>, mpsc::UnboundedReceiver<Outgoing>) {
         conn_on(scope, Road::Inbound)
     }
 
     /// A daemon of a computer somebody owns: the place file is what the roads table reads, and on this platform
     /// it turns no runtime on, so the bench is the switch alone.
-    fn place_bench() -> Bench {
+    pub(super) fn place_bench() -> Bench {
         let mut token = tempfile::NamedTempFile::new().unwrap();
         writeln!(token, "t").unwrap();
         let root = tempfile::tempdir().unwrap();
@@ -1259,12 +1265,12 @@ mod tests {
         Bench { ctx: Arc::new(Ctx::new(options, Box::new(|_| {}), 0).unwrap()), _token: token, root }
     }
 
-    fn conn_on(scope: Option<u16>, road: Road) -> (Arc<Conn>, mpsc::UnboundedReceiver<Outgoing>) {
+    pub(super) fn conn_on(scope: Option<u16>, road: Road) -> (Arc<Conn>, mpsc::UnboundedReceiver<Outgoing>) {
         let (tx, rx) = mpsc::unbounded_channel();
         (Arc::new(Conn::new(1, scope.and_then(NonZeroU16::new), Outbound(tx), road, None)), rx)
     }
 
-    async fn reply(bench: &Bench, conn: &Arc<Conn>, frame: Value) -> Value {
+    pub(super) async fn reply(bench: &Bench, conn: &Arc<Conn>, frame: Value) -> Value {
         serde_json::from_str(handle(conn, &bench.ctx, &frame.to_string()).await.text()).unwrap()
     }
 
@@ -1954,59 +1960,6 @@ mod tests {
         let frame: Value = serde_json::from_str(fork_watching.recv().await.unwrap().text()).unwrap();
         assert_eq!(frame["type"], "guest.opened");
         assert_eq!(frame.get("machineId"), None, "{frame}");
-    }
-
-    /// The pty ops for a workspace, on a daemon that runs none, which is every machine wsp forked and this bench.
-    /// What the frame has to carry is read before the workspace is looked up, since a pty with no folder would
-    /// open a shell in the computer's own home, which every workspace here has bound in; and a workspace this
-    /// daemon does not run is the one missing refusal every other op answers for one.
-    #[tokio::test]
-    async fn a_pty_for_a_workspace_names_its_folder_and_a_workspace_this_daemon_runs() {
-        let b = bench();
-        let (c, _rx) = conn(None);
-        // No folder at all, and one that is not absolute: a bad request before anything is looked up.
-        let none = reply(&b, &c, json!({"id": 1, "op": "pty.create", "machineId": "wsp-x"})).await;
-        assert_eq!(none, json!({"id": 1, "ok": false, "code": "bad-request", "error": "a pty inside wsp-x needs the folder it opens in"}));
-        let relative = reply(&b, &c, json!({"id": 2, "op": "pty.create", "machineId": "wsp-x", "cwd": "project"})).await;
-        assert_eq!(relative, json!({"id": 2, "ok": false, "code": "bad-request", "error": "project is not an absolute path inside wsp-x"}));
-        // And with both: the workspace, which this daemon does not run.
-        let gone = reply(&b, &c, json!({"id": 3, "op": "pty.create", "machineId": "wsp-x", "cwd": "/root/project"})).await;
-        assert_eq!(gone, json!({"id": 3, "ok": false, "code": "not-found", "error": "no such workspace: wsp-x"}));
-        // Every other pty op naming a workspace answers for a pty of that workspace, and this daemon holds none:
-        // a pane of one workspace never reaches a pty of another or of the computer itself.
-        for op in ["pty.attach", "pty.write", "pty.resize", "pty.detach", "pty.kill"] {
-            let said =
-                reply(&b, &c, json!({"id": 4, "op": op, "ptyId": "pty_1", "machineId": "wsp-x", "data": "x", "cols": 80, "rows": 24}))
-                    .await;
-            assert_eq!(said, json!({"id": 4, "ok": false, "error": "no such pty: pty_1"}), "{op}");
-        }
-        // And the listing is the machine's the frame named: this daemon's own where it named none, and a
-        // workspace's where it did, which here is empty either way.
-        assert_eq!(reply(&b, &c, json!({"id": 5, "op": "pty.list"})).await, json!({"id": 5, "ok": true, "ptys": []}));
-        assert_eq!(reply(&b, &c, json!({"id": 6, "op": "pty.list", "machineId": "wsp-x"})).await, json!({"id": 6, "ok": true, "ptys": []}));
-    }
-
-    /// A pty of this computer's own is not reachable by naming a workspace, and the shell the daemon opened for
-    /// itself is listed for this computer and for no workspace.
-    #[tokio::test]
-    async fn a_pty_of_this_computer_is_no_workspaces_pty() {
-        let b = bench();
-        let (c, _rx) = conn(None);
-        let made = reply(&b, &c, json!({"id": 1, "op": "pty.create", "shell": "bash"})).await;
-        assert_eq!(made["ok"], json!(true), "{made}");
-        let pty_id = made["ptyId"].as_str().unwrap().to_owned();
-        for op in ["pty.attach", "pty.write", "pty.resize", "pty.detach", "pty.kill"] {
-            let said =
-                reply(&b, &c, json!({"id": 2, "op": op, "ptyId": &pty_id, "machineId": "wsp-a", "data": "x", "cols": 80, "rows": 24}))
-                    .await;
-            assert_eq!(said["error"], json!(format!("no such pty: {pty_id}")), "{op}");
-        }
-        let listed = reply(&b, &c, json!({"id": 3, "op": "pty.list"})).await;
-        assert_eq!(listed["ptys"].as_array().unwrap().len(), 1, "{listed}");
-        assert_eq!(listed["ptys"][0]["id"], json!(pty_id));
-        let inside = reply(&b, &c, json!({"id": 4, "op": "pty.list", "machineId": "wsp-a"})).await;
-        assert_eq!(inside, json!({"id": 4, "ok": true, "ptys": []}));
-        assert_eq!(reply(&b, &c, json!({"id": 5, "op": "pty.kill", "ptyId": &pty_id})).await, json!({"id": 5, "ok": true}));
     }
 
     #[tokio::test]

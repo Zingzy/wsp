@@ -115,6 +115,10 @@ export interface HarnessStartOptions {
    * takes in a config; the adapter hands them to its CLI the way that CLI takes one. Absent on a turn that carries
    * none, which is every turn a person sends. */
   mcpServers?: Readonly<Record<string, McpServerSpec>>;
+  /** The vault's values for the agent's own MCP servers, for this launch alone and as its CLI takes them: whole entries
+   * for one that takes servers in a file, config keys for one that takes keys as its thread starts. Absent where the
+   * computer's own files hold the values or the turn's environment carries them. */
+  serverValues?: { entries?: Readonly<Record<string, Readonly<Record<string, unknown>>>>; config?: Readonly<Record<string, string>> };
   /** On a resume: the thread so far as text, for an adapter whose CLI holds no session under `resume` to open a new one
    * with. Asked for only then. */
   seed?: () => Promise<string>;

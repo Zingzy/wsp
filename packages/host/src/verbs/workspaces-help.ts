@@ -82,6 +82,7 @@ import {
   kindForComputer,
   sourceWord,
   isLocalWorkspace,
+  runsInFolder,
   namesPlace,
   packageOf,
   type SealedPin,
@@ -528,6 +529,8 @@ export interface Stopped {
   under?: readonly string[];
   /** Why a subagent's stop was refused or is not offered, in words. */
   error?: string;
+  /** What the stop could not end on a computer the person joined, in words. */
+  left?: string;
 }
 
 /** Stops the running turn of the thread a person names, or with task one of its agent's own subagents alone, through
@@ -535,8 +538,8 @@ export interface Stopped {
  * enum must not read as stopped. */
 export async function stop(client: HostClient, ref: string, task?: string): Promise<Stopped> {
   const thread = await threadOf(client, ref);
-  const { outcome, under, error } = SessionInterruptResult.parse(await client.request("sessions.interrupt", { sessionId: thread.sessionId, ...(task !== undefined ? { task } : {}) }));
-  return { threadId: thread.id, ...(task !== undefined ? { task } : {}), outcome, ...(under !== undefined && under.length > 0 ? { under } : {}), ...(error !== undefined ? { error } : {}) };
+  const { outcome, under, error, left } = SessionInterruptResult.parse(await client.request("sessions.interrupt", { sessionId: thread.sessionId, ...(task !== undefined ? { task } : {}) }));
+  return { threadId: thread.id, ...(task !== undefined ? { task } : {}), outcome, ...(under !== undefined && under.length > 0 ? { under } : {}), ...(error !== undefined ? { error } : {}), ...(left !== undefined ? { left } : {}) };
 }
 
 const STOP_WORDS: Record<SessionInterruptOutcome, string> = { accepted: "stopped", "not-running": "not running", "not-found": "not found by the host", refused: "not stopped", unsupported: "not stopped" };
@@ -546,7 +549,7 @@ export function stopLine(stopped: Stopped): string {
   if (stopped.error !== undefined) return `${named}: ${stopped.error}`;
   const under = stopped.under ?? [];
   const tree = under.length === 0 ? "" : `, and with it ${under.length} ${under.length === 1 ? "thread" : "threads"} its agents spawned: ${under.map(threadWord).join(", ")}`;
-  return `${named} ${STOP_WORDS[stopped.outcome]}${tree}`;
+  return `${named} ${STOP_WORDS[stopped.outcome]}${tree}${stopped.left === undefined ? "" : `, but ${stopped.left}`}`;
 }
 
 /** Drops the thread from this computer through the runtime, the road the app's row action takes; the runtime
@@ -614,7 +617,7 @@ export async function dropping(client: HostClient, ref: string): Promise<Droppin
   if (isLocalWorkspace(workspace) && workspace.worktree !== undefined) {
     throw usageRefusal(localWorktreeRefusal(workspace.name), "Remove it with wsp worktree remove <project> <branch>, or delete a thread there with wsp delete <thread>.");
   }
-  if (isLocalWorkspace(workspace)) throw usageRefusal(localFolderRefusal(workspace.name), "Run wsp threads to find its threads, then wsp delete <thread>.");
+  if (runsInFolder(workspaceKind(workspace))) throw usageRefusal(localFolderRefusal(workspace.name), "Run wsp threads to find its threads, then wsp delete <thread>.");
   return { workspace, threads: (await threads(client, workspace.id)).length };
 }
 

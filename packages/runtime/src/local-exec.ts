@@ -622,7 +622,9 @@ export function localExecStream(opts: LocalExecOptions, isWaiting?: TurnWaiting)
     } satisfies ExecStream;
   };
 
-  const factory: ExecStreamFactory = (command, { env, input, inputAfter }) => {
+  const factory: ExecStreamFactory = (command, { env, input, inputAfter, secret }) => {
+    // This computer's agents read their servers' values off their own files, so no launch here is handed one.
+    if (secret !== undefined) throw new Error("a launch on this computer takes no text holding a value; nothing was started");
     const base = join(runDir, randomBytes(6).toString("hex"));
     mkdirSync(runDir, { recursive: true, mode: OWNER_DIR });
     // The claim is the one path that says a run is on this computer, and mkdir is what makes it exist at once.

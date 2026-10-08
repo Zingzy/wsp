@@ -20,7 +20,8 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 use wsp_frames::{
     is_http_url, numbers, place_link_transcript, place_refusal_transcript, words, Base64Bytes, LinkEphemerals, LinkRole, PlaceAuthRefusal,
-    PlaceAuthReply, PlaceAuthRequest, PlaceEphemeral, PlaceFile, PlaceNonce, PlaceProveRequest, PlacePublicKey, PlaceSignature, RequestId,
+    PlaceAuthReply, PlaceAuthRequest, PlaceEphemeral, PlaceFile, PlaceNonce, PlaceProveRequest, PlacePublicKey, PlaceReport,
+    PlaceSignature, RequestId,
 };
 
 use crate::door::{self, Ended};
@@ -418,6 +419,7 @@ impl Link {
         agent_versions: &BTreeMap<String, String>,
     ) -> Result<PlaceProveRequest, String> {
         let pem = std::fs::read_to_string(Path::new(&file.key_path)).map_err(|e| format!("{}: {e}", file.key_path))?;
+        let door = self.ctx.computer_door.get();
         let report = place::place_report(&ReportInput {
             file,
             home: &self.home,
@@ -430,6 +432,14 @@ impl Link {
             runtime_root: self.ctx.options.runtime_root.as_deref().unwrap_or(Path::new(wsp_runtime::DEFAULT_ROOT)),
             system_root: Path::new("/"),
         });
+        // What became of the door this daemon binds for the threads on this computer itself: nothing where it stands,
+        // why where it does not, and no word at all where none was opened.
+        let report = PlaceReport {
+            wsp_door: door.map(Option::is_none),
+            wsp_door_blocked: door.cloned().flatten(),
+            daemon_unit: crate::own_unit(),
+            ..report
+        };
         let signature =
             place::sign_place_bytes(&pem, &place_link_transcript(LinkRole::Place, &file.place_id, host_nonce, my_nonce, ephemerals))?;
         Ok(PlaceProveRequest::new(RequestId::from(2), signature, report))

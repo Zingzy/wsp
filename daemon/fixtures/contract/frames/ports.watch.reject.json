@@ -21,5 +21,31 @@
       200
     ],
     "folder": 7
+  },
+  {
+    "id": 9,
+    "op": "ports.watch",
+    "watch": "a b"
+  },
+  {
+    "id": 10,
+    "op": "ports.watch",
+    "watch": ""
+  },
+  {
+    "id": 12,
+    "op": "ports.watch",
+    "roots": [],
+    "cgroups": [
+      "wsp-threads/a"
+    ]
+  },
+  {
+    "id": 13,
+    "op": "ports.watch",
+    "roots": [],
+    "cgroups": [
+      "/wsp-threads/../system.slice"
+    ]
   }
 ]

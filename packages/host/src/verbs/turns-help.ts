@@ -75,7 +75,9 @@ import {
   ProjectView,
   copiesFolder,
   kindForComputer,
-  isLocalWorkspace,
+  runsInFolder,
+  type WorkspaceKind,
+  workspaceKind,
   threadOnMachineLine,
   nameOfTask,
   takenNameAfter,
@@ -225,8 +227,9 @@ export async function runTarget(
   const said = (name: string | undefined) => (threadId: string, folder?: string): string =>
     folder === undefined ? `thread ${threadId}` : threadOpenedLine(threadId, name, homeShortened(folder, homedir()));
   if (ref !== undefined) {
-    const project = ((await projectsHere(client).catch(() => undefined)) ?? []).find(p => p.id === ref || p.name === ref);
-    if (project !== undefined && copiesFolder(kindForComputer(project.computer))) {
+    // The host's own reading first: a thread's word is its own project's, whatever another computer's is called.
+    const project = (await projectOf(client, ref).catch(() => undefined)) ?? ((await projectsHere(client).catch(() => undefined)) ?? []).find(p => p.id === ref || p.name === ref);
+    if (project !== undefined && (copiesFolder(kindForComputer(project.computer)) || (await threadsInFolder(client, project.id)))) {
       const full = await projectOf(client, project.id).catch(() => undefined);
       return { here: { project: { id: project.id, name: project.name, path: full?.path ?? "" }, ...asked }, opened: said(project.name) };
     }
@@ -240,14 +243,22 @@ export async function runTarget(
     if (where.branch !== undefined) throw branchRefused();
     return { workspace };
   }
-  // A line out of a thread carries the thread's own token, and with no project named it runs beside that thread.
+  // A line out of a thread carries the thread's own token, and with no project named it runs beside that thread, on
+  // whichever computer that thread runs: the host reads where off the token, never off the folder it was typed in.
   const fromThread = turnTokenOf(env) !== undefined || (env[HOST_TOKEN_ENV] ?? "") !== "";
-  if (fromThread && elsewhere !== true) return { here: asked, opened: said(undefined) };
+  if (fromThread) return { here: asked, opened: said(undefined) };
   if (elsewhere === true) throw usageRefusal(guestNamesWorkspaceLine, "Name the workspace on the line.");
   const project = callerCwd === undefined ? undefined : projectOfFolder(await projectsOf(client).catch(() => []), callerCwd);
   if (project === undefined) throw usageRefusal(noThreadTargetLine("<project>"), "Run wsp projects to read the names.");
   const inside = callerCwd !== undefined && !under(callerCwd, project.path);
   return { here: { project, ...asked, ...(inside && where.cwd === undefined && where.branch === undefined ? { cwd: callerCwd } : {}) }, opened: said(project.name) };
+}
+
+/** Whether a thread of this project runs in its folder on the computer holding it, as a project on a computer the
+ * person joined does: the host answers off the project's landing, since only it holds which computers are joined. */
+async function threadsInFolder(client: HostClient, project: string): Promise<boolean> {
+  const landing = await client.request<{ kind?: WorkspaceKind }>("workspaces.landing", { project }).catch(() => undefined);
+  return landing?.kind !== undefined && runsInFolder(landing.kind);
 }
 
 /** A machine forked for a run on a project elsewhere, the way the app's New thread makes one: named off the task, with
@@ -280,7 +291,7 @@ export async function threadHere(client: HostClient, ref: string): Promise<{ id:
   const thread = await threadOf(client, ref).catch(() => undefined);
   if (thread === undefined) return undefined;
   const at = (await workspaces(client)).find(w => w.id === thread.workspaceId);
-  if (at === undefined || !isLocalWorkspace(at)) return undefined;
+  if (at === undefined || !runsInFolder(workspaceKind(at))) return undefined;
   return { id: threadIdOf(thread), workspaceId: at.id, ...(at.worktree?.made === true && at.worktree.gone !== true ? { worktree: at.worktree.path } : {}) };
 }
 
@@ -290,7 +301,7 @@ export async function refuseMachineThread(client: HostClient, ref: string): Prom
   const thread = await threadOf(client, ref).catch(() => undefined);
   if (thread === undefined) return;
   const at = (await workspaces(client)).find(w => w.id === thread.workspaceId);
-  if (at !== undefined && !isLocalWorkspace(at)) throw Object.assign(new Error(threadOnMachineLine(at.name)), { kind: "usage" });
+  if (at !== undefined && !runsInFolder(workspaceKind(at))) throw Object.assign(new Error(threadOnMachineLine(at.name)), { kind: "usage" });
 }
 
 /** What the host took with a thread it deleted: the record's id, the worktree that went with it, and how many threads. */

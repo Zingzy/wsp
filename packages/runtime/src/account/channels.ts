@@ -2,8 +2,9 @@
 import { spawnSync } from "node:child_process";
 import { join, relative } from "node:path";
 import { remoteHost } from "@wsp/catalog";
-import { type DaemonFrame, type DaemonResponse, type DaemonReachView, type ProjectRef, type ProjectView, type WorkspaceAgents, type PlaceSettings, branchUnreadRefusal, GitPushReply, GitStatusReply, GitStartOnReply, DETACHED_HEAD, childStartedLine, forkNeedsPushLine, pushedForChildLine, uncommittedStayed, agentsFrom, placeAtLimitLine, placeSpendLimit, spendCapRefusal, THIS_COMPUTER, isLocalWorkspace, kindWords, machineWord, noSuchProjectLine, absentComputer, HERE_PLACE_ID, placeBlocked, placeWatchesItselfLine, forkProcsUnreadLine, forkOpRefusedLine, placeServesDaemonLine, ownerRepoOf, copiesFolder, kindForComputer, type Caller } from "@wsp/protocol";
+import { runsInFolder, type DaemonFrame, type DaemonResponse, type DaemonReachView, type ProjectRef, type ProjectView, type WorkspaceAgents, type PlaceSettings, branchUnreadRefusal, GitPushReply, GitStatusReply, GitStartOnReply, DETACHED_HEAD, childStartedLine, forkNeedsPushLine, pushedForChildLine, uncommittedStayed, agentsFrom, placeAtLimitLine, placeSpendLimit, spendCapRefusal, THIS_COMPUTER, isLocalWorkspace, kindWords, machineWord, noSuchProjectLine, absentComputer, HERE_PLACE_ID, placeBlocked, placeWatchesItselfLine, forkProcsUnreadLine, forkOpRefusedLine, placeServesDaemonLine, ownerRepoOf, copiesFolder, kindForComputer, type Caller } from "@wsp/protocol";
 import { groupExists } from "../local-exec.js";
+import { boxPanelsOpener } from "./box-panels.js";
 import type { DaemonChannel } from "../daemon-channel.js";
 import type { MachineExecOptions } from "../machine-exec.js";
 import type { WorkspaceRecord, LiveWorkspace } from "../types/wiring.js";
@@ -184,7 +185,8 @@ export function channelsArea(ctx: RuntimeContext): ChannelsArea {
     const report = await placeDoor.reportOf(placeId);
     return report === undefined ? undefined : placeBlocked(placeDoor.nameOf(placeId), report);
   };
-  const copyBlocked = (entry: LiveWorkspace): Promise<void> => placeRefuses(entry.record.place);
+  // A thread in a folder on that computer runs on the computer itself, which nothing of a copy's walls holds back.
+  const copyBlocked = (entry: LiveWorkspace): Promise<void> => (runsInFolder(entry.record.kind) ? Promise.resolve() : placeRefuses(entry.record.place));
 
   /** The frames a place daemon stamps with the workspace they are of: a guest session's, by the listener it arrived
    * on and never anything the guest said, and a tunnel's, by the workspace it was opened inside. */
@@ -278,6 +280,7 @@ export function channelsArea(ctx: RuntimeContext): ChannelsArea {
     for (const pid of portPids.get(workspaceId)?.values() ?? []) roots.add(pid);
     return [...roots].sort((a, b) => a - b);
   };
+  const openBoxPanels = boxPanelsOpener(ctx, portWatchers);
   /** Reads the workspace's roots now, which drops a turn's group that emptied, and names them again to every channel
    * that watches. */
   const portRootsMoved = (workspaceId: string): void => {
@@ -362,7 +365,13 @@ export function channelsArea(ctx: RuntimeContext): ChannelsArea {
      * this one; of those, the ones it is listening to, which it takes its listeners off when it goes. */
     const named = new Set<string>();
     const attached = new Set<string>();
+    // A folder there is the computer's own: its ports, readings and processes are that computer's, read for it here.
+    const panels = runsInFolder(entry.record.kind) ? openBoxPanels(entry, placeId, served, checkout) : undefined;
     const link = door.channel(placeId, event => {
+      if (panels?.heard(event) === true) {
+        onEvent(event);
+        return;
+      }
       const type = String(event["type"]);
       if (GUEST_EVENTS.includes(type)) {
         if (event["machineId"] === machineId) onEvent(event);
@@ -374,6 +383,8 @@ export function channelsArea(ctx: RuntimeContext): ChannelsArea {
       onEvent(event);
     });
     if (link === undefined) throw new Error(absentComputer(door.nameOf(placeId), null).sentence);
+    // A link that drops ends the channel with no close from the page: what the pane watched goes with it all the same.
+    void link.closed.then(() => panels?.close());
     /** What this channel now holds on the far end, off a frame it sent and the answer to it. */
     const held = (op: string, frame: Record<string, unknown>, reply: Record<string, unknown>): void => {
       if (op === "pty.create") {
@@ -395,6 +406,11 @@ export function channelsArea(ctx: RuntimeContext): ChannelsArea {
     return {
       async send(frame) {
         const op = frame.op;
+        if (panels?.answers(op) === true) {
+          const reply = await panels.send(frame as Record<string, unknown>);
+          if (reply["ok"] === true) held(op, frame as Record<string, unknown>, reply);
+          return { id: null, ...reply } as DaemonResponse;
+        }
         if (COMPUTER_WATCHES.includes(op)) return { id: null, ok: false, code: "unsupported", error: placeWatchesItselfLine(door.nameOf(placeId)) };
         if (COMPUTER_PROCS.includes(op)) return { id: null, ok: false, code: "unsupported", error: forkProcsUnreadLine(entry.record.name, door.nameOf(placeId)) };
         if (!carries.includes(op)) return { id: null, ok: false, code: "unsupported", error: forkOpRefusedLine(op, entry.record.name, door.nameOf(placeId)) };
@@ -410,6 +426,7 @@ export function channelsArea(ctx: RuntimeContext): ChannelsArea {
         // is done with; the socket's own close would be the link's, and that is the whole computer going.
         for (const ptyId of attached) void served({ op: "pty.detach", ptyId }).catch(() => undefined);
         attached.clear();
+        panels?.close();
         link.close();
       },
       closed: link.closed,
@@ -421,7 +438,7 @@ export function channelsArea(ctx: RuntimeContext): ChannelsArea {
    * which names the root git.status is asked under; a session or a pty the computer pushes never reaches a door. */
   const BLOCKED_READS: ReadonlySet<string> = new Set(["git.status", "ping"]);
   const copyChannel = async (entry: LiveWorkspace, onEvent: (event: Record<string, unknown>) => void, carries: readonly string[]): Promise<DaemonChannel> => {
-    const said = await blockedLine(entry.record.place);
+    const said = runsInFolder(entry.record.kind) ? undefined : await blockedLine(entry.record.place);
     const heard = (event: Record<string, unknown>): void => {
       if (said === undefined || event["type"] === "daemon.hello") onEvent(event);
     };

@@ -20,6 +20,10 @@ use wsp_frames::{numbers, DaemonEvent, ListeningPort};
 use crate::sys_local::host_command;
 use crate::{clock, Outbound};
 
+mod scope;
+pub(crate) use scope::{cgroup_for, CgroupSource, Scope};
+use scope::{in_cgroups, named};
+
 const TCP_LISTEN: &str = "0A";
 /// One read per five seconds, each diffed against the last: a listener that opens and closes between two reads sends
 /// nothing, and what moved goes out as one batch. A read a second sent 14 events a second to every page on a Mac.
@@ -477,22 +481,13 @@ pub(crate) fn cwd_for(proc_root: Option<&Path>) -> CwdSource {
     }
 }
 
-/// Whose listeners one watch sees.
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) enum Scope {
-    /// Every listener: what a watch that names no roots sees, the host's own watchers among them, and a cloud
-    /// machine, which is the workspace's whole.
-    Everything,
-    /// The listeners of the processes these roots hold, and with a folder, of every process running in it.
-    Roots { roots: Vec<u32>, folder: Option<PathBuf> },
-}
-
 /// The reads one watch is made of: the listeners and the processes holding them, and the DevTools question put to a
 /// browser's listener once.
 pub(crate) struct PortWatcher {
     source: PortSource,
     lineage: LineageSource,
     cwd: CwdSource,
+    cgroups: CgroupSource,
     alive: Box<dyn Fn(u32) -> bool + Send + Sync>,
     now: Box<dyn Fn() -> u64 + Send + Sync>,
     /// Kept while a listener lives, so each is asked once.
@@ -516,6 +511,7 @@ impl PortWatcher {
             source,
             lineage,
             cwd,
+            cgroups: cgroup_for(None),
             alive,
             now,
             devtools: Arc::new(Mutex::new(HashMap::new())),
@@ -541,22 +537,30 @@ impl PortWatcher {
                 Scope::Roots { roots, .. } => Some(members(&table, roots)),
             })
             .collect();
-        let unheld: HashSet<u32> = scopes
-            .iter()
-            .zip(&held)
-            .filter(|(scope, _)| matches!(scope, Scope::Roots { folder: Some(_), .. }))
-            .flat_map(|(_, held)| read.iter().filter_map(|r| r.pid).filter(|pid| !held.as_ref().is_some_and(|h| h.contains(pid))))
-            .collect();
-        let cwds = if unheld.is_empty() { HashMap::new() } else { (self.cwd)(unheld.into_iter().collect()).await };
+        let unheld = |wanted: fn(&Scope) -> bool| -> Vec<u32> {
+            let pids: HashSet<u32> = scopes
+                .iter()
+                .zip(&held)
+                .filter(|(scope, _)| wanted(scope))
+                .flat_map(|(_, held)| read.iter().filter_map(|r| r.pid).filter(|pid| !held.as_ref().is_some_and(|h| h.contains(pid))))
+                .collect();
+            pids.into_iter().collect()
+        };
+        let by_folder = unheld(|scope| matches!(scope, Scope::Roots { folder: Some(_), .. }));
+        let by_cgroup = unheld(|scope| matches!(scope, Scope::Roots { cgroups, .. } if !cgroups.is_empty()));
+        let cwds = if by_folder.is_empty() { HashMap::new() } else { (self.cwd)(by_folder).await };
+        let groups = if by_cgroup.is_empty() { HashMap::new() } else { (self.cgroups)(by_cgroup).await };
         let seen: Vec<Vec<ListeningPort>> = scopes
             .iter()
             .zip(&held)
             .map(|(scope, held)| match (scope, held) {
-                (Scope::Roots { folder, .. }, Some(held)) => read
+                (Scope::Roots { folder, cgroups, .. }, Some(held)) => read
                     .iter()
                     .filter(|r| {
                         r.pid.is_some_and(|pid| {
-                            held.contains(&pid) || folder.as_ref().is_some_and(|f| cwds.get(&pid).is_some_and(|cwd| cwd.starts_with(f)))
+                            held.contains(&pid)
+                                || folder.as_ref().is_some_and(|f| cwds.get(&pid).is_some_and(|cwd| cwd.starts_with(f)))
+                                || in_cgroups(groups.get(&pid), cgroups)
                         })
                     })
                     .cloned()
@@ -608,6 +612,7 @@ impl PortWatcher {
             pid: row.pid,
             process: row.process.clone(),
             loopback: Some(row.loopback),
+            watch: None,
         });
         closed.chain(opened).collect()
     }
@@ -616,7 +621,16 @@ impl PortWatcher {
     fn close_event(&self, row: &ListeningPort, still_listening: bool) -> DaemonEvent {
         let at = Some(clock::iso_millis((self.now)()));
         match row.pid {
-            None => DaemonEvent::PortClose { port: row.port, pid: None, process: None, command: None, exited: None, left: None, at },
+            None => DaemonEvent::PortClose {
+                port: row.port,
+                pid: None,
+                process: None,
+                command: None,
+                exited: None,
+                left: None,
+                at,
+                watch: None,
+            },
             Some(pid) => DaemonEvent::PortClose {
                 port: row.port,
                 pid: Some(pid),
@@ -625,6 +639,7 @@ impl PortWatcher {
                 exited: Some(!(self.alive)(pid)),
                 left: still_listening.then_some(true),
                 at,
+                watch: None,
             },
         }
     }
@@ -654,11 +669,13 @@ struct Watching {
     polling: bool,
 }
 
-/// One socket's watch: whose listeners it sees, and what it was last told; None until its first reply.
+/// One socket's watch: whose listeners it sees, and what it was last told; None until its first reply. A watch the
+/// socket named carries that name on every event it sends.
 struct Watcher {
     key: u64,
     out: Outbound,
     scope: Scope,
+    name: Option<String>,
     sent: Option<Vec<ListeningPort>>,
 }
 
@@ -671,6 +688,12 @@ impl PortWatch {
             hurried_until: Mutex::new(None),
             hurry: tokio::sync::Notify::new(),
         }
+    }
+
+    /// The same watch reading each holder's cgroup off this road rather than the machine's own /proc.
+    pub(crate) fn with_cgroups(self, cgroups: CgroupSource) -> PortWatch {
+        self.watcher.try_lock().expect("a watch nothing holds yet").cgroups = cgroups;
+        self
     }
 
     fn watching(&self) -> std::sync::MutexGuard<'_, Watching> {
@@ -686,16 +709,10 @@ impl PortWatch {
         self: &Arc<Self>,
         key: u64,
         out: Outbound,
-        roots: Option<Vec<u32>>,
-        folder: Option<String>,
+        scope: Scope,
+        name: Option<String>,
         on: OnChanges,
     ) -> (Vec<ListeningPort>, bool) {
-        // Held as the kernel names it, so a cwd read off /proc or lsof compares with it whatever links led there.
-        let folder = folder.map(|f| std::fs::canonicalize(&f).unwrap_or_else(|_| PathBuf::from(f)));
-        let scope = match roots {
-            Some(roots) => Scope::Roots { roots, folder },
-            None => Scope::Everything,
-        };
         let mut watcher = self.watcher.lock().await;
         let fresh = {
             let mut watching = self.watching();
@@ -705,7 +722,7 @@ impl PortWatch {
                     false
                 }
                 None => {
-                    watching.listeners.push(Watcher { key, out, scope, sent: None });
+                    watching.listeners.push(Watcher { key, out, scope, name, sent: None });
                     true
                 }
             };
@@ -772,7 +789,7 @@ impl PortWatch {
             let events = w.sent.as_deref().map(|sent| watcher.changes(sent, now, &listening)).unwrap_or_default();
             w.sent = Some(now.clone());
             for event in &events {
-                if !w.out.send_text(&crate::frame_text(event)) {
+                if !w.out.send_text(&crate::frame_text(&named(event.clone(), w.name.as_ref()))) {
                     return false;
                 }
                 if let DaemonEvent::PortOpen { port, .. } = event {
@@ -798,14 +815,14 @@ mod tests {
         std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures").join(name)).unwrap()
     }
 
-    fn fixed(rows: Arc<Mutex<Vec<ListeningPort>>>) -> PortSource {
+    pub(super) fn fixed(rows: Arc<Mutex<Vec<ListeningPort>>>) -> PortSource {
         Arc::new(move || {
             let rows = rows.lock().unwrap().clone();
             Box::pin(async move { rows })
         })
     }
 
-    fn row(port: u16, pid: Option<u32>, inode: u64, uid: u32, loopback: bool) -> ListeningPort {
+    pub(super) fn row(port: u16, pid: Option<u32>, inode: u64, uid: u32, loopback: bool) -> ListeningPort {
         ListeningPort { port, pid, inode: Some(inode), uid, process: None, command: None, loopback }
     }
 
@@ -815,7 +832,7 @@ mod tests {
     }
 
     /// A machine whose processes' folders cannot be read.
-    fn no_cwd() -> CwdSource {
+    pub(super) fn no_cwd() -> CwdSource {
         Arc::new(|_| Box::pin(async { HashMap::new() }))
     }
 
@@ -855,7 +872,11 @@ mod tests {
 
     /// A view whose roots are these pids, each leading its own group.
     fn rooted(source: PortSource, pids: &[u32]) -> View {
-        View { w: PortWatcher::new(source, groups(pids), no_cwd()), scope: Scope::Roots { roots: pids.to_vec(), folder: None }, sent: None }
+        View {
+            w: PortWatcher::new(source, groups(pids), no_cwd()),
+            scope: Scope::Roots { roots: pids.to_vec(), folder: None, cgroups: Vec::new() },
+            sent: None,
+        }
     }
 
     fn watcher_with(source: PortSource, alive: bool, at: u64) -> View {
@@ -896,7 +917,7 @@ mod tests {
         *snapshot.lock().unwrap() = vec![row(3000, Some(456), 45700, 1000, true)];
         let closed = w.poll().await;
         let steady = w.poll().await;
-        assert_eq!(opened, [DaemonEvent::PortOpen { port: 3000, pid: Some(456), process: None, loopback: Some(true) }]);
+        assert_eq!(opened, [DaemonEvent::PortOpen { port: 3000, pid: Some(456), process: None, loopback: Some(true), watch: None }]);
         assert!(matches!(closed.as_slice(), [DaemonEvent::PortClose { port: 8080, .. }]));
         assert!(steady.is_empty());
         assert_eq!(w.current().iter().map(|p| p.port).collect::<Vec<_>>(), [3000]);
@@ -964,11 +985,14 @@ mod tests {
         snapshot.lock().unwrap().extend([row(4100, Some(700), 2, 0, true), row(4101, None, 3, 0, true)]);
         assert_eq!(w.poll().await, [], "a listener held outside the tree, or by a holder nobody could name, is no change");
         snapshot.lock().unwrap().push(row(4201, Some(1235), 4, 0, true));
-        assert_eq!(w.poll().await, [DaemonEvent::PortOpen { port: 4201, pid: Some(1235), process: None, loopback: Some(true) }]);
+        assert_eq!(
+            w.poll().await,
+            [DaemonEvent::PortOpen { port: 4201, pid: Some(1235), process: None, loopback: Some(true), watch: None }]
+        );
         assert_eq!(w.current().iter().map(|p| p.port).collect::<Vec<_>>(), [4200, 4201]);
     }
 
-    fn out() -> (crate::Outbound, tokio::sync::mpsc::UnboundedReceiver<crate::Outgoing>) {
+    pub(super) fn out() -> (crate::Outbound, tokio::sync::mpsc::UnboundedReceiver<crate::Outgoing>) {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         (crate::Outbound(tx), rx)
     }
@@ -991,11 +1015,11 @@ mod tests {
         })
     }
 
-    async fn until(start: tokio::time::Instant, ms: u64) {
+    pub(super) async fn until(start: tokio::time::Instant, ms: u64) {
         tokio::time::sleep_until(start + Duration::from_millis(ms)).await;
     }
 
-    fn quiet() -> OnChanges {
+    pub(super) fn quiet() -> OnChanges {
         Arc::new(|_| {})
     }
 
@@ -1010,7 +1034,7 @@ mod tests {
         let watch = whole(fixed(Arc::clone(&snapshot)));
         let (o, mut rx) = out();
         let start = tokio::time::Instant::now();
-        assert_eq!(watch.watch(1, o, None, None, quiet()).await, (vec![], true));
+        assert_eq!(watch.watch(1, o, Scope::of(None, None, vec![]), None, quiet()).await, (vec![], true));
         until(start, 1_000).await;
         snapshot.lock().unwrap().push(row(3000, Some(1), 1, 0, true));
         until(start, 2_000).await;
@@ -1036,7 +1060,7 @@ mod tests {
         let watch = whole(fixed(Arc::clone(&snapshot)));
         let (o, mut rx) = out();
         let start = tokio::time::Instant::now();
-        assert_eq!(watch.watch(1, o, None, None, quiet()).await.0.len(), 1, "the watcher was told 3000 is open");
+        assert_eq!(watch.watch(1, o, Scope::of(None, None, vec![]), None, quiet()).await.0.len(), 1, "the watcher was told 3000 is open");
         until(start, 1_000).await;
         snapshot.lock().unwrap().clear();
         until(start, 2_000).await;
@@ -1053,7 +1077,7 @@ mod tests {
         let watch = whole(fixed(Arc::clone(&snapshot)));
         let (o, mut rx) = out();
         let start = tokio::time::Instant::now();
-        watch.watch(1, o, None, None, quiet()).await;
+        watch.watch(1, o, Scope::of(None, None, vec![]), None, quiet()).await;
         until(start, 1_000).await;
         *snapshot.lock().unwrap() = vec![row(3000, Some(2), 2, 0, true)];
         until(start, 5_100).await;
@@ -1067,12 +1091,12 @@ mod tests {
         let (first, mut heard_first) = out();
         let (second, mut heard_second) = out();
         let start = tokio::time::Instant::now();
-        watch.watch(1, first, None, None, quiet()).await;
+        watch.watch(1, first, Scope::of(None, None, vec![]), None, quiet()).await;
         until(start, 2_000).await;
         // The listener goes and another comes between the first watcher's reply and the second's: the second watch's
         // read tells the first what moved, and the second only what it holds.
         *snapshot.lock().unwrap() = vec![row(3001, Some(1), 2, 0, true)];
-        let (ports, fresh) = watch.watch(2, second, None, None, quiet()).await;
+        let (ports, fresh) = watch.watch(2, second, Scope::of(None, None, vec![]), None, quiet()).await;
         assert_eq!((ports.iter().map(|p| p.port).collect::<Vec<_>>(), fresh), (vec![3001], true));
         assert_eq!(heard(&mut heard_first), [("port.close".to_owned(), 3000), ("port.open".to_owned(), 3001)]);
         assert_eq!(heard(&mut heard_second), []);
@@ -1088,7 +1112,7 @@ mod tests {
         let read = || reads.load(std::sync::atomic::Ordering::SeqCst);
         let start = tokio::time::Instant::now();
         let (o, _rx) = out();
-        watch.watch(1, o, None, None, quiet()).await;
+        watch.watch(1, o, Scope::of(None, None, vec![]), None, quiet()).await;
         until(start, 5_100).await;
         assert_eq!(read(), 2);
         watch.unsubscribe(1);
@@ -1096,7 +1120,7 @@ mod tests {
         assert_eq!(read(), 2, "nobody watches, so nothing is read");
         snapshot.lock().unwrap().push(row(3001, Some(2), 2, 0, true));
         let (o, mut rx) = out();
-        let (ports, fresh) = watch.watch(2, o, None, None, quiet()).await;
+        let (ports, fresh) = watch.watch(2, o, Scope::of(None, None, vec![]), None, quiet()).await;
         assert_eq!((ports.len(), fresh), (2, true), "the next watch is seeded, not told of what moved while nobody watched");
         until(start, 65_100).await;
         assert_eq!((read(), heard(&mut rx)), (4, vec![]));
@@ -1111,7 +1135,7 @@ mod tests {
         let read = || reads.load(std::sync::atomic::Ordering::SeqCst);
         let start = tokio::time::Instant::now();
         let (o, mut rx) = out();
-        watch.watch(1, o, None, None, quiet()).await;
+        watch.watch(1, o, Scope::of(None, None, vec![]), None, quiet()).await;
         until(start, 500).await;
         snapshot.lock().unwrap().push(row(45543, Some(1), 1, 0, true));
         watch.hurry(Duration::from_secs(5));
@@ -1121,68 +1145,6 @@ mod tests {
         assert_eq!(read(), 7, "a read a second through the window");
         until(start, 15_600).await;
         assert_eq!(read(), 9, "then one every five seconds again");
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn a_watch_sees_what_its_roots_hold_and_one_that_names_none_sees_the_whole_machine() {
-        let snapshot = Arc::new(Mutex::new(vec![
-            row(4000, Some(100), 1, 0, true),
-            row(4001, Some(201), 2, 0, true),
-            row(4002, Some(301), 3, 0, true),
-        ]));
-        // One host (100) running a turn for each of two workspaces; A's server made a group of its own under its turn.
-        let table = vec![
-            Lineage { pid: 100, ppid: 1, pgid: 100 },
-            Lineage { pid: 200, ppid: 100, pgid: 200 },
-            Lineage { pid: 201, ppid: 200, pgid: 201 },
-            Lineage { pid: 300, ppid: 100, pgid: 300 },
-            Lineage { pid: 301, ppid: 300, pgid: 300 },
-        ];
-        let lineage: LineageSource = Arc::new(move || {
-            let table = table.clone();
-            Box::pin(async move { table })
-        });
-        let watch = Arc::new(PortWatch::new(fixed(snapshot), lineage, no_cwd(), DEFAULT_INTERVAL));
-        let ports = |seen: Vec<ListeningPort>| seen.iter().map(|p| p.port).collect::<Vec<_>>();
-        assert_eq!(ports(watch.watch(1, out().0, Some(vec![200]), None, quiet()).await.0), [4001]);
-        assert_eq!(ports(watch.watch(2, out().0, Some(vec![300]), None, quiet()).await.0), [4002]);
-        assert_eq!(
-            ports(watch.watch(3, out().0, None, None, quiet()).await.0),
-            [4000, 4001, 4002],
-            "the host's own watchers see every listener"
-        );
-        assert_eq!(
-            ports(watch.watch(4, out().0, Some(vec![100]), None, quiet()).await.0),
-            [4000, 4001, 4002],
-            "the host holds every workspace"
-        );
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn a_port_that_leaves_a_watch_while_it_still_listens_closes_as_left_and_one_that_stopped_does_not() {
-        let snapshot = Arc::new(Mutex::new(vec![row(4202, Some(202), 1, 0, true), row(4203, Some(203), 2, 0, true)]));
-        let table = vec![
-            Lineage { pid: 200, ppid: 1, pgid: 200 },
-            Lineage { pid: 202, ppid: 1, pgid: 200 },
-            Lineage { pid: 203, ppid: 1, pgid: 200 },
-        ];
-        let lineage: LineageSource = Arc::new(move || {
-            let table = table.clone();
-            Box::pin(async move { table })
-        });
-        let watch = Arc::new(PortWatch::new(fixed(Arc::clone(&snapshot)), lineage, no_cwd(), DEFAULT_INTERVAL));
-        let (o, mut rx) = out();
-        watch.watch(1, o.clone(), Some(vec![200]), None, quiet()).await;
-        snapshot.lock().unwrap().retain(|r| r.port != 4203);
-        // The turn's group stops being a root: 4202 still listens, held by a process that is no longer the workspace's.
-        watch.watch(1, o, Some(vec![]), None, quiet()).await;
-        let mut closes = Vec::new();
-        while let Ok(frame) = rx.try_recv() {
-            let v: serde_json::Value = serde_json::from_str(frame.text()).unwrap();
-            closes.push((v["port"].as_u64().unwrap(), v.get("left").cloned()));
-        }
-        closes.sort_by_key(|(port, _)| *port);
-        assert_eq!(closes, [(4202, Some(serde_json::json!(true))), (4203, None)]);
     }
 
     #[test]
@@ -1310,7 +1272,7 @@ mod tests {
         let started = std::time::Instant::now();
         let opened = w.poll().await;
         let took = started.elapsed();
-        assert_eq!(opened, [DaemonEvent::PortOpen { port, pid: Some(800), process: None, loopback: Some(true) }]);
+        assert_eq!(opened, [DaemonEvent::PortOpen { port, pid: Some(800), process: None, loopback: Some(true), watch: None }]);
         assert!(took < DEVTOOLS_PROBE / 2, "the open waited {took:?} on a port that says nothing");
     }
 
@@ -1340,7 +1302,7 @@ mod tests {
         snapshot.lock().unwrap().push(named(later, 902, 3, "chrome"));
         assert_eq!(
             w.poll().await,
-            [DaemonEvent::PortOpen { port: later, pid: Some(902), process: Some("chrome".to_owned()), loopback: Some(true) }]
+            [DaemonEvent::PortOpen { port: later, pid: Some(902), process: Some("chrome".to_owned()), loopback: Some(true), watch: None }]
         );
         let dropped = next_change(&mut w).await;
         assert!(matches!(dropped.as_slice(), [DaemonEvent::PortClose { port, .. }] if *port == later), "{dropped:?}");
@@ -1404,8 +1366,8 @@ mod tests {
         assert_eq!(
             w.poll().await,
             [
-                DaemonEvent::PortOpen { port: 8080, pid: Some(123), process: Some("node".into()), loopback: Some(false) },
-                DaemonEvent::PortOpen { port: 3000, pid: Some(456), process: None, loopback: Some(true) },
+                DaemonEvent::PortOpen { port: 8080, pid: Some(123), process: Some("node".into()), loopback: Some(false), watch: None },
+                DaemonEvent::PortOpen { port: 3000, pid: Some(456), process: None, loopback: Some(true), watch: None },
             ]
         );
     }
@@ -1433,6 +1395,7 @@ mod tests {
                 exited: Some(true),
                 left: None,
                 at: Some(AT_ISO.into()),
+                watch: None,
             }]
         );
         assert_eq!(

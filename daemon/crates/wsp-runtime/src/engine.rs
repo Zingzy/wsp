@@ -626,7 +626,7 @@ pub fn map_bind(rootfs: &Path, roots: &[(String, PathBuf)], binds: &Path, at: &s
 /// a directory and an empty file for anything else, since a bind wants the same kind at both ends.
 fn stage(binds: &Path, at: &str, source: &std::os::fd::OwnedFd) -> Result<PathBuf, String> {
     let held = nix::sys::stat::fstat(source).map_err(|e| format!("the bind source could not be read: {e}"))?;
-    let directory = nix::sys::stat::SFlag::from_bits_truncate(held.st_mode).contains(nix::sys::stat::SFlag::S_IFDIR);
+    let directory = crate::file_type::is_folder(held.st_mode);
     let dir = fs::File::open(binds).map_err(|e| format!("{}: {e}", binds.display()))?;
     let made = if directory {
         nix::sys::stat::mkdirat(&dir, at, nix::sys::stat::Mode::from_bits_truncate(0o700))

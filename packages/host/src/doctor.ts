@@ -12,7 +12,7 @@ import { dirname, join, posix } from "node:path";
 import { promisify } from "node:util";
 import { agentName, CATALOG_AGENTS, CLAUDE_CONFIG_DIR, GOLDEN_SETUP, GOLDEN_SMOKE, keyEnvOf, mintsToken, VAULT_VARIABLES } from "@wsp/catalog";
 import { CREATED_AT_LABEL, DAEMON_ENV_FILE, DAEMON_LISTENING_CHECK, DAEMON_PORT, DOCTOR_LABEL, EXEC_ENV, GUEST_USER_ENV, OWNER_LABEL, RUN_DIR, TOOLS_PATH, WSP_LABEL, clientWords, isMissing, isReserved, landBytes, presenceTests, presentElsewhere, presentSteps, whoseMachine, type DaemonSupervisor, type Machine, type MachineBackend, type ProvisionPlan } from "@wsp/engine";
-import { ALREADY_JOINED_LINE, absentComputer, agentSignInWord, agentVersionWord, awayMsOf, boxRoomLines, doctorComputerRowLine, DoctorLineEvent, EXIT_CODES, exitClassOf, hereDaemonBehindLine, HERE_PLACE_ID, isJoinedComputer, noSuchProjectLine, onNpmBin, placeBehindLine, placeDaemonBehind, plural, projectNeedsReaddLine, DAEMON_MEMORY_MAX_PERCENT, DAEMON_ROOTS_PATH, DAEMON_TOKEN_PATH, DAEMON_UNIT, DAEMON_VERSION, GUEST_DAEMON_DIR, GUEST_INBOX_DIR, GUEST_MANIFEST_PATH, GUEST_WSP_PATH, guestWspShim, LOOPBACK, WSP_WORKSPACE_APPARMOR_PATH, machineLacking, machineUnanswered, NO_LINGER_LINE, NO_NODE_LINE, PLACE_NEEDS_ROOT_LINE, NO_SNAPSHOT_LISTING, NO_SYSTEMD_LINE, NO_TEMPLATES_LINE, OPEN_SOCKET_PATH, THIS_COMPUTER, isLocalWorkspace, otherHostsMachinesLine, PLACE_FOUND_END, PLACE_FOUND_MAX_BYTES, PLACE_WORKSPACE_PATH, placeDaemonPaths, TOOL_LINKS_DIR, TOOL_PREFIX, placeOwnedPaths, rootsPathIn, shellQuote, workFolderIn, templateRecordedLine, templateSkippedLine, wspBinIn, wspPackageIn, type PlaceApplied, type PlaceView, type ProjectView, type SnapshotStorage, type DaemonKind } from "@wsp/protocol";
+import { ALREADY_JOINED_LINE, absentComputer, agentSignInWord, agentVersionWord, awayMsOf, boxRoomLines, doctorComputerRowLine, DoctorLineEvent, EXIT_CODES, exitClassOf, hereDaemonBehindLine, HERE_PLACE_ID, isJoinedComputer, noSuchProjectLine, onNpmBin, placeBehindLine, placeDaemonBehind, plural, runsInFolder, workspaceKind, DAEMON_MEMORY_MAX_PERCENT, DAEMON_ROOTS_PATH, DAEMON_TOKEN_PATH, DAEMON_UNIT, DAEMON_VERSION, GUEST_DAEMON_DIR, GUEST_INBOX_DIR, GUEST_MANIFEST_PATH, GUEST_WSP_PATH, guestWspShim, LOOPBACK, WSP_WORKSPACE_APPARMOR_PATH, machineLacking, machineUnanswered, NO_LINGER_LINE, NO_NODE_LINE, PLACE_NEEDS_ROOT_LINE, NO_SNAPSHOT_LISTING, NO_SYSTEMD_LINE, NO_TEMPLATES_LINE, OPEN_SOCKET_PATH, THIS_COMPUTER, isLocalWorkspace, otherHostsMachinesLine, PLACE_FOUND_END, PLACE_FOUND_MAX_BYTES, PLACE_WORKSPACE_PATH, placeDaemonPaths, TOOL_LINKS_DIR, TOOL_PREFIX, placeOwnedPaths, rootsPathIn, shellQuote, workFolderIn, templateRecordedLine, templateSkippedLine, wspBinIn, wspPackageIn, type PlaceApplied, type PlaceView, type ProjectView, type SnapshotStorage, type DaemonKind } from "@wsp/protocol";
 import { goldenHead, writeDaemonTokenScript, type AccountOrphans, type GoldenVersion, type HereDaemon, type Runtime } from "@wsp/runtime";
 import { keyIn } from "./env-keys.js";
 import WebSocket from "ws";
@@ -1651,18 +1651,15 @@ async function planToRead(opts: DoctorOptions, computer?: PlaceView): Promise<Pr
   return "noRecipe" in plan ? `this computer holds no recipe at ${plan.noRecipe}, so there is nothing to read inside` : plan;
 }
 
-/** The project the doctor's workspace on that computer is made of: the one `--project` names, else the first
- * project there whose checkout stands, since a workspace is a copy of one and a project recorded before its
- * computer cloned it once has nothing to copy. Throws the line that records it again, for that person's own first
- * project there, and the line that adds one where the computer holds none. */
+/** The project the doctor reads that computer through: the one `--project` names, else the first there. Throws the
+ * line that adds one where the computer holds none. */
 export function doctorProject(projects: readonly ProjectView[], computer: Pick<PlaceView, "id" | "name">, named?: string): ProjectView {
   const here = projects.filter(p => p.computer === computer.id);
-  const pick = named === undefined ? (here.find(p => p.checkout !== undefined) ?? here[0]) : here.find(p => p.id === named || p.name === named);
+  const pick = named === undefined ? here[0] : here.find(p => p.id === named || p.name === named);
   if (pick === undefined) {
     if (named !== undefined) throw new Error(noSuchProjectLine(named, here.map(p => p.name)));
-    throw new Error(`${computer.name} holds no project, and a workspace is a copy of one; wsp add <url> --on ${computer.name} records one`);
+    throw new Error(`${computer.name} holds no project, and a thread runs in one; wsp add <url> --on ${computer.name} records one`);
   }
-  if (pick.checkout === undefined) throw new Error(projectNeedsReaddLine(pick.name, computer.name, pick.source));
   return pick;
 }
 
@@ -1701,10 +1698,11 @@ export async function computerDoctor(rt: DoctorRuntime, io: CliIO, computer: Pla
         const project = doctorProject(await rt.projects.list(), computer, opts.project);
         // No size: the workspace the doctor makes is the one anybody gets on that computer without asking.
         const fresh = await rt.workspaces.create({ project: project.id, name: `doctor-${now.toString(36)}` });
-        made = fresh.id;
+        // A project folder is every thread's of that project, so it is read and never taken away.
+        if (!runsInFolder(workspaceKind(fresh))) made = fresh.id;
         return { view: fresh, project };
       },
-      w => `${w.view.name} on ${w.project.name}`,
+      w => (made === undefined ? `${w.project.name}'s folder, ${w.project.path}` : `${w.view.name} on ${w.project.name}`),
     );
 
     await timings.time(
@@ -1720,14 +1718,16 @@ export async function computerDoctor(rt: DoctorRuntime, io: CliIO, computer: Pla
       note => note,
     );
 
-    await timings.time(
-      "deleted",
-      async () => {
-        await rt.workspaces.delete(made!);
-        made = undefined;
-      },
-      () => `the workspace this run made on ${computer.name} is gone`,
-    );
+    if (made !== undefined) {
+      await timings.time(
+        "deleted",
+        async () => {
+          await rt.workspaces.delete(made!);
+          made = undefined;
+        },
+        () => `the workspace this run made on ${computer.name} is gone`,
+      );
+    }
   } catch (e) {
     failed = e instanceof Error ? e.message : String(e);
     if (made !== undefined) await rt.workspaces.delete(made).catch(() => {});
@@ -1738,7 +1738,7 @@ export async function computerDoctor(rt: DoctorRuntime, io: CliIO, computer: Pla
     io.error(`\nDOCTOR FAIL: ${computer.name}: ${failed}`);
     return 1;
   }
-  io.log(`\nDOCTOR PASS: ${computer.name} answers, a workspace was made there, the recipe's tools answered inside it and it is gone again.`);
+  io.log(`\nDOCTOR PASS: ${computer.name} answers and the recipe's tools answered where its threads run.`);
   return 0;
 }
 

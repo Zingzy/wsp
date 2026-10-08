@@ -4,7 +4,7 @@
 // cannot take says so with `applies` and is not drawn at all; `refusal` is for
 // what this object could take and cannot right now.
 import { CopyIcon, FolderOutputIcon, GlobeIcon, GitForkIcon, GitPullRequestArrowIcon, MessageSquarePlusIcon, PauseIcon, PencilIcon, PlayIcon, RefreshCwIcon, SquareIcon, SquareTerminalIcon, Trash2Icon } from "lucide-react";
-import { actionRefusal, goneRoadRefusal, isBilling, kindWords, machineWord, needsRebuild, undrivenRefusal, workspaceKind, workspaceState, type AbsentComputer, type MachineState, type PlaceView, type ReachState, type WorkspaceKind, type WorkspacePhase, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { actionRefusal, folderOnJoined, goneRoadRefusal, isBilling, kindWords, machineWord, needsRebuild, undrivenRefusal, workspaceKind, workspaceState, type AbsentComputer, type MachineState, type PlaceView, type ReachState, type WorkspaceKind, type WorkspacePhase, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import {
   BRING_BACK_HINT,
   CLIENT_CANNOT_DELETE,
@@ -195,6 +195,8 @@ export const workspaceActions: ReadonlyArray<ActionEntry<WorkspaceTarget, Worksp
     rowLabel: target => rowVerb("Bring back", target.displayName),
     buttonWord: () => WORKSPACE_WORDS.bringBack,
     hint: () => BRING_BACK_HINT,
+    // A folder on a computer the person joined is their own checkout there, which nothing of wsp's brings back.
+    applies: target => !folderOnJoined(target.kind),
     // The daemon inside the workspace is what pushes, so the machine has to be running; the runtime refuses the
     // base branch and a workspace with nothing ahead in its own sentence, which lands in the toast.
     refusal: (target, verbs) => (verbs.bringBack === undefined ? WHERE_WORDS.notYet : (target.absent?.sentence ?? actionRefusal(stateOf(target), "bring back"))),
@@ -206,6 +208,7 @@ export const workspaceActions: ReadonlyArray<ActionEntry<WorkspaceTarget, Worksp
     icon: () => FolderOutputIcon,
     searchTerms: ["export project", "export folder", "download", "bring home"],
     title: () => WORKSPACE_WORDS.exportProject,
+    applies: target => !folderOnJoined(target.kind),
     refusal: (target, verbs) => (dead(target) ? PROJECTS_WAIT : verbs.exportProject === undefined ? CLIENT_CANNOT_EXPORT : null),
     run: (target, verbs) => verbs.exportProject?.(target.id),
   },

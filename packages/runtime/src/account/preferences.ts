@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { homedir } from "node:os";
+import { CATALOG_AGENTS } from "@wsp/catalog";
 import { type Preferences, type PreferencesPatch, type Caller, THIS_COMPUTER, isLocalWorkspace, applyPreferencesPatch, serverIconsLeftLine, homeShortened, labsFromEnv, noAdapterLine, preferencesFrom, bareNoSuchProjectLine, absentComputer, HERE_PLACE_ID, accessRefusal, modelIdRefusal, setupView, type AccessChoice } from "@wsp/protocol";
 import { agentsReads, type ServerIcons } from "../agents-read.js";
 import { keyOf } from "../agent-setup.js";
@@ -85,8 +86,16 @@ export function preferencesArea(ctx: RuntimeContext): PreferencesArea {
     workspace: async (id, origin) => {
       const entry = await ctx.entryOf(id, origin);
       const project = ctx.projectHeld(entry.record.project);
-      return { name: entry.record.name, phase: entry.record.phase, local: isLocalWorkspace(entry.record), machine: entry.machine, project: { id: project.id, name: project.name, path: ctx.checkoutOf(entry.record) } };
+      const local = isLocalWorkspace(entry.record);
+      const stores = Object.fromEntries(
+        CATALOG_AGENTS.flatMap(a => {
+          const folder = local || a.stateHomeEnv === undefined ? undefined : ctx.threadEnv(entry, a.id)[a.stateHomeEnv];
+          return folder === undefined ? [] : [[a.id, folder]];
+        }),
+      );
+      return { name: entry.record.name, phase: entry.record.phase, local, machine: entry.machine, project: { id: project.id, name: project.name, path: ctx.checkoutOf(entry.record) }, stores };
     },
+    placeStores: ctx.placeStores,
     // A project's folder on the computer holding it: the checkout the add left there, else where it already sits.
     projects: async placeId => (await ctx.ready(), [...projectsHeld.values()].filter(p => p.computer === placeId).map(p => ({ id: p.id, name: p.name, path: p.checkout ?? p.path }))),
     ...(opts.agentsActs !== undefined ? { acts: opts.agentsActs } : {}),

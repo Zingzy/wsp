@@ -19,6 +19,7 @@ pub struct Turns {
     pub stopped: HashMap<String, String>,
     pub stop_under_one: String,
     pub stop_under_some: String,
+    pub stop_left: String,
     pub stopped_task: HashMap<String, String>,
     pub stop_task_said: String,
     pub renamed: HashMap<String, String>,

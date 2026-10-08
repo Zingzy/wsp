@@ -11,7 +11,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import type { HarnessAdapterFactory } from "../../runtime/src/runtime.js";
 import type { PlaceWiring } from "../../runtime/src/places.js";
 import type { Store } from "../../runtime/src/store.js";
-import { ctx, sockets, serving, code, join as joinHost, forks, placesOf } from "../../runtime/test/places-fixture.js";
+import { ctx, sockets, serving, code, join as joinHost, forks, placesOf, asRoot, ROOT_LOGIN } from "../../runtime/test/places-fixture.js";
 import { report } from "../../runtime/test/place-join.js";
 import { projectOn } from "../../runtime/test/stub-backend.js";
 import { WsClient } from "../../runtime/test/ws-client.js";
@@ -65,12 +65,12 @@ async function wsp(...argv: string[]): Promise<{ code: number; lines: string[]; 
 /** A host holding a computer added as spoo, with a project, a workspace and a thread on it, and a second computer. */
 async function hostWithSpoo(road: { runOver?: PlaceWiring["runOver"]; back?: PlaceWiring["back"]; dialWaitMs?: number } = {}) {
   const { hostKey, store } = await serving({ provider: { id: "solari", rateUsdPerHour: 0.11 }, adapters: { claude: answers }, ...road });
-  const spoo = await joinHost(hostKey, { code: await code(), name: "spoo", report: report("spoo", { daemonVersion: DAEMON_VERSION }), answers: c => void forks(c) });
+  const spoo = await joinHost(hostKey, { code: await code(), name: "spoo", report: report("spoo", { daemonVersion: DAEMON_VERSION, login: ROOT_LOGIN }), answers: c => void forks(c, undefined, asRoot) });
   sockets.push(spoo.client.ws);
   const other = await joinHost(hostKey, { code: await code(), name: "attic", report: report("attic") });
   sockets.push(other.client.ws);
   const project = await projectOn(ctx.runtime!, "spoo", undefined, { name: "spoo-api" });
-  const made = await ctx.runtime!.workspaces.create({ project: project.id, golden: "snap_g", name: "work" });
+  const made = await ctx.runtime!.workspaces.create({ project: project.id, name: "work" });
   await (await ctx.runtime!.sessions.start(made.id, { prompt: "look around", harness: "claude" })).finished;
   return { store, hostKey, spoo: { ...spoo, placeView: (await placesOf()).find(p => p.id === spoo.placeId)! }, other, project, made };
 }
@@ -193,7 +193,7 @@ describe("wsp computers set --ssh", () => {
     const set = await wsp("computers", "set", "spoo", "--name", "hetzner", "--ssh", "root@hetzner");
     expect(set.code, set.errors.join("\n")).toBe(0);
     expect(set.lines.join("\n").split("\n")).toEqual(["spoo is hetzner now", "hetzner is reached over ssh as root@hetzner from now"]);
-    expect(road.asked).toEqual([{ ssh: "root@hetzner", script: heldPlaceScript("/home/maya") }]);
+    expect(road.asked).toEqual([{ ssh: "root@hetzner", script: heldPlaceScript(ROOT_LOGIN.HOME) }]);
     expect(await roadOf(store, spoo.placeId)).toEqual({ ssh: "root@hetzner", back: { boxPort: 13758 } });
     expect(road.held).toEqual(["release root@spoo", "hold root@hetzner"]);
     expect(((await wsp("computers", "--json")).json()["computers"] as PlaceView[]).find(p => p.id === spoo.placeId)).toMatchObject({ name: "hetzner" });

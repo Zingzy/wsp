@@ -3,6 +3,7 @@
 // resolves a registry takes these, and a surface with its own confirmation
 // (the sidebar's forget dialog) puts its opener in place of the default.
 import { useMemo } from "react";
+import { addNotice } from "../notices/store.js";
 import { useStore } from "../protocol/store.js";
 import { useRightPanelStore } from "../rightPanelStore.js";
 import { openNewThread } from "../shell/NewThreadPicks.js";
@@ -70,7 +71,8 @@ export function useThreadVerbs(): ThreadVerbs {
         stop === undefined
           ? undefined
           : async sessionId => {
-              await stop(sessionId);
+              const { left } = await stop(sessionId);
+              if (left !== undefined) addNotice({ kind: "error", text: left });
             },
       forget: canForget ? thread => void forgetThread(thread) : undefined,
       settle: canSettle ? settleThreads : undefined,

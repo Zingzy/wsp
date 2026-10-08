@@ -43,7 +43,8 @@ import {
   type WorkspaceSize,
   type PlaceProveRequest,
 } from "@wsp/protocol";
-import type { EngineStep, ExecResult, Machine, MachineBackend, ProvisionPlan, ProvisionStage, SetupRun } from "@wsp/engine";
+import type { PaneForwards } from "./pane-ports.js";
+import type { EngineStep, ExecResult, Machine, MachineBackend, PlaceFolderMachine, ProvisionOn, ProvisionPlan, ProvisionStage, SetupRun } from "@wsp/engine";
 import type { WebSocket } from "ws";
 import type { DeviceDoor } from "../devices.js";
 import type { HereDaemon, PlaceBackends } from "../runtime.js";
@@ -220,7 +221,7 @@ export interface PlaceProvisioner {
   /** `only` holds a sync to the steps it runs, so a plan for those alone reads no more of this computer than they need. */
   setup(picks: RecipeFile, on: { home: string }, only?: ReadonlySet<PlaceSetupStep>): Promise<ProvisionPlan>;
   floor(machine: Machine, on: { home: string }, stage: ProvisionStage): Promise<PlaceProvisionRow[]>;
-  step(machine: Machine, plan: ProvisionPlan, step: EngineStep, run: SetupRun, stage: ProvisionStage, on: { home: string }): Promise<PlaceProvisionRow[]>;
+  step(machine: Machine, plan: ProvisionPlan, step: EngineStep, run: SetupRun, stage: ProvisionStage, on: ProvisionOn): Promise<PlaceProvisionRow[]>;
   /** What taking rows out of a computer's picks runs there, planned off the picks as they were. Absent, a row taken
    * out of a recipe stays where it is. */
   undo?(before: RecipeFile, removed: readonly { kind: RecipeKind; name: string }[], on: { home: string }): Promise<PlaceUndo[]>;
@@ -434,6 +435,8 @@ export interface PlaceDoorOptions {
    * Absent, nothing syncs. */
   recipes?: () => RecipeResolver | undefined;
   now?: () => number;
+  /** Runs fn once after ms, on the runtime's clock; the returned function cancels it. Unref'd timers by default. */
+  schedule?: (fn: () => void, ms: number) => () => void;
 }
 
 /** A saved recipe resolved against this computer now: its file, what this computer has for each row, the hash. */
@@ -491,6 +494,13 @@ export interface PlaceDoor {
    * place that is not connected the backend is still answered, so a record standing on it can be held without a
    * round trip, and every call on it rejects with PlaceAbsentError. */
   backendOf(placeId: string): MachineBackend | undefined;
+  /** A computer the person joined as the threads in a folder on it run on: one machine that is always there, every
+   * command run as the owner of the home it was joined with, and that home. Answered without a read, from the
+   * record, so a thread's record is held while the computer is away and every call on it then rejects with
+   * PlaceAbsentError. Nothing for a place that is no computer this host holds. */
+  folderComputer(placeId: string): { machine: PlaceFolderMachine; home: string; shape: { cpu: number; memMb: number }; tools: boolean } | undefined;
+  /** Whether a place is a computer the person joined, which is what makes a project on it a folder there. */
+  joined(placeId: string): boolean;
   /** The same, asked of the place itself where this host has not heard yet: one frame, remembered on the record, so
    * every road after it is answered without one. Refuses with placeForksNowhereLine on a computer that offers no
    * backend at all. */
@@ -511,6 +521,9 @@ export interface PlaceDoor {
    * without a read of the store, since every launch on that computer asks it. Nothing for a place this host holds
    * no record of and for a computer whose daemon lists no logins. */
   signInsAt(placeId: string): Record<string, AgentSignInState> | undefined;
+  /** Whether GitHub on that computer signs in from this host's vault: the person picked the vault for it there and
+   * its row says gh took the token. Answered without a read, since every launch on that computer asks it. */
+  githubFromVault(placeId: string): boolean;
   /** An agent's own sign-in on that computer landed, as the tool's status there said: the file its shared login
    * writes is taken as listed, so every word read before that computer's next report says signed in. */
   loginLanded(placeId: string, agent: string): Promise<void>;
@@ -521,7 +534,11 @@ export interface PlaceDoor {
   /** A port on this computer's loopback carried to one port on the place's own, for as long as this host runs: the
    * place's own daemon port and every fork's daemon port ride the same code. The same pair answers the same local
    * port every time, and the listener stays bound while the link is down, so nothing cached goes stale. */
-  forward(placeId: string, placePort: number): Promise<{ localPort: number }>;
+  /** With pane, a port a Browser pane opens for that workspace: the same number on this computer where it is free,
+   * else the first free one above it, on both loopback families, standing while the pane asks for it (pane-ports.ts). */
+  forward(placeId: string, placePort: number, o?: { pane?: { workspaceId: string; name: string } }): Promise<{ localPort: number }>;
+  /** The ports Browser panes opened, as the app lists and stops them beside the relay's forwards. */
+  readonly paneForwards: PaneForwards;
   /** The place a person's word names: an id, a name, or this computer itself, which is answered with no id since
    * the host's own backend is what a fork there lands on. Refuses with noSuchPlaceRefusal naming what is held. */
   placeFor(word: string): Promise<{ placeId?: string }>;

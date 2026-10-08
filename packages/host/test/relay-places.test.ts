@@ -93,7 +93,16 @@ function placeRuntime(box: ReturnType<typeof joinedComputer>) {
   const rt = {
     events: { on: (_type: string, fn: (e: EventUnion) => void) => (listeners.add(fn), () => listeners.delete(fn)) },
     backend: { capabilities: { callbackRelay: false } },
-    workspaces: { list: async () => [] },
+    workspaces: {
+      list: async () => [],
+      // A folder on spoo, a folder on another computer, and a workspace on spoo that is no folder.
+      get: async (id: string) => {
+        const at: Record<string, { kind: string; computer: string }> = { ws_here: { kind: "place", computer: "pl_1" }, ws_other: { kind: "place", computer: "pl_2" }, ws_made: { kind: "cloud", computer: "pl_1" } };
+        const w = at[id];
+        if (w === undefined) throw new Error(`no workspace ${id}`);
+        return { id, kind: w.kind, project: { id: "pr_1", name: "spoo-ts", path: "/root/spoo-ts", computer: w.computer } };
+      },
+    },
     places: {
       list: async () => [
         { id: "here", name: "this Mac", kind: "computer" },
@@ -141,16 +150,17 @@ describe("the callback relay on a joined computer", () => {
     const { rt, emit, forwards } = placeRuntime(box);
     const lines: string[] = [];
     const guestEvents: string[] = [];
+    const guestLinks: { workspaceId: string; admits?: (workspaceId: string) => Promise<boolean> }[] = [];
     relay = startCallbackRelay({
       runtime: rt,
       openUrl: async () => true,
       log: l => void lines.push(l),
       places: true,
       listenHosts: ["127.0.0.1"],
-      guest: { event: (_l: unknown, e: { type: string }) => void guestEvents.push(e.type), closeAll: () => {} } as never,
+      guest: { event: (l: (typeof guestLinks)[number], e: { type: string }) => void (guestLinks.push(l), guestEvents.push(e.type)), closeAll: () => {} } as never,
     });
     await until(() => box.ops.some(o => o.op === "ports.watch"));
-    return { h, port, second, box, emit, forwards, lines, guestEvents };
+    return { h, port, second, box, emit, forwards, lines, guestEvents, guestLinks };
   }
 
   it("listens on this computer for the port a page opened there names and carries the one callback to the harness there, logging no address", async () => {
@@ -166,15 +176,24 @@ describe("the callback relay on a joined computer", () => {
     expect(lines.join("\n")).not.toMatch(/THECODE|state=S|redirect_uri/);
   });
 
-  it("holds nothing of that computer's workspaces: no guest watch, no guest session, no printed local URL forwarded", async () => {
-    const { box, guestEvents } = await setup();
+  it("watches the sessions of the threads running on that computer itself, and takes none of a workspace it runs and no printed local URL", async () => {
+    const { box, guestEvents, guestLinks } = await setup();
     const other = await freePort();
+    await until(() => box.ops.some(o => o.op === "guest.watch"));
     box.push({ type: "guest.opened", session: "g1", life: "life-1", kind: "cli", token: "dev-1.tok", argv: ["threads"], cwd: "/root", machineId: "k1" });
     box.push({ type: "localhost.url", port: other });
+    box.push({ type: "guest.opened", session: "g2", life: "life-1", kind: "mcp", token: "dev-2.tok", argv: ["mcp"], cwd: "/root/spoo-ts" });
+    await until(() => guestEvents.length > 0);
     await new Promise(r => setTimeout(r, 50));
-    expect(box.ops.map(o => o.op)).not.toContain("guest.watch");
-    expect(guestEvents).toEqual([]);
+    expect(guestEvents).toEqual(["guest.opened"]);
     expect(relay!.list()).toEqual([]);
+    // The computer's own link carries a thread in any folder on it, and nothing else.
+    const link = guestLinks[0]!;
+    expect(link.workspaceId).toBe("pl_1");
+    expect(await link.admits!("ws_here")).toBe(true);
+    expect(await link.admits!("ws_other")).toBe(false);
+    expect(await link.admits!("ws_made")).toBe(false);
+    expect(await link.admits!("ws_gone")).toBe(false);
   });
 
   it("arms a sign-in's forward from the page it saw, says when this computer cannot listen, and carries a landed address to that port alone", async () => {
@@ -213,6 +232,20 @@ describe("the callback relay on a joined computer", () => {
     emit({ type: "place.present", placeId: "pl_1", from: "10.0.0.2" } as EventUnion);
     expect(await landed).toContain("signed in");
     emit({ type: "place.removed", placeId: "pl_1" } as EventUnion);
+    await until(() => relay!.list().length === 0);
+  });
+
+  it("reads its sign-in's listener off the link's own port watch, never off a watch a pane named on that link", async () => {
+    const { port, box, forwards } = await setup();
+    forwards()!.open({ placeId: "pl_1" });
+    box.push({ type: "browser.open", url: AUTH(port), port });
+    await until(() => relay!.list().length === 1);
+    box.push({ type: "port.open", port });
+    // A folder's watch on the same link losing sight of the port says nothing about the sign-in's listener.
+    box.push({ type: "port.close", port, left: true, watch: "ws_a" });
+    await new Promise(r => setTimeout(r, 50));
+    expect(relay!.list().map(f => f.port)).toEqual([port]);
+    box.push({ type: "port.close", port, exited: true });
     await until(() => relay!.list().length === 0);
   });
 

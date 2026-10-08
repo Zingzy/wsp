@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { createHash, randomBytes } from "node:crypto";
 import { MachineUnreachableError, RestoreUnfinishedError, MoveUnansweredError, ResumeUnansweredError, CREATED_AT_LABEL, GOLDEN_LABEL, NAME_LABEL, OWNER_LABEL, WORKSPACE_LABEL, WSP_LABEL, Workspace, importInto, isMissing, NapRefusedError, StopRefusedError, killUntilGone, readGone, type ExecResult, type Machine, type MachineBackend, type MachineKind, type MachineShape, type MachineSpec, type MachineState, type RunOptions, type WspError, type WorkspaceHooks, type WorkspacePhase as EnginePhase, applyMachineContext, DiskSyncError, syncDisk } from "@wsp/engine";
-import { type WorkspacePhase, goneRefusal, notFoundRefusal, noWorkspaceRefusal, noCommandsYetLine, WAKE_STOPPED_UP, type WorkspaceSize, type WorkspaceView, settingFor, IDLE_REASON, ALREADY_RUNNING, goldenImage, goneWords, HOSTNAME_KEPT, hostnameSetLine, NOT_GONE, GONE_UNCHECKED, RESUME_UNANSWERED, copiesFolder, placeHoldsNoImageLine } from "@wsp/protocol";
+import { type WorkspacePhase, goneRefusal, notFoundRefusal, noWorkspaceRefusal, noCommandsYetLine, WAKE_STOPPED_UP, type WorkspaceSize, type WorkspaceView, settingFor, IDLE_REASON, ALREADY_RUNNING, goldenImage, goneWords, HOSTNAME_KEPT, hostnameSetLine, NOT_GONE, GONE_UNCHECKED, RESUME_UNANSWERED, runsInFolder, placeHoldsNoImageLine } from "@wsp/protocol";
 import { templateHost } from "../host-id.js";
 import { backstopMs, createIdlePolicy } from "../idle.js";
 import { POLL_INTERVAL_MS, phaseLeavingGone, providerSaid } from "../status.js";
@@ -397,7 +397,7 @@ export function machinesArea(ctx: RuntimeContext): MachinesArea {
     live.delete(id);
     // A folder on this computer goes from its daemon's roots file with its record, since the computer and the
     // folder both stay; a fork's machine goes with its record and takes its file along.
-    if (going !== undefined && copiesFolder(going.record.kind)) await ctx.writeDaemonRoots(going);
+    if (going !== undefined && runsInFolder(going.record.kind)) await ctx.writeDaemonRoots(going);
     ctx.revivedAt.delete(id);
     ctx.unreadAt.delete(id);
     ctx.unreached.delete(id);

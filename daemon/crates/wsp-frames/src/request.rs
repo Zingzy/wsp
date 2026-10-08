@@ -5,7 +5,7 @@ use std::num::{NonZeroU16, NonZeroU32};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::validate::{bounded, bounded_opt, capped_list, exec_timeout, sha256_hex, upload_word};
+use crate::validate::{bounded, bounded_opt, capped_list, cgroup_paths, exec_timeout, sha256_hex, upload_word, watch_name};
 use crate::{
     FsReadEncoding, FsSearchMode, GitDiffScope, GuestKind, MergeMethod, ProcSignal, ReactionContent, RequestId, ReviewEvent, ReviewSide,
     UsageLogFormat,
@@ -134,6 +134,16 @@ pub enum DaemonOp {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[ts(optional)]
         folder: Option<String>,
+        /// With roots, cgroups whose processes are the watch's too, by the path /proc/[pid]/cgroup names: a thread's
+        /// on a computer the person joined, which holds what it started however far it detached.
+        #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "cgroup_paths")]
+        #[ts(optional)]
+        cgroups: Option<Vec<String>>,
+        /// A name for this watch on the socket, so one socket holds a watch per name, each with its own roots and
+        /// folder, and every port event it sends carries the name. Without one the watch is the socket's own.
+        #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "watch_name")]
+        #[ts(optional)]
+        watch: Option<String>,
     },
     #[serde(rename = "manifest.get")]
     ManifestGet,

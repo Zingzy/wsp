@@ -272,7 +272,6 @@ const ALLOWED: Record<Rule, readonly Allowed[]> = {
     { text: "expect(took).toBeLessThan(50);", count: 1, why: "tight: a start in the project folder answers under 50 ms, which a worktree's copy would not" },
     { text: "expect(Date.now() - asked).toBeLessThan(1_000);", count: 2, why: "an interrupt of a kept agent ends its turn under 1 s rather than at the stop's grace" },
     { text: "expect(Date.now() - attachedAt).toBeLessThan(WALL_MS * 0.9);", count: 1, why: "a cut at the idle or wall limit lands under 5 s or before the wall, not at the child's 30 s" },
-    { text: "expect(Date.now() - asked).toBeLessThan(50);", count: 2, why: "tight: a frame at an absent computer is refused under 50 ms where the relink wait is 400 ms or 50 s" },
     { text: "expect(Date.now() - at).toBeGreaterThanOrEqual(300 - 10);", count: 1, why: "a lost link waits out its 300 ms relink wait first; a lower bound with 10 ms for the clocks' drift, which load only lengthens" },
     { text: "expect(took).toBeLessThan(1_500);", count: 1, why: "an 8 MB frame is refused under 1.5 s rather than parsed whole" },
     { text: "expect(took).toBeLessThan(1000);", count: 1, why: "a search answers under 1 s; a scan of every transcript takes longer" },

@@ -41,6 +41,11 @@ describe("frameSrc", () => {
     expect(frameSrc(ROUTE, "/about?x=1")).toBe("https://m1-3000.preview.example/about?pt_token=edge&x=1");
   });
 
+  it("on a route with no query of its own, as a port forwarded to this computer is, keeps the page's query whole", () => {
+    expect(frameSrc("http://localhost:8080/", "/app?x=1&y=2")).toBe("http://localhost:8080/app?x=1&y=2");
+    expect(frameSrc("http://localhost:8080/", "/app")).toBe("http://localhost:8080/app");
+  });
+
   it("carries a fragment after the query", () => {
     expect(frameSrc(ROUTE, "/docs#install")).toBe("https://m1-3000.preview.example/docs?pt_token=edge#install");
   });

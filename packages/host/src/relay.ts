@@ -12,7 +12,7 @@ import { spawn } from "node:child_process";
 import { createServer, type Server, type Socket } from "node:net";
 import { platform } from "node:os";
 import { PassThrough } from "node:stream";
-import { DaemonEvent, LOOPBACK, SSH_BEHIND_KIND, SshStartReply, sshBehindLine, unknownOpLine, callbackPortOf, hostOf, isHttpUrl, isJoinedComputer, isLoopback, type AgentsTarget, type DaemonReachView, type ForwardEvent, type GoldenBuilderView, type PortForward } from "@wsp/protocol";
+import { DaemonEvent, FORWARD_MAX_PER_TARGET, LOOPBACK, runsInFolder, SSH_BEHIND_KIND, SshStartReply, sshBehindLine, unknownOpLine, callbackPortOf, hostOf, isHttpUrl, isJoinedComputer, isLoopback, type AgentsTarget, type DaemonReachView, type ForwardEvent, type GoldenBuilderView, type PortForward, type WorkspaceKind } from "@wsp/protocol";
 import { plumbTunnel, realClock, tunnelFrame, type Clock, type DaemonChannel, type EventUnion, type Runtime, type SignInForward } from "@wsp/runtime";
 import { DAEMON_CONNECT_TIMEOUT_MS, connectDaemonSocket, type ConnectOptions, type DaemonSocket } from "./doctor.js";
 import type { GuestDoor } from "./guest.js";
@@ -112,8 +112,7 @@ export const RELAY_WINDOW_MS = 3 * 60_000;
 export const RELAY_CAP_MS = 15 * 60_000;
 /** A url forward with no connection and no bytes for this long is one nobody is using. */
 export const FORWARD_IDLE_MS = 10 * 60_000;
-/** url forwards per workspace: the machine names the ports, so its say over this computer's loopback is bounded. */
-export const FORWARD_MAX_PER_TARGET = 16;
+export { FORWARD_MAX_PER_TARGET };
 /** The longest pause between redials of a dropped daemon link, before jitter. */
 export const REDIAL_CEILING_MS = 30_000;
 /** A callback that lands while the link is down waits this long for it: the longest jittered redial pause plus the dial's
@@ -136,8 +135,12 @@ interface Target {
   /** The forwards this link opens. A place's daemon watches the whole computer, and every workspace on it too, so a
    * printed local URL there is no one sign-in's and is never carried here. */
   kinds: readonly ForwardKind[];
-  /** Whether the guest sessions on the far end are this link's. A place's are its workspaces', each on its own link. */
+  /** Whether the guest sessions on the far end are this link's: a machine's own, a workspace's where its computer
+   * answers for it, and on a place's own link those of the threads running on that computer itself. */
   guests: boolean;
+  /** Whether a thread of that workspace opens its sessions on this link; the target's own workspace alone where
+   * absent. A computer's own link carries the threads of every folder on it. */
+  admits?: (workspaceId: string) => Promise<boolean>;
   /** Whether a callback forward opens only while a sign-in on the far end runs, and closes when the last one ends. Anything
    * on a computer that can post to its daemon's socket could otherwise hold a port on this computer's loopback. */
   armedBySignIn: boolean;
@@ -149,7 +152,9 @@ interface Target {
    * carry another workspace's listener to this computer's loopback. */
   ownPorts: boolean;
   /** The workspace as the computer answering for it names it on every frame it relays up, where the far end
-   * answers for more than one; what tells this target's sessions from another workspace's on the one link. */
+   * answers for more than one; what tells this target's sessions from another workspace's on the one link. None
+   * where a session names no workspace: a machine's own daemon, and the computer's own link, whose sessions are
+   * the threads running on that computer itself. */
   machineId?: string;
 }
 
@@ -645,7 +650,7 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
 
   const sshPort = async (workspaceId: string, authorizedKey: string): Promise<{ port: number; hostKey: string }> => {
     const link = links.get(workspaceId);
-    if (link === undefined || !link.target.guests) throw new NoSshLinkError(`${workspaceId}: this host holds no link to that workspace`);
+    if (link === undefined || link.target.noun !== "workspace") throw new NoSshLinkError(`${workspaceId}: this host holds no link to that workspace`);
     const { port: far, hostKey } = sshStarted(link.target.name, await downward(link, "ssh.start", { authorizedKey }));
     const held = sshRoads.get(workspaceId);
     if (held !== undefined && held.far === far) {
@@ -694,6 +699,8 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
       o.log(`${link.target.name}: ignored ${e.type === "browser.open" ? "a sign-in page" : "a callback port"} from the ${link.target.noun}; no sign-in runs there`);
       return;
     }
+    // A watch a pane named on a computer's one link is that pane's; this link's own watch names none.
+    if ((e.type === "port.open" || e.type === "port.close") && e.watch !== undefined) return;
     switch (e.type) {
       case "port.open": {
         link.ports.add(e.port);
@@ -735,9 +742,10 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
       case "guest.message":
       case "guest.closed":
         // A computer that answers for many workspaces names the one each session was opened inside; a session of
-        // another workspace is that workspace's link to hand over, and this one never opens or ends it.
-        if (!link.target.guests || (link.target.machineId !== undefined && e.machineId !== link.target.machineId)) return;
-        o.guest?.event({ workspaceId: link.target.id, request: (op, params) => downward(link, op, params) }, e);
+        // another workspace is that workspace's link to hand over, and this one never opens or ends it. One that
+        // names none is the computer's own, which its own link carries.
+        if (!link.target.guests || e.machineId !== link.target.machineId) return;
+        o.guest?.event({ workspaceId: link.target.id, name: link.target.name, request: (op, params) => downward(link, op, params), ...(link.target.admits !== undefined ? { admits: link.target.admits } : {}) }, e);
         return;
       case "tunnel.data":
       case "tunnel.end":
@@ -931,13 +939,15 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
 
   /** A workspace whose computer answers its daemon frames: the link is the channel the runtime holds over that
    * computer's own link, so nothing is dialled and nothing is beaten, and the sessions on it are told apart by
-   * the workspace the computer stamps on every frame it relays. */
-  const servedTarget = (id: string, name: string, machineId: string): Target => ({
+   * the workspace the computer stamps on every frame it relays. A folder on that computer takes none: its threads'
+   * sessions name no workspace and ride the computer's own link, and a link of the folder's own that asked to
+   * watch first would be handed them and take none. */
+  const servedTarget = (id: string, name: string, machineId: string, guests: boolean): Target => ({
     id,
     name,
     noun: "workspace",
     kinds: workspaceKinds,
-    guests: true,
+    guests,
     armedBySignIn: false,
     machineId,
     ownPorts: false,
@@ -945,22 +955,28 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
   });
 
   /** The target for one running workspace, on whichever of the two roads its own runtime says it is on. */
-  const addWorkspace = (w: { id: string; name: string; machineId: string }): void => {
+  const addWorkspace = (w: { id: string; name: string; machineId: string; kind?: WorkspaceKind | undefined }): void => {
     if (closed || !holdsWorkspaces || links.has(w.id)) return;
     void rt.workspaces.servedByItsComputer(w.id).then(
-      served => add(served ? servedTarget(w.id, w.name, w.machineId) : dialled(w.id, w.name, () => rt.workspaces.daemonReach(w.id))),
+      served =>
+        add(served ? servedTarget(w.id, w.name, w.machineId, w.kind !== undefined && !runsInFolder(w.kind)) : dialled(w.id, w.name, () => rt.workspaces.daemonReach(w.id))),
       () => {},
     );
   };
 
   /** A computer this host holds as a place: the link is a channel over the socket that computer opened, so nothing is
-   * dialled, and what it carries here is a sign-in's callback and nothing else. */
+   * dialled, and what it carries here is a sign-in's callback and the wsp sessions of the threads running on that
+   * computer itself, for as long as the link is up, whichever thread opens one first. */
   const placeTarget = (id: string, name: string): Target => ({
     id,
     name,
     noun: "computer",
     kinds: ["callback"],
-    guests: false,
+    guests: true,
+    admits: async workspaceId => {
+      const w = await rt.workspaces.get(workspaceId).catch(() => undefined);
+      return w?.kind !== undefined && w.project.computer === id && runsInFolder(w.kind);
+    },
     armedBySignIn: true,
     ownPorts: true,
     open: async at => {

@@ -44,6 +44,7 @@ interface Call {
   command: string;
   env: Record<string, string>;
   input: readonly string[] | undefined;
+  secret?: { files?: Readonly<Record<string, string>> };
 }
 
 /** The tail read prints `tail` and ends with `tailCode`; the CLI's run prints `lines`, then ends with `exitCode`, or in
@@ -53,8 +54,8 @@ function scripted(lines: string[], opts: { exitCode?: number; hang?: boolean; ta
   const calls: Call[] = [];
   const order: string[] = [];
   const writes: string[] = [];
-  const factory: ExecStreamFactory = (command, { env, input }) => {
-    calls.push({ command, env, input });
+  const factory: ExecStreamFactory = (command, { env, input, secret }) => {
+    calls.push({ command, env, input, ...(secret !== undefined ? { secret } : {}) });
     const n = calls.length;
     order.push(`launch ${n}`);
     let end: (code: number | null) => void = () => {};
@@ -285,6 +286,19 @@ describe("the adapter's aside", () => {
     expect(exec.order.indexOf("exited 1")).toBeLessThan(exec.order.indexOf("launch 2"));
     expect(exec.order.indexOf("exited 2")).toBeLessThan(exec.order.indexOf("launch 3"));
     expect(exec.calls).toHaveLength(3);
+  });
+
+  it("hands the copy each server's value the thread's turns get, in a file of the run's on the flag a turn takes it on", async () => {
+    const exec = scripted([JSON.stringify(RESULT)]);
+    const entries = { tracker: { type: "http", url: "https://mcp.linear.app/mcp", headers: { Authorization: "Bearer lin_TESTONLY" } } };
+    await adapter(exec.factory).aside!({ session: SESSION, question: "what did I last ask?", cwd: "/root/spoo", serverValues: { entries } });
+    const call = exec.calls[1]!;
+    expect(call.secret).toEqual({ files: { WSP_MCP_VALUES: JSON.stringify({ mcpServers: entries }) } });
+    expect(call.command).toContain('--mcp-config "$WSP_MCP_VALUES"');
+    expect(call.command).not.toContain("lin_TESTONLY");
+    expect(JSON.stringify(call.env)).not.toContain("lin_TESTONLY");
+    // The tail read and the copy's removal carry none.
+    expect([exec.calls[0]!, exec.calls[2]!].map(c => c.secret)).toEqual([undefined, undefined]);
   });
 
   it("hands each piece of the answer on as the CLI writes it, and still answers the whole result", async () => {

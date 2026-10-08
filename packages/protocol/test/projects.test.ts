@@ -4,7 +4,7 @@
 // this computer belongs to: the command line, the runtime and the app all
 // read these here.
 import { describe, expect, it } from "vitest";
-import { cloneFailedLine, cloneUrlRefusal, noComputerForSourceLine, addedProjectLine, addedProjectOn, addingProjectLine, ADD_FORMS_LINE, projectSourceOf, computerNamed, folderName, HERE_PLACE_ID, hiddenFolder, isMacMachine, goldenForkName, homeShortened, kindWords, landsOn, MEMORY_KEPT_CLAUSE, cwdOutsideLine, noBranchesLine, ProjectGolden, projectNameOf, projectPathOn, projectRemovedOnComputerLine, projectsInPlace, type ProjectSource, type ProjectView, REGISTERING_LINE, registeredLine, registerTakesNoConsentLine, sameSourceRefusal, sourceKind, threadOpenedLine, workspaceLands, type WorkspaceProject, WorkspaceView } from "../src/index.js";
+import { cloneFailedLine, cloneUrlRefusal, noComputerForSourceLine, addedProjectLine, addedProjectOn, addingProjectLine, ADD_FORMS_LINE, projectSourceOf, computerNamed, folderName, HERE_PLACE_ID, hiddenFolder, isMacMachine, goldenForkName, homeShortened, kindWords, landsOn, MEMORY_KEPT_CLAUSE, cwdOutsideLine, noBranchesLine, ProjectGolden, projectNameOf, projectPathOn, projectLeftOnComputerLine, projectsInPlace, type ProjectSource, type ProjectView, REGISTERING_LINE, registeredLine, registerTakesNoConsentLine, sameSourceRefusal, sourceKind, threadOpenedLine, workspaceLands, type WorkspaceProject, WorkspaceView } from "../src/index.js";
 
 const spoo: WorkspaceProject = { name: "spoo", dest: "/root/spoo", importedAt: "2026-09-01T00:00:00Z", size: 1024 };
 const wsp: WorkspaceProject = { name: "wsp", dest: "/root/wsp", importedAt: "2026-09-02T00:00:00Z" };
@@ -145,17 +145,10 @@ describe("what a computer is called in a row", () => {
     expect(addingProjectLine("spoo-ts", { kind: "git", url: "https://github.com/dev/spoo.git" }, false)).toBe("spoo-ts from https://github.com/dev/spoo.git, nothing seeded.");
   });
 
-  it("the remove on a computer you own names the memory kept there only where a folder of it stands", () => {
+  it("the remove on a computer you joined leaves the project's folder there as it is, and says so", () => {
     // The clause has one home, which the tool describing the remove reads too.
     expect(MEMORY_KEPT_CLAUSE).toBe("the memory its agent keeps on that computer stays");
-    expect(projectRemovedOnComputerLine("spoo-landing", "spoo", "/wsp/projects/pr_1", true)).toBe(
-      "spoo-landing is no longer a project on spoo; the folder wsp kept for it there, /wsp/projects/pr_1, is gone with its checkout, and the memory its agent keeps on that computer stays",
-    );
-    // No agent ever ran there, so there is no memory on that computer to say anything about and the sentence
-    // ends at the checkout rather than naming a folder that is not there.
-    expect(projectRemovedOnComputerLine("spoo-landing", "spoo", "/wsp/projects/pr_1", false)).toBe(
-      "spoo-landing is no longer a project on spoo; the folder wsp kept for it there, /wsp/projects/pr_1, is gone with its checkout",
-    );
+    expect(projectLeftOnComputerLine("spoo-landing", "spoo", "/root/spoo-landing")).toBe("spoo-landing is no longer a project on spoo; its folder /root/spoo-landing stays there as it is");
   });
 });
 

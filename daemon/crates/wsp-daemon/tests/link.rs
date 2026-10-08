@@ -805,12 +805,21 @@ async fn answers_place_leave_with_what_the_sweep_took_and_then_ends_the_daemon()
             "the leave took {path}, outside its temp root"
         );
     }
-    // The sweep is the real one over that home: the place file, its key and the token are gone and named, and
-    // wsp's own folder goes last and whole, so nothing of wsp's is left under the home.
-    let swept =
-        json!([at.place_file.to_string_lossy(), at.place_key.to_string_lossy(), at.token_path.to_string_lossy(), at.wsp.to_string_lossy()]);
+    // The sweep is the real one over that home: the place file, its key, the token, and the door and the wsp the
+    // daemon wrote for this computer's threads are gone and named, and wsp's own folder goes last and whole, so
+    // nothing of wsp's is left under the home.
+    let shim = at.guest_bin.join("wsp");
+    let swept = json!([
+        at.place_file.to_string_lossy(),
+        at.place_key.to_string_lossy(),
+        at.token_path.to_string_lossy(),
+        at.guest_socket.to_string_lossy(),
+        shim.to_string_lossy(),
+        at.guest_bin.to_string_lossy(),
+        at.wsp.to_string_lossy()
+    ]);
     assert_eq!(answer, json!({"id": 21, "ok": true, "swept": swept}));
-    for path in [&at.place_file, &at.place_key, &at.token_path, &at.wsp] {
+    for path in [&at.place_file, &at.place_key, &at.token_path, &at.guest_socket, &shim, &at.wsp] {
         assert!(!path.exists(), "{}", path.display());
     }
     assert_eq!(std::fs::read(machines).ok(), machines_before, "the leave touched this machine's own profile");
@@ -898,4 +907,81 @@ async fn a_rotation_of_this_computers_own_token_leaves_the_link_alone() {
     settled(200).await;
     let mut events = Vec::new();
     assert_eq!(ask(&mut held, 41, "ping", &mut events).await, json!({"id": 41, "ok": true}));
+}
+
+#[tokio::test]
+async fn a_thread_on_this_computer_opens_its_session_on_the_door_under_the_home_and_the_link_takes_it_when_it_watches() {
+    use std::os::unix::fs::PermissionsExt;
+    let key = place_pair();
+    let mut host = fake_place_host(HostOpts { key: Some(key), ..HostOpts::default() }).await;
+    let place = place_file(&[&host.url], &host.public_key, &place_pair().private_key_pem);
+    // The wsp the app or the install line keeps for the person on this login, which the daemon never writes over.
+    let persons = place.home.path().join(".wsp/bin/wsp");
+    std::fs::create_dir_all(persons.parent().unwrap()).unwrap();
+    std::fs::write(&persons, "#!/bin/sh\nexec '/opt/wsp/wsp' \"$@\"\n").unwrap();
+    let d = place_daemon(&place, |_| {}).await;
+    let mut held = host.held().await;
+    let at = place_daemon_paths(place.home.path());
+    assert_eq!(std::fs::read_to_string(&persons).unwrap(), "#!/bin/sh\nexec '/opt/wsp/wsp' \"$@\"\n");
+    // The wsp a thread here runs is two lines onto the binary serving this computer, in the place's own folder under
+    // the home, naming the door and no port.
+    let shim = std::fs::read_to_string(at.guest_bin.join("wsp")).unwrap();
+    assert_eq!(std::fs::metadata(at.guest_bin.join("wsp")).unwrap().permissions().mode() & 0o777, 0o755);
+    assert_eq!(std::fs::symlink_metadata(&at.guest_socket).unwrap().permissions().mode() & 0o777, 0o600);
+
+    // A thread's wsp opens its session and sends before the host has asked to watch anything.
+    let stream = tokio::net::UnixStream::connect(&at.guest_socket).await.unwrap();
+    let (mut guest, _) = tokio_tungstenite::client_async("ws://computer/", stream).await.unwrap();
+    let open = json!({"id": 2, "op": "guest.open", "kind": "mcp", "token": "dev-1.tok", "argv": ["mcp"], "cwd": "/root/spoo-ts"});
+    guest.send(Message::text(open.to_string())).await.unwrap();
+    assert_eq!(reply_with_id(&mut guest, 2).await["ok"], json!(true));
+    let message = json!({"jsonrpc": "2.0", "id": 1, "method": "initialize"});
+    guest.send(Message::text(json!({"id": 3, "op": "guest.send", "message": message}).to_string())).await.unwrap();
+    assert_eq!(reply_with_id(&mut guest, 3).await["ok"], json!(true));
+    // The door is a guest's, as a workspace's is: nothing of the computer is reached through it.
+    guest.send(Message::text(json!({"id": 4, "op": "exec", "cmd": "id"}).to_string())).await.unwrap();
+    assert_eq!(reply_with_id(&mut guest, 4).await, json!({"id": 4, "ok": false, "code": "forbidden", "error": words::NOT_ON_THIS_ROAD}));
+    // Nor the watch, which would hand this thread every other thread's sessions on this computer.
+    guest.send(Message::text(json!({"id": 5, "op": "guest.watch"}).to_string())).await.unwrap();
+    assert_eq!(reply_with_id(&mut guest, 5).await, json!({"id": 5, "ok": false, "code": "forbidden", "error": words::NOT_ON_THIS_ROAD}));
+    // The report the host read says these threads have the door.
+    d.until_logged(|l| l == words::link_linked(&host.url)).await;
+    let proof: PlaceProveRequest = serde_json::from_value(host.proofs.lock().unwrap()[0].clone()).unwrap();
+    assert_eq!((proof.report.wsp_door, proof.report.wsp_door_blocked), (Some(true), None));
+    // The shim names the unit the report does, read off this daemon's own cgroup, so its refusal names the restart.
+    let exe = std::env::current_exe().unwrap();
+    let unit = proof.report.daemon_unit.as_deref();
+    assert_eq!(shim, wsp_frames::computer_wsp_shim(&exe.to_string_lossy(), &at.guest_socket.to_string_lossy(), unit));
+
+    // The link watches and is handed the session whole, named to no workspace.
+    let mut events = Vec::new();
+    assert_eq!(ask(&mut held, 51, "guest.watch", &mut events).await["ok"], json!(true));
+    let guests: Vec<&Value> = events.iter().filter(|e| e["type"].as_str().is_some_and(|t| t.starts_with("guest."))).collect();
+    assert_eq!(guests.len(), 2, "{events:?}");
+    assert_eq!(guests[0]["type"], "guest.opened");
+    assert_eq!(guests[0]["token"], "dev-1.tok");
+    assert_eq!(guests[0]["cwd"], "/root/spoo-ts");
+    assert_eq!(guests[1]["type"], "guest.message");
+    assert_eq!(guests[1]["message"], message);
+    for event in guests {
+        assert!(event.get("machineId").is_none(), "{event}");
+    }
+}
+
+#[tokio::test]
+async fn a_door_this_computer_could_not_bind_is_said_in_the_report_the_host_reads() {
+    let key = place_pair();
+    let mut host = fake_place_host(HostOpts { key: Some(key), ..HostOpts::default() }).await;
+    let place = place_file(&[&host.url], &host.public_key, &place_pair().private_key_pem);
+    let at = place_daemon_paths(place.home.path());
+    // A folder where the socket goes: the bind cannot take the name.
+    std::fs::create_dir_all(at.guest_socket.join("held")).unwrap();
+    let d = place_daemon(&place, |_| {}).await;
+    host.held().await;
+    d.until_logged(|l| l == words::link_linked(&host.url)).await;
+    let proof: PlaceProveRequest = serde_json::from_value(host.proofs.lock().unwrap()[0].clone()).unwrap();
+    assert_eq!(proof.report.wsp_door, Some(false));
+    let why = proof.report.wsp_door_blocked.unwrap();
+    assert!(why.starts_with(&at.guest_socket.to_string_lossy().into_owned()), "{why}");
+    assert!(!at.guest_bin.join("wsp").exists(), "a wsp was written for a door that is not there");
 }

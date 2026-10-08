@@ -1346,3 +1346,29 @@ describe("a reader let go of while its poll is in flight", () => {
     expect(guest.childAlive()).toBe(true);
   });
 });
+
+describe("text a run reads that holds a value", () => {
+  it("lands in files of the run's own off the launch's input, the run handed the path, and no command and no environment of the run holds it", async () => {
+    const { machine, runDir, calls } = localGuest({ stdin: true });
+    const value = `lin_${randomBytes(8).toString("hex")}`;
+    const factory = machineExecStream(machine, { pollMs: 20, runDir });
+    // The mode through ls, since macOS's stat takes no -c.
+    const script = 'ls -l "$WSP_MCP_VALUES" | cut -c1-10; cat "$WSP_MCP_VALUES"; echo; read -r line; echo "got $line"; env | grep -c "^WSP_LAND" || true';
+    const stream = factory(script, { env: {}, input: [`seed ${value}`], secret: { files: { WSP_MCP_VALUES: `{"token":"${value}"}` }, input: true } });
+    const lines: string[] = [];
+    for await (const line of stream.lines) {
+      lines.push(line);
+      if (line === "0") stream.closeInput();
+    }
+    expect(lines).toEqual(["-rw-------", `{"token":"${value}"}`, `got seed ${value}`, "0"]);
+    expect(await stream.exited).toBe(0);
+    expect(calls.filter(cmd => cmd.includes(value))).toEqual([]);
+    expect(readdirSync(runDir)).toEqual([]);
+  });
+
+  it("is refused on a machine whose launch takes no input, before anything is started", () => {
+    const { machine, runDir, calls } = localGuest();
+    expect(() => machineExecStream(machine, { pollMs: 20, runDir })("true", { env: {}, secret: { files: { WSP_MCP_VALUES: "{}" } } })).toThrow("takes no input on its launch");
+    expect(calls).toEqual([]);
+  });
+});

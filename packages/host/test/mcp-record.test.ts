@@ -418,7 +418,8 @@ async function answeredLine(
   // A session from inside a machine is served as the host's guest kind serves it, on the launch's own variables alone.
   const guest = extra.guest === true;
   const answered = guest && verb !== undefined && GUEST_SERVED.skip(verb) ? undefined : extra.result;
-  const env = guest ? Object.fromEntries(Object.entries(extra.env ?? {}).filter(([key]) => GUEST_ENV.includes(key))) : (extra.env ?? {});
+  // The guest door opens no session without a token, and the session's launch always carries it.
+  const env = guest ? { [HOST_TOKEN_ENV]: "guest-token", ...Object.fromEntries(Object.entries(extra.env ?? {}).filter(([key]) => GUEST_ENV.includes(key))) } : (extra.env ?? {});
   const skip = (v: (typeof VERBS)[number]): boolean => (answered !== undefined && v === verb) || (guest && GUEST_SERVED.skip(v));
   // A server on this computer runs in some folder, as the binary does; one in no project reads the list and finds none.
   const server = mcpServer("/nonexistent/state.json", { env, dial, skip, ...(guest ? { elsewhere: GUEST_SERVED.elsewhere } : { cwd: tmpdir() }) });

@@ -545,6 +545,10 @@ export const PlaceView = z.object({
   /** Why nothing runs inside a copy there, off that computer's last report: its link stays up for the acts that
    * need no copy running. Absent while it runs workspaces. */
   blocked: z.string().optional(),
+  /** Why a thread on that computer itself is launched with no wsp tools, off its last report: its daemon could not
+   * open the door those threads reach the tools through. Absent where the door stands, and from a daemon older
+   * than the door, whose row reads behind. */
+  toolsBlocked: z.string().optional(),
   /** The copy of the image at this place while it is not standing: the stage sentence while a build runs there, the
    * reason after one stopped there. Absent once the copy stands, and on a place nothing was ever built at. */
   build: z.string().optional(),

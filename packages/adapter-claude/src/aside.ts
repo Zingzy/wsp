@@ -77,6 +77,8 @@ export interface AsideCommandOptions {
   fast?: boolean;
   /** The servers the thread's turns are handed. */
   mcpServers?: Readonly<Record<string, McpServerSpec>>;
+  /** The run's environment names a file of its servers with their values, as a turn's does. */
+  serverValues?: true;
   /** The folder the thread's turns keep their auto memory in. */
   memoryDir?: string;
   launch?: AgentLaunch;
@@ -92,7 +94,7 @@ export interface AsideCommandOptions {
  * and the CLI stops at two calls.
  */
 export function asideCommand(options: AsideCommandOptions): string {
-  const { session, fork, keep, configDir, cwd, model, effort, contextWindow, fast, mcpServers, memoryDir, launch } = options;
+  const { session, fork, keep, configDir, cwd, model, effort, contextWindow, fast, mcpServers, serverValues, memoryDir, launch } = options;
   if (!UUID_RE.test(fork)) throw new Error(`session identifier must be a UUID, got "${fork}"`);
   if (!Number.isSafeInteger(keep) || keep < 0) throw new Error(`a copy keeps a whole number of lines, got ${keep}`);
   const claude = buildCommand({
@@ -104,6 +106,7 @@ export function asideCommand(options: AsideCommandOptions): string {
     ...(contextWindow !== undefined ? { contextWindow } : {}),
     ...(fast === true ? { fast: true } : {}),
     ...(mcpServers !== undefined ? { mcpServers } : {}),
+    ...(serverValues === true ? { serverValues } : {}),
     ...(memoryDir !== undefined ? { memoryDir } : {}),
     ...(launch !== undefined ? { launch } : {}),
   });

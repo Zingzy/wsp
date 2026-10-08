@@ -9,5 +9,12 @@
     "pid": 123,
     "process": "node",
     "loopback": false
+  },
+  {
+    "type": "port.open",
+    "port": 8080,
+    "pid": 123,
+    "loopback": true,
+    "watch": "ws_a1"
   }
 ]

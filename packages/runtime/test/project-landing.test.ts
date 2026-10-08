@@ -9,8 +9,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DISK_SYNC_CMD } from "@wsp/engine";
-import { addedProjectOn, addingProjectLine, HERE_PLACE_ID, seedMemoryKeptLine, type AdapterEvent, type EventUnion, type MachineSpec, type ProjectAddEvent, type SeedChoice, type SeedPlan, type TurnResult } from "@wsp/protocol";
-import { MEMORY_KEPT_MARK, MEMORY_STANDS_MARK } from "../src/project-landing.js";
+import { addingProjectLine, HERE_PLACE_ID, seedMemoryKeptLine, type AdapterEvent, type EventUnion, type MachineSpec, type ProjectAddEvent, type SeedChoice, type SeedPlan, type TurnResult } from "@wsp/protocol";
+import { MEMORY_KEPT_MARK } from "../src/project-landing.js";
 import { copyKey, createRuntime, type HarnessAdapterFactory, type Runtime, type SeedWiring } from "../src/runtime.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { fakeLocal, missesFirstDelete, stubBackend, type StubBackend, type StubMachine } from "./stub-backend.js";
@@ -82,12 +82,8 @@ const TICKED: SeedChoice = { files: [".env.local"], memory: true, commits: false
 
 /** A host with an image sealed on the computer named, the stub provider as its backend and a folder reader that
  * answers the plan handed in: what an add of a folder on this computer onto a computer that clones needs. */
-async function withImage(o: { at?: string; plan: SeedPlan; projects?: string; packed?: Buffer; keepsImages?: boolean; left?: string[]; vault?: Record<string, string> } = { plan: plan("/x") }): Promise<{ rt: Runtime; backend: StubBackend; store: Store; seed: SeedWiring; packs: { plan: SeedPlan; choice: SeedChoice }[] }> {
+async function withImage(o: { at?: string; plan: SeedPlan; packed?: Buffer; left?: string[]; vault?: Record<string, string> } = { plan: plan("/x") }): Promise<{ rt: Runtime; backend: StubBackend; store: Store; seed: SeedWiring; packs: { plan: SeedPlan; choice: SeedChoice }[] }> {
   const backend = stubBackend();
-  // What the computer says about itself: a box keeps project checkouts on a disk of its own and no image at all,
-  // a provider keeps images and no checkout.
-  if (o.projects !== undefined) (backend as { projects?: string }).projects = o.projects;
-  if (o.keepsImages === false) backend.capabilities.images = false;
   const store = memoryStore();
   await store.put("goldens", copyKey(o.at ?? "default", "default"), { head: 1, versions: [version] });
   const packs: { plan: SeedPlan; choice: SeedChoice }[] = [];
@@ -129,13 +125,13 @@ function answering(backend: StubBackend, reply: (cmd: string) => { exitCode: num
 describe("a folder seeding a project on a computer that clones", () => {
   it("clones, lands the seed, installs and says each step as it happens", async () => {
     const folder = repo();
-    const { rt, backend } = await withImage({ plan: plan(folder), projects: "/wsp/projects" });
+    const { rt, backend } = await withImage({ plan: plan(folder) });
     // What the machine answers the listing of the checkout's root with: an npm lockfile, so the node row's install runs.
     answering(backend, cmd => (cmd.startsWith("ls -A") ? { exitCode: 0, stdout: "package.json\npackage-lock.json\n.env.local\n", stderr: "" } : undefined));
     const events: EventUnion[] = [];
     rt.events.on("*", e => events.push(e));
     const project = await rt.projects.add({ source: folder, on: "default", seed: TICKED });
-    expect(stages(events).map(e => e.stage)).toEqual(["planned", "cloning", "seeding", "installing", "done"]);
+    expect(stages(events).map(e => e.stage)).toEqual(["planned", "cloning", "seeding", "installing", "imaging", "done"]);
     // The folder as this host resolved it, which on a Mac is the real path under /private.
     expect(project.path).toMatch(/spoo-landing|wsp-seed-add-/);
     const ran = commands(backend);
@@ -144,10 +140,6 @@ describe("a folder seeding a project on a computer that clones", () => {
     // what the workspaces read rather than the folder the computer keeps the checkout in.
     expect(ran).toContain(`git clone -- ${REMOTE} ${project.path}`);
     expect(ran).toContain(`cd '${project.path}' && npm ci`);
-    expect(specs(backend)[0]?.binds).toEqual([
-      { source: `/wsp/projects/${project.id}`, target: `/wsp/projects/${project.id}` },
-      { source: `/wsp/projects/${project.id}/checkout`, target: project.path },
-    ]);
     // The seed is landed and unpacked before the install runs, and wsp's own folder inside the checkout is removed.
     const order = [ran.indexOf("tar -xzf"), ran.indexOf("npm ci")];
     expect(order[0]).toBeGreaterThanOrEqual(0);
@@ -162,7 +154,7 @@ describe("a folder seeding a project on a computer that clones", () => {
 
   it("runs every ecosystem the checkout's own root names a lockfile for, in catalogue order", async () => {
     const folder = repo();
-    const { rt, backend } = await withImage({ plan: plan(folder), projects: "/wsp/projects" });
+    const { rt, backend } = await withImage({ plan: plan(folder) });
     answering(backend, cmd => (cmd.startsWith("ls -A") ? { exitCode: 0, stdout: "package-lock.json\nCargo.lock\n", stderr: "" } : undefined));
     const project = await rt.projects.add({ source: folder, on: "default", seed: TICKED });
     const ran = commands(backend);
@@ -173,7 +165,7 @@ describe("a folder seeding a project on a computer that clones", () => {
 
   it("packs only what the person ticked, and nothing runs an install where no lockfile picks one", async () => {
     const folder = repo();
-    const { rt, backend, packs } = await withImage({ plan: plan(folder), projects: "/wsp/projects" });
+    const { rt, backend, packs } = await withImage({ plan: plan(folder) });
     answering(backend, cmd => (cmd.startsWith("ls -A") ? { exitCode: 0, stdout: "package.json\nREADME.md\n", stderr: "" } : undefined));
     const project = await rt.projects.add({ source: folder, on: "default", seed: TICKED });
     expect(packs).toEqual([{ plan: plan(folder), choice: TICKED }]);
@@ -183,7 +175,7 @@ describe("a folder seeding a project on a computer that clones", () => {
 
   it("names the logins a ticked folder held that never travel, so nothing they ticked is dropped in silence", async () => {
     const folder = repo();
-    const { rt, backend } = await withImage({ plan: plan(folder), projects: "/wsp/projects", left: ["config/.netrc"] });
+    const { rt, backend } = await withImage({ plan: plan(folder), left: ["config/.netrc"] });
     answering(backend, () => ({ exitCode: 0, stdout: "", stderr: "" }));
     const project = await rt.projects.add({ source: folder, on: "default", seed: { files: ["config"], memory: false, commits: false } });
     expect(project.notice).toBe("1 login inside the folders you ticked stayed on this computer: config/.netrc");
@@ -191,14 +183,14 @@ describe("a folder seeding a project on a computer that clones", () => {
 
   it("says nothing of the kind where every ticked path travelled", async () => {
     const folder = repo();
-    const { rt, backend } = await withImage({ plan: plan(folder), projects: "/wsp/projects" });
+    const { rt, backend } = await withImage({ plan: plan(folder) });
     answering(backend, () => ({ exitCode: 0, stdout: "", stderr: "" }));
     expect((await rt.projects.add({ source: folder, on: "default", seed: TICKED })).notice).toBeUndefined();
   });
 
   it("keeps the project's memory where the agent on that computer reads it, and no workspace of it mounts a thing for it", async () => {
     const folder = repo();
-    const { rt, backend } = await withImage({ plan: plan(folder), projects: "/wsp/projects" });
+    const { rt, backend } = await withImage({ plan: plan(folder) });
     answering(backend, () => ({ exitCode: 0, stdout: "", stderr: "" }));
     const project = await rt.projects.add({ source: folder, on: "default", seed: TICKED });
     // The key is the folder's own here, so the memory the agent already kept for it is the memory it keeps.
@@ -219,7 +211,7 @@ describe("a folder seeding a project on a computer that clones", () => {
 
   it("leaves the memory the agent has kept on that computer alone, records that it did and says so", async () => {
     const folder = repo();
-    const { rt, backend } = await withImage({ plan: plan(folder), projects: "/wsp/projects" });
+    const { rt, backend } = await withImage({ plan: plan(folder) });
     // The computer answers the clone with the mark the script prints where a memory folder already stands at
     // the agent's path: what is there is the agent's own work for this project.
     answering(backend, cmd => (cmd.includes(MEMORY_KEPT_MARK) ? { exitCode: 0, stdout: `${MEMORY_KEPT_MARK}\n`, stderr: "" } : undefined));
@@ -231,7 +223,7 @@ describe("a folder seeding a project on a computer that clones", () => {
     expect(project.seeded).toMatchObject({ memory: "kept", memoryFiles: 3 });
     expect(stages(events).map(e => e.message)).toContain(seedMemoryKeptLine("default"));
     // And a computer with nothing there says nothing of the kind and records that the memory landed.
-    const second = await withImage({ plan: plan(folder), projects: "/wsp/projects" });
+    const second = await withImage({ plan: plan(folder) });
     answering(second.backend, () => ({ exitCode: 0, stdout: "", stderr: "" }));
     const landed = await second.rt.projects.add({ source: folder, on: "default", seed: TICKED });
     expect(landed.seeded?.memory).toBe("landed");
@@ -239,7 +231,7 @@ describe("a folder seeding a project on a computer that clones", () => {
 
   it("says what travels and then what landed, in the counts the menu itself showed", async () => {
     const folder = repo();
-    const { rt, backend } = await withImage({ plan: plan(folder, { unpushed: { commits: 1, base: "abc123" }, branch: "main", defaultBranch: "main" }), projects: "/wsp/projects", keepsImages: false });
+    const { rt, backend } = await withImage({ plan: plan(folder, { unpushed: { commits: 1, base: "abc123" }, branch: "main", defaultBranch: "main" }) });
     answering(backend, cmd => (cmd.includes("am --3way") ? { exitCode: 0, stdout: "1\n", stderr: "" } : undefined));
     const events: EventUnion[] = [];
     rt.events.on("*", e => events.push(e));
@@ -254,7 +246,7 @@ describe("a folder seeding a project on a computer that clones", () => {
 
   it("says no commits to land where that computer's git found none to add, and nothing of commits where none travelled", async () => {
     const folder = repo();
-    const none = await withImage({ plan: plan(folder, { unpushed: { commits: 1, base: "abc123" }, branch: "main", defaultBranch: "main" }), projects: "/wsp/projects", keepsImages: false });
+    const none = await withImage({ plan: plan(folder, { unpushed: { commits: 1, base: "abc123" }, branch: "main", defaultBranch: "main" }) });
     // The patch went on and left the checkout where it was: the clone already had the person's work.
     answering(none.backend, cmd => (cmd.includes("am --3way") ? { exitCode: 0, stdout: "0\n", stderr: "" } : undefined));
     const events: EventUnion[] = [];
@@ -262,7 +254,7 @@ describe("a folder seeding a project on a computer that clones", () => {
     await none.rt.projects.add({ source: folder, on: "default", seed: { files: [".env.local"], memory: true, commits: true } });
     expect(stages(events).filter(e => e.stage === "seeding").map(e => e.message).at(-1)).toBe("no commits to land");
     // A seed carrying no commits says nothing about commits at all: the line that travelled named none.
-    const kept = await withImage({ plan: plan(folder), projects: "/wsp/projects", keepsImages: false });
+    const kept = await withImage({ plan: plan(folder) });
     answering(kept.backend, () => ({ exitCode: 0, stdout: "", stderr: "" }));
     const quiet: EventUnion[] = [];
     kept.rt.events.on("*", e => quiet.push(e));
@@ -274,29 +266,15 @@ describe("a folder seeding a project on a computer that clones", () => {
     const folder = repo();
     // The archive is far bigger than the one row the person ticked: the menu's sum is what the record keeps, so
     // the row they read and the record they can read back say one number.
-    const { rt, backend } = await withImage({ plan: plan(folder), projects: "/wsp/projects", keepsImages: false, packed: Buffer.alloc(179) });
+    const { rt, backend } = await withImage({ plan: plan(folder), packed: Buffer.alloc(179) });
     answering(backend, () => ({ exitCode: 0, stdout: "", stderr: "" }));
     const nothing = await rt.projects.add({ source: folder, on: "default", seed: { files: [], memory: true, commits: false } });
     expect(nothing.seeded).toMatchObject({ files: 0, bytes: 0, memory: "landed", memoryFiles: 3 });
   });
 
-  it("leaves the checkout on the computer, and every workspace of the project takes its own copy of it", async () => {
-    const folder = repo();
-    const { rt, backend } = await withImage({ plan: plan(folder), projects: "/wsp/projects", keepsImages: false });
-    answering(backend, () => ({ exitCode: 0, stdout: "", stderr: "" }));
-    const project = await rt.projects.add({ source: folder, on: "default", seed: TICKED });
-    expect(project.checkout).toBe(`/wsp/projects/${project.id}/checkout`);
-    const before = backend.machines.length;
-    await rt.workspaces.create({ project: project.id, name: "work" });
-    // The copy is mounted at the path the project has inside, which for a folder seeded from this computer is the
-    // folder's own path, and nothing clones over it.
-    expect(specs(backend)[before]?.copy).toEqual({ from: project.checkout, at: project.path });
-    expect(backend.machines[before]?.execLog.join("\n")).not.toContain("git clone");
-  });
-
   it("the machine that did the work is stopped whatever happened, and a failed install is the add's own failure", async () => {
     const folder = repo();
-    const { rt, backend } = await withImage({ plan: plan(folder), projects: "/wsp/projects" });
+    const { rt, backend } = await withImage({ plan: plan(folder) });
     answering(backend, cmd => {
       if (cmd.startsWith("ls -A")) return { exitCode: 0, stdout: "package-lock.json\n", stderr: "" };
       if (cmd.includes("npm ci")) return { exitCode: 1, stdout: "", stderr: "npm error code ENOSPC\nnpm error nospc ENOSPC: no space left on device\n" };
@@ -309,43 +287,6 @@ describe("a folder seeding a project on a computer that clones", () => {
     // Nothing is left running at the provider, and no project was recorded.
     expect(stopped(backend)).toBe(1);
     expect(await rt.projects.list()).toEqual([]);
-  });
-});
-
-describe("a private repo cloned on a computer the person owns", () => {
-  it("clones with the vault's GitHub token on the clone's own input and nowhere in its script, and points no git at gh there", async () => {
-    const folder = repo();
-    const { rt, backend } = await withImage({ plan: plan(folder), projects: "/wsp/projects", keepsImages: false, vault: { GH_TOKEN: "ghp_private", OPENAI_API_KEY: "sk-other" } });
-    const own = backend.execImpl;
-    const inputs: string[] = [];
-    // A remote that answers only a clone carrying the token, as a private repo does.
-    backend.execImpl = (m, cmd, stdin) => {
-      if (!cmd.includes(" clone ")) return own(m, cmd, stdin);
-      const input = stdin === undefined ? "" : Buffer.from(stdin).toString("utf8");
-      inputs.push(input);
-      return input.includes("GH_TOKEN=ghp_private\0") ? { exitCode: 0, stdout: "", stderr: "" } : { exitCode: 128, stdout: "", stderr: "fatal: could not read Username for 'https://github.com': terminal prompts disabled" };
-    };
-    await rt.projects.add({ source: folder, on: "default", seed: TICKED });
-    expect(inputs).toEqual(["GH_TOKEN=ghp_private\0"]);
-    const ran = commands(backend);
-    expect(ran).not.toContain("ghp_private");
-    expect(ran).not.toContain("setup-git");
-  });
-});
-
-describe("a computer that keeps no image of its own", () => {
-  it("is worked in a copy of its own directories: nothing is forked from an image and the clone still lands", async () => {
-    const folder = repo();
-    const { rt, backend } = await withImage({ plan: plan(folder), projects: "/wsp/projects", keepsImages: false });
-    answering(backend, cmd => (cmd.startsWith("ls -A") ? { exitCode: 0, stdout: "package-lock.json\n", stderr: "" } : undefined));
-    const project = await rt.projects.add({ source: folder, on: "default", seed: TICKED });
-    expect(specs(backend)[0]?.fromSnapshot).toBeUndefined();
-    expect(commands(backend)).toContain(`git clone -- ${REMOTE}`);
-    expect(project.installed).toMatchObject({ command: "npm ci" });
-    // The machine the work ran in is stopped, and the project's memory sits where that computer's own agent
-    // reads it.
-    expect(stopped(backend)).toBe(1);
-    expect(project.memoryDir).toBe(`/root/.claude-cfg/projects/${project.memoryKey}/memory`);
   });
 });
 
@@ -479,7 +420,7 @@ async function launchKey(rt: Runtime, workspaceId: string, harness: string): Pro
 describe("the menu a folder's add reads", () => {
   it("is the reader's own plan, with the ticks a choice remembered for that folder leaves on it", async () => {
     const folder = repo();
-    const { rt, backend } = await withImage({ plan: plan(folder), projects: "/wsp/projects" });
+    const { rt, backend } = await withImage({ plan: plan(folder) });
     answering(backend, () => ({ exitCode: 0, stdout: "", stderr: "" }));
     // Nothing is remembered yet: the catalogue's own ticks stand and the plan says so.
     const first = await rt.projects.seedPlan(folder);
@@ -495,146 +436,11 @@ describe("the menu a folder's add reads", () => {
   it("never ticks a path that never travels, whatever was remembered for the folder", async () => {
     const folder = repo();
     const login = { path: ".git-credentials", dir: false, bytes: 300, kind: "never" as const, row: { id: "logins", name: "logins" }, ticked: false };
-    const { rt, backend } = await withImage({ plan: plan(folder, { files: [login] }), projects: "/wsp/projects" });
+    const { rt, backend } = await withImage({ plan: plan(folder, { files: [login] }) });
     answering(backend, () => ({ exitCode: 0, stdout: "", stderr: "" }));
     await rt.projects.add({ source: folder, on: "default", seed: { files: [".git-credentials"], memory: false, commits: false, remember: true } });
     const again = await rt.projects.seedPlan(folder);
     expect(again.files.every(f => !f.ticked)).toBe(true);
-  });
-});
-
-describe("a repo added by url on a computer the person owns", () => {
-  /** That computer as the stub stands for one: it keeps project checkouts on a disk of its own and no image. */
-  const box = async (): Promise<Awaited<ReturnType<typeof withImage>>> => withImage({ plan: plan("/x"), projects: "/wsp/projects", keepsImages: false });
-
-  it("is cloned once by the add into the folder wsp keeps for it there, with nothing of it under the computer's own home", async () => {
-    const { rt, backend } = await box();
-    answering(backend, cmd => (cmd.startsWith("ls -A") ? { exitCode: 0, stdout: "package.json\npackage-lock.json\n", stderr: "" } : undefined));
-    const events: EventUnion[] = [];
-    rt.events.on("*", e => events.push(e));
-    const project = await rt.projects.add({ source: "https://github.com/spoo-me/spoo-ts", on: "default", name: "landing-906" });
-    // The same stages a seeded project's add prints, without the one for a seed there was none of.
-    expect(stages(events).map(e => e.stage)).toEqual(["planned", "cloning", "installing", "done"]);
-    expect(stages(events)[0]?.message).toBe("landing-906 from https://github.com/spoo-me/spoo-ts, nothing seeded.");
-    // The done stage carries the add's one sentence about where the project is, which is the line the command
-    // line and the tool answer with, so no door says that fact twice.
-    expect(stages(events).at(-1)?.message).toBe(addedProjectOn(project, "default"));
-    // The checkout is wsp's own folder on that computer, and the path inside a workspace of it is not under the
-    // computer's home: a copy bound there would leave its mount point on the computer itself.
-    expect(project.checkout).toBe(`/wsp/projects/${project.id}/checkout`);
-    expect(project.path).toBe("/srv/landing-906");
-    // The memory is where the agent on that computer reads it, under the computer's own home, which every
-    // workspace of the project sees from the computer itself.
-    expect(project.memoryDir).toBe("/root/.claude-cfg/projects/-srv-landing-906/memory");
-    expect(project.memoryKey).toBe("-srv-landing-906");
-    const ran = commands(backend);
-    expect(ran).toContain("git clone -- https://github.com/spoo-me/spoo-ts /srv/landing-906");
-    expect(ran).not.toContain("/root/landing-906");
-    // The worker the work ran in binds wsp's folder at its own path and the checkout where the workspaces read it.
-    expect(specs(backend)[0]?.binds).toEqual([
-      { source: `/wsp/projects/${project.id}`, target: `/wsp/projects/${project.id}` },
-      { source: project.checkout, target: "/srv/landing-906" },
-    ]);
-    expect(project.installed).toMatchObject({ row: "node", command: "npm ci" });
-    // Nothing of the add is left running, and nothing was seeded: no archive travelled.
-    expect(stopped(backend)).toBe(1);
-    expect(backend.puts).toEqual([]);
-    expect(project.seeded).toBeUndefined();
-  });
-
-  it("the machine the add worked in is asked again behind the add when its first delete reached the copy that never held it", async () => {
-    const { rt, backend } = await box();
-    answering(backend, () => ({ exitCode: 0, stdout: "", stderr: "" }));
-    missingFirstDeletes(backend);
-    await rt.projects.add({ source: "https://github.com/spoo-me/spoo-ts", on: "default", name: "landing-906" });
-    await vi.waitFor(() => expect(stopped(backend)).toBe(1));
-    await rt.close();
-  });
-
-  it("is copied into every workspace of it, two in a row, and neither of them clones anything", async () => {
-    const { rt, backend } = await box();
-    answering(backend, () => ({ exitCode: 0, stdout: "", stderr: "" }));
-    const project = await rt.projects.add({ source: "https://github.com/spoo-me/spoo-ts", on: "default", name: "landing-906" });
-    const cloned = (): number => backend.machines.flatMap(m => m.execLog).filter(cmd => cmd.includes("git clone")).length;
-    expect(cloned()).toBe(1);
-    for (const name of ["proof one", "proof two"]) {
-      const before = backend.machines.length;
-      await rt.workspaces.create({ project: project.id, name });
-      expect(specs(backend)[before]?.copy).toEqual({ from: project.checkout, at: "/srv/landing-906" });
-      expect(backend.machines[before]?.execLog.join("\n")).not.toContain("git clone");
-    }
-    // The clone the add ran is still the only one: the second workspace is a copy of the same checkout.
-    expect(cloned()).toBe(1);
-  });
-
-  it("an add that failed on the computer leaves nothing of the project there and records nothing", async () => {
-    const { rt, backend } = await box();
-    answering(backend, cmd => {
-      if (cmd.startsWith("ls -A")) return { exitCode: 0, stdout: "package-lock.json\n", stderr: "" };
-      if (cmd.includes("npm ci")) return { exitCode: 1, stdout: "", stderr: "npm error code ENOSPC\nnpm error nospc ENOSPC: no space left on device\n" };
-      return undefined;
-    });
-    // Whether the worker was already stopped when the sweep ran: those folders are its binds' own sources while
-    // it lives, so the sweep waits for it.
-    const workerStopped: boolean[] = [];
-    const own = backend.onComputer!.bind(backend);
-    backend.onComputer = async (cmd, opts) => {
-      workerStopped.push(backend.machines.every(m => m.killed));
-      return own(cmd, opts);
-    };
-    await expect(rt.projects.add({ source: "https://github.com/spoo-me/spoo-ts", on: "default", name: "landing-906" })).rejects.toThrow(/no space left on device/);
-    expect(await rt.projects.list()).toEqual([]);
-    // The folder the bind made on that computer goes with it, so the same name can be added again.
-    expect(backend.computerLog).toEqual([expect.stringMatching(/^rm -rf '\/wsp\/projects\/pr_[0-9a-f]{8}'$/)]);
-    expect(stopped(backend)).toBe(1);
-    expect(workerStopped).toEqual([true]);
-  });
-
-  it("is taken away with the folder wsp made for it, in one sentence naming that folder", async () => {
-    const { rt, backend } = await box();
-    answering(backend, () => ({ exitCode: 0, stdout: "", stderr: "" }));
-    const project = await rt.projects.add({ source: "https://github.com/spoo-me/spoo-ts", on: "default", name: "landing-906" });
-    const { said } = await rt.projects.remove(project.id);
-    // One command on the computer: it reads whether a memory folder for this project stands there and takes
-    // wsp's own folder away, so the sentence names the memory only where there is one.
-    expect(backend.computerLog).toEqual([expect.stringContaining(`rm -rf '/wsp/projects/${project.id}'`)]);
-    expect(backend.computerLog[0]).toContain(`[ -d '${project.memoryDir}' ]`);
-    expect(said).toBe(`landing-906 is no longer a project on default; the folder wsp kept for it there, /wsp/projects/${project.id}, is gone with its checkout`);
-    expect(await rt.projects.list()).toEqual([]);
-  });
-
-  it("names the memory its agent keeps there only where a folder of it stands on the computer", async () => {
-    const { rt, backend } = await box();
-    // The computer answers the remove's own read with the mark: a thread ran there, so the agent's memory for
-    // this project stands under its state home and stays when the project goes.
-    answering(backend, cmd => (cmd.includes(MEMORY_STANDS_MARK) && cmd.includes("rm -rf") ? { exitCode: 0, stdout: `${MEMORY_STANDS_MARK}\n`, stderr: "" } : undefined));
-    const project = await rt.projects.add({ source: "https://github.com/spoo-me/spoo-ts", on: "default", name: "landing-906" });
-    const { said } = await rt.projects.remove(project.id);
-    expect(said).toBe(`landing-906 is no longer a project on default; the folder wsp kept for it there, /wsp/projects/${project.id}, is gone with its checkout, and the memory its agent keeps on that computer stays`);
-  });
-
-  it("a record with no checkout refuses a workspace, before a machine is asked for", async () => {
-    const backend = stubBackend();
-    (backend as { projects?: string }).projects = "/wsp/projects";
-    backend.capabilities.images = false;
-    const store = memoryStore();
-    // A repo recorded with no checkout, whose path is under the computer's own home.
-    await store.put("projects", "pr_old", { id: "pr_old", name: "spoo-landing", computer: "default", source: { kind: "git", url: "https://github.com/spoo-me/frontend" }, path: "/root/spoo-landing", remote: "https://github.com/spoo-me/frontend", defaultBranch: "main", memoryKey: "-root-spoo-landing", memoryDir: "/root/.claude-cfg/projects/-root-spoo-landing/memory", createdAt: "2026-09-17T00:00:00.000Z" });
-    const root = mkdtempSync(join(tmpdir(), "wsp-add-old-"));
-    roots.push(root);
-    const rt = createRuntime({ backend, store, adapters: {}, local: fakeLocal(root) });
-    const before = backend.machines.length;
-    await expect(rt.workspaces.create({ project: "pr_old", name: "work" })).rejects.toThrow(
-      "spoo-landing was recorded before a project was cloned once on its computer, so default holds no checkout for a workspace to copy; wsp projects remove spoo-landing, then wsp add https://github.com/spoo-me/frontend --on default",
-    );
-    // No machine was asked for and no workspace was written: a refusal after either leaves a record for a fork
-    // that never happened.
-    expect(backend.machines.length).toBe(before);
-    expect(await rt.workspaces.list()).toEqual([]);
-    // And the remove it names takes the folder wsp had made for it there, whatever the record is missing.
-    const { said } = await rt.projects.remove("pr_old");
-    expect(backend.computerLog).toEqual([expect.stringContaining("rm -rf '/wsp/projects/pr_old'")]);
-    expect(said).toContain("no longer a project on default");
   });
 });
 
@@ -674,7 +480,7 @@ describe("the commits a seed carries onto a computer whose git refuses them", ()
 
   it("are nought on the record, with git's own last line in the notice and the checkout put back", async () => {
     const folder = repo();
-    const { rt, backend } = await withImage({ plan: withCommits(folder), projects: "/wsp/projects", keepsImages: false });
+    const { rt, backend } = await withImage({ plan: withCommits(folder) });
     answering(backend, cmd => (cmd.includes("am --3way") ? { exitCode: 128, stdout: "", stderr: "Committer identity unknown\nfatal: empty ident name (for <>) not allowed\n" } : undefined));
     const events: EventUnion[] = [];
     rt.events.on("*", e => events.push(e));
@@ -695,7 +501,7 @@ describe("the commits a seed carries onto a computer whose git refuses them", ()
     const folder = repo();
     // The person's own branch, which the remote has never seen, and a plan that names no default branch: the
     // branch to put back cannot be read off either without naming a ref the remote has not got.
-    const { rt, backend } = await withImage({ plan: plan(folder, { unpushed: { commits: 1, base: "abc123" }, branch: "refactor/dashboard-polish", defaultBranch: null }), projects: "/wsp/projects", keepsImages: false });
+    const { rt, backend } = await withImage({ plan: plan(folder, { unpushed: { commits: 1, base: "abc123" }, branch: "refactor/dashboard-polish", defaultBranch: null }) });
     answering(backend, cmd => {
       if (cmd.includes("symbolic-ref --short HEAD")) return { exitCode: 0, stdout: "main\n", stderr: "" };
       if (cmd.includes("am --3way")) return { exitCode: 128, stdout: "", stderr: "error: could not build fake ancestor\n" };
@@ -713,7 +519,7 @@ describe("the commits a seed carries onto a computer whose git refuses them", ()
 
   it("are the count git read off the checkout, never the number the plan carried", async () => {
     const folder = repo();
-    const { rt, backend } = await withImage({ plan: withCommits(folder), projects: "/wsp/projects", keepsImages: false });
+    const { rt, backend } = await withImage({ plan: withCommits(folder) });
     // The plan said two; the checkout has one, which is what git answers and what the record keeps.
     answering(backend, cmd => (cmd.includes("am --3way") ? { exitCode: 0, stdout: "1\n", stderr: "" } : undefined));
     const project = await rt.projects.add({ source: folder, on: "default", name: "seeded-919", seed: KEEPING });

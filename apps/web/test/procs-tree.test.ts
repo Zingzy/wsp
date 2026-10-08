@@ -41,6 +41,34 @@ describe("procTable", () => {
     ]);
   });
 
+  it("draws a thread known by its cgroup over every process standing there, a server it detached included, with what they spend together", () => {
+    const thread: ProcThread = { threadId: "t1", title: "serve it", cgroup: "/wsp-threads/t1" };
+    const box: ProcEntry[] = [
+      proc(1, 0, "systemd"),
+      // The turn: its shell and the agent under it.
+      proc(200, 1, "bash", { cgroup: "/wsp-threads/t1", cpu: 1, rss: 100 }),
+      proc(201, 200, "claude", { cgroup: "/wsp-threads/t1", cpu: 20, rss: 600 }),
+      // A dev server the turn detached: init's child now, still in the thread's cgroup.
+      proc(300, 1, "node", { cgroup: "/wsp-threads/t1", cpu: 5, rss: 300, cmdline: "node server.js" }),
+      // Another thread whose id begins the same way, and the computer's own.
+      proc(400, 1, "node", { cgroup: "/wsp-threads/t10", cpu: 9, rss: 900 }),
+      proc(500, 1, "sshd", { cgroup: "/system.slice/ssh.service" }),
+    ];
+    const table = procTable(box, "cpu", "", [thread]);
+    expect(table.threads).toHaveLength(1);
+    // Each process under the first of its parents standing there too, heads sorted by the column as siblings are.
+    expect(table.threads[0]!.rows.map(r => [r.proc.pid, r.depth])).toEqual([
+      [300, 0],
+      [200, 0],
+      [201, 1],
+    ]);
+    expect(table.threads[0]!.spent).toEqual({ cpu: 26, rss: 1000 });
+    // Everything else on the computer is the rest, the other thread's server among it.
+    expect(table.rest.map(r => r.proc.pid)).toEqual([1, 400, 500]);
+    // A filter hides rows, never what the thread spends.
+    expect(procTable(box, "cpu", "server", [thread]).threads[0]!.spent).toEqual({ cpu: 26, rss: 1000 });
+  });
+
   it("sorting by mem reorders siblings, not the tree", () => {
     expect(procTable(procs, "mem", "").rest.map(r => r.proc.pid)).toEqual([77, 1, 50, 40, 42, 41]);
   });

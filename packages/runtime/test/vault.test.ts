@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { LocalBackend } from "@wsp/engine";
 import type { HarnessAdapterContext, HarnessAdapterFactory, LocalWiring } from "../src/runtime.js";
+import type { ServersActs } from "../src/agents-read.js";
 import { createRuntime } from "../src/runtime.js";
 import { secretsOf } from "../src/adapters.js";
 import { localExecStream } from "../src/local-exec.js";
@@ -75,6 +76,23 @@ describe("the vault a turn launches with", () => {
     expect(env["CLAUDE_CODE_OAUTH_TOKEN"]).toBeUndefined();
     // Claude Code's own environment is the one it expands ${WSP_MCP_LINEAR_AUTHORIZATION} out of.
     expect(buildEnv({ base: env })).toMatchObject({ WSP_MCP_LINEAR_AUTHORIZATION: "lin_api_TESTONLY", NOTION_TOKEN: "ntn_TESTONLY" });
+  });
+
+  it("hands a server added from a provider's workspace the store that workspace's Claude Code turn reads its servers under", async () => {
+    const { factory, contexts } = recording();
+    const handed: (string | undefined)[] = [];
+    const serversActs: ServersActs = {
+      add: async on => (handed.push(on.kind === "here" ? "here" : on.stores?.["claude"]), { file: "" }),
+      remove: async () => ({ file: "" }),
+      toggle: async () => ({ file: "" }),
+    };
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: factory }, vault: () => ({ CLAUDE_CODE_OAUTH_TOKEN: TOKEN }), serversActs });
+    const ws = await createOn(rt, { golden: "snap_g", name: "x" });
+    await rt.agents.serversAdd({ workspaceId: ws.id }, { agent: "claude", name: "acme", command: "acme-mcp" });
+    await (await rt.sessions.start(ws.id, { prompt: "one" })).finished;
+    const env = contexts.find(c => TURN_TOKEN_ENV in c.env)!.env;
+    expect(env["CLAUDE_CONFIG_DIR"]).toBeDefined();
+    expect(handed).toEqual([env["CLAUDE_CONFIG_DIR"]]);
   });
 
   it("is empty for a host that wired none, so a turn carries nothing of one", async () => {

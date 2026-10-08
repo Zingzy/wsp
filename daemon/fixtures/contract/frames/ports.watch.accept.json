@@ -23,5 +23,24 @@
       200
     ],
     "folder": "/Users/zingzy/wsp/landing"
+  },
+  {
+    "id": 8,
+    "op": "ports.watch",
+    "roots": [
+      200
+    ],
+    "folder": "/root/spoo",
+    "watch": "ws_a1-b"
+  },
+  {
+    "id": 11,
+    "op": "ports.watch",
+    "roots": [],
+    "folder": "/root/spoo",
+    "cgroups": [
+      "/wsp-threads/0b9c"
+    ],
+    "watch": "ws_a1"
   }
 ]
