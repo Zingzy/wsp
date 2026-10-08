@@ -13,6 +13,7 @@ import { createRuntime, type Runtime } from "../src/runtime.js";
 import { HARNESS_ADAPTERS } from "../src/adapters.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { createOn, stubBackend } from "./stub-backend.js";
+import { LINUX_SHELL_PRELUDE } from "./linux-shell.js";
 import { until } from "./until.js";
 import { writeStub } from "../../protocol/test/stub-script.js";
 
@@ -95,11 +96,11 @@ describe("a cloud turn after its agent's final reply", () => {
     const backend = stubBackend();
     const answer = backend.execImpl;
     const path = process.env["PATH"] ?? "/usr/bin:/bin";
-    // Read by every bash the run starts. The machine's project folder is not on this computer, so the launch's cd lands
+    // Read by every bash the run starts, and gives this computer the machine's setsid. The machine's project folder is not on this computer, so the launch's cd lands
     // in the test's own folder; and the launch exports the turn's own PATH, so the stand-in is named by a function,
     // which wins over any claude on that PATH.
     const shim = join(dir, "env.sh");
-    writeFileSync(shim, `cd() { builtin cd ${dir}; }\nclaude() { ${join(bin, "claude")} "$@"; }\n`);
+    writeFileSync(shim, `${LINUX_SHELL_PRELUDE}cd() { builtin cd ${dir}; }\nclaude() { ${join(bin, "claude")} "$@"; }\n`);
     backend.execImpl = (m, cmd, stdin) => (cmd.includes(runDir) ? bash(cmd, path, shim, stdin) : answer(m, cmd, stdin));
     store = memoryStore();
     // The idle limit short, so a turn nothing holds is cut in seconds, as it is at TURN_IDLE_MS on a real machine.
