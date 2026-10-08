@@ -208,6 +208,9 @@ export interface NodeRelease {
  * agents and their version checks run on it. */
 export const NODE_PATH_LINE = 'export PATH="/usr/local/bin:$PATH"';
 
+/** The command a Node install puts on the machine. */
+export const NODE_BIN = "node";
+
 /** Installs the release into /usr/local unless the guest's Node major is
  * between `floor` and the release's own, and reports what it had and what it
  * did on stdout. A newer major is replaced too: the step names the release's

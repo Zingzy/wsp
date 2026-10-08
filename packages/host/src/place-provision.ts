@@ -11,7 +11,7 @@ import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { join, posix } from "node:path";
 import type { Host, Manifest, ManifestEntry, Platform } from "@wsp/collect";
 import { expand, nodeHost } from "@wsp/collect";
-import { CATALOG_AGENTS, COMPILER_ROW, SHARED_SKILLS, TOOL_PREFIX, catalogEntry, catalogIdOfRow, installHomes, ownSkillFolder, roadModule } from "@wsp/catalog";
+import { CATALOG_AGENTS, COMPILER_ROW, MCP_AGENTS, SHARED_SKILLS, TOOL_PREFIX, catalogEntry, catalogIdOfRow, installHomes, ownSkillFolder, roadModule } from "@wsp/catalog";
 import {
   agentStateFile,
   newSetupRun,
@@ -20,6 +20,7 @@ import {
   toolSize,
   pathLine,
   provisionStep,
+  serverNeeds,
   tarOf,
   toolUninstall,
   viaRoad,
@@ -29,6 +30,7 @@ import {
   type ProvisionPlan,
   type SkippedPath,
   type TarEntry,
+  type ToolInstall,
 } from "@wsp/engine";
 import { agentOfRow, MCP_ID_PREFIX, probePath, toolRowId, type Recipe, type RecipeFile, type RecipeKind } from "@wsp/protocol";
 import type { PlaceProvisioner, PlaceUndo } from "@wsp/runtime";
@@ -197,6 +199,29 @@ function githubTools(picks: RecipeFile, path: string, prefix: string): Provision
 const GH = "gh";
 const GITHUB_ROW = "github";
 
+/** The CLIs of a plan the kept servers need on first, read off this computer's copy of each config they travel in
+ * (`serverNeeds`): the servers wait on these alone, so they land beside the rest of the CLIs. A kept server that copy
+ * does not read, a config that does not parse among them, could run any CLI, so then the servers wait on all. */
+function serverTools(plan: ProvisionPlan, home: string): string[] {
+  const clis = plan.steps.slice(plan.agents);
+  // What the agents step puts on is there before any server starts.
+  const ready = new Set(plan.steps.slice(0, plan.agents).flatMap(s => s.bin ?? []));
+  const needs = new Set<ToolInstall>();
+  for (const agent of plan.mcp?.agents ?? []) {
+    const file = MCP_AGENTS.find(a => a.id === agent.id)?.mcp.files.map(f => expand({ home }, f)).find(f => existsSync(f));
+    const servers = file === undefined ? [] : (agent.scopes[0]?.format.read(readFileSync(file, "utf8"), home) ?? []);
+    for (const scope of agent.scopes) {
+      for (const name of scope.keep) {
+        const server = servers.find(s => s.name === name && (s.scope === "home") === (scope.project !== undefined));
+        if (server === undefined) return clis.map(s => s.id);
+        if (server.transport.kind !== "stdio") continue;
+        for (const row of serverNeeds(server.transport.command, clis, ready)) needs.add(row);
+      }
+    }
+  }
+  return clis.filter(s => needs.has(s)).map(s => s.id);
+}
+
 /** The steps whose plan reads this computer's manifest: the agents, the CLIs, the servers, the configs (the login
  * shell), the floor and the machine context. */
 const READS_THIS_COMPUTER: ReadonlySet<string> = new Set(["floor", "agents", "clis", "mcp", "configs", "context"]);
@@ -356,7 +381,8 @@ export function placeProvisioner(o: ProvisionReaders): PlaceProvisioner {
         ...(plugins.plugins.length > 0 ? { plugins: plugins.plugins } : {}),
         ...(github !== undefined ? { github } : {}),
       });
-      return { ...plan, skipped: [...plan.skipped, ...skills.skipped, ...plugins.skipped] };
+      const servers = serverTools(plan, o.home);
+      return { ...plan, ...(servers.length > 0 ? { serverTools: servers } : {}), skipped: [...plan.skipped, ...skills.skipped, ...plugins.skipped] };
     },
     floor: (machine, on, stage) => provisionStep(machine, { ...placePaths(on.home), recipeAt: "floor", steps: [], agents: 0, compiler: false, skipped: [] }, "floor", newSetupRun(), stage, on),
     step: (machine, plan, step, run, stage, on) => provisionStep(machine, plan, step, run, stage, on),

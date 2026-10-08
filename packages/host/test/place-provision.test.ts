@@ -176,6 +176,71 @@ describe("the recipe this host holds, planned for a computer you own", () => {
     expect((await planner.estimate!(saved)).unmeasured).toBe((await planner.estimate!({ ...saved, mcp: { github: saved.mcp.github }, clis: { "litmus-cli": saved.clis["litmus-cli"] } })).unmeasured);
   });
 
+  it("names the CLIs the kept servers run, read off this computer's config, so the servers wait on those alone", async () => {
+    writeFileSync(join(home, ".claude.json"), JSON.stringify({ mcpServers: { yaml: { command: "/opt/homebrew/bin/yq" }, diff: { command: "delta" }, web: { command: "npx", args: ["-y", "web-mcp"] }, off: { command: "gh" } } }));
+    const server = (name: string) => ({ rung: "agents" as const, id: `${MCP_ID_PREFIX}claude/${name}`, label: name, group: "Claude Code MCP servers", paths: ["~/.claude.json"], bytes: 300, default: "bring" as const });
+    const delta = { rung: "tools" as const, id: "tools/brew/git-delta", label: "git-delta", group: "Homebrew", paths: ["Brewfile"], bytes: 0, default: "bring" as const };
+    const manifest = { ...FIXTURE, entries: [...FIXTURE.entries, delta, server("yaml"), server("diff"), server("web"), server("off")] };
+    const picks = { name: "laptop", agents: { claude: { signin: "vault" as const } }, mcp: { yaml: { agents: ["claude"] }, diff: { agents: ["claude"] }, web: { agents: ["claude"] } }, clis: { gh: { via: "brew" }, yq: { via: "brew" }, "git-delta": { via: "brew" } }, skills: {}, plugins: {}, folders: {}, configs: {} };
+    const plan = await placeProvisioner({ statePath, home, platform: "linux", collect: async () => manifest, brew: async () => new Map() }).setup(picks, { home });
+    expect(plan.steps.map(s => s.id)).toEqual(expect.arrayContaining(["tools/brew/gh", "tools/brew/yq", "tools/brew/git-delta"]));
+    // yq and delta are kept servers' commands, delta by the catalog's name for git-delta's; npx comes with node,
+    // and gh is the command of a server that was not picked.
+    expect([...(plan.serverTools ?? [])].sort()).toEqual(["tools/brew/git-delta", "tools/brew/yq"]);
+  });
+
+  const tool = (id: string) => ({ rung: "tools" as const, id, label: id.slice(id.lastIndexOf("/") + 1), group: "CLIs", paths: [], bytes: 0, default: "bring" as const });
+  const server = (name: string) => ({ rung: "agents" as const, id: `${MCP_ID_PREFIX}claude/${name}`, label: name, group: "Claude Code MCP servers", paths: ["~/.claude.json"], bytes: 300, default: "bring" as const });
+  const clisOf = (plan: ProvisionPlan): string[] => plan.steps.slice(plan.agents).map(s => s.id);
+  // A picked npm row has the planner ask the managers here for wsp's own package; these cases ask none.
+  const noManagers = () => ({ ...nodeHost(), home, exec: { which: async () => false, run: async () => undefined } });
+
+  it("has the servers wait on every CLI nothing names when it cannot name the one a server runs, and on none for uv, npx or the floor's", async () => {
+    writeFileSync(
+      join(home, ".claude.json"),
+      JSON.stringify({ mcpServers: { files: { command: "mcp-server-filesystem" }, browser: { command: "playwright-mcp" }, py: { command: "uvx", args: ["mcp-py"] }, script: { command: "python3", args: ["s.py"] } } }),
+    );
+    const npm = ["tools/npm/@modelcontextprotocol/server-filesystem", "tools/npm/@playwright/mcp"];
+    const manifest = { ...FIXTURE, entries: [...FIXTURE.entries, ...[...npm, "tools/brew/uv"].map(tool), ...["files", "browser", "py", "script"].map(server)] };
+    const picks = {
+      name: "laptop",
+      agents: { claude: { signin: "vault" as const } },
+      mcp: { files: { agents: ["claude"] }, browser: { agents: ["claude"] }, py: { agents: ["claude"] }, script: { agents: ["claude"] } },
+      clis: { "@modelcontextprotocol/server-filesystem": { via: "npm" }, "@playwright/mcp": { via: "npm" }, yq: { via: "brew" }, uv: { via: "brew" } },
+      skills: {}, plugins: {}, folders: {}, configs: {},
+    };
+    const plan = await placeProvisioner({ statePath, home, platform: "linux", collect: async () => manifest, brew: async () => new Map(), here: noManagers() }).setup(picks, { home });
+    expect(clisOf(plan)).toEqual(expect.arrayContaining([...npm, "tools/brew/yq"]));
+    // Neither npm row names its command, so either may be the one the first two servers run; yq names its own, and
+    // uv comes with the floor, which python3 does too.
+    expect([...(plan.serverTools ?? [])].sort()).toEqual(npm);
+  });
+
+  it("has a server running an agent's own command wait on no CLI, since the agents step put it on", async () => {
+    writeFileSync(join(home, ".claude.json"), JSON.stringify({ mcpServers: { codex: { command: "codex", args: ["mcp-server"] } } }));
+    const manifest = { ...FIXTURE, entries: [...FIXTURE.entries, tool("tools/brew/act"), tool("tools/npm/some-cli"), server("codex")] };
+    const picks = {
+      name: "laptop",
+      agents: { claude: { signin: "vault" as const }, codex: { signin: "machine" as const } },
+      mcp: { codex: { agents: ["claude"] } },
+      clis: { act: { via: "brew" }, "some-cli": { via: "npm" } },
+      skills: {}, plugins: {}, folders: {}, configs: {},
+    };
+    const plan = await placeProvisioner({ statePath, home, platform: "linux", collect: async () => manifest, brew: async () => new Map(), here: noManagers() }).setup(picks, { home });
+    expect(plan.steps.slice(0, plan.agents).map(s => s.bin)).toContain("codex");
+    expect(clisOf(plan)).toEqual(expect.arrayContaining(["tools/brew/act", "tools/npm/some-cli"]));
+    expect(plan.serverTools).toBeUndefined();
+  });
+
+  it("has the servers wait on every CLI when this computer's config does not read", async () => {
+    writeFileSync(join(home, ".claude.json"), "{ not json");
+    const manifest = { ...FIXTURE, entries: [...FIXTURE.entries, tool("tools/brew/jq"), server("yaml")] };
+    const picks = { name: "laptop", agents: { claude: { signin: "vault" as const } }, mcp: { yaml: { agents: ["claude"] } }, clis: { yq: { via: "brew" }, jq: { via: "brew" } }, skills: {}, plugins: {}, folders: {}, configs: {} };
+    const plan = await placeProvisioner({ statePath, home, platform: "linux", collect: async () => manifest, brew: async () => new Map() }).setup(picks, { home });
+    expect(clisOf(plan).length).toBeGreaterThan(1);
+    expect(plan.serverTools).toEqual(clisOf(plan));
+  });
+
   it("puts a server added here with a header on that computer by name: no file there holds the value, and the vault does", async () => {
     write(SMALL);
     await serversActs({ here: () => ({ ...nodeHost(), home }) }).add({ kind: "here" }, { agent: "claude", name: "linear", url: "https://mcp.linear.app/mcp", headers: { Authorization: "Bearer lin_api_TESTONLY" } });

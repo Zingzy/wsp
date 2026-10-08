@@ -407,8 +407,9 @@ export interface InstallToolsOptions {
   /** Whether the caches the installs leave are swept. A builder becomes an image, so its are swept; a computer
    * somebody owns keeps its own, which are theirs and not this run's to throw away. */
   caches?: "sweep" | "keep";
-  /** Each row the moment its outcome exists, for a caller that reports as it goes rather than at the end. */
-  onTool?: (result: ToolResult) => void;
+  /** Each row the moment its outcome exists, for a caller that reports as it goes rather than at the end; the loop
+   * waits on what it answers before the next row. */
+  onTool?: (result: ToolResult) => void | Promise<void>;
   /** The PATH every script of this job exports. The tools PATH on a machine wsp forked, and the probe list on a
    * computer somebody owns, whose home every workspace there writes. */
   path?: string;
@@ -440,9 +441,9 @@ export async function installTools(machine: Machine, tools: readonly ToolInstall
   await machine.exec(SWEEP_TMP_CMD, { timeoutMs: INLINE_EXEC_MS });
   const out: ToolsOutcome = { tools: [] };
   /** One row's outcome: kept for the answer and handed to the caller watching, in the order the loop reaches them. */
-  const landed = (result: ToolResult): void => {
+  const landed = async (result: ToolResult): Promise<void> => {
     out.tools.push(result);
-    opts.onTool?.(result);
+    await opts.onTool?.(result);
   };
   const installed = new Set<string>();
   const labelOf = (id: string): string => tools.find(t => t.id === id)?.label ?? id;
@@ -469,15 +470,15 @@ export async function installTools(machine: Machine, tools: readonly ToolInstall
     // something that is already there.
     if (present.has(tool.id)) {
       installed.add(tool.id);
-      landed({ id: tool.id, label: tool.label, outcome: "installed", note: ALREADY_ON_MACHINE });
+      await landed({ id: tool.id, label: tool.label, outcome: "installed", note: ALREADY_ON_MACHINE });
       continue;
     }
     if (tool.after !== undefined && !installed.has(tool.after)) {
-      landed({ id: tool.id, label: tool.label, outcome: "skipped", note: `${labelOf(tool.after)} did not install` });
+      await landed({ id: tool.id, label: tool.label, outcome: "skipped", note: `${labelOf(tool.after)} did not install` });
       continue;
     }
     if (floor !== undefined) {
-      landed({ id: tool.id, label: tool.label, outcome: "skipped", note: floor });
+      await landed({ id: tool.id, label: tool.label, outcome: "skipped", note: floor });
       continue;
     }
     let free = reading ?? (await freeBytes(machine, opts.prefix));
@@ -490,7 +491,7 @@ export async function installTools(machine: Machine, tools: readonly ToolInstall
       if (after === undefined || after.kind === "unknown" || after.bytes < keep) {
         const words = after === undefined ? `${fmtBytes(free.bytes)} free` : after.kind === "free" ? `${fmtBytes(after.bytes)} free after cleanup` : `${fmtBytes(free.bytes)} free before cleanup and unknown after (${after.reason})`;
         floor = floorNote(words);
-        landed({ id: tool.id, label: tool.label, outcome: "skipped", note: floor });
+        await landed({ id: tool.id, label: tool.label, outcome: "skipped", note: floor });
         continue;
       }
       free = after;
@@ -504,7 +505,7 @@ export async function installTools(machine: Machine, tools: readonly ToolInstall
     }
     if (free.kind === "free" && tool.bytes !== undefined && free.bytes - tool.bytes < keep) {
       reading = free;
-      landed({ id: tool.id, label: tool.label, outcome: "skipped", note: floorNote(`needs about ${fmtBytes(tool.bytes)}, ${fmtBytes(free.bytes)} free`) });
+      await landed({ id: tool.id, label: tool.label, outcome: "skipped", note: floorNote(`needs about ${fmtBytes(tool.bytes)}, ${fmtBytes(free.bytes)} free`) });
       continue;
     }
     const step: GoldenStep = { label: tool.label, command: tool.shown ?? tool.cmd };
@@ -531,9 +532,9 @@ export async function installTools(machine: Machine, tools: readonly ToolInstall
       const left = await freeBytes(machine, opts.prefix);
       reading = left;
       const bytes = free.kind === "free" && left.kind === "free" ? Math.max(0, free.bytes - left.bytes) : undefined;
-      landed({ id: tool.id, label: tool.label, outcome: "installed", ...(tool.note !== undefined ? { note: tool.note } : {}), ms, ...(bytes !== undefined ? { bytes } : {}), ...(road !== undefined ? { road } : {}) });
+      await landed({ id: tool.id, label: tool.label, outcome: "installed", ...(tool.note !== undefined ? { note: tool.note } : {}), ms, ...(bytes !== undefined ? { bytes } : {}), ...(road !== undefined ? { road } : {}) });
     } else {
-      landed({ id: tool.id, label: tool.label, outcome: "failed", note: timeouts === 2 ? timedOutLine(limit, 2) : reasonOf(res, limit), ms });
+      await landed({ id: tool.id, label: tool.label, outcome: "failed", note: timeouts === 2 ? timedOutLine(limit, 2) : reasonOf(res, limit), ms });
     }
   }
   await verifyCommands(machine, tools, out.tools, stage, path, opts.prefix);

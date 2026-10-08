@@ -50,6 +50,9 @@ export interface ProvisionPlan {
   configTools?: readonly ToolInstall[];
   /** gh, where the GitHub row signs it in and no picked CLI puts it on. */
   github?: readonly ToolInstall[];
+  /** The CLIs among `steps` the kept servers need on first (`serverNeeds`): the servers wait on these and not on
+   * every CLI. */
+  serverTools?: readonly string[];
   /** Plugins, each put on by its agent's own commands; `asked` reads off what one printed why it is set aside. */
   plugins?: readonly { id: string; label: string; cmd: string; asked?(out: string): string | undefined }[];
 }
@@ -281,6 +284,8 @@ async function toolsStep(machine: Machine, plan: ProvisionPlan, steps: readonly 
   /** What each row read as the loop reached it, so a row the checks corrected after the loop is said again rather
    * than standing in the log on that computer as it first read. */
   const said = new Map<string, string>();
+  /** The rows whose hook failed, which stay failed whatever the loop's checks read after. */
+  const hookFailed = new Map<string, PlaceProvisionRow>();
   const disk = await diskUse(machine, plan.prefix);
   const tools = await installTools(
     machine,
@@ -295,18 +300,28 @@ async function toolsStep(machine: Machine, plan: ProvisionPlan, steps: readonly 
       floor: ownedFloorBytes(disk.kind === "use" ? disk.sizeBytes : undefined),
       path: plan.path,
       ...(plan.prefix !== undefined ? { prefix: plan.prefix } : {}),
-      onTool: result => {
-        const row = rowOf(result, present, stepOf.get(result.id));
+      onTool: async result => {
+        // Each row is on the run as it lands, so a step running beside the loop reads what became of it.
+        run.tools.push(result);
+        const row = await hooked(machine, plan, rowOf(result, present, stepOf.get(result.id)));
+        if (row.outcome === "failed" && result.outcome !== "failed") hookFailed.set(row.id, row);
         said.set(result.id, rowLine(row));
         done++;
         stage(rowLine(row), at(), row);
       },
     },
   );
-  run.tools.push(...tools.tools);
+  for (const result of tools.tools) {
+    const at = run.tools.findIndex(t => t.id === result.id);
+    if (at >= 0) run.tools[at] = result;
+    else run.tools.push(result);
+  }
   // The rows are read once the loop's own checks have run: a row whose install exited 0 and whose check then failed
   // is failed, and copying it at the moment the loop said it left the answer reading installed.
-  const rows = tools.tools.map(result => rowOf(result, present, stepOf.get(result.id)));
+  const rows = tools.tools.map(result => {
+    const row = rowOf(result, present, stepOf.get(result.id));
+    return row.outcome === "installed" ? (hookFailed.get(row.id) ?? row) : row;
+  });
   for (const row of rows) if (said.get(row.id) !== rowLine(row)) stage(rowLine(row));
   return rows;
 }
@@ -386,7 +401,7 @@ async function stepRows(machine: Machine, plan: ProvisionPlan, step: EngineStep,
     }
     // The C toolchain a picked row builds with is the floor's own row, which this plan's floor already carried.
     case "clis":
-      return hooked(machine, plan, await toolsStep(machine, plan, plan.steps.slice(plan.agents), run, stage), stage);
+      return toolsStep(machine, plan, plan.steps.slice(plan.agents), run, stage);
     case "mcp": {
       // The agents' own files land here and stay open for the servers, which read the configs that came: one round
       // in the folder beside the job at a time, so this waits for the CLIs a server may run rather than holding that
@@ -453,24 +468,21 @@ async function stepRows(machine: Machine, plan: ProvisionPlan, step: EngineStep,
 /** How long a tool's own hook gets once the tool stands. */
 const HOOK_MS = 60_000;
 
-/** The CLIs whose catalog row names a hook, run once wsp put the row on: a hook that fails fails its row, since the
- * tool is there and does not yet do what it was picked for. A row the box had before wsp is the person's own. */
-async function hooked(machine: Machine, plan: ProvisionPlan, rows: PlaceProvisionRow[], stage: ProvisionStage): Promise<PlaceProvisionRow[]> {
-  const out: PlaceProvisionRow[] = [];
-  for (const row of rows) {
-    const id = catalogIdOfRow(row);
-    const entry = id === undefined ? undefined : catalogEntry(id);
-    const hook = entry?.kind === "tool" ? entry.hook : undefined;
-    if (hook === undefined || row.outcome !== "installed") {
-      out.push(row);
-      continue;
-    }
-    const res = await machine.exec(`${pathLine(plan.path, plan.prefix)}\n${hook.on}`, { timeoutMs: HOOK_MS }).catch((e: unknown) => ({ exitCode: -1, stdout: "", stderr: e instanceof Error ? e.message : String(e) }));
-    const done: PlaceProvisionRow = res.exitCode === 0 ? row : { ...row, outcome: "failed", note: `${hook.on}: ${lastWords(res.stderr || res.stdout) ?? `exit ${res.exitCode}`}` };
-    if (done !== row) stage(rowLine(done), undefined, done);
-    out.push(done);
-  }
-  return out;
+/** The hook a CLI row's catalog entry names, run as the row lands. */
+export function hookOf(row: { id: string }): { on: string; off: string } | undefined {
+  const id = catalogIdOfRow(row);
+  const entry = id === undefined ? undefined : catalogEntry(id);
+  return entry?.kind === "tool" ? entry.hook : undefined;
+}
+
+/** A row with its catalog hook run, once wsp put the row on and before the row is said, so whatever waits on the
+ * row waits on its hook too: a hook that fails fails its row, since the tool is there and does not yet do what it
+ * was picked for. A row the box had before wsp is the person's own. */
+async function hooked(machine: Machine, plan: ProvisionPlan, row: PlaceProvisionRow): Promise<PlaceProvisionRow> {
+  const hook = hookOf(row);
+  if (hook === undefined || row.outcome !== "installed") return row;
+  const res = await machine.exec(`${pathLine(plan.path, plan.prefix)}\n${hook.on}`, { timeoutMs: HOOK_MS }).catch((e: unknown) => ({ exitCode: -1, stdout: "", stderr: e instanceof Error ? e.message : String(e) }));
+  return res.exitCode === 0 ? row : { ...row, outcome: "failed", note: `${hook.on}: ${lastWords(res.stderr || res.stdout) ?? `exit ${res.exitCode}`}` };
 }
 
 /** How long one plugin's install gets: its marketplace's clone and the plugin's own files. */
