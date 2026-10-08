@@ -3,8 +3,9 @@
 // with four changes the build makes to the shipped tile: the status slot shows each status as its icon alone, the
 // working crab among them at the end of the first row, a thread at rest keeping its age; the card leads with a status row, the
 // icon, the word, the reason and the time; on hover the slot gives way to Settle where a settle can run; and a tile
-// with threads under it folds them away, its agent mark turning into the fold's chevron on hover, the folded tile
-// carrying at its title's end what under it needs the person, the whole count on its card. ?tile=before draws the shipped tile, for the owner to compare.
+// with threads under it folds them away, its agent mark turning into the fold's chevron on hover and staying the
+// chevron while folded, the folded tile carrying beside its status the glyph of the most pressing thing under it that
+// needs the person, every count on its card. ?tile=before draws the shipped tile, for the owner to compare.
 // A thread in the sidebar as one tile of two rows: the project and the
 // computer it runs on with the thread's status at the right, then the agent's
 // mark and the title, with an open pull request's icon and the crab at the
@@ -110,7 +111,7 @@ function TileFrame({ card, place, harness, renaming, status, children, ...button
 
 /** The two rows every tile draws. Row two is the agent's mark and the title, then an open pull request's icon and
  * the crab while the thread works. */
-function TileRows({ place, status, title, harness, pr, crab, mark, end }: { place: TilePlace; status: ReactNode; title: ReactNode; harness: string | null; pr?: TileCheckout["pr"]; crab: boolean; mark?: ReactNode; end?: ReactNode }) {
+function TileRows({ place, status, title, harness, pr, crab, mark }: { place: TilePlace; status: ReactNode; title: ReactNode; harness: string | null; pr?: TileCheckout["pr"]; crab: boolean; mark?: ReactNode }) {
   return (
     <>
       <span className={TILE_ROW_ONE_CLASS}>
@@ -125,7 +126,6 @@ function TileRows({ place, status, title, harness, pr, crab, mark, end }: { plac
         {title}
         {tilePrIcon(pr) ? <GitPullRequestIcon aria-hidden data-tile-pr className="size-3 shrink-0 text-[var(--top-row-meta)]" /> : null}
         {crab ? <Crab className="shrink-0 text-status-working" /> : null}
-        {end}
       </span>
     </>
   );
@@ -319,14 +319,14 @@ export function ThreadTile({
           ? {
               mark: (
                 <span className="relative flex size-3 shrink-0 items-center justify-center">
-                  <HarnessMark harness={thread.harness} label={agentName(thread.harness)} className="size-3 group-hover/tile:invisible" />
+                  <HarnessMark harness={thread.harness} label={agentName(thread.harness)} className={cn("size-3", folded ? "invisible" : "group-hover/tile:invisible")} />
                   <span
                     role="button"
                     tabIndex={-1}
                     data-tile-fold
                     aria-expanded={!folded}
                     aria-label={folded ? TILE_WORDS.unfold : TILE_WORDS.fold}
-                    className="invisible absolute inset-0 flex items-center justify-center text-sidebar-muted-foreground hover:text-sidebar-foreground group-hover/tile:visible"
+                    className={cn("absolute inset-0 flex items-center justify-center text-sidebar-muted-foreground hover:text-sidebar-foreground", !folded && "invisible group-hover/tile:visible")}
                     onClick={event => {
                       event.stopPropagation();
                       toggleFolded(thread.id);
@@ -342,7 +342,8 @@ export function ThreadTile({
           BEFORE ? (
             <ThreadStatus thread={thread} age={time} settled={settled} />
           ) : (
-            <span className="relative flex shrink-0 items-center gap-2">
+            <span className="relative flex shrink-0 items-center gap-1.5">
+              {folds && folded ? <Rollup counts={under.counts} /> : null}
               <span className={cn("flex items-center", settleHere && "group-hover/tile:invisible")}>
                 {snoozed ? <SnoozedWorking count={snoozedWorking} /> : setupRefused !== undefined ? <span data-thread-status="setup-refused" title={setupRefused}>{LINK_DOWN_WORDS.refused}</span> : <StatusIcon thread={thread} kind={kind} tip={false} />}
               </span>
@@ -354,25 +355,6 @@ export function ThreadTile({
         harness={thread.harness}
         pr={checkout.pr}
         crab={BEFORE && status.crab === true}
-        {...(folds && folded
-          ? {
-              end: (
-                <span
-                  role="button"
-                  tabIndex={-1}
-                  data-tile-unfold
-                  aria-label={TILE_WORDS.unfold}
-                  className="flex shrink-0 items-center text-[11px]"
-                  onClick={event => {
-                    event.stopPropagation();
-                    toggleFolded(thread.id);
-                  }}
-                >
-                  <Rollup counts={under.counts} />
-                </span>
-              ),
-            }
-          : {})}
       />
     </TileFrame>
   );

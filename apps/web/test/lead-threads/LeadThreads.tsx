@@ -35,10 +35,11 @@ import {
   ListTreeIcon,
   MessageCircleQuestionIcon,
   MessageSquareIcon,
+  MessageSquareTextIcon,
   SquareIcon,
   type LucideIcon,
 } from "lucide-react";
-import { cloneElement, memo, useEffect, useRef, useState, type MouseEvent, type ReactElement, type ReactNode } from "react";
+import { cloneElement, memo, useRef, useState, type MouseEvent, type ReactElement, type ReactNode } from "react";
 import { create } from "zustand";
 import { openContextMenu } from "../../src/actions/contextMenu";
 import { THREAD_WORDS } from "../../src/actions/format";
@@ -117,7 +118,6 @@ export const LEAD_WORDS = {
   shut: "Show the threads",
   open: "Hide the threads",
   asked: "Asked",
-  said: "Said",
   lead: "Lead",
 } as const;
 
@@ -385,11 +385,13 @@ function Act({ icon: Icon, label, run }: { icon: LucideIcon; label: string; run:
  * how long it ran. The build exports TileCard from ThreadTile and gives it these lines. */
 function SubagentCard({ thread, kind }: { thread: Thread; kind: StatusKind }) {
   const facts = factsOf(thread);
-  const lines = [
-    facts.prompt === undefined ? null : `${LEAD_WORDS.asked}: ${facts.prompt}`,
-    facts.summary === undefined ? null : `${LEAD_WORDS.said}: ${facts.summary}`,
-    facts.model ?? null,
-  ].filter((line): line is string => line !== null);
+  // The tile card's line: a 12 px glyph, then the words on the column the status row's word stands on. What it was
+  // asked has the message's glyph, named for a screen reader; what it said is the status row's reason once it is done;
+  // the agent line is its mark.
+  const lines: Array<{ id: string; glyph: ReactNode; text: string; clamp?: boolean }> = [
+    ...(facts.prompt === undefined ? [] : [{ id: "asked", glyph: <MessageSquareTextIcon role="img" aria-label={LEAD_WORDS.asked} className="size-3" />, text: facts.prompt, clamp: true }]),
+    { id: "agent", glyph: <HarnessMark harness={thread.harness} label={agentName(thread.harness)} className="size-3" />, text: facts.model ?? agentName(thread.harness) },
+  ];
   return (
     <TooltipPopup side="right" align="start" sideOffset={6} data-subagent-card className="max-w-72 text-left whitespace-normal">
       <div className="flex min-w-0 flex-col gap-1.5 py-1">
@@ -397,8 +399,9 @@ function SubagentCard({ thread, kind }: { thread: Thread; kind: StatusKind }) {
         <ul className="flex min-w-0 flex-col gap-1 text-muted-foreground">
           <StatusLine thread={thread} kind={kind} />
           {lines.map(line => (
-            <li key={line} className="min-w-0 break-words">
-              {line}
+            <li key={line.id} data-tile-card-line={line.id} className="flex min-w-0 items-start gap-2">
+              <span className="mt-[3px] flex shrink-0">{line.glyph}</span>
+              <span className={cn("min-w-0 break-words", line.clamp === true && "line-clamp-3")}>{line.text}</span>
             </li>
           ))}
         </ul>
@@ -667,14 +670,17 @@ export function StatusLine({ thread, kind }: { thread: Thread; kind: StatusKind 
   );
 }
 
-/** What a folded tile says of everything under it, at any depth, in its first row: only what needs the person, each
- * status's icon and how many, asking first, in its own ink. The whole count, working and waiting with it, is on the
- * tile's card, so the row keeps its computer's name. */
+/** What a folded tile says of everything under it, at any depth, in its first row beside its own status: the glyph of
+ * the most pressing thing under it that needs the person, asking before failed, in its own ink, with no number. One
+ * glyph costs the row 18 px, which the computer's name spares; two would cut it. Every kind and its count is on the
+ * tile's card, and the glyph's name for a screen reader says them all. */
 export function Rollup({ counts }: { counts: TreeCounts }) {
   const marks: Array<{ id: string; n: number; ink: string; glyph: ReactNode }> = [
     { id: "needs-you", n: counts.needsYou, ink: "text-status-input", glyph: <MessageCircleQuestionIcon aria-hidden className="size-3" /> },
     { id: "failed", n: counts.failed, ink: "text-status-failed", glyph: <CircleAlertIcon aria-hidden className="size-3" /> },
-  ].filter(mark => mark.n > 0);
+  ]
+    .filter(mark => mark.n > 0)
+    .slice(0, 1);
   const said = [
     counts.needsYou > 0 ? LEAD_WORDS.needsYou(counts.needsYou) : null,
     counts.failed > 0 ? LEAD_WORDS.failed(counts.failed) : null,
@@ -683,11 +689,10 @@ export function Rollup({ counts }: { counts: TreeCounts }) {
   ].filter(Boolean).join(", ");
   if (marks.length === 0) return null;
   return (
-    <span data-rollup aria-label={said} className="inline-flex shrink-0 items-center gap-2 tabular-nums">
+    <span data-rollup role="img" aria-label={said} className="inline-flex shrink-0 items-center">
       {marks.map(mark => (
-        <span key={mark.id} data-rollup-count={mark.id} className={cn("inline-flex items-center gap-0.5 font-medium", mark.ink)}>
+        <span key={mark.id} data-rollup-count={mark.id} className={cn("inline-flex", mark.ink)}>
           {mark.glyph}
-          {mark.n}
         </span>
       ))}
     </span>
@@ -1010,11 +1015,10 @@ function SidebarTree({ lead, depth, nodes, tile }: Omit<SidebarProps, "in">) {
   const parts = childParts(nodes, tree);
   const key = foldKey("sidebar", lead, "finished");
   const finishedOpen = useLeadUi(s => s.open[key] ?? false);
-  // The page open is a finished child of this tile's: its fold opens so the row it stands for is marked.
-  const holdsOpen = useStore(s => s.selectedThreadId !== null && parts.finished.some(node => node.thread.thread !== null && keyOf(node.thread.thread) === s.selectedThreadId));
-  useEffect(() => {
-    if (holdsOpen && !finishedOpen) useLeadUi.setState(st => ({ open: { ...st.open, [key]: true } }));
-  }, [holdsOpen, finishedOpen, key]);
+  // The page open is a finished child of this tile's: while it is open its one row stands under the shut fold's head,
+  // so the person sees where they are without the fold opening on its own or staying open after they leave.
+  const opened = useStore(s => (s.selectedThreadId !== null && parts.finished.some(node => node.thread.thread !== null && keyOf(node.thread.thread) === s.selectedThreadId) ? s.selectedThreadId : null));
+  const openedNode = finishedOpen || opened === null ? undefined : parts.finished.find(node => node.thread.thread !== null && keyOf(node.thread.thread) === opened);
   const leadName = byKey.get(lead)?.title ?? fleet.flatMap(p => p.threads).find(t => t.id === lead)?.title ?? "";
   const settleAll = settleFinished(leadName, finishedKeys(nodes, tree));
   const row = (node: TileNode, part: ChildPart, slim: boolean, at: number) => {
@@ -1047,6 +1051,8 @@ function SidebarTree({ lead, depth, nodes, tile }: Omit<SidebarProps, "in">) {
                 )}
               />
             </ul>
+          ) : openedNode !== undefined ? (
+            <ul className={CHILD_LIST_CLASS}>{row(openedNode, "finished", true, depth + 1)}</ul>
           ) : null}
         </li>
       ) : null}

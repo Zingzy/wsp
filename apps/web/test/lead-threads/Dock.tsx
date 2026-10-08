@@ -31,9 +31,6 @@ const TITLE_CLASS = "text-base leading-6 font-semibold text-foreground";
 const DOCK_FOOT = "pt-0 pb-5";
 
 export const DOCK_WORDS = {
-  agent: "Agent",
-  asked: "Asked",
-  said: "Said",
   back: "Back to lead",
   backTo: (title: string) => `Back to ${title}`,
   workedFor: (ran: string | null) => (ran === null ? "Done" : `Worked for ${ran}`),
@@ -92,7 +89,9 @@ export function Dock({ k, mark, title, aside, note, foot, acts, children }: { k:
  * composer's strips belong to it. Where the composer's words stand, its state in the placeholder's type and ink: what
  * it is doing while it runs ("Working for", the timeline's own WorkingTimer, written straight to the page once a
  * second so a running subagent never draws the chat again), and once it ended how long it worked (its result is its
- * last message, right above), why it failed, or when it was stopped, clipped with the whole of it on hover. Where the model picker stands, the agent's
+ * last message, right above), why it failed, or when it was stopped, clipped with the whole of it on hover; under
+ * 640 px, where there is no hover, it wraps. The row keeps the composer's 48 px floor, which the composer gets from its
+ * 32 px send button and this row's xs keycap does not give it. Where the model picker stands, the agent's
  * mark in its colour and the model in the picker's own box, a label and not a menu. Where the send button stands, the
  * way back to its lead as the language's inline act, the outline xs keycap with its glyph. Under 640 px the model is
  * its mark and the way back its arrow, their words on hover. Stop is on its row in the tree, on hover. A screen
@@ -117,7 +116,7 @@ export function SubagentBar({ subagent }: { subagent: SidebarThreadSnapshot }) {
   const state = (
     <span
       data-subagent-state
-      className="min-w-0 truncate leading-relaxed text-placeholder tabular-nums [font-family:var(--font-composer,var(--font-sans))] [font-size:var(--font-size-prompt,0.875rem)]"
+      className="min-w-0 leading-relaxed break-words text-placeholder tabular-nums [font-family:var(--font-composer,var(--font-sans))] [font-size:var(--font-size-prompt,0.875rem)] max-sm:line-clamp-3 sm:truncate"
     >
       {running ? (
         <>
@@ -135,7 +134,7 @@ export function SubagentBar({ subagent }: { subagent: SidebarThreadSnapshot }) {
           <div className="mx-auto w-full min-w-0 max-w-3xl">
             <ComposerSurface.Main>
               <div className="overflow-hidden rounded-[20px]">
-                <div data-subagent-bar className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-x-1 py-2 ps-4 pe-2 sm:ps-5">
+                <div data-subagent-bar className="grid min-h-12 grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-x-1 py-2 ps-4 pe-2 sm:ps-5">
                   {running ? (
                     state
                   ) : (

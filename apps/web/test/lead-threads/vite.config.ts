@@ -9,7 +9,7 @@
 // settled footer and no turn folds, since its bar carries the state; and under ?around=proposed the timeline draws the
 // children one call started as one list of live tiles where it started them, ChatView leaves the Threads block out,
 // and ChatComposer draws the one drawer in place of its queue cards and its task drawer; and StepRow writes a step's
-// time as the transcript and the task drawer do, the one format the build takes app-wide. Everything else on the page is the app.
+// time as the transcript and the task drawer do, in their format and the drawer's mono, app-wide in this build. Everything else on the page is the app.
 // Serve from apps/web: vite --config test/lead-threads/vite.config.ts --host 127.0.0.1 --port <free>
 import { fileURLToPath } from "node:url";
 import type { ConfigEnv, Plugin, UserConfig } from "vite";
@@ -78,7 +78,10 @@ const SWAPS: Record<string, ReadonlyArray<readonly [string, string]>> = {
     ["{opened.length > 0 ? <OpenedThreads workspaceId={workspaceId} opened={opened} /> : null}", "{opened.length > 0 && !proposedComposer() ? <OpenedThreads workspaceId={workspaceId} opened={opened} /> : null}"],
     ["{view.settled !== null && !settledOnReply ? <SettledFooter turn={view.settled} /> : null}", "{view.settled !== null && !settledOnReply && !onSubagentPage() ? <SettledFooter turn={view.settled} /> : null}"],
   ],
-  [STEP_ROW]: [['{row.ms === undefined ? "" : fmtStepMs(row.ms, row.ticking === true)}', '{row.ms === undefined ? "" : fmtDuration(row.ms)}']],
+  [STEP_ROW]: [
+    ['<span data-step-time className={cn(FACT, "min-w-0 text-right")}>', '<span data-step-time className={cn(FACT, "min-w-0 text-right font-mono")}>'],
+    ['{row.ms === undefined ? "" : fmtStepMs(row.ms, row.ticking === true)}', '{row.ms === undefined ? "" : fmtDuration(row.ms)}'],
+  ],
   [ROW_GRAMMAR]: [
     ['export const CHILD_LIST_CLASS = "ml-3 flex min-w-0 flex-col";', "export { CHILD_LIST as CHILD_LIST_CLASS } from " + JSON.stringify(RAIL) + ";"],
     [

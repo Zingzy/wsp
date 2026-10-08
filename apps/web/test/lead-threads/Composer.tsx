@@ -9,7 +9,7 @@
 // study: today a limit ends the turn, so it never stands beside running work.
 import { LIMIT_WORDS } from "@wsp/protocol";
 import { ChevronDownIcon, GaugeIcon, ListTodoIcon, ListTreeIcon, MessageCircleQuestionIcon, MessageSquareTextIcon, type LucideIcon } from "lucide-react";
-import type { ReactNode } from "react";
+import { useLayoutEffect, useRef, type ReactNode, type RefObject } from "react";
 import { create } from "zustand";
 import { isPromptOpen, type PermissionPrompt } from "../../src/adapt/index";
 import { EMPTY_DRAFT, useComposerDraftStore, useComposerQueue } from "../../src/components/chat/composerDraftStore";
@@ -95,19 +95,53 @@ export function ComposerDrawer({ thread, threadKey }: { thread: ChatThreadHandle
   );
 }
 
-/** The Threads bar: the lead's tree in the bar's card, its rows on the card's column, the counts at the head, and
- * Settle finished as the foot's act. */
+/** The share of the window the Threads bar's card may take before it scrolls. */
+const THREADS_CARD_SHARE = 0.46;
+
+/** Holds a scrolling card to the bottom of the last row that fits its share of the window, so its edge never slices a
+ * row: the next row is either in or out. Read again when the window or the rows change size (a fold opening). */
+function useWholeRows(card: RefObject<HTMLDivElement | null>): void {
+  useLayoutEffect(() => {
+    const el = card.current;
+    if (el === null) return;
+    const fit = (): void => {
+      el.style.maxHeight = "";
+      const budget = window.innerHeight * THREADS_CARD_SHARE;
+      if (el.scrollHeight <= budget) return;
+      const top = el.getBoundingClientRect().top - el.scrollTop;
+      let cut = 0;
+      for (const row of el.querySelectorAll("[data-child-row], button[data-child-fold]")) {
+        const bottom = row.getBoundingClientRect().bottom - top;
+        if (bottom <= budget && bottom > cut) cut = bottom;
+      }
+      el.style.maxHeight = `${Math.round(cut)}px`;
+    };
+    fit();
+    const rows = new ResizeObserver(fit);
+    if (el.firstElementChild !== null) rows.observe(el.firstElementChild);
+    window.addEventListener("resize", fit);
+    return () => {
+      rows.disconnect();
+      window.removeEventListener("resize", fit);
+    };
+  }, [card]);
+}
+
+/** The Threads bar: the lead's tree in the bar's card, its rows on the card's column, the counts at the head in the
+ * drawer's quiet form, and Settle finished as the foot's act. */
 export function ThreadsDock({ threadKey }: { threadKey: string }) {
   const under = useSubtree(threadKey);
   const tree = useTranscriptTree(threadKey);
   const settle = useSettleFinished(threadKey);
+  const card = useRef<HTMLDivElement>(null);
+  useWholeRows(card);
   const any = settle.title !== "Settle 0 finished";
   return (
     <Dock
       k="threads"
       mark={<ListTreeIcon aria-hidden className={cn(GLYPH, "shrink-0")} />}
       title={DRAWER_WORDS.threads}
-      aside={<TreeSummary counts={under.counts} />}
+      aside={<TreeSummary counts={under.counts} quiet />}
       foot={<WriteMessage />}
       acts={
         any ? (
@@ -118,7 +152,7 @@ export function ThreadsDock({ threadKey }: { threadKey: string }) {
       }
     >
       <Grid id="threads">
-        <div data-threads-card className="max-h-[46vh] overflow-y-auto px-3 py-1">
+        <div ref={card} data-threads-card className="overflow-y-auto px-3 py-1">
           {tree.lead === undefined ? null : <ThreadsTree lead={tree.lead} leadPlace={tree.leadPlace} nodes={tree.nodes} byKey={tree.byKey} />}
         </div>
       </Grid>
