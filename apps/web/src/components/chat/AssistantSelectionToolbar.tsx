@@ -9,6 +9,7 @@ import { createPortal } from "react-dom";
 
 import { observeSelectionActions, resolveSelectionActionPosition, type SelectionActionPoint } from "../../lib/selectionActions";
 import { Button } from "../ui/button";
+import { usePortalHost } from "../ui/portal-host";
 
 /** The attribute an assistant reply's row carries, holding that reply's message id. */
 export const QUOTE_SOURCE_ATTRIBUTE = "data-quote-message";
@@ -34,6 +35,7 @@ export function AssistantSelectionToolbar({ viewport, replyToOf, onQuote }: { vi
   const [selection, setSelection] = useState<{ quote: QuotedSelection; position: SelectionActionPoint } | null>(null);
   const toolbarRef = useRef<HTMLButtonElement>(null);
   const actionsRef = useRef<ReturnType<typeof observeSelectionActions> | null>(null);
+  const host = usePortalHost();
 
   useLayoutEffect(() => {
     const toolbar = toolbarRef.current;
@@ -112,6 +114,6 @@ export function AssistantSelectionToolbar({ viewport, replyToOf, onQuote }: { vi
       <QuoteIcon aria-hidden="true" />
       Quote
     </Button>,
-    document.body,
+    host ?? document.body,
   );
 }

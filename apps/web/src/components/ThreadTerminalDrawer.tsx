@@ -34,6 +34,7 @@ import type { TerminalConfig, TerminalScheme } from "@wsp/protocol";
 import { Popover, PopoverPopup, PopoverTrigger } from "./ui/popover";
 import { Button } from "./ui/button";
 import { TerminalFontButton, TerminalFontCard } from "./TerminalFontButton";
+import { useTerminalGround } from "./terminalGround";
 import { PanelTabCloseButton } from "./ui/panel-tab-close-button";
 import { isTerminalAppShortcut } from "../keybindings";
 import type { ResolvedKeybindingsConfig } from "../keybindingTypes";
@@ -258,6 +259,7 @@ export function TerminalViewport({
   // The person's Ghostty config, as the host read it when this viewport opened; null until then and when no host answers.
   const fileRef = useRef<TerminalConfig | null>(null);
   const [translucent, setTranslucent] = useState(false);
+  useTerminalGround(containerRef, translucent);
   // Where the page draws no glass every surface is solid, the terminal too, whatever the Ghostty file's opacity says.
   const transparency = useGlass();
   const transparencyRef = useRef(transparency);

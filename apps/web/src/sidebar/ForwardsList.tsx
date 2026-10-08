@@ -32,7 +32,7 @@ export function ForwardsList() {
           <SidebarMenu>
             {forwards.map(f => {
               return (
-                <SidebarMenuItem key={`${f.workspaceId}:${f.port}`} data-forward={`${f.workspaceId}:${f.port}`} data-forward-kind={f.kind}>
+                <SidebarMenuItem key={`${f.workspaceId}:${f.port}`} data-has-action="" data-forward={`${f.workspaceId}:${f.port}`} data-forward-kind={f.kind}>
                   {f.kind === "callback" ? (
                     <div className="flex h-12 min-w-0 items-center gap-2 rounded-md p-2 text-left text-sm">
                       <span className="flex min-w-0 flex-1 flex-col gap-0.5 leading-tight">

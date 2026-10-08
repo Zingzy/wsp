@@ -164,9 +164,10 @@ describe("a thread the page holds", () => {
     await waitFor(() => expect(asked).toContain(`checkout ${WS}`));
     const before = asked.length;
     act(() => useStore.getState().openSettings());
-    expect(center().queryByText("Checking the keychain.")).toBeNull();
+    // Settings stands over the thread, which is kept under it hidden rather than taken down.
+    expect(center().getByText("Checking the keychain.").closest("[style*='display: none']")).not.toBeNull();
     act(() => useStore.getState().closeSettings());
-    expect(center().getByText("Checking the keychain.")).toBeDefined();
+    expect(center().getByText("Checking the keychain.").closest("[style*='display: none']")).toBeNull();
     expect(center().queryByText(TRANSCRIPT_LOADING)).toBeNull();
     await act(async () => await new Promise(r => setTimeout(r, 50)));
     expect(asked.slice(before)).toEqual([]);

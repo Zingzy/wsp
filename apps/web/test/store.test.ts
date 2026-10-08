@@ -1076,6 +1076,19 @@ describe("the projects a workspace is made of", () => {
   });
 });
 
+describe("a workspace's catalogs", () => {
+  it("read again the same keep the record they replace, so nothing that reads it draws again: every thread opened re-drew every sidebar tile", async () => {
+    const { api } = fakeApi([view("ws_a")], []);
+    const catalog = { harness: "claude", label: "Claude Code", source: "table" as const, version: null, models: [], efforts: [], contextWindows: [], permissionModes: [], steers: false, renames: false, images: false };
+    useStore.getState().bind({ ...api, listHarnesses: async () => [{ ...catalog }] });
+    await useStore.getState().loadHarnesses("ws_a");
+    const held = useStore.getState().harnessesByWorkspace;
+    expect(held["ws_a"]).toEqual([catalog]);
+    await useStore.getState().loadHarnesses("ws_a");
+    expect(useStore.getState().harnessesByWorkspace).toBe(held);
+  });
+});
+
 describe("store workspaces", () => {
   it("a refused nap reverts the optimistic phase and toasts the reason", async () => {
     const { api } = fakeApi([view("ws_a")], []);

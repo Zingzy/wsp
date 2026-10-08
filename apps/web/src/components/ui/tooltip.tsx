@@ -2,6 +2,7 @@
 import { Tooltip as TooltipPrimitive } from "@base-ui/react/tooltip";
 
 import { cn } from "../../lib/utils";
+import { usePortalHost } from "./portal-host";
 import { TOOLTIP_SKIN } from "./hover-skin";
 
 const TooltipCreateHandle = TooltipPrimitive.createHandle;
@@ -31,7 +32,7 @@ function TooltipPopup({
   anchor?: TooltipPrimitive.Positioner.Props["anchor"];
 }) {
   return (
-    <TooltipPrimitive.Portal>
+    <TooltipPrimitive.Portal container={usePortalHost()}>
       <TooltipPrimitive.Positioner
         align={align}
         anchor={anchor}

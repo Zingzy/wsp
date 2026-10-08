@@ -15,7 +15,6 @@ import { addNotice } from "../../src/notices/store";
 import { useStore } from "../../src/protocol/store";
 import { useAddFlow, type AddStep } from "../../src/settings/add/addFlow";
 import { useAdds } from "../../src/settings/adds";
-import { SettingsPage } from "../../src/settings/SettingsPage";
 import { useSettingsStore } from "../../src/settings/settingsStore";
 import { applyTheme } from "../../src/settings/theme";
 import { AppShell } from "../../src/shell/AppShell";
@@ -316,6 +315,8 @@ if (params.get("scroll") === "bottom") {
 
 createRoot(document.getElementById("root")!).render(
   <TooltipProvider>
-    <AppShell>{settingsOpen ? <SettingsPage /> : <div />}</AppShell>
+    <AppShell>
+      <div />
+    </AppShell>
   </TooltipProvider>,
 );

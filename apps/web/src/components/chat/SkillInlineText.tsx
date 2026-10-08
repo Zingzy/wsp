@@ -8,7 +8,7 @@ import {
   CHAT_INLINE_CHIP_CLASS_NAME,
   CHAT_INLINE_CHIP_LABEL_CLASS_NAME,
   COMPOSER_INLINE_CHIP_ICON_CLASS_NAME,
-  SKILL_CHIP_ICON_SVG,
+  SKILL_CHIP_ICON_HTML,
 } from "../composerInlineChip";
 import { cn } from "../../lib/utils";
 
@@ -86,7 +86,7 @@ function SkillChip(props: { skill: InlineSkill; rawText: string }) {
         <span
           aria-hidden="true"
           className={COMPOSER_INLINE_CHIP_ICON_CLASS_NAME}
-          dangerouslySetInnerHTML={{ __html: SKILL_CHIP_ICON_SVG }}
+          dangerouslySetInnerHTML={SKILL_CHIP_ICON_HTML}
         />
         <span className={CHAT_INLINE_CHIP_LABEL_CLASS_NAME}>
           {formatProviderSkillDisplayName(props.skill)}
