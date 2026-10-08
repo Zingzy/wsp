@@ -224,18 +224,29 @@ export class WorkspaceTerminals {
 
   // --- pty lifecycle -----------------------------------------------------------
 
-  async open(opts: OpenOpts = {}): Promise<PtyTabView> {
+  /** A new pty as a tab. claim runs before any listener hears of it, so the pane that asked for it holds it before
+   * the drawer, which shows every tab no panel holds, can draw it. */
+  async open(opts: OpenOpts = {}, claim?: (ptyId: string) => void): Promise<PtyTabView> {
     const params: Record<string, unknown> = { ...lastSize };
     if (opts.shell !== undefined) params["shell"] = opts.shell;
     if (opts.cwd !== undefined) params["cwd"] = opts.cwd;
     const created = await this.#wire.request("pty.create", params);
     this.#everOpened = true;
     const ptyId = String(created["ptyId"]);
-    const p = held(ptyId, (opts.shell ?? "shell").split("/").pop() ?? "shell", false);
+    const p = held(ptyId, "", false);
     this.#ptys.set(ptyId, p);
+    try {
+      await this.#wire.request("pty.attach", { ptyId });
+    } catch (cause) {
+      // Left to the next list, which adopts it as a tab of the drawer's.
+      this.#ptys.delete(ptyId);
+      throw cause;
+    }
+    // Named and listed only now: a tab list published while the attach was out would hand it to the drawer.
+    p.title = this.#numbered((opts.shell ?? "shell").split("/").pop() ?? "shell");
     this.#order.push(ptyId);
     this.#activeId = ptyId;
-    await this.#wire.request("pty.attach", { ptyId });
+    claim?.(ptyId);
     this.#notifyTabs();
     return { ptyId: p.ptyId, title: p.title, exited: p.exited, lost: p.lost };
   }
@@ -305,7 +316,7 @@ export class WorkspaceTerminals {
     if (!p) throw new Error(`no pty ${ptyId} here`);
     await this.#wire.request("pty.tab", { ptyId });
     p.reply = false;
-    p.title = "shell";
+    p.title = this.#numbered("shell");
     if (!this.#order.includes(ptyId)) this.#order.push(ptyId);
     this.#activeId = ptyId;
     this.#everOpened = true;
@@ -443,7 +454,7 @@ export class WorkspaceTerminals {
       if (this.#ptys.has(entry.id) || entry.reply === true) continue;
       // Registered before the attach, and not yet exited: the daemon replays scrollback as pty.data ahead of its
       // reply and pushes pty.exit for a dead pty, and feedEvent drops both for an unknown or already exited pty.
-      const p = held(entry.id, "shell", false);
+      const p = held(entry.id, this.#numbered("shell"), false);
       this.#ptys.set(entry.id, p);
       this.#order.push(entry.id);
       let attached = false;
@@ -466,6 +477,14 @@ export class WorkspaceTerminals {
     // Unconditional, also out of a cancelled ritual: a pty.exit during an attach publishes the list mid-loop, and
     // if that attach is then cut the pty leaves #order, so the view must be rebuilt even when nothing was adopted.
     this.#notifyTabs();
+  }
+
+  /** The name a new tab reads under: the shell's with the lowest number no tab here holds, so no two read alike. */
+  #numbered(shell: string): string {
+    const taken = new Set(this.#order.map(id => this.#ptys.get(id)?.title));
+    let n = 1;
+    while (taken.has(`${shell} ${n}`)) n += 1;
+    return `${shell} ${n}`;
   }
 
   #markExited(p: PtyState): void {

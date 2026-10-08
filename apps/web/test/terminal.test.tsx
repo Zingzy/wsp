@@ -162,8 +162,8 @@ describe("WorkspaceTerminals", () => {
     expect(statusChanges).toBe(1);
     expect(ops.map(o => o.op)).toEqual(["pty.list", "pty.attach", "pty.attach"]);
     expect(wt.tabs()).toEqual([
-      { ptyId: "p1", title: "shell", exited: false, lost: false },
-      { ptyId: "p2", title: "shell", exited: true, lost: false },
+      { ptyId: "p1", title: "shell 1", exited: false, lost: false },
+      { ptyId: "p2", title: "shell 2", exited: true, lost: false },
     ]);
     expect(wt.activeId()).toBe("p1");
     const replayed: string[] = [];
@@ -187,7 +187,7 @@ describe("WorkspaceTerminals", () => {
     const wt = new WorkspaceTerminals(wire);
     wt.feedStatus("live");
     await waitFor(() => expect(wt.status()).toBe("live"));
-    expect(wt.tabs()).toEqual([{ ptyId: "p1", title: "shell", exited: true, lost: false }]);
+    expect(wt.tabs()).toEqual([{ ptyId: "p1", title: "shell 1", exited: true, lost: false }]);
     const seen: string[] = [];
     wt.bind("p1", { data: d => seen.push(d), reset: () => {} })();
     expect(seen.join("")).toBe("\r\n[process exited]\r\n");

@@ -468,10 +468,19 @@ fn exit_event(pty_id: &str, exit: Exit) -> DaemonEvent {
     DaemonEvent::PtyExit { pty_id: pty_id.to_owned(), exit_code: exit.code, signal: exit.signal }
 }
 
-#[derive(Default)]
 pub(crate) struct PtyManager {
     sessions: HashMap<String, Session>,
     next_id: u64,
+}
+
+impl Default for PtyManager {
+    /// Numbered on from a random block rather than from one: a client keeps ids past this daemon (a reply's run on
+    /// its thread, a panel's tab), and the daemon the host starts after it must name none of its ptys by one of those.
+    fn default() -> Self {
+        let mut seed = [0u8; 4];
+        getrandom::fill(&mut seed).expect("the system gives random bytes");
+        Self { sessions: HashMap::new(), next_id: u64::from(u32::from_le_bytes(seed)) << 16 }
+    }
 }
 
 impl PtyManager {
@@ -764,6 +773,26 @@ mod tests {
         assert!(!ptys.tab("pty_404", None));
         ptys.destroy(&ran.id);
         ptys.destroy(&plain.id);
+    }
+
+    /// A client keeps pty ids past the daemon that gave them (a reply's run on its thread, a panel's tab), and the
+    /// host starts its daemon again with every restart of its own: the next one names none of its ptys by those.
+    #[test]
+    fn a_daemon_started_again_never_names_a_pty_by_an_id_the_one_before_it_gave() {
+        let tab = PtyCreateOpts { shell: Some("/bin/sh".to_owned()), ..Default::default() };
+        let home = env(&[("HOME", "/tmp")]);
+        let mut before = PtyManager::default();
+        let gave: Vec<String> = (0..3).map(|_| before.create(&tab, &home, None).unwrap().id).collect();
+        for id in &gave {
+            before.destroy(id);
+        }
+        let mut after = PtyManager::default();
+        let first = after.create(&tab, &home, None).unwrap().id;
+        let second = after.create(&tab, &home, None).unwrap().id;
+        assert!(!gave.contains(&first) && !gave.contains(&second), "{gave:?} then {first} and {second}");
+        assert_eq!(after.list(None).into_iter().map(|e| e.id).collect::<Vec<_>>(), [first.clone(), second.clone()]);
+        after.destroy(&first);
+        after.destroy(&second);
     }
 
     #[test]
