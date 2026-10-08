@@ -63,7 +63,7 @@ import {
 import { ownedFloorBytes, PlaceAbsentError, PlaceMachine, keyFingerprint } from "@wsp/engine";
 import { openPlaceForward } from "../place-forward.js";
 import {
-  CAPS, madeBySetup, type PlaceLogin, type PlaceRecord, type PlaceStaging, type RecipeResolver, type PlaceDoor, NO_PLACE_UPDATER,
+  CAPS, projectsMade, type PlaceLogin, type PlaceRecord, type PlaceStaging, type RecipeResolver, type PlaceDoor, NO_PLACE_UPDATER,
   placeUpdateSlowLine, placeSweptOverSshLine, placeLoginRoadLine, placeSweptOverLinkLine, placeElsewhereSweptOverLinkLine, PlaceLoginRefusedError, PlaceHostKeyChangedError,
   PlaceAddTakenBackError,
 } from "./types.js";
@@ -498,9 +498,9 @@ export function manageDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, 
       // A project is one computer's: taken out from under its projects, the place id on each record would name
       // nothing. The forks are refused first, since a workspace of a project is a machine standing on this place.
       // The projects the recipe's folders step made there are wsp's own and go with it; any other refuses.
-      const made = madeBySetup(held, "folders");
+      const made = projectsMade(held);
       const projects = await recording.projectsOn(placeId);
-      const theirs = projects.filter(name => !made.some(key => (held.picks?.folders[key]?.name ?? key) === name));
+      const theirs = projects.filter(p => !made.has(p.id)).map(p => p.name);
       if (theirs.length > 0) throw new Error(placeHoldsProjectsRefusal(held.name, theirs));
       const reach = live.get(placeId)?.reach;
       const leaver = wiring.leave;
@@ -574,10 +574,9 @@ export function manageDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, 
       }
       swept = [...plugins.off, ...swept];
       if (plugins.kept.length > 0) note = note === undefined ? pluginsKeptLine(held.name, plugins.kept) : `${note}; ${pluginsKeptLine(held.name, plugins.kept)}`;
-      for (const key of made) {
-        const folder = held.picks!.folders[key]!;
-        const gone = await recording.removeFolder?.(placeId, key, folder).then(
-          () => projectLeftLine(folder.name ?? key),
+      for (const project of projects) {
+        const gone = await recording.removeFolder?.(placeId, project.id).then(
+          () => projectLeftLine(project.name),
           () => undefined,
         );
         if (gone !== undefined) swept.push(gone);

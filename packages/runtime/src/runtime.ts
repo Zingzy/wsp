@@ -600,7 +600,7 @@ function runtimeCore(ctx: RuntimeContext, opts: RuntimeOptions): RuntimeCore {
         },
         projectsOn: async placeId => {
           await ctx.ready();
-          return [...projectsHeld.values()].filter(p => p.computer === placeId).map(p => p.name);
+          return [...projectsHeld.values()].filter(p => p.computer === placeId).map(p => ({ id: p.id, name: p.name }));
         },
         runningOn: async (placeId, rows) => {
           await ctx.ready();
@@ -632,19 +632,24 @@ function runtimeCore(ctx: RuntimeContext, opts: RuntimeOptions): RuntimeCore {
           if (folder.icon !== undefined || folder.hue !== undefined) {
             await ctx.preferences.set({ projectLook: { [project.id]: { ...(folder.icon !== undefined ? { icon: folder.icon } : {}), ...(folder.hue !== undefined ? { hue: folder.hue } : {}) } } });
           }
-          return { id: `folders/${key}`, label: project.name, outcome: "installed", ...(project.notice !== undefined ? { note: project.notice } : {}) };
+          return { id: `folders/${key}`, label: project.name, outcome: "installed", project: { id: project.id }, pick: folder, ...(project.notice !== undefined ? { note: project.notice } : {}) };
         },
         folderRemote: async folder => (await ctx.remoteHere(folder.from.replace(/^~(?=\/|$)/, homedir()))).remote || undefined,
         // A folder the recipe took out leaves this host's list; its checkout there is the person's and stays.
-        removeFolder: async (placeId, key, folder) => {
-          const name = folder.name ?? key;
-          const project = (await ctx.projectsDoor.list()).find(p => p.computer === placeId && p.name === name);
+        removeFolder: async (placeId, projectId) => {
+          const project = (await ctx.projectsDoor.list()).find(p => p.computer === placeId && p.id === projectId);
           if (project === undefined) return;
           const standing = [...live.values()].filter(e => e.record.project === project.id).map(e => e.record.name);
           if (standing.length > 0) throw new Error(projectInUseRefusal(project.name, standing));
           projectsHeld.delete(project.id);
           await store.delete(PROJECTS, project.id);
           bus.emit({ type: "project.removed", projectId: project.id });
+        },
+        folderLook: async (projectId, was, now) => {
+          const held = (await ctx.preferences.get()).projectLook[projectId];
+          const icon = was.icon !== now.icon ? now.icon : held?.icon;
+          const hue = was.hue !== now.hue ? now.hue : held?.hue;
+          await ctx.preferences.set({ projectLook: { [projectId]: icon === undefined && hue === undefined ? null : { ...(icon !== undefined ? { icon } : {}), ...(hue !== undefined ? { hue } : {}) } } });
         },
       },
     });

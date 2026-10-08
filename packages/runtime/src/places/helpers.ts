@@ -11,6 +11,7 @@ import {
   plural,
   type PlaceApplied,
   type PlaceSetup,
+  type PlaceProvisionRow,
   type PlaceSync,
   type PlaceSetupStep,
   type SetupEnd,
@@ -276,6 +277,8 @@ export function cliFirst(plan: ProvisionPlan, ids: readonly string[]): Provision
   return { ...plan, steps: [...plan.steps.slice(0, plan.agents), ...first, ...clis.filter(s => !first.includes(s))] };
 }
 
+/** A setup row the engine read off that computer: the sign-ins, the folders and the GitHub sign-in are the runtime's. */
+export const engineRow = (r: PlaceProvisionRow): boolean => r.step !== undefined && r.step !== "signins" && r.step !== "folders" && r.id !== GITHUB_ROW;
 /** The lanes no two of the setup's steps share: the package managers, and the folder beside the job a files round
  * stages in. */
 export const INSTALLS = "installs";
