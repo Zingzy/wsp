@@ -9,6 +9,7 @@ import { serveRuntime, type RuntimeServer } from "../src/serve.js";
 import type { AgentsActs, AgentsReader, ServerIcons, ServersActs, SkillsActs } from "../src/agents-read.js";
 import { memoryStore, type Store } from "../src/store.js";
 import type { Clock } from "../src/clock.js";
+import type { DaemonChannel, DaemonChannelOptions } from "../src/daemon-channel.js";
 import { stubBackend } from "./stub-backend.js";
 import { WsClient } from "./ws-client.js";
 import { joinAt, relinkAt, wiring } from "./place-join.js";
@@ -28,7 +29,7 @@ afterEach(async () => {
   ctx.runtime = undefined;
 });
 
-export async function serving(opts: { provider?: { id: string; rateUsdPerHour: number }; store?: Store; relinkWaitMs?: number; update?: PlaceUpdater; updateWaitMs?: number; leave?: PlaceLeaver; vault?: Record<string, string>; folders?: HostFolders; agentsReader?: AgentsReader; agentsActs?: AgentsActs; skillsActs?: SkillsActs; serversActs?: ServersActs; serverIcons?: ServerIcons; adapters?: Record<string, HarnessAdapterFactory>; runOver?: PlaceWiring["runOver"]; back?: PlaceWiring["back"]; dialWaitMs?: number; clock?: Clock; local?: LocalWiring; agents?: { here?: { url?: string }; wspMcp?: McpServerSpec } } = {}, serve: { log?: (line: string) => void } = {}): Promise<{ hostKey: PlaceKeyPair; store: Store }> {
+export async function serving(opts: { provider?: { id: string; rateUsdPerHour: number }; store?: Store; relinkWaitMs?: number; update?: PlaceUpdater; updateWaitMs?: number; leave?: PlaceLeaver; vault?: Record<string, string>; folders?: HostFolders; agentsReader?: AgentsReader; agentsActs?: AgentsActs; skillsActs?: SkillsActs; serversActs?: ServersActs; serverIcons?: ServerIcons; adapters?: Record<string, HarnessAdapterFactory>; runOver?: PlaceWiring["runOver"]; back?: PlaceWiring["back"]; dialWaitMs?: number; clock?: Clock; local?: LocalWiring; daemonChannel?: (o: DaemonChannelOptions) => Promise<DaemonChannel>; agents?: { here?: { url?: string }; wspMcp?: McpServerSpec } } = {}, serve: { log?: (line: string) => void } = {}): Promise<{ hostKey: PlaceKeyPair; store: Store }> {
   const store = opts.store ?? memoryStore();
   const hostKey = newPlaceKeyPair();
   ctx.runtime = createRuntime({
@@ -37,6 +38,7 @@ export async function serving(opts: { provider?: { id: string; rateUsdPerHour: n
     adapters: opts.adapters ?? {},
     ...(opts.vault === undefined ? {} : { vault: () => opts.vault! }),
     ...(opts.local === undefined ? {} : { local: opts.local }),
+    ...(opts.daemonChannel === undefined ? {} : { daemonChannel: opts.daemonChannel }),
     ...(opts.agents === undefined ? {} : { agents: opts.agents }),
     ...(opts.agentsReader === undefined ? {} : { agentsReader: opts.agentsReader }),
     ...(opts.agentsActs === undefined ? {} : { agentsActs: opts.agentsActs }),

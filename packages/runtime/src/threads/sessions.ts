@@ -141,9 +141,10 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
       // A send goes into a thread the caller drives, read on the thread it lands in.
       const opening = live.get(workspaceId)?.record;
       const opensThere = opening !== undefined && ctx.opensIn(opening, origin);
-      // A folder of its repository on another computer than the asking thread's is refused in the words the run road
-      // refuses it in, whatever id named it; one of another repository reads as absent, as every record outside a tree.
-      if (opens && opening !== undefined && !opensThere && runsInFolder(opening.kind) && ctx.ofThreadsRepository(origin, opening.project)) {
+      // A workspace of its repository on another computer than the asking thread's, a folder or a machine, its tree's or
+      // not, is refused in the words the run road refuses it in, whatever id named it; one of another repository reads
+      // as absent, as every record outside a tree.
+      if (opens && opening !== undefined && !opensThere && ctx.ofThreadsRepository(origin, opening.project)) {
         const away = ctx.elsewhereRefusal(origin, ctx.projectHeld(opening.project), opening.name);
         if (away !== undefined) throw away;
       }

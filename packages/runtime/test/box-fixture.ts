@@ -13,7 +13,7 @@ import type { Store } from "../src/store.js";
 import type { ServersActs } from "../src/agents-read.js";
 import { MCP_READ_END } from "@wsp/engine";
 import { ctx, sockets, serving, code, join, KEEPS_NO_IMAGE } from "./places-fixture.js";
-import { fakeLocal } from "./stub-backend.js";
+import { branchDaemons, fakeLocal } from "./stub-backend.js";
 import { report } from "./place-join.js";
 import type { WsClient } from "./ws-client.js";
 
@@ -182,8 +182,9 @@ export function leading(starts: Held[]): HarnessAdapterFactory {
 
 /** A host holding this computer's folder of acme/lab in `root`, with a lead thread running on it, hetzner joined as
  * root, the same repository added there and another repository there. With `reach`, the lead's launch carries the
- * host's address and its own token, as a launch on this computer does under the host. */
-export async function leadAndBox(root: string, o: { agents?: { spawn: boolean; maxDepth?: number }; reach?: true } = {}) {
+ * host's address and its own token, as a launch on this computer does under the host. With `forks`, a daemon answers
+ * the lead's folder on main, so the lead forks a cloud machine of its repository the way it does on this computer. */
+export async function leadAndBox(root: string, o: { agents?: { spawn: boolean; maxDepth?: number }; reach?: true; forks?: true } = {}) {
   const repo = joinPath(root, "lab");
   mkdirSync(repo);
   execFileSync("git", ["init", "-q", "-b", "main", repo]);
@@ -191,7 +192,9 @@ export async function leadAndBox(root: string, o: { agents?: { spawn: boolean; m
   execFileSync("git", ["-C", repo, "remote", "add", "origin", "git@github.com:acme/lab.git"]);
   const starts: Held[] = [];
   const here: { url?: string } = {};
-  const { hostKey, store } = await serving({ adapters: { claude: leading(starts) }, local: fakeLocal(joinPath(root, "home")), ...(o.reach === true ? { agents: { here, wspMcp: { command: "wsp", args: ["mcp"] } } } : {}) });
+  const local = fakeLocal(joinPath(root, "home"));
+  const daemon = o.forks === true ? { local: { ...local, daemonRoad: async () => ({ url: "http://127.0.0.1:1", expiresAt: Number.MAX_SAFE_INTEGER, daemonToken: "t" }) }, daemonChannel: branchDaemons({ branchOf: () => "main" }).open } : { local };
+  const { hostKey, store } = await serving({ adapters: { claude: leading(starts) }, ...daemon, ...(o.reach === true ? { agents: { here, wspMcp: { command: "wsp", args: ["mcp"] } } } : {}) });
   here.url = `ws://127.0.0.1:${ctx.srv!.port}`;
   let seen!: Box;
   const { client, placeId } = await join(hostKey, {

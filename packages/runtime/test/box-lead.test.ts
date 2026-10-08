@@ -13,7 +13,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { agentsOffComputerRefusal, agentsOffRefusal, childOnAnotherComputerLine, childToLeadsComputerLine, HERE_PLACE_ID, noWorkspaceRefusal, refusalLine, rootGoneRefusal, sendFilesAcrossLine, SEND_FILES_ACROSS_FIX, spawnDepthRefusal, spawnFolderRefusal, spawnReachFix, spawnReachRefusal, spawnRepositoryRefusal, spawnRepositoryWorkspaceRefusal, SPAWN_FOLDER_FIX, SPAWN_REPOSITORY_FIX, SPAWN_REPOSITORY_WORKSPACE_FIX, TURN_TOKEN_ENV, waitAcrossLine, WAIT_ACROSS_FIX, type Caller, type ThreadScope } from "@wsp/protocol";
+import { agentsOffComputerRefusal, agentsOffRefusal, childOnAnotherComputerLine, childToLeadsComputerLine, execOutsideFix, HERE_PLACE_ID, noWorkspaceRefusal, refusalLine, rootGoneRefusal, sendFilesAcrossLine, SEND_FILES_ACROSS_FIX, spawnDepthRefusal, spawnFolderRefusal, spawnReachFix, spawnReachRefusal, spawnRepositoryRefusal, spawnRepositoryWorkspaceRefusal, SPAWN_FOLDER_FIX, SPAWN_REPOSITORY_FIX, SPAWN_REPOSITORY_WORKSPACE_FIX, TURN_TOKEN_ENV, waitAcrossLine, WAIT_ACROSS_FIX, type Caller, type ThreadScope } from "@wsp/protocol";
 import { copyKey } from "../src/runtime.js";
 import { code, join as joinHost, placesOf, sockets } from "./places-fixture.js";
 import { report } from "./place-join.js";
@@ -26,9 +26,9 @@ afterEach(() => {
 });
 
 /** The lead and the joined computer, in a folder this case owns. */
-async function leadAndBox(agents?: { spawn: boolean; maxDepth?: number }) {
+async function leadAndBox(agents?: { spawn: boolean; maxDepth?: number }, forks?: true) {
   root = mkdtempSync(join(tmpdir(), "wsp-box-lead-"));
-  const held = await leading(root, agents === undefined ? {} : { agents });
+  const held = await leading(root, { ...(agents === undefined ? {} : { agents }), ...(forks === undefined ? {} : { forks }) });
   return { ...held, token: held.launch[TURN_TOKEN_ENV]! };
 }
 
@@ -146,6 +146,54 @@ describe("the tree rule over a lead's children on a computer the person joined",
     await expect(rt.workspaces.folderFor({ project: "lab-box" }, asCloud)).rejects.toThrow(folderRule);
     await expect(rt.sessions.start(boxFolder.workspaceId, { prompt: "on your box", harness: "claude" }, asCloud)).rejects.toThrow();
     expect(starts).toHaveLength(turns);
+  });
+
+  it("refuses a child on the box a cloud project of its repository at every door in the run road's sentence, and lists none of it", async () => {
+    const held = await leadAndBox();
+    const { rt, store, lead } = held;
+    await store.put("goldens", copyKey("default", "default"), IMAGE);
+    const cloud = await rt.projects.add({ source: "https://github.com/acme/lab", on: "default", name: "lab-cloud" });
+    const theirs = await rt.workspaces.create({ project: cloud.id, name: "theirs" });
+    const child = await childIn(held, "lab-box");
+    expect((await rt.projects.list(lead)).map(p => p.name)).toEqual(["lab", "lab-box", "lab-cloud"]);
+    expect((await rt.projects.resolve("lab-cloud", lead)).id).toBe(cloud.id);
+    expect((await rt.workspaces.landing({ project: "lab-cloud" }, lead)).kind).toBe("cloud");
+    const road = childOnAnotherComputerLine("hetzner", "default");
+    expect((await rt.projects.list(child.caller)).map(p => p.name)).toEqual(["lab-box"]);
+    for (const word of ["lab-cloud", cloud.id]) {
+      await expect(rt.projects.resolve(word, child.caller)).rejects.toThrow(road);
+      await expect(rt.workspaces.landing({ project: word }, child.caller)).rejects.toThrow(road);
+      await expect(rt.workspaces.folderFor({ project: word }, child.caller)).rejects.toThrow(road);
+      await expect(rt.workspaces.create({ project: word, name: "from-the-box" }, child.caller)).rejects.toThrow(road);
+    }
+    // A machine of it the person made is answered the same way, never with the road to fork one.
+    for (const word of ["theirs", theirs.id]) await expect(rt.workspaces.resolve(word, child.caller)).rejects.toThrow(road);
+    // An exec starts nothing, so it keeps its own words: the tree rule for the machine, absence for the project.
+    await expect(rt.workspaces.resolve("theirs", child.caller, "exec")).rejects.toThrow(refusalLine(spawnReachRefusal(child.threadId, "theirs"), execOutsideFix("lab-box")));
+    await expect(rt.workspaces.resolve("lab-cloud", child.caller, "exec")).rejects.toThrow(noWorkspaceRefusal("lab-cloud"));
+    expect((await rt.workspaces.list()).map(w => w.name)).not.toContain("from-the-box");
+  });
+
+  it("refuses a child on the box a thread on any computer but its own, a cloud machine its lead forked included, and keeps the lead's and the cloud thread's starts", async () => {
+    const held = await leadAndBox(undefined, true);
+    const { rt, store, lead, threadId, starts } = held;
+    await store.put("goldens", copyKey("default", "default"), IMAGE);
+    const cloud = await rt.projects.add({ source: "https://github.com/acme/lab", on: "default", name: "lab-cloud" });
+    const forked = await rt.workspaces.create({ project: cloud.id, name: "lab-cloud-one" }, lead);
+    const sibling = await rt.workspaces.create({ project: cloud.id, name: "lab-cloud-two" }, lead);
+    expect([forked, sibling]).toMatchObject([{ kind: "cloud", rootThreadId: threadId }, { kind: "cloud", rootThreadId: threadId }]);
+    const theirs = await rt.workspaces.create({ project: cloud.id, name: "theirs" });
+    const child = await childIn(held, "lab-box");
+    const turns = starts.length;
+    const road = childOnAnotherComputerLine("hetzner", "default");
+    for (const at of [forked.id, theirs.id]) await expect(rt.sessions.start(at, { prompt: "on the cloud", harness: "claude" }, child.caller)).rejects.toThrow(road);
+    expect(starts).toHaveLength(turns);
+    const there = await rt.sessions.start(forked.id, { prompt: "on the cloud", harness: "claude" }, lead);
+    await there.finished;
+    const onCloud: Caller = { origin: "relayed", by: { kind: "thread", threadId: there.view().threadId!, workspaceId: forked.id, rootThreadId: threadId } };
+    for (const at of [forked.id, sibling.id]) await (await rt.sessions.start(at, { prompt: "from the cloud", harness: "claude" }, onCloud)).finished;
+    await (await rt.sessions.start(child.workspaceId, { prompt: "beside", harness: "claude" }, child.caller)).finished;
+    expect(starts).toHaveLength(turns + 4);
   });
 
   it("refuses a child on the box another box's folder, by its record's id too, in the run road's sentence, and lists none of it", async () => {
