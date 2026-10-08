@@ -10,6 +10,7 @@ import { findNodeAtLocation, parseTree, visit, type JSONPath, type Node } from "
 import { readJsonc, type Jsonc } from "./jsonc.js";
 import type { McpCheck } from "./mcp-check.js";
 import type { McpLogin } from "./mcp-login.js";
+import { bearerOf, mcpBearerVariable } from "./mcp-bearer.js";
 
 export type McpTransport =
   | { kind: "stdio"; command: string; args: string[]; env: Record<string, string>; cwd?: string; toolTimeoutSec?: number }
@@ -199,7 +200,7 @@ const EVERY_MACHINE: ReadonlySet<string> = new Set(["HOME", "USER", "LOGNAME", "
 const readable =
   (outside: ReadonlySet<string>, writes: ReadonlySet<string>) =>
   (name: string, inAddress = false): boolean =>
-    outside.has(name) || writes.has(name) || (!inAddress && EVERY_MACHINE.has(name));
+    [name, bearerOf(name)].some(n => n !== undefined && (outside.has(n) || writes.has(n))) || (!inAddress && EVERY_MACHINE.has(name));
 
 /** Why a server that reads a variable nobody holds at `path` travels nowhere; never the variable, which for a
  * literal that reads like a reference is its value. */
@@ -366,11 +367,11 @@ function argStrings(def: Record<string, unknown>): [JSONPath, string, string][] 
 export const rowVariableLine = (name: string, row: string): string => `${name} belongs to the ${row} key, so set it there or give the variable another name`;
 
 /** The minted names of one server's headers, refused where two headers would travel under one. */
-function headerVariables(server: string, headers: readonly string[]): Map<string, string> {
+function headerVariables(server: string, headers: readonly string[], variable = (h: string): string => mcpHeaderVariable(server, h)): Map<string, string> {
   const out = new Map<string, string>();
   const seen = new Map<string, string>();
   for (const h of headers) {
-    const n = mcpHeaderVariable(server, h);
+    const n = variable(h);
     const other = seen.get(n);
     if (other !== undefined) throw new Error(`${server} sends ${other} and ${h}, which would both travel as ${n}; rename one`);
     seen.set(n, h);
@@ -379,8 +380,16 @@ function headerVariables(server: string, headers: readonly string[]): Map<string
   return out;
 }
 
-/** `Authorization: Bearer <token>`: the token alone, which is what both agents' by-name bearer fields read. */
+/** `Authorization: Bearer <token>`: the token alone, which an agent that writes the scheme before a name reads. */
 const bearerToken = (header: string, value: string): string | undefined => (/^authorization$/i.test(header) ? /^Bearer\s+(\S.*)$/i.exec(value)?.[1] : undefined);
+
+/** Each Codex header with the name it is read whole by through env_http_headers, the one by-name road a launch can
+ * fill, since Codex reads bearer_token_env_var from its own environment alone; and the name the vault keeps its value
+ * under, with that value. A bearer header is read by its bearer name and kept as the token alone. */
+function codexHeaders(server: string, headers: Record<string, string>): { header: string; reads: string; keeps: string; value: string }[] {
+  const reads = headerVariables(server, Object.keys(headers), h => (bearerToken(h, headers[h]!) === undefined ? mcpHeaderVariable(server, h) : mcpBearerVariable(mcpHeaderVariable(server, h))));
+  return Object.entries(headers).map(([h, v]) => ({ header: h, reads: reads.get(h)!, keeps: mcpHeaderVariable(server, h), value: bearerToken(h, v) ?? v }));
+}
 
 /** Why a server is left out of a copy for setting a name `by` already set to another value; servers.env's own where
  * it recorded no server for the name. */
@@ -1598,8 +1607,8 @@ function tomlKey(line: string): string | undefined {
 }
 
 /** Codex's text edited line by line toward the tree referCodex wants, for the spellings the line reader reads: a
- * server's http_headers and env, inline or as their own tables, go, and its bearer_token_env_var, env_http_headers and
- * env_vars name the variables instead, every other line byte for byte. */
+ * server's http_headers and env, inline or as their own tables, go, and its env_http_headers and env_vars name the
+ * variables instead, every other line byte for byte. */
 function referCodexLines(text: string, only?: string): string {
   let lines = text.split("\n");
   for (const s of readCodex(text)) {
@@ -1618,21 +1627,11 @@ function referCodexLines(text: string, only?: string): string {
     const mine = (i: number): boolean => owner[i] === s.name;
     const head = lines.findIndex((l, i) => mine(i) && uncommentToml(l).trim().startsWith("[") && subs[i] === undefined);
     const mainKey = (key: string): number => lines.findIndex((l, i) => mine(i) && i > head && subOf[i] === undefined && tomlKey(l) === key);
-    const hasBearer = mainKey("bearer_token_env_var") >= 0;
-    let bearer: string | undefined;
-    const envHeaders: [string, string][] = [];
-    const minted = headerVariables(s.name, Object.keys(headers));
-    for (const [h, v] of Object.entries(headers)) {
-      const token = hasBearer || bearer !== undefined ? undefined : bearerToken(h, v);
-      const n = minted.get(h)!;
-      if (token !== undefined) bearer = n;
-      else envHeaders.push([h, n]);
-    }
+    const envHeaders = codexHeaders(s.name, headers).map(c => [c.header, c.reads] as const);
     const envNames = Object.keys(env);
     const drop = new Set(lines.flatMap((l, i) => (mine(i) && (subOf[i] === "http_headers" || subOf[i] === "env" || (subOf[i] === undefined && i > head && (tomlKey(l) === "http_headers" || tomlKey(l) === "env"))) ? [i] : [])));
     const replace = new Map<number, string[]>();
     const added: string[] = [];
-    if (bearer !== undefined) added.push(`bearer_token_env_var = ${tomlString(bearer)}`);
     if (envHeaders.length > 0) {
       const inline = mainKey("env_http_headers");
       const table = lines.findIndex((l, i) => mine(i) && subs[i] === "env_http_headers" && uncommentToml(l).trim().startsWith("["));
@@ -1679,7 +1678,7 @@ async function referCodex(text: string, only?: string, known: readonly KnownValu
   const servers: McpReferred["servers"] = [];
   const next: Record<string, unknown> = { ...table };
   let changed = false;
-  const writes = new Set(Object.entries(table).flatMap(([name, raw]) => (!isObject(raw) || (only !== undefined && name !== only) ? [] : [...Object.keys(dict(raw["http_headers"])).map(h => mcpHeaderVariable(name, h)), ...Object.keys(dict(raw["env"]))])));
+  const writes = new Set(Object.entries(table).flatMap(([name, raw]) => (!isObject(raw) || (only !== undefined && name !== only) ? [] : [...codexHeaders(name, dict(raw["http_headers"])).map(c => c.keeps), ...Object.keys(dict(raw["env"]))])));
   const held = readable(outside, writes);
   for (const [name, raw] of Object.entries(table)) {
     if (!isObject(raw)) throw shapeRefusal(["mcp_servers", name]);
@@ -1703,21 +1702,13 @@ async function referCodex(text: string, only?: string, known: readonly KnownValu
     const values: Record<string, string> = {};
     servers.push({ name, values });
     if (Object.keys(headers).length + Object.keys(env).length === 0) continue;
-    const minted = headerVariables(name, Object.keys(headers));
-    let bearer = typeof raw["bearer_token_env_var"] === "string" ? undefined : ("" as string | undefined);
-    const envHeaders: Record<string, string> = {};
-    for (const [h, v] of Object.entries(headers)) {
-      const n = minted.get(h)!;
-      const token = bearer === "" ? bearerToken(h, v) : undefined;
-      values[n] = token ?? v;
-      if (token !== undefined) bearer = n;
-      else envHeaders[h] = n;
-    }
+    const sent = codexHeaders(name, headers);
+    const envHeaders = Object.fromEntries(sent.map(c => [c.header, c.reads]));
+    for (const c of sent) values[c.keeps] = c.value;
     for (const [k, v] of Object.entries(env)) if (v !== "") values[k] = v;
     const def: Record<string, unknown> = { ...raw };
     delete def["http_headers"];
     delete def["env"];
-    if (bearer !== undefined && bearer !== "") def["bearer_token_env_var"] = bearer;
     if (Object.keys(envHeaders).length > 0) def["env_http_headers"] = { ...dict(raw["env_http_headers"]), ...envHeaders };
     if (Object.keys(env).length > 0) {
       const had = Array.isArray(raw["env_vars"]) ? (raw["env_vars"] as unknown[]) : [];

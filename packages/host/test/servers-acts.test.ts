@@ -3,7 +3,7 @@ import { execFile, spawn } from "node:child_process";
 import { chmodSync, existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { CODEX_TOML, GEMINI_SETTINGS_JSON, OPENCODE_JSON } from "@wsp/catalog";
+import { CODEX_TOML, GEMINI_SETTINGS_JSON, OPENCODE_JSON, codexLaunchConfig } from "@wsp/catalog";
 import { nodeHost, tilde, type Host } from "@wsp/collect";
 import type { ExecResult, Machine } from "@wsp/engine";
 import { configChangedRefusal, configHardLinkRefusal, noServerSwitchRefusal, noSuchServerRefusal, serverNameFormatRefusal, serverNameRefusal, serverThereRefusal } from "@wsp/protocol";
@@ -190,7 +190,7 @@ describe("adding an MCP server", () => {
       expect(codex).not.toContain(secret);
     }
     expect(json(join(at.home, ".claude.json")).mcpServers!.tracker).toEqual({ type: "http", url: "https://mcp.linear.app/mcp", headers: { Authorization: "Bearer ${WSP_MCP_TRACKER_AUTHORIZATION}", "X-Team": "${WSP_MCP_TRACKER_X_TEAM}" } });
-    expect(codex).toContain('[mcp_servers.tracker]\nbearer_token_env_var = "WSP_MCP_TRACKER_AUTHORIZATION"');
+    expect(codex).toContain('[mcp_servers.tracker]\nenv_http_headers = { "Authorization" = "WSP_MCP_TRACKER_AUTHORIZATION_BEARER" }');
     expect(codex).toContain('[mcp_servers.notion]\nenv_vars = ["NOTION_TOKEN"]');
     expect(vaulted).toEqual([{ WSP_MCP_TRACKER_AUTHORIZATION: "lin_api_TESTONLY", WSP_MCP_TRACKER_X_TEAM: "eng" }, { WSP_MCP_TRACKER_AUTHORIZATION: "lin_api_TESTONLY" }, { NOTION_TOKEN: "ntn_TESTONLY" }]);
   });
@@ -337,7 +337,7 @@ describe("adding an MCP server", () => {
       const servers = json(settings).mcpServers as Record<string, { headers: Record<string, string> }>;
       expect(servers.named!.headers).toEqual({ Authorization: "Bearer ${TOKEN}" });
       expect(servers.lit!.headers).toEqual({ Authorization: "Bearer ${WSP_MCP_LIT_AUTHORIZATION}", "X-Key": "${WSP_MCP_LIT_X_KEY}" });
-      expect(vault.held()).toEqual({ TOKEN: "sk_TESTONLY_first", WSP_MCP_LIT_AUTHORIZATION: "tok_TESTONLY", WSP_MCP_LIT_X_KEY: "k$" });
+      expect(vault.held()).toEqual({ TOKEN: "sk_TESTONLY_first", WSP_MCP_LIT_AUTHORIZATION: "tok_TESTONLY", WSP_MCP_LIT_AUTHORIZATION_BEARER: "Bearer tok_TESTONLY", WSP_MCP_LIT_X_KEY: "k$" });
     });
 
     it("takes a new value from the same server as its rotation, on this computer and on another", async () => {
@@ -350,6 +350,33 @@ describe("adding an MCP server", () => {
       await acts.add(box(at, road(at).machine), { agent: "opencode", name: "acme", command: "npx", env: { TOKEN: "sk_TESTONLY_newest" } });
       expect(vault.held()).toEqual({ TOKEN: "sk_TESTONLY_newest" });
       expect(vault.owners()).toEqual({ TOKEN: ["acme"] });
+    });
+
+    /** A server both Claude Code and Codex read with a bearer token on another computer, and what Codex's copy sends. */
+    const bothRead = () => {
+      const { at, vault, acts, envFile } = setup();
+      const other = box(at, road(at).machine);
+      const add = (agent: string, token: string) => acts.add(other, { agent, name: "tracker", url: "https://mcp.linear.app/mcp", headers: { Authorization: `Bearer ${token}` } });
+      const codexSends = async () => (await codexLaunchConfig({ user: readFileSync(join(at.home, ".codex/config.toml"), "utf8"), folder: at.home }, vault.held()))["mcp_servers.tracker.http_headers.Authorization"];
+      return { add, remove: (agent: string) => acts.remove(other, { agent, name: "tracker" }), codexSends, envFile };
+    };
+
+    it("rotates a bearer token for both agents' copies through either one's servers add", async () => {
+      const { add, remove, codexSends } = bothRead();
+      await add("claude", "lin_TESTONLY_old");
+      await add("codex", "lin_TESTONLY_old");
+      expect(await codexSends()).toBe("Bearer lin_TESTONLY_old");
+      await remove("claude");
+      await add("claude", "lin_TESTONLY_new");
+      expect(await codexSends()).toBe("Bearer lin_TESTONLY_new");
+    });
+
+    it("keeps a bearer token under the one name Claude Code's copy reads, so the Codex copy gone leaves no second one", async () => {
+      const { add, remove, envFile } = bothRead();
+      await add("claude", "lin_TESTONLY_tok");
+      await add("codex", "lin_TESTONLY_tok");
+      await remove("codex");
+      expect(readFileSync(envFile, "utf8")).toBe("WSP_MCP_TRACKER_AUTHORIZATION=lin_TESTONLY_tok\n");
     });
 
     it("frees a removed server's names from servers.env, keeping a name another server still holds and every other line", async () => {

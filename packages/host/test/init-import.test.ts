@@ -667,7 +667,7 @@ describe("packPlan: MCP servers travel by name", () => {
     expect(copiedClaude).toContain('"Authorization": "Bearer ${WSP_MCP_LINEAR_AUTHORIZATION}"');
     expect(copiedClaude).toContain('"NOTION_TOKEN": "${NOTION_TOKEN}"');
     expect(copiedClaude).toContain("// mine");
-    expect(copiedCodex).toBe('[mcp_servers.linear]\nbearer_token_env_var = "WSP_MCP_LINEAR_AUTHORIZATION"\nurl = "https://mcp.linear.app/mcp"\n');
+    expect(copiedCodex).toBe('[mcp_servers.linear]\nenv_http_headers = { "Authorization" = "WSP_MCP_LINEAR_AUTHORIZATION_BEARER" }\nurl = "https://mcp.linear.app/mcp"\n');
     expect(vaulted).toEqual([{ WSP_MCP_LINEAR_AUTHORIZATION: "lin_api_TESTONLY" }, { NOTION_TOKEN: "ntn_TESTONLY" }]);
     expect(packed.skipped).toContainEqual({ id: "agents/codex", path: "~/.codex/config.toml", note: "other left out of the copy: sets NOTION_TOKEN, which notion already sets to another value" });
     expect(readFileSync(join(home, ".claude.json"), "utf8")).toBe(claude);
