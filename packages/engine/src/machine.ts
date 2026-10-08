@@ -73,6 +73,13 @@ export interface BytesLanded {
   pieces: number;
 }
 
+/** The command a machine's exec sends for the one it is handed, and, where the wrapper is the person's to shorten,
+ * what an upload is refused with when the wrapper leaves no room under the exec body cap for any of it. */
+export interface Framing {
+  wrap(cmd: string): string;
+  noRoom?: string;
+}
+
 export interface Machine {
   readonly id: string;
   readonly kind: MachineKind;
@@ -98,9 +105,9 @@ export interface Machine {
   exec(cmd: string, opts?: { timeoutMs?: number; idempotencyKey?: string; stdin?: Uint8Array }): Promise<ExecResult>; // always REST path
   /** Set on a machine whose exec hands `stdin` to the command; absent where the backend drops it. */
   readonly takesStdin?: true;
-  /** The command exec sends for the one it is handed, on a machine that wraps it: what an upload pages against the
-   * exec body cap, so the wrapper never takes a frame past it. Absent where exec sends the command as it is. */
-  framed?(): Promise<(cmd: string) => string>;
+  /** How exec wraps the command it is handed, on a machine that wraps it: what an upload pages against the exec body
+   * cap, so the wrapper never takes a frame past it. Absent where exec sends the command as it is. */
+  framed?(): Promise<Framing>;
   /** A command that may run for minutes: started detached on the guest and read until it exits or the deadline
    * kills it; the result is shaped like exec's. */
   run(script: string, opts: RunOptions): Promise<ExecResult>;

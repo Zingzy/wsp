@@ -7,6 +7,7 @@
 import { z } from "zod";
 import { AgentSetupView } from "./thread-defaults.js";
 import { HERE_PLACE_ID } from "./place-word.js";
+import { EXEC_BODY_MAX } from "./wire/limits.js";
 
 /** Whether an agent on a computer can run a turn there without anybody signing anything in: its own login stands on
  * that computer, the vault this host holds has the variable that agent reads, or neither. One word per agent, worked
@@ -317,6 +318,11 @@ export const nappingToolsRefusal = (name: string): string => `${name} is napping
 
 /** Why a computer that runs every line as root refused to read: the lines would run as root in somebody's home. */
 export const noRunuserRefusal = (user: string): string => `this computer runs wsp as root and has no runuser to run as ${user}, the owner of the home, so nothing was read`;
+
+/** Why nothing was sent to a computer whose login PATH, which every line there carries, leaves no room in one frame
+ * of the daemon's for the line itself. */
+export const loginPathRefusal = (chars: number): string =>
+  `this computer's login PATH is ${chars.toLocaleString("en-US")} characters, which leaves no room for a command in one frame of the daemon's ${EXEC_BODY_MAX.toLocaleString("en-US")}, so nothing was sent; shorten it in the login's shell startup files`;
 
 /** Why a computer that runs every line as root refused to read: the home it names is not there, so there is no
  * owner to hand the lines to and running them as root is not an answer. */

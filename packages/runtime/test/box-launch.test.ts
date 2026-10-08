@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // A box thread's turn as its launch reaches the box: run the way a box's daemon runs an exec frame, bash -c on the
 // command with the frame's stdin and the frame held to the daemon's schema, against this computer's own shells.
+import { createHash } from "node:crypto";
 import { chmodSync, chownSync, existsSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
@@ -19,14 +20,14 @@ const NOBODY = 65534;
 const LOGIN_PATH = "/root/.local/bin:/usr/local/sbin:/usr/local/bin:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/root/go/bin:/root/.cargo/bin:/root/.local/share/pnpm:/root/.bun/bin:/usr/sbin:/usr/bin:/sbin:/bin";
 
 /** A box's daemon answering the exec frame: the frame parsed as the daemon parses it, so a command past its cap is
- * refused, the login shell's PATH read as LOGIN_PATH, and bash -c on anything else with the frame's stdin. The line
- * that stands the launch in the thread's cgroup is left out, since as root here it would move this suite's shell into
- * one. */
-function daemonLink(home: string) {
+ * refused, the login shell's PATH read as `loginPath` however runuser quoted the read, and bash -c on anything else
+ * with the frame's stdin. The line that stands the launch in the thread's cgroup is left out, since as root here it
+ * would move this suite's shell into one. */
+function daemonLink(home: string, loginPath = LOGIN_PATH) {
   return {
     request: async (op: string, params: Record<string, unknown> = {}) => {
       const frame = DaemonExecRequest.parse({ id: "1", op, ...params });
-      if (frame.cmd.includes(`-ilc 'printf %s "$PATH"'`)) return { exitCode: 0, stdout: LOGIN_PATH, stderr: "", truncated: false };
+      if (frame.cmd.includes("-ilc ") && frame.cmd.includes(`printf %s "$PATH"`)) return { exitCode: 0, stdout: loginPath, stderr: "", truncated: false };
       const cmd = frame.cmd.replace(`${cgroupJoinLine(CGROUP)}\n`, "");
       const stdin = frame.stdin !== undefined ? Buffer.from(frame.stdin, "base64") : new Uint8Array();
       const ran = spawnSyncFed("bash", ["-c", cmd], stdin, { encoding: "utf8", cwd: home, env: { PATH: "/usr/sbin:/usr/bin:/sbin:/bin" }, timeout: 15_000 });
@@ -46,10 +47,11 @@ afterEach(() => {
   rmSync(home, { recursive: true, force: true });
 });
 
-const turn = async (command: string, input?: string[]): Promise<string[]> => {
+const turn = async (command: string, input?: string[], o: { loginPath?: string; follow?: string } = {}): Promise<string[]> => {
   const at = placeDaemonPaths(home);
-  const machine = new PlaceFolderMachine(daemonLink(home), { id: "hetzner", home });
+  const machine = new PlaceFolderMachine(daemonLink(home, o.loginPath), { id: "hetzner", home });
   const stream = machineExecStream(machine, { pollMs: 20, runDir: at.runDir, launchOn: machine.inCgroup(CGROUP, at.guestBin) })(command, { env: {}, ...(input !== undefined ? { input } : {}) });
+  if (o.follow !== undefined) expect(await stream.write(o.follow)).toBe("written");
   const lines: string[] = [];
   for await (const line of stream.lines) lines.push(line);
   expect(await stream.exited).toBe(0);
@@ -105,5 +107,29 @@ describe("a box thread's launch", () => {
       box();
       expect(await turn(`head -c ${length} | wc -c`, ["x".repeat(length)])).toEqual([String(length)]);
     });
+  }
+});
+
+describe("a message sent into a running box turn", () => {
+  // A login PATH of 701 characters, as a box with two dozen toolchains gives one, which every frame of the write carries.
+  const longPath = [...Array.from({ length: 24 }, (_, i) => `/opt/toolchains/tool-${String(i).padStart(2, "0")}/bin`), "/usr/sbin:/usr/bin:/sbin:/bin"].join(":");
+  const follow = (length: number): string => "say 'it' \"whole\" $HOME é ".repeat(Math.ceil(length / 25)).slice(0, length);
+  const sha = (text: string): string => createHash("sha256").update(`${text}\n`).digest("hex");
+  // Handing the turn to another login takes root, as the box's daemon has.
+  const logins = [
+    { as: "the login the daemon runs as", owner: undefined },
+    { as: "another login under runuser", owner: NOBODY },
+  ];
+  for (const { as, owner } of logins) {
+    for (const length of [30_000, 100_000]) {
+      it.skipIf(owner !== undefined && !ROOT)(`reaches the agent whole at ${length} characters, as ${as}, every frame under the daemon's cap`, async () => {
+        if (owner !== undefined) {
+          chmodSync(tmpdir(), statSync(tmpdir()).mode | 0o011);
+          chownSync(home, owner, owner);
+        }
+        const text = follow(length);
+        expect(await turn(`read -r first; IFS= read -r second; printf '%s\\n' "$second" | sha256sum | cut -d' ' -f1; id -u`, ["go"], { loginPath: longPath, follow: text })).toEqual([sha(text), String(owner ?? process.getuid?.())]);
+      });
+    }
   }
 });
