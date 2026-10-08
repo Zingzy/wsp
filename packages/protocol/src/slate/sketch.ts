@@ -4,10 +4,11 @@
 // what is hidden, tags each line with its id and type, lists the values, runs and problems, and caps the whole.
 import { fmtBytes, plural } from "../format.js";
 import { evaluateSlateExpression, parseSlateFormat, resolveSlateProp, slateDependencies, slatePropDependencies, slateTruthy, type SlateEvalContext } from "./expr.js";
+import { slateTime, SLATE_TIME_FLOOR } from "./chart.js";
 import { SLATE_PIECES, slateHeldText, type SlatePieceModule, type SlatePropSpec, type SlateSketchView } from "./kit.js";
 import { SLATE_LIMITS } from "./limits.js";
 import { parseSlateOwnPath, slateEqual, slateStep } from "./paths.js";
-import { slateProblem } from "./problems.js";
+import { slateProblem, SLATE_WARNINGS } from "./problems.js";
 import { isSlateBinding, isSlateFormat, isSlateSecretHandle, type SlateDoc, type SlateJson, type SlatePiece, type SlateProblem, type SlatePropValue, type SlateRunRecord, type SlateValues } from "./types.js";
 
 export interface SlateSketchContext {
@@ -70,6 +71,15 @@ function plotProblems(doc: SlateDoc, read: SlateEvalContext): SlateProblem[] {
   for (const [id, piece] of Object.entries(doc.pieces)) {
     const module: SlatePieceModule | undefined = SLATE_PIECES[piece.type];
     if (module === undefined) continue;
+    const entries = Object.entries(module.items).filter(([, item]) => item.row === true).flatMap(([tag, item]) =>
+      (Array.isArray(piece.props?.[item.prop]) ? (piece.props![item.prop] as SlatePropValue[]) : []).flatMap(entry =>
+        Object.entries(item.fields).filter(([, f]) => f.type === "number" && f.binds === "item").map(([field]) => ({ tag, field, prop: item.prop, raw: (entry as Record<string, SlatePropValue> | null)?.[field] }))));
+    for (const { tag, field, prop, raw } of entries) {
+      if (!isSlateBinding(raw)) continue;
+      const items = resolveSlateProp(piece.props?.["items"] ?? null, read);
+      const bad = Array.isArray(items) ? items.map((row, index) => resolveSlateProp(raw, { ...read, item: row, index })).filter(wrong) : [];
+      if (bad.length > 0) out.push(slateProblem("R905", `<${tag} ${field}={${raw.bind.trim()}}> read ${kindOf(bad[0]!)} on ${bad.length} of ${(items as SlateJson[]).length} rows, like ${shownValue(bad[0])}, so it draws no point for them; a plotted value is a number`, { piece: id, prop }));
+    }
     for (const [prop, spec] of Object.entries(module.props)) {
       const raw = piece.props?.[prop];
       if (!isSlateBinding(raw)) continue;
@@ -88,6 +98,14 @@ function plotProblems(doc: SlateDoc, read: SlateEvalContext): SlateProblem[] {
         const list = resolveSlateProp(raw, read);
         const bad = Array.isArray(list) ? list.filter(wrong) : [];
         if (bad.length > 0) add(`holds ${kindOf(bad[0]!)} in ${bad.length} of ${(list as SlateJson[]).length} places, like ${shownValue(bad[0])}, so it draws no point for them`, "a plotted list holds numbers", bad[0]!, true);
+      } else if (spec.time === true) {
+        const items = spec.binds === "item" ? resolveSlateProp(piece.props?.["items"] ?? null, read) : undefined;
+        const got = Array.isArray(items) ? items.map((item, index) => resolveSlateProp(raw, { ...read, item, index })) : [resolveSlateProp(raw, read)];
+        const bad = got.filter(v => v !== undefined && v !== null && slateTime(v) === undefined) as SlateJson[];
+        const where = (n: number): string => (Array.isArray(items) ? ` on ${n} of ${items.length} rows, like` : ",");
+        if (bad.length > 0) out.push(slateProblem("R905", `${prop}={${bind}} read ${kindOf(bad[0]!)}${where(bad.length)} ${shownValue(bad[0])}, which is not a time, so it draws no span; a time is ISO or ms`, { piece: id, prop }));
+        const early = got.filter(v => typeof v === "number" && slateTime(v) !== undefined && v < SLATE_TIME_FLOOR) as number[];
+        if (early.length > 0) out.push(slateProblem("W021", `${prop}={${bind}} read${where(early.length)} ${early[0]}, a time before 2000 that is most likely seconds where a slate reads milliseconds, like ${prop}={${bind} * 1000}`, { piece: id, prop, fix: `${prop}={${bind} * 1000}` }));
       } else if ((spec.type === "number" || spec.type === "integer") && spec.binds === "item") {
         const items = resolveSlateProp(piece.props?.["items"] ?? null, read);
         const bad = Array.isArray(items) ? items.map((item, index) => resolveSlateProp(raw, { ...read, item, index })).filter(wrong) : [];
@@ -143,8 +161,9 @@ export function sketchSlate(doc: SlateDoc | null, values: SlateValues, ctx: Slat
   };
   const pieces = Object.keys(doc.pieces).length;
   const bound = Object.values(doc.pieces).reduce((n, p) => n + Object.values(p.props ?? {}).reduce<number>((m, v) => m + boundCount(v), 0), 0);
-  const problems = [...(ctx.problems ?? []), ...(unbound ? [] : plotProblems(doc, read))];
-  const warned = ctx.warnings ?? [];
+  const plotted = unbound ? [] : plotProblems(doc, read);
+  const problems = [...(ctx.problems ?? []), ...plotted.filter(p => !SLATE_WARNINGS.has(p.code))];
+  const warned = [...(ctx.warnings ?? []), ...plotted.filter(p => SLATE_WARNINGS.has(p.code))];
   const head = `slate${version}${doc.title !== undefined ? ` ${JSON.stringify(doc.title)}` : ""}, ${plural(pieces, "piece")}, ${bound} bound, ${plural(problems.length, "problem")}${warned.length > 0 ? `, ${plural(warned.length, "warning")}` : ""}`;
 
   const lines: string[] = [];
@@ -155,6 +174,7 @@ export function sketchSlate(doc: SlateDoc | null, values: SlateValues, ctx: Slat
     return {
       id,
       unbound,
+      now: () => ctx.now ?? Date.now(),
       raw: name => { reads.add(name); return piece.props?.[name]; },
       bound: name => { reads.add(name); const v = piece.props?.[name]; return isSlateBinding(v) || isSlateFormat(v); },
       prop: name => {

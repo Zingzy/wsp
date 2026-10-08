@@ -9,7 +9,7 @@ import type * as React from "react";
 import { cn } from "../../lib/utils";
 
 /** The keycap's top light: a 1 px line along the inside of the top edge, in the theme's own strength. */
-const KEYCAP_BEVEL = "shadow-[inset_0_1px_0_var(--keycap-top)]";
+export const KEYCAP_BEVEL = "shadow-[inset_0_1px_0_var(--keycap-top)]";
 
 /** The ring a control takes where the accent would be a third hue on one screen: a destructive confirm, and the
  * Cancel standing beside it. A blue ring between a neutral button and a red one says nothing about either. */
