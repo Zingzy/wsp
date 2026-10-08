@@ -491,12 +491,12 @@ describe("wsp verbs over the host: fork, new and the image", () => {
     expect(extra.io.errors.at(-1)).toBe("wsp image move takes one workspace. usage: wsp image move <workspace>");
   });
 
-  it.runIf(CLOUD_ON)("fork's help says it makes a new machine from the source's image version, on the agent page and in wsp fork --help", async () => {
-    const line = "a new machine from the source's image version";
-    expect(agentPage()).toContain(line);
+  it.runIf(CLOUD_ON)("fork's help says it makes a new machine from the source's image version on the source's branch, on the agent page and in wsp fork --help", async () => {
+    const line = "a new machine from the source's image version, on the source's branch with its commits pushed first, not a copy of its live disk";
+    expect(agentPage().replace(/\s+/g, " ")).toContain(line);
     const { code, io } = await h.run("fork", "--help");
     expect(code).toBe(0);
-    expect(io.lines[0]).toContain(line);
+    expect(io.lines.join("\n").replace(/\s+/g, " ")).toContain(line);
   });
 
   it("wsp init --help names the screens of the wizard in order, as it draws them, with no count since a screen with nothing to pick is not shown", () => {

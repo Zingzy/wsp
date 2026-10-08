@@ -100,7 +100,7 @@ describe("a pane of a thread in a folder on a computer you joined", () => {
     const asking = channel.send({ op: "git.status", cwd: folder, id: 4242 });
     await until(() => sent("git.status").length > 0);
     expect(sent("git.status")[0]!["id"]).not.toBe(4242);
-    expect(await asking).toMatchObject({ ok: true, branch: "main" });
+    expect(await asking).toMatchObject({ ok: true, branch: { head: "main" } });
     channel.close();
   });
 });

@@ -78,7 +78,7 @@ export function box(client: WsClient, login: BoxLogin, o: { failClone?: boolean;
     if (op !== "exec") {
       seen.frames.push(frame);
       if (op === "pty.create") return say({ ptyId: `p${++ptys}` });
-      if (op === "git.status") return say({ branch: "main" });
+      if (op === "git.status") return say({ branch: { oid: "abc", head: "main", upstream: "origin/main", ahead: 0, behind: 0 }, entries: [], root: String(frame["cwd"]) });
       return say({});
     }
     const cmd = String(frame["cmd"]);

@@ -182,9 +182,10 @@ export const BRANCH_OR_CWD_LINE = "name a branch or a folder, not both";
 /** A start on this computer for a project another computer holds. */
 export const notOnThisComputerLine = (project: string): string => `${project} is not on this computer, so no thread runs in its folder here`;
 
-/** A thread on a computer the person joined naming a project on another computer: a thread elsewhere runs beside it
- * on its own computer, and nothing yet carries a thread's work from one computer to another. */
-export const childOnAnotherComputerLine = (from: string, to: string): string => `a thread on ${from} cannot start one on ${to} yet; start it on ${to} yourself, or name a project on ${from}`;
+/** A thread on a computer the person joined naming a project on another computer that no lead of its reaches: a
+ * thread elsewhere runs beside it on its own computer, nothing yet carries a thread's work from one computer to
+ * another, and the person is the one who can start it there. */
+export const childOnAnotherComputerLine = (from: string, to: string): string => `a thread on ${from} cannot start one on ${to} yet; the person can start it there, or name a project on ${from}`;
 
 /** A thread on a computer the person joined with a login that is not root: that computer's daemon runs a folder's git
  * and writes its roots file as root, which in a folder another login owns either stops at git's ownership check or

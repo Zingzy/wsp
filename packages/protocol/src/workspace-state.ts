@@ -152,6 +152,12 @@ export function machineWord(kind: WorkspaceKind): string {
   return WORKSPACE_KIND_WORDS[kind].machine;
 }
 
+/** Where a thread runs, as a sentence to that thread names it: the computer by its own name where the kind's threads
+ * run in a project's folder, else the kind's machine. */
+export function threadPlace(kind: WorkspaceKind, computer: string): string {
+  return WORKSPACE_KIND_WORDS[kind].inFolder ? computer : machineWord(kind);
+}
+
 /** What deleting a workspace takes, the one sentence every client's confirmation shows: what the delete does to
  * this kind's machine, in that kind's own words, and either way the record and the threads go from here. It sits
  * with the kind table rather than with the other notices, since the machine half is a kind's word. */

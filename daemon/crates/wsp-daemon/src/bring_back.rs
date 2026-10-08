@@ -6,7 +6,7 @@ use std::path::Path;
 
 use wsp_frames::{words, DaemonErrorCode, GitPushReply};
 
-use crate::git::{check, default_branch, parse_porcelain_v2, rev_exists, run_git, stdout_text, GitLine, Runs};
+use crate::git::{check, default_branch, default_branch_name, parse_porcelain_v2, rev_exists, run_git, stdout_text, GitLine, Runs};
 use crate::paths::OpError;
 
 /// Files of the diffstat one push carries; past it git prints its own "N more files" line and the reply stays a
@@ -149,6 +149,11 @@ pub(crate) async fn push<R: Runs>(runner: &R, cwd: &Path, named: Option<&str>) -
     let remote = remote_name(runner, cwd).await?.ok_or_else(|| OpError::plain(words::NO_REMOTE))?;
     let base = base_of(runner, cwd, &remote, named).await?;
     let branch = head_for(runner, cwd, &base).await?;
+    // A base the caller named may be another branch, as a fork names its lead's: the branch every copy starts from is
+    // still never pushed, whatever this push is measured against, and the caller words the refusal for its road.
+    if named.is_some() && default_branch_name(runner, cwd).await?.as_deref() == Some(branch.as_str()) {
+        return Err(OpError::coded(DaemonErrorCode::OnDefaultBranch, words::on_default_refusal(&branch)));
+    }
     let from = base_ref(runner, cwd, &remote, &base).await?;
     let ahead = ahead_of(runner, cwd, from.as_deref()).await?;
     if ahead == 0 {
@@ -204,18 +209,29 @@ mod tests {
 
     impl Repo {
         fn new() -> Repo {
+            Repo::on("main")
+        }
+
+        /// The same with the remote's default branch named, and origin/HEAD pointing at it as a clone leaves it.
+        fn starting_on(default: &str) -> Repo {
+            let repo = Repo::on(default);
+            git(&repo.at(), &["remote", "set-head", "origin", default]);
+            repo
+        }
+
+        fn on(default: &str) -> Repo {
             let dir = tempfile::Builder::new().prefix("wsp-bring-back-").tempdir().unwrap();
             let repo = dir.path().join("work");
             let origin = dir.path().join("origin.git");
             std::fs::create_dir_all(&repo).unwrap();
-            git(dir.path(), &["init", "-q", "--bare", "-b", "main", origin.to_str().unwrap()]);
-            git(&repo, &["init", "-q", "-b", "main"]);
+            git(dir.path(), &["init", "-q", "--bare", "-b", default, origin.to_str().unwrap()]);
+            git(&repo, &["init", "-q", "-b", default]);
             git(&repo, &["config", "commit.gpgsign", "false"]);
             std::fs::write(repo.join("README.md"), "# readme\n").unwrap();
             git(&repo, &["add", "-A"]);
             git(&repo, &["commit", "-q", "-m", "first"]);
             git(&repo, &["remote", "add", "origin", origin.to_str().unwrap()]);
-            git(&repo, &["push", "-q", "-u", "origin", "main"]);
+            git(&repo, &["push", "-q", "-u", "origin", default]);
             Repo { dir }
         }
 
@@ -280,6 +296,43 @@ mod tests {
         assert_eq!(err.message, words::on_base_refusal("main"));
         let landed = git(&repo.origin(), &["rev-parse", "main"]);
         assert_eq!(landed.trim(), git(&repo.at(), &["rev-parse", "HEAD~1"]).trim());
+    }
+
+    /// A fork names its lead's branch as the base, and a copy its agent moved onto the default branch would be measured
+    /// against that and pushed: the default branch is refused whatever base the caller named.
+    #[tokio::test]
+    async fn a_push_from_the_default_branch_is_refused_whatever_base_it_names_and_pushes_nothing() {
+        let repo = Repo::new();
+        git(&repo.at(), &["switch", "-q", "-c", "work"]);
+        repo.commit("on-work.txt");
+        git(&repo.at(), &["push", "-q", "-u", "origin", "work"]);
+        git(&repo.at(), &["switch", "-q", "main"]);
+        repo.commit("on-main.txt");
+        let err = push(&here(), &repo.at(), Some("work")).await.unwrap_err();
+        assert_eq!((err.code, err.message.as_str()), (Some(DaemonErrorCode::OnDefaultBranch), words::on_default_refusal("main").as_str()));
+        assert_eq!(git(&repo.origin(), &["rev-parse", "main"]).trim(), git(&repo.at(), &["rev-parse", "HEAD~1"]).trim());
+    }
+
+    /// The default branch is the one the copy's remote starts on, which the status a host reads and the push's own
+    /// guard both read: master here, and a branch called main is pushed like any other.
+    #[tokio::test]
+    async fn a_remote_that_starts_on_master_has_master_refused_and_a_branch_called_main_pushed() {
+        let repo = Repo::starting_on("master");
+        git(&repo.at(), &["switch", "-q", "-c", "work"]);
+        git(&repo.at(), &["push", "-q", "-u", "origin", "work"]);
+        git(&repo.at(), &["switch", "-q", "master"]);
+        repo.commit("on-master.txt");
+        assert_eq!(crate::git::git_status(&here(), &repo.at()).await.unwrap().default_branch.as_deref(), Some("master"));
+        let err = push(&here(), &repo.at(), Some("work")).await.unwrap_err();
+        assert_eq!(
+            (err.code, err.message.as_str()),
+            (Some(DaemonErrorCode::OnDefaultBranch), words::on_default_refusal("master").as_str())
+        );
+        assert_eq!(git(&repo.origin(), &["rev-parse", "master"]).trim(), git(&repo.at(), &["rev-parse", "HEAD~1"]).trim());
+        git(&repo.at(), &["switch", "-q", "-c", "main"]);
+        assert_eq!(crate::git::git_status(&here(), &repo.at()).await.unwrap().default_branch.as_deref(), Some("master"));
+        assert_eq!(push(&here(), &repo.at(), Some("work")).await.unwrap().branch, "main");
+        assert_eq!(git(&repo.origin(), &["rev-parse", "main"]).trim(), git(&repo.at(), &["rev-parse", "HEAD"]).trim());
     }
 
     #[tokio::test]

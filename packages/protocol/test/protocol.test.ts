@@ -2096,10 +2096,17 @@ describe("bringing work back", () => {
     expect(wire.refusalLine(wire.spawnRepositoryWorkspaceRefusal("thread_a1b2c3d4", "landing", "nightly"), wire.SPAWN_REPOSITORY_WORKSPACE_FIX)).toBe(
       `thread ${wire.threadWord("thread_a1b2c3d4")} works on landing, and the workspace nightly holds another repository; a thread reaches its own repository's workspaces alone. Name a workspace of your own tree or a project of your own repository, or ask the person.`,
     );
-    // A child on a computer the person joined reaches the lead that started it from another computer by message alone.
+    // A thread on a computer the person joined reaches the lead of its tree on another computer by message alone, and
+    // where no lead of its reaches the project, the person is the one who starts it there.
     expect(wire.childToLeadsComputerLine("hetzner", "my mac", "thread_a1b2c3d4")).toBe(
-      `a thread on hetzner cannot start one on my mac yet; ask thread ${wire.threadWord("thread_a1b2c3d4")}, which started you, with wsp send ${wire.threadWord("thread_a1b2c3d4")} "<message>", or name a project on hetzner`,
+      `a thread on hetzner cannot start one on my mac yet; ask thread ${wire.threadWord("thread_a1b2c3d4")}, your lead, with wsp send ${wire.threadWord("thread_a1b2c3d4")} "<message>", or name a project on hetzner`,
     );
+    expect(wire.childOnAnotherComputerLine("hetzner", "default")).toBe("a thread on hetzner cannot start one on default yet; the person can start it there, or name a project on hetzner");
+    // A workspace of another computer is refused in the words of the act asked for there.
+    expect(wire.elsewhereWorkspaceLine("lab-one", "default", "hetzner", "exec", "thread_a1b2c3d4")).toBe(
+      `lab-one is on default, and a thread on hetzner cannot run commands there yet; ask thread ${wire.threadWord("thread_a1b2c3d4")}, your lead, with wsp send ${wire.threadWord("thread_a1b2c3d4")} "<message>"`,
+    );
+    expect(wire.elsewhereWorkspaceLine("theirs", "default", "hetzner", "work")).toBe("theirs is on default, and a thread on hetzner cannot work there yet; ask the person");
     // A switch that is off on a computer, over a folder there holding none of its own, is turned on where it is held.
     expect(wire.agentsOffComputerRefusal("my box", "thread_new")).toBe(`agents on my box may not ${wire.SPAWN_ACTS["thread_new"]}; turn it on with wsp computers set 'my box' --spawn on`);
     // Exec starts nothing, so its refusals say what the word is and name exec on the thread's own machine as the road.
@@ -2111,7 +2118,13 @@ describe("bringing work back", () => {
     // Bringing work back is one of the acts a thread may ask for, and it is named in the table like the rest.
     expect(wire.SPAWN_ACTS_ALLOWED).toContain("bring_back");
     expect(wire.SPAWN_ACTS["bring_back"]).toBe("bring its work back");
-    expect(wire.spawnActRefusal("thread_a1b2c3d4", "delete")).toContain("bring its work back");
+    expect(wire.spawnActRefusal("thread_a1b2c3d4", "delete", "hetzner")).toContain("bring its work back");
+    // Every refusal to a thread's own token names where that thread runs, read off the kind table, and claims nothing
+    // about what a thread there may start.
+    expect(wire.spawnActRefusal("thread_a1b2c3d4", "size", "hetzner")).toMatch(/^this request came out of thread \S+ on hetzner, and .*, never pick a machine's size$/);
+    expect(wire.spawnActRefusal("thread_a1b2c3d4", "size", undefined)).toMatch(/^this request came out of thread \S+, and /);
+    expect([wire.threadPlace("local", "mini"), wire.threadPlace("place", "hetzner"), wire.threadPlace("cloud", "solari")]).toEqual(["mini", "hetzner", wire.MACHINE_WSP_FORKS]);
+    expect(wire.threadOpRefusal("pair.issue", "thread_a1b2c3d4", "hetzner")).not.toContain("forks machines");
   });
 });
 

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { type Capabilities, type PreferencesPatch, type ProjectView, type McpServerSpec, type Caller, type WorkspaceAgents, type WorkspaceKind, ThreadScope, phaseHoldsSlot, SPAWN_ACTS_ALLOWED, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnDepthRefusal, spawnRepositoryRefusal, spawnReachRefusal, type SpawnAct, forksNoMachines, kindWords, NO_PROVIDER_LINE, providerCannotRefusal, machineWord, noWorkspaceRefusal, notFoundRefusal, type WorktreeFolder, runsInFolder, copiesFolder, childOnAnotherComputerLine, childToLeadsComputerLine, agentsOffComputerRefusal, rootGoneRefusal, refusal, spawnFolderRefusal, SPAWN_FOLDER_FIX, SPAWN_REPOSITORY_FIX, relayedRecordRefusal, relayedRefusal, undrivenRefusal, workspaceState, HERE_PLACE_ID } from "@wsp/protocol";
+import { type Capabilities, type PreferencesPatch, type ProjectView, type McpServerSpec, type Caller, type WorkspaceAgents, type WorkspaceKind, ThreadScope, phaseHoldsSlot, SPAWN_ACTS_ALLOWED, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnDepthRefusal, spawnRepositoryRefusal, spawnReachRefusal, type SpawnAct, threadPlace, forksNoMachines, kindWords, NO_PROVIDER_LINE, providerCannotRefusal, machineWord, noWorkspaceRefusal, notFoundRefusal, type WorktreeFolder, runsInFolder, copiesFolder, childOnAnotherComputerLine, childToLeadsComputerLine, elsewhereWorkspaceLine, type AcrossAct, agentsOffComputerRefusal, rootGoneRefusal, refusal, spawnFolderRefusal, SPAWN_FOLDER_FIX, SPAWN_REPOSITORY_FIX, relayedRecordRefusal, relayedRefusal, undrivenRefusal, workspaceState, HERE_PLACE_ID } from "@wsp/protocol";
 import type { WorkspaceRecord, LiveWorkspace } from "../types/wiring.js";
 import { PROJECTS, type WorkspaceLike } from "../types/internal.js";
 import type { RuntimeContext, RulesArea } from "../context.js";
@@ -101,41 +101,72 @@ export function rulesArea(ctx: RuntimeContext): RulesArea {
    * every thread of that project shares. Every other act there stays its tree's. */
   const opensIn = (record: WorkspaceRecord, caller: Caller | undefined): boolean =>
     scopeOf(caller) !== undefined && runsInFolder(record.kind) && record.worktree === undefined && projectReached(caller, record.project);
+  /** A thread on a box with the computer that box is, the one computer it acts on; nothing for any other caller, a
+   * thread on this computer or on a machine included. */
+  const boxOf = (caller: Caller | undefined): { scope: ThreadScope; asking: WorkspaceRecord; computer: string } | undefined => {
+    const scope = scopeOf(caller);
+    const asking = scope === undefined ? undefined : live.get(scope.workspaceId)?.record;
+    if (scope === undefined || asking === undefined || !runsInFolder(asking.kind) || copiesFolder(asking.kind)) return undefined;
+    return { scope, asking, computer: ctx.projectHeld(asking.project).computer };
+  };
+  /** The lead of a thread's tree as a caller, the one thread every thread of the tree reaches by message wherever it
+   * runs: nothing for a thread that leads its own tree, or whose lead's workspace this host no longer holds. */
+  const leadOf = (scope: ThreadScope): { threadId: string; caller: Caller; computer: string } | undefined => {
+    const lead = scope.rootThreadId;
+    const record = lead === scope.threadId ? undefined : recordOfThread(lead);
+    if (record === undefined) return undefined;
+    return { threadId: lead, caller: { origin: "here", by: { kind: "thread", threadId: lead, workspaceId: record.id, rootThreadId: lead } }, computer: ctx.projectHeld(record.project).computer };
+  };
+  const usage = (line: string): Error => Object.assign(new Error(line), { kind: "usage" });
   /** Why a thread on a computer the person joined may not start a child on a project another computer holds, a
    * cloud's included, `word` being what it typed, in the order the project rule reads: another repository's is
-   * refused by the repository rule; where the thread that started it runs on that computer, a message to that thread
-   * is the road when that thread reaches the project itself, and the folder rule answers when it does not; otherwise
-   * the person is the road. Nothing for a thread on no joined computer, or a project on its own, so every door
-   * asks it whatever kind the project's computer is. */
+   * refused by the repository rule; where the lead of its tree reaches the project, a message to the lead is the
+   * road; where the lead runs on the project's computer and does not reach it, the folder rule answers; otherwise
+   * the person is the road. Nothing for a thread on no joined computer, or a project on its own, so every door asks
+   * it whatever kind the project's computer is. */
   const elsewhereRefusal = (caller: Caller | undefined, project: ProjectView, word: string): Error | undefined => {
-    const scope = scopeOf(caller);
-    if (scope === undefined) return undefined;
-    const asking = live.get(scope.workspaceId)?.record;
-    if (asking === undefined || !runsInFolder(asking.kind) || copiesFolder(asking.kind)) return undefined;
-    const from = ctx.projectHeld(asking.project).computer;
-    if (project.computer === from) return undefined;
+    const box = boxOf(caller);
+    if (box === undefined || project.computer === box.computer) return undefined;
+    const { scope, asking } = box;
     if (!ofThreadsRepository(caller, project.id)) return refusal(spawnRepositoryRefusal(scope.threadId, ctx.projectHeld(asking.project).name, word), SPAWN_REPOSITORY_FIX, "usage");
-    const parent = parentOf(scope.threadId);
-    const started = parent === undefined ? undefined : recordOfThread(parent);
-    if (parent === undefined || started === undefined || ctx.projectHeld(started.project).computer !== project.computer) {
-      return Object.assign(new Error(childOnAnotherComputerLine(ctx.placeName(from), ctx.placeName(project.computer))), { kind: "usage" });
-    }
-    const asParent: Caller = { origin: "here", by: { kind: "thread", threadId: parent, workspaceId: started.id, rootThreadId: scope.rootThreadId } };
-    if (!projectReached(asParent, project.id)) return refusal(spawnFolderRefusal(scope.threadId, word), SPAWN_FOLDER_FIX, "usage");
-    return Object.assign(new Error(childToLeadsComputerLine(ctx.placeName(from), ctx.placeName(project.computer), parent)), { kind: "usage" });
+    const [from, to] = [ctx.placeName(box.computer), ctx.placeName(project.computer)];
+    const lead = leadOf(scope);
+    if (lead !== undefined && projectReached(lead.caller, project.id)) return usage(childToLeadsComputerLine(from, to, lead.threadId));
+    if (lead !== undefined && lead.computer === project.computer) return refusal(spawnFolderRefusal(scope.threadId, word), SPAWN_FOLDER_FIX, "usage");
+    return usage(childOnAnotherComputerLine(from, to));
+  };
+  /** The computer rule: a thread on a box acts on the workspaces of that box alone, and reaches its tree anywhere else
+   * by message and the listing. Answers the box and the computer the workspace is on where the rule keeps it out. */
+  const awayOn = (record: WorkspaceLike, caller: Caller | undefined): { box: string; on: string } | undefined => {
+    const box = boxOf(caller);
+    const project = box === undefined || record.project === undefined ? undefined : projectsHeld.get(record.project);
+    return box === undefined || project === undefined || project.computer === box.computer ? undefined : { box: box.computer, on: project.computer };
+  };
+  /** Whether a caller acts on a workspace's threads beyond a message: stops, steers, renames and reads them, sends them
+   * files and waits on them. The kind rule, then the computer rule. */
+  const actsOn = (record: WorkspaceLike, caller: Caller | undefined): boolean => drives(record, caller) && awayOn(record, caller) === undefined;
+  /** The lead a thread on a box asks to act on a workspace of another computer for it: the lead of its tree, where the
+   * lead drives that workspace itself, which is its own tree's machines and its own folder. */
+  const leadActsOn = (record: WorkspaceLike, caller: Caller | undefined): string | undefined => {
+    const box = boxOf(caller);
+    const lead = box === undefined ? undefined : leadOf(box.scope);
+    return lead !== undefined && refusalFor(record, lead.caller) === undefined ? lead.threadId : undefined;
+  };
+  /** The computer rule as a thread reads it, `act` being what it asked to do there and `word` what it named the
+   * workspace by: a message to its lead where the lead may do that there itself, the person otherwise. */
+  const awayFor = (record: WorkspaceLike, caller: Caller | undefined, act: AcrossAct, word: string): Error | undefined => {
+    const away = awayOn(record, caller);
+    return away === undefined ? undefined : usage(elsewhereWorkspaceLine(word, ctx.placeName(away.on), ctx.placeName(away.box), act, leadActsOn(record, caller)));
   };
   /** Whether a request comes from a thread on a computer the person joined, which reaches every thread of its own tree
    * for a message and a listing wherever that thread runs: its lead and its siblings on this computer are how it talks
    * back, and a thread of another tree stays out of reach by the tree rule. */
-  const talksToItsTree = (caller: Caller | undefined): boolean => {
-    const scope = scopeOf(caller);
-    const asking = scope === undefined ? undefined : live.get(scope.workspaceId)?.record;
-    return asking !== undefined && runsInFolder(asking.kind) && !copiesFolder(asking.kind);
-  };
+  const talksToItsTree = (caller: Caller | undefined): boolean => boxOf(caller) !== undefined;
   /** The rule as a sentence: what this request is refused with for that record, or nothing when it may drive it.
    * A record this host does not hold, which a port forward's target may be since the host forwards a builder's
-   * ports too, is nobody's to refuse for. The project rule is read before the tree rule and answers first: a
-   * workspace of another project is outside the tree as well, and the project is why. */
+   * ports too, is nobody's to refuse for. The project rule is read before the computer rule, and both before the
+   * tree rule, and the first answers: a workspace of another project is outside the tree as well, and the project
+   * is why. */
   const refusalFor = (record: WorkspaceLike | undefined, caller: Caller | undefined): string | undefined => {
     if (record === undefined) return undefined;
     if (!drives(record, caller)) return relayedRefusal(record.name);
@@ -145,17 +176,22 @@ export function rulesArea(ctx: RuntimeContext): RulesArea {
     if (mine !== undefined && record.project !== undefined && !ofThreadsRepository(caller, record.project)) {
       return spawnRepositoryRefusal(scope.threadId, ctx.projectHeld(mine).name, ctx.projectHeld(record.project).name);
     }
+    const away = awayFor(record, caller, "work", record.name);
+    if (away !== undefined) return away.message;
     return !inTree(record, scope) ? spawnReachRefusal(scope.threadId, record.name) : undefined;
   };
-  /** The rule as the caller reads it. A person is told which rule hid the workspace, since what this host holds is
-   * theirs; a thread is told absence and nothing more, since a sentence naming a workspace or a project outside its
-   * tree is how a thread learns what else stands here. No word rides the thread's: every verb that reaches this
-   * found the workspace itself rather than being handed it. The name door, `workspaces.resolve`, differs: a whole
-   * word the thread typed is refused by its rule there, carrying that word and nothing else. */
-  const refuseRelayed = (record: WorkspaceLike | undefined, caller: Caller | undefined): void => {
+  /** The rule as the caller reads it, `act` being what the verb asked. A person is told which rule hid the workspace,
+   * since what this host holds is theirs; a thread is told absence and nothing more, since a sentence naming a
+   * workspace or a project outside its tree is how a thread learns what else stands here, but for a workspace on
+   * another computer its lead acts on, its tree's or the lead's own, which it already knows and reads the computer
+   * rule's words for. No word rides the thread's: every verb that reaches this found the workspace itself rather
+   * than being handed it. The name door, `workspaces.resolve`, differs: a whole word the thread typed is refused by
+   * its rule there, carrying that word and nothing else. */
+  const refuseRelayed = (record: WorkspaceLike | undefined, caller: Caller | undefined, act: AcrossAct = "work"): void => {
     const line = refusalFor(record, caller);
     if (line === undefined) return;
-    throw scopeOf(caller) === undefined ? new Error(line) : notFoundRefusal(noWorkspaceRefusal());
+    if (scopeOf(caller) === undefined) throw new Error(line);
+    throw (record !== undefined && leadActsOn(record, caller) !== undefined ? awayFor(record, caller, act, record.name) : undefined) ?? notFoundRefusal(noWorkspaceRefusal());
   };
   /** The rule for a workspace a caller named by id rather than one a verb found for itself: a thread reads one
    * sentence for an id this host does not hold and for one outside its tree alike, since telling the two apart is
@@ -234,6 +270,15 @@ export function rulesArea(ctx: RuntimeContext): RulesArea {
     const wsp = ctx.moduleOf(entry.record.kind).wspMcp(entry);
     return { ...reach, ...(wsp !== undefined ? { wsp } : {}) };
   };
+  /** Where a thread runs, as a refusal to its own token names it: its computer by name where it runs in a folder,
+   * else its kind's machine; nothing for a thread whose workspace this host no longer holds. */
+  const placeOfThread = (scope: ThreadScope): string | undefined => {
+    const own = live.get(scope.workspaceId)?.record;
+    return own === undefined ? undefined : threadPlace(own.kind, ctx.placeName(ctx.projectHeld(own.project).computer));
+  };
+  /** The refusal for an act no thread may ask for, in the usage class: the line asked for something the caps never
+   * open, which no retry changes. */
+  const actRefusal = (scope: ThreadScope, act: SpawnAct): Error => Object.assign(new Error(spawnActRefusal(scope.threadId, act, placeOfThread(scope))), { kind: "usage" });
   /** The one door every act a thread's own token asks for goes through: the switch on the workspace that thread
    * runs on, then the acts a thread may ask for at all, then how deep it already is, then how many machines its
    * root already holds. A caller that is not a thread passes straight through; nothing here is a second copy of a
@@ -251,7 +296,7 @@ export function rulesArea(ctx: RuntimeContext): RulesArea {
     const over = rooted === undefined ? undefined : [{ record: rooted, policy: agentsOf(rooted) }, ...(rooted.id !== own.id && runsInFolder(own.kind) ? [{ record: own, policy: agentsOf(own) }] : [])];
     if (over === undefined) throw new Error(rootGoneRefusal(scope.threadId, act));
     for (const { record, policy } of over) if (policy?.spawn !== true) throw new Error(agentsOffLine(record, act, record === own && record !== rooted));
-    if (!SPAWN_ACTS_ALLOWED.includes(act)) throw new Error(spawnActRefusal(scope.threadId, act));
+    if (!SPAWN_ACTS_ALLOWED.includes(act)) throw actRefusal(scope, act);
     // The depth cap counts what a thread starts under itself; a send and a bring back start nothing, so a thread
     // at the cap still talks to its tree and still gets its work out.
     if (act === "send" || act === "bring_back") return free;
@@ -283,8 +328,8 @@ export function rulesArea(ctx: RuntimeContext): RulesArea {
   const treeOf = (scope: ThreadScope | undefined): { parentThreadId?: string; rootThreadId?: string } =>
     scope === undefined ? {} : { parentThreadId: scope.threadId, rootThreadId: scope.rootThreadId };
   return {
-    rememberProject, rememberTarget, refuseCannot, pauses, refusePauseless, holdsSlot, drives, opensIn, projectOfScope, ofThreadsRepository, projectReached, elsewhereRefusal, talksToItsTree,
+    rememberProject, rememberTarget, refuseCannot, pauses, refusePauseless, holdsSlot, drives, actsOn, opensIn, projectOfScope, ofThreadsRepository, projectReached, elsewhereRefusal, awayFor, leadActsOn, talksToItsTree,
     refusalFor, refuseRelayed, refuseNamed, held, listedFor, refuseRecording, agentsOf, parentOf, rootOf, agentsReach,
-    spawnGuard, treeOf,
+    spawnGuard, treeOf, placeOfThread, actRefusal,
   };
 }
