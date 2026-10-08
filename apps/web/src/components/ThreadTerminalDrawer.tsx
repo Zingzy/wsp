@@ -1230,9 +1230,11 @@ export default function ThreadTerminalDrawer({
                         >
                           <GroupIcon className="size-3 shrink-0" />
                           <span className="min-w-0 flex-1 truncate text-left">{groupLabel}</span>
-                          <span className="font-mono text-muted-foreground text-[11px] tabular-nums">
-                            {terminalCount}
-                          </span>
+                          {isSplitGroup && (
+                            <span className="font-mono text-muted-foreground text-[11px] tabular-nums">
+                              {terminalCount}
+                            </span>
+                          )}
                         </button>
                       )}
 

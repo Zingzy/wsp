@@ -5,7 +5,7 @@
 // still come from the workspace's link, which also hands out their io.
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
 import { useRightPanelStore, type RightPanelSurface } from "../rightPanelStore.js";
-import { openPanelTerminal, splitPanelTerminal, type SplitDirection } from "../shell/shellCommands.js";
+import { newPanelTerminal, splitPanelTerminal, type SplitDirection } from "../shell/shellCommands.js";
 import { useTerminalViewportConfig } from "../terminal/fontSetting.js";
 import { getTerminals, NOT_OPENED_YET, onTerminals, type WorkspaceTerminals } from "../terminal/link.js";
 import { useOwnComputerName, useTerminalPane } from "../terminal/paneWords.js";
@@ -106,7 +106,7 @@ function LinkedPanel({
       lostTerminalIds={lost}
       onSplitTerminal={() => split("horizontal")}
       onSplitTerminalVertical={() => split("vertical")}
-      onNewTerminal={() => void openPanelTerminal(workspaceId)}
+      onNewTerminal={() => void newPanelTerminal(workspaceId, surface.id)}
       onActiveTerminalChange={id => activateTerminal(workspaceId, surface.id, id)}
       onCloseTerminal={id => {
         closeTerminal(workspaceId, surface.id, id);

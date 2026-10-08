@@ -146,6 +146,7 @@ const DAEMON_CONTENTS = [
   "55ddb7999b0cfdfc71b505a67752585dc97e1e74e47db1ab2d256573f577e5f3",
   "871dd3f376bcbde4e5f98c8d0777e75b0c36df1c81436b00c0749726d8122ccd",
   "664b32a5e3b463b18771d6a9f6938ea3f1312c96898a9951cb32a1ed15185ed0",
+  "9790029ce878d8248fe04d470b8da1e4060b686480f088f0d9d79c7b76e7064d",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -528,7 +529,8 @@ const DAEMON_CONTENTS = [
  * and a failed add name the socket and the wsp, and a socket or a block device is no longer read as a folder by the
  * leave or by a container's bind staging. ports.watch takes a name, so one socket holds a watch per name with roots, a
  * folder and cgroups of its own, and each port event says which watch it is for; a process row carries the cgroup v2
- * path it stands in. */
+ * path it stands in.
+ * Version 137: shells read apart, panel ptys never reach the drawer. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
