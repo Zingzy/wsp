@@ -383,6 +383,9 @@ export interface TurnLive {
   told?: number;
   /** The last of those replies is still the agent's latest word, nothing having woken it since: a cut sends no line. */
   toldLast?: true;
+  /** The outcome and the words the last of those lines carried, set again as a re-opened run replays its reply: an end
+   * that says nothing new is not told again. In memory alone. */
+  toldAs?: { status: TurnStatus; body?: string };
 }
 
 /** The message a turn's agent was handed and the effort it ran at, kept beside its run while it runs: the row's own

@@ -1087,12 +1087,14 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
       if (turnResult === undefined && heldReply !== undefined) {
         // The hold ended with the process. The words the agent gave stand, done, with any task still in the set named
         // under them. A woken agent was cut before its own reply, so the turn reads what ended it: the idle rule, the
-        // wall, or the process going.
+        // wall, or the process going. A stop or a cut is timed to the moment it came, not to the reply.
         sawResult = true;
+        const held = heldReply;
+        const cut = (): TurnResult => ({ ...withCallsAfter(held), ...(typeof held.durationMs === "number" ? { durationMs: held.durationMs + Date.now() - heldAt } : {}) });
         turnResult = interruptRequested
-          ? { ...withCallsAfter(heldReply), status: "interrupted" }
+          ? { ...cut(), status: "interrupted" }
           : woken
-            ? { ...withCallsAfter(heldReply), status: "failed", error: exitLine() }
+            ? { ...cut(), status: "failed", error: exitLine() }
             : heldWithFinished(heldReply, backgroundTasks);
         anchorOnce(claudeSessionId);
         onEvent({ type: "turn.done", sessionId: claudeSessionId, result: turnResult, ...(woken ? {} : { held: true as const }) });
