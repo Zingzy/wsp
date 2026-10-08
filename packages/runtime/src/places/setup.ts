@@ -44,14 +44,15 @@ import {
   type PlaceProvisionRow,
   githubAddress,
   shellQuote,
+  toolRowId,
 } from "@wsp/protocol";
-import { GITHUB_TOKEN_ENV, unlandFiles, PlaceAbsentError, PlaceMachine, envInput, newSetupRun, pathLine, putFiles, withEnvFromInput, type EngineStep, type ExecResult, type Machine, type MachineLink, type ProvisionPlan, type ProvisionStage } from "@wsp/engine";
+import { GITHUB_TOKEN_ENV, unlandFiles, PlaceAbsentError, PlaceMachine, envInput, hookOf, newSetupRun, pathLine, putFiles, withEnvFromInput, type EngineStep, type ExecResult, type Machine, type MachineLink, type ProvisionPlan, type ProvisionStage } from "@wsp/engine";
 import { CATALOG_AGENTS, loginSignIn } from "@wsp/catalog";
 import { runGraph, type GraphStep } from "../setup-graph.js";
 import { recipeChanges, stepsFor, type RecipeChange } from "../recipe-sync.js";
 import type { PlaceRecord, RecipeResolver } from "./types.js";
 import {
-  bounded, vaultSignIn, type SyncJob, setupOutcome, UNDO_MS, SIGN_IN_SLACK_MS, GITHUB_MS, GITHUB_ROW, GITHUB_CLI,
+  bounded, vaultSignIn, type SyncJob, setupOutcome, UNDO_MS, SIGN_IN_SLACK_MS, GITHUB_MS, GITHUB_ROW, GITHUB_CLI, cliFirst,
   INSTALLS, FILES, PROBE_MS, SIGNIN_STATUS_MS, firstLineOf, picksHash, PROVISION_LOG_EVERY_MS, PROVISION_LOG_LINES,
 } from "./helpers.js";
 import type { PlaceDoorContext } from "./context.js";
@@ -187,9 +188,9 @@ export function placeSetup(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea) 
    * done in `done` is passed over. The floor first, since a failure there stops the job; then the steps after it as
    * their work allows, at most as many at once as that computer's memory takes (`setupWidth`): the agents and every
    * other install one at a time, since two package managers run into each other; the files rounds one at a time,
-   * since they stage in one folder there, the servers after the CLIs a server may run; the sign-ins started and left
-   * waiting on the person; GitHub before the folders, so a private repository clones with it; the machine context
-   * last, so it names what did not land. */
+   * since they stage in one folder there, the servers after the CLIs they run and not every CLI; the sign-ins
+   * started and left waiting on the person; GitHub before the folders, so a private repository clones with it, and
+   * GitHub waits on gh alone where gh is one of the CLIs; the machine context last, so it names what did not land. */
   const runSetup = async (placeId: string, addId: string, picks: RecipeFile, done: ReadonlySet<PlaceSetupStep>, started: PlaceSetup, rerun: readonly PlaceWait[], sync?: SyncJob): Promise<void> => {
     const provisioner = wiring.provision!;
     const record = (await recordOf(placeId))!;
@@ -546,7 +547,13 @@ export function placeSetup(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea) 
       await undo();
       const planned = await provisioner.setup(picks, { home }, sync?.steps);
       // A sync puts on only the plugins it added; the rest are there, and their install would run again.
-      const plan = sync === undefined || planned.plugins === undefined ? planned : { ...planned, plugins: planned.plugins.filter(p => sync.moved.has(p.id)) };
+      const kept = sync === undefined || planned.plugins === undefined ? planned : { ...planned, plugins: planned.plugins.filter(p => sync.moved.has(p.id)) };
+      // gh comes with the CLIs where it is one of them, first among them, and on its own before them otherwise; the
+      // CLIs with a hook the folders wait on come next, then the CLIs the servers run.
+      const ghCli = picks.clis[GITHUB_CLI];
+      const ghRow = ghCli === undefined ? undefined : toolRowId(ghCli.via, GITHUB_CLI);
+      const hooks = kept.steps.slice(kept.agents).filter(s => hookOf(s) !== undefined).map(s => s.id);
+      const plan = cliFirst(kept, [...(ghRow !== undefined ? [ghRow] : []), ...hooks, ...(kept.serverTools ?? [])]);
       // A sign-in the last run left waiting is run again for a fresh page and code: the pty behind the old one is gone.
       for (const w of rerun) {
         if (w.row === GITHUB_ROW) await githubSignIn(plan);
@@ -558,9 +565,7 @@ export function placeSetup(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea) 
       let stopped: string | undefined;
       const installs = new Set(plan.steps.slice(0, plan.agents).map(s => s.id));
       const go = (work: Promise<unknown>): Promise<"go"> => work.then(() => "go" as const);
-      // gh comes with the CLIs where it is one of them, and on its own before them otherwise.
-      const ghIsCli = Object.keys(picks.clis).includes(GITHUB_CLI);
-      const graph: GraphStep<PlaceSetupStep>[] = [
+      const graph: GraphStep<PlaceSetupStep, "gh" | "hooks" | "servers">[] = [
         {
           name: "agents",
           after: [],
@@ -575,12 +580,35 @@ export function placeSetup(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea) 
         },
         { name: "signins", after: ["agents"], lanes: [], light: true, run: () => go(step("signins", () => signIns(plan))) },
         { name: "skills", after: [], lanes: [FILES], run: () => go(step("skills", engine("skills"))) },
-        { name: "github", after: ghIsCli ? ["clis"] : [], lanes: picks.configs.github === undefined || githubWord === "skip" ? [] : [INSTALLS], run: () => go(step("github", () => github(plan))) },
-        { name: "clis", after: ["agents"], lanes: [INSTALLS], run: () => go(step("clis", engine("clis"))) },
-        { name: "mcp", after: ["agents", "clis"], lanes: [FILES], run: () => go(step("mcp", engine("mcp"))) },
-        { name: "configs", after: [], lanes: [INSTALLS, FILES], run: () => go(step("configs", engine("configs"))) },
+        { name: "github", after: ghRow !== undefined ? ["gh"] : [], lanes: plan.github === undefined ? [] : [INSTALLS], run: () => go(step("github", () => github(plan))) },
+        {
+          name: "clis",
+          after: ["agents"],
+          marks: ["gh", "hooks", "servers"],
+          lanes: [INSTALLS],
+          run: release => {
+            // Each mark goes once every row it waits on is said, and a row with a hook is said once its hook ran.
+            const waits = [["gh", new Set(ghRow !== undefined ? [ghRow] : [])], ["hooks", new Set(hooks)], ["servers", new Set(plan.serverTools ?? [])]] as const;
+            for (const [mark, rows] of waits) if (rows.size === 0) release(mark);
+            return go(
+              step("clis", () =>
+                provisioner.step(machine, plan, "clis", run, (detail, at, row) => {
+                  stageOf("clis")(detail, at, row);
+                  if (row === undefined) return;
+                  for (const [mark, rows] of waits) if (rows.delete(row.id) && rows.size === 0) release(mark);
+                }, { home }),
+              ),
+            );
+          },
+        },
+        // The servers wait on the CLIs they run, since a server whose command is not there is dropped, and the plugins
+        // on the servers step, where the agents' own files land: a plugin's install writes the agent's settings,
+        // which a landing then never writes over.
+        { name: "mcp", after: ["agents", "servers"], lanes: [FILES], run: () => go(step("mcp", engine("mcp"))) },
+        { name: "configs", after: [], lanes: (plan.configTools ?? []).length > 0 ? [INSTALLS, FILES] : [FILES], run: () => go(step("configs", engine("configs"))) },
         { name: "plugins", after: ["mcp"], lanes: [], run: () => go(step("plugins", engine("plugins"))) },
-        { name: "folders", after: ["github"], lanes: [], run: () => go(step("folders", folders)) },
+        // The folders wait on every picked CLI's hook as well as GitHub: git-lfs's is what makes a clone check out its files.
+        { name: "folders", after: ["github", "hooks"], lanes: [], run: () => go(step("folders", folders)) },
       ];
       await runGraph(
         graph.filter(g => !done.has(g.name)),

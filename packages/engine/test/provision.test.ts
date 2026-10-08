@@ -767,6 +767,37 @@ describe("a CLI the catalog says takes hold with a command of its own", () => {
     const failed = await provisionStep(refused.machine, planOf([lfs]), "clis", newSetupRun(), () => {}, ON);
     expect(failed).toEqual([expect.objectContaining({ id: "tools/brew/git-lfs", outcome: "failed", note: expect.stringContaining("git: 'lfs' is not a git command") })]);
   });
+
+  it("runs a CLI's hook as its row lands, so the row is said after its hook and before the next row installs", async () => {
+    const lfs = step({ id: "tools/brew/git-lfs", label: "Git LFS", bin: "git-lfs" });
+    const jq = step({ id: "tools/brew/jq", label: "jq", bin: "jq" });
+    const order: string[] = [];
+    const { machine } = boxMachine(cmd => {
+      if (cmd.includes("git lfs install")) order.push("hook git-lfs");
+      if (cmd.includes("install tools/brew/jq")) order.push("install jq");
+      return undefined;
+    });
+    await provisionStep(machine, planOf([lfs, jq]), "clis", newSetupRun(), (_detail, _at, row) => void (row !== undefined && order.push(`said ${row.id}`)), ON);
+    expect(order).toEqual(["hook git-lfs", "said tools/brew/git-lfs", "install jq", "said tools/brew/jq"]);
+  });
+});
+
+describe("the CLIs a step beside the loop waits on", () => {
+  it("are on the run the moment each lands, and on it once when the loop ends", async () => {
+    const jq = step({ id: "tools/brew/jq", label: "jq", bin: "jq" });
+    const yq = step({ id: "tools/brew/yq", label: "yq", bin: "yq" });
+    const { machine } = boxMachine();
+    const run = newSetupRun();
+    const seen = new Map<string, string[]>();
+    await provisionStep(machine, planOf([jq, yq]), "clis", run, (_detail, _at, row) => {
+      if (row !== undefined && !seen.has(row.id)) seen.set(row.id, run.tools.map(t => t.id));
+    }, ON);
+    expect(seen.get("tools/brew/jq")).toEqual(["tools/brew/jq"]);
+    expect(run.tools.map(t => [t.id, t.outcome])).toEqual([
+      ["tools/brew/jq", "installed"],
+      ["tools/brew/yq", "installed"],
+    ]);
+  });
 });
 
 describe("a plugin that asks to run a command its marketplace declares", () => {

@@ -5,7 +5,7 @@
 import { existsSync, linkSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { applyMcp, mcpPlanFor, mcpTally, type McpPlan, type McpResult } from "../src/golden-mcp.js";
+import { applyMcp, commandRow, mcpPlanFor, mcpTally, serverNeeds, type McpPlan, type McpResult } from "../src/golden-mcp.js";
 import { CODEX_TOML, MCP_SERVERS_JSON, OPENCODE_JSON, UV_INSTALL, parseJsonc, type McpEditor, type McpFormat, type McpRemoved } from "@wsp/catalog";
 import { MCP_ID_PREFIX, configHardLinkRefusal, shellQuote } from "@wsp/protocol";
 import type { RecipeEntry } from "../src/golden-import.js";
@@ -305,6 +305,19 @@ describe("applyMcp", () => {
       const results = await applyMcp(machine, geminiOnly(root, { tools: [c.row] }), () => {}, c.result !== undefined ? [c.result] : []);
       expect(results.find(r => r.name === "memory")?.note).toBe(c.note);
     }
+  });
+
+  it("names the row that puts a command on, and when none does, has a server wait on every row putting on a command nothing names", () => {
+    const rows = [{ id: "tools/brew-toolchain/mcp" }, { id: "tools/brew/git-delta" }, { id: "tools/brew/yq" }, { id: "tools/npm/@playwright/mcp" }, { id: "tools/custom/mine" }, { id: "tools/custom/named", bin: "named" }];
+    expect(commandRow("delta", rows)?.id).toBe("tools/brew/git-delta");
+    expect(commandRow("/opt/homebrew/bin/yq", rows)?.id).toBe("tools/brew/yq");
+    expect(commandRow("named", rows)?.id).toBe("tools/custom/named");
+    // The toolchain's rows put no command on, whatever their last word.
+    expect(commandRow("mcp", [rows[0]!])).toBeUndefined();
+    expect(serverNeeds("delta", rows).map(r => r.id)).toEqual(["tools/brew/git-delta"]);
+    expect(serverNeeds("playwright-mcp", rows).map(r => r.id)).toEqual(["tools/npm/@playwright/mcp", "tools/custom/mine"]);
+    for (const command of ["uvx", "npx", "python3", "git"]) expect(serverNeeds(command, rows)).toEqual([]);
+    expect(serverNeeds("node", rows, new Set(["node"]))).toEqual([]);
   });
 
   it("running twice leaves the files as they were after the first run and reports the same, the moved home servers included", async () => {

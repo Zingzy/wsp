@@ -1548,7 +1548,8 @@ describe("the agents as steps of the one tools loop", () => {
     // and the row reads present on every run after the first.
     expect(node.check).toBe(nodeFloorCheck(plan.node!.floor));
     expect(node.check).toContain(`-ge ${plan.node!.floor}`);
-    expect(node.bin).toBeUndefined();
+    // A server that runs node waits on nothing once the agents step ended, read off this.
+    expect(node.bin).toBe("node");
   });
 
   it("reads that floor the way the install script reads it, under a real shell", () => {

@@ -47,7 +47,7 @@ import {
   type SeedPlan,
 } from "@wsp/protocol";
 import { loginSignIn } from "@wsp/catalog";
-import type { EngineStep, ProvisionPlan } from "@wsp/engine";
+import type { EngineStep, ProvisionPlan, ProvisionStage } from "@wsp/engine";
 import type { AgentsActs, SignInRun } from "../src/agents-read.js";
 import type { RecipeShelf, SeedWiring } from "../src/runtime.js";
 import { ADD_STOPPED_LINE, PlaceProvisioningError, type PlaceUndo, newPlaceKeyPair, type PlaceKeyPair, type PlaceProvisioner, type PlaceRecord, type PlaceUpdater, type PlaceUpdateRequest, type PlaceWiring } from "../src/places.js";
@@ -159,7 +159,18 @@ const ROWS: Partial<Record<EngineStep, PlaceProvisionRow[]>> = {
 
 /** A planner and the engine's steps as the host wires them, each step's rows under this test's hand: which steps
  * ran, in order, and a step held until the test lets it go. */
-function provisioner(o: { rows?: Partial<Record<EngineStep, PlaceProvisionRow[]>>; hold?: EngineStep; holds?: EngineStep[]; throws?: { step: EngineStep; error: Error }; undo?: (removed: readonly { kind: string; name: string }[]) => PlaceUndo[] } = {}) {
+function provisioner(
+  o: {
+    rows?: Partial<Record<EngineStep, PlaceProvisionRow[]>>;
+    /** Rows a step says as it reaches them, before it is held. */
+    said?: Partial<Record<EngineStep, PlaceProvisionRow[]>>;
+    plan?: ProvisionPlan;
+    hold?: EngineStep;
+    holds?: EngineStep[];
+    throws?: { step: EngineStep; error: Error };
+    undo?: (removed: readonly { kind: string; name: string }[]) => PlaceUndo[];
+  } = {},
+) {
   let release = (): void => {};
   const held = new Promise<void>(resolve => (release = resolve));
   const each = new Map<EngineStep, { at: Promise<void>; let: () => void }>();
@@ -170,6 +181,9 @@ function provisioner(o: { rows?: Partial<Record<EngineStep, PlaceProvisionRow[]>
   };
   for (const step of o.holds ?? []) arm(step);
   const ran: EngineStep[] = [];
+  /** The plan each step was handed. */
+  const plans: Partial<Record<EngineStep, ProvisionPlan>> = {};
+  const stages = new Map<EngineStep, ProvisionStage>();
   const floors: string[] = [];
   const picked: RecipeFile[] = [];
   const rows = { ...ROWS, ...o.rows };
@@ -177,15 +191,18 @@ function provisioner(o: { rows?: Partial<Record<EngineStep, PlaceProvisionRow[]>
     plan: async () => ({ noRecipe: "/nowhere/recipe.json" }),
     setup: async picks => {
       picked.push(picks);
-      return PLAN;
+      return o.plan ?? PLAN;
     },
     floor: async (_machine, on) => {
       floors.push(on.home);
       return [];
     },
-    step: async (_machine, _plan, step, _run, stage) => {
+    step: async (_machine, plan, step, _run, stage) => {
       ran.push(step);
+      plans[step] = plan;
+      stages.set(step, stage);
       stage(`${step} under way`);
+      for (const row of o.said?.[step] ?? []) stage(`${row.label}: ${row.outcome}`, undefined, { ...row, step });
       if (o.hold === step) await held;
       await each.get(step)?.at;
       if (o.throws?.step === step) throw o.throws.error;
@@ -198,7 +215,9 @@ function provisioner(o: { rows?: Partial<Record<EngineStep, PlaceProvisionRow[]>
     },
   };
   const undone: { before: RecipeFile; removed: string[] }[] = [];
-  return { wired, ran, floors, picked, undone, release: () => release(), let: (step: EngineStep) => each.get(step)?.let(), arm };
+  /** A running step says a row has landed, as the tools loop does while the rest of its rows install. */
+  const say = (step: EngineStep, row: PlaceProvisionRow): void => stages.get(step)?.(`${row.label}: ${row.outcome}`, undefined, { ...row, step });
+  return { wired, ran, plans, floors, picked, undone, release: () => release(), let: (step: EngineStep) => each.get(step)?.let(), arm, say };
 }
 
 /** Sign-ins as the app's own road runs them, each waiting on the test: the page and the code, then the end. The
@@ -747,6 +766,122 @@ describe("a computer added with its picks", () => {
     p.let("agents");
     await until(async () => (await rowOf(place.id)).setup?.state === "done");
     expect(Math.max(...frames.flatMap(f => (f.running === undefined ? [] : [f.running.filter(r => r !== "signins").length])))).toBe(1);
+  });
+
+  it("never starts a step before what it needs, and runs the rest beside the CLIs: GitHub once gh is on, the servers once theirs are", async () => {
+    const plan: ProvisionPlan = {
+      ...PLAN,
+      steps: [
+        PLAN.steps[0]!,
+        { id: "tools/manager/npm", label: "npm", manager: "script", cmd: "npm-step" },
+        { id: "tools/homebrew", label: "Homebrew", manager: "script", cmd: "brew-step" },
+        { id: "tools/brew/jq", label: "jq", manager: "brew", cmd: "jq-step", after: "tools/homebrew" },
+        { id: "tools/brew/gh", label: "GitHub CLI", manager: "brew", cmd: "gh-step", after: "tools/homebrew" },
+      ],
+      serverTools: ["tools/brew/jq"],
+    };
+    const p = provisioner({ plan, holds: ["clis"] });
+    const { frames } = await hosting({ provision: p.wired, vault: { CLAUDE_CODE_OAUTH_TOKEN: "sk-ant-oat01-x", GH_TOKEN: "ghp_vaulted" } });
+    const picks = RecipeFile.parse({ name: "laptop", agents: { claude: { signin: "vault" } }, clis: { jq: { via: "brew" }, gh: { via: "brew" } }, configs: { github: { signin: "vault" } } });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: picks }, Date.now());
+    /** Where in the frames each CLI row landed. */
+    const landed: [number, string][] = [];
+    const land = (row: PlaceProvisionRow): void => {
+      landed.push([frames.length, `landed ${row.id}`]);
+      p.say("clis", row);
+    };
+    const order = (): string[] =>
+      frames.flatMap((f, i) => [...landed.filter(([at]) => at === i).map(([, mark]) => mark), ...(f.line === undefined ? [] : [`${f.line.state === "running" ? "start" : "end"} ${f.line.step}`])]);
+    await until(() => ["skills", "configs", "signins"].every(s => order().includes(`end ${s}`)) && p.ran.includes("clis"));
+    await new Promise(r => setTimeout(r, 20));
+    expect(order()).not.toContain("start github");
+    expect(p.ran).not.toContain("mcp");
+    land({ id: "tools/brew/gh", label: "GitHub CLI", outcome: "installed" });
+    await until(() => ["github", "folders"].every(s => order().includes(`end ${s}`)));
+    expect(p.ran).not.toContain("mcp");
+    land({ id: "tools/brew/jq", label: "jq", outcome: "installed" });
+    // The servers, and the plugins behind them, land once the CLI the servers run is on, while the rest still install.
+    await until(() => ["mcp", "plugins"].every(s => order().includes(`end ${s}`)));
+    expect(order()).not.toContain("end clis");
+    expect((await rowOf(place.id)).applied?.rows.find(r => r.id === "github")).toMatchObject({ outcome: "present", step: "github" });
+    // gh goes first among the CLIs behind the Homebrew it needs, then the servers' own, since those are waited on.
+    expect(p.plans.clis?.steps.slice(p.plans.clis.agents).map(s => s.id)).toEqual(["tools/homebrew", "tools/brew/gh", "tools/brew/jq", "tools/manager/npm"]);
+    p.let("clis");
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    // What each step needs, written once here: none starts before every one of them ended or landed.
+    const needs: Record<PlaceSetupStep, string[]> = {
+      floor: [],
+      agents: ["end floor"],
+      signins: ["end agents"],
+      skills: ["end floor"],
+      configs: ["end floor"],
+      clis: ["end agents"],
+      github: ["end floor", "landed tools/brew/gh"],
+      mcp: ["end agents", "landed tools/brew/jq"],
+      plugins: ["end mcp"],
+      folders: ["end github"],
+      context: ["agents", "signins", "skills", "configs", "clis", "github", "mcp", "plugins", "folders"].map(s => `end ${s}`),
+    };
+    const at = order();
+    for (const [step, before] of Object.entries(needs)) {
+      expect(at).toContain(`start ${step}`);
+      for (const need of before) expect([step, need, at.indexOf(need) >= 0 && at.indexOf(need) < at.indexOf(`start ${step}`)]).toEqual([step, need, true]);
+    }
+    // Two at once on a 4 GB box, the sign-ins aside, and never more.
+    const widths = frames.flatMap(f => (f.running === undefined ? [] : [f.running.filter(r => r !== "signins").length]));
+    expect(Math.max(...widths)).toBe(2);
+  });
+
+  it("holds GitHub while the CLIs step runs and gh has not landed", async () => {
+    const p = provisioner({ holds: ["clis"] });
+    const { frames } = await hosting({ provision: p.wired, vault: { CLAUDE_CODE_OAUTH_TOKEN: "sk-ant-oat01-x", GH_TOKEN: "ghp_vaulted" } });
+    const picks = RecipeFile.parse({ name: "laptop", agents: { claude: { signin: "vault" } }, clis: { gh: { via: "brew" } }, configs: { github: { signin: "vault" } } });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: picks }, Date.now());
+    await until(() => p.ran.includes("clis") && p.ran.includes("configs"));
+    await new Promise(r => setTimeout(r, 20));
+    const at = (): string[] => frames.flatMap(f => (f.line === undefined ? [] : [`${f.line.state === "running" ? "start" : "end"} ${f.line.step}`]));
+    expect(at()).not.toContain("start github");
+    expect(at()).not.toContain("start folders");
+    p.let("clis");
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    expect(at().indexOf("end clis")).toBeLessThan(at().indexOf("start github"));
+  });
+
+  it("holds the folders until git-lfs's row is said, its hook run, and not until the rest of the CLIs land", async () => {
+    const plan: ProvisionPlan = { ...PLAN, steps: [...PLAN.steps, { id: "tools/brew/jq", label: "jq", manager: "brew", cmd: "jq-step" }, { id: "tools/apt/git-lfs", label: "Git LFS", manager: "apt", cmd: "lfs-step" }] };
+    const p = provisioner({ plan, holds: ["clis"] });
+    const { frames } = await hosting({ provision: p.wired, vault: { CLAUDE_CODE_OAUTH_TOKEN: "sk-ant-oat01-x", GH_TOKEN: "ghp_vaulted" } });
+    const picks = RecipeFile.parse({ name: "laptop", agents: { claude: { signin: "vault" } }, clis: { gh: { via: "brew" } }, configs: { github: { signin: "vault" } } });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: picks }, Date.now());
+    const at = (): string[] => frames.flatMap(f => (f.line === undefined ? [] : [`${f.line.state === "running" ? "start" : "end"} ${f.line.step}`]));
+    await until(() => p.ran.includes("clis"));
+    // gh first, then the hooked CLI, then the rest.
+    expect(p.plans.clis?.steps.slice(p.plans.clis.agents).map(s => s.id)).toEqual(["tools/brew/gh", "tools/apt/git-lfs", "tools/brew/jq"]);
+    p.say("clis", { id: "tools/brew/gh", label: "GitHub CLI", outcome: "installed" });
+    await until(() => at().includes("end github"));
+    await new Promise(r => setTimeout(r, 20));
+    expect(at()).not.toContain("start folders");
+    // The engine says a hooked row once its hook ran.
+    p.say("clis", { id: "tools/apt/git-lfs", label: "Git LFS", outcome: "installed" });
+    await until(() => at().includes("end folders"));
+    expect(at()).not.toContain("end clis");
+    p.let("clis");
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+  });
+
+  it("holds the servers and the plugins until the CLI the servers run is on", async () => {
+    const plan: ProvisionPlan = { ...PLAN, steps: [...PLAN.steps, { id: "tools/brew/jq", label: "jq", manager: "brew", cmd: "jq-step" }], serverTools: ["tools/brew/jq"] };
+    const p = provisioner({ plan, holds: ["clis"], said: { clis: [{ id: "tools/brew/gh", label: "GitHub CLI", outcome: "installed" }] } });
+    const { frames } = await hosting({ provision: p.wired });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: LAPTOP }, Date.now());
+    await until(() => p.ran.includes("configs"));
+    await new Promise(r => setTimeout(r, 20));
+    expect(p.ran).not.toContain("mcp");
+    p.let("clis");
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    const at = frames.flatMap(f => (f.line === undefined ? [] : [`${f.line.state === "running" ? "start" : "end"} ${f.line.step}`]));
+    expect(at.indexOf("end clis")).toBeLessThan(at.indexOf("start mcp"));
+    expect(at.indexOf("end mcp")).toBeLessThan(at.indexOf("start plugins"));
   });
 
   it("skips GitHub where the person said so, and a private folder reads as needing GitHub with nothing cloned", async () => {

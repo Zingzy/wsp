@@ -17,7 +17,7 @@ import {
   type AgentSignInState,
   type PlaceReport,
 } from "@wsp/protocol";
-import { SSH_STORE_VARS, plainPath } from "@wsp/engine";
+import { SSH_STORE_VARS, plainPath, type ProvisionPlan, type ToolInstall } from "@wsp/engine";
 import { CATALOG_AGENTS, keyEnvOf, mintsToken, sharedFileIn, sharedOn } from "@wsp/catalog";
 import type { WebSocket } from "ws";
 import type { PlaceForward } from "../place-forward.js";
@@ -255,6 +255,27 @@ export const GITHUB_MS = 30_000;
 /** The row the GitHub sign-in stands on, and the command its sign-in on that computer runs: gh's own. */
 export const GITHUB_ROW = "github";
 export const GITHUB_CLI = "gh";
+
+/** The plan with some CLIs first among them, in the order given, each behind the steps it needs so every step still
+ * comes after its own: gh, which GitHub and the folders behind it wait on, a CLI whose hook the folders wait on, and
+ * the CLIs the servers run, so none of them waits on every CLI. */
+export function cliFirst(plan: ProvisionPlan, ids: readonly string[]): ProvisionPlan {
+  const clis = plan.steps.slice(plan.agents);
+  const first: ToolInstall[] = [];
+  for (const id of ids) {
+    const chain: ToolInstall[] = [];
+    let at = clis.find(s => s.id === id);
+    while (at !== undefined && !first.includes(at) && !chain.includes(at)) {
+      chain.unshift(at);
+      const after = at.after;
+      at = clis.find(s => s.id === after);
+    }
+    first.push(...chain);
+  }
+  if (first.length === 0) return plan;
+  return { ...plan, steps: [...plan.steps.slice(0, plan.agents), ...first, ...clis.filter(s => !first.includes(s))] };
+}
+
 /** The lanes no two of the setup's steps share: the package managers, and the folder beside the job a files round
  * stages in. */
 export const INSTALLS = "installs";
