@@ -9,6 +9,7 @@ import { GitCommitHorizontalIcon, GithubIcon, PlugIcon, PuzzleIcon, ScrollTextIc
 import type { ReactNode } from "react";
 import { HERE_PLACE_ID, fmtBytes, fmtCalls, hereName, sizeTone, type GitHubSignIn, type ProjectHue, type ProjectIcon, type RecipeFile, type RecipeOptions, type RecipeSignIn } from "@wsp/protocol";
 import { AgentMarks } from "../../components/agents/agentsParts.js";
+import { catalogSignInRow } from "../../components/agents/agentsRows.js";
 import { useAgentsReport } from "../../components/agents/useAgentsReport.js";
 import { HarnessMark } from "../../components/chat/HarnessMark.js";
 import { Input } from "../../components/ui/input.js";
@@ -82,7 +83,19 @@ export function AgentsPicks({ picks, options, onChange, box, versions, onlyTicke
         const way = picks.agents[agent.id]?.signin ?? agent.signins[0] ?? "vault";
         const version = versions?.[agent.id];
         const row = report?.agents.find(a => a.id === agent.id && a.installed);
-        const note = on && wayAsNote ? words[way] : row === undefined ? undefined : signInSentence(row, here);
+        // Ticked with no way this computer can serve but its own road, it says that road: the token or key pasted on
+        // its row, or its terminal on the computer, which no setup sits at.
+        const road = on && !wayAsNote && agent.signins.every(w => w === "machine") ? catalogSignInRow(agent.id)?.signInRoad : undefined;
+        const note =
+          road === "token" || road === "key"
+            ? ADD_COMPUTER_WORDS.pasteOnceSetUp(road)
+            : road === "terminal"
+              ? ADD_COMPUTER_WORDS.atItsTerminalOnceSetUp(box === "" ? "that computer" : box)
+              : on && wayAsNote
+                ? words[way]
+                : row === undefined
+                  ? undefined
+                  : signInSentence(row, here);
         const select =
           on && !wayAsNote && agent.signins.length > 0 ? (
             <Select value={way} onValueChange={next => onChange(signIn(picks, agent.id, next as RecipeSignIn))}>

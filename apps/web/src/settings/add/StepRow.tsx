@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // One row of a list of steps, before and while they run: the state mark (a
-// muted empty circle for a step not started), the name with its quiet note,
-// and the time it took in the mono at the right. A row that needs the person
+// muted empty circle for a step not started, a muted minus for one the person
+// set aside), the name with its quiet note, and the time it took in the mono
+// at the right. A row that needs the person
 // opens under itself, inside the card, with what happened and the acts, in the
 // refusal slot's two inks; a step that ran opens on a click to its last lines
 // of output, its chevron turning. An item under a step (one sign-in, one skill
 // that did not land) steps in by the mark's width.
-import { ChevronRightIcon, CircleIcon } from "lucide-react";
+import { ChevronRightIcon, CircleIcon, CircleMinusIcon } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { StateMark } from "../../components/status/StateMark.js";
 import { Button } from "../../components/ui/button.js";
@@ -50,7 +51,13 @@ export function StepRow({ row, why, acts, toggle, children }: { row: StepLine; w
   const line = (
     <>
       <span className="flex size-4 items-center justify-center">
-        {quiet ? <CircleIcon data-state-mark="waiting" role="img" aria-label="Not started" className="size-3.5 text-muted-foreground/60" /> : <StateMark state={row.state} {...(why === undefined ? {} : { why })} />}
+        {quiet ? (
+          <CircleIcon data-state-mark="waiting" role="img" aria-label="Not started" className="size-3.5 text-muted-foreground/60" />
+        ) : row.state === "skipped" ? (
+          <CircleMinusIcon data-state-mark="skipped" role="img" aria-label="Skipped" className="size-3.5 text-muted-foreground" />
+        ) : (
+          <StateMark state={row.state} {...(why === undefined ? {} : { why })} />
+        )}
       </span>
       <span data-step-words className="flex min-w-0 flex-col">
         <span className={cn(SETTING_TITLE, "min-w-0 break-words", quiet && "font-normal text-muted-foreground")}>{row.name}</span>

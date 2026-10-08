@@ -195,9 +195,10 @@ on the Keybindings page. The prompt dock draws a question as one of these steps
 from the same head, body and foot.
 
 **Steps.** In a list of steps (`StepRow`) the state is an icon in the slot
-every row keeps: a muted empty circle (not started), `Crab` (an agent working,
-never a loading spinner), a check (done), the alert circle (failed). Loading is
-the plain `Spinner`. Never a status dot, never a word where an icon carries it,
+every row keeps: a muted empty circle (not started), the plain `Spinner` (a
+step running: a setup step is not an agent at work, so never the crab), a muted
+minus (set aside), a check (done), the alert circle (failed). Loading is the
+plain `Spinner` too. Never a status dot, never a word where an icon carries it,
 never a chip for state.
 
 **Machine words.** Paths, versions, counts and times are `FACT` or `VALUE`,
