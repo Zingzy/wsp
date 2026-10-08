@@ -23,7 +23,7 @@ import {
 } from "@wsp/protocol";
 import { LinkBackend, PlaceMachine, machineServerPort, serversOutLines, unmergeServers, type MachineBackend } from "@wsp/engine";
 import { verifyPlaceBytes } from "@wsp/keys";
-import { PLACES, CAPS, DEFAULT_COLLECTION, DEFAULT_ID, type PlaceRecord, madeBySetup, type PlaceLogin } from "./types.js";
+import { PLACES, CAPS, DEFAULT_COLLECTION, DEFAULT_ID, type PlaceRecord, madeBySetup, appliedView, type PlaceLogin } from "./types.js";
 import {
   bounded, takenReport, signInsOf, ADD_FACTS_MS, CAPACITY_MS, PENDING, type PendingRecord, pendingView,
   ADD_STOPPED_LINE, ADD_STOPPED_FIX, ADD_NOT_TAKEN_BACK_LINE, UNDO_MS, firstLineOf, UNMERGE_MS,
@@ -275,7 +275,7 @@ export function placeViews(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, 
       ...(record.dialled !== undefined ? { dialled: record.dialled } : {}),
       ...(blocked !== undefined ? { blocked } : {}),
       ...(record.setup !== undefined ? { setup: record.setup } : {}),
-      ...(record.applied !== undefined ? { applied: record.applied } : {}),
+      ...(record.applied !== undefined ? { applied: appliedView(record.applied) } : {}),
       ...(record.picks !== undefined ? { picks: record.picks } : {}),
       ...(record.recipe !== undefined ? { recipe: record.recipe } : {}),
       ...(record.sync !== undefined ? { sync: record.sync } : {}),
