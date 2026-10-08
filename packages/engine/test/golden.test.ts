@@ -1380,19 +1380,20 @@ describe("golden import stages", () => {
 
   it("a road install names the road it took: the result carries it and the stage summary says so", async () => {
     const { backend, fetch } = backendFor([
-      ["releases/tags/v0.1.0", { exitCode: 0, stdout: `WSP_ROAD release diskbloom_0.1.0_linux_amd64.tar.gz ${"a".repeat(64)} v0.1.0\n`, stderr: "" }],
+      ["releases/tags/v0.1.0", { exitCode: 0, stdout: `WSP_ROAD release diskbloom_0.1.0_linux_arm64.tar.gz ${"a".repeat(64)} v0.1.0 aarch64\n`, stderr: "" }],
       ["releases/tags/v1.13.1", { exitCode: 0, stdout: "go: downloading\nWSP_ROAD go github.com/TheZoraiz/ascii-image-converter@v1.13.1\n", stderr: "" }],
     ]);
     const { stages, onStage } = stageRecorder();
     const results: ImportResult[] = [];
     const roads = [
-      { id: "tools/brew/zingzy/tap/diskbloom", label: "diskbloom", manager: "release" as const, cmd: "curl https://api.github.com/repos/Zingzy/diskbloom/releases/tags/v0.1.0" },
+      { id: "tools/brew/zingzy/tap/diskbloom", label: "diskbloom", manager: "release" as const, cmd: "curl https://api.github.com/repos/Zingzy/diskbloom/releases/tags/v0.1.0", pin: { fixed: true, words: "from its release" } },
       { id: "tools/brew/thezoraiz/ascii-image-converter/ascii-image-converter", label: "ascii-image-converter", manager: "release" as const, cmd: "curl https://api.github.com/repos/TheZoraiz/ascii-image-converter/releases/tags/v1.13.1" },
     ];
     await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf({ tools: [...importOf().tools, ...roads], onResult: r => void results.push(r) }) });
     expect(stages).toContain("installing-tools:5 installed (diskbloom from its release, ascii-image-converter with go install); caches swept; 2.9 GB free");
     expect(results[0]!.tools.slice(3)).toEqual([
-      { id: roads[0]!.id, label: "diskbloom", outcome: "installed", road: { kind: "release", from: "diskbloom_0.1.0_linux_amd64.tar.gz", sha256: "a".repeat(64), tag: "v0.1.0" }, ms: expect.any(Number), bytes: 0 },
+      // The sum is recorded with the arch whose file it was, so a copy on the other arch never holds its own file to it.
+      { id: roads[0]!.id, label: "diskbloom", outcome: "installed", road: { kind: "release", from: "diskbloom_0.1.0_linux_arm64.tar.gz", sha256: "a".repeat(64), tag: "v0.1.0", arch: "aarch64" }, ms: expect.any(Number), bytes: 0, pin: { tag: "v0.1.0", sha256: "a".repeat(64), arch: "aarch64" } },
       { id: roads[1]!.id, label: "ascii-image-converter", outcome: "installed", road: { kind: "go", from: "github.com/TheZoraiz/ascii-image-converter@v1.13.1" }, ms: expect.any(Number), bytes: 0 },
     ]);
     // A brew install carries no road: it took the one its plan named.

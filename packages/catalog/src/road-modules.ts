@@ -10,7 +10,7 @@
 // /opt for a computer somebody owns, whose daemon resolves no command through
 // a folder the workspaces there can write.
 import { HOMEBREW_HOME as LINUXBREW_HOME, HOMEBREW_PREFIX as BREW_PREFIX, PNPM_HOME, TOOL_PREFIX, shellQuote } from "@wsp/protocol";
-import { APT_ENV, GUEST_HOME, HOME_BIN, LOCAL_BIN, ROADS, type InstallRoad, type PackageRoad, type ReleaseAsset, type ReleaseAssets, type RoadName, pinCheckLine, standingPin, versionOf } from "./roads.js";
+import { APT_ENV, GUEST_HOME, HOME_BIN, LOCAL_BIN, ROADS, type InstallRoad, type PackageRoad, type ReleaseAsset, type ReleaseAssets, type RoadName, type ToolPin, pinCheckLine, standingPin, versionOf } from "./roads.js";
 
 type Road<K extends RoadName> = Extract<InstallRoad, { road: K }>;
 
@@ -423,9 +423,9 @@ const go: RoadModule<Road<"go">> = {
 // --- releases ------------------------------------------------------------------
 
 /** What a downloaded asset becomes on the machine: unpacked where it is an archive, the command the row names found
- * in what came out, installed, and the artifact with its sum and tag printed on the WSP_ROAD line the stage reads.
- * `sum` is the shell word holding the sha256, which the two release roads fill from different places. */
-function unpackLines(sum: string): string[] {
+ * in what came out, installed, and the artifact printed on the WSP_ROAD line the stage reads with `read`, the words
+ * after it: its sum, its tag, and on the road whose pin is checked against one arch's file, that arch. */
+function unpackLines(read: string): string[] {
   return [
     'case "$asset" in',
     '  *.tar.gz|*.tgz) tar -xzf "$tmp/$asset" -C "$tmp" ;;',
@@ -437,7 +437,7 @@ function unpackLines(sum: string): string[] {
     `[ -n "$bin" ] || bin="$(find "$tmp" -type f -perm -u+x ! -name "$asset" ! -name '*.md' ! -name '*.txt' -printf '%s %p\\n' | sort -rn | head -1 | cut -d' ' -f2-)"`,
     '[ -n "$bin" ] || { echo "Error: no binary in $asset" >&2; exit 1; }',
     'install -m 0755 "$bin" "/usr/local/bin/$name"',
-    `echo "WSP_ROAD release $asset ${sum} $tag"`,
+    `echo "WSP_ROAD release $asset ${read}"`,
   ];
 }
 
@@ -474,7 +474,7 @@ function assetInstall(name: string, repo: string, tag: string, assets: ReleaseAs
     `url=${shellQuote(`https://github.com/${repo}/releases/download/${tag}/`)}"$asset"`,
     'curl -o "$tmp/$asset" "$url"',
     'echo "$sha  $tmp/$asset" | sha256sum -c - >/dev/null',
-    ...unpackLines("$sha"),
+    ...unpackLines("$sha $tag"),
   ];
   // A row the catalog recorded both arches for can only take the asset road, so nothing renders the other two.
   const complete = assets.x86_64 !== undefined && assets.aarch64 !== undefined;
@@ -502,8 +502,9 @@ function assetInstall(name: string, repo: string, tag: string, assets: ReleaseAs
 
 /** A person's own row's release, which names no asset: the release's listing read off the API at the tag the row
  * carries, the Linux asset for this arch picked out of it, and the sum its first install recorded checked where one
- * stands. Only a row the catalog does not carry takes this road; every catalog row names its asset above. */
-function releaseInstall(name: string, repo: string, tag: string, pin: string | undefined, go: string | undefined): string {
+ * stands: on the arch the pin names, or on any arch for a pin recorded before pins named one, every seal of which was
+ * built on x86_64. Only a row the catalog does not carry takes this road; every catalog row names its asset above. */
+function releaseInstall(name: string, repo: string, tag: string, pin: ToolPin | undefined, go: string | undefined): string {
   const goAt = goAtTag(go, tag);
   return [
     "set -euo pipefail",
@@ -520,8 +521,8 @@ function releaseInstall(name: string, repo: string, tag: string, pin: string | u
     '  asset="${url##*/}"',
     '  curl -o "$tmp/$asset" "$url"',
     `  sum="$(sha256sum "$tmp/$asset" | cut -d' ' -f1)"`,
-    ...(pin !== undefined ? [`  ${pinCheckLine("$asset", "$tag", pin)}`] : []),
-    ...unpackLines("$sum").map(l => `  ${l}`),
+    ...(pin?.sha256 === undefined ? [] : pin.arch === undefined ? [`  ${pinCheckLine("$asset", "$tag", pin.sha256)}`] : [`  if [ "$arch" = ${shellQuote(pin.arch)} ]; then ${pinCheckLine("$asset", "$tag", pin.sha256)}; fi`]),
+    ...unpackLines("$sum $tag $arch").map(l => `  ${l}`),
     ...(goAt === undefined ? [] : goLines(goAt, name)),
     "else",
     `  echo "Error: release "${shellQuote(tag)}" of "${shellQuote(repo)}" has no Linux build${goAt === undefined ? "" : ", and go is not on the machine"}" >&2`,
@@ -544,7 +545,7 @@ const release: RoadModule<Road<"release">> = {
     if (r.repo === undefined) return { note: NO_RELEASE };
     const tag = versionOf(r);
     if (tag === undefined) return { note: NO_TAG };
-    return r.assets === undefined ? releaseInstall(bin, r.repo, tag, standingPin(r)?.sha256, r.go) : assetInstall(bin, r.repo, tag, r.assets, r.go);
+    return r.assets === undefined ? releaseInstall(bin, r.repo, tag, standingPin(r), r.go) : assetInstall(bin, r.repo, tag, r.assets, r.go);
   },
   uninstall: (_r, bin) => ({ cmd: `rm -f /usr/local/bin/${shellQuote(bin)}` }),
   names: () => [],

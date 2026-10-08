@@ -5,6 +5,7 @@
 //! behind a separator. And a write by path in the daemon's root paths outside the bundle helpers, unless the
 //! function doing it is named below with the reason a link a workspace planted cannot steer it.
 
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -158,37 +159,69 @@ fn opens_function(line: &str) -> Option<String> {
     Some(name.chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect())
 }
 
-/// Every line of the root crates' sources outside `#[cfg(test)]` items and comments.
+/// Every line of the root crates' sources outside test code and comments.
 fn source_lines() -> Vec<Line> {
     let root = crates();
-    let mut lines = Vec::new();
+    let mut sources = Vec::new();
     for krate in ROOT_CRATES {
         let mut files = Vec::new();
         rust_files(&root.join(krate).join("src"), &mut files);
         files.sort();
         for path in files {
             let file = path.strip_prefix(&root).unwrap().to_string_lossy().into_owned();
-            let text = fs::read_to_string(&path).unwrap();
-            let all: Vec<&str> = text.lines().collect();
-            let mut function = String::new();
-            let mut i = 0;
-            while i < all.len() {
-                let trimmed = all[i].trim();
-                if test_gate(trimmed) {
-                    i = past_item(&all, i + 1);
-                    continue;
-                }
-                if let Some(name) = opens_function(all[i]) {
-                    function = name;
-                }
-                if !trimmed.starts_with("//") {
-                    lines.push(Line { file: file.clone(), at: i + 1, function: function.clone(), text: all[i].to_owned() });
-                }
-                i += 1;
+            sources.push((file, fs::read_to_string(&path).unwrap()));
+        }
+    }
+    lines_of(&sources)
+}
+
+/// The lines of each source, a path under the crates and its text, outside `#[cfg(test)]` items, the files of modules
+/// declared under one, and comments.
+fn lines_of(sources: &[(String, String)]) -> Vec<Line> {
+    let test_files: BTreeSet<String> = sources.iter().flat_map(|(file, text)| test_modules(file, text)).collect();
+    let mut lines = Vec::new();
+    for (file, text) in sources.iter().filter(|(file, _)| !test_files.contains(file)) {
+        let all: Vec<&str> = text.lines().collect();
+        let mut function = String::new();
+        let mut i = 0;
+        while i < all.len() {
+            let trimmed = all[i].trim();
+            if test_gate(trimmed) {
+                i = past_item(&all, i + 1);
+                continue;
             }
+            if let Some(name) = opens_function(all[i]) {
+                function = name;
+            }
+            if !trimmed.starts_with("//") {
+                lines.push(Line { file: file.clone(), at: i + 1, function: function.clone(), text: all[i].to_owned() });
+            }
+            i += 1;
         }
     }
     lines
+}
+
+/// The files Rust would read for each `#[cfg(test)] mod name;` that `file` declares, at both places it looks.
+fn test_modules(file: &str, text: &str) -> Vec<String> {
+    let dir = ["/lib.rs", "/main.rs", "/mod.rs"]
+        .iter()
+        .find_map(|end| file.strip_suffix(end))
+        .map_or_else(|| file.trim_end_matches(".rs").to_owned(), str::to_owned);
+    let all: Vec<&str> = text.lines().map(str::trim).collect();
+    let mut files = Vec::new();
+    for i in (0..all.len()).filter(|&i| test_gate(all[i])) {
+        let Some(item) = all[i + 1..].iter().find(|l| !l.starts_with("#[")) else { continue };
+        let mut rest = *item;
+        for word in ["pub(crate) ", "pub(super) ", "pub "] {
+            rest = rest.strip_prefix(word).unwrap_or(rest);
+        }
+        if let Some(name) = rest.strip_prefix("mod ").and_then(|r| r.strip_suffix(';')) {
+            files.push(format!("{dir}/{name}.rs"));
+            files.push(format!("{dir}/{name}/mod.rs"));
+        }
+    }
+    files
 }
 
 /// A `cfg` that keeps an item to test builds: `test` as a word of its own and not under `not(`, so a feature named
@@ -220,6 +253,20 @@ fn writes_by_path(text: &str) -> bool {
             !after.is_some_and(|c| c.is_alphanumeric() || c == '_')
         })
     }) || ["File::create(", "File::create_new(", "DirBuilder::new("].iter().any(|call| text.contains(call))
+}
+
+#[test]
+fn a_module_declared_under_a_test_cfg_is_read_as_test_code_and_the_file_beside_it_as_source() {
+    let source = |file: &str, text: &str| (file.to_owned(), text.to_owned());
+    let lines = lines_of(&[
+        source("wsp-daemon/src/place.rs", "#[cfg(test)]\nmod version_tests;\nmod real;\n"),
+        source("wsp-daemon/src/place/real.rs", "fn keep() {\n    std::fs::write(at, b\"\")?;\n}\n"),
+        source("wsp-daemon/src/place/version_tests.rs", "fn fake_bin() {\n    std::fs::write(at, b\"\")?;\n}\n"),
+        source("wsp-daemon/src/lib.rs", "#[cfg(test)]\npub(crate) mod helpers;\n"),
+        source("wsp-daemon/src/helpers/mod.rs", "fn stub() {\n    std::fs::write(at, b\"\")?;\n}\n"),
+    ]);
+    let writes: Vec<String> = lines.iter().filter(|l| writes_by_path(&l.text)).map(|l| format!("{} in {}", l.file, l.function)).collect();
+    assert_eq!(writes, ["wsp-daemon/src/place/real.rs in keep"]);
 }
 
 #[test]
