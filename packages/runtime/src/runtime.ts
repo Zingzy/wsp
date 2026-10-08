@@ -935,7 +935,7 @@ function runtimeOf(ctx: RuntimeContext): Runtime {
     harnesses: {
       list: async (workspaceId, origin) => {
         const prefs = await ctx.preferences.get();
-        const entry = workspaceId === undefined ? undefined : await ctx.entryOf(workspaceId, origin);
+        const entry = workspaceId === undefined ? undefined : await ctx.entryOf(workspaceId, ctx.talksToTreeOn(workspaceId, origin) ? undefined : origin);
         // Only a harness with an adapter can run a turn, and one the person turned off on that computer runs none
         // there; the rest of the table waits.
         const table = HARNESS_CATALOGS.filter(c => c.harness in adapters && (entry === undefined || !ctx.agentOff(entry, c.harness)));

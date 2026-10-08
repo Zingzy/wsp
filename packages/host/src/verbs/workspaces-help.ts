@@ -808,7 +808,7 @@ export async function createFor(
 }
 
 /** The projects a caller may name, as the host's list answers it: every one for a person's terminal, and for a
- * thread its own and its repository's on computers that fork machines. A host from before threads could list
+ * thread its own and its repository's on a box or a cloud. A host from before threads could list
  * projects refuses the list, and a thread there names the projects its own workspaces hold. */
 export async function projectsHere(client: HostClient): Promise<Pick<ProjectView, "id" | "name" | "computer">[]> {
   const held = await projectsOf(client).catch(() => undefined);

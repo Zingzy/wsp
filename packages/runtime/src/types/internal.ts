@@ -548,13 +548,19 @@ export function readRoad(raw: unknown): WorkspaceOrigin | undefined {
   return read.success ? read.data : undefined;
 }
 
-/** A thread's own record: the agent it runs on and the access it is at, written at its first turn and moved by the
- * access verb alone. The rows are capped at SESSION_INDEX_CAP per workspace and the transcript at TRANSCRIPT_CAP
- * events, while a thread keeps its agent and its access for its whole life, so both are read here first and off
- * the rows only for a thread from before the record existed. */
+/** What a thread on a computer the person joined reaches a thread of its own tree on another computer for: a message
+ * into it and the listing of it, and nothing else of its turns. */
+export type TreeTalk = "send" | "list";
+
+/** A thread's own record: the agent it runs on, the access it is at and the tree it sits in, written at its first turn
+ * and its access moved by the access verb alone. The rows are capped at SESSION_INDEX_CAP per workspace and the
+ * transcript at TRANSCRIPT_CAP events, while a thread keeps its agent, its access and its tree for its whole life, so
+ * each is read here first and off the rows only for a thread from before the record existed. */
 export interface ThreadRecord {
   harness: string;
   permissionMode?: string;
+  parentThreadId?: string;
+  rootThreadId?: string;
   /** When a window last showed the thread and when the person settled it, ms epoch; kept here rather than on a row,
    * since every row of the thread shares them and a row falls off the cap while the thread lives on. */
   readAt?: number;

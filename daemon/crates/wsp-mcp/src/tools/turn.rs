@@ -1030,16 +1030,17 @@ pub(super) async fn notify_of(client: &Client, named: &[String]) -> Result<Optio
 }
 
 /// Where a thread the host picked the folder for went: the project named, where the caller named one, and the
-/// folder the host started it in.
+/// folder the host started it in, shortened against this computer's home only where it is on this computer.
 struct Opened {
     project: Option<String>,
+    here: bool,
 }
 
 impl Opened {
     fn line(&self, thread_id: &str, folder: Option<&str>) -> String {
         let words = turns();
         let Some(folder) = folder else { return fill(&words.opened_thread, &[("thread", thread_id)]) };
-        let home = std::env::var("HOME").ok();
+        let home = std::env::var("HOME").ok().filter(|_| self.here);
         let folder = home_shortened(folder, home.as_deref());
         match &self.project {
             Some(project) => fill(&words.thread_opened, &[("thread", thread_id), ("project", project), ("folder", &folder)]),
@@ -1113,7 +1114,8 @@ async fn run(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
             if let Some(branch) = branch {
                 at.insert("branch".to_owned(), Value::from(branch));
             }
-            (opening_at(&host, at, &message, agent, folder, notify), Some(Opened { project: project.map(|p| p.name) }))
+            let here = project.as_ref().is_none_or(|p| p.computer == super::workspace::words().here_place_id);
+            (opening_at(&host, at, &message, agent, folder, notify), Some(Opened { project: project.map(|p| p.name), here }))
         }
     };
     if let Some(title) = title {
@@ -1269,5 +1271,14 @@ mod tests {
         std::fs::create_dir_all(dir.path().join(".git")).unwrap();
         std::fs::create_dir_all(dir.path().join("a/b")).unwrap();
         assert_eq!(git_root_of(&dir.path().join("a/b")), Some(dir.path().to_path_buf()));
+    }
+
+    #[test]
+    fn a_folder_on_another_computer_is_never_shortened_against_this_ones_home() {
+        let Ok(home) = std::env::var("HOME") else { return };
+        let folder = format!("{}/site", home.trim_end_matches('/'));
+        let on = |here: bool| Opened { project: Some("site".to_owned()), here }.line("t1", Some(&folder));
+        assert!(on(true).ends_with(" in ~/site"), "{}", on(true));
+        assert!(on(false).ends_with(&format!(" in {folder}")), "{}", on(false));
     }
 }

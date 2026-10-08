@@ -139,6 +139,16 @@ export function agentsOffRefusal(workspace: string, act: SpawnAct): string {
   return `agents on ${workspace} may not ${SPAWN_ACTS[act]}; turn it on with wsp workspaces agents ${workspace} --spawn on`;
 }
 
+/** The same refusal where the switch that is off is a computer's, over a folder there that holds none of its own. */
+export function agentsOffComputerRefusal(computer: string, act: SpawnAct): string {
+  return `agents on ${computer} may not ${SPAWN_ACTS[act]}; turn it on with ${shellLine(["wsp", "computers", "set", computer, "--spawn", "on"])}`;
+}
+
+/** The refusal where no switch is off but the thread a tree started from was deleted, so nothing governs it. */
+export function rootGoneRefusal(threadId: string, act: SpawnAct): string {
+  return `thread ${threadWord(threadId)} may not ${SPAWN_ACTS[act]}, since the thread that started its tree was deleted; finish the work in this thread, or ask the person to start the one you need`;
+}
+
 /** The one sentence the guest door refuses a line that carries neither a thread's token nor a turn's with: a
  * person's shell or a `wsp exec` on the machine. The switch may well be on, so the sentence names the missing
  * identity and never tells anyone to turn it on. */
@@ -301,8 +311,26 @@ export function spawnReachRefusal(threadId: string, name: string): string {
   return `thread ${threadWord(threadId)} may drive the workspace it runs on and the ones it forked, and ${name} is neither`;
 }
 
+/** The one sentence a child on a computer the person joined is refused with for naming a project on the computer its
+ * lead runs on: nothing carries a thread's work back across yet, and a child talks to the thread that started it by
+ * message alone, so the road is a message asking that thread to start it. */
+export function childToLeadsComputerLine(from: string, to: string, lead: string): string {
+  return `a thread on ${from} cannot start one on ${to} yet; ask thread ${threadWord(lead)}, which started you, with ${shellLine(["wsp", "send", threadWord(lead)])} "<message>", or name a project on ${from}`;
+}
+
+/** A thread on a computer the person joined reaches a thread of its tree on another computer by its words alone: no
+ * file of its lands there, and nothing of that thread's turn comes back but a message that thread sends. */
+export function sendFilesAcrossLine(from: string, to: string, thread: string): string {
+  return `a thread on ${from} cannot send files to thread ${threadWord(thread)} on ${to}`;
+}
+export const SEND_FILES_ACROSS_FIX = "Send the message without them, with what they hold written into it.";
+export function waitAcrossLine(from: string, to: string, thread: string): string {
+  return `a thread on ${from} cannot wait on thread ${threadWord(thread)} on ${to} for its reply`;
+}
+export const WAIT_ACROSS_FIX = "Send it again with --detach and end your turn; that thread answers you with a message of its own.";
+
 /** What a thread does about a workspace outside its tree: a child on that workspace's project, in the words of what a
- * run does there, a machine of its own on a box or a cloud and a thread in the folder on a computer that copies one. */
+ * run does there, a machine of its own on a cloud and a thread in the folder on this computer or a box. */
 export function spawnReachFix(project: string, forks: boolean): string {
   const line = `${shellLine(["wsp", "run", project])} "<message>"`;
   return forks
