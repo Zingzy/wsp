@@ -6,7 +6,7 @@
 // shows.
 import { spawn } from "node:child_process";
 import type { Host } from "@wsp/collect";
-import { asLogin, stageAsLogin, targetLogin, type ExecResult } from "@wsp/engine";
+import { asLogin, stageAsLogin, storesReached, targetLogin, type ExecResult } from "@wsp/engine";
 import { shellQuote } from "@wsp/protocol";
 import type { AgentsOn } from "@wsp/runtime";
 import { machineHost } from "./machine-host.js";
@@ -54,7 +54,7 @@ export async function roadOf(on: AgentsOn, here: () => Host, what: string): Prom
   }
   const login = await targetLogin(on.machine, on.kind === "box" ? on.login : {});
   const bound = { timeoutMs: WRITE_MS };
-  const stores = on.stores === undefined ? {} : { stores: on.stores };
+  const stores = on.stores === undefined ? {} : { stores: storesReached(login, on.stores) };
   if (on.kind === "box") {
     const machine = on.machine;
     return { host: { ...machineHost(machine, login, { stdin: true }), ...stores }, run: (line, stdin) => machine.exec(asLogin(login, line), { ...bound, ...(stdin !== undefined ? { stdin } : {}) }) };

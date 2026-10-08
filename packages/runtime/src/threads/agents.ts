@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { homedir } from "node:os";
 import { dirname, join, posix, resolve as resolvePathOn } from "node:path";
-import { CATALOG_AGENTS, DEFAULT_AGENT, LAUNCH_SERVER_ROADS, installsOnFirstRun, serverValuesOf } from "@wsp/catalog";
+import { CATALOG_AGENTS, DEFAULT_AGENT, LAUNCH_SERVER_ROADS, MCP_AGENTS, installsOnFirstRun, ownServerConfig, serverValuesOf } from "@wsp/catalog";
 import { INLINE_EXEC_MS, harnessExec, landBytes, agentHomes, parseConfigs, readConfigsCmd, readReason, readWhole } from "@wsp/engine";
 import {
   type AttachmentRoad, type HarnessCatalog, type Preferences, type SessionView, type TitleSource, type Attachment,
@@ -451,7 +451,8 @@ export function agentsArea(ctx: RuntimeContext): AgentsArea {
 
   /** The folder each agent's store variable names for a thread on a computer you joined, by agent id, read as
    * threadEnv reads it for a thread there: what the person set for that variable, else the config folder they kept,
-   * else the kind's own. What an act on that computer's page writes where its threads' agents read. */
+   * else the kind's own. What an act on that computer's page and its recipe's servers write where its threads' agents
+   * read. */
   const placeStores = (place: string, home: string): Readonly<Record<string, string>> =>
     Object.fromEntries(
       CATALOG_AGENTS.flatMap(a => {
@@ -466,12 +467,13 @@ export function agentsArea(ctx: RuntimeContext): AgentsArea {
    * vault holds no server's value. */
   const serverValuesFor = async (entry: LiveWorkspace, harness: string, folder: string): Promise<HarnessStartOptions["serverValues"]> => {
     const road = LAUNCH_SERVER_ROADS[harness];
+    const mcp = MCP_AGENTS.find(a => a.id === harness);
     const values = serverValuesOf(opts.vault?.() ?? {});
-    if (road === undefined || ctx.moduleOf(entry.record.kind).serverValues !== "launch" || Object.keys(values).length === 0) return undefined;
+    if (road === undefined || mcp === undefined || ctx.moduleOf(entry.record.kind).serverValues !== "launch" || Object.keys(values).length === 0) return undefined;
     const env = threadEnv(entry, harness);
     const home = env["HOME"] ?? "~";
     const store = CATALOG_AGENTS.find(a => a.id === harness)?.stateHomeEnv;
-    const scopes = [{ files: [road.user(store === undefined ? undefined : env[store], home)] }, { files: [posix.join(folder, road.project)] }];
+    const scopes = [{ files: ownServerConfig(mcp, home, store === undefined ? undefined : env[store]).files }, { files: [posix.join(folder, road.project)] }];
     const res = await entry.machine.exec(readConfigsCmd(scopes), { timeoutMs: INLINE_EXEC_MS });
     const agent = CATALOG_AGENTS.find(a => a.id === harness)?.name ?? harness;
     if (res.exitCode === 0 && !readWhole(res.stdout)) throw new Error(serverValuesCutLine(agent, scopes.flatMap(scope => scope.files)));

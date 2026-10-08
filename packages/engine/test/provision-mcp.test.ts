@@ -4,13 +4,14 @@
 // disk: the file an agent keeps its servers in is merged key by key, every
 // other key of its own stands, and a server the agent or the person has under
 // one of the recipe's names is left with its row saying so.
-import { readFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { readFileSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { CODEX_TOML, MCP_SERVERS_JSON, OPENCODE_JSON, parseJsonc } from "@wsp/catalog";
 import { MCP_ID_PREFIX, TOOLS_PATH, placeProvisionPaths } from "@wsp/protocol";
 import type { McpPlan } from "../src/golden-mcp.js";
-import { closeAgentFiles, oncePathsOf, provisionFiles, type ProvisionLanding } from "../src/provision-files.js";
+import { closeAgentFiles, machineServerPort, oncePathsOf, provisionFiles, unmergeServers, type ProvisionLanding } from "../src/provision-files.js";
 import { keyUnreachedLine, provisionMcp, theirServerLine } from "../src/provision-mcp.js";
 import { tarOf } from "../src/vault.js";
 import type { PackedFiles } from "../src/golden.js";
@@ -314,6 +315,32 @@ describe("the recipe's servers on a computer somebody owns", { timeout: 60_000 }
     const held = readFileSync(config, "utf8");
     expect(parseJsonc(held)).toEqual({ theme: "dark", mcp: { docs: { type: "local", command: ["npx", "docs-mcp"], enabled: true } } });
     expect(held).toContain("  // my own servers\n");
+  });
+
+  it("merges an agent's servers into the config under the store its threads there read, outside the home, and takes them back out of it on a leave", async () => {
+    const g = box();
+    // The box's shared logins folder, where its Codex sign-in wrote and a thread's CODEX_HOME points.
+    const logins = mkdtempSync(join(tmpdir(), "wsp-box-logins-"));
+    g.dirs.push(logins);
+    writeFileSync(join(logins, "config.toml"), 'model = "o4"\n');
+    const said: string[] = [];
+    const landed = await provisionFiles(g.machine, { home: g.root, lands: LANDS, pack: async () => packed(tarOfConfigs(CLAUDE_TRAVELLED(), CODEX_TRAVELLED)) });
+    const o = { home: g.root, landed: landed.owned, tools: [], path: TOOLS_PATH, stores: { codex: logins }, stage: (_w: string, d?: string) => void (d !== undefined && said.push(d)) };
+    const rows = await provisionMcp(g.machine, planOn(g.root), o);
+    await closeAgentFiles(g.machine, g.root, oncePathsOf(LANDS));
+    expect(rows.find(r => r.id === `${MCP_ID_PREFIX}codex/context7`)?.outcome).toBe("installed");
+    const own = readFileSync(join(logins, "config.toml"), "utf8");
+    expect(own.startsWith('model = "o4"\n')).toBe(true);
+    expect(CODEX_TOML.read(own, g.root).map(s => s.name)).toEqual(["context7"]);
+    // Claude Code names no store here, so its servers go where the catalog keeps them, as before.
+    expect(Object.keys(claudeOf(g.root).mcpServers)).toContain("gsc");
+
+    const again = await provisionMcp(g.machine, planOn(g.root), { ...o, landed: new Map() });
+    expect(again.find(r => r.id === `${MCP_ID_PREFIX}codex/context7`)?.outcome).toBe("present");
+
+    const out = await unmergeServers(machineServerPort(g.machine), g.root, { codex: logins });
+    expect(out.find(x => x.path === join(logins, "config.toml"))?.names).toEqual(["context7"]);
+    expect(readFileSync(join(logins, "config.toml"), "utf8")).toBe('model = "o4"\n');
   });
 
   it("leaves a config that is on no computer to the merge itself, which skips its servers rather than writing a file nobody has", async () => {

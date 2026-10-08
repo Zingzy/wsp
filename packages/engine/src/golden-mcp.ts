@@ -260,7 +260,7 @@ function editScopes(plan: McpPlan, agents: readonly McpAgentPlan[], read: readon
 /** Puts every config the edit changed back on the machine, each by the one config write inside `base`, from a
  * landing beside it; the words when one of them did not land. A landing the write never took is swept: it holds the
  * whole config at the upload road's own mode, and the machine it sits on may be about to be sealed into an image. */
-export async function landConfigs(machine: Machine, base: string, read: readonly (ScopeFile | undefined)[], texts: ReadonlyMap<string, string>): Promise<string | undefined> {
+export async function landConfigs(machine: Machine, base: string | ((path: string) => string), read: readonly (ScopeFile | undefined)[], texts: ReadonlyMap<string, string>): Promise<string | undefined> {
   const was = new Map(read.flatMap(f => (f === undefined ? [] : [[f.path, f] as const])));
   const changed = [...texts].filter(([path, text]) => was.get(path)?.text !== text).map(([path, text]) => ({ path, bytes: new TextEncoder().encode(text), landing: configLanding(path, randomBytes(6).toString("hex")) }));
   if (changed.length === 0) return undefined;
@@ -274,7 +274,7 @@ export async function landConfigs(machine: Machine, base: string, read: readonly
     return swept(e instanceof Error ? e.message : String(e));
   }
   // Each write in a subshell of its own, so its exit and its trap are its own and the first refusal stops the rest.
-  const line = changed.map(c => `(\n${configWriteLine({ file: c.path, base, bytes: c.bytes.length, from: c.landing, ...(was.has(c.path) ? { sum: was.get(c.path)!.sum } : {}) })}\n) || exit $?`).join("\n");
+  const line = changed.map(c => `(\n${configWriteLine({ file: c.path, base: typeof base === "string" ? base : base(c.path), bytes: c.bytes.length, from: c.landing, ...(was.has(c.path) ? { sum: was.get(c.path)!.sum } : {}) })}\n) || exit $?`).join("\n");
   const res = await machine.exec(line, { timeoutMs: INLINE_EXEC_MS }).catch(refused);
   if (res.exitCode === 0) return undefined;
   return swept(configRefusal(res, changed[0]!.path, p => p) ?? reasonOf(res, INLINE_EXEC_MS / 1000));

@@ -6,6 +6,7 @@
 // in an --mcp-config file, which stand for the config's own for that run;
 // Codex takes config keys on its thread's start, laid over its own entries, so
 // every key the person set there stays.
+import { underProject } from "@wsp/protocol";
 import { readJsonc } from "./jsonc.js";
 import { CODEX_TOML, type McpFormat, type McpServer } from "./mcp.js";
 
@@ -130,6 +131,17 @@ export const LAUNCH_SERVER_ROADS: Readonly<Record<string, LaunchServerRoad>> = {
     hands: (server, name) => (server.reads?.env.includes(name) ?? false) || Object.values(server.reads?.headers ?? {}).includes(name),
   },
 };
+
+/** Where one agent's own servers live on a computer, the one rule every reader and writer of them takes there, the
+ * launch among them: the file under the store its threads are pointed at, where one is named, else the catalog's files
+ * under the home, the first that is there being the config. A store is whatever folder the agent's own variable names
+ * (CLAUDE_CONFIG_DIR, CODEX_HOME), a box's logins folder among them. `base` is the folder a write must stay inside: the
+ * home, or the store where it sits outside the home. */
+export function ownServerConfig(agent: { id: string; mcp: { files: readonly string[] } }, home: string, store?: string): { files: string[]; base: string } {
+  const road = LAUNCH_SERVER_ROADS[agent.id];
+  if (store !== undefined && road !== undefined) return { files: [road.user(store, home)], base: underProject(store, home) ? home : store };
+  return { files: agent.mcp.files.map(f => (f.startsWith("~/") ? `${home}/${f.slice(2)}` : f)), base: home };
+}
 
 /** The names `held` holds that a server reads and a turn's launch on a computer the person owns cannot hand it: every
  * one where the agent's CLI takes no servers at launch, and for Codex one read through bearer_token_env_var. The names
