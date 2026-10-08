@@ -211,6 +211,7 @@ enum Held {
 /// broker inside a workspace. Both take a chunk from whichever socket wrote it, without waiting.
 enum Typed {
     Here(std_mpsc::Sender<Vec<u8>>),
+    #[cfg(target_os = "linux")]
     Inside(mpsc::UnboundedSender<Vec<u8>>),
 }
 
@@ -220,6 +221,7 @@ impl Typed {
             Typed::Here(feed) => {
                 let _ = feed.send(bytes);
             }
+            #[cfg(target_os = "linux")]
             Typed::Inside(feed) => {
                 let _ = feed.send(bytes);
             }

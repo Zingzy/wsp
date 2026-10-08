@@ -250,6 +250,7 @@ fn install_room(system_root: &Path) -> Option<(u64, u64)> {
 /// not say.
 fn disk_room(folder: &Path) -> Option<(u64, u64)> {
     let fs = nix::sys::statfs::statfs(folder).ok()?;
+    #[cfg_attr(target_os = "macos", allow(clippy::unnecessary_fallible_conversions))]
     let block = u64::try_from(fs.block_size()).ok()?;
     Some((fs.blocks_available() * block, fs.blocks() * block))
 }

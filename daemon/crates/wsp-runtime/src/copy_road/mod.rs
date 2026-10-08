@@ -189,7 +189,7 @@ fn tried<'a>(roads: &'a [&'a dyn CopyRoad], ask: &CopyAsk) -> Result<Vec<&'a dyn
 
 /// The copy taken away by the road that made it, which is the road the record carries.
 pub fn remove(from: &Path, to: &Path, road: CopyRoadName) -> Result<(), String> {
-    if ROADS.is_empty() {
+    if cfg!(not(target_os = "macos")) {
         return Err(NOT_THIS_COMPUTER.to_owned());
     }
     let taking = road_named(road).ok_or_else(|| no_such_road(road))?;
@@ -263,7 +263,7 @@ mod tests {
         std::fs::create_dir_all(&from).unwrap();
         let to = dir.path().join("plain-other");
         let refused = make(&ask(&from, &to)).unwrap_err();
-        if ROADS.is_empty() {
+        if cfg!(not(target_os = "macos")) {
             assert_eq!(refused, NOT_THIS_COMPUTER);
         } else {
             assert!(refused.contains("is not a git repository"), "{refused}");
