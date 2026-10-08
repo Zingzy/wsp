@@ -30,9 +30,10 @@ export interface ToolResult {
 export interface ToolRoad {
   kind: Extract<RoadName, "release" | "go">;
   from: string;
-  /** The release asset's sha256 as the guest read it, and the tag it came from; the recipe records both on the first install of a tag. */
+  /** The release asset's sha256 as the guest read it, the tag it came from and the arch it was built for; the recipe records all three on the first install of a tag. */
   sha256?: string;
   tag?: string;
+  arch?: ToolPin["arch"];
 }
 
 export interface ToolsOutcome {
@@ -148,7 +149,8 @@ async function readPins(machine: Machine, tools: readonly ToolInstall[], results
     return tool?.pin === undefined ? [] : [{ result: r, tool, pin: tool.pin }];
   });
   for (const row of rows) {
-    if (row.result.road?.tag !== undefined) row.result.pin = { tag: row.result.road.tag, ...(row.result.road.sha256 !== undefined ? { sha256: row.result.road.sha256 } : {}), ...(row.pin.fixed ? {} : { latest: true as const }) };
+    const road = row.result.road;
+    if (road?.tag !== undefined) row.result.pin = { tag: road.tag, ...(road.sha256 !== undefined ? { sha256: road.sha256, ...(road.arch !== undefined ? { arch: road.arch } : {}) } : {}), ...(row.pin.fixed ? {} : { latest: true as const }) };
   }
   const reads = rows.filter(row => row.result.pin === undefined && row.pin.read !== undefined);
   // Paged as the checks are: a version line on a manager's own store is as slow as any other read, and a page that
@@ -174,8 +176,10 @@ async function readPins(machine: Machine, tools: readonly ToolInstall[], results
 
 /** The last WSP_ROAD line a road install printed, when it printed one. */
 export function roadOf(stdout: string): ToolRoad | undefined {
-  const m = [...stdout.matchAll(/^WSP_ROAD (release|go) (\S+)(?: ([0-9a-f]{64})(?: (\S+))?)?/gm)].at(-1);
-  return m === undefined ? undefined : { kind: m[1] as ToolRoad["kind"], from: m[2]!, ...(m[3] !== undefined ? { sha256: m[3] } : {}), ...(m[4] !== undefined ? { tag: m[4] } : {}) };
+  const m = [...stdout.matchAll(/^WSP_ROAD (release|go) (\S+)(?: ([0-9a-f]{64})(?: (\S+)(?: (x86_64|aarch64))?)?)?/gm)].at(-1);
+  return m === undefined
+    ? undefined
+    : { kind: m[1] as ToolRoad["kind"], from: m[2]!, ...(m[3] !== undefined ? { sha256: m[3] } : {}), ...(m[4] !== undefined ? { tag: m[4] } : {}), ...(m[5] !== undefined ? { arch: m[5] as ToolPin["arch"] } : {}) };
 }
 
 export type FreeDisk = { kind: "free"; bytes: number } | { kind: "unknown"; reason: string };
