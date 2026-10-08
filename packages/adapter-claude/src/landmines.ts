@@ -311,7 +311,7 @@ export function savedSpendCommand(o: { configDir: string; sessionId: string }): 
  * base64 content blocks ahead of the text, the shape the CLI took on 2.1.263 (measured 2026-09-08: a 64px block sent
  * this way came back described), so nothing has to land on the machine for this harness.
  */
-export function userMessageLine(text: string, sessionId: string, images: readonly TurnImage[] = []): string {
+export function userMessageLine(text: string, sessionId: string, images: readonly TurnImage[] = [], uuid?: string): string {
   return JSON.stringify({
     type: "user",
     message: {
@@ -323,5 +323,8 @@ export function userMessageLine(text: string, sessionId: string, images: readonl
     },
     parent_tool_use_id: null,
     session_id: sessionId,
+    // A message that carries a uuid is reported by the CLI as it queues, starts and completes it, under that uuid
+    // (command_lifecycle, measured on 2.1.280); one without is never reported.
+    ...(uuid !== undefined ? { uuid } : {}),
   });
 }

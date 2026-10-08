@@ -20,6 +20,7 @@ import type {
 import type { DaemonFrame } from "@wsp/protocol";
 import type {
   AdapterEvent,
+  SessionOrigin,
   AttachmentRoad,
   Capabilities,
   DaemonReachView,
@@ -611,12 +612,13 @@ export interface ThreadsArea {
   readonly tellAs: (s: { notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin }) => { by?: ThreadScope; road?: WorkspaceOrigin };
   readonly notifyEnd: (s: { view: SessionView; turnId: string; turnLive?: TurnLive }, notify: readonly string[], named: { by?: ThreadScope; road?: WorkspaceOrigin }, result: TurnResult) => void;
   readonly deliverOwed: () => Promise<void>;
+  readonly sendBack: (s: { view: SessionView; turnId: string; turnLive?: TurnLive }, ids: readonly string[], stopped: boolean) => void;
   readonly settleCut: (s: { view: SessionView; turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin; turnLive?: TurnLive; snapshot?: string }, reason: string, cutLine: (endedAt: number) => string) => void;
   readonly notARepo: (r: WorkspaceRecord) => boolean;
   readonly checkpointsLanding: Map<string, Promise<void>>;
   readonly keepCheckpoint: (entry: LiveWorkspace, turn: { sessionId: string; threadId: string; turnId: string; anchor?: string; kept?: string }) => Promise<void>;
   readonly takenTurn: (workspaceId: string, taken: Taken) => Promise<SessionHandle | undefined>;
-  readonly recordSteer: (s: { view: SessionView; turnId: string }, handleId: string, o: { prompt: string; requestId?: string; via?: "slate" }) => void;
+  readonly recordSteer: (s: { view: SessionView; turnId: string; turnLive?: TurnLive }, handleId: string, o: { prompt: string; requestId?: string; via?: "slate"; startedBy?: SessionOrigin }, caller: Caller | undefined, steerId: string) => void;
   readonly snapshotOf: (entry: LiveWorkspace, cwd: string) => Promise<string | undefined>;
   readonly readTurnChanges: (entry: LiveWorkspace, turn: { sessionId: string; turnId: string; threadId: string; cwd: string; from: string; startedAt: number; wrote?: ReadonlySet<string> }) => Promise<boolean>;
   readonly usageComputerOf: (r: WorkspaceRecord) => string;

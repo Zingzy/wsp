@@ -71,7 +71,9 @@ export function scriptGuest(backend: StubBackend, steps: Step[], otherwise?: Stu
       probes++;
       if (probeFails !== undefined) throw probeFails;
       if (probeGarbles) return { exitCode: 1, stdout: "", stderr: "bash: line 1: unexpected" };
-      return { exitCode: 0, stdout: claimed ? "WSP_RUN\n" : "WSP_GONE\n", stderr: "" };
+      // The run's channel read back under the answer, as the attach asks for one it writes to.
+      const channel = cmd.includes(".in") ? at(".in") : "";
+      return { exitCode: 0, stdout: claimed ? `WSP_RUN\n${channel}` : "WSP_GONE\n", stderr: "" };
     }
     // The machine-context probe kills the group its own alias scan ran in; that is not a signal to the run.
     const signals = !cmd.includes("echo WSP_CTX") && (cmd.includes("kill -KILL") || cmd.includes("kill -TERM"));

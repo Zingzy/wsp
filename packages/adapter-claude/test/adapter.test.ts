@@ -713,7 +713,7 @@ describe("steer over the stdin channel", () => {
     exec.push(init);
     await until(() => events.some((e) => e.type === "session.start"));
     expect(await session.steer("also this")).toBe("accepted");
-    expect(exec.writes).toEqual([userMessageLine("also this", FIXTURE_SESSION_ID)]);
+    expect(exec.writes).toEqual([userMessageLine("also this", FIXTURE_SESSION_ID, [], (JSON.parse(exec.writes[0]!) as { uuid: string }).uuid)]);
     expect(exec.order).toEqual(["write"]);
     exec.push(result);
     exec.end(0);
@@ -795,6 +795,30 @@ describe("steer over the stdin channel", () => {
     expect(exec.writes).toHaveLength(1);
     exec.end(0);
     await session.finished;
+  });
+
+  it("on a CLI that reports its messages, a result read while a steer's write travels does not end the turn under it: the CLI takes the line after its result and its answer is the turn's", async () => {
+    const { events, onEvent } = collect();
+    let resultLands: () => void = () => {};
+    const exec = manualExec({
+      beforeWrite: async () => {
+        resultLands();
+        await new Promise(r => setTimeout(r, 20));
+      },
+    });
+    const adapter = createClaudeAdapter({ exec: exec.factory, configDir: "/root/.claude-cfg", resultExitMs: 60_000 });
+    const session = adapter.start({ prompt: "go", onEvent });
+    exec.push(`{"type":"system","subtype":"init","session_id":"${FIXTURE_SESSION_ID}","capabilities":["msg_lifecycle_v1"]}`);
+    await until(() => events.some((e) => e.type === "session.start"));
+    resultLands = () => exec.push(result);
+    expect(await session.steer("racing")).toBe("accepted");
+    expect(events.some((e) => e.type === "turn.done")).toBe(false);
+    const uuid = (JSON.parse(exec.writes[0]!) as { uuid: string }).uuid;
+    const lifecycle = (state: string) => JSON.stringify({ type: "command_lifecycle", command_uuid: uuid, state, session_id: FIXTURE_SESSION_ID });
+    for (const line of [lifecycle("queued"), lifecycle("started"), init, result.replace('"result":"ok"', '"result":"raced"'), lifecycle("completed")]) exec.push(line);
+    await until(() => events.some((e) => e.type === "turn.done"));
+    exec.end(0);
+    expect(await session.finished).toMatchObject({ status: "completed", text: "raced" });
   });
 });
 
@@ -1296,7 +1320,7 @@ describe("a reply given while the agent's background work runs", () => {
     await drained();
     expect(dones(events)).toEqual([]);
     expect(await session.steer("also say ok")).toBe("accepted");
-    expect(m.writes).toContain(userMessageLine("also say ok", SID));
+    expect(m.writes).toContain(userMessageLine("also say ok", SID, [], (JSON.parse(m.writes[0]!) as { uuid: string }).uuid));
     expect(dones(events)).toEqual([]);
 
     m.push(none);

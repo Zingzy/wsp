@@ -464,8 +464,9 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
           // land after the reply the caller read. The send waits for that process to exit and runs as the thread's
           // next turn; nothing here is ever refused for being in the way.
           const steer = running.turnLive?.reply === undefined && adapter.steers ? running.handle.steer : undefined;
-          if (steer !== undefined && (await steer(o.prompt)) === "accepted") {
-            ctx.recordSteer(running, running.handle.id, o);
+          const steerId = randomUUID();
+          if (steer !== undefined && (await steer(o.prompt, steerId)) === "accepted") {
+            ctx.recordSteer(running, running.handle.id, o, origin, steerId);
             return { ...running.handle, outcome: "steered" };
           }
           if (outcome === "started") bus.emit({ type: "session.queued", workspaceId, threadId, harness, prompt: o.prompt, ...(o.requestId !== undefined ? { requestId: o.requestId } : {}) });
@@ -690,9 +691,10 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
       if (refusal !== null) throw new Error(refusal);
       if (s.view.status !== "running" || s.handle === undefined) return { outcome: "not-running" };
       if (s.handle.steer === undefined) return { outcome: "unsupported" };
-      const outcome = await s.handle.steer(o.prompt);
+      const steerId = randomUUID();
+      const outcome = await s.handle.steer(o.prompt, steerId);
       if (outcome !== "accepted") return { outcome };
-      ctx.recordSteer(s, sessionId, o);
+      ctx.recordSteer(s, sessionId, o, origin, steerId);
       return { outcome: "accepted" };
     },
 

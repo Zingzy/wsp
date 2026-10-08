@@ -3,8 +3,9 @@
 // t3code ClaudeAdapter.ts (MIT, see NOTICE); event shapes are the ones
 // recorded in solari-poc/RESULTS.md.
 
+import { randomUUID } from "node:crypto";
 import { ASIDE_WALL_MS, baseModel, INTERRUPT_GRACE_MS, LOST_SESSION_NOTE, PERMISSION_ALLOW, PERMISSION_DENY, QUESTION_TOOL, RUN_EXIT_MS, asideWallLine, backgroundTasksLine, claudeMemoryDir, endAfterResult, endRun, fmtDuration, keepRun, harnessExitLine, lostSessionPrompt, refusedTurn, taskFinishedLine, titlePrompt } from "@wsp/protocol";
-import type { AdapterAttachOptions, AdapterEvent, AgentLaunch, KeptAgent, KeptRun, KeptTurn, SubagentState, TaskStop, AsideAnswer, AsideQuestion, ExecStream, ExecStreamFactory, HarnessCatalogProbe, HarnessExec, McpServerSpec, PermissionAsk, PermissionOutcome, ScreenCommand, SessionAsker, SessionHarness, SessionRenamer, SessionTitleMaker, SessionTitleReader, TurnImage, TurnRefusal, TurnResult, TurnStatus, CommitDrafter, PlanStep, TurnTokens } from "@wsp/protocol";
+import type { AdapterAttachOptions, AdapterEvent, AgentLaunch, KeptAgent, KeptRun, KeptTurn, SubagentState, TaskStop, AsideAnswer, AsideQuestion, ExecStream, ExecStreamFactory, HarnessCatalogProbe, HarnessExec, McpServerSpec, PermissionAsk, PermissionOutcome, ScreenCommand, SessionAsker, SessionHarness, SessionRenamer, SessionTitleMaker, SessionTitleReader, TurnImage, TurnRefusal, TurnResult, TurnStatus, CommitDrafter, TurnTokens } from "@wsp/protocol";
 import { SKIP_PROMPTS_MODE, controlAllowLine, controlAnswerLine, controlErrorLine, controlLine, interruptLine, modeOptionOn, setModeLine, stopTaskLine } from "./permissions.js";
 import { CLAUDE_SCREEN_COMMANDS, catalogProbeCommand, parseCatalogProbe } from "./catalog.js";
 import { rec, str, num, strArr } from "./fields.js";
@@ -12,6 +13,8 @@ import { limitOf, noteRejected, withLimit } from "./limits.js";
 import { ASIDE_HOOKS_ID, asideAnswer, asideCommand, asideCut, asideHooksLine, asidePrompt, asideTailCommand, asideTextOf, forkCleanupCommand, hookDenyLine, noConversationLine, promptDenyLine } from "./aside.js";
 import { draftForCommand, parseDraftFor, parseRename, parseSessionTitle, parseTitleFor, renameCommand, sessionTitleCommand, titleForCommand } from "./session-title.js";
 import { buildCommand, buildEnv, forwardsSubagentText, newSessionId, savedSpendCommand, serverValuesFile, userMessageLine } from "./landmines.js";
+import { steersOf } from "./steers.js";
+import { newPlanBook, readPlanCall, type PlanBook } from "./plans.js";
 import { shellCwdAfter } from "./shell-cwd.js";
 
 export interface StartOptions {
@@ -83,8 +86,9 @@ export interface ClaudeSession {
   /** Once the turn is over, the CLI still up for the next message; nothing where the turn was not kept or its process
    * went with it. */
   kept?(): KeptAgent<ClaudeSession> | undefined;
-  /** Writes a user message into the running turn; not-running before system/init and once result was seen or the process is gone. */
-  steer(prompt: string): Promise<SteerOutcome>;
+  /** Writes a user message into the running turn under `id`, which unread messages are told by; not-running before
+   * system/init and once result was seen or the process is gone. */
+  steer(prompt: string, id?: string): Promise<SteerOutcome>;
   /** Answers a permission prompt this turn raised, by the ask's own id and one of the options it carried; the tool
    * call it blocks runs or is refused as the option says. The caller names the outcome, since only it knows whether
    * this is the person's pick or its own answer for a prompt nobody came to, and denyMessage is what the agent
@@ -506,55 +510,6 @@ function drainedNotice(event: Record<string, unknown>): boolean {
   return answeredNothing(normalizeResult(event, undefined));
 }
 
-/** The turn's plan as its calls so far built it. */
-interface PlanBook {
-  /** The ids of the calls read as the plan, whose results are bookkeeping and draw nothing either. */
-  calls: Set<string>;
-  /** The list TaskCreate and TaskUpdate keep, in the order its tasks were made, each by the id the CLI gave it. */
-  tasks: { id?: string; text: string; state: PlanStep["state"] }[];
-  /** A TaskCreate's task by its call, until the call's result names the id the CLI gave it. */
-  unnamed: Map<string, number>;
-}
-
-const newPlanBook = (): PlanBook => ({ calls: new Set(), tasks: [], unnamed: new Map() });
-
-const stepState = (status: unknown): PlanStep["state"] => (status === "completed" ? "done" : status === "in_progress" ? "working" : "pending");
-
-/** A call the agent keeps its plan in, read into the book: TodoWrite's list whole each time the agent rewrites it,
- * 2.1.283's task list one TaskCreate or TaskUpdate at a time, and the Markdown ExitPlanMode proposes. Undefined for
- * any other call; null for a plan call with nothing new to show, a TaskList or a TaskGet. */
-function readPlanCall(name: string | undefined, input: unknown, id: string | undefined, book: PlanBook): { steps: PlanStep[] } | { text: string } | null | undefined {
-  const fields = rec(input);
-  const listed = (): { steps: PlanStep[] } => ({ steps: book.tasks.map(({ text, state }) => ({ text, state })) });
-  switch (name) {
-    case "TodoWrite": {
-      if (!Array.isArray(fields?.todos)) return undefined;
-      const todos = fields.todos.map(rec).filter((t): t is Record<string, unknown> => t !== undefined);
-      return { steps: todos.map(t => ({ text: str(t.content) ?? "", state: stepState(t.status) })) };
-    }
-    case "ExitPlanMode": {
-      const plan = str(fields?.plan);
-      return plan === undefined ? undefined : { text: plan };
-    }
-    case "TaskCreate":
-      if (id !== undefined) book.unnamed.set(id, book.tasks.length);
-      book.tasks.push({ text: str(fields?.subject) ?? "", state: "pending" });
-      return listed();
-    case "TaskUpdate": {
-      const at = book.tasks.findIndex(t => t.id !== undefined && t.id === str(fields?.taskId));
-      if (at === -1) return null;
-      if (fields?.status === "deleted") book.tasks.splice(at, 1);
-      else book.tasks[at] = { ...book.tasks[at]!, ...(fields?.status !== undefined ? { state: stepState(fields.status) } : {}), ...(str(fields?.subject) !== undefined ? { text: str(fields?.subject)! } : {}) };
-      return listed();
-    }
-    case "TaskList":
-    case "TaskGet":
-      return null;
-    default:
-      return undefined;
-  }
-}
-
 function normalizeEvent(event: Record<string, unknown>, fallbackSessionId: string, refusal: { road?: string; cause?: TurnRefusal } | undefined, plans: PlanBook): AdapterEvent[] {
   const sessionId = str(event.session_id) ?? fallbackSessionId;
   // A subagent's lines ride the parent's stream and carry the call that launched it; the parent's own carry null.
@@ -734,9 +689,14 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
      * own: on a turn re-opened after a host restart the run's log is replayed from its first byte, so the figure a
      * finished line carries is measured from the replay and not from the words the person read an hour ago. */
     let heldAt = 0;
+    /** The held reply's line went as it was given (`replied`), so a turn.done ending on that reply says so. Set with the
+     * reply itself: `woken` resets at the agent's next result, so it cannot say which reply went. */
+    let heldTold = false;
     /** The CLI's one phrase for each background task it has reported, by its own handle for it: only the set lines
      * carry it, and the line a finished task gets is written from it. */
     const taskNames = new Map<string, string>();
+    /** The messages steered into this turn, which the reply waits on until the CLI has answered each. */
+    const steers = steersOf(stream.taken ?? []);
     const plans = newPlanBook();
     /** What the model held after its last call, the agent's own and never a subagent's: the last reply's usage, or a
      * compaction's figure where one came after it. The result's usage sums the turn, so it cannot say this. */
@@ -848,9 +808,15 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
       // A process is kept only past a turn that went as it should: one that refused or failed is launched again, so a
       // sign-in or a fix made in between reaches the next turn, and one that answered nothing says why as it exits.
       if ((result.status !== "completed" && result.status !== "interrupted") || answeredNothing(result)) o.keeper?.release();
+      // A message the CLI still queues is answered next as a turn of its own, past a stop it could not cancel (2.1.280:
+      // the interrupt's answer names it still_queued). Nobody reads that turn, and a kept process's next turn would
+      // read it as its own, so the process goes and the message goes back unread.
+      const queuedLeft = steers.settle();
+      if (queuedLeft) o.keeper?.release();
       stream.closeInput();
       settleAsked();
-      void endAfterResult(stream, exitMs, deps.interruptGraceMs ?? INTERRUPT_GRACE_MS).catch(() => {});
+      const graceMs = deps.interruptGraceMs ?? INTERRUPT_GRACE_MS;
+      void (queuedLeft ? endRun(stream, graceMs) : endAfterResult(stream, exitMs, graceMs)).catch(() => {});
       // Held until the process exits, since the CLI writes its reason to stderr after the result.
       if (answeredNothing(result) && !compacted) {
         emptyResult = result;
@@ -858,8 +824,12 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
       }
       turnResult = result;
       anchorOnce(sessionId);
+      steers.tellUnread(sessionId, onEvent);
       onEvent({ type: "turn.done", sessionId, result, ...(held ? { held } : {}) });
     };
+
+    /** The CLI is at work under a held reply: its agent woken, or a steered message taken up. */
+    const busy = (): boolean => woken || steers.working;
 
     /** A held reply with one line under it per task that finished after it: the road where the CLI reported the
      * exits and never woke its agent, so these lines are the turn's own report of them. Where it did wake the agent,
@@ -888,7 +858,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
       if (settleTimer !== undefined) clearTimeout(settleTimer);
       settleTimer = setTimeout(() => {
         settleTimer = undefined;
-        if (heldReply !== undefined && backgroundTasks === 0) deliver(heldWithFinished(heldReply), claudeSessionId, true);
+        if (heldReply !== undefined && backgroundTasks === 0) deliver(heldWithFinished(heldReply), claudeSessionId, heldTold);
       }, exitMs);
     };
 
@@ -898,7 +868,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
         for await (const raw of stream.lines) {
           // A held reply waiting on nothing but silence: this line is the CLI saying something, so the window it has
           // to wake its agent in starts again.
-          if (heldReply !== undefined && backgroundTasks === 0 && !woken) armSettle();
+          if (heldReply !== undefined && backgroundTasks === 0 && !busy()) armSettle();
           const event = parseLine(raw);
           if (event === undefined) {
             const text = raw.trim();
@@ -907,6 +877,16 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
           }
           if (event.type === "cost-state") {
             saved = savedUseOf(event, localId);
+            continue;
+          }
+          if (steers.read(event)) {
+            if (steers.working && settleTimer !== undefined) {
+              clearTimeout(settleTimer);
+              settleTimer = undefined;
+            }
+            // The last message the reply waited on is answered: the CLI prints its completion right after the
+            // answer's own result, so this is the turn's end.
+            if (heldReply !== undefined && backgroundTasks === 0 && !steers.open) deliver(interruptRequested ? { ...withCallsAfter(heldReply), status: "interrupted" } : heldWithFinished(heldReply), claudeSessionId, heldTold);
             continue;
           }
           if (event.type === "result" && !drainedNotice(event)) {
@@ -968,7 +948,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
             runningTasks = tasks.map(task => task.id);
             // The runtime reads this to know the turn is working while the agent waits, which holds its idle clock.
             onEvent({ type: "turn.tasks", sessionId: claudeSessionId, running: backgroundTasks });
-            if (heldReply !== undefined && backgroundTasks === 0 && !woken) armSettle();
+            if (heldReply !== undefined && backgroundTasks === 0 && !busy()) armSettle();
             if (backgroundTasks > 0 && settleTimer !== undefined) {
               clearTimeout(settleTimer);
               settleTimer = undefined;
@@ -1048,20 +1028,31 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
               // their own lines.
               if (sawResult) continue;
               woken = false;
+              // A slash command steered under the held reply answers with no call (num_turns 0, a <synthetic> message,
+              // 2.1.280): its words stay a row of their own, and the reply a lead reads stays the agent's.
+              if (heldReply !== undefined && num(event.num_turns) === 0) continue;
               const result = spanned(withContext(ownUse(normalized.result, saved, o.fresh, spent), heldContext, initModel));
               if (backgroundTasks > 0 && interruptRequested) {
                 // The person stopped the turn, so its result is the turn's end and the work it left in the background is
                 // stopped with it. The CLI stops that work by itself too, but only seconds after its result (5.2 s,
                 // measured on 2.1.289), which held a stopped turn past the interrupt's grace and into the kill.
                 for (const task of runningTasks) void stream.write(stopTaskLine(`wsp-stop-task-${++askedSeq}`, task));
-              } else if (backgroundTasks > 0) {
-                // The agent replied while the CLI still reports work it started. The turn is not over: ending it
-                // here kills that work mid-write and nothing ever says what came of it, so the reply is kept, the
-                // channel stays open and the stream goes on being read until nothing of the agent's is running.
+              } else if (interruptRequested && heldReply !== undefined && (result.text ?? "").trim() === "") {
+                // Stopped while the CLI answered a steered message, before the answer said anything: the held words stand.
+                deliver({ ...result, text: heldReply.text ?? "" }, normalized.sessionId);
+                continue;
+              } else if (backgroundTasks > 0 || (steers.open && !interruptRequested)) {
+                // The agent replied while the CLI still reports work it started, or holds a steered message it has not
+                // answered. Ending here kills that work mid-write or drops the message, so the reply is kept and the
+                // stream read until nothing of the agent's runs and every message is answered. A hold on messages
+                // alone also ends at the window's silence, so a CLI that stops reporting cannot keep the turn open.
                 heldReply = result;
                 heldAt = Date.now();
                 finishedAfter.length = 0;
-                onEvent({ type: "turn.tasks", sessionId: claudeSessionId, running: backgroundTasks, replied: result });
+                // Told now over background work, which may run for an hour; a steer alone is answered within seconds.
+                heldTold = backgroundTasks > 0;
+                if (heldTold) onEvent({ type: "turn.tasks", sessionId: claudeSessionId, running: backgroundTasks, replied: result });
+                else if (!busy()) armSettle();
                 continue;
               }
               deliver(result, normalized.sessionId);
@@ -1097,7 +1088,9 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
             ? { ...cut(), status: "failed", error: exitLine() }
             : heldWithFinished(heldReply, backgroundTasks);
         anchorOnce(claudeSessionId);
-        onEvent({ type: "turn.done", sessionId: claudeSessionId, result: turnResult, ...(woken ? {} : { held: true as const }) });
+        steers.tellUnread(claudeSessionId, onEvent);
+        // A woken agent cut before its own reply ends on a word the lead has not read: the stop or the exit.
+        onEvent({ type: "turn.done", sessionId: claudeSessionId, result: turnResult, ...(heldTold && !woken ? { held: true as const } : {}) });
       }
       if (turnResult === undefined) {
         turnResult =
@@ -1107,6 +1100,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
               ? { status: "interrupted", ...drewUse() }
               : { status: "failed", error: exitLine(), ...drewUse() };
         anchorOnce(claudeSessionId);
+        steers.tellUnread(claudeSessionId, onEvent);
         onEvent({ type: "turn.done", sessionId: claudeSessionId, result: turnResult });
       }
       onEvent({ type: "session.end", sessionId: claudeSessionId, exitCode, sawResult });
@@ -1136,11 +1130,14 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
       ...(stream.run !== undefined ? { run: stream.run } : {}),
       ...(stream.pid !== undefined ? { pid: stream.pid } : {}),
       finished,
-      steer: async (prompt) => {
+      steer: async (prompt, uuid = randomUUID()) => {
         if (!running()) return "not-running";
-        const wrote = await stream.write(userMessageLine(prompt, claudeSessionId));
+        steers.add(uuid);
+        const wrote = await stream.write(userMessageLine(prompt, claudeSessionId, [], uuid));
         // The turn may have ended while the write travelled; the line then sits unread and the caller starts a turn.
-        return wrote === "written" && running() ? "accepted" : "not-running";
+        if (wrote === "written" && running()) return "accepted";
+        steers.forget(uuid);
+        return "not-running";
       },
       answer: answerAsk,
       setAccess: async (mode) => {
@@ -1201,8 +1198,15 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
         const live = running();
         interruptRequested = true;
         const graceMs = deps.interruptGraceMs ?? INTERRUPT_GRACE_MS;
+        // A reply held for messages the CLI has not taken up yet, on a CLI that cannot be asked to cancel them: nothing
+        // of the agent's is running to stop, so the held words are the turn's now, stopped, and the messages go back.
+        if (heldReply !== undefined && backgroundTasks === 0 && !busy() && !steers.cancelsQueued) {
+          deliver({ ...withCallsAfter(heldReply), status: "interrupted" }, claudeSessionId, heldTold);
+          await settlesWithin(finished, graceMs);
+          return;
+        }
         if (o.keeper?.up === true && live) {
-          const wrote = await stream.write(interruptLine(`wsp-interrupt-${++askedSeq}`));
+          const wrote = await stream.write(interruptLine(`wsp-interrupt-${++askedSeq}`, steers.cancelsQueued));
           if (wrote === "written" && (await settlesWithin(finished, graceMs))) return;
         }
         o.keeper?.release();
@@ -1313,7 +1317,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
       finished,
       kept: () => current.kept?.(),
       interrupt: () => current.interrupt(),
-      steer: prompt => current.steer(prompt),
+      steer: (prompt, id) => current.steer(prompt, id),
       answer: (askId, answer) => current.answer(askId, answer),
       setAccess: mode => current.setAccess(mode),
       stopTask: task => current.stopTask(task),

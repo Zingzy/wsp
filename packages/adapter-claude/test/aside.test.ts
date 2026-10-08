@@ -279,6 +279,8 @@ describe("the adapter's aside", () => {
     expect(call.env["CLAUDE_CODE_ENTRYPOINT"]).toBeUndefined();
     // The hook that refuses every tool goes first, so it stands before the question is read.
     expect(call.input).toEqual([asideHooksLine(), userMessageLine(asidePrompt("which folder, and what did I last ask?"), fork)]);
+    // No line carries the uuid a steer goes out under: the copy holds no reply for the CLI's word on a message.
+    for (const line of call.input!) expect(JSON.parse(line)).not.toHaveProperty("uuid");
     expect(exec.order).toContain("closeInput");
     // The copy's file goes by a last run on the same road and environment, once the CLI's own run has ended.
     expect(exec.calls[2]).toMatchObject({ command: forkCleanupCommand({ fork, configDir: CONFIG }), input: undefined });

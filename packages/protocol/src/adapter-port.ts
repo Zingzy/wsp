@@ -107,6 +107,17 @@ export type AdapterEvent =
       replied?: TurnResult;
     }
   | {
+      /** The messages steered into this turn that its agent never read, sent once just before the turn's end: a
+       * harness that queues a message until its agent is ready takes the queue with it when its process goes or the
+       * person stops the turn. Each goes by the id it was steered under, and by that id alone: on a turn re-opened
+       * after a host restart the ids come off the harness's input, which its agent can write, so the runtime takes
+       * the words from what it kept when it steered. Read by the runtime alone, which sends each again or tells the
+       * person. */
+      type: "turn.unread";
+      sessionId: string;
+      ids: string[];
+    }
+  | {
       /** The harness's own name for the point this turn ended at, sent once per turn: what cutting the thread's
        * conversation back to this turn, or to the one before the next, is asked with (Claude Code's uuid of the
        * turn's last message, Codex's turn id). Read by the runtime alone, which keeps it with the turn. */
