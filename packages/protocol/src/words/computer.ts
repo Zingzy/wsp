@@ -311,11 +311,23 @@ export function spawnReachRefusal(threadId: string, name: string): string {
   return `thread ${threadWord(threadId)} may drive the workspace it runs on and the ones it forked, and ${name} is neither`;
 }
 
-/** The one sentence a child on a computer the person joined is refused with for naming a project on the computer its
- * lead runs on: nothing carries a thread's work back across yet, and a child talks to the thread that started it by
- * message alone, so the road is a message asking that thread to start it. */
+/** The one sentence a thread on a computer the person joined is refused with for naming a project on another computer
+ * that its lead reaches: nothing carries a thread's work back across yet, and a thread talks to the lead of its tree
+ * by message alone, so the road is a message asking the lead to start it. */
 export function childToLeadsComputerLine(from: string, to: string, lead: string): string {
-  return `a thread on ${from} cannot start one on ${to} yet; ask thread ${threadWord(lead)}, which started you, with ${shellLine(["wsp", "send", threadWord(lead)])} "<message>", or name a project on ${from}`;
+  return `a thread on ${from} cannot start one on ${to} yet; ask thread ${threadWord(lead)}, your lead, with ${shellLine(["wsp", "send", threadWord(lead)])} "<message>", or name a project on ${from}`;
+}
+
+/** What a thread on a computer the person joined asked to do on a workspace of another computer, as its refusal names
+ * it: `work` where the door it came in by does not know the verb. */
+export const ACROSS_ACTS = { start: "start a thread", exec: "run commands", commit: "commit", update: "update a copy", fix: "ask for a fix", wake: "wake it", work: "work" } as const;
+export type AcrossAct = keyof typeof ACROSS_ACTS;
+
+/** The sentence a thread on a computer the person joined is refused with for acting on a workspace of another
+ * computer: a message to its lead where the lead may do that act there itself, the person otherwise. */
+export function elsewhereWorkspaceLine(name: string, on: string, from: string, act: AcrossAct, lead?: string): string {
+  const road = lead === undefined ? "ask the person" : `ask thread ${threadWord(lead)}, your lead, with ${shellLine(["wsp", "send", threadWord(lead)])} "<message>"`;
+  return `${name} is on ${on}, and a thread on ${from} cannot ${ACROSS_ACTS[act]} there yet; ${road}`;
 }
 
 /** A thread on a computer the person joined reaches a thread of its tree on another computer by its words alone: no

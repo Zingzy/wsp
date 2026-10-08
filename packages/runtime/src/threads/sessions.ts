@@ -237,11 +237,12 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
       // A send goes into a thread the caller drives, read on the thread it lands in.
       const opening = live.get(workspaceId)?.record;
       const opensThere = opening !== undefined && ctx.opensIn(opening, origin);
-      // A workspace of its repository on another computer than the asking thread's, a folder or a machine, its tree's or
-      // not, is refused in the words the run road refuses it in, whatever id named it; one of another repository reads
-      // as absent, as every record outside a tree.
+      // A workspace of its repository on another computer than the asking thread's, its tree's or not, is refused by
+      // the computer rule: a folder in the words the run road refuses its project in, a machine in the words of a
+      // thread started there, by the id that named it; one of another repository reads as absent, as every record
+      // outside a tree.
       if (opens && opening !== undefined && !opensThere && ctx.ofThreadsRepository(origin, opening.project)) {
-        const away = ctx.elsewhereRefusal(origin, ctx.projectHeld(opening.project), opening.name);
+        const away = runsInFolder(opening.kind) ? ctx.elsewhereRefusal(origin, ctx.projectHeld(opening.project), opening.name) : ctx.awayFor(opening, origin, "start", workspaceId);
         if (away !== undefined) throw away;
       }
       const reached = opens ? await ctx.entryOf(workspaceId, opensThere ? undefined : origin) : await ctx.entryOfRow({ threadId, workspaceId }, origin, "send");
@@ -249,7 +250,7 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
       const entry = reached;
       // A send a thread on a computer the person joined makes into its tree on another computer carries its words
       // alone: no file of its lands in that folder, and nothing of the turn it starts comes back to wait on.
-      const asking = scopeOf(origin) === undefined || opens || ctx.drives(entry.record, origin) ? undefined : live.get(scopeOf(origin)!.workspaceId)?.record;
+      const asking = scopeOf(origin) === undefined || opens || ctx.actsOn(entry.record, origin) ? undefined : live.get(scopeOf(origin)!.workspaceId)?.record;
       if (asking !== undefined) {
         const [from, to] = [asking, entry.record].map(r => ctx.placeName(ctx.projectHeld(r.project).computer)) as [string, string];
         if ((opened.attachments ?? []).length > 0) throw refusal(sendFilesAcrossLine(from, to, threadId), SEND_FILES_ACROSS_FIX, "usage");
@@ -309,8 +310,9 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
         o.notify === undefined
           ? undefined
           : [...new Set(o.notify.map(target => (target === NOTIFY_ME && o.turnToken !== undefined ? ctx.threadOfToken(o.turnToken) : target)))];
-      // The threads a start may name as targets: the ones the caller drives, every thread of its own tree, so a
-      // notify reaches no thread a send could not and the line it delivers is one the caller could have sent by
+      // The threads a start may name as targets: the threads of its own tree the caller acts on, which for a thread
+      // on a box are the ones on that box alone, its lead hearing its end through the `--notify me` that started it.
+      // So a notify reaches no thread a send could not and the line it delivers is one the caller could have sent by
       // hand. A thread of another tree reads as no thread at all, so a guest cannot tell a foreign thread from
       // none. The one crossing this keeps is the shim's own `--notify me`, which is the caller itself.
       for (const target of asked ?? []) {

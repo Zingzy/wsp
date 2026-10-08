@@ -11,7 +11,8 @@ import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { childToLeadsComputerLine, EXIT_CODES, HERE_PLACE_ID, HOST_TOKEN_ENV, refusalLine, sendFilesAcrossLine, SEND_FILES_ACROSS_FIX, TURN_TOKEN_ENV, threadOpenedLine, waitAcrossLine, WAIT_ACROSS_FIX, type ThreadView } from "@wsp/protocol";
+import { copyKey } from "@wsp/runtime";
+import { childToLeadsComputerLine, elsewhereWorkspaceLine, EXIT_CODES, HERE_PLACE_ID, HOST_TOKEN_ENV, refusalLine, sendFilesAcrossLine, SEND_FILES_ACROSS_FIX, TURN_TOKEN_ENV, threadOpenedLine, waitAcrossLine, WAIT_ACROSS_FIX, type ThreadView } from "@wsp/protocol";
 import { ctx, sockets, placesOf } from "../../runtime/test/places-fixture.js";
 import { FAIL, HOLD, leadAndBox } from "../../runtime/test/box-fixture.js";
 import { HERE } from "../../runtime/test/place-join.js";
@@ -20,6 +21,7 @@ import { CLI_VERBS, runVerb, type HostClient } from "../src/verbs.js";
 import { mcpServer } from "../src/mcp.js";
 import type { ThreadRow } from "../src/verbs/workspaces-help.js";
 import { captured } from "./verbs-fixture.js";
+import { SEALED_GOLDEN } from "./sealed-golden.js";
 
 let root: string | undefined;
 let mcp: Client | undefined;
@@ -61,9 +63,9 @@ async function wsp(launch: Readonly<Record<string, string>>, ...argv: string[]) 
   return { code, errors: io.errors, json: <T>() => JSON.parse(io.lines.at(-1)!) as T };
 }
 
-async function lead() {
+async function lead(forks?: true) {
   root = mkdtempSync(join(tmpdir(), "wsp-box-lead-host-"));
-  return leadAndBox(root, { reach: true });
+  return leadAndBox(root, { reach: true, ...(forks === undefined ? {} : { forks }) });
 }
 
 describe("a lead thread on this computer starting a child on a computer the person joined", () => {
@@ -135,6 +137,57 @@ describe("a lead thread on this computer starting a child on a computer the pers
     const asked = await wsp(starts[1]!.env, "run", "lab", "--detach", "go back home");
     expect(asked.code).toBe(EXIT_CODES.usage);
     expect(asked.errors.join("\n")).toBe(`wsp run: ${childToLeadsComputerLine("hetzner", here, threadId)}`);
+    starts[1]!.answer("asked the lead");
+  });
+
+  it("a child there naming a cloud project of its repository, or a cloud machine its lead forked, is told to ask its lead, from the command line", async () => {
+    const { rt, store, starts, threadId, lead: asLead, launch } = await lead(true);
+    await store.put("goldens", copyKey("default", "default"), SEALED_GOLDEN);
+    const cloud = await rt.projects.add({ source: "https://github.com/acme/lab", on: "default", name: "lab-cloud" });
+    await rt.workspaces.create({ project: cloud.id, name: "lab-cloud-one" }, asLead);
+    const ran = await wsp(launch, "run", "lab-box", "--detach", `${HOLD}build it`, "--json");
+    expect(ran.code).toBe(0);
+    const road = childToLeadsComputerLine("hetzner", "default", threadId);
+    const asked = await wsp(starts[1]!.env, "run", "lab-cloud", "--detach", "fork one");
+    expect(asked.code).toBe(EXIT_CODES.usage);
+    expect(asked.errors.join("\n")).toBe(`wsp run: ${road}`);
+    const execd = await wsp(starts[1]!.env, "exec", "lab-cloud-one", "--", "true");
+    expect(execd.code).toBe(EXIT_CODES.usage);
+    expect(execd.errors.join("\n")).toBe(`wsp exec: ${elsewhereWorkspaceLine("lab-cloud-one", "default", "hetzner", "exec", threadId)}`);
+    starts[1]!.answer("asked the lead");
+  });
+
+  it("a child there acts on a thread on its lead's cloud machine by its words alone: no stop, no rename, no send that waits or carries a file, and that turn runs on", async () => {
+    const { rt, store, starts, lead: asLead, launch } = await lead(true);
+    await store.put("goldens", copyKey("default", "default"), SEALED_GOLDEN);
+    const cloud = await rt.projects.add({ source: "https://github.com/acme/lab", on: "default", name: "lab-cloud" });
+    const forked = await rt.workspaces.create({ project: cloud.id, name: "lab-cloud-one" }, asLead);
+    const ran = await wsp(launch, "run", "lab-box", "--detach", `${HOLD}build it`, "--json");
+    expect(ran.code).toBe(0);
+    const child = starts[1]!.env;
+    const cloudId = (await rt.sessions.start(forked.id, { prompt: `${HOLD}build on the cloud`, harness: "claude" }, asLead)).view().threadId!;
+    const building = starts[2]!;
+    const running = async (): Promise<boolean> => (await rt.sessions.list()).some(r => r.threadId === cloudId && r.status === "running");
+    expect((await wsp(child, "threads", "--json")).json<{ threads: ThreadView[] }>().threads.map(t => t.threadId)).toContain(cloudId);
+    expect((await wsp(child, "stop", cloudId, "--json")).json<{ outcome: string }>().outcome).toBe("not-found");
+    expect((await wsp(child, "thread", "rename", cloudId, "mine now", "--json")).json<{ outcome: string }>().outcome).toBe("not-found");
+    expect(await running()).toBe(true);
+    const notes = join(root!, "notes.sh");
+    writeFileSync(notes, "echo hi\n");
+    const filed = await wsp(child, "send", cloudId, "--detach", "--file", notes, "see the file");
+    expect(filed.code).toBe(EXIT_CODES.usage);
+    expect(filed.errors.join("\n")).toBe(`wsp send: ${refusalLine(sendFilesAcrossLine("hetzner", "default", cloudId), SEND_FILES_ACROSS_FIX)}`);
+    const waited = await wsp(child, "send", cloudId, "which branch do I push to?");
+    expect(waited.code).toBe(EXIT_CODES.usage);
+    expect(waited.errors.join("\n")).toBe(`wsp send: ${refusalLine(waitAcrossLine("hetzner", "default", cloudId), WAIT_ACROSS_FIX)}`);
+    expect(await running()).toBe(true);
+    // Its words go through once that turn ends, as a message into the lead does.
+    building.answer("built on the cloud");
+    await expect.poll(running).toBe(false);
+    const sent = await wsp(child, "send", cloudId, "--detach", "the box is done");
+    expect(sent.errors).toEqual([]);
+    expect(sent.code).toBe(0);
+    await expect.poll(() => starts.at(-1)!.o.prompt).toBe("the box is done");
     starts[1]!.answer("asked the lead");
   });
 

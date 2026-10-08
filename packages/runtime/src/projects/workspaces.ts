@@ -176,8 +176,9 @@ export function workspacesArea(ctx: RuntimeContext): WorkspacesArea {
       // most, since the create and the rename both refuse a name another already holds, and a word that is one is
       // that workspace whatever else it starts. Only a word that is neither reaches the prefix, where enough of an
       // id is the way round quoting a name with spaces and a word that starts two is refused with both ids.
-      // A thread on a computer the person joined names by its id the workspace its lead's message goes to.
-      const tree = scope === undefined ? undefined : ctx.held().find(e => e.record.id === ref && ctx.talksToTreeOn(ref, origin));
+      // A thread on a computer the person joined names by its id the workspace its lead's message goes to, and an exec
+      // is never that message.
+      const tree = scope === undefined || verb === "exec" ? undefined : ctx.held().find(e => e.record.id === ref && ctx.talksToTreeOn(ref, origin));
       const exact = rows.find(e => e.record.id === ref) ?? tree ?? rows.find(e => e.record.name === ref);
       const started = exact === undefined && ref.length >= ID_PREFIX_MIN ? rows.filter(e => e.record.id.startsWith(ref)) : [];
       if (started.length > 1) throw new Error(idPrefixRefusal(ref, started.map(e => e.record.id)));
@@ -189,7 +190,10 @@ export function workspacesArea(ctx: RuntimeContext): WorkspacesArea {
           // thread typed and nothing of the workspace it may not see. A word that names nothing, or only starts an
           // id, reads as absent. A run names a project here when the thread's listing did not carry it, and the
           // project door refuses one the thread may not use in its own words. Exec starts nothing, so its refusal
-          // says what the word is and its road is exec on the machine the thread runs on.
+          // says what the word is and its road is exec on the machine the thread runs on. A thread on a box naming a
+          // workspace of another computer reads the computer rule: a folder, for any verb but exec, as its project
+          // reads on the run road; otherwise a message to its lead where the lead acts there itself, in the act's
+          // words, and else exec's own words for an exec and the person for a machine.
           const mine = ctx.projectOfScope(scope);
           const own = verb === "exec" && mine !== undefined ? ctx.live.get(scope.workspaceId)?.record.name : undefined;
           const execFix = own === undefined ? undefined : execOutsideFix(own);
@@ -198,7 +202,14 @@ export function workspacesArea(ctx: RuntimeContext): WorkspacesArea {
           if (theirs !== undefined && mine !== undefined && ctx.refusalFor(theirs.record, origin) !== undefined) {
             const project = ctx.projectHeld(theirs.record.project);
             if (!ctx.ofThreadsRepository(origin, project.id)) throw execFix !== undefined ? outside("workspace", execFix) : refusal(spawnRepositoryWorkspaceRefusal(scope.threadId, ctx.projectHeld(mine).name, ref), SPAWN_REPOSITORY_WORKSPACE_FIX, "usage");
-            const away = execFix === undefined ? ctx.elsewhereRefusal(origin, project, ref) : undefined;
+            const away =
+              execFix !== undefined
+                ? ctx.leadActsOn(theirs.record, origin) !== undefined
+                  ? ctx.awayFor(theirs.record, origin, "exec", ref)
+                  : undefined
+                : runsInFolder(theirs.record.kind)
+                  ? ctx.elsewhereRefusal(origin, project, ref)
+                  : ctx.awayFor(theirs.record, origin, "work", ref);
             if (away !== undefined) throw away;
             const folder = runsInFolder(ctx.kindOf(project.computer));
             if (!ctx.projectReached(origin, project.id) && folder) throw execFix !== undefined ? outside("folder", execFix) : refusal(spawnFolderRefusal(scope.threadId, ref), SPAWN_FOLDER_FIX, "usage");
@@ -239,7 +250,7 @@ export function workspacesArea(ctx: RuntimeContext): WorkspacesArea {
 
     async wake(id, origin) {
       if (ctx.talksToTreeOn(id, origin)) return WorkspaceTalked.parse(await workspaces.wake(id));
-      const entry = await ctx.entryOf(id, origin);
+      const entry = await ctx.entryOf(id, origin, { act: "wake" });
       await ctx.copyBlocked(entry);
       if (entry.waking) return entry.waking;
       if (entry.record.phase === "gone") {
@@ -607,14 +618,14 @@ export function workspacesArea(ctx: RuntimeContext): WorkspacesArea {
     },
 
     async exec(id, cmd, o, origin) {
-      const entry = await ctx.entryOf(id, origin);
+      const entry = await ctx.entryOf(id, origin, { act: "exec" });
       await ctx.copyBlocked(entry);
       await ctx.worktreeMounted(entry);
       return entry.machine.exec(cmd, o);
     },
 
     async execStream(id, argv, cwd, origin) {
-      const entry = await ctx.entryOf(id, origin);
+      const entry = await ctx.entryOf(id, origin, { act: "exec" });
       await ctx.copyBlocked(entry);
       await ctx.worktreeMounted(entry);
       const { adapter } = await ctx.launchAdapterFor(entry);
@@ -772,7 +783,7 @@ export function workspacesArea(ctx: RuntimeContext): WorkspacesArea {
 
     async commit({ workspaceId, message, paths }, origin) {
       ctx.spawnGuard("commit", origin);
-      const entry = await ctx.entryOf(workspaceId, origin);
+      const entry = await ctx.entryOf(workspaceId, origin, { act: "commit" });
       await ctx.copyBlocked(entry);
       const cwd = ctx.checkoutOf(entry.record);
       const made = GitCommitReply.parse(
@@ -792,7 +803,7 @@ export function workspacesArea(ctx: RuntimeContext): WorkspacesArea {
     async commitDraft({ workspaceId, paths }, origin) {
       ctx.spawnGuard("commit", origin);
       if (paths !== undefined && paths.length === 0) return { message: null, note: DRAFT_NOTES.nothing };
-      const entry = await ctx.entryOf(workspaceId, origin);
+      const entry = await ctx.entryOf(workspaceId, origin, { act: "commit" });
       await ctx.copyBlocked(entry);
       // The workspace's newest thread drafts, on its own agent and from the task it was opened with; a workspace
       // with no thread yet drafts on the default agent from the diff alone.
@@ -881,7 +892,7 @@ export function workspacesArea(ctx: RuntimeContext): WorkspacesArea {
     async fix({ workspaceId, check, child }, origin) {
       ctx.spawnGuard("fix", origin);
       if (check !== undefined && child !== undefined) throw Object.assign(new Error(FIX_CHECK_OR_CHILD), { kind: "invalid" });
-      const entry = await ctx.entryOf(workspaceId, origin);
+      const entry = await ctx.entryOf(workspaceId, origin, { act: "fix" });
       await ctx.copyBlocked(entry);
       const project = ctx.projectHeld(entry.record.project);
       let prompt: string;
@@ -950,7 +961,7 @@ export function workspacesArea(ctx: RuntimeContext): WorkspacesArea {
 
     async update({ workspaceId }, origin) {
       ctx.spawnGuard("update", origin);
-      const entry = await ctx.entryOf(workspaceId, origin);
+      const entry = await ctx.entryOf(workspaceId, origin, { act: "update" });
       await ctx.copyBlocked(entry);
       return ctx.updateCopy(entry);
     },

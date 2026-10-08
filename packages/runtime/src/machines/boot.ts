@@ -2,7 +2,7 @@
 import { randomBytes } from "node:crypto";
 import { hostname } from "node:os";
 import { OWNER_LABEL, goldenHead, isMissing, readGone, sightMachine, type Machine, type MachineBackend, isNoProvider, isPlaceAbsent } from "@wsp/engine";
-import { type PlaceKind, type ProjectView, type SessionView, type Caller, type WorkspacePhase, ThreadPlacement, ThreadScope, TurnStatus, WorkspaceOrigin, notTheLeadsChildRefusal, foldThreads, threadKeyOf, threadWord, scopeOf, goneWords, NO_IMAGE_YET, noWorkspaceRefusal, notFoundRefusal, goneUnconfirmedLine, type GoneSeenBy, copiesFolder, kindForComputer, RUN_GONE_LINE, HERE_PLACE_ID, workspaceLands, type ThreadFacts, refusal, LIMIT_RESUME_PROMPT, heldUntil, capRestartedLine } from "@wsp/protocol";
+import { type AcrossAct, type PlaceKind, type ProjectView, type SessionView, type Caller, type WorkspacePhase, ThreadPlacement, ThreadScope, TurnStatus, WorkspaceOrigin, notTheLeadsChildRefusal, foldThreads, threadKeyOf, threadWord, scopeOf, goneWords, NO_IMAGE_YET, noWorkspaceRefusal, notFoundRefusal, goneUnconfirmedLine, type GoneSeenBy, copiesFolder, kindForComputer, RUN_GONE_LINE, HERE_PLACE_ID, workspaceLands, type ThreadFacts, refusal, LIMIT_RESUME_PROMPT, heldUntil, capRestartedLine } from "@wsp/protocol";
 import { keyOf } from "../agent-setup.js";
 import { harnessCatalog } from "../harness-catalog.js";
 import { accountOnComputer } from "../usage.js";
@@ -466,14 +466,14 @@ export function bootArea(ctx: RuntimeContext): BootArea {
 
   /** Every verb that names a workspace comes through here, so the origin rule is read once for all of them. A verb
    * may start a run on the machine, so it waits for what the boot still has out there; `now` is for a read that
-   * walks every workspace, which no one machine may hold. */
-  const entryOf = async (id: string, origin?: Caller, o: { now?: true } = {}): Promise<LiveWorkspace> => {
+   * walks every workspace, which no one machine may hold, and `act` is what the verb asks there, as a refusal names it. */
+  const entryOf = async (id: string, origin?: Caller, o: { now?: true; act?: AcrossAct } = {}): Promise<LiveWorkspace> => {
     await ready();
     const entry = live.get(id);
     // A workspace this host does not hold and one outside the caller's tree read alike to a thread: telling the two
     // apart is how a thread walks what else stands here.
     if (!entry || entry.creating) throw notFoundRefusal(scopeOf(origin) !== undefined ? noWorkspaceRefusal() : `${noWorkspaceRefusal()}: ${id}`);
-    ctx.refuseRelayed(entry.record, origin);
+    ctx.refuseRelayed(entry.record, origin, o.act);
     if (o.now !== true) await ctx.bootWork.get(id);
     return entry;
   };
@@ -485,15 +485,16 @@ export function bootArea(ctx: RuntimeContext): BootArea {
     return kid;
   };
   /** Which rows a caller reaches, for the verbs that name a thread rather than a workspace: the thread tree, then
-   * the kind rule on the row's workspace, so a request relayed from a machine still drives only kinds that take
-   * one. A thread on a computer the person joined passes the kind rule for its own tree's threads wherever they run
-   * for `talk` alone, a message into one or the listing of them, and reaches nothing of their turns beyond that.
+   * the kind rule and the computer rule on the row's workspace, so a request relayed from a machine still drives only
+   * kinds that take one, and a thread on a box acts on that box's threads alone. A thread on a computer the person
+   * joined reaches its own tree's threads wherever they run for `talk` alone, a message into one or the listing of
+   * them, and nothing of their turns beyond that.
    * Neither the project rule nor the workspace tree is read here: a child on a fresh copy reaches its lead on the
    * workspace the person made, which the workspace rule alone would hide from it. */
   const reachesRow = (row: { threadId?: string; workspaceId: string }, caller: Caller | undefined, talk?: TreeTalk): boolean => {
     if (!ctx.drivesThread(row.threadId, caller)) return false;
     const record = live.get(row.workspaceId)?.record;
-    return record === undefined || ctx.drives(record, caller) || (talk !== undefined && ctx.talksToItsTree(caller));
+    return record === undefined || (talk !== undefined && ctx.talksToItsTree(caller)) || ctx.actsOn(record, caller);
   };
   /** Every session verb that names a thread comes through here, as the verbs naming a workspace come through
    * entryOf: the entry the row stands on, or nothing when the caller is a thread the row is out of reach for, so
