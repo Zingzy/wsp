@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { z } from "zod";
+import { WorkspaceKind } from "./workspace-kind.js";
 import type { WorktreeReport as WireWorktreeReport } from "../generated/WorktreeReport.js";
 import type { WorktreeRemoval as WireWorktreeRemoval } from "../generated/WorktreeRemoval.js";
 import { Checkout } from "../changes.js";
@@ -214,16 +215,11 @@ export type ProjectView = z.infer<typeof ProjectView>;
 export const ProjectRef = ProjectView.pick({ id: true, name: true, path: true, computer: true });
 export type ProjectRef = z.infer<typeof ProjectRef>;
 
-/** What a workspace's machine is: cloud, a fork wsp made at a provider or on a computer somebody joined, or local,
- * this computer itself. The one fact every road that varies by machine kind reads; nothing switches on it outside
- * the backend registry. */
-export const WorkspaceKind = z.enum(["cloud", "local"]);
-export type WorkspaceKind = z.infer<typeof WorkspaceKind>;
+export { WorkspaceKind };
 
-/** Which machine a daemon's own cpu, memory and process readings describe. Wider than WorkspaceKind by one: a
- * computer somebody joined is a place and no workspace of its own, and its daemon still reads that box for the
- * person sitting at it. */
-export const DaemonKind = z.enum([...WorkspaceKind.options, "place"]);
+/** Which machine a daemon's own cpu, memory and process readings describe: a computer somebody joined is a place,
+ * and its daemon reads that box for the person sitting at it and for every thread in a folder on it. */
+export const DaemonKind = WorkspaceKind;
 export type DaemonKind = z.infer<typeof DaemonKind>;
 
 /** Where a request to a workspace verb came from: here, this computer's own app, CLI or MCP; relayed from a

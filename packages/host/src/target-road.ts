@@ -54,13 +54,14 @@ export async function roadOf(on: AgentsOn, here: () => Host, what: string): Prom
   }
   const login = await targetLogin(on.machine, on.kind === "box" ? on.login : {});
   const bound = { timeoutMs: WRITE_MS };
+  const stores = on.stores === undefined ? {} : { stores: on.stores };
   if (on.kind === "box") {
     const machine = on.machine;
-    return { host: machineHost(machine, login, { stdin: true }), run: (line, stdin) => machine.exec(asLogin(login, line), { ...bound, ...(stdin !== undefined ? { stdin } : {}) }) };
+    return { host: { ...machineHost(machine, login, { stdin: true }), ...stores }, run: (line, stdin) => machine.exec(asLogin(login, line), { ...bound, ...(stdin !== undefined ? { stdin } : {}) }) };
   }
   const machine = on.machine;
   return {
-    host: machineHost(machine, login, { land: machine }),
+    host: { ...machineHost(machine, login, { land: machine }), ...stores },
     run: (line, stdin) => (stdin === undefined ? machine.exec(asLogin(login, line), bound) : stageAsLogin(machine, machine, login, what, stdin, file => machine.exec(asLogin(login, `{\n${line}\n} < ${shellQuote(file)}`), bound), bound)),
   };
 }

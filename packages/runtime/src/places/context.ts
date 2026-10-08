@@ -26,6 +26,7 @@ export interface PlaceDoorContext {
   signInsHere: (placeId: string) => Record<string, AgentSignInState> | undefined;
   backends: Map<string, MachineBackend>;
   forwards: Map<string, Forward>;
+  schedule: (fn: () => void, ms: number) => () => void;
   asking: Map<string, Promise<MachineBackend>>;
   watchers: Set<(e: PlaceEvent) => void>;
   emit: (e: PlaceEvent) => void;
@@ -36,6 +37,13 @@ export interface PlaceDoorContext {
 export function placeDoorContext(opts: PlaceDoorOptions): PlaceDoorContext {
   const { store, devices, wiring, recording } = opts;
   const clockNow = opts.now ?? Date.now;
+  const schedule =
+    opts.schedule ??
+    ((fn: () => void, ms: number): (() => void) => {
+      const timer = setTimeout(fn, ms);
+      timer.unref();
+      return () => clearTimeout(timer);
+    });
   const seenEveryMs = opts.seenEveryMs ?? SEEN_EVERY_MS;
   const dialWaitMs = opts.dialWaitMs ?? DIAL_MS;
   const frameWaitMs = opts.frameWaitMs ?? LINK_FRAME_MS;
@@ -61,7 +69,7 @@ export function placeDoorContext(opts: PlaceDoorOptions): PlaceDoorContext {
     for (const fn of watchers) fn(e);
   };
   return {
-    opts, store, devices, wiring, recording, clockNow, seenEveryMs, dialWaitMs, frameWaitMs, relinkWaitMs, live, kept,
+    opts, store, devices, wiring, recording, clockNow, schedule, seenEveryMs, dialWaitMs, frameWaitMs, relinkWaitMs, live, kept,
     signInsHere, backends, forwards, asking, watchers, emit, door: undefined as unknown as PlaceDoor,
   };
 }

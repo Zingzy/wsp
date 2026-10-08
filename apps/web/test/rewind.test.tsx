@@ -81,7 +81,7 @@ function fixtureApi(o: { catalog?: HarnessCatalog; rewind?: Api["rewindThread"];
     },
     getGolden: async () => undefined,
     startSession: async () => ROW,
-    interruptSession: async () => "accepted",
+    interruptSession: async () => ({ outcome: "accepted" }),
     rewindThread:
       o.rewind ??
       (async (threadId, turnId, files) => {

@@ -124,6 +124,10 @@ async fn every_recorded_answer_is_printed_byte_for_byte() {
             let mut out = Vec::new();
             let home = |name: &str| dir.path().join(name).to_string_lossy().into_owned();
             let mut env: wsp_mcp::Env = case.env.into_iter().filter(|(key, _)| !guest || guest_env().contains(key)).collect();
+            // The guest door opens no session without a token, and the session's launch always carries it.
+            if guest && !env.contains_key(&guest_env()[1]) {
+                env.insert(guest_env()[1].clone(), "guest-token".to_owned());
+            }
             env.insert("WSP_HOME".to_owned(), home("home"));
             env.insert("HOME".to_owned(), home("user"));
             if case.cloud {

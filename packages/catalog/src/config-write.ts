@@ -16,10 +16,11 @@ export const CONFIG_CHANGED_EXIT = 5;
 /** The exit a write takes when the file has another hard link. */
 export const CONFIG_LINKS_EXIT = 6;
 
-/** Every temp file the write stages beside a config: this, then mktemp's six letters and digits or a landing's
- * twelve hex digits. The sweep takes those two shapes and nothing else, since the folder may be the person's home. */
+/** Every temp file the write stages beside a config: this, then mktemp's six letters and digits, a landing's twelve
+ * hex digits, or one of the numbered parts a landing arrives in. The sweep takes those shapes and nothing else, since
+ * the folder may be the person's home. */
 const TEMP = ".wsp-config-tmp.";
-const MINTED = [`${TEMP}${"[A-Za-z0-9]".repeat(6)}`, `${TEMP}${"[0-9a-f]".repeat(12)}`];
+const MINTED = [`${TEMP}${"[A-Za-z0-9]".repeat(6)}`, `${TEMP}${"[0-9a-f]".repeat(12)}`, `${TEMP}${"[0-9a-f]".repeat(12)}.part[0-9]*`];
 /** A temp file older than this belongs to a write that was killed; a live one takes milliseconds. */
 const STALE_MINUTES = 10;
 

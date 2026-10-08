@@ -5,6 +5,7 @@ import {
   PLACE_KEY_REFUSAL,
   forkRoom,
   placeBlocked,
+  placeNoToolsLine,
   pluginOffLine,
   PendingComputer,
   SETUP_STEP_WORDS,
@@ -230,6 +231,7 @@ export function placeViews(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, 
 
   const viewOf = (record: PlaceRecord, defaulted: string | undefined): PlaceView => {
     const blocked = placeBlocked(record.name, record.report);
+    const toolsBlocked = placeNoToolsLine(record.name, record.report);
     const mac = record.report.model === undefined ? undefined : macKindOf(record.report.model);
     return {
       id: record.id,
@@ -274,6 +276,7 @@ export function placeViews(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, 
       ...(record.reportedAt !== undefined ? { reportedAt: record.reportedAt } : {}),
       ...(record.dialled !== undefined ? { dialled: record.dialled } : {}),
       ...(blocked !== undefined ? { blocked } : {}),
+      ...(toolsBlocked !== undefined ? { toolsBlocked } : {}),
       ...(record.setup !== undefined ? { setup: record.setup } : {}),
       ...(record.applied !== undefined ? { applied: appliedView(record.applied) } : {}),
       ...(record.picks !== undefined ? { picks: record.picks } : {}),

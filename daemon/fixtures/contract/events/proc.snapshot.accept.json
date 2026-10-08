@@ -34,5 +34,26 @@
     "daemon": 42,
     "total": 3,
     "procs": []
+  },
+  {
+    "type": "proc.snapshot",
+    "at": 1757000000000,
+    "daemon": 42,
+    "total": 1,
+    "procs": [
+      {
+        "pid": 51,
+        "ppid": 1,
+        "user": "root",
+        "state": "S",
+        "comm": "node",
+        "cmdline": "node server.js",
+        "cpu": 0,
+        "rss": 4096,
+        "startedAt": 1757000001000,
+        "cgroup": "/wsp-threads/t_abc"
+      }
+    ],
+    "seq": 3
   }
 ]

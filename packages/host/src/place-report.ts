@@ -13,7 +13,7 @@ import { spawnRun } from "@wsp/collect";
 import { PLACE_FILE_MODE, engineWord, parsePlaceFile, placeFileText, workspacesBlockedBy, type PlaceEngine, type PlaceFile, type PlaceReport } from "@wsp/protocol";
 import { CATALOG_AGENTS, configSum } from "@wsp/catalog";
 import { LOGIN_READ, SSH_STORE_VARS, landedFilesScript, writeConfigHere, localShape, outsideMarks, outsideSweepScript, ownMarks, plainPath, readValues, serversOutLines, unmergeServers, type ServerPort } from "@wsp/engine";
-import { DAEMON_VERSION, isPlainPath, placeDaemonPaths, placeKeptForLinkLine, placeOutsideLeftLine, placeOwnedPaths, placeOwnersUnknownLine, placeStoodBeforeLine, PLACE_FOUND_END, PLACE_FOUND_MAX_BYTES, TOOL_LINKS_DIR, TOOL_PREFIX, workFolderIn, WSP_WORKSPACE_APPARMOR_PATH } from "@wsp/protocol";
+import { DAEMON_VERSION, threadCgroupsEndScript, isPlainPath, placeDaemonPaths, placeKeptForLinkLine, placeOutsideLeftLine, placeOwnedPaths, placeOwnersUnknownLine, placeStoodBeforeLine, PLACE_FOUND_END, PLACE_FOUND_MAX_BYTES, TOOL_LINKS_DIR, TOOL_PREFIX, workFolderIn, WSP_WORKSPACE_APPARMOR_PATH } from "@wsp/protocol";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { apparmorOffStep, sshDaemonPlace, type DaemonPlace } from "./doctor.js";
 import { onPath, runningWsp, wspCommand, type RunningWsp } from "./mcp-install.js";
@@ -269,6 +269,9 @@ export interface ToolFolders {
  * names that unit from the host, and a second spelling of it there would be a second copy of the rule. */
 export const placeService = (home: string, uid?: number): ServiceAddress => ({ role: "place", statePath: placeFilePath(home), home, uid: uid ?? process.getuid?.() ?? 0 });
 
+/** How long a leave gives the threads' cgroups to end: each thread's processes get their grace. */
+const THREADS_END_MS = 60_000;
+
 /** Takes wsp off this computer: every file wsp itself landed in the agents' homes here, every file that holds the
  * agent up, the place file and the key, and every path the daemon, the installer and the recipe's job put under
  * wsp's own folder here, read off the one list the ssh road's removal reads so nothing is named twice and nothing
@@ -330,6 +333,9 @@ export async function sweepPlace(opts: PlaceSweepOptions = {}): Promise<PlaceSwe
       const refused = stopRefused ?? forgetRefused ?? reloadRefused;
       removed.push(`${held.words} ${held.unit.name} (${refused === undefined ? "stopped" : runFailureLine(refused)})`);
     }
+    // A thread's turns stand in cgroups of their own, outside the agent's unit, so its stop left them running.
+    const ended = await run(["sh", "-c", threadCgroupsEndScript()], THREADS_END_MS);
+    removed.push(...(ended.code === 0 ? ended.output.split("\n").filter(line => line !== "") : [`the threads' processes there were not all ended: ${ended.output}`]));
   }
   for (const out of unmerged) removed.push(...serversOutLines(out));
   // Every file wsp itself landed in an agent's home here whose bytes are still the ones wsp left. A file the

@@ -146,6 +146,21 @@ pub struct PlaceReport {
     #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "under_paths_opt::<_, 200, 64>")]
     #[ts(optional)]
     pub logins: Option<Vec<String>>,
+    /// Whether a thread on this computer itself reaches the wsp tools: the daemon bound the socket for those threads
+    /// under the login's home and wrote the wsp beside it that dials it. Absent from a daemon older than that door,
+    /// whose threads are launched with no wsp tools.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub wsp_door: Option<bool>,
+    /// When it does not, why, in the daemon's own words.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub wsp_door_blocked: Option<String>,
+    /// The systemd unit this daemon runs under, the one the join wrote, read off its own cgroup: what the person
+    /// restarts to open the door again. Absent where the daemon runs under no unit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub daemon_unit: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

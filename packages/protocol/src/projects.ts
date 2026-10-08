@@ -8,7 +8,7 @@ import { THIS_COMPUTER, thisComputer } from "./format.js";
 import { HERE_PLACE_ID, namesPlace } from "./place-word.js";
 import type { ProjectSource, ProjectView, WorkspaceKind, WorkspaceProject } from "./index.js";
 import { folderName, underProject } from "./project-path.js";
-import { shellLine, shellQuote } from "./shell-quote.js";
+import { shellQuote } from "./shell-quote.js";
 import { kindWords, workspaceKind } from "./workspace-state.js";
 
 /** What a caller is told once a project is recorded: what it is called, where its code comes from, the computer it
@@ -182,6 +182,19 @@ export const BRANCH_OR_CWD_LINE = "name a branch or a folder, not both";
 /** A start on this computer for a project another computer holds. */
 export const notOnThisComputerLine = (project: string): string => `${project} is not on this computer, so no thread runs in its folder here`;
 
+/** A thread on a computer the person joined naming a project on another computer: a thread elsewhere runs beside it
+ * on its own computer, and nothing yet carries a thread's work from one computer to another. */
+export const childOnAnotherComputerLine = (from: string, to: string): string => `a thread on ${from} cannot start one on ${to} yet; start it on ${to} yourself, or name a project on ${from}`;
+
+/** A thread on a computer the person joined with a login that is not root: that computer's daemon runs a folder's git
+ * and writes its roots file as root, which in a folder another login owns either stops at git's ownership check or
+ * runs that login's hooks as root. */
+export const placeLoginNotRootLine = (computer: string, user: string): string =>
+  `threads on ${computer} would run as ${user}, and wsp runs threads on a computer you added only as root for now; remove ${computer} and add it again with a root login`;
+
+/** A branch named for a thread on a computer the person joined, where wsp makes no worktree yet. */
+export const placeBranchLine = (computer: string): string => `wsp makes no worktrees on ${computer} yet; start the thread without a branch, or make one inside the project folder with git worktree add and name it as the folder`;
+
 /** A folder a thread may not run in: only the project folder and the worktrees of its repo are a project's. */
 export const cwdOutsideLine = (path: string, project: string): string => `${path} is not in ${project} or a worktree of it; wsp add it first`;
 /** A start's folder that is not there: refused before the agent is launched into it, which would only die. */
@@ -216,7 +229,7 @@ export const WORKTREE_BUSY_LINE = "a thread is working in that worktree; let its
 export const WORKTREE_FORCE_LINE = "only the person removes a worktree over files no commit holds; commit them, or ask them to remove it";
 
 /** A folder of a project on this computer named to delete or forget: the verbs take threads there, never the folder. */
-export const localFolderRefusal = (name: string): string => `${name} is a project's folder on this computer, which delete and forget leave alone`;
+export const localFolderRefusal = (name: string): string => `${name} is a project's folder, which delete and forget leave alone`;
 
 /** A worktree's record on this computer named to delete or forget: a worktree goes by its own verb or with its thread. */
 export const localWorktreeRefusal = (name: string): string => `${name} is a worktree of a project on this computer, which delete and forget leave alone`;
@@ -282,23 +295,14 @@ export const projectRemovedHereLine = (name: string): string => `${name} is no l
  * same rule. */
 export const MEMORY_KEPT_CLAUSE = "the memory its agent keeps on that computer stays";
 
-/** What a remove says on a computer the person owns: the folder wsp itself made there at the add goes with the
- * record, and nothing else on that computer is touched. The memory clause is said only where such a folder stands
- * on the computer, read by the remove itself: a project no agent ever ran on there has no memory, and naming one
- * would name a thing that is not there. */
-export const projectRemovedOnComputerLine = (name: string, computer: string, folder: string, memoryStands: boolean): string =>
-  `${name} is no longer a project on ${computer}; the folder wsp kept for it there, ${folder}, is gone with its checkout${memoryStands ? `, and ${MEMORY_KEPT_CLAUSE}` : ""}`;
+/** What a remove says on a computer the person joined: the project is a folder in their home there, which they and
+ * their threads work in, so it stays as it is and only the record goes. */
+export const projectLeftOnComputerLine = (name: string, computer: string, folder: string): string => `${name} is no longer a project on ${computer}; its folder ${folder} stays there as it is`;
 
 /** What a remove says for a project a provider keeps in an image: nothing runs on any machine, and the image
  * stays where it is, since no verb deletes one yet. */
 export const projectRemovedAtProviderLine = (name: string, computer: string, snapshotId?: string): string =>
   `${name} is no longer a project on ${computer}; ${snapshotId === undefined ? "nothing of it was held there" : `its project image ${snapshotId} stays at the provider`}`;
-
-/** Why no workspace can be made of a project recorded before its computer cloned it once at the add: there is no
- * checkout on that computer for a copy to be taken of, and nothing clones one at a create any more. Recording it
- * again is the road, by the word it was added with. */
-export const projectNeedsReaddLine = (name: string, computer: string, source: ProjectSource): string =>
-  `${name} was recorded before a project was cloned once on its computer, so ${computer} holds no checkout for a workspace to copy; ${shellLine(["wsp", "projects", "remove", name])}, then ${shellLine(["wsp", "add", sourceWord(source), "--on", computer])}`;
 
 /** What the seeding says where the computer already keeps this project's memory at the path its agent reads:
  * that memory is the agent's own work on that computer and stays, so the folder the seed carried is not landed
@@ -373,17 +377,32 @@ export function copiesFolder(kind: WorkspaceKind): boolean {
   return kindWords(kind).copiesFolder;
 }
 
-/** Whether a record is a folder's on this computer that no thread names: the host makes one before a folder's first
- * thread and keeps it past its last, so nothing shows it and nothing counts it as standing on its project. */
-export function bareFolder(record: { readonly kind?: WorkspaceKind | undefined }, holdsThread: boolean): boolean {
-  return !holdsThread && copiesFolder(workspaceKind(record));
+/** Whether a thread on a workspace of this kind runs in its project's folder, so a start makes nothing: the reading
+ * of the kind table the create, the folder rule and the tree rule take. */
+export function runsInFolder(kind: WorkspaceKind): boolean {
+  return kindWords(kind).inFolder;
 }
 
-/** The kind of workspace a computer makes: the computer the app runs on copies a folder of the person's own, and
- * every other computer takes a copy of its own image. The one place a computer's id is read for its kind, so no
- * road anywhere compares that id itself. */
-export function kindForComputer(computer: string): WorkspaceKind {
-  return computer === HERE_PLACE_ID ? "local" : "cloud";
+/** Whether a workspace of this kind is a folder on a computer the person joined, reached over that computer's link:
+ * its ports open here on demand, its threads' processes are told apart by cgroup, and nothing of a machine wsp
+ * made, a pause, a bring back or an export, applies to it. */
+export function folderOnJoined(kind: WorkspaceKind): boolean {
+  return kindWords(kind).inFolder && !kindWords(kind).copiesFolder;
+}
+
+/** Whether a record is a folder's that no thread names: the host makes one before a folder's first thread and keeps
+ * it past its last, so nothing shows it and nothing counts it as standing on its project. */
+export function bareFolder(record: { readonly kind?: WorkspaceKind | undefined }, holdsThread: boolean): boolean {
+  return !holdsThread && runsInFolder(workspaceKind(record));
+}
+
+/** The kind of workspace a computer makes: the computer the app runs on and every computer the person joined run a
+ * thread in the project's folder there, and a cloud account forks a copy of its image. `joined` says whether the
+ * computer is one the person joined, which only a reader of the places can know; a caller asking only whether the
+ * kind is this computer's leaves it out. The one place a computer's id is read for its kind, so no road anywhere
+ * compares that id itself. */
+export function kindForComputer(computer: string, joined = false): WorkspaceKind {
+  return computer === HERE_PLACE_ID ? "local" : joined ? "place" : "cloud";
 }
 
 /** Where a workspace of a project on this computer lands: a copy of a folder beside the app for a project here, a
@@ -405,8 +424,8 @@ export function landsOn(computer: string, place: { id: string; name: string }): 
 /** Why a project on this computer takes none of the words a fork takes: its threads run in its own folder, so there
  * is no image to start from, no machine to size and no engine to hand it. The words are named in the order the
  * command line lists them, so the sentence says exactly which to drop. */
-export const copyTakesNone = (project: string, words: readonly string[]): string =>
-  `${project} is on ${THIS_COMPUTER}, where threads run in its folder and nothing forks, so it takes no ${words.join(", ")}`;
+export const copyTakesNone = (project: string, words: readonly string[], computer: string = THIS_COMPUTER): string =>
+  `${project} is on ${computer}, where threads run in its folder and nothing forks, so it takes no ${words.join(", ")}`;
 
 /** What a computer is called in a row or a line: the name this wsp holds for it, and this computer's own word
  * where the record names this one. `named` is the places table by id, which every caller already reads for its

@@ -64,6 +64,52 @@ pub fn run(line: &[String], env: &dyn Fn(&str) -> Option<String>, daemon: Socket
     runtime.block_on(session(line, env, daemon, token_path, socket_path, &mut streams))
 }
 
+/// Runs one line typed on a computer somebody joined, over the door its daemon binds for that computer's threads.
+pub fn run_at_door(line: &[String], env: &dyn Fn(&str) -> Option<String>, door: &Path, unit: Option<&str>) -> i32 {
+    let runtime = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
+        Ok(runtime) => runtime,
+        Err(e) => {
+            eprintln!("{e}");
+            return REFUSED;
+        }
+    };
+    let mut input = BufReader::new(tokio::io::stdin());
+    let mut out = tokio::io::stdout();
+    let mut err = tokio::io::stderr();
+    let mut streams = Streams { input: &mut input, out: &mut out, err: &mut err };
+    runtime.block_on(session_at_door(line, env, door, unit, &mut streams))
+}
+
+/// One session over that door, start to end. The door is the whole road: that computer's loopback port is anybody's
+/// to bind and the token file in wsp's folder there is its daemon's own, which opens a socket that runs anything as
+/// root, so a door that is missing or refuses is said in one sentence and nothing else is dialled or read. The unit
+/// is the daemon's own, as its shim names it, for the restart that sentence ends with.
+pub async fn session_at_door(
+    line: &[String],
+    env: &dyn Fn(&str) -> Option<String>,
+    door: &Path,
+    unit: Option<&str>,
+    streams: &mut Streams<'_>,
+) -> i32 {
+    let lost = words::guest_no_door_line(&computer_name(), door, unit);
+    let Ok(socket) = UnixStream::connect(door).await else {
+        return refused(streams, &lost).await;
+    };
+    let Ok((ws, _)) = tokio_tungstenite::client_async(INSIDE_URL, socket).await else {
+        return refused(streams, &lost).await;
+    };
+    speak(ws, line, env, &lost, streams).await
+}
+
+/// What the computer a line was typed on calls itself, as hostname prints it, for the sentence that names it.
+fn computer_name() -> String {
+    std::fs::read_to_string("/proc/sys/kernel/hostname")
+        .ok()
+        .map(|name| name.trim().to_owned())
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| "this computer".to_owned())
+}
+
 /// One session start to end. `env` is read rather than taken from this process so a case hands in the launch it
 /// means, and the cwd is this process's, which is the folder the line was typed in.
 pub async fn session(
@@ -84,26 +130,27 @@ pub async fn session(
         let Ok((ws, _)) = tokio_tungstenite::client_async(INSIDE_URL, inside).await else {
             return refused(streams, &words::guest_no_daemon_line(daemon.port())).await;
         };
-        return speak(ws, line, env, daemon, streams).await;
+        return speak(ws, line, env, &words::guest_no_daemon_line(daemon.port()), streams).await;
     }
     let Some(ws) = dial(daemon, token_path).await else {
         return refused(streams, &words::guest_no_daemon_line(daemon.port())).await;
     };
-    speak(ws, line, env, daemon, streams).await
+    speak(ws, line, env, &words::guest_no_daemon_line(daemon.port()), streams).await
 }
 
 /// The session itself, once the socket stands: the open frame, its reply, then the pump for the kind of line this
-/// is. The same words either road, since a session is a session whichever socket carried it.
+/// is. The same words every road, since a session is a session whichever socket carried it; `lost` is what the road
+/// says of a socket that failed before the far end said anything.
 async fn speak<S: AsyncRead + AsyncWrite + Unpin>(
     mut ws: Socket<S>,
     line: &[String],
     env: &dyn Fn(&str) -> Option<String>,
-    daemon: SocketAddr,
+    lost: &str,
     streams: &mut Streams<'_>,
 ) -> i32 {
     let kind = if line == [MCP_WORD] { GuestKind::Mcp } else { GuestKind::Cli };
     if let Err(error) = open(&mut ws, kind, line, env).await {
-        let said = error.unwrap_or_else(|| words::guest_no_daemon_line(daemon.port()));
+        let said = error.unwrap_or_else(|| lost.to_owned());
         return refused(streams, &said).await;
     }
     match kind {
@@ -237,6 +284,44 @@ fn cut(text: &str, max: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A computer's door gone while the wsp beside it stands: the line is refused in one sentence naming that
+    /// computer, and the loopback port a fork's wsp dials gets nothing, though a listener holds it and the daemon's
+    /// token file sits where a fork's wsp reads its own.
+    #[tokio::test]
+    async fn a_line_at_a_computer_door_that_is_gone_is_refused_and_dials_no_port() {
+        let home = tempfile::tempdir().unwrap();
+        let at = wsp_frames::place_daemon_paths(home.path());
+        std::fs::create_dir_all(&at.guest_bin).unwrap();
+        std::fs::write(&at.token_path, "the-box-daemons-own-token").unwrap();
+        let squatter = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let home_word = home.path().to_string_lossy().into_owned();
+        let env = |name: &str| match name {
+            "HOME" => Some(home_word.clone()),
+            "WSP_HOST_TOKEN" => Some("thread-token".to_owned()),
+            _ => None,
+        };
+        let mut input = BufReader::new(tokio::io::empty());
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        let mut streams = Streams { input: &mut input, out: &mut out, err: &mut err };
+        let unit = Some("wsp-place-ecffdb75.service");
+        let code = session_at_door(&["mcp".to_owned()], &env, &at.guest_socket, unit, &mut streams).await;
+        assert_eq!(code, REFUSED);
+        let said = String::from_utf8(err).unwrap();
+        assert_eq!(said, format!("{}\n", words::guest_no_door_line(&computer_name(), &at.guest_socket, unit)));
+        assert!(said.ends_with("; restart wsp's daemon there with systemctl restart wsp-place-ecffdb75.service\n"), "{said}");
+        let dialled = tokio::time::timeout(std::time::Duration::from_millis(300), squatter.accept()).await;
+        assert!(dialled.is_err(), "a listener on loopback was dialled");
+    }
+
+    #[test]
+    fn a_door_under_no_unit_the_join_wrote_sends_the_computer_to_be_added_again_and_names_no_restart() {
+        let said = words::guest_no_door_line("box", std::path::Path::new("/root/.wsp/daemon.sock"), None);
+        assert_eq!(
+            said,
+            "wsp on box reaches no daemon: nothing answers at /root/.wsp/daemon.sock; remove this computer from wsp and add it again"
+        );
+    }
 
     #[test]
     fn an_over_long_folder_keeps_its_end() {

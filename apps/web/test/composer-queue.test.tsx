@@ -60,7 +60,7 @@ function fixtureApi(history: Record<string, SessionEvent[]> = {}, rows: SessionV
   const emit = (e: EventUnion) => act(() => { for (const fn of [...listeners]) fn(e); });
   const hooks: { onInterrupt: () => void; onSteer: (prompt: string, requestId: string) => "accepted" | "not-running" | "unsupported" | "not-found" } = { onInterrupt: () => {}, onSteer: () => "accepted" };
   const api: Api = {
-    interruptSession: async id => { interrupted.push(id); hooks.onInterrupt(); return "accepted"; },
+    interruptSession: async id => { interrupted.push(id); hooks.onInterrupt(); return { outcome: "accepted" }; },
     // The table row answers when the case names no catalog, since a composer with no agent to send to is held and
     // queues nothing; steering stays with the case, which is what says whether this harness takes a mid-turn message.
     listHarnesses: async () => harnesses ?? [TABLE_CATALOG],

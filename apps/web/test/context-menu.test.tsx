@@ -86,7 +86,7 @@ function fakeApi(workspaces: WorkspaceView[], statuses: WorkspaceStatus[], sessi
       for (let i = sessions.length - 1; i >= 0; i--) if (sessions[i]!.threadId === threadId) sessions.splice(i, 1);
     }),
     rebuild: async id => ({ ...view(id, "?", "running"), machineId: "m_rebuilt" }),
-    interruptSession: vi.fn(async () => "accepted" as const),
+    interruptSession: vi.fn(async () => ({ outcome: "accepted" as const })),
     // The runtime keeps the name on the row, so the next listing carries it, as the real one does.
     renameSession: vi.fn(async (sessionId: string, title: string) => {
       const row = sessions.find(s => s.id === sessionId);

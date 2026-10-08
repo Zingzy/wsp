@@ -291,6 +291,9 @@
             "blocked": {
               "type": "string"
             },
+            "toolsBlocked": {
+              "type": "string"
+            },
             "build": {
               "type": "string"
             },
@@ -1276,6 +1279,9 @@
               "additionalProperties": false
             },
             "blocked": {
+              "type": "string"
+            },
+            "toolsBlocked": {
               "type": "string"
             },
             "build": {

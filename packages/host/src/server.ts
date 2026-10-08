@@ -6,7 +6,7 @@ import { isIP, type Socket } from "node:net";
 import { homedir, networkInterfaces, platform } from "node:os";
 import { extname, join, resolve as resolvePath, sep } from "node:path";
 import { CREATED_AT_LABEL, HOST_LABEL, SMOKE_LABEL, WSP_LABEL, type ProvisionPlan } from "@wsp/engine";
-import { BOOT_SCRIPT, DEFAULT_PORT, PAIR_CODE_TTL_MS, PLACES_WORDS, PLACE_PORT_OFFSET, WILDCARD, WS_PATH, authority, doorPortHeldLine, isLoopback, joinAddressOf, servedHostname, noSuchPlaceRefusal, recordRestoredLine, peerAddress, relayUrlOf, scopeOf, type BootPayload, type ProductUsageOff, type DoctorLineEvent, type Caller, type PlaceDoorView, type ProjectImportResult, type ProjectPlan, type PlaceView, type ProjectView, type WorkspaceView, kindForComputer, nameTheProjectLine, copiesFolder } from "@wsp/protocol";
+import { BOOT_SCRIPT, DEFAULT_PORT, PAIR_CODE_TTL_MS, PLACES_WORDS, PLACE_PORT_OFFSET, WILDCARD, WS_PATH, authority, doorPortHeldLine, isLoopback, joinAddressOf, servedHostname, noSuchPlaceRefusal, recordRestoredLine, peerAddress, relayUrlOf, scopeOf, type BootPayload, type ProductUsageOff, type DoctorLineEvent, type Caller, type PlaceDoorView, type ProjectImportResult, type ProjectPlan, type PlaceView, type ProjectView, type WorkspaceView, kindForComputer, nameTheProjectLine, copiesFolder, runsInFolder } from "@wsp/protocol";
 import { sshHostsIn } from "./ssh-hosts.js";
 import { LOOPBACK, describeAge, goldenHead, serveRuntime, tokenDigest, type AdmittedDevices, type CreatedWorkspace, type GoldenBuilderView, type GoldenVersion, type HostSsh, type InitDoor, type PlaceBackHolder, type PlaceDoctor, type PlaceDoorControl, type ProjectBundler, type ProjectImportOptions, type ProjectLander, type ReapedMachine, type RestartDoor, type Runtime, type RuntimeServer, type SparedMachine } from "@wsp/runtime";
 import { computerDoctor } from "./doctor.js";
@@ -367,16 +367,19 @@ export function workspaceRoads(rt: Runtime, opts: Pick<HostOptions, "workspaceEn
       const project = named === undefined ? held[0] : held.find(p => p.id === named || p.name === named);
       if (project === undefined || (named === undefined && held.length !== 1)) throw new Error(held.length === 0 ? NO_PROJECT_YET : nameTheProjectLine(held.map(p => p.name)));
       const head = goldenHead(await rt.golden.get());
-      // A copy of a folder here forks nothing, so it needs no image; every other computer's copy does.
-      if (!head && !copiesFolder(kindForComputer(project.computer))) throw new Error("no image yet; run wsp init first");
+      // A thread in a project's folder forks nothing, here or on a computer the person joined, so it needs no image
+      // and takes none; every other computer's copy does.
+      const kind = (await rt.workspaces.landing({ project: project.id }, caller)).kind;
+      const forks = kind === undefined || !runsInFolder(kind);
+      if (!head && forks) throw new Error("no image yet; run wsp init first");
       return rt.workspaces.create(
         {
           project: project.id,
           // A thread forks the image its own workspace's project runs and is refused where it names one, so the
           // head this host holds rides only the person's own create.
-          ...(head !== undefined && scopeOf(caller) === undefined ? { golden: head.snapshotId } : {}),
+          ...(head !== undefined && forks && scopeOf(caller) === undefined ? { golden: head.snapshotId } : {}),
           name,
-          ...(opts.workspaceEnvs !== undefined && head !== undefined ? { envs: opts.workspaceEnvs(head) } : {}),
+          ...(opts.workspaceEnvs !== undefined && head !== undefined && forks ? { envs: opts.workspaceEnvs(head) } : {}),
           labels: { [WSP_LABEL]: "1", [HOST_LABEL]: "1", [CREATED_AT_LABEL]: new Date().toISOString() },
         },
         caller,

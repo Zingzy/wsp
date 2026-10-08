@@ -227,17 +227,18 @@ impl Drop for DoorSlot {
     }
 }
 
-/// The door inside one workspace: every socket accepted on that workspace's own unix socket, each served with no
-/// auth frame and no token. The file is the gate, and what the socket may ask for is the roads table's, which
-/// answers a process inside its own two guest ops and refuses it everything else. The count is the other half of
-/// the gate: this door takes no token, so a socket accepted past the cap is dropped here, closed with no hello and
-/// no task of its own, and the daemon every co-tenant workspace shares stands.
-pub(crate) async fn serve_workspace(listener: tokio::net::UnixListener, ctx: Arc<Ctx>, workspace: String, door: Arc<AtomicUsize>) {
+/// The door inside one workspace, or on the computer itself for the threads that run there: every socket accepted
+/// on that unix socket, each served with no auth frame and no token. The file is the gate, and what the socket may
+/// ask for is the roads table's, which answers a process inside its own two guest ops and refuses it everything
+/// else. The count is the other half of the gate: this door takes no token, so a socket accepted past the cap is
+/// dropped here, closed with no hello and no task of its own, and the daemon every co-tenant workspace shares
+/// stands.
+pub(crate) async fn serve_guests(listener: tokio::net::UnixListener, ctx: Arc<Ctx>, road: Road, door: Arc<AtomicUsize>) {
     loop {
         let Ok((stream, _)) = listener.accept().await else { return };
         let Some(slot) = DoorSlot::take(&door) else { continue };
-        let (ctx, workspace) = (Arc::clone(&ctx), workspace.clone());
-        tokio::spawn(serve_inside(stream, ctx, workspace, slot));
+        let (ctx, road) = (Arc::clone(&ctx), road.clone());
+        tokio::spawn(serve_inside(stream, ctx, road, slot));
     }
 }
 
@@ -248,7 +249,7 @@ pub(crate) async fn serve_workspace(listener: tokio::net::UnixListener, ctx: Arc
 /// than the ceiling every other socket gets, so a frame larger than a guest message may be is refused by the
 /// framing before the daemon holds it or reads it as a message. The place on the door is held for the life of
 /// this task.
-async fn serve_inside(stream: tokio::net::UnixStream, ctx: Arc<Ctx>, workspace: String, _slot: DoorSlot) {
+async fn serve_inside(stream: tokio::net::UnixStream, ctx: Arc<Ctx>, road: Road, _slot: DoorSlot) {
     let config = WebSocketConfig::default()
         .max_message_size(Some(numbers::GUEST_FRAME_CAP_BYTES))
         .max_frame_size(Some(numbers::GUEST_FRAME_CAP_BYTES));
@@ -257,7 +258,7 @@ async fn serve_inside(stream: tokio::net::UnixStream, ctx: Arc<Ctx>, workspace: 
         return;
     };
     let (tx, rx) = mpsc::unbounded_channel();
-    let conn = Arc::new(Conn::new(ctx.next_key(), None, Outbound(tx), Road::Workspace(workspace), None));
+    let conn = Arc::new(Conn::new(ctx.next_key(), None, Outbound(tx), road, None));
     serve_authed(ws, &ctx, conn, rx, None, None).await;
 }
 
@@ -288,7 +289,7 @@ where
     S: AsyncRead + AsyncWrite + Unpin,
 {
     let key = conn.key;
-    if conn.scope.is_none() && !matches!(conn.road, Road::Workspace(_)) {
+    if conn.scope.is_none() && !conn.road.guests() {
         ctx.add_authed(key, conn.out.clone());
     }
     if let Some(token) = conn.token.clone() {

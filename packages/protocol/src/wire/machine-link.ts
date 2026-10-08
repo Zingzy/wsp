@@ -378,6 +378,16 @@ export const placeCannotBootLine = (place: string, reason?: string): string =>
 export const placeBlocked = (place: string, report: Pick<PlaceReport, "runsWorkspaces" | "workspacesBlocked">): string | undefined =>
   report.runsWorkspaces ? undefined : placeCannotBootLine(place, report.workspacesBlocked);
 
+/** What a computer's row says while the threads on that computer itself get no wsp tools: its daemon could not open
+ * the door they reach the tools through, in its own words, and the restart that opens it again, of the unit the
+ * daemon says it runs under. An update does not do it: one of a daemon already current sends no binary and restarts
+ * nothing. A daemon in no unit the join writes names none, and is added again to get one. Nothing from a daemon older
+ * than that door, which the row's behind word already answers, or from one whose door stands. */
+export const placeNoToolsLine = (place: string, report: Pick<PlaceReport, "wspDoor" | "wspDoorBlocked" | "daemonUnit">): string | undefined =>
+  report.wspDoor !== false
+    ? undefined
+    : `threads on ${place} get no wsp tools: ${report.wspDoorBlocked ?? "its daemon opened no door for them"}; ${report.daemonUnit === undefined ? `remove ${place} and add it again` : `restart wsp's daemon there with systemctl restart ${report.daemonUnit}`}`;
+
 /** The word a computer's row carries while its doctor says it cannot run workspaces. */
 export const PLACE_BLOCKED_WORD = "can't run threads";
 

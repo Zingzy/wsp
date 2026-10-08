@@ -6,26 +6,25 @@
 // whose command is twenty characters of the same flags is still told apart by
 // what started it.
 import { CATALOG_AGENTS } from "@wsp/catalog";
-import { byProcColumn, type ProcEntry, type ProcSort } from "@wsp/protocol";
+import { byProcColumn, inCgroup, type ProcEntry, type ProcSort } from "@wsp/protocol";
 
 export type { ProcSort };
 
-/** One thread of this workspace and the process the host started for it, which that thread's tree is rooted at. */
-export interface ProcThread {
-  threadId: string;
-  title: string;
-  pid: number;
-}
+/** One thread of this workspace: the process the host started for it, which that thread's tree is rooted at, or on a
+ * computer the person joined, the cgroup every process it started stands in. */
+export type ProcThread = { threadId: string; title: string } & ({ pid: number; cgroup?: never } | { cgroup: string; pid?: never });
 
 export interface ProcRow {
   proc: ProcEntry;
   depth: number;
 }
 
-/** One thread's own tree: the process the host started for it and everything under it. */
+/** One thread's own tree: the process the host started for it and everything under it. A thread known by its cgroup
+ * carries what that cgroup's processes spend together, whatever the filter shows of them. */
 export interface ProcThreadTree {
   thread: ProcThread;
   rows: ProcRow[];
+  spent?: { cpu: number; rss: number };
 }
 
 /** What the pane draws: this workspace's threads first, then everything else the machine is running. A process
@@ -92,6 +91,24 @@ export function procTable(procs: readonly ProcEntry[], sort: ProcSort, filter: s
   };
   const trees: ProcThreadTree[] = [];
   for (const thread of threads) {
+    if (thread.cgroup !== undefined) {
+      // Every process in the cgroup, each drawn under the first of its parents that stands there too: a server the
+      // thread detached heads a tree of its own beside the turn's.
+      const members = procs.filter(p => !claimed.has(p.pid) && inCgroup(p.cgroup, thread.cgroup));
+      if (members.length === 0) continue;
+      const inside = new Set(members.map(p => p.pid));
+      const heads = members.filter(p => p.ppid === p.pid || !inside.has(p.ppid));
+      const rows = rowsOf(heads, claimed);
+      for (const head of heads) claim(head);
+      let cpu = 0;
+      let rss = 0;
+      for (const p of members) {
+        cpu += p.cpu;
+        rss += p.rss;
+      }
+      if (rows.length > 0) trees.push({ thread, rows, spent: { cpu, rss } });
+      continue;
+    }
     const head = byPid.get(thread.pid);
     // A thread whose process already sits inside an earlier thread's tree is drawn there and not a second time.
     if (head === undefined || claimed.has(head.pid)) continue;

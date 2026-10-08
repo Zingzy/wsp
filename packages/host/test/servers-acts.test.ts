@@ -12,6 +12,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import { agentHome, type AgentHome } from "../../collect/test/agent-home.js";
 import { serverVault, type ServerVault } from "../src/env-keys.js";
 import { serverTransport, serversActs } from "../src/servers-acts.js";
+import { readAgents } from "../src/agents-reader.js";
+import { resolveServer } from "../src/server-tools.js";
 import { writeStub } from "../../protocol/test/stub-script.js";
 import { CLOUD_ON } from "../src/cloud.js";
 
@@ -107,6 +109,25 @@ describe("adding an MCP server", () => {
     expect(CODEX_TOML.read(after, at.home).find(s => s.name === "acme")?.transport).toEqual({ kind: "http", url: "https://mcp.acme.example/mcp", headers: { Authorization: "Bearer tok-acme" } });
   });
 
+  it("on a box, writes Claude Code's server into the config under the store a thread's Claude there reads, where the list and the tools find it", async () => {
+    const at = fixture();
+    const store = join(at.home, ".claude-cfg");
+    const on: AgentsOn = { kind: "box", machine: road(at).machine, login: { HOME: at.home, PATH: `${at.bin}:/usr/bin:/bin` }, stores: { claude: store, codex: "/var/lib/wsp/logins/codex" } };
+    const vaulted: Record<string, string>[] = [];
+    const added = await serversActs({ vault: memVault(vaulted) }).add(on, { agent: "claude", name: "acme", command: "acme-mcp", env: { ACME_TOKEN: "sk_acme_TESTONLY" } });
+    expect(added).toEqual({ file: "~/.claude-cfg/.claude.json" });
+    expect(json(join(store, ".claude.json")).mcpServers).toEqual({ acme: { command: "acme-mcp", args: [], env: { ACME_TOKEN: "${ACME_TOKEN}" } } });
+    expect(json(join(at.home, ".claude.json")).mcpServers).not.toHaveProperty("acme");
+    expect(vaulted).toEqual([{ ACME_TOKEN: "sk_acme_TESTONLY" }]);
+    // No agent's command is on this host's PATH, so the list reads the files alone.
+    const host: Host = { ...here(at), exec: { which: async () => false, run: async () => undefined }, stores: { claude: store } };
+    expect((await readAgents(host, { user: "ada", vault: {} })).servers.filter(s => s.name === "acme").map(s => s.file)).toEqual(["~/.claude-cfg/.claude.json"]);
+    expect((await resolveServer(host, "claude", "acme", { values: { ACME_TOKEN: "sk_acme_TESTONLY" } })).transport).toMatchObject({ kind: "stdio", command: "acme-mcp" });
+    // A store outside the login's home is not one an act writes in, so Codex's server stays where it was.
+    await serversActs({ vault: memVault(vaulted) }).add(on, { agent: "codex", name: "acme", command: "acme-mcp" });
+    expect(CODEX_TOML.read(readFileSync(join(at.home, ".codex/config.toml"), "utf8"), at.home).map(s => s.name)).toContain("acme");
+  });
+
   it("writes names into another computer's files and hands each value to the vault, never to the file", async () => {
     const at = fixture();
     const vaulted: Record<string, string>[] = [];
@@ -124,6 +145,24 @@ describe("adding an MCP server", () => {
     expect(codex).toContain('[mcp_servers.tracker]\nbearer_token_env_var = "WSP_MCP_TRACKER_AUTHORIZATION"');
     expect(codex).toContain('[mcp_servers.notion]\nenv_vars = ["NOTION_TOKEN"]');
     expect(vaulted).toEqual([{ WSP_MCP_TRACKER_AUTHORIZATION: "lin_api_TESTONLY", WSP_MCP_TRACKER_X_TEAM: "eng" }, { WSP_MCP_TRACKER_AUTHORIZATION: "lin_api_TESTONLY" }, { NOTION_TOKEN: "ntn_TESTONLY" }]);
+  });
+
+  it("on a computer you own writes no value into any file, the project's included, and leaves every other server as the person wrote it", async () => {
+    const at = fixture();
+    const { machine } = road(at, { root: true });
+    const claudeFile = join(at.home, ".claude.json");
+    const mine = { command: "mine-mcp", args: [], env: { GH_TOKEN: "${GH_TOKEN}" }, timeout: 60000 };
+    writeFileSync(claudeFile, JSON.stringify({ ...json(claudeFile), mcpServers: { ...json(claudeFile).mcpServers, mine } }));
+    const vaulted: Record<string, string>[] = [];
+    const acts = serversActs({ vault: memVault(vaulted) });
+    const on: AgentsOn = { ...box(at, machine), projects: [{ id: "pr_app", name: "app", path: at.project }] };
+    await acts.add(on, { agent: "claude", name: "gh", command: "gh-mcp", env: { GH_TOKEN: "ghp_TESTONLY" } });
+    await acts.add(on, { agent: "claude", name: "tracker", project: true, url: "https://mcp.linear.app/mcp", headers: { Authorization: "Bearer lin_api_TESTONLY" } });
+    for (const file of [claudeFile, join(at.project, ".mcp.json")]) for (const secret of ["ghp_TESTONLY", "lin_api_TESTONLY"]) expect(readFileSync(file, "utf8")).not.toContain(secret);
+    expect(json(claudeFile).mcpServers!.mine).toEqual(mine);
+    expect(json(claudeFile).mcpServers!.gh).toEqual({ command: "gh-mcp", args: [], env: { GH_TOKEN: "${GH_TOKEN}" } });
+    expect(json(join(at.project, ".mcp.json")).mcpServers!.tracker).toEqual({ type: "http", url: "https://mcp.linear.app/mcp", headers: { Authorization: "Bearer ${WSP_MCP_TRACKER_AUTHORIZATION}" } });
+    expect(vaulted).toEqual([{ GH_TOKEN: "ghp_TESTONLY" }, { WSP_MCP_TRACKER_AUTHORIZATION: "lin_api_TESTONLY" }]);
   });
 
   it("keeps a variable an argument or the address names as ${NAME} by name in each agent's own syntax, the value given with env in the vault alone", async () => {

@@ -83,7 +83,7 @@ describe.skipIf(renderSkipped !== undefined)("a turn stopped with a message queu
             w.__replay.stopped = true;
             play(stopAt, sendAt, stopAt);
             await at(rec.replies.interrupt.after);
-            return rec.replies.interrupt.outcome as never;
+            return { outcome: rec.replies.interrupt.outcome } as never;
           },
           startSession: async (opts: { requestId?: string }) => {
             w.__replay.sent = true;

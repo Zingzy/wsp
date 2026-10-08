@@ -60,7 +60,18 @@ const portCloseDetail = {
   /** The port still listens, held by a process no longer the watching workspace's: it left the view, not stopped. */
   left: z.boolean().optional(),
   at: z.string().optional(),
+  watch: z.string().optional(),
 };
+
+/** A name a socket gives one of its port watches, which every port event of that watch carries: one socket holds a
+ * watch per name, each with roots and a folder of its own. */
+const watchName = z.string().regex(/^[A-Za-z0-9_-]{1,64}$/);
+
+/** A cgroup path as /proc/[pid]/cgroup names it: absolute, of plain names, nothing climbing out with "..". */
+const cgroupPath = z
+  .string()
+  .max(512)
+  .refine(path => path.startsWith("/") && path.slice(1).split("/").every(name => name !== "" && name !== "." && name !== ".."));
 
 const channel = z.number().int().min(0).max(255);
 
@@ -94,5 +105,5 @@ const base64 = (bytes: number) =>
     .regex(/^[A-Za-z0-9+/]+={0,2}$/)
     .refine(text => text.length % 4 === 0 && base64Bytes(text) === bytes, `must be ${bytes} bytes, base64`);
 
-export { permissionPrompt, listed, portCloseDetail, channel, sequenced, reqId, base64 };
+export { permissionPrompt, listed, portCloseDetail, watchName, cgroupPath, channel, sequenced, reqId, base64 };
 export type { Same, Held };

@@ -90,6 +90,36 @@ where
     Ok(s)
 }
 
+/// A name a socket gives one of its port watches: one to sixty-four letters, digits, `_` and `-`, so it is a word
+/// and never shell or a path wherever it is echoed.
+pub(crate) fn watch_name<'de, D>(d: D) -> Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let s = bounded::<_, 1, 64>(d)?;
+    if !s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-') {
+        return Err(de::Error::custom("a watch name is letters, digits, _ and -"));
+    }
+    Ok(Some(s))
+}
+
+/// Cgroup paths as /proc/[pid]/cgroup names them: absolute, of plain names, at most sixteen of 512 characters, so no
+/// path climbs out with `..` or names nothing.
+pub(crate) fn cgroup_paths<'de, D>(d: D) -> Result<Option<Vec<String>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let list = capped_list::<_, 16>(d)?;
+    for path in &list {
+        let names = path.strip_prefix('/').map(|rest| rest.split('/').collect::<Vec<_>>());
+        let plain = names.is_some_and(|names| names.iter().all(|n| !n.is_empty() && *n != "." && *n != ".."));
+        if !plain || js_len(path) > 512 {
+            return Err(de::Error::custom(format!("not a cgroup path: {path}")));
+        }
+    }
+    Ok(Some(list))
+}
+
 /// A sha256 as the protocol spells it: sixty-four lowercase hex characters.
 pub(crate) fn sha256_hex<'de, D>(d: D) -> Result<String, D::Error>
 where

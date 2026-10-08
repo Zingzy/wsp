@@ -2,7 +2,7 @@
 //! The numbers and paths the protocol and the node daemon own, as the contract fixture pins them.
 
 /// The daemon's protocol version, carried in its hello: the length of the protocol's DAEMON_CONTENTS record.
-pub const DAEMON_VERSION: u32 = 135;
+pub const DAEMON_VERSION: u32 = 136;
 
 pub const DEFAULT_HOST: &str = "0.0.0.0";
 pub const DEFAULT_PORT: u16 = 7070;
@@ -175,15 +175,18 @@ pub const GUEST_MESSAGE_CAP_BYTES: usize = 4 * 1024 * 1024;
 pub const GUEST_QUEUE_CAP_FRAMES: usize = 256;
 /// Guest bytes one workspace may have waiting at once, queued in its sessions and written onto the watcher's
 /// channel but not carried out of the socket yet. One count per workspace on a computer that runs them, and one
-/// for the daemon itself inside a machine, where a session names no workspace and every session shares it. Four
-/// of one message's cap, so the largest honest thing on this road is never what fills it; a send past the cap is
+/// for the daemon itself inside a machine, where a session names no workspace and every session shares it. A
+/// computer somebody joined counts the same way for the threads running on that computer itself: every one of them
+/// shares one count, as a machine's threads do. Four of one message's cap, so the largest honest thing on this road is never what fills it; a send past the cap is
 /// refused and its session stands.
 pub const GUEST_IN_FLIGHT_CAP_BYTES: usize = 4 * GUEST_MESSAGE_CAP_BYTES;
 /// Guest sockets one workspace's door serves at once, and guest sessions one workspace holds at once, a session
 /// whose socket went and whose close is waiting for a watcher counted among them. The door of a workspace on a
 /// computer somebody owns needs no token, so what a process inside opens is what this bounds: past the cap a
 /// socket is closed with no hello and an open is refused, while the workspaces beside it and the host link stand.
-/// One count per workspace, and one for the daemon inside a machine, where a session names no workspace.
+/// One count per workspace, and one for the daemon inside a machine, where a session names no workspace. The
+/// threads running on a computer somebody joined, outside any workspace, share one count and one door, as a
+/// machine's do.
 pub const GUEST_SESSIONS_PER_WORKSPACE_CAP: usize = 64;
 /// The largest frame a workspace's door reads, in place of the ceiling every other socket is opened with: one
 /// guest message's cap and room for the envelope around it. A frame past this is refused by the framing before a

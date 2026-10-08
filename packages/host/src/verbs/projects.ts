@@ -90,7 +90,7 @@ export const PROJECT_VERBS: readonly Verb[] = [
   {
     name: "projects remove",
     usage: "wsp projects remove <project>",
-    about: "takes a project out of this wsp, with the folder wsp itself made for it on the computer holding it; a folder of yours on this computer is left where it is, and a project with a machine standing on it is refused naming them",
+    about: "takes a project out of this wsp; its folder is left where it is, on this computer or on a computer you joined, and a project with a machine standing on it is refused naming them",
     page: "agent",
     options: {},
     run: async ctx => {
@@ -105,7 +105,7 @@ export const PROJECT_VERBS: readonly Verb[] = [
       return 0;
     },
     tool: tool({
-      description: `Takes a project's record out of this wsp, and with it the folder wsp itself made for the project on the computer holding it: its checkout there goes, and ${MEMORY_KEPT_CLAUSE}. A folder of yours on this computer stays exactly where it is, and no repo is ever asked for anything. Refused in one line while a machine of it stands, naming them; delete those first.`,
+      description: `Takes a project's record out of this wsp. Its folder stays exactly where it is, on this computer or on a computer you joined, ${MEMORY_KEPT_CLAUSE}, and no repo is ever asked for anything. Refused in one line while a machine of it stands, naming them; delete those first.`,
       input: { project: z.string().describe("the project's name, or its id when two share a name") },
       output: { project: ProjectView, said: z.string() },
       call: async ({ project: ref }, deps) => {

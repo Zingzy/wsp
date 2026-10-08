@@ -3,7 +3,7 @@
 // provider's word and the daemon reach only change it where they contradict
 // it. Every client renders these words, and the runtime refuses a send with
 // the same sentence the composer shows, so one screen never says two things.
-import { computerWord, fmtThreads, LIST_PRICE_WORD, MACHINE_WSP_FORKS, offlineFor, THIS_COMPUTER, type CpuWord } from "./format.js";
+import { computerWord, fmtThreads, JOINED_COMPUTER, LIST_PRICE_WORD, MACHINE_WSP_FORKS, offlineFor, THIS_COMPUTER, type CpuWord } from "./format.js";
 import type { HarnessCatalog, MachineFacts, MachineState, PauseMode, PlaceBack, ProjectSource, ReachState, ScreenCommand, ScreenControl, WorkspaceKind, WorkspacePhase, WorkspaceStatus, WorkspaceView } from "./index.js";
 import { LOOPBACK, authority } from "./app-ports.js";
 import type { Checkout } from "./changes.js";
@@ -69,6 +69,10 @@ export interface WorkspaceKindWords {
    * image: this computer alone. Its own word and not a reading of the sources above, since a computer that clones
    * also takes a folder on this computer as a source, seeded onto the clone, and would otherwise read as one. */
   copiesFolder: boolean;
+  /** Whether a thread of this kind runs in its project's folder on the computer holding it, so a start makes nothing:
+   * no machine, no copy, no name of its own, and every thread of the folder shares one record. This computer, and a
+   * computer the person joined, whose folder is reached over its link. */
+  inFolder: boolean;
   /** Whether the agents on a machine of this kind could drive this host at all, which is what says the spawn switch
    * means anything there. A fork's agents reach the host over the road a scoped token opens, and this computer's
    * over its loopback with a token of the same scope; a machine somebody already owns is handed no wsp to drive
@@ -109,8 +113,9 @@ export type ReadingRoad = "daemon" | "host" | false;
 /** The words per kind, the one table every client reads instead of comparing a kind itself. Adding a kind is a row
  * here. */
 export const WORKSPACE_KIND_WORDS: Record<WorkspaceKind, WorkspaceKindWords> = {
-  cloud: { machine: MACHINE_WSP_FORKS, rowReadsMachine: true, cpu: "vCPU", where: A_PROVIDER, driven: true, daemon: true, metrics: "daemon", processes: "daemon", projectSources: ["git", "github", "gitlab", "folder"], copiesFolder: false, agents: true, onDelete: { asked: "computer is deleted in the cloud", done: machineId => `computer ${machineId} is gone in the cloud` } },
-  local: { machine: THIS_COMPUTER, rowReadsMachine: true, cpu: "cores", where: THIS_COMPUTER, driven: false, daemon: true, metrics: "host", processes: "daemon", projectSources: ["git", "github", "gitlab", "folder"], copiesFolder: true, agents: true, onDelete: { asked: COMPUTER_LEFT, done: () => `its ${COMPUTER_LEFT}` } },
+  cloud: { machine: MACHINE_WSP_FORKS, rowReadsMachine: true, cpu: "vCPU", where: A_PROVIDER, driven: true, daemon: true, metrics: "daemon", processes: "daemon", projectSources: ["git", "github", "gitlab", "folder"], copiesFolder: false, inFolder: false, agents: true, onDelete: { asked: "computer is deleted in the cloud", done: machineId => `computer ${machineId} is gone in the cloud` } },
+  local: { machine: THIS_COMPUTER, rowReadsMachine: true, cpu: "cores", where: THIS_COMPUTER, driven: false, daemon: true, metrics: "host", processes: "daemon", projectSources: ["git", "github", "gitlab", "folder"], copiesFolder: true, inFolder: true, agents: true, onDelete: { asked: COMPUTER_LEFT, done: () => `its ${COMPUTER_LEFT}` } },
+  place: { machine: JOINED_COMPUTER, rowReadsMachine: false, cpu: "cores", where: null, driven: false, daemon: true, metrics: "daemon", processes: "daemon", projectSources: ["git", "github", "gitlab", "folder"], copiesFolder: false, inFolder: true, agents: true, onDelete: { asked: COMPUTER_LEFT, done: () => `its ${COMPUTER_LEFT}` } },
 };
 
 export function kindWords(kind: WorkspaceKind): WorkspaceKindWords {

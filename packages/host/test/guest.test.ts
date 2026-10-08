@@ -100,6 +100,7 @@ describe("a guest session on the host", () => {
     sent = [];
     link = {
       workspaceId,
+      name: "alpha",
       request: async (op, params) => {
         sent.push({ op, params });
         return {};
@@ -126,8 +127,8 @@ describe("a guest session on the host", () => {
       // host that minted none, and the switch has nothing to do with it.
       door.event(link, opened({ token: "" }));
       await settled(() => closes().length > 0);
-      expect(closes()[0]!.params).toEqual({ session: "g0", error: guestTurnNoTokenRefusal(workspaceId) });
-      expect(guestTurnNoTokenRefusal(workspaceId)).not.toContain("--spawn");
+      expect(closes()[0]!.params).toEqual({ session: "g0", error: guestTurnNoTokenRefusal("alpha") });
+      expect(guestTurnNoTokenRefusal("alpha")).not.toContain("--spawn");
       expect(replies()).toEqual([]);
     });
 
@@ -135,8 +136,8 @@ describe("a guest session on the host", () => {
       // A `wsp exec` or a shell pane on the machine: turning the switch on changes nothing for it.
       door.event(link, opened({ token: "", turnToken: null }));
       await settled(() => closes().length > 0);
-      expect(closes()[0]!.params).toEqual({ session: "g0", error: guestNoTokenRefusal(workspaceId) });
-      expect(guestNoTokenRefusal(workspaceId)).not.toContain("--spawn on");
+      expect(closes()[0]!.params).toEqual({ session: "g0", error: guestNoTokenRefusal("alpha") });
+      expect(guestNoTokenRefusal("alpha")).not.toContain("--spawn on");
       expect(replies()).toEqual([]);
     });
 

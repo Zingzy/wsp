@@ -5,9 +5,9 @@
 // of the project then binds. The add asks a module through PROJECT_LANDINGS;
 // nothing outside this file decides by what a computer is. Adding a road is a
 // module and its row.
-import { CLAUDE_CONFIG_DIR } from "@wsp/catalog";
+import { CLAUDE_CONFIG_DIR, GUEST_HOME } from "@wsp/catalog";
 import { envInput, INSTALL_MS, installScript, projectInstalls, withEnvFromInput, type Machine } from "@wsp/engine";
-import { claudeMemoryDir, NO_IMAGE_FOR_SEED, projectNeedsReaddLine, projectPathOn, projectRemovedAtProviderLine, projectRemovedHereLine, projectRemovedOnComputerLine, seedBytes, seedCommitsLandedLine, seedCommitsLostLine, SEED_DIR, SEED_MEMORY_DIR, SEED_PATCH, seedingLine, seedMemoryKeptLine, shellLine, shellQuote, type ExecResult, type MachineBind, type ProjectAddStage, type ProjectSource, type ProjectView, type SeedChoice, type SeedPlan } from "@wsp/protocol";
+import { claudeMemoryDir, claudeProjectKey, NO_IMAGE_FOR_SEED, placeDaemonPaths, projectLeftOnComputerLine, projectPathOn, projectRemovedAtProviderLine, projectRemovedHereLine, seedBytes, seedCommitsLandedLine, seedCommitsLostLine, SEED_DIR, SEED_MEMORY_DIR, SEED_PATCH, seedingLine, seedMemoryKeptLine, shellLine, shellQuote, type MachineBind, type ProjectAddStage, type ProjectSource, type ProjectView, type SeedChoice, type SeedPlan } from "@wsp/protocol";
 import type { ProjectSourceModule } from "./project-sources.js";
 
 /** How far the add has got, as the door turns each one into an event. */
@@ -34,6 +34,12 @@ export interface LandRequest {
 export interface Landed {
   /** Where the checkout it cloned sits on the computer, for a road that keeps one outside its workspaces. */
   checkout?: string;
+  /** The folder the project took on the computer where it was not the one the record named before the add, which a
+   * name already taken there moves, with the memory key and folder of that path and the repo it is. */
+  path?: string;
+  memoryKey?: string;
+  memoryDir?: string;
+  git?: ProjectView["git"];
   seeded?: ProjectView["seeded"];
   installed?: ProjectView["installed"];
   image?: ProjectView["image"];
@@ -56,9 +62,9 @@ export interface LandingDeps {
   checkpoint(machine: Machine, name: string): Promise<string>;
   /** Where wsp writes its own working files on that machine. */
   scratch(machine: Machine): string;
-  /** Where the computer keeps project checkouts and each project's memory, as its own daemon says; absent from a
-   * computer that keeps none, which is every provider. */
-  projectsDir?: string;
+  /** A computer the person joined, as its login runs every command there, and that login's home: where the add
+   * clones, seeds and installs. Absent on a provider and on this computer. */
+  computer?: { machine: Machine; home: string };
   /** Where Claude Code keeps its projects on this Mac, for the road whose project is a folder here. */
   macStateHome: string;
   /** What this computer is called, since a record names it by its id and no sentence a person reads may. */
@@ -69,21 +75,17 @@ export interface LandingDeps {
   /** What a clone on a computer the person owns reads on its own input: the vault's GitHub token where it holds one,
    * which is how a private repo clones there without a login of that computer's own. */
   cloneEnv?(): Readonly<Record<string, string>>;
-  /** One command on the computer holding the project, outside every workspace of it: how the folder wsp keeps
-   * there is taken away again. Absent on a computer that runs nothing of wsp's outside a workspace, which is this
-   * Mac and every provider. */
-  onComputer?(cmd: string, opts?: { timeoutMs?: number }): Promise<ExecResult>;
   now(): number;
 }
 
 export interface ProjectLanding {
-  /** What the computer is: a computer the person owns whose daemon holds the disk, a provider that keeps the
-   * project in an image, or the computer the app runs on. */
+  /** What the computer is: a computer the person joined, whose project is a folder in its login's home, a provider
+   * that keeps the project in an image, or the computer the app runs on. */
   kind: "box" | "provider" | "mac";
-  /** Where the checkout sits inside a workspace of this project: the folder rule is one for every computer and
-   * the folder a cloned checkout sits under is this road's own, since it is the road that knows which folders a
-   * workspace there can hold a copy at. */
-  path(o: { name: string; source: ProjectSource }): string;
+  /** Where the checkout sits for a thread of this project: the folder rule is one for every computer and the folder
+   * a cloned checkout sits under is this road's own. On a computer the person joined this is where the add means
+   * to clone, and the add answers the folder it took. */
+  path(o: { name: string; source: ProjectSource; deps: LandingDeps }): string;
   places(o: { project: Pick<ProjectView, "id" | "name" | "path" | "source">; memoryKey: string; deps: LandingDeps }): ProjectPlaces;
   /** Whether the add itself does the work on this computer, or the record stands alone and the first workspace of
    * it clones inside its own copy. A seed is always the add's: it carries the person's own files, which only the
@@ -101,11 +103,6 @@ export interface ProjectLanding {
   workspaceBinds(project: ProjectView): MachineBind[];
 }
 
-/** The folder a workspace on a computer the person owns holds a cloned checkout under. /srv is one of the five
- * trees such a workspace reads through an overlay of its own, so the mount point the copy is bound at lands in
- * that workspace's upper and goes when it goes; /root is the computer's own home, bound into every workspace of
- * it, where a bind would leave its mount point on the computer itself. */
-const BOX_CHECKOUT_HOME = "/srv";
 /** The folder a fork of an image holds its checkout under: its own login's home, shared with nothing. */
 const FORK_CHECKOUT_HOME = "/root";
 /** How every git line of the patch step is run on a computer that has no git identity of its own: wsp's own, since
@@ -191,18 +188,6 @@ export function patchCleanupScript(o: PatchStep & { checkout: string }): string 
 /** What the memory step prints where the computer already keeps memory at the agent's path: read off the step's
  * own output, since the script is the only thing that sees what stands there. */
 export const MEMORY_KEPT_MARK = "wsp-memory-kept";
-
-/** What the remove prints where a memory folder for the project stands on the computer: the same road, since the
- * one command the remove runs there is the only thing that can see it. */
-export const MEMORY_STANDS_MARK = "wsp-memory-stands";
-
-/** The one command a remove runs on the computer: it says whether the agent there kept memory for this project,
- * which the sentence names only where it is true, and takes away wsp's own folder for the project. The read comes
- * first because the folder goes with the command; the memory is under the computer's own home and is never
- * touched by it. No `set -e`: a memory folder that is not there is the common case, not a failure. */
-export function removeScript(o: { dir: string; memoryDir: string }): string {
-  return [`[ -d ${shellQuote(o.memoryDir)} ] && echo ${shellQuote(MEMORY_STANDS_MARK)}`, `rm -rf ${shellQuote(o.dir)}`].join("\n");
-}
 
 /** The last of the seed: the memory folder moved out of the checkout onto the computer, where every workspace of
  * the project reads it, and wsp's own folder and the archive gone from the checkout every copy is taken of.
@@ -363,65 +348,59 @@ async function cloneBranch(o: { seed: { plan: SeedPlan }; checkout: string; base
   return on ?? o.base ?? o.seed.plan.defaultBranch ?? o.seed.plan.branch;
 }
 
-/** A computer the person owns: its daemon holds the disk, so the checkout sits on that disk under wsp's own folder
- * for the project. The memory sits where the agent on that computer already reads it, in the agent's own state
- * home under the computer's home, and no workspace binds it: that home is the computer's own inside every
- * workspace of it, so the memory is already at the path each of them reads, and a mount point made under that
- * home would be left on the computer once the workspace was gone. The clone, the seed and the install run inside
- * one short-lived workspace of that computer, with wsp's folder for the project bound in, so the toolchain and
- * the logins are the ones its workspaces run with and nothing of wsp's is installed on the computer itself. */
+/** A path under the guest's home moved under the home a computer was joined with: where an agent keeps its store on
+ * that computer is the same folder under its own login's home. */
+export const underLoginHome = (home: string, path: string): string => (path === GUEST_HOME || path.startsWith(`${GUEST_HOME}/`) ? `${home.replace(/\/+$/, "")}${path.slice(GUEST_HOME.length)}` : path);
+
+/** How many names the add tries in a home before it gives up on one: the name, then the name with -2 to this. */
+const NAMES_TRIED = 99;
+
+/** The first folder free in the home for a project's name, read and claimed as the login on that computer: the name
+ * itself, else the name with -2, -3 and on after it. `mkdir` is the claim, so two adds of one name at once take two
+ * folders, and a folder that stands, empty or not, is somebody's and never cloned into. */
+export function freeFolderScript(home: string, name: string): string {
+  const at = shellQuote(`${home.replace(/\/+$/, "")}/${name}`);
+  const tails = ["''", ...Array.from({ length: NAMES_TRIED - 1 }, (_, i) => `-${i + 2}`)].join(" ");
+  return `for n in ${tails}; do mkdir ${at}"$n" 2>/dev/null && { printf '%s\\n' ${at}"$n"; exit 0; }; done; echo ${shellQuote(`every name from ${name} to ${name}-${NAMES_TRIED} is taken in ${home}`)} >&2; exit 1`;
+}
+
+/** A computer the person joined: the project is a folder in the home of the login the computer was joined with,
+ * where the person finds it over ssh, and its threads run there as that login. A repo is cloned by the add into
+ * the first free folder of its name there, seeded and installed as that login; a folder already on that computer
+ * stays where it is and nothing is cloned. The memory sits where the agent there keeps it for that folder, keyed
+ * to the folder's own path, the key Claude Code gives it in the person's own terminal there. */
 const boxLanding: ProjectLanding = {
   kind: "box",
-  path: ({ source, name }) => projectPathOn(source, name, BOX_CHECKOUT_HOME),
+  path: ({ source, name, deps }) => projectPathOn(source, name, computerOf(deps).home),
   places({ project, memoryKey, deps }) {
-    return { checkout: `${projectDir(deps, project.id)}/checkout`, memoryDir: guestMemoryDir(memoryKey) };
+    return { memoryDir: claudeMemoryDir(underLoginHome(computerOf(deps).home, CLAUDE_CONFIG_DIR), memoryKey) };
   },
-  // Every project here is cloned once by the add, however it was named: a repo the computer could clone at each
-  // create would be cloned into the same folder twice and would leave that folder behind when the project goes.
   landsAtAdd: () => true,
-  refusal: (project, deps) => (project.checkout === undefined ? projectNeedsReaddLine(project.name, deps.computerName, project.source) : undefined),
+  refusal: () => undefined,
+  // The folder is the person's own from the add on: they and their threads work in it, so it stays as it is.
   async remove(project, deps) {
-    const dir = removableProjectDir(deps, project.id);
-    const ran = await onComputer(deps)(removeScript({ dir, memoryDir: project.memoryDir }), { timeoutMs: STEP_MS });
-    return projectRemovedOnComputerLine(project.name, deps.computerName, dir, ran.stdout.includes(MEMORY_STANDS_MARK));
+    return projectLeftOnComputerLine(project.name, deps.computerName, project.path);
   },
   async land(o, deps) {
-    const dir = projectDir(deps, o.project.id);
-    const checkout = `${dir}/checkout`;
-    // Two folders of the computer's own, bound into the machine that does the work: wsp's own folder for the
-    // project at its own path, so the install's log lands on the computer and stays there once the machine is
-    // gone; and the checkout at the path the project has inside every workspace of it, so the clone and the
-    // install run where the workspaces will read them. An install that writes an absolute path (a virtualenv's
-    // own shebangs, its pyvenv.cfg) then names the path the workspaces have rather than the folder the computer
-    // keeps the checkout in. The memory needs no bind: the machine's home is the computer's own, so the seed's
-    // memory lands where the agent on it reads this project.
-    const binds = [
-      { source: dir, target: dir },
-      { source: checkout, target: o.project.path },
-    ];
-    // A computer that keeps no image is worked in a copy of its own directories: nothing of this host's is forked
-    // here, which is why no image is read on this road at all.
-    const machine = await deps.worker({ binds, image: false, from: "" });
-    let failed: unknown;
+    const { machine, home } = computerOf(deps);
+    // A folder already on that computer is the project as it stands, and nothing is cloned into it.
+    if (o.project.source.kind === "folder" && o.seed === undefined) return { git: { top: o.project.path } };
+    const picked = await machine.exec(freeFolderScript(home, o.project.name), { timeoutMs: STEP_MS });
+    const path = lastLine(picked.stdout);
+    if (picked.exitCode !== 0 || path === undefined) throw new Error(lastLine(picked.stderr) ?? `no folder for ${o.project.name} in ${home}: exit ${picked.exitCode}`);
+    const memoryKey = claudeProjectKey(path);
+    const memoryDir = claudeMemoryDir(underLoginHome(home, CLAUDE_CONFIG_DIR), memoryKey);
+    const wsp = placeDaemonPaths(home);
     try {
-      // The checkout stays on the computer once the machine is gone: every workspace of this project takes its own
-      // copy of it, so the seed and the install are paid for once.
-      return { checkout, ...(await cloneSeedInstall(o, deps, machine, { checkout: o.project.path, holds: checkout, memoryDir: o.project.memoryDir, log: `${dir}/install.log` }, { env: deps.cloneEnv?.() ?? {} })) };
+      const landed = await cloneSeedInstall({ ...o, project: { ...o.project, path, memoryKey, memoryDir } }, { ...deps, scratch: () => wsp.putDir }, machine, { checkout: path, holds: path, memoryDir, log: `${wsp.wsp}/install-${o.project.id}.log` }, { env: deps.cloneEnv?.() ?? {} });
+      return { ...landed, path, memoryKey, memoryDir, git: { top: path } };
     } catch (e) {
-      failed = e;
+      // Nothing of a project that was not recorded is left in the home: the folder this add made goes, so the add
+      // can be run again under the same name.
+      await machine.exec(`rm -rf -- ${shellQuote(path)}`, { timeoutMs: STEP_MS }).catch((swallow: unknown) =>
+        console.warn(`${path} on ${deps.computerName} was not swept after the add of ${o.project.name} failed: ${swallow instanceof Error ? swallow.message : String(swallow)}`),
+      );
       throw e;
-    } finally {
-      await deps.stop(machine).catch((e: unknown) => console.warn(`the machine that added ${o.project.name} was not stopped: ${e instanceof Error ? e.message : String(e)}`));
-      // Nothing of a project that was not recorded is left on the computer: the folder the bind made goes, so the
-      // add can be run again under the same name and nothing of it sits on that disk unowned. After the machine is
-      // stopped and never before: those folders are its binds' own sources while it runs, and what Linux makes of
-      // a source removed under a live container is not a question to open for a sweep that can wait a second.
-      if (failed !== undefined) {
-        const swept = removableProjectDir(deps, o.project.id);
-        await onComputer(deps)(`rm -rf ${shellQuote(swept)}`, { timeoutMs: STEP_MS }).catch((swallow: unknown) =>
-          console.warn(`${swept} on ${deps.computerName} was not swept after the add of ${o.project.name} failed: ${swallow instanceof Error ? swallow.message : String(swallow)}`),
-        );
-      }
     }
   },
   workspaceBinds: () => [],
@@ -501,33 +480,10 @@ export function projectLanding(kind: ProjectLanding["kind"]): ProjectLanding {
  * the project's key rather than by the path the checkout happens to sit at. */
 export const guestMemoryDir = (memoryKey: string): string => claudeMemoryDir(CLAUDE_CONFIG_DIR, memoryKey);
 
-/** Where the computer keeps this project, under the folder its own daemon says it keeps project checkouts in. A
- * computer that names none cannot hold a project this way, which is a wiring fault rather than a person's road. */
-function projectDir(deps: LandingDeps, projectId: string): string {
-  return `${projectsDir(deps)}/${projectId}`;
-}
-
-/** The one folder a remove or a failed add takes on the computer, read before it is ever spelled into an
- * `rm -rf`: wsp's own folder for that project, one segment under the projects directory the computer's daemon
- * named, named by an id wsp minted itself. No word a person typed is ever part of it, and a path of any other
- * shape is a wiring fault that removes nothing. */
-function removableProjectDir(deps: LandingDeps, projectId: string): string {
-  const under = projectsDir(deps);
-  const dir = `${under}/${projectId}`;
-  if (!under.startsWith("/") || !/^[A-Za-z0-9_-]+$/.test(projectId)) throw new Error(`${dir} is not wsp's own folder for a project under ${under}, so nothing was removed`);
-  return dir;
-}
-
-/** The road one command on the computer itself takes, or the wiring fault of a computer that holds a project's
- * folder and runs nothing outside its workspaces. */
-function onComputer(deps: LandingDeps): NonNullable<LandingDeps["onComputer"]> {
-  if (deps.onComputer === undefined) throw new Error("that computer runs nothing of wsp's outside its workspaces, so the folder wsp keeps for a project there cannot be taken away");
-  return deps.onComputer;
-}
-
-function projectsDir(deps: LandingDeps): string {
-  if (deps.projectsDir === undefined) throw new Error("that computer's daemon does not say where it keeps project checkouts, so nothing can be cloned there");
-  return deps.projectsDir.replace(/\/+$/, "");
+/** The computer a project on a joined computer lands on, or the wiring fault of a road handed none. */
+function computerOf(deps: LandingDeps): NonNullable<LandingDeps["computer"]> {
+  if (deps.computer === undefined) throw new Error(`${deps.computerName} answered no login to run the add as, so nothing can be cloned there`);
+  return deps.computer;
 }
 
 const lastLine = (out: string): string | undefined => {

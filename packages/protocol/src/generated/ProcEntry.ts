@@ -4,4 +4,9 @@
  * One process as /proc/[pid] shows it. cpu is its busy share of one core over the interval; rss in bytes;
  * startedAt epoch milliseconds; pty names the daemon pty whose shell this is.
  */
-export type ProcEntry = { pid: number, ppid: number, user: string, state: string, comm: string, cmdline: string, cpu: number, rss: number, startedAt: number, pty?: string, };
+export type ProcEntry = { pid: number, ppid: number, user: string, state: string, comm: string, cmdline: string, cpu: number, rss: number, startedAt: number, pty?: string, 
+/**
+ * The cgroup v2 path the process stands in, as /proc/[pid]/cgroup names it: what tells one thread's processes
+ * on a computer from another's, a server it detached included. Linux only.
+ */
+cgroup?: string, };

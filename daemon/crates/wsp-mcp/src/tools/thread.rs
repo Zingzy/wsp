@@ -74,6 +74,8 @@ pub struct StopOut {
     pub under: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub left: Option<String>,
 }
 
 async fn stop(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
@@ -87,13 +89,15 @@ async fn stop(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
         under: Option<Vec<String>>,
         #[serde(default)]
         error: Option<String>,
+        #[serde(default)]
+        left: Option<String>,
     }
     let mut asked = params([("sessionId", Value::from(thread.session_id.as_str()))]);
     if let Some(task) = &task {
         asked.insert("task".to_owned(), Value::from(task.as_str()));
     }
     let reply = client.request("sessions.interrupt", asked).await?;
-    let Interrupted { outcome, under, error } =
+    let Interrupted { outcome, under, error, left } =
         with_outcome("sessions.interrupt", reply, &["accepted", "not-running", "not-found", "refused", "unsupported"])?;
     let under = under.filter(|u| !u.is_empty());
     let words = turns();
@@ -103,7 +107,7 @@ async fn stop(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
             Some(_) => fill(&words.stop_task_said, &filled),
             None => fill(words.stopped_task.get(&outcome).map_or("", String::as_str), &filled),
         };
-        return Ok(Answer::text(line, &StopOut { thread_id: thread.id, task, outcome, under, error }));
+        return Ok(Answer::text(line, &StopOut { thread_id: thread.id, task, outcome, under, error, left }));
     }
     let mut line = fill(words.stopped.get(&outcome).map_or("", String::as_str), &[("thread", &thread.id)]);
     match under.as_deref() {
@@ -114,7 +118,10 @@ async fn stop(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
             line.push_str(&fill(&words.stop_under_some, &[("count", &several.len().to_string()), ("under", &named.join(", "))]));
         }
     }
-    Ok(Answer::text(line, &StopOut { thread_id: thread.id, task: None, outcome, under, error }))
+    if let Some(left) = &left {
+        line.push_str(&fill(&words.stop_left, &[("left", left)]));
+    }
+    Ok(Answer::text(line, &StopOut { thread_id: thread.id, task: None, outcome, under, error, left }))
 }
 
 #[derive(Debug, Serialize, Deserialize)]

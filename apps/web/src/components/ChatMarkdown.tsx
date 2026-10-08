@@ -24,6 +24,7 @@ import { mediaKindFromPath } from "../lib/filePreview";
 import { isAbsolutePath } from "../terminal-links";
 import { cn } from "../lib/utils";
 import { noticeFailureOnce } from "../notices/store";
+import { LoopbackLinks } from "../browser/loopbackLinks";
 import { hasMath, rehypePreserveImageSourceMeta, rehypeRestrict, remarkNormalizeLinksAndTagInlineCode, remarkPandocMath, remarkPreserveCodeMeta, RESTRICTED_FACT_CLASS, restrictedImageSrc } from "./markdown/plugins";
 import { findTaskListMarkerOffset, GITHUB_ALERT_PRESENTATIONS, MarkdownDetails, MarkdownTable, orderedListGutterStyle } from "./markdown/blocks";
 import { extractCodeBlock, extractFenceLanguage, extractFenceTitle, extractPreCodeMeta, MarkdownCodeBlock, nodeToPlainText, SuspenseShikiCodeBlock } from "./markdown/codeBlocks";
@@ -244,6 +245,7 @@ function ChatMarkdown({
   /* eslint-disable react/no-unstable-nested-components -- ReactMarkdown requires component
    * renderers that close over this message's metadata. useMemo keeps them stable until that
    * metadata changes. */
+  const loopbackLinks = use(LoopbackLinks);
   const markdownComponents = useMemo<Components>(() => {
     const fileLinkChip = (
       fileLinkMeta: MarkdownFileLinkMeta,
@@ -379,6 +381,8 @@ function ChatMarkdown({
                 onClick?.(event);
                 if (isSameDocumentLink && href) {
                   handleMarkdownFragmentClick(event, href);
+                } else if (href && loopbackLinks?.(href) === true) {
+                  event.preventDefault();
                 }
               }}
             >
@@ -556,6 +560,7 @@ function ChatMarkdown({
     inlineCodeFileLinkMetaByText,
     imageBaseDir,
     isStreaming,
+    loopbackLinks,
     markdownFileLinkMetaByHref,
     onTaskListChange,
     onImageExpand,

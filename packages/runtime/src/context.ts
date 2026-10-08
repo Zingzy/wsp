@@ -94,7 +94,7 @@ import type { Vaulted } from "./usage.js";
 import type { ThreadFacts } from "@wsp/protocol";
 import type { TranscriptRows } from "./sqlite-transcripts.js";
 import type { TranscriptReader } from "./transcript-reader.js";
-import type { HarnessSession, HarnessAdapter, StartPicksAsked } from "./types/harness.js";
+import type { HarnessSession, HarnessAdapter, HarnessStartOptions, StartPicksAsked } from "./types/harness.js";
 import type {
   WorkspaceSpec,
   CreatedWorkspace,
@@ -243,6 +243,7 @@ export interface KindsArea {
   readonly placeDoorOf: () => PlaceDoor;
   readonly machineReading: Set<() => void>;
   readonly moduleOf: (kind: WorkspaceKind) => KindModule;
+  readonly placeAgentHome: (place: string | undefined, home: string, id: string) => string;
   readonly backendFor: (record: WorkspaceRecord) => MachineBackend;
   readonly openChannel: (o: DaemonChannelOptions) => Promise<DaemonChannel>;
   readonly backendOfKind: (kind: WorkspaceKind, place?: string) => MachineBackend;
@@ -252,6 +253,7 @@ export interface KindsArea {
   readonly lifecycleOf: (entry: LiveWorkspace) => Lifecycle;
   readonly execFactoryFor: (entry: LiveWorkspace, o?: MachineExecOptions, waiting?: TurnWaiting) => ExecStreamFactory;
   readonly threadFolder: (entry: LiveWorkspace, o: { cwd?: string | undefined }) => Promise<string>;
+  readonly kindOf: (computer: string) => WorkspaceKind;
 }
 
 export interface RulesArea {
@@ -551,7 +553,10 @@ export interface AgentsArea {
   readonly landFiles: (entry: LiveWorkspace, folder: string, dir: string, files: readonly Attachment[]) => Promise<string[]>;
   readonly dropThreadFiles: (entry: LiveWorkspace, threadIds: Iterable<string>) => Promise<void>;
   readonly dropImages: (entry: LiveWorkspace, dir: string) => void;
-  readonly adapterFor: (entry: LiveWorkspace, named?: string, turnEnv?: Readonly<Record<string, string>>, waiting?: TurnWaiting, servers?: Readonly<Record<string, string>>) => { harness: string; adapter: HarnessAdapter };
+  readonly threadEnv: (entry: LiveWorkspace, harness?: string) => Readonly<Record<string, string>>;
+  readonly placeStores: (place: string, home: string) => Readonly<Record<string, string>>;
+  readonly serverValuesFor: (entry: LiveWorkspace, harness: string, folder: string) => Promise<HarnessStartOptions["serverValues"]>;
+  readonly adapterFor: (entry: LiveWorkspace, named?: string, turnEnv?: Readonly<Record<string, string>>, waiting?: TurnWaiting, servers?: Readonly<Record<string, string>>, thread?: string) => { harness: string; adapter: HarnessAdapter };
 }
 
 export interface ThreadsArea {

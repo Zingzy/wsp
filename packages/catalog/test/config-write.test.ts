@@ -140,13 +140,13 @@ describe("configWriteLine", () => {
     expect(temps(h)).toEqual([".wsp-config-tmp.Young1"]);
   });
 
-  it("sweeps only the two temp shapes it mints, so a person's file of a like name in the home survives however old", () => {
+  it("sweeps only the temp shapes it mints, a landing's parts among them, so a person's file of a like name in the home survives however old", () => {
     const h = home();
     const file = join(h, ".claude.json");
     writeFileSync(file, "{}\n");
     const aged = new Date(Date.now() - 60 * 60_000);
-    const theirs = [".wsp-config-notes.md", ".wsp-config-tmp.notes.md", ".wsp-config-tmp.abc12", ".wsp-config-tmp.0123456789abc", ".wsp-config-tmp.0123456789aZ"];
-    const ours = [".wsp-config-tmp.aB3xY9", ".wsp-config-tmp.0123456789ab"];
+    const theirs = [".wsp-config-notes.md", ".wsp-config-tmp.notes.md", ".wsp-config-tmp.abc12", ".wsp-config-tmp.0123456789abc", ".wsp-config-tmp.0123456789aZ", ".wsp-config-tmp.0123456789ab.parts"];
+    const ours = [".wsp-config-tmp.aB3xY9", ".wsp-config-tmp.0123456789ab", ".wsp-config-tmp.0123456789ab.part0", ".wsp-config-tmp.0123456789ab.part12"];
     for (const n of [...theirs, ...ours]) {
       writeFileSync(join(h, n), "kept");
       utimesSync(join(h, n), aged, aged);

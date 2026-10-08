@@ -52,6 +52,7 @@ import {
   refusalLine,
   spawnFolderRefusal,
   SPAWN_FOLDER_FIX,
+  threadLeftLine,
 } from "@wsp/protocol";
 import { BASE_GROUP, FLOOR_LINE, GROUP_LABEL, tableLines, totalsLine, type TableRow } from "../src/init-table.js";
 import { GUTTER } from "../src/init-layout.js";
@@ -241,6 +242,7 @@ export async function turnWords(): Promise<Record<string, unknown>> {
     goneWith: goneRefusal("{name}", "{action}", "{words}"),
     stopped: { accepted: stopped("accepted"), "not-running": stopped("not-running"), "not-found": stopped("not-found") },
     stopUnderOne: stopLine({ threadId: "{thread}", outcome: "accepted", under: ["{under}"] }).slice(stopped("accepted").length),
+    stopLeft: stopLine({ threadId: "{thread}", outcome: "accepted", left: "{left}" }).slice(stopped("accepted").length),
     stopUnderSome: stopLine({ threadId: "{thread}", outcome: "accepted", under: standIn("{count}", "{under}") }).slice(stopped("accepted").length),
     stoppedTask: Object.fromEntries((["accepted", "not-running", "not-found"] as const).map(outcome => [outcome, stopLine({ threadId: "{thread}", task: "{task}", outcome })])),
     stopTaskSaid: stopLine({ threadId: "{thread}", task: "{task}", outcome: "refused", error: "{error}" }),
@@ -398,6 +400,7 @@ export const TURN_ANSWERED: Record<string, TurnCase[]> = {
   stop: [
     { case: "stopped with the tree", arguments: { thread: "thread-7f" }, replies: { "sessions.list": listed(), "sessions.interrupt": ok({ outcome: "accepted", under: ["thread-1111aaaa2222", "thread-3333bbbb4444"] }) } },
     { case: "stopped with one under", arguments: { thread: THREAD }, replies: { "sessions.list": listed(), "sessions.interrupt": ok({ outcome: "accepted", under: ["thread-1111aaaa2222"] }) } },
+    { case: "stopped, a process it started left running", arguments: { thread: THREAD }, replies: { "sessions.list": listed(), "sessions.interrupt": ok({ outcome: "accepted", left: threadLeftLine("hetzner", [4242]) }) } },
     { case: "not running", arguments: { thread: THREAD }, replies: { "sessions.list": listed(), "sessions.interrupt": ok({ outcome: "not-running", under: [] }) } },
     { case: "not found by the host", arguments: { thread: OTHER }, replies: { "sessions.list": listed(), "sessions.interrupt": ok({ outcome: "not-found" }) } },
     { case: "one subagent stopped", arguments: { thread: THREAD, task: "a1b2c3" }, replies: { "sessions.list": listed(), "sessions.interrupt": ok({ outcome: "accepted" }) } },

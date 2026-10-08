@@ -37,7 +37,7 @@ import { GitPrReadReply, GitPrViewReply, GitPrMergeReply, GitPrReactReply, GitPr
 import { GitIssueReadReply, GitPrCheckoutReply, GitPrDiffReply, GitPrReviewReply } from "../start.js";
 import { SSH_KEY_MAX } from "../daemon-contract.js";
 import type { UsageStore as WireUsageStore } from "../generated/UsageStore.js";
-import { type Held, reqId, type Same } from "./helpers.js";
+import { cgroupPath, type Held, reqId, type Same, watchName } from "./helpers.js";
 import { EXEC_BODY_MAX, GUEST_ARGV_MAX, GUEST_CWD_MAX, GUEST_TOKEN_MAX, USAGE_STORES_MAX } from "./limits.js";
 
 // --- daemon wire protocol (ws://0.0.0.0:7070, auth frame first, 4401 on anything else) ---
@@ -274,6 +274,9 @@ export const ProcEntry = z.object({
   rss: z.number(),
   startedAt: z.number(),
   pty: z.string().optional(),
+  /** The cgroup v2 path the process stands in, Linux only: what tells a thread's processes on a computer from
+   * another's, a server it detached included. */
+  cgroup: z.string().optional(),
 });
 export type ProcEntry = z.infer<typeof ProcEntry>;
 
@@ -378,8 +381,10 @@ export const DaemonRequest = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("pty.list"), machineId: z.string().optional() }),
   /** With roots, the listeners of the processes they hold: each root's process group and every process under it,
    * and with a folder, every process running in it. A watch that names no roots sees every listener on the machine,
-   * which is what the host's own watchers ask for. A second watch on the socket names its roots again. */
-  z.object({ id: reqId, op: z.literal("ports.watch"), roots: z.array(z.number().int().nonnegative()).optional(), folder: z.string().optional() }),
+   * which is what the host's own watchers ask for. A second watch on the socket names its roots again; a watch
+   * given a name is one of its own beside the socket's, and every port event it sends carries that name. With
+   * cgroups, a process standing in one of them is the watch's too: a thread's on a computer the person joined. */
+  z.object({ id: reqId, op: z.literal("ports.watch"), roots: z.array(z.number().int().nonnegative()).optional(), folder: z.string().optional(), cgroups: z.array(cgroupPath).max(16).optional(), watch: watchName.optional() }),
   z.object({ id: reqId, op: z.literal("manifest.get") }),
   z.object({
     id: reqId,

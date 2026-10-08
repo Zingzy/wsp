@@ -39,7 +39,8 @@ export function parseEnvFile(path: string): Record<string, string> {
 export const envFileFor = (statePath: string): string => join(dirname(statePath), ".env");
 
 /** The file beside it that holds the values the MCP servers on other computers read by name: a header's under its
- * WSP_MCP_ name, a command's variable under its own. Every name in it is handed to every turn. */
+ * WSP_MCP_ name, a command's variable under its own. A turn hands each to its servers in its launch on a computer
+ * the person owns, and in its environment on a fork. */
 export const serverEnvFileFor = (statePath: string): string => join(dirname(statePath), "servers.env");
 
 /** Beside it, the servers each of its names belongs to, by server name: what tells a second server claiming a name

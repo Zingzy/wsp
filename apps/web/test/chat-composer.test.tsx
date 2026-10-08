@@ -68,7 +68,7 @@ function fixtureApi(workspaces: WorkspaceView[], history: Record<string, Session
   const started: StartSessionOptions[] = [];
   const interrupted: string[] = [];
   const api: Api = {
-    interruptSession: async id => { interrupted.push(id); return "accepted"; },
+    interruptSession: async id => { interrupted.push(id); return { outcome: "accepted" }; },
     portReach: async (_id, port) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, expiresAt: Date.now() + 3_600_000 }),
     daemon: noDaemonApi,
     sessionHistory: async id => history[id] ?? [],

@@ -12,10 +12,16 @@
 import { type DaemonEvent, GUEST_SESSIONS_PER_WORKSPACE_CAP, GUEST_WORKSPACE_FULL, guestNoKindLine, guestNoLoopbackLine, guestNoSessionLine, guestNoTokenRefusal, guestTurnNoTokenRefusal, HOST_TOKEN_ENV, HOST_URL_ENV, TURN_TOKEN_ENV, UNAUTHORIZED, type GuestKind } from "@wsp/protocol";
 import type { Authed, GuestKindModule, GuestSession } from "@wsp/runtime";
 
-/** The road back down to one machine's daemon, and which workspace that machine is. */
+/** The road back down to one machine's daemon, and which workspace that machine is: a computer's own link is
+ * named by that computer, and the threads it carries are of every folder on it. */
 export interface GuestLink {
   workspaceId: string;
+  /** What a person calls the computer or the workspace that link is, which a refusal names it by. */
+  name: string;
   request(op: string, params: Record<string, unknown>): Promise<unknown>;
+  /** Whether a thread of that workspace may open a session down this link; the link's own workspace alone where
+   * absent. */
+  admits?(workspaceId: string): Promise<boolean>;
 }
 
 export interface GuestDoor {
@@ -87,15 +93,18 @@ export function guestDoor(o: GuestDoorOptions): GuestDoor {
 
   const opened = async (e: Extract<DaemonEvent, { type: "guest.opened" }>, held: Held): Promise<void> => {
     if (e.token === "") {
-      const refusal = e.turnToken === undefined || e.turnToken === "" ? guestNoTokenRefusal(held.workspaceId) : guestTurnNoTokenRefusal(held.workspaceId);
+      const refusal = e.turnToken === undefined || e.turnToken === "" ? guestNoTokenRefusal(held.link.name) : guestTurnNoTokenRefusal(held.link.name);
       return endHere(held, e.session, refusal);
     }
     const who = await o.authorize(e.token);
+    // A thread's token and a workspace this link carries: a paired computer's token drives everything this host
+    // holds and is not what a process inside a machine was handed.
+    const scope = who?.kind === "device" ? who.device.scope : undefined;
+    const { link } = held;
+    const admitted = scope !== undefined && (link.admits === undefined ? scope.workspaceId === link.workspaceId : await link.admits(scope.workspaceId));
     // The guest went while its token was being read, or a session took this one's name; nothing is opened either way.
     if (held.ended) return;
-    // A thread's token and that thread's own workspace: a paired computer's token drives everything this host
-    // holds and is not what a process inside a machine was handed.
-    if (who?.kind !== "device" || who.device.scope?.workspaceId !== held.workspaceId) return endHere(held, e.session, UNAUTHORIZED);
+    if (scope === undefined || !admitted) return endHere(held, e.session, UNAUTHORIZED);
     // A kind nobody built here is not a token nobody holds, so it says so in its own words.
     const module = o.kinds[e.kind];
     if (module === undefined) return endHere(held, e.session, guestNoKindLine(e.kind));
@@ -107,7 +116,6 @@ export function guestDoor(o: GuestDoorOptions): GuestDoor {
       [HOST_TOKEN_ENV]: e.token,
       ...(e.turnToken !== undefined ? { [TURN_TOKEN_ENV]: e.turnToken } : {}),
     };
-    const scope = who.device.scope;
     const session = module.open({
       argv: e.argv,
       cwd: e.cwd,

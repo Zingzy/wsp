@@ -7,10 +7,11 @@
 // sentence rather than sending a frame nothing on the far side would take.
 import { randomBytes } from "node:crypto";
 import { posix } from "node:path";
-import { DaemonExecReply, EXEC_TIMEOUT_MAX_MS, base64Length, placeProvisionPaths, shellQuote } from "@wsp/protocol";
+import { DaemonExecReply, EXEC_TIMEOUT_MAX_MS, base64Length, cgroupJoinLine, placeProvisionPaths, shellQuote, type Capabilities } from "@wsp/protocol";
 import { INLINE_EXEC_MS, execDetached, machineAnswer } from "./exec-detached.js";
 import { LINK_MARGIN_MS, type MachineLink } from "./link-backend.js";
-import type { BytesLanded, ExecResult, Machine, MachineKind, MachineState, RunOptions } from "./machine.js";
+import type { BackendPricing, BytesLanded, ExecResult, Machine, MachineBackend, MachineKind, MachineListRow, MachineState, RunOptions } from "./machine.js";
+import { asLogin, loginShellPath, targetLogin, type TargetLogin } from "./target-line.js";
 
 /** What every call that belongs to a workspace refuses with on the computer itself. */
 export const NOT_A_WORKSPACE = "this is the computer itself, not a workspace on it";
@@ -74,7 +75,8 @@ export class PlaceMachine implements Machine {
    * frame's own stdin, and a last frame joining the parts in order and taking them away. A part is written over
    * rather than appended and the join is skipped once the parts are gone, so a frame whose answer the link lost is
    * sent again and the file still reads the same bytes once. The parts are what a trip over this road costs, and
-   * they ride back on the answer. */
+   * they ride back on the answer. Every part and the file are the login's alone, whatever mask the daemon runs under,
+   * since what lands this way is often a config or a secret; a caller that wants the file shared sets its mode. */
   async putBytes(path: string, bytes: Uint8Array, opts?: { timeoutMs?: number }): Promise<BytesLanded> {
     const at = shellQuote(path);
     const parts = Math.max(1, Math.ceil(bytes.length / PLACE_PART_BYTES));
@@ -83,14 +85,14 @@ export class PlaceMachine implements Machine {
     try {
       for (let i = 0; i < parts; i++) {
         const part = bytes.subarray(i * PLACE_PART_BYTES, Math.min((i + 1) * PLACE_PART_BYTES, bytes.length));
-        const res = await this.exec([`mkdir -p ${shellQuote(posix.dirname(path))}`, `cat > ${at}.part${i}`].join("\n"), {
+        const res = await this.exec(["umask 077", `mkdir -p ${shellQuote(posix.dirname(path))}`, `cat > ${at}.part${i}`].join("\n"), {
           timeoutMs: placePartBoundMs(part.length, opts?.timeoutMs),
           idempotencyKey: `${put}/${i}`,
           stdin: part,
         });
         if (res.exitCode !== 0) throw new Error(`part ${i + 1} of ${parts} did not land at ${path} on ${this.id}: ${machineAnswer(res)}`);
       }
-      const joined = await this.exec(`if [ -e ${at}.part0 ]; then cat ${names} > ${at} && rm -f ${names}; fi`, {
+      const joined = await this.exec(`umask 077; if [ -e ${at}.part0 ]; then cat ${names} > ${at} && rm -f ${names}; fi`, {
         idempotencyKey: `${put}/join`,
         ...(opts?.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
       });
@@ -131,4 +133,100 @@ export class PlaceMachine implements Machine {
   uploadUrl(): Promise<string> {
     return Promise.reject(new Error(NOT_A_WORKSPACE));
   }
+}
+
+/** The computer a thread in a folder on it runs on: every command runs as the owner of the home the computer was
+ * joined with, in that home, as targetLogin reads it once at the first command, so a thread there is the person's
+ * login as it is on the computer they sit at, and nothing it writes is root's where the login is not. The daemon's
+ * own frames go up the same link naming no machine, which is that computer's daemon answering for itself. */
+export class PlaceFolderMachine extends PlaceMachine {
+  private login?: Promise<TargetLogin>;
+  private readonly given: { HOME: string; PATH?: string };
+
+  constructor(
+    private readonly road: Pick<MachineLink, "request">,
+    o: { id: string; home: string; path?: string },
+  ) {
+    super(road, o);
+    this.given = { HOME: o.home, ...(o.path !== undefined ? { PATH: o.path } : {}) };
+  }
+
+  /** Who every command runs as, with the PATH that login's own shell gives it, read once, so the add and every
+   * thread there run one toolchain; a read that failed is read again at the next command. */
+  loginOf(): Promise<TargetLogin> {
+    const road = { exec: (cmd: string, opts?: { timeoutMs?: number }) => super.exec(cmd, opts) };
+    this.login ??= targetLogin(road, this.given)
+      .then(async at => {
+        const path = await loginShellPath(road, at);
+        return path === undefined ? at : { ...at, path };
+      })
+      .catch((e: unknown) => {
+        this.login = undefined;
+        throw e;
+      });
+    return this.login;
+  }
+
+  /** A folder's record going takes nothing off the computer: the computer and the folder both stay. */
+  override kill(): Promise<void> {
+    return Promise.resolve();
+  }
+
+  override async exec(cmd: string, opts?: { timeoutMs?: number; idempotencyKey?: string; stdin?: Uint8Array }): Promise<ExecResult> {
+    return super.exec(asLogin(await this.loginOf(), cmd), opts);
+  }
+
+  /** This computer as a turn's launch reaches it: each line still runs as the login, from a shell that first stands
+   * itself in the thread's cgroup as the daemon's root, so the run and everything it starts stand there too; a
+   * folder named goes in front of the login's PATH for those lines alone. */
+  inCgroup(cgroup: string, pathFirst?: string): Machine {
+    const join = cgroupJoinLine(cgroup);
+    const path = pathFirst === undefined ? "" : `export PATH=${shellQuote(pathFirst)}:"$PATH"; `;
+    const grouped = Object.create(this) as PlaceFolderMachine;
+    grouped.exec = async (cmd, opts) => PlaceMachine.prototype.exec.call(this, `${join}\n${asLogin(await this.loginOf(), `${path}${cmd}`)}`, opts);
+    return grouped;
+  }
+
+  /** One daemon frame answered by that computer's own daemon, naming no machine. A refusal comes back as the reply
+   * it was, with its code, as every machine whose daemon is its computer's answers one. */
+  async daemonFrame(frame: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const { op, ...params } = frame as { op: string };
+    try {
+      return { ok: true, ...(await this.road.request(op, params)) };
+    } catch (e) {
+      const said = e as { message?: string; code?: unknown };
+      return { ok: false, error: said.message ?? String(e), ...(typeof said.code === "string" ? { code: said.code } : {}) };
+    }
+  }
+}
+
+/** The backend a folder on a computer the person joined stands on: that computer, as one machine that is always
+ * there, which wsp never makes, pauses, sizes or images. */
+export function placeFolderBackend(machine: () => Machine, shape: { cpu: number; memMb: number }): MachineBackend {
+  const capabilities: Capabilities = {
+    liveCloneForks: false,
+    replacesMachine: false,
+    previewUrls: false,
+    signedUrls: false,
+    callbackRelay: false,
+    diskSnapshots: false,
+    images: false,
+    snapshotsAnyLife: false,
+    snapshotListing: false,
+    templates: false,
+    sizes: [],
+    // The person's own computer: nothing on it was made by wsp, so a turn's access starts where its harness asks.
+    kept: true,
+    copies: false,
+    ownNetwork: false,
+  };
+  const pricing: BackendPricing = { rateUsdPerHour: () => 0, defaultSize: shape, snapshotStorage: { freeGb: 0, usdPerGbMonth: 0, billedFrom: "" } };
+  return {
+    capabilities,
+    pricing,
+    create: () => Promise.reject(new Error(NOT_A_WORKSPACE)),
+    get: async () => machine(),
+    list: async (): Promise<MachineListRow[]> => [],
+    deleteSnapshot: () => Promise.reject(new Error(NOT_A_WORKSPACE)),
+  };
 }

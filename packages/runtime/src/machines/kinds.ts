@@ -2,22 +2,26 @@
 import { existsSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve as resolvePathOn } from "node:path";
-import { CATALOG_AGENTS, GUEST_HOME, guestEnv, sharedOn } from "@wsp/catalog";
-import { INLINE_EXEC_MS, installScript, INSTALL_MS, guestAgentHomes, projectInstalls, type Lifecycle, type MachineBackend, GUEST_TMP, LOCAL_MACHINE_ID, projectStateKey } from "@wsp/engine";
-import { type DaemonReachView, type ExecStreamFactory, type ProjectSource, type ProjectView, type WorkspaceKind, type WorkspaceProject, SCOPED_MCP_ARG, imageCarriesCheckout, DAEMON_TOKEN_PATH, homeShortened, folderName, noKindLine, registeredLine, REGISTERING_LINE, cloneFailedLine, cloneIntoTakenLine, cloneUrlRefusal, shellLine, shellQuote, placeForksNowhereLine, placeServesDaemonLine } from "@wsp/protocol";
-import { cloneLines } from "../project-landing.js";
+import { CATALOG_AGENTS, GUEST_HOME, guestEnv, loginHomeIn, sharedLoginOf, sharedOn } from "@wsp/catalog";
+import { INLINE_EXEC_MS, installScript, INSTALL_MS, guestAgentHomes, PlaceFolderMachine, placeFolderBackend, projectInstalls, type Lifecycle, type MachineBackend, GUEST_TMP, GITHUB_TOKEN_ENV, LOCAL_MACHINE_ID, projectStateKey } from "@wsp/engine";
+import { type DaemonReachView, type ExecStreamFactory, type ProjectSource, type ProjectView, type WorkspaceKind, type WorkspaceProject, SCOPED_MCP_ARG, imageCarriesCheckout, placeLoginNotRootLine, DAEMON_TOKEN_PATH, homeShortened, folderName, kindForComputer, noKindLine, registeredLine, REGISTERING_LINE, cloneFailedLine, cloneIntoTakenLine, cloneUrlRefusal, placeDaemonPaths, rootsPathIn, shellLine, shellQuote, placeForksNowhereLine, placeServesDaemonLine, threadCgroup } from "@wsp/protocol";
+import { cloneLines, underLoginHome } from "../project-landing.js";
+import { threadEnds } from "./thread-ends.js";
+import { PANE_HOLD_MS } from "../places/pane-ports.js";
 import { projectRemote, projectSource } from "../project-sources.js";
 import { openDaemonChannel } from "../daemon-channel.js";
 import { machineExecStream, type MachineExecOptions, type TurnWaiting } from "../machine-exec.js";
 import { writeDaemonRootsScript } from "../daemon-roots.js";
-import { PlaceForksNowhereError, type PlaceDoor } from "../places.js";
-import { loginEnvOn } from "../types/harness.js";
+import { PlaceForksNowhereError, placeHomeRefusal, type PlaceDoor } from "../places.js";
+import { loginEnvOn, PLACE_LOGIN_ENV } from "../types/harness.js";
+import { secretEnvOf } from "../adapters.js";
 import { type ProjectImportOptions, type WorkspaceRecord, type LiveWorkspace, type StageReport, CLONE_MS, folderNamed, lastLineOf } from "../types/wiring.js";
 import type { KindModule, ImportReport, ImportLanded } from "../types/internal.js";
 import type { RuntimeContext, KindsArea } from "../context.js";
 
 export function kindsArea(ctx: RuntimeContext): KindsArea {
   const { opts, backend, local, placeDoor, clock, places } = ctx;
+  const ends = placeDoor === undefined ? undefined : threadEnds(ctx, placeDoor);
   const projectOf = (dest: string, size: number): WorkspaceProject => ({ name: folderName(dest), dest, importedAt: new Date(clock.now()).toISOString(), size });
   /** The command that puts a project's repo inside a copy of an image, word for word, so the test that reads the
    * machine's log and the machine that runs it read one line. No --branch where the record names no base: the
@@ -140,7 +144,7 @@ export function kindsArea(ctx: RuntimeContext): KindsArea {
   };
   /** The guest's login plus the variable pointing one harness at its store there, the store cloudHome names: a guest
    * exec carries no environment of its own, so the adapter exports this on every launch. */
-  const cloudEnv = (record: Pick<WorkspaceRecord, "place" | "npmBin">, id: string): Readonly<Record<string, string>> => {
+  const cloudEnv = (record: Pick<WorkspaceRecord, "place" | "npmBin">, id: string | undefined): Readonly<Record<string, string>> => {
     const login = loginEnvOn(record.place, record.npmBin);
     const agent = CATALOG_AGENTS.find(a => a.id === id);
     return agent === undefined ? login : { ...login, ...guestEnv(agent) };
@@ -172,6 +176,43 @@ export function kindsArea(ctx: RuntimeContext): KindsArea {
     if (placeDoor === undefined) throw new Error(noKindLine("place"));
     return placeDoor;
   };
+  /** The computer a folder record on a joined computer stands on, with the home its login was joined with. A record
+   * naming a computer this host no longer holds is held by nothing, and the hydration leaves it as it was. */
+  const placeOf = (record: Pick<WorkspaceRecord, "place" | "name">): NonNullable<ReturnType<PlaceDoor["folderComputer"]>> => {
+    const at = record.place === undefined ? undefined : placeDoorOf().folderComputer(record.place);
+    if (at === undefined && record.place !== undefined && placeDoorOf().joined(record.place)) throw new Error(placeHomeRefusal(undefined));
+    if (at === undefined) throw new Error(`${record.name} stands on ${record.place ?? "no computer"}, which this host no longer holds`);
+    return at;
+  };
+  /** Where one agent keeps its store for a thread on that computer: the folder a sign-in there pointed the tool's
+   * home at where its login is one the computer signs in once, else its guest store under the login's home. */
+  const placeAgentHome = (place: string | undefined, home: string, id: string): string => {
+    const agent = CATALOG_AGENTS.find(a => a.id === id);
+    const shared = agent === undefined ? undefined : sharedLoginOf(agent.signIn);
+    const logins = place === undefined ? undefined : placeDoor?.backendOf(place)?.logins;
+    return shared !== undefined && logins !== undefined ? loginHomeIn(logins, shared) : underLoginHome(home, cloudHome(id));
+  };
+  /** Whether the computer a workspace stands on listed a login of this agent's own, by the word its row carries. */
+  const placeLoginStands = (entry: LiveWorkspace, id: string): boolean => entry.record.place !== undefined && placeDoor?.signInsAt(entry.record.place)?.[id] === "signed-in";
+  /** The environment every process of a thread in a folder on that computer runs under, its agent's turns and its
+   * terminal's shell alike: the order and knobs every thread there reads, the login's own home, and for every agent
+   * its store variable pointed where it keeps its store there and the vault's sign-in its turn would be handed. So
+   * `claude` or `codex` typed in either reads the login the other reads, whichever agent the thread runs. GitHub's
+   * token is there only where the person picked the vault for GitHub on that computer: gh reads it before its own
+   * login, so a skipped sign-in or gh's own login there gets nothing of the vault's. */
+  const placeEnv = (entry: LiveWorkspace, homeOf: (id: string) => string): Readonly<Record<string, string>> => {
+    const { home } = placeOf(entry.record);
+    // The PATH is the login's own, which the run's command exports as the login before this environment is read.
+    const { USER: _root, PATH: _path, ...login } = PLACE_LOGIN_ENV;
+    const vault = opts.vault?.() ?? {};
+    const agents = CATALOG_AGENTS.map(agent => {
+      const variable = agent.stateHomeEnv ?? sharedLoginOf(agent.signIn)?.homeEnv;
+      return { ...(variable !== undefined ? { [variable]: homeOf(agent.id) } : {}), ...secretEnvOf(vault, agent.id, placeLoginStands(entry, agent.id)) };
+    });
+    const token = vault[GITHUB_TOKEN_ENV];
+    const github = token !== undefined && entry.record.place !== undefined && placeDoor?.githubFromVault(entry.record.place) === true ? { [GITHUB_TOKEN_ENV]: token } : {};
+    return Object.assign({ ...login, HOME: home }, ...agents, github) as Record<string, string>;
+  };
   /** Every run on a machine this runtime is reading, as the call that lets go of each. A poll on a turn left
    * running holds this process after its last line, and a turn on a machine is not this host's to end: closing
    * lets go and leaves them running, and whoever opens them next reads their logs from the first byte. Each
@@ -195,7 +236,7 @@ export function kindsArea(ctx: RuntimeContext): KindsArea {
       // A fork at a provider is a copy of an image, and no sign-in is ever sealed into one, so the vault's key is
       // what a turn there runs on. A workspace on a computer somebody joined shares that computer's own logins,
       // and the word for each is the one its row carries.
-      loginStands: (entry, id) => entry.record.place !== undefined && placeDoor?.signInsAt(entry.record.place)?.[id] === "signed-in",
+      loginStands: (entry, id) => placeLoginStands(entry, id),
       relayed: () => true,
       // The word, not a path: the deploy writes the shim onto the machine's PATH and the binary under it carries the
       // chip in its own path, so the one stable name for a fork's wsp is the word a turn's own shell runs. It dials
@@ -205,6 +246,7 @@ export function kindsArea(ctx: RuntimeContext): KindsArea {
       turnReach: () => ({}),
       turnRoad: "relayed",
       keepsAgents: false,
+      serverValues: "environment",
       // A workspace whose computer answers its daemon frames has no daemon of its own to dial and no route worth
       // minting: nothing listens inside it, and the road to its files and its git is the link this host holds.
       hasDaemon: entry => ctx.servedByItsComputer(entry) === undefined && Boolean(entry.machine.previewUrl),
@@ -261,6 +303,7 @@ export function kindsArea(ctx: RuntimeContext): KindsArea {
             },
             turnRoad: "here",
             keepsAgents: true,
+            serverValues: "file",
             hasDaemon: () => local.daemonRoad !== undefined,
             sharedDaemon: true,
             daemonRoad: localRoad,
@@ -287,7 +330,79 @@ export function kindsArea(ctx: RuntimeContext): KindsArea {
               return top !== undefined && top !== project.path ? projectStateKey(agentId, top) : projectMemoryKey(agentId, project);
             },
           },
+    place:
+      placeDoor === undefined
+        ? undefined
+        : {
+            backend: record => {
+              const at = placeOf(record);
+              return placeFolderBackend(() => at.machine, at.shape);
+            },
+            // That computer's daemon runs a folder's git and writes its roots file as root: over a folder another
+            // login owns, git stops at its ownership check or runs that login's hooks as root.
+            admitFolder: async record => {
+              const login = await placeOf(record).machine.loginOf();
+              if (login.user !== "root") throw Object.assign(new Error(placeLoginNotRootLine(placeDoorOf().nameOf(record.place!), login.user)), { kind: "usage" });
+            },
+            // The same detached run a machine's turn is, on the computer itself as its login, under wsp's own folder
+            // in that login's home rather than a folder every account there shares.
+            // A thread's turn is launched from a shell standing in that thread's cgroup, so everything it starts is
+            // the thread's to list and to end, a server it detached included; wsp's own folder goes in front of the
+            // login's PATH for the turn alone, so the wsp it finds is the one that computer's daemon writes for its threads.
+            execStream: (entry, o, waiting) => {
+              const machine = entry.machine;
+              const at = placeDaemonPaths(placeOf(entry.record).home);
+              const launchOn = o?.thread !== undefined && machine instanceof PlaceFolderMachine ? machine.inCgroup(threadCgroup(o.thread), at.guestBin) : undefined;
+              return machineExecStream(machine, { reading: machineReading, runDir: at.runDir, ...o, ...(launchOn !== undefined ? { launchOn } : {}) }, waiting);
+            },
+            // That computer's port at the same number on this one, so a link its threads print opens what they meant;
+            // held while the pane showing it asks again inside the hold.
+            portReach: async (entry, port) => {
+              const { localPort } = await placeDoor.forward(entry.record.place!, port, { pane: { workspaceId: entry.record.id, name: entry.record.name } });
+              return { url: `http://localhost:${localPort}/`, expiresAt: clock.now() + PANE_HOLD_MS };
+            },
+            // As root on that computer, since a thread's cgroup is root's to empty and take away; a computer that is
+            // away is owed the end of a deleted thread's.
+            endThread: (entry, threadId, o) => ends!.end(entry.record.place!, threadId, o),
+            folder: record => ctx.checkoutOf(record),
+            home: (entry, id) => placeAgentHome(entry.record.place, placeOf(entry.record).home, id),
+            homeDir: record => placeOf(record).home,
+            env: (entry, _id, homeOf) => placeEnv(entry, homeOf),
+            loginStands: (entry, id) => placeLoginStands(entry, id),
+            relayed: () => true,
+            // The word, as a fork's: the PATH above finds the wsp that computer's daemon writes beside the socket it
+            // binds for its threads, which carries the session up the link this host already holds. Only where its
+            // report says that door stands: a daemon older than it, or one that could not bind it, has no such wsp,
+            // and a launch naming one shows the tools failed or finds another wsp that dials a host of its own.
+            wspMcp: entry => (entry.record.place !== undefined && placeDoor.folderComputer(entry.record.place)?.tools === true ? { command: "wsp", args: ["mcp"] } : undefined),
+            turnReach: () => ({}),
+            turnRoad: "relayed",
+            keepsAgents: false,
+            serverValues: "launch",
+            // That computer's own daemon answers for the folder over its link: nothing is dialled.
+            hasDaemon: () => false,
+            sharedDaemon: true,
+            daemonRoad: entry => Promise.reject(new Error(placeServesDaemonLine(entry.record.name, ctx.computerOf(entry)))),
+            scratch: entry => placeDaemonPaths(placeOf(entry.record).home).putDir,
+            daemonVersion: async entry => (entry.record.place === undefined ? null : ((await placeDoor.reportOf(entry.record.place))?.daemonVersion ?? null)),
+            dropped: async () => {},
+            import: entry => Promise.reject(Object.assign(new Error(`${entry.record.name} is a project folder on ${ctx.computerOf(entry)}; a folder from this computer goes there as a project of its own, with wsp add <folder> --on ${ctx.computerOf(entry)}`), { kind: "usage" })),
+            // The file that computer's daemon reads beside the home it was joined with, written by the daemon itself
+            // and never as the login: it says which folders a root daemon serves.
+            roots: async (entry, dests) => {
+              const { home } = placeOf(entry.record);
+              const wrote = await placeDoor.exec(entry.record.place!, writeDaemonRootsScript(dests, rootsPathIn(home)), { timeoutMs: INLINE_EXEC_MS });
+              if (wrote.exitCode !== 0) throw new Error(`could not make ${dests.at(-1)} browsable on ${placeDoor.nameOf(entry.record.place!)}: ${wrote.stderr.slice(-200)}`);
+            },
+            landProject: async () => {},
+            // The key the add fixed for the folder's own path on that computer, which is the key Claude Code gives
+            // that folder in the person's own terminal there.
+            memoryKey: (entry, agentId) => projectMemoryKey(agentId, ctx.projectHeld(entry.record.project)),
+          },
   };
+  /** The kind of workspace a project on this computer lands as: a computer the person joined is told apart from a
+   * cloud account by whether this host holds it as a computer. */
+  const kindOf = (computer: string): WorkspaceKind => kindForComputer(computer, placeDoor?.joined(computer) === true);
   const moduleOf = (kind: WorkspaceKind): KindModule => {
     const found = modules[kind];
     if (found === undefined) throw new Error(noKindLine(kind));
@@ -341,6 +456,6 @@ export function kindsArea(ctx: RuntimeContext): KindsArea {
   return {
     projectOf, remoteHere, gitHere, gitTopOf, branchAt, stateFolder, cloneHere, localRoad, placeDoorOf, machineReading,
     moduleOf, backendFor, openChannel, backendOfKind, keepsImages, pauseKeepsDisk, namesWorkspace, lifecycleOf,
-    execFactoryFor, threadFolder,
+    execFactoryFor, threadFolder, kindOf, placeAgentHome,
   };
 }

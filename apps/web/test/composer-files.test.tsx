@@ -73,7 +73,7 @@ function fixtureApi(history: Record<string, SessionEvent[]> = {}, statuses: Work
   const kept = new Map<string, KeptAttachment>();
   const workspaces = [workspace];
   const api: Api = {
-    interruptSession: async () => "accepted",
+    interruptSession: async () => ({ outcome: "accepted" }),
     portReach: async (_id, port) => ({ url: `https://m1-${port}.preview.example/`, expiresAt: Date.now() + 3_600_000 }),
     daemon: noDaemonApi,
     sessionHistory: async id => history[id] ?? [],

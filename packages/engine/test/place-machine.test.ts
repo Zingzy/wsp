@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The computer itself as a machine: the frames it sends over the link its
 // daemon holds, and the calls that belong to a workspace and are refused here.
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -135,6 +135,24 @@ describe("bytes onto the computer itself", () => {
     }
     expect(readFileSync(path)).toEqual(file);
     expect(readdirSync(join(at, "deep"))).toEqual(["in.tgz"]);
+    rmSync(at, { recursive: true, force: true });
+  });
+});
+
+describe("bytes landed on the computer itself under a daemon's shared mask", () => {
+  it("are its login's alone in every part and in the file, a config's or a secret's bytes among them", async () => {
+    const l = link();
+    const at = mkdtempSync(join(tmpdir(), "wsp-place-"));
+    const path = join(at, ".wsp-config-tmp.0123456789ab");
+    await machineOn(l).putBytes(path, Buffer.concat([Buffer.alloc(PLACE_PART_BYTES, 3), Buffer.from("tail")]));
+    const modes: string[] = [];
+    for (const f of l.frames) {
+      const stdin = f.params["stdin"] === undefined ? Buffer.alloc(0) : Buffer.from(String(f.params["stdin"]), "base64");
+      const ran = spawnSyncFed("bash", ["-c", `umask 022\n${String(f.params["cmd"])}`], stdin, { encoding: "utf8", timeout: 15_000 });
+      expect(ran.status, ran.stderr).toBe(0);
+      for (const name of readdirSync(at)) modes.push(`${name} ${(statSync(join(at, name)).mode & 0o777).toString(8)}`);
+    }
+    expect([...new Set(modes)].sort()).toEqual([".wsp-config-tmp.0123456789ab 600", ".wsp-config-tmp.0123456789ab.part0 600", ".wsp-config-tmp.0123456789ab.part1 600"]);
     rmSync(at, { recursive: true, force: true });
   });
 });

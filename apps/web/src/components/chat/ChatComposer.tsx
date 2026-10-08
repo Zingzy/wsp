@@ -606,19 +606,21 @@ export function ChatComposer({
       if (!method || runningTurn === null || stopTarget === null || stopPending) return;
       const { turnId } = runningTurn;
       const attempt = ++stops.current;
-      const settle = (words: string | null) => {
-        if (stops.current !== attempt) return;
+      const settle = (words: string | null): boolean => {
+        if (stops.current !== attempt) return false;
         stops.current += 1;
         setStop(null);
         onSettled?.();
         if (words !== null) flyout(words);
+        return true;
       };
       setStop({ turnId });
       const waited = window.setTimeout(() => settle(COMPOSER_WORDS.stopDidNotEnd), STOP_WAIT.ms);
       void method(stopTarget).then(
-        outcome => {
+        ({ outcome, left }) => {
           window.clearTimeout(waited);
-          settle(outcome === "not-found" ? COMPOSER_WORDS.stopUnknown : null);
+          // An answer past the wait still names what the stop left running, which nothing else says.
+          if (!settle(outcome === "not-found" ? COMPOSER_WORDS.stopUnknown : (left ?? null)) && left !== undefined) flyout(left);
         },
         (err: unknown) => {
           window.clearTimeout(waited);

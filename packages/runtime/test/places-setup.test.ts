@@ -52,7 +52,7 @@ import {
   placeFileText,
 } from "@wsp/protocol";
 import { loginSignIn } from "@wsp/catalog";
-import type { EngineStep, ProvisionPlan, ProvisionStage } from "@wsp/engine";
+import type { EngineStep, ProvisionOn, ProvisionPlan, ProvisionStage } from "@wsp/engine";
 import type { AgentsActs, SignInRun } from "../src/agents-read.js";
 import type { RecipeShelf, SeedWiring } from "../src/runtime.js";
 import { ADD_STOPPED_LINE, PlaceProvisioningError, type PlaceUndo, newPlaceKeyPair, type PlaceKeyPair, type PlaceProvisioner, type PlaceRecord, type PlaceUpdater, type PlaceUpdateRequest, type PlaceWiring } from "../src/places.js";
@@ -128,6 +128,11 @@ function answersFor(cmds: string[], answer?: (cmd: string) => { exitCode: number
       const input = typeof frame["stdin"] === "string" ? Buffer.from(frame["stdin"], "base64").toString("utf8") : "";
       const said = answer?.(cmd);
       if (said !== undefined) return void c.say({ id: frame["id"], ok: true, exitCode: said.exitCode, stdout: said.stdout ?? "", stderr: "", truncated: false });
+      // An add's claim of a folder in the login's home takes the name it asks for, and its clone waits where the
+      // test holds the checkout.
+      const claim = /mkdir '([^']+)'"\$n"/.exec(cmd);
+      if (claim !== null) return void c.say({ id: frame["id"], ok: true, exitCode: 0, stdout: `${claim[1]}\n`, stderr: "", truncated: false });
+      if (cmd.includes("git clone")) await checkouts?.created;
       // gh with no token on its input reads its own login there, and this computer has none.
       if (cmd.includes("gh auth status") && !input.includes("GH_TOKEN=")) return void c.say({ id: frame["id"], ok: true, exitCode: 1, stdout: "You are not logged into any GitHub hosts. To log in, run: gh auth login\n", stderr: "", truncated: false });
       const gh = cmd.includes("gh auth status") ? "github.com\n  - Logged in to github.com account dev (GH_TOKEN)\n  - Token scopes: 'gist', 'read:org', 'repo'\n" : "";
@@ -189,6 +194,7 @@ function provisioner(
   /** The plan each step was handed. */
   const plans: Partial<Record<EngineStep, ProvisionPlan>> = {};
   const stages = new Map<EngineStep, ProvisionStage>();
+  const ons = new Map<EngineStep, ProvisionOn>();
   const floors: string[] = [];
   const picked: RecipeFile[] = [];
   const rows = { ...ROWS, ...o.rows };
@@ -202,10 +208,11 @@ function provisioner(
       floors.push(on.home);
       return [];
     },
-    step: async (_machine, plan, step, _run, stage) => {
+    step: async (_machine, plan, step, _run, stage, on) => {
       ran.push(step);
       plans[step] = plan;
       stages.set(step, stage);
+      ons.set(step, on);
       stage(`${step} under way`);
       for (const row of o.said?.[step] ?? []) stage(`${row.label}: ${row.outcome}`, undefined, { ...row, step });
       if (o.hold === step) await held;
@@ -222,7 +229,7 @@ function provisioner(
   const undone: { before: RecipeFile; removed: string[] }[] = [];
   /** A running step says a row has landed, as the tools loop does while the rest of its rows install. */
   const say = (step: EngineStep, row: PlaceProvisionRow): void => stages.get(step)?.(`${row.label}: ${row.outcome}`, undefined, { ...row, step });
-  return { wired, ran, plans, floors, picked, undone, release: () => release(), let: (step: EngineStep) => each.get(step)?.let(), arm, say };
+  return { wired, ran, plans, ons, floors, picked, undone, release: () => release(), let: (step: EngineStep) => each.get(step)?.let(), arm, say };
 }
 
 /** Sign-ins as the app's own road runs them, each waiting on the test: the page and the code, then the end. The
@@ -379,6 +386,16 @@ describe("the add's own steps", () => {
     const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: LAPTOP }, Date.now());
     const job = runtime!.places!.adds().find(a => a.placeId === place.id);
     expect(job?.steps.find(s => s.step === "join")).toMatchObject({ state: "done", ms: expect.any(Number) });
+  });
+});
+
+describe("the servers step of an add", () => {
+  it("hands the engine the names the vault holds a server's value under, and no sign-in's, so a row can say where a value does not reach", async () => {
+    const p = provisioner();
+    await hosting({ provision: p.wired, vault: { CLAUDE_CODE_OAUTH_TOKEN: "sk-ant-oat01-x", LINEAR_TOKEN: "lin_TESTONLY" } });
+    await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: LAPTOP }, Date.now());
+    await until(() => p.ons.has("mcp"));
+    expect(p.ons.get("mcp")?.held).toEqual(new Set(["LINEAR_TOKEN"]));
   });
 });
 

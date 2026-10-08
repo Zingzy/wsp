@@ -119,7 +119,7 @@ fn on_delete(workspace: &Workspace, on: Option<&str>) -> (String, String) {
     } else if workspace.worktree.as_ref().is_some_and(|w| w.removable()) {
         "worktree"
     } else if on.is_some() {
-        "place"
+        "joined"
     } else {
         workspace.kind.unwrap_or(Kind::Cloud).word()
     };
@@ -166,7 +166,7 @@ async fn delete(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
 /// A folder of a project on this computer is never named to delete or forget: its threads are what goes, and a
 /// worktree goes by its own verb.
 fn refuse_folder(workspace: &Workspace) -> Result<(), Failure> {
-    if workspace.kind != Some(Kind::Local) {
+    if !workspace.kind.is_some_and(Kind::in_folder) {
         return Ok(());
     }
     let words = workspace::words();
@@ -208,11 +208,11 @@ async fn delete_thread(client: &Client, named: &str, confirm: bool) -> Result<An
         let at = workspaces.into_iter().find(|w| w.id == thread.workspace_id);
         Ok(Some((thread, at)))
     };
-    let Some((thread, Some(at))) = found().await?.filter(|(_, at)| at.as_ref().is_some_and(|w| w.kind == Some(Kind::Local))) else {
+    let Some((thread, Some(at))) = found().await?.filter(|(_, at)| at.as_ref().is_some_and(|w| w.kind.is_some_and(Kind::in_folder))) else {
         // As the command line: a word that names a thread on a box's machine says the thread goes with its machine,
         // read again as that line reads it, and any other word names no thread here.
         return match found().await? {
-            Some((_, Some(at))) if at.kind != Some(Kind::Local) => {
+            Some((_, Some(at))) if !at.kind.is_some_and(Kind::in_folder) => {
                 Err(Failure::usage(fill(&words.thread_on_machine, &[("name", &at.name)])).into())
             }
             _ => Err(not_here().into()),

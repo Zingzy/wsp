@@ -490,6 +490,29 @@ describe("processes surface", () => {
     expect(pids()).toEqual([200, 201, 1, DAEMON, 42, 41, 100, 101, 102, 50, 51]);
   });
 
+  it("a folder on a computer the person joined sections each thread by its cgroup, a detached server and a finished turn's included, with what it spends", async () => {
+    const BOX: ProcEntry[] = [
+      ...PROCS,
+      proc(300, 1, "node", { cpu: 4, rss: 200 * 1024 ** 2, cmdline: "node server.js --port 8080", cgroup: "/wsp-threads/th_serve" }),
+      proc(310, 1, "bash", { cpu: 1, rss: 2 * 1024 ** 2, cmdline: "bash -c claude -p tests", cgroup: "/wsp-threads/th_tests" }),
+      proc(311, 310, "claude", { cpu: 10, rss: 700 * 1024 ** 2, cmdline: "claude -p tests", cgroup: "/wsp-threads/th_tests" }),
+    ];
+    // The thread that started the server has no turn running: its server is still its own.
+    act(() => useStore.setState({ workspaces: [{ ...view, kind: "place" }], sessions: { [WS]: [session("th_serve", "serve it"), session("th_tests", "the tests agent", 999)] } }));
+    render(<ProcessesSurface workspaceId={WS} />);
+    await feed(BOX);
+    const headings = Array.from(document.querySelectorAll<HTMLElement>("[data-procs-thread]"));
+    expect(headings.map(h => [h.dataset["procsThread"], h.textContent])).toEqual([
+      ["th_serve", "4.0200Mserve it"],
+      ["th_tests", "11.0702Mthe tests agent"],
+    ]);
+    expect(pids()).toEqual([300, 310, 311]);
+    // The rest of the computer waits behind the toggle, which widens the pane to all of it.
+    const toggle = document.querySelector<HTMLButtonElement>("[data-procs-rest]")!;
+    fireEvent.click(toggle);
+    expect(pids()).toEqual([300, 310, 311, 1, DAEMON, 42, 41, 50, 51]);
+  });
+
   it("a machine wsp forks is listed whole, with no threads section and no toggle", async () => {
     act(() => useStore.setState({ sessions: { [WS]: [session("th_docs", "the docs agent", 100)] } }));
     render(<ProcessesSurface workspaceId={WS} />);

@@ -2,12 +2,12 @@
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, posix } from "node:path";
 import { CARRIED_DIR_NAMES } from "@wsp/catalog";
 import { INLINE_EXEC_MS, LOCAL_MACHINE_ID } from "@wsp/engine";
 import type { ProjectView, Caller } from "@wsp/protocol";
 import { threadWord, scopeOf } from "@wsp/protocol";
-import { hereDaemonBehindLine, homeShortened, DAEMON_VERSION, folderName, NAME_A_PROJECT_LINE, BRANCH_OR_CWD_LINE, notOnThisComputerLine, cwdOutsideLine, noBranchesLine, notMadeWorktreeLine, OLD_COPY_WORDS, ProjectCopy, WORKTREE_BUSY_LINE, worktreeChangedLine, keptChangedLine, KEPT_RUNNING_LINE, KEPT_ABANDONED_LINE, type WorktreeFolder, type WorktreeSettled, copiesFolder, kindForComputer, shellLine } from "@wsp/protocol";
+import { hereDaemonBehindLine, homeShortened, DAEMON_VERSION, folderName, NAME_A_PROJECT_LINE, BRANCH_OR_CWD_LINE, notOnThisComputerLine, cwdOutsideLine, noBranchesLine, notMadeWorktreeLine, OLD_COPY_WORDS, ProjectCopy, WORKTREE_BUSY_LINE, worktreeChangedLine, keptChangedLine, KEPT_RUNNING_LINE, KEPT_ABANDONED_LINE, type WorktreeFolder, type WorktreeSettled, childOnAnotherComputerLine, copiesFolder, guestNamesWorkspaceLine, placeBranchLine, refusalLine, runsInFolder, shellLine, workspaceLands } from "@wsp/protocol";
 import { takenNameAfter } from "@wsp/protocol";
 import type { StartPicksAsked } from "../types/harness.js";
 import { type WorkspaceRecord, type LiveWorkspace, CLONE_MS, folderNamed, NO_COPIER_HERE, lastLineOf } from "../types/wiring.js";
@@ -15,18 +15,23 @@ import type { RuntimeContext, FoldersArea } from "../context.js";
 
 export function foldersArea(ctx: RuntimeContext): FoldersArea {
   const { local, bus, clock, live, projectsHeld, threadRecords, sessions } = ctx;
-  /** A folder's record, written once: the machine is this computer, running, with auto-nap off, since a machine wsp
-   * does not run neither naps nor wakes. Its name is the project's, or the project's with the branch for a worktree,
-   * and nothing shows it to a person. */
+  /** A folder's record, written once: the machine is the computer holding the project, this one or one the person
+   * joined, running, with auto-nap off, since a machine wsp does not run neither naps nor wakes. Its name is the
+   * project's, or the project's with the branch for a worktree, and nothing shows it to a person. */
   const recordFolder = async (project: ProjectView, worktree?: WorktreeFolder, parent?: string): Promise<LiveWorkspace> => {
-    const mine = ctx.backendOfKind("local");
-    const machine = await mine.get(LOCAL_MACHINE_ID);
+    const kind = ctx.kindOf(project.computer);
+    const lands = workspaceLands(project.computer, undefined);
+    const place = lands.at === "place" ? lands.place : undefined;
+    await ctx.moduleOf(kind).admitFolder?.({ kind, name: project.name, ...(place !== undefined ? { place } : {}) });
+    const mine = ctx.backendOfKind(kind, place);
+    const machine = await mine.get(place ?? LOCAL_MACHINE_ID);
     const id = `ws_${randomBytes(4).toString("hex")}`;
     const taken = new Set([...live.values()].map(e => e.record.name));
     const record: WorkspaceRecord = {
       id,
       name: takenNameAfter(worktree?.branch === undefined ? project.name : `${project.name}@${worktree.branch}`, taken),
-      kind: "local",
+      kind,
+      ...(place !== undefined ? { place } : {}),
       machineId: machine.id,
       phase: "running",
       golden: "",
@@ -91,12 +96,29 @@ export function foldersArea(ctx: RuntimeContext): FoldersArea {
   const folderFor = async (o: { project?: string; branch?: string; cwd?: string; picks?: StartPicksAsked }, origin: Caller | undefined): Promise<{ entry: LiveWorkspace; cwd?: string }> => {
     const scope = scopeOf(origin);
     const asking = scope === undefined ? undefined : live.get(scope.workspaceId);
+    // A thread on a machine wsp forked has no folder to run beside: it names the workspace it means.
+    if (o.project === undefined && asking !== undefined && !runsInFolder(asking.record.kind)) throw Object.assign(new Error(refusalLine(guestNamesWorkspaceLine, "Name the workspace on the line.")), { kind: "usage" });
+    // A thread on a computer the person joined starts threads on that computer alone, said before the project rule
+    // reads the word as absent. A word its own project answers is its own, whatever another computer's is called.
+    const own = asking === undefined || asking.record.place === undefined ? undefined : ctx.projectHeld(asking.record.project);
+    const from = own?.computer;
+    const elsewhere = own === undefined || o.project === undefined || o.project === own.id || o.project === own.name ? undefined : [...projectsHeld.values()].find(p => (p.id === o.project || p.name === o.project) && p.computer !== from);
+    if (from !== undefined && elsewhere !== undefined) throw Object.assign(new Error(childOnAnotherComputerLine(ctx.placeName(from), ctx.placeName(elsewhere.computer))), { kind: "usage" });
     const project = o.project !== undefined ? await ctx.projectsDoor.resolve(o.project, origin) : asking !== undefined ? ctx.projectHeld(asking.record.project) : undefined;
     if (project === undefined) throw Object.assign(new Error(NAME_A_PROJECT_LINE), { kind: "usage" });
-    if (!copiesFolder(kindForComputer(project.computer))) throw Object.assign(new Error(notOnThisComputerLine(project.name)), { kind: "usage" });
+    const kind = ctx.kindOf(project.computer);
+    if (!runsInFolder(kind)) throw Object.assign(new Error(notOnThisComputerLine(project.name)), { kind: "usage" });
     if (o.picks !== undefined) await ctx.picksHold(project, o.picks);
-    const beside = asking !== undefined && copiesFolder(asking.record.kind) && asking.record.project === project.id ? asking : undefined;
+    const beside = asking !== undefined && runsInFolder(asking.record.kind) && asking.record.project === project.id ? asking : undefined;
     if (o.branch !== undefined && o.cwd !== undefined) throw Object.assign(new Error(BRANCH_OR_CWD_LINE), { kind: "usage" });
+    // A folder on a computer the person joined runs in the project folder or a folder inside it: its worktrees are
+    // read and made by this computer's own git and copier, which reach no other.
+    if (!copiesFolder(kind)) {
+      if (o.branch !== undefined) throw Object.assign(new Error(placeBranchLine(ctx.placeName(project.computer))), { kind: "usage" });
+      const cwd = o.cwd === undefined ? undefined : posix.normalize(o.cwd);
+      if (cwd !== undefined && (!posix.isAbsolute(cwd) || !under(cwd, project.path))) throw Object.assign(new Error(cwdOutsideLine(cwd, project.name)), { kind: "usage" });
+      return { entry: beside !== undefined && beside.record.worktree === undefined ? beside : await projectFolder(project), ...(cwd !== undefined ? { cwd } : {}) };
+    }
     const top = project.git?.top;
     if (o.cwd !== undefined) {
       const cwd = folderNamed(o.cwd);

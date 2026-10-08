@@ -8,6 +8,7 @@ import { newPlaceKeyPair, type PlaceKeyPair, type PlaceLeaver, type PlaceUpdater
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
 import type { AgentsActs, AgentsReader, ServerIcons, ServersActs, SkillsActs } from "../src/agents-read.js";
 import { memoryStore, type Store } from "../src/store.js";
+import type { Clock } from "../src/clock.js";
 import { stubBackend } from "./stub-backend.js";
 import { WsClient } from "./ws-client.js";
 import { joinAt, relinkAt, wiring } from "./place-join.js";
@@ -27,7 +28,7 @@ afterEach(async () => {
   ctx.runtime = undefined;
 });
 
-export async function serving(opts: { provider?: { id: string; rateUsdPerHour: number }; store?: Store; relinkWaitMs?: number; update?: PlaceUpdater; updateWaitMs?: number; leave?: PlaceLeaver; vault?: Record<string, string>; folders?: HostFolders; agentsReader?: AgentsReader; agentsActs?: AgentsActs; skillsActs?: SkillsActs; serversActs?: ServersActs; serverIcons?: ServerIcons; adapters?: Record<string, HarnessAdapterFactory>; runOver?: PlaceWiring["runOver"]; back?: PlaceWiring["back"]; dialWaitMs?: number } = {}, serve: { log?: (line: string) => void } = {}): Promise<{ hostKey: PlaceKeyPair; store: Store }> {
+export async function serving(opts: { provider?: { id: string; rateUsdPerHour: number }; store?: Store; relinkWaitMs?: number; update?: PlaceUpdater; updateWaitMs?: number; leave?: PlaceLeaver; vault?: Record<string, string>; folders?: HostFolders; agentsReader?: AgentsReader; agentsActs?: AgentsActs; skillsActs?: SkillsActs; serversActs?: ServersActs; serverIcons?: ServerIcons; adapters?: Record<string, HarnessAdapterFactory>; runOver?: PlaceWiring["runOver"]; back?: PlaceWiring["back"]; dialWaitMs?: number; clock?: Clock } = {}, serve: { log?: (line: string) => void } = {}): Promise<{ hostKey: PlaceKeyPair; store: Store }> {
   const store = opts.store ?? memoryStore();
   const hostKey = newPlaceKeyPair();
   ctx.runtime = createRuntime({
@@ -43,6 +44,7 @@ export async function serving(opts: { provider?: { id: string; rateUsdPerHour: n
     placeLinks: { ...wiring(hostKey, opts.provider, opts.update), ...(opts.leave === undefined ? {} : { leave: opts.leave }), ...(opts.runOver === undefined ? {} : { runOver: opts.runOver }), ...(opts.back === undefined ? {} : { back: opts.back }) },
     ...(opts.relinkWaitMs !== undefined ? { placeRelinkWaitMs: opts.relinkWaitMs } : {}),
     ...(opts.dialWaitMs !== undefined ? { placeDialWaitMs: opts.dialWaitMs } : {}),
+    ...(opts.clock !== undefined ? { clock: opts.clock } : {}),
     ...(opts.updateWaitMs !== undefined ? { placeUpdateWaitMs: opts.updateWaitMs } : {}),
   });
   ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices, ...(opts.folders === undefined ? {} : { folders: opts.folders }), ...(serve.log === undefined ? {} : { log: serve.log }) });
@@ -207,6 +209,12 @@ export const SEALED = {
  * so the work of an add there runs in a copy of its own directories. */
 export const HOLDS_PROJECTS = { ...KEEPS_NO_IMAGE, projects: "/wsp/projects" };
 
+/** The login a computer joined as root reports, the one login a thread in a folder there runs as. */
+export const ROOT_LOGIN = { HOME: "/root", USER: "root", PATH: "/usr/bin" };
+
+/** What a computer joined as root answers a command on itself with: who its lines run as, and nothing else. */
+export const asRoot = (cmd: string): { exitCode: number; stdout: string; stderr: string } => ({ exitCode: 0, stdout: cmd.includes("command -v runuser") ? "Linux\n0\nroot\nroot\n1\n/root\n/usr/bin\n" : "", stderr: "" });
+
 export function forks(
   client: WsClient,
   capacity: {
@@ -332,8 +340,12 @@ export function forks(
       case "ssh.start":
         seen.frames.push(frame);
         return say({ port: 40022, hostKey: "ssh-ed25519 AAAAC3Nz the-fork" });
-      case "exec":
-        return say({ exitCode: 0, stdout: "", stderr: "", truncated: false });
+      // A command on the computer itself: the claim an add makes in the login's home takes the name it asks for, and
+      // every other command answers as the case says.
+      case "exec": {
+        const claim = /mkdir '([^']+)'"\$n"/.exec(String(frame["cmd"]));
+        return say({ ...(claim === null ? exec(String(frame["cmd"])) : { exitCode: 0, stdout: `${claim[1]}\n`, stderr: "" }), truncated: false });
+      }
       // The workspace's own git, answered by this computer's daemon for the workspace the frame names, which is
       // what a workspace with no daemon of its own is served by.
       case "git.status":

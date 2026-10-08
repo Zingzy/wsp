@@ -37,6 +37,11 @@ pub struct ProcEntry {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub pty: Option<String>,
+    /// The cgroup v2 path the process stands in, as /proc/[pid]/cgroup names it: what tells one thread's processes
+    /// on a computer from another's, a server it detached included. Linux only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub cgroup: Option<String>,
 }
 
 /// Every frame the daemon pushes without being asked, keyed on `type` as the zod union is.
@@ -69,6 +74,10 @@ pub enum DaemonEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[ts(optional)]
         loopback: Option<bool>,
+        /// The watch this is for, where the socket named one: one socket carries a watch per folder there.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        watch: Option<String>,
     },
     #[serde(rename = "port.close")]
     PortClose {
@@ -94,6 +103,10 @@ pub enum DaemonEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[ts(optional)]
         at: Option<String>,
+        /// The watch this is for, as on port.open.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        watch: Option<String>,
     },
     #[serde(rename = "inbox.file")]
     InboxFile { path: String, bytes: u64 },
@@ -230,6 +243,7 @@ mod tests {
             rss: 0,
             started_at: 0,
             pty: None,
+            cgroup: None,
         };
         assert_eq!(serde_json::to_value(&proc_entry).unwrap()["cpu"], json!(0.0));
         let fine =

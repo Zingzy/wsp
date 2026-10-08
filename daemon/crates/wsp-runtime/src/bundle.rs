@@ -1066,7 +1066,7 @@ fn write_named(dir: BorrowedFd<'_>, name: &str, landed: &Path, bytes: &[u8], mod
 
 /// Whether what a descriptor holds is a regular file, and not a fifo, a socket or a device a workspace put there.
 fn regular(fd: &OwnedFd) -> nix::Result<bool> {
-    Ok(nix::sys::stat::SFlag::from_bits_truncate(fstat(fd)?.st_mode) & nix::sys::stat::SFlag::S_IFMT == nix::sys::stat::SFlag::S_IFREG)
+    Ok(crate::file_type::is_regular(fstat(fd)?.st_mode))
 }
 
 /// Where the login shell inside a workspace reads its PATH from: a file of the workspace's own under the /etc
@@ -1266,11 +1266,10 @@ pub fn take_off_point(point: &str) -> Result<Option<String>, Error> {
         Err(Errno::ENOENT) => return Ok(None),
         Err(e) => return Err(Error { path: walked.join(name), source: e.into() }),
     };
-    let kind = nix::sys::stat::SFlag::from_bits_truncate(held.st_mode) & nix::sys::stat::SFlag::S_IFMT;
-    if kind == nix::sys::stat::SFlag::S_IFLNK {
+    if crate::file_type::is_link(held.st_mode) {
         return Ok(stands(&walked.join(name).to_string_lossy()));
     }
-    if kind == nix::sys::stat::SFlag::S_IFREG && held.st_size == 0 {
+    if crate::file_type::is_regular(held.st_mode) && held.st_size == 0 {
         nix::unistd::unlinkat(&dir, name, nix::unistd::UnlinkatFlags::NoRemoveDir).map_err(nix_at(&walked.join(name)))?;
     }
     Ok(None)

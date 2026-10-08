@@ -7,7 +7,9 @@ import { useStore } from "../protocol/store.js";
 
 /** Ask again with this much of the hour left. The runtime hands the cached
  * route back while more than ten minutes remain (its refresh margin), so
- * asking with nine is what makes it remint. */
+ * asking with nine is what makes it remint. A route that stands only while the
+ * pane keeps asking, a port forwarded from a computer the person joined, is
+ * asked again halfway through instead. */
 export const REACH_REFRESH_WITH_MS_LEFT = 9 * 60_000;
 
 /** Never re-ask sooner than this: expiresAt is the host's clock and Date.now()
@@ -36,7 +38,8 @@ export function usePortReach(workspaceId: string, port: number | null, remints =
         reach => {
           if (gone) return;
           setMinted({ workspaceId, port, reach });
-          timer = setTimeout(ask, Math.max(REACH_REASK_FLOOR_MS, reach.expiresAt - REACH_REFRESH_WITH_MS_LEFT - Date.now()));
+          const left = reach.expiresAt - Date.now();
+          timer = setTimeout(ask, Math.max(REACH_REASK_FLOOR_MS, left - Math.min(REACH_REFRESH_WITH_MS_LEFT, left / 2)));
         },
         (e: unknown) => {
           if (!gone) setMinted({ workspaceId, port, error: e instanceof Error ? e.message : String(e) });

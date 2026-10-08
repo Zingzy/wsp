@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { homedir } from "node:os";
 import { dirname, join, posix, resolve as resolvePathOn } from "node:path";
-import { CATALOG_AGENTS, DEFAULT_AGENT, installsOnFirstRun } from "@wsp/catalog";
-import { INLINE_EXEC_MS, harnessExec, landBytes, agentHomes } from "@wsp/engine";
+import { CATALOG_AGENTS, DEFAULT_AGENT, LAUNCH_SERVER_ROADS, installsOnFirstRun, serverValuesOf } from "@wsp/catalog";
+import { INLINE_EXEC_MS, harnessExec, landBytes, agentHomes, parseConfigs, readConfigsCmd, readReason, readWhole } from "@wsp/engine";
 import {
   type AttachmentRoad, type HarnessCatalog, type Preferences, type SessionView, type TitleSource, type Attachment,
   type TurnImage, threadKeyOf, isLocalWorkspace, catalogRefused, imagePathIn, noAdapterLine, shellQuote,
@@ -14,13 +14,13 @@ import type { TurnWaiting } from "../machine-exec.js";
 import { keyOf, realFolderHere, realFolderScript } from "../agent-setup.js";
 import { providerSaid } from "../status.js";
 import { catalogFromProbe, harnessCatalog, smallestModel } from "../harness-catalog.js";
-import type { HarnessAdapter } from "../types/harness.js";
+import type { HarnessAdapter, HarnessStartOptions } from "../types/harness.js";
 import {
   CATALOG_TTL_MS, CATALOG_PROBE_TIMEOUT_MS, FIRST_RUN_READ_MS, SESSION_TITLE_TTL_MS, SESSION_TITLE_TIMEOUT_MS, SESSION_TITLE_REFRESH_MAX,
   TITLE_MAKE_TIMEOUT_MS,
 } from "../types/events.js";
 import type { LiveWorkspace } from "../types/wiring.js";
-import { noTitleLogLine, noMadeTitleLogLine, noNameWriteLogLine } from "../types/internal.js";
+import { noTitleLogLine, noMadeTitleLogLine, noNameWriteLogLine, serverValuesCutLine, serverValuesUnreadLine } from "../types/internal.js";
 import type { RuntimeContext, AgentsArea } from "../context.js";
 
 export function agentsArea(ctx: RuntimeContext): AgentsArea {
@@ -433,6 +433,54 @@ export function agentsArea(ctx: RuntimeContext): AgentsArea {
     });
   };
 
+  /** Where one agent keeps its store on this workspace: the config folder the person set for it on that computer,
+   * else the kind's own. */
+  const agentHome = (entry: LiveWorkspace, id: string): string => {
+    const place = setupPlace(entry);
+    return (place === undefined ? undefined : setups.get(place, id)?.configDir) ?? ctx.moduleOf(entry.record.kind).home(entry, id);
+  };
+  /** The environment a thread's processes start under where it runs, before what one turn adds: a turn of `harness`,
+   * or with none a process that is no agent's, the terminal opened in a thread on a computer the person joined. One
+   * reading for both, so a login one of them reads is the login the other reads. The variables the person set for an
+   * agent on that computer go on top: a turn's own agent's, and every agent's for a terminal, where any may be run. */
+  const threadEnv = (entry: LiveWorkspace, harness?: string): Readonly<Record<string, string>> => {
+    const place = setupPlace(entry);
+    const set = place === undefined ? [] : (harness === undefined ? CATALOG_AGENTS.map(a => a.id) : [harness]).map(id => setups.launchOf(place, id).env);
+    return Object.assign({ ...ctx.moduleOf(entry.record.kind).env(entry, harness, id => agentHome(entry, id)) }, ...set) as Record<string, string>;
+  };
+
+  /** The folder each agent's store variable names for a thread on a computer you joined, by agent id, read as
+   * threadEnv reads it for a thread there: what the person set for that variable, else the config folder they kept,
+   * else the kind's own. What an act on that computer's page writes where its threads' agents read. */
+  const placeStores = (place: string, home: string): Readonly<Record<string, string>> =>
+    Object.fromEntries(
+      CATALOG_AGENTS.flatMap(a => {
+        const variable = a.stateHomeEnv;
+        return variable === undefined ? [] : [[a.id, setups.launchOf(place, a.id).env[variable] ?? setups.get(place, a.id)?.configDir ?? ctx.placeAgentHome(place, home, a.id)]];
+      }),
+    );
+
+  /** The vault's values for the agent's own MCP servers, for one launch in `folder` on a kind that hands them in the
+   * launch: its config there read as the turn's login, and each server that reads a value the vault holds filled for
+   * that agent's CLI. Nothing on any other kind, for an agent whose CLI takes no servers at launch, or where the
+   * vault holds no server's value. */
+  const serverValuesFor = async (entry: LiveWorkspace, harness: string, folder: string): Promise<HarnessStartOptions["serverValues"]> => {
+    const road = LAUNCH_SERVER_ROADS[harness];
+    const values = serverValuesOf(opts.vault?.() ?? {});
+    if (road === undefined || ctx.moduleOf(entry.record.kind).serverValues !== "launch" || Object.keys(values).length === 0) return undefined;
+    const env = threadEnv(entry, harness);
+    const home = env["HOME"] ?? "~";
+    const store = CATALOG_AGENTS.find(a => a.id === harness)?.stateHomeEnv;
+    const scopes = [{ files: [road.user(store === undefined ? undefined : env[store], home)] }, { files: [posix.join(folder, road.project)] }];
+    const res = await entry.machine.exec(readConfigsCmd(scopes), { timeoutMs: INLINE_EXEC_MS });
+    const agent = CATALOG_AGENTS.find(a => a.id === harness)?.name ?? harness;
+    if (res.exitCode === 0 && !readWhole(res.stdout)) throw new Error(serverValuesCutLine(agent, scopes.flatMap(scope => scope.files)));
+    const read = res.exitCode === 0 ? parseConfigs(res.stdout, scopes) : undefined;
+    if (read === undefined) throw new Error(serverValuesUnreadLine(agent, readReason(res, INLINE_EXEC_MS / 1000)));
+    const filled = await road.fill({ ...(read[0] !== undefined ? { user: read[0].text } : {}), ...(read[1] !== undefined ? { project: read[1].text } : {}), folder }, values);
+    return Object.values(filled).every(v => Object.keys(v ?? {}).length === 0) ? undefined : filled;
+  };
+
   /** The adapter for a harness on this workspace's current machine; unnamed means the runtime's default. `turnEnv` is
    * what only a turn's own launch carries, laid over the machine's login environment: every kind answers with that
    * environment through its one module, so a variable put on here reaches a launch on every kind of machine and is
@@ -440,8 +488,10 @@ export function agentsArea(ctx: RuntimeContext): AgentsArea {
    * process, a person's answer to a prompt or a command it started in the background, which its stream's idle clock
    * reads; absent on every road that is not a turn. It is handed beside the limits and never as one; the wall the
    * factory gets is the turn limit of the place the workspace stands on, read at each launch, where the door has one. `servers` is the values the MCP servers'
-   * definitions read by name, which only a turn's agent starts servers with, under the machine's own environment. */
-  const adapterFor = (entry: LiveWorkspace, named?: string, turnEnv?: Readonly<Record<string, string>>, waiting?: TurnWaiting, servers: Readonly<Record<string, string>> = {}): { harness: string; adapter: HarnessAdapter } => {
+   * definitions read by name, which only a turn's agent starts servers with: they ride its environment only on a kind
+   * whose machines name each by a variable and get it no other way. `thread` is the thread a turn's launch is for,
+   * which a kind that groups a thread's processes groups it under. */
+  const adapterFor = (entry: LiveWorkspace, named?: string, turnEnv?: Readonly<Record<string, string>>, waiting?: TurnWaiting, servers: Readonly<Record<string, string>> = {}, thread?: string): { harness: string; adapter: HarnessAdapter } => {
     const harness = named ?? DEFAULT_AGENT.id;
     const factory = adapters[harness];
     if (!factory) throw new Error(noAdapterLine(harness, Object.keys(adapters)));
@@ -449,15 +499,16 @@ export function agentsArea(ctx: RuntimeContext): AgentsArea {
     const vault = opts.vault?.() ?? {};
     const place = setupPlace(entry);
     const setup = place === undefined ? undefined : setups.launchOf(place, harness);
+    const carried = kind.serverValues === "environment" ? servers : {};
     return {
       harness,
       adapter: factory({
         machine: entry.machine,
         workspaceId: entry.record.id,
-        execStream: ctx.execFactoryFor(entry, ctx.turnLimitOf(entry.record), waiting),
-        home: id => (place === undefined ? undefined : setups.get(place, id)?.configDir) ?? kind.home(entry, id),
+        execStream: ctx.execFactoryFor(entry, thread !== undefined && kind.endThread !== undefined ? { ...ctx.turnLimitOf(entry.record), thread } : ctx.turnLimitOf(entry.record), waiting),
+        home: id => agentHome(entry, id),
         // The person's variables over the computer's own and under the turn's, which only wsp sets.
-        env: { ...servers, ...kind.env(entry, harness), ...setup?.env, ...turnEnv },
+        env: { ...carried, ...threadEnv(entry, harness), ...turnEnv },
         ...(setup?.launch !== undefined ? { launch: setup.launch } : {}),
         ...((): { projectKey?: string } => {
           const key = kind.memoryKey(entry, harness);
@@ -472,6 +523,6 @@ export function agentsArea(ctx: RuntimeContext): AgentsArea {
   return {
     catalogOn, firstRunHere, refreshTitle, sourceOf, rowsOn, carriedTitle, nameInHarness, makeTitle, agentAsks, holdAsk, titleRows, setupPlace, agentOff,
     agentLabel, configFolderOn, setupRefusals, setupRefusal, homesHere, confineSetup, launchAdapterFor, defaultAgentOf,
-    defaultsOn, namedMode, landImages, landFiles, dropThreadFiles, dropImages, adapterFor,
+    defaultsOn, namedMode, landImages, landFiles, dropThreadFiles, dropImages, threadEnv, placeStores, serverValuesFor, adapterFor,
   };
 }
