@@ -17,6 +17,7 @@ import { WorkingTimer } from "../../src/components/chat/timeline/working";
 import { Button } from "../../src/components/ui/button";
 import { cn } from "../../src/lib/utils";
 import { useSidebarProjects, useStore } from "../../src/protocol/store";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../../src/components/ui/tooltip";
 import { STEP_BODY, STEP_HEAD, StepFoot } from "../../src/settings/add/StepDialog";
 import { StepRow } from "../../src/settings/add/StepRow";
 import type { StepLine } from "../../src/settings/add/setup";
@@ -34,15 +35,18 @@ export const DOCK_WORDS = {
   asked: "Asked",
   said: "Said",
   back: "Back to lead",
+  backTo: (title: string) => `Back to ${title}`,
+  workedFor: (ran: string | null) => (ran === null ? "Done" : `Worked for ${ran}`),
+  failedWhy: (why: string) => (why === "" ? "Failed" : `Failed: ${why}`),
+  stoppedAfter: (ran: string | null) => (ran === null ? "Stopped" : `Stopped after ${ran}`),
   working: "Working",
   workingFor: "Working for",
-  workedFor: "Worked for",
   done: "Done",
   stopped: "Stopped",
   failed: "Failed",
   tasks: "Tasks",
-  tasksDone: (done: number, all: number) => `${done} of ${all} done`,
-  write: "Write a message instead",
+  tasksDone: (done: number, all: number) => `${done}/${all}`,
+  write: "Write a message",
 } as const;
 
 /** The frame: the composer's shell, the head, the body's cards and the foot. */
@@ -85,11 +89,14 @@ export function Dock({ k, mark, title, aside, note, foot, acts, children }: { k:
 
 /** A subagent's page bar, after T3 Code's ProviderSubagentBar, on our composer's own grid: one row inside the
  * composer's shell, host and surface, at its height and padding, since nobody can write to a subagent and none of the
- * composer's strips belong to it. Where the composer's words stand, its status in the transcript's own words in the
- * placeholder's type and ink, the timer written straight to the page once a second by the timeline's own WorkingTimer
- * so a running subagent never draws the chat again; where the model picker stands, the agent's mark in its colour and
- * the model in the picker's own box, a label and not a menu; where the send button stands, the way back to its lead.
- * Stop is on its row in the tree, on hover, not here. A screen reader hears the state once each time it changes. */
+ * composer's strips belong to it. Where the composer's words stand, its state in the placeholder's type and ink: what
+ * it is doing while it runs ("Working for", the timeline's own WorkingTimer, written straight to the page once a
+ * second so a running subagent never draws the chat again), and once it ended how long it worked (its result is its
+ * last message, right above), why it failed, or when it was stopped, clipped with the whole of it on hover. Where the model picker stands, the agent's
+ * mark in its colour and the model in the picker's own box, a label and not a menu. Where the send button stands, the
+ * way back to its lead as the language's inline act, the outline xs keycap with its glyph. Under 640 px the model is
+ * its mark and the way back its arrow, their words on hover. Stop is on its row in the tree, on hover. A screen
+ * reader hears the state once each time it changes. */
 export function SubagentBar({ subagent }: { subagent: SidebarThreadSnapshot }) {
   const facts = CHILD_FACTS[subagent.threadId ?? subagent.id] ?? {};
   const fleet = useSidebarProjects();
@@ -97,9 +104,30 @@ export function SubagentBar({ subagent }: { subagent: SidebarThreadSnapshot }) {
   const running = subagent.status === "running";
   const ran = subagent.startedAt !== null && subagent.endedAt !== null ? fmtDuration(Date.parse(subagent.endedAt) - Date.parse(subagent.startedAt)) : null;
   const word = running ? DOCK_WORDS.working : subagent.status === "failed" ? DOCK_WORDS.failed : subagent.status === "interrupted" ? DOCK_WORDS.stopped : DOCK_WORDS.done;
+  const ended =
+    subagent.status === "failed"
+      ? DOCK_WORDS.failedWhy(facts.why ?? "")
+      : subagent.status === "interrupted"
+        ? DOCK_WORDS.stoppedAfter(ran)
+        : DOCK_WORDS.workedFor(ran);
+  const model = facts.model ?? agentName(subagent.harness);
   const back = (): void => {
     if (lead?.threadId != null) useStore.getState().select(lead.workspaceId, lead.threadId);
   };
+  const state = (
+    <span
+      data-subagent-state
+      className="min-w-0 truncate leading-relaxed text-placeholder tabular-nums [font-family:var(--font-composer,var(--font-sans))] [font-size:var(--font-size-prompt,0.875rem)]"
+    >
+      {running ? (
+        <>
+          {DOCK_WORDS.workingFor} <WorkingTimer createdAt={subagent.startedAt ?? new Date().toISOString()} />
+        </>
+      ) : (
+        ended
+      )}
+    </span>
+  );
   return (
     <div className="relative w-full px-3 pt-1.5 pb-4 sm:px-5 sm:pt-2 sm:pb-5" data-subagent-composer>
       <ComposerSurface.Shell>
@@ -108,35 +136,39 @@ export function SubagentBar({ subagent }: { subagent: SidebarThreadSnapshot }) {
             <ComposerSurface.Main>
               <div className="overflow-hidden rounded-[20px]">
                 <div data-subagent-bar className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-x-1 py-2 ps-4 pe-2 sm:ps-5">
-                  <span
-                    data-subagent-state
-                    className="min-w-0 truncate leading-relaxed text-placeholder tabular-nums [font-family:var(--font-composer,var(--font-sans))] [font-size:var(--font-size-prompt,0.875rem)]"
-                  >
-                    {running ? (
-                      <>
-                        {DOCK_WORDS.workingFor} <WorkingTimer createdAt={subagent.startedAt ?? new Date().toISOString()} />
-                      </>
-                    ) : word === DOCK_WORDS.done && ran !== null ? (
-                      `${DOCK_WORDS.workedFor} ${ran}`
-                    ) : (
-                      word
-                    )}
-                  </span>
+                  {running ? (
+                    state
+                  ) : (
+                    <Tooltip>
+                      <TooltipTrigger render={<span className="flex min-w-0" />}>{state}</TooltipTrigger>
+                      <TooltipPopup side="top" className="max-w-96 whitespace-normal">
+                        {ended}
+                      </TooltipPopup>
+                    </Tooltip>
+                  )}
                   <span role="status" className="sr-only">
                     {word}
                   </span>
-                  <span data-composer-picker="model" data-subagent-model className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-[var(--control-radius)] px-2 text-[13px] font-normal text-muted-foreground">
-                    <span className="inline-flex text-foreground">
-                      <HarnessMark harness={subagent.harness} label={agentName(subagent.harness)} className="size-4" />
-                    </span>
-                    {facts.model === undefined ? agentName(subagent.harness) : facts.model}
-                  </span>
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={<span data-composer-picker="model" data-subagent-model className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-[var(--control-radius)] px-2 text-[13px] font-normal text-muted-foreground" />}
+                    >
+                      <span className="inline-flex text-foreground">
+                        <HarnessMark harness={subagent.harness} label={agentName(subagent.harness)} className="size-4" />
+                      </span>
+                      <span className="max-sm:hidden">{model}</span>
+                    </TooltipTrigger>
+                    <TooltipPopup side="top">{`${agentName(subagent.harness)}, ${model}`}</TooltipPopup>
+                  </Tooltip>
                   <span className="flex shrink-0 items-center justify-self-end">
                     {lead === undefined ? null : (
-                      <Button type="button" variant="ghost" data-subagent-back onClick={back}>
-                        <ArrowUpLeftIcon aria-hidden />
-                        {DOCK_WORDS.back}
-                      </Button>
+                      <Tooltip>
+                        <TooltipTrigger render={<Button type="button" size="xs" variant="outline" data-subagent-back aria-label={DOCK_WORDS.backTo(lead.title)} onClick={back} />}>
+                          <ArrowUpLeftIcon aria-hidden />
+                          <span className="max-sm:hidden">{DOCK_WORDS.back}</span>
+                        </TooltipTrigger>
+                        <TooltipPopup side="top">{DOCK_WORDS.backTo(lead.title)}</TooltipPopup>
+                      </Tooltip>
                     )}
                   </span>
                 </div>

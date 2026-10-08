@@ -38,7 +38,7 @@ import {
   SquareIcon,
   type LucideIcon,
 } from "lucide-react";
-import { cloneElement, memo, useRef, useState, type MouseEvent, type ReactElement, type ReactNode } from "react";
+import { cloneElement, memo, useEffect, useRef, useState, type MouseEvent, type ReactElement, type ReactNode } from "react";
 import { create } from "zustand";
 import { openContextMenu } from "../../src/actions/contextMenu";
 import { THREAD_WORDS } from "../../src/actions/format";
@@ -68,6 +68,7 @@ import { RowNameInput } from "../../src/sidebar/RowNameInput";
 import type { TileNode } from "../../src/sidebar/threadTree";
 import { computerName, computerOf } from "../../src/sidebar/workspaceRows";
 import { CHILD_FACTS, type ChildFacts } from "./fixtures";
+import { setSubagentPageCheck } from "./mode";
 import { TRANSCRIPT_ITEM, TRANSCRIPT_LIST } from "./rail";
 
 type Thread = SidebarThreadSnapshot;
@@ -382,7 +383,7 @@ function Act({ icon: Icon, label, run }: { icon: LucideIcon; label: string; run:
 
 /** A subagent's card, the tile card's skin: its task, what it was asked, what it said once it ended, its model and
  * how long it ran. The build exports TileCard from ThreadTile and gives it these lines. */
-function SubagentCard({ thread }: { thread: Thread }) {
+function SubagentCard({ thread, kind }: { thread: Thread; kind: StatusKind }) {
   const facts = factsOf(thread);
   const lines = [
     facts.prompt === undefined ? null : `${LEAD_WORDS.asked}: ${facts.prompt}`,
@@ -394,6 +395,7 @@ function SubagentCard({ thread }: { thread: Thread }) {
       <div className="flex min-w-0 flex-col gap-1.5 py-1">
         <p className="font-medium text-foreground">{thread.title}</p>
         <ul className="flex min-w-0 flex-col gap-1 text-muted-foreground">
+          <StatusLine thread={thread} kind={kind} />
           {lines.map(line => (
             <li key={line} className="min-w-0 break-words">
               {line}
@@ -452,7 +454,7 @@ const ChildRow = memo(function ChildRow({ thread, part, place, at, note, byKey, 
     useLeadUi.setState({ shown: key });
     void openContextMenu(event, acts).finally(() => useLeadUi.setState(s => (s.shown === key ? { shown: null } : s)));
   };
-  const kind = part !== "settled" && thread.status === "interrupted" ? STOPPED : undefined;
+  const kind = kindOf(thread, part === "settled", part === "finished");
   const twoLines = twoLinesOf(note, place, sending);
   // The slot's status gives way to the acts while the pointer or the focus is on the row, or its menu is open; a row
   // with no act to take keeps its status.
@@ -489,7 +491,7 @@ const ChildRow = memo(function ChildRow({ thread, part, place, at, note, byKey, 
             <TooltipTrigger delay={CARD_DELAY_MS} render={<span className="flex min-w-0" />}>
               {title}
             </TooltipTrigger>
-            <SubagentCard thread={thread} />
+            <SubagentCard thread={thread} kind={kind} />
           </Tooltip>
         ) : (
           title
@@ -510,11 +512,11 @@ const ChildRow = memo(function ChildRow({ thread, part, place, at, note, byKey, 
         ) : null}
       </span>
       <span className="relative flex shrink-0 items-center">
-        <span className={cn(LINE_SLOT_CLASS, "inline-flex items-center", yields && "group-hover/child:invisible group-focus-within/child:invisible group-data-[acts=shown]/child:invisible")}>
-          <StatusIcon thread={thread} kind={kind ?? kindOf(thread, part === "settled")} tip={!peek} />
+        <span className={cn("inline-flex min-w-4 shrink-0 items-center justify-end text-xs text-muted-foreground", yields && "group-hover/child:invisible group-focus-within/child:invisible group-data-[acts=shown]/child:invisible")}>
+          <StatusIcon thread={thread} kind={kind} tip={!peek} />
         </span>
         {yields ? (
-          <span data-child-acts className="invisible absolute inset-y-0 right-0 flex items-center justify-end gap-1 group-hover/child:visible group-focus-within/child:visible group-data-[acts=shown]/child:visible">
+          <span data-child-acts className="invisible absolute inset-y-0 right-0 flex items-center justify-end gap-1 rounded-[var(--control-radius)] bg-accent ps-2 group-hover/child:visible group-focus-within/child:visible group-data-[acts=shown]/child:visible">
             {acts.slice(0, 2).map(act => (
               <Act key={act.id} icon={act.icon!} label={act.title} run={() => void act.run()} />
             ))}
@@ -556,7 +558,7 @@ function FoldRow({ part, label, count, open: isOpen, onToggle, onContextMenu }: 
 
 /** The shut block's count of the tree, in the status marks' own glyphs and inks, each word on its hover: asks,
  * failed, works, waits; with nothing live, how many finished, in the row's ink. */
-export function TreeSummary({ counts }: { counts: TreeCounts }) {
+export function TreeSummary({ counts, quiet = false }: { counts: TreeCounts; quiet?: boolean }) {
   const marks: Array<{ id: string; n: number; ink: string; glyph: ReactNode; word: string }> = [
     { id: "needs-you", n: counts.needsYou, ink: "text-status-input", glyph: <MessageCircleQuestionIcon aria-hidden className="size-3" />, word: LEAD_WORDS.needsYou(counts.needsYou) },
     { id: "failed", n: counts.failed, ink: "text-status-failed", glyph: <CircleAlertIcon aria-hidden className="size-3" />, word: LEAD_WORDS.failed(counts.failed) },
@@ -568,15 +570,15 @@ export function TreeSummary({ counts }: { counts: TreeCounts }) {
     <span data-tree-summary className="inline-flex items-center gap-3 text-xs tabular-nums">
       {marks.map(mark => (
         <Tooltip key={mark.id}>
-          <TooltipTrigger render={<span data-tree-count={mark.id} className={cn("inline-flex items-center gap-1 font-medium", mark.ink)} />}>
+          <TooltipTrigger render={<span data-tree-count={mark.id} className={cn("inline-flex items-center gap-1", quiet ? "font-normal text-muted-foreground" : cn("font-medium", mark.ink))} />}>
             {mark.id === "working" ? (
               <>
                 {mark.n}
-                {mark.glyph}
+                <span className={cn("inline-flex", mark.ink)}>{mark.glyph}</span>
               </>
             ) : (
               <>
-                {mark.glyph}
+                <span className={cn("inline-flex", mark.ink)}>{mark.glyph}</span>
                 {mark.n}
               </>
             )}
@@ -588,11 +590,17 @@ export function TreeSummary({ counts }: { counts: TreeCounts }) {
   );
 }
 
-/** The status a thread reads as, the registry's, with Stopped for a turn a stop ended once nothing else is news. */
-export function kindOf(thread: Thread, settled = false): StatusKind {
+/** A finished child once seen: the check Done wears, in the row's own ink, so every row of a Finished fold ends in
+ * the same mark whether or not a window has opened it. */
+export const FINISHED: StatusKind = { id: "finished", is: () => false, glyph: CircleCheckIcon, word: "Done", glyphOnly: true };
+
+/** The status a thread reads as, the registry's, with Stopped for a turn a stop ended once nothing else is news, and
+ * in a Finished fold the check for a finished turn already seen. */
+export function kindOf(thread: Thread, settled = false, finished = false): StatusKind {
   if (settled) return RESTING;
   const kind = threadStatusOf(thread);
-  return thread.status === "interrupted" && (kind.id === "resting" || kind.id === "done") ? STOPPED : kind;
+  if (thread.status === "interrupted" && (kind.id === "resting" || kind.id === "done")) return STOPPED;
+  return finished && kind.id === "resting" && thread.status === "completed" ? FINISHED : kind;
 }
 
 /** A status's one word, the hover and the screen reader's: the kind's own, or for a thread at rest how it ended. */
@@ -648,23 +656,24 @@ export function StatusLine({ thread, kind }: { thread: Thread; kind: StatusKind 
   const Glyph = kind.glyph;
   const ink = working ? "text-status-working" : kind.ink;
   return (
-    <li data-tile-card-line="status" className="flex min-w-0 items-center gap-2">
-      <span className={cn("flex w-3 shrink-0 justify-center", ink ?? "text-muted-foreground")}>{working ? <Crab /> : Glyph === undefined ? <CircleCheckIcon aria-hidden className="size-3" /> : <Glyph aria-hidden className="size-3" />}</span>
-      <span className={cn("shrink-0", ink !== undefined && "font-medium", ink ?? "text-foreground")}>{statusWord(thread, kind)}</span>
-      {reason === undefined ? null : <span className="min-w-0 flex-1 truncate">{reason}</span>}
-      <span className="ms-auto shrink-0 tabular-nums">{working ? <WorkingSince since={thread.startedAt} /> : thread.status === "running" ? null : restingAge(thread)}</span>
+    <li data-tile-card-line="status" className="flex min-w-0 flex-col gap-0.5">
+      <span className="flex min-w-0 items-center gap-2">
+        <span className={cn("flex w-3 shrink-0 justify-center", ink ?? "text-muted-foreground")}>{working ? <Crab /> : Glyph === undefined ? <CircleCheckIcon aria-hidden className="size-3" /> : <Glyph aria-hidden className="size-3" />}</span>
+        <span className={cn("shrink-0", ink !== undefined && "font-medium", ink ?? "text-foreground")}>{statusWord(thread, kind)}</span>
+        <span className="ms-auto shrink-0 tabular-nums">{working ? <WorkingSince since={thread.startedAt} /> : thread.status === "running" ? null : restingAge(thread)}</span>
+      </span>
+      {reason === undefined ? null : <span data-status-reason className="line-clamp-3 min-w-0 ps-5 break-words">{reason}</span>}
     </li>
   );
 }
 
-/** What a folded tile says of everything under it, at any depth: each status's icon and how many, most pressing
- * first, in its own ink; with nothing live, how many finished. One line of the tile's first row. */
+/** What a folded tile says of everything under it, at any depth, in its first row: only what needs the person, each
+ * status's icon and how many, asking first, in its own ink. The whole count, working and waiting with it, is on the
+ * tile's card, so the row keeps its computer's name. */
 export function Rollup({ counts }: { counts: TreeCounts }) {
   const marks: Array<{ id: string; n: number; ink: string; glyph: ReactNode }> = [
     { id: "needs-you", n: counts.needsYou, ink: "text-status-input", glyph: <MessageCircleQuestionIcon aria-hidden className="size-3" /> },
     { id: "failed", n: counts.failed, ink: "text-status-failed", glyph: <CircleAlertIcon aria-hidden className="size-3" /> },
-    { id: "working", n: counts.working, ink: "text-status-working", glyph: <Crab /> },
-    { id: "waiting", n: counts.waiting, ink: "text-sidebar-muted-foreground", glyph: <HourglassIcon aria-hidden className="size-3" /> },
   ].filter(mark => mark.n > 0);
   const said = [
     counts.needsYou > 0 ? LEAD_WORDS.needsYou(counts.needsYou) : null,
@@ -672,13 +681,7 @@ export function Rollup({ counts }: { counts: TreeCounts }) {
     counts.working > 0 ? LEAD_WORDS.working(counts.working, counts.working - counts.workingSubagents, counts.workingSubagents) : null,
     counts.waiting > 0 ? LEAD_WORDS.waiting(counts.waiting) : null,
   ].filter(Boolean).join(", ");
-  if (marks.length === 0)
-    return counts.finished === 0 ? null : (
-      <span data-rollup className="inline-flex shrink-0 items-center gap-1 text-sidebar-muted-foreground tabular-nums" aria-label={LEAD_WORDS.allFinished(counts.finished)}>
-        <CircleCheckIcon aria-hidden className="size-3" />
-        {counts.finished}
-      </span>
-    );
+  if (marks.length === 0) return null;
   return (
     <span data-rollup aria-label={said} className="inline-flex shrink-0 items-center gap-2 tabular-nums">
       {marks.map(mark => (
@@ -689,6 +692,18 @@ export function Rollup({ counts }: { counts: TreeCounts }) {
       ))}
     </span>
   );
+}
+
+/** The whole count of a folded tile's tree, for its card: every live status in words. */
+export function rollupWords(counts: TreeCounts): string {
+  return [
+    counts.needsYou > 0 ? LEAD_WORDS.needsYou(counts.needsYou) : null,
+    counts.failed > 0 ? LEAD_WORDS.failed(counts.failed) : null,
+    counts.working > 0 ? LEAD_WORDS.working(counts.working, counts.working - counts.workingSubagents, counts.workingSubagents) : null,
+    counts.waiting > 0 ? LEAD_WORDS.waiting(counts.waiting) : null,
+  ]
+    .filter(Boolean)
+    .join(", ");
 }
 
 /** A thread as the sidebar's fleet holds it, with every thread and subagent under it. */
@@ -730,9 +745,23 @@ export function drawnCount(node: TileNode): number {
 /** Whether the page open is a subagent's: it has no folder, terminal or changes of its own, so the lead's panels and
  * the header's buttons that open them stand hidden while it is open, mounted as they were. */
 export const useSubagentPage = (): boolean => useStore(s => s.selectedThreadId !== null && CHILD_FACTS[s.selectedThreadId]?.subagentOf !== undefined);
+setSubagentPageCheck(() => {
+  const open = useStore.getState().selectedThreadId;
+  return open !== null && CHILD_FACTS[open]?.subagentOf !== undefined;
+});
 
 /** A child where its lead started it, in the lead's transcript: its own row from the Threads block, live, its status
  * moving in place, at the point of the call that started it (a wsp run or fork, or the Agent call of a subagent). */
+export function SpawnTiles({ childKeys }: { childKeys: ReadonlyArray<string> }) {
+  return (
+    <div data-spawn-tiles className="flex min-w-0 flex-col">
+      {childKeys.map(key => (
+        <SpawnTile key={key} childKey={key} />
+      ))}
+    </div>
+  );
+}
+
 export function SpawnTile({ childKey }: { childKey: string }) {
   const fleet = useSidebarProjects();
   const places = usePlaces();
@@ -746,7 +775,7 @@ export function SpawnTile({ childKey }: { childKey: string }) {
   const place = computerName(places, found.runs);
   const leadPlace = lead === undefined ? place : computerName(places, lead.runs);
   return (
-    <div data-spawn-tile={childKey} className="min-w-0 px-1">
+    <div data-spawn-tile={childKey} className="min-w-0">
       <ChildRow thread={found.thread} part={part === "settled" ? "finished" : part} place={place === leadPlace ? "" : place} at={computerOf(places, found.runs)} note={noteOf(found.thread, part === "settled" ? "finished" : part, byKey)} byKey={byKey} subtree={() => [found.thread.id]} />
     </div>
   );
@@ -820,6 +849,21 @@ function TranscriptItem({ node, part, depth, tree, leadPlace, railed }: { node: 
       </li>
     </>
   );
+}
+
+/** The lead's tree without the block's head, for the Threads bar: the bar's own head names it and its foot holds
+ * Settle. */
+export function ThreadsTree({ lead, leadPlace, nodes, byKey }: Omit<TranscriptProps, "in" | "className">) {
+  const settleMs = useSettleMs();
+  const tree: Tree<TranscriptNode> = { threadOf: n => n.thread, kidsOf: n => n.children, byKey, nowMs: Date.now(), settleMs };
+  return <TranscriptLevel parent={keyOf(lead)} nodes={nodes} depth={1} tree={tree} leadPlace={leadPlace} top />;
+}
+
+/** What Settle finished takes under a lead, for the Threads bar's foot. */
+export function useSettleFinished(leadKey: string): ResolvedAction {
+  const under = useSubtree(leadKey);
+  const title = useSidebarProjects().flatMap(p => p.threads).find(t => keyOf(t) === leadKey)?.title ?? "";
+  return settleFinished(title, finishedKeys(under.nodes, under.tree));
 }
 
 function TranscriptThreads({ lead, leadPlace, nodes, byKey, className }: TranscriptProps) {
@@ -915,7 +959,7 @@ function SubagentSidebarRow({ thread, part, depth, tree }: { thread: Thread; par
               data-row-id={threadRowId(thread.id)}
               data-depth={depth}
               data-subagent
-              className={cn(ONE_LINE_ROW_CLASS, "group/tile")}
+              className={cn(ONE_LINE_ROW_CLASS, "group/tile gap-1.5")}
               onClick={() => open(thread)}
               {...(acts.length > 0 ? { onContextMenu: (event: MouseEvent<HTMLElement>) => void openContextMenu(event, acts) } : {})}
             />
@@ -925,7 +969,7 @@ function SubagentSidebarRow({ thread, part, depth, tree }: { thread: Thread; par
           <span className={cn("min-w-0 flex-1 truncate", active ? "font-medium text-sidebar-foreground" : "text-sidebar-muted-foreground")}>{thread.title}</span>
           <span className={cn("relative flex shrink-0 items-center text-xs", !working && "text-sidebar-muted-foreground")}>
             <span className={cn("flex", working && "group-hover/tile:invisible")}>
-              <ThreadStatus thread={thread} age={restingAge(thread)} crab={working} />
+              <StatusIcon thread={thread} kind={kindOf(thread, part === "settled", part === "finished")} tip={false} />
             </span>
             {working ? (
               // A subagent's one act, on hover where its status stood, as T3 Code puts Stop on a subagent's row: it
@@ -947,7 +991,7 @@ function SubagentSidebarRow({ thread, part, depth, tree }: { thread: Thread; par
             ) : null}
           </span>
         </TooltipTrigger>
-        <SubagentCard thread={thread} />
+        <SubagentCard thread={thread} kind={kindOf(thread, part === "settled", part === "finished")} />
       </Tooltip>
     </li>
   );
@@ -966,6 +1010,11 @@ function SidebarTree({ lead, depth, nodes, tile }: Omit<SidebarProps, "in">) {
   const parts = childParts(nodes, tree);
   const key = foldKey("sidebar", lead, "finished");
   const finishedOpen = useLeadUi(s => s.open[key] ?? false);
+  // The page open is a finished child of this tile's: its fold opens so the row it stands for is marked.
+  const holdsOpen = useStore(s => s.selectedThreadId !== null && parts.finished.some(node => node.thread.thread !== null && keyOf(node.thread.thread) === s.selectedThreadId));
+  useEffect(() => {
+    if (holdsOpen && !finishedOpen) useLeadUi.setState(st => ({ open: { ...st.open, [key]: true } }));
+  }, [holdsOpen, finishedOpen, key]);
   const leadName = byKey.get(lead)?.title ?? fleet.flatMap(p => p.threads).find(t => t.id === lead)?.title ?? "";
   const settleAll = settleFinished(leadName, finishedKeys(nodes, tree));
   const row = (node: TileNode, part: ChildPart, slim: boolean, at: number) => {
@@ -978,7 +1027,7 @@ function SidebarTree({ lead, depth, nodes, tile }: Omit<SidebarProps, "in">) {
       {parts.live.map(node => row(node, "live", false, depth))}
       {parts.finished.length > 0 ? (
         <li data-child-fold="finished" data-slim className={RAIL_ITEM_CLASS}>
-          <SidebarMenuButton size="sm" aria-expanded={finishedOpen} data-sidebar-row data-row-id={`fold:${lead}`} data-depth={depth} className={ONE_LINE_ROW_CLASS} onClick={() => toggleFold(key)} onContextMenu={event => void openContextMenu(event, [settleAll])}>
+          <SidebarMenuButton size="sm" aria-expanded={finishedOpen} data-sidebar-row data-row-id={`fold:${lead}`} data-depth={depth} className={cn(ONE_LINE_ROW_CLASS, "gap-1.5")} onClick={() => toggleFold(key)} onContextMenu={event => void openContextMenu(event, [settleAll])}>
             <CircleCheckIcon aria-hidden className="size-3 shrink-0 text-sidebar-muted-foreground" />
             <span className="min-w-0 flex-1 truncate text-sidebar-muted-foreground">{LEAD_WORDS.finished}</span>
             <span className={cn(ROW_META_CLASS, "shrink-0")}>{parts.finished.length}</span>
@@ -991,7 +1040,7 @@ function SidebarTree({ lead, depth, nodes, tile }: Omit<SidebarProps, "in">) {
                 render={node => row(node, "finished", true, depth + 1)}
                 more={(rest, show) => (
                   <li key="more" data-child-fold="more" data-slim className={RAIL_ITEM_CLASS}>
-                    <SidebarMenuButton size="sm" className={ONE_LINE_ROW_CLASS} onClick={show}>
+                    <SidebarMenuButton size="sm" className={cn(ONE_LINE_ROW_CLASS, "gap-1.5")} onClick={show}>
                       <span className="min-w-0 flex-1 truncate text-sidebar-muted-foreground">{LEAD_WORDS.more(rest)}</span>
                     </SidebarMenuButton>
                   </li>
@@ -1003,6 +1052,20 @@ function SidebarTree({ lead, depth, nodes, tile }: Omit<SidebarProps, "in">) {
       ) : null}
     </ul>
   );
+}
+
+/** The tree under a lead as the transcript draws it, off the fleet the sidebar reads. */
+export function useTranscriptTree(leadKey: string): { lead: Thread | undefined; leadPlace: string; nodes: TranscriptNode[]; byKey: ReadonlyMap<string, Thread> } {
+  const places = usePlaces();
+  const fleet = useSidebarProjects();
+  const all = fleet.flatMap(runs => runs.threads.map(thread => ({ thread, runs })));
+  const byKey = new Map(all.map(({ thread }) => [keyOf(thread), thread] as const));
+  const found = all.find(({ thread }) => keyOf(thread) === leadKey);
+  const build = (key: string, seen: ReadonlySet<string>): TranscriptNode[] =>
+    all
+      .filter(({ thread }) => thread.parentThreadId === key && !seen.has(keyOf(thread)))
+      .map(({ thread, runs }) => ({ thread, place: computerName(places, runs), at: computerOf(places, runs), children: build(keyOf(thread), new Set([...seen, keyOf(thread)])) }));
+  return { lead: found?.thread, leadPlace: found === undefined ? "" : computerName(places, found.runs), nodes: build(leadKey, new Set([leadKey])), byKey };
 }
 
 /** The transcript's Threads block, put in place of src/tree/TreeRows.tsx by this page's vite config: the same props

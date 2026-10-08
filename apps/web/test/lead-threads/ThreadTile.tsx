@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Prototype copy of src/sidebar/ThreadTile.tsx as on main at 4c5d84dc4, put in its place by this page's vite config,
-// with four changes the build makes to the shipped tile: the status slot shows each status as its icon alone (the
-// working crab stays at the title's end, a thread at rest keeps its age); the card leads with a status row, the
+// with four changes the build makes to the shipped tile: the status slot shows each status as its icon alone, the
+// working crab among them at the end of the first row, a thread at rest keeping its age; the card leads with a status row, the
 // icon, the word, the reason and the time; on hover the slot gives way to Settle where a settle can run; and a tile
 // with threads under it folds them away, its agent mark turning into the fold's chevron on hover, the folded tile
-// carrying a count of everything under it. ?tile=before draws the shipped tile, for the owner to compare.
+// carrying at its title's end what under it needs the person, the whole count on its card. ?tile=before draws the shipped tile, for the owner to compare.
 // A thread in the sidebar as one tile of two rows: the project and the
 // computer it runs on with the thread's status at the right, then the agent's
 // mark and the title, with an open pull request's icon and the crab at the
@@ -41,7 +41,7 @@ import { CAP_WAIT_WORDS, SNOOZE_WORDS } from "../../src/sidebar/words.js";
 import { LINK_DOWN_WORDS } from "../../src/adapt/terminal-pane.js";
 import { ONE_LINE_ROW_CLASS, TILE_CLASS, TILE_ROW_ONE_CLASS, TILE_ROW_TWO_CLASS, TILE_TITLE_CLASS, threadRowId } from "../../src/sidebar/rowGrammar.js";
 import { useStore } from "../../src/protocol/store.js";
-import { Rollup, StatusIcon, StatusLine, isSubagent, kindOf, partOf, subtreeKeys, toggleFolded, foldedKey, useLeadUi, useSubtree } from "./LeadThreads";
+import { Rollup, StatusIcon, StatusLine, isSubagent, kindOf, partOf, rollupWords, subtreeKeys, toggleFolded, foldedKey, useLeadUi, useSubtree } from "./LeadThreads";
 
 const BEFORE = new URLSearchParams(window.location.search).get("tile") === "before";
 const TILE_WORDS = { settle: "Settle thread", fold: "Fold its threads", unfold: "Show its threads" } as const;
@@ -110,7 +110,7 @@ function TileFrame({ card, place, harness, renaming, status, children, ...button
 
 /** The two rows every tile draws. Row two is the agent's mark and the title, then an open pull request's icon and
  * the crab while the thread works. */
-function TileRows({ place, status, title, harness, pr, crab, mark }: { place: TilePlace; status: ReactNode; title: ReactNode; harness: string | null; pr?: TileCheckout["pr"]; crab: boolean; mark?: ReactNode }) {
+function TileRows({ place, status, title, harness, pr, crab, mark, end }: { place: TilePlace; status: ReactNode; title: ReactNode; harness: string | null; pr?: TileCheckout["pr"]; crab: boolean; mark?: ReactNode; end?: ReactNode }) {
   return (
     <>
       <span className={TILE_ROW_ONE_CLASS}>
@@ -125,6 +125,7 @@ function TileRows({ place, status, title, harness, pr, crab, mark }: { place: Ti
         {title}
         {tilePrIcon(pr) ? <GitPullRequestIcon aria-hidden data-tile-pr className="size-3 shrink-0 text-[var(--top-row-meta)]" /> : null}
         {crab ? <Crab className="shrink-0 text-status-working" /> : null}
+        {end}
       </span>
     </>
   );
@@ -270,7 +271,20 @@ export function ThreadTile({
     place,
     harness: thread.harness,
     renaming,
-    ...(BEFORE || settled ? {} : { status: <StatusLine thread={thread} kind={kind} /> }),
+    ...(BEFORE || settled
+      ? {}
+      : {
+          status: (
+            <>
+              <StatusLine thread={thread} kind={kind} />
+              {folded && rollupWords(under.counts) !== "" ? (
+                <li data-tile-card-line="under" className="min-w-0 break-words">
+                  {rollupWords(under.counts)}
+                </li>
+              ) : null}
+            </>
+          ),
+        }),
     // An input may not sit inside a button, so a tile being renamed is a plain box with the same grammar.
     render: renaming ? <div /> : <button type="button" />,
     isActive: active,
@@ -282,7 +296,7 @@ export function ThreadTile({
   const titleOrBox = renaming ? <NameBox name={thread.title} label={THREAD_WORDS.rename} saving={saving} onRename={onRename} onCancel={onRenameCancel} /> : null;
   if (settled)
     return (
-      <TileFrame {...frame} data-slim="true" className={cn(ONE_LINE_ROW_CLASS, "group/tile")}>
+      <TileFrame {...frame} data-slim="true" className={cn(ONE_LINE_ROW_CLASS, "group/tile", !BEFORE && "gap-1.5")}>
         <ProjectGlyph projectId={place.projectId} className={cn("size-3 shrink-0", !active && "opacity-40 grayscale")} />
         {titleOrBox ?? (
           <span className="flex min-w-0 flex-1">
@@ -291,7 +305,7 @@ export function ThreadTile({
         )}
         <span className="relative flex shrink-0 items-center text-xs text-sidebar-muted-foreground">
           <span className={cn("flex", settleHere && "group-hover/tile:invisible")}>
-            <ThreadStatus thread={thread} age={time} settled />
+            {!BEFORE && part === "finished" ? <StatusIcon thread={thread} kind={kindOf(thread, false, true)} tip={false} /> : <ThreadStatus thread={thread} age={time} settled />}
           </span>
           {settleButton}
         </span>
@@ -329,22 +343,8 @@ export function ThreadTile({
             <ThreadStatus thread={thread} age={time} settled={settled} />
           ) : (
             <span className="relative flex shrink-0 items-center gap-2">
-              {folds && folded ? (
-                <span
-                  role="button"
-                  tabIndex={-1}
-                  data-tile-unfold
-                  aria-label={TILE_WORDS.unfold}
-                  onClick={event => {
-                    event.stopPropagation();
-                    toggleFolded(thread.id);
-                  }}
-                >
-                  <Rollup counts={under.counts} />
-                </span>
-              ) : null}
               <span className={cn("flex items-center", settleHere && "group-hover/tile:invisible")}>
-                {snoozed ? <SnoozedWorking count={snoozedWorking} /> : setupRefused !== undefined ? <span data-thread-status="setup-refused" title={setupRefused}>{LINK_DOWN_WORDS.refused}</span> : <StatusIcon thread={thread} kind={kind} tip={false} crab={false} />}
+                {snoozed ? <SnoozedWorking count={snoozedWorking} /> : setupRefused !== undefined ? <span data-thread-status="setup-refused" title={setupRefused}>{LINK_DOWN_WORDS.refused}</span> : <StatusIcon thread={thread} kind={kind} tip={false} />}
               </span>
               {settleButton}
             </span>
@@ -353,7 +353,26 @@ export function ThreadTile({
         title={titleOrBox ?? <Title text={label ?? thread.title} idle={recede} active={active} onDoubleClick={onRenameOpen} />}
         harness={thread.harness}
         pr={checkout.pr}
-        crab={status.crab === true}
+        crab={BEFORE && status.crab === true}
+        {...(folds && folded
+          ? {
+              end: (
+                <span
+                  role="button"
+                  tabIndex={-1}
+                  data-tile-unfold
+                  aria-label={TILE_WORDS.unfold}
+                  className="flex shrink-0 items-center text-[11px]"
+                  onClick={event => {
+                    event.stopPropagation();
+                    toggleFolded(thread.id);
+                  }}
+                >
+                  <Rollup counts={under.counts} />
+                </span>
+              ),
+            }
+          : {})}
       />
     </TileFrame>
   );

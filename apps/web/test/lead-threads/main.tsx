@@ -84,29 +84,52 @@ const launch = (scope: Scope, toolUseId: string, sub: string): SessionEvent[] =>
  * timeline holds. */
 const SUBAGENT_WORK: Record<string, ReadonlyArray<{ say?: string; tool?: string; input?: object; result?: string }>> = {
   thr_sa_steps: [
-    { say: "I'll find where the add sheet builds its list of steps." },
+    { say: "I'll find where the add sheet builds its list of steps, then every test that pins their order." },
     { tool: "Grep", input: { pattern: "SETUP_ROWS", path: "apps/web/src/settings/add" }, result: "setup.ts:41\nAddComputerDialog.tsx:88\nStepDialog.tsx:12" },
     { tool: "Read", input: { file_path: "/Users/zingzy/wsp/apps/web/src/settings/add/setup.ts" }, result: "212 lines" },
-    { say: "SETUP_ROWS in setup.ts holds the order and AddComputerDialog maps over it. Checking the tests next." },
+    { say: "SETUP_ROWS in setup.ts:41 is the one list: eight rows, each with an id, its words and the state it starts in. The sheet never reorders it; it only filters out the rows a computer of that kind skips." },
+    { tool: "Read", input: { file_path: "/Users/zingzy/wsp/apps/web/src/settings/add/AddComputerDialog.tsx" }, result: "318 lines" },
+    { say: "AddComputerDialog.tsx:88 maps SETUP_ROWS straight into StepRow, so the order on screen is the order in setup.ts. StepDialog.tsx:12 only frames them." },
+    { tool: "Grep", input: { pattern: "skipFor|skips", path: "apps/web/src/settings/add" }, result: "setup.ts:63\nsetup.ts:71" },
+    { tool: "Read", input: { file_path: "/Users/zingzy/wsp/apps/web/src/settings/add/setup.ts", offset: 60, limit: 20 }, result: "20 lines" },
+    { say: "The filter at setup.ts:63 drops the sign-in rows for a box that already has the image; it keeps the order of what is left. Now the tests." },
+    { tool: "Glob", input: { pattern: "apps/web/test/**/add*.test.tsx" }, result: "apps/web/test/add-sheet.test.tsx\napps/web/test/add-computer-dialog.test.tsx" },
     { tool: "Grep", input: { pattern: "SETUP_ROWS", path: "apps/web/test" } },
   ],
   thr_sa_order: [
     { say: "Reading the add sheet's tests for anything that pins the order." },
+    { tool: "Glob", input: { pattern: "apps/web/test/**/add*.test.tsx" }, result: "apps/web/test/add-sheet.test.tsx\napps/web/test/add-computer-dialog.test.tsx" },
     { tool: "Read", input: { file_path: "/Users/zingzy/wsp/apps/web/test/add-sheet.test.tsx" }, result: "164 lines" },
+    { say: "add-sheet.test.tsx:41 lists the rows' ids in order for a laptop, a box and a cloud, and compares the sheet against each list." },
+    { tool: "Read", input: { file_path: "/Users/zingzy/wsp/apps/web/test/add-computer-dialog.test.tsx" }, result: "231 lines" },
+    { say: "add-computer-dialog.test.tsx only checks which step a row opens on. It never looks at the order." },
+    { tool: "Bash", input: { command: "pnpm exec vitest run apps/web/test/add-sheet.test.tsx", description: "Run the add sheet's tests" }, result: "3 passed" },
     { say: "add-sheet.test.tsx:41 pins the order in three cases, all green." },
   ],
   thr_sa_map: [
-    { say: "Listing the open tickets with no branch yet." },
+    { say: "Listing the open tickets with no branch yet, then reading each for the files it names." },
     { tool: "Bash", input: { command: "gh issue list -R wsp-labs/wsp-map --state open --limit 200 --json number,title,body", description: "List the map's open tickets" }, result: "34 issues" },
-    { say: "34 open. Reading each one for the files it names." },
+    { tool: "Bash", input: { command: "git branch -r --list 'origin/*' --format '%(refname:short)'", description: "List the remote branches" }, result: "61 branches" },
+    { say: "34 open, 12 of them with a branch already. That leaves 22 to read." },
+    { tool: "Bash", input: { command: "gh issue view 1858 -R wsp-labs/wsp-map --json body", description: "Read ticket 1858" }, result: "names packages/runtime/src/runtime.ts and apps/web/src/components/chat/ComposerQueue.tsx" },
+    { tool: "Bash", input: { command: "gh issue view 1849 -R wsp-labs/wsp-map --json body", description: "Read ticket 1849" }, result: "names packages/host/src/verbs.ts" },
+    { tool: "Bash", input: { command: "gh issue view 1845 -R wsp-labs/wsp-map --json body", description: "Read ticket 1845" }, result: "names packages/runtime/src/runtime.ts" },
+    { say: "1858 and 1845 both touch runtime.ts, so their builders should not run at the same time. Noting that for the lead." },
+    { tool: "Bash", input: { command: "gh issue view 1841 -R wsp-labs/wsp-map --json body", description: "Read ticket 1841" }, result: "names apps/web/src/settings/usage.tsx" },
     { tool: "Bash", input: { command: "gh issue view 1830 -R wsp-labs/wsp-map --json body", description: "Read ticket 1830" } },
   ],
   thr_sa_hdr: [
     { say: "Fetching the landing page to read its headers." },
     { tool: "WebFetch", input: { url: "https://spoo.me", prompt: "List the Content-Security-Policy header" }, result: "connect ETIMEDOUT" },
+    { say: "The fetch timed out. Trying the www address before I give up." },
+    { tool: "WebFetch", input: { url: "https://www.spoo.me", prompt: "List the Content-Security-Policy header" }, result: "connect ETIMEDOUT" },
+    { tool: "Bash", input: { command: "curl -sI --max-time 10 https://spoo.me", description: "Read the landing's headers" }, result: "curl: (28) Connection timed out after 10001 milliseconds" },
+    { say: "Neither address answers from here, so I can't read the header. The site is down or this network can't reach it." },
   ],
   thr_sa_csp: [
-    { say: "Running the CSP gate." },
+    { say: "The gate builds the landing first, so I'll build it and then run the gate." },
+    { tool: "Bash", input: { command: "pnpm --filter landing build", description: "Build the landing" }, result: "built in 41s" },
+    { say: "Built. Running the CSP gate." },
     { tool: "Bash", input: { command: "pnpm gate:csp", description: "Run the CSP gate" } },
   ],
   thr_sa_prs: [{ say: "11 open, 4 approved, 7 waiting on a reviewer." }],
@@ -354,6 +377,10 @@ const STATES: ReadonlyArray<readonly [string, string]> = [
   ["Around the composer: proposed", "busy=1&around=proposed"],
   ["Around the composer: proposed, Threads open", "busy=1&around=proposed&open=threads"],
   ["Around the composer: proposed, question open", "busy=1&around=proposed&open=question"],
+  ["Around the composer: proposed, tasks open", "busy=1&around=proposed&open=tasks"],
+  ["Around the composer: proposed, queue open", "busy=1&around=proposed&open=queue"],
+  ["Shape study: a usage limit's row (never beside a running turn today)", "busy=1&around=proposed&usage=1"],
+  ["Shape study: the usage limit's bar", "busy=1&around=proposed&usage=1&open=usage"],
   ["Marathon with the proposed composer", "around=proposed"],
   ["Bar: a question", "dock=question"],
   ["A: task list stays in today's drawer", "dock=tasks-a"],
@@ -436,9 +463,9 @@ function ProposedPage({ workspaceId, threadId }: { workspaceId: string; threadId
       {thread => {
         const prompt = openPrompt(thread);
         if (bar === "question" && prompt !== null) return <PromptDock key={prompt.askId} permission={prompt} agent={thread.view.agent} onAnswer={answer} onWriteInstead={() => openBar(null)} />;
-        if (bar === "threads") return <ThreadsDock workspaceId={workspaceId} threadKey={threadId} />;
+        if (bar === "threads") return <ThreadsDock threadKey={threadId} />;
         if (bar === "tasks") return <TaskDock steps={TASKS} onWrite={() => openBar(null)} />;
-        if (bar === "queue") return <QueueDock threadKey={threadId} />;
+        if (bar === "queue") return <QueueDock workspaceId={workspaceId} threadKey={threadId} />;
         if (bar === "usage") return <UsageDock />;
         return <ChatComposer key={workspaceId} workspaceId={workspaceId} thread={thread} />;
       }}

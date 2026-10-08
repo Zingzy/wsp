@@ -5,10 +5,11 @@
 // children becomes LeadThreads, the item around a tile says whether its row is one line, and a section's head counts
 // the tiles it draws; and the sidebar's two connector classes in rowGrammar.ts come from rail.ts, so every tree in
 // the sidebar takes the new connector; AppShell hides the lead's panels and the header's buttons that open them while
-// a subagent's page is open, keeping them mounted; the headless
-// list loses the gap above it; and under ?around=proposed the timeline draws a child as a live tile where its lead
-// started it, ChatView leaves the Threads block out, and ChatComposer draws the one drawer in place of its queue cards
-// and its task drawer. Everything else on the page is the app.
+// a subagent's page is open, keeping them mounted; on a subagent's page the timeline draws no working line, no
+// settled footer and no turn folds, since its bar carries the state; and under ?around=proposed the timeline draws the
+// children one call started as one list of live tiles where it started them, ChatView leaves the Threads block out,
+// and ChatComposer draws the one drawer in place of its queue cards and its task drawer; and StepRow writes a step's
+// time as the transcript and the task drawer do, the one format the build takes app-wide. Everything else on the page is the app.
 // Serve from apps/web: vite --config test/lead-threads/vite.config.ts --host 127.0.0.1 --port <free>
 import { fileURLToPath } from "node:url";
 import type { ConfigEnv, Plugin, UserConfig } from "vite";
@@ -26,6 +27,7 @@ const TIMELINE_BUILD = at("../../src/adapt/timeline-rows.ts");
 const CHAT_COMPOSER = at("../../src/components/chat/ChatComposer.tsx");
 const CHAT_VIEW = at("../../src/components/chat/ChatView.tsx");
 const MODE = at("./mode.ts");
+const STEP_ROW = at("../../src/settings/add/StepRow.tsx");
 const COMPOSER = at("./Composer.tsx");
 const PROTO = at("./LeadThreads.tsx");
 const RAIL = at("./rail.ts");
@@ -42,7 +44,6 @@ const SWAPS: Record<string, ReadonlyArray<readonly [string, string]>> = {
       "const tileCount = (node: TileNode): number => drawnCount(node);",
     ],
     ["export function WorkspaceSidebar() {", "export function WorkspaceSidebar() {\n  useLeadUi(s => s.open);"],
-    ['index > 0 && "mt-3"', 'index > 0 && section.id !== "threads" && "mt-3"'],
     [
       '<li key={item.id} data-thread-item data-workspace-id={runs.id} className={cn("min-w-0", depth > 0 && RAIL_ITEM_CLASS)}>',
       '<li key={item.id} data-thread-item data-workspace-id={runs.id} {...(settled ? { "data-slim": "" } : {})} className={cn("min-w-0", depth > 0 && RAIL_ITEM_CLASS)}>',
@@ -60,18 +61,24 @@ const SWAPS: Record<string, ReadonlyArray<readonly [string, string]>> = {
     ],
   ],
   [TIMELINE_ROWS]: [
-    ['{row.kind === "subagent" ? <SubagentTimelineRow row={row} /> : null}', '{row.kind === "subagent" ? <SubagentTimelineRow row={row} /> : null}\n      {(row as { kind: string }).kind === "spawn" ? <SpawnTile childKey={(row as unknown as { childKey: string }).childKey} /> : null}'],
+    ['{row.kind === "subagent" ? <SubagentTimelineRow row={row} /> : null}', '{row.kind === "subagent" ? <SubagentTimelineRow row={row} /> : null}\n      {(row as { kind: string }).kind === "spawn" ? <SpawnTiles childKeys={(row as unknown as { childKeys: string[] }).childKeys} /> : null}'],
     ["return <SubagentFoldRow onAnswer={ctx.onAnswerPermission} subagent={row.subagent} />;", "return launchedBy(row.subagent.parentToolUseId) !== null ? <SpawnTile childKey={launchedBy(row.subagent.parentToolUseId)!} /> : <SubagentFoldRow onAnswer={ctx.onAnswerPermission} subagent={row.subagent} />;"],
   ],
   [TIMELINE_BUILD]: [
-    ['    if (entry.kind === "work") {\n      if (standsAlone(entry.entry)) {', '    if (entry.kind === "work" && spawnedBy(entry.entry) !== null) {\n      rows.push({ kind: "spawn", id: entry.id, createdAt: entry.createdAt, childKey: spawnedBy(entry.entry) } as never);\n      continue;\n    }\n    if (entry.kind === "work") {\n      if (standsAlone(entry.entry)) {'],
+    ['    if (entry.kind === "work") {\n      if (standsAlone(entry.entry)) {', '    if (spawnKeyOf(entry) !== null) {\n      const childKeys = [spawnKeyOf(entry)];\n      while (index + 1 < entries.length && spawnKeyOf(entries[index + 1]) !== null && !collapsed.has(entries[index + 1].id)) {\n        index++;\n        childKeys.push(spawnKeyOf(entries[index]));\n      }\n      rows.push({ kind: "spawn", id: entry.id, createdAt: entry.createdAt, childKeys } as never);\n      continue;\n    }\n    if (entry.kind === "work") {\n      if (standsAlone(entry.entry)) {'],
+    ['  const pushWorking = (): void => { rows.push({ kind: "working"', '  const pushWorking = (): void => { if (!onSubagentPage()) rows.push({ kind: "working"'],
+    ["  const { folds, stops } = deriveTurnFolds(entries, terminalAssistantIds, turnById, unsettledTurnId);", "  const { folds, stops } = onSubagentPage() ? { folds: new Map(), stops: new Map() } : deriveTurnFolds(entries, terminalAssistantIds, turnById, unsettledTurnId);"],
     ['if (next.kind !== "work" || standsAlone(next.entry) ||', 'if (next.kind !== "work" || standsAlone(next.entry) || spawnedBy(next.entry) !== null ||'],
   ],
   [CHAT_COMPOSER]: [
     ["<ComposerQueue rows={queue} files={queuedFiles} next={next} waiting={waiting?.line ?? null} onEdit={editCard} onRemove={removeCard} />", "{proposedComposer() ? null : <ComposerQueue rows={queue} files={queuedFiles} next={next} waiting={waiting?.line ?? null} onEdit={editCard} onRemove={removeCard} />}"],
     ["{tasks !== null ? <ComposerTasks tasks={tasks} /> : null}", "{proposedComposer() ? <ComposerDrawer thread={thread} threadKey={threadKey} /> : tasks !== null ? <ComposerTasks tasks={tasks} /> : null}"],
   ],
-  [CHAT_VIEW]: [["{opened.length > 0 ? <OpenedThreads workspaceId={workspaceId} opened={opened} /> : null}", "{opened.length > 0 && !proposedComposer() ? <OpenedThreads workspaceId={workspaceId} opened={opened} /> : null}"]],
+  [CHAT_VIEW]: [
+    ["{opened.length > 0 ? <OpenedThreads workspaceId={workspaceId} opened={opened} /> : null}", "{opened.length > 0 && !proposedComposer() ? <OpenedThreads workspaceId={workspaceId} opened={opened} /> : null}"],
+    ["{view.settled !== null && !settledOnReply ? <SettledFooter turn={view.settled} /> : null}", "{view.settled !== null && !settledOnReply && !onSubagentPage() ? <SettledFooter turn={view.settled} /> : null}"],
+  ],
+  [STEP_ROW]: [['{row.ms === undefined ? "" : fmtStepMs(row.ms, row.ticking === true)}', '{row.ms === undefined ? "" : fmtDuration(row.ms)}']],
   [ROW_GRAMMAR]: [
     ['export const CHILD_LIST_CLASS = "ml-3 flex min-w-0 flex-col";', "export { CHILD_LIST as CHILD_LIST_CLASS } from " + JSON.stringify(RAIL) + ";"],
     [
@@ -101,10 +108,11 @@ function swapLeadThreads(): Plugin {
       const lead = JSON.stringify(PROTO);
       if (id === SIDEBAR) return `import { LeadThreads, drawnCount, useLeadUi } from ${lead};\n${out}`;
       if (id === APP_SHELL) return `import { useSubagentPage } from ${lead};\n${out}`;
-      if (id === TIMELINE_ROWS) return `import { SpawnTile } from ${lead};\nimport { launchedBy } from ${JSON.stringify(MODE)};\n${out}`;
-      if (id === TIMELINE_BUILD) return `import { spawnedBy } from ${JSON.stringify(MODE)};\n${out}`;
+      if (id === TIMELINE_ROWS) return `import { SpawnTile, SpawnTiles } from ${lead};\nimport { launchedBy } from ${JSON.stringify(MODE)};\n${out}`;
+      if (id === TIMELINE_BUILD) return `import { spawnedBy, spawnKeyOf, onSubagentPage } from ${JSON.stringify(MODE)};\n${out}`;
       if (id === CHAT_COMPOSER) return `import { proposedComposer } from ${JSON.stringify(MODE)};\nimport { ComposerDrawer } from ${JSON.stringify(COMPOSER)};\n${out}`;
-      if (id === CHAT_VIEW) return `import { proposedComposer } from ${JSON.stringify(MODE)};\n${out}`;
+      if (id === STEP_ROW) return `import { fmtDuration } from "@wsp/protocol";\n${out}`;
+      if (id === CHAT_VIEW) return `import { proposedComposer, onSubagentPage } from ${JSON.stringify(MODE)};\n${out}`;
       return out;
     },
   };

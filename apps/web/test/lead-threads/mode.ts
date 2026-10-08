@@ -14,3 +14,14 @@ export const spawnedBy = (entry: { readonly toolCallId?: string | undefined }): 
 
 /** The subagent a launching call started, by the fixture's launch id; null under today's composer. */
 export const launchedBy = (parentToolUseId: string): string | null => (PROPOSED && parentToolUseId.startsWith("launch_") ? parentToolUseId.slice("launch_".length) : null);
+
+/** The child a timeline entry started, where it is a wsp run or fork or an Agent call; null for every other entry. */
+export const spawnKeyOf = (entry: { readonly kind: string; readonly entry?: { readonly toolCallId?: string | undefined }; readonly subagent?: { readonly parentToolUseId: string } }): string | null =>
+  entry.kind === "work" && entry.entry !== undefined ? spawnedBy(entry.entry) : entry.kind === "subagent" && entry.subagent !== undefined ? launchedBy(entry.subagent.parentToolUseId) : null;
+
+/** Whether the page open is a subagent's, asked by modules that hold no store: the page registers the reading. */
+let subagentPage: () => boolean = () => false;
+export const setSubagentPageCheck = (check: () => boolean): void => {
+  subagentPage = check;
+};
+export const onSubagentPage = (): boolean => subagentPage();
