@@ -198,15 +198,20 @@ export function workspacesArea(ctx: RuntimeContext): WorkspacesArea {
           if (theirs !== undefined && mine !== undefined && ctx.refusalFor(theirs.record, origin) !== undefined) {
             const project = ctx.projectHeld(theirs.record.project);
             if (!ctx.ofThreadsRepository(origin, project.id)) throw execFix !== undefined ? outside("workspace", execFix) : refusal(spawnRepositoryWorkspaceRefusal(scope.threadId, ctx.projectHeld(mine).name, ref), SPAWN_REPOSITORY_WORKSPACE_FIX, "usage");
-            const away = execFix === undefined && runsInFolder(ctx.kindOf(project.computer)) ? ctx.elsewhereRefusal(origin, project, ref) : undefined;
+            const away = execFix === undefined ? ctx.elsewhereRefusal(origin, project, ref) : undefined;
             if (away !== undefined) throw away;
-            if (!ctx.projectReached(origin, project.id)) throw execFix !== undefined ? outside("folder", execFix) : refusal(spawnFolderRefusal(scope.threadId, ref), SPAWN_FOLDER_FIX, "usage");
-            throw refusal(spawnReachRefusal(scope.threadId, ref), execFix ?? spawnReachFix(project.name, !runsInFolder(ctx.kindOf(project.computer))), "usage");
+            const folder = runsInFolder(ctx.kindOf(project.computer));
+            if (!ctx.projectReached(origin, project.id) && folder) throw execFix !== undefined ? outside("folder", execFix) : refusal(spawnFolderRefusal(scope.threadId, ref), SPAWN_FOLDER_FIX, "usage");
+            throw refusal(spawnReachRefusal(scope.threadId, ref), execFix ?? spawnReachFix(project.name, !folder), "usage");
           }
           if (execFix !== undefined) {
             const held = [...ctx.projectsHeld.values()];
             const project = held.find(p => p.id === ref) ?? held.find(p => p.name === ref);
-            if (project !== undefined && !ctx.projectReached(origin, project.id)) throw outside(ctx.ofThreadsRepository(origin, project.id) ? "folder" : "project", execFix);
+            if (project !== undefined && !ctx.projectReached(origin, project.id)) {
+              if (!ctx.ofThreadsRepository(origin, project.id)) throw outside("project", execFix);
+              if (runsInFolder(ctx.kindOf(project.computer))) throw outside("folder", execFix);
+            }
+            throw notFoundRefusal(noWorkspaceRefusal(ref));
           }
           await ctx.projectsDoor.resolve(ref, origin).catch((e: unknown) => {
             if ((e as { kind?: unknown }).kind !== "not-found") throw e;
