@@ -4,7 +4,7 @@
 // status check, the global config that carries over, how it keys project
 // state to a path, and whether it is on by default with the evidence behind
 // that. The wizard's tables read from here; nothing here runs a command.
-import { agentOfRow, packageOf, thisComputer, toolRowPrefix, type PageReach } from "@wsp/protocol";
+import { agentOfRow, compareVersions, packageOf, thisComputer, toolRowPrefix, type PageReach } from "@wsp/protocol";
 import { AGENT_MODULES } from "./agents/index.js";
 import type { AgentContext } from "./context.js";
 import type { HookCarry } from "./hooks.js";
@@ -13,7 +13,7 @@ import type { McpConfig } from "./mcp.js";
 import { loginRoad, type ServerSignInRoad } from "./mcp-login.js";
 import { pinnedRelease } from "./release-pins.js";
 import type { BundledSkills, PluginRoad, PluginSkills, SkillRoots } from "./skills.js";
-import { APT_BIN, APT_INDEX, CARGO_BIN, roadModule } from "./road-modules.js";
+import { APT_BIN, APT_INDEX, CARGO_BIN, roadModule, type InstallHomes } from "./road-modules.js";
 import type { RoadName } from "./roads.js";
 import { DOCKER_INSTALL, FD_INSTALL, LOCAL_BIN, NODE_RELEASES, OP_INSTALL, PLAYWRIGHT, PLAYWRIGHT_INSTALL, PYTHON_INSTALL, RUSTUP_INSTALL, SWIFT, SWIFT_INSTALL, UV_INSTALL, YARN_INSTALL, nodeInstallScript, type InstallRoad } from "./roads.js";
 import { NO_SIGN_IN, SIGN_IN_ROWS, hasLogin, keysIdOf, keysRowOf, loginIdOf, mintsToken, sharedLoginOf, type KeyFiles, type SharedLogin, type SignIn } from "./signin.js";
@@ -185,6 +185,9 @@ export interface ToolEntry extends EntryBase {
   /** What a computer runs once the row is on it for the tool to take hold there, and what takes that back before the
    * row comes off: git-lfs's filters, which no copied gitconfig carries. */
   hook?: { on: string; off: string };
+  /** The lowest Node, major.minor, the engines of the version the road pins accept, where a version a row asks may
+   * run on less: a computer on an older Node keeps the row's own version, since the pin would not start there. */
+  pinNode?: string;
 }
 
 export type CatalogEntry = AgentEntry | ToolEntry;
@@ -231,7 +234,7 @@ export const CATALOG: readonly CatalogEntry[] = [
   // against the used floor either way, and the npm road brings node where a ticked row walks one. pnpm goes with it:
   // its road is npm, so a floor row for it would drag node back onto every image.
   { ...tool, id: "node", name: "Node 22 with npm", bin: "node", installRoad: { road: "script", script: nodeInstallScript(22, NODE_RELEASES[22]), bins: [LOCAL_BIN] }, floor: false, after: "curl", covers: ["node@22", "nodejs"], major: { name: "Node", version: "22" }, brings: [{ bin: "npm", version: "npm --version" }], signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 73, images: 5, road: "measured" }, size: measured("unpacked", 208449536) },
-  { ...tool, id: "pnpm", name: "pnpm", bin: "pnpm", ...npm(20357120, "pnpm", "11.9.0"), floor: false, signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 36, images: 3, road: "unmeasured" } },
+  { ...tool, id: "pnpm", name: "pnpm", bin: "pnpm", ...npm(20357120, "pnpm", "11.9.0"), pinNode: "22.13", floor: false, signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 36, images: 3, road: "unmeasured" } },
   { ...tool, id: "uv", name: "uv", bin: "uv", installRoad: { road: "script", script: UV_INSTALL, bins: [LOCAL_BIN] }, floor: true, after: "curl", signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 46, images: 3, road: "unmeasured" }, size: measured("unpacked", 49660896) },
   { ...tool, id: "python", name: "Python 3.12", bin: "python3", installRoad: { road: "script", script: PYTHON_INSTALL, bins: [LOCAL_BIN] }, floor: true, after: "uv", covers: ["python@3.12"], major: { name: "Python", version: "3.12" }, signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 107, images: 4, road: "unmeasured" }, size: measured("du", 108105728) },
   { ...tool, id: "git", name: "git", bin: "git", ...apt(123789312, "git"), floor: true, signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 118, images: 5, road: "unmeasured" } },
@@ -393,6 +396,41 @@ export function catalogToolForDependency(road: RoadName, pkg: string): ToolEntry
  * road's own name for it, by a name it covers, or by a command it brings along; or nothing. */
 export function catalogToolFor(pkg: string): ToolEntry | undefined {
   return CATALOG_TOOLS.find(e => e.id === pkg || e.bin === pkg || roadNames(e.installRoad).includes(pkg) || (e.covers ?? []).includes(pkg) || (e.brings ?? []).some(b => b.bin === pkg));
+}
+
+/** What a row is told when the catalog's pin, not the version it asked, is what installs. */
+export const pinnedNote = (asked: string, pinned: string): string => `asked ${asked}, installed at the catalog's pinned ${pinned}`;
+
+/** Whether the node on PATH is at least `floor`, a major.minor; false where no node answers. */
+export const nodeAtLeast = (floor: string): string => {
+  const [major, minor] = floor.split(".");
+  return `node --version 2>/dev/null | awk -F. -v a=${Number(major)} -v b=${Number(minor ?? 0)} 'NR==1{sub(/^v/,"",$1); ok=($1+0>a||($1+0==a&&$2+0>=b))} END{exit !ok}'`;
+};
+
+/** A package road at the version the catalog pins that package at on the same road, where the row asks an older one or
+ * none: a pnpm older than the one a project pins switches itself to that one on its first call there and trusts the
+ * copy it downloaded from then on. A row asking a newer version keeps it. `pinned` is the pin where it won, and
+ * `below` the version the row asked, for a computer whose Node is older than the pin's engines take. */
+export function atCatalogPin(road: InstallRoad, asked: string | undefined): { road: InstallRoad; pinned?: string; note?: string; below?: { node: string; road: InstallRoad } } {
+  if (!("package" in road)) return { road };
+  const entry = CATALOG_TOOLS.find(e => e.installRoad.road === road.road && "package" in e.installRoad && e.installRoad.package === road.package && "version" in e.installRoad);
+  const version = entry !== undefined && "version" in entry.installRoad ? entry.installRoad.version : undefined;
+  if (entry === undefined || version === undefined || (asked !== undefined && compareVersions(asked, version) >= 0)) return { road };
+  if (asked === undefined) return { road: { ...road, version }, pinned: version };
+  const node = entry.pinNode;
+  if (node === undefined) return { road: { ...road, version }, pinned: version, note: pinnedNote(asked, version) };
+  return { road: { ...road, version }, pinned: version, note: `${pinnedNote(asked, version)}, or ${asked} where the computer's Node is older than ${node}, which ${road.package} ${version} needs`, below: { node, road } };
+}
+
+/** A pinned road's install line that installs the row's own version instead where the computer's Node is older than the
+ * pin's engines take, so a pin that would not start there is never installed: both lines are the road's own. */
+export function belowLine(road: InstallRoad, below: { node: string; road: InstallRoad }, bin: string, homes: InstallHomes): string {
+  const line = (r: InstallRoad): string => {
+    const l = roadModule(r).install(r, bin, homes);
+    if (typeof l !== "string") throw new Error(`${bin}: ${l.note}`);
+    return l;
+  };
+  return `if ${nodeAtLeast(below.node)}; then\n${line(road)}\nelse\n${line(below.road)}\nfi`;
 }
 
 /** The base row a recipe's tools row stands for, or nothing when the tool is not on the floor. */

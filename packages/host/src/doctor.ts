@@ -12,7 +12,7 @@ import { dirname, join, posix } from "node:path";
 import { promisify } from "node:util";
 import { agentName, CATALOG_AGENTS, CLAUDE_CONFIG_DIR, GOLDEN_SETUP, GOLDEN_SMOKE, keyEnvOf, mintsToken, VAULT_VARIABLES } from "@wsp/catalog";
 import { CREATED_AT_LABEL, DAEMON_ENV_FILE, DAEMON_LISTENING_CHECK, DAEMON_PORT, DOCTOR_LABEL, EXEC_ENV, GUEST_USER_ENV, OWNER_LABEL, RUN_DIR, TOOLS_PATH, WSP_LABEL, clientWords, isMissing, isReserved, landBytes, presenceTests, presentElsewhere, presentSteps, whoseMachine, type DaemonSupervisor, type Machine, type MachineBackend, type ProvisionPlan } from "@wsp/engine";
-import { ALREADY_JOINED_LINE, absentComputer, agentSignInWord, agentVersionWord, awayMsOf, boxRoomLines, doctorComputerRowLine, DoctorLineEvent, EXIT_CODES, exitClassOf, hereDaemonBehindLine, HERE_PLACE_ID, isJoinedComputer, noSuchProjectLine, placeBehindLine, placeDaemonBehind, plural, projectNeedsReaddLine, DAEMON_MEMORY_MAX_PERCENT, DAEMON_ROOTS_PATH, DAEMON_TOKEN_PATH, DAEMON_UNIT, DAEMON_VERSION, GUEST_DAEMON_DIR, GUEST_INBOX_DIR, GUEST_MANIFEST_PATH, GUEST_WSP_PATH, guestWspShim, LOOPBACK, WSP_WORKSPACE_APPARMOR_PATH, machineLacking, machineUnanswered, NO_LINGER_LINE, NO_NODE_LINE, PLACE_NEEDS_ROOT_LINE, NO_SNAPSHOT_LISTING, NO_SYSTEMD_LINE, NO_TEMPLATES_LINE, OPEN_SOCKET_PATH, THIS_COMPUTER, isLocalWorkspace, otherHostsMachinesLine, PLACE_FOUND_END, PLACE_FOUND_MAX_BYTES, PLACE_WORKSPACE_PATH, placeDaemonPaths, TOOL_LINKS_DIR, TOOL_PREFIX, placeOwnedPaths, rootsPathIn, shellQuote, workFolderIn, templateRecordedLine, templateSkippedLine, wspBinIn, wspPackageIn, type PlaceApplied, type PlaceView, type ProjectView, type SnapshotStorage, type DaemonKind } from "@wsp/protocol";
+import { ALREADY_JOINED_LINE, absentComputer, agentSignInWord, agentVersionWord, awayMsOf, boxRoomLines, doctorComputerRowLine, DoctorLineEvent, EXIT_CODES, exitClassOf, hereDaemonBehindLine, HERE_PLACE_ID, isJoinedComputer, noSuchProjectLine, onNpmBin, placeBehindLine, placeDaemonBehind, plural, projectNeedsReaddLine, DAEMON_MEMORY_MAX_PERCENT, DAEMON_ROOTS_PATH, DAEMON_TOKEN_PATH, DAEMON_UNIT, DAEMON_VERSION, GUEST_DAEMON_DIR, GUEST_INBOX_DIR, GUEST_MANIFEST_PATH, GUEST_WSP_PATH, guestWspShim, LOOPBACK, WSP_WORKSPACE_APPARMOR_PATH, machineLacking, machineUnanswered, NO_LINGER_LINE, NO_NODE_LINE, PLACE_NEEDS_ROOT_LINE, NO_SNAPSHOT_LISTING, NO_SYSTEMD_LINE, NO_TEMPLATES_LINE, OPEN_SOCKET_PATH, THIS_COMPUTER, isLocalWorkspace, otherHostsMachinesLine, PLACE_FOUND_END, PLACE_FOUND_MAX_BYTES, PLACE_WORKSPACE_PATH, placeDaemonPaths, TOOL_LINKS_DIR, TOOL_PREFIX, placeOwnedPaths, rootsPathIn, shellQuote, workFolderIn, templateRecordedLine, templateSkippedLine, wspBinIn, wspPackageIn, type PlaceApplied, type PlaceView, type ProjectView, type SnapshotStorage, type DaemonKind } from "@wsp/protocol";
 import { goldenHead, writeDaemonTokenScript, type AccountOrphans, type GoldenVersion, type HereDaemon, type Runtime } from "@wsp/runtime";
 import { keyIn } from "./env-keys.js";
 import WebSocket from "ws";
@@ -1338,14 +1338,14 @@ export const GUEST_ENVS: Record<string, string> = {
 /** What a machine is created with for Claude Code: the config dir and the guest's own variables, and nothing of a
  * sign-in. No key and no token is among them, since anything of that kind in a machine's environment outranks the
  * token the vault sets on each turn inside the CLI, and a sign-in never sits on a machine.
- * BROWSER rides along only for a golden sealed with the shim: Claude Code in an
- * agent session (no TTY, no BROWSER) opens nothing at all, so a remote MCP
- * sign-in from an agent run needs it; a golden without the shim would point
- * every tool at a missing file. */
-export function claudeEnvs(golden?: Pick<GoldenVersion, "browserShim">): Record<string, string> {
+ * BROWSER rides along only for a golden sealed with the shim: Claude Code in an agent session (no TTY, no BROWSER)
+ * opens nothing at all, so a remote MCP sign-in from an agent run needs it; a golden without the shim would point
+ * every tool at a missing file. npm's own folder leads the PATH where the version's seal read one. */
+export function claudeEnvs(golden?: Pick<GoldenVersion, "browserShim" | "npmBin">): Record<string, string> {
   return {
     CLAUDE_CONFIG_DIR,
     ...GUEST_ENVS,
+    PATH: onNpmBin(golden?.npmBin, TOOLS_PATH),
     ...(golden?.browserShim === true ? { BROWSER: OPEN_SHIM_PATH } : {}),
   };
 }
@@ -1607,9 +1607,9 @@ const vaultVariablesOf = (signIn: Parameters<typeof keyEnvOf>[0]): string[] => {
 
 /** The tools the recipe plans, read from inside the workspace this run made, by the one presence read the recipe
  * job runs on the same planned steps: a tool that answers on the computers row and not here is the bug this step
- * exists to catch, and one rule for both readings is what keeps them from disagreeing. The read the spoo proof of
- * 2026-09-18 had to be done by hand, where gh and every other Homebrew row was on the box and in no workspace of
- * it, because the prefix that road installs into is outside the trees a workspace carries.
+ * exists to catch, and one rule for both readings keeps them from disagreeing. Any version answers: a box set up before
+ * a catalog pin moved keeps its copy until its Behind sync. The spoo proof of 2026-09-18 read this by hand, where gh
+ * was on the box and in no workspace of it, since the prefix that road installs into is outside a workspace's trees.
  *
  * A step nothing can be asked about is not read: an index refresh answers no read of its own, and what it was for
  * is the rows behind it. A command answering from outside its own road's directories is a note and not a failure;
@@ -1621,7 +1621,7 @@ export async function toolsInside(machine: Pick<Machine, "exec">, plan: Pick<Pro
   // On the order a workspace on a computer somebody owns boots with, and under the same managers' knobs the job
   // ran: a row's version read is its manager's own command and answers about the folder that manager was told to
   // use, and a copy of that tool under the shared home does not answer ahead of it here either.
-  const present = await presentSteps(machine as Machine, asked, PLACE_WORKSPACE_PATH, plan.prefix);
+  const present = await presentSteps(machine as Machine, asked, PLACE_WORKSPACE_PATH, plan.prefix, "any");
   const notes = asked.flatMap(step => {
     const note = presentElsewhere(step, present.get(step.id));
     return note === undefined ? [] : [note];

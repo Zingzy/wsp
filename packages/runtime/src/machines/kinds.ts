@@ -140,8 +140,8 @@ export function kindsArea(ctx: RuntimeContext): KindsArea {
   };
   /** The guest's login plus the variable pointing one harness at its store there, the store cloudHome names: a guest
    * exec carries no environment of its own, so the adapter exports this on every launch. */
-  const cloudEnv = (place: string | undefined, id: string): Readonly<Record<string, string>> => {
-    const login = loginEnvOn(place);
+  const cloudEnv = (record: Pick<WorkspaceRecord, "place" | "npmBin">, id: string): Readonly<Record<string, string>> => {
+    const login = loginEnvOn(record.place, record.npmBin);
     const agent = CATALOG_AGENTS.find(a => a.id === id);
     return agent === undefined ? login : { ...login, ...guestEnv(agent) };
   };
@@ -191,7 +191,7 @@ export function kindsArea(ctx: RuntimeContext): KindsArea {
       folder: () => undefined,
       home: (_entry, id) => cloudHome(id),
       homeDir: () => GUEST_HOME,
-      env: (entry, id) => cloudEnv(entry.record.place, id),
+      env: (entry, id) => cloudEnv(entry.record, id),
       // A fork at a provider is a copy of an image, and no sign-in is ever sealed into one, so the vault's key is
       // what a turn there runs on. A workspace on a computer somebody joined shares that computer's own logins,
       // and the word for each is the one its row carries.

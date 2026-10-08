@@ -324,6 +324,24 @@ export function snapshotRefusedLine(name: string, answer: ProviderAnswer, disk: 
   return `${name} was not snapshotted: ${answered}; ${full}, so the disk is not the reason`;
 }
 
+/** The folders that hold a pnpm switched to the version a folder pins, read off everything the failed call printed:
+ * pnpm 10 keeps the copy in PNPM_HOME/.tools/pnpm/<v> beside its <v>_tmp_ stage, pnpm 11 in its store's
+ * links/@/pnpm/<v>. Either is trusted while it stands and never fetched again, so removing it is the repair. */
+function switchedPnpm(output: string): string | undefined {
+  const tools = /([^\s'"]*\/\.tools\/pnpm\/)([^/]+?)(?:_tmp_[^/]*)?\//.exec(output);
+  if (tools !== null) return `${tools[1]}${tools[2]} and ${tools[1]}${tools[2]}_tmp_*`;
+  return /([^\s'"]*\/store\/v\d+\/links\/@\/pnpm\/[^/\s'"]+)\//.exec(output)?.[1];
+}
+
+/** A workspace snapshot refused because the manager the project's install runs does not start in its folder: every
+ * fork of that disk would fail its first install the same way. `output` is all the call printed, where a switched
+ * pnpm's folder may show only in a stack below the error line. */
+export function snapshotManagerLine(name: string, check: string, dir: string, said: string, output: string = said): string {
+  const copy = switchedPnpm(output);
+  const fix = copy === undefined ? `make ${check} answer there` : `remove ${copy}, run ${check} in ${dir} to fetch it again`;
+  return `${name} was not snapshotted: ${check} fails in ${dir} (${said}), so every fork of it would fail the same way; ${fix}, then snapshot again`;
+}
+
 /** The snapshotting stage's line after one refused attempt with another to come: which attempt, what the provider
  * said, what the builder reads at the provider, and when the next attempt is. */
 export function snapshotAttemptLine(attempt: number, attempts: number, answer: ProviderAnswer, builderState: BuilderReading, retryMs: number): string {
