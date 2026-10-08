@@ -53,6 +53,7 @@ import { recipeChanges, stepsFor, type RecipeChange } from "../recipe-sync.js";
 import type { PlaceRecord, RecipeResolver } from "./types.js";
 import {
   bounded, vaultSignIn, type SyncJob, setupOutcome, UNDO_MS, SIGN_IN_SLACK_MS, GITHUB_MS, GITHUB_ROW, GITHUB_CLI, cliFirst,
+  engineRow,
   INSTALLS, FILES, PROBE_MS, SIGNIN_STATUS_MS, firstLineOf, picksHash, PROVISION_LOG_EVERY_MS, PROVISION_LOG_LINES,
 } from "./helpers.js";
 import type { PlaceDoorContext } from "./context.js";
@@ -202,9 +203,16 @@ export function placeSetup(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea) 
     const shelf = opts.recipes?.();
     const resolved = sync ?? (await (record.recipe === undefined || record.recipe === NO_RECIPE ? shelf?.resolveFile(picks) : shelf?.resolve(record.recipe))?.catch(() => undefined));
     const hash = resolved?.hash ?? picksHash(picks);
+    const before = record.applied?.rows ?? [];
+    // What an earlier run put on reads present to every step run after it, since the engine's read there cannot tell
+    // who put it on. It stays wsp's on the record until its own step reads it again, through a resume and a step that
+    // threw, so a recipe that drops it later still takes it off.
+    const put = before.filter(r => engineRow(r) && r.outcome === "installed");
+    const carried = new Set<PlaceProvisionRow>(sync !== undefined ? [] : put.filter(r => !done.has(r.step!)).map(r => ({ ...r, earlier: true })));
     // The rows of the steps that already ended stand: a resume runs only what did not. A sync keeps every row and
     // writes each step's over its own.
-    const rows: PlaceProvisionRow[] = sync !== undefined ? [...(record.applied?.rows ?? [])] : (record.applied?.rows ?? []).filter(r => r.step !== undefined && done.has(r.step));
+    const rows: PlaceProvisionRow[] = sync !== undefined ? [...before] : [...before.filter(r => r.step !== undefined && done.has(r.step)), ...carried];
+    const ours = (got: PlaceProvisionRow[]): PlaceProvisionRow[] => got.map(r => (r.outcome === "present" && put.some(p => p.id === r.id) ? { ...r, outcome: "installed", earlier: true } : r));
     let held = started;
     let ended = false;
     let writing: Promise<void> = Promise.resolve();
@@ -257,6 +265,7 @@ export function placeSetup(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea) 
       let got: PlaceProvisionRow[];
       try {
         got = (await work()).map(r => ({ ...r, step: name }));
+        rows.splice(0, rows.length, ...rows.filter(r => !(carried.has(r) && r.step === name)));
       } catch (e) {
         if (e instanceof PlaceAbsentError) throw e;
         got = [{ id: `${name}/stopped`, label: SETUP_STEP_WORDS[name], outcome: "failed", step: name, note: firstLineOf(e) }];
@@ -426,7 +435,7 @@ export function placeSetup(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea) 
         githubSettled(false);
         return [{ id: GITHUB_ROW, label: "GitHub", outcome: "skipped", note: GITHUB_SKIPPED_LINE }];
       }
-      const gh = await provisioner.step(machine, plan, "github", run, stageOf("github"), { home });
+      const gh = ours(await provisioner.step(machine, plan, "github", run, stageOf("github"), { home }));
       if (gh.some(r => r.outcome === "failed")) {
         githubSettled(false);
         return gh;
@@ -559,7 +568,7 @@ export function placeSetup(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea) 
         if (w.row === GITHUB_ROW) await githubSignIn(plan);
         else await agentSignIn(w.row.slice("signins/".length), plan);
       }
-      const engine = (s: EngineStep) => () => provisioner.step(machine, plan, s, run, stageOf(s), { home });
+      const engine = (s: EngineStep) => async () => ours(await provisioner.step(machine, plan, s, run, stageOf(s), { home }));
       const floor = await step("floor", engine("floor"));
       if (floor?.failed === true) return await end(floorFailedLine(floor.rows));
       let stopped: string | undefined;
@@ -591,12 +600,14 @@ export function placeSetup(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea) 
             const waits = [["gh", new Set(ghRow !== undefined ? [ghRow] : [])], ["hooks", new Set(hooks)], ["servers", new Set(plan.serverTools ?? [])]] as const;
             for (const [mark, rows] of waits) if (rows.size === 0) release(mark);
             return go(
-              step("clis", () =>
-                provisioner.step(machine, plan, "clis", run, (detail, at, row) => {
-                  stageOf("clis")(detail, at, row);
-                  if (row === undefined) return;
-                  for (const [mark, rows] of waits) if (rows.delete(row.id) && rows.size === 0) release(mark);
-                }, { home }),
+              step("clis", async () =>
+                ours(
+                  await provisioner.step(machine, plan, "clis", run, (detail, at, row) => {
+                    stageOf("clis")(detail, at, row);
+                    if (row === undefined) return;
+                    for (const [mark, rows] of waits) if (rows.delete(row.id) && rows.size === 0) release(mark);
+                  }, { home }),
+                ),
               ),
             );
           },

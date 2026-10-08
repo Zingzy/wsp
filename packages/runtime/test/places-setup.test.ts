@@ -36,6 +36,8 @@ import {
   DAEMON_VERSION,
   SIGN_IN_WAIT_MS,
   SIGNED_IN_THERE,
+  FROM_THE_VAULT,
+  setupLines,
   readJoinToken,
   type AgentsSignInEvent,
   type PlaceProvisionRow,
@@ -1365,7 +1367,8 @@ describe("a computer that follows a recipe", () => {
 
   /** A computer set up from the saved recipe and in step with it. */
   async function following(o: { undo?: (removed: readonly { kind: string; name: string }[]) => PlaceUndo[]; answer?: (cmd: string) => { exitCode: number; stdout?: string } | undefined; cmds?: string[]; rows?: Partial<Record<EngineStep, PlaceProvisionRow[]>> } = {}) {
-    const p = provisioner({ ...(o.undo !== undefined ? { undo: o.undo } : {}), ...(o.rows !== undefined ? { rows: o.rows } : {}) });
+    const opts: Parameters<typeof provisioner>[0] = { ...(o.undo !== undefined ? { undo: o.undo } : {}), ...(o.rows !== undefined ? { rows: o.rows } : {}) };
+    const p = provisioner(opts);
     const r = shelf(V1, ITEMS);
     const host = await hosting({ provision: p.wired, recipes: r.recipes, ...(o.answer !== undefined ? { answer: o.answer } : {}), ...(o.cmds !== undefined ? { cmds: o.cmds } : {}) });
     const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: V1, recipe: "laptop" }, Date.now());
@@ -1374,7 +1377,37 @@ describe("a computer that follows a recipe", () => {
     expect((await rowOf(place.id)).applied).toMatchObject({ hash: "h1", items: ITEMS });
     await new Promise(resolve => setTimeout(resolve, 20));
     p.ran.length = 0;
-    return { p, r, host, placeId: place.id };
+    return { p, r, host, opts, placeId: place.id };
+  }
+
+  /** A computer set up once where wsp put jq on, which the engine reads as present from then on, as it does a tool
+   * found there whoever put it on, and a recipe drop of jq that takes it off with its own command. */
+  async function jqPutOn() {
+    const cmds: string[] = [];
+    const clis: PlaceProvisionRow[] = [{ id: "tools/brew/jq", label: "jq", outcome: "installed" }];
+    const agents: PlaceProvisionRow[] = [{ id: "agents/claude", label: "Claude Code", outcome: "installed" }];
+    const set = await following({
+      cmds,
+      rows: { clis, agents },
+      undo: removed => removed.map(c => ({ key: `${c.kind}/${c.name}`, label: c.name, ids: ["tools/brew/jq"], owner: "tools/brew/jq", cmd: `take-off-${c.name}` })),
+    });
+    clis.splice(0, 1, { id: "tools/brew/jq", label: "jq", outcome: "present" });
+    agents.splice(0, 1, { id: "agents/claude", label: "Claude Code", outcome: "present" });
+    const setUpAgain = async (): Promise<void> => {
+      const before = (await rowOf(set.placeId)).setup?.startedAt;
+      await new Promise(resolve => setTimeout(resolve, 5));
+      await runtime!.places!.setUp(set.placeId, {});
+      await until(async () => (await rowOf(set.placeId)).setup?.startedAt !== before);
+    };
+    const settled = (): Promise<void> => until(async () => (await rowOf(set.placeId)).setup?.state === "done");
+    const jq = async (): Promise<PlaceProvisionRow["outcome"] | undefined> => (await rowOf(set.placeId)).applied?.rows.find(row => row.id === "tools/brew/jq")?.outcome;
+    const dropJq = async (): Promise<string[]> => {
+      set.r.move({ ...V1, clis: {} }, { "skills/unslop": "d1" }, "h12");
+      await runtime!.places!.recipeChanged("laptop");
+      await until(async () => (await rowOf(set.placeId)).applied?.hash === "h12");
+      return cmds.filter(c => c.startsWith("take-off-"));
+    };
+    return { ...set, cmds, clis, setUpAgain, settled, jq, dropJq };
   }
 
   it("never refuses a fork there as still being set up while a sync runs, and holds the daemon off it meanwhile", async () => {
@@ -1444,6 +1477,86 @@ describe("a computer that follows a recipe", () => {
     const rows = (await rowOf(placeId)).applied?.rows.map(r => r.id);
     expect(rows).not.toContain("tools/brew/jq");
     expect(rows).not.toContain("agents/claude");
+  });
+
+  it("keeps a tool wsp put on as wsp's through a setup run again, and takes it off once the recipe drops it", async () => {
+    const set = await jqPutOn();
+    await set.setUpAgain();
+    await set.settled();
+    expect(set.p.ran).toContain("clis");
+    expect(await set.jq()).toBe("installed");
+    // The line a terminal prints says what this run did, and this run found everything there.
+    const row = await rowOf(set.placeId);
+    expect(setupLines("spoo", row.setup!, row.applied)[0]).toBe("spoo: nothing installed, 3 already there");
+    expect(await set.dropJq()).toEqual(["take-off-jq"]);
+  });
+
+  it("keeps a tool wsp put on as wsp's through a setup run again that the link cut and the dial-back resumed", async () => {
+    const set = await jqPutOn();
+    set.p.arm("agents");
+    await set.setUpAgain();
+    await until(() => set.p.ran.includes("agents"));
+    // Whose jq is stands on the record while the second run has not reached its step yet.
+    expect(await set.jq()).toBe("installed");
+    for (const ws of sockets.splice(0)) ws.close();
+    await until(async () => (await rowOf(set.placeId)).present === false);
+    set.opts.throws = { step: "agents", error: new PlaceAbsentError("spoo is not connected") };
+    set.p.let("agents");
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect((await rowOf(set.placeId)).setup?.state).toBe("running");
+    expect(await set.jq()).toBe("installed");
+    delete set.opts.throws;
+    await dialsBack(set.host.hostKey, set.placeId, set.host.joined[0]!.pair, set.cmds);
+    await set.settled();
+    expect(set.p.ran.filter(s => s === "clis")).toEqual(["clis"]);
+    expect(await set.jq()).toBe("installed");
+    expect(await set.dropJq()).toEqual(["take-off-jq"]);
+  });
+
+  it("keeps a tool wsp put on as wsp's through a setup whose CLIs step threw, and a setup after it", async () => {
+    const set = await jqPutOn();
+    set.opts.throws = { step: "clis", error: new Error("brew: could not resolve host") };
+    await set.setUpAgain();
+    await set.settled();
+    const rows = (await rowOf(set.placeId)).applied?.rows ?? [];
+    expect(rows.find(r => r.id === "clis/stopped")).toMatchObject({ outcome: "failed", note: "brew: could not resolve host" });
+    expect(await set.jq()).toBe("installed");
+    delete set.opts.throws;
+    await set.setUpAgain();
+    await set.settled();
+    expect(await set.jq()).toBe("installed");
+    expect(await set.dropJq()).toEqual(["take-off-jq"]);
+  });
+
+  it("keeps a tool wsp put on as wsp's through a sync that runs its step again for a CLI the recipe added", async () => {
+    const set = await jqPutOn();
+    set.clis.push({ id: "tools/brew/rg", label: "ripgrep", outcome: "installed" });
+    set.r.move({ ...V1, clis: { ...V1.clis, rg: { via: "brew" } } }, { ...ITEMS, "clis/rg": "14" }, "h11");
+    await runtime!.places!.recipeChanged("laptop");
+    await until(async () => (await rowOf(set.placeId)).applied?.hash === "h11");
+    expect(set.p.ran).toEqual(["clis", "context"]);
+    const rows = (await rowOf(set.placeId)).applied?.rows ?? [];
+    expect(rows.filter(r => r.step === "clis").map(r => [r.id, r.outcome])).toEqual([
+      ["tools/brew/jq", "installed"],
+      ["tools/brew/rg", "installed"],
+    ]);
+    expect(await set.dropJq()).toEqual(["take-off-jq"]);
+  });
+
+  it("leaves a sign-in row as its own step reads it, though an earlier run signed it in there", async () => {
+    const s = signIns();
+    const there = RecipeFile.parse({ ...V1, agents: { ...V1.agents, codex: { signin: "machine" } } });
+    const r = shelf(there, ITEMS);
+    await hosting({ provision: provisioner().wired, recipes: r.recipes, acts: s.acts, vault: { CLAUDE_CODE_OAUTH_TOKEN: "sk-ant-oat01-x", OPENAI_API_KEY: "sk-x" } });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: there, recipe: "laptop" }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.waiting.some(w => w.url !== undefined) === true);
+    s.end("codex", { state: "signed-in" });
+    await until(async () => (await rowOf(place.id)).applied?.rows.find(row => row.id === "signins/codex")?.outcome === "installed");
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    r.move({ ...V1, agents: { ...V1.agents, codex: { signin: "vault" } } }, ITEMS, "h11");
+    await runtime!.places!.recipeChanged("laptop");
+    await until(async () => (await rowOf(place.id)).applied?.hash === "h11");
+    expect((await rowOf(place.id)).applied?.rows.find(row => row.id === "signins/codex")).toMatchObject({ outcome: "present", note: FROM_THE_VAULT });
   });
 
   it("never takes an agent the box had before wsp off, though wsp landed a file of its own for it, and says why on its row", async () => {

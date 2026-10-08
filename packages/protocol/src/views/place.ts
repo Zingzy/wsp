@@ -238,6 +238,8 @@ export const PlaceProvisionRow = z.object({
   /** On a row that did not land: what to do about it, beside the note that says what happened. */
   fix: z.string().optional(),
   ms: z.number().int().nonnegative().optional(),
+  /** On an installed row: an earlier setup put it on, and the run that wrote the row found it there. */
+  earlier: z.boolean().optional(),
 });
 export type PlaceProvisionRow = z.infer<typeof PlaceProvisionRow>;
 
