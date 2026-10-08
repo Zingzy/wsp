@@ -1055,6 +1055,11 @@ describe("the projects a workspace is made of", () => {
     useStore.getState().applyEvent({ type: "project.added", project: { ...WSP, name: "wsp-renamed" } });
     expect(useStore.getState().projects.map(p => p.name)).toEqual(["spoo-landing", "wsp-renamed"]);
 
+    // A project taken off and added again under its id keeps its age, so it lands back in the host's order.
+    useStore.getState().applyEvent({ type: "project.removed", projectId: "pr_1" });
+    useStore.getState().applyEvent({ type: "project.added", project: { ...SPOO, createdAt: "s" } });
+    expect(useStore.getState().projects.map(p => p.id)).toEqual(["pr_1", "pr_2"]);
+
     useStore.getState().applyEvent({ type: "project.removed", projectId: "pr_1" });
     expect(useStore.getState().projects.map(p => p.id)).toEqual(["pr_2"]);
     // An id this app holds no record for changes nothing: the list is what the host said, not what an event guessed.

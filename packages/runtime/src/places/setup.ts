@@ -49,7 +49,7 @@ import { GITHUB_TOKEN_ENV, unlandFiles, PlaceAbsentError, PlaceMachine, envInput
 import { CATALOG_AGENTS, loginSignIn, serverValuesOf } from "@wsp/catalog";
 import { runGraph, type GraphStep } from "../setup-graph.js";
 import { recipeChanges, stepsFor, type RecipeChange } from "../recipe-sync.js";
-import { appliedView, type HeldApplied, type HeldRow, type PlaceRecord, type RecipeResolver } from "./types.js";
+import { appliedView, type FolderMove, type HeldApplied, type HeldRow, type PlaceRecord, type RecipeResolver } from "./types.js";
 import {
   bounded, vaultSignIn, type SyncJob, setupOutcome, UNDO_MS, SIGN_IN_SLACK_MS, GITHUB_MS, GITHUB_ROW, GITHUB_CLI, cliFirst,
   engineRow,
@@ -467,12 +467,13 @@ export function placeSetup(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea) 
       return read?.exitCode !== 0;
     };
 
-    /** One folder made a project there by the add's own road. */
-    const addFolder = async (key: string, folder: RecipeFile["folders"][string]): Promise<HeldRow> => {
+    /** One folder made a project there by the add's own road, under the id of the project wsp made from it before
+     * where there is one. */
+    const addFolder = async (key: string, folder: RecipeFile["folders"][string], move?: FolderMove): Promise<HeldRow> => {
       const label = folder.name ?? key;
       const add = recording.addFolder;
       if (add === undefined) return { id: `folders/${key}`, label, outcome: "failed", note: NO_FOLDER_ROAD };
-      return foldersOf.run(placeId, () => add(placeId, key, folder)).catch((e: unknown): PlaceProvisionRow => ({ id: `folders/${key}`, label, outcome: "failed", note: firstLineOf(e) }));
+      return foldersOf.run(placeId, () => add(placeId, key, folder, move)).catch((e: unknown): PlaceProvisionRow => ({ id: `folders/${key}`, label, outcome: "failed", note: firstLineOf(e) }));
     };
 
     /** The folders, each a project on that computer. One whose repository needs GitHub there waits on the GitHub
@@ -485,19 +486,23 @@ export function placeSetup(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea) 
         if (sync !== undefined && !sync.moved.has(`folders/${key}`)) continue;
         const label = folder.name ?? key;
         // A project an earlier run made from this same pick stands as wsp's, since a second add of its source is
-        // refused as already one; a recipe that moved its look puts the look on it, one that moved its source or
-        // what it keeps adds it again, and a row that add did not land keeps the claim, so a remove still takes it.
+        // refused as already one; a recipe that moved its look puts the look on it.
         const was = made.find(r => r.id === `folders/${key}`);
-        const ours = was?.project !== undefined && was.pick !== undefined && standing.has(was.project.id) ? { id: was.project.id, pick: was.pick } : undefined;
+        const claim: FolderMove | undefined = was?.project !== undefined && was.pick !== undefined ? { id: was.project.id, pick: was.pick, ...(was.createdAt !== undefined ? { createdAt: was.createdAt } : {}) } : undefined;
+        const ours = claim !== undefined && standing.has(claim.id) ? claim : undefined;
         if (ours !== undefined && ours.pick.from === folder.from && ours.pick.name === folder.name && ours.pick.keep.join("\n") === folder.keep.join("\n")) {
           const row: HeldRow = { id: `folders/${key}`, label: was!.label, outcome: "installed", project: { id: ours.id }, pick: folder };
           if (ours.pick.icon === folder.icon && ours.pick.hue === folder.hue) out.push({ ...row, earlier: true });
           else out.push(await recording.folderLook(ours.id, ours.pick, folder).then(() => row, (e: unknown): HeldRow => ({ ...row, outcome: "failed", note: firstLineOf(e), pick: ours.pick })));
           continue;
         }
-        const claimed = (r: HeldRow): HeldRow => (ours === undefined || r.project !== undefined ? r : { ...r, project: { id: ours.id }, pick: ours.pick });
+        // One whose kept files alone moved gets the new ones copied in; one whose source or name moved is added again
+        // under the id it had, the old one taken off only once GitHub, the folder and the seed say the new one can
+        // land and its folder there is gone. A row that did not land keeps the claim, so the next run moves it and a
+        // remove takes it.
+        const claimed = (r: HeldRow): HeldRow => (claim === undefined || r.project !== undefined ? r : { ...r, project: { id: claim.id }, pick: claim.pick, ...(claim.createdAt !== undefined ? { createdAt: claim.createdAt } : {}) });
         if (githubKnown === true || !(await needsGitHub(folder))) {
-          out.push(claimed(await addFolder(key, folder)));
+          out.push(claimed(await addFolder(key, folder, claim)));
           continue;
         }
         if (githubKnown === false) {
@@ -507,7 +512,7 @@ export function placeSetup(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea) 
         out.push(claimed({ id: `folders/${key}`, label, outcome: "skipped", note: WAITS_ON_GITHUB_LINE }));
         foldersWaiting++;
         void githubReady.then(async ok => {
-          const landed = ok ? await addFolder(key, folder) : { id: `folders/${key}`, label, outcome: "failed" as const, note: NEEDS_GITHUB_LINE };
+          const landed = ok ? await addFolder(key, folder, claim) : { id: `folders/${key}`, label, outcome: "failed" as const, note: NEEDS_GITHUB_LINE };
           foldersWaiting--;
           landRow(claimed({ ...landed, step: "folders" }));
         });
@@ -553,7 +558,7 @@ export function placeSetup(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea) 
           stage(`${u.label}: ${out === undefined ? "its files were not taken off" : `${out.gone.length} files taken off, ${out.kept.length} kept`}`);
         }
         const project = rows.find(r => r.id === u.owner)?.project;
-        if (u.folder !== undefined && project !== undefined) await recording.removeFolder?.(placeId, project.id).catch((e: unknown) => stage(`${u.label}: ${firstLineOf(e)}`));
+        if (u.folder !== undefined && project !== undefined) await recording.removeFolder(placeId, project.id).catch((e: unknown) => stage(`${u.label}: ${firstLineOf(e)}`));
         // A road with no way off says so on the row, where the person reads what stayed.
         if (u.cmd === undefined && u.note !== undefined && ours) left.push({ id: u.key, label: u.label, outcome: "skipped", note: u.note });
         if (u.cmd !== undefined && ours) {

@@ -581,7 +581,7 @@ export function manageDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, 
       swept = [...plugins.off, ...swept];
       if (plugins.kept.length > 0) note = note === undefined ? pluginsKeptLine(held.name, plugins.kept) : `${note}; ${pluginsKeptLine(held.name, plugins.kept)}`;
       for (const project of projects) {
-        const gone = await recording.removeFolder?.(placeId, project.id).then(
+        const gone = await recording.removeFolder(placeId, project.id).then(
           () => projectLeftLine(project.name),
           () => undefined,
         );

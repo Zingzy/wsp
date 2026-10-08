@@ -197,7 +197,7 @@ export function projectsArea(ctx: RuntimeContext): ProjectsArea {
       return { ...plan, remembered: true, files: plan.files.map(f => ({ ...f, ticked: f.kind !== "never" && remembered.files.includes(f.path) })) };
     },
 
-    async add(o: { source: string; on?: string; name?: string; base?: string; into?: string; seed?: SeedChoice }, origin?: Caller): Promise<ProjectView & { notice?: string }> {
+    async add(o: { source: string; on?: string; name?: string; base?: string; into?: string; seed?: SeedChoice; id?: string; createdAt?: string }, origin?: Caller): Promise<ProjectView & { notice?: string }> {
       await ctx.ready();
       // A project is this computer's to record: the folder and the computer named are read here, and a machine
       // that asked would be naming paths on a computer it cannot see.
@@ -250,7 +250,8 @@ export function projectsArea(ctx: RuntimeContext): ProjectsArea {
       const seeding = resolved.seed !== undefined && road.kind !== "mac";
       if (seeding && o.seed === undefined) throw Object.assign(new Error(seedChoiceNeeded(source.kind === "folder" ? source.path : o.source)), { kind: "invalid" });
       const name = o.name ?? resolved.name;
-      const id = `pr_${randomBytes(4).toString("hex")}`;
+      // An id and an age are named only by a recipe folder moving the project wsp made from it, which went first.
+      const id = o.id ?? `pr_${randomBytes(4).toString("hex")}`;
       const path = road.path({ name, source, deps });
       // The key the agent's memory sits under, fixed here and never recomputed: the folder's own key where a folder
       // on this computer seeded the project, so the memory it already has is the memory it keeps, else the key of
@@ -273,7 +274,7 @@ export function projectsArea(ctx: RuntimeContext): ProjectsArea {
         // their own after the clone and the record stays on the branch the remote has.
         ...(o.base !== undefined ? { base: o.base } : {}),
         ...(top !== undefined ? { git: { top } } : {}),
-        createdAt: new Date(clock.now()).toISOString(),
+        createdAt: o.createdAt ?? new Date(clock.now()).toISOString(),
       };
       const began = clock.now();
       const report = (stage: ProjectAddStage, message: string): void => {
@@ -360,6 +361,24 @@ export function projectsArea(ctx: RuntimeContext): ProjectsArea {
       }
       if (found === undefined) throw notFoundRefusal(noSuchProjectLine(ref, all.map(p => p.name)));
       return found;
+    },
+
+    /** Whether the folder a project lives in still stands on its computer; a road where wsp keeps the project for
+     * itself holds no folder of the person's, so none stands. */
+    async folderStands(id: string): Promise<boolean> {
+      const project = await projectsDoor.resolve(id);
+      const { deps, at } = await landingDeps(project.computer);
+      return (await projectLanding(landingKind(project.computer, at)).folderStands?.(project, deps)) ?? false;
+    },
+
+    /** Copies files off a folder's seed menu into the folder its project stands in on its computer. */
+    async seedInto(id: string, plan: SeedPlan, files: readonly string[]): Promise<void> {
+      const project = await projectsDoor.resolve(id);
+      const { deps, at } = await landingDeps(project.computer);
+      const road = projectLanding(landingKind(project.computer, at));
+      if (road.seedInto === undefined) throw new Error(`${project.name} keeps no folder of its own on ${deps.computerName} to copy files into`);
+      const packed = await seedWiring().pack({ plan, choice: { files: [...files], memory: false, commits: false }, homes: await ctx.homesHere() });
+      await road.seedInto(project, packed.tar, deps);
     },
 
     async remove(id: string, origin?: Caller): Promise<{ said: string }> {
