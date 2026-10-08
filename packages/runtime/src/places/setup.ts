@@ -32,7 +32,6 @@ import {
   setupWidth,
   floorFailedLine,
   noAgentLine,
-  type PlaceApplied,
   type PlaceSetup,
   type PlaceSetupEvent,
   type PlaceSetupLine,
@@ -50,9 +49,10 @@ import { GITHUB_TOKEN_ENV, unlandFiles, PlaceAbsentError, PlaceMachine, envInput
 import { CATALOG_AGENTS, loginSignIn } from "@wsp/catalog";
 import { runGraph, type GraphStep } from "../setup-graph.js";
 import { recipeChanges, stepsFor, type RecipeChange } from "../recipe-sync.js";
-import type { PlaceRecord, RecipeResolver } from "./types.js";
+import { appliedView, type HeldApplied, type HeldRow, type PlaceRecord, type RecipeResolver } from "./types.js";
 import {
   bounded, vaultSignIn, type SyncJob, setupOutcome, UNDO_MS, SIGN_IN_SLACK_MS, GITHUB_MS, GITHUB_ROW, GITHUB_CLI, cliFirst,
+  engineRow,
   INSTALLS, FILES, PROBE_MS, SIGNIN_STATUS_MS, firstLineOf, picksHash, PROVISION_LOG_EVERY_MS, PROVISION_LOG_LINES,
 } from "./helpers.js";
 import type { PlaceDoorContext } from "./context.js";
@@ -202,13 +202,22 @@ export function placeSetup(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea) 
     const shelf = opts.recipes?.();
     const resolved = sync ?? (await (record.recipe === undefined || record.recipe === NO_RECIPE ? shelf?.resolveFile(picks) : shelf?.resolve(record.recipe))?.catch(() => undefined));
     const hash = resolved?.hash ?? picksHash(picks);
+    const before = record.applied?.rows ?? [];
+    // What an earlier run put on reads present to every step run after it, since the engine's read there cannot tell
+    // who put it on. It stays wsp's on the record until its own step reads it again, through a resume and a step that
+    // threw, so a recipe that drops it later still takes it off.
+    const put = before.filter(r => engineRow(r) && r.outcome === "installed");
+    // A project an earlier run made stays wsp's the same way, until the folders step reads it again.
+    const made = before.filter(r => r.step === "folders" && r.project !== undefined);
+    const carried = new Set<HeldRow>(sync !== undefined ? [] : [...put, ...made].filter(r => !done.has(r.step!)).map(r => ({ ...r, earlier: true })));
     // The rows of the steps that already ended stand: a resume runs only what did not. A sync keeps every row and
     // writes each step's over its own.
-    const rows: PlaceProvisionRow[] = sync !== undefined ? [...(record.applied?.rows ?? [])] : (record.applied?.rows ?? []).filter(r => r.step !== undefined && done.has(r.step));
+    const rows: HeldRow[] = sync !== undefined ? [...before] : [...before.filter(r => r.step !== undefined && done.has(r.step)), ...carried];
+    const ours = (got: PlaceProvisionRow[]): PlaceProvisionRow[] => got.map(r => (r.outcome === "present" && put.some(p => p.id === r.id) ? { ...r, outcome: "installed", earlier: true } : r));
     let held = started;
     let ended = false;
     let writing: Promise<void> = Promise.resolve();
-    const applied = (): PlaceApplied => {
+    const applied = (): HeldApplied => {
       // A sync holds the recipe it started from until its last step ended, so one cut partway still reads changes.
       const from = sync !== undefined && !ended ? { hash: record.applied?.hash ?? "", items: record.applied?.items } : { hash, items: resolved?.items };
       return {
@@ -257,6 +266,7 @@ export function placeSetup(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea) 
       let got: PlaceProvisionRow[];
       try {
         got = (await work()).map(r => ({ ...r, step: name }));
+        rows.splice(0, rows.length, ...rows.filter(r => !(carried.has(r) && r.step === name)));
       } catch (e) {
         if (e instanceof PlaceAbsentError) throw e;
         got = [{ id: `${name}/stopped`, label: SETUP_STEP_WORDS[name], outcome: "failed", step: name, note: firstLineOf(e) }];
@@ -270,7 +280,7 @@ export function placeSetup(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea) 
     /** A row that lands after its step ended, since it waited on the person: it takes the place of what stood under
      * that id and is said on the stream, and the last wait gone after the steps ended is the setup coming out again,
      * said with it. */
-    const landRow = (r: PlaceProvisionRow): void => {
+    const landRow = (r: HeldRow): void => {
       rows.splice(0, rows.length, ...rows.filter(x => x.id !== r.id), r);
       push({ ...held });
       setupFrame({ addId, placeId, landed: r.id, ...(ended && held.waiting.length === 0 && foldersWaiting === 0 ? outcome() : {}) });
@@ -426,7 +436,7 @@ export function placeSetup(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea) 
         githubSettled(false);
         return [{ id: GITHUB_ROW, label: "GitHub", outcome: "skipped", note: GITHUB_SKIPPED_LINE }];
       }
-      const gh = await provisioner.step(machine, plan, "github", run, stageOf("github"), { home });
+      const gh = ours(await provisioner.step(machine, plan, "github", run, stageOf("github"), { home }));
       if (gh.some(r => r.outcome === "failed")) {
         githubSettled(false);
         return gh;
@@ -458,7 +468,7 @@ export function placeSetup(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea) 
     };
 
     /** One folder made a project there by the add's own road. */
-    const addFolder = async (key: string, folder: RecipeFile["folders"][string]): Promise<PlaceProvisionRow> => {
+    const addFolder = async (key: string, folder: RecipeFile["folders"][string]): Promise<HeldRow> => {
       const label = folder.name ?? key;
       const add = recording.addFolder;
       if (add === undefined) return { id: `folders/${key}`, label, outcome: "failed", note: NO_FOLDER_ROAD };
@@ -468,25 +478,38 @@ export function placeSetup(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea) 
     /** The folders, each a project on that computer. One whose repository needs GitHub there waits on the GitHub
      * sign-in while the person has it open, and lands once they are through; with GitHub skipped or not signed in it
      * reads as needing GitHub to clone, and nothing is asked of the remote. */
-    const folders = async (): Promise<PlaceProvisionRow[]> => {
-      const out: PlaceProvisionRow[] = [];
+    const folders = async (): Promise<HeldRow[]> => {
+      const out: HeldRow[] = [];
+      const standing = new Set((await recording.projectsOn(placeId)).map(p => p.id));
       for (const [key, folder] of Object.entries(picks.folders)) {
         if (sync !== undefined && !sync.moved.has(`folders/${key}`)) continue;
         const label = folder.name ?? key;
+        // A project an earlier run made from this same pick stands as wsp's, since a second add of its source is
+        // refused as already one; a recipe that moved its look puts the look on it, one that moved its source or
+        // what it keeps adds it again, and a row that add did not land keeps the claim, so a remove still takes it.
+        const was = made.find(r => r.id === `folders/${key}`);
+        const ours = was?.project !== undefined && was.pick !== undefined && standing.has(was.project.id) ? { id: was.project.id, pick: was.pick } : undefined;
+        if (ours !== undefined && ours.pick.from === folder.from && ours.pick.name === folder.name && ours.pick.keep.join("\n") === folder.keep.join("\n")) {
+          const row: HeldRow = { id: `folders/${key}`, label: was!.label, outcome: "installed", project: { id: ours.id }, pick: folder };
+          if (ours.pick.icon === folder.icon && ours.pick.hue === folder.hue) out.push({ ...row, earlier: true });
+          else out.push(await recording.folderLook(ours.id, ours.pick, folder).then(() => row, (e: unknown): HeldRow => ({ ...row, outcome: "failed", note: firstLineOf(e), pick: ours.pick })));
+          continue;
+        }
+        const claimed = (r: HeldRow): HeldRow => (ours === undefined || r.project !== undefined ? r : { ...r, project: { id: ours.id }, pick: ours.pick });
         if (githubKnown === true || !(await needsGitHub(folder))) {
-          out.push(await addFolder(key, folder));
+          out.push(claimed(await addFolder(key, folder)));
           continue;
         }
         if (githubKnown === false) {
-          out.push({ id: `folders/${key}`, label, outcome: "failed", note: NEEDS_GITHUB_LINE });
+          out.push(claimed({ id: `folders/${key}`, label, outcome: "failed", note: NEEDS_GITHUB_LINE }));
           continue;
         }
-        out.push({ id: `folders/${key}`, label, outcome: "skipped", note: WAITS_ON_GITHUB_LINE });
+        out.push(claimed({ id: `folders/${key}`, label, outcome: "skipped", note: WAITS_ON_GITHUB_LINE }));
         foldersWaiting++;
         void githubReady.then(async ok => {
           const landed = ok ? await addFolder(key, folder) : { id: `folders/${key}`, label, outcome: "failed" as const, note: NEEDS_GITHUB_LINE };
           foldersWaiting--;
-          landRow({ ...landed, step: "folders" });
+          landRow(claimed({ ...landed, step: "folders" }));
         });
       }
       return out;
@@ -500,7 +523,7 @@ export function placeSetup(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea) 
         await writing;
         if (failed !== undefined) log.write(failed);
         await writeSetup(placeId, { applied: applied(), picks, sync: undefined });
-        syncFrame({ placeId, applied: applied() });
+        syncFrame({ placeId, applied: appliedView(applied()) });
         return;
       }
       push({ ...held, state: failed === undefined ? "done" : "failed", finishedAt: new Date(clockNow()).toISOString(), ...(failed !== undefined ? { said: failed } : {}) });
@@ -529,7 +552,8 @@ export function placeSetup(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea) 
           else if (out.kept.length > 0) left.push({ id: u.key, label: u.label, outcome: "skipped", note: editedThereLine(record.name, out.kept) });
           stage(`${u.label}: ${out === undefined ? "its files were not taken off" : `${out.gone.length} files taken off, ${out.kept.length} kept`}`);
         }
-        if (u.folder !== undefined && ours) await recording.removeFolder?.(placeId, u.folder, sync.before.folders[u.folder]!).catch((e: unknown) => stage(`${u.label}: ${firstLineOf(e)}`));
+        const project = rows.find(r => r.id === u.owner)?.project;
+        if (u.folder !== undefined && project !== undefined) await recording.removeFolder?.(placeId, project.id).catch((e: unknown) => stage(`${u.label}: ${firstLineOf(e)}`));
         // A road with no way off says so on the row, where the person reads what stayed.
         if (u.cmd === undefined && u.note !== undefined && ours) left.push({ id: u.key, label: u.label, outcome: "skipped", note: u.note });
         if (u.cmd !== undefined && ours) {
@@ -559,7 +583,7 @@ export function placeSetup(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea) 
         if (w.row === GITHUB_ROW) await githubSignIn(plan);
         else await agentSignIn(w.row.slice("signins/".length), plan);
       }
-      const engine = (s: EngineStep) => () => provisioner.step(machine, plan, s, run, stageOf(s), { home });
+      const engine = (s: EngineStep) => async () => ours(await provisioner.step(machine, plan, s, run, stageOf(s), { home }));
       const floor = await step("floor", engine("floor"));
       if (floor?.failed === true) return await end(floorFailedLine(floor.rows));
       let stopped: string | undefined;
@@ -591,12 +615,14 @@ export function placeSetup(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea) 
             const waits = [["gh", new Set(ghRow !== undefined ? [ghRow] : [])], ["hooks", new Set(hooks)], ["servers", new Set(plan.serverTools ?? [])]] as const;
             for (const [mark, rows] of waits) if (rows.size === 0) release(mark);
             return go(
-              step("clis", () =>
-                provisioner.step(machine, plan, "clis", run, (detail, at, row) => {
-                  stageOf("clis")(detail, at, row);
-                  if (row === undefined) return;
-                  for (const [mark, rows] of waits) if (rows.delete(row.id) && rows.size === 0) release(mark);
-                }, { home }),
+              step("clis", async () =>
+                ours(
+                  await provisioner.step(machine, plan, "clis", run, (detail, at, row) => {
+                    stageOf("clis")(detail, at, row);
+                    if (row === undefined) return;
+                    for (const [mark, rows] of waits) if (rows.delete(row.id) && rows.size === 0) release(mark);
+                  }, { home }),
+                ),
               ),
             );
           },
