@@ -13,6 +13,8 @@ import { SidebarProvider, useSidebar } from "../src/components/ui/sidebar.js";
 import { compileResolvedKeybindingsConfig } from "../src/keybindingDefaults.js";
 import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
+import { closeAdd, useAddFlow } from "../src/settings/add/addFlow.js";
+import { useSettingsStore } from "../src/settings/settingsStore.js";
 import { useRightPanelStore } from "../src/rightPanelStore.js";
 import { AppShell } from "../src/shell/AppShell.js";
 import { KeybindingDispatcher } from "../src/shell/KeybindingDispatcher.js";
@@ -298,7 +300,10 @@ describe("command palette", () => {
     fireEvent.click(inPalette().getByText(PLACES_WORDS.addComputer));
     await waitFor(() => expect(palette()).toBeNull());
     expect(useStore.getState().settingsOpen).toBe(true);
-    expect(useStore.getState().addComputerOpen).toBe(true);
+    // The page takes the ask: it stands on Computers with the sheet open over it.
+    await waitFor(() => expect(useAddFlow.getState().open).toBe(true));
+    expect(useSettingsStore.getState().at).toEqual({ kind: "group", group: "computers" });
+    act(() => closeAdd());
   });
 
   it("carries Add a project, which opens the sheet the sidebar's own row opens, and no cloud to connect", async () => {
@@ -349,8 +354,9 @@ describe("command palette", () => {
     fireEvent.click(row);
     await waitFor(() => expect(palette()).toBeNull());
     expect(useStore.getState().settingsOpen).toBe(true);
-    // The settings sidebar stands in the app sidebar's place while the page is open, so Back is the row that closes it.
-    expect(document.querySelector("[data-row-id='ws:ws_b']")).toBeNull();
+    // The settings sidebar stands in the app sidebar's place while the page is open, so Back is the row that closes it;
+    // the app sidebar is kept under it, hidden.
+    expect(document.querySelector("[data-row-id='ws:ws_b']")!.closest("[style*='display: none']")).not.toBeNull();
     fireEvent.click(document.querySelector("[data-k=settings-back]")!);
     expect(useStore.getState().settingsOpen).toBe(false);
     mod(",");

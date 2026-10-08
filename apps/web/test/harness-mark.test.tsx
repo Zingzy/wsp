@@ -62,6 +62,13 @@ describe("HarnessMark", () => {
     expect([...pi.querySelectorAll("path")].map(p => p.getAttribute("fill"))).toEqual([null, "var(--ink-1)", "var(--ink-2)"]);
   });
 
+  it("drawn again with the same mark keeps its shapes: React 19 writes innerHTML anew for every new object, which replaced every tile's mark on each sidebar render", () => {
+    const { container, rerender } = render(<HarnessMark harness="claude" label="Claude Code" />);
+    const shape = container.querySelector('[data-harness-mark="claude"]')!.firstElementChild;
+    rerender(<HarnessMark harness="claude" label="Claude Code" className="opacity-50" />);
+    expect(container.querySelector('[data-harness-mark="claude"]')!.firstElementChild).toBe(shape);
+  });
+
   it("an agent with no mark draws its initials in the box a mark takes, so they scale with it", () => {
     for (const id of UNMARKED_AGENTS) {
       const { container, unmount } = render(<HarnessMark harness={id} label={CATALOG_AGENTS.find(a => a.id === id)!.name} className="size-5" />);

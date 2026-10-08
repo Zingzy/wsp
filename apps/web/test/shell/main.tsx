@@ -76,7 +76,6 @@ import { getLive } from "../../src/machine/live";
 import { useStore } from "../../src/protocol/store";
 import { openCommandPalette } from "../../src/commandPaletteBus";
 import { openComputerSettings, openSettingsGroup } from "../../src/settings/openAt";
-import { SettingsPage } from "../../src/settings/SettingsPage";
 import { useHostNotices } from "../../src/notices/hostNotices.js";
 import { addNotice, type NoticeKind } from "../../src/notices/store.js";
 import { useWorkspaceLineNotices } from "../../src/notices/workspaceLines.js";
@@ -453,6 +452,29 @@ const chatHistory: SessionEvent[] = [
   },
 ];
 
+// ?chat=long&turns=<n>&tools=<m> replays n answered turns of m tool calls each, every call with its output, so a long
+// thread's first draw, the one Settings back to the thread pays, can be timed.
+const longHistory: SessionEvent[] = Array.from({ length: Number(params.get("turns") ?? 20) }, (_, t) => {
+  const turn = { ...chatTurn, turnId: `turn_long_${t}` };
+  const tools = Array.from({ length: Number(params.get("tools") ?? 20) }, (_, k): SessionEvent[] => [
+    { type: "session.delta", ...turn, kind: "tool_use", toolName: k % 2 === 0 ? "Bash" : "Read", toolUseId: `toolu_${t}_${k}`, text: JSON.stringify(k % 2 === 0 ? { command: `pnpm exec vitest run test/file-${k}.test.ts` } : { file_path: `/root/wsp/apps/web/src/file-${k}.ts` }) },
+    { type: "session.delta", ...turn, kind: "tool_result", toolUseId: `toolu_${t}_${k}`, text: `line one of ${k}\nline two\nline three`, isError: false },
+  ]).flat();
+  return [
+    { type: "session.start", ...turn, prompt: `Turn ${t}: run the next file and report.` },
+    ...tools,
+    { type: "session.delta", ...turn, kind: "text", text: CHAT_MARKDOWN },
+    { type: "session.done", ...turn, result: { status: "completed", durationMs: 2400, costUsd: 0.004 } },
+  ] satisfies SessionEvent[];
+}).flat();
+
+// ?chat=tasks replays a turn still running with its step list, which the composer's top edge carries attached.
+const tasksHistory: SessionEvent[] = [
+  { type: "session.start", ...chatTurn, prompt: "Bump the lockfile and run the gate." },
+  { type: "session.plan", ...chatTurn, steps: [{ text: "Bump the lockfile", state: "done" }, { text: "Run the gate", state: "working" }, { text: "Report", state: "pending" }] },
+  { type: "session.delta", ...chatTurn, kind: "text", text: "Running the gate now." },
+];
+
 // ?chat=diagram replays a reply with a Mermaid flowchart whose label carries a script tag, a Mermaid fence that does
 // not parse, a display formula and an inline one: what the renderer has to draw, and what it must never let through.
 const DIAGRAM_MARKDOWN = [
@@ -534,7 +556,9 @@ const diagramHistory: SessionEvent[] = [
   },
 ];
 
+// ?marks=1 lets a thread be pinned and snoozed and a project be exported, so the Snooze and Export dialogs open.
 const api: Api = {
+  ...(params.get("marks") === "1" ? { markThreads: async () => {}, exportProject: async opts => ({ dest: opts.dest, files: 0, bytes: 0, excluded: [], agents: [] }) } : {}),
   ...(params.get("consent") === "1" ? { editorList: async () => [{ id: "vscode", name: "VS Code", remote: true }], sshInclude: async () => false } : {}),
   listWorkspaces: async () => workspaces,
   getWorkspace: async id => workspaces.find(w => w.id === id)!,
@@ -565,6 +589,10 @@ const api: Api = {
         ? []
         : params.get("chat") === "1"
           ? chatHistory
+          : params.get("chat") === "long"
+            ? longHistory
+            : params.get("chat") === "tasks"
+              ? tasksHistory
           : params.get("chat") === "failed"
             ? failedHistory
             : params.get("chat") === "diagram"
@@ -768,7 +796,6 @@ const settingsGroup = params.get("settings");
 const settingsShown = settingsGroup === "general" || settingsGroup === "appearance";
 if (settingsShown) openSettingsGroup(settingsGroup);
 if (settingsGroup === "computer") openComputerSettings("p_hetzner");
-const settingsPage = settingsShown || settingsGroup === "computer";
 // ?init=building puts the init job mid-build on the store, as its events would, so the collapsed cloud row's progress
 // line can be measured and photographed; the fixture's golden is none, so the row is there.
 if (params.get("init") === "building") {
@@ -909,9 +936,7 @@ createRoot(document.getElementById("root")!).render(
     {params.get("version") === "behind" ? <VersionRule /> : null}
     {params.get("host") === "1" ? <HostRule /> : null}
     <AppShell>
-      {settingsPage ? (
-        <SettingsPage />
-      ) : shown === null ? (
+      {shown === null ? (
         <div />
       ) : (
         <div className="flex min-h-0 flex-1 flex-col" data-terminal-beside>

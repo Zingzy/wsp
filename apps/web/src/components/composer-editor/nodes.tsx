@@ -4,7 +4,7 @@ import { $applyNodeReplacement, DecoratorNode, type LexicalNode, type NodeKey, t
 
 import { baseName } from "../../files/entries";
 import type { ComposerTokenSegment } from "../../composer-editor-mentions";
-import { COMPOSER_INLINE_CHIP_CLASS_NAME, COMPOSER_INLINE_CHIP_DECORATOR_CLASS_NAME, COMPOSER_INLINE_CHIP_ICON_CLASS_NAME, COMPOSER_INLINE_CHIP_LABEL_CLASS_NAME, SKILL_CHIP_ICON_SVG } from "../composerInlineChip";
+import { COMPOSER_INLINE_CHIP_CLASS_NAME, COMPOSER_INLINE_CHIP_DECORATOR_CLASS_NAME, COMPOSER_INLINE_CHIP_ICON_CLASS_NAME, COMPOSER_INLINE_CHIP_LABEL_CLASS_NAME, SKILL_CHIP_ICON_HTML } from "../composerInlineChip";
 import { FILE_TAG_CHIP_CLASS_NAME, FileTagChipContent } from "../chat/FileTagChip";
 import { ComposerPendingTerminalContextChip } from "../chat/ComposerPendingTerminalContexts";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -86,7 +86,7 @@ function $createComposerMentionNode(path: string, source: string): ComposerMenti
 function ComposerSkillDecorator(props: { skillName: string }) {
   return (
     <span className={COMPOSER_INLINE_CHIP_CLASS_NAME} contentEditable={false} spellCheck={false} data-composer-skill-chip="true">
-      <span aria-hidden="true" className={COMPOSER_INLINE_CHIP_ICON_CLASS_NAME} dangerouslySetInnerHTML={{ __html: SKILL_CHIP_ICON_SVG }} />
+      <span aria-hidden="true" className={COMPOSER_INLINE_CHIP_ICON_CLASS_NAME} dangerouslySetInnerHTML={SKILL_CHIP_ICON_HTML} />
       <span className={COMPOSER_INLINE_CHIP_LABEL_CLASS_NAME}>{props.skillName}</span>
     </span>
   );

@@ -163,7 +163,7 @@ export function NounSwitcher({
 
   return (
     <Popover open={open} onOpenChange={next => setOpen(next && !held)}>
-      <div className="group/menu-item relative" {...(onContextMenu === undefined ? {} : { onContextMenu })}>
+      <div className="group/menu-item relative" data-has-action={action === undefined ? undefined : ""} {...(onContextMenu === undefined ? {} : { onContextMenu })}>
         <PopoverTrigger
           ref={headRef}
           render={<SidebarMenuButton size="sm" />}

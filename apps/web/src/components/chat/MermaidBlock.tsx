@@ -7,7 +7,7 @@
 // to the fence's own config, and the SVG it returns is purified once more,
 // links out, before it goes in. A fence that does not parse keeps its source,
 // with the line saying so and Mermaid's own under it.
-import { useEffect, useId, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import DOMPurify from "dompurify";
 import mermaid from "mermaid";
 
@@ -149,13 +149,14 @@ export default function MermaidBlock({ code, resolvedTheme, source, look, drawin
     };
   }, [code, id, resolvedTheme, look]);
 
-  if (drawn.kind === "svg") {
+  const svg = useMemo(() => (drawn.kind === "svg" ? { __html: drawn.svg } : null), [drawn]);
+  if (svg !== null && drawn.kind === "svg") {
     return (
       <div
         data-mermaid
         className="flex overflow-x-auto px-3 pt-1 pb-3 [&_svg]:mx-auto [&_svg]:h-auto [&_svg]:min-w-(--diagram-min)"
         style={{ "--diagram-min": drawn.width === null ? "0px" : `${drawn.width}px` } as CSSProperties}
-        dangerouslySetInnerHTML={{ __html: drawn.svg }}
+        dangerouslySetInnerHTML={svg}
       />
     );
   }

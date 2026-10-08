@@ -9,6 +9,7 @@ import { ChevronDownIcon, ChevronsUpDownIcon, ChevronUpIcon } from "lucide-react
 import type * as React from "react";
 
 import { cn } from "../../lib/utils";
+import { usePortalHost } from "./portal-host";
 
 const Select = SelectPrimitive.Root;
 
@@ -129,7 +130,7 @@ function SelectPopup({
   anchor?: SelectPrimitive.Positioner.Props["anchor"];
 }) {
   return (
-    <SelectPrimitive.Portal>
+    <SelectPrimitive.Portal container={usePortalHost()}>
       <SelectPrimitive.Positioner
         align={align}
         alignItemWithTrigger={alignItemWithTrigger}

@@ -97,48 +97,6 @@ function Peek({
   );
 }
 
-function Attachment({ className, ...props }: ComponentProps<"div">) {
-  return (
-    <div
-      data-slot="composer-banner-attachment"
-      className={cn(
-        "mx-auto -mb-[calc(1rem+1px)] w-[calc(100%-2*var(--chat-composer-drawer-inset))]",
-        // Adjacent attachments share their outline, including notices outside the form.
-        "[&+[data-slot=composer-banner-attachment]_[data-composer-banner-surface=attached]]:before:rounded-none [&+[data-slot=composer-banner-attachment]_[data-composer-banner-surface=attached]]:before:border-t-0",
-        "[&+:has([data-chat-composer-form])_[data-chat-composer-form]>[data-slot=composer-banner-attachment]:first-child_[data-composer-banner-surface=attached]]:before:rounded-none [&+:has([data-chat-composer-form])_[data-chat-composer-form]>[data-slot=composer-banner-attachment]:first-child_[data-composer-banner-surface=attached]]:before:border-t-0",
-        className,
-      )}
-      {...props}
-    />
-  );
-}
-
-function Dock({ className, ...props }: ComponentProps<"div">) {
-  return (
-    <Attachment
-      className={cn(
-        "flex items-end gap-1 not-has-data-[composer-banner-surface=attached]:hidden",
-        className,
-      )}
-      {...props}
-    />
-  );
-}
-
-/** Attachments share a column while neighboring tabs keep their own surface. */
-function Column({ className, ...props }: ComponentProps<"div">) {
-  return (
-    <div
-      className={cn(
-        "flex min-w-0 flex-1 flex-col empty:hidden",
-        "[&>[data-slot=composer-banner-attachment]]:w-full [&>[data-slot=composer-banner-attachment]:last-child]:mb-0",
-        className,
-      )}
-      {...props}
-    />
-  );
-}
-
 function Root({
   className,
   density = "default",
@@ -217,8 +175,9 @@ function Content({ className, ...props }: ComponentProps<"span">) {
       data-slot="composer-banner-content"
       className={cn(
         "col-start-2 row-start-1 flex min-w-0 items-center gap-1",
-        "group-not-has-[>[data-slot=composer-banner-icon]]/banner-row:col-[1/3] group-not-has-[>[data-slot=composer-banner-icon]]/banner-row:ps-2 sm:group-not-has-[>[data-slot=composer-banner-icon]]/banner-row:ps-1.5",
-        "group-not-has-[>[data-slot=composer-banner-icon],>[data-slot=composer-banner-actions]]/banner-row:pe-2 sm:group-not-has-[>[data-slot=composer-banner-icon],>[data-slot=composer-banner-actions]]/banner-row:pe-1.5",
+        // A row's parts come icon, content, actions: content with no icon before it, or nothing after it, reads so off its siblings.
+        "[&:not([data-slot=composer-banner-icon]~*)]:col-[1/3] [&:not([data-slot=composer-banner-icon]~*)]:ps-2 sm:[&:not([data-slot=composer-banner-icon]~*)]:ps-1.5",
+        "[&:not([data-slot=composer-banner-icon]~*):last-child]:pe-2 sm:[&:not([data-slot=composer-banner-icon]~*):last-child]:pe-1.5",
         className,
       )}
       {...props}
@@ -322,9 +281,6 @@ function Dismiss({ className, children, ...props }: ComponentProps<typeof Button
 export const ComposerBanner = {
   Surface,
   Peek,
-  Attachment,
-  Dock,
-  Column,
   Root,
   Row,
   Icon,

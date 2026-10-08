@@ -556,7 +556,8 @@ describe.skipIf(renderSkipped !== undefined)("the settings page laid out in Chro
         .filter(el => el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 1)
         .map(el => `${(el.textContent ?? "").trim()} [${el.scrollWidth}/${el.clientWidth} ${el.scrollHeight}/${el.clientHeight}]`);
       const opacity = (selector: string): number[] => [...document.querySelectorAll<HTMLElement>(selector)].map(el => Number(getComputedStyle(el).opacity));
-      const sidebarRows = [...document.querySelectorAll<HTMLElement>("[data-slot=sidebar] [data-sidebar-row]")].map(el => ({
+      // The workspace sidebar stands hidden under Settings; the rows read are the ones on screen.
+      const sidebarRows = [...document.querySelectorAll<HTMLElement>("[data-slot=sidebar] [data-sidebar-row]")].filter(el => el.checkVisibility()).map(el => ({
         id: el.dataset["rowId"] ?? "?",
         height: box(el).height,
         active: el.dataset["active"] === "true",
@@ -745,7 +746,7 @@ describe.skipIf(renderSkipped !== undefined)("the settings page laid out in Chro
 
   it("opens one group's sub-rows at a time: picking Computers folds Appearance's sections and lists the computers right under it, 36 px apart", async () => {
     const tops = (): Promise<[string, number][]> =>
-      page!.evaluate(() => [...document.querySelectorAll<HTMLElement>("[data-slot=sidebar] [data-sidebar-row]")].map(el => [el.dataset["rowId"] ?? "?", Math.round(el.getBoundingClientRect().top)] as [string, number]));
+      page!.evaluate(() => [...document.querySelectorAll<HTMLElement>("[data-slot=sidebar] [data-sidebar-row]")].filter(el => el.checkVisibility()).map(el => [el.dataset["rowId"] ?? "?", Math.round(el.getBoundingClientRect().top)] as [string, number]));
     await open("settings-appearance", "dark", "[data-settings-at=appearance]");
     const before = await tops();
     expect(before.some(([id]) => id.startsWith("section:"))).toBe(true);
@@ -820,7 +821,7 @@ describe.skipIf(renderSkipped !== undefined)("the settings page laid out in Chro
     await page!.waitForSelector("[data-slot=sidebar][data-mobile=true] [data-k=settings-row]");
     await page!.locator("[data-slot=sidebar][data-mobile=true] [data-k=settings-row]").click();
     await page!.waitForSelector("[data-slot=sidebar][data-mobile=true] [data-settings-groups]");
-    expect(await page!.locator("[data-slot=sidebar][data-mobile=true] [data-sidebar-tree]").count()).toBe(0);
+    expect(await page!.locator("[data-slot=sidebar][data-mobile=true] [data-sidebar-tree]:visible").count()).toBe(0);
     await shot("from-foot-390-dark");
   }, 60_000);
 

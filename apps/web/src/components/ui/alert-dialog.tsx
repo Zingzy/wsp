@@ -10,6 +10,7 @@ import {
   DIALOG_POPUP_CLASS,
 } from "./dialog-styles";
 import { Kbd } from "./kbd";
+import { usePortalHost } from "./portal-host";
 
 const AlertDialogCreateHandle = AlertDialogPrimitive.createHandle;
 
@@ -54,8 +55,9 @@ function AlertDialogPopup({
   bottomStickOnMobile?: boolean;
   portalContainer?: AlertDialogPrimitive.Portal.Props["container"];
 }) {
+  const host = usePortalHost();
   return (
-    <AlertDialogPortal container={portalContainer}>
+    <AlertDialogPortal container={portalContainer ?? host}>
       <AlertDialogBackdrop />
       <AlertDialogViewport
         className={cn(bottomStickOnMobile && "max-sm:grid-rows-[1fr_auto] max-sm:p-0 max-sm:pt-12")}

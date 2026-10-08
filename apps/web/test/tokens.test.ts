@@ -84,7 +84,7 @@ describe("index.css", () => {
     // The composer and the rows attached to it frost on the Mac too, its tray among them: the owner wants the page
     // under them to show.
     expect(uses.filter(use => !use.startsWith("off-mac:")).sort()).toEqual(
-      ["before:glass-backdrop", "before:glass-backdrop", "before:glass-backdrop", "glass-backdrop", "glass-backdrop", "group-has-data-[composer-banner-surface=attached]/composer-surface:glass-backdrop"].sort(),
+      ["before:glass-backdrop", "before:glass-backdrop", "before:glass-backdrop", "glass-backdrop", "glass-backdrop", "group-data-banner-attached/composer-surface:glass-backdrop"].sort(),
     );
   });
 
@@ -157,22 +157,22 @@ describe("index.css", () => {
 
       /* A translucent terminal shows the window's glass through its canvas, so with one open the centre's share moves off
          the whole column onto the thread and the header, and the drawer's own ground stays clear. */
-      html.desktop-mac.dark:has([data-terminal-translucent]) [data-shell-center] {
+      html.desktop-mac.dark[data-terminal-ground] [data-shell-center] {
         background: transparent;
       }
 
-      html.desktop-mac.dark:has([data-terminal-translucent]) :is([data-shell-center] > header, [data-terminal-beside], [data-shell-center] [data-terminal-tabs]) {
+      html.desktop-mac.dark[data-terminal-ground] :is([data-shell-center] > header, [data-terminal-beside], [data-shell-center] [data-terminal-tabs]) {
         background: color-mix(in srgb, var(--material-ground) var(--material-centre), transparent);
       }
 
       /* The same in the right panel: holding a translucent terminal, its share moves onto the tab strip. */
-      html.desktop-mac.dark [data-preview-panel-mode="inline"]:has([data-terminal-translucent]) {
+      html.desktop-mac.dark [data-preview-panel-mode="inline"][data-terminal-ground] {
         background: transparent;
         /* The hairline read against the share; over the bare glass it takes the grey it shows there, as a solid line. */
         border-color: var(--material-edge);
       }
 
-      html.desktop-mac.dark [data-preview-panel-mode="inline"]:has([data-terminal-translucent]) [data-right-panel-tabbar] {
+      html.desktop-mac.dark [data-preview-panel-mode="inline"][data-terminal-ground] [data-right-panel-tabbar] {
         background: color-mix(in srgb, var(--material-ground) var(--material-panel), transparent);
       }
 
@@ -316,22 +316,23 @@ describe("index.css", () => {
         color: var(--sidebar-muted-foreground);
       }
 
-      /* A Ghostty config with background-opacity under 1: the viewport marks itself
-         translucent. In the macOS desktop window, whose html carries the class the
-         desktop preload sets, every element between the window and the canvas stops
-         painting so the window's own material shows through the canvas alone, and
+      /* A Ghostty config with background-opacity under 1: the viewport marks every
+         element above it data-terminal-ground (terminalGround.ts). In the macOS
+         desktop window, whose html carries the class the desktop preload sets,
+         every element between the window and the canvas stops painting so the
+         window's own material shows through the canvas alone, and
          the chrome around it paints the app background itself: the right pane's tab
          strip, the terminal tabs beside a split, the header row and the thread above
          a drawer, and every column and banner that does not hold the canvas. In dark
          mode every region already paints its own share over the glass, so only light
          mode repaints the chrome. In a browser tab there is no material, and the
          canvas blends over the pane's token. */
-      html.desktop-mac:has([data-terminal-translucent]),
-      html.desktop-mac :has([data-terminal-translucent]) {
+      html.desktop-mac[data-terminal-ground],
+      html.desktop-mac [data-terminal-ground] {
         background: transparent;
       }
 
-      html.desktop-mac:not(.dark):has([data-terminal-translucent]) :is([data-right-panel-tabbar], [data-terminal-tabs], [data-shell-center] > header, [data-terminal-beside], [data-slot="sidebar-inset"] > :not(:has([data-terminal-translucent])), [data-slot="sidebar-inset"] > div > :not(:has([data-terminal-translucent]))) {
+      html.desktop-mac:not(.dark)[data-terminal-ground] :is([data-right-panel-tabbar], [data-terminal-tabs], [data-shell-center] > header, [data-terminal-beside], [data-slot="sidebar-inset"] > :not([data-terminal-ground]), [data-slot="sidebar-inset"] > div > :not([data-terminal-ground])) {
         background: var(--background);
       }
 

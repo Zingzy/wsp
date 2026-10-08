@@ -1005,7 +1005,7 @@ export function ChatComposer({
     <div className="relative w-full px-3 pt-1.5 pb-4 sm:px-5 sm:pt-2 sm:pb-5" data-chat-composer>
       {dropZone}
       <ComposerQueue rows={queue} files={queuedFiles} next={next} waiting={waiting?.line ?? null} onEdit={editCard} onRemove={removeCard} />
-      <ComposerSurface.Shell tray>
+      <ComposerSurface.Shell tray attached={tasks !== null}>
         {tasks !== null ? <ComposerTasks tasks={tasks} /> : null}
         <ComposerSurface.Host>
           <form

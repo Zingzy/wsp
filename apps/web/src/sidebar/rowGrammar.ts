@@ -35,7 +35,7 @@ export const TILE_TITLE_CLASS = "block h-[18px] min-w-0 truncate text-sm leading
 export const TILE_ROW_TWO_CLASS = "flex h-[18px] min-w-0 items-center gap-1.5";
 /** A row whose frame puts glyphs beside it on hover keeps its text running to its own inset: the glyphs land in the
  * slot at the row's right edge, where the word or the count yields to them, rather than taking room off the row. */
-export const GLYPH_ROW_CLASS = "group-has-data-[sidebar=menu-action]/menu-item:pe-2";
+export const GLYPH_ROW_CLASS = "group-data-has-action/menu-item:pe-2";
 /** A glyph the hover puts beside a row is nothing at rest at every width. The kit stands it up under its md
  * breakpoint, where a phone's sheet would then show every plus and chevron at once; under that width it is not
  * drawn at all, so a control nobody can see is neither a tap target nor a tab stop. */

@@ -2,7 +2,7 @@
 // The three regions: a resizable sidebar on the left, the selected
 // workspace's panes in the center, the surface panel on the right. State
 // drives every switch here; there is no router.
-import { useEffect, type ReactNode } from "react";
+import { Activity, useEffect, type ReactNode } from "react";
 import { ContextMenuHost } from "../actions/ContextMenuHost.js";
 import { CommandPalette } from "../components/palette/CommandPalette.js";
 import { RewindDialogHost } from "../components/chat/RewindDialog.js";
@@ -13,6 +13,7 @@ import { GitSplit } from "../pull-request/GitSplit.js";
 import { ContextRing } from "../components/chat/ContextMeter.js";
 import { WorkspaceSwitcher } from "../components/switcher/WorkspaceSwitcher.js";
 import { PanelLayoutControls } from "../components/chat/PanelLayoutControls.js";
+import { PortalHostContext, usePlacedPortalHost } from "../components/ui/portal-host.js";
 import { Sidebar, SidebarInset, SidebarProvider, SidebarRail, type SidebarWidthStore } from "../components/ui/sidebar.js";
 import { WorkspacePageHeader } from "../components/WorkspacePageHeader.js";
 import { useMediaQuery } from "../hooks/useMediaQuery.js";
@@ -27,6 +28,7 @@ import { trackThreadHistory } from "./threadHistory.js";
 import { useShortcutLabel } from "./useKeybindings.js";
 import { selectWorkspaceRightPanelState, useRightPanelStore } from "../rightPanelStore.js";
 import { SettingsHeaderActions } from "../settings/SettingsHeaderActions.js";
+import { SettingsPage } from "../settings/SettingsPage.js";
 import { SettingsSidebar } from "../settings/SettingsSidebar.js";
 import { WorkspaceSidebar } from "../sidebar/WorkspaceSidebar.js";
 import { workspaceOrHere } from "../terminal/computer.js";
@@ -52,6 +54,10 @@ const sidebarWidthStore: SidebarWidthStore = {
     }),
 };
 
+/** One element for the life of the module, so a render of the shell (Settings opening or closing) leaves the sidebar
+ * and its tiles as they are. */
+const WORKSPACE_SIDEBAR = <WorkspaceSidebar />;
+
 export function AppShell({ children }: { children: ReactNode }) {
   const workspaceId = useSelectedWorkspaceId();
   // With no workspace on screen the terminal and the panel are this computer's own.
@@ -65,6 +71,9 @@ export function AppShell({ children }: { children: ReactNode }) {
   // it, with Restore defaults where the layout controls were. The panel's own record is untouched, so every
   // surface is back as it was the moment Settings closes.
   const settingsOpen = useSettingsOpen();
+  // The sidebar's own host, since in a narrow window it stands in a sheet whose portal its popups belong inside.
+  const [sidebarHost, placeSidebarHost] = usePlacedPortalHost(settingsOpen);
+  const [centreHost, placeCentreHost] = usePlacedPortalHost(settingsOpen);
   const useSheet = useMediaQuery(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY);
   const viewportWidth = useViewportWidth();
   const rightPanelOpen = panel.isOpen && !settingsOpen;
@@ -103,7 +112,13 @@ export function AppShell({ children }: { children: ReactNode }) {
         className={cn(isDesktopMac() ? "sidebar-vibrancy" : "sidebar-glass", "border-r border-sidebar-border text-sidebar-foreground")}
         resizable={{ minWidth: SIDEBAR_MIN_WIDTH, maxWidth: sidebarMaxWidthBeside(viewportWidth, panelInline), width: sidebarWidthStore }}
       >
-        {settingsOpen ? <SettingsSidebar /> : <WorkspaceSidebar />}
+        {settingsOpen ? <SettingsSidebar /> : null}
+        {/* Hidden under Settings rather than taken down, as the centre is: drawing every tile and a long thread again
+            on the way back blocked the window for seconds. Their popups go into the portal host, hidden with them. */}
+        <Activity mode={settingsOpen ? "hidden" : "visible"}>
+          <PortalHostContext value={sidebarHost}>{WORKSPACE_SIDEBAR}</PortalHostContext>
+        </Activity>
+        <span hidden ref={placeSidebarHost} />
         <SidebarRail />
       </Sidebar>
       <SidebarInset className="h-dvh min-h-0 overflow-hidden">
@@ -131,7 +146,12 @@ export function AppShell({ children }: { children: ReactNode }) {
             <div className="relative h-0">
               <Notices />
             </div>
-            <div className="flex min-h-0 flex-1 flex-col">{children}</div>
+            <div className="flex min-h-0 flex-1 flex-col" ref={placeCentreHost}>
+              {settingsOpen ? <SettingsPage /> : null}
+              <Activity mode={settingsOpen ? "hidden" : "visible"}>
+                <PortalHostContext value={centreHost}>{children}</PortalHostContext>
+              </Activity>
+            </div>
           </div>
           {rightPanelOpen ? (
             <RightPanel workspaceId={terminalKey} state={panel} mode={useSheet ? "sheet" : "inline"} {...(useSheet ? {} : { layoutControls })} />

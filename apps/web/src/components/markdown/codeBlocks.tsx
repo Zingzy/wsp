@@ -296,14 +296,10 @@ export function SuspenseShikiCodeBlock({
   const language = extractFenceLanguage(className);
   const cacheKey = createHighlightCacheKey(code, language, themeName);
   const cachedHighlightedHtml = !isStreaming ? highlightedCodeCache.get(cacheKey) : null;
+  const cached = useMemo(() => (cachedHighlightedHtml == null ? null : { __html: cachedHighlightedHtml }), [cachedHighlightedHtml]);
 
-  if (cachedHighlightedHtml != null) {
-    return (
-      <div
-        className="chat-markdown-shiki"
-        dangerouslySetInnerHTML={{ __html: cachedHighlightedHtml }}
-      />
-    );
+  if (cached !== null) {
+    return <div className="chat-markdown-shiki" dangerouslySetInnerHTML={cached} />;
   }
 
   return (
@@ -357,7 +353,6 @@ function UncachedShikiCodeBlock({
     }
   }, [cacheKey, code, highlightedHtml, isStreaming]);
 
-  return (
-    <div className="chat-markdown-shiki" dangerouslySetInnerHTML={{ __html: highlightedHtml }} />
-  );
+  const html = useMemo(() => ({ __html: highlightedHtml }), [highlightedHtml]);
+  return <div className="chat-markdown-shiki" dangerouslySetInnerHTML={html} />;
 }
