@@ -576,6 +576,7 @@ export interface ThreadsArea {
   readonly notifyReach: (from: readonly string[]) => Set<string>;
   readonly tellAs: (s: { notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin }) => { by?: ThreadScope; road?: WorkspaceOrigin };
   readonly notifyEnd: (s: { view: SessionView; turnId: string }, notify: readonly string[], named: { by?: ThreadScope; road?: WorkspaceOrigin }, result: TurnResult) => void;
+  readonly deliverOwed: () => Promise<void>;
   readonly settleCut: (s: { view: SessionView; turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin; turnLive?: TurnLive; snapshot?: string }, reason: string, cutLine: (endedAt: number) => string) => void;
   readonly notARepo: (r: WorkspaceRecord) => boolean;
   readonly checkpointsLanding: Map<string, Promise<void>>;

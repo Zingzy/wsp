@@ -430,6 +430,8 @@ export function bootArea(ctx: RuntimeContext): BootArea {
         if (thread !== undefined && !ctx.threadRuns(thread)) await deviceDoor.revoke(device.id);
       }
       await deviceDoor.revokeAsides();
+      // Each start waits for its thread's workspace to settle its turns, so a line meets the turn re-opened there.
+      void ctx.deliverOwed().catch((e: unknown) => console.warn(`the lines owed to threads were not sent: ${e instanceof Error ? e.message : String(e)}`));
       for (const raw of await store.list(BUILDERS)) await admit(raw as StoredBuilder);
       // Not waited on: a fetch of a big copy's branches takes seconds, and the records it drops leave as they go.
       ctx.state.copiesMoving = ctx.moveOldCopies().catch((e: unknown) => console.warn(`the move off old copies stopped: ${e instanceof Error ? e.message : String(e)}`));

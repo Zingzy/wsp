@@ -87,6 +87,9 @@ export const ATTACHMENTS = "attachments";
 export const ATTACHMENT_KEYS = "attachment-keys";
 /** One document per workspace: the turns sessions.list serves, read back at boot so the rows outlive the process. */
 export const SESSIONS = "sessions";
+/** A child's finished line into a thread, kept from the child's end until a turn of that thread takes it, so a host
+ * that stops in between delivers it when it starts again. */
+export const NOTIFY_OWED = "notify-owed";
 /** The name a person gave a workspace, keyed by its id, which its machines carry as a label across every rebuild:
  * the sweep reads it when it records a machine whose workspace document this store lost, so a restored record keeps
  * that name rather than the one the fork stamped, which the provider takes at create and never updates. */
