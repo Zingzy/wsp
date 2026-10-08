@@ -3,7 +3,7 @@
 // The index and a piece's entry stay under their token budgets in limits.ts; slateTokens is the estimate the tests hold.
 import { SLATE_FUNCTIONS, SLATE_PIPE_STEPS } from "./expr.js";
 import { SLATE_EXAMPLES } from "./examples.js";
-import { SLATE_PIECES, SLATE_TONES, type SlatePieceModule, type SlatePropSpec } from "./kit.js";
+import { SLATE_FIGURES, SLATE_PIECES, SLATE_TONES, type SlatePieceModule, type SlatePropSpec } from "./kit.js";
 import { nearest } from "./problems.js";
 import { sketchSlate } from "./sketch.js";
 import { SLATE_SOURCES, slateShapeText, type SlateShape } from "./sources.js";
@@ -55,10 +55,13 @@ const BOX = { pad: true, surface: true };
 /** Enums said once for every piece on the index's own lines, so a piece's line does not repeat them. */
 const SAID_ONCE = new Set(["tone", "emphasis", "pad", "align"]);
 
+/** Whether a prop takes the figure formats, which the index says once rather than on every piece that plots. */
+export const slateTakesFigures = (spec: SlatePropSpec): boolean => Array.isArray(spec.type) && (spec.type as readonly string[]).join() === SLATE_FIGURES.join();
+
 /** A prop as the index names it: its allowed words where it takes a fixed set, as the checker holds them, and a !
  * where a piece is refused without it. */
 function propWord(name: string, spec: SlatePropSpec): string {
-  const words = Array.isArray(spec.type) && !SAID_ONCE.has(name) ? `(${(spec.type as readonly string[]).join("|")})` : "";
+  const words = Array.isArray(spec.type) && !SAID_ONCE.has(name) && !slateTakesFigures(spec) ? `(${(spec.type as readonly string[]).join("|")})` : "";
   return `${name}${spec.required === true ? "!" : ""}${words}`;
 }
 
@@ -82,9 +85,9 @@ function index(): string {
   return [
     "Slate kit wsp/2, JSX-like text. Pieces (attributes, ! required, (a|b) the only values; <items>):",
     ...core.map(pieceLine),
-    "Every piece: id, when={cond}; items take when too. tone: default muted good warning bad info accent. emphasis: normal strong quiet.",
+    `Every piece: id, when={cond}; items take when too. tone: default muted good warning bad info accent. emphasis: normal strong quiet. format, where a line lists none: ${SLATE_FIGURES.join(" ")}.`,
     "section, column, grid: pad none tight normal loose; surface=\"inset\" sets the card ground; align start center end, else children fill the width.",
-    "bars compare categories; time is a chart, x in ms or ISO; a flow is a diagram.",
+    "bars compare categories; time is a chart, x in ms or ISO; shares a donut, sizes a treemap, spans on a clock a timeline; a flow is a diagram.",
     "Sources, read only:",
     ...Object.values(SLATE_SOURCES).filter(s => s.level === "core").map(s => sourceLine(s.name)),
     "Declarations: <value name start> <secret name> <derived name value> <run name cmd env args stdin on timeout every always once confirm then tool resource> <file name> <when change={$path} or done={$run} do={steps}>",

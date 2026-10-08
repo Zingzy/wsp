@@ -215,7 +215,7 @@ export const DIAGRAM_TEXT = `<slate title="Deploy">
   <column>
     <section title="Deploy">
       <diagram id="flow" label="Where the deploy is" value={\`flowchart LR
-  build --> test --> ship
+  build --> lint --> test --> stage --> ship
   classDef now stroke-width:3px
   class \${$step} now\`} />
     </section>

@@ -15,6 +15,8 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../../components/ui/toolt
 import { useAppDark } from "../../settings/theme.js";
 import type { PieceView } from "../SlateView.js";
 import { str } from "./look.js";
+import { KEYCAP_FILTER } from "./keycap.js";
+import { SHAPE_TOKEN, withShapes } from "./shapes.js";
 import { ZoomFrame, type ZoomControls } from "./zoom.js";
 
 const MermaidBlock = lazy(() => import("../../components/chat/MermaidBlock.js"));
@@ -35,13 +37,23 @@ const OVERVIEW_LEAST = 0.4;
 const CARD = "color-mix(in srgb, var(--card) 40%, var(--background))";
 const EDGE = "color-mix(in srgb, var(--border) 60%, var(--background))";
 const LINE = "color-mix(in srgb, var(--muted-foreground) 60%, var(--background))";
+/** A shape's tint: the card mixed with its token, the edge a stronger mix, the label kept in the page's text ink. */
+const FILL_SHARE = 14;
+const EDGE_SHARE = 48;
+const TINTS = Object.entries(SHAPE_TOKEN).map(
+  ([shape, token]) =>
+    `.node.shape-${shape} rect, .node.shape-${shape} polygon, .node.shape-${shape} circle, .node.shape-${shape} ellipse, .node.shape-${shape} path { fill: color-mix(in srgb, var(${token}) ${FILL_SHARE}%, ${CARD}) !important; stroke: color-mix(in srgb, var(${token}) ${EDGE_SHARE}%, var(--background)) !important; }`,
+);
 const SLATE_LOOK: MermaidLook = {
   variables: { fontSize: `${LABEL_PX}px` },
-  flowchart: { padding: 16, nodeSpacing: 36, rankSpacing: 40 },
+  // Mermaid 12 pads every label to 120 px wide, which drew a two-word decision as a diamond five steps tall.
+  flowchart: { padding: 16, nodeSpacing: 36, rankSpacing: 40, minNodeWidth: 0 },
+  look: "classic",
   css: [
     `* { filter: none !important; }`,
     `.node rect, .node polygon, .node circle, .node ellipse, .node path { fill: ${CARD} !important; stroke: ${EDGE} !important; stroke-width: 1px !important; }`,
     `.node rect { rx: 10px; ry: 10px; }`,
+    `.node > rect, .node > polygon, .node > circle, .node > ellipse, .node > path, .node > g > path { filter: ${KEYCAP_FILTER} !important; }`,
     `.node .label rect, .node rect.background { fill: none !important; stroke: none !important; }`,
     `.node text, .node tspan { fill: var(--foreground) !important; font-family: var(--font-sans) !important; font-size: ${LABEL_PX}px !important; }`,
     `.flowchart-link { stroke: ${LINE} !important; stroke-width: 1px !important; }`,
@@ -50,6 +62,7 @@ const SLATE_LOOK: MermaidLook = {
     `.edgeLabel rect, .labelBkg { fill: var(--background) !important; stroke: none !important; opacity: 1 !important; }`,
     `.cluster rect { fill: none !important; stroke: ${EDGE} !important; stroke-width: 1px !important; rx: 10px; ry: 10px; }`,
     `.cluster-label text, .cluster-label tspan { fill: color-mix(in srgb, var(--foreground) 70%, transparent) !important; font-family: var(--font-sans) !important; font-size: 14px !important; }`,
+    ...TINTS,
   ].join("\n"),
 };
 
@@ -77,7 +90,7 @@ function IconButton({ label, onClick, children }: { label: string; onClick?: () 
 export const diagram: PieceView = {
   type: "diagram",
   card: false,
-  component: function DiagramPiece({ props }) {
+  component: function DiagramView({ props }) {
     const code = str(props["value"]) ?? "";
     const label = str(props["label"]);
     const [open, setOpen] = useState(false);
@@ -97,7 +110,7 @@ export const diagram: PieceView = {
           </span>
         </div>
         <ZoomFrame floor={FLOOR_PX / EDGE_PX} cap={INLINE_CAP}>
-          <Drawing code={code} source={source} />
+          <Drawing code={withShapes(code)} source={source} />
         </ZoomFrame>
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogPopup ref={popup} initialFocus={popup} data-slate-diagram-expanded className="h-[85vh] w-[90vw] max-w-[min(90vw,1400px)] sm:max-w-[min(90vw,1400px)]" bottomStickOnMobile={false}>
@@ -117,7 +130,7 @@ export const diagram: PieceView = {
               </DialogClose>
             </div>
             <ZoomFrame floor={OVERVIEW_LEAST} fill controls={big} className="mx-5 mb-5 flex-1 rounded-xl bg-background">
-              <Drawing code={code} source={source} />
+              <Drawing code={withShapes(code)} source={source} />
             </ZoomFrame>
           </DialogPopup>
         </Dialog>

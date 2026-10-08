@@ -4,6 +4,7 @@
 import type { PieceView } from "../SlateView.js";
 import { cn } from "../../lib/utils.js";
 import { CARD_SURFACE } from "../../settings/rows.js";
+import { KEYCAP_BEVEL } from "../../components/ui/button.js";
 import { SECTION_HEAD } from "../../settings/layout.js";
 import { figure, num, str, TONE_FILL, toneOf } from "./look.js";
 import { inBarSwitch, placeOf } from "./runs.js";
@@ -37,7 +38,7 @@ export const bars: PieceView = {
                 <span className="min-w-0 flex-1 break-words text-sm leading-5 text-foreground">{row.name}</span>
                 <span className="flex shrink-0 items-center gap-2">
                   <span aria-hidden className="block h-1 w-14 overflow-hidden rounded-full bg-foreground/10">
-                    <span className={cn("block h-full rounded-full", row.tone === undefined ? "bg-foreground/55" : TONE_FILL[toneOf(row.tone, slate, id)])} style={{ width: `${Math.round(share * 1000) / 10}%` }} />
+                    <span className={cn("block h-full rounded-full", KEYCAP_BEVEL, row.tone === undefined ? "bg-foreground/55" : TONE_FILL[toneOf(row.tone, slate, id)])} style={{ width: `${Math.round(share * 1000) / 10}%` }} />
                   </span>
                   <span className="min-w-12 text-right font-mono text-xs leading-5 tabular-nums text-foreground">{format === "none" ? null : format === "percent" ? `${Math.round(share * 100)}%` : figure(row.value, "value")}</span>
                 </span>

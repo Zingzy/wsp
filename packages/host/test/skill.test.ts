@@ -6,11 +6,14 @@ import { CLOUD_ENV, RUN_BLOCK_WORDS, thisComputerLine } from "@wsp/protocol";
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import { CATALOG_AGENTS, MCP_AGENT_IDS, THREAD_AGENTS } from "@wsp/catalog";
-import { ANOTHER_AGENT_WORDS, BACKGROUND_WORK_WORDS, COORDINATOR_HANDOFF, LOGIN_CHOICES, NOTIFY_CALLER, SessionStartOutcome, backgroundTasksLine, notifyLine, stillWorkingLine } from "@wsp/protocol";
+import { ANOTHER_AGENT_WORDS, BACKGROUND_WORK_WORDS, COORDINATOR_HANDOFF, LOGIN_CHOICES, NOTIFY_CALLER, SessionStartOutcome, SLATE_BRIEF, backgroundTasksLine, notifyLine, stillWorkingLine } from "@wsp/protocol";
+import { slateCatalog } from "@wsp/protocol/slate";
 import { instructions, INSTRUCTIONS_KEPT, SLATE_WORDS, THREAD_SLATE_WORDS, RULES_HEADING, SETUP_HEADING, SHELL_HEADING, SKILL_NAME, VERBS_HEADING, wspSkill, agentsLine, instructionsOf, skillFor } from "../src/skill.js";
 import { CLOUD_ON } from "../src/cloud.js";
 import { hasTool, CLI_VERBS, VERBS, toolName } from "../src/verbs.js";
 import { SERVICE_MANAGERS } from "../src/service.js";
+
+const said = (text: string, word: string): boolean => new RegExp(`\\b${word}\\b`, "i").test(text);
 
 describe("the wsp skill", () => {
   it("is the repo's skills/wsp/SKILL.md as this process reads it, with the frontmatter name and a one-line description without a colon or a quote", () => {
@@ -133,7 +136,6 @@ describe("the wsp skill", () => {
   // it here, it only holds the instructions and the tool descriptions, which tool search matches, to those words.
   it("says every word the slate reach prompts rely on in a thread's instructions and in a slate tool's description", () => {
     const reach = JSON.parse(readFileSync(new URL("./slate-reach.json", import.meta.url), "utf8")) as { prompt: string; intent: string[] }[];
-    const said = (text: string, word: string): boolean => new RegExp(`\\b${word}\\b`, "i").test(text);
     const kept = instructions(true).slice(0, INSTRUCTIONS_KEPT);
     const described = VERBS.filter(hasTool).filter(v => v.name.startsWith("slate ")).map(v => v.tool.description);
     expect(described).toHaveLength(4);
@@ -145,6 +147,27 @@ describe("the wsp skill", () => {
         expect(described.some(d => said(d, word)), `${word} in a slate tool's description`).toBe(true);
       }
     }
+  });
+
+  // The record is what the tool server greets with, a Codex thread's wsp_slate server among them; the brief is Claude's.
+  it("names the slate's chart kinds wherever an agent learns its pieces, and no look the owner dropped", () => {
+    const served = JSON.parse(readFileSync(new URL("../../../daemon/crates/wsp-mcp/record/server.json", import.meta.url), "utf8")) as { instructions: Record<string, string> };
+    const texts: Record<string, string> = {
+      catalog: slateCatalog(),
+      "Claude slate brief": SLATE_BRIEF,
+      "thread instructions": instructions(true),
+      "served scoped, cloud off": served.instructions["scopedCloudOff"]!,
+      "served scoped, cloud on": served.instructions["scopedCloudOn"]!,
+    };
+    for (const [where, text] of Object.entries(texts)) {
+      for (const kind of ["chart", "donut", "timeline", "treemap", "diagram"]) expect(said(text, kind), `${kind} in the ${where}`).toBe(true);
+      for (const dropped of ["ramp", "outlined"]) expect(said(text, dropped), `${dropped} in the ${where}`).toBe(false);
+    }
+    for (const prop of ["<series", "stack"]) expect(slateCatalog(), prop).toContain(prop);
+    expect(served.instructions["scopedCloudOn"]!.length).toBeLessThanOrEqual(INSTRUCTIONS_KEPT);
+    // The skill sends an agent to the catalog for the pieces and names none of its own.
+    const section = wspSkill().slice(wspSkill().indexOf("### slate\n"), wspSkill().indexOf("\n## ", wspSkill().indexOf("### slate\n")));
+    for (const kind of ["sparkline", "chart", "donut", "timeline", "treemap"]) expect(said(section, kind), `${kind} in the skill`).toBe(false);
   });
 
   it("says a send is never refused for meeting a turn, and names the steer, the queue and the reply tail in the runtime's own words", () => {

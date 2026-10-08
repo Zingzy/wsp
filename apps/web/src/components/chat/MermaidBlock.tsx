@@ -73,6 +73,8 @@ export interface MermaidLook {
   readonly variables?: Readonly<Record<string, string>>;
   readonly css?: string;
   readonly flowchart?: Readonly<Record<string, number>>;
+  /** Mermaid's node sizing: neo, its default, pads a circle 32 px past its label; classic pads by the flowchart's own. */
+  readonly look?: "classic" | "neo";
 }
 
 let configuredFor: string | null = null;
@@ -95,6 +97,7 @@ function configure(theme: "light" | "dark", look: MermaidLook | undefined): void
     ...(variables === null && look?.variables === undefined ? {} : { themeVariables: { ...variables, ...look?.variables } }),
     ...(look?.css === undefined ? {} : { themeCSS: look.css }),
     ...(look?.flowchart === undefined ? {} : { flowchart: { ...look.flowchart } }),
+    ...(look?.look === undefined ? {} : { look: look.look }),
   });
   configuredFor = key;
 }

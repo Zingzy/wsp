@@ -2,8 +2,8 @@
 // The pieces of kit wsp/2 (05-pieces), one self-contained entry each: props, items, events, its sketch line and its
 // catalog text. The compiler, the validator, the sketch and the catalog read these and switch on no type name of
 // their own, so adding a piece is one entry here and one view in the web app.
-import { fmtBytes, fmtCost, fmtDuration, fmtInr, fmtTokens } from "../format.js";
-import { slateAxisWord, slateChartAxis } from "./chart.js";
+import { fmtBytes, fmtClock, fmtCost, fmtDuration, fmtElapsed, fmtInr, fmtTokens } from "../format.js";
+import { slateAxisWord, slateChartAxis, slateShares, slateSpanState, slateTime, SLATE_SPAN_STATES } from "./chart.js";
 import { slateResultShape, sketchSlateResult } from "./shape.js";
 import { isSlateBinding, isSlateSecretHandle, type SlateEventName, type SlateJson, type SlatePropValue, type SlateRunDecl, type SlateRunRecord } from "./types.js";
 import { slateDependencies } from "./expr.js";
@@ -20,7 +20,7 @@ const VARIANT = ["default", "primary", "quiet", "danger"] as const;
 const PAD = ["none", "tight", "normal", "loose"] as const;
 const SURFACE = ["plain", "inset"] as const;
 const PLACE = ["start", "center", "end"] as const;
-const FIGURE = ["plain", "tokens", "bytes", "percent", "usd", "inr", "duration", "integer"] as const;
+export const SLATE_FIGURES = ["plain", "tokens", "bytes", "percent", "usd", "inr", "duration", "integer"] as const;
 
 /** A prop's type. text is a string or a number; path names a run or value as $name; an array is an enum. */
 export type SlatePropType = "string" | "number" | "integer" | "boolean" | "text" | "list" | "any" | "id" | "path" | readonly string[];
@@ -41,6 +41,8 @@ export interface SlatePropSpec {
   literal?: true;
   /** A list the piece plots, whose every entry is a number. */
   of?: "number";
+  /** A value the piece places on a clock, a time in ms or ISO. */
+  time?: true;
   /** A path prop that names a run, never a value. */
   names?: "run";
   /** Free text, whose words may sit beside a mark such as a middle dot, as markdown's do. */
@@ -87,6 +89,8 @@ export interface SlateSketchView {
   runKind(path: string): SlateRunDecl["kind"] | undefined;
   /** A check with no thread: bound props read as their formula in braces. */
   unbound: boolean;
+  /** The clock the sketch reads time.now by. */
+  now(): number;
 }
 
 export interface SlatePieceModule {
@@ -257,7 +261,7 @@ const PIECES: Record<string, SlatePieceModule> = {
   },
   number: {
     type: "number", level: "core", purpose: "A figure with a label.", holdsChildren: false,
-    props: { label: str(req), value: { type: "text", binds: "yes", required: true }, format: enm(FIGURE, "plain"), unit: str(), tone: tone(), note: str(), size: enm(["normal", "large"]), trend: { type: "list", binds: "yes", of: "number", about: "read in the sketch alone; the panel's stat cell draws its figure alone, so a trend the person sees is a sparkline beside it" } },
+    props: { label: str(req), value: { type: "text", binds: "yes", required: true }, format: enm(SLATE_FIGURES, "plain"), unit: str(), tone: tone(), note: str(), size: enm(["normal", "large"]), trend: { type: "list", binds: "yes", of: "number", about: "read in the sketch alone; the panel's stat cell draws its figure alone, so a trend the person sees is a sparkline beside it" } },
     items: {}, events: [],
     sketch: v => {
       const value = v.prop("value");
@@ -299,37 +303,117 @@ const PIECES: Record<string, SlatePieceModule> = {
     fallback: "table", example: `<bars label="Busiest" items={processes.list | take(5)} name={item.name} value={item.cpu} />`,
   },
   chart: {
-    type: "chart", level: "core", purpose: "A line over a list, oldest first: x and value read each row.", holdsChildren: false, repeating: true,
-    props: { label: str(req), items: { type: "list", binds: "yes", required: true }, x: { type: "any", binds: "item", about: "a time on x (ISO or ms) labels the axis by clock, in this computer's time zone; a number by its value" }, value: { type: "number", binds: "item", required: true }, format: enm(FIGURE, "plain"), unit: str(), tone: tone(), height: enm(SIZE, "normal") },
-    items: {}, events: [],
+    type: "chart", level: "core", purpose: "Lines over a list, oldest first; stack piles the <series>.", holdsChildren: false, repeating: true,
+    props: { label: str(req), items: { type: "list", binds: "yes", required: true }, x: { type: "any", binds: "item", about: "a time on x (ISO or ms) labels the axis by clock, in this computer's time zone; a number by its value" }, value: { type: "number", binds: "item" }, format: enm(SLATE_FIGURES, "plain"), unit: str(), tone: tone(), height: enm(SIZE, "normal"), stack: flag() },
+    items: { series: { prop: "series", row: true, max: 4, fields: { label: str({ ...req, binds: "no" }), value: { type: "number", binds: "item", required: true }, tone: { type: SLATE_TONES, binds: "no" } } } }, events: [],
     sketch: v => {
       const label = shown(v.prop("label"));
       const items = v.prop("items");
-      if (v.unbound) return `${label}  line of ${shown(items)}, x ${v.raw("x") === undefined ? "{index}" : shown(v.prop("x"))}`;
+      const series = present(v, asList(v.raw("series")));
+      // Read only with lines to pile, so a stack with none is tagged on the line rather than said to draw.
+      const stack = series.length > 0 && v.prop("stack") === true;
+      const lines = series.length === 0 ? "line" : `${series.length}${stack ? " stacked" : ""} lines`;
+      if (v.unbound) return `${label}  ${lines} of ${shown(items)}, x ${v.raw("x") === undefined ? "{index}" : shown(v.prop("x"))}`;
       const x = v.raw("x");
-      const rowsRead = (Array.isArray(items) ? items : []).map((item, i) => ({ x: x === undefined ? i : v.row({ x }, item, i).x, value: v.row({ value: v.raw("value") ?? null }, item, i).value })).filter(r => isNum(r.value));
-      if (rowsRead.length === 0) return `${label}  no points yet`;
-      const vals = rowsRead.map(r => r.value as number);
+      const list = Array.isArray(items) ? items : [];
       const format = String(v.prop("format") ?? "plain");
       const unit = shown(v.prop("unit"));
       const fig = (n: number): string => [figure(format, n, undefined), unit].filter(Boolean).join(" ");
-      const axis = slateChartAxis(vals.length === 1 ? [vals[0]!, vals[0]!] : vals);
+      const xs = list.map((item, i) => (x === undefined ? i : v.row({ x }, item, i).x));
+      const axisLine = (all: number[], at: number[]): string => {
+        const axis = slateChartAxis(all.length === 1 ? [all[0]!, all[0]!] : all);
+        return `  x ${slateAxisWord(xs[at[0]!])} to ${slateAxisWord(xs[at.at(-1)!])}, y ${fig(axis.from)} to ${fig(axis.to)}`;
+      };
+      if (series.length === 0) {
+        if (v.raw("value") === undefined) return `${label}  nothing plotted from ${list.length} rows${list.length === 0 ? "" : `, x ${slateAxisWord(xs[0])} to ${slateAxisWord(xs.at(-1))}`}; give value or a <series> per line`.trimStart();
+        const at = list.map((item, i) => (isNum(v.row({ value: v.raw("value") ?? null }, item, i).value) ? i : -1)).filter(i => i >= 0);
+        if (at.length === 0) return `${label}  no points yet`;
+        const vals = at.map(i => v.row({ value: v.raw("value") ?? null }, list[i]!, i).value as number);
+        return [`${label}  last ${fig(vals.at(-1)!)}, min ${fig(Math.min(...vals))}, max ${fig(Math.max(...vals))} over ${vals.length} point${vals.length === 1 ? "" : "s"}`.trimStart(), axisLine(vals, at)];
+      }
+      const read = series.map(s => list.map((item, i) => v.row(s, item, i)));
+      const own = read.map(rows => rows.map(r => (isNum(r.value) ? r.value : 0)));
+      const at = list.map((_, i) => i).filter(i => read.some(rows => isNum(rows[i]!.value)));
+      if (at.length === 0) return `${label}  ${lines}, no points yet`;
+      const drawn = stack ? own.map((_, k) => own[0]!.map((__, i) => own.slice(0, k + 1).reduce((sum, line) => sum + line[i]!, 0))) : own;
+      const all = at.flatMap(i => drawn.map(line => line[i]!));
       return [
-        `${label}  last ${fig(vals.at(-1)!)}, min ${fig(Math.min(...vals))}, max ${fig(Math.max(...vals))} over ${vals.length} point${vals.length === 1 ? "" : "s"}`.trimStart(),
-        `  x ${slateAxisWord(rowsRead[0]!.x)} to ${slateAxisWord(rowsRead.at(-1)!.x)}, y ${fig(axis.from)} to ${fig(axis.to)}`,
+        `${label}  ${lines} over ${at.length} point${at.length === 1 ? "" : "s"}`.trimStart(),
+        ...read.map((rows, k) => {
+          const vals = at.map(i => rows[i]!.value).filter(isNum);
+          return `  ${shown(rows[0]?.label ?? rec(series[k] as SlateJson).label)}  ${vals.length === 0 ? "no points yet" : `last ${fig(vals.at(-1)!)}, min ${fig(Math.min(...vals))}, max ${fig(Math.max(...vals))}`}${marks({ tone: rec(series[k] as SlateJson).tone })}`;
+        }),
+        axisLine(stack ? [0, ...all] : all, at),
       ];
     },
     check: c => {
       const x = c.props.x;
       if (x === undefined || (isSlateBinding(x) && x.bind.trim() === "index")) c.add("W013", "the chart's x is each row's index, so its axis reads 0 to the count; give each row its time, for example x={item.at}", "x", "x={item.at}");
+      if (c.props.value === undefined && asList(c.props.series).length === 0) c.add("T304", "a chart draws value={...} or a <series> per line, and it has neither", "value", "value={item.v}");
+      else if (c.props.value !== undefined && asList(c.props.series).length > 0) c.add("W020", "the chart draws its <series> and leaves value out; drop value, or give it a <series> of its own", "value");
     },
-    fallback: "text", example: `<chart label="Gold" items={$hist} x={item.at} value={item.v} format="usd" />`,
+    fallback: "text", example: `<chart label="Gold" items={$hist} x={item.at} value={item.v} />`,
   },
   diagram: {
     type: "diagram", level: "core", purpose: "A Mermaid diagram: a flow, a sequence or a state machine; value={`...${$step}`} shows the live step.", holdsChildren: false, textProp: "value", rawText: true,
     props: { value: { type: "string", binds: "yes", required: true, about: "Mermaid source; a text child is taken as written, braces and all. Labels a few words, decisions short questions; detail goes in a text beside it. Under about 15 nodes; past that, split it or summarize" }, label: str() }, items: {}, events: [],
     sketch: v => { const lines = shown(v.prop("value")).split("\n"); const label = shown(v.prop("label")); return `${label === "" ? "" : `${label}  `}${lines[0]}${lines.length > 1 ? ` (+${lines.length - 1} line${lines.length === 2 ? "" : "s"})` : ""}`; },
     fallback: "its source as code", example: "<diagram label=\"Deploy\" value={`flowchart LR\n  build --> test --> ship\n  classDef now stroke-width:3px\n  class ${$step} now`} />",
+  },
+  timeline: {
+    type: "timeline", level: "core", purpose: "Spans on a clock, Gantt style, such as a run's steps or a deploy's phases.", holdsChildren: false, repeating: true,
+    props: { label: str(req), items: { type: "list", binds: "yes", required: true }, name: { type: "string", binds: "item", required: true }, start: { type: "any", binds: "item", time: true, about: "a time, ISO or ms; none waits" }, end: { type: "any", binds: "item", time: true, about: "none while it runs" }, state: { type: SLATE_SPAN_STATES, binds: "item" }, group: { type: "string", binds: "item", about: "rows of one group sit under its name" }, now: { type: "any", binds: "yes", time: true, about: "where a running span ends; the clock if unset" } },
+    items: {}, events: [],
+    sketch: v => {
+      const given = v.prop("now");
+      const now = slateTime(given) ?? v.now();
+      const notTime = (word: string, value: SlateJson | undefined): string => (value === undefined || value === null || slateTime(value) !== undefined ? "" : `${word} ${JSON.stringify(value)} is not a time`);
+      if (v.unbound) return `${shown(v.prop("label"))}  spans of ${shown(v.prop("items"))}`;
+      let group: string | undefined;
+      return [join2(shown(v.prop("label")), notTime("now", given)), ...rows(v, (item, i) => {
+        const r = v.row({ name: v.raw("name") ?? null, start: v.raw("start") ?? null, end: v.raw("end") ?? null, state: v.raw("state") ?? null, group: v.raw("group") ?? null }, item, i);
+        const start = slateTime(r.start);
+        const end = slateTime(r.end);
+        const state = slateSpanState(r.state, start, end);
+        const head = typeof r.group === "string" && r.group !== group ? `  ${(group = r.group)}\n` : "";
+        const clock = start === undefined ? "" : `${fmtClock(start)} to ${state === "running" ? "now" : end === undefined ? "?" : fmtClock(end)}`;
+        const said = state === "done" ? (start === undefined || end === undefined ? "done" : fmtElapsed(end - start)) : state === "running" && start !== undefined ? `running ${fmtElapsed(now - start)}` : state;
+        return `${head}  ${shown(r.name)}  ${join2(clock, said, notTime("start", r.start), notTime("end", r.end))}`;
+      }).flatMap(line => line.split("\n"))];
+    },
+    fallback: "table", example: `<timeline label="CI run" items={$steps} name={item.name} start={item.started} end={item.ended} group={item.job} />`,
+  },
+  treemap: {
+    type: "treemap", level: "core", purpose: "Sizes of one whole's parts as nested boxes, such as a bundle by module within package.", holdsChildren: false, repeating: true,
+    props: { label: str(req), items: { type: "list", binds: "yes", required: true }, name: { type: "string", binds: "item", required: true }, value: { type: "number", binds: "item", required: true }, group: { type: "string", binds: "item" }, format: enm(SLATE_FIGURES, "plain") },
+    items: {}, events: [],
+    sketch: v => {
+      const items = v.prop("items");
+      if (v.unbound) return `${shown(v.prop("label"))}  boxes of ${shown(items)}`;
+      const format = String(v.prop("format") ?? "plain");
+      const parts = (Array.isArray(items) ? items : []).map((item, i) => v.row({ name: v.raw("name") ?? null, value: v.raw("value") ?? null, group: v.raw("group") ?? null }, item, i));
+      const whole = parts.reduce((sum, p) => sum + (isNum(p.value) ? Math.max(0, p.value) : 0), 0);
+      const groups = new Set(parts.map(p => shown(p.group))).size;
+      const head = join2(shown(v.prop("label")), parts.length === 0 ? "" : `${figure(format, whole, undefined)} in ${parts.length} parts${groups > 1 ? `, ${groups} groups` : ""}`);
+      return [head, ...rows(v, (_, i) => { const p = parts[i]!; return `  ${join2(shown(p.group), shown(p.name))}  ${figure(format, p.value, undefined)}${isNum(p.value) && whole > 0 ? ` ${Math.round((Math.max(0, p.value) / whole) * 100)}%` : ""}`; })];
+    },
+    fallback: "bars", example: `<treemap label="Bundle" items={$stats.json.modules} name={item.name} value={item.bytes} group={item.package} format="bytes" />`,
+  },
+  donut: {
+    type: "donut", level: "core", purpose: "Shares of one whole, five parts at most with the rest as Other; never a series over time.", holdsChildren: false, repeating: true,
+    props: { label: str(req), items: { type: "list", binds: "yes", required: true }, name: { type: "string", binds: "item", required: true }, value: { type: "number", binds: "item", required: true }, format: enm(SLATE_FIGURES, "plain"), unit: str() },
+    items: {}, events: [],
+    sketch: v => {
+      const items = v.prop("items");
+      if (v.unbound) return `${shown(v.prop("label"))}  shares of ${shown(items)}`;
+      const format = String(v.prop("format") ?? "plain");
+      const unit = shown(v.prop("unit"));
+      const parts = slateShares((Array.isArray(items) ? items : []).map((item, i) => { const r = v.row({ name: v.raw("name") ?? null, value: v.raw("value") ?? null }, item, i); return { name: shown(r.name), value: isNum(r.value) ? r.value : 0 }; }));
+      const whole = parts.reduce((sum, p) => sum + p.value, 0);
+      if (whole === 0) return `${shown(v.prop("label"))}  no shares yet`;
+      return [join2(shown(v.prop("label")), [figure(format, whole, undefined), unit].filter(Boolean).join(" ")), ...parts.map(p => `  ${p.name}  ${figure(format, p.value, undefined)} ${Math.round((p.value / whole) * 100)}%`)];
+    },
+    fallback: "bars", example: `<donut label="By country" items={$countries} name={item.name} value={item.n} format="integer" />`,
   },
   sparkline: {
     type: "sparkline", level: "core", purpose: "A small line beside text, the way to show a figure's trend.", holdsChildren: false,
@@ -491,7 +575,7 @@ export const SLATE_PIECES: Readonly<Record<string, SlatePieceModule>> = slateTab
 }])));
 
 /** Item kinds by tag, wherever they may sit. */
-export const SLATE_ITEM_KINDS = ["col", "action", "fact", "option"] as const;
+export const SLATE_ITEM_KINDS = ["col", "action", "fact", "option", "series"] as const;
 
 /** Style props a slate can never set, each with the meaning prop to use instead (05, "What the agent can never set"). */
 export const SLATE_RESERVED_PROPS: Readonly<Record<string, string>> = slateTable<string>({

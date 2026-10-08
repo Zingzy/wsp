@@ -87,7 +87,8 @@ describe.skipIf(renderSkipped !== undefined)("the slate's diagram drawn in Chrom
     expect(wide["y-start"]).toBe(0);
     expect(wide["y-end"]).toBeGreaterThan(0);
     expect(wide["x-start"] + wide["x-end"]).toBeGreaterThan(0);
-    // The deploy's flow is a line of three, a little wider than the panel and no taller than its frame.
+    // The deploy's flow is a line of five, a little wider than the panel and no taller than its frame: nodes sized to
+    // their labels drew a line of three inside the panel, with nothing beyond to fade.
     const flow = await beyond('[data-slate-piece="flow"] [data-slate-zoom]');
     expect(flow).toMatchObject({ "x-start": 0, "y-start": 0, "y-end": 0 });
     expect(flow["x-end"]).toBeGreaterThan(0);
@@ -201,6 +202,19 @@ describe.skipIf(renderSkipped !== undefined)("the slate's diagram drawn in Chrom
     await page.close();
   });
 
+  it("keeps every tinted shape's label at AA contrast over its fill, in graphite and in paper", async () => {
+    for (const theme of ["graphite", "paper"]) {
+      const page = await browser!.newPage({ viewport: { width: 680, height: 1000 } });
+      await page.goto(`${harness!.base}?w=640&doc=viz-diagram&theme=${theme}`);
+      await page.waitForSelector('[data-slate-piece="flow"] [data-mermaid] svg g.node', { timeout: 30_000 });
+      const nodes = await page.evaluate(labelContrast);
+      const shapes = new Set(nodes.map(n => n.shape));
+      expect([...shapes].sort(), theme).toEqual(["decision", "event", "io", "prep", "step", "store", "terminal"]);
+      for (const n of nodes) expect(n.ratio, `${theme} ${n.shape} "${n.label}" ${n.text} on ${n.fill}`).toBeGreaterThanOrEqual(4.5);
+      await page.close();
+    }
+  });
+
   it("keeps MermaidBlock's own line under a source that does not parse", async () => {
     const page = await open("diagram");
     const line = page.locator('[data-slate-piece="broken"] [data-mermaid-note]');
@@ -223,3 +237,31 @@ describe.skipIf(renderSkipped !== undefined)("the slate's diagram drawn in Chrom
     await page.close();
   });
 });
+
+/** Each node's shape class, its label, and the WCAG ratio of the label's ink over the shape's fill laid on the page. */
+function labelContrast() {
+  const pen = document.createElement("canvas").getContext("2d", { willReadFrequently: true })!;
+  const rgba = (css: string): number[] => {
+    pen.clearRect(0, 0, 1, 1);
+    pen.fillStyle = "#000";
+    pen.fillStyle = css;
+    pen.fillRect(0, 0, 1, 1);
+    return [...pen.getImageData(0, 0, 1, 1).data];
+  };
+  const over = (top: number[], under: number[]): number[] => top.slice(0, 3).map((c, i) => c * (top[3]! / 255) + under[i]! * (1 - top[3]! / 255));
+  const lum = (c: number[]): number => {
+    const [r, g, b] = c.map(v => { const s = v / 255; return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4; });
+    return 0.2126 * r! + 0.7152 * g! + 0.0722 * b!;
+  };
+  const hex = (c: number[]): string => `#${c.map(v => Math.round(v).toString(16).padStart(2, "0")).join("")}`;
+  const page = rgba(getComputedStyle(document.body).backgroundColor);
+  return [...document.querySelectorAll('[data-slate-piece="flow"] svg g.node')].map(node => {
+    const shape = node.querySelector(":scope > rect, :scope > polygon, :scope > circle, :scope > path, :scope > g > path, rect.label-container")!;
+    const text = node.querySelector(".nodeLabel, text")!;
+    const fill = over(rgba(getComputedStyle(shape).fill), page);
+    const ink = over(rgba(getComputedStyle(text).color || getComputedStyle(text).fill), fill);
+    const [hi, lo] = [lum(ink), lum(fill)].sort((a, b) => b - a);
+    const tinted = /shape-(\w+)/.exec(node.getAttribute("class") ?? "")?.[1];
+    return { shape: tinted ?? "step", label: node.textContent?.trim() ?? "", fill: hex(fill), text: hex(ink), ratio: Math.round(((hi! + 0.05) / (lo! + 0.05)) * 100) / 100 };
+  });
+}

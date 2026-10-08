@@ -26,7 +26,7 @@ const PAD = 6;
 
 /** The dither under each line, biggest first: the lead at full density and each line after it lighter, each on its
  * own phase of the pattern so two lines never take the same cell and an overlap reads as both inks. */
-function paintDither(canvas: HTMLCanvasElement, fills: ReadonlyArray<{ points: readonly number[]; ink: string }>, top: number): void {
+function paintDither(canvas: HTMLCanvasElement, fills: ReadonlyArray<{ points: readonly number[]; below?: readonly number[]; ink: string }>, top: number): void {
   const dpr = window.devicePixelRatio || 1;
   const w = canvas.clientWidth;
   const h = canvas.clientHeight;
@@ -38,23 +38,25 @@ function paintDither(canvas: HTMLCanvasElement, fills: ReadonlyArray<{ points: r
   ctx.clearRect(0, 0, w, h);
   const y = (v: number): number => h - PAD - (v / top) * (h - PAD * 2);
   const floor = h - PAD;
-  fills.forEach(({ points, ink }, rank) => {
+  fills.forEach(({ points, below, ink }, rank) => {
     const n = points.length;
     if (n < 2) return;
-    const at = (px: number): number => {
+    const at = (series: readonly number[], px: number): number => {
       const t = (px / w) * (n - 1);
       const i = Math.min(n - 2, Math.floor(t));
       const f = t - i;
-      return points[i]! * (1 - f) + points[i + 1]! * f;
+      return series[i]! * (1 - f) + series[i + 1]! * f;
     };
-    const density = rank === 0 ? 0.55 : 0.32;
+    // A stacked band fills down to the band under it, each as dense as the lead, since none of them overlaps another.
+    const density = rank === 0 || below !== undefined ? 0.55 : 0.32;
     const phase = rank * 5;
     ctx.fillStyle = ink;
-    ctx.globalAlpha = rank === 0 ? 0.5 : 0.45;
+    ctx.globalAlpha = rank === 0 || below !== undefined ? 0.5 : 0.45;
     for (let px = 0; px < w; px += CELL) {
-      const line = y(at(px));
-      for (let py = Math.ceil(line); py < floor; py += CELL) {
-        const depth = 1 - (py - line) / (floor - line + 1);
+      const line = y(at(points, px));
+      const base = below === undefined ? floor : y(at(below, px));
+      for (let py = Math.ceil(line); py < base; py += CELL) {
+        const depth = below === undefined ? 1 - (py - line) / (floor - line + 1) : 1;
         if (depth * density > BAYER[((((py / CELL) & 3) * 4 + ((px / CELL) & 3)) + phase) % 16]!) ctx.fillRect(px, py, CELL - 0.6, CELL - 0.6);
       }
     }
@@ -126,7 +128,7 @@ function useThemeTick(): number {
   return tick;
 }
 
-export function UsageChart({ steps, lines: given, stepWord, ticks, height: HEIGHT = CHART_HEIGHT, figure = fmtTokens, axisFigure = figure, label = "Tokens over the range", axis, small = false, everyFigure = false }: {
+export function UsageChart({ steps, lines: given, stepWord, ticks, height: HEIGHT = CHART_HEIGHT, figure = fmtTokens, axisFigure = figure, label = "Tokens over the range", axis, small = false, everyFigure = false, stacked = false, fill = true }: {
   steps: readonly number[];
   lines: readonly ChartLine[];
   stepWord: (t: number) => string;
@@ -146,6 +148,11 @@ export function UsageChart({ steps, lines: given, stepWord, ticks, height: HEIGH
   /** Every line's figure in the hover, a zero and a negative too: a slate's figures are the data it was given, where
    * the Usage page's zero is a day nothing was spent and says nothing. */
   everyFigure?: boolean;
+  /** The lines are a stack's running totals, bottom first: each fills down to the one under it, and the hover says
+   * each band's own figure. */
+  stacked?: boolean;
+  /** The dither under the lines; without it they are plain lines that cross. */
+  fill?: boolean;
 }) {
   const [hovered, setHovered] = useState<number | null>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
@@ -157,7 +164,7 @@ export function UsageChart({ steps, lines: given, stepWord, ticks, height: HEIGH
   const total = (line: ChartLine): number => line.points.reduce((a, b) => a + b, 0);
   const parts = axis?.parts ?? 4;
   const marks = Array.from({ length: parts + 1 }, (_, g) => g);
-  const lead = [...lines].sort((a, b) => total(b) - total(a))[0];
+  const lead = stacked ? lines[0] : [...lines].sort((a, b) => total(b) - total(a))[0];
   const x = (i: number): number => (n > 1 ? (i / (n - 1)) * 100 : 0);
   const dataKey = lines.map(line => `${line.key}:${line.points.join(",")}`).join("|");
   const frame = useTween(lines, top, dataKey);
@@ -166,16 +173,23 @@ export function UsageChart({ steps, lines: given, stepWord, ticks, height: HEIGH
   const y = (v: number): number => HEIGHT - PAD - (scale === 0 ? 0 : (v / scale) * (HEIGHT - PAD * 2));
 
   const inks = useRef(new Map<string, SVGGElement>());
-  const byTotal = [...lines].sort((a, b) => total(b) - total(a));
+  const byTotal = stacked ? lines : [...lines].sort((a, b) => total(b) - total(a));
   // The resize observer is set up once, so it reads the latest frame through this ref rather than the first render's.
-  const painted = useRef({ fills: byTotal, scale, points: frame.points });
-  painted.current = { fills: byTotal, scale, points: frame.points };
+  const painted = useRef({ fills: byTotal, scale, points: frame.points, fill, stacked });
+  painted.current = { fills: byTotal, scale, points: frame.points, fill, stacked };
   const paint = (): void => {
     const el = canvas.current;
     if (el === null) return;
-    const fills = painted.current.fills.map(line => {
+    // A chart patched from a stack to plain lines keeps its canvas, so the old bands are wiped rather than left.
+    if (!painted.current.fill) return void el.getContext("2d")?.clearRect(0, 0, el.width, el.height);
+    const fills = painted.current.fills.map((line, at, all) => {
       const g = inks.current.get(line.key);
-      return { points: painted.current.points.get(line.key) ?? line.points, ink: g === undefined ? "currentColor" : getComputedStyle(g).color };
+      const under = painted.current.stacked && at > 0 ? all[at - 1]! : undefined;
+      return {
+        points: painted.current.points.get(line.key) ?? line.points,
+        ...(under === undefined ? {} : { below: painted.current.points.get(under.key) ?? under.points }),
+        ink: g === undefined ? "currentColor" : getComputedStyle(g).color,
+      };
     });
     paintDither(el, fills, painted.current.scale);
   };
@@ -202,7 +216,8 @@ export function UsageChart({ steps, lines: given, stepWord, ticks, height: HEIGH
           </span>
         ))}
       </div>
-      <div className="relative" style={{ height: HEIGHT }}>
+      {/* In the panel the plot meets the piece's edge, so it stops half the end dot short to keep the dot inside. */}
+      <div className={cn("relative", small && "mr-0.75")} style={{ height: HEIGHT }}>
         <svg aria-hidden className="absolute inset-0 size-full overflow-visible text-border" viewBox={`0 0 100 ${HEIGHT}`} preserveAspectRatio="none">
           {marks.slice(1).map(g => {
             const gy = HEIGHT - PAD - (g / parts) * (HEIGHT - PAD * 2);
@@ -240,7 +255,7 @@ export function UsageChart({ steps, lines: given, stepWord, ticks, height: HEIGH
               <TooltipPopup {...(small ? { side: "right", align: "start", sideOffset: 8 } : { side: "top", sideOffset: 6 })}>
                 <span className="flex flex-col gap-1">
                   <span className="font-mono text-xs text-muted-foreground tabular-nums">{stepWord(t)}</span>
-                  {given
+                  {(stacked ? given.map((line, at) => (at === 0 ? line : { ...line, points: line.points.map((v, j) => v - (given[at - 1]!.points[j] ?? 0)) })).reverse() : given)
                     .filter(line => everyFigure ? line.points[i] !== undefined : (line.points[i] ?? 0) > 0)
                     .map(line => (
                       <span key={line.key} data-k="point-figure" className="flex items-center justify-between gap-4 text-xs">

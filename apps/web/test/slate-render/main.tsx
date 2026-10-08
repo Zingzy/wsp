@@ -12,6 +12,10 @@ import { SlateView } from "../../src/slate/SlateView";
 import "./harness.css";
 
 const query = new URLSearchParams(location.search);
+if (query.get("theme") === "paper") {
+  document.documentElement.classList.remove("dark");
+  document.documentElement.dataset["theme"] = "paper";
+}
 const width = Number(query.get("w") ?? 400);
 const named = RENDER_CASES[query.get("doc") ?? ""];
 const { doc, values } = named !== undefined ? kitSlate(named.text, named.values) : query.get("doc") === "diagram" ? kitSlate(DIAGRAM_TEXT) : kitSlate(REACH_TEXT, REACH_VALUES);

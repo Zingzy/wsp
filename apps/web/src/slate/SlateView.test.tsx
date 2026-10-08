@@ -50,7 +50,7 @@ const EVERY_PIECE: SlateDoc = slate({
   title: "Pull request",
   values: { note: { start: "" } },
   pieces: {
-    root: { type: "column", children: ["head", "line", "notes", "intro", "cost", "week", "facts", "checks", "go", "note", "none"] },
+    root: { type: "column", children: ["head", "line", "notes", "intro", "cost", "week", "facts", "checks", "lat", "shares", "run", "bundle", "go", "note", "none"] },
     head: { type: "row", props: { align: "between" }, children: ["title"] },
     title: { type: "text", props: { value: { bind: "thread.title" } } },
     line: { type: "text", props: { value: { bind: "pr.word" }, tone: "muted" } },
@@ -70,6 +70,10 @@ const EVERY_PIECE: SlateDoc = slate({
         ],
       },
     },
+    lat: { type: "chart", props: { label: "Latency", items: { bind: "data.lat" }, x: { bind: "item.at" }, stack: true, series: [{ label: "p50", value: { bind: "item.p50" } }, { label: "p99", value: { bind: "item.p99" } }] } },
+    shares: { type: "donut", props: { label: "Clicks", items: { bind: "data.countries" }, name: { bind: "item.name" }, value: { bind: "item.n" } } },
+    run: { type: "timeline", props: { label: "CI run", items: { bind: "data.steps" }, name: { bind: "item.name" }, start: { bind: "item.start" }, end: { bind: "item.end" } } },
+    bundle: { type: "treemap", props: { label: "Bundle", items: { bind: "data.mods" }, name: { bind: "item.name" }, value: { bind: "item.bytes" }, group: { bind: "item.pkg" } } },
     go: { type: "button", props: { label: "Go on", variant: "primary" }, on: { press: [{ do: "send", text: "Go on to the next step.", with: ["$note"] }] } },
     note: { type: "input", props: { label: "Note for the agent", value: { bind: "$note" } } },
     none: { type: "empty", props: { title: "No pull request yet" }, when: "pr.number == null" },
@@ -88,6 +92,22 @@ const VALUES: Record<string, SlateJson> = {
     { name: "build", state: "pass" },
     { name: "lint", state: "fail" },
   ],
+  "data.lat": [
+    { at: "2026-10-07T14:00:00", p50: 19, p99: 210 },
+    { at: "2026-10-07T14:10:00", p50: 22, p99: 340 },
+  ],
+  "data.countries": [
+    { name: "India", n: 41 },
+    { name: "Brazil", n: 8 },
+  ],
+  "data.steps": [
+    { name: "Install", start: "2026-10-07T14:02:10", end: "2026-10-07T14:03:22" },
+    { name: "Shard 3", start: "2026-10-07T14:03:22" },
+  ],
+  "data.mods": [
+    { pkg: "mermaid", name: "core", bytes: 231_424 },
+    { pkg: "app", name: "chat", bytes: 94_208 },
+  ],
 };
 
 describe("the slate renderer", () => {
@@ -102,8 +122,14 @@ describe("the slate renderer", () => {
   it("draws every core piece from a fixture document", () => {
     draw(EVERY_PIECE, VALUES);
     const types = new Set([...document.querySelectorAll<HTMLElement>("[data-slate-type]")].map(el => el.dataset["slateType"]));
-    for (const type of ["column", "row", "section", "text", "markdown", "number", "meter", "facts", "table", "button", "input"]) expect(types).toContain(type);
-    expect(Object.keys(SLATE_VIEWS).sort()).toEqual(["bars", "button", "chart", "checklist", "chip", "choices", "column", "diagram", "empty", "facts", "grid", "heading", "input", "markdown", "meter", "number", "output", "ring", "row", "section", "select", "sparkline", "status", "table", "text", "toggle"]);
+    for (const type of ["column", "row", "section", "text", "markdown", "number", "meter", "facts", "table", "chart", "donut", "timeline", "treemap", "button", "input"]) expect(types).toContain(type);
+    expect(Object.keys(SLATE_VIEWS).sort()).toEqual(["bars", "button", "chart", "checklist", "chip", "choices", "column", "diagram", "donut", "empty", "facts", "grid", "heading", "input", "markdown", "meter", "number", "output", "ring", "row", "section", "select", "sparkline", "status", "table", "text", "timeline", "toggle", "treemap"]);
+    // Each chart kind draws its own marks, not its fallback or the failed line.
+    expect(document.querySelector("[data-slate-failed]")).toBeNull();
+    expect(screen.getByText("p99")).toBeTruthy();
+    expect(screen.getByText("India")).toBeTruthy();
+    expect(document.querySelector('[data-slate-span="running"]')?.textContent).toContain("Shard 3");
+    expect(screen.getByText("mermaid")).toBeTruthy();
     expect(screen.getByText("Fix the login")).toBeTruthy();
     expect(screen.getByRole("meter", { name: "Weekly" }).getAttribute("aria-valuenow")).toBe("46");
     expect(screen.getByText("resets 3d 7h")).toBeTruthy();

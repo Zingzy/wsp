@@ -486,6 +486,8 @@ export class SlateEngine {
       const piece = this.piece(id);
       const derived = this.#doc?.derived ?? {};
       let own = piece === undefined ? { when: [], props: [] } : pieceReads(piece);
+      const extra = piece === undefined ? [] : (viewOf(piece.type)?.reads?.(piece) ?? []);
+      if (extra.length > 0) own = { when: own.when, props: [...new Set([...own.props, ...extra])] };
       if (viewOf(piece?.type)?.aligns === true) {
         const beside = this.tablesBeside(id).flatMap(other => (other === id ? [] : pieceReads(this.piece(other)!).props));
         own = { when: own.when, props: [...new Set([...own.props, ...beside])] };
