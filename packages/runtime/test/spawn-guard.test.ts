@@ -1125,8 +1125,9 @@ describe("agents spawning agents", () => {
     const onFork = await rt.sessions.start(forked.id, { prompt: "build" }, asThread(rootScope));
     const forkScope: ThreadScope = { kind: "thread", threadId: onFork.view().threadId!, workspaceId: forked.id, rootThreadId: rootThread };
     await rt.workspaces.agents(lead.id, { spawn: false });
-    await expect(createOn(rt, { name: "deeper" }, asThread(forkScope))).rejects.toThrow(agentsOffRefusal("builder", "fork"));
-    await expect(rt.sessions.start(forked.id, { prompt: "again" }, asThread(forkScope))).rejects.toThrow(agentsOffRefusal("builder", "thread_new"));
+    // The refusal names the switch it read, the lead's, since turning the fork's own on changes nothing.
+    await expect(createOn(rt, { name: "deeper" }, asThread(forkScope))).rejects.toThrow(agentsOffRefusal("lead", "fork"));
+    await expect(rt.sessions.start(forked.id, { prompt: "again" }, asThread(forkScope))).rejects.toThrow(agentsOffRefusal("lead", "thread_new"));
     // And the fork's own listing says so, so a person reading the card is not told the old answer.
     expect((await rt.workspaces.get(forked.id)).agents).toEqual({ spawn: false, maxMachines: 3, maxDepth: 2 });
     held.end(1);

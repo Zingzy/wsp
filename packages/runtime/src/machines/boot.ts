@@ -8,7 +8,7 @@ import { harnessCatalog } from "../harness-catalog.js";
 import { accountOnComputer } from "../usage.js";
 import { phaseLeavingGone, providerSaid } from "../status.js";
 import type { WorkspaceRecord, LiveWorkspace, FoundMachine } from "../types/wiring.js";
-import { WORKSPACES, PROJECTS, TRANSCRIPTS, SESSIONS, HELD_STARTS, type HeldStartRecord, READS, READS_ID, RESTARTED_REASON, goneLogLine, restartCutLine, turnWritten, type TranscriptRecord, type TurnLive, type TurnAsked, readAsked, readScope, readRoad, readSteered, type ThreadRecord, type SessionIndexRecord, BUILDERS, OWNER, HELD_TTL_MS, pidAlive, type BuilderRecord, type LiveBuilder, deadMachine, isAbsentMachine, absentMachine, type StoredBuilder } from "../types/internal.js";
+import { WORKSPACES, PROJECTS, TRANSCRIPTS, SESSIONS, HELD_STARTS, type HeldStartRecord, READS, READS_ID, RESTARTED_REASON, goneLogLine, restartCutLine, turnWritten, type TranscriptRecord, type TurnLive, type TurnAsked, readAsked, readScope, readRoad, readSteered, type ThreadRecord, type TreeTalk, type SessionIndexRecord, BUILDERS, OWNER, HELD_TTL_MS, pidAlive, type BuilderRecord, type LiveBuilder, deadMachine, isAbsentMachine, absentMachine, type StoredBuilder } from "../types/internal.js";
 import type { RuntimeContext, BootArea } from "../context.js";
 
 export function bootArea(ctx: RuntimeContext): BootArea {
@@ -307,6 +307,8 @@ export function bootArea(ctx: RuntimeContext): BootArea {
             workspaceId: index.workspaceId,
             harness: held.harness,
             ...(typeof held.permissionMode === "string" ? { permissionMode: held.permissionMode } : {}),
+            ...(typeof held.parentThreadId === "string" ? { parentThreadId: held.parentThreadId } : {}),
+            ...(typeof held.rootThreadId === "string" ? { rootThreadId: held.rootThreadId } : {}),
             ...(typeof held.readAt === "number" ? { readAt: held.readAt } : {}),
             ...(typeof held.settledAt === "number" ? { settledAt: held.settledAt } : {}),
             ...(typeof held.pinnedAt === "number" ? { pinnedAt: held.pinnedAt } : {}),
@@ -480,22 +482,24 @@ export function bootArea(ctx: RuntimeContext): BootArea {
   };
   /** Which rows a caller reaches, for the verbs that name a thread rather than a workspace: the thread tree, then
    * the kind rule on the row's workspace, so a request relayed from a machine still drives only kinds that take
-   * one. Neither the project rule nor the workspace tree is read here: a child on a fresh copy reaches its lead on
-   * the workspace the person made, which the workspace rule alone would hide from it. */
-  const reachesRow = (row: { threadId?: string; workspaceId: string }, caller: Caller | undefined): boolean => {
+   * one. A thread on a computer the person joined passes the kind rule for its own tree's threads wherever they run
+   * for `talk` alone, a message into one or the listing of them, and reaches nothing of their turns beyond that.
+   * Neither the project rule nor the workspace tree is read here: a child on a fresh copy reaches its lead on the
+   * workspace the person made, which the workspace rule alone would hide from it. */
+  const reachesRow = (row: { threadId?: string; workspaceId: string }, caller: Caller | undefined, talk?: TreeTalk): boolean => {
     if (!ctx.drivesThread(row.threadId, caller)) return false;
     const record = live.get(row.workspaceId)?.record;
-    return record === undefined || ctx.drives(record, caller);
+    return record === undefined || ctx.drives(record, caller) || (talk !== undefined && ctx.talksToItsTree(caller));
   };
   /** Every session verb that names a thread comes through here, as the verbs naming a workspace come through
    * entryOf: the entry the row stands on, or nothing when the caller is a thread the row is out of reach for, so
    * the verb answers absence and no sentence says which rule hid the row. A caller that is no thread reads the
    * workspace as every verb naming one does. */
-  const entryOfRow = async (row: { threadId?: string; workspaceId: string }, origin: Caller | undefined): Promise<LiveWorkspace | undefined> => {
+  const entryOfRow = async (row: { threadId?: string; workspaceId: string }, origin: Caller | undefined, talk?: TreeTalk): Promise<LiveWorkspace | undefined> => {
     if (scopeOf(origin) === undefined) return entryOf(row.workspaceId, origin);
     await ready();
     const entry = live.get(row.workspaceId);
-    if (entry === undefined || entry.creating || !reachesRow(row, origin)) return undefined;
+    if (entry === undefined || entry.creating || !reachesRow(row, origin, talk)) return undefined;
     await ctx.bootWork.get(row.workspaceId);
     return entry;
   };
@@ -653,8 +657,12 @@ export function bootArea(ctx: RuntimeContext): BootArea {
   };
   /** Whether a thread of the caller's tree stands on that workspace, which is what lets a child list and read the
    * transcript of the workspace its lead runs on; a caller that is no thread reads workspaces by their own rule. */
-  const treeStandsOn = (workspaceId: string, caller: Caller | undefined): boolean =>
-    scopeOf(caller) !== undefined && [...sessions.values()].some(s => s.view.workspaceId === workspaceId && reachesRow(s.view, caller));
+  const treeStandsOn = (workspaceId: string, caller: Caller | undefined, talk?: TreeTalk): boolean =>
+    scopeOf(caller) !== undefined && [...sessions.values()].some(s => s.view.workspaceId === workspaceId && reachesRow(s.view, caller, talk));
+  /** Whether a thread on a computer the person joined names, by its id, a workspace a thread of its own tree stands
+   * on: what a message to its lead on this computer reads on the way, the workspace's agents and its state. A thread
+   * on a machine reaches its tree by the thread alone. */
+  const talksToTreeOn = (workspaceId: string, caller: Caller | undefined): boolean => ctx.talksToItsTree(caller) && treeStandsOn(workspaceId, caller, "send");
 
   /** The create itself, one stage report per awaited step. The hostname is set inside the fork, before the daemon
    * is asked and before the workspace is listed or reachable, so no shell can open under the guest's boot name. */
@@ -693,7 +701,7 @@ export function bootArea(ctx: RuntimeContext): BootArea {
   };
   return {
     refreshBuilders, isHeldAway, rereadHeld, hydrateWorkspace, ready, entryOf, childOf, reachesRow, entryOfRow,
-    listedRows, threadFacts, pushHead, mark, endSnoozeFor, armResume, resumeAfterLimit, treeStandsOn, computerRows, nameOfComputer, imageHeadOrNone,
+    listedRows, threadFacts, pushHead, mark, endSnoozeFor, armResume, resumeAfterLimit, treeStandsOn, talksToTreeOn, computerRows, nameOfComputer, imageHeadOrNone,
     imageHead, landingPlace,
   };
 }

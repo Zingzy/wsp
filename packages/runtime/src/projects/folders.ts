@@ -7,7 +7,7 @@ import { CARRIED_DIR_NAMES } from "@wsp/catalog";
 import { INLINE_EXEC_MS, LOCAL_MACHINE_ID } from "@wsp/engine";
 import type { ProjectView, Caller } from "@wsp/protocol";
 import { threadWord, scopeOf } from "@wsp/protocol";
-import { hereDaemonBehindLine, homeShortened, DAEMON_VERSION, folderName, NAME_A_PROJECT_LINE, BRANCH_OR_CWD_LINE, notOnThisComputerLine, cwdOutsideLine, noBranchesLine, notMadeWorktreeLine, OLD_COPY_WORDS, ProjectCopy, WORKTREE_BUSY_LINE, worktreeChangedLine, keptChangedLine, KEPT_RUNNING_LINE, KEPT_ABANDONED_LINE, type WorktreeFolder, type WorktreeSettled, childOnAnotherComputerLine, copiesFolder, guestNamesWorkspaceLine, placeBranchLine, refusalLine, runsInFolder, shellLine, workspaceLands } from "@wsp/protocol";
+import { hereDaemonBehindLine, homeShortened, DAEMON_VERSION, folderName, NAME_A_PROJECT_LINE, BRANCH_OR_CWD_LINE, notOnThisComputerLine, cwdOutsideLine, noBranchesLine, notMadeWorktreeLine, OLD_COPY_WORDS, ProjectCopy, WORKTREE_BUSY_LINE, worktreeChangedLine, keptChangedLine, KEPT_RUNNING_LINE, KEPT_ABANDONED_LINE, type WorktreeFolder, type WorktreeSettled, copiesFolder, guestNamesWorkspaceLine, placeBranchLine, refusalLine, runsInFolder, shellLine, workspaceLands } from "@wsp/protocol";
 import { takenNameAfter } from "@wsp/protocol";
 import type { StartPicksAsked } from "../types/harness.js";
 import { type WorkspaceRecord, type LiveWorkspace, CLONE_MS, folderNamed, NO_COPIER_HERE, lastLineOf } from "../types/wiring.js";
@@ -103,7 +103,8 @@ export function foldersArea(ctx: RuntimeContext): FoldersArea {
     const own = asking === undefined || asking.record.place === undefined ? undefined : ctx.projectHeld(asking.record.project);
     const from = own?.computer;
     const elsewhere = own === undefined || o.project === undefined || o.project === own.id || o.project === own.name ? undefined : [...projectsHeld.values()].find(p => (p.id === o.project || p.name === o.project) && p.computer !== from);
-    if (from !== undefined && elsewhere !== undefined) throw Object.assign(new Error(childOnAnotherComputerLine(ctx.placeName(from), ctx.placeName(elsewhere.computer))), { kind: "usage" });
+    const away = elsewhere === undefined || o.project === undefined ? undefined : ctx.elsewhereRefusal(origin, elsewhere, o.project);
+    if (away !== undefined) throw away;
     const project = o.project !== undefined ? await ctx.projectsDoor.resolve(o.project, origin) : asking !== undefined ? ctx.projectHeld(asking.record.project) : undefined;
     if (project === undefined) throw Object.assign(new Error(NAME_A_PROJECT_LINE), { kind: "usage" });
     const kind = ctx.kindOf(project.computer);

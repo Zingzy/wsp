@@ -508,6 +508,12 @@ export const TURN_ANSWERED: Record<string, TurnCase[]> = {
     { case: "in a folder of the project", arguments: { project: "wsp", cwd: "/Users/me/wsp/src", message: "t", detach: true }, replies: { ...PROJECTS, "projects.resolve": ok({ project: HERE_PROJECT }), "harnesses.list": HARNESSES, "sessions.start": startIn("/Users/me/wsp/src") } },
     { case: "a relative folder of the project", arguments: { project: "wsp", cwd: "src", message: "t" }, replies: { ...PROJECTS, "projects.resolve": ok({ project: HERE_PROJECT }), "harnesses.list": HARNESSES } },
     { case: "a branch for a box", arguments: { project: "attic-work", branch: "x", message: "t" }, replies: { ...PROJECTS, "workspaces.resolve": resolved() } },
+    {
+      case: "a project of the thread's repository on a box opens in its folder there",
+      arguments: { project: "site", message: "build it", notify: ["me"], detach: true },
+      env: { [TURN_TOKEN_ENV]: "turn-token-1" },
+      replies: { ...PROJECTS, "workspaces.landing": ok({ kind: "place", place: "pl-attic", name: "attic", capabilities: { sizes: [] } }), "harnesses.list": HARNESSES, "sessions.start": startIn("/root/site") },
+    },
     { case: "a branch for a project on another computer", arguments: { project: "site", branch: "x", message: "t" }, replies: PROJECTS },
     { case: "a branch for a project the thread may not use", arguments: { project: "lab-two", branch: "x", message: "t" }, replies: { ...PROJECTS, "workspaces.resolve": no(refusalLine(spawnFolderRefusal("thread-7f", "lab-two"), SPAWN_FOLDER_FIX), "usage") } },
     {

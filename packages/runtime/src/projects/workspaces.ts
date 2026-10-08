@@ -7,7 +7,7 @@ import type { ProjectGolden, ProjectView, WorkspaceProject } from "@wsp/protocol
 import { noParentWorkspaceLine, parentProjectRefusal, BringBackResult, GitPrReply, GitPushReply, GitCommitReply, GitDiscardReply, GitDiffReply, GitRunLogReply, GitPrMergeReply, GitMergeInReply, DETACHED_HEAD, leadBusyRefusal, FIX_CHECK_OR_CHILD, childOnNoBranchRefusal, mergeChildPrompt, mergeIntoOwnRefusal, noRemoteForTreeLine, type TreeRecord, GitPrReplyReply, GitPrResolveReply, GitPrReactReply, REPLY_EMPTY_LINE, type PullRequestItem, GIT_DIFF_CAP_BYTES, pullRequestSendPrompt, checkFailedPrompt, conflictsPrompt, checkNotFailedRefusal, childPushedLine, isPullRequestFact, mergeMethodRefusal, noPullRequestRefusal, noSuchCheckRefusal, notOpenRefusal, AUTO_MERGE_OFF_LINE, DRAFT_NOTES, cleanCheckoutLine, commitMessage, cutDiff, draftPrompt, agentsFrom, agentsKindRefusal, agentsMayDrive, askerOf, scopeOf, spawnActRefusal, spawnGoldenRefusal, workspaceIdOf } from "@wsp/protocol";
 import { isLocalWorkspace, kindWords, noCommandsYetLine, readingRoad, forgetUndrivenRefusal, goneRefusal, goneWords, imageMoveRefusal, inFolder, machineWord, deleteRefusedLine, snapshotRefusedLine, snapshotManagerLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, refusalLine, notOnThisComputerLine, noBranchesLine, notMadeWorktreeLine, WORKTREE_FORCE_LINE, copiesFolder, copyTakesNone, placeBranchLine, runsInFolder, workspaceLands, shellQuote, WAKE_STOPPED, wakeAsksIn, wakeGaveUpLine, workspaceState, HERE_PLACE_ID, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, refusal, execOutsideFix, execOutsideRefusal, spawnFolderRefusal, spawnReachFix, spawnReachRefusal, spawnRepositoryWorkspaceRefusal, SPAWN_FOLDER_FIX, SPAWN_REPOSITORY_WORKSPACE_FIX } from "@wsp/protocol";
 import { harnessExec, putFiles } from "@wsp/engine";
-import { ownerRepoOf } from "@wsp/protocol";
+import { ownerRepoOf, WorkspaceTalked } from "@wsp/protocol";
 import { providerSaid } from "../status.js";
 import { harnessCatalog, smallestModel } from "../harness-catalog.js";
 import { GitPrDiffReply, GitPrReviewReply, START_WORDS, fromTaskPrompt, githubLinkOf, isReviewRead, reviewTaskPrompt, withCloses } from "@wsp/protocol";
@@ -176,7 +176,9 @@ export function workspacesArea(ctx: RuntimeContext): WorkspacesArea {
       // most, since the create and the rename both refuse a name another already holds, and a word that is one is
       // that workspace whatever else it starts. Only a word that is neither reaches the prefix, where enough of an
       // id is the way round quoting a name with spaces and a word that starts two is refused with both ids.
-      const exact = rows.find(e => e.record.id === ref) ?? rows.find(e => e.record.name === ref);
+      // A thread on a computer the person joined names by its id the workspace its lead's message goes to.
+      const tree = scope === undefined ? undefined : ctx.held().find(e => e.record.id === ref && ctx.talksToTreeOn(ref, origin));
+      const exact = rows.find(e => e.record.id === ref) ?? tree ?? rows.find(e => e.record.name === ref);
       const started = exact === undefined && ref.length >= ID_PREFIX_MIN ? rows.filter(e => e.record.id.startsWith(ref)) : [];
       if (started.length > 1) throw new Error(idPrefixRefusal(ref, started.map(e => e.record.id)));
       const entry = exact ?? started[0];
@@ -196,6 +198,8 @@ export function workspacesArea(ctx: RuntimeContext): WorkspacesArea {
           if (theirs !== undefined && mine !== undefined && ctx.refusalFor(theirs.record, origin) !== undefined) {
             const project = ctx.projectHeld(theirs.record.project);
             if (!ctx.ofThreadsRepository(origin, project.id)) throw execFix !== undefined ? outside("workspace", execFix) : refusal(spawnRepositoryWorkspaceRefusal(scope.threadId, ctx.projectHeld(mine).name, ref), SPAWN_REPOSITORY_WORKSPACE_FIX, "usage");
+            const away = execFix === undefined && runsInFolder(ctx.kindOf(project.computer)) ? ctx.elsewhereRefusal(origin, project, ref) : undefined;
+            if (away !== undefined) throw away;
             if (!ctx.projectReached(origin, project.id)) throw execFix !== undefined ? outside("folder", execFix) : refusal(spawnFolderRefusal(scope.threadId, ref), SPAWN_FOLDER_FIX, "usage");
             throw refusal(spawnReachRefusal(scope.threadId, ref), execFix ?? spawnReachFix(project.name, !runsInFolder(ctx.kindOf(project.computer))), "usage");
           }
@@ -217,6 +221,7 @@ export function workspacesArea(ctx: RuntimeContext): WorkspacesArea {
         if (place.length > 0) throw notFoundRefusal(refusalLine(placeNotAWorkspaceLine(place[0]!.name), placeNotAWorkspaceFix(place[0]!.name)));
         throw notFoundRefusal(noWorkspaceRefusal(ref));
       }
+      if (entry === tree) return WorkspaceTalked.parse(ctx.view(entry.record));
       ctx.refuseRelayed(entry.record, origin);
       return ctx.view(entry.record);
     },
@@ -228,6 +233,7 @@ export function workspacesArea(ctx: RuntimeContext): WorkspacesArea {
     },
 
     async wake(id, origin) {
+      if (ctx.talksToTreeOn(id, origin)) return WorkspaceTalked.parse(await workspaces.wake(id));
       const entry = await ctx.entryOf(id, origin);
       await ctx.copyBlocked(entry);
       if (entry.waking) return entry.waking;

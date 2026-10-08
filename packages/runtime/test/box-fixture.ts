@@ -1,14 +1,19 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // A computer the person joined, as its daemon answers the host over the link:
 // the login read, the login shell's PATH, the folder an add claims, a turn's
-// launch, its polls and its signals, a pane's ptys, and every frame kept.
+// launch, its polls and its signals, a pane's ptys, and every frame kept; and a
+// lead thread on the computer the app runs on, beside one such computer.
+import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import type { Caller, ThreadScope, TurnResult } from "@wsp/protocol";
+import { mkdirSync } from "node:fs";
+import { join as joinPath } from "node:path";
+import { HERE_PLACE_ID, type Caller, type ThreadScope, type TurnResult } from "@wsp/protocol";
 import type { HarnessAdapterFactory, HarnessStartOptions } from "../src/runtime.js";
 import type { Store } from "../src/store.js";
 import type { ServersActs } from "../src/agents-read.js";
 import { MCP_READ_END } from "@wsp/engine";
 import { ctx, sockets, serving, code, join, KEEPS_NO_IMAGE } from "./places-fixture.js";
+import { fakeLocal } from "./stub-backend.js";
 import { report } from "./place-join.js";
 import type { WsClient } from "./ws-client.js";
 
@@ -141,3 +146,67 @@ export async function joined(o: { login?: BoxLogin; adapters?: Record<string, Ha
 }
 
 export const asThread = (scope: ThreadScope): Caller => ({ origin: "relayed", by: scope });
+
+/** What a message starts with to hold its turn open until the case answers it. */
+export const HOLD = "hold: ";
+
+export interface Held {
+  o: HarnessStartOptions;
+  env: Readonly<Record<string, string>>;
+  answer(text: string): void;
+}
+
+/** A harness whose lead turn runs until the case answers it, as a coordinator's does while its children work, and
+ * whose every other turn answers at once, but one the case marks to hold the same way, as a builder's turn runs. */
+export function leading(starts: Held[]): HarnessAdapterFactory {
+  return hctx => ({
+    steers: false,
+    start: o => {
+      const sessionId = randomUUID();
+      let answer = (_text: string): void => {};
+      const finished = new Promise<TurnResult>(resolve => {
+        answer = text => {
+          const result: TurnResult = { status: "completed", text };
+          o.onEvent({ type: "turn.done", sessionId, result });
+          o.onEvent({ type: "session.end", sessionId, exitCode: 0, sawResult: true });
+          resolve(result);
+        };
+      });
+      starts.push({ o, env: hctx.env, answer });
+      o.onEvent({ type: "session.start", sessionId });
+      if (o.prompt !== "coordinate" && !o.prompt.startsWith(HOLD)) answer("built it");
+      return { localId: sessionId, finished, interrupt: async () => answer("stopped") };
+    },
+  });
+}
+
+/** A host holding this computer's folder of acme/lab in `root`, with a lead thread running on it, hetzner joined as
+ * root, the same repository added there and another repository there. With `reach`, the lead's launch carries the
+ * host's address and its own token, as a launch on this computer does under the host. */
+export async function leadAndBox(root: string, o: { agents?: { spawn: boolean; maxDepth?: number }; reach?: true } = {}) {
+  const repo = joinPath(root, "lab");
+  mkdirSync(repo);
+  execFileSync("git", ["init", "-q", "-b", "main", repo]);
+  execFileSync("git", ["-C", repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "first"]);
+  execFileSync("git", ["-C", repo, "remote", "add", "origin", "git@github.com:acme/lab.git"]);
+  const starts: Held[] = [];
+  const here: { url?: string } = {};
+  const { hostKey, store } = await serving({ adapters: { claude: leading(starts) }, local: fakeLocal(joinPath(root, "home")), ...(o.reach === true ? { agents: { here, wspMcp: { command: "wsp", args: ["mcp"] } } } : {}) });
+  here.url = `ws://127.0.0.1:${ctx.srv!.port}`;
+  let seen!: Box;
+  const { client, placeId } = await join(hostKey, {
+    code: await code(),
+    report: report("hetzner", { login: { HOME: HETZNER.home, USER: "root", PATH: "/usr/bin" } }),
+    answers: c => void (seen = box(c, HETZNER)),
+  });
+  sockets.push(client.ws);
+  const rt = ctx.runtime!;
+  const mac = await rt.projects.add({ source: repo, on: HERE_PLACE_ID, name: "lab" });
+  const onBox = await rt.projects.add({ source: "https://github.com/acme/lab", on: "hetzner", name: "lab-box" });
+  await rt.projects.add({ source: "https://github.com/acme/else", on: "hetzner", name: "else-box" });
+  const folder = await rt.workspaces.create({ project: mac.id, name: "lab", agents: o.agents ?? { spawn: true } });
+  const turn = await rt.sessions.start(folder.id, { prompt: "coordinate", harness: "claude" });
+  const threadId = turn.view().threadId!;
+  const lead: Caller = { origin: "here", by: { kind: "thread", threadId, workspaceId: folder.id, rootThreadId: threadId } };
+  return { rt, seen, starts, mac, onBox, folder, threadId, lead, launch: starts[0]!.env, turn, hostKey, store, placeId, repo };
+}
