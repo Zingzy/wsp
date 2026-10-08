@@ -7,6 +7,7 @@ import { spawn } from "node:child_process";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EXEC_CHUNK_BYTES, endRun, shellQuote, turnCutLine, type ExecStream } from "@wsp/protocol";
 import { groupExists, localExecStream, ownOrphans, type GroupWorkReader } from "../src/local-exec.js";
+import { LINUX_SHELL_PRELUDE } from "./linux-shell.js";
 import { alive, gone, grandchild, sweepStrays } from "./strays.js";
 
 async function collect(lines: AsyncIterable<string>): Promise<string[]> {
@@ -633,7 +634,7 @@ describe("a real turn's process group", () => {
   it("a stop reads the log to the size it had at the KILL and ends, while a writer outside the group goes on printing", async () => {
     const marker = join(root, "writer");
     const stream = localExecStream({ root, runDir })(
-      `setsid sh -c 'end=$(($(date +%s) + 60)); while [ $(date +%s) -lt $end ]; do head -c 65536 /dev/zero | tr "\\0" y; echo; sleep 0.03; done' & echo $! > ${shellQuote(marker)}; echo ready; sleep 30`,
+      `${LINUX_SHELL_PRELUDE}setsid sh -c 'end=$(($(date +%s) + 60)); while [ $(date +%s) -lt $end ]; do head -c 65536 /dev/zero | tr "\\0" y; echo; sleep 0.03; done' & echo $! > ${shellQuote(marker)}; echo ready; sleep 30`,
       { env: {} },
     );
     let writer: number | undefined;

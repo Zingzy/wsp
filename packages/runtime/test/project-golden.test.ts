@@ -2,7 +2,7 @@
 // A workspace with its project loaded is snapshotted as a project golden, and forks of that snapshot start with the
 // project in place: the record the snapshot keeps, the refusals, what a fork inherits, and the two ops over the wire.
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gunzipSync } from "node:zlib";
@@ -182,7 +182,8 @@ describe("a project golden", () => {
   });
 
   it("names the repair for pnpm 11's switched copy too, which sits in its store's links and shows only in the stack below the error", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "wsp-snapshot-pnpm11-"));
+    // Real, as node names the module it could not load in the stack: on macOS tmpdir() is a link under /private.
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "wsp-snapshot-pnpm11-")));
     try {
       // A global pnpm 11 hands a folder that pins another version to the copy it switched to in its store, as pnpm 11
       // lays it out; that copy's command requires its dist, which is gone.
