@@ -33,7 +33,20 @@ pub struct PlaceDaemonPaths {
     pub place_log: PathBuf,
     /// What stood before the add at the paths outside the home it or its setup writes, each path NUL-terminated.
     pub place_found: PathBuf,
+    /// That record while the deploy is still writing it.
+    pub place_found_part: PathBuf,
+    /// The join code the add lands for the join to spend.
+    pub join_code: PathBuf,
+    /// Where the install a project's landing runs writes its output, one log per project, written by the host.
+    pub install_logs: PathBuf,
+    pub readings: PathBuf,
+    pub ssh: PathBuf,
 }
+
+/// The folder a daemon keeps its minute readings in, beside its token file.
+pub const READINGS_FOLDER: &str = "readings";
+/// The folder of the sshd a daemon starts for a workspace, beside its token file.
+pub const SSH_FOLDER: &str = "ssh";
 
 /// The home with its trailing slashes gone, as the protocol strips them before it joins.
 fn trimmed(home: &Path) -> PathBuf {
@@ -65,6 +78,11 @@ pub fn place_daemon_paths(home: &Path) -> PlaceDaemonPaths {
         place_key: wsp.join("place-key.pem"),
         place_log: wsp.join("place.log"),
         place_found: wsp.join("place-found"),
+        place_found_part: wsp.join("place-found.part"),
+        join_code: wsp.join("join-code"),
+        install_logs: wsp.join("install-logs"),
+        readings: wsp.join(READINGS_FOLDER),
+        ssh: wsp.join(SSH_FOLDER),
         wsp,
     }
 }
@@ -101,9 +119,10 @@ pub fn probe_path(home: &Path) -> String {
     numbers::TOOLS_PATH.split(':').filter(|dir| !dir.is_empty() && !under(dir)).collect::<Vec<_>>().join(":")
 }
 
-/// Every path a leave takes off a place, in the order the protocol's placeOwnedPaths names them: the parts first,
-/// each for the line it puts in front of a person reading the leave, then wsp's own folder whole, which takes
-/// whatever no part above names. The work folder is not here: what the person's threads wrote there is theirs.
+/// Every path a leave takes off a place, in the order the protocol's placeOwnedPaths names them, each for the line it
+/// puts in front of a person reading the leave. Not wsp's own folder, which holds the person's own wsp and a host's
+/// state on the same login, so every write under it, the daemon's or the host's over the link, has its own row here.
+/// Nor the work folder: what the person's threads wrote there is theirs.
 pub fn place_owned_paths(home: &Path) -> Vec<PathBuf> {
     let at = place_daemon_paths(home);
     vec![
@@ -111,6 +130,8 @@ pub fn place_owned_paths(home: &Path) -> Vec<PathBuf> {
         at.place_key,
         at.place_log,
         at.place_found,
+        at.place_found_part,
+        at.join_code,
         at.dir,
         place_provision_paths(home).dir,
         at.bundle,
@@ -124,9 +145,13 @@ pub fn place_owned_paths(home: &Path) -> Vec<PathBuf> {
         at.guest_bin,
         at.run_dir,
         at.port_file,
+        at.manifest_path,
+        at.put_dir,
+        at.install_logs,
+        at.readings,
+        at.ssh,
         at.bin_dir.join("wsp-open"),
         at.bin_dir.join("xdg-open"),
-        at.wsp,
     ]
 }
 
@@ -160,7 +185,7 @@ mod tests {
     }
 
     #[test]
-    fn the_provision_folder_follows_the_daemons_and_wsps_own_folder_is_last() {
+    fn the_provision_folder_follows_the_daemons_and_wsps_own_folder_is_not_on_it() {
         let owned: Vec<String> = place_owned_paths(Path::new("/h")).iter().map(|p| p.to_string_lossy().into_owned()).collect();
         let at = place_daemon_paths(Path::new("/h"));
         // The exact list and its order are held against the protocol's own by the contract fixture; what is read
@@ -169,8 +194,7 @@ mod tests {
             |path: &Path| owned.iter().position(|row| row == &path.to_string_lossy()).unwrap_or_else(|| panic!("{}", path.display()));
         assert_eq!(after(&place_provision_paths(Path::new("/h")).dir), after(&at.dir) + 1);
         assert!(after(&at.bundle) > after(&place_provision_paths(Path::new("/h")).dir));
-        // Last, so every part above it is taken and named first and the folder then takes whatever no part names.
-        assert_eq!(owned.last().map(String::as_str), Some("/h/.wsp"));
+        assert!(!owned.iter().any(|row| row == "/h/.wsp"), "{owned:?}");
         assert!(owned.iter().all(|row| row.starts_with("/h/")), "{owned:?}");
     }
 

@@ -9,7 +9,7 @@ import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSy
 import { basename, dirname, join, relative } from "node:path";
 import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import WebSocket from "ws";
-import { ALREADY_JOINED_LINE, JOIN_NO_KEY_REFUSAL, PLACE_LEAVE_LINE, PLACE_CODE_REFUSAL, PLACE_NEEDS_ROOT_LINE, joinKeyRefusal, placeFileText, MCP_ID_PREFIX, placeDaemonPaths, placeKeptForLinkLine, placeProvisionPaths, shellQuote, wsUrlOf } from "@wsp/protocol";
+import { ALREADY_JOINED_LINE, JOIN_NO_KEY_REFUSAL, PLACE_LEAVE_LINE, PLACE_CODE_REFUSAL, PLACE_NEEDS_ROOT_LINE, joinKeyRefusal, placeFileText, MCP_ID_PREFIX, placeDaemonPaths, placeInstallLog, placeKeptForLinkLine, placeProvisionPaths, shellQuote, wsUrlOf } from "@wsp/protocol";
 import { CODEX_TOML } from "@wsp/catalog";
 import { OWN_MARK, outsideAfterScript, outsideBeforeScript, keyFingerprint } from "@wsp/engine";
 import { daemonBinaryHere } from "../src/assets.js";
@@ -393,7 +393,7 @@ describe("taking wsp off the computer it is typed on", () => {
     // The list's server line named no path, so the leave took nothing for it and made nothing at its name.
     expect(existsSync(join(home, "agents"))).toBe(false);
     expect(swept.removed.filter(took => took.includes("agents/mcp"))).toEqual([]);
-    // And wsp's own folder is gone whole, the provision folder and the ledger inside it with it.
+    // And wsp's own folder goes too, since the sweep left it empty, the provision folder and the ledger with it.
     expect(existsSync(placeDaemonPaths(home).wsp)).toBe(false);
     expect(swept.removed.at(-1)).toBe(placeDaemonPaths(home).wsp);
   });
@@ -417,15 +417,54 @@ describe("taking wsp off the computer it is typed on", () => {
     expect(existsSync(join(home, rows[0]!.rel))).toBe(false);
   });
 
-  it("takes wsp's own folder whole, so nothing under it is left on a computer the person joined", async () => {
+  it("takes every path the daemon writes under wsp's own folder, and the folder once nothing else is in it", async () => {
     const home = tmp("leave-whole");
     const at = placeDaemonPaths(home);
     mkdirSync(at.putDir, { recursive: true });
     writeFileSync(join(at.putDir, "797"), "half an update");
-    writeFileSync(join(at.wsp, "place.json.bak-747"), "old");
+    writeFileSync(at.manifestPath, "{}");
+    for (const folder of ["readings", "ssh"]) mkdirSync(join(at.wsp, folder));
     const swept = await sweepPlace({ home, manager: undefined, run: fakeRunner().run, sh: () => "" });
     expect(existsSync(at.wsp)).toBe(false);
-    expect(swept.removed).toEqual([at.wsp]);
+    expect(swept.removed.at(-1)).toBe(at.wsp);
+  });
+
+  it("takes the log a project's install wrote there over the link, and the folder with it once nothing else is in it", async () => {
+    const home = tmp("leave-landed-log");
+    const host = await fakeHost();
+    expect(await joinCommand(captured(), [host.url], { code: codeFor(host, "7QK3M2VD"), name: "box" }, joinDepsFor(home, fakeRunner().run))).toBe(0);
+    const log = placeInstallLog(home, "p_abc123");
+    mkdirSync(dirname(log), { recursive: true });
+    writeFileSync(log, "added 812 packages\n");
+    expect(await leaveCommand(captured(), [], { home, run: fakeRunner().run, platform: "linux" })).toBe(0);
+    expect(existsSync(placeDaemonPaths(home).wsp) ? readdirSync(placeDaemonPaths(home).wsp) : []).toEqual([]);
+  });
+
+  it("takes what an add killed before its join leaves, the record's part and the join code, and the folder with them", async () => {
+    const home = tmp("leave-partial");
+    const at = placeDaemonPaths(home);
+    mkdirSync(at.inbox, { recursive: true });
+    writeFileSync(at.tokenPath, "token");
+    for (const path of [at.placeFoundPart, at.joinCode]) writeFileSync(path, "left");
+    const swept = await sweepPlace({ home, manager: undefined, run: fakeRunner().run, sh: () => "" });
+    expect(existsSync(at.wsp) ? readdirSync(at.wsp) : []).toEqual([]);
+    expect(swept.removed.at(-1)).toBe(at.wsp);
+  });
+
+  it("leaves the person's own wsp and a host's state under wsp's folder byte for byte, and the folder with them", async () => {
+    const home = tmp("leave-theirs");
+    const at = placeDaemonPaths(home);
+    const theirs = { [join(at.wsp, "bin", "wsp")]: "#!/bin/sh\necho the install line's wsp\n", [join(at.wsp, "state.json")]: "{\"workspaces\":[]}\n" };
+    for (const [path, text] of Object.entries(theirs)) {
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, text);
+    }
+    const host = await fakeHost();
+    expect(await joinCommand(captured(), [host.url], { code: codeFor(host, "7QK3M2VD"), name: "box" }, joinDepsFor(home, fakeRunner().run))).toBe(0);
+    for (const folder of ["readings", "ssh"]) mkdirSync(join(at.wsp, folder), { recursive: true });
+    expect(await leaveCommand(captured(), [], { home, run: fakeRunner().run, platform: "linux" })).toBe(0);
+    for (const [path, text] of Object.entries(theirs)) expect(readFileSync(path, "utf8"), path).toBe(text);
+    expect(readdirSync(at.wsp).sort()).toEqual(["bin", "state.json"]);
   });
 
   it("keeps every file of the person's on a computer the recipe never ran on", async () => {
@@ -462,7 +501,7 @@ describe("taking wsp off the computer it is typed on", () => {
       expect(swept.removed, path).toContain(placeKeptForLinkLine(path));
       expect(swept.removed, path).not.toContain(path);
     }
-    // Wsp's own folder is under no link and goes as it always did.
+    // Wsp's own folder is under no link and goes once the sweep has left it empty.
     expect(existsSync(at.wsp)).toBe(false);
     expect(swept.removed).toContain(at.wsp);
   });
