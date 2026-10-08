@@ -49,13 +49,19 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
   const ending = new Map<string, Promise<void>>();
   /** The computer a thread's next turn waits on to connect, by thread, while the hold on it is an end a stop owed there. */
   const waitsFor = new Map<string, string>();
+  /** The sends waiting for a running turn's process to exit, by thread: a stop that owes the end to a computer that is
+   * away wakes them, since that exit is not heard until it connects and they wait on the end instead. */
+  const behindTurn = new Map<string, Set<() => void>>();
   /** Holds the thread's next turn until `until` settles as well: merged with a hold already standing, never in its
    * place, so a second stop cannot release what the first one holds. */
   const holdNext = (threadId: string, until: Promise<void>, box?: string): void => {
     const prior = ending.get(threadId);
     const gate = prior === undefined ? until : Promise.all([prior, until]).then(() => {});
     ending.set(threadId, gate);
-    if (box !== undefined) waitsFor.set(threadId, box);
+    if (box !== undefined) {
+      waitsFor.set(threadId, box);
+      for (const wake of behindTurn.get(threadId) ?? []) wake();
+    }
     void gate.then(() => {
       if (ending.get(threadId) !== gate) return;
       ending.delete(threadId);
@@ -479,15 +485,21 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
           if (running === undefined) {
             const stopping = ending.get(threadId);
             if (stopping !== undefined) {
-              // A wait on a computer that is away says so, once, even after a wait behind the turn the stop ended.
+              // A wait on a computer that is away says so, once, even after a wait behind the turn the stop ended; a wait
+              // behind a turn after it says so again.
               const box = waitsFor.get(threadId);
               if (outcome === "started" || (box !== undefined && !toldBox)) {
                 bus.emit({ type: "session.queued", workspaceId, threadId, harness, prompt: o.prompt, ...(o.requestId !== undefined ? { requestId: o.requestId } : {}), ...(box !== undefined ? { waitsFor: box } : {}) });
                 toldBox = box !== undefined;
               }
               outcome = "queued";
+              // A send a Stop woke from behind the running turn holds the thread's row too, which a Stop and a window
+              // opened later read the wait off.
+              if (box !== undefined) hold();
               const waitingRow = box === undefined ? undefined : sessions.get(turnId);
               if (waitingRow !== undefined) waitingRow.view.waitsFor = box!;
+              // A send behind the one holding the row looks again once that one leaves, so the next takes the row.
+              const holder = box === undefined || waitingRow !== undefined ? undefined : ctx.launchingOn(threadId)?.launch;
               if (box === undefined) await stopping;
               else
                 await new Promise<void>((resolve, reject) => {
@@ -500,6 +512,7 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
                     },
                   });
                   void stopping.then(resolve);
+                  void holder?.then(resolve);
                 }).finally(() => {
                   heldSends.delete(turnId);
                   if (waitingRow !== undefined) delete waitingRow.view.waitsFor;
@@ -514,8 +527,9 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
             if (launching !== undefined && launching.turnId !== turnId) {
               // A held turn ahead of this one would otherwise wait on the slot this send's follower holds.
               if (lender !== undefined) ctx.capLend(launching.turnId, lender);
-              if (outcome === "started") bus.emit({ type: "session.queued", workspaceId, threadId, harness, prompt: o.prompt, ...(o.requestId !== undefined ? { requestId: o.requestId } : {}) });
+              if (outcome === "started" || toldBox) bus.emit({ type: "session.queued", workspaceId, threadId, harness, prompt: o.prompt, ...(o.requestId !== undefined ? { requestId: o.requestId } : {}) });
               outcome = "queued";
+              toldBox = false;
               await launching.launch;
               refuse();
               cleared = false;
@@ -582,9 +596,15 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
             ctx.recordSteer(running, running.handle.id, o, origin, steerId);
             return { ...running.handle, outcome: "steered" };
           }
-          if (outcome === "started") bus.emit({ type: "session.queued", workspaceId, threadId, harness, prompt: o.prompt, ...(o.requestId !== undefined ? { requestId: o.requestId } : {}) });
+          if (outcome === "started" || toldBox) bus.emit({ type: "session.queued", workspaceId, threadId, harness, prompt: o.prompt, ...(o.requestId !== undefined ? { requestId: o.requestId } : {}) });
           outcome = "queued";
-          await running.handle.finished.catch(() => {});
+          toldBox = false;
+          const woken = behindTurn.get(threadId) ?? new Set<() => void>();
+          behindTurn.set(threadId, woken);
+          let wake!: () => void;
+          await Promise.race([running.handle.finished.catch(() => {}), new Promise<void>(resolve => woken.add((wake = resolve)))]);
+          woken.delete(wake);
+          if (woken.size === 0) behindTurn.delete(threadId);
           refuse();
           cleared = false;
         }
