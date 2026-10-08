@@ -55,6 +55,31 @@ const rustVersion = (repo: string): number => Number(/pub const DAEMON_VERSION: 
 const fixtureVersion = (repo: string): number => (JSON.parse(read(repo, CUT_PATHS.fixture)) as { daemonVersion: number }).daemonVersion;
 
 describe("cutting the daemon version at landing", () => {
+  it("pins a gate a branch wrote as its own daemon to the version its landing cuts, which a later cut leaves alone", () => {
+    const main = repoAt();
+    const n = recordOf(read(main, CUT_PATHS.record)).length;
+    expect(read(main, CUT_PATHS.record)).not.toMatch(/_DAEMON_VERSION = DAEMON_VERSION;/);
+    const first = repoAt(main);
+    const record = read(first, CUT_PATHS.record);
+    writeFileSync(join(first, CUT_PATHS.record), `${record}\nexport const GATED_DAEMON_VERSION = DAEMON_VERSION;\n`);
+    change(first, "gated");
+    expect(cutDaemonVersion(first, { note: "feat(daemon): gated" }).version).toBe(n + 1);
+    expect(read(first, CUT_PATHS.record)).toContain(`export const GATED_DAEMON_VERSION = ${n + 1};`);
+    commitAll(first);
+    const second = repoAt(first);
+    change(second, "later");
+    expect(cutDaemonVersion(second, { note: "fix: later" }).version).toBe(n + 2);
+    expect(read(second, CUT_PATHS.record)).toContain(`export const GATED_DAEMON_VERSION = ${n + 1};`);
+  });
+
+  it("refuses a gate on this build's daemon where the daemon did not change, since no version holds what it asks for", () => {
+    const main = repoAt();
+    const record = read(main, CUT_PATHS.record);
+    writeFileSync(join(main, CUT_PATHS.record), `${record}\nexport const GATED_DAEMON_VERSION = DAEMON_VERSION;\n`);
+    commitAll(main);
+    expect(() => cutDaemonVersion(main, { note: "fix: nothing in the daemon" })).toThrow(/GATED_DAEMON_VERSION = DAEMON_VERSION;/);
+  });
+
   it("lands two branches off one main one after the other as N+1 then N+2, each carrying no version of its own", () => {
     const main = repoAt();
     const n = recordOf(read(main, CUT_PATHS.record)).length;

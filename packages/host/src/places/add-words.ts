@@ -2,7 +2,7 @@
 
 import { readFileSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
-import { ALREADY_JOINED_LINE, GITHUB_CLI, signInOfRow, waitsForInstallLine, type PlaceProvisionRow, isHttpUrl, PLACE_LEAVE_LINE, fmtPrice, joinRoads, PlaceView, type PlaceFile, fmtBytes, fmtDuration, shellQuote, BACK_OVER_SSH, backUrl, dialsBackWord, PLACE_SUDO_KIND, refusal, twoPlacesRefusal, relayUrlOf, TOOL_PREFIX } from "@wsp/protocol";
+import { ALREADY_JOINED_LINE, GITHUB_CLI, signInOfRow, waitsForInstallLine, type PlaceProvisionRow, isHttpUrl, PLACE_LEAVE_LINE, fmtPrice, joinRoads, PlaceView, type PlaceFile, fmtBytes, fmtDuration, shellQuote, BACK_OVER_SSH, backUrl, dialsBackWord, PLACE_SUDO_KIND, refusal, twoPlacesRefusal, relayUrlOf, TOOL_PREFIX, placeHoldsLine, pluginOffLine, type PlaceHolds, type PlaceRemoved } from "@wsp/protocol";
 import { prefixVolume, SSH_LINE_CAP, boxWord, keyFingerprint, type SshReach, type SshSudo } from "@wsp/engine";
 import { CATALOG_AGENTS, agentName, hasLogin, keyEnvOf, mintsToken, sharedOn } from "@wsp/catalog";
 import { cappedLine } from "../doctor.js";
@@ -101,11 +101,48 @@ export const deviceLeftLine = (name: string, deviceIds: readonly string[]): stri
   return `${name} still holds ${one ? "a token" : `${deviceIds.length} tokens`} for this wsp, which its own window signs in with; ${revoke} take${one ? "s it" : " them"} back.`;
 };
 
-/** What a remove prints: what came off that computer, the note for a place that was not connected to sweep, and
- * the device a join bought for it where one is still on record. */
-export function removeLines(name: string, answer: { swept: readonly string[]; note?: string }, deviceIds: readonly string[] = []): string[] {
+/** The most lines a remove's list of what came off takes: a screen's worth, whatever the computer held. */
+export const REMOVE_LINES_MAX = 20;
+
+/** The path segments a removed path is counted under: a file deeper than this is one of its folder's. */
+const SWEPT_FOLDER_DEPTH = 3;
+
+/** What came off a computer as a person reads it: every plugin on one line, every path deeper than a folder's own
+ * counted under that folder, each other line as it was said, in the order each first came, and at most a screen of
+ * them. --json carries every line. */
+export function sweptSummary(swept: readonly string[]): string[] {
+  const plugin = pluginOffLine("");
+  const groups = new Map<string, string[]>();
+  for (const line of swept) {
+    const parts = line.startsWith("/") ? line.split("/").filter(part => part !== "") : [];
+    const key = line.startsWith(plugin) ? plugin : parts.length > SWEPT_FOLDER_DEPTH ? `/${parts.slice(0, SWEPT_FOLDER_DEPTH).join("/")}` : line;
+    groups.set(key, [...(groups.get(key) ?? []), line]);
+  }
+  const lines = [...groups].map(([key, held]) => {
+    if (held.length === 1) return held[0]!;
+    if (key === plugin) return `${held.length} plugins: ${held.map(line => line.slice(plugin.length)).join(", ")}`;
+    return key.startsWith("/") ? `${held.length} files under ${key}` : `${key} (${held.length} times)`;
+  });
+  if (lines.length <= REMOVE_LINES_MAX) return lines;
+  return [...lines.slice(0, REMOVE_LINES_MAX - 1), `and ${lines.length - REMOVE_LINES_MAX + 1} more; --json lists each one`];
+}
+
+/** The one question a remove asks: what goes with the computer, what comes off it, and, where it is forced, the work
+ * no remote has that goes too. */
+export function removeQuestion(name: string, holds: Omit<PlaceHolds, "unsaved"> & { unsaved?: readonly string[] }): string {
+  const went = placeHoldsLine(holds);
+  const off = `wsp comes off ${name}, which is otherwise left as wsp found it.`;
+  const losing = holds.unsaved === undefined || holds.unsaved.length === 0 ? "" : `\nWith it goes work no remote has: ${holds.unsaved.join("; ")}.`;
+  return `Remove ${name}?\n${went === undefined ? off.charAt(0).toUpperCase() + off.slice(1) : `${went.charAt(0).toUpperCase()}${went.slice(1)}; ${off}`}${losing}`;
+}
+
+/** What a remove prints: what went with the computer, what came off it, the note for a place that was not connected
+ * to sweep, and the device a join bought for it where one is still on record. */
+export function removeLines(name: string, answer: Pick<PlaceRemoved, "took" | "swept" | "note">, deviceIds: readonly string[] = []): string[] {
+  const went = answer.took === undefined ? undefined : placeHoldsLine(answer.took);
   return [
-    ...(answer.swept.length === 0 ? [] : [`removed from ${name}:`, ...answer.swept.map(line => sweptLine(line))]),
+    ...(went === undefined ? [] : [`${name}: ${went}.`]),
+    ...(answer.swept.length === 0 ? [] : [`removed from ${name}:`, ...sweptSummary(answer.swept).map(line => sweptLine(line))]),
     ...(answer.note === undefined ? [] : [answer.note]),
     ...(deviceIds.length === 0 ? [] : [deviceLeftLine(name, deviceIds)]),
     `${name} is no longer a place in this wsp.`,

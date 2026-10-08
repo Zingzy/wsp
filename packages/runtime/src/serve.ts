@@ -862,6 +862,12 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
           const workspace = held.phase === "running" ? held : await rt.workspaces.wake(held.id, origin);
           return { id: workspace.id, name: workspace.name };
         };
+        /** An op only the host's own road may ask answers any other socket with the ticket refusal and runs nothing. */
+        const refusedOffOwnRoad = (): boolean => {
+          if (ownRoad()) return false;
+          send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
+          return true;
+        };
         try {
           switch (msg.op) {
             case "auth":
@@ -903,92 +909,64 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               send({ id: msg.id, ok: false, error: PLACE_UNKNOWN_REFUSAL });
               return;
             case "places.list":
-              if (!ownRoad()) {
-                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
-                return;
-              }
+              if (refusedOffOwnRoad()) return;
               send({ id: msg.id, ok: true, places: await places().list(now()), adds: places().adds(), pending: await places().pending() });
               return;
             case "places.update": {
-              if (!ownRoad()) {
-                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
-                return;
-              }
+              if (refusedOffOwnRoad()) return;
               send({ id: msg.id, ok: true, ...(await places().update(msg.placeId, msg.sudoPassword === undefined ? {} : { sudoPassword: msg.sudoPassword })) });
               return;
             }
             case "places.remove": {
-              if (!ownRoad()) {
-                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
-                return;
-              }
-              send({ id: msg.id, ok: true, ...(await places().remove(msg.placeId, msg.sudoPassword === undefined ? {} : { sudoPassword: msg.sudoPassword })) });
+              if (refusedOffOwnRoad()) return;
+              send({ id: msg.id, ok: true, ...(await places().remove(msg.placeId, { ...(msg.sudoPassword === undefined ? {} : { sudoPassword: msg.sudoPassword }), ...(msg.force === true ? { force: true } : {}) })) });
+              return;
+            }
+            case "places.holds": {
+              if (refusedOffOwnRoad()) return;
+              send({ id: msg.id, ok: true, ...(await places().holds(msg.placeId)) });
               return;
             }
             case "places.dial": {
-              if (!ownRoad()) {
-                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
-                return;
-              }
+              if (refusedOffOwnRoad()) return;
               send({ id: msg.id, ok: true, ...(await places().dial(msg.placeId, now())) });
               return;
             }
             case "places.set": {
-              if (!ownRoad()) {
-                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
-                return;
-              }
+              if (refusedOffOwnRoad()) return;
               const { id: _id, op: _op, placeId, reset, name, ssh, recipe, ...set } = msg;
               send({ id: msg.id, ok: true, ...(await places().set(placeId, set, reset, { name, ssh, recipe: recipe === undefined || recipe === NO_RECIPE ? recipe : (await recipeNamed(recipe)).slug })) });
               return;
             }
             case "places.follow": {
-              if (!ownRoad()) {
-                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
-                return;
-              }
+              if (refusedOffOwnRoad()) return;
               const slug = msg.recipe === NO_RECIPE ? NO_RECIPE : (await recipeNamed(msg.recipe)).slug;
               send({ id: msg.id, ok: true, place: await places().follow(msg.placeId, slug) });
               return;
             }
             case "places.skip": {
-              if (!ownRoad()) {
-                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
-                return;
-              }
+              if (refusedOffOwnRoad()) return;
               send({ id: msg.id, ok: true, place: await places().skip(msg.placeId, msg.row) });
               return;
             }
             case "places.estimate": {
-              if (!ownRoad()) {
-                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
-                return;
-              }
+              if (refusedOffOwnRoad()) return;
               send({ id: msg.id, ok: true, estimate: await places().estimate(msg.ref, msg.choices) });
               return;
             }
             case "places.setupLog": {
-              if (!ownRoad()) {
-                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
-                return;
-              }
+              if (refusedOffOwnRoad()) return;
               send({ id: msg.id, ok: true, lines: await places().setupLog(msg.placeId, msg.step) });
               return;
             }
             case "places.loginLanded": {
-              if (!ownRoad()) {
-                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
-                return;
-              }
+              if (refusedOffOwnRoad()) return;
               await places().loginLanded(msg.placeId, msg.agent);
               send({ id: msg.id, ok: true });
               return;
             }
             case "places.doctor": {
-              if (!ownRoad()) {
-                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
-                return;
-              }
+              if (refusedOffOwnRoad()) return;
               if (opts.doctor === undefined) {
                 send({ id: msg.id, ok: false, error: DOCTOR_UNSERVED });
                 return;
@@ -1060,10 +1038,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               return;
             }
             case "places.add": {
-              if (!ownRoad()) {
-                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
-                return;
-              }
+              if (refusedOffOwnRoad()) return;
               // The addresses the computer being installed on is to dial are the door's own reading, asked for here
               // rather than read a second time inside the door: a host that opens none could never be dialled back.
               if (opts.door === undefined) {
@@ -1093,20 +1068,14 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               return;
             }
             case "places.setup": {
-              if (!ownRoad()) {
-                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
-                return;
-              }
+              if (refusedOffOwnRoad()) return;
               const picked = msg.recipe === undefined ? undefined : await recipeNamed(msg.recipe);
               const given = picked !== undefined ? { choices: picked.file, recipe: picked.slug } : msg.choices !== undefined ? { choices: msg.choices } : {};
               send({ id: msg.id, ok: true, ...(await places().setUp(msg.ref, { ...given, ...(msg.addId !== undefined ? { addId: msg.addId } : {}) })) });
               return;
             }
             case "places.choose": {
-              if (!ownRoad()) {
-                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
-                return;
-              }
+              if (refusedOffOwnRoad()) return;
               send({ id: msg.id, ok: true, pending: await places().choose(msg.ref, msg.choices, msg.recipe) });
               return;
             }
@@ -1138,8 +1107,8 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
                 send({ id: msg.id, ok: true, recipe: recipeView(held, await followers()) });
               } else if (msg.op === "recipes.remove") {
                 const by = await followers();
-                const held = await recipes().remove(msg.name);
-                if (rt.places !== undefined) await rt.places.unfollow(held.slug);
+                const held = msg.check === true ? await recipes().read(msg.name) : await recipes().remove(msg.name);
+                if (rt.places !== undefined && msg.check !== true) await rt.places.unfollow(held.slug);
                 send({ id: msg.id, ok: true, recipe: recipeView(held, by) });
               } else {
                 // This computer's own projects are the folders a box can take.
@@ -1293,14 +1262,14 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               send({ id: msg.id, ok: true, ...(await rt.workspaces.worktree({ project: msg.project, branch: msg.branch }, origin)) });
               return;
             case "worktree.remove":
-              await rt.workspaces.worktreeRemove({ project: msg.project, branch: msg.branch, ...(msg.force !== undefined ? { force: msg.force } : {}) }, origin);
+              await rt.workspaces.worktreeRemove({ project: msg.project, branch: msg.branch, ...(msg.force !== undefined ? { force: msg.force } : {}), ...(msg.check === true ? { check: true } : {}) }, origin);
               send({ id: msg.id, ok: true });
               return;
             case "workspaces.checkout":
               send({ id: msg.id, ok: true, ...(await rt.workspaces.checkout(msg.workspaceId, origin)) });
               return;
             case "workspaces.discard":
-              send({ id: msg.id, ok: true, ...(await rt.workspaces.discard({ workspaceId: msg.workspaceId, path: msg.path }, origin)) });
+              send({ id: msg.id, ok: true, ...(await rt.workspaces.discard({ workspaceId: msg.workspaceId, path: msg.path, ...(msg.check === true ? { check: true } : {}) }, origin)) });
               return;
             case "workspaces.commit":
               send({ id: msg.id, ok: true, ...(await rt.workspaces.commit({ workspaceId: msg.workspaceId, message: msg.message, ...(msg.paths !== undefined ? { paths: msg.paths } : {}) }, origin)) });
@@ -1448,7 +1417,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               send({ id: msg.id, ok: true, project: await rt.projects.resolve(msg.ref, origin) });
               return;
             case "projects.remove":
-              send({ id: msg.id, ok: true, ...(await rt.projects.remove(msg.projectId, origin)) });
+              send({ id: msg.id, ok: true, ...(await rt.projects.remove(msg.projectId, origin, { ...(msg.force === true ? { force: true } : {}), ...(msg.check === true ? { check: true } : {}) })) });
               return;
             case "projectGoldens.list":
               send({ id: msg.id, ok: true, projectGoldens: await rt.golden.projects() });
@@ -1475,10 +1444,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
                 // gate every other places op reads; the channel rides the link that computer opened, or dials this
                 // computer's own daemon where the place is this one.
                 if (msg.workspaceId !== undefined) throw new Error(DAEMON_OPEN_ONE_OF);
-                if (!ownRoad()) {
-                  send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
-                  return;
-                }
+                if (refusedOffOwnRoad()) return;
                 if (msg.placeId === HERE_PLACE_ID) ch = await rt.hereChannel(onEvent);
                 else {
                   const onLink = places().channel(msg.placeId, onEvent);
@@ -1638,7 +1604,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               send({ id: msg.id, ok: true, ...(await rt.sessions.rename(msg.sessionId, msg.title, origin)) });
               return;
             case "sessions.forget":
-              await rt.sessions.forget(msg.threadId, origin);
+              await rt.sessions.forget(msg.threadId, origin, msg.check === true ? { check: true } : {});
               send({ id: msg.id, ok: true });
               return;
             case "sessions.delete":
@@ -1773,26 +1739,17 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             case "usage.accounts":
               // The person's accounts and what their turns used are read on the road their computers are: a socket let
               // in on a ticket sees neither.
-              if (!ownRoad()) {
-                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
-                return;
-              }
+              if (refusedOffOwnRoad()) return;
               if (msg.op === "usage.used") send({ id: msg.id, ok: true, used: await rt.usage.used({ range: msg.range, split: msg.split, ...(msg.outside !== undefined ? { outside: msg.outside } : {}) }) });
               else send({ id: msg.id, ok: true, ...(await rt.usage.accounts()) });
               return;
             case "usage.reset":
               // Spending a reset is the person's act on their own account, on the road their computers are.
-              if (!ownRoad()) {
-                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
-                return;
-              }
+              if (refusedOffOwnRoad()) return;
               send({ id: msg.id, ok: true, ...(await rt.usage.reset({ account: msg.account, ...(msg.creditId !== undefined ? { creditId: msg.creditId } : {}), ...(msg.on !== undefined ? { on: msg.on } : {}) })) });
               return;
             case "places.readings": {
-              if (!ownRoad()) {
-                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
-                return;
-              }
+              if (refusedOffOwnRoad()) return;
               const target = msg.workspaceId !== undefined ? { workspaceId: msg.workspaceId } : msg.placeId !== undefined ? { placeId: msg.placeId } : undefined;
               if (target === undefined) {
                 send({ id: msg.id, ok: false, error: "places.readings names a placeId or a workspaceId", kind: "usage" });
@@ -1804,10 +1761,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             case "cost.spend":
               // What the person's computers and providers have cost them is read on the same road their list is:
               // a socket let in on a ticket sees neither.
-              if (!ownRoad()) {
-                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
-                return;
-              }
+              if (refusedOffOwnRoad()) return;
               send({ id: msg.id, ok: true, places: await rt.status.spend((await rt.places?.list(now())) ?? []) });
               return;
             case "snapshots.rollback": {
@@ -1894,10 +1848,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
                 return;
               }
               // Another computer's disk is read over the link it holds, which is the places road: the host's own.
-              if (!ownRoad()) {
-                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
-                return;
-              }
+              if (refusedOffOwnRoad()) return;
               send({ id: msg.id, ok: true, listing: await placeFolders(msg.on, asked, origin) });
               return;
             }
@@ -1919,10 +1870,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               return;
             case "servers.icon":
               // Google is asked by this host for the person's own windows alone: a ticket or a device draws the glyph.
-              if (!ownRoad()) {
-                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
-                return;
-              }
+              if (refusedOffOwnRoad()) return;
               send({ id: msg.id, ok: true, icon: await rt.agents.serversIcon(msg.host, msg.refresh) });
               return;
             case "agents.signIn":
@@ -1932,10 +1880,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             case "agents.signInStop":
               // A sign-in on one of the person's computers is theirs alone, and its page and code go to the sockets
               // following it and to no other: they are what finishes that login.
-              if (!ownRoad()) {
-                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
-                return;
-              }
+              if (refusedOffOwnRoad()) return;
               await signInOps(msg, send, origin);
               return;
             case "agents.signInLine":
@@ -1959,10 +1904,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             case "agents.setup": {
               // How an agent runs on one of the person's computers is theirs alone, and a variable's value crosses only
               // from a socket holding this host's own token, as a key into the vault does.
-              if (!ownRoad()) {
-                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
-                return;
-              }
+              if (refusedOffOwnRoad()) return;
               const { id: _id, op: _op, placeId, agent, ...change } = msg;
               if (me?.kind !== "host" && Object.values(change.env ?? {}).some(value => value !== null)) {
                 send({ id: msg.id, ok: false, error: ENV_VALUE_REFUSAL });
@@ -1972,10 +1914,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               return;
             }
             case "agents.addTools":
-              if (!ownRoad()) {
-                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
-                return;
-              }
+              if (refusedOffOwnRoad()) return;
               send({ id: msg.id, ok: true, ...(await rt.agents.addTools(msg.target, msg.agent, origin)) });
               return;
             case "skills.search":
@@ -1985,10 +1924,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             case "skills.remove":
             case "skills.toggle": {
               // skills.sh is asked by this host alone, and a skill on one of the person's computers is theirs to change.
-              if (!ownRoad()) {
-                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
-                return;
-              }
+              if (refusedOffOwnRoad()) return;
               const skill = (ask: { name: string; project?: boolean }) => ({ name: ask.name, ...(ask.project !== undefined ? { project: ask.project } : {}) });
               if (msg.op === "skills.search") send({ id: msg.id, ok: true, skills: await rt.agents.skillsSearch(msg.q, msg.limit) });
               else if (msg.op === "skills.get") send({ id: msg.id, ok: true, preview: await rt.agents.skillsGet(msg.skill) });
@@ -2005,10 +1941,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             case "servers.toggle": {
               // A server in an agent's config on one of the person's computers is theirs to change, and the values an
               // add carries go into that file or the vault, never into an answer.
-              if (!ownRoad()) {
-                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
-                return;
-              }
+              if (refusedOffOwnRoad()) return;
               if (msg.op === "servers.add") {
                 const { id: _id, op: _op, target, ...ask } = msg;
                 send({ id: msg.id, ok: true, ...(await rt.agents.serversAdd(target, ask, origin)) });

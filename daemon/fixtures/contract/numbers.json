@@ -1,5 +1,5 @@
 {
-  "daemonVersion": 140,
+  "daemonVersion": 141,
   "execBodyMax": 16384,
   "prReplyBodyMax": 65536,
   "guestMessageCapBytes": 4194304,
@@ -64,6 +64,8 @@
   "xdgOpenPath": "/usr/local/bin/xdg-open",
   "workspaceApparmorPath": "/etc/apparmor.d/wsp-workspace",
   "toolPrefix": "/opt/wsp",
+  "runtimeRoot": "/wsp",
+  "seededRefs": "refs/wsp/seeded",
   "toolLinksDir": "/usr/local/bin",
   "placeFoundEnd": "wsp-found-end",
   "placeFoundMaxBytes": 33554432,

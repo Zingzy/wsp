@@ -3,7 +3,7 @@
 // after a write and never on a timer; a discard and a commit sent down that same road; a commit message drafted by
 // the workspace's own agent with no thread; and the viewed marks kept on the workspace's record.
 import { afterEach, describe, expect, it } from "vitest";
-import { agentsOffRefusal, cleanCheckoutLine, DRAFT_NOTES, type AdapterEvent, type Caller, type DaemonFrame, type DaemonResponse, type EventUnion, type TurnResult } from "@wsp/protocol";
+import { agentsOffRefusal, noChangeLine, cleanCheckoutLine, DRAFT_NOTES, type AdapterEvent, type Caller, type DaemonFrame, type DaemonResponse, type EventUnion, type TurnResult } from "@wsp/protocol";
 import { CHECKOUT_TTL_MS, createRuntime, type HarnessAdapter, type HarnessAdapterFactory, type Runtime } from "../src/runtime.js";
 import type { DaemonChannel, DaemonChannelOptions } from "../src/daemon-channel.js";
 import { memoryStore, type Store } from "../src/store.js";
@@ -203,6 +203,15 @@ describe("a discard and a commit", () => {
       { op: "git.discard", cwd: CWD, path: "a*b.ts" },
       { op: "git.status", cwd: CWD },
     ]);
+  });
+
+  it("checks a discard against the copy's changes and puts nothing back: a file with no change is refused as the discard would", async () => {
+    const daemon = fakeDaemon();
+    const { id } = await withWorkspace(daemon);
+    expect(await rt!.workspaces.discard({ workspaceId: id, path: "a.ts", check: true })).toEqual({ path: "a.ts" });
+    await expect(rt!.workspaces.discard({ workspaceId: id, path: "x.log", check: true })).rejects.toThrow(noChangeLine("x.log"));
+    await expect(rt!.workspaces.discard({ workspaceId: id, path: "c.ts", check: true })).rejects.toThrow(noChangeLine("c.ts"));
+    expect(daemon.frames.map(f => f["op"])).not.toContain("git.discard");
   });
 
   it("commits the files named with the message, then reads the checkout again", async () => {

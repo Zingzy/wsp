@@ -2,16 +2,16 @@
 import { randomUUID } from "node:crypto";
 import { connect as netConnect } from "node:net";
 import { describe, expect, it } from "vitest";
-import { workspaceStateOf, type TurnResult } from "@wsp/protocol";
-import { copyKey, createRuntime, wiredPlace, type HarnessAdapterFactory, type PlaceBackends } from "../src/runtime.js";
+import { workspaceStateOf, type ProjectView, type TurnResult } from "@wsp/protocol";
+import { copyKey, createRuntime, wiredPlace, type CreatedWorkspace, type HarnessAdapterFactory, type PlaceBackends } from "../src/runtime.js";
 import type { MachineBackend } from "@wsp/engine";
 import { newPlaceKeyPair } from "../src/places.js";
 import { serveRuntime } from "../src/serve.js";
 import { memoryStore } from "../src/store.js";
-import { stubBackend, createOn, projectOn } from "./stub-backend.js";
+import { stubBackend, createOn, projectOn, type CreateOn } from "./stub-backend.js";
 import { until } from "./until.js";
 import { report, wiring } from "./place-join.js";
-import { ctx, sockets, serving, code, join, relink, placesOf, ForkingPlace, KEEPS_NO_IMAGE, SEALED, forks, asRoot, ROOT_LOGIN } from "./places-fixture.js";
+import { ctx, sockets, serving, code, join, relink, placesOf, ForkingPlace, KEEPS_NO_IMAGE, HOLDS_PROJECTS, SEALED, forks, asRoot, ROOT_LOGIN } from "./places-fixture.js";
 
 describe("a fork at a provider this host is not wired to", () => {
   /** Two providers over two backends, as the host's own table hands them down: the wired one and one more whose key
@@ -279,21 +279,170 @@ describe("a fork on a computer you joined", () => {
     expect((await placesOf()).find(p => p.id === placeId)!.forks).toEqual({ running: 1, room: 2 });
   });
 
-  it("refuses to take a computer out from under the projects recorded on it, naming them, and sweeps nothing", async () => {
+  /** A fork standing on that computer from before a thread on a computer you joined ran in its project folder: made
+   * as a host made one then, a copy on that computer's own backend, which a host that held it still holds. */
+  const oldFork = async (o: CreateOn): Promise<CreatedWorkspace> => {
+    const door = ctx.runtime!.places!;
+    const joined = door.joined;
+    door.joined = () => false;
+    try {
+      return await createOn(ctx.runtime!, o);
+    } finally {
+      door.joined = joined;
+    }
+  };
+
+  /** What the unsaved read prints, and nothing for any other command. */
+  const counted = (said: string) => (cmd: string) => ({ exitCode: 0, stdout: cmd.includes("rev-list") ? `${said}\n` : "", stderr: "" });
+
+  /** A computer that forks, whose fork reads clean and whose project folder holds nothing a remote lacks unless a
+   * case says otherwise, and that answers its own leave. */
+  const removable = async (): Promise<{ place: ForkingPlace; placeId: string; asked: string[]; client: { close(): void } }> => {
     const { hostKey } = await serving();
     let place!: ForkingPlace;
-    const { client, placeId } = await join(hostKey, { code: await code(), name: "srv", answers: c => (place = forks(c)) });
+    const { client, placeId } = await join(hostKey, { code: await code(), name: "srv", answers: c => (place = forks(c, undefined, undefined, HOLDS_PROJECTS)) });
     sockets.push(client.ws);
-    const swept: string[] = [];
+    const asked: string[] = [];
     client.onFrame(raw => {
-      const frame = raw as unknown as { op?: string };
-      if (frame.op === "place.leave") swept.push("asked");
+      const frame = raw as unknown as { id?: number; op?: string };
+      if (frame.op !== "place.leave") return;
+      asked.push("place.leave");
+      client.say({ id: frame.id, ok: true, swept: ["/root/.wsp"] });
     });
-    // A project with no workspace of it: the forks refusal cannot be what answers here, so the projects one is.
-    await projectOn(ctx.runtime!, "srv", "https://github.com/wsp/spoo-landing.git", { name: "spoo-landing" });
-    await expect(ctx.runtime!.places!.remove(placeId)).rejects.toThrow(/srv still holds a project \(spoo-landing\); wsp projects remove each of them first/);
-    expect(swept).toEqual([]);
-    expect(place.killed).toEqual([]);
+    place.gitStatus = { branch: { oid: "abc1234", head: "work", ahead: 0, behind: 0 }, entries: [], root: "/srv/spoo-landing" };
+    place.onComputer = counted("0 0 0");
+    place.onMachine = counted("0 0 0");
+    return { place, placeId, asked, client };
+  };
+
+  /** A project recorded there before a project on a computer you joined was a folder in its login's home: the add
+   * cloned it into the folder wsp kept for it under /wsp, which a host that held it still names. */
+  const oldProject = async (): Promise<ProjectView> => {
+    const made = await projectOn(ctx.runtime!, "srv", "https://github.com/wsp/spoo-landing.git", { name: "spoo-landing" });
+    return Object.assign(await ctx.runtime!.projects.resolve(made.id), { checkout: `/wsp/projects/${made.id}/checkout` });
+  };
+
+  it("takes a computer out in one remove, with the forks standing on it and the projects recorded on it", async () => {
+    const { place, placeId, asked } = await removable();
+    const project = await projectOn(ctx.runtime!, "srv", "https://github.com/wsp/spoo-landing.git", { name: "spoo-landing" });
+    const fork = await oldFork({ golden: "snap_g", name: "x", on: "srv", project: project.id });
+    const before = [...place.killed];
+    expect(await ctx.runtime!.places!.holds(placeId)).toEqual({ forks: [{ name: "x", threads: 0 }], projects: [{ name: "spoo-landing", threads: 0 }], unsaved: [] });
+    const answer = await ctx.runtime!.places!.remove(placeId);
+    expect(answer).toMatchObject({ removed: true, took: { forks: [{ name: "x", threads: 0 }], projects: [{ name: "spoo-landing", threads: 0 }] }, swept: ["/root/.wsp"] });
+    expect(place.killed).toEqual([...before, fork.machineId]);
+    expect(asked).toEqual(["place.leave"]);
+    expect((await ctx.runtime!.workspaces.list()).map(w => w.name)).not.toContain("x");
+    expect((await ctx.runtime!.projects.list()).map(p => p.name)).not.toContain("spoo-landing");
+    expect((await placesOf()).some(p => p.id === placeId)).toBe(false);
+  });
+
+  it("stops on a fork or a project folder holding work no remote has, naming each, and takes it only when forced", async () => {
+    const { place, placeId, asked } = await removable();
+    const project = await oldProject();
+    await oldFork({ golden: "snap_g", name: "x", on: "srv", project: project.id });
+    const before = [...place.killed];
+    place.onMachine = counted("1 0 0");
+    place.onComputer = counted("2 1 0");
+    const refused = await ctx.runtime!.places!.remove(placeId).then(
+      () => undefined,
+      (e: unknown) => e as Error & { fix?: string },
+    );
+    expect(refused?.message).toContain(`srv holds work no remote has, which a remove would lose: x holds 1 commit not pushed; spoo-landing at ${project.checkout} holds 2 commits not pushed and 1 uncommitted file.`);
+    expect(refused?.fix).toContain("wsp remove srv --force");
+    expect(place.killed).toEqual(before);
+    expect(asked).toEqual([]);
+    expect((await ctx.runtime!.projects.list()).map(p => p.name)).toContain("spoo-landing");
+    const forced = await ctx.runtime!.places!.remove(placeId, { force: true });
+    expect(forced.took).toEqual({ forks: [{ name: "x", threads: 0 }], projects: [{ name: "spoo-landing", threads: 0 }] });
+    expect(asked).toEqual(["place.leave"]);
+  });
+
+  it("reads a fork whose checkout cannot be read as work that may be lost, since nothing says it is not", async () => {
+    const { place, placeId } = await removable();
+    delete place.gitStatus;
+    await oldFork({ golden: "snap_g", name: "x", on: "srv" });
+    place.onMachine = () => ({ exitCode: 1, stdout: "", stderr: "" });
+    const before = [...place.killed];
+    await expect(ctx.runtime!.places!.remove(placeId)).rejects.toThrow("x: could not read what is not pushed");
+    expect(place.killed).toEqual(before);
+  });
+
+  it("counts a fork's commit on a branch it does not have checked out, which its checked-out branch reads nothing of", async () => {
+    const { place, placeId } = await removable();
+    await oldFork({ golden: "snap_g", name: "x", on: "srv" });
+    // The daemon's own read of the checked-out branch, level with its remote; the read inside the fork counts them all.
+    place.gitStatus = { branch: { oid: "abc1234", head: "main", ahead: 0, behind: 0 }, entries: [], root: "/srv/x" };
+    place.onMachine = counted("1 0 0");
+    expect((await ctx.runtime!.places!.holds(placeId)).unsaved).toEqual(["x holds 1 commit not pushed"]);
+  });
+
+  it("wakes a napping fork to read it, since a stopped copy's own read sees none of its edits", async () => {
+    const { place, placeId } = await removable();
+    const fork = await oldFork({ golden: "snap_g", name: "x", on: "srv" });
+    await ctx.runtime!.workspaces.nap(fork.id);
+    const resumed = place.resumed;
+    place.onMachine = counted("0 2 0");
+    expect((await ctx.runtime!.places!.holds(placeId)).unsaved).toEqual(["x holds 2 uncommitted files"]);
+    expect(place.resumed).toBe(resumed + 1);
+  });
+
+  it("says a computer that is not answering is not answering, before anything about the work on it it cannot read", async () => {
+    const { placeId, client } = await removable();
+    await oldFork({ golden: "snap_g", name: "x", on: "srv" });
+    client.close();
+    await until(async () => (await placesOf()).find(p => p.id === placeId)!.present === false);
+    for (const ask of [{}, { force: true }]) {
+      const refused = await ctx.runtime!.places!.remove(placeId, ask).then(
+        () => undefined,
+        (e: unknown) => e as Error & { fix?: string },
+      );
+      expect(refused?.message).toContain("srv is not answering, and its forks and projects go over its link");
+      expect(refused?.fix).toBe("Turn srv on and remove it again once it answers.");
+    }
+    await expect(ctx.runtime!.places!.holds(placeId)).rejects.toThrow("srv is not answering");
+    expect((await placesOf()).some(p => p.id === placeId)).toBe(true);
+  });
+
+  it("names the forks a remove already deleted where a later one refuses", async () => {
+    const { place, placeId, asked } = await removable();
+    await oldFork({ golden: "snap_g", name: "x", on: "srv" });
+    const y = await oldFork({ golden: "snap_g", name: "y", on: "srv" });
+    place.refuseKill = new Set([y.machineId]);
+    const refused = await ctx.runtime!.places!.remove(placeId).then(
+      () => undefined,
+      (e: unknown) => e as Error,
+    );
+    expect(refused?.message).toMatch(/; x had already gone with the remove$/);
+    expect(asked).toEqual([]);
+    expect((await placesOf()).some(p => p.id === placeId)).toBe(true);
+  });
+
+  it("stops a project's own remove on its folder holding work no remote has, naming its path there, and takes it when forced", async () => {
+    const { place } = await removable();
+    const project = await oldProject();
+    place.onComputer = counted("2 0 0");
+    const line = `spoo-landing at ${project.checkout} holds 2 commits not pushed`;
+    const refused = await ctx.runtime!.projects.remove(project.id).then(
+      () => undefined,
+      (e: unknown) => e as Error & { fix?: string },
+    );
+    expect(refused?.message).toContain(`${line}, which removing spoo-landing would lose`);
+    expect(refused?.fix).toContain("wsp projects remove spoo-landing --force");
+    // The check a command line asks before its question reads the same and takes nothing.
+    expect(await ctx.runtime!.projects.remove(project.id, undefined, { check: true, force: true })).toEqual({ said: "", unsaved: line });
+    expect((await ctx.runtime!.projects.list()).map(p => p.name)).toContain("spoo-landing");
+    await ctx.runtime!.projects.remove(project.id, undefined, { force: true });
+    expect((await ctx.runtime!.projects.list()).map(p => p.name)).not.toContain("spoo-landing");
+  });
+
+  it("says a fork read clean before and unreadable now could not be read, never the fact it held", async () => {
+    const { place, placeId } = await removable();
+    await oldFork({ golden: "snap_g", name: "x", on: "srv" });
+    expect((await ctx.runtime!.places!.holds(placeId)).unsaved).toEqual([]);
+    place.gitStatus = { branch: "not a status" };
+    place.onMachine = () => ({ exitCode: 128, stdout: "", stderr: "fatal: not a git repository" });
+    expect((await ctx.runtime!.places!.holds(placeId)).unsaved).toEqual(["x: could not read what is not pushed"]);
   });
 });
 

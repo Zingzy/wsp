@@ -7,7 +7,7 @@
 // that adds another computer.
 import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { type InitJob, COPY_CURRENT, DAEMON_VERSION, DEFAULT_PREFERENCES, PLACES_TICKET_REFUSAL, PLACES_WORDS, PLACE_LOGIN_REFUSED_KIND, placeSshOtherRefusal, placeSshUncheckedRefusal, usageRefusal, PLACE_SUDO_KIND, PlaceAddStep, absentRoad, fmtBytes, fmtMemGb, fmtSize, imageCopyStaysLine, placeAddSheetWord, placeDaemonBehind, placeNoDialLine, placeSettingDropped, setupWord, type PlaceSettings, type AgentsReport, type AgentsTarget, type EventUnion, type InitSetup, type PlaceAddJob, type PlaceApplied, type PlaceSetup, type PlaceView, type SealedImage, type SessionView, type WorkspaceStatus, type WorkspaceView, PLACE_INSTALL, PROVIDER_KEY_WORDS } from "@wsp/protocol";
+import { type InitJob, COPY_CURRENT, DAEMON_VERSION, DEFAULT_PREFERENCES, PLACES_TICKET_REFUSAL, PLACES_WORDS, PLACE_LOGIN_REFUSED_KIND, placeSshOtherRefusal, placeSshUncheckedRefusal, usageRefusal, PLACE_SUDO_KIND, PlaceAddStep, absentRoad, fmtBytes, fmtMemGb, fmtSize, imageCopyLine, placeAddSheetWord, placeDaemonBehind, placeNoDialLine, placeSettingDropped, setupWord, type PlaceSettings, type AgentsReport, type AgentsTarget, type EventUnion, type InitSetup, type PlaceAddJob, type PlaceApplied, type PlaceSetup, type PlaceView, type SealedImage, type SessionView, type WorkspaceStatus, type WorkspaceView, PLACE_INSTALL, PROVIDER_KEY_WORDS, placeUnsavedRefusal, type ProjectView } from "@wsp/protocol";
 import { render } from "@testing-library/react";
 import { makeApi, ProtocolClient, RequestError, type Api, type SshLogin } from "../src/protocol/client.js";
 import { useContextMenuStore } from "../src/actions/contextMenu.js";
@@ -598,12 +598,43 @@ describe("a computer's own page", () => {
     expect(document.querySelector("[data-k='remove-note']")?.textContent).toBe(WHERE_WORDS.removeDescription("old-macbook", MAC));
     fireEvent.click(document.querySelector("[data-settings-page] [data-k='remove']")!);
     expect(screen.getByText("Remove old-macbook?")).toBeTruthy();
-    expect(document.querySelector("[data-k='remove-sentence']")?.textContent).toBe("wsp and its task come off old-macbook, which is otherwise left as it is, and the copy of your image stays where it is. The task's record and 2 threads leave zingzy's MacBook Pro. It is offline; what is on it is swept the next time it connects.");
+    expect(document.querySelector("[data-k='remove-sentence']")?.textContent).toBe("wsp and its task come off old-macbook, which keeps the copy of your image and is otherwise left as it is. The task's record and 2 threads leave zingzy's MacBook Pro. It is offline; what is on it is swept the next time it connects.");
     expect(document.querySelector("[data-k='leave-line']")?.textContent).toBe(PLACES_WORDS.remove.leaveLine);
-    expect(document.querySelector("[data-remove-place-dialog]")?.textContent).toContain(imageCopyStaysLine());
+    expect(document.querySelector("[data-remove-place-dialog]")?.textContent).toContain(imageCopyLine());
     fireEvent.click(document.querySelector("[data-k='remove-confirm']")!);
     await waitFor(() => expect(removed).toEqual(["p_1"]));
     await waitFor(() => expect(pageAt()).toBe("computers"));
+  });
+
+  it("names the computer's projects at once, holds the confirm while it reads the work no remote has, then names that work in the slot's muted note with Remove anyway taking it", async () => {
+    useStore.setState({ places: [here, { ...laptop, present: true }], projects: [{ id: "pr_1", name: "wsp-vm", computer: "p_1" } as unknown as ProjectView] });
+    const forced: (boolean | undefined)[] = [];
+    const unsaved = ["wsp-vm at /wsp/projects/pr_1/checkout holds 2 commits not pushed"];
+    let land: () => void = () => {};
+    const read = new Promise<void>(done => (land = done));
+    await mountComputers(
+      computersApi({
+        placeHolds: async () => (await read, { forks: [], projects: [{ name: "wsp-vm", threads: 0 }], unsaved }),
+        removePlace: async (_id: string, _sudo?: string, force?: boolean) => (forced.push(force), { removed: true, swept: [] }),
+      } as unknown as Partial<Api>).api,
+      { kind: "computer", id: "p_1" },
+    );
+    fireEvent.click(document.querySelector("[data-settings-page] [data-k='remove']")!);
+    // The sentence is whole before the read lands, so it does not grow under the pointer.
+    expect(document.querySelector("[data-k='remove-sentence']")?.textContent).toContain("Its project wsp-vm leaves zingzy's MacBook Pro.");
+    expect(document.querySelector("[data-k='remove-refusal']")?.textContent).toBe(WHERE_WORDS.readingHolds);
+    expect((document.querySelector("[data-k='remove-confirm']") as HTMLButtonElement).disabled).toBe(true);
+    land();
+    await waitFor(() => expect(document.querySelector("[data-k='unsaved']")).not.toBeNull());
+    const note = document.querySelector("[data-k='unsaved']")!;
+    expect(note.textContent).toContain(placeUnsavedRefusal("old-macbook", unsaved).said);
+    expect(note.textContent).toContain(WHERE_WORDS.unsavedFix);
+    // A note at rest, in the muted ink, kept to the slot's two lines: the refusal ink is the host's refusal alone.
+    expect(note.closest(".text-muted-foreground")).not.toBeNull();
+    expect(note.className).toContain("max-h-9");
+    expect(document.querySelector("[data-k='remove-confirm']")?.textContent).toBe(WHERE_WORDS.removeAnyway);
+    fireEvent.click(document.querySelector("[data-k='remove-confirm']")!);
+    await waitFor(() => expect(forced).toEqual([true]));
   });
 
   it("draws a refused remove in the refusal slot, the host's fix in the fix ink, and a remove the host did not make in that same slot", async () => {

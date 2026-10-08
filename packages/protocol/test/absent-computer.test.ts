@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { PLACE_INSTALL, PLACES_WORDS, REPORTED_WORD, ROW_LINE_MAX, START_DAEMON_WORD, absentComputer, absentRoad, awayMsOf, backUrl, linkedOver, daemonSilent, imageCopyStaysLine, lastKnown, ownDaemonDown, placeAddSheetWord, placeDialLine, placeDialRoad, placeNoDialLine, placeOwnedPaths, workspacePlace, workspaceState } from "../src/index.js";
+import { PLACE_INSTALL, PLACES_WORDS, REPORTED_WORD, ROW_LINE_MAX, START_DAEMON_WORD, absentComputer, absentRoad, awayMsOf, backUrl, linkedOver, daemonSilent, imageCopyLine, lastKnown, ownDaemonDown, placeAddSheetWord, placeDialLine, placeDialRoad, placeNoDialLine, placeOwnedPaths, workspacePlace, workspaceState } from "../src/index.js";
 
 describe("the one state of a computer that is not answering", () => {
   const now = Date.parse("2026-09-12T13:30:00.000Z");
@@ -202,15 +202,14 @@ describe("what the two screens say wsp puts on a computer", () => {
     // Every one of the three, in the sentence, off the list rather than spelled again beside it.
     for (const said of Object.values(PLACE_INSTALL.taken)) expect(PLACES_WORDS.remove.leaveTakes).toContain(said);
     expect(PLACES_WORDS.remove.leaveTakes).toBe(
-      `It takes off ${PLACE_INSTALL.taken.service}, ${PLACE_INSTALL.taken.files}, and ${PLACE_INSTALL.taken.opener}. Your work folder stays, and ${imageCopyStaysLine()}.`,
+      `It takes off ${PLACE_INSTALL.taken.service}, ${PLACE_INSTALL.taken.files}, ${PLACE_INSTALL.taken.opener}, and, on a computer added over ssh, ${imageCopyLine()}. Your work folder stays.`,
     );
   });
 
-  it("tells a person the copy of their image stays where it is when wsp comes off", () => {
-    // placeOwnedPaths is what a sweep walks, at the terminal and over the link alike, and the workspace store the
-    // copy sits in is not on it.
+  it("tells a person the copy of their image comes off with wsp, since it sits in the runtime folder a root leave takes", () => {
+    // The runtime folder is no path of the home's own list; the leave as root takes it on its own road.
     expect(placeOwnedPaths("/home/maya").some(path => path.includes("var/lib"))).toBe(false);
-    expect(PLACES_WORDS.remove.leaveTakes).toContain(imageCopyStaysLine());
+    expect(PLACES_WORDS.remove.leaveTakes).toContain(imageCopyLine());
     expect(PLACES_WORDS.remove.leaveTakes).not.toContain("Docker");
   });
 });

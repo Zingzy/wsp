@@ -9,12 +9,12 @@
 // Every script here runs with no identity and no git config at all, which is
 // what a computer the person joined has.
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { SeedChoice, SeedPlan } from "@wsp/protocol";
-import { cloneScript, MEMORY_KEPT_MARK, patchCleanupScript, patchScript, seedRestScript } from "../src/project-landing.js";
+import { cloneScript, MEMORY_KEPT_MARK, patchCleanupScript, patchScript, seedRestScript, unsavedOf, unsavedScript } from "../src/project-landing.js";
 import { projectSource } from "../src/project-sources.js";
 
 const roots: string[] = [];
@@ -373,5 +373,132 @@ describe("a patch the computer's git refuses", () => {
     run(patchCleanupScript({ ...ran.step, checkout }), root);
     expect(git(checkout, "rev-parse", "HEAD").trim()).toBe(tip);
     expect(existsSync(join(checkout, ".git", "rebase-apply"))).toBe(false);
+  });
+});
+
+describe("what a checkout holds that no remote does, read the one way for a fork and for a project folder", () => {
+  const counted = (checkout: string, root: string): string => run(unsavedScript(checkout), root).stdout.trim();
+  const commit = (at: string, name: string): void => {
+    writeFileSync(join(at, `${name}.md`), `${name}\n`);
+    git(at, "add", "-A");
+    git(at, "commit", "-qm", name);
+  };
+
+  it("reads a clone with nothing of its own as clean", () => {
+    const { folder, root } = originAndClone();
+    expect(counted(folder, root)).toBe("0 0 0");
+    expect(unsavedOf("x", run(unsavedScript(folder), root))).toBeUndefined();
+  });
+
+  it("counts a commit on a branch that is not checked out, which the checked-out branch's own count never sees", () => {
+    const { folder, root } = originAndClone();
+    git(folder, "checkout", "-qb", "feature");
+    commit(folder, "two");
+    git(folder, "checkout", "-q", "main");
+    expect(counted(folder, root)).toBe("1 0 0");
+    expect(unsavedOf("x", run(unsavedScript(folder), root))).toBe("x holds 1 commit not pushed");
+  });
+
+  it("counts a commit at a detached HEAD, which no branch holds", () => {
+    const { folder, root } = originAndClone();
+    git(folder, "checkout", "-q", "--detach");
+    commit(folder, "two");
+    expect(counted(folder, root)).toBe("1 0 0");
+  });
+
+  it("counts what a linked worktree holds: its uncommitted files and the commit at its detached HEAD", () => {
+    const { folder, root } = originAndClone();
+    const tree = join(root, "tree");
+    git(folder, "worktree", "add", "-q", "--detach", tree);
+    writeFileSync(join(tree, "draft.md"), "draft\n");
+    expect(counted(folder, root)).toBe("0 1 0");
+    commit(tree, "three");
+    expect(counted(folder, root)).toBe("1 0 0");
+  });
+
+  it("counts every commit where there is no remote at all, and the stashes", () => {
+    const root = mkdtempSync(join(tmpdir(), "wsp-unsaved-"));
+    roots.push(root);
+    const folder = join(root, "alone");
+    execFileSync("git", ["init", "-q", "-b", "main", folder]);
+    commit(folder, "one");
+    writeFileSync(join(folder, "one.md"), "changed\n");
+    git(folder, "stash", "-q");
+    writeFileSync(join(folder, "new.md"), "new\n");
+    expect(counted(folder, root)).toBe("1 1 1");
+    expect(unsavedOf("x", run(unsavedScript(folder), root))).toBe("x holds 1 commit not pushed, 1 uncommitted file and 1 stash");
+  });
+
+  it("does not count the commits a seed carried over from the person's own folder, and counts one made after them", () => {
+    const { origin, folder, root } = originAndClone();
+    git(folder, "checkout", "-qb", "mine");
+    commit(folder, "two");
+    commit(folder, "three");
+    const base = git(folder, "merge-base", "HEAD", "origin/main").trim();
+    const patch = git(folder, "format-patch", "--stdout", `${base}..HEAD`);
+    const checkout = join(root, "checkout");
+    const ran = landing({ root, remote: origin, checkout, memoryDir: join(root, "memory"), plan: plan({ source: folder, remote: origin, branch: "mine", base, commits: 2 }), seedTar: seedTar(root, { patch }) });
+    expect(ran.patch.exitCode, ran.patch.stderr).toBe(0);
+    expect(ran.rest().exitCode).toBe(0);
+    // The ticked file the seed unpacked is the person's too, and ignored by nothing here, so it is the one change.
+    expect(counted(checkout, root)).toBe("0 1 0");
+    git(checkout, "checkout", "-q", "mine");
+    commit(checkout, "four");
+    expect(counted(checkout, root)).toBe("1 0 0");
+  });
+
+  it("reads a checkout whose HEAD git cannot open as one it could not read, never as a folder with no checkout", () => {
+    for (const broken of [(folder: string) => writeFileSync(join(folder, ".git", "HEAD"), ""), (folder: string) => rmSync(join(folder, ".git", "HEAD"))]) {
+      const { folder, root } = originAndClone();
+      commit(folder, "two");
+      broken(folder);
+      expect(unsavedOf("x", run(unsavedScript(folder), root))).toBe("x: could not read what is not pushed");
+    }
+  });
+
+  it("reads a stash list that fails as a read that failed, not as no stashes", () => {
+    const { folder, root } = originAndClone();
+    writeFileSync(join(folder, ".git", "refs", "stash"), `${"1".repeat(40)}\n`);
+    expect(unsavedOf("x", run(unsavedScript(folder), root))).toBe("x: could not read what is not pushed");
+  });
+
+  it("reads a fresh clone of a remote holding a tag on a branch deleted since as clean", () => {
+    const { origin, folder, root } = originAndClone();
+    git(folder, "checkout", "-qb", "release");
+    commit(folder, "released");
+    git(folder, "tag", "-a", "-m", "v1", "v1");
+    git(folder, "push", "-q", "origin", "release", "v1");
+    git(folder, "push", "-q", "origin", "--delete", "release");
+    const fresh = join(root, "fresh");
+    execFileSync("git", ["clone", "-q", origin, fresh]);
+    expect(git(fresh, "tag").trim()).toBe("v1");
+    expect(counted(fresh, root)).toBe("0 0 0");
+    expect(unsavedOf("x", run(unsavedScript(fresh), root))).toBeUndefined();
+  });
+
+  it("reads a .git that is a dangling link as a checkout it could not read", () => {
+    const { folder, root } = originAndClone();
+    rmSync(join(folder, ".git"), { recursive: true });
+    symlinkSync(join(root, "gone"), join(folder, ".git"));
+    expect(unsavedOf("x", run(unsavedScript(folder), root))).toBe("x: could not read what is not pushed");
+  });
+
+  it("reads a dangling .git link in a folder inside another repository as could not read, never as that repository", () => {
+    const { folder, root } = originAndClone();
+    writeFileSync(join(folder, "README.md"), "two\n");
+    git(folder, "commit", "-qam", "never pushed");
+    const inner = join(folder, "inner");
+    mkdirSync(inner);
+    symlinkSync(join(root, "gone"), join(inner, ".git"));
+    expect(unsavedOf("x", run(unsavedScript(inner), root))).toBe("x: could not read what is not pushed");
+  });
+
+  it("reads a folder git does not track as nothing to lose, and a read that failed as one it could not read", () => {
+    const root = mkdtempSync(join(tmpdir(), "wsp-unsaved-"));
+    roots.push(root);
+    expect(unsavedOf("x", run(unsavedScript(root), root))).toBeUndefined();
+    expect(unsavedOf("x", run(unsavedScript(join(root, "gone")), root))).toBeUndefined();
+    expect(unsavedOf("x", { exitCode: 1, stdout: "", stderr: "" })).toBe("x: could not read what is not pushed");
+    expect(unsavedOf("x", undefined)).toBe("x: could not read what is not pushed");
   });
 });

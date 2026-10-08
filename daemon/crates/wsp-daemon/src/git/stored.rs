@@ -4,12 +4,15 @@
 //! agent wrote into that directory (a hook, an fsmonitor, a filter, an include, an ssh command) runs as the root this
 //! daemon is, and nothing of the worktree or the index is read, so the edits never committed stay unread. Every
 //! file is opened one component at a time with no link followed, so a link or a gitfile cannot point the read at
-//! another folder, and every size read is capped, since the bytes are an agent's to write.
+//! another folder, and every size read is capped, since the bytes are an agent's to write. A leave's count of what no
+//! remote has follows a link only where it stays inside the checkout, and fails on one that leads out.
 
 use std::collections::{BinaryHeap, HashMap, HashSet};
+use std::ffi::{OsStr, OsString};
 use std::fs::File;
 use std::io::{self, Read};
 use std::os::fd::OwnedFd;
+use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::FileExt;
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -56,6 +59,39 @@ pub(crate) fn status(copy: &Path, root: &str) -> Result<GitStatusReply, OpError>
     Ok(GitStatusReply { branch, entries: Vec::new(), root: root.to_owned(), edits_unread: true, counts_unknown: repo.over_budget, stashes })
 }
 
+/// What a stopped checkout holds that no remote does, off its git directory alone: the commits at every branch's tip,
+/// at HEAD and at each linked worktree's HEAD that no remote-tracking branch and no seeded ref reaches, and its stashes.
+/// None where the checkout holds no git directory. Its uncommitted files are never read: that takes running git over
+/// what an agent wrote, as root.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub(crate) fn unsaved(checkout: &Path) -> Result<Option<Unsaved>, String> {
+    let dir = match GitDir::open_following(checkout) {
+        Ok(dir) => dir,
+        Err(_) if std::fs::symlink_metadata(checkout.join(".git")).is_err() => return Ok(None),
+        Err(_) => return Err(format!("{}: its git folder could not be opened", checkout.display())),
+    };
+    let mut repo = Repo::new(&dir)?;
+    let commits = match repo.unpushed() {
+        Ok(n) => Some(n),
+        Err(_) if repo.over_budget => None,
+        Err(why) => return Err(why),
+    };
+    let stashes = stashes_of(&dir)?.unwrap_or(0);
+    Ok(Some(Unsaved { commits, stashes }))
+}
+
+/// What `unsaved` read: the commits no remote has, None past the walk's budget, and the stashes.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct Unsaved {
+    pub(crate) commits: Option<u64>,
+    pub(crate) stashes: u64,
+}
+
+/// How many refs one prefix's loose folders are read for, and how deep, before the read gives up: git's own run far
+/// under both, and the folders are an agent's to fill.
+const LOOSE_REFS_MAX: usize = 100_000;
+const REF_DEPTH_MAX: usize = 32;
+
 /// How many stashes the stash ref's log holds, one line each; a stash ref with no log is one.
 fn stashes_of(dir: &GitDir) -> Result<Option<u64>, String> {
     let logged = dir.text("logs/refs/stash", LIST_MAX)?.map_or(0, |log| log.lines().filter(|line| !line.trim().is_empty()).count() as u64);
@@ -67,9 +103,13 @@ fn unread(root: &str, why: &str) -> OpError {
     OpError::plain(format!("the branch of {root} could not be read while it is stopped: {why}"))
 }
 
-/// The copy's `.git`, a real folder or nothing: a gitfile or a link there names another folder.
+/// The copy's `.git`, a real folder or nothing: a gitfile or a link there names another folder. Every name under it is
+/// opened one component at a time with no link followed, except in a leave's unsaved read, which holds the checkout's
+/// own folder too and follows a link inside the checkout as git would, and refuses one that leads out of it, since a
+/// link there that read as nothing would hide commits a leave then takes.
 struct GitDir {
     fd: OwnedFd,
+    within: Option<OwnedFd>,
 }
 
 impl GitDir {
@@ -77,9 +117,35 @@ impl GitDir {
         let top = open(copy, OFlag::O_RDONLY | OFlag::O_DIRECTORY | OFlag::O_CLOEXEC, Mode::empty())
             .map_err(|e| OpError::plain(format!("{}: {e}", copy.display())))?;
         match openat(&top, ".git", dir_flags(), Mode::empty()) {
-            Ok(fd) => Ok(GitDir { fd }),
+            Ok(fd) => Ok(GitDir { fd, within: None }),
             Err(Errno::ENOENT | Errno::ENOTDIR | Errno::ELOOP) => Err(not_a_repo()),
             Err(e) => Err(OpError::plain(format!("{}: {e}", copy.display()))),
+        }
+    }
+
+    /// The same `.git`, read with the links inside the checkout followed.
+    fn open_following(copy: &Path) -> Result<GitDir, OpError> {
+        let mut dir = GitDir::open(copy)?;
+        let top = open(copy, OFlag::O_RDONLY | OFlag::O_DIRECTORY | OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC, Mode::empty())
+            .map_err(|e| OpError::plain(format!("{}: {e}", copy.display())))?;
+        dir.within = Some(top);
+        Ok(dir)
+    }
+
+    /// `rel` under `.git` opened with `flags`, or None where nothing stands there or a name on the way is no folder.
+    fn open_at(&self, rel: &OsStr, flags: OFlag) -> Result<Option<OwnedFd>, String> {
+        let shown = rel.to_string_lossy();
+        if let Some(top) = &self.within {
+            return open_within(top, rel, flags);
+        }
+        let rel = rel.to_str().ok_or_else(|| format!("{shown} is not a name this reads"))?;
+        let Some((parent, leaf)) = self.parent_of(rel)? else { return Ok(None) };
+        match openat(&parent, leaf, flags | OFlag::O_NOFOLLOW, Mode::empty()) {
+            Ok(fd) => Ok(Some(fd)),
+            Err(Errno::ENOENT) => Ok(None),
+            Err(Errno::ENOTDIR) if flags.contains(OFlag::O_DIRECTORY) => Ok(None),
+            Err(Errno::ELOOP) => Err(format!("a link stands at {rel}")),
+            Err(e) => Err(format!("{rel}: {e}")),
         }
     }
 
@@ -89,29 +155,82 @@ impl GitDir {
     }
 
     /// A regular file, or None where nothing or a folder stands there.
-    fn file(&self, rel: &str) -> Result<Option<File>, String> {
-        beneath::file(&self.fd, rel)
+    fn file(&self, rel: impl AsRef<OsStr>) -> Result<Option<File>, String> {
+        let rel = rel.as_ref();
+        if self.within.is_none() {
+            return beneath::file(&self.fd, rel.to_str().ok_or_else(|| format!("{} is not a name this reads", rel.to_string_lossy()))?);
+        }
+        let flags = OFlag::O_RDONLY | OFlag::O_NONBLOCK | OFlag::O_CLOEXEC;
+        let Some(fd) = self.open_at(rel, flags)? else { return Ok(None) };
+        let file = File::from(fd);
+        let kind = file.metadata().map_err(|e| format!("{}: {e}", rel.to_string_lossy()))?.file_type();
+        if kind.is_dir() {
+            return Ok(None);
+        }
+        if !kind.is_file() {
+            return Err(format!("{} is not a file", rel.to_string_lossy()));
+        }
+        Ok(Some(file))
     }
 
-    fn text(&self, rel: &str, max: u64) -> Result<Option<String>, String> {
+    fn text(&self, rel: impl AsRef<OsStr>, max: u64) -> Result<Option<String>, String> {
+        let rel = rel.as_ref();
         let Some(file) = self.file(rel)? else { return Ok(None) };
         let mut bytes = Vec::new();
-        file.take(max + 1).read_to_end(&mut bytes).map_err(|e| format!("{rel}: {e}"))?;
+        file.take(max + 1).read_to_end(&mut bytes).map_err(|e| format!("{}: {e}", rel.to_string_lossy()))?;
         if bytes.len() as u64 > max {
-            return Err(format!("{rel} is too large"));
+            return Err(format!("{} is too large", rel.to_string_lossy()));
         }
         Ok(Some(String::from_utf8_lossy(&bytes).into_owned()))
     }
 
+    /// Every name in a folder, byte for byte, and whether it is a folder itself, or None where it is no folder or not
+    /// there.
+    fn entries(&self, rel: &OsStr) -> Result<Option<Vec<(OsString, bool)>>, String> {
+        let Some(fd) = self.open_at(rel, dir_flags())? else { return Ok(None) };
+        let shown = rel.to_string_lossy();
+        let mut listed = nix::dir::Dir::from_fd(fd).map_err(|e| format!("{shown}: {e}"))?;
+        let mut names = Vec::new();
+        for entry in listed.iter() {
+            let entry = entry.map_err(|e| format!("{shown}: {e}"))?;
+            let name = OsStr::from_bytes(entry.file_name().to_bytes()).to_owned();
+            if name == "." || name == ".." {
+                continue;
+            }
+            let folder = match entry.file_type() {
+                Some(nix::dir::Type::Directory) => true,
+                Some(nix::dir::Type::Symlink) if self.within.is_some() => self.entries(&joined_name(rel, &name))?.is_some(),
+                Some(_) => false,
+                None => self.entries(&joined_name(rel, &name))?.is_some(),
+            };
+            names.push((name, folder));
+        }
+        names.sort();
+        Ok(Some(names))
+    }
+
+    /// The loose refs under a prefix, by their full names byte for byte: the folders walked one at a time.
+    fn loose_refs(&self, prefix: &OsStr, depth: usize, out: &mut Vec<OsString>) -> Result<(), String> {
+        if depth > REF_DEPTH_MAX {
+            return Err(format!("{} is nested too deep to read", prefix.to_string_lossy()));
+        }
+        for (name, folder) in self.entries(prefix)?.unwrap_or_default() {
+            let full = joined_name(prefix, &name);
+            if folder {
+                self.loose_refs(&full, depth + 1, out)?;
+            } else if plain_ref_bytes(full.as_bytes()) {
+                if out.len() == LOOSE_REFS_MAX {
+                    return Err(format!("{} holds too many refs to read", prefix.to_string_lossy()));
+                }
+                out.push(full);
+            }
+        }
+        Ok(())
+    }
+
     /// The names in a folder ending in `suffix`, or none where it is not there.
     fn names(&self, rel: &str, suffix: &str) -> Result<Vec<String>, String> {
-        let Some((parent, leaf)) = self.parent_of(rel)? else { return Ok(Vec::new()) };
-        let fd = match openat(&parent, leaf, dir_flags(), Mode::empty()) {
-            Ok(fd) => fd,
-            Err(Errno::ENOENT | Errno::ENOTDIR) => return Ok(Vec::new()),
-            Err(Errno::ELOOP) => return Err(format!("a link stands at {rel}")),
-            Err(e) => return Err(format!("{rel}: {e}")),
-        };
+        let Some(fd) = self.open_at(OsStr::new(rel), dir_flags())? else { return Ok(Vec::new()) };
         let mut listed = nix::dir::Dir::from_fd(fd).map_err(|e| format!("{rel}: {e}"))?;
         let mut names = Vec::new();
         for entry in listed.iter() {
@@ -130,6 +249,36 @@ impl GitDir {
     }
 }
 
+fn joined_name(prefix: &OsStr, name: &OsStr) -> OsString {
+    let mut full = prefix.to_owned();
+    full.push("/");
+    full.push(name);
+    full
+}
+
+/// `.git/<rel>` under the checkout's own folder, following a link only where it stays inside that folder and on its
+/// mount, as openat2 resolves beneath a folder; a link that leads out of it is refused, never read as nothing.
+#[cfg(target_os = "linux")]
+fn open_within(top: &OwnedFd, rel: &OsStr, flags: OFlag) -> Result<Option<OwnedFd>, String> {
+    use nix::fcntl::{openat2, OpenHow, ResolveFlag};
+    let shown = rel.to_string_lossy();
+    let path = joined_name(OsStr::new(".git"), rel);
+    let how = OpenHow::new()
+        .flags(flags.difference(OFlag::O_NOFOLLOW))
+        .resolve(ResolveFlag::RESOLVE_BENEATH | ResolveFlag::RESOLVE_NO_MAGICLINKS | ResolveFlag::RESOLVE_NO_XDEV);
+    match openat2(top, path.as_os_str(), how) {
+        Ok(fd) => Ok(Some(fd)),
+        Err(Errno::ENOENT | Errno::ENOTDIR) => Ok(None),
+        Err(Errno::EXDEV | Errno::ELOOP) => Err(format!("a link at {shown} leads out of the checkout")),
+        Err(e) => Err(format!("{shown}: {e}")),
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn open_within(_top: &OwnedFd, rel: &OsStr, _flags: OFlag) -> Result<Option<OwnedFd>, String> {
+    Err(format!("{}: only Linux reads a checkout beneath its own folder", rel.to_string_lossy()))
+}
+
 type Oid = Vec<u8>;
 
 fn hex(oid: &[u8]) -> String {
@@ -145,11 +294,17 @@ fn parse_oid(text: &str, len: usize) -> Option<Oid> {
 /// A ref name this reader will open as a path: under refs/, no component a path walk reads as anything but itself,
 /// and none of the characters git refuses in a ref.
 fn plain_ref(name: &str) -> bool {
-    name.starts_with("refs/")
-        && !name.contains("..")
-        && !name.contains("@{")
-        && !name.bytes().any(|b| b < 0x20 || b == 0x7f || b" ~^:?*[\\".contains(&b))
-        && name.split('/').all(|part| !part.is_empty() && !part.starts_with('.') && !part.ends_with(".lock"))
+    plain_ref_bytes(name.as_bytes())
+}
+
+/// The same rule over a name's bytes, which git takes in any encoding.
+fn plain_ref_bytes(name: &[u8]) -> bool {
+    let has = |needle: &[u8]| name.windows(needle.len()).any(|w| w == needle);
+    name.starts_with(b"refs/")
+        && !has(b"..")
+        && !has(b"@{")
+        && !name.iter().any(|b| *b < 0x20 || *b == 0x7f || b" ~^:?*[\\".contains(b))
+        && name.split(|b| *b == b'/').all(|part| !part.is_empty() && !part.starts_with(b".") && !part.ends_with(b".lock"))
 }
 
 /// The values of the lines `keep` takes, the last `CONFIG_KEPT` of them, as git reads the repository's own file with
@@ -398,6 +553,75 @@ impl<'a> Repo<'a> {
         Ok(branch)
     }
 
+    /// The commits reachable from a branch, HEAD or a linked worktree's HEAD that no remote-tracking branch and no
+    /// seeded ref reaches, as `rev-list --count --branches <heads> --not --remotes --glob=<seeded>` counts them. A tag
+    /// is not counted: a clone fetches the remote's tags with no mark saying the remote holds them.
+    fn unpushed(&mut self) -> Result<u64, String> {
+        let mut heads = self.tips("refs/heads")?;
+        let mut bases = self.tips("refs/remotes")?;
+        bases.extend(self.tips(wsp_frames::numbers::SEEDED_REFS)?);
+        if let Some(oid) = self.head_of(OsStr::new("HEAD"))? {
+            heads.push(oid);
+        }
+        for (name, folder) in self.dir.entries(OsStr::new("worktrees"))?.unwrap_or_default() {
+            if folder {
+                let mut head = joined_name(OsStr::new("worktrees"), &name);
+                head.push("/HEAD");
+                if let Some(oid) = self.head_of(&head)? {
+                    heads.push(oid);
+                }
+            }
+        }
+        if heads.is_empty() {
+            return Ok(0);
+        }
+        Ok(self.apart(&heads, &bases)?.0)
+    }
+
+    /// The commit a HEAD file names, through the ref it points at; None for a branch with no commit yet. A loose ref
+    /// whose name is not UTF-8 is read the same way, by its bytes.
+    fn head_of(&mut self, rel: &OsStr) -> Result<Option<Oid>, String> {
+        let shown = rel.to_string_lossy();
+        let Some(text) = self.dir.text(rel, REF_MAX)? else { return Ok(None) };
+        let text = text.trim();
+        match text.strip_prefix("ref: ") {
+            Some(target) if plain_ref(target.trim()) => self.resolve(target.trim()),
+            Some(_) => Err(format!("{shown} names no ref")),
+            None => parse_oid(text, self.len).map(Some).ok_or_else(|| format!("{shown} names no commit")),
+        }
+    }
+
+    /// The commit at every ref under a prefix, loose or packed, a loose one standing over a packed one of its name.
+    fn tips(&mut self, prefix: &str) -> Result<Vec<Oid>, String> {
+        let mut loose = Vec::new();
+        self.dir.loose_refs(OsStr::new(prefix), 0, &mut loose)?;
+        if self.packed.is_none() {
+            self.packed = Some(self.dir.text("packed-refs", LIST_MAX)?.unwrap_or_default());
+        }
+        let within = format!("{prefix}/");
+        let mut packed = Vec::new();
+        for line in self.packed.as_deref().unwrap_or_default().lines().filter(|line| !line.starts_with('#') && !line.starts_with('^')) {
+            if let Some((_, named)) = line.split_once(' ') {
+                let named = named.trim();
+                if named.starts_with(&within) && plain_ref(named) && !loose.iter().any(|n| n.as_bytes() == named.as_bytes()) {
+                    packed.push(named.to_owned());
+                }
+            }
+        }
+        let mut tips = Vec::new();
+        for name in loose {
+            let oid = match name.to_str() {
+                Some(name) => self.resolve(name)?,
+                None => self.head_of(&name)?,
+            };
+            tips.extend(oid);
+        }
+        for name in packed {
+            tips.extend(self.resolve(&name)?);
+        }
+        Ok(tips)
+    }
+
     /// The branch's upstream as git names it and the commit its tracking ref holds, where it has one that is here.
     fn upstream_of(&mut self, local: &str) -> Result<Option<(String, Oid)>, String> {
         let remote = self.config.last("branch", Some(local), "remote");
@@ -452,26 +676,36 @@ impl<'a> Repo<'a> {
     }
 
     /// Commits reachable from the head and not the base, and from the base and not the head, as
-    /// `rev-list --left-right --count base...head` counts them: newest first by committer date, stopping once
-    /// every commit left to read is reachable from both.
+    /// `rev-list --left-right --count base...head` counts them.
     fn ahead_behind(&mut self, head: &Oid, base: &Oid) -> Result<(u64, u64), String> {
+        self.apart(std::slice::from_ref(head), std::slice::from_ref(base))
+    }
+
+    /// Commits reachable from some head and no base, and from some base and no head: newest first by committer date,
+    /// stopping once every commit left to read is reachable from both sides.
+    fn apart(&mut self, heads: &[Oid], bases: &[Oid]) -> Result<(u64, u64), String> {
         const AHEAD: u8 = 1;
         const BEHIND: u8 = 2;
         const BOTH: u8 = AHEAD | BEHIND;
-        let head = self.peel(head)?;
-        let base = self.peel(base)?;
-        if head == base {
+        let mut flags: HashMap<Oid, u8> = HashMap::new();
+        for (side, flag) in [(heads, AHEAD), (bases, BEHIND)] {
+            for oid in side {
+                let oid = self.peel(oid)?;
+                *flags.entry(oid).or_default() |= flag;
+            }
+        }
+        if flags.values().all(|flag| *flag == BOTH) {
             return Ok((0, 0));
         }
-        let mut flags: HashMap<Oid, u8> = HashMap::new();
         let mut spread: HashMap<Oid, u8> = HashMap::new();
         let mut queue: BinaryHeap<(i64, Oid, u8)> = BinaryHeap::new();
         let mut single = 0usize;
-        for (oid, flag) in [(head, AHEAD), (base, BEHIND)] {
+        for (oid, flag) in flags.clone() {
             let (time, _) = self.commit(&oid)?;
-            flags.insert(oid.clone(), flag);
+            if flag != BOTH {
+                single += 1;
+            }
             queue.push((time, oid, flag));
-            single += 1;
         }
         let mut slop = SLOP;
         while let Some((_, oid, pushed)) = queue.pop() {
@@ -576,7 +810,7 @@ impl<'a> Repo<'a> {
 
     fn locate(&mut self, oid: &Oid) -> Result<Located, String> {
         let name = hex(oid);
-        if let Some(file) = self.dir.file(&format!("objects/{}/{}", &name[..2], &name[2..]))? {
+        if let Some(file) = self.dir.file(format!("objects/{}/{}", &name[..2], &name[2..]))? {
             return Ok(Located::Loose(file));
         }
         if self.packs.is_none() {
@@ -592,7 +826,7 @@ impl<'a> Repo<'a> {
         for name in self.dir.names("objects/pack", ".idx")? {
             let Some(stem) = name.strip_suffix(".idx") else { continue };
             let (Some(idx), Some(pack)) =
-                (self.dir.file(&format!("objects/pack/{name}"))?, self.dir.file(&format!("objects/pack/{stem}.pack"))?)
+                (self.dir.file(format!("objects/pack/{name}"))?, self.dir.file(format!("objects/pack/{stem}.pack"))?)
             else {
                 continue;
             };
@@ -872,457 +1106,5 @@ fn apply_delta(base: &[u8], delta: &[u8]) -> Option<Vec<u8>> {
 }
 
 #[cfg(test)]
-mod tests {
-    use std::io::Write;
-    use std::path::PathBuf;
-    use std::process::Command;
-
-    use super::*;
-    use crate::git::parse_porcelain_v2;
-    use wsp_frames::DaemonErrorCode;
-
-    fn git(cwd: &Path, args: &[&str]) -> String {
-        let out = Command::new("git")
-            .args([
-                "-c",
-                "user.name=t",
-                "-c",
-                "user.email=t@example.com",
-                "-c",
-                "init.defaultBranch=main",
-                "-c",
-                "core.hooksPath=/dev/null",
-            ])
-            .args(args)
-            .current_dir(cwd)
-            .env("GIT_CONFIG_NOSYSTEM", "1")
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .env("LC_ALL", "C")
-            .output()
-            .unwrap();
-        assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
-        String::from_utf8_lossy(&out.stdout).into_owned()
-    }
-
-    fn commit(cwd: &Path, file: &str, text: &str) {
-        std::fs::write(cwd.join(file), text).unwrap();
-        git(cwd, &["add", file]);
-        git(cwd, &["commit", "-q", "-m", text]);
-    }
-
-    /// An origin with three commits, a clone of it on a branch that tracks origin/main, two commits of the clone's
-    /// own and one more on origin fetched: ahead two, behind one.
-    fn tracking_clone() -> (tempfile::TempDir, PathBuf) {
-        let dir = tempfile::tempdir().unwrap();
-        let origin = dir.path().join("origin");
-        std::fs::create_dir(&origin).unwrap();
-        git(&origin, &["init", "-q"]);
-        for n in 0..3 {
-            commit(&origin, "a.txt", &format!("origin {n}\n{}", "shared line\n".repeat(200)));
-        }
-        let copy = dir.path().join("copy");
-        git(dir.path(), &["clone", "-q", &origin.to_string_lossy(), "copy"]);
-        git(&copy, &["checkout", "-q", "-b", "fix/cart", "--track", "origin/main"]);
-        commit(&copy, "b.txt", "mine 1\n");
-        commit(&copy, "b.txt", "mine 2\n");
-        commit(&origin, "a.txt", "origin 3\n");
-        git(&copy, &["fetch", "-q"]);
-        (dir, copy)
-    }
-
-    /// What git itself reads for the branch, for the cases that hold this reader to it.
-    fn by_git(copy: &Path) -> GitBranch {
-        parse_porcelain_v2(&git(copy, &["status", "--porcelain=v2", "--branch", "-z"])).0
-    }
-
-    #[test]
-    fn a_tracking_branch_reads_as_git_reads_it_loose_packed_and_deltified() {
-        let (_dir, copy) = tracking_clone();
-        let want = by_git(&copy);
-        assert_eq!((want.head.as_str(), want.upstream.as_deref(), want.ahead, want.behind), ("fix/cart", Some("origin/main"), 2, 1));
-        let loose = status(&copy, "/root/app").unwrap();
-        assert_eq!(loose.branch, want);
-        assert_eq!((loose.root.as_str(), loose.entries.len(), loose.edits_unread), ("/root/app", 0, true));
-        // Every object in one pack, deltas chained as deep as git will make them, and every ref in packed-refs.
-        git(&copy, &["repack", "-q", "-a", "-d", "-f", "--depth=50", "--window=250"]);
-        git(&copy, &["pack-refs", "--all", "--prune"]);
-        git(&copy, &["prune-packed"]);
-        assert!(!copy.join(".git/refs/heads/fix/cart").exists());
-        assert_eq!(status(&copy, "/root/app").unwrap().branch, want);
-        // And with every delta naming its base by id rather than by where it sits in the pack.
-        git(&copy, &["-c", "repack.useDeltaBaseOffset=false", "repack", "-q", "-a", "-d", "-f", "--depth=50", "--window=250"]);
-        assert_eq!(status(&copy, "/root/app").unwrap().branch, want);
-    }
-
-    #[test]
-    fn a_stopped_copys_stashes_are_counted_off_the_stash_log() {
-        let (_dir, copy) = tracking_clone();
-        assert_eq!(status(&copy, "/root/app").unwrap().stashes, None);
-        for n in 0..2 {
-            std::fs::write(copy.join("stashed.txt"), format!("{n}\n")).unwrap();
-            git(&copy, &["add", "stashed.txt"]);
-            git(&copy, &["stash", "-q"]);
-        }
-        assert_eq!(status(&copy, "/root/app").unwrap().stashes, Some(2));
-    }
-
-    #[test]
-    fn a_branch_with_no_upstream_counts_against_origins_default_branch() {
-        let (_dir, copy) = tracking_clone();
-        git(&copy, &["branch", "-q", "--unset-upstream"]);
-        let read = status(&copy, "/root/app").unwrap().branch;
-        assert_eq!((read.upstream, read.ahead, read.behind), (None, 2, 1));
-        // A detached head reads as git reads it, and counts the same way.
-        git(&copy, &["checkout", "-q", "--detach", "HEAD~1"]);
-        let detached = status(&copy, "/root/app").unwrap().branch;
-        assert_eq!((detached.head.as_str(), detached.oid, detached.ahead, detached.behind), ("(detached)", by_git(&copy).oid, 1, 1));
-    }
-
-    #[test]
-    fn a_repo_with_no_commits_and_a_shallow_clone_read_as_git_reads_them() {
-        let dir = tempfile::tempdir().unwrap();
-        git(dir.path(), &["init", "-q"]);
-        assert_eq!(status(dir.path(), "/root/app").unwrap().branch, by_git(dir.path()));
-        let (_origin, copy) = tracking_clone();
-        let shallow = dir.path().join("shallow");
-        git(dir.path(), &["clone", "-q", "--depth=1", &format!("file://{}", copy.display()), "shallow"]);
-        commit(&shallow, "c.txt", "on top\n");
-        assert_eq!(status(&shallow, "/root/app").unwrap().branch, by_git(&shallow));
-    }
-
-    #[test]
-    fn a_link_a_gitfile_or_a_fifo_in_the_git_directory_is_refused_and_nothing_hangs() {
-        let (dir, copy) = tracking_clone();
-        let elsewhere = dir.path().join("elsewhere");
-        std::fs::rename(copy.join(".git"), &elsewhere).unwrap();
-        std::os::unix::fs::symlink(&elsewhere, copy.join(".git")).unwrap();
-        assert_eq!(status(&copy, "/root/app").unwrap_err().code, Some(DaemonErrorCode::NotAGitRepo));
-        std::fs::remove_file(copy.join(".git")).unwrap();
-        std::fs::write(copy.join(".git"), format!("gitdir: {}\n", elsewhere.display())).unwrap();
-        assert_eq!(status(&copy, "/root/app").unwrap_err().code, Some(DaemonErrorCode::NotAGitRepo));
-        std::fs::remove_file(copy.join(".git")).unwrap();
-        std::fs::rename(&elsewhere, copy.join(".git")).unwrap();
-        assert!(status(&copy, "/root/app").is_ok());
-
-        let branch_ref = copy.join(".git/refs/heads/fix/cart");
-        let secret = dir.path().join("secret");
-        std::fs::copy(&branch_ref, &secret).unwrap();
-        std::fs::remove_file(&branch_ref).unwrap();
-        std::os::unix::fs::symlink(&secret, &branch_ref).unwrap();
-        let err = status(&copy, "/root/app").unwrap_err();
-        assert!(err.message.contains("a link stands at refs/heads/fix/cart"), "{}", err.message);
-        std::fs::remove_file(&branch_ref).unwrap();
-
-        // A packed ref that names no commit is damaged, never a branch with nothing on it.
-        std::fs::write(copy.join(".git/packed-refs"), "# pack-refs with: peeled\nnot-an-oid refs/heads/fix/cart\n").unwrap();
-        assert!(status(&copy, "/root/app").unwrap_err().message.contains("refs/heads/fix/cart holds no commit"));
-
-        std::fs::write(copy.join(".git/HEAD"), "ref: refs/heads/../../../etc/passwd\n").unwrap();
-        assert!(status(&copy, "/root/app").unwrap_err().message.contains("HEAD names no ref"));
-        std::fs::remove_file(copy.join(".git/HEAD")).unwrap();
-        let made = Command::new("mkfifo").arg(copy.join(".git/HEAD")).status().unwrap();
-        assert!(made.success());
-        assert!(status(&copy, "/root/app").unwrap_err().message.contains("HEAD is not a file"));
-    }
-
-    /// Everything a checkout's config and folder can name that runs a program, each writing a mark of its own: an
-    /// fsmonitor, a hooks folder and the hooks in .git/hooks, a filter's clean, smudge and process, a textconv, an
-    /// ssh command, a credential helper, a gpg program, a pager, an editor, an alias over status, and an include and
-    /// an includeIf naming a file that sets an fsmonitor of its own. The worktree is dirty, so a status that read it
-    /// would hand the change to the filter.
-    #[test]
-    fn a_hostile_config_runs_nothing_and_the_branch_still_reads() {
-        let (dir, copy) = tracking_clone();
-        let want = by_git(&copy);
-        let marks = dir.path().join("marks");
-        std::fs::create_dir(&marks).unwrap();
-        let script = |name: &str| -> String {
-            let at = dir.path().join(format!("run-{name}"));
-            std::fs::write(&at, format!("#!/bin/sh\ntouch '{}/{name}'\nexit 1\n", marks.display())).unwrap();
-            std::fs::set_permissions(&at, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
-            at.to_string_lossy().into_owned()
-        };
-        let hooks = dir.path().join("hooks");
-        std::fs::create_dir(&hooks).unwrap();
-        for hook in ["pre-commit", "post-checkout", "post-index-change", "reference-transaction", "fsmonitor-watchman", "pre-push"] {
-            let body = format!("#!/bin/sh\ntouch '{}/hook-{hook}'\n", marks.display());
-            for folder in [hooks.clone(), copy.join(".git/hooks")] {
-                std::fs::write(folder.join(hook), &body).unwrap();
-                std::fs::set_permissions(folder.join(hook), std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
-            }
-        }
-        let included = dir.path().join("included");
-        std::fs::write(&included, format!("[core]\n\tfsmonitor = {}\n", script("include"))).unwrap();
-        let hostile = format!(
-            "[core]\n\tfsmonitor = {fsmonitor}\n\thooksPath = {hooks}\n\tsshCommand = {ssh}\n\tpager = {pager}\n\teditor = {editor}\n\
-             [filter \"evil\"]\n\tclean = {clean}\n\tsmudge = {smudge}\n\tprocess = {process}\n\trequired = true\n\
-             [diff \"evil\"]\n\ttextconv = {textconv}\n\
-             [credential]\n\thelper = !{credential}\n\
-             [gpg]\n\tprogram = {gpg}\n\
-             [alias]\n\tstatus = !{alias}\n\
-             [include]\n\tpath = {included}\n\
-             [includeIf \"gitdir:/\"]\n\tpath = {included}\n",
-            fsmonitor = script("fsmonitor"),
-            hooks = hooks.display(),
-            ssh = script("ssh"),
-            pager = script("pager"),
-            editor = script("editor"),
-            clean = script("clean"),
-            smudge = script("smudge"),
-            process = script("process"),
-            textconv = script("textconv"),
-            credential = script("credential"),
-            gpg = script("gpg"),
-            alias = script("alias"),
-            included = included.display(),
-        );
-        let config = copy.join(".git/config");
-        std::fs::write(&config, format!("{}{hostile}", std::fs::read_to_string(&config).unwrap())).unwrap();
-        std::fs::write(copy.join(".gitattributes"), "* filter=evil diff=evil\n").unwrap();
-        std::fs::write(copy.join("a.txt"), "an edit never committed\n").unwrap();
-        std::fs::write(copy.join("untracked.txt"), "new\n").unwrap();
-
-        let read = status(&copy, "/root/app").unwrap();
-        assert_eq!(read.branch, want);
-        assert!(read.entries.is_empty() && read.edits_unread);
-        let ran: Vec<String> = std::fs::read_dir(&marks).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
-        assert!(ran.is_empty(), "the read ran {ran:?}");
-    }
-
-    /// One repo read by both roads, the running one through git and the stopped one off the files, answers one
-    /// branch: tracking, with no upstream, with an upstream whose tracking ref is gone, detached, and with no commits.
-    #[tokio::test]
-    async fn a_running_copy_and_a_stopped_one_answer_the_same_branch() {
-        let both = async |copy: &Path| {
-            let running = crate::git::git_status(&crate::git::here::Here::new(), copy).await.unwrap().branch;
-            assert_eq!(running, status(copy, "/root/app").unwrap().branch);
-            running
-        };
-        let (dir, copy) = tracking_clone();
-        assert_eq!(both(&copy).await.upstream.as_deref(), Some("origin/main"));
-        git(&copy, &["branch", "-q", "--unset-upstream"]);
-        let unset = both(&copy).await;
-        assert_eq!((unset.upstream, unset.ahead, unset.behind), (None, 2, 1));
-        git(&copy, &["branch", "-q", "--set-upstream-to=origin/main"]);
-        git(&copy, &["update-ref", "-d", "refs/remotes/origin/main"]);
-        // origin/HEAD left naming a branch a prune took, as a renamed default branch leaves it: both fall to main.
-        let dangling = both(&copy).await;
-        assert_eq!((dangling.upstream, dangling.ahead, dangling.behind), (None, 2, 0));
-        git(&copy, &["remote", "set-head", "origin", "-d"]);
-        let gone = both(&copy).await;
-        assert_eq!((gone.upstream, gone.ahead, gone.behind), (None, 2, 0));
-        git(&copy, &["checkout", "-q", "--detach", "HEAD~1"]);
-        assert_eq!(both(&copy).await.head, "(detached)");
-        let empty = dir.path().join("empty");
-        std::fs::create_dir(&empty).unwrap();
-        git(&empty, &["init", "-q"]);
-        assert_eq!(both(&empty).await.oid, "(initial)");
-    }
-
-    /// A pack whose one object is a delta over itself: the chain is followed in a loop and ends at the depth cap,
-    /// never on the stack of a daemon that aborts on overflow.
-    #[test]
-    fn a_delta_that_names_itself_as_its_base_ends_at_the_depth_cap() {
-        let dir = tempfile::tempdir().unwrap();
-        git(dir.path(), &["init", "-q"]);
-        let oid = vec![0x42u8; 20];
-        let mut delta = Vec::new();
-        flate2::write::ZlibEncoder::new(&mut delta, flate2::Compression::default()).write_all(&[0, 0]).unwrap();
-        let mut pack = b"PACK\0\0\0\x02\0\0\0\x01".to_vec();
-        pack.push(0x72);
-        pack.extend_from_slice(&oid);
-        pack.extend_from_slice(&delta);
-        let mut idx = vec![0xff, b't', b'O', b'c', 0, 0, 0, 2];
-        for byte in 0..=255u8 {
-            idx.extend_from_slice(&u32::from(byte >= 0x42).to_be_bytes());
-        }
-        idx.extend_from_slice(&oid);
-        idx.extend_from_slice(&[0; 4]);
-        idx.extend_from_slice(&12u32.to_be_bytes());
-        let packs = dir.path().join(".git/objects/pack");
-        std::fs::write(packs.join("pack-self.pack"), pack).unwrap();
-        std::fs::write(packs.join("pack-self.idx"), idx).unwrap();
-        let git_dir = GitDir::open(dir.path()).unwrap();
-        let err = Repo::new(&git_dir).unwrap().object(&oid).unwrap_err();
-        assert!(err.contains("a delta chain is too deep"), "{err}");
-    }
-
-    /// One pack entry's header: its type and inflated size.
-    fn entry_head(kind: u8, size: usize) -> Vec<u8> {
-        let mut head = vec![(kind << 4) | (size & 15) as u8];
-        let mut rest = size >> 4;
-        while rest > 0 {
-            *head.last_mut().unwrap() |= 0x80;
-            head.push((rest & 0x7f) as u8);
-            rest >>= 7;
-        }
-        head
-    }
-
-    fn zlib(bytes: &[u8]) -> Vec<u8> {
-        let mut out = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
-        out.write_all(bytes).unwrap();
-        out.finish().unwrap()
-    }
-
-    fn size_varint(mut n: usize) -> Vec<u8> {
-        let mut out = Vec::new();
-        loop {
-            let byte = (n & 0x7f) as u8;
-            n >>= 7;
-            if n == 0 {
-                out.push(byte);
-                return out;
-            }
-            out.push(byte | 0x80);
-        }
-    }
-
-    /// A delta over `base` that writes `head` of its own, then copies `base[from..]` whole.
-    fn delta_over(base: &[u8], head: &[u8], from: usize) -> Vec<u8> {
-        let mut delta = size_varint(base.len());
-        delta.extend(size_varint(head.len() + base.len() - from));
-        for chunk in head.chunks(127) {
-            delta.push(chunk.len() as u8);
-            delta.extend_from_slice(chunk);
-        }
-        let len = base.len() - from;
-        delta.push(0x80 | 0x0f | 0x70);
-        delta.extend_from_slice(&(from as u32).to_le_bytes());
-        delta.extend_from_slice(&(len as u32).to_le_bytes()[..3]);
-        delta
-    }
-
-    /// A repository whose objects are one hand-built pack: a whole commit of `pad` bytes that nothing names, and
-    /// `commits` commits in a line, each a delta naming that commit as its base by id and copying its bytes, the
-    /// shape a history built to be slow takes. feature is the last of them and main the first.
-    fn slow_history(pad: usize, commits: u8) -> tempfile::TempDir {
-        let dir = tempfile::tempdir().unwrap();
-        git(dir.path(), &["init", "-q"]);
-        let base_oid = vec![0xf0u8; 20];
-        let mut base = format!("tree {}\ncommitter t <t> 1 +0000\n\n", "0".repeat(40)).into_bytes();
-        let from = base.len();
-        base.resize(from + pad, b'x');
-        let mut entries = vec![(base_oid.clone(), [entry_head(1, base.len()), zlib(&base)].concat())];
-        for n in 1..=commits {
-            let parent = if n == 1 { String::new() } else { format!("parent {}\n", hex(&[n - 1; 20])) };
-            let head = format!("tree {}\n{parent}committer t <t> {n} +0000\n\n", "0".repeat(40));
-            let delta = delta_over(&base, head.as_bytes(), from);
-            entries.push((vec![n; 20], [entry_head(7, delta.len()), base_oid.clone(), zlib(&delta)].concat()));
-        }
-        entries.sort();
-        let mut pack = b"PACK\0\0\0\x02".to_vec();
-        pack.extend_from_slice(&(entries.len() as u32).to_be_bytes());
-        let mut offsets = Vec::new();
-        for (_, bytes) in &entries {
-            offsets.push(pack.len() as u32);
-            pack.extend_from_slice(bytes);
-        }
-        let mut idx = vec![0xff, b't', b'O', b'c', 0, 0, 0, 2];
-        for byte in 0..=255u8 {
-            idx.extend_from_slice(&(entries.iter().filter(|(oid, _)| oid[0] <= byte).count() as u32).to_be_bytes());
-        }
-        entries.iter().for_each(|(oid, _)| idx.extend_from_slice(oid));
-        idx.extend(vec![0u8; 4 * entries.len()]);
-        offsets.iter().for_each(|at| idx.extend_from_slice(&at.to_be_bytes()));
-        let packs = dir.path().join(".git/objects/pack");
-        std::fs::write(packs.join("pack-slow.pack"), pack).unwrap();
-        std::fs::write(packs.join("pack-slow.idx"), idx).unwrap();
-        std::fs::write(dir.path().join(".git/refs/heads/feature"), format!("{}\n", hex(&[commits; 20]))).unwrap();
-        std::fs::write(dir.path().join(".git/refs/heads/main"), format!("{}\n", hex(&[1; 20]))).unwrap();
-        std::fs::write(dir.path().join(".git/HEAD"), "ref: refs/heads/feature\n").unwrap();
-        dir
-    }
-
-    /// Commits are small, so a commit, or a base one is built on, past the object cap is refused before any of it
-    /// is inflated: a 72 KB pack of deltas over one huge base once cost a quarter second a commit.
-    #[test]
-    fn a_commit_built_on_a_base_past_the_object_cap_is_refused_at_once() {
-        let fits = slow_history(64 << 10, 8);
-        let read = status(fits.path(), "/root/app").unwrap();
-        assert_eq!((read.branch.ahead, read.branch.behind, read.counts_unknown), (7, 0, false));
-        let huge = slow_history(2 << 20, 8);
-        let started = Instant::now();
-        let err = status(huge.path(), "/root/app").unwrap_err();
-        assert!(err.message.contains("past 1048576 bytes"), "{}", err.message);
-        assert!(started.elapsed() < Duration::from_millis(500), "{:?}", started.elapsed());
-    }
-
-    /// A walk past what it may inflate or past its time answers its counts as unknown, never as a count and never
-    /// by holding the thread.
-    #[test]
-    fn a_walk_past_its_budget_answers_unknown_counts_rather_than_a_count() {
-        let slow = slow_history(256 << 10, 32);
-        let dir = GitDir::open(slow.path()).unwrap();
-        let mut spent = Repo::new(&dir).unwrap();
-        spent.budget = 2 << 20;
-        let branch = spent.branch().unwrap();
-        assert!(spent.over_budget);
-        assert_eq!((branch.head.as_str(), branch.ahead, branch.behind), ("feature", 0, 0));
-        let mut late = Repo::new(&dir).unwrap();
-        late.deadline = Instant::now();
-        late.branch().unwrap();
-        assert!(late.over_budget);
-        let mut whole = Repo::new(&dir).unwrap();
-        assert_eq!(whole.branch().unwrap().ahead, 31);
-        assert!(!whole.over_budget);
-    }
-
-    /// Each file has a cap of its own, and a config at its cap costs its bytes: the lines no query asked for are
-    /// dropped as they are read.
-    #[test]
-    fn a_file_past_its_cap_is_refused_and_a_config_keeps_only_what_is_asked() {
-        let (_dir, copy) = tracking_clone();
-        let config = copy.join(".git/config");
-        let kept = std::fs::read_to_string(&config).unwrap();
-        let junk = "b\n".repeat(((1 << 20) - kept.len()) / 2);
-        assert!(parse_config(&junk, |_, _, _| false).is_empty());
-        std::fs::write(&config, format!("{junk}{kept}")).unwrap();
-        assert_eq!(status(&copy, "/root/app").unwrap().branch.upstream.as_deref(), Some("origin/main"));
-        std::fs::write(&config, format!("{junk}{kept}{}", "b\n".repeat(64))).unwrap();
-        assert!(status(&copy, "/root/app").unwrap_err().message.contains("config is too large"));
-        std::fs::write(&config, kept).unwrap();
-        std::fs::write(copy.join(".git/HEAD"), format!("ref: refs/heads/fix/cart\n{}", " ".repeat(16 << 10))).unwrap();
-        assert!(status(&copy, "/root/app").unwrap_err().message.contains("HEAD is too large"));
-        std::fs::write(copy.join(".git/HEAD"), "ref: refs/heads/fix/cart\n").unwrap();
-        std::fs::write(copy.join(".git/config"), "[extensions]\n\trefStorage = reftable\n").unwrap();
-        assert!(status(&copy, "/root/app").unwrap_err().message.contains("refs kept as reftable are not ones this reads"));
-    }
-
-    #[test]
-    fn config_reads_sections_subsections_quotes_comments_and_continued_lines() {
-        let text = "# top\n[branch \"fix/Cart\"]\n\tremote = origin ; a comment\n\tmerge = \"refs/heads/ma\\\nin\"\n\
-                    [Remote \"origin\"]\n\tFetch = +refs/heads/*:refs/remotes/origin/*\n[core.Sub]\n\tbare\n";
-        let config = Config(text.to_owned());
-        assert_eq!(config.last("branch", Some("fix/Cart"), "remote").as_deref(), Some("origin"));
-        assert_eq!(config.last("branch", Some("fix/Cart"), "merge").as_deref(), Some("refs/heads/main"));
-        assert_eq!(config.last("branch", Some("fix/cart"), "merge"), None);
-        assert_eq!(config.all("remote", Some("origin"), "fetch"), vec!["+refs/heads/*:refs/remotes/origin/*"]);
-        assert_eq!(config.last("core", Some("sub"), "bare").as_deref(), Some("true"));
-        let specs = |all: &[&str]| all.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>();
-        assert_eq!(
-            tracking_of(&specs(&["+refs/heads/*:refs/remotes/origin/*"]), "refs/heads/main").as_deref(),
-            Some("refs/remotes/origin/main")
-        );
-        assert_eq!(tracking_of(&specs(&["refs/heads/main:refs/remotes/o/m"]), "refs/heads/main").as_deref(), Some("refs/remotes/o/m"));
-        assert_eq!(tracking_of(&specs(&["^refs/heads/main", "refs/heads/dev:refs/x"]), "refs/heads/main"), None);
-    }
-
-    #[test]
-    fn a_ref_name_that_would_walk_out_of_the_git_directory_is_no_ref() {
-        assert!(plain_ref("refs/heads/fix/cart"));
-        for bad in ["refs/heads/../../x", "refs/heads/.hidden", "refs//x", "HEAD", "/etc/passwd", "refs/heads/a.lock", "refs/heads/a b"] {
-            assert!(!plain_ref(bad), "{bad}");
-        }
-    }
-
-    #[test]
-    fn a_delta_copies_and_inserts_and_a_damaged_one_is_refused() {
-        let base = b"hello world";
-        let delta = [11, 9, 0x91, 0, 5, 4, b' ', b'y', b'o', b'u'];
-        assert_eq!(apply_delta(base, &delta).as_deref(), Some(&b"hello you"[..]));
-        assert_eq!(apply_delta(base, &[10, 9]), None);
-        assert_eq!(apply_delta(base, &[11, 5, 0x91, 8, 5]), None);
-        assert_eq!(apply_delta(base, &[11, 1, 0]), None);
-    }
-}
+#[path = "../../tests/stored_git/mod.rs"]
+mod tests;

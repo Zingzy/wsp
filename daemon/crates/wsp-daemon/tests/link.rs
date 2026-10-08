@@ -793,6 +793,9 @@ async fn answers_place_leave_with_what_the_sweep_took_and_then_ends_the_daemon()
     let at = place_daemon_paths(place.home.path());
     // What a join and a daemon leave under the home: the token file beside the place file and its key.
     std::fs::write(&at.token_path, "a-token\n").unwrap();
+    // The record an add over ssh leaves where nothing it would take stood before it, so a leave run as root takes the
+    // runtime's folder this daemon made under the case's home.
+    std::fs::write(&at.place_found, format!("{}\0", wsp_frames::numbers::PLACE_FOUND_END)).unwrap();
     let machines = std::path::Path::new(wsp_frames::numbers::WORKSPACE_APPARMOR_PATH);
     let machines_before = std::fs::read(machines).ok();
     let d = place_daemon(&place, |_| {}).await;
@@ -805,19 +808,24 @@ async fn answers_place_leave_with_what_the_sweep_took_and_then_ends_the_daemon()
             "the leave took {path}, outside its temp root"
         );
     }
-    // The sweep is the real one over that home: the place file, its key, the token, and the door and the wsp the
-    // daemon wrote for this computer's threads are gone and named, and wsp's own folder goes last and whole, so
-    // nothing of wsp's is left under the home.
+    // The sweep is the real one over that home: the place file, its key, the add's record, the token, and the door
+    // and the wsp the daemon wrote for this computer's threads are gone and named, and wsp's own folder goes last and
+    // whole, so nothing of wsp's is left under the home.
     let shim = at.guest_bin.join("wsp");
-    let swept = json!([
+    let runtime = place.home.path().join("runtime");
+    let mut swept = vec![
         at.place_file.to_string_lossy(),
         at.place_key.to_string_lossy(),
+        at.place_found.to_string_lossy(),
         at.token_path.to_string_lossy(),
         at.guest_socket.to_string_lossy(),
         shim.to_string_lossy(),
         at.guest_bin.to_string_lossy(),
-        at.wsp.to_string_lossy()
-    ]);
+        at.wsp.to_string_lossy(),
+    ];
+    if nix::unistd::geteuid().is_root() {
+        swept.push(runtime.to_string_lossy());
+    }
     assert_eq!(answer, json!({"id": 21, "ok": true, "swept": swept}));
     for path in [&at.place_file, &at.place_key, &at.token_path, &at.guest_socket, &shim, &at.wsp] {
         assert!(!path.exists(), "{}", path.display());
@@ -832,6 +840,10 @@ async fn answers_place_leave_with_what_the_sweep_took_and_then_ends_the_daemon()
     })
     .await;
     assert!(ended.is_ok(), "the daemon did not end after the leave");
+    // Read once the daemon has ended, so a write on its way out that brought the folder back is seen.
+    if nix::unistd::geteuid().is_root() {
+        assert!(!runtime.exists(), "{}", runtime.display());
+    }
     let dialed = host.dials();
     settled(150).await;
     assert_eq!(host.dials(), dialed);

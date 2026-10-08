@@ -26,7 +26,7 @@ use wsp_frames::{
 
 use crate::door::{self, Ended};
 use crate::ops::{Conn, Road};
-use crate::place::{self, AgentBin, AgentVersions, ReportInput};
+use crate::place::{self, AgentBin, AgentVersions, ReportInput, WspBuild};
 use crate::seal::{self, Seal};
 use crate::{Ctx, Outbound};
 
@@ -142,6 +142,8 @@ struct Link {
     agents: Vec<AgentBin>,
     /// Each agent's version line, held across dials and read again only where its binary moved.
     versions: Arc<Mutex<AgentVersions>>,
+    /// The daemon version the wsp this daemon was started with was built with, read again only where its files moved.
+    wsp_build: Arc<Mutex<WspBuild>>,
     connect: Duration,
     quiet: Duration,
     refused_retry: u64,
@@ -157,6 +159,7 @@ pub(crate) async fn run(ctx: Arc<Ctx>, daemon_port: u16) {
         home: place::place_home(o.home.as_deref()),
         agents: place::parse_agents(&o.agents),
         versions: Arc::new(Mutex::new(AgentVersions::default())),
+        wsp_build: Arc::new(Mutex::new(WspBuild::default())),
         connect: Duration::from_millis(o.link_connect_ms.unwrap_or(CONNECT_MS)),
         quiet: Duration::from_millis(o.link_quiet_ms.unwrap_or(QUIET_MS)),
         refused_retry: o.link_refused_retry_ms.unwrap_or(REFUSED_RETRY_MS),
@@ -356,7 +359,7 @@ impl Link {
                         return self.cut(ws, Outcome::Answered).await;
                     };
                     let mut seal = Seal::place(&seal::seal_keys(&secret, &file.place_id));
-                    let versions = self.agent_versions().await;
+                    let versions = self.versions().await;
                     let prove = match self.prove(
                         file,
                         url,
@@ -390,19 +393,23 @@ impl Link {
         }
     }
 
-    /// Each agent's version line as of this dial: stats every agent's binary and runs the ones that moved. On the
-    /// blocking pool, since one read is a process and a wait and the task holding this link may not stand still
-    /// for them; a pool that will not take the work leaves the report the lines it had.
-    async fn agent_versions(&self) -> BTreeMap<String, String> {
+    /// Each agent's version line as of this dial, and the daemon version the wsp was built with: stats every agent's
+    /// binary and the wsp's files and runs the ones that moved. On the blocking pool, since one read is a process and
+    /// a wait and the task holding this link may not stand still for them; a pool that will not take the work leaves
+    /// the report the lines it had and no wsp version.
+    async fn versions(&self) -> (BTreeMap<String, String>, Option<u32>) {
         let held = Arc::clone(&self.versions);
+        let build = Arc::clone(&self.wsp_build);
         let agents = self.agents.clone();
+        let wsp = place::report_wsp(&self.ctx.options.wsp_argv);
         // What this daemon's own children run on, which a place sets to the probe list at start: a binary a
         // workspace planted under the home this daemon shares with them is on no line of it.
         let path = place::run_path();
         tokio::task::spawn_blocking(move || {
             let mut versions = held.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             versions.refresh(&agents, &path, place::VERSION_DEADLINE);
-            versions.lines()
+            let built = build.lock().unwrap_or_else(std::sync::PoisonError::into_inner).refresh(&wsp, place::VERSION_DEADLINE);
+            (versions.lines(), built)
         })
         .await
         .unwrap_or_default()
@@ -416,7 +423,7 @@ impl Link {
         host_nonce: &str,
         my_nonce: &str,
         ephemerals: LinkEphemerals<'_>,
-        agent_versions: &BTreeMap<String, String>,
+        (agent_versions, wsp_daemon_version): &(BTreeMap<String, String>, Option<u32>),
     ) -> Result<PlaceProveRequest, String> {
         let pem = std::fs::read_to_string(Path::new(&file.key_path)).map_err(|e| format!("{}: {e}", file.key_path))?;
         let door = self.ctx.computer_door.get();
@@ -426,6 +433,7 @@ impl Link {
             wsp_argv: &self.ctx.options.wsp_argv,
             agents: &self.agents,
             agent_versions,
+            wsp_daemon_version: *wsp_daemon_version,
             daemon_port: self.daemon_port,
             dialed: url,
             unit_path: self.ctx.options.unit_path.as_deref(),

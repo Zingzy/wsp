@@ -21,8 +21,9 @@ import {
   joinToken,
   absentComputer,
   noSuchPlaceRefusal,
-  placeHoldsForksRefusal,
-  placeHoldsProjectsRefusal,
+  placeUnsavedRefusal,
+  placeAwayRefusal,
+  type PlaceHolds,
   placeNoDaemonPortLine,
   placeNoLinkLine,
   placeStillInstalledLine,
@@ -32,7 +33,6 @@ import {
   placeProvisionPaths,
   placeSyncingLine,
   pluginsKeptLine,
-  projectLeftLine,
   RecipeFile,
   recipeCounts,
   SETUP_LOG_TAIL_BYTES,
@@ -64,7 +64,7 @@ import {
 import { ownedFloorBytes, PlaceAbsentError, PlaceMachine, keyFingerprint } from "@wsp/engine";
 import { openPlaceForward } from "../place-forward.js";
 import {
-  CAPS, projectsMade, type PlaceLogin, type PlaceRecord, type PlaceStaging, type RecipeResolver, type PlaceDoor, NO_PLACE_UPDATER,
+  CAPS, type PlaceLogin, type PlaceRecord, type PlaceStaging, type RecipeResolver, type PlaceDoor, NO_PLACE_UPDATER,
   placeUpdateSlowLine, placeSweptOverSshLine, placeLoginRoadLine, placeSweptOverLinkLine, placeElsewhereSweptOverLinkLine, PlaceLoginRefusedError, PlaceHostKeyChangedError,
   PlaceAddTakenBackError,
 } from "./types.js";
@@ -81,7 +81,7 @@ import type { PlaceViewsArea } from "./views.js";
 const THREADS_END_MS = 60_000;
 
 /** The door's half a person drives: add, dial, update, remove, set up, follow a recipe and list the places. */
-export function manageDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, setupArea: PlaceSetupArea, viewArea: PlaceViewsArea): Pick<PlaceDoor, "add" | "dial" | "road" | "exec" | "adds" | "reportOf" | "homeOf" | "list" | "rows" | "set" | "update" | "remove" | "find" | "pending" | "choose" | "setUp" | "follow" | "recipeChanged" | "followers" | "skip" | "estimate" | "setupLog" | "unfollow" | "picksOf" | "on" | "close"> {
+export function manageDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, setupArea: PlaceSetupArea, viewArea: PlaceViewsArea): Pick<PlaceDoor, "add" | "dial" | "road" | "exec" | "adds" | "reportOf" | "homeOf" | "list" | "rows" | "set" | "update" | "holds" | "remove" | "find" | "pending" | "choose" | "setUp" | "follow" | "recipeChanged" | "followers" | "skip" | "estimate" | "setupLog" | "unfollow" | "picksOf" | "on" | "close"> {
   const { opts, store, devices, wiring, recording, clockNow, dialWaitMs, live, kept, forwards, watchers, emit } = ctx;
   const {
     records, providerIds, recordOf, settingsOf, settingsHeld, rowIds, withCap, untilDaemonVersion, awaiting, adds,
@@ -131,6 +131,18 @@ export function manageDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, 
     if (read.refused === true) return { refused: read.unread };
     const said = placeLoginUncheckedRefusal(login.ssh, record.name, read.unread);
     throw usageRefusal(said.happened, said.fix);
+  };
+
+  /** What goes with a place, read over its link: refused first, naming the computer, where forks or projects stand on
+   * one that is not answering, since none of them can be read or deleted until it is back. */
+  const holdsOf = async (placeId: string, name: string): Promise<PlaceHolds> => {
+    const answers = live.get(placeId)?.reach !== undefined;
+    const holds = await recording.holdsOn(placeId, answers);
+    if (!answers && (holds.forks.length > 0 || holds.projects.length > 0)) {
+      const refused = placeAwayRefusal(name, absentComputer(name, null).said);
+      throw usageRefusal(refused.said, refused.fix);
+    }
+    return holds;
   };
 
   return {
@@ -492,20 +504,21 @@ export function manageDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, 
       return { name: held.name, ...(daemon === undefined ? {} : { daemon }) };
     },
 
+    holds: async placeId => {
+      const held = await recordOf(placeId);
+      return held === undefined ? { forks: [], projects: [], unsaved: [] } : holdsOf(placeId, held.name);
+    },
+
     async remove(placeId, ask = {}) {
       const held = await recordOf(placeId);
       if (held === undefined) return { removed: false, swept: [] };
-      // The forks on it are wsp's own machines and the person's to delete: a place taken out from under them would
-      // leave containers on that computer nothing here can name again.
-      const forks = await recording.forksOn(placeId);
-      if (forks.length > 0) throw new Error(placeHoldsForksRefusal(held.name, forks));
-      // A project is one computer's: taken out from under its projects, the place id on each record would name
-      // nothing. The forks are refused first, since a workspace of a project is a machine standing on this place.
-      // The projects the recipe's folders step made there are wsp's own and go with it; any other refuses.
-      const made = projectsMade(held);
-      const projects = await recording.projectsOn(placeId);
-      const theirs = projects.filter(p => !made.has(p.id)).map(p => p.name);
-      if (theirs.length > 0) throw new Error(placeHoldsProjectsRefusal(held.name, theirs));
+      // Read before anything goes: a fork's commits and a project folder's are on that computer alone until they are
+      // pushed, and the remove takes that computer's copies with it.
+      const holds = await holdsOf(placeId, held.name);
+      if (holds.unsaved.length > 0 && ask.force !== true) {
+        const refused = placeUnsavedRefusal(held.name, holds.unsaved);
+        throw usageRefusal(refused.said, refused.fix);
+      }
       const reach = live.get(placeId)?.reach;
       const leaver = wiring.leave;
       const login = loginOf(held);
@@ -529,6 +542,8 @@ export function manageDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, 
       const stands = reached !== undefined && "stands" in reached;
       const elsewhere = reached !== undefined && "elsewhere" in reached ? reached : undefined;
       const away = elsewhere === undefined ? undefined : placeLoginElsewhere(login!.ssh, held.name, elsewhere.other);
+      // The forks and the projects go first, each by its own road, over the link and the login the sweep then takes.
+      const went = await recording.dropOn(placeId);
       // Before either road sweeps: a plugin comes off by its agent's own command, which may sit in the install folder
       // the sweep takes, and nothing on that computer knows which plugins were wsp's.
       const plugins = await pluginsOff(placeId, held, reach !== undefined, stands ? login : undefined, sudoPassword);
@@ -546,7 +561,7 @@ export function manageDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, 
           loginRoad = { at: login.ssh };
         } else {
           try {
-            swept = [...(await leaver({ placeId, name: held.name, report: held.report, ssh: login, ...(sudoPassword === undefined ? {} : { sudoPassword }) }))];
+            swept = [...(await leaver({ placeId, name: held.name, report: held.report, ssh: login, ...(sudoPassword === undefined ? {} : { sudoPassword }), ...(ask.force === true ? { force: true } : {}) }))];
             note = placeSweptOverSshLine(held.name);
           } catch (e) {
             // Two different things, and the line a person reads says which: the login would not stand, or that
@@ -568,7 +583,7 @@ export function manageDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, 
             const took = await unmergedOver(placeId, held);
             // A thread's turns stand in cgroups of their own, outside the unit the leave stops, so they go first.
             const ended = await ctx.door.exec(placeId, threadCgroupsEndScript(), { timeoutMs: THREADS_END_MS }).catch(() => undefined);
-            const answer = await reach.request("place.leave");
+            const answer = await reach.request("place.leave", ask.force === true ? { force: true } : {});
             swept = [...took, ...(ended?.stdout.split("\n").filter(line => line !== "") ?? []), ...(Array.isArray(answer["swept"]) ? (answer["swept"] as unknown[]).map(String) : [])];
             if (loginRoad !== undefined && away === undefined) note = placeSweptOverLinkLine(held.name, loginRoad.at, loginRoad.said);
           } catch (e) {
@@ -580,20 +595,13 @@ export function manageDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, 
       }
       swept = [...plugins.off, ...swept];
       if (plugins.kept.length > 0) note = note === undefined ? pluginsKeptLine(held.name, plugins.kept) : `${note}; ${pluginsKeptLine(held.name, plugins.kept)}`;
-      for (const project of projects) {
-        const gone = await recording.removeFolder(placeId, project.id).then(
-          () => projectLeftLine(project.name),
-          () => undefined,
-        );
-        if (gone !== undefined) swept.push(gone);
-      }
       if (reach !== undefined) cut(placeId, "removed from this host");
       // After the sweep, since the link that sweep may ride comes in through the forward.
       // Another record on the same login keeps it held: a failed add tried again leaves two, the live one among them.
       if (login !== undefined && held.road?.back !== undefined && !(await records()).some(r => r.id !== placeId && loginOf(r)?.ssh === login.ssh)) wiring.back?.release(login);
       for (const pending of await pendingRecords()) if (pending.placeId === placeId) await dropPending(pending.id);
       await forget(placeId);
-      return { removed: true, swept, ...(note !== undefined ? { note } : {}) };
+      return { removed: true, took: went, swept, ...(note !== undefined ? { note } : {}) };
     },
 
     find: async ref => (await records()).filter(r => r.id === ref || r.name === ref),

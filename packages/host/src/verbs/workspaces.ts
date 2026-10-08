@@ -217,16 +217,19 @@ export const WORKSPACE_VERBS: readonly Verb[] = [
   },
   {
     name: "discard",
-    usage: "wsp discard <workspace> <path>",
+    usage: "wsp discard <workspace> <path> [--yes]",
     about: "puts one changed file of the workspace's copy back as its last commit has it, or removes it where that has none",
     page: "agent",
-    options: {},
+    options: { yes: { type: "boolean" } },
     run: async ctx => {
       const [ref, path] = ctx.args;
       if (ref === undefined || path === undefined || ctx.args.length !== 2) throw usageRefusal("wsp discard takes one workspace and one file.", usageIs(ctx));
       const client = await ctx.client();
       const workspace = await workspaceOf(client, ref);
       const { workspace: awoken } = await awake(client, workspace, "discard", line => ctx.io.error(line));
+      // The host's own refusal of a file with no change first, so the one question is asked only of a discard that would go.
+      await client.request("workspaces.discard", { workspaceId: awoken.id, path, check: true });
+      if (!(await confirmed(ctx, `Discard the change to ${path} in ${workspace.name}?\nThe file goes back to its last commit, which cannot be undone.`, path))) return 1;
       const put = GitDiscardReply.parse(await client.request("workspaces.discard", { workspaceId: awoken.id, path }));
       ctx.out.emit({ ...put }, discardedLine(awoken.name, put.path));
       return 0;

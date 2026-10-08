@@ -8,7 +8,7 @@ import { INLINE_EXEC_MS, BUILDER_LABEL, CREATED_AT_LABEL, OWNER_LABEL, WSP_LABEL
 import type { HarnessCatalog, ProjectAddStage, ProjectExportStage, ProjectSource, ProjectView, ProjectPlan, SeedChoice, SeedPlan, Caller } from "@wsp/protocol";
 import { projectLanding, type Landed, type LandingDeps, type ProjectLanding } from "../project-landing.js";
 import { projectSource } from "../project-sources.js";
-import { refusal, scopeOf, spawnFolderRefusal, spawnRepositoryRefusal, SPAWN_FOLDER_FIX, SPAWN_REPOSITORY_FIX } from "@wsp/protocol";
+import { projectUnsavedRefusal, refusal, scopeOf, spawnFolderRefusal, spawnRepositoryRefusal, usageRefusal, SPAWN_FOLDER_FIX, SPAWN_REPOSITORY_FIX } from "@wsp/protocol";
 import { addedProjectOn, addingProjectLine, actionRefusal, kindWords, fmtBytes, notFoundRefusal, claudeProjectKey, folderOnCopyRefusal, cloneIntoNeeded, intoIsHereLine, INTO_TAKES_A_REPO_LINE, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, leftBehindLine, projectInUseRefusal, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, bareFolder, copiesFolder, kindForComputer, runsInFolder, shellQuote, underProject, workspaceState, HERE_PLACE_ID, noSuchPlaceRefusal } from "@wsp/protocol";
 import { GITHUB_TOKEN_ENV } from "@wsp/engine";
 import { resolveThreadDefaults, withCustomModels } from "@wsp/protocol";
@@ -386,7 +386,13 @@ export function projectsArea(ctx: RuntimeContext): ProjectsArea {
       await road.seedInto(project, packed.tar, deps);
     },
 
-    async remove(id: string, origin?: Caller): Promise<{ said: string }> {
+    /** What the checkout the project's computer holds has that no remote does, one line, or nothing. */
+    async unsaved(project: ProjectView): Promise<string | undefined> {
+      const { deps, at } = await landingDeps(project.computer);
+      return projectLanding(landingKind(project.computer, at)).unsaved?.(project, deps);
+    },
+
+    async remove(id: string, origin?: Caller, o: { force?: boolean; check?: boolean } = {}): Promise<{ said: string; unsaved?: string }> {
       await ctx.ready();
       ctx.spawnGuard("delete", origin);
       const project = await projectsDoor.resolve(id);
@@ -395,6 +401,14 @@ export function projectsArea(ctx: RuntimeContext): ProjectsArea {
       if (standing.length > 0) throw Object.assign(new Error(projectInUseRefusal(project.name, standing)), { kind: "conflict" });
       const { deps, at, placeId } = await landingDeps(project.computer);
       await readableComputer(at, placeId);
+      const road = projectLanding(landingKind(project.computer, at));
+      // The checkout on a computer of the person's goes with the record, and what it holds that no remote has with it.
+      const unsaved = o.force === true && o.check !== true ? undefined : await road.unsaved?.(project, deps);
+      if (unsaved !== undefined && o.force !== true) {
+        const refused = projectUnsavedRefusal(project.name, unsaved);
+        throw usageRefusal(refused.said, refused.fix);
+      }
+      if (o.check === true) return { said: "", ...(unsaved === undefined ? {} : { unsaved }) };
       for (const entry of held) await ctx.workspaces.delete(entry.record.id, origin);
       // The frozen copies its worktrees' overlays sat on go with it: no later worktree of this id reuses or drops them.
       const top = project.git?.top;
@@ -404,7 +418,7 @@ export function projectsArea(ctx: RuntimeContext): ProjectsArea {
       // What the add made on that computer goes before the record does, so a computer that cannot be reached
       // keeps both and the person can say it again when it is back. The sentence is the road's: it is true
       // differently on a computer of theirs, at a provider and here.
-      const said = await projectLanding(landingKind(project.computer, at)).remove(project, deps);
+      const said = await road.remove(project, deps);
       projectsHeld.delete(project.id);
       await store.delete(PROJECTS, project.id);
       bus.emit({ type: "project.removed", projectId: project.id });
