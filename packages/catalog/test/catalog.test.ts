@@ -3,7 +3,7 @@
 // every browser or device sign-in has a status that proves it, the agents are
 // the six whose project state has a measured resolver, every default names
 // its evidence, and the seeded rows are what the snapshot says they are.
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawnSync, type SpawnSyncReturns } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -422,7 +422,7 @@ describe("catalog", () => {
       .replace('"https://downloads.cursor.com/lab/$ver/linux/$a/$pkg"', `"file://${join(dir, "served.tar.gz")}"`)
       .replaceAll("/opt/cursor-agent", home)
       .replaceAll("/usr/local/bin", bin);
-    const run = spawnSync("bash", ["-c", `${CURL_NET}\n${script}`], { encoding: "utf8" });
+    const run = runInstall(dir, `${CURL_NET}\n${script}`);
     expect(run.stderr).toBe("");
     expect(run.status).toBe(0);
     expect(run.stdout).toContain(`WSP_ROAD release cursor-agent-2026.09.26-dd393fe-linux-x64 ${sum} 2026.09.26-dd393fe`);
@@ -780,7 +780,7 @@ describe("catalog", () => {
       .replace(`"https://downloads.claude.ai/claude-code-releases/${catalog.CLAUDE_CODE.version}/$plat/claude"`, `"file://${join(dir, "served")}"`)
       .replaceAll(catalog.CLAUDE_CODE.sha256.x86_64, flip(catalog.CLAUDE_CODE.sha256.x86_64))
       .replaceAll(catalog.CLAUDE_CODE.sha256.aarch64, flip(catalog.CLAUDE_CODE.sha256.aarch64));
-    const run = spawnSync("bash", ["-c", script], { encoding: "utf8" });
+    const run = runInstall(dir, script);
     expect(run.status).toBe(1);
     expect(run.stderr).toContain("sha256sum");
     expect(existsSync(download)).toBe(false);
@@ -1070,6 +1070,25 @@ describe("catalog", () => {
     expect(rows).toMatchSnapshot();
   });
 });
+
+/** Runs an install script under bash as a Linux machine would, on a PATH and a HOME of the case's own folder. */
+function runInstall(dir: string, script: string): SpawnSyncReturns<string> {
+  const tools = join(dir, "tools");
+  mkdirSync(tools);
+  // A Mac has shasum and no sha256sum; this checks `sha256sum -c -` lines as the coreutils one does.
+  writeStub(
+    join(tools, "sha256sum"),
+    `#!${process.execPath}
+const { createHash } = require("node:crypto");
+const { readFileSync } = require("node:fs");
+const lines = readFileSync(0, "utf8").split("\\n").filter(Boolean);
+const bad = lines.filter(l => { const [want, f] = l.split("  "); const ok = createHash("sha256").update(readFileSync(f)).digest("hex") === want; console.log(f + (ok ? ": OK" : ": FAILED")); return !ok; });
+if (bad.length > 0) { console.error("sha256sum: WARNING: " + bad.length + " computed checksum did NOT match"); process.exit(1); }
+`,
+  );
+  // A bash whose stdin is node's socket takes itself for an ssh login and reads ~/.bashrc unless told not to.
+  return spawnSync("bash", ["--noprofile", "--norc", "-c", script], { encoding: "utf8", env: { PATH: `${tools}:/usr/bin:/bin`, HOME: dir } });
+}
 
 type Road = (typeof CATALOG)[number]["installRoad"];
 function roadArgument(road: Road): string {
