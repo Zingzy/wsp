@@ -82,7 +82,7 @@ describe("the other JSON formats write their own syntax", () => {
 });
 
 describe("Codex's reference writer", () => {
-  it("writes bearer_token_env_var, env_http_headers and env_vars in place of the values, every other line as it was", async () => {
+  it("writes env_http_headers and env_vars in place of the values, every other line as it was", async () => {
     const text = [
       'model = "gpt-5"',
       "",
@@ -110,8 +110,7 @@ describe("Codex's reference writer", () => {
         "",
         "# linear, added by hand",
         "[mcp_servers.linear]",
-        'bearer_token_env_var = "WSP_MCP_LINEAR_AUTHORIZATION"',
-        'env_http_headers = { "X-Team" = "WSP_MCP_LINEAR_X_TEAM" }',
+        'env_http_headers = { "Authorization" = "WSP_MCP_LINEAR_AUTHORIZATION_BEARER", "X-Team" = "WSP_MCP_LINEAR_X_TEAM" }',
         'url = "https://mcp.linear.app/mcp"',
         "startup_timeout_sec = 20",
         "",
@@ -130,15 +129,31 @@ describe("Codex's reference writer", () => {
       { name: "notion", values: { NOTION_TOKEN: NOTION } },
     ]);
     const read = CODEX_TOML.read(out.text, HOME);
-    expect(read.find(s => s.name === "linear")).toMatchObject({ transport: { kind: "http", headers: {} }, envRefs: ["WSP_MCP_LINEAR_AUTHORIZATION", "WSP_MCP_LINEAR_X_TEAM"] });
+    expect(read.find(s => s.name === "linear")).toMatchObject({ transport: { kind: "http", headers: {} }, envRefs: ["WSP_MCP_LINEAR_AUTHORIZATION_BEARER", "WSP_MCP_LINEAR_X_TEAM"] });
     expect(read.find(s => s.name === "notion")).toMatchObject({ transport: { kind: "stdio", env: {} } });
+  });
+
+  it("reads a name another server's bearer header is read by as held, the token alone kept under the header's own name", async () => {
+    const reads = (name: string) => ["[mcp_servers.acme]", 'url = "https://a.example"', 'http_headers = { "Authorization" = "Bearer tok_TESTONLY" }', "[mcp_servers.beta]", 'url = "https://b.example"', `env_http_headers = { "Authorization" = "${name}" }`, ""].join("\n");
+    for (const name of ["WSP_MCP_ACME_AUTHORIZATION_BEARER", "WSP_MCP_ACME_AUTHORIZATION"]) {
+      expect((await CODEX_TOML.refer(reads(name))).servers, name).toEqual([
+        { name: "acme", values: { WSP_MCP_ACME_AUTHORIZATION: "tok_TESTONLY" } },
+        { name: "beta", values: {} },
+      ]);
+    }
+    expect((await CODEX_TOML.refer(reads("WSP_MCP_ELSE_AUTHORIZATION_BEARER"))).servers[1]!.unread).toBeDefined();
+  });
+
+  it("refuses two headers that would travel under one name, naming the headers as the person typed them", async () => {
+    const text = ["[mcp_servers.acme]", 'url = "https://a.example"', 'http_headers = { "Authorization" = "Bearer tok_TESTONLY", "Authorization-Bearer" = "x" }', ""].join("\n");
+    await expect(CODEX_TOML.refer(text)).rejects.toThrow("acme sends Authorization and Authorization-Bearer, which would both travel as WSP_MCP_ACME_AUTHORIZATION_BEARER; rename one");
   });
 
   it("adds to the names a table already reads rather than writing a key twice", async () => {
     const text = ["[mcp_servers.a]", 'url = "https://a.example"', 'bearer_token_env_var = "A_TOKEN"', 'env_http_headers = { "X-One" = "ONE" }', 'http_headers = { "Authorization" = "Bearer x1", "X-Two" = "two" }', ""].join("\n");
     const out = await CODEX_TOML.refer(text, undefined, [], new Set(["A_TOKEN", "ONE"]));
-    expect(out.text).toBe(["[mcp_servers.a]", 'url = "https://a.example"', 'bearer_token_env_var = "A_TOKEN"', 'env_http_headers = { "X-One" = "ONE", "Authorization" = "WSP_MCP_A_AUTHORIZATION", "X-Two" = "WSP_MCP_A_X_TWO" }', ""].join("\n"));
-    expect(out.servers[0]!.values).toEqual({ WSP_MCP_A_AUTHORIZATION: "Bearer x1", WSP_MCP_A_X_TWO: "two" });
+    expect(out.text).toBe(["[mcp_servers.a]", 'url = "https://a.example"', 'bearer_token_env_var = "A_TOKEN"', 'env_http_headers = { "X-One" = "ONE", "Authorization" = "WSP_MCP_A_AUTHORIZATION_BEARER", "X-Two" = "WSP_MCP_A_X_TWO" }', ""].join("\n"));
+    expect(out.servers[0]!.values).toEqual({ WSP_MCP_A_AUTHORIZATION: "x1", WSP_MCP_A_X_TWO: "two" });
     const stdio = ["[mcp_servers.b]", 'command = "b"', 'env_vars = ["HOME_DIR"]', 'env = { K = "v" }', ""].join("\n");
     expect((await CODEX_TOML.refer(stdio)).text).toBe(["[mcp_servers.b]", 'command = "b"', 'env_vars = ["HOME_DIR", "K"]', ""].join("\n"));
   });
@@ -225,7 +240,7 @@ describe("what a reference writer refuses rather than guess", () => {
       const def = Object.values(read.mcp_servers)[0]!;
       expect(def["http_headers"], text).toBeUndefined();
       expect(def["env"], text).toBeUndefined();
-      expect(def["bearer_token_env_var"] ?? def["env_vars"], text).toEqual(Object.keys(values)[0] === "NOTION_TOKEN" ? ["NOTION_TOKEN"] : "WSP_MCP_LINEAR_AUTHORIZATION");
+      expect(def["env_http_headers"] ?? def["env_vars"], text).toEqual(Object.keys(values)[0] === "NOTION_TOKEN" ? ["NOTION_TOKEN"] : { Authorization: "WSP_MCP_LINEAR_AUTHORIZATION_BEARER" });
     }
   });
 
