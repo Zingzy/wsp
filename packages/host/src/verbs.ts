@@ -474,6 +474,7 @@ export const FLAG_WORDS: Readonly<Record<string, string>> = {
   "run branch": "a branch other than the one the project's folder has checked out: the thread runs in the worktree holding it, made under wsp's folder from the folder's current commit for a new branch",
   "run cwd": "a folder inside the project or one of its worktrees, absolute, to start the thread in; the project's folder without it",
   "worktree remove force": "remove it over files no commit holds, which go with it",
+  "projects remove force": "remove it even where its checkout on a computer of yours holds work no remote has, which goes with it",
   "export from": "the folder on the machine to bring home; the project registered for the folder you named without it",
   "recipes save from": "the computer whose picks the recipe is saved from, by the name wsp computers shows; it follows the recipe from then on",
   "computers set ssh": "the login user@host the host reaches a computer you added by over ssh from now, saved only once the computer it reaches reads as that same one",

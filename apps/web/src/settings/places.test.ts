@@ -19,10 +19,11 @@ const hetzner: PlaceView = {
   engine: "docker",
   present: true,
   takesForks: true,
+  takesRuntime: true,
   joinedAt: ago(60 * 60 * 1000),
   lastSeenAt: ago(3_000),
 };
-const laptop: PlaceView = { ...hetzner, id: "p_2", name: "old-macbook", default: false, shape: { cpu: 4, memMb: 8 * 1024 }, diskFreeBytes: 91 * 1024 ** 3, engine: "none", present: false, lastSeenAt: ago(2 * 60 * 60 * 1000) };
+const laptop: PlaceView = { ...hetzner, id: "p_2", name: "old-macbook", default: false, takesRuntime: false, shape: { cpu: 4, memMb: 8 * 1024 }, diskFreeBytes: 91 * 1024 ** 3, engine: "none", present: false, lastSeenAt: ago(2 * 60 * 60 * 1000) };
 const ascii: PlaceView = { id: "box", kind: "provider", name: "box", default: false, shape: { cpu: 2, memMb: 4 * 1024 }, diskFreeBytes: 40 * 1024 ** 3, rateUsdPerHour: 0.018, takesForks: true };
 
 describe("what the section computes beyond the table's own cells", () => {
@@ -47,28 +48,41 @@ describe("the remove sentence", () => {
   it("names what comes off a computer that holds workspaces, and what leaves the computer the host runs on", () => {
     expect(removeTitle(hetzner)).toBe("Remove hetzner?");
     expect(removeSentence(hetzner, { workspaces: [{ name: "spoo-fix", state: "Running", threads: 2 }] }, MAC, 4.2 * 1024 ** 3)).toBe(
-      "wsp and its task come off hetzner, which is otherwise left as it is, and the copy of your image (4.2 GB) stays where it is. The task's record and 2 threads leave zingzy's MacBook Pro.",
+      "wsp, its task and the copy of your image (4.2 GB) come off hetzner, which is otherwise left as it is. The task's record and 2 threads leave zingzy's MacBook Pro.",
     );
   });
 
   it("says workspaces and records in the plural above one", () => {
     expect(removeSentence(hetzner, { workspaces: [{ name: "a", state: "Running", threads: 2 }, { name: "b", state: "Running", threads: 1 }] }, MAC, 4.2 * 1024 ** 3)).toBe(
-      "wsp and its 2 tasks come off hetzner, which is otherwise left as it is, and the copy of your image (4.2 GB) stays where it is. The tasks' records and 3 threads leave zingzy's MacBook Pro.",
+      "wsp, its 2 tasks and the copy of your image (4.2 GB) come off hetzner, which is otherwise left as it is. The tasks' records and 3 threads leave zingzy's MacBook Pro.",
     );
   });
 
+  it("names the projects that leave with a computer once the host has said which", () => {
+    expect(removeSentence(hetzner, { workspaces: [], projects: ["wsp-vm"] }, MAC)).toBe("wsp and the copy of your image come off hetzner, which is otherwise left as it is. Its project wsp-vm leaves zingzy's MacBook Pro.");
+    expect(removeSentence(hetzner, { workspaces: [], projects: ["a", "b"] }, MAC)).toContain("Its 2 projects a, b leave zingzy's MacBook Pro.");
+  });
+
   it("drops the second sentence for a computer that holds none", () => {
-    expect(removeSentence(hetzner, NOTHING_HELD, MAC, 4.2 * 1024 ** 3)).toBe("wsp comes off hetzner, which is otherwise left as it is, and the copy of your image (4.2 GB) stays where it is.");
+    expect(removeSentence(hetzner, NOTHING_HELD, MAC, 4.2 * 1024 ** 3)).toBe("wsp and the copy of your image (4.2 GB) come off hetzner, which is otherwise left as it is.");
   });
 
   it("leaves the size out where nothing has measured the image", () => {
-    expect(removeSentence(hetzner, NOTHING_HELD, MAC)).toBe("wsp comes off hetzner, which is otherwise left as it is, and the copy of your image stays where it is.");
+    expect(removeSentence(hetzner, NOTHING_HELD, MAC)).toBe("wsp and the copy of your image come off hetzner, which is otherwise left as it is.");
   });
 
   it("says what becomes of the copy of the image, since every computer that joined runs workspaces and holds one", () => {
-    // What Remove promises about four gigabytes of somebody's disk is what the sweep does: it walks wsp's own
-    // folder and the unit, and never the store the copy sits in, so the copy stays.
-    expect(removeSentence(hetzner, NOTHING_HELD, MAC, 4.2 * 1024 ** 3)).toBe("wsp comes off hetzner, which is otherwise left as it is, and the copy of your image (4.2 GB) stays where it is.");
+    // What Remove promises about four gigabytes of somebody's disk is what the sweep does: the leave takes the
+    // runtime's folder the copy sits in, so the copy comes off with wsp.
+    expect(removeSentence(hetzner, NOTHING_HELD, MAC, 4.2 * 1024 ** 3)).toBe("wsp and the copy of your image (4.2 GB) come off hetzner, which is otherwise left as it is.");
+  });
+
+  it("says the copy of the image stays on a computer whose leave keeps the runtime's folder, as one joined with a code does", () => {
+    const studio: PlaceView = { ...hetzner, name: "studio", takesRuntime: false };
+    expect(removeSentence(studio, NOTHING_HELD, MAC, 4.2 * 1024 ** 3)).toBe("wsp comes off studio, which keeps the copy of your image (4.2 GB) and is otherwise left as it is.");
+    expect(removeSentence(studio, { workspaces: [{ name: "spoo-fix", state: "Running", threads: 2 }] }, MAC)).toBe(
+      "wsp and its task come off studio, which keeps the copy of your image and is otherwise left as it is. The task's record and 2 threads leave zingzy's MacBook Pro.",
+    );
   });
 
   it("says a provider's workspaces are deleted there and its key forgotten here", () => {
@@ -79,7 +93,7 @@ describe("the remove sentence", () => {
 
   it("adds when an offline computer is swept", () => {
     expect(removeSentence(laptop, NOTHING_HELD, MAC)).toBe(
-      "wsp comes off old-macbook, which is otherwise left as it is, and the copy of your image stays where it is. It is offline; what is on it is swept the next time it connects.",
+      "wsp comes off old-macbook, which keeps the copy of your image and is otherwise left as it is. It is offline; what is on it is swept the next time it connects.",
     );
   });
 });

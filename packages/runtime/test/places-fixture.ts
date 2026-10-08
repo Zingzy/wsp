@@ -163,6 +163,14 @@ export interface ForkingPlace {
   push(event: Record<string, unknown>): void;
   /** Holds every resume frame until it is called, for a wake a test wants in flight. */
   holdResumes(): () => void;
+  /** What a workspace's git status answers, whole; a reply no checkout reads out of until a test sets one. */
+  gitStatus?: Record<string, unknown>;
+  /** What a command on the computer itself, outside every workspace, answers; nothing and exit 0 unless set. */
+  onComputer: (cmd: string) => { exitCode: number; stdout: string; stderr: string };
+  /** Machines whose kill this computer refuses, for a remove that stops part way. */
+  refuseKill?: Set<string>;
+  /** What a command inside a machine there answers, where a case sets it over what the fixture was made with. */
+  onMachine?: (cmd: string) => { exitCode: number; stdout: string; stderr: string };
 }
 
 export const PLACE_FACTS = {
@@ -252,6 +260,7 @@ export function forks(
     daemonAnswersAfter: 1,
     swallow: new Set<string>(),
     push: event => client.say(event),
+    onComputer: exec,
     holdResumes: () => {
       held = [];
       return () => {
@@ -297,7 +306,7 @@ export function forks(
       case "machine.state":
         return gone(String(frame["machineId"])) ? missing(String(frame["machineId"])) : say({ state });
       case "machine.exec":
-        return say({ result: exec(String(frame["cmd"])) });
+        return say({ result: (seen.onMachine ?? exec)(String(frame["cmd"])) });
       case "machine.describe":
         return say({ shape: { cpu: 2, memMb: 4096 } });
       case "machine.facts":
@@ -320,6 +329,7 @@ export function forks(
         return;
       }
       case "machine.kill":
+        if (seen.refuseKill?.has(String(frame["machineId"])) === true) return void client.say({ id, ok: false, error: "the engine refused the kill" });
         seen.killed.push(String(frame["machineId"]));
         return say({});
       case "machine.putBytes":
@@ -344,13 +354,13 @@ export function forks(
       // every other command answers as the case says.
       case "exec": {
         const claim = /mkdir '([^']+)'"\$n"/.exec(String(frame["cmd"]));
-        return say({ ...(claim === null ? exec(String(frame["cmd"])) : { exitCode: 0, stdout: `${claim[1]}\n`, stderr: "" }), truncated: false });
+        return say({ ...(claim === null ? seen.onComputer(String(frame["cmd"])) : { exitCode: 0, stdout: `${claim[1]}\n`, stderr: "" }), truncated: false });
       }
       // The workspace's own git, answered by this computer's daemon for the workspace the frame names, which is
       // what a workspace with no daemon of its own is served by.
       case "git.status":
         seen.frames.push(frame);
-        return say({ branch: "work", ahead: 0, files: [] });
+        return say(seen.gitStatus ?? { branch: "work", ahead: 0, files: [] });
       // The pane's road: this computer's daemon opens and drives a shell inside the workspace the frame names.
       case "pty.create":
         seen.frames.push(frame);

@@ -26,6 +26,7 @@ use wsp_frames::{Bind, CopyWord, Share};
 
 use crate::doctor::OVERLAID;
 use crate::hardening;
+use crate::mount_table::{mount_points, MOUNTINFO};
 use crate::profile;
 
 mod ssh;
@@ -1332,60 +1333,6 @@ pub fn unmount_inside(target: &Path) -> Result<(), Error> {
     Ok(())
 }
 
-/// The filesystem the mount covering this path is of, for the sentence a plain copy is explained in; nothing
-/// where the table names no mount over it.
-pub fn filesystem_at(path: &Path) -> Option<String> {
-    let table = fs::read_to_string(MOUNTINFO).ok()?;
-    mounts(&table)
-        .into_iter()
-        .filter(|(point, _)| path.starts_with(point))
-        .max_by_key(|(point, _)| point.components().count())
-        .map(|(_, kind)| kind)
-}
-
-/// Where the kernel writes this process's own mounts.
-const MOUNTINFO: &str = "/proc/self/mountinfo";
-
-fn mount_points(table: &str) -> Vec<PathBuf> {
-    mounts(table).into_iter().map(|(point, _)| point).collect()
-}
-
-/// Every mount in the table as its point and its filesystem. A line is the kernel's: the point is the fifth
-/// field with its spaces and other odd bytes written as octal escapes, and the filesystem is the first field
-/// after the lone dash, which the optional fields before it are told from by nothing else.
-fn mounts(table: &str) -> Vec<(PathBuf, String)> {
-    table
-        .lines()
-        .filter_map(|line| {
-            let mut fields = line.split(' ');
-            let point = unescaped(fields.nth(4)?);
-            let kind = fields.by_ref().skip_while(|word| *word != "-").nth(1)?;
-            Some((PathBuf::from(point), kind.to_owned()))
-        })
-        .collect()
-}
-
-/// A mount point as the kernel wrote it: \040 and its three siblings back to the bytes they stand for.
-fn unescaped(word: &str) -> String {
-    let mut out = String::with_capacity(word.len());
-    let mut bytes = word.chars();
-    while let Some(c) = bytes.next() {
-        if c != '\\' {
-            out.push(c);
-            continue;
-        }
-        let octal: String = bytes.clone().take(3).collect();
-        match u8::from_str_radix(&octal, 8) {
-            Ok(byte) if octal.len() == 3 => {
-                out.push(char::from(byte));
-                bytes.nth(2);
-            }
-            _ => out.push(c),
-        }
-    }
-    out
-}
-
 /// The sibling a death leaves sits in the workspace's own directory, which the remove and the open's sweep take
 /// away with everything else under it.
 pub fn write_json(path: &Path, value: &impl Serialize) -> Result<(), Error> {
@@ -1508,28 +1455,6 @@ mod tests {
             let refused = inside(&l.rootfs("wsp-a"), walking).unwrap_err().to_string();
             assert!(refused.contains(walking) && refused.contains("not a path inside a workspace"), "{walking}: {refused}");
         }
-    }
-
-    #[test]
-    fn the_mount_table_reads_as_the_kernel_writes_it() {
-        // The kernel's own shape: optional fields before the dash on the first line and none on the second, a
-        // point with a space in it as an octal escape, and a filesystem after the dash rather than before it.
-        let table = concat!(
-            "36 35 98:0 / /wsp rw,noatime shared:1 master:2 - xfs /dev/sda1 rw\n",
-            "37 36 0:24 / /wsp/run/wsp-a/rootfs rw - overlay overlay rw\n",
-            "38 37 98:0 /copies/wsp-a /wsp/run/wsp-a/rootfs/Users/my\\040project rw - xfs /dev/sda1 rw\n",
-        );
-        assert_eq!(
-            mounts(table),
-            vec![
-                (PathBuf::from("/wsp"), "xfs".to_owned()),
-                (PathBuf::from("/wsp/run/wsp-a/rootfs"), "overlay".to_owned()),
-                (PathBuf::from("/wsp/run/wsp-a/rootfs/Users/my project"), "xfs".to_owned()),
-            ]
-        );
-        assert_eq!(unescaped("/a\\040b\\011c"), "/a b\tc");
-        assert_eq!(unescaped("/plain\\x"), "/plain\\x");
-        assert!(mounts("not a mount line").is_empty());
     }
 
     #[test]

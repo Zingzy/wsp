@@ -12,7 +12,7 @@ import { dirname, join, posix } from "node:path";
 import { promisify } from "node:util";
 import { agentName, CATALOG_AGENTS, CLAUDE_CONFIG_DIR, GOLDEN_SETUP, GOLDEN_SMOKE, keyEnvOf, mintsToken, VAULT_VARIABLES } from "@wsp/catalog";
 import { CREATED_AT_LABEL, DAEMON_ENV_FILE, DAEMON_LISTENING_CHECK, DAEMON_PORT, DOCTOR_LABEL, EXEC_ENV, GUEST_USER_ENV, OWNER_LABEL, RUN_DIR, TOOLS_PATH, WSP_LABEL, clientWords, isMissing, isReserved, landBytes, presenceTests, presentElsewhere, presentSteps, whoseMachine, type DaemonSupervisor, type Machine, type MachineBackend, type ProvisionPlan } from "@wsp/engine";
-import { ALREADY_JOINED_LINE, capWaitLine, absentComputer, agentSignInWord, agentVersionWord, awayMsOf, boxRoomLines, doctorComputerRowLine, DoctorLineEvent, EXIT_CODES, exitClassOf, hereDaemonBehindLine, HERE_PLACE_ID, isJoinedComputer, noSuchProjectLine, onNpmBin, placeBehindLine, placeDaemonBehind, plural, runsInFolder, workspaceKind, DAEMON_MEMORY_MAX_PERCENT, DAEMON_ROOTS_PATH, DAEMON_TOKEN_PATH, DAEMON_UNIT, DAEMON_VERSION, GUEST_DAEMON_DIR, GUEST_INBOX_DIR, GUEST_MANIFEST_PATH, GUEST_WSP_PATH, guestWspShim, LOOPBACK, WSP_WORKSPACE_APPARMOR_PATH, machineLacking, machineUnanswered, NO_LINGER_LINE, NO_NODE_LINE, PLACE_NEEDS_ROOT_LINE, NO_SNAPSHOT_LISTING, NO_SYSTEMD_LINE, NO_TEMPLATES_LINE, OPEN_SOCKET_PATH, THIS_COMPUTER, isLocalWorkspace, otherHostsMachinesLine, PLACE_FOUND_END, PLACE_FOUND_MAX_BYTES, PLACE_WORKSPACE_PATH, placeDaemonPaths, TOOL_LINKS_DIR, TOOL_PREFIX, placeOwnedPaths, rootsPathIn, shellQuote, workFolderIn, templateRecordedLine, templateSkippedLine, wspBinIn, wspPackageIn, type PlaceApplied, type PlaceView, type ProjectView, type SnapshotStorage, type DaemonKind } from "@wsp/protocol";
+import { ALREADY_JOINED_LINE, capWaitLine, absentComputer, agentSignInWord, agentVersionWord, awayMsOf, boxRoomLines, doctorComputerRowLine, DoctorLineEvent, EXIT_CODES, exitClassOf, hereDaemonBehindLine, HERE_PLACE_ID, isJoinedComputer, noSuchProjectLine, onNpmBin, placeBehindLine, placeDaemonBehind, plural, runsInFolder, workspaceKind, DAEMON_MEMORY_MAX_PERCENT, DAEMON_ROOTS_PATH, DAEMON_TOKEN_PATH, DAEMON_UNIT, DAEMON_VERSION, GUEST_DAEMON_DIR, GUEST_INBOX_DIR, GUEST_MANIFEST_PATH, GUEST_WSP_PATH, guestWspShim, LOOPBACK, WSP_WORKSPACE_APPARMOR_PATH, machineLacking, machineUnanswered, NO_LINGER_LINE, NO_NODE_LINE, PLACE_NEEDS_ROOT_LINE, NO_SNAPSHOT_LISTING, NO_SYSTEMD_LINE, NO_TEMPLATES_LINE, OPEN_SOCKET_PATH, THIS_COMPUTER, isLocalWorkspace, otherHostsMachinesLine, PLACE_FOUND_END, PLACE_FOUND_MAX_BYTES, PLACE_WORKSPACE_PATH, placeDaemonPaths, TOOL_LINKS_DIR, TOOL_PREFIX, RUNTIME_ROOT, placeOwnedPaths, rootsPathIn, shellQuote, workFolderIn, templateRecordedLine, templateSkippedLine, wspBinIn, wspPackageIn, type PlaceApplied, type PlaceView, type ProjectView, type SnapshotStorage, type DaemonKind } from "@wsp/protocol";
 import { goldenHead, writeDaemonTokenScript, type AccountOrphans, type GoldenVersion, type HereDaemon, type Runtime } from "@wsp/runtime";
 import { keyIn } from "./env-keys.js";
 import WebSocket from "ws";
@@ -753,14 +753,14 @@ export const placeFoundSkippedLine = (prefix: string): string =>
   `wsp could not write down everything under ${prefix} before it was added (the listing did not finish or passed ${PLACE_FOUND_MAX_BYTES / 1024 / 1024} MB), so a remove will leave ${prefix} and the ${WSP_WORKSPACE_APPARMOR} apparmor profile for you to clear by hand`;
 
 /** Written by a joined add's deploy before anything of wsp's lands outside the home: every path there a leave run
- * as root would take that stood already, so the leave takes back only what wsp made. The workspace profile, every
- * path under wsp's install folder, the folder itself first, and every link in the folder commands are linked into,
- * each NUL-terminated since a name may hold a newline. A prefix that is a link is not named: every leave keeps one.
+ * as root would take that stood already, so the leave takes back only what wsp made. The workspace profile, the
+ * runtime folder, every path under wsp's install folder (the folder first) and every link in the folder commands are
+ * linked into, each NUL-terminated as a name may hold a newline. A prefix that is a link is not named: every leave keeps one.
  * The listing goes to a file beside the record and is renamed over it only once it ran to its end, under the cap,
  * with the end entry last, so a record cut short anywhere reads as none and its leave takes nothing. A whole record
  * already there is the first add's and stays: a second add of a computer already joined runs this before its join is
  * refused, and a listing then would name what wsp itself put there as having stood before. */
-export function placeFoundStep(place: DaemonPlace, at: { profile: string; prefix: string; links: string } = { profile: WSP_WORKSPACE_APPARMOR_PATH, prefix: TOOL_PREFIX, links: TOOL_LINKS_DIR }): string[] {
+export function placeFoundStep(place: DaemonPlace, at: { profile: string; prefix: string; links: string; runtime?: string } = { profile: WSP_WORKSPACE_APPARMOR_PATH, prefix: TOOL_PREFIX, links: TOOL_LINKS_DIR, runtime: RUNTIME_ROOT }): string[] {
   const prefix = sh(place, at.prefix);
   const links = sh(place, at.links);
   const record = sh(place, placeDaemonPaths(place.root).placeFound);
@@ -769,7 +769,7 @@ export function placeFoundStep(place: DaemonPlace, at: { profile: string; prefix
     `rm -f ${part}`,
     "found=1",
     "{",
-    `  if ${stoodTest(place, at.profile)}; then printf '%s\\0' ${sh(place, at.profile)}; fi`,
+    ...[at.profile, ...(at.runtime === undefined ? [] : [at.runtime])].map(path => `  if ${stoodTest(place, path)}; then printf '%s\\0' ${sh(place, path)}; fi`),
     `  if [ -d ${prefix} ] && [ ! -L ${prefix} ]; then find ${prefix} -print0 2>/dev/null || found=0; fi`,
     `  if [ -d ${links} ]; then find ${links} -mindepth 1 -maxdepth 1 -type l -print0 2>/dev/null || found=0; fi`,
     `} > ${part}`,

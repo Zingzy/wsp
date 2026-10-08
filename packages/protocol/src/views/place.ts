@@ -488,6 +488,10 @@ export const PlaceView = z.object({
    * that runs no workspaces and on one that has never said. */
   copies: CopyWord.optional(),
   present: z.boolean().optional(),
+  /** Whether a remove's leave takes the runtime's folder there, the copy of the image with it, as that computer last
+   * reported: one added over ssh, whose add wrote what stood before it. Absent where it never said, and on a computer
+   * joined with a code, which keeps both. */
+  takesRuntime: z.boolean().optional(),
   joinedAt: z.string().optional(),
   lastSeenAt: z.string().optional(),
   daemonVersion: z.number().int().optional(),
@@ -622,6 +626,18 @@ export const PlaceUpdateReply = z.object({
     .optional(),
 });
 export type PlaceUpdateReply = z.infer<typeof PlaceUpdateReply>;
+
+const PlaceHeldRow = z.object({ name: z.string(), threads: z.number().int() });
+
+/** What a remove of a computer takes with it: the forks wsp made there and the projects recorded on it, each with
+ * its threads, and, one line each, the work among them that is on no remote yet, which stops a remove unforced. */
+export const PlaceHolds = z.object({ forks: z.array(PlaceHeldRow), projects: z.array(PlaceHeldRow), unsaved: z.array(z.string()) });
+export type PlaceHolds = z.infer<typeof PlaceHolds>;
+
+/** What places.remove answers: whether a computer of that id was there, the forks and projects that went with it,
+ * every line of what the sweep took off it, and the one line for a computer that was not connected to sweep. */
+export const PlaceRemoved = z.object({ removed: z.boolean(), took: PlaceHolds.omit({ unsaved: true }).optional(), swept: z.array(z.string()), note: z.string().optional() });
+export type PlaceRemoved = z.infer<typeof PlaceRemoved>;
 
 export { HERE_PLACE_ID, namesPlace, placeRenameRefusal, placeSshRefusal, placeSshOtherRefusal, placeSshUncheckedRefusal, placeLoginOtherRefusal, placeLoginUncheckedRefusal, placeLoginElsewhere, placeLoginElsewhereRemovedLine, type RefusalHalves };
 

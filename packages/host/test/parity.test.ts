@@ -559,6 +559,20 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
     expect([...keys], "lines written for flags no verb reads").toEqual([]);
   });
 
+  it("every line that takes something away reads --yes the same way: the flag, its usage and its one help line", () => {
+    // Read off the line's last word, so a new line that removes, deletes, forgets, discards or leaves fails here until it asks.
+    const takesAway = COMMAND_LINES.filter(line => /(^| )(remove|delete|forget|discard|leave)$/.test(line.words));
+    expect(takesAway.map(line => line.words).sort()).toEqual(
+      ["delete", "discard", "forget", ...(CLOUD_ON ? ["image remove"] : []), "leave", "projects remove", "recipes remove", "remove", "servers remove", "skills remove", "thread forget", "worktree remove"].sort(),
+    );
+    for (const line of takesAway) {
+      expect(line.options["yes"], `wsp ${line.words} reads --yes`).toMatchObject({ type: "boolean" });
+      expect(line.usage, `wsp ${line.words} shows --yes`).toContain("[--yes]");
+      const says = CLI_VERBS.some(v => v.name === line.words) ? flagSays(line.words, "yes") : SHARED_FLAGS.find(f => f.name === "yes" && f.on.includes(line.words))?.says;
+      expect(says, `wsp ${line.words} --yes says the one line`).toBe(FLAG_WORDS["yes"]);
+    }
+  });
+
   it("every help page fits the width its rows keep, and spells the flags every line takes one way", () => {
     // A usage line wrapped to two spaces and then opened with `usage: ` stood five columns wider than the rows
     // under it, and a verb whose flags were one unbreakable bracket group ran to 147. Every page is measured here.

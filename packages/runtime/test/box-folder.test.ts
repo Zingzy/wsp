@@ -52,6 +52,21 @@ describe("a thread on a project of a computer the person joined", () => {
     expect(seen.ops).not.toContain("machine.create");
   });
 
+  it("goes with its computer in one remove, the threads in its folder with it and the folder left as it is", async () => {
+    const starts: Started[] = [];
+    const { rt, placeId, project, seen } = await joined({ adapters: { claude: answering(starts) } });
+    const at = await rt.workspaces.folderFor({ project: project.id });
+    await (await rt.sessions.start(at.workspace.id, { prompt: "hello", harness: "claude" })).finished;
+    // A folder there is the project's, so its thread counts on the project's row and nothing reads as a fork.
+    const holds = { forks: [], projects: [{ name: "spoo-ts", threads: 1 }] };
+    expect(await rt.places!.holds(placeId)).toEqual({ ...holds, unsaved: [] });
+    expect(await rt.places!.remove(placeId)).toMatchObject({ removed: true, took: holds });
+    expect(seen.ops).toContain("place.leave");
+    expect((await rt.workspaces.list()).map(w => w.id)).not.toContain(at.workspace.id);
+    expect(await rt.projects.list()).toEqual([]);
+    expect(seen.execs.filter(e => handedLine(e.cmd).includes("rm -rf") && e.cmd.includes("/root/spoo-ts"))).toEqual([]);
+  });
+
   it("never reaches the container create on a start by project, as the command line sends one", async () => {
     const starts: Started[] = [];
     const { rt, project, seen } = await joined({ adapters: { claude: answering(starts) } });

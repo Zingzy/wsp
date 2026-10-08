@@ -149,7 +149,7 @@ export function foldersArea(ctx: RuntimeContext): FoldersArea {
   /** Takes a worktree wsp made away with git, under the folder's queue: never while a turn runs there and never over
    * files no commit holds unless forced; the verb keeps a detached HEAD under refs/rescue first. The record stays,
    * gone, while threads name it, and goes with the last of them. */
-  const removeWorktree = (entry: LiveWorkspace, force: boolean, o: { ending?: boolean } = {}): Promise<void> =>
+  const removeWorktree = (entry: LiveWorkspace, force: boolean, o: { ending?: boolean; check?: boolean } = {}): Promise<void> =>
     queued(entry.record.id, async () => {
       const tree = entry.record.worktree;
       const project = ctx.projectHeld(entry.record.project);
@@ -158,8 +158,9 @@ export function foldersArea(ctx: RuntimeContext): FoldersArea {
       const copier = local?.copier;
       if (copier === undefined) throw Object.assign(new Error(NO_COPIER_HERE), { kind: "invalid" });
       if (o.ending !== true && ctx.turnRuns(entry.record.id)) throw Object.assign(new Error(WORKTREE_BUSY_LINE), { kind: "conflict" });
+      if (existsSync(tree.path) && !force) await refuseChanged(tree.path);
+      if (o.check === true) return;
       if (existsSync(tree.path)) {
-        if (!force) await refuseChanged(tree.path);
         await copier.worktreeRemove({ from: top, home: ctx.stateFolder(), path: tree.path, force });
       }
       if (o.ending !== true) await worktreeGone(entry, "removed");

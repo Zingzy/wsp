@@ -906,7 +906,7 @@ impl Ops {
     /// since the place's row already carries the word and neither took a minute.
     fn plain_copy_notice(&self, made: &CopyMade) -> Option<String> {
         (made.made == CopyWord::Plain)
-            .then(|| plain_copy_line(self.layout.root(), bundle::filesystem_at(self.layout.root()).as_deref(), made.ms))
+            .then(|| plain_copy_line(self.layout.root(), crate::mount_table::filesystem_at(self.layout.root()).as_deref(), made.ms))
     }
 
     async fn build(

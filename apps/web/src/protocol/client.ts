@@ -129,6 +129,8 @@ import {
   type WorkspaceStatus,
   WorkspaceSysEvent,
   type WorkspaceView,
+  PlaceHolds,
+  PlaceRemoved,
 } from "@wsp/protocol";
 import { slateApi, type SlateApi } from "../slate/wire.js";
 
@@ -443,14 +445,6 @@ export class ProtocolClient {
   #failAll(e: Error): void { for (const p of this.#pending.values()) p.reject(e); this.#pending.clear(); }
 }
 
-/** What a remove took: whether a computer of that id was there, what the sweep took off it, and the one line for a
- * computer that was not connected to sweep. */
-export interface PlaceRemoved {
-  removed: boolean;
-  swept: string[];
-  note?: string;
-}
-
 /** The ssh road of Add a computer: the login as a person's terminal would take it. No key rides here; the host
  * logs in through the ssh agent and config as they stand, which is what the note under the fields promises. */
 export interface SshLogin {
@@ -552,7 +546,9 @@ export interface Api {
   stopForward?(workspaceId: string, port: number): Promise<void>;
   /** Takes a computer or a provider back out: the host sweeps wsp off it over its link where it is connected, drops
    * the workspaces standing on it and the record. */
-  removePlace?(placeId: string, sudoPassword?: string): Promise<PlaceRemoved>;
+  /** What a remove of that computer takes with it, read now: its tasks and projects, and the work among them no remote has. */
+  placeHolds?(placeId: string): Promise<PlaceHolds>;
+  removePlace?(placeId: string, sudoPassword?: string, force?: boolean): Promise<PlaceRemoved>;
   /** Puts this wsp's daemon on the computer where that computer runs an older one; what it was set up with stays.
    * Answers what the daemon half came to where it ran. A client without it holds Update rather than offering one
    * that asks nobody. */
@@ -1095,7 +1091,8 @@ export function makeApi(c: ProtocolClient): Api {
     initBuild: async o => InitJob.parse((await c.request<{ job?: unknown }>("init.build", { ...o })).job),
     initSignInCode: async o => InitJob.parse((await c.request<{ job?: unknown }>("init.signInCode", { ...o })).job),
     initCancel: async () => InitJob.parse((await c.request<{ job?: unknown }>("init.cancel")).job),
-    removePlace: async (placeId, sudoPassword) => await c.request<PlaceRemoved>("places.remove", { placeId, ...(sudoPassword === undefined ? {} : { sudoPassword }) }),
+    placeHolds: async placeId => PlaceHolds.parse(await c.request("places.holds", { placeId })),
+    removePlace: async (placeId, sudoPassword, force) => PlaceRemoved.parse(await c.request("places.remove", { placeId, ...(sudoPassword === undefined ? {} : { sudoPassword }), ...(force === true ? { force: true } : {}) })),
     // Parsed, not trusted: the row the answer lands on is redrawn off it, so only what the wire type vouches for
     // reaches the table.
     dialPlace: async placeId => PlaceDial.parse(await c.request<Record<string, unknown>>("places.dial", { placeId })),

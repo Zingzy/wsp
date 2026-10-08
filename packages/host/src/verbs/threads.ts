@@ -29,7 +29,7 @@ import {
 import { hostBack, type VerbDeps, type VerbContext, usageIs, tool, type CliVerb, type Verb, PICK_OPTIONS, SEND_OPTIONS, flag, flagList, absolutePath, absoluteFolder } from "./client.js";
 import { workspaceOf, threadOf, SSH_PIPES_HERE_LINE, sshWorkspaceOf, pipeBytes, awake, napAfterDeadLaunch, withLine, stop, stopLine, forgetThread, threadForgotLine, rename, renameLine } from "./workspaces-help.js";
 import { type Turn, pickFlags, checkedStart, runTarget, forkFor, worktreeFor, openingOf, notifyOf, messageTo, startDetached, follow, hostRestartedLine, restartHost, readThread, readLine, threadHead, headLine, type AnswerRoad, ANSWER_ROADS, answerOpenAsk, followVerb, beforeSending, detachVerb, turnView } from "./turns-help.js";
-import { execOn, type ExportRequest, exportProject, withReplaceHint, agentsFlag, QUIET_LINE, QUIET_TURN, SEND_MEETS, CAP_MEETS, TurnOut, Argv, asJson, asText, turnText, detachedOut, turnOut, WorkspaceIn, AgentIn, NotifyIn, RunProjectIn, BranchIn, RunCwdIn, CwdIn, DetachIn, TitleIn, FilesIn, FastIn, PICK_INPUTS, SEND_INPUTS, schemeFlag, hostFolders, initSetup, folderLines, REASON_FLAG } from "./io.js";
+import { confirmed, execOn, type ExportRequest, exportProject, withReplaceHint, agentsFlag, QUIET_LINE, QUIET_TURN, SEND_MEETS, CAP_MEETS, TurnOut, Argv, asJson, asText, turnText, detachedOut, turnOut, WorkspaceIn, AgentIn, NotifyIn, RunProjectIn, BranchIn, RunCwdIn, CwdIn, DetachIn, TitleIn, FilesIn, FastIn, PICK_INPUTS, SEND_INPUTS, schemeFlag, hostFolders, initSetup, folderLines, REASON_FLAG } from "./io.js";
 import { SLATE_VERBS } from "./slate.js";
 
 /** The lines another terminal answers a thread's open prompt with, one per road that carries a verb: the same op the
@@ -147,14 +147,19 @@ export const THREAD_VERBS: readonly Verb[] = [
   },
   {
     name: "worktree remove",
-    usage: "wsp worktree remove <project> <branch> [--force]",
+    usage: "wsp worktree remove <project> <branch> [--force] [--yes]",
     about: "takes away a worktree wsp made for the branch, with git: refused while a thread is working in it, and over files no commit holds unless --force; the branch stays, and a worktree wsp did not make is never removed",
     page: "agent",
-    options: { force: { type: "boolean" } },
+    options: { force: { type: "boolean" }, yes: { type: "boolean" } },
     run: async ctx => {
       const [project, branch] = ctx.args;
       if (project === undefined || branch === undefined || ctx.args.length !== 2) throw usageRefusal("wsp worktree remove takes a project and a branch.", usageIs(ctx));
-      await (await ctx.client()).request("worktree.remove", { project, branch, ...(ctx.flags["force"] === true ? { force: true } : {}) });
+      const client = await ctx.client();
+      const asked = { project, branch, ...(ctx.flags["force"] === true ? { force: true } : {}) };
+      // The host's own refusals first, so the one question is asked only of a removal that would go.
+      await client.request("worktree.remove", { ...asked, check: true });
+      if (!(await confirmed(ctx, `Remove the worktree for ${branch} in ${project}?\nThe branch stays${ctx.flags["force"] === true ? ", and the files no commit holds there go" : ""}.`, branch))) return 1;
+      await client.request("worktree.remove", asked);
       ctx.out.emit({ project, branch, removed: true }, worktreeRemovedLine(branch));
       return 0;
     },
@@ -259,15 +264,17 @@ export const THREAD_VERBS: readonly Verb[] = [
   },
   {
     name: "thread forget",
-    usage: "wsp thread forget <thread>",
+    usage: "wsp thread forget <thread> [--yes]",
     about: "drops a thread no turn ever ran on, the row a launch that never got going leaves behind; refused once a turn of it did work",
     page: "agent",
-    options: {},
+    options: { yes: { type: "boolean" } },
     run: async ctx => {
       const [ref] = ctx.args;
       if (ref === undefined || ctx.args.length !== 1) throw usageRefusal("wsp thread forget takes one thread.", usageIs(ctx));
       const client = await ctx.client();
       const thread = await threadOf(client, ref);
+      await forgetThread(client, thread, { check: true });
+      if (!(await confirmed(ctx, `Forget thread ${thread.id}?\nIts row leaves this computer and the sidebar.`, thread.id))) return 1;
       await forgetThread(client, thread);
       ctx.out.emit({ threadId: thread.id, workspaceId: thread.workspaceId }, threadForgotLine(thread));
       return 0;

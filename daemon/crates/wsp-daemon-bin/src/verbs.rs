@@ -30,6 +30,10 @@ pub(crate) enum Verb {
         #[command(subcommand)]
         verb: CopyVerb,
     },
+    /// What a leave of this computer would take that no remote holds: one line per checkout or workspace under the
+    /// runtime's folder named, and nothing where it holds none. The command line's own leave reads it before it takes
+    /// anything, so both leaves read the checkouts one way.
+    Unsaved { root: PathBuf },
     /// The wsp a process inside this machine runs: the whole line goes to the host over this machine's own daemon.
     /// Nothing here reads a verb or a flag, so the words the host's command line takes are the words that work.
     #[command(disable_help_flag = true)]
@@ -271,6 +275,18 @@ pub(crate) fn run(verb: Verb) -> i32 {
         }
         Verb::Runtime { verb: RuntimeVerb::Init { cmd } } => linux::init(&cmd),
         Verb::Copy { verb } => copy(verb),
+        Verb::Unsaved { root } => match wsp_daemon::leave_unsaved(&root) {
+            Ok(lines) => {
+                for line in lines {
+                    println!("{line}");
+                }
+                0
+            }
+            Err(why) => {
+                eprintln!("{why}");
+                1
+            }
+        },
         Verb::Wsp { line } => {
             let daemon = SocketAddr::from((Ipv4Addr::LOCALHOST, numbers::DEFAULT_PORT));
             wsp_guest::run(

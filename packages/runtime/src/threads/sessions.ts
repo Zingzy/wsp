@@ -1058,7 +1058,7 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
       return { workspaceId, threads: 1 };
     },
 
-    async forget(threadId, origin) {
+    async forget(threadId, origin, o = {}) {
       await ctx.ready();
       const held = [...sessions].filter(([, s]) => s.view.threadId === threadId);
       const record = threadRecords.get(threadId);
@@ -1071,6 +1071,7 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
       // The rows that say a turn did work fall off the index cap, so the record's word stands beside them: a thread
       // whose worked turns fell off is refused however few rows it has left, and one whose turns never worked goes.
       if (threadRan(held.map(([, s]) => s.view)) || (record !== undefined && record.worked !== false)) throw Object.assign(new Error(threadForgetRefusal(threadId)), { kind: "conflict" });
+      if (o.check === true) return;
       // A transcript that does not read refuses here, before anything is changed.
       await ctx.openTranscript(workspaceId);
       // A launch that never got going can still have landed the files its send carried.

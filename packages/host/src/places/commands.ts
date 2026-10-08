@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { platform } from "node:os";
-import { addedProjectLine, defaultSeedChoice, kindForComputer, ProjectAddEvent, seedChoiceFrom, seedConsentLines, seedMenuRows, sourceKind, copiesFolder, type ProjectView, type SeedChoice, type SeedPlan, LOOPBACK, PLACE_DOOR_UNSERVED, PLACE_ADD_WORDS, PlaceUpdateReply, placeCurrentLine, PlaceAddStep, SETUP_STEP_WORDS, jsonLine, setupLines, waitLine, type AddLine, type PendingComputer, type PlaceSetup, type PlaceSetupStep, type PlaceWait, DAEMON_VERSION, joinToken, placeEngineLine, PlaceView, type DeviceView, type PlaceDoorView, authority, fmtBytes, fmtDuration, fmtSize, placeUpdateLine, shellQuote, hostKeyAsk, hostKeyUnconfirmedRefusal, PLACE_SUDO_KIND, hostKeyUnscannableRefusal, isLoopback, usageRefusal, cloudOffRefusal, SignInLine } from "@wsp/protocol";
+import { addedProjectLine, defaultSeedChoice, kindForComputer, ProjectAddEvent, seedChoiceFrom, seedConsentLines, seedMenuRows, sourceKind, copiesFolder, type ProjectView, type SeedChoice, type SeedPlan, LOOPBACK, PLACE_DOOR_UNSERVED, PLACE_ADD_WORDS, PlaceUpdateReply, placeCurrentLine, PlaceAddStep, SETUP_STEP_WORDS, jsonLine, setupLines, waitLine, type AddLine, type PendingComputer, type PlaceSetup, type PlaceSetupStep, type PlaceWait, DAEMON_VERSION, joinToken, placeEngineLine, PlaceView, type DeviceView, type PlaceDoorView, authority, fmtBytes, fmtDuration, fmtSize, placeUpdateLine, shellQuote, hostKeyAsk, hostKeyUnconfirmedRefusal, PLACE_SUDO_KIND, hostKeyUnscannableRefusal, isLoopback, usageRefusal, cloudOffRefusal, SignInLine, PlaceHolds, PlaceRemoved, placeUnsavedRefusal } from "@wsp/protocol";
 import { checkProviderKey, keyCheckLine, knownHostKey, offeredHostKey, sshLoginWord, sshWordReach, type KeyCheck, type MachineBackend, type SshReach } from "@wsp/engine";
 import { sharedOn } from "@wsp/catalog";
 import { randomBytes } from "node:crypto";
@@ -15,11 +15,11 @@ import { systemOpener } from "../relay.js";
 import type { RelayTerminal } from "../signin-relay.js";
 import { pairOnLoopbackLine, reachAddresses } from "../pairing.js";
 import { systemRunner, type ServiceRunner } from "../service.js";
-import { dialHost, hostPlatform, table, type DialOpts, type HostClient } from "../verbs.js";
+import { confirmedAt, dialHost, hostPlatform, table, type DialOpts, type HostClient } from "../verbs.js";
 import type { HostStarter } from "../host-start.js";
 import { envFileFor, writeEnvFile } from "../env-keys.js";
 import { openWaits, watchSetup, type SetupWatch } from "../setup-follow.js";
-import { ADD_FLAGS_REFUSAL, SIGN_IN_FLAGS_REFUSAL, addLines, addRefusal, addableProviders, boxNotSignedInLine, boxReplacesLine, boxSignedInLine, noPlaceLine, onePlace, placeNoLoginsLine, providerPlaceLine, removeLines, signInAgentRefusal, signsInOnComputer } from "./add-words.js";
+import { ADD_FLAGS_REFUSAL, SIGN_IN_FLAGS_REFUSAL, addLines, addRefusal, addableProviders, boxNotSignedInLine, boxReplacesLine, boxSignedInLine, noPlaceLine, onePlace, placeNoLoginsLine, providerPlaceLine, removeLines, removeQuestion, signInAgentRefusal, signsInOnComputer } from "./add-words.js";
 import type { AddFlags, SshWordReader } from "./add-words.js";
 import { hostKeyHere } from "./this-computer.js";
 
@@ -609,9 +609,18 @@ async function runBoxSignIn(io: CliIO, client: HostClient, place: PlaceView, age
   }
 }
 
-export async function removeCommand(io: CliIO, opts: PlaceOpts, args: readonly string[], deps: PlaceDeps = systemDeps): Promise<number> {
+/** The words wsp remove reads off its line beyond the computer it names. */
+export interface RemoveFlags {
+  yes?: boolean;
+  force?: boolean;
+  json?: boolean;
+}
+
+export const REMOVE_USAGE = "wsp remove <computer> [--yes] [--force] [--json]";
+
+export async function removeCommand(io: CliIO, opts: PlaceOpts, args: readonly string[], flags: RemoveFlags = {}, deps: PlaceDeps = systemDeps): Promise<number> {
   const [ref] = args;
-  if (ref === undefined || args.length !== 1) throw usageRefusal("wsp remove takes one place.", "usage: wsp remove <place>");
+  if (ref === undefined || args.length !== 1) throw usageRefusal("wsp remove takes one computer.", `usage: ${REMOVE_USAGE}`);
   const aim = aimHere("remove", opts);
   const client = await deps.dial(opts.statePath, dialHere(io, opts, aim));
   const typed = `wsp remove ${ref}`;
@@ -622,8 +631,18 @@ export async function removeCommand(io: CliIO, opts: PlaceOpts, args: readonly s
       return 1;
     }
     const place = picked.place;
-    const answer = await withSudoAsk(io, place.road?.ssh ?? place.name, sudoPassword =>
-      client.request<{ removed: boolean; swept: string[]; note?: string }>("places.remove", { placeId: place.id, ...(sudoPassword !== undefined ? { sudoPassword } : {}) }),
+    // What goes with it is read before the one question, so the question names it and work no remote has stops
+    // the line before anybody is asked to say yes to losing it.
+    const holds = PlaceHolds.parse(await client.request("places.holds", { placeId: place.id }));
+    if (holds.unsaved.length > 0 && flags.force !== true) {
+      const refused = placeUnsavedRefusal(place.name, holds.unsaved);
+      throw usageRefusal(refused.said, refused.fix);
+    }
+    if (!(await confirmedAt(io, flags.yes === true, removeQuestion(place.name, holds), place.name))) return 1;
+    const answer = PlaceRemoved.parse(
+      await withSudoAsk(io, place.road?.ssh ?? place.name, sudoPassword =>
+        client.request("places.remove", { placeId: place.id, ...(sudoPassword !== undefined ? { sudoPassword } : {}), ...(flags.force === true ? { force: true } : {}) }),
+      ),
     );
     if (!answer.removed) {
       // The list this place was picked out of, so a host that holds others still names them: the record went
@@ -637,7 +656,8 @@ export async function removeCommand(io: CliIO, opts: PlaceOpts, args: readonly s
       answered => answered.devices.filter(d => d.name === place.name).map(d => d.id),
       () => [],
     );
-    for (const line of removeLines(place.name, answer, held)) io.log(line);
+    if (flags.json === true) io.log(jsonLine({ ...answer, ...(held.length > 0 ? { devices: held } : {}) }));
+    else for (const line of removeLines(place.name, answer, held)) io.log(line);
     return 0;
   } finally {
     client.close();

@@ -558,9 +558,9 @@ export function stopLine(stopped: Stopped): string {
  * refuses one whose turn ran and nothing on the machine is touched either way. A row from before threads carries
  * no thread id, so it is refused here in its own words rather than dialled for and answered as a thread nobody has,
  * which is the guard the app's row action makes before it offers the action at all. */
-export async function forgetThread(client: HostClient, thread: ThreadView): Promise<void> {
+export async function forgetThread(client: HostClient, thread: ThreadView, o: { check?: boolean } = {}): Promise<void> {
   if (thread.threadId === undefined) throw new Error(threadWithoutIdRefusal(thread.id));
-  await client.request("sessions.forget", { threadId: thread.threadId });
+  await client.request("sessions.forget", { threadId: thread.threadId, ...(o.check === true ? { check: true } : {}) });
 }
 
 /** The line every director prints for a forget, naming what nobody loses: no turn of the thread did any work. */

@@ -4,7 +4,7 @@ import { existsSync } from "node:fs";
 import { GUEST_HOME, remoteHost } from "@wsp/catalog";
 import { NotFirstLifeError, RestoreUnfinishedError, ResumeUnansweredError, goldenHead, isMissing, readGone, MachineAliveError, answerOf, diskUse, projectSnapshotName, syncDisk, CHECK_MS, INLINE_EXEC_MS, checkScripts, projectInstalls } from "@wsp/engine";
 import type { ProjectGolden, ProjectView, WorkspaceProject } from "@wsp/protocol";
-import { noParentWorkspaceLine, parentProjectRefusal, BringBackResult, GitPrReply, GitPushReply, GitCommitReply, GitDiscardReply, GitDiffReply, GitRunLogReply, GitPrMergeReply, GitMergeInReply, DETACHED_HEAD, leadBusyRefusal, FIX_CHECK_OR_CHILD, childOnNoBranchRefusal, mergeChildPrompt, mergeIntoOwnRefusal, noRemoteForTreeLine, type TreeRecord, GitPrReplyReply, GitPrResolveReply, GitPrReactReply, REPLY_EMPTY_LINE, type PullRequestItem, GIT_DIFF_CAP_BYTES, pullRequestSendPrompt, checkFailedPrompt, conflictsPrompt, checkNotFailedRefusal, childPushedLine, isPullRequestFact, mergeMethodRefusal, noPullRequestRefusal, noSuchCheckRefusal, notOpenRefusal, AUTO_MERGE_OFF_LINE, DRAFT_NOTES, cleanCheckoutLine, commitMessage, cutDiff, draftPrompt, agentsFrom, agentsKindRefusal, agentsMayDrive, askerOf, scopeOf, spawnActRefusal, spawnGoldenRefusal, workspaceIdOf } from "@wsp/protocol";
+import { noParentWorkspaceLine, parentProjectRefusal, BringBackResult, GitPrReply, GitPushReply, GitCommitReply, GitDiscardReply, GitStatusReply, noChangeLine, GitDiffReply, GitRunLogReply, GitPrMergeReply, GitMergeInReply, DETACHED_HEAD, leadBusyRefusal, FIX_CHECK_OR_CHILD, childOnNoBranchRefusal, mergeChildPrompt, mergeIntoOwnRefusal, noRemoteForTreeLine, type TreeRecord, GitPrReplyReply, GitPrResolveReply, GitPrReactReply, REPLY_EMPTY_LINE, type PullRequestItem, GIT_DIFF_CAP_BYTES, pullRequestSendPrompt, checkFailedPrompt, conflictsPrompt, checkNotFailedRefusal, childPushedLine, isPullRequestFact, mergeMethodRefusal, noPullRequestRefusal, noSuchCheckRefusal, notOpenRefusal, AUTO_MERGE_OFF_LINE, DRAFT_NOTES, cleanCheckoutLine, commitMessage, cutDiff, draftPrompt, agentsFrom, agentsKindRefusal, agentsMayDrive, askerOf, scopeOf, spawnActRefusal, spawnGoldenRefusal, workspaceIdOf } from "@wsp/protocol";
 import { isLocalWorkspace, kindWords, noCommandsYetLine, readingRoad, forgetUndrivenRefusal, goneRefusal, goneWords, imageMoveRefusal, inFolder, machineWord, deleteRefusedLine, snapshotRefusedLine, snapshotManagerLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, refusalLine, notOnThisComputerLine, noBranchesLine, notMadeWorktreeLine, WORKTREE_FORCE_LINE, copiesFolder, copyTakesNone, placeBranchLine, runsInFolder, workspaceLands, shellQuote, WAKE_STOPPED, wakeAsksIn, wakeGaveUpLine, workspaceState, HERE_PLACE_ID, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, refusal, execOutsideFix, execOutsideRefusal, spawnFolderRefusal, spawnReachFix, spawnReachRefusal, spawnRepositoryWorkspaceRefusal, SPAWN_FOLDER_FIX, SPAWN_REPOSITORY_WORKSPACE_FIX } from "@wsp/protocol";
 import { harnessExec, putFiles } from "@wsp/engine";
 import { ownerRepoOf } from "@wsp/protocol";
@@ -718,7 +718,7 @@ export function workspacesArea(ctx: RuntimeContext): WorkspacesArea {
       return { path: tree?.path ?? top, branch, made: tree?.made === true };
     },
 
-    async worktreeRemove({ project: named, branch, force }, origin) {
+    async worktreeRemove({ project: named, branch, force, check }, origin) {
       await ctx.ready();
       const project = await ctx.projectsDoor.resolve(named, origin);
       const top = project.git?.top;
@@ -731,7 +731,7 @@ export function workspacesArea(ctx: RuntimeContext): WorkspacesArea {
       if (entry !== undefined) ctx.refuseRelayed(entry.record, origin);
       if (entry?.record.worktree?.made !== true) throw Object.assign(new Error(notMadeWorktreeLine(branch)), { kind: "invalid" });
       if (force === true && scopeOf(origin) !== undefined) throw Object.assign(new Error(WORKTREE_FORCE_LINE), { kind: "usage" });
-      await ctx.removeWorktree(entry, force === true);
+      await ctx.removeWorktree(entry, force === true, check === true ? { check: true } : {});
     },
 
     async checkout(id, origin) {
@@ -744,9 +744,14 @@ export function workspacesArea(ctx: RuntimeContext): WorkspacesArea {
       return checkout === undefined ? {} : { checkout };
     },
 
-    async discard({ workspaceId, path }, origin) {
+    async discard({ workspaceId, path, check }, origin) {
       const entry = await ctx.entryOf(workspaceId, origin);
       await ctx.copyBlocked(entry);
+      if (check === true) {
+        const said = GitStatusReply.parse(await ctx.withDaemon(entry, ask => ask({ op: "git.status", cwd: ctx.checkoutOf(entry.record) })));
+        if (said.editsUnread !== true && !said.entries.some(e => e.xy !== "!!" && e.path === path)) throw new Error(noChangeLine(path));
+        return { path };
+      }
       const put = GitDiscardReply.parse(await ctx.queued(entry.record.id, () => ctx.withDaemon(entry, ask => ask({ op: "git.discard", cwd: ctx.checkoutOf(entry.record), path }))));
       await ctx.readCheckout(entry, true);
       return put;

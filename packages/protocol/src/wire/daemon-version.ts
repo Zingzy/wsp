@@ -147,6 +147,7 @@ const DAEMON_CONTENTS = [
   "871dd3f376bcbde4e5f98c8d0777e75b0c36df1c81436b00c0749726d8122ccd",
   "664b32a5e3b463b18771d6a9f6938ea3f1312c96898a9951cb32a1ed15185ed0",
   "9790029ce878d8248fe04d470b8da1e4060b686480f088f0d9d79c7b76e7064d",
+  "1cfddd629ba79a1d129471b014978b189f4bfa032b0fdfa4807cab0239489ff0",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -530,7 +531,14 @@ const DAEMON_CONTENTS = [
  * leave or by a container's bind staging. ports.watch takes a name, so one socket holds a watch per name with roots, a
  * folder and cgroups of its own, and each port event says which watch it is for; a process row carries the cgroup v2
  * path it stands in.
- * Version 137: shells read apart, panel ptys never reach the drawer. */
+ * Version 137: shells read apart, panel ptys never reach the drawer.
+ * Version 138: A root leave takes the runtime folder whole unless the add found it standing, something is mounted under
+ * it or the mount table cannot be read, and stops before anything goes, unless force, where a workspace's copy or a
+ * project checkout there holds commits no remote has or edits it cannot read; `wsp-daemon unsaved <root>` prints that
+ * same read, counts a branch whose name is not UTF-8 and no commit a tag alone keeps, follows a link in a checkout's
+ * git folder that stays inside the checkout, and exits 1 where a folder of the runtime's cannot be listed; the place
+ * report says whether the leave would take the runtime folder, and the daemon version the wsp it was started with says
+ * it was built with, read off `<wsp> --version --json`. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
@@ -588,6 +596,14 @@ export function placeDaemonBehind(place: { daemonVersion?: number }): string | u
 
 /** The first daemon that answers fs.folders. */
 export const FS_FOLDERS_DAEMON_VERSION = 73;
+
+/** The first build whose `wsp leave` takes --yes and --force, asks off a terminal without --yes, and takes the
+ * runtime's folder. A gate written as this build's own daemon is pinned to its number by the landing's cut. */
+export const LEAVE_ASKS_DAEMON_VERSION = 138;
+
+/** Whether the `wsp leave` a computer runs is that build or later, read off the version its own wsp says it was built
+ * with and never its daemon's: an update moves the daemon alone. A wsp that said none runs an older leave. */
+export const leaveAsks = (report: { wspDaemonVersion?: number }): boolean => (report.wspDaemonVersion ?? 0) >= LEAVE_ASKS_DAEMON_VERSION;
 
 /** The line that moves a place onto this wsp's daemon, which is the fix half of every sentence about a place that
  * is behind. */

@@ -135,6 +135,8 @@ async fn add(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct RemoveIn {
     pub project: String,
+    #[serde(default)]
+    pub force: Option<bool>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -168,11 +170,15 @@ async fn remove(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
     struct Removed {
         said: String,
     }
-    let RemoveIn { project } = input(REMOVE_NAME, arguments)?;
+    let RemoveIn { project, force } = input(REMOVE_NAME, arguments)?;
     let client = host.client().await?;
     let resolved: Resolved = client.request("projects.resolve", params([("ref", Value::from(project))])).await?;
     let Id { id } = read(&resolved.project, "projects.resolve")?;
-    let Removed { said } = client.request("projects.remove", params([("projectId", Value::from(id))])).await?;
+    let mut asked = params([("projectId", Value::from(id))]);
+    if force == Some(true) {
+        asked.insert("force".to_owned(), Value::Bool(true));
+    }
+    let Removed { said } = client.request("projects.remove", asked).await?;
     Ok(Answer::text(said.clone(), &RemoveOut { project: resolved.project, said }))
 }
 

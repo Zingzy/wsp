@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 //! The agents' version reads: one read per binary as it stands, on the tools PATH, inside a deadline.
+use super::versions::{spawn_unless_busy, VERSION_LINE_MAX};
 use super::*;
+use std::time::Instant;
 
 /// A binary that prints a line and records that it ran, so a second read can be told from a held one.
 fn fake_bin(dir: &Path, name: &str, prints: &str, counter: &Path) -> PathBuf {

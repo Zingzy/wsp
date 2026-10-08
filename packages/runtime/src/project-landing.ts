@@ -7,7 +7,7 @@
 // module and its row.
 import { CLAUDE_CONFIG_DIR, GUEST_HOME } from "@wsp/catalog";
 import { envInput, INSTALL_MS, installScript, projectInstalls, withEnvFromInput, type Machine } from "@wsp/engine";
-import { claudeMemoryDir, claudeProjectKey, NO_IMAGE_FOR_SEED, placeDaemonPaths, projectLeftOnComputerLine, projectPathOn, projectRemovedAtProviderLine, projectRemovedHereLine, seedBytes, seedCommitsLandedLine, seedCommitsLostLine, SEED_DIR, SEED_MEMORY_DIR, SEED_PATCH, seedingLine, seedMemoryKeptLine, shellLine, shellQuote, type MachineBind, type ProjectAddStage, type ProjectSource, type ProjectView, type SeedChoice, type SeedPlan } from "@wsp/protocol";
+import { claudeMemoryDir, claudeProjectKey, NO_IMAGE_FOR_SEED, placeDaemonPaths, projectLeftOnComputerLine, projectPathOn, projectRemovedAtProviderLine, projectRemovedHereLine, seedBytes, seedCommitsLandedLine, seedCommitsLostLine, SEED_DIR, SEED_MEMORY_DIR, SEED_PATCH, seedingLine, seedMemoryKeptLine, SEEDED_REFS, projectFolderNamed, shellLine, shellQuote, unpushedLine, type ExecResult, type MachineBind, type ProjectAddStage, type ProjectSource, type ProjectView, type SeedChoice, type SeedPlan } from "@wsp/protocol";
 import type { ProjectSourceModule } from "./project-sources.js";
 
 /** How far the add has got, as the door turns each one into an event. */
@@ -104,6 +104,9 @@ export interface ProjectLanding {
   folderStands?(project: ProjectView, deps: LandingDeps): Promise<boolean>;
   /** Puts the files of a seed archive into the folder the project stands in, leaving a file already there as it is. */
   seedInto?(project: ProjectView, tar: Buffer, deps: LandingDeps): Promise<void>;
+  /** What the checkout this computer holds of the project has that no remote does, as a remove names it: nothing
+   * where it holds none, or a road whose checkout lives nowhere a remove of its computer would take. */
+  unsaved?(project: ProjectView, deps: LandingDeps): Promise<string | undefined>;
   /** The folders of the computer's own every workspace of this project mounts. */
   workspaceBinds(project: ProjectView): MachineBind[];
 }
@@ -169,6 +172,7 @@ export function patchScript(o: PatchStep & { checkout: string }): string {
     "set -e",
     shellLine([...at, "checkout", "-B", o.branch, o.base]),
     shellLine([...at, "am", "--3way", `${o.checkout}/${SEED_PATCH}`]),
+    shellLine([...at, "update-ref", `${SEEDED_REFS}/${o.branch}`, "HEAD"]),
     shellLine([...at, "checkout", o.back]),
     shellLine([...at, "rev-list", "--count", `${o.base}..${o.branch}`]),
   ].join("\n");
@@ -193,6 +197,69 @@ export function patchCleanupScript(o: PatchStep & { checkout: string }): string 
 /** What the memory step prints where the computer already keeps memory at the agent's path: read off the step's
  * own output, since the script is the only thing that sees what stands there. */
 export const MEMORY_KEPT_MARK = "wsp-memory-kept";
+
+/** What the unsaved read answers for a folder that holds no git checkout, which has nothing a remote could hold. */
+const NO_CHECKOUT_MARK = "wsp-no-checkout";
+
+/** One line counting what a checkout holds that no remote does, read the same way for a project folder on its
+ * computer and for a fork's checkout inside the fork: the commits on any branch or at any worktree's HEAD that no
+ * remote branch carries and the seed did not bring from the person's own folder, the uncommitted files of every
+ * worktree, and the stashes. A tag is not counted, since a clone fetches the remote's tags with no mark saying the
+ * remote holds them. A computer with no git, a `.git` git cannot open (a dangling link included), and any step of
+ * the read that fails answer nothing, which reads as a checkout that could not be read rather than a clean one. */
+export function unsavedScript(checkout: string): string {
+  const git = "git -c safe.directory='*' -c core.fsmonitor=false --no-optional-locks -C";
+  const at = shellQuote(checkout);
+  return [
+    `[ -d ${at} ] || { echo ${NO_CHECKOUT_MARK}; exit 0; }`,
+    "command -v git >/dev/null 2>&1 || exit 1",
+    // Before git is asked: git passes over a .git link that leads nowhere and reads the repository above the folder.
+    `[ -L ${at}/.git ] && [ ! -e ${at}/.git ] && exit 1`,
+    `if [ -e ${at}/.git ] || [ -L ${at}/.git ]; then ${git} ${at} rev-parse --git-dir >/dev/null 2>&1 || exit 1;`,
+    `else ${git} ${at} rev-parse --git-dir >/dev/null 2>&1 || { echo ${NO_CHECKOUT_MARK}; exit 0; }; fi`,
+    `trees=$(${git} ${at} worktree list --porcelain) || exit 1`,
+    "heads=$(printf '%s\\n' \"$trees\" | sed -n 's/^HEAD //p' | grep -v '^0*$')",
+    `ahead=$(${git} ${at} rev-list --count --branches $heads --not --remotes ${shellQuote(`--glob=${SEEDED_REFS}/*`)}) || exit 1`,
+    "changed=0",
+    "tree=",
+    "while IFS= read -r line; do",
+    '  case $line in',
+    '    "worktree "*) tree=${line#worktree } ;;',
+    "    bare) tree= ;;",
+    '    "")',
+    '      if [ -n "$tree" ] && [ -d "$tree" ]; then',
+    `        said=$(${git} "$tree" status --porcelain) || exit 1`,
+    "        [ -z \"$said\" ] || changed=$((changed + $(printf '%s\\n' \"$said\" | wc -l)))",
+    "      fi",
+    "      tree= ;;",
+    "  esac",
+    "done <<WSP_TREES",
+    "$trees",
+    "",
+    "WSP_TREES",
+    `stashed=$(${git} ${at} stash list) || exit 1`,
+    "stashes=0",
+    "[ -z \"$stashed\" ] || stashes=$(($(printf '%s\\n' \"$stashed\" | wc -l)))",
+    'echo "$ahead $changed $stashes"',
+  ].join("\n");
+}
+
+/** The line a remove names a checkout by, off what `unsavedScript` printed there: nothing for a clean checkout or a
+ * folder git does not track, and "could not read" for a read that failed or printed anything else. */
+export function unsavedOf(name: string, ran: ExecResult | undefined): string | undefined {
+  const said = ran?.exitCode === 0 ? lastLine(ran.stdout) : undefined;
+  if (said === NO_CHECKOUT_MARK) return undefined;
+  const counts = (said ?? "").split(/\s+/).map(Number);
+  if (counts.length !== 3 || !counts.every(n => Number.isInteger(n) && n >= 0)) return unpushedLine(name, undefined);
+  const [ahead, changed, stashes] = counts as [number, number, number];
+  return unpushedLine(name, { branch: "", ahead, behind: 0, changed, ...(stashes > 0 ? { stashes } : {}), readAt: 0 });
+}
+
+/** The unsaved read of one checkout, run where `run` runs a command: on the computer for a project folder, inside
+ * the fork for a fork's checkout. */
+export async function readUnsaved(name: string, checkout: string, run: (cmd: string, o: { timeoutMs: number }) => Promise<ExecResult>): Promise<string | undefined> {
+  return unsavedOf(name, await run(unsavedScript(checkout), { timeoutMs: STEP_MS }).catch(() => undefined));
+}
 
 /** The last of the seed: the memory folder moved out of the checkout onto the computer, where every workspace of
  * the project reads it, and wsp's own folder and the archive gone from the checkout every copy is taken of.
@@ -404,6 +471,10 @@ const boxLanding: ProjectLanding = {
     await deps.land(machine, seedTar, tar);
     const ran = await machine.exec(seedIntoScript({ checkout: project.path, seedTar }), { timeoutMs: STEP_MS });
     if (ran.exitCode !== 0) throw new Error(lastLine(ran.stderr) ?? lastLine(ran.stdout) ?? `putting the kept files into ${project.path} exited ${ran.exitCode}`);
+  },
+  async unsaved(project, deps) {
+    if (project.checkout === undefined) return undefined;
+    return readUnsaved(projectFolderNamed(project.name, project.checkout), project.checkout, (cmd, o) => computerOf(deps).machine.exec(cmd, o));
   },
   async land(o, deps) {
     const { machine, home } = computerOf(deps);

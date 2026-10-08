@@ -6,13 +6,15 @@ import { createPrivateKey, sign, verify } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import WebSocket, { WebSocketServer } from "ws";
-import { NO_PLACE_FILE_LINE, NOT_ON_THIS_ROAD, PLACE_UNKNOWN_REFUSAL, PlaceProveRequest, PlaceReport, hostKeyRefusal, hostQuietLine, linkedLine, placeDaemonPaths, placeLinkTranscript, unknownOpLine, type PlaceFile } from "@wsp/protocol";
+import { DAEMON_VERSION, NO_PLACE_FILE_LINE, NOT_ON_THIS_ROAD, PLACE_UNKNOWN_REFUSAL, PlaceProveRequest, PlaceReport, hostKeyRefusal, hostQuietLine, linkedLine, placeDaemonPaths, placeLinkTranscript, unknownOpLine, type PlaceFile } from "@wsp/protocol";
 import { freshEphemeral, makeSeal, sealKeys, sharedSecret, type Seal } from "@wsp/runtime";
 import { closeFakePlaceHosts, fakePlaceHost, listening, placePair, settled, writePlaceFile } from "./fake-place-host.js";
 import { daemonUnderTest, type DaemonUnderTest, type DaemonUnderTestArgs } from "./harness.js";
 import { rejectedEvents } from "./wire-events.js";
+import { writeStub } from "../../protocol/test/stub-script.js";
 
 const dirs: string[] = [];
 const servers: WebSocketServer[] = [];
@@ -72,6 +74,29 @@ describe("the link a place dials", () => {
     // The agents are the ids off the list it was started with whose command is on PATH now: sh is, the other is not.
     expect(report).toMatchObject({ name: "old-macbook", dialed: host.url, daemonPort: d.port, wsp: ["/usr/local/bin/node", "/opt/wsp/bin.js"], login: { HOME: place.home }, agents: ["a1"] });
     expect(report.shape.cpu).toBeGreaterThan(0);
+  });
+
+  it("tells the host which build the wsp it runs is, off that wsp's own answer, and none off a wsp from before the question", async () => {
+    const key = placePair();
+    const host = await fakePlaceHost({ key });
+    const place = placeFile([host.url], key.publicKey, placePair().privateKeyPem);
+    // This checkout's own built wsp, which the daemon asks as it asks an agent for its version.
+    const d = await placeDaemon(place, { wspArgv: [process.execPath, fileURLToPath(new URL("../../host/dist/bin.js", import.meta.url))] });
+    await host.socket;
+    await untilLogged(d, line => line === linkedLine(host.url));
+    expect(PlaceReport.parse(PlaceProveRequest.parse(host.proofs[0]).report).wspDaemonVersion).toBe(DAEMON_VERSION);
+
+    // A wsp from before it answers `--version --json` with its version line alone, which names no build: the host
+    // then hands that computer the leave such a wsp reads.
+    const older = await fakePlaceHost({ key });
+    const again = placeFile([older.url], key.publicKey, placePair().privateKeyPem);
+    const wsp = writeStub(join(again.home, "wsp"), "#!/bin/sh\necho 'wsp 0.2.0'\n");
+    const o = await placeDaemon(again, { wspArgv: [wsp] });
+    await older.socket;
+    await untilLogged(o, line => line === linkedLine(older.url));
+    const report = PlaceReport.parse(PlaceProveRequest.parse(older.proofs[0]).report);
+    expect(report.wsp).toEqual([wsp]);
+    expect(report.wspDaemonVersion).toBeUndefined();
   });
 
   it("dials the second address when the first refuses the connect, and names both in its log", async () => {

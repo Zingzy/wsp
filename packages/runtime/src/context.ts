@@ -498,7 +498,7 @@ export interface FoldersArea {
   readonly worktreeFolder: (project: ProjectView, top: string, branch: string, parent?: string, madeFor?: string) => Promise<LiveWorkspace>;
   readonly folderFor: (o: { project?: string; branch?: string; cwd?: string; picks?: StartPicksAsked }, origin: Caller | undefined) => Promise<{ entry: LiveWorkspace; cwd?: string }>;
   readonly queued: <T>(id: string, work: () => Promise<T>) => Promise<T>;
-  readonly removeWorktree: (entry: LiveWorkspace, force: boolean, o?: { ending?: boolean }) => Promise<void>;
+  readonly removeWorktree: (entry: LiveWorkspace, force: boolean, o?: { ending?: boolean; check?: boolean }) => Promise<void>;
   readonly refuseChanged: (path: string) => Promise<void>;
   readonly dropCheckpoints: (entry: LiveWorkspace, threadId: string) => Promise<void>;
   readonly holdsThread: (workspaceId: string) => boolean;
@@ -728,7 +728,7 @@ export interface ProjectsArea {
   readonly copyImport: (entry: LiveWorkspace, o: ProjectImportOptions, report: ImportReport) => Promise<ImportLanded>;
   readonly landingKind: (computer: string, at: MachineBackend | undefined) => ProjectLanding["kind"];
   readonly landingDeps: (computer: string) => Promise<{ deps: LandingDeps; at: MachineBackend | undefined; placeId: string | undefined }>;
-  readonly projectsDoor: { seedPlan(source: string): Promise<SeedPlan>; add(o: { source: string; on?: string; name?: string; base?: string; into?: string; seed?: SeedChoice; id?: string; createdAt?: string; }, origin?: Caller): Promise<ProjectView & { notice?: string; }>; list(origin?: Caller): Promise<ProjectView[]>; computers(): Promise<{ id: string; name: string; }[]>; resolve(ref: string, origin?: Caller): Promise<ProjectView>; folderStands(id: string): Promise<boolean>; seedInto(id: string, plan: SeedPlan, files: readonly string[]): Promise<void>; remove(id: string, origin?: Caller): Promise<{ said: string; }>; };
+  readonly projectsDoor: { seedPlan(source: string): Promise<SeedPlan>; add(o: { source: string; on?: string; name?: string; base?: string; into?: string; seed?: SeedChoice; id?: string; createdAt?: string; }, origin?: Caller): Promise<ProjectView & { notice?: string; }>; list(origin?: Caller): Promise<ProjectView[]>; computers(): Promise<{ id: string; name: string; }[]>; resolve(ref: string, origin?: Caller): Promise<ProjectView>; unsaved(project: ProjectView): Promise<string | undefined>; folderStands(id: string): Promise<boolean>; seedInto(id: string, plan: SeedPlan, files: readonly string[]): Promise<void>; remove(id: string, origin?: Caller, o?: { force?: boolean; check?: boolean }): Promise<{ said: string; unsaved?: string }>; };
   readonly projects: Runtime["projects"];
 }
 

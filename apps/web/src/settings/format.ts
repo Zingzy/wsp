@@ -94,6 +94,12 @@ export const WHERE_WORDS = {
   removeDescription: (computer: string, here: string): string => onceNamed(here, h => `wsp comes off ${computer} and its threads' records leave ${h}. Your files there stay.`),
   removeCloudDescription: "Deletes every machine wsp made there and forgets the key.",
   removing: "Removing…",
+  /** The confirm where a task or a project folder there holds work no remote has, which the remove takes with it. */
+  removeAnyway: "Remove anyway",
+  /** The fix under that work's names: the ways to keep it, and what the button does. */
+  unsavedFix: "Export a task's project or push its branch, and copy a project folder's work off the computer from the path named; Remove anyway takes it with the computer.",
+  /** The slot's note while the host reads what goes with the computer, the confirm held until it lands. */
+  readingHolds: "Reading what goes with it.",
   cancel: "Cancel",
   /** Why a row's action is held: the op that carries it is not on the wire yet. */
   notYet: "not on this wsp yet",

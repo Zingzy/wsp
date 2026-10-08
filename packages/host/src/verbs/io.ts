@@ -206,10 +206,15 @@ export function agentsFlag(value: string | undefined): string[] | undefined {
 /** The one question a drop asks unless --yes, and the one line it prints when the answer is anything but yes. Off a
  * terminal nobody can answer, so the line without --yes is refused as written. */
 export async function confirmed(ctx: VerbContext, question: string, name: string): Promise<boolean> {
-  if (ctx.flags["yes"] === true) return true;
-  if (ctx.io.isTTY !== true) throw usageRefusal(`${question.split("\n")[0]} There is no terminal to answer on.`, "Pass --yes to say yes.");
-  if ((await ctx.io.ask(question)) === "yes") return true;
-  ctx.io.error(`${name} kept`);
+  return confirmedAt(ctx.io, ctx.flags["yes"] === true, question, name);
+}
+
+/** The same question for a line of the shared parse, which reads --yes off its own flags. */
+export async function confirmedAt(io: CliIO, yes: boolean, question: string, name: string): Promise<boolean> {
+  if (yes) return true;
+  if (io.isTTY !== true) throw usageRefusal(`${question.split("\n")[0]} There is no terminal to answer on.`, "Pass --yes to say yes.");
+  if ((await io.ask(question)) === "yes") return true;
+  io.error(`${name} kept`);
   return false;
 }
 

@@ -82,9 +82,12 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * the install used, and waits for that computer to dial back running it. The workspaces on it and what it was set
    * up with are kept. Answers a PlaceUpdateReply. */
   z.object({ id: reqId, op: z.literal("places.update"), placeId: z.string(), sudoPassword: SudoPassword.optional() }),
-  /** Takes a place back out: sweeps wsp off that computer over its link, drops the workspaces standing on it and
-   * the place record. Answers `{ removed, swept, note? }`. */
-  z.object({ id: reqId, op: z.literal("places.remove"), placeId: z.string(), sudoPassword: SudoPassword.optional() }),
+  /** What a remove of one place would take with it, read now and taking nothing: answers a PlaceHolds. */
+  z.object({ id: reqId, op: z.literal("places.holds"), placeId: z.string() }),
+  /** Takes a place back out: deletes the forks standing on it, takes the projects recorded on it out of this wsp,
+   * sweeps wsp off that computer and drops the place record. Refused, naming them, while a fork or a project there
+   * holds work no remote has, unless `force`. Answers a PlaceRemoved. */
+  z.object({ id: reqId, op: z.literal("places.remove"), placeId: z.string(), sudoPassword: SudoPassword.optional(), force: z.boolean().optional() }),
   /** Runs the doctor's computer road here, for a computer this host holds the link to: the six steps against that
    * link, and every line of them pushed as a doctor.line event under `doctorId` to the sockets subscribed to
    * events. The id is the caller's own, minted before the request, since the first line is said before the reply
@@ -280,11 +283,11 @@ const RuntimeOp = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("folder.make"), project: z.string() }),
   /** Takes a wsp worktree away with git, refused while a turn runs in it and, without force, while it holds files
    * no commit has. A worktree wsp did not make is never removed. */
-  z.object({ id: reqId, op: z.literal("worktree.remove"), project: z.string(), branch: z.string(), force: z.boolean().optional() }),
+  z.object({ id: reqId, op: z.literal("worktree.remove"), project: z.string(), branch: z.string(), force: z.boolean().optional(), check: z.boolean().optional() }),
   /** The copy's checkout, read again unless the host read it moments ago, and answered as a CheckoutReply. */
   z.object({ id: reqId, op: z.literal("workspaces.checkout"), workspaceId: z.string() }),
   /** Puts one changed file of the copy back as HEAD has it and answers a GitDiscardReply. */
-  z.object({ id: reqId, op: z.literal("workspaces.discard"), workspaceId: z.string(), path: z.string() }),
+  z.object({ id: reqId, op: z.literal("workspaces.discard"), workspaceId: z.string(), path: z.string(), check: z.boolean().optional() }),
   /** Commits the files named in the copy with the message given, hooks and all, and answers a GitCommitReply; paths
    * absent is every changed file, and an empty list is refused as nothing to commit. */
   z.object({ id: reqId, op: z.literal("workspaces.commit"), workspaceId: z.string(), message: z.string(), paths: z.array(z.string()).optional() }),
@@ -531,7 +534,7 @@ const RuntimeOp = z.discriminatedUnion("op", [
   /** Drops a thread no turn ever ran on: its rows and its transcript rows go and nothing is asked of the machine.
    * Takes the runtime's thread id, the one the rows carry, not a session id; refused with threadForgetRefusal's
    * sentence once a turn reached the agent. */
-  z.object({ id: reqId, op: z.literal("sessions.forget"), threadId: z.string() }),
+  z.object({ id: reqId, op: z.literal("sessions.forget"), threadId: z.string(), check: z.boolean().optional() }),
   /** Takes a thread away on this computer, its turns and its checkpoints with it: a thread in the project folder goes
    * alone and the folder is never touched; a thread in a worktree wsp made takes that worktree and every thread in it,
    * refused over files no commit holds. A thread on a box goes with its machine. */
@@ -824,7 +827,7 @@ const RuntimeOp = z.discriminatedUnion("op", [
   /** The project a word names, by id or by name. Replies with { project }. */
   z.object({ id: reqId, op: z.literal("projects.resolve"), ref: z.string() }),
   /** Drops a project's record; refused while a workspace of it stands, naming the workspaces. Replies with {}. */
-  z.object({ id: reqId, op: z.literal("projects.remove"), projectId: z.string() }),
+  z.object({ id: reqId, op: z.literal("projects.remove"), projectId: z.string(), force: z.boolean().optional(), check: z.boolean().optional() }),
   /** Replies with { plan: ProjectPlan } for a folder on this computer; nothing is read into memory or uploaded. */
   z.object({ id: reqId, op: z.literal("project.plan"), source: z.string() }),
   /** Packs the folder and lands it at `dest` on the workspace's machine; progress rides project.import events and the

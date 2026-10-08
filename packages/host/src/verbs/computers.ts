@@ -218,13 +218,14 @@ export const COMPUTER_VERBS: readonly Verb[] = [
   },
   {
     name: "recipes remove",
-    usage: "wsp recipes remove <name>",
+    usage: "wsp recipes remove <name> [--yes]",
     about: "takes a recipe away; the computers that followed it keep what they have and follow none",
     page: "agent",
-    options: {},
+    options: { yes: { type: "boolean" } },
     run: async ctx => {
       const [name, ...rest] = ctx.args;
       if (name === undefined || rest.length > 0) throw usageRefusal("wsp recipes remove takes one recipe.", usageIs(ctx));
+      if (!(await confirmed(ctx, `Remove the recipe ${name}?\nThe computers that follow it keep what it put there and follow none.`, name))) return 1;
       const { recipe } = await (await ctx.client()).request<{ recipe: RecipeView }>("recipes.remove", { name });
       ctx.out.emit({ recipe }, recipeRemovedLine(recipe));
       return 0;

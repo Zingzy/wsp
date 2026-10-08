@@ -216,20 +216,16 @@ pub(crate) async fn handle(conn: &Arc<Conn>, ctx: &Arc<Ctx>, raw: &str) -> Outgo
                 let home = crate::place::place_home(ctx.options.home.as_deref());
                 let profile = ctx.options.apparmor_profile.clone().unwrap_or_else(|| wsp_frames::numbers::WORKSPACE_APPARMOR_PATH.into());
                 let install = ctx.options.install_root.as_deref().map(|root| root.to_string_lossy().into_owned()).unwrap_or_default();
-                let swept = fs::blocking(move || {
-                    // The add's record of what stood before it sits in wsp's folder, which the home's sweep takes.
-                    let found = crate::place::place_found(&home);
-                    let mut swept = crate::place::sweep_place_home(&home, &crate::place::sh_stdout);
-                    // Only root's install loaded the profile and only root's jobs install outside the home, and only
-                    // root can take either off.
-                    if nix::unistd::geteuid().is_root() {
-                        swept.extend(crate::place::sweep_outside_owned(found.as_ref(), &profile, &install, &crate::place::sh_stdout));
-                    }
-                    Ok(swept)
-                })
-                .await
-                .unwrap_or_default();
-                return Outgoing::Leave(text(&Reply::new(id, PlaceLeaveReply { swept })));
+                let runtime =
+                    ctx.options.runtime_root.clone().unwrap_or_else(|| format!("{install}{}", wsp_frames::numbers::RUNTIME_ROOT).into());
+                let force = frame.get("force").and_then(Value::as_bool).unwrap_or(false);
+                let swept = fs::blocking(move || Ok(crate::place::leave_here(&home, &profile, &install, &runtime, force)))
+                    .await
+                    .unwrap_or_else(|_| Ok(Vec::new()));
+                return match swept {
+                    Ok(swept) => Outgoing::Leave(text(&Reply::new(id, PlaceLeaveReply { swept }))),
+                    Err(why) => Outgoing::Text(refuse(id, DaemonErrorCode::BadRequest, why)),
+                };
             }
             Some("place.update") => return place_update(ctx, id, &frame).await,
             Some(name) if MACHINE_OPS.contains(&name) => return Outgoing::Text(machine_answer(ctx, id, name, &frame).await),
@@ -1222,7 +1218,7 @@ async fn serve(conn: &Arc<Conn>, ctx: &Arc<Ctx>, id: Option<RequestId>, name: &s
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     mod ptys_and_ports;
     use super::*;
     use crate::Options;
@@ -1265,7 +1261,7 @@ mod tests {
         Bench { ctx: Arc::new(Ctx::new(options, Box::new(|_| {}), 0).unwrap()), _token: token, root }
     }
 
-    pub(super) fn conn_on(scope: Option<u16>, road: Road) -> (Arc<Conn>, mpsc::UnboundedReceiver<Outgoing>) {
+    pub(crate) fn conn_on(scope: Option<u16>, road: Road) -> (Arc<Conn>, mpsc::UnboundedReceiver<Outgoing>) {
         let (tx, rx) = mpsc::unbounded_channel();
         (Arc::new(Conn::new(1, scope.and_then(NonZeroU16::new), Outbound(tx), road, None)), rx)
     }

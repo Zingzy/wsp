@@ -34,6 +34,8 @@ import {
   type PlaceEvent,
   type PlaceDial,
   type PlaceDialled,
+  type PlaceHolds,
+  type PlaceRemoved,
   type PlaceProvisionRow,
   type PlaceReport,
   type PlaceBack,
@@ -305,6 +307,8 @@ export interface PlaceLeaveRequest {
   ssh: PlaceLogin;
   /** The password the login's sudo took for this remove, held for it alone. */
   sudoPassword?: string;
+  /** The person forced the remove past work no remote has, which the leave there then takes too. */
+  force?: boolean;
 }
 
 /** How the agent comes off a computer this host holds no link to: the leave that computer already carries, run
@@ -364,11 +368,15 @@ export type PlaceInstaller = (req: PlaceInstallRequest, stage: PlaceStaging) => 
 /** The one road into the runtime a place needs, handed in because it is the runtime's own: a place holds its forks
  * and the projects recorded on it, and a remove refuses to take the place out from under either. */
 export interface PlaceRecording {
-  /** The names of the forks standing on this place: the machines wsp made there, which are the only workspaces a
-   * place carries. */
-  forksOn(placeId: string): Promise<string[]>;
   /** The projects recorded on this place, which every workspace of them is a copy for. */
   projectsOn(placeId: string): Promise<{ id: string; name: string }[]>;
+  /** The forks standing on this place and the projects recorded on it, each with its threads, and the work among
+   * them no remote has: a fork's checkout read fresh, a project's folder there read by its computer. With read false,
+   * none of that work is read, for a computer whose link is down. */
+  holdsOn(placeId: string, read?: boolean): Promise<PlaceHolds>;
+  /** Deletes every fork on this place, then takes every project recorded on it out of this wsp, each by the road
+   * delete and projects remove take; answers what went. Stops at the first that refuses, which says why. */
+  dropOn(placeId: string): Promise<Omit<PlaceHolds, "unsaved">>;
   /** How many of what that place's cap counts run there now, read against every row the list holds. */
   runningOn(placeId: string, places: readonly Pick<PlaceView, "id" | "kind">[]): Promise<number>;
   /** Signs an agent in on that computer through the sign-in relay, as the app's own sign-in does: every step it
@@ -600,7 +608,11 @@ export interface PlaceDoor {
    * Refuses in one sentence a place this host does not hold, and a computer that is behind on a runtime wired with
    * no updater. */
   update(placeId: string, ask?: { sudoPassword?: string }): Promise<PlaceUpdateReply>;
-  remove(placeId: string, ask?: { sudoPassword?: string }): Promise<PlaceRemoved>;
+  /** What a remove of that place would take with it, read now; an id this host holds no place by holds nothing. */
+  holds(placeId: string): Promise<PlaceHolds>;
+  /** Takes a place out with everything standing on it, its forks deleted and its projects removed first, then sweeps
+   * wsp off that computer. Refused naming them while any of those holds work no remote has, unless `force`. */
+  remove(placeId: string, ask?: { sudoPassword?: string; force?: boolean }): Promise<PlaceRemoved>;
   /** Every place a word picks, by id or by the name the person gave it: none, one, or the two that share a name,
    * which is a refusal the caller writes with the ids in it. */
   find(ref: string): Promise<PlaceRecord[]>;
@@ -712,10 +724,3 @@ export interface PlaceSetUp {
   said?: string;
 }
 
-/** What a remove answers: whether a place of that id was there, what the sweep took off that computer, what the
- * workspaces standing on it said as they went, and the one line for a place that was not connected to sweep. */
-export interface PlaceRemoved {
-  removed: boolean;
-  swept: string[];
-  note?: string;
-}

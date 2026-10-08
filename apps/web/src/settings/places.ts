@@ -6,7 +6,7 @@
 // rate are all the protocol's (absentComputer, fmtSize, fmtBytes, offlineFor,
 // fmtRate) and are not copied here.
 import type { MarkState } from "../components/status/markState.js";
-import { FREE_WORD, JOINED_COMPUTER, hereName, isHere, isProviderPlace, placeName, placeOf, absentComputer, placeDaemonBehind, awayMsOf, chargesNothing, daemonSilent, fmtBytes, fmtRate, imageCopyStaysLine, isLocalWorkspace, landsOn, namesPlace, ownDaemonDown, plural, placeWord, SETUP_WORDS, type AbsentComputer, type CpuWord, type InitSetup, type PlaceKind, type PlaceProvisionRow, type PlaceView, type ProjectView, type SealedImageCopy, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { FREE_WORD, JOINED_COMPUTER, hereName, isHere, isProviderPlace, placeName, placeOf, absentComputer, placeDaemonBehind, awayMsOf, chargesNothing, daemonSilent, fmtBytes, fmtRate, imageCopyLine, isLocalWorkspace, landsOn, namesPlace, ownDaemonDown, plural, placeWord, SETUP_WORDS, type AbsentComputer, type CpuWord, type InitSetup, type PlaceKind, type PlaceProvisionRow, type PlaceView, type ProjectView, type SealedImageCopy, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { agentName } from "@wsp/catalog";
 import { PLACE_STATE_WORDS, PROVISION_OUTCOME_WORDS, WHERE_WORDS, capitalised } from "./format.js";
 
@@ -25,6 +25,8 @@ export const placeIsOffline = (place: PlaceView): boolean => place.present === f
  * protocol's own rule off the row. */
 export interface PlaceHolding {
   workspaces: readonly { name: string; state: string; threads: number }[];
+  /** The projects recorded on that computer, which a remove takes out of this wsp with it, once the host has said. */
+  projects?: readonly string[];
 }
 
 export const NOTHING_HELD: PlaceHolding = { workspaces: [] };
@@ -39,9 +41,9 @@ export const threadWord = (n: number): string => `${n} ${n === 1 ? "thread" : "t
  * was; a provider's workspaces are deleted where they stand and its key is forgotten here. The second sentence is
  * about the computer the host runs on alone, so a computer holding nothing gets no second sentence.
  *
- * The copy of the image is one of the things left as they are: it sits in that computer's own workspace store,
- * which no sweep walks, and only a computer that runs workspaces ever held one. The clause is the protocol's, the
- * same one the Add sheet says before any of this. */
+ * The copy of the image sits in the runtime's folder there, which the leave takes whole only where that computer
+ * says it will: one added over ssh, whose add wrote down what stood before it. One joined with a code keeps it. The
+ * words for it are the protocol's. */
 export function removeSentence(place: PlaceView, holding: PlaceHolding, here: string, imageBytes?: number): string {
   if (here === "") return "";
   const count = holding.workspaces.length;
@@ -53,9 +55,12 @@ export function removeSentence(place: PlaceView, holding: PlaceHolding, here: st
     lines.push(count === 0 ? `The key for ${name} is forgotten on ${here}.` : `Its ${count === 1 ? "task is" : `${count} tasks are`} deleted at ${name} and the key is forgotten on ${here}.`);
     if (count > 0) lines.push(`${count === 1 ? "Its record" : "Their records"} and ${threadWord(threads)} leave ${here}.`);
   } else {
-    const stays = `, and ${imageCopyStaysLine(imageBytes === undefined ? undefined : fmtBytes(imageBytes))}`;
-    lines.push(count === 0 ? `wsp comes off ${name}, which is otherwise left as it is${stays}.` : `wsp and ${held} come off ${name}, which is otherwise left as it is${stays}.`);
+    const copy = imageCopyLine(imageBytes === undefined ? undefined : fmtBytes(imageBytes));
+    if (place.takesRuntime === true) lines.push(count === 0 ? `wsp and ${copy} come off ${name}, which is otherwise left as it is.` : `wsp, ${held} and ${copy} come off ${name}, which is otherwise left as it is.`);
+    else lines.push(`${count === 0 ? "wsp comes" : `wsp and ${held} come`} off ${name}, which keeps ${copy} and is otherwise left as it is.`);
     if (count > 0) lines.push(`${count === 1 ? "The task's record" : "The tasks' records"} and ${threadWord(threads)} leave ${here}.`);
+    const projects = holding.projects ?? [];
+    if (projects.length > 0) lines.push(`${projects.length === 1 ? "Its project" : `Its ${projects.length} projects`} ${projects.join(", ")} ${projects.length === 1 ? "leaves" : "leave"} ${here}.`);
   }
   // A computer that is not answering cannot be swept now, and the sentence says when it will be.
   if (placeIsOffline(place)) lines.push("It is offline; what is on it is swept the next time it connects.");
