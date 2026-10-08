@@ -3,7 +3,7 @@ import {
   type AdapterEvent, type PermissionAsk, type PermissionOption, type PermissionOutcome, type SessionEvent,
   type SessionAnswerResult, type SessionStartOutcome, type SessionView, type AttachmentRecord, type TurnResult,
   type TurnStatus, ThreadScope, WorkspaceOrigin, threadWord, leadAsk, askingLine, permissionModeOptionLabel,
-  pickedOptions, deniedLine, toolCallFacts,
+  pickedOptions, deniedLine, toolCallFacts, notifyBody,
 } from "@wsp/protocol";
 import { harnessCatalog } from "../harness-catalog.js";
 import type { HarnessSession, HarnessAdapter } from "../types/harness.js";
@@ -184,6 +184,17 @@ export function turnsArea(ctx: RuntimeContext): TurnsArea {
     const withWaited = (reply: TurnResult): TurnResult => {
       const onThePerson = waitedSoFar();
       return onThePerson > 0 ? { ...reply, waitedMs: onThePerson } : reply;
+    };
+    /** What a turn's end tells whoever its start named once a held reply's line went: the end whole where the agent
+     * said something new, its outcome alone where only that changed, as a stop does, and nothing where both are what
+     * the line said. A held end carries the told words by the adapter's word, whatever task lines it adds under them. */
+    const afterTold = (result: TurnResult, held: boolean): TurnResult | undefined => {
+      const told = turnLive.toldAs;
+      if (told === undefined) return held ? undefined : result;
+      if (!held && notifyBody(result, "whole") !== told.body) return result;
+      if (result.status === told.status) return undefined;
+      const { text: _text, error: _error, ...outcome } = result;
+      return outcome;
     };
 
     /** The one expression that says the turn is waiting on something outside its own process, which its stream's
@@ -398,7 +409,8 @@ export function turnsArea(ctx: RuntimeContext): TurnsArea {
           }
           void ctx.persistSessions(workspaceId);
           // A reply held over background work had its line when it was given, and a lead is never told one reply twice.
-          if (notify !== undefined && event.held !== true) ctx.notifyEnd({ view, turnId, turnLive }, notify, ctx.tellAs(t), result);
+          const told = afterTold(result, event.held === true);
+          if (notify !== undefined && told !== undefined) ctx.notifyEnd({ view, turnId, turnLive }, notify, ctx.tellAs(t), told);
           ctx.record({ type: "session.done", workspaceId, sessionId, turnId, threadId, result });
           readChanges(sessionId);
           return;
@@ -469,10 +481,12 @@ export function turnsArea(ctx: RuntimeContext): TurnsArea {
           // The agent's final reply, given while that work runs: the turn goes on, and nothing reads the reply again
           // until the work wakes it, so its line goes now. A run re-read after a restart already sent the ones it told.
           if (event.replied !== undefined) {
+            const replied = withWaited(event.replied);
             turnLive.toldLast = true;
+            turnLive.toldAs = { status: replied.status, body: notifyBody(replied, "whole") };
             if (replayingTold > 0) replayingTold--;
             else if (notify !== undefined) {
-              ctx.notifyEnd({ view, turnId, turnLive }, notify, ctx.tellAs(t), withWaited(event.replied));
+              ctx.notifyEnd({ view, turnId, turnLive }, notify, ctx.tellAs(t), replied);
               turnLive.told = (turnLive.told ?? 0) + 1;
             }
             void ctx.persistSessions(workspaceId);

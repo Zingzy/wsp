@@ -22,7 +22,8 @@ import { writeStub } from "../../protocol/test/stub-script.js";
  * (run_in_background, or a foreground call past its timeout, which the CLI moves to the background itself), and the
  * CLI waits on it with its input still open: in `bg` it never ends, in `quiet` it ends past the idle limit and the CLI
  * does not wake the agent, in `wake` it ends past the idle limit and the CLI wakes the agent, which replies again, and in
- * `steer` a message steered in wakes the agent, whose process then dies before it replies. */
+ * `steer` a message steered in wakes the agent, whose process then dies before it replies. In `stop` a message steered
+ * in wakes the agent, which starts on it and is stopped before it replies, the stop ending the process. */
 const FAKE_CLAUDE = `#!/bin/bash
 sid=""
 prev=""
@@ -46,10 +47,12 @@ setsid sleep 601 &
 echo $! > "$here/escaped.pid"
 # The CLI reads its input until EOF and exits; with a background task in its set it waits on that task first.
 if [ "$mode" = "bg" ]; then wait; fi
-if [ "$mode" = "steer" ]; then
+if [ "$mode" = "steer" ] || [ "$mode" = "stop" ]; then
   read -r steered
   say '{"type":"system","subtype":"init","cwd":"/root","session_id":"'"$sid"'","tools":["Bash"],"model":"claude-haiku-4-5","permissionMode":"bypassPermissions"}'
-  exit 1
+  [ "$mode" = "steer" ] && exit 1
+  say '{"type":"assistant","message":{"id":"msg_3","role":"assistant","model":"claude-haiku-4-5","content":[{"type":"text","text":"Looking at the flaky test."}],"usage":{"input_tokens":4,"output_tokens":5}},"parent_tool_use_id":null,"session_id":"'"$sid"'"}'
+  sleep 600
 fi
 if [ "$mode" = "quiet" ] || [ "$mode" = "wake" ]; then
   sleep 4
@@ -114,7 +117,7 @@ describe("a cloud turn after its agent's final reply", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  const turn = async (mode: "plain" | "bg" | "quiet" | "wake" | "steer") => {
+  const turn = async (mode: "plain" | "bg" | "quiet" | "wake" | "steer" | "stop") => {
     writeFileSync(join(bin, "mode"), mode);
     const ws = await createOn(rt, { golden: "snap_g", name: "boat" });
     const handle = await rt.sessions.start(ws.id, { prompt: "build the ticket", notify: ["me"] });
@@ -168,6 +171,32 @@ describe("a cloud turn after its agent's final reply", () => {
     expect({ status: handle.view().status, lines: await lines(ws.id, threadId) }).toEqual({
       status: "failed",
       lines: [expect.stringContaining("Pushed and reported."), expect.stringContaining("finished (failed")],
+    });
+  }, 30_000);
+
+  it("stopped well after the held reply's line, with nothing woken, the lead is told the stop once, timed to the stop, and not the reply's words again", async () => {
+    const { ws, handle, threadId } = await turn("bg");
+    await until(async () => (await notified(ws.id, threadId)).length === 1, 5_000);
+    await new Promise(r => setTimeout(r, 3_000));
+    expect((await rt.sessions.interrupt(handle.id)).outcome).toBe("accepted");
+    const told = await lines(ws.id, threadId);
+    expect({ status: handle.view().status, lines: told }).toEqual({
+      status: "interrupted",
+      lines: [expect.stringContaining("finished (completed, 1.2s, $0.01): Pushed and reported."), expect.stringMatching(/finished \(interrupted, [\d.]+s, \$0\.01\)$/)],
+    });
+    // The CLI timed the reply at 1.2 s; the stop came at least 3 s after the reply's line went.
+    expect(Number(/interrupted, ([\d.]+)s/.exec(told[1]!)![1])).toBeGreaterThanOrEqual(4.2);
+  }, 30_000);
+
+  it("stopped after a steer woke the agent under the held reply, before it replied, the lead is told the stop once and not the reply's words again", async () => {
+    const { ws, handle, threadId } = await turn("stop");
+    await until(async () => (await notified(ws.id, threadId)).length === 1, 5_000);
+    expect((await rt.sessions.start(ws.id, { prompt: "also fix the flaky test", thread: threadId })).outcome).toBe("steered");
+    await until(async () => (await rt.sessions.history(ws.id)).some(e => e.type === "session.delta" && e.text === "Looking at the flaky test."), 5_000);
+    expect((await rt.sessions.interrupt(handle.id)).outcome).toBe("accepted");
+    expect({ status: handle.view().status, lines: await lines(ws.id, threadId) }).toEqual({
+      status: "interrupted",
+      lines: [expect.stringContaining("Pushed and reported."), expect.stringMatching(/finished \(interrupted[^)]*\)$/)],
     });
   }, 30_000);
 });

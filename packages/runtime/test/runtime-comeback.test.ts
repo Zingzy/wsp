@@ -1006,6 +1006,23 @@ describe("a turn the host comes back to", () => {
     await rt2.close();
   });
 
+  it("a stop after a restart, the agent woken under the held reply and not replied, tells the stop alone: the replay names the words already told", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const h = machineRuns();
+    const { rt: rt1, ws, run } = await heldLineSent(h, store, backend);
+    await rt1.close();
+
+    const rt2 = createRuntime({ backend, store, adapters: { claude: h.adapter } });
+    expect((await rt2.sessions.list(ws.id)).map(s => s.status)).toEqual(["running"]);
+    h.emit(run, { type: "session.start", sessionId: "sess-1" });
+    h.emit(run, { type: "turn.done", sessionId: "sess-1", result: { status: "interrupted", text: "Pushed; CI runs in the background." } });
+    h.emit(run, { type: "session.end", sessionId: "sess-1", exitCode: null, sawResult: true });
+    await until(async () => (await rt2.sessions.list(ws.id))[0]!.status === "interrupted");
+    expect((await notifies(rt2, ws.id)).map(t => t.replace(/^thread \w+ /, ""))).toEqual(["finished (completed): Pushed; CI runs in the background.", "finished (interrupted)"]);
+    await rt2.close();
+  });
+
   it("a held reply's line is not sent again by a restarted host whose transcript the cap trimmed past that line", async () => {
     const backend = stubBackend();
     const store = memoryStore();
