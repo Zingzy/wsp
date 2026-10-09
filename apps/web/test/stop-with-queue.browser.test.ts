@@ -57,11 +57,24 @@ describe.skipIf(renderSkipped !== undefined)("a turn stopped with a message queu
       const api = useStore.getState().api!;
       const watchers = new Set<(e: unknown) => void>();
       let clock = -1;
+      // The host pushes each row that moves rather than answering a list: every list the recording holds goes out, at
+      // its time, as the rows of it that changed.
+      const told = new Map((rec.lists[0]?.rows ?? []).map(r => [(r as { id: string }).id, JSON.stringify(r)]));
       const play = (from: number, to: number, base: number) => {
         for (const { ms, event } of rec.events.filter(e => e.ms >= from && e.ms < to)) {
           setTimeout(() => {
             clock = Math.max(clock, ms);
             for (const fn of watchers) fn(event);
+          }, ms - base);
+        }
+        for (const { ms, rows } of rec.lists.filter(l => l.ms >= from && l.ms < to)) {
+          setTimeout(() => {
+            clock = Math.max(clock, ms);
+            for (const row of rows as { id: string; workspaceId: string; threadId?: string }[]) {
+              if (told.get(row.id) === JSON.stringify(row)) continue;
+              told.set(row.id, JSON.stringify(row));
+              for (const fn of watchers) fn({ type: "session.row", workspaceId: row.workspaceId, threadId: row.threadId, id: row.id, row });
+            }
           }, ms - base);
         }
       };

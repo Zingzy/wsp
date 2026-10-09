@@ -6,7 +6,7 @@ import { AttachmentRecord } from "../attachments.js";
 import { TurnLimit, UsageTokens } from "../usage.js";
 import { SessionSlateEvent } from "../slate/wire.js";
 import { permissionPrompt } from "../wire/helpers.js";
-import { PermissionOutcome, SessionOrigin, SubagentState, ThreadCapWait, TurnRefusal } from "./session.js";
+import { PermissionOutcome, SessionOrigin, SessionView, SubagentState, ThreadCapWait, TurnRefusal } from "./session.js";
 
 // --- session events (the wire form of adapter-port.ts's AdapterEvent) ------
 
@@ -224,6 +224,32 @@ export const SessionHeldEvent = z.object({
   requestId: z.string().optional(),
 });
 export type SessionHeldEvent = z.infer<typeof SessionHeldEvent>;
+
+/** One row moved: the row of a thread's latest turn as sessions.list answers it, pushed after the hold, start, cap,
+ * child, prompt, mark or end that moved it, so no window reads the workspace's whole list again for one row (on a
+ * project of 400 threads that list was 2.2 MB). The opening prompt every row of a thread repeats rides the first
+ * push under a row's id alone, and a window keeps the one it holds. No row: the host holds none under that id any
+ * more (a start that never ran, a launch whose row moved to the harness's id, a thread deleted or forgotten), and a
+ * window drops it. Never in history. */
+export const SessionRowEvent = z.object({
+  type: z.literal("session.row"),
+  workspaceId: z.string(),
+  threadId: z.string().optional(),
+  id: z.string(),
+  row: SessionView.optional(),
+});
+export type SessionRowEvent = z.infer<typeof SessionRowEvent>;
+
+/** A pushed row in its workspace's rows: in the place of the row under its id, or after the rest as a new turn; a
+ * push with no row takes that row out. A push that leaves out the opening prompt keeps the one a row of the thread
+ * holds. The same rows back when nothing changed. */
+export const withPushedRow = (rows: SessionView[], e: SessionRowEvent): SessionView[] => {
+  const at = rows.findIndex(r => r.id === e.id);
+  if (e.row === undefined) return at < 0 ? rows : rows.filter((_, i) => i !== at);
+  const prompt = e.row.prompt ?? rows[at]?.prompt ?? rows.find(r => r.threadId !== undefined && r.threadId === e.row!.threadId && r.prompt !== undefined)?.prompt;
+  const row = prompt === undefined ? e.row : { ...e.row, prompt };
+  return at < 0 ? [...rows, row] : rows.map((r, i) => (i === at ? row : r));
+};
 
 /** Pushed once when a start has waited AGENT_STARTING_MS on its agent with no session from it yet, so a client says
  * the agent is starting rather than showing a bare wait; not a session event, never in history. */
