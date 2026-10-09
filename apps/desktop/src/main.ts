@@ -11,7 +11,7 @@ import { chooseFrom, contextMenuTemplate, parseContextMenuItems } from "./contex
 import { deepLinks, linkInArgv } from "./deep-link.js";
 import { fontDirs, fontFamilies, indexFonts, localFontFaces, type FontFile } from "./fonts.js";
 import { bundleShell, type BundleShell } from "./get-bundle.js";
-import { homeOf, loginStart, openHost, openHostReady, setLoginStart, statePathIn, stopWsp, userDataIn, workingHere, type HostSession, type Launch, type OpenHostOptions } from "./host-lifecycle.js";
+import { KeptOtherRelease, homeOf, loginStart, openHost, openHostReady, setLoginStart, statePathIn, stopWsp, userDataIn, workingHere, type HostSession, type Launch, type OpenHostOptions } from "./host-lifecycle.js";
 import { hostSwitcher, type HostSwitcher } from "./host-switch.js";
 import { offerMove, type MoveGate } from "./move.js";
 import { noticeWindowOf, sayOutside, showBadge, type Notifier } from "./needs-you.js";
@@ -321,7 +321,7 @@ function attach(): Promise<HostSession> {
 
 function hostOptions(): OpenHostOptions {
   const { home, statePath } = where();
-  return { statePath, home, shim: shimPath(wspHome()), io, service: systemService() };
+  return { statePath, home, shim: shimPath(wspHome()), io, service: systemService(), ask: async prompt => (app.focus({ steal: true }), (await dialog.showMessageBox({ type: "question", ...prompt })).response === 0) };
 }
 
 /** The window, on the host it was handed. */
@@ -477,14 +477,27 @@ app.on("activate", () => void reopen());
 
 /** The window for this launch: the app on the host it attaches to, or the first launch's screen where that host holds
  * nothing yet. */
-async function openWindow(): Promise<void> {
+async function openOnHost(): Promise<void> {
   // Read across a restart: a launch that meets the host on its way down attaches again to the one coming up.
-  const { session: on, first } = await openHostReady(hostOptions());
+  const opened = await openHostReady(hostOptions()).catch((e: unknown) => {
+    // The person kept a host of another release serving, and this app draws no page but its own release's.
+    if (!(e instanceof KeptOtherRelease)) throw e;
+    io.log(e.message);
+    app.quit();
+  });
+  if (opened === undefined) return;
+  const { session: on, first } = opened;
   if (!first) await showApp(on);
   else await showOnboarding();
 }
 
-let reopening: Promise<void> | undefined;
+let opening: Promise<void> | undefined;
+/** The one open in flight, which the launch and every Dock or menu bar click share: an open waits on the person while
+ * a host of another release asks, and a second open would ask again. */
+function openWindow(): Promise<void> {
+  return (opening ??= openOnHost().finally(() => (opening = undefined)));
+}
+
 /** The window brought back, from the menu bar or the Dock: the one standing is raised, and a closed one opened again. */
 function reopen(): Promise<void> {
   // A quit under way opens nothing: a window opened then outlives the quit, and on Quit and stop wsp the open would
@@ -494,13 +507,13 @@ function reopen(): Promise<void> {
     raiseWindow(win);
     return Promise.resolve();
   }
-  return (reopening ??= openWindow()
-    .catch((e: unknown) => {
-      const why = e instanceof Error ? e.message : String(e);
-      io.error(`wsp could not open: ${why}`);
-      if (!quitting) dialog.showErrorBox("wsp could not open", why);
-    })
-    .finally(() => (reopening = undefined)));
+  // An open already under way says its own failure, the launch's included.
+  if (opening !== undefined) return opening.catch(() => {});
+  return openWindow().catch((e: unknown) => {
+    const why = e instanceof Error ? e.message : String(e);
+    io.error(`wsp could not open: ${why}`);
+    if (!quitting) dialog.showErrorBox("wsp could not open", why);
+  });
 }
 
 /** The menu bar: its icon, its count and its menu, drawn from the feed on the host the window is on. */

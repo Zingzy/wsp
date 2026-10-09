@@ -166,7 +166,7 @@ describe("one module per service manager", () => {
       ["systemctl", "--user", "disable", "--now", `wsp-host-${tag}.service`],
       ["systemctl", "--user", "daemon-reload"],
     ]);
-    expect(systemd.holds(at)).toEqual(["systemctl", "--user", "is-enabled", `wsp-host-${tag}.service`]);
+    expect(systemd.holds(at)).toEqual(["systemctl", "--user", "show", `wsp-host-${tag}.service`, "--property=ActiveState,UnitFileState"]);
     expect(systemd.afterLoad?.(at)).toContain("enable-linger");
     expect(systemd.needsRoot?.(at)).toBe(false);
   });
@@ -189,7 +189,7 @@ describe("one module per service manager", () => {
       ["systemctl", "disable", "--now", `wsp-place-${theirTag}.service`],
       ["systemctl", "daemon-reload"],
     ]);
-    expect(systemd.holds(there)).toEqual(["systemctl", "is-enabled", `wsp-place-${theirTag}.service`]);
+    expect(systemd.holds(there)).toEqual(["systemctl", "show", `wsp-place-${theirTag}.service`, "--property=ActiveState,UnitFileState"]);
     // Both systemds, the one a place writes today first: a computer joined on the road before it has its unit
     // under that login's own, and a sweep that read the machine's alone left it there to flap under auto-restart.
     expect(systemd.held(there)).toEqual([
@@ -278,6 +278,15 @@ describe("one module per service manager", () => {
     }
   });
 
+  it("each manager reads back every word a unit it wrote runs, so a rewrite can keep the words wsp up was given", () => {
+    const at: ServiceAddress = { statePath: "/Users/z/.wsp/state.json", home: "/Users/z", uid: 501 };
+    const argv = ["/Users/z/O'Brien & Co/.wsp/bin/wsp", "up", "--state", at.statePath, "--port", "4500", "--listen", "0.0.0.0", "--no-relay", "a <b>"];
+    for (const manager of Object.values(SERVICE_MANAGERS)) {
+      expect(manager.argv(manager.text({ ...at, argv, cwd: "/Users/z", env: { A: "1" }, logPath: "/l" })), manager.words).toEqual(argv);
+      expect(manager.argv("not a unit"), manager.words).toBeUndefined();
+    }
+  });
+
   it("the unit standing is what says this computer is registered to serve a state file, whether or not the manager has it loaded", () => {
     const home = mkdtempSync(join(tmpdir(), "wsp-registered-"));
     try {
@@ -306,12 +315,27 @@ describe("one module per service manager", () => {
     expect(launchd.absent({ code: 5, output: "Bootstrap failed: 5: Input/output error" })).toBe(false);
 
     const systemd = SERVICE_MANAGERS.systemd;
-    expect(systemd.absent({ code: 1, output: "disabled" })).toBe(true);
-    expect(systemd.absent({ code: 1, output: `Failed to get unit file state for wsp-host-${tag}.service: No such file or directory` })).toBe(true);
-    // Measured on a Linux box with no user bus: is-enabled exits 1 there too, so the code alone cannot tell the two apart.
+    // What show says of a unit systemd does not have: inactive, with no file state.
+    expect(systemd.absent({ code: 0, output: "ActiveState=inactive\nUnitFileState=\n" })).toBe(true);
     expect(systemd.absent({ code: 1, output: "Failed to connect to bus: No medium found" })).toBe(false);
     expect(systemd.absent({ code: 127, output: "systemctl: command not found" })).toBe(false);
-    expect(systemd.absent({ code: 0, output: "enabled" })).toBe(false);
+  });
+
+  it("a manager holds a unit that starts at login or runs: systemd's is-enabled alone reads one set off at login as gone while it runs", () => {
+    const launchd = SERVICE_MANAGERS.launchd;
+    expect(launchd.holding({ code: 0, output: "state = running" })).toBe(true);
+    expect(launchd.holding({ code: 113, output: "Could not find service" })).toBe(false);
+
+    const systemd = SERVICE_MANAGERS.systemd;
+    const show = (active: string, file: string): { code: number; output: string } => ({ code: 0, output: `ActiveState=${active}\nUnitFileState=${file}\n` });
+    expect(systemd.holding(show("active", "disabled"))).toBe(true);
+    // Restart=always waiting out RestartSec between two runs.
+    expect(systemd.holding(show("activating", "disabled"))).toBe(true);
+    expect(systemd.holding(show("inactive", "enabled"))).toBe(true);
+    expect(systemd.holding(show("failed", "enabled"))).toBe(true);
+    expect(systemd.holding(show("inactive", "disabled"))).toBe(false);
+    expect(systemd.holding(show("inactive", ""))).toBe(false);
+    expect(systemd.holding({ code: 1, output: "Failed to connect to bus: No medium found" })).toBe(false);
   });
 });
 
@@ -349,9 +373,11 @@ function fakeService(over: Partial<ServiceDeps> = {}): {
       return `fake ${plan.argv.join(" ")}\n`;
     },
     runs: (text, program) => text.startsWith(`fake ${program} `),
+    argv: text => (text.startsWith("fake ") ? text.trim().slice("fake ".length).split(" ") : undefined),
     load: a => [["fake", "load", unit(a).name]],
     unload: a => [["fake", "unload", unit(a).name]],
     holds: a => ["fake", "holds", unit(a).name],
+    holding: answer => answer.code === 0,
     atLogin: (a, on) => [["fake", on ? "enable" : "disable", unit(a).name]],
     loginRead: a => ["fake", "is-enabled", unit(a).name],
     startsAtLogin: answer => answer.output === "enabled",
@@ -939,6 +965,34 @@ describe("wsp up --service, wsp down and wsp status", () => {
       ["fake", "unload", name],
     ]);
     expect(lines).toEqual([`fake service ${name} stopped; nothing serves ${statePath} now, and its running turns keep going until the next host adopts them`]);
+  });
+
+  it("wsp down stops a systemd unit set not to start at login while it still runs, rather than taking its file and leaving it running", async () => {
+    // systemd as `systemctl --user` answers it for a unit disabled at login and running under Restart=always.
+    const systemd = SERVICE_MANAGERS.systemd;
+    const at = serviceAddressHere(statePath);
+    const unit = systemd.unit(at);
+    mkdirSync(dirname(unit.path), { recursive: true });
+    writeFileSync(unit.path, systemd.text({ ...at, argv: ["/opt/wsp", "up", "--state", statePath], cwd: home, env: {}, logPath: join(home, "host.log") }));
+    writeFileSync(join(home, ".wsp", "host.lock"), JSON.stringify({ pid: process.pid, port: 4400, startedAt: new Date().toISOString(), startedBy: "service" }));
+    let active = true;
+    const ran: string[][] = [];
+    const run: ServiceRunner = async argv => {
+      ran.push([...argv]);
+      if (argv[2] === "is-enabled") return { code: 1, output: "disabled" };
+      if (argv[2] === "show") return { code: 0, output: `ActiveState=${active ? "active" : "inactive"}\nUnitFileState=disabled\n` };
+      if (argv[2] === "disable" && argv[3] === "--now") {
+        active = false;
+        rmSync(join(home, ".wsp", "host.lock"), { force: true });
+      }
+      return { code: 0, output: "" };
+    };
+    const lines: string[] = [];
+    expect(await downCommand(quietIO(lines), opts, { ...svc().deps, platform: "linux", manager: systemd, run, waitMs: 500 })).toBe(0);
+    expect(ran.map(argv => argv.slice(2, 4).join(" "))).toContainEqual(`disable --now`);
+    expect(active).toBe(false);
+    expect(existsSync(unit.path)).toBe(false);
+    expect(lines).toEqual([`systemd unit ${unit.name} stopped; nothing serves ${statePath} now, and its running turns keep going until the next host adopts them`]);
   });
 
   it("wsp down changes nothing and names the command that could not answer when the manager cannot say whether it holds it", async () => {
