@@ -30,8 +30,8 @@ export const CATALOG_PROBE_TIMEOUT_MS = 25_000;
 /** A look at the agent's command and its installer's record, which runs nothing; past this the agent is just starting. */
 export const FIRST_RUN_READ_MS = 3_000;
 
-/** How long a harness's title for a session stands before its store is read again on a refresh. Clients reload the
- * index on every session event, and a person renaming a session in the harness waits at most this long to see it. */
+/** How long a harness's title for a session stands before its store is read again on a refresh. A row that moves
+ * asks again for its workspace's rows, so a rename made in the harness shows at the first move past this. */
 export const SESSION_TITLE_TTL_MS = 10_000;
 
 /** How long a copy's checkout, once read, answers a tile or a pane asking again without asking git: every tile reads
