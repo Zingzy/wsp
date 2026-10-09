@@ -42,8 +42,6 @@ With Node 22 or newer, this installs the command line alone:
 npm i -g @wsp-labs/wsp
 ```
 
-This README describes the next release, 0.3.0. Until it is out, build from source (below) to run what is here.
-
 ## First run
 
 Open the app. It finds the agents on your Mac and serves your projects from there. Add a project (any folder, a git repo or not) and start a thread from the composer.
