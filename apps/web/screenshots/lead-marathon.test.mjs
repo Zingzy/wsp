@@ -132,9 +132,14 @@ suite("the marathon lead, as the host serving it lists it", () => {
     expect(of("lead").map(([title, state]) => [title, state])).toEqual([
       ["Check main's gate", "done"],
       ["List the open pull requests", "done"],
-      ["Check the landing's CSP headers", "failed"],
       ["Read the open tickets on the map", "running"],
+      ["Check the landing's CSP headers", "failed"],
     ]);
+  });
+
+  it("starts both subagents of the lead's running turn inside it, so each launch stands at its call in that turn", () => {
+    const turn = lead().startedAt;
+    expect(lead().subagents.filter(s => s.startedAt >= turn).map(s => s.title)).toEqual(["Read the open tickets on the map", "Check the landing's CSP headers"]);
   });
 
   it("stops the lead's running turn on a question, with the project's other threads beside it", () => {

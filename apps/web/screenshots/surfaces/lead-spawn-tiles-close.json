@@ -1,0 +1,15 @@
+{
+  "at": "/",
+  "fixture": "lead-marathon",
+  "steps": [
+    "row-id=thread:lead",
+    "key:ControlOrMeta+Alt+b"
+  ],
+  "wait": "spawn-tiles",
+  "widths": [
+    1440
+  ],
+  "reason": "The close look is judged at 1440, the width its frozen shot is cut from; the window stands tall so both lists and the reply between them show whole above the Threads block at the transcript's end.",
+  "height": 2400,
+  "settleMs": 1200
+}

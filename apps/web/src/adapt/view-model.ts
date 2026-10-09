@@ -77,6 +77,8 @@ export interface WorkLogEntry {
   readonly requestKind?: ProviderRequestKind;
   readonly toolLifecycleStatus?: WorkLogToolLifecycleStatus;
   readonly sourceActivityKind: WorkLogSourceKind;
+  /** The thread a wsp run or fork call opened, as its answer names it. */
+  readonly spawned?: string;
 }
 
 /** One step of the agent's list, with how long it took where the list set it working and later marked it done. */
@@ -212,6 +214,9 @@ export interface TurnSummary {
 export type ToolGroupAction = "read" | "edit" | "command" | "code-search" | "search" | "other" | "update";
 export type ToolGroupSummaryKind = ToolGroupAction | "dynamic-tool" | "agent-tool" | "tone-tool" | "mixed";
 
+/** A call drawn as its child's row: the thread's runtime id, or the subagent's launching call. */
+export type SpawnCall = { readonly id: string; readonly thread: string } | { readonly id: string; readonly subagent: string };
+
 export type MessagesTimelineRow =
   | {
       readonly kind: "work";
@@ -240,6 +245,13 @@ export type MessagesTimelineRow =
       readonly summary: string;
       readonly summaryKind: ToolGroupSummaryKind;
       readonly hasFailure: boolean;
+    }
+  | {
+      /** The calls one turn made in a row that each started a child this thread holds, drawn as the children's rows. */
+      readonly kind: "spawn";
+      readonly id: string;
+      readonly createdAt: string;
+      readonly calls: ReadonlyArray<SpawnCall>;
     }
   | {
       readonly kind: "turn-fold";

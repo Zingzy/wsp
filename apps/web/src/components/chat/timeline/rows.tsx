@@ -13,6 +13,7 @@ import { COMPOSER_WORDS } from "../composerWords";
 import { useSentFiles } from "../composerFiles";
 import { PermissionPromptRow } from "../PermissionPromptRow";
 import { SubagentFoldRow } from "../SubagentFoldRow";
+import { SpawnTiles } from "../../threads/SpawnTiles";
 import { ProposedPlanCard } from "../ProposedPlanCard";
 import { ChangedFilesCard } from "../ChangedFilesTree";
 import { MessageCopyButton } from "../MessageCopyButton";
@@ -79,6 +80,7 @@ export const TimelineRowContent = memo(function TimelineRowContent({ row }: { ro
       {row.kind === "proposed-plan" ? <ProposedPlanTimelineRow row={row} /> : null}
       {row.kind === "permission" ? <PermissionTimelineRow row={row} /> : null}
       {row.kind === "subagent" ? <SubagentTimelineRow row={row} /> : null}
+      {row.kind === "spawn" ? <SpawnTimelineRow row={row} /> : null}
       {row.kind === "working" ? <WorkingTimelineRow row={row} /> : null}
       {row.kind === "thinking" ? <ThinkingTimelineRow /> : null}
     </div>
@@ -256,6 +258,12 @@ function PermissionTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "per
 function SubagentTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "subagent" }> }) {
   const ctx = use(TimelineRowCtx);
   return <SubagentFoldRow onAnswer={ctx.onAnswerPermission} subagent={row.subagent} />;
+}
+
+/** The children a run of calls started, as their rows where the calls stand. */
+function SpawnTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "spawn" }> }) {
+  const { leadKey } = use(TimelineRowCtx);
+  return leadKey === null ? null : <SpawnTiles calls={row.calls} leadKey={leadKey} />;
 }
 
 /** Owns the expand-all state for one turn's changed files,
