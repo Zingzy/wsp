@@ -137,6 +137,11 @@ export interface SubagentLine {
   readonly label: string;
   readonly detail?: string;
   readonly status?: WorkLogToolLifecycleStatus;
+  /** The tool call a tool line is, as its input arrived: what the subagent's page groups and words it by. */
+  readonly call?: { readonly name: string; readonly input: string };
+  /** The launching call's own answer, the run's last line: its first line, which a done run's own words already say
+   * whole and a failed run's bar says. */
+  readonly answer?: true;
 }
 
 /** stopped is a subagent the turn ended under: the harness kills what it started, so a run whose launch never
@@ -152,9 +157,13 @@ export interface SubagentRun {
   readonly turnId: string | null;
   /** The task's own description, the fold's title; the tool call's line where the call described none. */
   readonly title: string;
+  /** What its lead asked it, whole, from the launching call; null where the call carried no prompt. */
+  readonly prompt: string | null;
   readonly lines: ReadonlyArray<SubagentLine>;
   /** The prompts this subagent's own run raised, open and closed, drawn inside its fold. */
   readonly prompts: ReadonlyArray<PermissionPrompt>;
+  /** Why it failed, the first line of the error its launching call answered with; absent on any other end. */
+  readonly failure?: string;
   readonly state: SubagentState;
   readonly startedAt: string;
   readonly endedAt: string | null;

@@ -28,6 +28,7 @@ export function useLaunches(): Record<string, Launch> {
 
 export function useSelectedId(): string | null { return useStore(s => s.selectedId); }
 export function useSelectedThreadId(): string | null { return useStore(s => s.selectedThreadId); }
+export function useSelectedSubagent(): string | null { return useStore(s => s.selectedSubagent); }
 
 export function useSelectedWorkspaceId(): string | null {
   return useStore(selectedWorkspaceIdOf);

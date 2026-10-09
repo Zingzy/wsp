@@ -146,6 +146,9 @@ export interface State {
   /** The thread of the selected workspace the centre is on, which the page's address names too; null until a pick
    * or the centre's own view has settled on one, where the workspace's latest thread shows. */
   selectedThreadId: string | null;
+  /** The subagent of the selected thread whose page the centre shows, by the call that launched it; null on the
+   * thread's own page. The address names it too, and every pick but one that names it again leaves it. */
+  selectedSubagent: string | null;
   /** Whether the centre is on the screen the selected workspace's next thread is written on: it has no thread of its
    * own yet, and its address says so, so a reload opens it again rather than the thread it was opened from. */
   freshThread: boolean;
@@ -181,7 +184,7 @@ export interface State {
   setConn(conn: ConnStatus): void;
   /** Also leaves the settings page: every road to a workspace lands on its thread. The pick goes into the page's
    * address, which is where the next load reads it back from. */
-  select(id: string | null, threadId?: string | null): void;
+  select(id: string | null, threadId?: string | null, subagent?: string | null): void;
   /** Lets the landed setup go once the thread it stood over has a message. */
   dropLanded(workspaceId: string): void;
   /** Opens a project's home in the centre, where a task typed and sent becomes a workspace of its own. */

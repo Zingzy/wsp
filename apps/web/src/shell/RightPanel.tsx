@@ -97,11 +97,14 @@ export function RightPanel({
   state,
   mode,
   layoutControls,
+  hidden = false,
 }: {
   workspaceId: string;
   state: WorkspaceRightPanelState;
   mode: PreviewPanelMode;
   layoutControls?: ReactNode;
+  /** Shut over a subagent's page and kept mounted: the sheet a narrow window draws portals past the shell's wrapper. */
+  hidden?: boolean;
 }) {
   const workspace = useWorkspace(workspaceId);
   const here = workspaceId === HERE_KEY;
@@ -177,7 +180,7 @@ export function RightPanel({
 
   if (mode === "sheet") {
     return (
-      <RightPanelSheet open onClose={() => close(workspaceId)}>
+      <RightPanelSheet open={!hidden} onClose={() => close(workspaceId)}>
         {tabs}
       </RightPanelSheet>
     );

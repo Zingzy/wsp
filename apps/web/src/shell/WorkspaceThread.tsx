@@ -9,17 +9,20 @@
 // or a letter typed outside the dock's own keys folds the prompt to the first
 // row of the composer's drawer until the person opens it again. A turn the
 // agent's usage limit stopped is a row of that drawer too, until the turn goes
-// on or the thread moves on without it.
+// on or the thread moves on without it. On a subagent's page the slot holds
+// that subagent's bar: nobody writes to a subagent but through its lead.
 import { useEffect, useMemo } from "react";
-import { permissionPromptWords } from "@wsp/protocol";
+import { agentName } from "@wsp/catalog";
+import { modelOf, modelPicks, permissionPromptWords } from "@wsp/protocol";
 import { ChatComposer } from "../components/chat/ChatComposer.js";
 import { ChatView } from "../components/chat/ChatView.js";
 import { answerPrompt, type AnswerPrompt } from "../components/chat/answerPrompt.js";
 import { useComposerBarStore } from "../components/chat/composerBar.js";
 import { PromptDock } from "../components/chat/PromptDock.js";
+import { SubagentBar } from "../components/chat/SubagentBar.js";
 import { useTypeToWrite } from "../components/chat/composerTypeToFocus.js";
 import type { ChatThreadHandle } from "../components/chat/useChatThread.js";
-import { isPromptOpen, type PermissionPrompt } from "../adapt/index.js";
+import { isPromptOpen, subagentOfRun, subagentRunOf, type PermissionPrompt } from "../adapt/index.js";
 import { useHarnessCatalog, useStore, useThreadSessions } from "../protocol/store.js";
 import { requestComposerFocus } from "./shellRequests.js";
 
@@ -36,16 +39,35 @@ const askedLine = (prompt: PermissionPrompt): string => {
   return words.questions !== undefined ? words.questions[0]!.question : words.lead;
 };
 
-export function WorkspaceThread({ workspaceId, threadId = null }: { workspaceId: string; threadId?: string | null }) {
+export function WorkspaceThread({ workspaceId, threadId = null, subagent = null }: { workspaceId: string; threadId?: string | null; subagent?: string | null }) {
   const api = useStore(s => s.api);
   const answer = useMemo(() => answerPrompt(api), [api]);
+  const page = threadId === null ? null : subagent;
   // The thread's own prompt is the dock's whether the dock is up or folded to the drawer: its row keeps the record
   // alone either way.
   return (
-    <ChatView workspaceId={workspaceId} threadId={threadId} docked={thread => openPrompt(thread)?.askId ?? null}>
-      {thread => <Slot workspaceId={workspaceId} thread={thread} answer={answer} />}
+    <ChatView workspaceId={workspaceId} threadId={threadId} subagent={page} docked={thread => openPrompt(thread)?.askId ?? null}>
+      {thread => (page === null ? <Slot workspaceId={workspaceId} thread={thread} answer={answer} /> : <SubagentSlot workspaceId={workspaceId} threadId={threadId!} subagent={page} thread={thread} />)}
     </ChatView>
   );
+}
+
+/** The bar of the subagent whose page this is, off the lead's listing, which says its state, times and model; where
+ * the listing does not carry it, off its own fold in the lead's transcript. */
+function SubagentSlot({ workspaceId, threadId, subagent, thread }: { workspaceId: string; threadId: string; subagent: string; thread: ChatThreadHandle }) {
+  const rows = useThreadSessions(workspaceId, threadId);
+  const row = rows.findLast(r => r.subagents?.some(sub => sub.parentToolUseId === subagent) === true);
+  const run = subagentRunOf(thread.view.entries, subagent);
+  const shown = row?.subagents?.find(sub => sub.parentToolUseId === subagent) ?? (run === null ? undefined : subagentOfRun(run));
+  const harness = row?.harness ?? rows.at(-1)?.harness ?? null;
+  const catalog = useHarnessCatalog(harness, workspaceId);
+  if (shown === undefined || harness === null) return null;
+  const model = shown.model === undefined ? agentName(harness) : catalog === null ? shown.model : (modelOf(catalog, modelPicks(shown.model).model)?.label ?? shown.model);
+  const back = (): void => {
+    useStore.getState().select(workspaceId, threadId);
+    requestComposerFocus(workspaceId);
+  };
+  return <SubagentBar subagent={shown} harness={harness} model={model} onBack={back} />;
 }
 
 /** What stands in the composer's slot: the dock while this thread's own prompt is open and not folded, else the

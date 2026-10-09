@@ -8,7 +8,7 @@
 // md up. A subagent's row is the same box, led by the glyph the timeline gives
 // the call that launched it.
 import { agentName } from "@wsp/catalog";
-import type { PlaceView, SubagentView } from "@wsp/protocol";
+import { appHash, type PlaceView, type SubagentView } from "@wsp/protocol";
 import { BotIcon, EllipsisIcon, GitBranchIcon, type LucideIcon } from "lucide-react";
 import { memo, useState, type MouseEvent, type ReactNode } from "react";
 import { CHILD_WORDS } from "../../actions/format.js";
@@ -259,27 +259,66 @@ function sameRow(a: ThreadRowProps, b: ThreadRowProps): boolean {
   );
 }
 
+type SubagentRowProps = {
+  subagent: SubagentView;
+  target: ChildTarget;
+  kind: StatusKind;
+  note: string | undefined;
+  /** The lead thread whose page holds the subagent's lines, where a press on the row opens its page. */
+  lead?: { workspaceId: string; threadId: string } | undefined;
+};
+
 /** One of an agent's own subagents, in the row's box under the thread whose agent runs it: the launching call's
- * glyph, its title with its card on rest, its status, and Stop subagent on hover while it runs. */
-export const SubagentRow = memo(function SubagentRow({ subagent, target, kind, note }: { subagent: SubagentView; target: ChildTarget; kind: StatusKind; note: string | undefined }) {
+ * glyph, its title with its card on rest, its status, and Stop subagent on hover while it runs. A press on it, but on
+ * its acts, opens its page where it names its lead. */
+export const SubagentRow = memo(function SubagentRow({ subagent, target, kind, note, lead }: SubagentRowProps) {
   const verbs = useChildVerbs();
   const acts = resolveActions(childActions, target, verbs);
   const menu = (event: MouseEvent<HTMLElement>): void => {
     if (acts.length > 0) void openContextMenu(event, acts);
   };
   const ended = subagent.endedAt === undefined ? null : new Date(subagent.endedAt).toISOString();
+  const call = subagent.parentToolUseId;
+  const opens = lead === undefined || call === undefined ? undefined : () => useStore.getState().select(lead.workspaceId, lead.threadId, call);
+  const titleInk = target.part === "settled" ? "text-muted-foreground" : "text-foreground";
   const status = (
     <ThreadStatus thread={subagentStatus(subagent)} age={restingAge({ startedAt: new Date(subagent.startedAt).toISOString(), endedAt: ended })} kind={kind} className={LINE_SLOT_CLASS} />
   );
   return (
-    <div data-subagent-row={subagent.id} data-child-part={target.part} className={rowBox(note !== undefined)} {...(acts.length > 0 ? { onContextMenu: menu } : {})}>
+    <div
+      data-subagent-row={subagent.id}
+      data-child-part={target.part}
+      className={rowBox(note !== undefined, opens === undefined ? undefined : "cursor-pointer")}
+      {...(acts.length > 0 ? { onContextMenu: menu } : {})}
+      {...(opens === undefined
+        ? {}
+        : {
+            onClick: (event: MouseEvent<HTMLDivElement>) => {
+              if (!(event.target instanceof Element) || event.target.closest("a, button, input") === null) opens();
+            },
+          })}
+    >
       <span className="inline-flex shrink-0 text-muted-foreground">
         <BotIcon aria-hidden data-subagent-mark className="size-3.25" />
       </span>
       <span className="flex min-w-28 flex-1 flex-col">
         <Tooltip>
           <TooltipTrigger delay={CARD_DELAY_MS} render={<span className="flex min-w-0" />}>
-            <span className={cn("min-w-0 truncate", target.part === "settled" ? "text-muted-foreground" : "text-foreground")}>{subagent.title}</span>
+            {lead === undefined || call === undefined ? (
+              <span className={cn("min-w-0 truncate", titleInk)}>{subagent.title}</span>
+            ) : (
+              <a
+                data-subagent-open
+                href={appHash({ workspaceId: lead.workspaceId, threadId: lead.threadId, subagent: call })}
+                className={cn("min-w-0 truncate underline-offset-2 hover:underline", titleInk)}
+                onClick={event => {
+                  event.preventDefault();
+                  opens?.();
+                }}
+              >
+                {subagent.title}
+              </a>
+            )}
           </TooltipTrigger>
           <SubagentCard subagent={subagent} harness={target.harness} kind={kind} reason={note} />
         </Tooltip>
@@ -288,7 +327,7 @@ export const SubagentRow = memo(function SubagentRow({ subagent, target, kind, n
       <Slot status={status} acts={acts} menu={menu} more={false} />
     </div>
   );
-}, sameSubagentRow);
+}, (a, b) => a.lead?.workspaceId === b.lead?.workspaceId && a.lead?.threadId === b.lead?.threadId && sameSubagentRow(a, b));
 
 const SUBAGENT_DRAWN = ["id", "title", "state", "startedAt", "endedAt", "asked", "model", "lastLine", "failure"] as const;
 

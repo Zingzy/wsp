@@ -71,6 +71,9 @@ export function AppShell({ children }: { children: ReactNode }) {
   // it, with Restore defaults where the layout controls were. The panel's own record is untouched, so every
   // surface is back as it was the moment Settings closes.
   const settingsOpen = useSettingsOpen();
+  // A subagent's page has no folder, terminal or changes of its own: the lead's panels and the header's buttons that
+  // open them stand hidden while it is open, mounted as they were, so going back is a reveal.
+  const subagentPage = useStore(s => s.selectedSubagent !== null);
   // The sidebar's own host, since in a narrow window it stands in a sheet whose portal its popups belong inside.
   const [sidebarHost, placeSidebarHost] = usePlacedPortalHost(settingsOpen);
   const [centreHost, placeCentreHost] = usePlacedPortalHost(settingsOpen);
@@ -136,10 +139,10 @@ export function AppShell({ children }: { children: ReactNode }) {
                 </div>
               ) : (
                 <div className="ml-auto mr-px flex items-center gap-2">
-                  {workspaceId !== null ? <ContextRing workspaceId={workspaceId} /> : null}
-                  {workspaceId !== null ? <GitSplit workspaceId={workspaceId} /> : null}
-                  {workspaceId !== null ? <OpenSplit workspaceId={workspaceId} /> : null}
-                  {panelInline ? null : layoutControls}
+                  {workspaceId !== null && !subagentPage ? <ContextRing workspaceId={workspaceId} /> : null}
+                  {workspaceId !== null && !subagentPage ? <GitSplit workspaceId={workspaceId} /> : null}
+                  {workspaceId !== null && !subagentPage ? <OpenSplit workspaceId={workspaceId} /> : null}
+                  {panelInline || subagentPage ? null : layoutControls}
                 </div>
               )}
             </WorkspacePageHeader>
@@ -154,7 +157,9 @@ export function AppShell({ children }: { children: ReactNode }) {
             </div>
           </div>
           {rightPanelOpen ? (
-            <RightPanel workspaceId={terminalKey} state={panel} mode={useSheet ? "sheet" : "inline"} {...(useSheet ? {} : { layoutControls })} />
+            <div data-lead-panels className={subagentPage ? "hidden" : "contents"}>
+              <RightPanel workspaceId={terminalKey} state={panel} mode={useSheet ? "sheet" : "inline"} hidden={subagentPage} {...(useSheet ? {} : { layoutControls })} />
+            </div>
           ) : null}
         </div>
       </SidebarInset>
