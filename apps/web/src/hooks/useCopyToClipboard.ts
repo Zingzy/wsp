@@ -19,23 +19,6 @@ export class ClipboardWriteError extends Error {
   }
 }
 
-export class ClipboardReadUnavailableError extends Error {
-  constructor(readonly target: string) {
-    super(`Clipboard API is unavailable while reading ${target}.`);
-    this.name = "ClipboardReadUnavailableError";
-  }
-}
-
-export class ClipboardReadError extends Error {
-  constructor(
-    readonly target: string,
-    readonly cause: unknown,
-  ) {
-    super(`Failed to read ${target} from the clipboard.`);
-    this.name = "ClipboardReadError";
-  }
-}
-
 export async function writeTextToClipboard(value: string, target = "text") {
   if (
     typeof window === "undefined" ||
@@ -52,22 +35,6 @@ export async function writeTextToClipboard(value: string, target = "text") {
     return true;
   } catch (cause) {
     throw new ClipboardWriteError(target, cause);
-  }
-}
-
-export async function readTextFromClipboard(target = "text"): Promise<string> {
-  if (
-    typeof window === "undefined" ||
-    typeof navigator === "undefined" ||
-    !navigator.clipboard?.readText
-  ) {
-    throw new ClipboardReadUnavailableError(target);
-  }
-
-  try {
-    return await navigator.clipboard.readText();
-  } catch (cause) {
-    throw new ClipboardReadError(target, cause);
   }
 }
 

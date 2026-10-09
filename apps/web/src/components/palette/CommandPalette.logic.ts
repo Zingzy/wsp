@@ -12,7 +12,6 @@ export { normalizeSearchText } from "../../lib/utils.js";
 
 export const RECENT_THREAD_LIMIT = 12;
 export const ITEM_ICON_CLASS = "size-4 text-icon-muted";
-export const ADDON_ICON_CLASS = "size-4";
 
 export interface CommandPaletteItem {
   readonly kind: "action" | "submenu";

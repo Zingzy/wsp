@@ -28,13 +28,15 @@ import type { Browser, ConsoleMessage, Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ACCESS_REFUSED_LINE, accessReachLine, contrastRatio, DEFAULT_THEME, dotColour, effectiveOpacity, FREE_WORD, INK_FLOOR, sendRefusal, SIDE_INK, THEME_PRESETS, themeInk, themeScheme, type Rgb } from "@wsp/protocol";
 import { WAKE_AND_SEND_LABEL } from "../src/components/chat/ComposerPrimaryActions";
-import { LOCKUP_OPTICAL_CENTRE } from "../src/brand/optical";
 import { textContrast } from "./contrast";
 import { launchRender, renderSkipped, stopRender } from "./render-browser";
 import { startVite, type ViteChild } from "./vite-child";
 
 const WEB_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SHOTS_DIR = join(tmpdir(), "wsp-render");
+/** Where the lockup's optical centre sits in its box, top down: the wordmark's x-height band runs from y 1 to y 9 of
+ * the 14-unit viewBox (the p's descender hangs below it), so the eye reads the line at y 5. */
+const LOCKUP_OPTICAL_CENTRE = 5 / 14;
 /** What React says when one body is drawn as both panes. The case that watches for it wants this line and not
  * whatever else a browser puts on the console. */
 const DUPLICATE_KEY = "two children with the same key";

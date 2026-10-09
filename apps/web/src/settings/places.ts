@@ -6,14 +6,11 @@
 // rate are all the protocol's (absentComputer, fmtSize, fmtBytes, offlineFor,
 // fmtRate) and are not copied here.
 import type { MarkState } from "../components/status/markState.js";
-import { FREE_WORD, JOINED_COMPUTER, hereName, isHere, isProviderPlace, placeName, placeOf, absentComputer, placeDaemonBehind, awayMsOf, chargesNothing, daemonSilent, fmtBytes, fmtRate, imageCopyLine, isLocalWorkspace, landsOn, namesPlace, ownDaemonDown, plural, placeWord, SETUP_WORDS, type AbsentComputer, type CpuWord, type InitSetup, type PlaceKind, type PlaceProvisionRow, type PlaceView, type ProjectView, type SealedImageCopy, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { FREE_WORD, JOINED_COMPUTER, hereName, isHere, isProviderPlace, placeName, placeOf, absentComputer, placeDaemonBehind, awayMsOf, chargesNothing, daemonSilent, fmtBytes, fmtRate, imageCopyLine, isLocalWorkspace, landsOn, namesPlace, ownDaemonDown, plural, placeWord, SETUP_WORDS, type AbsentComputer, type InitSetup, type PlaceKind, type PlaceProvisionRow, type PlaceView, type ProjectView, type SealedImageCopy, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { agentName } from "@wsp/catalog";
 import { PLACE_STATE_WORDS, PROVISION_OUTCOME_WORDS, WHERE_WORDS, capitalised } from "./format.js";
 
 export { hereName, isHere, isProviderPlace, placeName, placeOf };
-
-/** What one of this row's cpus is called: a provider's are virtual and a computer's are the cores it has. */
-export const placeCpuWord = (place: PlaceView): CpuWord => (isProviderPlace(place) ? "vCPU" : "cores");
 
 /** Whether this row is a computer that is not holding its link right now, read the one way the protocol's own state
  * word reads it. This computer and a provider are never absent: one is the computer the host runs on and the other

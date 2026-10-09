@@ -549,15 +549,6 @@ export function selectActiveRightPanel(
   return state.surfaces.find((surface) => surface.id === state.activeSurfaceId)?.kind ?? null;
 }
 
-export function selectActiveRightPanelSurface(
-  byWorkspaceId: Record<string, WorkspaceRightPanelState>,
-  workspaceId: string | null | undefined,
-): RightPanelSurface | null {
-  const state = selectWorkspaceRightPanelState(byWorkspaceId, workspaceId);
-  if (!state.isOpen) return null;
-  return selectSelectedRightPanelSurface(byWorkspaceId, workspaceId);
-}
-
 /** The selected surface even while the panel is hidden, so a layout control can restore it. */
 export function selectSelectedRightPanelSurface(
   byWorkspaceId: Record<string, WorkspaceRightPanelState>,
