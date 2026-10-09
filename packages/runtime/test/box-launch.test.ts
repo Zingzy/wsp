@@ -10,9 +10,11 @@ import { PlaceFolderMachine, spawnSyncFed } from "@wsp/engine";
 import { DaemonExecRequest, cgroupJoinLine, placeDaemonPaths, threadCgroup } from "@wsp/protocol";
 import { writeStub } from "../../protocol/test/stub-script.js";
 import { machineExecStream } from "../src/machine-exec.js";
+import { LINUX_SHELL_PRELUDE } from "./linux-shell.js";
 
 const CGROUP = threadCgroup("thread-1");
-const ROOT = process.getuid?.() === 0;
+/** Root on Linux, where runuser hands a turn to another login as the box's daemon does; a Mac has no runuser. */
+const ROOT = process.platform === "linux" && process.getuid?.() === 0;
 /** The login nobody signs in as, which every Linux computer has: a box's login that is not root, where this suite is. */
 const NOBODY = 65534;
 /** The PATH a box's login shell gives it with a few toolchains installed, which every launch line carries, answered
@@ -30,7 +32,7 @@ function daemonLink(home: string, loginPath = LOGIN_PATH) {
       if (frame.cmd.includes("-ilc ") && frame.cmd.includes(`printf %s "$PATH"`)) return { exitCode: 0, stdout: loginPath, stderr: "", truncated: false };
       const cmd = frame.cmd.replace(`${cgroupJoinLine(CGROUP)}\n`, "");
       const stdin = frame.stdin !== undefined ? Buffer.from(frame.stdin, "base64") : new Uint8Array();
-      const ran = spawnSyncFed("bash", ["-c", cmd], stdin, { encoding: "utf8", cwd: home, env: { PATH: "/usr/sbin:/usr/bin:/sbin:/bin" }, timeout: 15_000 });
+      const ran = spawnSyncFed("bash", ["-c", `${LINUX_SHELL_PRELUDE}${cmd}`], stdin, { encoding: "utf8", cwd: home, env: { PATH: "/usr/sbin:/usr/bin:/sbin:/bin" }, timeout: 15_000 });
       return { exitCode: ran.status ?? 1, stdout: ran.stdout, stderr: ran.stderr, truncated: false };
     },
   };
@@ -105,7 +107,7 @@ describe("a box thread's launch", () => {
   for (const length of [11_000, 30_000]) {
     it(`starts with a first message of ${length} characters, every frame under the daemon's cap`, async () => {
       box();
-      expect(await turn(`head -c ${length} | wc -c`, ["x".repeat(length)])).toEqual([String(length)]);
+      expect(await turn(`head -c ${length} | wc -c | tr -d ' '`, ["x".repeat(length)])).toEqual([String(length)]);
     });
   }
 });
