@@ -1149,6 +1149,46 @@ describe("the threads a thread opened", () => {
     expect(sectionDraws.n - before).toBe(0);
   });
 
+  it("says nothing of a branch, a push or a merge on a child's row, on its own branch or on the lead's, at rest, on hover or in its menu", async () => {
+    const QUIET: WorkspaceView = { ...BENCH, id: "ws_quiet", name: "spoo-quiet" };
+    const quiet: SessionView = { id: "sess_quiet", workspaceId: "ws_quiet", harness: "claude", status: "completed", startedBy: "agent", threadId: "thr_quiet", parentThreadId: PARENT, prompt: "tidy the index names" };
+    // The lead's status as the host pushes it, carrying what it read of its children's branches.
+    const tree = {
+      leadBranch: "fix/fleet",
+      readAt: T0,
+      children: [
+        { workspaceId: "ws_bench", branch: "child/bench", pushed: false, conflicts: ["a.ts"], pushRefused: "no git credential for github.com, so nothing was pushed" },
+        { workspaceId: "ws_quiet", branch: "child/quiet", pushed: true, aheadOfLead: 2, behindLead: 0 },
+      ],
+    };
+    const { api } = fixtureApi([workspace, BENCH, QUIET], { [WS]: lead }, [...rows, quiet]);
+    api.watchStatuses = async () => [{ ...workspace, machineState: "running", reach: { state: "reachable" }, tree }] as never;
+    await setup(api);
+    await waitFor(() => expect(useStore.getState().statuses[WS]?.tree).toBeDefined());
+    const fold = await waitFor(() => document.querySelector<HTMLElement>('[data-child-fold="finished"]')!);
+    fireEvent.click(fold);
+    const words = /child\/|fix\/fleet|ahead|push|merge|conflict|counted|credential/i;
+    const said = (at: Element): string => [at.textContent ?? "", ...[at, ...at.querySelectorAll("*")].flatMap(el => [el.getAttribute("title") ?? "", el.getAttribute("aria-label") ?? ""])].join("\n");
+    for (const id of ["thr_bench", "thr_quiet", "thr_web"]) {
+      const row = await waitFor(() => document.querySelector<HTMLElement>(`[data-thread-row="${id}"]`)!);
+      expect(said(row)).not.toMatch(words);
+      expect([...row.querySelectorAll("button:not([data-child-act])")]).toHaveLength(0);
+      fireEvent.pointerEnter(row, { pointerType: "mouse" });
+      fireEvent.mouseEnter(row);
+      expect(said(document.body)).not.toMatch(words);
+      let menu: string[] = [];
+      window.wsp = { contextMenu: async (items: Array<{ label?: string }>) => ((menu = items.map(item => item.label ?? "")), null) } as never;
+      try {
+        fireEvent.contextMenu(row);
+        await waitFor(() => expect(menu.length).toBeGreaterThan(0));
+      } finally {
+        delete (window as { wsp?: unknown }).wsp;
+      }
+      expect(menu.join("\n")).not.toMatch(words);
+      fireEvent.mouseLeave(row);
+    }
+  });
+
   it("leaves the transcript alone on a thread that opened none", async () => {
     const { api } = fixtureApi([workspace], { [WS]: lead });
     await setup(api);
