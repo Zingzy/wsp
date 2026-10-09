@@ -4,7 +4,8 @@
 import type { ComponentType } from "react";
 import { DOWNLOADS } from "./downloads";
 import { EMAIL, ORG, SITE, X } from "./links";
-import { Compare } from "./pages/compare";
+import { TOOLS } from "./compare";
+import { Compare, ToolPage } from "./pages/compare";
 import { Home } from "./pages/home";
 import { Privacy, Security, Terms } from "./pages/legal";
 import { NotFound } from "./pages/not-found";
@@ -70,6 +71,16 @@ export const ROUTES: readonly Route[] = [
     index: true,
     Page: Compare,
   },
+  ...TOOLS.map(
+    (tool): Route => ({
+      path: `/compare/${tool.slug}`,
+      title: `wsp vs ${tool.name}`,
+      description: tool.differs,
+      image: { path: `/og-compare-${tool.slug}.png`, line: `wsp vs ${tool.name}.`, alt: `wsp vs ${tool.name}.` },
+      index: true,
+      Page: () => <ToolPage tool={tool} />,
+    }),
+  ),
   {
     path: "/404",
     title: "Not found: wsp",
