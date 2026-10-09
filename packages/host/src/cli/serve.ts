@@ -37,7 +37,7 @@ import { hostPlatform } from "../verbs.js";
 import { installedVersion, VERSION } from "../version.js";
 import { releaseWatch } from "../release.js";
 import { analyticsOff, hostAnalytics } from "../analytics.js";
-import { followUsage } from "../analytics-events.js";
+import { followUsage, hostCommon } from "../analytics-events.js";
 import type { CliIO } from "./io.js";
 import { keySources, providerEnvNow, loadKeys, vaultNow } from "./keys.js";
 import { goldenRecipe, hostRecipeWatch, swapProvider, makeRuntime, collectThisComputer, projectFolder, workspaceEnvsFor } from "./wiring.js";
@@ -299,7 +299,7 @@ export async function hostFor(
   const usageOff = analyticsOff(opts.statePath, process.env);
   const analytics = hostAnalytics({
     off: usageOff,
-    common: { wspVersion: VERSION, os: ["darwin", "linux", "win32"].includes(process.platform) ? process.platform : "other", arch: ["arm64", "x64"].includes(process.arch) ? process.arch : "other", host: started ?? "app" },
+    common: hostCommon(VERSION, started),
     log: line => io.log(line),
   });
   const init = hostInitDoor(rt, opts.statePath, run, opts.openUrl ?? systemOpener(), line => io.log(line), opts.providerEnv);

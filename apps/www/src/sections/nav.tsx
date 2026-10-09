@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { useEffect, useState } from "react";
 import { Lockup } from "@/components/brand";
-import { DOWNLOADS, platformOf } from "@/downloads";
+import { DOWNLOADS, useVisitor } from "@/downloads";
 import { DOCS, REPO } from "@/links";
 import { cn } from "@/lib/utils";
 
@@ -21,7 +21,7 @@ export function Nav() {
     window.addEventListener("scroll", on, { passive: true });
     return () => window.removeEventListener("scroll", on);
   }, []);
-  const platform = typeof navigator === "undefined" ? "mac" : platformOf(navigator.userAgent);
+  const platform = useVisitor();
 
   return (
     <header
@@ -31,19 +31,19 @@ export function Nav() {
       )}
     >
       <nav className="mx-auto flex h-16 max-w-[1200px] items-center justify-between px-4 sm:px-6">
-        <a href="#top" aria-label="wsp" className="text-[22px]">
+        <a href="/#top" aria-label="wsp" className="text-[22px]">
           <Lockup />
         </a>
         <div className="flex items-center gap-1 sm:gap-2">
           <a href={DOCS} className="rounded-md px-3 py-2 text-[14px] text-muted-foreground transition-colors duration-150 hover:text-foreground">
             Docs
           </a>
-          <a href={REPO} className="flex items-center gap-2 rounded-md px-3 py-2 text-[14px] text-muted-foreground transition-colors duration-150 hover:text-foreground">
+          <a href={REPO} aria-label="GitHub" className="flex items-center gap-2 rounded-md px-3 py-2 text-[14px] text-muted-foreground transition-colors duration-150 hover:text-foreground">
             <GithubGlyph className="size-4" />
             <span className="hidden sm:inline">GitHub</span>
           </a>
           <a
-            href={platform === "windows" ? "#get" : DOWNLOADS[platform].href}
+            href={platform === "windows" ? "/#get" : DOWNLOADS[platform].href}
             className="key ml-1 inline-flex h-8 items-center rounded-[8px] px-3 text-[13px] font-medium transition-opacity duration-150 hover:opacity-90"
           >
             {platform === "windows" ? "Get wsp" : "Download"}

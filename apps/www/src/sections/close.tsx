@@ -3,7 +3,7 @@ import { Lockup } from "@/components/brand";
 import { Install } from "@/components/download";
 import { Field } from "@/components/field";
 import { Section } from "@/components/section";
-import { DOCS, REPO } from "@/links";
+import { DOCS, EMAIL, REPO, X } from "@/links";
 
 export const QUESTIONS = [
   { q: "Do I need API keys?", a: "No. Your agents use the subscriptions they're already signed in to." },
@@ -66,11 +66,11 @@ export function Footer() {
           <a className="transition-colors hover:text-foreground" href={REPO}>
             GitHub
           </a>
-          <a className="transition-colors hover:text-foreground" href="https://x.com/wsplabs">
+          <a className="transition-colors hover:text-foreground" href={X}>
             X
           </a>
-          <a className="transition-colors hover:text-foreground" href="mailto:hello@usewsp.com">
-            hello@usewsp.com
+          <a className="transition-colors hover:text-foreground" href={`mailto:${EMAIL}`}>
+            {EMAIL}
           </a>
         </nav>
       </div>

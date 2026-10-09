@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { HERE_PLACE_ID, usageRefusal, type EventUnion, type InitJob, type InitJobEvent, type Preferences } from "@wsp/protocol";
 import { hostAnalytics, NO_ANALYTICS, type AnalyticsProps } from "../src/analytics.js";
-import { followUsage, OP_FAILED_EVERY_MS, osWord, usageReader } from "../src/analytics-events.js";
+import { followUsage, hostCommon, OP_FAILED_EVERY_MS, osWord, usageReader } from "../src/analytics-events.js";
 
 // Every property each event may carry. A property not written here fails the suite, so adding one is a change to
 // this list that a reviewer reads, never a field that rides along unseen.
@@ -19,7 +19,7 @@ const ALLOWED: Record<string, readonly string[]> = {
   "project.added": ["source", "here"],
   "op.failed": ["op", "class", "kind"],
 };
-const COMMON = ["wspVersion", "os", "arch", "host", "$process_person_profile"];
+const COMMON = ["wspVersion", "os", "arch", "host", "surface", "$process_person_profile"];
 
 /** Put in every field that carries a person's words, a path, a name, a secret or a model's free text. */
 const S = "SENTINEL-sk-ant-x-/Users/someone/secret-project";
@@ -251,7 +251,7 @@ function wired(productUsage: boolean) {
     bodies.push(String(init.body));
     return new Response("{}", { status: 200 });
   }) as typeof globalThis.fetch;
-  const client = hostAnalytics({ off: undefined, key: "phc_test", host: "http://capture.test", idDir: join(home, "config"), fetch, flushMs: 3_600_000, common: { wspVersion: "0.2.0", os: "darwin", arch: "arm64", host: "app" } });
+  const client = hostAnalytics({ off: undefined, key: "phc_test", host: "http://capture.test", idDir: join(home, "config"), fetch, flushMs: 3_600_000, common: hostCommon("0.2.0", undefined) });
   const runtime = fakeRuntime(productUsage);
   let initListener: ((e: InitJobEvent) => void) | undefined;
   const usage = followUsage(client, runtime.rt, { on: fn => ((initListener = fn), () => (initListener = undefined)) });
@@ -274,6 +274,7 @@ describe("following a runtime", () => {
     expect(new Set(batch.map(e => e.event))).toEqual(new Set(Object.keys(ALLOWED)));
     for (const e of batch) for (const key of Object.keys(e.properties)) expect([...ALLOWED[e.event]!, ...COMMON], `${e.event} carries ${key}`).toContain(key);
     expect(bodies.join("\n")).not.toContain("SENTINEL");
+    for (const e of batch) expect(e.properties, e.event).toMatchObject({ wspVersion: "0.2.0", host: "app", surface: "app" });
     expect(batch.find(e => e.event === "host.started")!.properties).toMatchObject({ projects: 2, workspaces: 1, computers: 1, firstRun: true });
   });
 

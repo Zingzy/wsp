@@ -1,4 +1,0 @@
-User-agent: *
-Allow: /
-
-Sitemap: https://wspx.vercel.app/sitemap.xml
