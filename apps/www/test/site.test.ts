@@ -12,7 +12,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { App } from "../src/App";
 import { DOWNLOADS, platformOf } from "../src/downloads";
 import { DOCS, EMAIL, ORG, REPO, X } from "../src/links";
-import { AHEAD, COLUMNS, KINDS, sources, WSP } from "../src/compare";
+import { aheadOf, KINDS, ROWS, sources, TOOLS, WSP } from "../src/compare";
 import { fileOf, ROUTES } from "../src/routes";
 import { QUESTIONS } from "../src/sections/close";
 
@@ -82,28 +82,53 @@ describe("every route, as raw HTML", () => {
     expect(html).toMatch(/<a href="\/compare"[^>]*>Compare with Conductor/);
   });
 
-  it("serves /compare with the table, where the others are ahead and every source before any script runs", () => {
+  it("serves /compare as one card per tool, under its kind, each opening the tool's page", () => {
     const html = built(fileOf("/compare"));
     const body = text(html);
     expect(html).toMatch(/<h1[^>]*>Where wsp sits\.<\/h1>/);
-    for (const tool of [WSP, ...KINDS.flatMap(k => k.tools)]) for (const c of COLUMNS) expect(body).toContain(tool.cells[c.key][0]);
-    for (const kind of KINDS) expect(body).toContain(kind.name);
-    for (const { title, body: [line] } of AHEAD) expect(body).toContain(`${title} ${line}`);
-    for (const url of sources()) expect(html).toContain(`href="${url}"`);
-    expect(body).toContain("Sources, read 2026-10-09");
+    expect(body).toContain("The vendors run them on their own VM, from your repo, a setup script, and on Claude and Cursor some skills you turn on.");
+    for (const kind of KINDS) expect(html).toMatch(new RegExp(`<h2[^>]*>${kind.name.replace(/'/g, "&#x27;")}</h2>`));
+    for (const tool of TOOLS) {
+      expect(html).toContain(`href="/compare/${tool.slug}"`);
+      expect(body).toContain(tool.line);
+    }
+    expect(html.match(/<a href="\/compare\/[^"]+"/g)).toHaveLength(TOOLS.length);
     expect(body).not.toContain("\u2014");
   });
 
-  it("groups /compare's rows by kind under one name each, and heads each group on a phone", () => {
-    const html = built(fileOf("/compare"));
-    expect(html.match(/<tbody/g)).toHaveLength(KINDS.length + 1);
-    for (const kind of KINDS) {
-      expect(html).toMatch(new RegExp(`<th scope="rowgroup"[^>]*>${kind.name.replace(/'/g, "&#x27;")}</th>`));
-      expect(html).toMatch(new RegExp(`<h2[^>]*>${kind.name.replace(/'/g, "&#x27;")}</h2>`));
-    }
-    expect(KINDS[0]!.name).toBe("Apps on the computer you sit at");
-    expect(text(built("index.html"))).toContain("Apps on the computer you sit at");
-  });
+  for (const tool of TOOLS) {
+    it(`serves /compare/${tool.slug} with the eight questions, wsp in the raised column, and no citation numbers in a cell`, () => {
+      const html = built(fileOf(`/compare/${tool.slug}`));
+      const body = text(html);
+      expect(html).toMatch(new RegExp(`<h1[^>]*>wsp vs ${tool.name}</h1>`));
+      expect(body).toContain(tool.differs);
+      const table = /<table[\s\S]*<\/table>/.exec(html)![0];
+      expect(table).not.toMatch(/<a |<sup/);
+      const rows = [...table.matchAll(/<tr class="border-t[\s\S]*?<\/tr>/g)].map(m => m[0]);
+      expect(rows).toHaveLength(ROWS.length);
+      ROWS.forEach((r, i) => {
+        const cells = [...rows[i]!.matchAll(/<td title="([^"]*)" class="([^"]*)">([\s\S]*?)<\/td>/g)];
+        expect(unescape(/<th[^>]*>([^<]*)<\/th>/.exec(rows[i]!)![1]!)).toBe(r.label);
+        expect(cells).toHaveLength(2);
+        const [theirs, ours] = cells.map(m => ({ title: unescape(m[1]!), raised: m[2]!.includes("bg-raised"), text: text(m[3]!).trim(), mark: /aria-label="(yes|no)"/.exec(m[3]!)![1] }));
+        for (const [seen, cell] of [[theirs!, tool.cells[r.key]], [ours!, WSP[r.key]]] as const) {
+          expect(seen.text).toBe(cell.short);
+          expect(seen.mark).toBe(cell.good ? "yes" : "no");
+          expect(seen.title.split("\n")[0]).toBe(cell.says[0]);
+          expect(seen.title.split("\n")).toHaveLength(cell.says.length);
+        }
+        expect([theirs!.raised, ours!.raised]).toEqual([false, true]);
+      });
+      expect(body).toContain(tool.well);
+      expect(body).toContain(tool.fit);
+      for (const a of aheadOf(tool)) expect(body).toContain(`${a.title} ${a.said[0]} ${a.wsp}`);
+      expect(html).toMatch(/<details class="[^"]*">/);
+      const details = /<details[\s\S]*<\/details>/.exec(html)![0];
+      for (const url of sources(tool)) expect(details).toContain(`href="${url}"`);
+      expect(body).not.toContain("\u2014");
+      expect(body).not.toMatch(/\bAI\b/);
+    });
+  }
 
   it("says on / what /compare says about the other kinds", () => {
     const body = text(built("index.html"));
@@ -112,26 +137,8 @@ describe("every route, as raw HTML", () => {
     expect(body).toContain("The vendors bring your repo, a setup script, and on Claude and Cursor some skills you turn on. wsp brings your setup.");
     expect(body).not.toContain("some reach a box");
     expect(body).not.toContain("Your repo and a setup script");
-  });
-
-  it("says what /compare's sources say, in one word for how many reach a second computer", () => {
-    const body = text(built(fileOf("/compare")));
-    expect(body).toContain("What the repo has committed, and skills you turn on at claude.ai. Not your ~/.claude, plugins or local MCP servers");
-    expect(body).toContain("Most can also reach a second computer");
-    expect(body).toContain("Most of these can start an agent on another computer");
-    expect(body).not.toMatch(/\bSome reach\b/);
-    expect(body).toContain('"What that computer has when the agent starts" sorts the field.');
-    expect(body).toContain("it started in September 2026");
-    expect(body).toContain("The vendors run agents on their own machines, from your repo, a setup script, and on Claude and Cursor some skills you turn on.");
-    expect(body).toContain("Conductor, Superset and all three vendors sell plans for teams.");
-    const teams = AHEAD.find(a => a.title === "Teammates")!.body;
-    for (const page of ["https://www.conductor.build/pricing", "https://superset.sh/pricing", "https://claude.com/pricing", "https://learn.chatgpt.com/docs/pricing", "https://cursor.com/help/account-and-billing/pricing"]) expect(teams).toContain(page);
-    const [conductor, superset] = KINDS[0]!.tools;
-    expect(conductor!.cells.has).toContain("https://www.conductor.build/docs/cloud/cloud-computer");
-    expect(superset!.cells.has).toContain("https://docs.superset.sh/usage");
-    expect(WSP.cells.price[1]).toMatch(/\/apps\/www\/src\/sections\/close\.tsx#L13$/);
-    const phone = AHEAD.find(a => a.title === "Your phone")!.body;
-    for (const page of ["https://code.claude.com/docs/en/claude-code-on-the-web", "https://learn.chatgpt.com/docs/environments/cloud-environments", "https://cursor.com/docs/cloud-agent/mobile"]) expect(phone).toContain(page);
+    expect(KINDS[0]!.name).toBe("Apps on the computer you sit at");
+    expect(body).toContain("Apps on the computer you sit at");
   });
 
   it("answers an unknown path's page with a way home, kept out of search", () => {
@@ -240,21 +247,23 @@ describe("the built page in a visitor's browser", () => {
     });
   }
 
-  it("hydrates /compare with no mismatch and no warning", async () => {
-    const page = new DOMParser().parseFromString(built(fileOf("/compare")), "text/html");
-    const container = document.createElement("div");
-    container.innerHTML = asSource(page.getElementById("root")!.innerHTML);
-    document.body.append(container);
-    const mismatches: unknown[] = [];
-    const warned = vi.spyOn(console, "error");
-    try {
-      const root = await act(async () => hydrateRoot(container, createElement(App, { path: "/compare" }), { onRecoverableError: error => mismatches.push(error) }));
-      expect(mismatches).toEqual([]);
-      expect(warned).not.toHaveBeenCalled();
-      act(() => root.unmount());
-    } finally {
-      warned.mockRestore();
-      container.remove();
-    }
-  });
+  for (const path of ["/compare", ...TOOLS.map(t => `/compare/${t.slug}`)]) {
+    it(`hydrates ${path} with no mismatch and no warning`, async () => {
+      const page = new DOMParser().parseFromString(built(fileOf(path)), "text/html");
+      const container = document.createElement("div");
+      container.innerHTML = asSource(page.getElementById("root")!.innerHTML);
+      document.body.append(container);
+      const mismatches: unknown[] = [];
+      const warned = vi.spyOn(console, "error");
+      try {
+        const root = await act(async () => hydrateRoot(container, createElement(App, { path }), { onRecoverableError: error => mismatches.push(error) }));
+        expect(mismatches).toEqual([]);
+        expect(warned).not.toHaveBeenCalled();
+        act(() => root.unmount());
+      } finally {
+        warned.mockRestore();
+        container.remove();
+      }
+    });
+  }
 });
