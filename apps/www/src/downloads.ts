@@ -4,19 +4,18 @@
 // moves these links with it and nothing on this page can go stale.
 import { downloadUrl, STABLE_NAMES } from "../../../packages/protocol/src/bundles.mjs";
 
-export type Platform = "mac" | "linux";
+export type Platform = "mac" | "linux" | "windows";
 
-export const DOWNLOADS: Record<Platform, { label: string; href: string }> = {
+export const DOWNLOADS: Record<Exclude<Platform, "windows">, { label: string; href: string }> = {
   mac: { label: "Download for Mac", href: downloadUrl(STABLE_NAMES.mac) },
   linux: { label: "Download for Linux", href: downloadUrl(STABLE_NAMES.appImage) },
 };
 
-export const OTHER: Record<Platform, Platform> = { mac: "linux", linux: "mac" };
-
 /** Which download to put first. Mac against Linux is the one thing a browser answers reliably; the chip is not, since
- * Safari on an M-series Mac reports an Intel one, and one bundle covers both chips so nothing has to ask. A phone and
- * anything else get the Mac button, with Linux beside it and the command line under both. */
+ * Safari on an M-series Mac reports an Intel one, and one bundle covers both chips so nothing has to ask. Windows has
+ * no build yet, so it gets the waitlist. A phone and anything else get the Mac button. */
 export function platformOf(userAgent: string): Platform {
   if (/Android/i.test(userAgent)) return "mac";
+  if (/Windows/i.test(userAgent)) return "windows";
   return /Linux|X11|CrOS/i.test(userAgent) ? "linux" : "mac";
 }

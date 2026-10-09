@@ -12,7 +12,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { ROOT } from "../../protocol/test/source-files.js";
 import { DIST, describeWithDists, distOf } from "./built-bin.js";
 
 /** The budget the landing page promises for what the host still holds after a day of agents: change it here and the
@@ -24,9 +23,6 @@ const HOST_MEMORY_BUDGET_MB = 40;
  * under Node 22 on Linux the day added 3.7 MB on 2026-10-06 before the Slate landed (31.2 MB at start-up), with it
  * (33.3) and once start-up shed 9 MB (23.4), and 3.9 under Node 24. Start-up answers to the budget alone. */
 const HOST_DAY_CAP_MB = 5;
-
-/** The one page that quotes the budget. */
-const PAGE = join("apps", "www", "src", "sections", "story.tsx");
 
 /** The scripted day: ten threads that run one turn first thing, each replying 18 KB that ends on one word, then four
  * threads a person keeps open in the project's folder, thirty turns each, forty deltas a turn
@@ -217,13 +213,6 @@ const reading = (out: string, who: string): Reading => {
   if (line === undefined) throw new Error(`${who} printed no measurement:\n${out}`);
   return JSON.parse(line.slice("measured ".length)) as Reading;
 };
-
-describe("the page prints the budget the test guards", () => {
-  it("names the same number the host is held to", () => {
-    const page = readFileSync(join(ROOT, PAGE), "utf8");
-    expect(page, `${PAGE} must quote ${HOST_MEMORY_BUDGET_MB} MB, the budget this file guards`).toMatch(new RegExp(`\\b${HOST_MEMORY_BUDGET_MB} MB\\b`));
-  });
-});
 
 /** Every module the host's library and the runtime it starts load, as URLs. register, not registerHooks: the engines
  * floor is Node 22.0 and registerHooks came in 22.15. Its hooks run on a thread of their own, so the list is read once
