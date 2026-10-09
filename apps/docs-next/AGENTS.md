@@ -17,6 +17,7 @@ change to that file tells its reviewer which page to open. Generated pages: ever
 (from the built binary's help), `reference/mcp-tools`, `reference/slate`, `reference/environment`,
 `features/settings`, `features/shortcuts`, `agents/skill`, `project/changelog`, `project/contributing` and
 `project/security`. A generated page is never edited by hand; until its script lands, it holds its stub.
+A written page keeps its sources as one `{/* Written from <paths> */}` line under its h1, which readers never see.
 
 ## Writing
 

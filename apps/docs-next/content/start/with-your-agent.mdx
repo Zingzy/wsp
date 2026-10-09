@@ -1,6 +1,6 @@
 # Let your agent set you up
 
-{/* Written from skills/wsp/SKILL.md (Setting a person up from nothing, and the wsp mcp install paragraph), packages/host/src/mcp-install.ts, and wsp mcp install run against a throwaway home for claude and cursor. */}
+{/* Written from skills/wsp/SKILL.md (Setting a person up from nothing, and the wsp mcp install paragraph), packages/host/src/mcp-install.ts, and wsp mcp install run against a throwaway home for claude, cursor and amp. */}
 
 Your coding agent can set wsp up for you and open your first thread. It uses the wsp tools and the wsp skill, which is a file that tells the agent how to use wsp. You give the agent both with one command.
 
@@ -20,11 +20,11 @@ Before you start, install wsp ([on a Mac](/install/mac) or [on Linux](/install/l
 
 <video src="/shots/docs-mcp-install.mp4" controls muted loop playsinline />
 
-`--agent` takes `claude`, `codex`, `gemini`, `opencode` or `cursor`. To set up more than one agent, give `--agent` again for each one. If one agent fails, the others still get the tools.
+`--agent` takes the id of any agent in the catalog, which is the list of agents that wsp knows. For example, it takes `claude`, `codex`, `gemini`, `opencode` or `cursor`. To set up more than one agent, give `--agent` again for each one. If one agent fails, the others still get the tools.
 
-For Cursor, the command writes the skill to `~/.cursor/skills/wsp/SKILL.md` and the wsp section to `AGENTS.md`. It does not write the MCP server. To give Cursor the tools, add an MCP server in Cursor that runs `wsp mcp`.
+The catalog has an MCP configuration for `claude`, `codex`, `gemini` and `opencode`. For any other agent, such as Cursor, the command writes the skill and the wsp section, but not the MCP server. For Cursor, the skill goes to `~/.cursor/skills/wsp/SKILL.md`. To give that agent the tools, add an MCP server in the agent that runs `wsp mcp`.
 
-For the other four agents, the command writes three things:
+For `claude`, `codex`, `gemini` and `opencode`, the command writes three things:
 
 | What | Where |
 |---|---|
