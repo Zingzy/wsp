@@ -164,6 +164,10 @@ describe("a lead's children as rows", () => {
     expect(row.className).toContain("group/row");
     expect(row.className).toContain("hover:bg-accent");
     const acts = row.querySelector<HTMLElement>("[data-child-acts]")!;
+    // A tree mounts every row as its lead opens: the acts mount once the pointer reaches the row, and stay.
+    expect(acts.querySelectorAll("button")).toHaveLength(0);
+    fireEvent.pointerEnter(row);
+    fireEvent.pointerLeave(row);
     expect([...acts.querySelectorAll("button")].map(b => b.getAttribute("aria-label"))).toEqual(["Send a message", "Stop thread", "More"]);
     // At rest and under md nothing is drawn; on hover or focus they fade in, on no fill of their own.
     expect(acts.className).toContain("opacity-0");
@@ -189,6 +193,7 @@ describe("a lead's children as rows", () => {
     useStore.setState({ api: { startSession } } as never);
     render(tree([nodeOf(finished("Coupon expiry test", 30), []), nodeOf(working("Cart total rounding"))]));
     const row = document.querySelector<HTMLElement>('[data-thread-row="Cart total rounding"]')!;
+    fireEvent.pointerEnter(row);
     fireEvent.click(row.querySelector<HTMLElement>('[aria-label="Send a message"]')!);
     const field = row.querySelector<HTMLInputElement>("[data-row-name-input]")!;
     expect(field.placeholder).toBe("Send a message");
@@ -210,6 +215,7 @@ describe("a lead's children as rows", () => {
     const row = document.querySelector<HTMLElement>('[data-thread-row="Rounding probe"]')!;
     const item = row.closest("li")!;
     expect(item.hasAttribute("data-two")).toBe(false);
+    fireEvent.pointerEnter(row);
     fireEvent.click(row.querySelector<HTMLElement>('[aria-label="Send a message"]')!);
     expect(row.querySelector("[data-row-name-input]")).not.toBeNull();
     expect(item.hasAttribute("data-two")).toBe(true);
@@ -251,6 +257,8 @@ describe("a lead's children as rows", () => {
     const row = document.querySelector<HTMLElement>('[data-subagent-row="task_1"]')!;
     expect(row.querySelector("[data-subagent-mark]")!.getAttribute("class")).toContain("lucide-bot");
     expect(row.textContent).toContain("Read the open tickets");
+    // Focus reaching the row mounts its acts as the pointer does, so a keyboard reaches them next.
+    fireEvent.focus(row.querySelector<HTMLElement>("[data-subagent-open], span")!);
     expect([...row.querySelectorAll("[data-child-acts] button")].map(b => b.getAttribute("aria-label"))).toEqual(["Stop subagent"]);
     expect(row.querySelector("[data-child-acts]")!.parentElement!.className).toContain("md:min-w-6");
   });

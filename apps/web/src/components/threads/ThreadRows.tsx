@@ -75,9 +75,17 @@ function Act({ icon: Icon, label, run }: { icon: LucideIcon; label: string; run:
   );
 }
 
+/** Whether the pointer or the focus has reached the row yet. Its acts mount then and stay: a lead's tree mounts every
+ * row as its thread opens, and each act is a tooltip of its own that nobody has pointed at. */
+function useWoken(): [boolean, { onPointerEnter: () => void; onFocus: () => void }] {
+  const [woken, setWoken] = useState(false);
+  const wake = (): void => setWoken(true);
+  return [woken, { onPointerEnter: wake, onFocus: wake }];
+}
+
 /** The status slot and, where the row takes acts, the acts it yields to while the pointer or the focus is on the row
  * or its menu is open: Send a message and the state act, then More, which opens the right-click's menu. */
-function Slot({ status, acts, menu, more }: { status: ReactNode; acts: ReadonlyArray<ResolvedAction>; menu: (event: MouseEvent<HTMLElement>) => void; more: boolean }) {
+function Slot({ status, acts, menu, more, woken }: { status: ReactNode; acts: ReadonlyArray<ResolvedAction>; menu: (event: MouseEvent<HTMLElement>) => void; more: boolean; woken: boolean }) {
   const shown = acts.filter(act => act.refusal === null && act.icon !== undefined).slice(0, 2);
   const count = shown.length + (more ? 1 : 0);
   if (count === 0) return status;
@@ -85,10 +93,8 @@ function Slot({ status, acts, menu, more }: { status: ReactNode; acts: ReadonlyA
     <span className={cn("relative flex shrink-0 items-center justify-end", ACTS_ROOM[count])}>
       <span className="inline-flex md:group-hover/row:invisible md:group-focus-within/row:invisible md:group-data-[acts=shown]/row:invisible">{status}</span>
       <span data-child-acts className={cn("absolute inset-y-0 right-0 flex items-center justify-end gap-1 transition-opacity duration-150 group-hover/row:opacity-100 group-focus-within/row:opacity-100 group-data-[acts=shown]/row:opacity-100", HOVER_GLYPH_CLASS)}>
-        {shown.map(act => (
-          <Act key={act.id} icon={act.icon!} label={act.title} run={() => void runAction(act)} />
-        ))}
-        {more ? <Act icon={EllipsisIcon} label={CHILD_WORDS.more} run={menu} /> : null}
+        {woken ? shown.map(act => <Act key={act.id} icon={act.icon!} label={act.title} run={() => void runAction(act)} />) : null}
+        {woken && more ? <Act icon={EllipsisIcon} label={CHILD_WORDS.more} run={menu} /> : null}
       </span>
     </span>
   );
@@ -146,6 +152,7 @@ export const ThreadRow = memo(function ThreadRow({ thread, place, at, note, targ
   const api = useStore(s => s.api);
   const verbs = useChildVerbs();
   const [shown, setShown] = useState(false);
+  const [woken, wake] = useWoken();
   const threadId = thread.threadId;
   const acts = target === undefined ? [] : resolveActions(childActions, target, { ...verbs, message: onSending === undefined ? undefined : () => onSending(true) });
   const menu = (event: MouseEvent<HTMLElement>): void => {
@@ -169,6 +176,7 @@ export const ThreadRow = memo(function ThreadRow({ thread, place, at, note, targ
             },
           })}
       {...(acts.length > 0 ? { onContextMenu: menu } : {})}
+      {...wake}
     >
       {/* The muted ink is the wrapper's, so a mark with inks of its own keeps them and a bare one takes the row's quiet ink. */}
       <span className="inline-flex shrink-0 text-muted-foreground">
@@ -197,7 +205,7 @@ export const ThreadRow = memo(function ThreadRow({ thread, place, at, note, targ
       {sending ? (
         status
       ) : (
-        <Slot status={status} acts={acts} menu={menu} more={target !== undefined && target.task === null} />
+        <Slot status={status} acts={acts} menu={menu} more={target !== undefined && target.task === null} woken={woken || shown} />
       )}
     </div>
   );
@@ -250,6 +258,7 @@ type SubagentRowProps = {
  * its acts, opens its page where it names its lead. */
 export const SubagentRow = memo(function SubagentRow({ subagent, target, kind, note, lead }: SubagentRowProps) {
   const verbs = useChildVerbs();
+  const [woken, wake] = useWoken();
   const acts = resolveActions(childActions, target, verbs);
   const menu = (event: MouseEvent<HTMLElement>): void => {
     if (acts.length > 0) void openContextMenu(event, acts);
@@ -267,6 +276,7 @@ export const SubagentRow = memo(function SubagentRow({ subagent, target, kind, n
       data-child-part={target.part}
       className={rowBox(note !== undefined, opens === undefined ? undefined : "cursor-pointer")}
       {...(acts.length > 0 ? { onContextMenu: menu } : {})}
+      {...wake}
       {...(opens === undefined
         ? {}
         : {
@@ -301,7 +311,7 @@ export const SubagentRow = memo(function SubagentRow({ subagent, target, kind, n
         </Tooltip>
         <SecondLine place="" at={undefined} note={note} />
       </span>
-      <Slot status={status} acts={acts} menu={menu} more={false} />
+      <Slot status={status} acts={acts} menu={menu} more={false} woken={woken} />
     </div>
   );
 }, (a, b) => a.lead?.workspaceId === b.lead?.workspaceId && a.lead?.threadId === b.lead?.threadId && sameSubagentRow(a, b));
