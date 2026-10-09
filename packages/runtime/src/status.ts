@@ -209,6 +209,8 @@ export interface StatusTrackerOptions {
   /** Holds each workspace's folded cost history so the series and the meter behind it outlive the process. */
   store: Store;
   emit(event: EventUnion): void;
+  /** To every listener and into no replay list, for a cost tick whose figures repeat the last ones emitted. */
+  pass(event: EventUnion): void;
   on(type: EventUnion["type"] | "*", listener: (e: EventUnion) => void): () => void;
   defaults?: StatusWatchOptions;
   /** Every status the poll built, on every tick, ahead of the bus dropping the ones that did not change. What a
@@ -308,6 +310,24 @@ interface Probes {
   shown: ReachState;
 }
 
+const figuresOf = (tick: WorkspaceCostEvent): string => `${tick.phase} ${tick.rateUsdPerHour} ${tick.accruedUsd}`;
+
+/** One socket's filter: a workspace's spend goes out when its figures move. The timer ticks every workspace every 5 s,
+ * and 70 napping or gone ones with past spend sent the same figures 14 times a second. */
+export function costMoved(): (e: unknown) => boolean {
+  const sent = new Map<string, string>();
+  return e => {
+    const type = (e as { type?: unknown }).type;
+    if (type === "workspace.deleted") sent.delete((e as { workspaceId: string }).workspaceId);
+    if (type !== "workspace.cost") return true;
+    const cost = e as WorkspaceCostEvent;
+    const figures = figuresOf(cost);
+    if (sent.get(cost.workspaceId) === figures) return false;
+    sent.set(cost.workspaceId, figures);
+    return true;
+  };
+}
+
 export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
   const probeTimeoutMs = o.defaults?.probeTimeoutMs ?? PROBE_TIMEOUT_MS;
   const promptMs = o.defaults?.promptMs ?? PROMPT_MS;
@@ -401,6 +421,7 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
     closedByGone.delete(e.workspaceId);
     forget(e.workspaceId);
     lastEmitted.delete(e.workspaceId);
+    sentFigures.delete(e.workspaceId);
     reconciled.delete(e.workspaceId);
     goneReasons.delete(e.workspaceId);
     suspects.delete(e.workspaceId);
@@ -791,12 +812,15 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
       const added = before.length === 0 || next[next.length - 2] === before[before.length - 1];
       if (added) persist(() => o.store.put(COST_HISTORIES, view.id, document(view.id)));
       // A workspace nobody bills says its zeros once: 125 folders on this computer ticking sent 25 frames a second.
-      const figures = `${tick.phase} ${tick.rateUsdPerHour} ${tick.accruedUsd}`;
+      // A repeat reaches every listener but stays out of the replay list, which 14 repeats a second filled in 6 minutes.
+      const figures = figuresOf(tick);
       const unbilled = tick.rateUsdPerHour === 0 && tick.accruedUsd === 0;
-      const due = only === undefined ? !unbilled || sentFigures.get(view.id) !== figures : last?.rateUsdPerHour !== tick.rateUsdPerHour;
+      const moved = sentFigures.get(view.id) !== figures;
+      const due = only === undefined ? !unbilled || moved : last?.rateUsdPerHour !== tick.rateUsdPerHour;
       if (due) {
         sentFigures.set(view.id, figures);
-        o.emit(tick);
+        if (moved) o.emit(tick);
+        else o.pass(tick);
       }
     }
   };

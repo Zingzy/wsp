@@ -42,6 +42,7 @@ export function statusArea(ctx: RuntimeContext): StatusArea {
       }));
     },
     emit: e => bus.emit(e),
+    pass: e => bus.pass(e),
     on: (type, l) => bus.on(type, l),
     // Every tick, not every change: this is where the runtime learns what its machines' reach actually is, and a
     // machine parked in one state is the case both readers of it exist for.
