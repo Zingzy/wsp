@@ -272,8 +272,9 @@ export interface State {
   /** Tells the host this window showed the thread; the thread.marked it answers with reloads the rows in every
    * window. A refusal says nothing: nobody asked for it, and the thread reads Done until the next showing. */
   readThread(threadId: string): Promise<void>;
-  /** Settles the threads by hand through the host, a root and every thread under it; a refusal is a toast. */
-  settleThreads(threadIds: readonly string[]): Promise<void>;
+  /** Settles the threads by hand through the host, a root and every thread under it; a refusal is a toast, and the
+   * answer is whether the host settled them. */
+  settleThreads(threadIds: readonly string[]): Promise<boolean>;
   /** Pins, snoozes or places threads through the host, or takes one of those back; a refusal is a toast. */
   markThreads(threadIds: readonly string[], marks: ThreadMarks): Promise<void>;
   /** Takes settled threads back out of the fold through the host; a refusal is a toast. */

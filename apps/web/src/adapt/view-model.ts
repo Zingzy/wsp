@@ -5,7 +5,7 @@
 // useDiscoveredLocalServers.ts and contracts (commit 57a66608). Fields the
 // wsp wire cannot fill today are kept when a copied component reads them and
 // dropped when nothing does. Everything here is data: no React, no schemas.
-import type { AttachmentRecord, MachineState, PermissionOption, PermissionOutcome, ReachState, SessionOrigin, SessionStatus, ThreadCapWait, ThreadPlacement, TurnLimit, WorkspacePhase, WorkspaceState, WorkspaceStatus, WorkspaceView, PlanStep, TurnChangedFile, TurnTokens } from "@wsp/protocol";
+import type { AttachmentRecord, MachineState, PermissionOption, PermissionOutcome, ReachState, SessionOrigin, SessionStatus, SubagentView, ThreadCapWait, ThreadPlacement, TurnLimit, WorkspacePhase, WorkspaceState, WorkspaceStatus, WorkspaceView, PlanStep, TurnChangedFile, TurnTokens } from "@wsp/protocol";
 
 // --- chat -------------------------------------------------------------------
 
@@ -407,6 +407,15 @@ export interface SidebarThreadSnapshot {
   readonly pinnedAt: string | null;
   readonly snoozedUntil: string | null;
   readonly section: ThreadPlacement | null;
+  /** The agent's own subagents of every turn, in the order they started; empty where it ran none. A lead's tree draws
+   * each under this thread, never as a thread of its own. */
+  readonly subagents: ReadonlyArray<SubagentView>;
+  /** The last line of the latest turn's reply and why that turn failed, as the host keeps them; null where it holds
+   * none. */
+  readonly lastLine: string | null;
+  readonly failure: string | null;
+  /** When the person folded the thread's tree in the sidebar, as the host keeps it; null while it stands open. */
+  readonly foldedAt: string | null;
 }
 
 /** A send whose thread the runtime has written no row for yet: what the sidebar draws in place of that row, so the

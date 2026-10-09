@@ -3,14 +3,17 @@
 // resolves a registry takes these, and a surface with its own confirmation
 // (the sidebar's forget dialog) puts its opener in place of the default.
 import { useMemo } from "react";
-import { addNotice } from "../notices/store.js";
+import { agentName } from "@wsp/catalog";
+import { taskStopUnsupportedLine } from "@wsp/protocol";
+import { addNotice, noticeFailure } from "../notices/store.js";
+import type { Api } from "../protocol/client.js";
 import { useStore } from "../protocol/store.js";
 import { useRightPanelStore } from "../rightPanelStore.js";
 import { openNewThread } from "../shell/NewThreadPicks.js";
 import { showTerminal } from "../shell/shellCommands.js";
 import { requestDeleteWorkspace, requestForgetWorkspace, requestProjectTrip, requestRenameWorkspace, requestUndoRewind } from "../shell/shellRequests.js";
 import { copyText } from "./clipboard.js";
-import type { ThreadVerbs } from "./threadActions.js";
+import type { ChildVerbs, ThreadVerbs } from "./threadActions.js";
 import type { WorkspaceVerbs } from "./workspaceActions.js";
 
 export function useWorkspaceVerbs(): WorkspaceVerbs {
@@ -73,7 +76,7 @@ export function useThreadVerbs(): ThreadVerbs {
               if (left !== undefined) addNotice({ kind: "error", text: left });
             },
       forget: canForget ? thread => void forgetThread(thread) : undefined,
-      settle: canSettle ? settleThreads : undefined,
+      settle: canSettle ? async threadIds => void (await settleThreads(threadIds)) : undefined,
       restore: canRestore ? restoreThreads : undefined,
       mark: canMark ? markThreads : undefined,
       undoRewind: canUndoRewind ? requestUndoRewind : undefined,
@@ -81,5 +84,52 @@ export function useThreadVerbs(): ThreadVerbs {
       copyText,
     }),
     [api, canForget, canMark, canRestore, canSettle, canUndoRewind, forgetThread, markThreads, restoreThreads, settleThreads, stop],
+  );
+}
+
+/** Stops one subagent of a turn: a refusal is a notice in the host's words, named by the subagent. The host words
+ * every refusal; an agent with no stop of one subagent reads the host's own line where its words are missing. */
+export async function stopSubagent(api: Pick<Api, "interruptSession">, task: { sessionId: string; task: string; harness: string; title: string }): Promise<void> {
+  if (api.interruptSession === undefined) return;
+  try {
+    const { outcome, error } = await api.interruptSession(task.sessionId, task.task);
+    if (outcome !== "refused" && outcome !== "unsupported") return;
+    const text = error ?? (outcome === "unsupported" ? taskStopUnsupportedLine(agentName(task.harness)) : undefined);
+    if (text !== undefined) addNotice({ kind: "error", text, where: task.title });
+  } catch (e) {
+    noticeFailure(e, said => said, { where: task.title });
+  }
+}
+
+/** Sends a message to a thread as the composer would, a refusal said as a notice naming the thread. */
+export function sendToThread(api: Pick<Api, "startSession"> | null, thread: { workspaceId: string; threadId: string | null; harness: string; title: string }, prompt: string): void {
+  if (api === null) return;
+  void api
+    .startSession({ workspaceId: thread.workspaceId, prompt, harness: thread.harness, requestId: crypto.randomUUID(), ...(thread.threadId !== null ? { thread: thread.threadId } : {}) })
+    .catch((e: unknown) => noticeFailure(e, said => said, { where: thread.title }));
+}
+
+/** The verbs a lead's child takes but its message field, which its row opens itself. */
+export function useChildVerbs(): ChildVerbs {
+  const api = useStore(s => s.api);
+  const settle = useStore(s => s.settleThreads);
+  const restore = useStore(s => s.restoreThreads);
+  const stop = api?.interruptSession;
+  const canSettle = api?.settleThreads !== undefined;
+  const canRestore = api?.restoreThreads !== undefined;
+  return useMemo<ChildVerbs>(
+    () => ({
+      stop:
+        stop === undefined
+          ? undefined
+          : async sessionId => {
+              const { left } = await stop(sessionId);
+              if (left !== undefined) addNotice({ kind: "error", text: left });
+            },
+      stopTask: stop === undefined ? undefined : task => stopSubagent({ interruptSession: stop }, task),
+      settle: canSettle ? settle : undefined,
+      restore: canRestore ? restore : undefined,
+    }),
+    [canRestore, canSettle, restore, settle, stop],
   );
 }

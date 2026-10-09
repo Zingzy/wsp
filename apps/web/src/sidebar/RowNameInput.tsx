@@ -13,6 +13,7 @@ import { useEffect, useRef, type KeyboardEvent } from "react";
 export function RowNameInput({
   name,
   label,
+  placeholder,
   saving,
   onRename,
   onCancel,
@@ -20,6 +21,8 @@ export function RowNameInput({
   name: string;
   /** What the field is called: the row's own rename action, as the menu shows it. */
   label: string;
+  /** What the empty field says, for a field that starts empty. */
+  placeholder?: string;
   /** That name is on its way to the runtime: the field stays exactly as it is and takes no second Enter. */
   saving: boolean;
   onRename: (name: string) => void;
@@ -49,6 +52,7 @@ export function RowNameInput({
       ref={ref}
       data-row-name-input
       aria-label={label}
+      {...(placeholder !== undefined ? { placeholder } : {})}
       defaultValue={name}
       spellCheck={false}
       className="min-w-0 flex-1 rounded-sm border border-input bg-transparent px-1 text-inherit outline-hidden transition-[border-color] duration-150 focus:border-ring"

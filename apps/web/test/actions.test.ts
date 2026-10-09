@@ -4,9 +4,10 @@
 // the palette, the row buttons, the Machine tab and the context menus all
 // read the same list. These tests pin the rules per kind and the shapes the
 // menus are built from.
+import { agentName } from "@wsp/catalog";
 import { PauseIcon, PlayIcon, SquareIcon } from "lucide-react";
 import { describe, expect, it, vi } from "vitest";
-import { goneRefusal, kindWords, machineWord, notAnsweringYet, ownDaemonDown, threadForgetRefusal, threadMarkdown, threadMessages, workspaceState, workspaceWord, type HarnessCatalog, type PlaceView, type SessionEvent, type SessionStatus, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { taskStopRefusedLine, taskStopUnsupportedLine, goneRefusal, kindWords, machineWord, notAnsweringYet, ownDaemonDown, threadForgetRefusal, threadMarkdown, threadMessages, workspaceState, workspaceWord, type HarnessCatalog, type PlaceView, type SessionEvent, type SessionStatus, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { TERMINAL_WORDS, THREAD_WORDS, WORKSPACE_WORDS, terminalRefusedLine } from "../src/actions/format.js";
 import { placeMenu } from "../src/actions/menuPlacement.js";
 import { actionById, actionIfAny, resolveActions, toMenuItems } from "../src/actions/registry.js";
@@ -15,6 +16,11 @@ import { settledFoldActions, threadActions, threadTarget, type ThreadTarget, typ
 import { workspaceActions, workspaceTarget, type WorkspaceTarget, type WorkspaceVerbs } from "../src/actions/workspaceActions.js";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "../src/keybindingDefaults.js";
 import { MAX_TERMINALS_PER_GROUP } from "../src/terminal/groups.js";
+import { stopSubagent } from "../src/actions/verbs.js";
+import type { SidebarThreadSnapshot } from "../src/adapt/index.js";
+import { childActs, leadActs, partOf, type Tree } from "../src/components/threads/leadTree.js";
+import { useNotices } from "../src/notices/store.js";
+import { useStore } from "../src/protocol/store.js";
 
 /** A target in one folded state, spelled as the phase, machine state and reach that fold to it. */
 const workspace = (state: WorkspaceState, over: Partial<WorkspaceTarget> = {}): WorkspaceTarget => ({
@@ -315,7 +321,7 @@ describe("thread actions", () => {
     ran = true,
   ): ThreadTarget =>
     threadTarget(
-      { id: "thr_1", sessionId: "s1", threadId, workspaceId: "ws_a", harness, title: "fix the port list", status, ran, startedAt: null, endedAt: null, indicator: null, startedBy: "person", project: null, parentThreadId: null, attempt: null, model: null, asking: null, costUsd: null, unread: false, readAt: null, settledAt: null, needsYou: false, pinnedAt: null, snoozedUntil: null, section: null },
+      { id: "thr_1", sessionId: "s1", threadId, workspaceId: "ws_a", harness, title: "fix the port list", status, ran, startedAt: null, endedAt: null, indicator: null, startedBy: "person", project: null, parentThreadId: null, attempt: null, model: null, asking: null, costUsd: null, unread: false, readAt: null, settledAt: null, needsYou: false, pinnedAt: null, snoozedUntil: null, section: null, subagents: [], lastLine: null, failure: null, foldedAt: null },
       { catalog: machine.catalog === undefined ? row(harness) : machine.catalog, state: machine.state ?? "running", ...(machine.goneWords !== undefined ? { goneWords: machine.goneWords } : {}) },
     );
   const threadVerbs = (over: Partial<ThreadVerbs> = {}): ThreadVerbs => ({ stop: vi.fn(async () => {}), rename: vi.fn(), forget: vi.fn(), readEvents: vi.fn(async () => []), copyText: vi.fn(async () => {}), ...over });
@@ -534,3 +540,127 @@ describe("placing the in-app menu", () => {
   });
 });
 
+
+describe("a lead's child", () => {
+  interface Node {
+    readonly thread: SidebarThreadSnapshot;
+    readonly kids: Node[];
+  }
+  const snapshot = (id: string, status: SessionStatus, over: Partial<SidebarThreadSnapshot> = {}): SidebarThreadSnapshot => ({
+    id,
+    threadId: id,
+    sessionId: `s_${id}`,
+    workspaceId: "ws_a",
+    harness: "claude",
+    title: id,
+    status,
+    ran: true,
+    startedAt: "2026-10-09T11:00:00.000Z",
+    endedAt: status === "running" ? null : "2026-10-09T11:30:00.000Z",
+    indicator: null,
+    startedBy: "agent",
+    project: null,
+    parentThreadId: null,
+    attempt: null,
+    model: null,
+    asking: null,
+    costUsd: null,
+    unread: false,
+    readAt: null,
+    settledAt: null,
+    needsYou: false,
+    pinnedAt: null,
+    snoozedUntil: null,
+    section: null,
+    subagents: [],
+    lastLine: null,
+    failure: null,
+    foldedAt: null,
+    ...over,
+  });
+  const tree: Tree<Node> = { threadOf: n => n.thread, kidsOf: n => n.kids, nowMs: Date.parse("2026-10-09T12:00:00Z"), settleMs: null };
+  const at = (node: Node) => ({ node, thread: node.thread });
+
+  it("Stop subagent sends the task to its thread's session and words a refusal as the host does", async () => {
+    useNotices.getState().clear();
+    const refused = taskStopRefusedLine("Claude Code", "the task already finished");
+    const interruptSession = vi.fn(async () => ({ outcome: "refused" as const, error: refused }));
+    const lead = snapshot("thr_lead", "running", { subagents: [{ id: "task_1", title: "Read the open tickets", state: "running", startedAt: Date.parse("2026-10-09T11:59:00Z") }] });
+    const stopTask = vi.fn((task: { sessionId: string; task: string; harness: string; title: string }) => stopSubagent({ interruptSession }, task));
+    const [stop] = childActs({ subagent: lead.subagents[0]!, of: lead }, "live", tree, { stopTask });
+    expect(stop).toMatchObject({ id: "stop-subagent", title: "Stop subagent", refusal: null });
+    await stop!.run();
+    expect(interruptSession).toHaveBeenCalledWith("s_thr_lead", "task_1");
+    expect(useNotices.getState().notices[0]).toMatchObject({ kind: "error", text: refused, where: "Read the open tickets" });
+    // An agent that offers no stop of one subagent says so in the host's line, the agent named as the host names it.
+    interruptSession.mockResolvedValueOnce({ outcome: "unsupported" as never, error: undefined as never });
+    await stopSubagent({ interruptSession }, { sessionId: "s_thr_lead", task: "task_1", harness: "codex", title: "Probe" });
+    expect(useNotices.getState().notices[0]).toMatchObject({ kind: "error", text: taskStopUnsupportedLine(agentName("codex")) });
+    // The host words every refusal; one without words is never said as the bare outcome.
+    useNotices.getState().clear();
+    interruptSession.mockResolvedValueOnce({ outcome: "refused" as const, error: undefined as never });
+    await stopSubagent({ interruptSession }, { sessionId: "s_thr_lead", task: "task_1", harness: "claude", title: "Probe" });
+    expect(useNotices.getState().notices.map(n => n.text)).not.toContain(taskStopRefusedLine("Claude Code", "refused"));
+    // A stop the agent took says nothing more.
+    const count = useNotices.getState().notices.length;
+    interruptSession.mockResolvedValueOnce({ outcome: "accepted" as never, error: undefined as never });
+    await stopSubagent({ interruptSession }, { sessionId: "s_thr_lead", task: "task_1", harness: "claude", title: "Probe" });
+    expect(useNotices.getState().notices).toHaveLength(count);
+    // An ended subagent takes no act at all.
+    const ended = snapshot("thr_lead", "running", { subagents: [{ id: "task_2", title: "Done one", state: "done", startedAt: 1, endedAt: 2 }] });
+    expect(childActs({ subagent: ended.subagents[0]!, of: ended }, "settled", tree, { stopTask })).toEqual([]);
+  });
+
+  it("Settle on a child settles it and everything under it, is refused while anything under it works, and Undo restores the same set", async () => {
+    useNotices.getState().clear();
+    const settle = vi.fn(async (_ids: ReadonlyArray<string>) => true);
+    const restore = vi.fn(async (_ids: ReadonlyArray<string>) => {});
+    const quiet: Node = { thread: snapshot("thr_build", "completed"), kids: [{ thread: snapshot("thr_review", "failed"), kids: [{ thread: snapshot("thr_probe", "completed"), kids: [] }] }] };
+    const acts = childActs(at(quiet), partOf(at(quiet), tree), tree, { settle, restore });
+    const act = actionById(acts, "settle");
+    expect(act).toMatchObject({ title: THREAD_WORDS.settle, refusal: null });
+    await act.run();
+    expect(settle).toHaveBeenCalledWith(["thr_build", "thr_review", "thr_probe"]);
+    const notice = useNotices.getState().notices[0]!;
+    expect(notice).toMatchObject({ kind: "done", text: "Settled 3 threads", where: "thr_build" });
+    notice.action!.run();
+    expect(restore).toHaveBeenCalledWith(["thr_build", "thr_review", "thr_probe"]);
+    // A thread whose child still works offers the settle held, with the reason.
+    const busy: Node = { thread: snapshot("thr_build", "completed"), kids: [{ thread: snapshot("thr_review", "running"), kids: [] }] };
+    expect(actionById(childActs(at(busy), partOf(at(busy), tree), tree, { settle, restore }), "settle").refusal).toBe("A thread in it is still working");
+    // A settled child offers Restore over the same set.
+    const put = { ...quiet, thread: snapshot("thr_build", "completed", { settledAt: "2026-10-09T11:40:00.000Z" }) };
+    const back = actionById(childActs(at(put), "settled", tree, { settle, restore }), "restore");
+    await back.run();
+    expect(restore).toHaveBeenLastCalledWith(["thr_build", "thr_review", "thr_probe"]);
+  });
+
+  it("a settle the host refuses shows the refusal alone, with no Settled toast and no Undo", async () => {
+    useNotices.getState().clear();
+    useStore.setState({ api: { settleThreads: async () => Promise.reject(new Error("A thread in it is still working")) } } as never);
+    try {
+      const settle = useStore.getState().settleThreads;
+      const quiet: Node = { thread: snapshot("thr_build", "completed"), kids: [] };
+      await actionById(childActs(at(quiet), "finished", tree, { settle }), "settle").run();
+      await leadActs(snapshot("thr_lead", "running", { title: "Coordinator" }), ["thr_build"], { settle })[0]!.run();
+      expect(useNotices.getState().notices.map(n => ({ kind: n.kind, text: n.text, undo: n.action?.word ?? null }))).toEqual([
+        { kind: "error", text: "A thread in it is still working", undo: null },
+        { kind: "error", text: "A thread in it is still working", undo: null },
+      ]);
+    } finally {
+      useStore.setState({ api: null } as never);
+    }
+  });
+
+  it("the lead's Settle N finished settles every finished thread it is handed, with the way back on its toast", async () => {
+    useNotices.getState().clear();
+    const settle = vi.fn(async (_ids: ReadonlyArray<string>) => true);
+    const restore = vi.fn(async (_ids: ReadonlyArray<string>) => {});
+    const [all] = leadActs(snapshot("thr_lead", "running", { title: "Coordinator" }), ["thr_a", "thr_b"], { settle, restore });
+    expect(all!.title).toBe("Settle 2 finished");
+    await all!.run();
+    expect(settle).toHaveBeenCalledWith(["thr_a", "thr_b"]);
+    useNotices.getState().notices[0]!.action!.run();
+    expect(restore).toHaveBeenCalledWith(["thr_a", "thr_b"]);
+  });
+});

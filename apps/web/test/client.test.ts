@@ -66,6 +66,10 @@ describe("makeApi wrappers", () => {
     // An outcome outside the enum must not read as accepted.
     ScriptedSocket.reply = f => ({ id: f["id"], ok: true, outcome: "maybe" });
     await expect(interrupt("s1")).rejects.toThrow();
+    // One subagent alone: the task rides the same op, and a refusal comes back in the host's words.
+    ScriptedSocket.reply = f => ({ id: f["id"], ok: true, outcome: "refused", error: "Claude Code would not stop it: it already ended" });
+    expect(await interrupt("s1", "task_1")).toEqual({ outcome: "refused", error: "Claude Code would not stop it: it already ended" });
+    expect(lastSent()).toEqual({ id: expect.any(Number), op: "sessions.interrupt", sessionId: "s1", task: "task_1" });
   });
 
   it("hostTerminalConfig sends host.terminalConfig with the scheme and unwraps the config the wire type vouches for", async () => {

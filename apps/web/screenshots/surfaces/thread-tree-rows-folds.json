@@ -1,0 +1,14 @@
+{
+  "at": "/",
+  "fixture": "lead-rows",
+  "widths": [
+    1440
+  ],
+  "reason": "The Finished fold opened under the lead, each row ending in its check, beside the Settled fold's icon; the rows' 390 layout is thread-tree-rows.",
+  "steps": [
+    "row-id=thread:tree-lead",
+    "child-fold=finished"
+  ],
+  "wait": "child-part=finished",
+  "settleMs": 900
+}

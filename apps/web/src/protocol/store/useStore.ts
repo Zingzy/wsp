@@ -716,11 +716,13 @@ export const useStore = create<State>((set, get) => {
     },
     async settleThreads(threadIds) {
       const api = get().api;
-      if (!api?.settleThreads || threadIds.length === 0) return;
+      if (!api?.settleThreads || threadIds.length === 0) return false;
       try {
         await api.settleThreads(threadIds);
+        return true;
       } catch (e: unknown) {
         noticeFailure(e);
+        return false;
       }
     },
     async markThreads(threadIds, marks) {
