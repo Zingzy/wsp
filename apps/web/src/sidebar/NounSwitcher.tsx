@@ -10,6 +10,7 @@ import { CheckIcon, ChevronDownIcon, PlusIcon, SearchIcon, SettingsIcon, type Lu
 import { useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { Popover, PopoverPopup, PopoverTrigger } from "../components/ui/popover.js";
 import { SidebarMenuButton } from "../components/ui/sidebar.js";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.js";
 import { cn, normalizeSearchText } from "../lib/utils.js";
 import { GLYPH_ROW_CLASS, ONE_LINE_ROW_CLASS, ROW_META_CLASS } from "./rowGrammar.js";
 
@@ -230,19 +231,26 @@ export function NounSwitcher({
                 {option.meta === null ? null : <span className={cn(ROW_META_CLASS, "shrink-0")}>{option.meta}</span>}
                 {(pick?.id ?? null) === option.id ? <CheckIcon aria-hidden className="size-4 shrink-0" /> : null}
                 {option.id === null ? null : (
-                  <button
-                    type="button"
-                    data-k={`${noun}-settings`}
-                    aria-label={words.settingsOf(option.name)}
-                    onClick={event => {
-                      event.stopPropagation();
-                      setOpen(false);
-                      onSettings(option.id!);
-                    }}
-                    className="-mr-1 flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors duration-150 hover:bg-background/60 hover:text-foreground"
-                  >
-                    <SettingsIcon className="size-4" aria-hidden />
-                  </button>
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <button
+                          type="button"
+                          data-k={`${noun}-settings`}
+                          aria-label={words.settingsOf(option.name)}
+                          onClick={event => {
+                            event.stopPropagation();
+                            setOpen(false);
+                            onSettings(option.id!);
+                          }}
+                          className="-mr-1 flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors duration-150 hover:bg-background/60 hover:text-foreground"
+                        />
+                      }
+                    >
+                      <SettingsIcon className="size-4" aria-hidden />
+                    </TooltipTrigger>
+                    <TooltipPopup side="top">{words.settingsOf(option.name)}</TooltipPopup>
+                  </Tooltip>
                 )}
               </div>
             ))}

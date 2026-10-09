@@ -34,6 +34,8 @@
 // ?many=<n> adds n more running forks so the space bar overflows;
 // ?archived=1 gives the first workspace two threads read and quiet for days, so
 // the Settled fold can be measured shut and opened;
+// ?inbox=<glyph> puts a sub-thread and a top-level thread in the Needs you inbox, the
+// project drawn in that glyph, so the mark on a sub-thread's glyph can be photographed;
 // ?images=<n> puts n images in the composer so the thumbnail row above the
 // text can be measured; ?size=file is the record saying the terminal's text size comes
 // from the Ghostty file; ?local=1 puts this computer in the list beside the
@@ -68,7 +70,7 @@
 // stands, closed with its checks kept).
 import { useEffect } from "react";
 import { createRoot } from "react-dom/client";
-import { DAEMON_UPDATING, DEFAULT_PREFERENCES, DEFAULT_THEME, DESKTOP_MAC_CLASS, DESKTOP_WCO_CLASS, GOLDEN_STAGE_WORDS, SIGN_IN_OPEN_STATE, THEME_PRESETS, vaultOverCapLine, type HarnessCatalog, type SessionEvent, type SessionView, type TerminalConfig, type WorkspaceView } from "@wsp/protocol";
+import { DAEMON_UPDATING, DEFAULT_PREFERENCES, DEFAULT_THEME, DESKTOP_MAC_CLASS, DESKTOP_WCO_CLASS, GOLDEN_STAGE_WORDS, SIGN_IN_OPEN_STATE, THEME_PRESETS, vaultOverCapLine, type HarnessCatalog, type ProjectIcon, type SessionEvent, type SessionView, type TerminalConfig, type WorkspaceView } from "@wsp/protocol";
 import { statusOf } from "../workspace-status";
 import { TooltipProvider } from "../../src/components/ui/tooltip";
 import type { Api, ProtocolEvent } from "../../src/protocol/client";
@@ -177,6 +179,16 @@ const toned: SessionView[] = params.get("tones") !== "1"
       { id: "s13", threadId: "s13", workspaceId: "ws_b", harness: "claude", status: "failed", prompt: "Rebuild the search index.", startedBy: "person", startedAt: Date.now() - 20 * 60_000, endedAt: Date.now() - 15 * 60_000 },
       { id: "s14", threadId: "s14", workspaceId: "ws_a", harness: "claude", status: "running", prompt: "Write the release notes.", startedBy: "person", startedAt: Date.now() - 10 * 60_000, asking: "Which version goes out?" } as SessionView,
     ];
+// ?inbox=<glyph> adds a lead with a child waiting on a question and a thread of its own waiting on one, so the Needs
+// you inbox holds a sub-thread's tile beside a top-level one, and gives the first workspace's project that glyph.
+const inboxGlyph = params.get("inbox") as ProjectIcon | null;
+const inbox: SessionView[] = inboxGlyph === null
+  ? []
+  : [
+      { id: "s15", threadId: "s15", workspaceId: "ws_a", harness: "claude", status: "running", prompt: "Coordinator: the marathon", startedBy: "person", startedAt: Date.now() - 50 * 60_000 },
+      { id: "s16", threadId: "s16", workspaceId: "ws_a", harness: "claude", status: "running", prompt: "Build: box thread in the project", startedBy: "agent", parentThreadId: "s15", startedAt: Date.now() - 20 * 60_000, asking: "Run pnpm install?" } as SessionView,
+      { id: "s17", threadId: "s17", workspaceId: "ws_a", harness: "claude", status: "running", prompt: "Probe: send latency on the relay", startedBy: "person", startedAt: Date.now() - 15 * 60_000, asking: "Which relay?" } as SessionView,
+    ];
 const sessions: SessionView[] = [
   // With ?projects=1 the first thread works in spoo and the second deep inside wsp, so both rows carry a project word.
   { id: "s1", threadId: "s1", workspaceId: "ws_a", harness: "claude", status: "running", prompt: "Now reply with exactly the word pong.", startedBy: "person", startedAt: Date.now() - 48 * 60_000, ...(projects ? { cwd: "/root/spoo" } : {}) },
@@ -185,6 +197,7 @@ const sessions: SessionView[] = [
   { id: "s4", threadId: "s4", workspaceId: "ws_b", harness: "claude", status: "interrupted", prompt: "Drop the old preview shim.", startedBy: "person", startedAt: Date.now() - 120 * 60_000, endedAt: Date.now() - 110 * 60_000 },
   ...archived,
   ...toned,
+  ...inbox,
 ];
 // ?switcher=1: two more projects, one of them on this computer, and the threads on them, ten in all with the four above.
 const switcher = params.get("switcher") === "1";
@@ -704,6 +717,7 @@ if (switcher) {
     preferences: { ...s.preferences, projectLook: { pr_1: { icon: "rocket", hue: "violet" }, pr_billing: { icon: "database", hue: "amber" }, pr_docs: { icon: "book", hue: "teal" } } },
   }));
 }
+if (inboxGlyph !== null) useStore.setState(s => ({ preferences: { ...s.preferences, projectLook: { pr_1: { icon: inboxGlyph, hue: "amber" } } } }));
 // ?places=1 fills the places list with the worst row the spec draws, a computer away with a long name beside
 // this Mac and a provider, so the pane's rows can be measured against a full list at every window.
 if (params.get("places") === "1") {

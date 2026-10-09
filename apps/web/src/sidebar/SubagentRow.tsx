@@ -17,7 +17,7 @@ import { subagentStatus } from "../components/threads/leadTree.js";
 import { SubagentCard } from "../components/threads/SubagentCard.js";
 import { sameSubagentRow } from "../components/threads/ThreadRows.js";
 import { SidebarMenuAction, SidebarMenuButton } from "../components/ui/sidebar.js";
-import { Tooltip, TooltipTrigger } from "../components/ui/tooltip.js";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.js";
 import { cn } from "../lib/utils.js";
 import { GLYPH_ROW_CLASS, HOVER_GLYPH_CLASS, ONE_LINE_ROW_CLASS, SLOT_YIELDS_CLASS, SLOT_ACT_CLASS } from "./rowGrammar.js";
 
@@ -60,9 +60,12 @@ export const SubagentRow = memo(function SubagentRow({ subagent, target, kind, n
         <SubagentCard subagent={subagent} harness={target.harness} kind={kind} reason={note} />
       </Tooltip>
       {stop === undefined ? null : (
-        <SidebarMenuAction showOnHover data-subagent-stop aria-label={stop.title} className={cn(HOVER_GLYPH_CLASS, SLOT_ACT_CLASS)} onClick={() => void runAction(stop)}>
-          <SquareIcon aria-hidden className="size-3.5" />
-        </SidebarMenuAction>
+        <Tooltip>
+          <TooltipTrigger render={<SidebarMenuAction showOnHover data-subagent-stop aria-label={stop.title} className={cn(HOVER_GLYPH_CLASS, SLOT_ACT_CLASS)} onClick={() => void runAction(stop)} />}>
+            <SquareIcon aria-hidden className="size-3.5" />
+          </TooltipTrigger>
+          <TooltipPopup side="top">{stop.title}</TooltipPopup>
+        </Tooltip>
       )}
     </div>
   );

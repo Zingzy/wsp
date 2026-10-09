@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SidebarThreadSnapshot } from "../adapt/index.js";
 import { threadIndicator } from "../adapt/index.js";
 import { SidebarProvider } from "../components/ui/sidebar.js";
+import { TooltipProvider } from "../components/ui/tooltip.js";
 import { ThreadTile, WorkspaceTile, useTileHandlers, type TilePlace } from "./ThreadTile.js";
 import { SubagentRow } from "./SubagentRow.js";
 import { settlesOnHover } from "./LeadTree.js";
@@ -53,6 +54,19 @@ const rows = (): HTMLElement[] => Array.from(tile().children) as HTMLElement[];
 const slot = (): HTMLElement => tile().querySelector<HTMLElement>("[data-thread-status]")!;
 
 afterEach(cleanup);
+
+/** Rests the pointer on an act, as a mouse comes onto it; the timers are fake, so the caller says how long passes. */
+const pointAt = (el: HTMLElement): void => {
+  fireEvent.pointerEnter(el, { pointerType: "mouse" });
+  fireEvent.mouseEnter(el);
+  fireEvent.mouseMove(el);
+};
+
+/** What the app's tooltips say once this much more time has passed. */
+const tipsAfter = async (ms: number): Promise<string[]> => {
+  await act(async () => void vi.advanceTimersByTime(ms));
+  return [...document.querySelectorAll("[data-slot=tooltip-popup]")].map(popup => popup.textContent ?? "");
+};
 
 describe("a thread tile", () => {
   it("a thread whose agent the host refuses to start there says Refused in its slot with the host's sentence on its hover and its card", () => {
@@ -370,7 +384,7 @@ describe("a tile's acts on hover", () => {
     expect(item.className).toContain("group/menu-item");
     const settle = item.querySelector<HTMLElement>(":scope > [data-tile-settle]")!;
     expect(tile().contains(settle)).toBe(false);
-    expect(settle.dataset["slot"]).toBe("sidebar-menu-action");
+    expect(settle.dataset["sidebar"]).toBe("menu-action");
     expect(settle.getAttribute("aria-label")).toBe("Settle thread");
     expect(settle.querySelector("svg.lucide-archive")).not.toBeNull();
     expect(settle.className).toContain("opacity-0");
@@ -382,6 +396,51 @@ describe("a tile's acts on hover", () => {
     fireEvent.click(settle);
     expect(onSettle).toHaveBeenCalledTimes(1);
     expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it("a tile's Settle says Settle on the app's tooltip once the pointer rests on it the kit's 600 ms, as the Threads bar's acts do", async () => {
+    vi.useFakeTimers();
+    try {
+      render(
+        <TooltipProvider>
+          <SidebarProvider defaultOpen>
+            <ThreadTile thread={thread({ status: "completed", endedAt: "2026-09-17T00:05:00.000Z" })} place={PLACE} model={null} time="3m" depth={0} active={false} renaming={false} saving={false} onSelect={() => {}} onContextMenu={() => {}} onRename={() => {}} onRenameCancel={() => {}} onSettle={() => {}} />
+          </SidebarProvider>
+        </TooltipProvider>,
+      );
+      const settle = tile().parentElement!.querySelector<HTMLElement>(":scope > [data-tile-settle]")!;
+      expect(settle.hasAttribute("title")).toBe(false);
+      pointAt(settle);
+      expect(await tipsAfter(300)).toEqual([]);
+      expect(await tipsAfter(400)).toEqual(["Settle"]);
+      expect(document.querySelector("[data-tile-card]")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a lead tile's fold control names what it does on the app's tooltip: Fold while the tree is open, Unfold while it is shut", async () => {
+    vi.useFakeTimers();
+    try {
+      const draw = (fold: "open" | number) =>
+        render(
+          <TooltipProvider>
+            <SidebarProvider defaultOpen>
+              <ThreadTile thread={thread()} place={PLACE} model={null} time="3m" depth={0} active={false} renaming={false} saving={false} onSelect={() => {}} onContextMenu={() => {}} onRename={() => {}} onRenameCancel={() => {}} fold={fold} onFold={() => {}} />
+            </SidebarProvider>
+          </TooltipProvider>,
+        );
+      draw("open");
+      pointAt(document.querySelector<HTMLElement>("[data-tile-fold=open]")!);
+      expect(await tipsAfter(300)).toEqual([]);
+      expect(await tipsAfter(400)).toEqual(["Fold"]);
+      cleanup();
+      draw(3);
+      pointAt(document.querySelector<HTMLElement>("[data-tile-fold=shut]")!);
+      expect(await tipsAfter(700)).toEqual(["Unfold"]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("offers Settle only where the thread and everything under it is quiet: a working, waiting or asking tile, or one over a working child, offers nothing", () => {
@@ -403,16 +462,18 @@ describe("a tile's acts on hover", () => {
     expect(settlesOnHover(node(thread(ended), [node(failed, [node(thread({ id: "th_3", parentThreadId: "th_2", capped: { placeId: "p", place: "hetzner", running: 2, atOnce: 2 } }))])]), tree)).toBe(false);
   });
 
-  it("a running subagent's row offers Stop subagent beside it in its status's place, and an ended one nothing", () => {
+  it("a running subagent's row offers Stop subagent beside it in its status's place, named on the app's tooltip, and an ended one nothing", async () => {
     const of = thread();
     const draw = (subagent: SubagentView) => {
       const leaf = { subagent, of };
       const part = subagent.state === "running" ? ("live" as const) : ("finished" as const);
       const tree = tileTree({ nowMs: Date.now(), settleMs: null });
       render(
-        <SidebarProvider defaultOpen>
-          <SubagentRow subagent={subagent} target={childTarget(leaf, part, tree)} kind={kindOf(leaf, part)} note={undefined} depth={1} />
-        </SidebarProvider>,
+        <TooltipProvider>
+          <SidebarProvider defaultOpen>
+            <SubagentRow subagent={subagent} target={childTarget(leaf, part, tree)} kind={kindOf(leaf, part)} note={undefined} depth={1} />
+          </SidebarProvider>
+        </TooltipProvider>,
       );
     };
     useStore.setState({ api: { interruptSession: async () => ({}) } } as never);
@@ -423,6 +484,14 @@ describe("a tile's acts on hover", () => {
     expect(stop.getAttribute("aria-label")).toBe("Stop subagent");
     expect(stop.className).toContain("opacity-0");
     expect(row.contains(stop)).toBe(false);
+    vi.useFakeTimers();
+    try {
+      pointAt(stop);
+      expect(await tipsAfter(300)).toEqual([]);
+      expect(await tipsAfter(400)).toEqual(["Stop subagent"]);
+    } finally {
+      vi.useRealTimers();
+    }
     cleanup();
     draw({ id: "sa", title: "Read the map", state: "done", startedAt: Date.now() - 60_000, endedAt: Date.now() - 30_000 });
     expect(document.querySelector("[data-subagent-stop]")).toBeNull();
