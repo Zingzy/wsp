@@ -2,14 +2,14 @@
 // The recipe beside this host's state file, planned for a computer somebody
 // owns: the same rows a copy of the image is planned from, come to the steps
 // that run on the computer itself.
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Manifest } from "@wsp/collect";
 import { TOOL_PREFIX, catalogEntry } from "@wsp/catalog";
-import { MCP_ID_PREFIX, TOOLS_PATH, probePath, type Recipe, type RecipeFile } from "@wsp/protocol";
-import { AGENT_NODE_STEP, closeAgentFiles, oncePathsOf, pathLine, provisionFiles, provisionMcp, type ProvisionPlan } from "@wsp/engine";
+import { MCP_ID_PREFIX, TOOLS_PATH, placeProvisionPaths, probePath, type Recipe, type RecipeFile } from "@wsp/protocol";
+import { AGENT_NODE_STEP, closeAgentFiles, oncePathsOf, pathLine, provisionFiles, provisionMcp, unlandFiles, type ProvisionPlan } from "@wsp/engine";
 import { nodeHost } from "@wsp/collect";
 import { boxGuest, cleanGuests } from "../../engine/test/box-guest.js";
 import { parseEnvFile, serverEnvFileFor } from "../src/env-keys.js";
@@ -270,6 +270,31 @@ describe("the recipe this host holds, planned for a computer you own", () => {
     }
   });
 
+  it("takes a dropped Claude Code's own files off where the plan landed them on a box, and their lines off the list", async () => {
+    write(SMALL);
+    writeFileSync(join(home, ".claude", "CLAUDE.md"), "Answer in one line.\n");
+    mkdirSync(join(home, ".claude", "agents"), { recursive: true });
+    writeFileSync(join(home, ".claude", "agents", "reviewer.md"), "Review the diff.\n");
+    const g = boxGuest([]);
+    try {
+      const plan = await placeProvisioner({ statePath, home, platform: "linux", collect: async () => FIXTURE, brew: async () => new Map() }).plan({ home: g.root });
+      if ("noRecipe" in plan || plan.files === undefined) throw new Error("no files planned");
+      const stores = { claude: join(g.root, ".claude-cfg"), codex: join(g.root, "logins", "codex") };
+      await provisionFiles(g.machine, { home: g.root, lands: plan.files.lands, pack: plan.files.pack, stores });
+      await closeAgentFiles(g.machine, g.root, oncePathsOf(plan.files.lands), stores);
+      const own = [".claude-cfg/CLAUDE.md", ".claude-cfg/agents/reviewer.md"];
+      const listed = (): string[] => readFileSync(placeProvisionPaths(g.root).landed, "utf8").split("\n").map(l => l.split("\t")[0]!);
+      expect(listed()).toEqual(expect.arrayContaining(own));
+      const before: RecipeFile = { name: "laptop", agents: { claude: { signin: "vault" } }, mcp: {}, clis: {}, skills: {}, plugins: {}, folders: {}, configs: {} };
+      const [undo] = await undoPlan(before, [{ kind: "agents", name: "claude" }], { home: g.root }, async () => new Map());
+      expect(await unlandFiles(g.machine, g.root, undo?.dests ?? [], stores)).toEqual({ gone: own, kept: [] });
+      for (const rel of own) expect(existsSync(join(g.root, rel)), rel).toBe(false);
+      expect(listed().filter(rel => own.includes(rel))).toEqual([]);
+    } finally {
+      cleanGuests([g]);
+    }
+  });
+
   it("plans nothing at all for a row of this computer that has no Linux road, and sets nothing aside for it", async () => {
     // The recipe locks such a row off before a plan sees it, so it is neither a step nor a row of the job: the
     // rows the plan does set aside are the ones it could not walk, which the engine's own tests read.
@@ -347,8 +372,9 @@ describe("what taking rows out of a computer's picks runs there", () => {
     ];
     const undo = await undoPlan(before, removed, { home: "/root" }, async () => new Map());
     const by = new Map(undo.map(u => [u.key, u]));
-    expect(by.get("agents/claude")).toMatchObject({ ids: expect.arrayContaining(["agents/claude", "signins/claude", "files/.claude/settings.json"]), dests: expect.arrayContaining([".claude/settings.json", ".claude/CLAUDE.md"]) });
-    expect(by.get("agents/claude")?.dests).not.toContain(".claude.json");
+    // Named where the plan landed them on that computer, under Claude Code's store there.
+    expect(by.get("agents/claude")).toMatchObject({ ids: expect.arrayContaining(["agents/claude", "signins/claude", "files/.claude-cfg/settings.json"]), dests: expect.arrayContaining([".claude-cfg/settings.json", ".claude-cfg/CLAUDE.md"]) });
+    expect(by.get("agents/claude")?.dests).not.toContain(".claude-cfg/.claude.json");
     // Claude Code's script road names no uninstall, which its row says.
     expect(by.get("agents/claude")?.note).toContain("no uninstaller");
     expect(by.get("clis/cowsay")).toMatchObject({ ids: ["tools/npm/cowsay"], cmd: expect.stringContaining("npm uninstall -g cowsay") });

@@ -39,7 +39,7 @@ import {
   withApiKeyHelper,
   withImagePaths,
 } from "@wsp/engine";
-import { baseNote, CATALOG_AGENTS, CLAUDE_CONFIG_REL, CLAUDE_SETTINGS_FILE, GUEST_HOME, MCP_AGENTS, serversByName } from "@wsp/catalog";
+import { baseNote, CATALOG_AGENTS, CLAUDE_SETTINGS_FILE, GUEST_HOME, GUEST_REWRITES, MCP_AGENTS, rewrittenRel, serversByName } from "@wsp/catalog";
 import type { GoldenLeftBehind, RecipeCustomRow } from "@wsp/protocol";
 import { tarPackCommand } from "./doctor.js";
 import type { ServerVault } from "./env-keys.js";
@@ -635,9 +635,7 @@ export function digestOf(file: PlannedFile, home: string): string {
 
 /** Where a laptop config lands on the guest, by the same rewrite the files plan applies. */
 function guestPath(tildePath: string): string {
-  const rel = tildePath.slice(2);
-  const moved = rel === ".claude.json" ? `${CLAUDE_CONFIG_REL}/.claude.json` : rel.startsWith(".claude/") ? `${CLAUDE_CONFIG_REL}/${rel.slice(".claude/".length)}` : rel;
-  return `${GUEST_HOME}/${moved}`;
+  return `${GUEST_HOME}/${rewrittenRel(tildePath.slice(2))}`;
 }
 
 const MCP_SOURCES = Object.fromEntries(MCP_AGENTS.map(a => [a.id, { label: a.name, format: a.mcp.format, files: a.mcp.files.map(guestPath) }]));
@@ -670,7 +668,7 @@ export function importFor(picked: readonly ManifestEntry[], opts: ImportOptions)
     stat: statOf,
     read: readSmall,
     platform: opts.platform,
-    rewrites: [[".claude/", `${CLAUDE_CONFIG_REL}/`], [".claude.json", `${CLAUDE_CONFIG_REL}/.claude.json`]],
+    rewrites: GUEST_REWRITES,
     ...(keepFile !== undefined ? { keep: (f: PlannedFile) => keepFile(f, home) } : {}),
   });
   const shell = shellInstallFor(bring);

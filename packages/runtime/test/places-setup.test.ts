@@ -1847,12 +1847,20 @@ describe("a computer that follows a recipe", () => {
   const ITEMS = { "clis/jq": "1.7", "skills/unslop": "d1" };
 
   /** A computer set up from the saved recipe and in step with it. */
-  async function following(o: { undo?: (removed: readonly { kind: string; name: string }[]) => PlaceUndo[]; answer?: (cmd: string) => { exitCode: number; stdout?: string } | undefined; cmds?: string[]; rows?: Partial<Record<EngineStep, PlaceProvisionRow[]>> } = {}) {
+  async function following(o: { undo?: (removed: readonly { kind: string; name: string }[]) => PlaceUndo[]; answer?: (cmd: string) => { exitCode: number; stdout?: string } | undefined; cmds?: string[]; rows?: Partial<Record<EngineStep, PlaceProvisionRow[]>>; recipe?: RecipeFile; logins?: string; report?: PlaceReport } = {}) {
     const opts: Parameters<typeof provisioner>[0] = { ...(o.undo !== undefined ? { undo: o.undo } : {}), ...(o.rows !== undefined ? { rows: o.rows } : {}) };
     const p = provisioner(opts);
-    const r = shelf(V1, ITEMS);
-    const host = await hosting({ provision: p.wired, recipes: r.recipes, ...(o.answer !== undefined ? { answer: o.answer } : {}), ...(o.cmds !== undefined ? { cmds: o.cmds } : {}) });
-    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: V1, recipe: "laptop" }, Date.now());
+    const recipe = o.recipe ?? V1;
+    const r = shelf(recipe, ITEMS);
+    const host = await hosting({
+      provision: p.wired,
+      recipes: r.recipes,
+      ...(o.answer !== undefined ? { answer: o.answer } : {}),
+      ...(o.cmds !== undefined ? { cmds: o.cmds } : {}),
+      ...(o.logins !== undefined ? { logins: o.logins } : {}),
+      ...(o.report !== undefined ? { report: o.report } : {}),
+    });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: recipe, recipe: "laptop" }, Date.now());
     await until(async () => (await rowOf(place.id)).setup?.state === "done");
     // The setup holds the computer against the recipe as resolved, so the sync its link starts finds nothing to do.
     expect((await rowOf(place.id)).applied).toMatchObject({ hash: "h1", items: ITEMS });
@@ -2068,6 +2076,31 @@ describe("a computer that follows a recipe", () => {
     // Its own file wsp landed comes off by the ledger all the same, and the row says the agent stays.
     expect(cmds.some(c => c.includes("wsp-unland"))).toBe(true);
     expect((await rowOf(placeId)).applied?.rows.find(row => row.id === "agents/claude")).toMatchObject({ outcome: "skipped", note: wasThereLine("spoo") });
+  });
+
+  it("takes a dropped Codex's files off under the box's logins folder, which its threads there read as CODEX_HOME", async () => {
+    const cmds: string[] = [];
+    const withCodex = RecipeFile.parse({ ...V1, agents: { ...V1.agents, codex: { signin: "vault" } } });
+    const { r } = await following({
+      cmds,
+      recipe: withCodex,
+      logins: "/var/lib/wsp/logins",
+      report: report("spoo", { daemonVersion: DAEMON_VERSION, login: { HOME: "/root", USER: "root", PATH: "/usr/bin" } }),
+      rows: { agents: [{ id: "agents/codex", label: "Codex", outcome: "installed" }] },
+      answer: cmd =>
+        cmd.startsWith("uname -s;")
+          ? { exitCode: 0, stdout: ["Linux", "0", "root", "root", "1", "/root", "/usr/bin", ""].join("\n") }
+          : cmd.includes("wsp-unland")
+            ? { exitCode: 0, stdout: "wsp-unland\tgone\t.codex/AGENTS.md\n" }
+            : undefined,
+      undo: () => [{ key: "agents/codex", label: "Codex", ids: ["agents/codex", "files/.codex/AGENTS.md"], owner: "agents/codex", dests: [".codex/AGENTS.md"] }],
+    });
+    r.move(V1, ITEMS, "h10");
+    await runtime!.places!.recipeChanged("laptop");
+    await until(() => cmds.some(c => c.includes("wsp-unland")));
+    expect(cmds.find(c => c.includes("wsp-unland"))).toContain("('.codex'/*) root='/var/lib/wsp/logins/codex'");
+    // Claude Code's own files are named under its store by the plan itself, and its skills land under the home.
+    expect(cmds.find(c => c.includes("wsp-unland"))).not.toContain("'.claude'/*");
   });
 
   it("never takes gh off for a GitHub row dropped where gh came as a CLI, though the GitHub sign-in there was wsp's", async () => {

@@ -4,15 +4,16 @@
 // disk: the file an agent keeps its servers in is merged key by key, every
 // other key of its own stands, and a server the agent or the person has under
 // one of the recipe's names is left with its row saying so.
-import { readFileSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { CODEX_TOML, MCP_SERVERS_JSON, OPENCODE_JSON, parseJsonc } from "@wsp/catalog";
 import { MCP_ID_PREFIX, TOOLS_PATH, placeProvisionPaths } from "@wsp/protocol";
 import type { McpPlan } from "../src/golden-mcp.js";
-import { closeAgentFiles, machineServerPort, oncePathsOf, provisionFiles, unmergeServers, type ProvisionLanding } from "../src/provision-files.js";
+import { closeAgentFiles, machineServerPort, oncePathsOf, provisionFiles, unlandFiles, unmergeServers, type ProvisionLanding } from "../src/provision-files.js";
 import { keyUnreachedLine, provisionMcp, theirServerLine } from "../src/provision-mcp.js";
+import { newSetupRun, provisionStep, type ProvisionPlan } from "../src/provision.js";
 import { tarOf } from "../src/vault.js";
 import type { PackedFiles } from "../src/golden.js";
 import { boxGuest, cleanGuests, type BoxGuest } from "./box-guest.js";
@@ -131,6 +132,50 @@ async function run(g: BoxGuest, o: { claude?: string; codex?: string; far?: bool
     servers: servers.map(r => [r.id, r.outcome, r.note]),
     closing: said.at(-1) ?? "",
   };
+}
+
+const CODEX_AGENTS_MD = "Answer in one line.\n";
+const CODEX_PROMPT = "Review the diff.\n";
+
+/** The servers step of a box job carrying Codex alone: its config, its standing instructions and a prompt, with the
+ * one server the person ticked. */
+const codexStepPlan = (root: string): ProvisionPlan => ({
+  recipeAt: "picks",
+  path: TOOLS_PATH,
+  steps: [],
+  skipped: [],
+  agents: 0,
+  compiler: false,
+  files: {
+    lands: [
+      { id: "agents/codex", label: "Codex", dest: ".codex/config.toml", once: true },
+      { id: "agents/codex", label: "Codex", dest: ".codex/AGENTS.md" },
+      { id: "agents/codex", label: "Codex", dest: ".codex/prompts" },
+    ],
+    pack: async () =>
+      packed(
+        tarOf([
+          { path: ".codex/config.toml", mode: 0o600, content: CODEX_TRAVELLED },
+          { path: ".codex/AGENTS.md", mode: 0o644, content: CODEX_AGENTS_MD },
+          { path: ".codex/prompts/review.md", mode: 0o644, content: CODEX_PROMPT },
+        ]),
+      ),
+  },
+  mcp: { ...planOn(root), agents: planOn(root).agents.filter(a => a.id === "codex") },
+});
+
+const CODEX_OWN = [
+  { path: ".codex/AGENTS.md", content: CODEX_AGENTS_MD },
+  { path: ".codex/prompts/review.md", content: CODEX_PROMPT },
+];
+
+/** One files round and its close with no server in it, as the skills step lands a skill, given the stores its step
+ * is handed. */
+async function landOnly(g: BoxGuest, files: readonly { path: string; content: string }[], stores?: Record<string, string>): Promise<void> {
+  const lands = files.map(f => ({ id: `files/${f.path}`, label: f.path, dest: f.path }));
+  const pack = async () => packed(tarOf(files.map(f => ({ path: f.path, mode: 0o644, content: f.content }))));
+  await provisionFiles(g.machine, { home: g.root, lands, pack, ...(stores !== undefined ? { stores } : {}) });
+  await closeAgentFiles(g.machine, g.root, [], stores);
 }
 
 const list = (root: string): string[] => readFileSync(placeProvisionPaths(root).landed, "utf8").split("\n").filter(l => l !== "");
@@ -341,6 +386,97 @@ describe("the recipe's servers on a computer somebody owns", { timeout: 60_000 }
     const out = await unmergeServers(machineServerPort(g.machine), g.root, { codex: logins });
     expect(out.find(x => x.path === join(logins, "config.toml"))?.names).toEqual(["context7"]);
     expect(readFileSync(join(logins, "config.toml"), "utf8")).toBe('model = "o4"\n');
+  });
+
+  it("lands the rest of an agent's own files under the store its threads there read, and leaves none of them under the home", async () => {
+    const g = box();
+    // The box's logins folder, which a Codex thread there reads as its CODEX_HOME.
+    const logins = mkdtempSync(join(tmpdir(), "wsp-box-logins-"));
+    g.dirs.push(logins);
+    const plan = codexStepPlan(g.root);
+    const on = { home: g.root, stores: { codex: logins } };
+    const rows = await provisionStep(g.machine, plan, "mcp", newSetupRun(), () => {}, on);
+    const own = readFileSync(join(logins, "config.toml"), "utf8");
+    expect(own).toContain('model = "gpt-5"');
+    expect(CODEX_TOML.read(own, g.root).map(s => s.name)).toEqual(["context7"]);
+    expect(readFileSync(join(logins, "AGENTS.md"), "utf8")).toBe(CODEX_AGENTS_MD);
+    expect(readFileSync(join(logins, "prompts/review.md"), "utf8")).toBe(CODEX_PROMPT);
+    expect(existsSync(join(g.root, ".codex"))).toBe(false);
+    expect(rows.filter(r => r.kind === "file").map(r => [r.label, r.outcome])).toEqual([
+      [`Codex ${logins}/config.toml`, "installed"],
+      [`Codex ${logins}/AGENTS.md`, "installed"],
+      [`Codex ${logins}/prompts`, "installed"],
+    ]);
+
+    // The next run reads them as wsp's own copies, and a sync that takes the prompts off takes them from the store.
+    const again = await provisionStep(g.machine, plan, "mcp", newSetupRun(), () => {}, on);
+    expect(again.filter(r => r.kind === "file").map(r => r.outcome)).toEqual(["present", "present", "present"]);
+    expect(await unlandFiles(g.machine, g.root, [".codex/prompts"], on.stores)).toEqual({ gone: [".codex/prompts/review.md"], kept: [] });
+    expect(existsSync(join(logins, "prompts"))).toBe(false);
+    expect(existsSync(join(logins, "AGENTS.md"))).toBe(true);
+  });
+
+  it("moves the copies an earlier run left under the home into the store, a file the person wrote there since staying", async () => {
+    const g = box();
+    const logins = mkdtempSync(join(tmpdir(), "wsp-box-logins-"));
+    g.dirs.push(logins);
+    const plan = codexStepPlan(g.root);
+    await provisionStep(g.machine, plan, "mcp", newSetupRun(), () => {}, { home: g.root });
+    writeFileSync(join(g.root, ".codex/prompts/mine.md"), "his own\n");
+    await provisionStep(g.machine, plan, "mcp", newSetupRun(), () => {}, { home: g.root, stores: { codex: logins } });
+    expect(readFileSync(join(logins, "AGENTS.md"), "utf8")).toBe(CODEX_AGENTS_MD);
+    expect(existsSync(join(g.root, ".codex/AGENTS.md"))).toBe(false);
+    expect(existsSync(join(g.root, ".codex/prompts/review.md"))).toBe(false);
+    expect(readFileSync(join(g.root, ".codex/prompts/mine.md"), "utf8")).toBe("his own\n");
+  });
+
+  it("takes a dropped skill off under the home where the skills step landed it, on a box whose Claude reads a store of its own", async () => {
+    const g = box();
+    const logins = mkdtempSync(join(tmpdir(), "wsp-box-logins-"));
+    g.dirs.push(logins);
+    const skill = ".claude/skills/why/SKILL.md";
+    await landOnly(g, [{ path: skill, content: "# why\n" }]);
+    expect(list(g.root).some(l => l.startsWith(`${skill}\t`))).toBe(true);
+    const stores = { claude: join(g.root, ".claude-cfg"), codex: logins };
+    expect(await unlandFiles(g.machine, g.root, [".claude/skills/why"], stores)).toEqual({ gone: [skill], kept: [] });
+    expect(existsSync(join(g.root, ".claude/skills/why"))).toBe(false);
+    expect(list(g.root).some(l => l.startsWith(`${skill}\t`))).toBe(false);
+  });
+
+  it("takes the copies an earlier run left under the home off with a Codex dropped before any run moved them", async () => {
+    const g = box();
+    const logins = mkdtempSync(join(tmpdir(), "wsp-box-logins-"));
+    g.dirs.push(logins);
+    await landOnly(g, CODEX_OWN);
+    writeFileSync(join(g.root, ".codex/prompts/mine.md"), "his own\n");
+    const out = await unlandFiles(g.machine, g.root, [".codex/AGENTS.md", ".codex/prompts"], { codex: logins });
+    expect(out).toEqual({ gone: [".codex/AGENTS.md", ".codex/prompts/review.md"], kept: [] });
+    expect(existsSync(join(g.root, ".codex/AGENTS.md"))).toBe(false);
+    expect(existsSync(join(g.root, ".codex/prompts/review.md"))).toBe(false);
+    expect(readFileSync(join(g.root, ".codex/prompts/mine.md"), "utf8")).toBe("his own\n");
+    expect(list(g.root).filter(l => l.startsWith(".codex/"))).toEqual([]);
+  });
+
+  it("moves an earlier copy into the store without taking the agent's own folder under the home", async () => {
+    const g = box();
+    const logins = mkdtempSync(join(tmpdir(), "wsp-box-logins-"));
+    g.dirs.push(logins);
+    await landOnly(g, CODEX_OWN);
+    await landOnly(g, CODEX_OWN, { codex: logins });
+    expect(readFileSync(join(logins, "prompts/review.md"), "utf8")).toBe(CODEX_PROMPT);
+    expect(existsSync(join(g.root, ".codex/prompts"))).toBe(false);
+    expect(existsSync(join(g.root, ".codex"))).toBe(true);
+  });
+
+  it("takes every file wsp landed in a store off by the agent's folder alone, and leaves the store standing", async () => {
+    const g = box();
+    const logins = mkdtempSync(join(tmpdir(), "wsp-box-logins-"));
+    g.dirs.push(logins);
+    await landOnly(g, CODEX_OWN, { codex: logins });
+    expect(await unlandFiles(g.machine, g.root, [".codex"], { codex: logins })).toEqual({ gone: [".codex/AGENTS.md", ".codex/prompts/review.md"], kept: [] });
+    expect(existsSync(join(logins, "AGENTS.md"))).toBe(false);
+    expect(existsSync(logins)).toBe(true);
+    expect(list(g.root).filter(l => l.startsWith(".codex/"))).toEqual([]);
   });
 
   it("leaves a config that is on no computer to the merge itself, which skips its servers rather than writing a file nobody has", async () => {

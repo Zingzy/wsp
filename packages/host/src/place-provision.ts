@@ -11,7 +11,7 @@ import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { join, posix } from "node:path";
 import type { Host, Manifest, ManifestEntry, Platform } from "@wsp/collect";
 import { expand, nodeHost } from "@wsp/collect";
-import { CATALOG_AGENTS, COMPILER_ROW, MCP_AGENTS, SHARED_SKILLS, TOOL_PREFIX, catalogEntry, catalogIdOfRow, installHomes, ownSkillFolder, roadModule } from "@wsp/catalog";
+import { CATALOG_AGENTS, COMPILER_ROW, MCP_AGENTS, SHARED_SKILLS, TOOL_PREFIX, catalogEntry, catalogIdOfRow, installHomes, ownSkillFolder, rewrittenRel, roadModule } from "@wsp/catalog";
 import {
   agentStateFile,
   newSetupRun,
@@ -291,8 +291,9 @@ export async function undoPlan(before: RecipeFile, removed: readonly { kind: Rec
         break;
       }
       case "agents": {
-        // Its own files wsp landed come off with it; a file it rewrites as it runs was never wsp's to keep.
-        const dests = agentOwnPaths(name).map(p => p.replace(/^~\//, ""));
+        // Its own files wsp landed come off with it, named where the plan landed them; a file it rewrites as it runs
+        // was never wsp's to keep.
+        const dests = agentOwnPaths(name).map(p => rewrittenRel(p.replace(/^~\//, "")));
         out.push({ key, label: CATALOG_AGENTS.find(a => a.id === name)?.name ?? name, ids: [`agents/${name}`, signInRowId(name), ...dests.map(d => `files/${d}`)], owner: `agents/${name}`, dests, ...catalogUninstall(name, path, prefix) });
         break;
       }
