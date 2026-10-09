@@ -11,6 +11,7 @@
 // surface needs both.
 import { bareFolder, ThreadSection, type ProjectView, type ThreadMarks, type ThreadPlacement } from "@wsp/protocol";
 import type { SidebarProjectSnapshot, SidebarThreadSnapshot } from "../adapt/index.js";
+import { settleTake } from "../components/threads/leadTree.js";
 import { workspaceRowId } from "./rowGrammar.js";
 import { isThreadSettleable, isThreadSettled, isThreadWorking, nestSpawnedThreads, sortSettledThreadsForSidebar, sortThreadsForSidebar, threadForest, threadSection, type ThreadNode } from "./Sidebar.logic.js";
 
@@ -317,10 +318,9 @@ export function treeWorkspaceIds(node: TileNode): string[] {
   return [...new Set(ids(node))];
 }
 
-/** What a settle of a root takes: every thread of its tree, and whether one of them is working, which holds it. */
+/** What a settle of a root takes, read where every settle in the app is. */
 export function treeSettle(node: TileNode): { threadIds: string[]; working: boolean } {
-  const works = ({ thread: { thread }, children }: TileNode): boolean => (thread !== null && isThreadWorking(thread)) || children.some(works);
-  return { threadIds: treeThreadIds(node), working: works(node) };
+  return settleTake({ node, thread: node.thread.thread }, { threadOf: n => n.thread.thread, kidsOf: n => n.children, nowMs: Date.now(), settleMs: null });
 }
 
 /** The live roots "Settle all read" takes: every tree whose threads have all been read and are quiet. */

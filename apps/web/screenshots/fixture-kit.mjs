@@ -307,6 +307,9 @@ export const turn = (thread, minutes, workspaceId = "ws_api") => ({
   startedAt: ago(minutes),
   ...(thread.status === "running" ? { run: `run_${thread.id}` } : { endedAt: ago(minutes - 3) }),
   ...(thread.asking === undefined ? {} : { asking: thread.asking }),
+  // The last line of the turn's reply and why it failed, as the runtime writes them on the row when it ends.
+  ...(thread.lastLine === undefined ? {} : { lastLine: thread.lastLine }),
+  ...(thread.failure === undefined ? {} : { failure: thread.failure }),
   // The agent's own session, which a side question copies; only a thread a shot asks one of names it.
   ...(thread.session === undefined ? {} : { claudeSessionId: thread.session }),
   cwd: thread.cwd ?? projectDest("spoo"),
@@ -330,6 +333,11 @@ export const replay = (thread, minutes, workspaceId = "ws_api") => {
     event(thread, { type: "session.delta", at: ago(minutes - 1), kind: "thinking", text: thread.thought }, workspaceId),
     event(thread, { type: "session.delta", at: ago(minutes - 1), kind: "tool_use", toolName: thread.tool.name, toolUseId: `tu_${thread.id}`, text: thread.tool.input }, workspaceId),
     event(thread, { type: "session.delta", at: ago(minutes - 2), kind: "tool_result", toolName: thread.tool.name, toolUseId: `tu_${thread.id}`, text: thread.tool.result }, workspaceId),
+    // The agent's own subagents, each a running row as it starts and a second row where it ended.
+    ...(thread.subagents ?? []).flatMap(sub => [
+      event(thread, { type: "session.subagent", at: ago(sub.started), task: sub.task, state: "running", title: sub.title, ...(sub.model === undefined ? {} : { model: sub.model }), ...(sub.asked === undefined ? {} : { asked: sub.asked }) }, workspaceId),
+      ...(sub.state === "running" ? [] : [event(thread, { type: "session.subagent", at: ago(sub.ended), task: sub.task, state: sub.state, ...(sub.summary === undefined ? {} : { summary: sub.summary }) }, workspaceId)]),
+    ]),
     ...(thread.steps === undefined ? [] : [event(thread, { type: "session.plan", at: ago(minutes - 2), steps: thread.steps }, workspaceId)]),
     ...(thread.proposed === undefined ? [] : [event(thread, { type: "session.plan", at: ago(minutes - 2), text: thread.proposed }, workspaceId)]),
     event(thread, { type: "session.delta", at: ago(minutes - 2), kind: "text", text: thread.reply }, workspaceId),

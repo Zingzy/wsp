@@ -993,12 +993,13 @@ describe("the threads a thread opened", () => {
       return found;
     });
     expect(document.querySelector("[data-thread-rows-head]")!.textContent).toBe("Threads");
-    expect(opened.map(row => [row.querySelector("a")!.textContent, row.querySelector("[data-thread-place]")!.textContent, row.querySelector<HTMLElement>("[data-thread-status]")!.dataset.threadStatus])).toEqual([
+    // Failed ranks before working; the computer leads a row's second line only where it is not the lead's own.
+    expect(opened.map(row => [row.querySelector("a")!.textContent, row.querySelector("[data-thread-place]")?.textContent ?? null, row.querySelector<HTMLElement>("[data-thread-status]")!.dataset.threadStatus])).toEqual([
+      ["rewrite the web client", null, "failed"],
       ["benchmark the new index", "Boat", "working"],
-      ["rewrite the web client", "Solari", "failed"],
     ]);
     expect(document.querySelector("[data-thread-rows]")!.textContent).not.toMatch(/·|opened| on /);
-    const link = opened[0]!.querySelector<HTMLAnchorElement>("a")!;
+    const link = opened[1]!.querySelector<HTMLAnchorElement>("a")!;
     expect(link.textContent).toBe("benchmark the new index");
     expect(link.getAttribute("href")).toBe(`${window.location.origin}${window.location.pathname}#w/ws_bench/t/thr_bench`);
     // Clicking it walks down the tree the same way the child's own header walks up it.

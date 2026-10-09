@@ -98,9 +98,26 @@ describe("deriveSidebarProjects", () => {
     ]);
     expect(projects[0]).toMatchObject({ projectKey: LIVE_WS, environmentPresence: "remote-only", groupedProjectCount: 1, allRemoteMembersAreDesktopLocal: false, machineState: "running", reach: "reachable", state: "running" });
     expect(projects[0]?.threads).toEqual([
-      { id: "s1", threadId: null, sessionId: "s1", workspaceId: LIVE_WS, title: "hello", status: "completed", ran: true, startedAt: "2026-09-02T17:19:35.668Z", endedAt: "2026-09-02T17:19:37.768Z", indicator: { label: "Idle", tone: "neutral", pulse: false }, harness: "claude", startedBy: "person", project: "the-project", parentThreadId: null, attempt: null, model: null, asking: null, limit: null, resumeAt: null, costUsd: null, unread: false, readAt: "2026-09-02T17:19:40.000Z", settledAt: null, needsYou: false, pinnedAt: null, snoozedUntil: null, section: null },
-      { id: "s0", threadId: null, sessionId: "s0", workspaceId: LIVE_WS, title: "59094224", status: "running", ran: true, startedAt: null, endedAt: null, indicator: { label: "Working", tone: "neutral", pulse: true }, harness: "claude", startedBy: "person", project: "the-project", parentThreadId: null, attempt: null, model: null, asking: null, limit: null, resumeAt: null, costUsd: null, unread: false, readAt: null, settledAt: null, needsYou: false, pinnedAt: null, snoozedUntil: null, section: null },
+      { id: "s1", threadId: null, sessionId: "s1", workspaceId: LIVE_WS, title: "hello", status: "completed", ran: true, startedAt: "2026-09-02T17:19:35.668Z", endedAt: "2026-09-02T17:19:37.768Z", indicator: { label: "Idle", tone: "neutral", pulse: false }, harness: "claude", startedBy: "person", project: "the-project", parentThreadId: null, attempt: null, model: null, asking: null, limit: null, resumeAt: null, costUsd: null, unread: false, readAt: "2026-09-02T17:19:40.000Z", settledAt: null, needsYou: false, pinnedAt: null, snoozedUntil: null, section: null, subagents: [], lastLine: null, failure: null, foldedAt: null },
+      { id: "s0", threadId: null, sessionId: "s0", workspaceId: LIVE_WS, title: "59094224", status: "running", ran: true, startedAt: null, endedAt: null, indicator: { label: "Working", tone: "neutral", pulse: true }, harness: "claude", startedBy: "person", project: "the-project", parentThreadId: null, attempt: null, model: null, asking: null, limit: null, resumeAt: null, costUsd: null, unread: false, readAt: null, settledAt: null, needsYou: false, pinnedAt: null, snoozedUntil: null, section: null, subagents: [], lastLine: null, failure: null, foldedAt: null },
     ]);
+  });
+
+  it("takes the listing's subagents, last line, failure and fold mark onto the thread, which the lead's tree reads", () => {
+    const subagent = { id: "task_1", title: "Read the map", state: "done" as const, startedAt: 10, endedAt: 20, model: "Haiku 4.5", asked: "Read every open ticket", lastLine: "11 open." };
+    const [project] = deriveSidebarProjects({
+      workspaces: [LIVE_WORKSPACE_1],
+      statuses: statusesFrom(LIVE_RUN_1),
+      sessions: {
+        [LIVE_WS]: [
+          { id: "s1", threadId: "thr_1", workspaceId: LIVE_WS, harness: "claude", status: "failed", prompt: "land it", startedAt: 1, endedAt: 30, lastLine: "Pushed the branch.", failure: "pnpm test exited 1", foldedAt: Date.parse("2026-10-09T12:00:00Z"), subagents: [subagent] },
+          { id: "s2", threadId: "thr_2", workspaceId: LIVE_WS, harness: "claude", status: "completed", prompt: "quiet", startedAt: 1, endedAt: 2 },
+        ],
+      },
+    });
+    const [failed, quiet] = [...project!.threads].sort((a, b) => a.id.localeCompare(b.id));
+    expect(failed).toMatchObject({ subagents: [subagent], lastLine: "Pushed the branch.", failure: "pnpm test exited 1", foldedAt: "2026-10-09T12:00:00.000Z" });
+    expect(quiet).toMatchObject({ subagents: [], lastLine: null, failure: null, foldedAt: null });
   });
 
   it("a thread carries the name of its workspace's project, whatever folder the turn ran in: a workspace is one project's copy", () => {

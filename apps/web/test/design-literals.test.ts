@@ -135,7 +135,7 @@ const ALLOWED: readonly Allowed[] = [
 
 /** How many of each counted kind the sources hold now. A new one fails; one taken away fails until the figure here
  * falls with it. */
-const CEILINGS: Readonly<Record<string, number>> = { spacing: 102, size: 136 };
+const CEILINGS: Readonly<Record<string, number>> = { spacing: 102, size: 135 };
 
 describe("sizes, radii, shadows and colours come from the named scale", () => {
   const held = holdTo(hits.map(hit => ({ text: hit.text, where: hit.file })), ALLOWED);

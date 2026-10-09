@@ -6,11 +6,13 @@
 // restore take a root thread with every thread under it; a pin and a snooze
 // mark the root alone, which carries its tree with it. Keep this one, on a
 // thread one send to several models opened, deletes the copies the others run in.
-import { AlarmClockIcon, ArchiveIcon, ArchiveRestoreIcon, CheckIcon, FileTextIcon, LinkIcon, PencilIcon, PinIcon, PinOffIcon, SquareIcon, Trash2Icon, Undo2Icon } from "lucide-react";
+import { AlarmClockIcon, ArchiveIcon, ArchiveRestoreIcon, CheckIcon, FileTextIcon, LinkIcon, MessageSquareIcon, PencilIcon, PinIcon, PinOffIcon, SquareIcon, Trash2Icon, Undo2Icon } from "lucide-react";
 import { threadMarkdown, threadMessages, type HarnessCatalog, type SessionEvent, type SessionStatus, type ThreadMarks, type WorkspaceState } from "@wsp/protocol";
 import type { SidebarThreadSnapshot } from "../adapt/index.js";
 import { addressLink } from "../protocol/address.js";
-import { CLIENT_CANNOT_REWIND, CLIENT_CANNOT_DELETE, CLIENT_CANNOT_MARK, CLIENT_CANNOT_RESTORE, CLIENT_CANNOT_SETTLE, CLIENT_CANNOT_STOP, NOTHING_READ_TO_SETTLE, THREAD_HAS_NO_ID, THREAD_NOT_RUNNING, THREAD_TREE_WORKING, THREAD_WORDS, threadForgetRefusalFor, threadRenameRefusal, CLIENT_CANNOT_READ } from "./format.js";
+import { CHILD_WORDS, CLIENT_CANNOT_SEND, CLIENT_CANNOT_REWIND, CLIENT_CANNOT_DELETE, CLIENT_CANNOT_MARK, CLIENT_CANNOT_RESTORE, CLIENT_CANNOT_SETTLE, CLIENT_CANNOT_STOP, NOTHING_READ_TO_SETTLE, THREAD_HAS_NO_ID, THREAD_NOT_RUNNING, THREAD_TREE_WORKING, THREAD_WORDS, threadForgetRefusalFor, threadRenameRefusal, CLIENT_CANNOT_READ } from "./format.js";
+import type { ChildPart } from "../components/threads/leadTree.js";
+import { addNotice } from "../notices/store.js";
 import type { ActionEntry } from "./registry.js";
 
 export interface ThreadTarget {
@@ -255,5 +257,106 @@ export const settledFoldActions: ReadonlyArray<ActionEntry<SettledFoldTarget, Th
     title: () => THREAD_WORDS.deleteCopies,
     refusal: (_target, verbs) => (verbs.deleteCopies === undefined ? CLIENT_CANNOT_DELETE : null),
     run: (target, verbs) => verbs.deleteCopies?.(target.workspaceIds),
+  },
+];
+
+/** One child of a lead's tree as its acts read it: a thread, or a subagent of the thread whose session runs it. */
+export interface ChildTarget {
+  readonly title: string;
+  /** The session a stop goes to: the thread's own, or for a subagent the thread's whose agent runs it. */
+  readonly sessionId: string;
+  readonly harness: string;
+  /** The subagent's own id, what a stop of it names; null on a thread. */
+  readonly task: string | null;
+  readonly part: ChildPart;
+  readonly running: boolean;
+  /** What a settle of the thread takes, and whether anything in it works, which holds the settle. */
+  readonly settles: ReadonlyArray<string>;
+  readonly working: boolean;
+}
+
+export interface ChildVerbs {
+  /** Opens the message field on the child's own row; the surface that draws the row puts its opener here. */
+  readonly message?: (() => void) | undefined;
+  readonly stop?: ((sessionId: string) => Promise<void>) | undefined;
+  readonly stopTask?: ((task: { sessionId: string; task: string; harness: string; title: string }) => Promise<void>) | undefined;
+  /** Whether the host settled them: a refusal is the settle's own toast. */
+  readonly settle?: ((threadIds: ReadonlyArray<string>) => Promise<boolean>) | undefined;
+  readonly restore?: ((threadIds: ReadonlyArray<string>) => Promise<void>) | undefined;
+}
+
+/** Settles threads and says so with the way back, which restores the same set; a refused settle says the refusal alone. */
+async function settleWithUndo(threadIds: ReadonlyArray<string>, verbs: ChildVerbs, where: string): Promise<void> {
+  if (verbs.settle === undefined || !(await verbs.settle(threadIds))) return;
+  addNotice({ kind: "done", text: CHILD_WORDS.settled(threadIds.length), where, action: { word: CHILD_WORDS.undo, run: () => void verbs.restore?.(threadIds) } });
+}
+
+const isThread = (target: ChildTarget): boolean => target.task === null;
+
+/** A child's acts, in the order its hover draws them: Send a message, then Stop, Settle or Restore. A subagent takes
+ * Stop subagent while it runs and nothing after: no message reaches it but through its lead. */
+export const childActions: ReadonlyArray<ActionEntry<ChildTarget, ChildVerbs>> = [
+  {
+    id: "send",
+    group: "talk",
+    icon: () => MessageSquareIcon,
+    applies: isThread,
+    title: () => CHILD_WORDS.send,
+    refusal: (_target, verbs) => (verbs.message === undefined ? CLIENT_CANNOT_SEND : null),
+    run: (_target, verbs) => verbs.message?.(),
+  },
+  {
+    id: "stop",
+    group: "state",
+    icon: () => SquareIcon,
+    applies: target => isThread(target) && target.part !== "settled" && target.running,
+    title: () => THREAD_WORDS.stop,
+    refusal: (_target, verbs) => (verbs.stop === undefined ? CLIENT_CANNOT_STOP : null),
+    run: (target, verbs) => verbs.stop?.(target.sessionId),
+  },
+  {
+    id: "settle",
+    group: "state",
+    icon: () => ArchiveIcon,
+    applies: target => isThread(target) && target.part !== "settled" && !target.running,
+    title: () => THREAD_WORDS.settle,
+    refusal: (target, verbs) => (verbs.settle === undefined ? CLIENT_CANNOT_SETTLE : target.working ? THREAD_TREE_WORKING : null),
+    run: (target, verbs) => settleWithUndo(target.settles, verbs, target.title),
+  },
+  {
+    id: "restore",
+    group: "state",
+    icon: () => ArchiveRestoreIcon,
+    applies: target => isThread(target) && target.part === "settled",
+    title: () => THREAD_WORDS.restore,
+    refusal: (_target, verbs) => (verbs.restore === undefined ? CLIENT_CANNOT_RESTORE : null),
+    run: (target, verbs) => verbs.restore?.(target.settles),
+  },
+  {
+    id: "stop-subagent",
+    group: "state",
+    icon: () => SquareIcon,
+    applies: target => !isThread(target) && target.running,
+    title: () => CHILD_WORDS.stopSubagent,
+    refusal: (_target, verbs) => (verbs.stopTask === undefined ? CLIENT_CANNOT_STOP : null),
+    run: (target, verbs) => (target.task === null ? undefined : verbs.stopTask?.({ sessionId: target.sessionId, task: target.task, harness: target.harness, title: target.title })),
+  },
+];
+
+/** A lead over its tree: every finished thread in it, which Settle N finished takes at once. */
+export interface LeadTarget {
+  readonly title: string;
+  readonly finished: ReadonlyArray<string>;
+}
+
+export const leadActions: ReadonlyArray<ActionEntry<LeadTarget, ChildVerbs>> = [
+  {
+    id: "settle-finished",
+    group: "state",
+    icon: () => ArchiveIcon,
+    applies: target => target.finished.length > 0,
+    title: target => CHILD_WORDS.settleFinished(target.finished.length),
+    refusal: (_target, verbs) => (verbs.settle === undefined ? CLIENT_CANNOT_SETTLE : null),
+    run: (target, verbs) => settleWithUndo(target.finished, verbs, target.title),
   },
 ];

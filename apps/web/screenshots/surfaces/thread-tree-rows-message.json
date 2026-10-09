@@ -1,0 +1,15 @@
+{
+  "at": "/",
+  "fixture": "lead-rows",
+  "widths": [
+    1440
+  ],
+  "reason": "Send a message opens its field in the row's second line; the act is drawn from md up only, so 390 has no way to it.",
+  "steps": [
+    "row-id=thread:tree-lead",
+    "hover:child-part=live",
+    "child-act=Send a message"
+  ],
+  "wait": "row-name-input",
+  "settleMs": 900
+}

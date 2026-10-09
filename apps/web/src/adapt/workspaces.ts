@@ -167,6 +167,10 @@ function deriveThread(thread: ThreadView, workspace: Pick<WorkspaceView, "projec
     pinnedAt: thread.pinnedAt !== undefined ? new Date(thread.pinnedAt).toISOString() : null,
     snoozedUntil: thread.snoozedUntil !== undefined ? new Date(thread.snoozedUntil).toISOString() : null,
     section: thread.section ?? null,
+    subagents: thread.subagents ?? [],
+    lastLine: thread.lastLine ?? null,
+    failure: thread.failure ?? null,
+    foldedAt: thread.foldedAt !== undefined ? new Date(thread.foldedAt).toISOString() : null,
   };
 }
 

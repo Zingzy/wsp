@@ -491,7 +491,7 @@ export function WorkspaceSidebar() {
   });
   const settledCount = tiles.settled.reduce((sum, node) => sum + tileCount(node), 0);
   const settleable = settleableRoots(tiles.live);
-  const settledRowActions = resolveActions(settledFoldActions, { threadIds: settleable.flatMap(treeThreadIds), workspaceIds: [...new Set(tiles.settled.flatMap(treeWorkspaceIds))] }, threadVerbs);
+  const settledRowActions = resolveActions(settledFoldActions, { threadIds: settleable.flatMap(root => treeSettle(root).threadIds), workspaceIds: [...new Set(tiles.settled.flatMap(treeWorkspaceIds))] }, threadVerbs);
 
   // The body on its way out of a slide is still drawn: its rows are not the ones the keyboard walks.
   const rows = (): HTMLElement[] => Array.from(rootRef.current?.querySelectorAll<HTMLElement>("[data-sidebar-row]") ?? []);
