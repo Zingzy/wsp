@@ -547,15 +547,18 @@ const RuntimeOp = z.discriminatedUnion("op", [
   /** A window showed the thread, or `wsp thread read` read it: its read stamp moves to now, and every window hears
    * thread.marked. Takes the thread's fold key, as ThreadView.id carries it. */
   z.object({ id: reqId, op: z.literal("sessions.read"), threadId: z.string() }),
-  /** The person settled these threads by hand, a root and every thread under it: each takes a settled stamp and a
-   * read stamp of now, and every window hears thread.marked. Takes fold keys. */
-  z.object({ id: reqId, op: z.literal("sessions.settle"), threadIds: z.array(z.string()).min(1) }),
+  /** Settles each thread named and every thread under it, each taking a settled stamp and a read stamp of now, and
+   * every window hears thread.marked; with finished, each named thread stays and the finished threads under it
+   * settle. The named threads keep the settle's stamp, which a restore of them reads. Replies with a
+   * SessionSettleResult. Takes fold keys. */
+  z.object({ id: reqId, op: z.literal("sessions.settle"), threadIds: z.array(z.string()).min(1), finished: z.boolean().optional() }),
   /** The person pinned, snoozed or placed these threads, or took one of those back with false or null: each moves on
    * the thread's record and every window hears thread.marked. A snooze stamps the thread read as well, since putting
    * a finish away is looking at it. Takes fold keys. */
   z.object({ id: reqId, op: z.literal("sessions.mark"), threadIds: z.array(z.string()).min(1), marks: ThreadMarks }),
-  /** The person took settled threads back out of the fold: the settled stamp goes and the read stamp moves to now, so
-   * the quiet the fold reads counts from the restore. Takes fold keys. */
+  /** Takes each thread named back out of the fold with the threads under it that the latest settle naming it moved,
+   * never one folded by the quiet time or settled before: the settled stamp goes and the read stamp moves to now, so
+   * the quiet the fold reads counts from the restore. Replies with a SessionRestoreResult. Takes fold keys. */
   z.object({ id: reqId, op: z.literal("sessions.restore"), threadIds: z.array(z.string()).min(1) }),
   /** The words of every thread the caller reaches, the person's messages and the agent's replies, searched on the
    * host for the query, case aside: one hit per thread with a snippet around the words. Reads only what the host
@@ -974,6 +977,10 @@ export const THREAD_OPS: readonly string[] = [
   "sessions.steer",
   "sessions.rename",
   "sessions.read",
+  // A thread settles and restores itself and the threads under it, never its lead or one beside it: the runtime
+  // reads that rule beside the tree rule.
+  "sessions.settle",
+  "sessions.restore",
   "sessions.search",
   // A thread writes and reads its own slate, and a lead reads a child's; the window's own slate ops are not here.
   "slates.write",
@@ -1211,6 +1218,16 @@ export const SessionRenameOutcome = z.enum(["renamed", "unsupported", "no-sessio
 export type SessionRenameOutcome = z.infer<typeof SessionRenameOutcome>;
 export const SessionRenameResult = z.object({ outcome: SessionRenameOutcome, error: z.string().optional() });
 export type SessionRenameResult = z.infer<typeof SessionRenameResult>;
+
+/** A thread a settle or a restore moved, by fold key, with its title as threads lists it. */
+export const SettledThread = z.object({ threadId: z.string(), title: z.string() });
+export type SettledThread = z.infer<typeof SettledThread>;
+/** What a settle moved, and each thread it was named that it left with why: a tree with a thread working or asking,
+ * or a thread the fold already holds. */
+export const SessionSettleResult = z.object({ settled: z.array(SettledThread), left: z.array(z.object({ threadId: z.string(), why: z.string() })) });
+export type SessionSettleResult = z.infer<typeof SessionSettleResult>;
+export const SessionRestoreResult = z.object({ restored: z.array(SettledThread) });
+export type SessionRestoreResult = z.infer<typeof SessionRestoreResult>;
 
 /** One thread whose words hold the query: the thread by the runtime's id and the workspace it runs on, and the words
  * around the first place they hold it, on one line. */

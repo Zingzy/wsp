@@ -1767,7 +1767,7 @@ describe("thread provenance", () => {
     expect(needsYouCount([{ id: "s_1", workspaceId: "ws_a", harness: "claude", status: "interrupted", threadId: "thr_1", endedAt: 2_000 }])).toBe(0);
   });
 
-  it("the marks, the restore and the search are ops a paired device sends; a thread's token searches its own tree and marks nothing", () => {
+  it("the marks, the settle, the restore and the search are ops a paired device sends; a thread's token searches its own tree, settles and restores, and marks nothing", () => {
     expect(RuntimeRequest.safeParse({ id: 1, op: "sessions.mark", threadIds: ["thr_a"], marks: { pinned: true } }).success).toBe(true);
     expect(RuntimeRequest.safeParse({ id: 1, op: "sessions.mark", threadIds: ["thr_a"], marks: { snoozedUntil: null, section: null } }).success).toBe(true);
     expect(RuntimeRequest.safeParse({ id: 1, op: "sessions.mark", threadIds: ["thr_a"], marks: { section: { name: "working", whileState: "running s1" } } }).success).toBe(true);
@@ -1775,11 +1775,12 @@ describe("thread provenance", () => {
     expect(RuntimeRequest.safeParse({ id: 1, op: "sessions.mark", threadIds: [], marks: { pinned: true } }).success).toBe(false);
     expect(RuntimeRequest.safeParse({ id: 1, op: "sessions.mark", threadIds: ["thr_a"], marks: { settledAt: 3 } }).success).toBe(false);
     expect(RuntimeRequest.safeParse({ id: 1, op: "sessions.restore", threadIds: ["thr_a"] }).success).toBe(true);
+    expect(RuntimeRequest.safeParse({ id: 1, op: "sessions.settle", threadIds: ["thr_a"], finished: true }).success).toBe(true);
     expect(RuntimeRequest.safeParse({ id: 1, op: "sessions.search", query: "canonical" }).success).toBe(true);
-    expect(DEVICE_OPS).toEqual(expect.arrayContaining(["sessions.mark", "sessions.restore", "sessions.search"]));
-    expect(THREAD_OPS).toContain("sessions.search");
+    expect(DEVICE_OPS).toEqual(expect.arrayContaining(["sessions.mark", "sessions.settle", "sessions.restore", "sessions.search"]));
+    // A thread puts away its own finished children; the runtime holds its token to the threads under it.
+    expect(THREAD_OPS).toEqual(expect.arrayContaining(["sessions.search", "sessions.settle", "sessions.restore"]));
     expect(THREAD_OPS).not.toContain("sessions.mark");
-    expect(THREAD_OPS).not.toContain("sessions.restore");
   });
 
   it("foldThreads carries the latest turn's folder, so every director shows where the thread works; a row without one shows none", () => {

@@ -14,6 +14,7 @@
 // panels wait for a workspace.
 import { SETTLE_MS } from "@wsp/protocol";
 import { terminalRefusedLine } from "../actions/format.js";
+import { settleSaying } from "../actions/threadActions.js";
 import { deriveSidebarProjects, type SidebarProjectSnapshot, type SidebarThreadSnapshot } from "../adapt/index.js";
 import { toggleCommandPalette } from "../commandPaletteBus.js";
 import { openFileFinder } from "../files/finderBus.js";
@@ -248,7 +249,7 @@ function stepPanelTab(workspaceId: string, step: 1 | -1): void {
 /** The open thread's root tree, settled by hand as the tile's menu settles it: the thread the centre shows, else the
  * workspace's top thread, and nothing while a thread of the tree works or the tree is settled already. */
 export function settleOpenThread(): void {
-  const { selectedId, selectedThreadId, settleThreads, preferences } = useStore.getState();
+  const { selectedId, selectedThreadId, settleThreads, restoreThreads, preferences } = useStore.getState();
   const projects = sidebarProjects();
   const runs = projects.find(project => project.id === selectedId);
   if (runs === undefined) return;
@@ -257,7 +258,7 @@ export function settleOpenThread(): void {
   const root = rootHolding(sidebarTiles(projects, { picked: null, nowMs: Date.now(), open: open.id, settleMs: SETTLE_MS[preferences.settleAfter] }).live, open.id);
   if (root === undefined) return;
   const settle = treeSettle(root);
-  if (!settle.working) void settleThreads(settle.threadIds);
+  if (!settle.working) void settleSaying(settle.threadIds, { settle: settleThreads, restore: restoreThreads });
 }
 
 /** Opens the next thread after the open one that needs the person, in the order the sidebar draws its list under the

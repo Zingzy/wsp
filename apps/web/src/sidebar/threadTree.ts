@@ -360,7 +360,7 @@ function everyTile({ thread: { thread, groupTitle }, children }: TileNode, test:
   return own && children.every(child => everyTile(child, test));
 }
 
-/** The fold keys of every thread a tree holds, the root first: what a settle of the root sends. */
+/** The fold keys of every thread a tree holds, the root first. */
 export function treeThreadIds({ thread: { thread }, children }: TileNode): string[] {
   return [...(thread === null ? [] : [thread.id]), ...children.flatMap(treeThreadIds)];
 }
@@ -373,7 +373,8 @@ export function treeWorkspaceIds(node: TileNode): string[] {
 
 /** What a settle of a root takes, read where every settle in the app is. */
 export function treeSettle(node: TileNode): { threadIds: string[]; working: boolean } {
-  return settleTake({ node, thread: node.thread.thread }, { threadOf: n => n.thread.thread, kidsOf: n => n.children, nowMs: Date.now(), settleMs: null });
+  const { threadIds, working } = settleTake({ node, thread: node.thread.thread }, { threadOf: n => n.thread.thread, kidsOf: n => n.children, nowMs: Date.now(), settleMs: null });
+  return { threadIds, working };
 }
 
 /** The live roots "Settle all read" takes: every tree whose threads have all been read and are quiet. */

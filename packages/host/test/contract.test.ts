@@ -13,7 +13,7 @@ import { type AddressInfo } from "node:net";
 import { promisify } from "node:util";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { CLOUD_ENV, DAEMON_TOKEN_PATH, deniedLine, noSuchAccountLine, PERMISSION_DENY, pushedForChildLine, EXIT_CODES, refusalLine, SCOPED_MCP_ARG, scopedNoPairLine, HERE_PLACE_ID, shellQuote, TURN_TOKEN_ENV, VerbFailure, WS_PATH } from "@wsp/protocol";
+import { HOST_TOKEN_ENV, HOST_URL_ENV, NOT_UNDER_FIX, notUnderLine, CLOUD_ENV, DAEMON_TOKEN_PATH, deniedLine, noSuchAccountLine, PERMISSION_DENY, pushedForChildLine, EXIT_CODES, refusalLine, SCOPED_MCP_ARG, scopedNoPairLine, HERE_PLACE_ID, shellQuote, TURN_TOKEN_ENV, VerbFailure, WS_PATH } from "@wsp/protocol";
 import { CLOUD_ON } from "../src/cloud.js";
 import { copyKey, createRuntime, DAEMON_TOKEN_SET, localExecStream, memoryStore, type Runtime, type Store } from "@wsp/runtime";
 import { fakeCopier, LocalBackend } from "@wsp/engine";
@@ -473,6 +473,9 @@ describe("the agent contract on the command line and the tool door", () => {
     // The deny's reason reaches the agent as the question panel's does: the refusal it reads, and the words beside it.
     expect(answers.at(-1)).toEqual({ optionId: PERMISSION_DENY, outcome: "denied", denyMessage: deniedLine("count the lines with awk instead"), reason: "count the lines with awk instead" });
     await last("thread rename", "thread", "rename", opened.threadId, "the name he typed");
+    // A settle folds the thread and its tree and a restore brings it back, each answering what it moved.
+    expect(await last("thread settle", "thread", "settle", opened.threadId)).toEqual({ settled: [{ threadId: opened.threadId, title: expect.any(String) }], left: [] });
+    expect(await last("thread restore", "thread", "restore", opened.threadId)).toEqual({ restored: [{ threadId: opened.threadId, title: expect.any(String) }] });
     // The thread's slate from a person's shell, named by the thread's id: every slate verb once.
     const tracker = join(dir, "tracker.slate");
     writeFileSync(tracker, '<slate title="Steps">\n  <value name="done" start={1} />\n  <column>\n    <meter id="progress" label="Steps" value={$done} max={3} />\n  </column>\n</slate>\n');
@@ -635,6 +638,30 @@ describe("the agent contract on the command line and the tool door", () => {
     const blank = await run("projects", "set", "alpha", "--after-worktree", "  ", "--json");
     expect(blank.code).toBe(EXIT_CODES.usage);
     expect(failure(blank.io)).toEqual({ error: refusalLine(afterWorktreeBlankLine, AFTER_WORKTREE_BLANK_FIX), class: "usage", exit: 3 });
+  });
+
+  it("a thread's own token settles itself and is refused for its lead, exit 3 with the lead named", async () => {
+    const [project] = await rt.projects.list();
+    const made = await rt.workspaces.create({ project: project!.id, golden: SEALED_GOLDEN.versions[0]!.snapshotId, name: "alpha" });
+    const lead = await rt.sessions.start(made.id, { prompt: "lead the work" });
+    await lead.finished;
+    const leadId = lead.view().threadId!;
+    const scope = { kind: "thread", threadId: leadId, workspaceId: made.id, rootThreadId: leadId } as const;
+    const child = await rt.sessions.start(made.id, { prompt: "build it" }, { origin: "relayed", by: scope });
+    await child.finished;
+    const childId = child.view().threadId!;
+    const minted = await rt.devices.mint(`thread ${childId.slice(0, 8)}`, { ...scope, threadId: childId }, Date.now(), { road: "relayed" });
+    const asChild = async (...argv: string[]) => {
+      const io = captured();
+      const code = await cli(argv, io, undefined, { [HOST_URL_ENV]: `http://127.0.0.1:${handle!.port}`, [HOST_TOKEN_ENV]: minted.deviceToken, HOME: join(dir, "agent"), WSP_HOME: join(dir, "agent", ".wsp") });
+      return { code, io };
+    };
+    const refused = await asChild("thread", "settle", leadId, "--json");
+    expect(refused.code).toBe(EXIT_CODES.usage);
+    expect(failure(refused.io)).toEqual({ error: refusalLine(notUnderLine(leadId), NOT_UNDER_FIX), class: "usage", exit: EXIT_CODES.usage });
+    const own = await asChild("thread", "settle", childId, "--json");
+    expect(own.code).toBe(0);
+    expect(objects(own.io)).toEqual([{ settled: [{ threadId: childId, title: "build it" }], left: [] }]);
   });
 
   it("an auth refusal exits 2: the host refusing the token, or no token file to read", async () => {

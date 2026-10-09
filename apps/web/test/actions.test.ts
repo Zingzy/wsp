@@ -7,7 +7,7 @@
 import { agentName } from "@wsp/catalog";
 import { PauseIcon, PlayIcon, SquareIcon } from "lucide-react";
 import { describe, expect, it, vi } from "vitest";
-import { taskStopRefusedLine, taskStopUnsupportedLine, goneRefusal, kindWords, machineWord, notAnsweringYet, ownDaemonDown, threadForgetRefusal, threadMarkdown, threadMessages, workspaceState, workspaceWord, type HarnessCatalog, type PlaceView, type SessionEvent, type SessionStatus, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { taskStopRefusedLine, taskStopUnsupportedLine, goneRefusal, kindWords, machineWord, notAnsweringYet, ownDaemonDown, threadForgetRefusal, threadMarkdown, threadMessages, workspaceState, workspaceWord, type HarnessCatalog, type PlaceView, type SessionEvent, type SessionSettleResult, type SessionStatus, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { TERMINAL_WORDS, THREAD_WORDS, WORKSPACE_WORDS, terminalRefusedLine } from "../src/actions/format.js";
 import { placeMenu } from "../src/actions/menuPlacement.js";
 import { actionById, actionIfAny, resolveActions, toMenuItems } from "../src/actions/registry.js";
@@ -611,28 +611,40 @@ describe("a lead's child", () => {
     expect(childActs({ subagent: ended.subagents[0]!, of: ended }, "settled", tree, { stopTask })).toEqual([]);
   });
 
-  it("Settle on a child settles it and everything under it, is refused while anything under it works, and Undo restores the same set", async () => {
+  it("Settle on a child sends its own id, the host settling everything under it, is refused while anything under it works, says what was left, and Undo restores what the host settled", async () => {
     useNotices.getState().clear();
-    const settle = vi.fn(async (_ids: ReadonlyArray<string>) => true);
+    const under = ["thr_build", "thr_review", "thr_probe"].map(threadId => ({ threadId, title: threadId }));
+    const settle = vi.fn(async (_ids: ReadonlyArray<string>): Promise<SessionSettleResult> => ({ settled: under, left: [] }));
     const restore = vi.fn(async (_ids: ReadonlyArray<string>) => {});
     const quiet: Node = { thread: snapshot("thr_build", "completed"), kids: [{ thread: snapshot("thr_review", "failed"), kids: [{ thread: snapshot("thr_probe", "completed"), kids: [] }] }] };
     const acts = childActs(at(quiet), partOf(at(quiet), tree), tree, { settle, restore });
     const act = actionById(acts, "settle");
     expect(act).toMatchObject({ title: THREAD_WORDS.settle, refusal: null });
     await act.run();
-    expect(settle).toHaveBeenCalledWith(["thr_build", "thr_review", "thr_probe"]);
+    expect(settle).toHaveBeenCalledWith(["thr_build"]);
     const notice = useNotices.getState().notices[0]!;
     expect(notice).toMatchObject({ kind: "done", text: "Settled 3 threads", where: "thr_build" });
     notice.action!.run();
     expect(restore).toHaveBeenCalledWith(["thr_build", "thr_review", "thr_probe"]);
+    // What the host left is named on the toast, its Undo takes back only what moved, and a settle that moved nothing
+    // offers no way back.
+    settle.mockResolvedValueOnce({ settled: under.slice(1), left: [{ threadId: "thr_build", why: "already settled" }] });
+    await act.run();
+    expect(useNotices.getState().notices[0]).toMatchObject({ kind: "done", text: "Settled 2 threads. Left 1 thread: already settled" });
+    useNotices.getState().notices[0]!.action!.run();
+    expect(restore).toHaveBeenLastCalledWith(["thr_review", "thr_probe"]);
+    settle.mockResolvedValueOnce({ settled: [], left: [{ threadId: "thr_build", why: "still working: stop it first" }] });
+    await act.run();
+    expect(useNotices.getState().notices[0]).toMatchObject({ kind: "note", text: "Left 1 thread: still working: stop it first" });
+    expect(useNotices.getState().notices[0]!.action).toBeUndefined();
     // A thread whose child still works offers the settle held, with the reason.
     const busy: Node = { thread: snapshot("thr_build", "completed"), kids: [{ thread: snapshot("thr_review", "running"), kids: [] }] };
     expect(actionById(childActs(at(busy), partOf(at(busy), tree), tree, { settle, restore }), "settle").refusal).toBe("A thread in it is still working");
-    // A settled child offers Restore over the same set.
+    // A settled child offers Restore, which sends its own id and the host brings its tree back.
     const put = { ...quiet, thread: snapshot("thr_build", "completed", { settledAt: "2026-10-09T11:40:00.000Z" }) };
     const back = actionById(childActs(at(put), "settled", tree, { settle, restore }), "restore");
     await back.run();
-    expect(restore).toHaveBeenLastCalledWith(["thr_build", "thr_review", "thr_probe"]);
+    expect(restore).toHaveBeenLastCalledWith(["thr_build"]);
   });
 
   it("a settle the host refuses shows the refusal alone, with no Settled toast and no Undo", async () => {
@@ -642,7 +654,7 @@ describe("a lead's child", () => {
       const settle = useStore.getState().settleThreads;
       const quiet: Node = { thread: snapshot("thr_build", "completed"), kids: [] };
       await actionById(childActs(at(quiet), "finished", tree, { settle }), "settle").run();
-      await leadActs(snapshot("thr_lead", "running", { title: "Coordinator" }), ["thr_build"], { settle })[0]!.run();
+      await leadActs(snapshot("thr_lead", "running", { title: "Coordinator" }), { threadIds: ["thr_build"], threads: 1 }, { settle })[0]!.run();
       expect(useNotices.getState().notices.map(n => ({ kind: n.kind, text: n.text, undo: n.action?.word ?? null }))).toEqual([
         { kind: "error", text: "A thread in it is still working", undo: null },
         { kind: "error", text: "A thread in it is still working", undo: null },
@@ -652,15 +664,17 @@ describe("a lead's child", () => {
     }
   });
 
-  it("the lead's Settle N finished settles every finished thread it is handed, with the way back on its toast", async () => {
+  it("the lead's Settle N finished counts the threads it takes, sends each finished thread's own id, and its Undo takes back what the host settled", async () => {
     useNotices.getState().clear();
-    const settle = vi.fn(async (_ids: ReadonlyArray<string>) => true);
+    const moved = ["thr_a", "thr_a1", "thr_b"].map(threadId => ({ threadId, title: threadId }));
+    const settle = vi.fn(async (_ids: ReadonlyArray<string>) => ({ settled: moved, left: [] }));
     const restore = vi.fn(async (_ids: ReadonlyArray<string>) => {});
-    const [all] = leadActs(snapshot("thr_lead", "running", { title: "Coordinator" }), ["thr_a", "thr_b"], { settle, restore });
-    expect(all!.title).toBe("Settle 2 finished");
+    const [all] = leadActs(snapshot("thr_lead", "running", { title: "Coordinator" }), { threadIds: ["thr_a", "thr_b"], threads: 3 }, { settle, restore });
+    expect(all!.title).toBe("Settle 3 finished");
     await all!.run();
     expect(settle).toHaveBeenCalledWith(["thr_a", "thr_b"]);
+    expect(useNotices.getState().notices[0]).toMatchObject({ kind: "done", text: "Settled 3 threads" });
     useNotices.getState().notices[0]!.action!.run();
-    expect(restore).toHaveBeenCalledWith(["thr_a", "thr_b"]);
+    expect(restore).toHaveBeenCalledWith(["thr_a", "thr_a1", "thr_b"]);
   });
 });

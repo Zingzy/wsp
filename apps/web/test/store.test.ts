@@ -565,7 +565,10 @@ describe("store sessions", () => {
     const sessions: SessionView[] = [{ id: "s1", workspaceId: "ws_a", harness: "claude", status: "completed", threadId: "thr_a", endedAt: 2_000, readAt: 1_000 }];
     const { api, emit, listCalls } = fakeApi([view("ws_a"), view("ws_b")], sessions);
     const settled: (readonly string[])[] = [];
-    api.settleThreads = async ids => void settled.push(ids);
+    api.settleThreads = async ids => {
+      settled.push(ids);
+      return { settled: [], left: [] };
+    };
     useStore.getState().bind(api);
     await flush();
     listCalls.length = 0;

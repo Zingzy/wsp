@@ -14,6 +14,8 @@ import {
   ProjectExportResult,
   SessionInterruptOutcome,
   SessionRenameOutcome,
+  SessionRestoreResult,
+  SessionSettleResult,
   TURN_END_WORDS,
   TerminalConfig,
   TerminalScheme,
@@ -27,7 +29,7 @@ import {
   turnSpendWord,
 } from "@wsp/protocol";
 import { hostBack, type VerbDeps, type VerbContext, usageIs, tool, type CliVerb, type Verb, PICK_OPTIONS, SEND_OPTIONS, flag, flagList, absolutePath, absoluteFolder } from "./client.js";
-import { workspaceOf, threadOf, SSH_PIPES_HERE_LINE, sshWorkspaceOf, pipeBytes, awake, napAfterDeadLaunch, withLine, stop, stopLine, forgetThread, threadForgotLine, rename, renameLine } from "./workspaces-help.js";
+import { workspaceOf, threadOf, SSH_PIPES_HERE_LINE, sshWorkspaceOf, pipeBytes, awake, napAfterDeadLaunch, withLine, stop, stopLine, forgetThread, threadForgotLine, rename, renameLine, threadsOf, settleThreads, restoreThreads, settledLines, restoredLines } from "./workspaces-help.js";
 import { type Turn, pickFlags, checkedStart, runTarget, forkFor, worktreeFor, openingOf, notifyOf, messageTo, startDetached, follow, hostRestartedLine, restartHost, readThread, readLine, threadHead, headLine, type AnswerRoad, ANSWER_ROADS, answerOpenAsk, followVerb, beforeSending, detachVerb, turnView } from "./turns-help.js";
 import { confirmed, execOn, type ExportRequest, exportProject, withReplaceHint, agentsFlag, QUIET_LINE, QUIET_TURN, SEND_MEETS, CAP_MEETS, TurnOut, Argv, asJson, asText, turnText, detachedOut, turnOut, WorkspaceIn, AgentIn, NotifyIn, RunProjectIn, BranchIn, RunCwdIn, CwdIn, DetachIn, TitleIn, FilesIn, FastIn, PICK_INPUTS, SEND_INPUTS, schemeFlag, hostFolders, initSetup, folderLines, REASON_FLAG } from "./io.js";
 import { SLATE_VERBS } from "./slate.js";
@@ -289,6 +291,59 @@ export const THREAD_VERBS: readonly Verb[] = [
         const thread = await threadOf(client, ref);
         await forgetThread(client, thread);
         return asText(threadForgotLine(thread), { threadId: thread.id, workspaceId: thread.workspaceId });
+      },
+    }),
+  },
+  {
+    name: "thread settle",
+    usage: "wsp thread settle <thread>... [--finished]",
+    about: "folds each thread and every thread under it into the sidebar's Settled, leaving a tree with a thread still working or asking in it; a thread settles itself and the threads it started, never its lead",
+    page: "agent",
+    options: { finished: { type: "boolean" } },
+    run: async ctx => {
+      if (ctx.args.length === 0) throw usageRefusal("wsp thread settle takes one thread or more.", usageIs(ctx));
+      const client = await ctx.client();
+      const answer = await settleThreads(client, await threadsOf(client, ctx.args), ctx.flags["finished"] === true);
+      ctx.out.emit(answer, settledLines(answer));
+      return 0;
+    },
+    tool: tool({
+      description:
+        "Settles each thread (by id, or a prefix of it) and every thread under it: they fold into the person's Settled in the sidebar, as the app's Settle does, and come back by themselves on their next turn. A thread with a thread working or asking anywhere in its tree is left whole, with why, as is one already settled; with finished, each thread named stays and every finished thread under it settles, a failed one staying for the person to read and one with work under it left with why. A thread settles itself and the threads under it, never its lead or a thread beside it. Settle each child once its report is acted on. The answer lists what settled and what was left, with why.",
+      input: {
+        threads: z.array(z.string()).min(1).describe("the threads' ids, or prefixes that each name one, as threads lists them"),
+        finished: z.boolean().optional().describe("settle the finished threads under each thread named, and not the thread itself"),
+      },
+      output: SessionSettleResult.shape,
+      call: async ({ threads: refs, finished }, deps) => {
+        const client = await deps.client();
+        const answer = await settleThreads(client, await threadsOf(client, refs), finished === true);
+        return asText(settledLines(answer), answer);
+      },
+    }),
+  },
+  {
+    name: "thread restore",
+    usage: "wsp thread restore <thread>...",
+    about: "brings each thread back out of the sidebar's Settled with what the latest settle naming it moved",
+    page: "agent",
+    options: {},
+    run: async ctx => {
+      if (ctx.args.length === 0) throw usageRefusal("wsp thread restore takes one thread or more.", usageIs(ctx));
+      const client = await ctx.client();
+      const answer = await restoreThreads(client, await threadsOf(client, ctx.args));
+      ctx.out.emit(answer, restoredLines(answer));
+      return 0;
+    },
+    tool: tool({
+      description:
+        "Brings each thread (by id, or a prefix of it) back out of the person's Settled in the sidebar, with the threads under it that the latest settle naming it moved: after a settle with finished, the finished threads that settle moved. A thread folded by the quiet time or settled before stays. A thread restores itself and the threads under it, never its lead or a thread beside it. The answer lists what came back.",
+      input: { threads: z.array(z.string()).min(1).describe("the threads' ids, or prefixes that each name one, as threads lists them") },
+      output: SessionRestoreResult.shape,
+      call: async ({ threads: refs }, deps) => {
+        const client = await deps.client();
+        const answer = await restoreThreads(client, await threadsOf(client, refs));
+        return asText(restoredLines(answer), answer);
       },
     }),
   },

@@ -2,13 +2,13 @@
 import { randomBytes } from "node:crypto";
 import { hostname } from "node:os";
 import { OWNER_LABEL, goldenHead, isMissing, readGone, sightMachine, type Machine, type MachineBackend, isNoProvider, isPlaceAbsent } from "@wsp/engine";
-import { type AcrossAct, type PlaceKind, type ProjectView, type SessionView, type Caller, type WorkspacePhase, ThreadPlacement, ThreadScope, TurnStatus, WorkspaceOrigin, notTheLeadsChildRefusal, foldThreads, threadKeyOf, threadWord, scopeOf, goneWords, NO_IMAGE_YET, noWorkspaceRefusal, notFoundRefusal, goneUnconfirmedLine, type GoneSeenBy, copiesFolder, kindForComputer, RUN_GONE_LINE, HERE_PLACE_ID, workspaceLands, type ThreadFacts, refusal, LIMIT_RESUME_PROMPT, heldUntil, capRestartedLine } from "@wsp/protocol";
+import { type AcrossAct, type PlaceKind, type ProjectView, type SessionView, type Caller, type WorkspacePhase, ThreadPlacement, ThreadScope, TurnStatus, WorkspaceOrigin, notTheLeadsChildRefusal, foldThreads, threadKeyOf, threadWord, scopeOf, goneWords, NO_IMAGE_YET, noWorkspaceRefusal, notFoundRefusal, goneUnconfirmedLine, type GoneSeenBy, copiesFolder, kindForComputer, RUN_GONE_LINE, HERE_PLACE_ID, workspaceLands, type ThreadFacts, threadSettled, refusal, LIMIT_RESUME_PROMPT, heldUntil, capRestartedLine } from "@wsp/protocol";
 import { keyOf } from "../agent-setup.js";
 import { harnessCatalog } from "../harness-catalog.js";
 import { accountOnComputer } from "../usage.js";
 import { phaseLeavingGone, providerSaid } from "../status.js";
 import type { WorkspaceRecord, LiveWorkspace, FoundMachine } from "../types/wiring.js";
-import { WORKSPACES, PROJECTS, TRANSCRIPTS, SESSIONS, HELD_STARTS, type HeldStartRecord, READS, READS_ID, RESTARTED_REASON, goneLogLine, restartCutLine, turnWritten, type TranscriptRecord, type TurnLive, type TurnAsked, readAsked, readScope, readRoad, readSteered, type ThreadRecord, type TreeTalk, type SessionIndexRecord, BUILDERS, OWNER, HELD_TTL_MS, pidAlive, type BuilderRecord, type LiveBuilder, deadMachine, isAbsentMachine, absentMachine, type StoredBuilder } from "../types/internal.js";
+import { WORKSPACES, PROJECTS, TRANSCRIPTS, SESSIONS, HELD_STARTS, type HeldStartRecord, READS, READS_ID, RESTARTED_REASON, goneLogLine, restartCutLine, turnWritten, type TranscriptRecord, type TurnLive, type TurnAsked, readAsked, readScope, readRoad, readSteered, type ThreadRecord, type ThreadStamps, type TreeTalk, type SessionIndexRecord, BUILDERS, OWNER, HELD_TTL_MS, pidAlive, type BuilderRecord, type LiveBuilder, deadMachine, isAbsentMachine, absentMachine, type StoredBuilder } from "../types/internal.js";
 import type { RuntimeContext, BootArea } from "../context.js";
 
 export function bootArea(ctx: RuntimeContext): BootArea {
@@ -312,6 +312,7 @@ export function bootArea(ctx: RuntimeContext): BootArea {
             ...(typeof held.rootThreadId === "string" ? { rootThreadId: held.rootThreadId } : {}),
             ...(typeof held.readAt === "number" ? { readAt: held.readAt } : {}),
             ...(typeof held.settledAt === "number" ? { settledAt: held.settledAt } : {}),
+            ...(typeof held.settleNamedAt === "number" ? { settleNamedAt: held.settleNamedAt } : {}),
             ...(typeof held.pinnedAt === "number" ? { pinnedAt: held.pinnedAt } : {}),
             ...(typeof held.foldedAt === "number" ? { foldedAt: held.foldedAt } : {}),
             ...(typeof held.snoozedUntil === "number" ? { snoozedUntil: held.snoozedUntil } : {}),
@@ -564,6 +565,14 @@ export function bootArea(ctx: RuntimeContext): BootArea {
       ...(running !== undefined ? { turnId: running.turnId } : {}),
     };
   };
+  /** Whether a thread reads settled now, by hand or by quiet time, off the facts its listing carries: the host's one
+   * read of it. A thread with no row here reads settled only by its stamp. */
+  const settledNow = (threadId: string, settleMs: number | null): boolean => {
+    const t = threadFacts(threadId);
+    if (t === undefined) return threadRecords.get(threadId)?.settledAt !== undefined;
+    const facts = { working: t.status === "running", asking: t.asking !== undefined || t.waitingOn !== undefined, failed: t.status === "failed", startedAt: t.startedAt ?? null, endedAt: t.endedAt ?? null, readAt: t.readAt ?? null, settledAt: t.settledAt ?? null };
+    return threadSettled(facts, clock.now(), settleMs);
+  };
   /** Tells every window a thread's facts moved, so none asks for its head again. */
   const pushHead = (threadId: string): void => {
     const facts = threadFacts(threadId);
@@ -572,7 +581,7 @@ export function bootArea(ctx: RuntimeContext): BootArea {
   /** Moves the read or settled stamp of each thread, by fold key, on the thread's record, which a thread from before
    * records existed takes here off its latest row; each workspace touched is written once and told once. Every
    * thread is checked before any moves, so a list naming one the caller cannot reach moves nothing. */
-  const mark = async (threadIds: readonly string[], stamps: Partial<Omit<ThreadRecord, "harness" | "permissionMode">>, origin: Caller | undefined): Promise<void> => {
+  const mark = async (threadIds: readonly string[], stamped: ThreadStamps | ((threadId: string) => ThreadStamps), origin: Caller | undefined): Promise<void> => {
     await ready();
     const found = await Promise.all(
       threadIds.map(async threadId => {
@@ -587,6 +596,7 @@ export function bootArea(ctx: RuntimeContext): BootArea {
     );
     const touched = new Map<string, string[]>();
     for (const { threadId, workspaceId, base } of found) {
+      const stamps = typeof stamped === "function" ? stamped(threadId) : stamped;
       const next: ThreadRecord & { workspaceId: string } = { ...base, ...stamps };
       for (const key of Object.keys(stamps) as (keyof typeof stamps)[]) if (stamps[key] === undefined) delete next[key];
       threadRecords.set(threadId, next);
@@ -717,7 +727,7 @@ export function bootArea(ctx: RuntimeContext): BootArea {
   };
   return {
     refreshBuilders, isHeldAway, rereadHeld, hydrateWorkspace, ready, entryOf, childOf, reachesRow, entryOfRow,
-    listedRows, threadFacts, pushHead, mark, endSnoozeFor, armResume, resumeAfterLimit, treeRecords, treeStandsOn, talksToTreeOn, computerRows, nameOfComputer, imageHeadOrNone,
+    listedRows, threadFacts, settledNow, pushHead, mark, endSnoozeFor, armResume, resumeAfterLimit, treeRecords, treeStandsOn, talksToTreeOn, computerRows, nameOfComputer, imageHeadOrNone,
     imageHead, landingPlace,
   };
 }

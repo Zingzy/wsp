@@ -27,6 +27,8 @@ import type {
   SessionAnswerResult,
   SessionInterruptResult,
   SessionRenameResult,
+  SessionSettleResult,
+  SessionRestoreResult,
   SessionSteerResult,
   SessionOrigin,
   SessionAsideResult,
@@ -446,13 +448,18 @@ export interface Runtime {
     /** Stamps a thread as shown by a window now, by its fold key, and tells every window with thread.marked. Reads
      * the absence a name nothing holds reads for a thread the caller cannot reach. */
     read(threadId: string, origin?: Caller): Promise<void>;
-    /** Stamps each thread as settled by the person and as read, now, and tells every window as read does. */
-    settle(threadIds: readonly string[], origin?: Caller): Promise<void>;
+    /** Stamps each thread and every thread under it settled and read, now, and tells every window as read does; a
+     * thread whose tree works or asks is left whole, and one the fold holds already is left too. With finished, each
+     * thread named stays and the finished threads under it settle, a failed one staying and one with work under it
+     * left. A thread's own token settles itself and the threads under it alone. */
+    settle(threadIds: readonly string[], origin?: Caller, o?: { finished?: boolean }): Promise<SessionSettleResult>;
     /** Pins, snoozes or places each thread, or takes one of those back, and tells every window as read does; a snooze
      * stamps the thread read too, and every window is told again the moment it ends. */
     mark(threadIds: readonly string[], marks: ThreadMarks, origin?: Caller): Promise<void>;
-    /** Takes each thread's settled stamp away and stamps it read now, and tells every window as read does. */
-    restore(threadIds: readonly string[], origin?: Caller): Promise<void>;
+    /** Takes the settled stamp off each thread and the threads under it that the latest settle naming it moved, never
+     * one folded by the quiet time or settled before, stamps them read now, and tells every window as read does; under
+     * settle's rule for a thread's own token. */
+    restore(threadIds: readonly string[], origin?: Caller): Promise<SessionRestoreResult>;
     /** The threads the caller reaches whose messages or replies hold the query, case aside, one hit each with the
      * words around it, off the transcripts this host holds. */
     search(query: string, origin?: Caller): Promise<SessionSearchResult>;
