@@ -127,9 +127,14 @@ export function filesRefusal(files: readonly AttachmentRecord[]): string | null 
   return null;
 }
 
-/** The refusal of a message with a file while the thread's turn is still running: a queued row keeps only its words,
- * so the files would leave the composer and reach nothing. */
-export const FILES_AFTER_TURN = "the thread's turn is still running; a file goes with a message that starts a turn, so wait for this one to end";
+/** Why these files cannot go into a running turn of this agent, or null when they can: an image goes where the
+ * agent's steer reads one, and any other file lands in the thread's folder, which only a message that starts a turn
+ * does. A message that cannot go waits for the turn to end. */
+export function steerFilesBlocked(files: readonly AttachmentRecord[], steersImages: boolean, agent: string): string | null {
+  if (files.length === 0) return null;
+  if (files.some(f => !isImage(f.mediaType))) return "a file that is not an image goes only with a message that starts a turn";
+  return steersImages ? null : `${agent} takes no image into a running turn`;
+}
 
 /** The refusal of a message with an image to an agent that takes none, said before the machine is asked. */
 export function noImagesLine(harness: string): string {

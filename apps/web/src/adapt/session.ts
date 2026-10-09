@@ -383,7 +383,11 @@ export function createSessionFold(): SessionFold {
       case "session.steer": {
         const t = turnFor(event, at);
         closeOpenMessage(t);
-        addMessage(t, "user", event.prompt, at, false, true);
+        addMessage(t, "user", event.prompt, at, false, true, {
+          ...(event.attachments !== undefined ? { attachments: event.attachments } : {}),
+          ...(event.requestId !== undefined ? { requestId: event.requestId } : {}),
+          ...(event.threadId !== undefined ? { sentOn: { workspaceId: event.workspaceId, threadId: event.threadId } } : {}),
+        });
         return;
       }
       case "session.notify": {

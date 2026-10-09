@@ -528,8 +528,9 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * id and nothing else; replies with a SessionInterruptResult. */
   z.object({ id: reqId, op: z.literal("sessions.interrupt"), sessionId: z.string(), task: z.string().optional() }),
   /** Sends a message into the session's running turn; replies with a SessionSteerResult. Takes the runtime's session
-   * id, as sessions.interrupt does. */
-  z.object({ id: reqId, op: z.literal("sessions.steer"), sessionId: z.string(), prompt: z.string(), requestId: z.string().optional() }),
+   * id, as sessions.interrupt does. Images ride as on sessions.start where the harness's catalog says steersImages;
+   * any other file, or an image to a harness whose steer reads none, is refused with steerFilesBlocked's line. */
+  z.object({ id: reqId, op: z.literal("sessions.steer"), sessionId: z.string(), prompt: z.string(), requestId: z.string().optional(), attachments: z.array(Attachment).optional() }),
   /** Answers a permission prompt the session's running turn relayed into the chat, by the prompt's id and one of its
    * options; replies with a SessionAnswerResult. Takes the session id the prompt's row carries, the agent's own, or
    * the runtime's. A deny may carry the person's reason, what the agent should do instead. */

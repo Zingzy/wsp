@@ -88,8 +88,8 @@ export interface ClaudeSession {
    * went with it. */
   kept?(): KeptAgent<ClaudeSession> | undefined;
   /** Writes a user message into the running turn under `id`, which unread messages are told by; not-running before
-   * system/init and once result was seen or the process is gone. */
-  steer(prompt: string, id?: string): Promise<SteerOutcome>;
+   * system/init and once result was seen or the process is gone. Images ride ahead of the words, as on the first message. */
+  steer(prompt: string, id?: string, images?: readonly TurnImage[]): Promise<SteerOutcome>;
   /** The CLI announced msg_lifecycle_v1, so the turn tells the messages it never took up as it ends. */
   readonly tellsUnread: boolean;
   /** Answers a permission prompt this turn raised, by the ask's own id and one of the options it carried; the tool
@@ -155,6 +155,8 @@ export interface ClaudeAdapter {
   readonly resumesAt: true;
   /** The CLI's stream-json user message carries image blocks, so an image never lands on the machine. */
   readonly attachments: "inline";
+  /** A message written mid-turn is the same stream-json user message, image blocks and all. */
+  readonly steersImages: true;
   /** The CLI takes MCP servers on the launch itself (--mcp-config), so a turn gets one whatever the config dir holds. */
   readonly mcpServers: true;
   /** A start takes promptAfter: the CLI starts up before it reads its first message. */
@@ -1163,10 +1165,10 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
       get tellsUnread() {
         return steers.reports;
       },
-      steer: async (prompt, uuid = randomUUID()) => {
+      steer: async (prompt, uuid = randomUUID(), images = []) => {
         if (!running()) return "not-running";
         steers.add(uuid);
-        const wrote = await stream.write(userMessageLine(prompt, claudeSessionId, [], uuid));
+        const wrote = await stream.write(userMessageLine(prompt, claudeSessionId, images, uuid));
         // The turn may have ended while the write travelled; the line then sits unread and the caller starts a turn.
         if (wrote === "written" && running()) return "accepted";
         steers.forget(uuid);
@@ -1353,7 +1355,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
       finished,
       kept: () => current.kept?.(),
       interrupt: () => current.interrupt(),
-      steer: (prompt, id) => current.steer(prompt, id),
+      steer: (prompt, id, images) => current.steer(prompt, id, images),
       answer: (askId, answer) => current.answer(askId, answer),
       setAccess: mode => current.setAccess(mode),
       stopTask: task => current.stopTask(task),
@@ -1459,6 +1461,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
     movesAccess: true,
     compacts: "/compact",
     attachments: "inline",
+    steersImages: true,
     mcpServers: true,
     waitsForPrompt: true,
     screenCommands: CLAUDE_SCREEN_COMMANDS,
