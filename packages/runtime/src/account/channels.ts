@@ -416,11 +416,8 @@ export function channelsArea(ctx: RuntimeContext): ChannelsArea {
         if (COMPUTER_WATCHES.includes(op)) return { id: null, ok: false, code: "unsupported", error: placeWatchesItselfLine(door.nameOf(placeId)) };
         if (COMPUTER_PROCS.includes(op)) return { id: null, ok: false, code: "unsupported", error: forkProcsUnreadLine(entry.record.name, door.nameOf(placeId)) };
         if (!carries.includes(op)) return { id: null, ok: false, code: "unsupported", error: forkOpRefusedLine(op, entry.record.name, door.nameOf(placeId)) };
-        // The pane's first tab names no folder, and the daemon answering for a workspace has no working directory
-        // inside it: without one the shell would open in the home of the computer, which is bound in.
-        const asked = op === "pty.create" && frame["cwd"] === undefined ? { ...frame, cwd: checkout } : frame;
-        const reply = await served(asked);
-        if (reply["ok"] === true) held(op, asked, reply);
+        const reply = await served(frame);
+        if (reply["ok"] === true) held(op, frame, reply);
         return { id: null, ...reply } as DaemonResponse;
       },
       close: () => {
@@ -445,7 +442,15 @@ export function channelsArea(ctx: RuntimeContext): ChannelsArea {
       if (said === undefined || event["type"] === "daemon.hello") onEvent(event);
     };
     const served = servedByItsComputer(entry);
-    const channel = await (served === undefined ? ownDaemonChannel(entry, heard) : servedChannel(entry, served, heard, carries));
+    // A pane's first tab names no folder, and a daemon that answers for a whole computer opens such a shell in that
+    // computer's home: it opens where the workspace's threads work instead. A cloud fork's daemon is its own.
+    const folder = served !== undefined || ctx.moduleOf(entry.record.kind).sharedDaemon ? await ctx.threadFolder(entry, {}) : undefined;
+    const opened = await (served === undefined ? ownDaemonChannel(entry, heard) : servedChannel(entry, served, heard, carries));
+    const channel: DaemonChannel = {
+      send: frame => opened.send(folder !== undefined && frame.op === "pty.create" && frame.cwd === undefined ? { ...frame, cwd: folder } : frame),
+      close: () => opened.close(),
+      closed: opened.closed,
+    };
     if (said === undefined) return channel;
     return {
       send: frame => (BLOCKED_READS.has(frame.op) ? channel.send(frame) : Promise.resolve({ id: null, ok: false, code: "unsupported", error: said })),
