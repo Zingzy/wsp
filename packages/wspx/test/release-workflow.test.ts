@@ -84,9 +84,11 @@ describe("the release workflow", () => {
     expect(workflow).toContain("if: ${{ github.event_name == 'push' && github.ref_type == 'tag' }}");
     expect(npmJob).toContain("name: Publish\n        if: ${{ github.event_name == 'push' }}");
     expect(npmJob).toContain("needs.daemon.result == 'success' && (github.event_name != 'push' || needs.draft.result == 'success')");
-    // The linux job builds and starts the AppImage on a run by hand too, and only a pushed tag attaches it.
-    expect(linuxJob).toContain("needs.daemon.result == 'success' && (github.event_name != 'push' || needs.draft.result == 'success')");
-    expect(linuxJob).toContain("name: Attach them to the draft\n        if: ${{ github.event_name == 'push' }}");
+    // The mac and linux jobs build and check their bundles on a run by hand too, and only a pushed tag attaches them.
+    for (const job of [macJob, linuxJob]) {
+      expect(job).toContain("needs.daemon.result == 'success' && (github.event_name != 'push' || needs.draft.result == 'success')");
+      expect(job).toContain("name: Attach them to the draft\n        if: ${{ github.event_name == 'push' }}");
+    }
   });
 
   it("refuses a tag off main's own line before it drafts anything", () => {
@@ -215,7 +217,11 @@ describe("the release workflow", () => {
     expect(macJob.slice(smoke, macJob.indexOf("- name:", smoke + 1))).toContain("run: pnpm --filter @wsp/desktop smoke\n");
     expect(workflow).not.toContain("WSP_DESKTOP_SCREEN");
     expect(workflow).not.toContain("merge gate");
-    expect(workflow).toContain("test/signing.test.ts");
+    // ci runs the signing check word for word on every land run, so a root config that breaks it from apps/desktop
+    // fails a landing and not a tag.
+    const signing = "run: pnpm --filter @wsp/desktop exec vitest run --minWorkers=1 --maxWorkers=1 test/signing.test.ts\n";
+    expect(macJob.slice(check, smoke)).toContain(signing);
+    expect(readFileSync(join(repo, ".github", "workflows", "ci.yml"), "utf8")).toContain(signing);
     expect(workflow).not.toContain("pty-native");
     expect(desktopScripts["build:mac"]).toContain("--mac");
     expect(desktopScripts["build:linux"]).toContain("--linux");

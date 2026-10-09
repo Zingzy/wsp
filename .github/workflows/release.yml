@@ -7,8 +7,9 @@ name: release
 # version moves, which is what releases/latest/download serves and what the
 # site links. A run started by hand is the dry run and there is no box to untick:
 # the daemon binaries are built and uploaded as artifacts, the command line
-# package is staged with them, the linux AppImage is built and started once,
-# and nothing is drafted, attached or published.
+# package is staged with them, the mac disk image is built and checked, the
+# linux AppImage is built and started once, and nothing is drafted, attached
+# or published.
 # The tag runs the workflow of the commit it points at, so the check that the
 # commit stands on main's own line holds against a tag pushed by hand on the
 # wrong commit, not against a credential that strips the check from a commit
@@ -142,6 +143,9 @@ jobs:
   mac:
     name: macOS disk image
     needs: [draft, daemon]
+    # On a run by hand the draft is skipped and this still runs, so the disk image is built and checked on a branch
+    # before a tag is the first build to check it.
+    if: ${{ !cancelled() && needs.daemon.result == 'success' && (github.event_name != 'push' || needs.draft.result == 'success') }}
     runs-on: macos-14
     permissions:
       contents: write
@@ -220,6 +224,7 @@ jobs:
           fi
           mv "$1" "$MAC_ZIP"
       - name: Attach them to the draft
+        if: ${{ github.event_name == 'push' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release upload "$GITHUB_REF_NAME" "$MAC_DMG" "$MAC_STABLE" "$MAC_ZIP" --clobber
