@@ -75,7 +75,7 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
   const heldSends = new Map<string, { threadId: string; giveUp: () => string }>();
   /** Whether a computer a stop has to reach is away, goes away, or has not answered a ping within STOP_REACH_MS
    * while the agent's own stop is still out; a stop that lands first was heard. */
-  const unanswered = (place: string, stopping: Promise<void> | undefined): Promise<boolean> => {
+  const stopUnheard = (place: string, stopping: Promise<void> | undefined): Promise<boolean> => {
     const door = ctx.placeDoorOf();
     const link = door.link(place);
     if (ctx.placeAway(place) || link === undefined) return Promise.resolve(true);
@@ -161,6 +161,16 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
       await s.launch;
       return answered("accepted");
     }
+    // A line's try on a computer that answered nothing since the restart is out of reach: the person's stop settles
+    // the line, and the turn is left as it stands.
+    ctx.tryStopped(s.turnId);
+    const { outcome, left } = await endTurn(s, origin, rowOf);
+    return answered(outcome, left);
+  };
+  /** Ends one turn, the stop's own part: the agent's stop, and the end of the thread's group where its computer
+   * groups a thread's processes, owed to that computer's next link where it is away. */
+  const endTurn = async (s: SessionEntry, origin: Caller | undefined, rowOf: () => SessionEntry | undefined): Promise<{ outcome: SessionInterruptOutcome; left?: string }> => {
+    const answered = (outcome: SessionInterruptOutcome, left?: string): { outcome: SessionInterruptOutcome; left?: string } => ({ outcome, ...(left !== undefined ? { left } : {}) });
     // A turn let through and still reaching its machine is stopped once it is there.
     if (s.view.status === "running" && s.handle === undefined && s.launch !== undefined) {
       await s.launch;
@@ -190,7 +200,7 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
       // Nothing reaches the turn's process while its computer is away, and the agent's own stop would wait on it: the
       // row ends here as stopped, and the end of the thread's group is owed to that computer's next link, held in the
       // state file. The thread's next turn waits for that end, so it never launches into the group being emptied.
-      if (place !== undefined && (await unanswered(place, stopping))) {
+      if (place !== undefined && (await stopUnheard(place, stopping))) {
         const left = await ends!(entry!, thread!, { away: true });
         row.end?.(left ?? TURN_STOPPED_LINE, true);
         const owed = await kind!.endOwed?.(entry!, thread!);
@@ -406,6 +416,7 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
           // environment is what carries it.
           serverValuesOf(opts.vault?.() ?? {}),
           threadId,
+          o.asksUntilStopped,
         );
       } catch (e) {
         dropScope();
@@ -669,9 +680,20 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
           // next turn; nothing here is ever refused for being in the way.
           const steer = running.turnLive?.reply === undefined && adapter.steers ? running.handle.steer : undefined;
           const steerId = randomUUID();
-          if (steer !== undefined && (await steer(o.prompt, steerId)) === "accepted") {
-            ctx.recordSteer(running, running.handle.id, o, origin, steerId);
-            return { ...running.handle, outcome: "steered" };
+          if (steer !== undefined) {
+            // The turn keeps the message before the write, so a write whose answer was lost, landed or not, leaves it
+            // with the turn: its end sends back one its agent never took up, and nothing sends it a second time. A
+            // turn that ends while the write is out leaves the message to this road, which queues it as the next turn.
+            await ctx.keepSteer(running, o, origin, steerId);
+            const answer = await steer(o.prompt, steerId).catch((e: unknown) => (e instanceof Error ? e : new Error(String(e))));
+            // Where the turn's agent tells no unread messages, nothing will say whether a write that threw landed: the
+            // caller hears it failed, in words no retry reads as a computer that did not answer, so a line falls to the
+            // person rather than reach the thread twice.
+            if (answer instanceof Error && running.handle.tellsUnread?.() !== true) {
+              ctx.steerLost(running, steerId);
+              throw new Error(answer.message, { cause: answer });
+            }
+            if (ctx.steerAnswered(running, running.handle.id, o, origin, steerId, answer !== "not-running")) return { ...running.handle, outcome: "steered" };
           }
           if (outcome === "started" || toldBox) bus.emit({ type: "session.queued", workspaceId, threadId, harness, prompt: o.prompt, ...(o.requestId !== undefined ? { requestId: o.requestId } : {}) });
           outcome = "queued";
@@ -744,7 +766,7 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
           })(),
           ...(launchKey !== undefined ? { keep: { launch: kept?.launch ?? launchKey } } : {}),
           opening: { prompt: o.prompt, ...(o.requestId !== undefined ? { requestId: o.requestId } : {}), ...(o.via !== undefined ? { via: o.via } : {}), ...(afterCut ? { afterCut } : {}), ...(o.afterLimit !== undefined ? { afterLimit: o.afterLimit } : {}), ...(opens ? { opensThread: true } : {}), ...(title !== undefined ? { title } : {}), ...(records.length > 0 ? { attachments: records } : {}) },
-          asked: { prompt: handed, ...(picks.effort !== undefined ? { effort: picks.effort } : {}), ...(handed !== o.prompt ? { typed: o.prompt } : {}) },
+          asked: { prompt: handed, ...(picks.effort !== undefined ? { effort: picks.effort } : {}), ...(handed !== o.prompt ? { typed: o.prompt } : {}), ...(o.requestId !== undefined ? { requestId: o.requestId } : {}), ...(o.owed === true ? { owed: true as const } : {}) },
           ...(imagesDir !== undefined ? { imagesDir } : {}),
           ...(snapshot !== undefined ? { snapshot } : {}),
           ...(resume !== undefined ? { resume } : {}),
@@ -805,7 +827,7 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
           if (held) {
             // A start its caller heard was held went on without it, so the thread it was to report to hears how it
             // ended, as it hears of a turn that ran: a lead that ended its turn to wait on it is woken.
-            if (toldHeld && failure !== undefined && notify !== undefined) {
+            if (toldHeld && failure !== undefined && notify !== undefined && o.owed !== true) {
               ctx.notifyEnd({ view, turnId }, notify, ctx.tellAs({ ...(notifyBy !== undefined ? { notifyBy } : {}), ...(notifyRoad !== undefined ? { notifyRoad } : {}) }), { status: "failed", error: failure });
             }
             sessions.delete(turnId);
@@ -1366,5 +1388,9 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
       await ctx.persistSessions(workspaceId);
     },
   };
-  return { sessionsApi, stopHolds: threadId => ending.has(threadId) };
+  const stopTry = async (rowId: string): Promise<void> => {
+    const s = sessions.get(rowId);
+    if (s !== undefined) await endTurn(s, undefined, () => sessions.get(rowId));
+  };
+  return { sessionsApi, stopHolds: threadId => ending.has(threadId), stopTry };
 }

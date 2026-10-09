@@ -431,6 +431,9 @@ export interface SessionHandle {
   view(): SessionView;
   interrupt(): Promise<void>;
   steer?(prompt: string, id?: string): Promise<"accepted" | "not-running">;
+  /** Whether the turn tells, as it ends, the steered messages its agent never read, as its agent said when it
+   * announced itself; absent or false, nothing says whether a steer whose answer never came was read. */
+  tellsUnread?(): boolean;
   /** Answers a permission prompt this turn raised, by the prompt's id and one of its options. Only a person answers
    * one: the prompt stands for as long as the turn does. Absent on a harness that raises none. */
   answer?(askId: string, opts: { optionId: string; reason?: string }): Promise<SessionAnswerResult["outcome"]>;

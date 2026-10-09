@@ -492,8 +492,9 @@ export function agentsArea(ctx: RuntimeContext): AgentsArea {
    * factory gets is the turn limit of the place the workspace stands on, read at each launch, where the door has one. `servers` is the values the MCP servers'
    * definitions read by name, which only a turn's agent starts servers with: they ride its environment only on a kind
    * whose machines name each by a variable and get it no other way. `thread` is the thread a turn's launch is for,
-   * which a kind that groups a thread's processes groups it under. */
-  const adapterFor = (entry: LiveWorkspace, named?: string, turnEnv?: Readonly<Record<string, string>>, waiting?: TurnWaiting, servers: Readonly<Record<string, string>> = {}, thread?: string): { harness: string; adapter: HarnessAdapter } => {
+   * which a kind that groups a thread's processes groups it under. `asksUntilStopped` is set on a line's try, whose
+   * launch asks after a run it may have started until the line's hour stops it. */
+  const adapterFor = (entry: LiveWorkspace, named?: string, turnEnv?: Readonly<Record<string, string>>, waiting?: TurnWaiting, servers: Readonly<Record<string, string>> = {}, thread?: string, asksUntilStopped?: true): { harness: string; adapter: HarnessAdapter } => {
     const harness = named ?? DEFAULT_AGENT.id;
     const factory = adapters[harness];
     if (!factory) throw new Error(noAdapterLine(harness, Object.keys(adapters)));
@@ -502,12 +503,13 @@ export function agentsArea(ctx: RuntimeContext): AgentsArea {
     const place = setupPlace(entry);
     const setup = place === undefined ? undefined : setups.launchOf(place, harness);
     const carried = kind.serverValues === "environment" ? servers : {};
+    const ofTurn = thread !== undefined && kind.endThread !== undefined ? { thread, ...(asksUntilStopped !== undefined ? { asksUntilStopped } : {}) } : asksUntilStopped !== undefined ? { asksUntilStopped } : undefined;
     return {
       harness,
       adapter: factory({
         machine: entry.machine,
         workspaceId: entry.record.id,
-        execStream: ctx.execFactoryFor(entry, thread !== undefined && kind.endThread !== undefined ? { ...ctx.turnLimitOf(entry.record), thread } : ctx.turnLimitOf(entry.record), waiting),
+        execStream: ctx.execFactoryFor(entry, ofTurn === undefined ? ctx.turnLimitOf(entry.record) : { ...ctx.turnLimitOf(entry.record), ...ofTurn }, waiting),
         home: id => agentHome(entry, id),
         // The person's variables over the computer's own and under the turn's, which only wsp sets.
         env: { ...carried, ...threadEnv(entry, harness), ...turnEnv },

@@ -280,6 +280,7 @@ export function turnsArea(ctx: RuntimeContext): TurnsArea {
      * since a nap's cut is a process that goes with its messages unread. */
     let unread: readonly string[] = [];
     let stopped = false;
+    const lineTry = (): boolean => ctx.lineTry({ view, turnId, ...(t.asked !== undefined ? { asked: t.asked } : {}) });
     const forward = (event: AdapterEvent): void => {
       if (event.type === "turn.unread") {
         unread = event.ids;
@@ -297,8 +298,13 @@ export function turnsArea(ctx: RuntimeContext): TurnsArea {
           entry.record.claudeSessionId = sessionId;
           // The harness loaded the session up to the rewind's anchor, so the thread no longer holds it for a later start.
           if (t.cutAt !== undefined && threadRecords.get(threadId)?.resumeAt === t.cutAt) delete threadRecords.get(threadId)!.resumeAt;
+          // An agent that announced itself before it was handed the prompt holds it once it announces again; kept on
+          // the row, so a host that re-opens the turn in between still reads its request as not taken.
+          if (t.asked !== undefined && event.prompted === false && !startRecorded) t.asked.awaitsPrompt = true;
+          else if (t.asked !== undefined && event.prompted !== false) delete t.asked.awaitsPrompt;
           void ctx.persist(entry.record);
           void ctx.persistSessions(workspaceId);
+          if (event.prompted !== false && opening.requestId !== undefined) ctx.promptHeld(opening.requestId);
           // The harness keys its store by the id it just announced, so a name given at the start is written now;
           // a CLI that already took it at launch is told the same name twice, which is what keeps this one road.
           if (opening.title !== undefined && !startRecorded) void ctx.nameInHarness(view, opening.title);
@@ -421,7 +427,7 @@ export function turnsArea(ctx: RuntimeContext): TurnsArea {
           void ctx.persistSessions(workspaceId);
           // A reply held over background work had its line when it was given, and a lead is never told one reply twice.
           const told = afterTold(result, event.held === true);
-          if (notify !== undefined && told !== undefined) ctx.notifyEnd({ view, turnId, turnLive }, notify, ctx.tellAs(t), told);
+          if (notify !== undefined && told !== undefined && !lineTry()) ctx.notifyEnd({ view, turnId, turnLive }, notify, ctx.tellAs(t), told);
           ctx.record({ type: "session.done", workspaceId, sessionId, turnId, threadId, result });
           readChanges(sessionId);
           return;
@@ -520,6 +526,7 @@ export function turnsArea(ctx: RuntimeContext): TurnsArea {
           closeAsk(event.askId, event.outcome, event.optionId);
           return;
         case "session.end":
+          if (event.failure !== undefined) turnLive.failure = event.failure;
           // A prompt the harness left open goes with its process: nothing can answer it now, and a row left open
           // would leave the thread reading as waiting on a person forever.
           closeOpenAsks();
@@ -535,6 +542,7 @@ export function turnsArea(ctx: RuntimeContext): TurnsArea {
             threadId,
             exitCode: event.exitCode,
             sawResult: event.sawResult,
+            ...(t.asked?.awaitsPrompt === true ? { promptless: true as const } : {}),
           });
           turnOver();
           readChanges(sessionId);
@@ -598,6 +606,7 @@ export function turnsArea(ctx: RuntimeContext): TurnsArea {
         return started.interrupt();
       },
       ...(started.steer !== undefined ? { steer: (prompt: string, id?: string) => started.steer!(prompt, id) } : {}),
+      tellsUnread: () => started.tellsUnread === true,
       ...(started.answer !== undefined ? { answer } : {}),
       ...(started.setAccess !== undefined ? { setAccess } : {}),
       ...(started.stopTask !== undefined ? { stopTask: (task: string) => started.stopTask!(task) } : {}),
@@ -611,7 +620,7 @@ export function turnsArea(ctx: RuntimeContext): TurnsArea {
       ended = true;
       const row = sessions.get(rowId);
       if (row?.turnId === turnId) delete row.snapshot;
-      ctx.settleCut({ view, turnId, ...(notify !== undefined ? { notify } : {}), ...(notifyBy !== undefined ? { notifyBy } : {}), ...(notifyRoad !== undefined ? { notifyRoad } : {}), turnLive }, reason, () => reason, byStop);
+      ctx.settleCut({ view, turnId, ...(notify !== undefined ? { notify } : {}), ...(notifyBy !== undefined ? { notifyBy } : {}), ...(notifyRoad !== undefined ? { notifyRoad } : {}), turnLive, ...(t.asked !== undefined ? { asked: t.asked } : {}) }, reason, () => reason, byStop);
       void ctx.persistSessions(workspaceId);
       void started.interrupt().catch(() => {});
       turnOver();
@@ -767,6 +776,7 @@ export function turnsArea(ctx: RuntimeContext): TurnsArea {
         ...(view.cwd !== undefined ? { cwd: view.cwd } : {}),
         ...(s.asked !== undefined ? { prompt: s.asked.prompt, ...(s.asked.effort !== undefined ? { effort: s.asked.effort } : {}) } : {}),
         ...(s.from !== undefined ? { from: s.from } : {}),
+        ...(s.turnLive?.steered !== undefined ? { steered: Object.keys(s.turnLive.steered) } : {}),
         onEvent: event => (sink === undefined ? void held.push(event) : sink(event)),
       });
     } catch (e: unknown) {
@@ -810,7 +820,7 @@ export function turnsArea(ctx: RuntimeContext): TurnsArea {
         waiting,
         // The row's own prompt is the thread's opening once a later turn takes the row over, so the start row a
         // re-opened turn still owes is written from what was typed for this turn.
-        opening: { prompt: s.asked?.typed ?? s.asked?.prompt ?? view.prompt ?? "" },
+        opening: { prompt: s.asked?.typed ?? s.asked?.prompt ?? view.prompt ?? "", ...(s.asked?.requestId !== undefined ? { requestId: s.asked.requestId } : {}) },
         open: forward => {
           sink = forward;
           for (const event of held.splice(0)) forward(event);

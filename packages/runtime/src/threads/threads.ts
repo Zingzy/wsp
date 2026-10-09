@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { randomUUID } from "node:crypto";
 import { CATALOG_AGENTS, type ThreadAgent } from "@wsp/catalog";
+import { MachineUnreachableError, MachineUnreached, isPlaceAbsent } from "@wsp/engine";
 import {
   AGENT_KEEP_MS, AGENTS_KEPT, type PermissionAsk, type SessionRenameWrite, type SessionView, type TurnResult,
   type Caller, SessionOrigin, ThreadScope, WorkspaceOrigin, GitDiffReply, GitWorktreesReply, repoPathOf, worktreeOf, foldThreads, threadWord, threadsFollowed, scopeOf,
@@ -9,20 +11,22 @@ import {
 import { harnessCatalog } from "../harness-catalog.js";
 import { PLAN_RESETS, secretsOf } from "../adapters.js";
 import { accountOf, accountOnComputer, resetDetailsDue, type Vaulted } from "../usage.js";
-import type { WorkspaceRecord, LiveWorkspace, SessionHandle } from "../types/wiring.js";
+import { DeadlineError, type WorkspaceRecord, type LiveWorkspace, type SessionHandle } from "../types/wiring.js";
+import { isDaemonUnanswered } from "../daemon-channel.js";
+import { LaunchUnanswered } from "../machine-exec.js";
 import {
-  RESTARTED_REASON, NOTIFY_OWED, readRoad, readScope, noCheckpointLogLine, type Taken, type TurnLive, type KeptProcess, type KeptLaunch, launchesAs,
-  stampSessionFile, sameSessionFile, DaemonRefusal, type LiveSession, HELD_STARTS, type HeldStartRecord, writeLines,
+  RESTARTED_REASON, NOTIFY_OWED, OWED_RETRY_MS, OWED_RETRY_MAX_MS, OWED_FOR_MS, readRoad, readScope, noCheckpointLogLine, type Taken, type TurnAsked, type TurnLive, type KeptProcess, type KeptLaunch, launchesAs,
+  stampSessionFile, sameSessionFile, DaemonRefusal, type LiveSession, type SessionEntry, HELD_STARTS, type HeldStartRecord, writeLines,
 } from "../types/internal.js";
 import type { CapHeld, RuntimeContext, ThreadsArea } from "../context.js";
 
 /** The row the person is told where a line falls, kept with the line so a host that restarts tells it too. */
 type PersonRow = { workspaceId: string; sessionId: string; turnId: string; text: string };
 /** A line into one thread, as the store keeps it until that thread takes it: a child's finished line, or a message
- * steered into the thread's turn that its agent never read, which goes as whoever opened it. */
-type Owed = { id: string; from: string; notify: string; text: string; by?: ThreadScope; road?: WorkspaceOrigin; startedBy?: SessionOrigin; toPerson?: PersonRow };
-/** A line on its way, with the road that tells the person where its thread's door refuses it. */
-type Line = Owed & { fell?: () => void };
+ * steered into the thread's turn that its agent never read, which goes as whoever opened it. `since` is the wall time
+ * it became owed and `requestId` the one request every try of it goes under, on any host; `tries` is how many of those
+ * failed on a computer that did not answer and `next` when the next may go, so a restart keeps the spacing. */
+type Owed = { id: string; from: string; notify: string; text: string; by?: ThreadScope; road?: WorkspaceOrigin; startedBy?: SessionOrigin; toPerson?: PersonRow; since?: number; requestId?: string; tries?: number; next?: number };
 const readPersonRow = (raw: unknown): PersonRow | undefined => {
   const r = raw as Partial<Record<keyof PersonRow, unknown>> | undefined;
   return typeof r?.workspaceId === "string" && typeof r.sessionId === "string" && typeof r.turnId === "string" && typeof r.text === "string"
@@ -40,8 +44,16 @@ const readOwed = (raw: unknown): Owed | undefined => {
     id: r.id, from: r.from, notify: r.notify, text: r.text,
     ...(by !== undefined ? { by } : {}), ...(road !== undefined ? { road } : {}),
     ...(startedBy.success ? { startedBy: startedBy.data } : {}), ...(toPerson !== undefined ? { toPerson } : {}),
+    ...(typeof r.since === "number" ? { since: r.since } : {}), ...(typeof r.requestId === "string" ? { requestId: r.requestId } : {}),
+    ...(typeof r.tries === "number" ? { tries: r.tries } : {}), ...(typeof r.next === "number" ? { next: r.next } : {}),
   };
 };
+
+/** Whether a start or a launch failed on the way to its thread's computer, which did not answer, rather than was
+ * refused: read off the class or the kind stamped where the error was born, never its words, so a refusal thrown as a
+ * plain Error goes to the person at once and is never tried again. */
+export const computerSilent = (e: unknown): boolean =>
+  e instanceof MachineUnreached || e instanceof MachineUnreachableError || e instanceof DeadlineError || e instanceof LaunchUnanswered || isPlaceAbsent(e) || isDaemonUnanswered(e);
 
 export function threadsArea(ctx: RuntimeContext): ThreadsArea {
   const { opts, bus, clock, deviceDoor, live, threadRecords, sessions } = ctx;
@@ -436,13 +448,30 @@ export function threadsArea(ctx: RuntimeContext): ThreadsArea {
   };
   /** Lines for a parent whose workspace could not take a start when the child ended (napping, or the nap that ended
    * the child), sent when that workspace wakes; a host restart during the nap holds them again from the store. */
-  const heldLines = new Map<string, Line[]>();
-  /** The lines this host is carrying, by id, which the boot's pass over the store leaves to the road already on them. */
-  const sending = new Set<string>();
+  const heldLines = new Map<string, Owed[]>();
+  /** The lines this host is carrying, by id, each as it stands, which the boot's pass over the store leaves to the road
+   * already on them. */
+  const sending = new Map<string, Owed>();
   /** A line leaves the store once a turn of its thread took it, or once it fell to the person. */
-  const owedTaken = (line: Line): void => {
+  const owedTaken = (line: Owed): void => {
     sending.delete(line.id);
     void ctx.store.delete(NOTIFY_OWED, line.id).catch((e: unknown) => console.warn(`the line of thread ${line.from.slice(0, 8)} into thread ${line.notify.slice(0, 8)} stays owed: ${e instanceof Error ? e.message : String(e)}`));
+  };
+  /** The line as it stands, written to the store, so a next host goes on from it. */
+  const keepOwed = (line: Owed): Promise<void> =>
+    ctx.store.put(NOTIFY_OWED, line.id, line).catch((e: unknown) => console.warn(`the line of thread ${line.from.slice(0, 8)} into thread ${line.notify.slice(0, 8)} was not kept: ${e instanceof Error ? e.message : String(e)}`));
+  /** A child's end is told the person once however many of its lines fall: the row leaves every other line of that
+   * end once told, here and in the store, so neither this host nor a next one tells it again. Once the boot's pass over
+   * the store has run, every line there is one this host carries, a held one included, so the others are in `sending`. */
+  const tellPerson = (line: Owed): void => {
+    const row = line.toPerson;
+    if (row === undefined) return;
+    ctx.record({ type: "session.notify", ...row, threadId: line.from, notify: NOTIFY_ME });
+    for (const other of sending.values()) {
+      if (other.id === line.id || other.toPerson?.turnId !== row.turnId || other.toPerson.text !== row.text) continue;
+      delete other.toPerson;
+      void keepOwed(other);
+    }
   };
   /** Who the lines off a row are delivered as: the thread that registered its targets and the road it registered
    * them from, read off the row that holds both so the two never drift apart. */
@@ -450,20 +479,83 @@ export function threadsArea(ctx: RuntimeContext): ThreadsArea {
     ...(s.notifyBy !== undefined ? { by: s.notifyBy } : {}),
     ...(s.notifyRoad !== undefined ? { road: s.notifyRoad } : {}),
   });
+  /** Whether a turn of the thread took the request: a steer under it joined a turn, which then sends back what its
+   * agent never read, or a turn started under it and its agent holds the prompt, which one that announced itself
+   * before it was handed the prompt (Codex) says by announcing again. */
+  const tookRequest = (workspaceId: string, requestId: string): boolean => {
+    const taken = ctx.transcriptIndex.get(workspaceId)?.taken.get(requestId);
+    if (taken === undefined) return false;
+    return taken.outcome === "steered" || ![...sessions.values()].some(s => s.turnId === taken.turnId && s.asked?.awaitsPrompt === true);
+  };
+  /** A turn carrying a line the host keeps is that line's try until its agent holds the line: how it ends is the
+   * line's to tell, so the thread's own targets hear nothing of it. */
+  const lineTry = (s: { view: SessionView; turnId: string; asked?: TurnAsked }): boolean => {
+    const requestId = s.asked?.owed === true ? s.asked.requestId : undefined;
+    if (requestId === undefined) return false;
+    return ctx.transcriptIndex.get(s.view.workspaceId)?.taken.get(requestId)?.turnId !== s.turnId || s.asked?.awaitsPrompt === true;
+  };
+  /** The tries out whose request a turn may take, by request: each settles its line as taken once that turn's agent
+   * holds the prompt. */
+  const promptWaits = new Map<string, () => void>();
+  const promptHeld = (requestId: string): void => promptWaits.get(requestId)?.();
+  /** The tries out on a computer that answered nothing since the restart, by turn: a person's stop of one settles its
+   * line, since nothing reaches the turn itself. */
+  const darkTries = new Map<string, () => void>();
+  const tryStopped = (turnId: string): void => darkTries.get(turnId)?.();
+  /** The end the host records for a turn's row, read as the turn's result: what settles a row whose agent cannot be
+   * reached, a turn a restart left on a computer that did not answer its re-open, or one a stop ended while its
+   * computer was away, whose agent's own end never comes. */
+  const rowEnded = (s: SessionEntry): Promise<TurnResult> =>
+    new Promise(resolve => {
+      const off = bus.on("session.end", e => {
+        if (e.type !== "session.end" || e.turnId !== s.turnId) return;
+        off();
+        resolve({ status: s.view.status === "interrupted" ? "interrupted" : "failed", ...(e.reason !== undefined ? { error: e.reason } : {}) });
+      });
+    });
+  /** The running turn of the thread a try of the request is still out on: its launch carries it, or it kept the
+   * message steered under it before a write whose answer never came. */
+  const carrying = (threadId: string, requestId: string): SessionEntry | undefined =>
+    [...sessions.values()].find(s => s.view.threadId === threadId && s.view.status === "running" && (s.asked?.requestId === requestId || Object.values(s.turnLive?.steered ?? {}).some(m => m.requestId === requestId)));
+  /** What failed a turn's stream, off its row while that turn still holds it. */
+  const failureOf = (h: Pick<SessionHandle, "id" | "turnId">): unknown => {
+    const row = sessions.get(h.id);
+    return row?.turnId === h.turnId ? row.turnLive?.failure : undefined;
+  };
   /** The line into the parent thread as a send would go: steered into its running turn, or queued behind it, which
    * is what a parent still in its own reply tail gets, since the send road waits for that process rather than
    * refusing. It goes under the thread that named the target, so the switch on that thread's workspace and the
    * tree rule are read at delivery and not at registration alone; a line a person registered goes as the person's,
-   * which is what every row written before the scope rode beside the targets carries. A parent with no session to
-   * resume, and a start that door refuses, drop the line with a warning and call the line's own `fell`, which tells
-   * the person the report is there; the child's end must not fail on either. */
-  const deliver = (line: Line): void => {
+   * which is what every row written before the scope rode beside the targets carries.
+   *
+   * The line stays owed until a turn of the parent takes it: a steer under its request, or a launch whose agent
+   * announced itself. Every try goes under the one request id, written on the line before the first, so a start the
+   * parent already took answers that turn and starts nothing, and a try still out on a running turn is waited out
+   * before another goes: a lost answer is never a second line. A start or a launch the parent's computer did not
+   * answer goes again on the clock, spaced out as they keep failing, for an hour of wall time from when the line
+   * became owed; at the hour the try still out is stopped and the person is told the report is there. So are they at
+   * once where the door or the computer refuses, where the parent has no session to resume, and where they stopped
+   * the turn carrying the line. A line held for the parent's wake gets a try at the wake, past its hour or not: the
+   * hour bounds tries while the computer answers. The child's end must not fail on any of it. */
+  const deliver = (line: Owed, o: { woke?: true } = {}): void => {
     const { from, notify, text, by, road } = line;
-    sending.add(line.id);
+    // Written before the first try, so the next host sends the same request and can tell whether a turn took it.
+    const sent: Owed = { ...line, since: line.since ?? clock.now(), requestId: line.requestId ?? randomUUID() };
+    sending.set(line.id, sent);
+    const requestId = sent.requestId!;
+    const deadline = sent.since! + OWED_FOR_MS;
+    const kept = line.requestId === undefined || line.since === undefined ? keepOwed(sent) : Promise.resolve();
+    const carried = (): boolean => !ctx.state.closing && sending.get(line.id) === sent;
     const fell = (): void => {
-      owedTaken(line);
-      if (line.fell !== undefined) line.fell();
-      else if (line.toPerson !== undefined) ctx.record({ type: "session.notify", ...line.toPerson, threadId: from, notify: NOTIFY_ME });
+      owedTaken(sent);
+      tellPerson(sent);
+    };
+    /** A turn of the parent took the line. A child's finished line is its whole report, so a lead that took it has
+     * read the child. */
+    const taken = (): void => {
+      if (sending.get(line.id) !== sent) return;
+      owedTaken(sent);
+      if (line.startedBy === undefined) void ctx.mark([from], { readAt: clock.now() }, undefined).catch((e: unknown) => console.warn(`thread ${from.slice(0, 8)} was not marked read: ${e instanceof Error ? e.message : String(e)}`));
     };
     const parent = latestOn(notify);
     if (!tellable(parent)) {
@@ -476,7 +568,7 @@ export function threadsArea(ctx: RuntimeContext): ThreadsArea {
     const holdForWake = (): boolean => {
       const phase = live.get(parent.workspaceId)?.record.phase;
       if (phase === undefined || sendRefusal(workspaceState({ phase })) === null) return false;
-      heldLines.set(parent.workspaceId, [...(heldLines.get(parent.workspaceId) ?? []), line]);
+      heldLines.set(parent.workspaceId, [...(heldLines.get(parent.workspaceId) ?? []), sent]);
       return true;
     };
     if (holdForWake()) return;
@@ -492,18 +584,129 @@ export function threadsArea(ctx: RuntimeContext): ThreadsArea {
     // registered them from. A line nobody but the person registered carries neither and goes as theirs, which is
     // what every row written before the road rode beside the targets holds.
     const asWho: Caller | undefined = by === undefined ? road : { origin: road ?? "here", by };
-    // A start answers once the line steered the running turn or launched one of its own, which is when it is taken.
-    ctx.sessionsApi.start(parent.workspaceId, { prompt: text, harness: parent.harness, thread: notify, startedBy: line.startedBy ?? "agent", ...(line.startedBy === undefined ? { wakesLead: true as const } : {}) }, asWho).then(() => {
-      owedTaken(line);
-      // A child's finished line is its whole report, so the lead that took it has read the child.
-      if (line.startedBy === undefined) void ctx.mark([from], { readAt: clock.now() }, undefined).catch((e: unknown) => console.warn(`thread ${from.slice(0, 8)} was not marked read: ${e instanceof Error ? e.message : String(e)}`));
-    }, (e: unknown) => {
-      // A line queued behind the parent's turn meets the nap that ended that turn: it waits for the wake as well.
-      if (holdForWake()) return;
-      console.warn(`thread ${from.slice(0, 8)} ended, but its line did not reach thread ${notify.slice(0, 8)}: ${e instanceof Error ? e.message : String(e)}`);
+    const gaveUp = (said: string): void => {
+      console.warn(`thread ${from.slice(0, 8)} ended, but its line did not reach thread ${notify.slice(0, 8)} within ${OWED_FOR_MS / 60_000} minutes: ${said}`);
       fell();
+    };
+    const tryAgain = (said: string): void => {
+      const left = deadline - clock.now();
+      if (left <= 0) return gaveUp(said);
+      sent.tries = (sent.tries ?? 0) + 1;
+      const wait = Math.min(OWED_RETRY_MS * 2 ** (sent.tries - 1), OWED_RETRY_MAX_MS, left);
+      sent.next = clock.now() + wait;
+      void keepOwed(sent);
+      console.warn(`thread ${from.slice(0, 8)} ended, but its line did not reach thread ${notify.slice(0, 8)} yet, and goes again in ${wait / 1000} s: ${said}`);
+      clock.schedule(() => {
+        if (carried()) deliver(sent);
+      }, wait, { unref: true });
+    };
+    /** Settles a try a turn of the parent carries, launched here or re-opened from an earlier host: taken once the
+     * parent's agent announced itself under the request, stopped at the line's hour, and otherwise read off how the
+     * turn ended before its agent announced itself, which never handed the agent the line. A stop is the person's and
+     * the line goes no further; a nap that cut it waits for the wake; a computer that did not answer goes again on the
+     * clock; anything else is a refusal and falls to the person. */
+    const settleTry = async (handle: Pick<SessionHandle, "id" | "turnId"> & { finished?: Promise<TurnResult> }, dark = false): Promise<void> => {
+      promptWaits.set(requestId, () => {
+        if (carried()) taken();
+      });
+      if (tookRequest(parent.workspaceId, requestId)) taken();
+      try {
+        let atHour = false;
+        // A try on a computer that answered nothing since the restart is out of reach: nothing stops it, so at the
+        // hour, at once past it, and at the person's stop the line is settled without it, and the turn is left as it
+        // stands. One whose computer answers is stopped at the hour by the stop road, and runs on past it, since a try
+        // already out is the one try a wake past the hour gets.
+        let cut: (r: TurnResult) => void = () => {};
+        const cutShort = new Promise<TurnResult>(resolve => (cut = resolve));
+        if (dark) darkTries.set(handle.turnId, () => cut({ status: "interrupted" }));
+        const left = deadline - clock.now();
+        const stop =
+          left > 0 || dark
+            ? clock.schedule(() => {
+                if (!carried() || tookRequest(parent.workspaceId, requestId)) return;
+                atHour = true;
+                if (dark) return cut({ status: "failed", error: `nothing answered for the turn carrying it since the host restarted` });
+                void ctx.stopTry(handle.id).catch((e: unknown) => console.warn(`the try of the line of thread ${from.slice(0, 8)} into thread ${notify.slice(0, 8)} was not stopped: ${e instanceof Error ? e.message : String(e)}`));
+              }, Math.max(left, 0), { unref: true })
+            : undefined;
+        const row = sessions.get(handle.id);
+        const ends = [cutShort, ...(handle.finished !== undefined ? [handle.finished] : []), ...(row?.turnId === handle.turnId ? [rowEnded(row)] : [])];
+        const ended = await Promise.race(ends).catch((e: unknown): TurnResult => ({ status: "failed", error: e instanceof Error ? e.message : String(e) }));
+        stop?.();
+        if (!carried()) return;
+        if (tookRequest(parent.workspaceId, requestId)) return taken();
+        const said = ended.error ?? `the turn ended ${ended.status} before its agent started`;
+        if (atHour) return gaveUp(said);
+        if (ended.status === "interrupted") {
+          console.warn(`thread ${from.slice(0, 8)} ended, but the turn carrying its line into thread ${notify.slice(0, 8)} was stopped`);
+          return fell();
+        }
+        if (holdForWake()) return;
+        if (computerSilent(failureOf(handle))) return tryAgain(said);
+        console.warn(`thread ${from.slice(0, 8)} ended, but its line did not reach thread ${notify.slice(0, 8)}: ${said}`);
+        fell();
+      } finally {
+        promptWaits.delete(requestId);
+        darkTries.delete(handle.turnId);
+      }
+    };
+    void (async () => {
+      await kept;
+      if (line.requestId !== undefined) {
+        // A next host reads the try only once its re-open of the parent's turns answered or failed: a row with no
+        // handle before then says nothing about its computer.
+        await ctx.bootWork.get(parent.workspaceId);
+        if (!carried()) return;
+        if (tookRequest(parent.workspaceId, requestId)) return taken();
+        const out = carrying(notify, requestId);
+        if (out !== undefined) {
+          const steered = out.asked?.requestId !== requestId;
+          if (!steered && out.handle !== undefined) return settleTry(out.handle);
+          if (!steered && out.launch === undefined) return settleTry({ id: out.view.id, turnId: out.turnId }, true);
+          const over = await (out.handle?.finished.then(() => true, () => true) ?? out.launch?.then(() => false, () => false) ?? new Promise<boolean>(resolve => clock.schedule(() => resolve(false), OWED_RETRY_MS, { unref: true })));
+          if (!carried()) return;
+          if (steered && over) {
+            // A turn that kept the message before its write sends it back at its end if its agent never read it, where
+            // that agent tells what it never read. Any other cannot say: the person is told, rather than the thread twice.
+            if (out.handle?.tellsUnread?.() === true) return taken();
+            console.warn(`thread ${from.slice(0, 8)} ended, and nothing says whether thread ${notify.slice(0, 8)} read its line`);
+            return fell();
+          }
+          return deliver(sent);
+        }
+      }
+      // A line that has failed before keeps its spacing and its hour across a restart, until the wake it waited for.
+      if ((sent.tries ?? 0) > 0 && o.woke !== true) {
+        if (clock.now() >= deadline) return gaveUp("its last try failed");
+        if (sent.next !== undefined && sent.next > clock.now()) {
+          clock.schedule(() => {
+            if (carried()) deliver(sent);
+          }, sent.next - clock.now(), { unref: true });
+          return;
+        }
+      }
+      try {
+        const handle = await ctx.sessionsApi.start(parent.workspaceId, { prompt: text, harness: parent.harness, thread: notify, startedBy: line.startedBy ?? "agent", requestId, owed: true, ...(deadline > clock.now() ? { asksUntilStopped: true as const } : {}), ...(line.startedBy === undefined ? { wakesLead: true as const } : {}) }, asWho);
+        if (handle.outcome === "steered") return taken();
+        await settleTry(handle);
+      } catch (e: unknown) {
+        // A line queued behind the parent's turn meets the nap that ended that turn: it waits for the wake as well.
+        if (holdForWake()) return;
+        const said = e instanceof Error ? e.message : String(e);
+        if (computerSilent(e)) return tryAgain(said);
+        console.warn(`thread ${from.slice(0, 8)} ended, but its line did not reach thread ${notify.slice(0, 8)}: ${said}`);
+        fell();
+      }
+    })().catch((e: unknown) => {
+      // Nothing above throws by design; one that does leaves the line in the store for the next host.
+      sending.delete(line.id);
+      console.warn(`the line of thread ${from.slice(0, 8)} into thread ${notify.slice(0, 8)} was not sent: ${e instanceof Error ? e.message : String(e)}`);
     });
   };
+  /** The steers whose write has not answered yet, by the id the harness is handed each under: the start road owns the
+   * message until it answers. A turn that ends meanwhile with it unread leaves it here, with whether a stop ended
+   * that turn, for that road to settle, so the message never goes both as the turn's unread and as the next turn. */
+  const steersOut = new Map<string, { ended?: { s: { view: SessionView; turnId: string; turnLive?: TurnLive }; stopped: boolean } }>();
   /** The messages steered into a turn that its agent never read, once the turn is over: each goes into the thread
    * again as its next message, in the words the row kept when it was steered, kept in the store as a child's line is,
    * under the caller that steered it and opened by whoever opened it, so the doors read it as a fresh steer and a nap
@@ -513,17 +716,20 @@ export function threadsArea(ctx: RuntimeContext): ThreadsArea {
     const threadId = s.view.threadId;
     if (threadId === undefined) return;
     for (const id of ids) {
+      const out = steersOut.get(id);
+      if (out !== undefined) {
+        out.ended = { s, stopped };
+        continue;
+      }
       const steered = s.turnLive?.steered?.[id];
       if (steered === undefined) continue;
-      const { prompt, ...as } = steered;
+      const { prompt, requestId: _steeredUnder, ...as } = steered;
       const toPerson: PersonRow = { workspaceId: s.view.workspaceId, sessionId: s.view.claudeSessionId ?? s.view.id, turnId: s.turnId, text: unreadLine(prompt) };
       if (stopped) {
         ctx.record({ type: "session.notify", ...toPerson, threadId, notify: NOTIFY_ME });
         continue;
       }
-      const line: Owed = { id: `${s.turnId}:unread:${id}`, from: threadId, notify: threadId, text: prompt, ...as, toPerson };
-      void ctx.store.put(NOTIFY_OWED, line.id, line).catch((e: unknown) => console.warn(`the message steered into thread ${threadId.slice(0, 8)} was not kept: ${e instanceof Error ? e.message : String(e)}`));
-      deliver(line);
+      deliver({ id: `${s.turnId}:unread:${id}`, from: threadId, notify: threadId, text: prompt, ...as, toPerson });
     }
   };
   // A wake or a rebuild (of a gone or zombie machine) puts the workspace back to running: the held lines go now.
@@ -532,27 +738,20 @@ export function threadsArea(ctx: RuntimeContext): ThreadsArea {
       if (e.type !== type) return;
       const lines = heldLines.get(e.workspaceId) ?? [];
       heldLines.delete(e.workspaceId);
-      for (const l of lines) deliver(l);
+      for (const l of lines) deliver(l, { woke: true });
     });
   }
   /** The one line an ending turn sends where its thread's start said: into a thread, or nowhere further for me, whom
    * the recorded event reaches. Recorded before the turn's session.done, since a follower ends there; the person's
-   * own row for a line the target's door refused is the exception, since that answer comes after the start it made. */
+   * own row for a line that falls is the exception, since that answer comes after the start it made. A target whose
+   * thread has gone by now cannot be told, and its report must not go with it: the person is told instead, once,
+   * however many targets fell away, and each line keeps the person's row so a next host can do the same. */
   const notifyEnd = (s: { view: SessionView; turnId: string; turnLive?: TurnLive }, notify: readonly string[], named: { by?: ThreadScope; road?: WorkspaceOrigin }, result: TurnResult): void => {
     const threadId = s.view.threadId;
     if (threadId === undefined) return;
-    // A target whose thread has gone by now cannot be told, and its report must not go with it: the person is told
-    // instead, once, however many targets fell away.
     const reachable = notify.filter(target => target === NOTIFY_ME || tellable(latestOn(target)));
     const targets = reachable.length === notify.length ? notify : [...new Set([...reachable, NOTIFY_ME])];
-    let toldThePerson = targets.includes(NOTIFY_ME);
-    // The same road for a line the target's own door refused, which the start answers only after this loop is over:
-    // a workspace whose switch went off after the registration, or a thread that left the tree that named it.
-    const fell = (): void => {
-      if (toldThePerson) return;
-      toldThePerson = true;
-      ctx.record({ type: "session.notify", workspaceId: s.view.workspaceId, sessionId: s.view.claudeSessionId ?? s.view.id, turnId: s.turnId, threadId, notify: NOTIFY_ME, text: notifyLine(threadId, result, "tail") });
-    };
+    const toPerson: PersonRow = { workspaceId: s.view.workspaceId, sessionId: s.view.claudeSessionId ?? s.view.id, turnId: s.turnId, text: notifyLine(threadId, result, "tail") };
     for (const target of targets) {
       // A thread reads its child's line as a message and acts on it, so it gets the report whole; the person reads
       // it as a row beside every other, so theirs stays one line.
@@ -560,9 +759,7 @@ export function threadsArea(ctx: RuntimeContext): ThreadsArea {
       ctx.record({ type: "session.notify", workspaceId: s.view.workspaceId, sessionId: s.view.claudeSessionId ?? s.view.id, turnId: s.turnId, threadId, notify: target, text });
       if (target === NOTIFY_ME) continue;
       // A turn whose agent replied over background work sends a line per reply, each kept apart.
-      const line: Owed = { id: `${s.turnId}:${s.turnLive?.told ?? 0}:${target}`, from: threadId, notify: target, text, ...named };
-      void ctx.store.put(NOTIFY_OWED, line.id, line).catch((e: unknown) => console.warn(`the line of thread ${threadId.slice(0, 8)} into thread ${target.slice(0, 8)} was not kept: ${e instanceof Error ? e.message : String(e)}`));
-      deliver({ ...line, fell });
+      deliver({ id: `${s.turnId}:${s.turnLive?.told ?? 0}:${target}`, from: threadId, notify: target, text, ...named, ...(targets.includes(NOTIFY_ME) ? {} : { toPerson }) });
     }
   };
   /** Every line a host that stopped had not seen taken, sent again once this one has read its rows. */
@@ -577,7 +774,7 @@ export function threadsArea(ctx: RuntimeContext): ThreadsArea {
    * where a stop settled it. A reply held
    * over background work whose line went, with nothing waking the agent since, is the turn's last word: no line. The
    * session.end carries `reason` either way. The one rule for both roads, the runtime's end() and the restart load. */
-  const settleCut = (s: { view: SessionView; turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin; turnLive?: TurnLive; snapshot?: string }, reason: string, cutLine: (endedAt: number) => string, stopped = false): void => {
+  const settleCut = (s: { view: SessionView; turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin; turnLive?: TurnLive; snapshot?: string; asked?: TurnAsked }, reason: string, cutLine: (endedAt: number) => string, stopped = false): void => {
     const reply = s.turnLive?.reply;
     delete s.snapshot;
     const endedAt = Date.now();
@@ -591,11 +788,11 @@ export function threadsArea(ctx: RuntimeContext): ThreadsArea {
     delete s.view.asking;
     if (s.view.threadId !== undefined) leadAsks.delete(s.view.threadId);
     const cut: TurnResult = { status: stopped ? "interrupted" : "failed", error: cutLine(endedAt) };
-    if (reply === undefined && s.turnLive?.toldLast !== true && s.notify !== undefined) notifyEnd(s, s.notify, tellAs(s), cut);
+    if (reply === undefined && s.turnLive?.toldLast !== true && s.notify !== undefined && !lineTry(s)) notifyEnd(s, s.notify, tellAs(s), cut);
     const sessionId = s.view.claudeSessionId ?? s.view.id;
     // A stop the process never heard is still the turn's reply, so every client reads the turn stopped, not failed.
     if (reply === undefined && stopped) ctx.record({ type: "session.done", workspaceId: s.view.workspaceId, sessionId, turnId: s.turnId, threadId: s.view.threadId, result: cut });
-    ctx.record({ type: "session.end", workspaceId: s.view.workspaceId, sessionId, turnId: s.turnId, threadId: s.view.threadId, exitCode: null, sawResult: reply !== undefined || stopped, reason });
+    ctx.record({ type: "session.end", workspaceId: s.view.workspaceId, sessionId, turnId: s.turnId, threadId: s.view.threadId, exitCode: null, sawResult: reply !== undefined || stopped, reason, ...(s.asked?.awaitsPrompt === true ? { promptless: true as const } : {}) });
   };
   /** A folder on this computer git holds no repo in: it keeps no checkpoint and no rewind moves its files. */
   const notARepo = (r: WorkspaceRecord): boolean => runsInFolder(r.kind) && ctx.projectHeld(r.project).git === undefined;
@@ -632,13 +829,53 @@ export function threadsArea(ctx: RuntimeContext): ThreadsArea {
     return { id: taken.sessionId, workspaceId, turnId: taken.turnId, outcome: taken.outcome, finished: Promise.resolve(result), view: () => sessions.get(taken.sessionId)?.view ?? held.view, interrupt: async () => {} };
   };
 
-  const recordSteer = (s: { view: SessionView; turnId: string; turnLive?: TurnLive }, handleId: string, o: { prompt: string; requestId?: string; via?: "slate"; startedBy?: SessionOrigin }, caller: Caller | undefined, steerId: string): void => {
-    if (s.turnLive !== undefined) {
-      const by = scopeOf(caller);
-      const road = roadOf(caller);
-      s.turnLive.steered = { ...s.turnLive.steered, [steerId]: { prompt: o.prompt, startedBy: o.startedBy ?? "person", ...(by !== undefined ? { by } : {}), ...(road !== undefined ? { road } : {}) } };
-      void ctx.persistSessions(s.view.workspaceId);
+  /** The message on the turn's row under the id the harness is handed it by, written to the store: what its end sends
+   * back if the agent never took it up, past a host restart too. */
+  const keepOnTurn = (s: { view: SessionView; turnLive?: TurnLive }, o: { prompt: string; requestId?: string; startedBy?: SessionOrigin }, caller: Caller | undefined, steerId: string): Promise<void> => {
+    if (s.turnLive === undefined) return Promise.resolve();
+    const by = scopeOf(caller);
+    const road = roadOf(caller);
+    s.turnLive.steered = { ...s.turnLive.steered, [steerId]: { prompt: o.prompt, startedBy: o.startedBy ?? "person", ...(by !== undefined ? { by } : {}), ...(road !== undefined ? { road } : {}), ...(o.requestId !== undefined ? { requestId: o.requestId } : {}) } };
+    return ctx.persistSessions(s.view.workspaceId);
+  };
+  /** The message kept on the turn before its write goes, the start road owning it until the write answers. */
+  const keepSteer = (s: { view: SessionView; turnLive?: TurnLive }, o: { prompt: string; requestId?: string; startedBy?: SessionOrigin }, caller: Caller | undefined, steerId: string): Promise<void> => {
+    steersOut.set(steerId, {});
+    return keepOnTurn(s, o, caller, steerId);
+  };
+  /** A message kept before a write that did not land in the turn: its caller starts it as the next turn instead. */
+  const dropSteer = (s: { view: SessionView; turnLive?: TurnLive }, steerId: string): void => {
+    if (s.turnLive?.steered?.[steerId] === undefined) return;
+    const { [steerId]: _dropped, ...rest } = s.turnLive.steered;
+    s.turnLive.steered = rest;
+    void ctx.persistSessions(s.view.workspaceId);
+  };
+  /** A steer whose write threw on an agent that tells no unread messages: nothing will say whether it landed, so the
+   * turn lets the message go and its caller hears the write failed. */
+  const steerLost = (s: { view: SessionView; turnLive?: TurnLive }, steerId: string): void => {
+    steersOut.delete(steerId);
+    dropSteer(s, steerId);
+  };
+  /** Settles a steer whose write answered, `landed` unless it answered that the turn was not running: true where the
+   * message is the turn's now, false where the start road queues it as the thread's next turn. One the turn's end
+   * found unread while the write was out goes as that next turn, or to the person where a stop ended the turn, and
+   * never by both roads. */
+  const steerAnswered = (s: { view: SessionView; turnId: string; turnLive?: TurnLive }, handleId: string, o: { prompt: string; requestId?: string; via?: "slate"; startedBy?: SessionOrigin }, caller: Caller | undefined, steerId: string, landed: boolean): boolean => {
+    const ended = steersOut.get(steerId)?.ended;
+    steersOut.delete(steerId);
+    if (ended === undefined && landed) {
+      recordSteer(s, handleId, o, caller, steerId);
+      return true;
     }
+    if (ended?.stopped === true) {
+      sendBack(ended.s, [steerId], true);
+      return true;
+    }
+    dropSteer(s, steerId);
+    return false;
+  };
+  const recordSteer = (s: { view: SessionView; turnId: string; turnLive?: TurnLive }, handleId: string, o: { prompt: string; requestId?: string; via?: "slate"; startedBy?: SessionOrigin }, caller: Caller | undefined, steerId: string): void => {
+    if (s.turnLive?.steered?.[steerId] === undefined) void keepOnTurn(s, o, caller, steerId);
     ctx.record({
       type: "session.steer",
       workspaceId: s.view.workspaceId,
@@ -777,7 +1014,7 @@ export function threadsArea(ctx: RuntimeContext): ThreadsArea {
   return {
     threadRuns, launchingOn, runningOn, latestOn, keptAgents, reapKept, endKept, hostWrites, writeSession, takeKept,
     holdKept, threadOfToken, treeUnder, restarts, drivesThread, settlesThread, leadAsks, capHeld, capHold, capLend, capFull, capWait, capStop, capStopping, capLeft, stoppedBehind, stopUnder, notifyOn, notifyReach, tellAs,
-    notifyEnd, deliverOwed, sendBack, settleCut, notARepo, checkpointsLanding, keepCheckpoint, takenTurn, recordSteer, snapshotOf,
+    notifyEnd, deliverOwed, sendBack, settleCut, notARepo, checkpointsLanding, keepCheckpoint, takenTurn, keepSteer, steerAnswered, steerLost, recordSteer, lineTry, promptHeld, tryStopped, snapshotOf,
     readTurnChanges, usageComputerOf, vaultedFor, usageAccountOf, limitDetailsDue,
   };
 }

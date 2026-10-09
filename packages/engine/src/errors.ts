@@ -160,6 +160,24 @@ export function isNetworkError(e: unknown): boolean {
   return e.message === "fetch failed" || NETWORK_CODES.has(codeOf(e) ?? "") || NETWORK_CODES.has(codeOf(e.cause) ?? "");
 }
 
+/** The network failures of a call that never left this computer: a name that did not resolve, a connection refused or
+ * never made. Whatever it asked for did not happen on the far end. */
+const UNSENT_CODES = new Set(["EAI_AGAIN", "ENOTFOUND", "ECONNREFUSED", "UND_ERR_CONNECT_TIMEOUT"]);
+
+export function neverSent(e: unknown): boolean {
+  if (!(e instanceof Error)) return false;
+  return UNSENT_CODES.has(codeOf(e) ?? "") || UNSENT_CODES.has(codeOf(e.cause) ?? "");
+}
+
+/** Whether the far end answered the call, a refusal included: the error carries the status or the kind the provider
+ * or the computer answered with, a gateway's among them, since the backend already retried that answer. A call
+ * nothing answered carries neither, whatever its words say. */
+export function farEndAnswered(e: unknown): boolean {
+  if (typeof e !== "object" || e === null) return false;
+  const { kind, status } = e as { kind?: unknown; status?: unknown };
+  return typeof kind === "string" || typeof status === "number";
+}
+
 /** Whether the call was cut off by the cap its caller gave it rather than answered or refused by the far end. The
  * name is fetch's own for an AbortSignal.timeout; DOMException carries it and is an Error here, but the check reads
  * the name off any object so a fetch a test stands in for needs no DOMException of its own. */

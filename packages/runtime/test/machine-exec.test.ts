@@ -650,6 +650,151 @@ describe("machineExecStream", () => {
     expect(g.guest.files()).toEqual([]);
   });
 
+  it("a launch whose answer was lost after it ran is read as that run once the machine answers again, and is never posted twice", async () => {
+    const { backend, machine } = await makeMachine();
+    const guest = scriptGuest(backend, [{ append: "ran\n", exit: 0 }, {}]);
+    const clock = { now: 0 };
+    let landed = 0;
+    let dark = true;
+    const inner = backend.execImpl;
+    // The first post lands and its answer is lost; nothing answers after it until past the launch's own link window,
+    // inside the one the question about its run is given.
+    backend.execImpl = async (m, cmd): Promise<ExecResult> => {
+      if (!dark) return inner(m, cmd);
+      if (cmd.includes("WSP_LAUNCHED") && landed === 0) {
+        landed++;
+        await inner(m, cmd);
+      }
+      clock.now += 5_000;
+      throw Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" });
+    };
+    const opts = {
+      pollMs: 5,
+      now: () => clock.now,
+      sleep: async (ms: number): Promise<void> => {
+        clock.now += ms;
+        if (clock.now > 1.5 * LINK_RETRY_WINDOW_MS) dark = false;
+      },
+    };
+    const stream = machineExecStream(machine, opts)("claude -p hi", { env: {} });
+    const lines: string[] = [];
+    for await (const l of stream.lines) lines.push(l);
+    expect(lines).toEqual(["ran"]);
+    expect(await stream.exited).toBe(0);
+    expect(landed).toBe(1);
+    expect(guest.calls.filter(c => c.includes("WSP_LAUNCHED"))).toHaveLength(1);
+  });
+
+  /** The first launch post lands on the machine and its answer is lost with `lost`; every exec after it fails with
+   * `meanwhile` until `darkMs` of the stream's clock, then the machine answers again and holds the run. */
+  const landedThenDark = async (lost: () => Error, meanwhile: () => Error, darkMs: number, o: { asksUntilStopped?: true; stopAt?: number } = {}) => {
+    const { backend, machine } = await makeMachine();
+    const guest = scriptGuest(backend, [{ append: "ran\n", exit: 0 }, {}]);
+    const inner = backend.execImpl;
+    const clock = { now: 0 };
+    let landed = 0;
+    let stream: ExecStream | undefined;
+    backend.execImpl = async (m, cmd): Promise<ExecResult> => {
+      if (clock.now >= darkMs) return inner(m, cmd);
+      clock.now += 1_000;
+      if (o.stopAt !== undefined && clock.now >= o.stopAt) stream?.kill();
+      if (cmd.includes("WSP_LAUNCHED") && landed === 0) {
+        landed++;
+        await inner(m, cmd);
+        throw lost();
+      }
+      throw meanwhile();
+    };
+    const opts = { pollMs: 5, now: () => clock.now, sleep: async (ms: number): Promise<void> => void (clock.now += ms), ...(o.asksUntilStopped !== undefined ? { asksUntilStopped: o.asksUntilStopped } : {}) };
+    stream = machineExecStream(machine, opts)("claude -p hi", { env: {} });
+    const lines: string[] = [];
+    let failure: unknown;
+    try {
+      for await (const l of stream.lines) lines.push(l);
+    } catch (e) {
+      failure = e;
+    }
+    return { lines, failure, at: clock.now, launches: guest.calls.filter(c => c.includes("WSP_LAUNCHED")).length };
+  };
+  const reset = (): Error => Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" });
+
+  it("a launch that ran and lost its answer to a link drop is read as that run while the box is not connected, never as a run that is not there", async () => {
+    const r = await landedThenDark(() => new Error("connection lost"), () => new PlaceAbsentError("lab-box is not connected"), 20_000);
+    expect(r.failure).toBeUndefined();
+    expect(r.lines).toEqual(["ran"]);
+    expect(r.launches).toBe(1);
+  });
+
+  it("a launch that ran and lost its answer is read as that run while the provider says the sandbox is not reachable", async () => {
+    const r = await landedThenDark(reset, () => new MachineUnreachableError("m1", "Sandbox is not reachable", 502, "the computer is not reachable"), 20_000);
+    expect(r.failure).toBeUndefined();
+    expect(r.lines).toEqual(["ran"]);
+    expect(r.launches).toBe(1);
+  });
+
+  it("a line's try whose launch ran and lost its answer keeps asking after its run past the link window, and reads it once the machine answers", async () => {
+    const r = await landedThenDark(reset, reset, 2.5 * LINK_RETRY_WINDOW_MS, { asksUntilStopped: true });
+    expect(r.failure).toBeUndefined();
+    expect(r.lines).toEqual(["ran"]);
+    expect(r.launches).toBe(1);
+  });
+
+  it("a line's try asking after its run ends at the stop and not before, in the launch's own words", async () => {
+    const r = await landedThenDark(reset, reset, 10 * LINK_RETRY_WINDOW_MS, { asksUntilStopped: true, stopAt: 5 * LINK_RETRY_WINDOW_MS });
+    expect(r.failure).toBeInstanceOf(MachineUnreached);
+    expect(r.at).toBeGreaterThanOrEqual(5 * LINK_RETRY_WINDOW_MS);
+    expect(r.at).toBeLessThan(6 * LINK_RETRY_WINDOW_MS);
+    expect(r.lines).toEqual([]);
+  });
+
+  /** A machine every exec of which fails the way `fail` says, each costing a second of the stream's clock. */
+  const darkMachine = async (fail: () => Error) => {
+    const { backend, machine } = await makeMachine();
+    scriptGuest(backend, [{ append: "ran\n", exit: 0 }, {}]);
+    const clock = { now: 0 };
+    const calls: string[] = [];
+    backend.execImpl = async (_m, cmd): Promise<ExecResult> => {
+      calls.push(cmd);
+      clock.now += 1_000;
+      throw fail();
+    };
+    const opts = { now: () => clock.now, sleep: async (ms: number): Promise<void> => void (clock.now += ms) };
+    const stream = machineExecStream(machine, opts)("claude -p hi", { env: {} });
+    const failure = await (async (): Promise<Error> => {
+      for await (const l of stream.lines) void l;
+      throw new Error("the stream ended without a failure");
+    })().catch((e: unknown) => e as Error);
+    return { machine, failure, at: clock.now, calls };
+  };
+
+  it("a launch the provider refuses fails at once in its words, and never asks after a run while every exec is refused", async () => {
+    const r = await darkMachine(() => Object.assign(new Error("gone"), { kind: "missing", status: 404 }));
+    expect(r.failure.message).toBe(`remote launch failed on ${r.machine.id}: gone`);
+    expect(r.calls.filter(c => c.includes("WSP_LAUNCHED"))).toHaveLength(1);
+    expect(r.calls.filter(c => c.includes("WSP_RUN"))).toEqual([]);
+    expect(r.at).toBeLessThan(10_000);
+  });
+
+  it("a launch whose posts went out to a computer that never answers again fails as unreached once the question about its run has had a link window, not at the turn's wall", async () => {
+    const r = await darkMachine(() => Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" }));
+    expect(r.failure).toBeInstanceOf(MachineUnreached);
+    expect(r.calls.some(c => c.includes("WSP_RUN"))).toBe(true);
+    expect(r.at).toBeGreaterThan(LINK_RETRY_WINDOW_MS);
+    expect(r.at).toBeLessThan(3 * LINK_RETRY_WINDOW_MS);
+  });
+
+  it("a launch none of whose posts left this computer fails without asking the machine about a run it never started", async () => {
+    const { backend, machine } = await makeMachine();
+    const g = unreachedGuest(backend, 99, fetchFailed);
+    const stream = machineExecStream(machine, g.opts)("claude -p hi", { env: {} });
+    await expect(
+      (async () => {
+        for await (const l of stream.lines) void l;
+      })(),
+    ).rejects.toBeInstanceOf(MachineUnreached);
+    expect(g.guest.calls.filter(c => c.includes("WSP_RUN"))).toEqual([]);
+  });
+
   it("a launch that failed for any reason but the network fails at once, in the machine's own words", async () => {
     const { backend, machine } = await makeMachine();
     const g = unreachedGuest(backend, 99, () => Object.assign(new Error("gone"), { kind: "missing", status: 404 }));
