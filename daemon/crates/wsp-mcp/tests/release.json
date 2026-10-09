@@ -3,5 +3,5 @@
   "url": "http://127.0.0.1:{port}",
   "theirs": "0.0.1",
   "road": "service",
-  "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"this line runs wsp 0.3.0 and the host at http://127.0.0.1:{port} runs wsp 0.0.1: restart that host with wsp restart.\"}],\"structuredContent\":{\"error\":\"this line runs wsp 0.3.0 and the host at http://127.0.0.1:{port} runs wsp 0.0.1: restart that host with wsp restart.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}"
+  "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"this line runs wsp 0.3.1 and the host at http://127.0.0.1:{port} runs wsp 0.0.1: restart that host with wsp restart.\"}],\"structuredContent\":{\"error\":\"this line runs wsp 0.3.1 and the host at http://127.0.0.1:{port} runs wsp 0.0.1: restart that host with wsp restart.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}"
 }
