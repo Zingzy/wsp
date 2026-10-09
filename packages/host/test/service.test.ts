@@ -832,6 +832,22 @@ describe("wsp up --service, wsp down and wsp status", () => {
     expect(held[0]).toBe(`wsp down: the host a verb started (pid ${process.pid}) is still serving ${statePath}.`);
   });
 
+  it("wsp down stops a host a verb started beside a unit the manager no longer runs, rather than waiting on that host's lock as the unit's", async () => {
+    // The app's service stopped with its unit file left (a reboot with it off at login, a stop by hand), and an older
+    // wsp's verb started a host of its own on the state file.
+    const tag = serviceTag(statePath);
+    mkdirSync(join(home, "fake-units"), { recursive: true });
+    writeFileSync(join(home, "fake-units", `${tag}.unit`), `fake /opt/wsp up --state ${statePath}\n`);
+    writeFileSync(join(home, ".wsp", "host.lock"), JSON.stringify({ pid: process.pid, port: 4400, startedAt: new Date().toISOString(), startedBy: "verb" }));
+    const fake = svc({ stop: pid => void (pid === process.pid && rmSync(join(home, ".wsp", "host.lock"), { force: true })), waitMs: 500 });
+    const lines: string[] = [];
+    const errors: string[] = [];
+    expect(await downCommand(quietIO(lines, errors), opts, fake.deps)).toBe(0);
+    expect(errors).toEqual([]);
+    expect(lines).toEqual([hostStoppedLine("verb", process.pid, statePath)]);
+    expect(existsSync(join(home, ".wsp", "host.lock"))).toBe(false);
+  });
+
   it("wsp down stops the host wsp up started, whatever port it took, and says which line brought it up", async () => {
     // Both testers ended their session here: up started it, down refused to stop it, and they killed a pid by
     // hand. The pid comes off the lock that host wrote, so the port it ended up on decides nothing.

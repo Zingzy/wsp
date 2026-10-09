@@ -34,12 +34,16 @@ export interface HostSwitcher {
   token(): string | undefined;
   /** Puts the window on a host on the account, or on this computer for null, loaded at the fragment where one is named. */
   to(alias: string | null, hash?: string): Promise<HostOutcome>;
+  /** This computer's own host after a replace, which may answer at another address: the window's way back here, and
+   * the host it is on where that was here. */
+  replaced(local: HostSession): void;
 }
 
 const text = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
 export function hostSwitcher(deps: SwitcherDeps): HostSwitcher {
-  let current = deps.local;
+  let local = deps.local;
+  let current = local;
   const dial = deps.dial ?? dialHost;
 
   /** A record off the account, dialled once before the window moves: the first dial admits this computer over there
@@ -68,10 +72,14 @@ export function hostSwitcher(deps: SwitcherDeps): HostSwitcher {
       hosts: accountHosts(deps.statePath, deps.home).map(({ alias, record }) => ({ alias, url: record.url })),
     }),
     token: () => (current.remote ? current.deviceToken : hostTokenFor(deps.statePath)),
+    replaced(session) {
+      if (current === local) current = session;
+      local = session;
+    },
     async to(alias, hash) {
       try {
         if (alias === null) {
-          await moveTo(deps.local, hash);
+          await moveTo(local, hash);
           return { ok: true };
         }
         const held = readHost(deps.home, alias);

@@ -236,8 +236,10 @@ export async function downCommand(io: CliIO, opts: { statePath: string }, deps: 
     io.error(`wsp down: ${runFailureLine(failure)}`);
     return 1;
   }
-  if (!held && !installed) {
-    const serving = servingHost(opts.statePath);
+  const serving = servingHost(opts.statePath);
+  // A host a line started holds the lock whatever unit the manager has, and only its pid stops it.
+  const lineStarted = serving?.startedBy !== undefined && serving.startedBy !== "service";
+  if ((!held && !installed) || lineStarted) {
     // A host the command line brought up is wsp down's to stop, whether a verb started it for itself or a person
     // typed wsp up: up and down are a pair. The pid comes off the lock that host wrote, never off a search for a
     // process that looks like it.

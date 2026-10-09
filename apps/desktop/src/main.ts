@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { adoptLoginPath, agentsHere, aimedHost, computerNameHere, daemonBinaryHere, dialHost, installEach, mcpServerSpec, runningWsp, serviceAddressHere, shimPath, systemService, wspHome, type CliIO } from "@wsp/host";
+import { adoptLoginPath, agentsHere, aimedHost, computerNameHere, daemonBinaryHere, dialHost, installEach, mcpServerSpec, runningWsp, serviceAddressHere, shimPath, systemService, wspHome, VERSION, type CliIO } from "@wsp/host";
 import { DEFAULT_PREFERENCES, HOME_ENV, HOST_WORDS, OutsideLine, ThemePreference, hostMenuAction, hostsMenuItems } from "@wsp/protocol";
 import { BrowserWindow, Menu, Notification, Tray, app, dialog, ipcMain, nativeImage, nativeTheme, powerSaveBlocker, shell, type IpcMainEvent, type IpcMainInvokeEvent } from "electron";
 import { awakeWanted } from "./awake.js";
@@ -11,7 +11,7 @@ import { chooseFrom, contextMenuTemplate, parseContextMenuItems } from "./contex
 import { deepLinks, linkInArgv } from "./deep-link.js";
 import { fontDirs, fontFamilies, indexFonts, localFontFaces, type FontFile } from "./fonts.js";
 import { bundleShell, type BundleShell } from "./get-bundle.js";
-import { KeptOtherRelease, homeOf, loginStart, openHost, openHostReady, setLoginStart, statePathIn, stopWsp, userDataIn, workingHere, type HostSession, type Launch, type OpenHostOptions } from "./host-lifecycle.js";
+import { KeptOtherRelease, earlierHostCheck, homeOf, loginStart, oneAtATime, openHost, openHostReady, servesAgainNotice, setLoginStart, statePathIn, stopWsp, userDataIn, workingHere, type HostSession, type Launch, type OpenHostOptions } from "./host-lifecycle.js";
 import { hostSwitcher, type HostSwitcher } from "./host-switch.js";
 import { offerMove, type MoveGate } from "./move.js";
 import { noticeWindowOf, sayOutside, showBadge, type Notifier } from "./needs-you.js";
@@ -21,7 +21,7 @@ import { guardWorkers, loadHostPage } from "./page-session.js";
 import { pagePreviews } from "./previews.js";
 import { QUIT_WORD, quitAnswer, quitChoice, quitPrompt } from "./quit.js";
 import { bundleOf, discardStage, inPlaceRefusal, settleStage, stageOf, stageUpdate, startSwap } from "./self-update.js";
-import { installShim, keepAppImage, shimText, type ShimTarget } from "./shim.js";
+import { installShim, keepAppImage, replaceOlderOnPath, shimText, type ShimTarget } from "./shim.js";
 import { trayModel, trayNotice, type TrayAct, type TrayModel, type TrayRow } from "./tray.js";
 import { desktopOf, setsMenu, titleBarOverlayFor, vibrancyFor, windowOptions, type UpdateRoad } from "./window.js";
 import { isShellZoomChord, shellChordOf } from "./zoom.js";
@@ -316,8 +316,13 @@ function where(): { home: string; statePath: string } {
 /** The host the window opens on: the one serving this launch's state file, the account's, or this computer's own
  * service, installed and started first where it is not serving. */
 function attach(): Promise<HostSession> {
-  return openHost(hostOptions());
+  return hostTurn(() => openHost(hostOptions()));
 }
+
+/** Every road that may ask about an older host takes its turn here: a launch, a Dock or menu bar click, a Start, and
+ * the menu bar's check on each dial. */
+const hostTurn = oneAtATime();
+const recheck = earlierHostCheck();
 
 function hostOptions(): OpenHostOptions {
   const { home, statePath } = where();
@@ -479,7 +484,7 @@ app.on("activate", () => void reopen());
  * nothing yet. */
 async function openOnHost(): Promise<void> {
   // Read across a restart: a launch that meets the host on its way down attaches again to the one coming up.
-  const opened = await openHostReady(hostOptions()).catch((e: unknown) => {
+  const opened = await hostTurn(() => openHostReady(hostOptions())).catch((e: unknown) => {
     // The person kept a host of another release serving, and this app draws no page but its own release's.
     if (!(e instanceof KeptOtherRelease)) throw e;
     io.log(e.message);
@@ -539,7 +544,7 @@ function follow(on: HostSession): void {
   fed = undefined;
   const { home, statePath } = where();
   feed = hostFeed({
-    dial: () => dialHost(statePath, { aim: on.remote && on.alias !== undefined ? aimedHost(statePath, { host: on.alias, home }) : { kind: "here" }, home }),
+    dial: () => (on.remote && on.alias !== undefined ? dialHost(statePath, { aim: aimedHost(statePath, { host: on.alias, home }), home }) : dialHere()),
     changed: state => {
       fed = state;
       drawTray();
@@ -548,6 +553,37 @@ function follow(on: HostSession): void {
     event: sayWhileClosed,
     log: io.error,
   });
+}
+
+/** The feed's dial on this computer's host, each reconnect included: a host of an earlier release that came up since
+ * the window opened is replaced first, and the window moves to the host serving after it. One that serves again after
+ * its replace is left, said once, and the dial refuses it as before. */
+async function dialHere(): Promise<Awaited<ReturnType<typeof dialHost>>> {
+  const { home, statePath } = where();
+  try {
+    const found = await hostTurn(() => recheck(hostOptions()));
+    if (found.kind === "replaced") await movedHere(found.session);
+    if (found.kind === "again" && found.first) void dialog.showMessageBox({ type: "warning", ...servesAgainNotice(found.release, found.failed) });
+  } catch (e) {
+    // As at start: the person kept the older host serving, and this app draws no page but its own release's.
+    if (e instanceof KeptOtherRelease) {
+      io.log(e.message);
+      app.quit();
+    }
+    throw e;
+  }
+  return dialHost(statePath, { aim: { kind: "here" }, home });
+}
+
+/** This computer's host after a replace, which may answer at another port: every bridge call is held to the session's
+ * address, so the session, the way back here and a window on it all move. */
+async function movedHere(next: HostSession): Promise<void> {
+  const onHere = session === local;
+  local = next;
+  switcher?.replaced(next);
+  if (!onHere) return;
+  session = next;
+  if (win !== undefined) await loadHostPage(win, next.url, { log: io.error });
 }
 
 function menuOf(rows: readonly TrayRow[]): Electron.MenuItemConstructorOptions[] {
@@ -688,6 +724,14 @@ app
     // Then, before the service is written and before the first launch reads the agents on this computer: a window
     // opened from Finder or the Dock was handed launchd's PATH, and the service runs with the PATH this launch holds.
     await adoptLoginPath(line => io.log(line));
+    // Read off the login PATH just taken, by an installed app alone: a development build is no release to link to.
+    if (app.isPackaged) {
+      try {
+        for (const line of replaceOlderOnPath(wspHome(), process.env["PATH"] ?? "", VERSION)) io.log(line);
+      } catch (e) {
+        io.error(`the wsp on PATH was not checked: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
     await openWindow();
   })
   .catch((e: unknown) => {
