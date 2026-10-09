@@ -7,9 +7,8 @@ import browser from "@/assets/shots/w-browser.webp";
 import terminal from "@/assets/shots/w-terminal.webp";
 import editor from "@/assets/shots/w-editor.webp";
 import pr from "@/assets/shots/w-pr.webp";
-import usage from "@/assets/shots/w-usage.webp";
 
-type Feature = { title: string; line: string; src: string; alt: string; at: At; scale: number; wall: string; wide?: boolean; size?: [number, number] };
+type Feature = { title: string; line: string; src: string; alt: string; at: At; scale: number; wall: string; wide?: boolean };
 
 const FEATURES: Feature[] = [
   {
@@ -58,16 +57,6 @@ const FEATURES: Feature[] = [
     wall: "85% 55%",
     alt: "The browser pane showing the site the thread is serving on localhost:5420, beside the thread.",
   },
-  {
-    title: "Know what every agent used.",
-    line: "Tokens and cost at list price, by agent, account, computer, project and model, with each plan's limits a tab away.",
-    src: usage,
-    at: "top",
-    scale: 0.9,
-    wall: "40% 40%",
-    wide: true,
-    alt: "The usage page: tokens a day for Claude Code and Codex, and the table by agent and model.",
-  },
 ];
 
 export function Features() {
@@ -81,7 +70,7 @@ export function Features() {
               <h3 className="text-[18px] font-medium tracking-[-0.012em] text-foreground">{f.title}</h3>
               <p className={cn("mt-1.5 text-[15px] leading-relaxed text-muted-foreground", f.wide && "md:mt-0 md:max-w-[520px] md:text-right")}>{f.line}</p>
             </figcaption>
-            <Peek src={f.src} alt={f.alt} at={f.at} scale={f.scale} size={f.size} wall={f.wall} className={cn("mt-auto", f.wide ? "aspect-[2.1]" : "aspect-[1.45]")} />
+            <Peek src={f.src} alt={f.alt} at={f.at} scale={f.scale} wall={f.wall} className={cn("mt-auto", f.wide ? "aspect-[2.1]" : "aspect-[1.45]")} />
           </figure>
         ))}
       </div>
