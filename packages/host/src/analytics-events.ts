@@ -37,6 +37,12 @@ function modeWord(agent: string | undefined, mode: string | undefined): string |
   return catalog?.permissionModes.some(o => o.value === mode) === true ? mode : OTHER;
 }
 
+/** Sent beside every event's own properties. host is how the host was started; surface reads the app apart from
+ * usewsp.com, which sends to the same project. */
+export function hostCommon(version: string, started: string | undefined): AnalyticsProps {
+  return { wspVersion: version, os: ["darwin", "linux", "win32"].includes(process.platform) ? process.platform : OTHER, arch: ["arm64", "x64"].includes(process.arch) ? process.arch : OTHER, host: started ?? "app", surface: "app" };
+}
+
 /** A computer's own os line ("Ubuntu 24.04", "macOS 15.0", "Darwin 25.4.0") as one of three words. */
 export function osWord(os: string | undefined): string {
   if (os === undefined) return OTHER;
