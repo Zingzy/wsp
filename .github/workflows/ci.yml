@@ -312,6 +312,10 @@ jobs:
       # building it never does; the command bundle shares its chunks with the window's main.
       - name: The staged bundle loads
         run: node apps/desktop/build/app/main/cli.mjs --version
+      # The release's signing step word for word: run from apps/desktop, which has no vitest config of its own, it
+      # loads the root one, so a setup file the root config names by a relative path fails here and not at a tag.
+      - name: The release's signing check runs from apps/desktop
+        run: pnpm --filter @wsp/desktop exec vitest run --minWorkers=1 --maxWorkers=1 test/signing.test.ts
       - name: The packed command and the staged app carry no cloud provider
         env:
           PUBLIC_BUILD: "1"
