@@ -268,6 +268,7 @@ const ALLOWED: Record<Rule, readonly Allowed[]> = {
     { text: "expect(Date.now() - started).toBeLessThan(3_000);", count: 1, why: "a server that exits or never answers is given up on under 3 to 6 s rather than at the suite's budget" },
     { text: "expect(Date.now() - started).toBeLessThan(600);", count: 1, why: "tight: a redial waits its whole 300 ms window and ends within 600 ms to 1 s of it" },
     { text: "expect(Date.now() - started).toBeLessThan(100);", count: 1, why: "tight: hostile slate input is refused under 100 to 500 ms; the faults it guards take seconds and gigabytes" },
+    { text: "expect(spent).toBeLessThan(15_000);", count: 1, why: "200 streamed events among 200 threads settle in about 1 s; re-deriving every thread once per workspace took 7 s idle" },
     { text: "expect(performance.now() - started).toBeLessThan(200);", count: 1, why: "tight: hostile slate input is refused under 100 to 500 ms; the faults it guards take seconds and gigabytes" },
     { text: "expect(performance.now() - started).toBeLessThan(500);", count: 1, why: "tight: hostile slate input is refused under 100 to 500 ms; the faults it guards take seconds and gigabytes" },
     { text: "expect(took).toBeLessThan(50);", count: 1, why: "tight: a start in the project folder answers under 50 ms, which a worktree's copy would not" },

@@ -1,8 +1,19 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { threadKeyOf, type HarnessCatalog, type SessionView } from "@wsp/protocol";
+import { threadKeyOf, type HarnessCatalog, type PauseMode, type SessionView } from "@wsp/protocol";
 import type { State } from "./types.js";
 
 export const NO_SESSIONS: SessionView[] = [];
+
+const pauses = new WeakMap<State["landings"], Record<string, PauseMode | undefined>>();
+/** How each project's computer pauses a machine, by project id: one object per landings record, so every surface
+ * deriving the sidebar passes the same one and they share one answer. */
+export function pauseModesOf(landings: State["landings"]): Record<string, PauseMode | undefined> {
+  const held = pauses.get(landings);
+  if (held !== undefined) return held;
+  const modes = Object.fromEntries(Object.entries(landings).map(([project, landing]) => [project, landing?.capabilities.pauseMode]));
+  pauses.set(landings, modes);
+  return modes;
+}
 
 /** The selected workspace's id, or null while a creation row is selected: no command may act on a creation's key. */
 /** The workspace selected, or none while the selection is a workspace still being made. */

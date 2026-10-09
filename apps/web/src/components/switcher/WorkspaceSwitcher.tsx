@@ -11,7 +11,7 @@ import { agentName } from "@wsp/catalog";
 import { deriveSidebarProjects } from "../../adapt/index.js";
 import { cn } from "../../lib/utils.js";
 import { ProjectGlyph } from "../../projects/look.js";
-import { threadOnScreen, useStore } from "../../protocol/store.js";
+import { pauseModesOf, threadOnScreen, useStore } from "../../protocol/store.js";
 import { capturePagePreview, loadPagePreviews, picturesInTheme, useWorkspacePreviews } from "../../shell/workspacePreviews.js";
 import { highlightedTarget, SWITCHER_PAINT_DELAY_MS, useWorkspaceSwitcher } from "../../shell/workspaceSwitcher.js";
 import { HarnessMark } from "../chat/HarnessMark.js";
@@ -26,6 +26,7 @@ export function WorkspaceSwitcher() {
   const workspaces = useStore(s => s.workspaces);
   const statuses = useStore(s => s.statuses);
   const sessions = useStore(s => s.sessions);
+  const landings = useStore(s => s.landings);
   const places = useStore(s => s.places);
   const images = useWorkspacePreviews(s => s.images);
   const [painted, setPainted] = useState(false);
@@ -73,8 +74,8 @@ export function WorkspaceSwitcher() {
 
   const cards = useMemo(() => {
     if (!open || !painted) return [];
-    return buildSwitcherCards({ projects: deriveSidebarProjects({ workspaces, statuses, sessions }), places, targets, images: picturesInTheme(images, targets.map(target => target.threadId)) });
-  }, [targets, images, open, painted, places, sessions, statuses, workspaces]);
+    return buildSwitcherCards({ projects: deriveSidebarProjects({ workspaces, statuses, sessions, pauseModes: pauseModesOf(landings) }), places, targets, images: picturesInTheme(images, targets.map(target => target.threadId)) });
+  }, [targets, images, landings, open, painted, places, sessions, statuses, workspaces]);
 
   if (!open || !painted) return null;
   return (

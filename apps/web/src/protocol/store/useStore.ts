@@ -25,7 +25,7 @@ import { useComposerFilesStore } from "../../components/chat/composerFiles.js";
 import { useComposerOptionsStore } from "../../components/chat/composerOptionsStore.js";
 import { transcripts } from "../../components/chat/transcripts.js";
 import { couldNotStart, explainCreateRefusal, keptAtLoad, madeAs, NO_LINES, restored, toKeep } from "./creations.js";
-import { addressed, firstRow, groupSessions, keptThread, openThreadOf, remembered } from "./selection.js";
+import { addressed, firstRow, groupSessions, keptRows, keptThread, openThreadOf, remembered } from "./selection.js";
 import { CREATION_PREFIX, NO_SESSIONS } from "./selectors.js";
 import type { CostTick, Creation, CreationLine, Opens, State } from "./types.js";
 
@@ -658,7 +658,11 @@ export const useStore = create<State>((set, get) => {
         const rows = await api.listSessions(workspaceId);
         if ((rowsFrom.get(workspaceId) ?? 0) > asked) return;
         rowsFrom.set(workspaceId, asked);
-        set(s => ({ sessions: { ...s.sessions, [workspaceId]: rows } }));
+        // A list the host answered unchanged writes nothing, so a reread of every workspace changes only what moved.
+        set(s => {
+          const kept = keptRows(s.sessions[workspaceId], rows);
+          return kept === s.sessions[workspaceId] ? s : { sessions: { ...s.sessions, [workspaceId]: kept } };
+        });
       } catch (e) {
         // Said once per workspace for a refusal; anything else, the next session event asks again.
         if (e instanceof RequestError && !sessionsSaid.has(workspaceId)) {

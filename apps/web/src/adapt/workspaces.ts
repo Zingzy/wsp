@@ -35,8 +35,12 @@ function threadsOf(rows: ReadonlyArray<SessionView>, workspace: WorkspaceView): 
   return threads;
 }
 
+/** The list last answered, so every surface reading it in one change gets the same array, and gets it again while no
+ * workspace in it changed. */
+let last: { snapshots: SidebarProjectSnapshot[]; sorted: SidebarProjectSnapshot[] } | null = null;
+
 export function deriveSidebarProjects(input: SidebarInput): SidebarProjectSnapshot[] {
-  return input.workspaces
+  const snapshots = input.workspaces
     .filter(workspace => !bareFolder(workspace, (input.sessions?.[workspace.id]?.length ?? 0) > 0))
     .map(workspace => {
       const status = input.statuses?.[workspace.id] ?? null;
@@ -65,15 +69,26 @@ export function deriveSidebarProjects(input: SidebarInput): SidebarProjectSnapsh
       };
       built.set(workspace, { status, rows, pauseMode, snapshot });
       return snapshot;
-    })
-    .sort(byCreation);
+    });
+  if (last !== null && last.snapshots.length === snapshots.length && last.snapshots.every((snapshot, i) => snapshot === snapshots[i])) return last.sorted;
+  last = { snapshots, sorted: snapshots.toSorted(byCreation) };
+  return last.sorted;
 }
+
+const created = new WeakMap<WorkspaceView, number>();
+const createdMs = (workspace: WorkspaceView): number => {
+  const held = created.get(workspace);
+  if (held !== undefined) return held;
+  const ms = Date.parse(workspace.createdAt);
+  created.set(workspace, ms);
+  return ms;
+};
 
 /** A list a person picks rows out of by position may not reshuffle while they reach for one, so nothing about what
  * a machine is doing sorts it and recency lives in the palette's Recent list instead. Two workspaces stamped the
  * same millisecond fall to their ids, since the record they arrive in is a map with no order of its own. */
 const byCreation = (a: SidebarProjectSnapshot, b: SidebarProjectSnapshot): number =>
-  Date.parse(a.workspace.createdAt) - Date.parse(b.workspace.createdAt) || a.id.localeCompare(b.id);
+  createdMs(a.workspace) - createdMs(b.workspace) || a.id.localeCompare(b.id);
 
 /** The workspace ids as the sidebar draws them, top to bottom: the one order every "first" or "next" workspace reads. */
 export function sidebarWorkspaceOrder(input: SidebarInput): string[] {

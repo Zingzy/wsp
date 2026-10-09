@@ -7,7 +7,7 @@ import type { ProtocolEvent } from "../client.js";
 import type { Failure } from "../failure.js";
 import { absenceOf } from "../../settings/places.js";
 import { useStore } from "./useStore.js";
-import { catalogIn, catalogsIn, NO_SESSIONS, selectedWorkspaceIdOf, threadRows } from "./selectors.js";
+import { catalogIn, catalogsIn, NO_SESSIONS, pauseModesOf, selectedWorkspaceIdOf, threadRows } from "./selectors.js";
 import type { CostTick, Creation } from "./types.js";
 
 /** Every workspace with its threads, as the sidebar's rows read them, for the surfaces that need the whole fleet
@@ -18,8 +18,7 @@ export function useSidebarProjects(): SidebarProjectSnapshot[] {
   const statuses = useStore(s => s.statuses);
   const sessions = useStore(s => s.sessions);
   const landings = useStore(s => s.landings);
-  const pauseModes = useMemo(() => Object.fromEntries(Object.entries(landings).map(([project, landing]) => [project, landing?.capabilities.pauseMode])), [landings]);
-  return useMemo(() => deriveSidebarProjects({ workspaces, statuses, sessions, pauseModes }), [workspaces, statuses, sessions, pauseModes]);
+  return useMemo(() => deriveSidebarProjects({ workspaces, statuses, sessions, pauseModes: pauseModesOf(landings) }), [workspaces, statuses, sessions, landings]);
 }
 
 /** Every workspace's send in flight, for the sidebar, which reads them beside the rows the runtime has written. */
