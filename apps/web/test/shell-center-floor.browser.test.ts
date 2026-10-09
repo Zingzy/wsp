@@ -11,6 +11,8 @@
 // kept width, a press on the rail with no travel keeps the record as it was
 // and a drag past the cap writes the width the pointer asked for inside the
 // record's own bounds, so the sidebar comes back to it once the panel closes.
+// A drag on the panel's edge widens it by the pointer's travel, and a drag
+// past the centre's floor stops the panel at that floor (#1957).
 // Both themes draw the same boxes. Runs only when asked for (WSP_RENDER=1)
 // and skips without Playwright's Chromium.
 import { mkdirSync } from "node:fs";
@@ -282,5 +284,37 @@ describe.skipIf(renderSkipped !== undefined)("the shell's centre column floor la
       expectNoScroll(shell, where);
       expectRowWhole(shell, where);
     }
+  }, 90_000);
+
+  it("at 1600 px a 150 px drag on the panel's edge widens the panel by 150 px, and a drag past the centre's floor stops it there", async () => {
+    const viewport = 1600;
+    await page!.setViewportSize({ width: viewport, height: 800 });
+    await page!.goto(`${base}?theme=dark&local=1&ws=ws_m&projects=1&efforts=1&panel=preview`);
+    await page!.waitForSelector("[data-composer-picker='access']");
+    await settle();
+    /** The pointer on the handle's middle, pressed, moved by dx, released. */
+    const drag = async (dx: number): Promise<void> => {
+      const b = await page!.locator("[data-preview-panel-mode=inline] > [role=separator]").boundingBox();
+      if (!b) throw new Error("the panel's handle has no box");
+      const x = b.x + b.width / 2;
+      const y = b.y + b.height / 2;
+      await page!.mouse.move(x, y);
+      await page!.mouse.down();
+      await page!.mouse.move(x + dx, y, { steps: 8 });
+      await page!.mouse.up();
+      await settle();
+    };
+    const before = await readShell();
+    await drag(-150);
+    const wider = await readShell();
+    console.info(`${viewport} panel drag: ${before.panel!.width} px, after 150 px ${wider.panel!.width} px`);
+    expect(wider.panel!.width - before.panel!.width, "a 150 px drag on the panel's edge").toBe(150);
+
+    await drag(-viewport);
+    const widest = await readShell();
+    const floor = Math.min(Math.floor(viewport * 0.7), Math.floor(widest.panel!.right - widest.center.left) - CENTER_COLUMN_MIN_WIDTH);
+    console.info(`${viewport} panel drag past the floor: ${widest.panel!.width} px, centre ${widest.center.width} px`);
+    expect(widest.panel!.width, "a drag past the centre's floor").toBe(floor);
+    expect(widest.center.width).toBeGreaterThanOrEqual(CENTER_COLUMN_MIN_WIDTH - 0.5);
   }, 90_000);
 });
