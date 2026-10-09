@@ -67,8 +67,6 @@ wsp add root@203.0.113.7 --name vps --host-key 'SHA256:...'
 
 `--host-key` takes the fingerprint alone or the whole `ssh-ed25519 SHA256:...` word. If the server answers with another key, the add stops before it sends anything. But ssh has already written that other key into your `known_hosts`, so a second add without `--host-key` trusts it without a question. Before you add the server again, run the `ssh-keygen -R` line that the refusal prints, which takes that key out.
 
-<video src="/shots/docs-ssh-add.mp4" autoPlay muted loop playsInline aria-label="wsp add root@203.0.113.7 in a terminal: the host key question, then each step of the install" />
-
 Other flags of the add:
 
 - `--recipe <name>` sets the server up from a saved recipe. Step 4 shows how to save one.

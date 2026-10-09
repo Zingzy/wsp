@@ -24,7 +24,8 @@
       ],
       "fixture": "a Debian box",
       "kind": "tape",
-      "seconds": 15
+      "seconds": 15,
+      "skip": "Needs a Linux computer to run the install line on; none the shoot can change."
     },
     {
       "name": "docs-first-thread",
@@ -33,7 +34,8 @@
       ],
       "fixture": "site",
       "kind": "recording",
-      "seconds": 15
+      "seconds": 15,
+      "skip": "The fixture's agents are stand-ins that send no reply, so a first thread cannot be recorded replying without faking the product."
     },
     {
       "name": "wizard",
@@ -74,7 +76,8 @@
       ],
       "fixture": "site",
       "kind": "recording",
-      "seconds": 12
+      "seconds": 12,
+      "skip": "Needs a turn that streams while a second message waits; the fixture's stand-in agents send no reply."
     },
     {
       "name": "sidebar",
@@ -94,7 +97,8 @@
       ],
       "fixture": "site",
       "kind": "recording",
-      "seconds": 15
+      "seconds": 15,
+      "skip": "Needs a lead's live turn starting sub-threads; the fixture's stand-in agents send no reply."
     },
     {
       "name": "docs-prompt",
@@ -137,8 +141,9 @@
       "pages": [
         "/features/projects"
       ],
-      "fixture": "site",
-      "kind": "still"
+      "fixture": "changes",
+      "kind": "still",
+      "note": "A thread run with wsp run --branch, in its worktree: the composer's row names the branch. wsp add takes no --branch."
     },
     {
       "name": "setup",
@@ -157,8 +162,7 @@
         "/guides/behind-a-firewall"
       ],
       "fixture": "firewall",
-      "kind": "still",
-      "clip": "computers list"
+      "kind": "still"
     },
     {
       "name": "docs-join",
@@ -167,7 +171,8 @@
         "/guides/behind-a-firewall"
       ],
       "fixture": "throwaway host",
-      "kind": "tape"
+      "kind": "tape",
+      "skip": "Needs a relay join code and a box to join."
     },
     {
       "name": "computers",
@@ -246,7 +251,8 @@
       ],
       "fixture": "site-slates",
       "kind": "recording",
-      "seconds": 10
+      "seconds": 10,
+      "skip": "The site-slates fixture writes every value in, so no slate refreshes on a timer."
     },
     {
       "name": "terminal",
@@ -304,7 +310,8 @@
       ],
       "fixture": "site, one failed check",
       "kind": "recording",
-      "seconds": 10
+      "seconds": 10,
+      "skip": "Send to agent starts a turn the stand-in agent cannot answer."
     },
     {
       "name": "docs-files",
@@ -322,7 +329,8 @@
       ],
       "fixture": "site",
       "kind": "still",
-      "clip": "pane"
+      "clip": "pane",
+      "skip": "The Computer pane reads the Mac it runs on: its load and memory are the owner's, and disagree with the fixture's own figures."
     },
     {
       "name": "docs-processes",
@@ -331,7 +339,8 @@
       ],
       "fixture": "site",
       "kind": "still",
-      "clip": "pane"
+      "clip": "pane",
+      "skip": "The Processes pane reads the Mac it runs on, and its rows showed the owner's own processes."
     },
     {
       "name": "docs-side-question",
@@ -340,7 +349,8 @@
       ],
       "fixture": "site",
       "kind": "still",
-      "clip": "pane"
+      "clip": "pane",
+      "skip": "A side question needs the agent to answer; the fixture's stand-in agents send no reply."
     },
     {
       "name": "docs-rewind",
@@ -442,7 +452,8 @@
         "/guides/home-computer"
       ],
       "fixture": "throwaway host",
-      "kind": "tape"
+      "kind": "tape",
+      "skip": "Needs a reachable ssh computer the shoot may install on; its real address and key would show."
     },
     {
       "name": "docs-doctor",

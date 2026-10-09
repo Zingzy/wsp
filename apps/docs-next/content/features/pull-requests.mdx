@@ -51,8 +51,6 @@ Click **Ask your agent to fix** on a failed check. wsp sends one message to the 
 
 If the thread is idle, the message starts a turn at once. If the thread is working, the message joins the running turn where the agent takes one, and otherwise waits as the thread's next turn. If the computer already runs as many threads as it takes at once, the turn waits for a free place.
 
-<video src="/shots/docs-pr-fix.mp4" autoPlay muted loop playsInline aria-label="A failed check sent to the agent, and the thread starting a turn with the failure." />
-
 The command line does the same with `wsp fix <workspace> --check "<name>"`. Without `--check`, `wsp fix` first updates the branch from its base. If that merge conflicts, it sends the agent the files to resolve.
 
 ## Send review comments to the agent
