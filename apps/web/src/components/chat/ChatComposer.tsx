@@ -76,7 +76,7 @@
 import { cn, isMacPlatform } from "../../lib/utils";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type ClipboardEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { PaperclipIcon } from "lucide-react";
-import { ASIDE_NO_SESSION_LINE, composerHeldLine, HERE_PLACE_ID, hereName, HOST_ASLEEP_SEND, isLocalWorkspace, signedOutLine, type AgentsTarget, FILES_MAX, FILE_MAX_WORDS, IMAGE_MAX_WORDS, IMAGE_TYPE_WORDS, TURN_IN_FLIGHT, movesRunningAccess, noImagesLine, readsImages, screenCommandLine, screenCommandTyped, screenCommandsOf, sendRefusal, type SendRefusalKind, type WorkspaceState } from "@wsp/protocol";
+import { ASIDE_NO_SESSION_LINE, composerHeldLine, HERE_PLACE_ID, hereName, HOST_ASLEEP_SEND, isLocalWorkspace, signedOutLine, type AgentsTarget, FILES_MAX, FILE_MAX_WORDS, IMAGE_MAX_WORDS, IMAGE_TYPE_WORDS, TURN_IN_FLIGHT, movesRunningAccess, noImagesLine, readsImages, screenCommandLine, screenCommandTyped, screenCommandsOf, sendRefusal, type SendRefusalKind, type TurnLimit, type WorkspaceState } from "@wsp/protocol";
 import type { ConnStatus } from "../../protocol/client";
 import { hostAsleep } from "../../boot";
 import { projectHomeKey, useAbsentComputer, useHarnessCatalogs, useStore, useThreadSessions, useWorkspace, useWorkspaceState } from "../../protocol/store";
@@ -107,7 +107,7 @@ import { partitionStashFiles, usePromptStashStore, type PromptStashEntry } from 
 import { ComposerStashMenu, stashedWord } from "./ComposerStashMenu";
 import { usePublishContext } from "./ContextMeter";
 import { useChatDropZone } from "./ChatDropZone";
-import { useTypeToFocus } from "./composerTypeToFocus";
+import { useTypeToFocus, useTypeToWrite } from "./composerTypeToFocus";
 import { useComposerModesStore } from "./composerModesStore";
 import { nextPastedTextName, pastesAsFile } from "./pastedText";
 import { buildComposerPromptHistoryEntries, stepComposerPromptHistory, type ComposerPromptHistoryPosition } from "./composerPromptHistory";
@@ -120,13 +120,16 @@ import { resolveComposerMenuActiveItemId } from "./composerMenuHighlight";
 import { ComposerModelChips } from "./ComposerModelChips";
 import { useMultiPicks } from "./composerMultiPick";
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
-import { ComposerQueue } from "./ComposerQueue";
+import { ComposerDrawer, hasRows, type DrawerRows } from "./ComposerDrawer";
+import { firstLine, QueueBar, QUEUE_WORDS } from "./bars/QueueBar";
+import { TasksBar } from "./bars/TasksBar";
+import { limitWords, UsageBar } from "./bars/UsageBar";
+import { foldBar, useComposerBarStore, useOpenBar } from "./composerBar";
 import { ComposerSurface } from "./ComposerSurface";
 import { ACCESS_IN_BAR_PX, useAnimatedHeight, useFlip, useTallDraft, useWiderThan } from "./composerMotion";
 import { Button } from "../ui/button";
 import type { ChatThreadHandle } from "./useChatThread";
-import { ComposerTasks } from "./ComposerTasks";
-import { asksThePerson, composerTasks } from "./composerTasks.logic";
+import { composerTasks } from "./composerTasks.logic";
 
 const noop = () => {};
 
@@ -206,6 +209,14 @@ export function sendPicks(pinned: boolean, picks: ComposerStart): ComposerStart 
   return kept;
 }
 
+/** The usage limit that stopped a thread's latest turn: whose it is, what the agent said of its reset, and the reset
+ * the host is armed to go on at, null while nobody armed it. */
+export interface ThreadLimit {
+  readonly agent: string;
+  readonly limit: TurnLimit;
+  readonly resumeAt: number | null;
+}
+
 /** A stop click still out for the turn it targeted; the turn id keeps it from leaking onto the next turn. */
 interface StopAttempt {
   readonly turnId: string;
@@ -213,9 +224,10 @@ interface StopAttempt {
 
 /** `onStart` takes the first send instead of the runtime: a project's home has no workspace yet, and its send is what
  * makes one. A sentence it answers is why nothing was made: the draft goes back and the sentence is raised as a flyout.
- * `waiting` is set while the workspace is still being made: a send joins the queue, whose cards say on their hover
+ * `waiting` is set while the workspace is still being made: a send joins the queue, whose drawer row says on its hover
  * why they wait, and nothing leaves it here, since the queue goes to the workspace once it is up; the folder row
- * names the copy's folder. */
+ * names the copy's folder. `question` is the line of the question the person folded and `limit` the usage limit that
+ * stopped the thread's turn, each a row of the drawer on the box's edge. */
 export function ChatComposer({
   workspaceId,
   thread,
@@ -225,6 +237,8 @@ export function ChatComposer({
   sendLabel: sendGiven,
   beside,
   under,
+  question = null,
+  limit = null,
 }: {
   workspaceId: string;
   thread: ChatThreadHandle;
@@ -239,6 +253,8 @@ export function ChatComposer({
   /** One line under the tray, where what is typed is refused before any send: a link no project matches. It stands
    * below the composer's glass, which ends at the tray. */
   under?: ReactNode;
+  question?: string | null;
+  limit?: ThreadLimit | null;
 }) {
   const api = useStore(s => s.api);
   const waits = waiting !== undefined;
@@ -264,9 +280,8 @@ export function ChatComposer({
   const opening = opensThread(thread);
   const folderStart = useMemo(() => (opening ? nextStart : viewCwd !== null ? { cwd: viewCwd } : {}), [nextStart, opening, viewCwd]);
   const { harness: harnessId, startOptions, pinned, latestRow, catalog: harnessCatalog, model: pickedModel, picks } = useComposerPicks(workspaceId, thread);
-  const latestTurnId = thread.view.latestTurn?.turnId ?? null;
-  const prompts = thread.view.entries.flatMap(e => (e.kind === "permission" && e.permission.turnId === latestTurnId ? [e.permission] : []));
-  const tasks = composerTasks({ latestTurn: thread.view.latestTurn, running: thread.view.running, plan: thread.view.plan, asking: asksThePerson(prompts, latestRow?.waitingOn !== undefined) });
+  const tasks = composerTasks({ latestTurn: thread.view.latestTurn, running: thread.view.running, plan: thread.view.plan });
+  const openBar = useOpenBar(threadKey);
   const launching = useStore(s => s.launching);
   const launched = useStore(s => s.launched);
   const harnessCatalogs = useHarnessCatalogs(workspaceId);
@@ -758,6 +773,28 @@ export function ChatComposer({
     [dropFiles, removeQueued, threadKey],
   );
 
+  const drawer: DrawerRows = {
+    question,
+    usage: limit === null ? null : { name: limitWords(limit.agent, limit.limit, limit.resumeAt).title, agent: limit.agent, resetsAt: limit.limit.resetsAt ?? null },
+    tasks: tasks === null ? null : { step: tasks.step, count: `${tasks.done}/${tasks.total}` },
+    queue: head === undefined ? null : { name: head.id === next ? QUEUE_WORDS.sending : QUEUE_WORDS.waiting(queue.length), line: firstLine(head.prompt), ...(waiting === undefined ? {} : { hover: waiting.line }) },
+  };
+  const bar =
+    openBar === "tasks" && tasks !== null ? (
+      <TasksBar tasks={tasks} threadKey={threadKey} workspaceId={workspaceId} />
+    ) : openBar === "queue" && head !== undefined ? (
+      <QueueBar rows={queue} files={queuedFiles} threadKey={threadKey} workspaceId={workspaceId} onEdit={editCard} onRemove={removeCard} />
+    ) : openBar === "usage" && limit !== null ? (
+      <UsageBar agent={limit.agent} limit={limit.limit} resumeAt={limit.resumeAt} threadKey={threadKey} workspaceId={workspaceId} />
+    ) : null;
+  // A bar whose thing went (the turn ended, the last message left) gives the place back, and stays shut after.
+  const barGone = openBar !== null && bar === null;
+  useEffect(() => {
+    if (barGone) foldBar(threadKey, workspaceId);
+  }, [barGone, threadKey, workspaceId]);
+  // The editor is not drawn under a bar, so a letter typed there goes into the draft and the composer comes back.
+  useTypeToWrite(workspaceId, bar !== null, () => useComposerBarStore.getState().closeBar(threadKey));
+
   const selectItem = useCallback(
     (item: ComposerCommandItem) => {
       const snapshot = editorRef.current?.readSnapshot() ?? { value: draft.prompt, expandedCursor: expandCollapsedComposerCursor(draft.prompt, draft.cursor) };
@@ -1002,12 +1039,12 @@ export function ChatComposer({
     </div>
   );
 
+  if (bar !== null) return bar;
   return (
     <div className="relative w-full px-3 pt-1.5 pb-4 sm:px-5 sm:pt-2 sm:pb-5" data-chat-composer>
       {dropZone}
-      <ComposerQueue rows={queue} files={queuedFiles} next={next} waiting={waiting?.line ?? null} onEdit={editCard} onRemove={removeCard} />
-      <ComposerSurface.Shell tray attached={tasks !== null}>
-        {tasks !== null ? <ComposerTasks tasks={tasks} /> : null}
+      <ComposerSurface.Shell tray attached={hasRows(drawer)}>
+        <ComposerDrawer threadKey={threadKey} rows={drawer} />
         <ComposerSurface.Host>
           <form
             className="mx-auto w-full min-w-0 max-w-3xl"

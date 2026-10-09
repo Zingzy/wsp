@@ -59,9 +59,10 @@ export function imageBuildFrame(e: Pick<GoldenStageEvent, "stage" | "detail">, p
 
 /** A create's lines as the step list draws them: each ended step with how long it took, off the gap to the line after
  * it, and the last one under way with its time climbing, or the one a refusal stopped on, failed with the reason. The
- * refusal is not a step of its own, and a create that has reported nothing yet is one step, the asking. Once the
- * create has `ended`, `now` is the moment it landed and the last step is done at that time. */
-export function creationSteps(creation: Pick<Creation, "lines" | "failed" | "askedAt">, now: number, ended = false): StepLine[] {
+ * refusal is not a step of its own, and a create that has reported nothing yet is one step, the asking. Given
+ * `landedAt`, the create ended then and the last step is done at that time. */
+export function creationSteps(creation: Pick<Creation, "lines" | "failed" | "askedAt">, landedAt?: number): StepLine[] {
+  const ended = landedAt !== undefined;
   const { failed } = creation;
   const taken = creation.lines.filter(line => line.stage !== "failed");
   const refusedAt = creation.lines.find(line => line.stage === "failed");
@@ -72,7 +73,7 @@ export function creationSteps(creation: Pick<Creation, "lines" | "failed" | "ask
     const next = taken[i + 1];
     if (next !== undefined) return { ...row, state: "done", ms: Math.max(0, next.elapsedMs - line.elapsedMs) };
     if (failed !== null) return stopped(row, refusedAt === undefined ? undefined : Math.max(0, refusedAt.elapsedMs - line.elapsedMs));
-    const ms = Math.max(0, now - creation.askedAt - line.elapsedMs);
-    return ended ? { ...row, state: "done", ms } : { ...row, state: "working", ticking: true, ms };
+    const since = creation.askedAt + line.elapsedMs;
+    return ended ? { ...row, state: "done", ms: Math.max(0, landedAt - since) } : { ...row, state: "working", since };
   });
 }

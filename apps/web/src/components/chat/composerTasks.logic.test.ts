@@ -11,31 +11,28 @@ const steps = [
   { text: "push", key: "push\n0", state: "pending" as const },
 ];
 
-describe("the tasks row on the composer's edge", () => {
+describe("the tasks row in the composer's drawer", () => {
   it("names the step the running turn is on, with how many of its own steps are done", () => {
-    expect(composerTasks({ latestTurn: turn("t1"), running: true, plan: { turnId: "t1", steps }, asking: false })).toEqual({ step: "fix the rounding", done: 1, total: 3, steps });
+    expect(composerTasks({ latestTurn: turn("t1"), running: true, plan: { turnId: "t1", steps } })).toEqual({ step: "fix the rounding", done: 1, total: 3, steps });
   });
 
   it("names the first step still to do when none is working", () => {
     const waiting = steps.map(s => (s.state === "working" ? { ...s, state: "pending" as const } : s));
-    expect(composerTasks({ latestTurn: turn("t1"), running: true, plan: { turnId: "t1", steps: waiting }, asking: false })?.step).toBe("fix the rounding");
+    expect(composerTasks({ latestTurn: turn("t1"), running: true, plan: { turnId: "t1", steps: waiting } })?.step).toBe("fix the rounding");
   });
 
   it("is gone once the turn ends", () => {
-    expect(composerTasks({ latestTurn: turn("t1", "completed"), running: false, plan: { turnId: "t1", steps }, asking: false })).toBeNull();
+    expect(composerTasks({ latestTurn: turn("t1", "completed"), running: false, plan: { turnId: "t1", steps } })).toBeNull();
   });
 
-  it("stands aside while the agent asks the person something", () => {
-    expect(composerTasks({ latestTurn: turn("t1"), running: true, plan: { turnId: "t1", steps }, asking: true })).toBeNull();
-  });
 
   it("carries no earlier turn's list into this one", () => {
-    expect(composerTasks({ latestTurn: turn("t2"), running: true, plan: { turnId: "t1", steps }, asking: false })).toBeNull();
+    expect(composerTasks({ latestTurn: turn("t2"), running: true, plan: { turnId: "t1", steps } })).toBeNull();
   });
 
   it("is gone when every step is done, or the list holds none", () => {
     const done = steps.map(s => ({ ...s, state: "done" as const }));
-    expect(composerTasks({ latestTurn: turn("t1"), running: true, plan: { turnId: "t1", steps: done }, asking: false })).toBeNull();
-    expect(composerTasks({ latestTurn: turn("t1"), running: true, plan: { turnId: "t1", steps: [] }, asking: false })).toBeNull();
+    expect(composerTasks({ latestTurn: turn("t1"), running: true, plan: { turnId: "t1", steps: done } })).toBeNull();
+    expect(composerTasks({ latestTurn: turn("t1"), running: true, plan: { turnId: "t1", steps: [] } })).toBeNull();
   });
 });

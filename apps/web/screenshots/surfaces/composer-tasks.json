@@ -7,6 +7,6 @@
     "row-id=thread:tasks",
     "390:key:Escape"
   ],
-  "wait": "composer-tasks",
+  "wait": "drawer-row=tasks",
   "settleMs": 800
 }

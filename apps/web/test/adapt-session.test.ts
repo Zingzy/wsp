@@ -1004,7 +1004,8 @@ describe("the agent's plan", () => {
       { type: "session.plan", ...scoped, turnId: "t2", at: 6_000, steps: first },
     ]);
     expect(model.timeline.map(e => e.kind)).toEqual(["message", "message", "message"]);
-    expect(model.plan).toEqual({ turnId: "t2", steps: first.map(step => ({ ...step, key: `${step.text}\n0` })) });
+    // A step at work carries when it began, for the Tasks bar's ticking time.
+    expect(model.plan).toEqual({ turnId: "t2", steps: first.map(step => ({ ...step, key: `${step.text}\n0`, ...(step.state === "working" ? { startedAt: 6_000 } : {}) })) });
   });
 
   it("times each step from the list that set it working to the one that marked it done", () => {
@@ -1013,7 +1014,7 @@ describe("the agent's plan", () => {
       { type: "session.plan", ...scoped, turnId: "t1", at: 2_000, steps: first },
       { type: "session.plan", ...scoped, turnId: "t1", at: 9_500, steps: second },
     ]);
-    expect(model.plan).toEqual({ turnId: "t1", steps: [{ text: "read", key: "read\n0", state: "done", durationMs: 7_500 }, { text: "write", key: "write\n0", state: "working" }] });
+    expect(model.plan).toEqual({ turnId: "t1", steps: [{ text: "read", key: "read\n0", state: "done", durationMs: 7_500 }, { text: "write", key: "write\n0", state: "working", startedAt: 9_500 }] });
   });
 
   it("takes the plan the agent proposed as the turn's plan card, a later one replacing it", () => {

@@ -154,7 +154,7 @@ async function firstTurn(w: Window, host: Host, result: { status: "completed" | 
 
 const chat = () => document.querySelector<HTMLElement>("[data-chat-view]");
 const footer = () => document.querySelector("[data-testid=settled-footer]")?.textContent ?? null;
-const waitingCard = () => document.querySelector("[data-composer-queue]");
+const waitingCard = () => document.querySelector("[data-drawer-row=queue]");
 
 let restoreLayout: () => void = () => {};
 beforeAll(() => { restoreLayout = installFakeLayout(); });

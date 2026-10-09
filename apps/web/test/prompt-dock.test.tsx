@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The prompt dock in the thread: a prompt the thread's own agent is stopped
 // on takes the composer's place, is answered with its keys or its buttons,
-// folds to one row over the composer on Esc, and gives the composer back once
+// folds to the first row of the composer's drawer on Esc, and gives the composer back once
 // it closes. Same fixture api shape as chat-composer.test.tsx; no live daemon.
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -203,14 +203,14 @@ describe("the prompt dock", () => {
     await waitFor(() => expect(document.querySelector("[data-permission-refused]")).toBeNull());
   });
 
-  it("folds to one row over the composer on Esc, and opens again from that row", async () => {
+  it("folds to the first row of the composer's drawer on Esc, and opens again from that row", async () => {
     const { api } = fixture([bash("ask_e")]);
     await setup(api);
     press(root(), "Escape");
-    await waitFor(() => expect(document.querySelector("[data-prompt-strip]")).not.toBeNull());
+    await waitFor(() => expect(document.querySelector("[data-drawer-row=question]")).not.toBeNull());
     expect(document.querySelector("[data-prompt-dock]")).toBeNull();
     expect(composer()).not.toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Answer" }));
+    fireEvent.click(document.querySelector("[data-drawer-row=question]")!);
     await waitFor(() => expect(document.querySelector('[data-prompt-dock="ask_e"]')).not.toBeNull());
   });
 
@@ -238,7 +238,7 @@ describe("the prompt dock", () => {
     expect(keyBelongsElsewhere(document.body, "1")).toBe(false);
     press(root(), "h");
     await waitFor(() => expect(composer()).not.toBeNull());
-    expect(document.querySelector("[data-prompt-strip]")).not.toBeNull();
+    expect(document.querySelector("[data-drawer-row=question]")).not.toBeNull();
     expect(useComposerDraftStore.getState().drafts[WS]?.prompt).toBe("h");
     expect(answered).toEqual([]);
   });
@@ -253,7 +253,7 @@ describe("the prompt dock", () => {
     enter(document.querySelector<HTMLElement>("[data-prompt-dock] [data-copy-row] button")!);
     expect(answered).toEqual([]);
     enter(document.querySelector<HTMLElement>("[data-prompt-write]")!);
-    await waitFor(() => expect(document.querySelector("[data-prompt-strip]")).not.toBeNull());
+    await waitFor(() => expect(document.querySelector("[data-drawer-row=question]")).not.toBeNull());
     expect(answered).toEqual([]);
   });
 

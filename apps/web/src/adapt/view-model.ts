@@ -86,6 +86,8 @@ export interface TaskStep extends PlanStep {
   /** The step's words and how many steps with those words came before it: one step's key across the list's rewrites. */
   readonly key: string;
   readonly durationMs?: number;
+  /** When a step at work began, where the list's events said so. */
+  readonly startedAt?: number;
 }
 
 /** The agent's step list for one turn as it last wrote it. */
