@@ -7,7 +7,7 @@ import { act, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-const drawn = vi.hoisted(() => ({ tiles: 0 }));
+const drawn = vi.hoisted(() => ({ tiles: 0, subagents: new Map<string, number>() }));
 vi.mock("../src/sidebar/ThreadTile.js", async importOriginal => {
   const { memo } = await import("react");
   const real = await importOriginal<typeof import("../src/sidebar/ThreadTile.js")>();
@@ -21,11 +21,23 @@ vi.mock("../src/sidebar/ThreadTile.js", async importOriginal => {
     }, tile.compare),
   };
 });
+vi.mock("../src/sidebar/SubagentRow.js", async importOriginal => {
+  const { memo } = await import("react");
+  const real = await importOriginal<typeof import("../src/sidebar/SubagentRow.js")>();
+  const row = real.SubagentRow as unknown as { type: (props: { subagent: { id: string } }) => ReactNode; compare: (a: object, b: object) => boolean };
+  return {
+    ...real,
+    SubagentRow: memo((props: { subagent: { id: string } }) => {
+      drawn.subagents.set(props.subagent.id, (drawn.subagents.get(props.subagent.id) ?? 0) + 1);
+      return row.type(props);
+    }, row.compare),
+  };
+});
 vi.mock("../src/components/DiffWorkerPoolProvider.js", () => ({
   DiffWorkerPoolProvider: ({ children }: { children?: ReactNode }) => children,
 }));
 
-import type { HarnessCatalog, ProjectView, SessionView, WorkspaceView } from "@wsp/protocol";
+import type { HarnessCatalog, ProjectView, SessionView, SubagentView, WorkspaceView } from "@wsp/protocol";
 import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { AppShell } from "../src/shell/AppShell.js";
@@ -161,5 +173,30 @@ describe("over a lead's tree", () => {
     await waitFor(() => expect(document.querySelectorAll("[data-slot=sidebar] [data-thread-status=waiting]").length).toBe(1));
     await settle();
     expect(drawn.tiles - before).toBe(1);
+  });
+});
+
+describe("a lead's subagents in the sidebar", () => {
+  /** A working lead running twelve subagents, beside two threads of its own. */
+  const subagents = (moved?: (sub: SubagentView) => SubagentView): SubagentView[] =>
+    Array.from({ length: 12 }, (_, i) => {
+      const sub: SubagentView = { id: `sa_${i}`, title: `subagent ${i}`, state: "running", parentToolUseId: `toolu_${i}`, startedAt: 1_000 + i, asked: `Read part ${i}` };
+      return i === 5 && moved !== undefined ? moved(sub) : sub;
+    });
+
+  it("a keystroke in the composer and a listing read again redraw no subagent row, and one subagent's change redraws its row alone", async () => {
+    SESSIONS = [{ ...thread(1, "running"), subagents: subagents() }, thread(2, "completed"), thread(3, "completed")];
+    const editor = await mount();
+    await waitFor(() => expect(document.querySelectorAll("[data-slot=sidebar] [data-subagent-row]").length).toBe(12));
+    await settle();
+    drawn.subagents.clear();
+    for (const ch of "abcdef") await typeInto(editor, ch);
+    await act(() => useStore.getState().reloadSessions(WS));
+    await settle();
+    expect(drawn.subagents.size).toBe(0);
+    SESSIONS = [{ ...thread(1, "running"), subagents: subagents(sub => ({ ...sub, model: "claude-opus-5-5" })) }, thread(2, "completed"), thread(3, "completed")];
+    await act(() => useStore.getState().reloadSessions(WS));
+    await settle();
+    expect(Object.fromEntries(drawn.subagents)).toEqual({ sa_5: 1 });
   });
 });

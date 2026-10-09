@@ -182,6 +182,15 @@ describe("the app's built CSS", () => {
     expect(withGroupHas.flatMap(broken)).toEqual(["a :has() styling past its own element: :where(.group\\/g):has([data-x]) *"]);
   });
 
+  it("holds for the sheets the app writes into a viewer's shadow root at runtime, which no build reads", () => {
+    const injected = sources(SRC)
+      .filter(file => !file.endsWith(".css"))
+      .flatMap(file => [...readFileSync(file, "utf8").matchAll(/`([^`]*)`/g)].map(m => m[1]!))
+      .filter(text => text.includes("{"));
+    expect(injected.some(text => text.includes("[data-separator-content]"))).toBe(true);
+    expect(injected.flatMap(text => selectorLists(text)).flatMap(broken)).toEqual([]);
+  });
+
   it("reads the shapes it is meant to", () => {
     expect(broken(":is(:where(.group\\/g):has([data-x]) *)")).toHaveLength(1);
     expect(broken(".a:has(> b) > c")).toHaveLength(1);

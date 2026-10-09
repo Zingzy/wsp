@@ -3,21 +3,27 @@ import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const drawn = vi.hoisted(() => ({ rows: new Map<string, number>() }));
+const drawn = vi.hoisted(() => ({ rows: new Map<string, number>(), subagents: new Map<string, number>() }));
 vi.mock("../src/components/threads/ThreadRows.js", async importOriginal => {
   const { memo } = await import("react");
   const real = await importOriginal<typeof import("../src/components/threads/ThreadRows.js")>();
   // The row is a memo: count its draws inside it, behind the row's own comparison, where the tree draws it.
   const row = real.ThreadRow as unknown as { type: (props: { thread: { id: string } }) => ReactNode; compare: (a: object, b: object) => boolean };
+  const subagentRow = real.SubagentRow as unknown as { type: (props: { subagent: { id: string } }) => ReactNode; compare: (a: object, b: object) => boolean };
   return {
     ...real,
     ThreadRow: memo((props: { thread: { id: string } }) => {
       drawn.rows.set(props.thread.id, (drawn.rows.get(props.thread.id) ?? 0) + 1);
       return row.type(props);
     }, row.compare),
+    SubagentRow: memo((props: { subagent: { id: string } }) => {
+      drawn.subagents.set(props.subagent.id, (drawn.subagents.get(props.subagent.id) ?? 0) + 1);
+      return subagentRow.type(props);
+    }, subagentRow.compare),
   };
 });
 
+import type { SubagentView } from "@wsp/protocol";
 import type { SidebarThreadSnapshot } from "../src/adapt/index.js";
 import { ThreadRow, type ThreadRowItem } from "../src/components/threads/ThreadRows.js";
 import { useNotices } from "../src/notices/store.js";
@@ -150,6 +156,7 @@ describe("a lead's children as rows", () => {
     vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
     vi.setSystemTime(NOW);
     drawn.rows.clear();
+    drawn.subagents.clear();
   });
   afterEach(() => {
     cleanup();
@@ -294,6 +301,26 @@ describe("a lead's children as rows", () => {
     drawn.rows.clear();
     view.rerender(tree(twelve(t => ({ ...t, asking: "Bash: pnpm install" }))));
     expect(drawn.rows.size).toBe(0);
+  });
+
+  it("redraws only the subagent row that moved, among twelve, and none when the listing is read again unchanged", () => {
+    const lead = (moved?: (sub: SubagentView) => SubagentView) =>
+      thread("lead", {
+        status: "running",
+        startedAt: at(20),
+        endedAt: null,
+        subagents: Array.from({ length: 12 }, (_, i) => {
+          const sub: SubagentView = { id: `sa_${i}`, title: `subagent ${i}`, state: "running", parentToolUseId: `toolu_${i}`, startedAt: NOW.getTime() - (30 - i) * 60_000, asked: `Read part ${i}` };
+          return i === 5 && moved !== undefined ? moved(sub) : sub;
+        }),
+      });
+    const view = render(tree([], lead()));
+    expect([...drawn.subagents.values()].reduce((a, b) => a + b, 0)).toBe(12);
+    drawn.subagents.clear();
+    view.rerender(tree([], lead()));
+    expect(drawn.subagents.size).toBe(0);
+    view.rerender(tree([], lead(sub => ({ ...sub, model: "claude-opus-5-5" }))));
+    expect(Object.fromEntries(drawn.subagents)).toEqual({ sa_5: 1 });
   });
 
   it("redraws a row whose restart link moved, since its menu reads both ends", () => {

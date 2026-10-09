@@ -88,6 +88,29 @@ describe("index.css", () => {
     );
   });
 
+  it("takes the glass inks only while the page draws its glass: with transparency off the sidebar keeps the theme's quiet inks", () => {
+    // Each declaration that reads the glass ink, with the heads of the blocks it sits in, outermost first.
+    const reads: string[][] = [];
+    const heads: string[] = [];
+    let head = "";
+    for (const ch of css.replace(/\/\*[\s\S]*?\*\//g, "")) {
+      if (ch === "{") {
+        heads.push(head.trim());
+        head = "";
+      } else if (ch === "}") {
+        heads.pop();
+        head = "";
+      } else if (ch === ";") {
+        if (/^--[\w-]+:.*var\(--glass-ink\)/.test(head.trim())) reads.push([...heads]);
+        head = "";
+      } else head += ch;
+    }
+    expect(reads.length).toBeGreaterThan(6);
+    expect(reads.filter(within => !within.some(h => h.includes(":not(.solid)")))).toEqual([]);
+    const sidebar = /\n(\S[^{\n]*\[data-app-sidebar\]) \{\n {2}@variant dark \{\n {4}--muted-foreground: var\(--glass-ink\);/.exec(css)!;
+    expect(sidebar[1]).toBe(".desktop-mac:not(.solid) [data-app-sidebar]");
+  });
+
   it("pins the sidebar glass utility added after the upstream set", () => {
     const additions = css.slice(css.indexOf("/* wsp additions below this line. */"));
     expect(additions).toMatchInlineSnapshot(`
@@ -136,10 +159,13 @@ describe("index.css", () => {
         background: transparent;
       }
 
-      .desktop-mac.dark {
+      .desktop-mac.dark:not(.solid) {
         /* Over a white desktop the glass reads as mid grey and the page's muted ink falls under AA on every share of it;
            this step clears it under a hover fill and stays a step behind the body. */
         --muted-foreground: color-mix(in oklab, var(--glass-ink) 85%, var(--material-ground));
+      }
+
+      .desktop-mac.dark {
         --material-centre: 67%;
         --material-panel: 74%;
         --material-sidebar: 40%;
@@ -294,8 +320,9 @@ describe("index.css", () => {
       /* Over the glass the sidebar's quiet text and glyphs have no solid card
          behind them: one step up, the rows' words and the prose whole, the
          counts nearly opaque and the state words a tint lighter, keep them at AA
-         over a white desktop, where the glass reads as mid grey. */
-      .desktop-mac [data-app-sidebar] {
+         over a white desktop, where the glass reads as mid grey. With transparency off there is no glass, and the
+         theme's own inks stand. */
+      .desktop-mac:not(.solid) [data-app-sidebar] {
         @variant dark {
           --muted-foreground: var(--glass-ink);
           --sidebar-muted-foreground: var(--glass-ink);
@@ -312,7 +339,7 @@ describe("index.css", () => {
 
       /* The search row's word paints at the kit's 80 percent; over the glass it
          takes the muted token whole, the step that keeps it AA over a white desktop. */
-      .desktop-mac [data-app-sidebar] [data-search-row] {
+      .desktop-mac:not(.solid) [data-app-sidebar] [data-search-row] {
         color: var(--sidebar-muted-foreground);
       }
 

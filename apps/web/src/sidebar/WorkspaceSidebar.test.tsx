@@ -1136,7 +1136,7 @@ describe("a lead's tree in the sidebar", () => {
     await waitFor(() => expect(screen.queryByText("grandchild")).toBeNull());
     expect(lead().getAttribute("aria-expanded")).toBe("false");
     const shut = lead().querySelector<HTMLElement>("[data-tile-fold]")!;
-    expect(shut.textContent).toBe("3");
+    expect(shut.textContent).toBe("4");
     expect(shut.className).not.toContain("opacity-0");
     expect(shut.querySelector("svg.lucide-chevron-right")).not.toBeNull();
     expect(lead().closest("li")!.querySelector("ul, [data-child-fold]")).toBeNull();
@@ -1152,6 +1152,19 @@ describe("a lead's tree in the sidebar", () => {
     expect(rowOf("child one").querySelector("[data-tile-fold]")).toBeNull();
     fireEvent.click(rowOf("child two").querySelector<HTMLElement>("[data-tile-fold]")!);
     await waitFor(() => expect(markThreads).toHaveBeenLastCalledWith(["c-two"], { folded: true }));
+  });
+
+  it("a folded tile whose tree is a Finished fold alone counts that fold's row, never 0", async () => {
+    mount({ projects: [project("pr_1", "spoo")], workspaces: [workspace("ws_a", "pricing page", "pr_1")] });
+    const tree = [
+      { ws: "ws_a", id: "lead", prompt: "coordinator", startedAgo: 2 * MIN },
+      { ws: "ws_a", id: "c-done", prompt: "child done", parent: "lead", status: "completed", startedAgo: 9 * MIN, endedAgo: 8 * MIN },
+    ];
+    await act(async () => useStore.setState({ sessions: sessions(tree) } as never));
+    await waitFor(() => expect(document.querySelector("[data-child-fold=finished]")).not.toBeNull());
+    await act(async () => useStore.setState({ sessions: sessions(tree.map(row => (row.id === "lead" ? { ...row, foldedAgo: MIN } : row))) } as never));
+    await waitFor(() => expect(document.querySelector("[data-child-fold=finished]")).toBeNull());
+    expect(rowOf("coordinator").querySelector<HTMLElement>("[data-tile-fold]")!.textContent).toBe("1");
   });
 
   it("draws live children first and the finished behind a shut Finished fold that mounts none of them; open, it pages twenty at a time; its menu and the lead's hold Settle N finished", async () => {
