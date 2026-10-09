@@ -15,6 +15,7 @@ import { draftForCommand, parseDraftFor, parseRename, parseSessionTitle, parseTi
 import { buildCommand, buildEnv, forwardsSubagentText, newSessionId, savedSpendCommand, serverValuesFile, userMessageLine } from "./landmines.js";
 import { steersOf } from "./steers.js";
 import { newPlanBook, readPlanCall, type PlanBook } from "./plans.js";
+import { endAnswer, heldCall, interimEnd, laterEnd, newHandbackBook, noteLine, readAnswer, taskEnded, type HandbackBook, type TurnDelta } from "./handback.js";
 import { shellCwdAfter } from "./shell-cwd.js";
 
 export interface StartOptions {
@@ -470,9 +471,6 @@ function subagentPrompts(event: Record<string, unknown>): [string, string][] {
   });
 }
 
-/** The CLI's own word for how a subagent ended, as wsp's; a word it has not used before reads as failed. */
-const SUBAGENT_ENDS: Readonly<Record<string, SubagentState>> = { completed: "done", failed: "failed", stopped: "stopped", killed: "stopped" };
-
 /** A subagent the agent started, off its task_started line: the CLI tracks background commands as tasks on the same
  * line, and task_type is what tells a subagent from one of those. */
 function subagentStarted(event: Record<string, unknown>): { task: string; parent?: string; title?: string; depth?: number } | undefined {
@@ -483,19 +481,6 @@ function subagentStarted(event: Record<string, unknown>): { task: string; parent
   const title = str(event.description);
   const depth = num(event.spawn_depth);
   return { task, ...(parent !== undefined ? { parent } : {}), ...(title !== undefined ? { title } : {}), ...(depth !== undefined ? { depth } : {}) };
-}
-
-/** A task the CLI says is over, off either line that says so: the notification with its summary, or the update a kill
- * writes ahead of it. Any task; the caller knows which of them are subagents. */
-function taskEnded(event: Record<string, unknown>): { task: string; state: SubagentState; summary?: string } | undefined {
-  if (str(event.type) !== "system") return undefined;
-  const subtype = str(event.subtype);
-  const task = str(event.task_id);
-  const status = subtype === "task_notification" ? str(event.status) : subtype === "task_updated" ? str(rec(event.patch)?.status) : undefined;
-  if (task === undefined || status === undefined) return undefined;
-  if (subtype === "task_updated" && status !== "killed") return undefined;
-  const summary = subtype === "task_notification" ? str(event.summary) : undefined;
-  return { task, state: SUBAGENT_ENDS[status] ?? "failed", ...(summary !== undefined && summary !== "" ? { summary } : {}) };
 }
 
 /** The CLI's own live background tasks (commands and subagents the agent did not wait for), sent whole each time the
@@ -528,7 +513,7 @@ function drainedNotice(event: Record<string, unknown>): boolean {
   return answeredNothing(normalizeResult(event, undefined));
 }
 
-function normalizeEvent(event: Record<string, unknown>, fallbackSessionId: string, refusal: { road?: string; cause?: TurnRefusal } | undefined, plans: PlanBook): AdapterEvent[] {
+function normalizeEvent(event: Record<string, unknown>, fallbackSessionId: string, refusal: { road?: string; cause?: TurnRefusal } | undefined, plans: PlanBook, book: HandbackBook): AdapterEvent[] {
   const sessionId = str(event.session_id) ?? fallbackSessionId;
   // A subagent's lines ride the parent's stream and carry the call that launched it; the parent's own carry null.
   const parent = str(event.parent_tool_use_id);
@@ -585,7 +570,7 @@ function normalizeEvent(event: Record<string, unknown>, fallbackSessionId: strin
               if (plan !== null) deltas.push({ type: "turn.plan", sessionId, ...plan });
               break;
             }
-            deltas.push({
+            const call: TurnDelta = {
               type: "turn.delta",
               sessionId,
               kind: "tool_use",
@@ -593,7 +578,8 @@ function normalizeEvent(event: Record<string, unknown>, fallbackSessionId: strin
               toolName: str(block.name),
               toolUseId: str(block.id),
               ...from,
-            });
+            };
+            if (!heldCall(book, call)) deltas.push(call);
             break;
           }
           default:
@@ -618,7 +604,7 @@ function normalizeEvent(event: Record<string, unknown>, fallbackSessionId: strin
           plans.unnamed.delete(answered);
           continue;
         }
-        deltas.push({
+        deltas.push(...readAnswer(book, {
           type: "turn.delta",
           sessionId,
           kind: "tool_result",
@@ -626,7 +612,7 @@ function normalizeEvent(event: Record<string, unknown>, fallbackSessionId: strin
           toolUseId: str(block.tool_use_id),
           isError: block.is_error === true,
           ...from,
-        });
+        }));
       }
       return deltas;
     }
@@ -718,6 +704,8 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
     /** The messages steered into this turn, which the reply waits on until the CLI has answered each. */
     const steers = steersOf(stream.taken ?? [], o.steered);
     const plans = newPlanBook();
+    /** How each of the turn's subagents ends and hands its report back. */
+    const book = newHandbackBook();
     /** What the model held after its last call, the agent's own and never a subagent's: the last reply's usage, or a
      * compaction's figure where one came after it. The result's usage sums the turn, so it cannot say this. */
     let heldContext: number | undefined;
@@ -924,6 +912,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
           }
           if (event.type === "assistant" && typeof event.uuid === "string" && (event.parent_tool_use_id === undefined || event.parent_tool_use_id === null)) anchor = event.uuid;
           for (const [call, prompt] of subagentPrompts(event)) askedBy.set(call, prompt);
+          noteLine(book, event);
           const childLine = str(event.type) === "assistant" && event.is_api_error_message !== true ? str(event.parent_tool_use_id) : undefined;
           const childModel = childLine === undefined ? undefined : str(rec(event.message)?.model);
           if (childLine !== undefined && childModel !== undefined) {
@@ -993,12 +982,14 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
             }
             continue;
           }
+          if (interimEnd(book, event)) continue;
           const ended = taskEnded(event);
-          if (ended !== undefined && subagents.get(ended.task) === "running") {
+          if (ended !== undefined && (subagents.get(ended.task) === "running" || (subagents.has(ended.task) && laterEnd(book, event)))) {
             subagents.set(ended.task, ended.state);
             const parent = launchedBy.get(ended.task);
             onEvent({ type: "subagent", sessionId: claudeSessionId, task: ended.task, state: ended.state, ...(parent !== undefined ? { parentToolUseId: parent } : {}), ...(ended.summary !== undefined ? { summary: ended.summary } : {}) });
           }
+          for (const answer of endAnswer(book, event, claudeSessionId)) onEvent(answer);
           const over = taskFinishedOf(event);
           if (over !== undefined) {
             if (heldReply !== undefined) finishedAfter.push(taskFinishedLine(taskNames.get(over.id) ?? over.id, over.status, Date.now() - heldAt));
@@ -1037,7 +1028,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
             refusalCause = cause;
             continue;
           }
-          for (const normalized of normalizeEvent(event, claudeSessionId, refusalOf(refusalCause), plans)) {
+          for (const normalized of normalizeEvent(event, claudeSessionId, refusalOf(refusalCause), plans, book)) {
             if (normalized.type === "session.start") {
               claudeSessionId = normalized.sessionId;
               initModel = normalized.model ?? initModel;

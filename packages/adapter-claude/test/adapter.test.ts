@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
-import { backgroundTasksLine, LOST_SESSION_NOTE, notifyTail, signInRefusalLine, SUBAGENT_ASKED_CHARS, subagentAsked } from "@wsp/protocol";
+import { backgroundTasksLine, internalToolResult, LOST_SESSION_NOTE, NO_REPORT_LINE, notifyTail, signInRefusalLine, SUBAGENT_ASKED_CHARS, subagentAsked } from "@wsp/protocol";
 import type { AdapterEvent, ExecStream, ExecStreamFactory, TurnResult } from "@wsp/protocol";
 import { createClaudeAdapter, type ClaudeSession } from "../src/adapter.js";
 import { CLAUDE_SCREEN_COMMANDS } from "../src/catalog.js";
@@ -492,6 +492,209 @@ describe("ClaudeAdapter over the recorded fixture", () => {
     const { events, onEvent } = collect();
     await adapter.start({ prompt: "serve", onEvent }).finished;
     expect(events.filter(e => e.type === "subagent")).toEqual([]);
+  });
+
+  describe("a subagent's end on 2.1.295: its report handed back in auto mode, framed or backgrounded in the default mode", () => {
+    const replay = async (lines: string[]): Promise<AdapterEvent[]> => {
+      const exec = scriptedExec(lines);
+      const adapter = createClaudeAdapter({ exec: exec.factory, configDir: "/root/.claude-cfg" });
+      const { events, onEvent } = collect();
+      await adapter.start({ prompt: "fan out", onEvent }).finished;
+      return events;
+    };
+    const recorded = (file: string): string[] => readFileSync(new URL(`./fixtures/${file}`, import.meta.url), "utf8").split("\n").filter(line => line.trim().length > 0);
+    const deltas = (events: AdapterEvent[]) => events.flatMap(e => (e.type === "turn.delta" ? [e] : []));
+    /** Every line the fold of one launching call reads: the call's own answers and its subagent's lines. */
+    const foldOf = (events: AdapterEvent[], call: string) => deltas(events).filter(d => d.toolUseId === call || d.parentToolUseId === call);
+    const handedBack = (events: AdapterEvent[], handback: string) => deltas(events).filter(d => d.toolName === "SubagentHandback" || d.toolUseId === handback);
+    const answer = (sessionId: string, call: string, text: string) => ({ type: "turn.delta", sessionId, kind: "tool_result", text, toolUseId: call, isError: false });
+
+    it("answers a backgrounded launch with the report, where the fold and the subagent's page end, and draws no hand-back", async () => {
+      const sid = "21921000-0000-4aaa-8bbb-000000000001";
+      const REPORT = "2 + 2 is 4.\n\n3 + 3 is 6.";
+      const events = await replay(recorded("subagent-handback.jsonl"));
+      const fold = foldOf(events, "toolu_01WspFixHandBg");
+      expect(fold.at(-1)).toEqual(answer(sid, "toolu_01WspFixHandBg", REPORT));
+      // The launch's own answer is the CLI's note to the model, which the fold hides; the report is the one other.
+      expect(fold.filter(d => d.kind === "tool_result" && d.toolUseId === "toolu_01WspFixHandBg").map(d => (internalToolResult(d.text) ? "note" : d.text))).toEqual(["note", REPORT]);
+      // The hand-back reads as the subagent's own last words, as an older CLI's forwarded text did.
+      expect(fold.filter(d => d.parentToolUseId === "toolu_01WspFixHandBg").map(d => [d.kind, d.text])).toEqual([["thinking", ""], ["text", REPORT]]);
+      expect(handedBack(events, "toolu_01WspFixHandBgCall")).toEqual([]);
+      expect(events.filter(e => e.type === "subagent" && e.state === "done")).toEqual([{ type: "subagent", sessionId: sid, task: "aafea93324a2f8ca1", parentToolUseId: "toolu_01WspFixHandBg", state: "done", summary: REPORT }]);
+    });
+
+    it("answers a launch it waited on with the report once, never the note that stands in its place", async () => {
+      const sid = "21921000-0000-4aaa-8bbb-000000000002";
+      const REPORT = "2+2 is 4.\n\n3+3 is 6.";
+      const events = await replay(recorded("subagent-handback-foreground.jsonl"));
+      const fold = foldOf(events, "toolu_01WspFixHandFg");
+      expect(fold.filter(d => d.kind === "tool_result" && d.parentToolUseId === undefined)).toEqual([answer(sid, "toolu_01WspFixHandFg", REPORT)]);
+      expect(fold.at(-1)).toEqual(answer(sid, "toolu_01WspFixHandFg", REPORT));
+      expect(fold.filter(d => d.parentToolUseId === "toolu_01WspFixHandFg").map(d => [d.kind, d.text])).toEqual([["text", REPORT]]);
+      expect(handedBack(events, "toolu_01WspFixHandFgCall")).toEqual([]);
+      expect(events.filter(e => e.type === "subagent" && e.state === "done").map(e => (e as { summary?: string }).summary)).toEqual([REPORT]);
+    });
+
+    it("leaves an older CLI's launch answered with the report as it was, in the same shape", async () => {
+      const events = await replay(subagentFixtureLines());
+      expect(foldOf(events, AGENT_A_CALL).at(-1)).toEqual(answer(FIXTURE_SESSION_ID, AGENT_A_CALL, "acpi\nadduser.conf\nalsa"));
+    });
+
+    // Variants of the recorded backgrounded run for the outcomes nobody recorded, each one line changed as the
+    // 2.1.295 binary's own schema and strings write it.
+    const BG = "toolu_01WspFixHandBg";
+    const BG_SID = "21921000-0000-4aaa-8bbb-000000000001";
+    const BG_REPORT = "2 + 2 is 4.\n\n3 + 3 is 6.";
+    const variant = (change: (frame: Record<string, unknown>) => Record<string, unknown>[]): string[] =>
+      recorded("subagent-handback.jsonl").flatMap(line => change(JSON.parse(line) as Record<string, unknown>).map(frame => JSON.stringify(frame)));
+    const isNotification = (frame: Record<string, unknown>) => frame["subtype"] === "task_notification";
+    const handbackResult = (frame: Record<string, unknown>) => frame["type"] === "user" && JSON.stringify(frame).includes("toolu_01WspFixHandBgCall");
+    const doneSummaries = (events: AdapterEvent[]) => events.flatMap(e => (e.type === "subagent" && e.state !== "running" ? [[e.state, e.summary]] : []));
+    const answers = (events: AdapterEvent[], call: string) => deltas(events).filter(d => d.kind === "tool_result" && d.toolUseId === call && d.parentToolUseId === undefined);
+
+    it("draws a report auto mode flagged with its warning above it, in the answer, the subagent's last words and the listing", async () => {
+      const warning = "SECURITY WARNING: auto mode blocked this subagent's report. Reason: the report asks the caller to run a command it was not asked for. The report follows; review the subagent's actions carefully before acting on it.";
+      const events = await replay(variant(f => [isNotification(f) ? { ...f, handback: "flagged", handback_report: { text: BG_REPORT, warning } } : f]));
+      const warned = `${warning}\n\n${BG_REPORT}`;
+      expect(foldOf(events, BG).at(-1)).toEqual(answer(BG_SID, BG, warned));
+      expect(foldOf(events, BG).filter(d => d.parentToolUseId === BG && d.kind === "text").map(d => d.text)).toEqual([warned]);
+      // The listing keeps one line, so it is the warning.
+      expect(doneSummaries(events)).toEqual([["done", warning]]);
+    });
+
+    it("leaves a hand-back the CLI refused as the failed call it was, and ends the backgrounded subagent done without a report", async () => {
+      const refused = "Nothing was sent: the agent that spawned you is no longer running.";
+      const events = await replay(variant(f => {
+        if (handbackResult(f)) {
+          const result = (f["message"] as { content: { content: { text: string }[] }[] }).content[0]!;
+          result.content[0]!.text = JSON.stringify({ success: false, message: refused });
+          return [f];
+        }
+        if (!isNotification(f)) return [f];
+        const { handback_report: _report, ...rest } = f;
+        return [{ ...rest, handback: "withheld", summary: "The subagent ended without delivering a report through SubagentHandback, so no report was delivered. Its unsent text is not shown. Send the agent a message (SendMessage) to ask it to deliver its report.\n" }];
+      }));
+      const fold = foldOf(events, BG);
+      expect(fold.filter(d => d.parentToolUseId === BG).map(d => [d.kind, d.toolName ?? null, d.kind === "tool_result" ? d.text : null, d.isError ?? null])).toEqual([
+        ["thinking", null, null, null],
+        ["tool_use", "SubagentHandback", null, null],
+        ["tool_result", null, refused, true],
+        ["note", null, null, null],
+      ]);
+      expect(answers(events, BG).filter(d => !internalToolResult(d.text))).toEqual([answer(BG_SID, BG, NO_REPORT_LINE)]);
+      expect(doneSummaries(events)).toEqual([["done", NO_REPORT_LINE]]);
+    });
+
+    it("ends a withheld subagent it waited on in wsp's words, never the CLI's instruction to the model", async () => {
+      const call = "toolu_01WspFixWh1";
+      const events = await replay(recorded("subagent-handback-withheld.jsonl"));
+      expect(answers(events, call)).toEqual([answer("21921000-0000-4aaa-8bbb-000000000003", call, NO_REPORT_LINE)]);
+      expect(foldOf(events, call).at(-1)).toEqual(answer("21921000-0000-4aaa-8bbb-000000000003", call, NO_REPORT_LINE));
+      expect(deltas(events).some(d => d.text.includes("SendMessage"))).toBe(false);
+      // Its page leaves the answer out after words of its own, so the line that no report came is one of its lines too.
+      expect(foldOf(events, call).filter(d => d.parentToolUseId === call).at(-1)).toMatchObject({ kind: "note", text: NO_REPORT_LINE });
+      expect(doneSummaries(events)).toEqual([["done", NO_REPORT_LINE]]);
+    });
+
+    it("answers a launch made inside a subagent with the report, under that subagent and in its own fold", async () => {
+      const [outer, inner] = ["toolu_01WspFixNe1", "toolu_01WspFixNe2"];
+      const sid = "21921000-0000-4aaa-8bbb-000000000005";
+      const outerReport = 'I launched one general-purpose subagent (model haiku) with the prompt "What is 2+2? Answer in one short sentence, no tools." It finished and reported: "2 + 2 = 4."';
+      const events = await replay(recorded("subagent-handback-nested.jsonl"));
+      // The inner launch is a call on the outer subagent's page; its answer there is the report, not the CLI's note.
+      expect(deltas(events).filter(d => d.kind === "tool_result" && d.toolUseId === inner && d.parentToolUseId === outer).map(d => d.text)).toEqual(["2 + 2 = 4."]);
+      expect(answers(events, inner)).toEqual([answer(sid, inner, "2 + 2 = 4.")]);
+      expect(foldOf(events, inner).filter(d => d.parentToolUseId === inner).map(d => [d.kind, d.text])).toEqual([["thinking", ""], ["text", "2 + 2 = 4."]]);
+      expect(foldOf(events, outer).at(-1)).toEqual(answer(sid, outer, outerReport));
+      expect(deltas(events).some(d => d.text.includes("delivered to you as a message"))).toBe(false);
+    });
+
+    it("says a report once when the subagent wrote it as text and then handed the same words back", async () => {
+      const call = "toolu_01WspFixTf1";
+      const events = await replay(recorded("subagent-handback-text-first.jsonl"));
+      expect(foldOf(events, call).filter(d => d.parentToolUseId === call && d.kind === "text").map(d => d.text)).toEqual(["pong"]);
+      expect(foldOf(events, call).at(-1)).toEqual(answer("21921000-0000-4aaa-8bbb-000000000004", call, "pong"));
+    });
+
+    it("lets a later notification for a subagent replace its earlier end, as the CLI's resumed report does", async () => {
+      const again = "2 + 2 is 4.\n\n3 + 3 is 6.\n\nChecked twice.";
+      const events = await replay(variant(f => (isNotification(f) ? [f, { ...f, handback_report: { text: again } }] : [f])));
+      expect(doneSummaries(events)).toEqual([["done", BG_REPORT], ["done", again]]);
+      expect(answers(events, BG).filter(d => !internalToolResult(d.text)).at(-1)).toEqual(answer(BG_SID, BG, again));
+    });
+
+    // The CLI decides the hand-back per subagent at its start; these are the frames a subagent writes without it in a
+    // run whose init said auto, each a recorded fixture with the lines named changed.
+    const withInit = (file: string, change: Record<string, unknown>, more: (frame: Record<string, unknown>) => Record<string, unknown> = f => f) =>
+      recorded(file).map(line => JSON.parse(line) as Record<string, unknown>).map(f => more(f["subtype"] === "init" ? { ...f, ...change } : f)).map(f => JSON.stringify(f));
+    const PLAIN_FG = "2 + 2 is 4, and 3 + 3 is 6.\n\nBoth are basic addition facts, so no tools were needed to answer.";
+
+    it("ends a subagent it waited on in auto mode with the hand-back flag off, as the default mode does", async () => {
+      const call = "toolu_01WspFixPf1";
+      const events = await replay(withInit("subagent-bypass-foreground.jsonl", { permissionMode: "auto" }));
+      expect(doneSummaries(events)).toEqual([["done", PLAIN_FG]]);
+      expect(answers(events, call)).toEqual([answer("21921000-0000-4aaa-8bbb-000000000007", call, PLAIN_FG)]);
+    });
+
+    it("ends a backgrounded subagent started after a switch away from auto mode, though the init said auto", async () => {
+      const call = "toolu_01WspFixPb1";
+      const events = await replay(withInit("subagent-bypass-background.jsonl", { permissionMode: "auto" }));
+      expect(doneSummaries(events)).toEqual([["done", BG_REPORT]]);
+      expect(answers(events, call).filter(d => !internalToolResult(d.text))).toEqual([answer("21921000-0000-4aaa-8bbb-000000000006", call, BG_REPORT)]);
+    });
+
+    it("ends a fork, which never hands back, in an auto run", async () => {
+      const call = "toolu_01WspFixPb1";
+      const fork = (f: Record<string, unknown>) => (JSON.stringify(f).includes('"name": "Agent"') ? (JSON.parse(JSON.stringify(f).replace('"subagent_type": "general-purpose"', '"subagent_type": "fork"')) as Record<string, unknown>) : f);
+      const events = await replay(withInit("subagent-bypass-background.jsonl", { permissionMode: "auto" }, fork));
+      expect(doneSummaries(events)).toEqual([["done", BG_REPORT]]);
+      expect(answers(events, call).filter(d => !internalToolResult(d.text))).toEqual([answer("21921000-0000-4aaa-8bbb-000000000006", call, BG_REPORT)]);
+    });
+
+    it("holds a subagent's notification while a command it started runs, after a switch to auto mode, and answers once", async () => {
+      const call = "toolu_01WspFixOw1";
+      const sid = "21921000-0000-4aaa-8bbb-000000000008";
+      const report = "The background command `sleep 3; echo hi` ran with run_in_background: true and completed with exit code 0. It printed: hi";
+      const waiting = "This agent has not reported yet: it is waiting on its own background work and will deliver its report through SubagentHandback when that finishes.\n";
+      // The init said default; the subagent's notification while its command still runs is the CLI's interim one.
+      const lines = withInit("subagent-handback-own-work.jsonl", { permissionMode: "default" }).flatMap(line => {
+        const f = JSON.parse(line) as Record<string, unknown>;
+        if (f["subtype"] !== "task_started" || f["task_type"] !== "local_bash") return [line];
+        return [line, JSON.stringify({ type: "system", subtype: "task_notification", task_id: "adaddd87fd4862bf8", tool_use_id: call, status: "completed", summary: waiting, session_id: sid })];
+      });
+      const events = await replay(lines);
+      expect(doneSummaries(events)).toEqual([["done", report]]);
+      expect(answers(events, call).filter(d => !internalToolResult(d.text))).toEqual([answer(sid, call, report)]);
+    });
+
+    it("leaves a background command alone in auto mode: its call one answer, the held reply its finished line", async () => {
+      const call = "toolu_01WspFixBc1";
+      // Cut where the CLI would wake its agent: the reply stays the one held, and the command's end is its line.
+      const recordedLines = recorded("background-command-auto.jsonl");
+      const woken = recordedLines.findIndex((line, i) => i > 1 && (JSON.parse(line) as Record<string, unknown>)["subtype"] === "init");
+      for (const mode of ["auto", "default"]) {
+        const lines = withInit("background-command-auto.jsonl", { permissionMode: mode }).slice(0, woken);
+        const events = await replay(lines);
+        expect(answers(events, call).map(d => d.text.split(".")[0])).toEqual(["Command running in background with ID: bnf8k15go"]);
+        const done = events.filter(e => e.type === "turn.done");
+        expect(done.map(e => (e as { result: TurnResult }).result.text)).toEqual([expect.stringMatching(/^started\n\n`Sleep 4 seconds then echo done` completed, \d+m?s after the reply$/)]);
+        expect(events.filter(e => e.type === "subagent")).toEqual([]);
+      }
+    });
+
+    it("answers a launch the default mode waited on with the bare report, not the CLI's framing line", async () => {
+      const call = "toolu_01WspFixPf1";
+      const events = await replay(recorded("subagent-bypass-foreground.jsonl"));
+      const report = "2 + 2 is 4, and 3 + 3 is 6.\n\nBoth are basic addition facts, so no tools were needed to answer.";
+      expect(answers(events, call)).toEqual([answer("21921000-0000-4aaa-8bbb-000000000007", call, report)]);
+    });
+
+    it("ends a backgrounded subagent of the default mode on its report, done, as the listing says", async () => {
+      const call = "toolu_01WspFixPb1";
+      const events = await replay(recorded("subagent-bypass-background.jsonl"));
+      expect(answers(events, call).filter(d => !internalToolResult(d.text))).toEqual([answer("21921000-0000-4aaa-8bbb-000000000006", call, BG_REPORT)]);
+      expect(doneSummaries(events)).toEqual([["done", BG_REPORT]]);
+    });
   });
 
   it("forwards system/init's slash_commands, permissionMode and agents as harness", async () => {
