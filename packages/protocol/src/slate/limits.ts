@@ -27,6 +27,7 @@ export const SLATE_LIMITS = {
   pipelineSteps: 12,
   evalSteps: 20_000,
   listItems: 5_000,
+  imagesPerList: 60,
   pipelineVisits: 100_000,
   columns: 8,
   facts: 12,
@@ -39,7 +40,7 @@ export const SLATE_LIMITS = {
   sketchValueChars: 80,
   sketchTokens: 2_000,
   printColumns: 120,
-  catalogIndexTokens: 1_450,
+  catalogIndexTokens: 1_500,
   catalogEntryTokens: 200,
 } as const;
 

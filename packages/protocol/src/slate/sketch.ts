@@ -5,6 +5,7 @@
 import { fmtBytes, plural } from "../format.js";
 import { evaluateSlateExpression, parseSlateFormat, resolveSlateProp, slateDependencies, slatePropDependencies, slateTruthy, type SlateEvalContext } from "./expr.js";
 import { slateTime, SLATE_TIME_FLOOR } from "./chart.js";
+import { slateListTooLong } from "./image.js";
 import { SLATE_PIECES, slateHeldText, type SlatePieceModule, type SlatePropSpec, type SlateSketchView } from "./kit.js";
 import { SLATE_LIMITS } from "./limits.js";
 import { parseSlateOwnPath, slateEqual, slateStep } from "./paths.js";
@@ -71,6 +72,12 @@ function plotProblems(doc: SlateDoc, read: SlateEvalContext): SlateProblem[] {
   for (const [id, piece] of Object.entries(doc.pieces)) {
     const module: SlatePieceModule | undefined = SLATE_PIECES[piece.type];
     if (module === undefined) continue;
+    for (const [prop, spec] of Object.entries(module.props)) {
+      const raw = piece.props?.[prop];
+      if (spec.most === undefined || !isSlateBinding(raw)) continue;
+      const listed = resolveSlateProp(raw, read);
+      if (Array.isArray(listed) && listed.length > spec.most.count) out.push({ ...slateListTooLong(listed.length, spec.most.count, spec.most.noun, raw.bind.trim()), piece: id, prop });
+    }
     const entries = Object.entries(module.items).filter(([, item]) => item.row === true).flatMap(([tag, item]) =>
       (Array.isArray(piece.props?.[item.prop]) ? (piece.props![item.prop] as SlatePropValue[]) : []).flatMap(entry =>
         Object.entries(item.fields).filter(([, f]) => f.type === "number" && f.binds === "item").map(([field]) => ({ tag, field, prop: item.prop, raw: (entry as Record<string, SlatePropValue> | null)?.[field] }))));

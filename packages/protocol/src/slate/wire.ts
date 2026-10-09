@@ -190,6 +190,9 @@ export const SlatesRevokeParams = z.object({ threadId: z.string(), key: z.string
 export const SlatesShownParams = z.object({ threadId: z.string() });
 export const SlatesSubscribeParams = z.object({ threadId: z.string(), sources: z.array(z.string()) });
 export const SlatesResolveParams = z.object({ threadId: z.string(), paths: z.array(z.string()).max(200) });
+/** An image piece's src: a path on the thread's computer or an http(s) address; have is the version the window
+ * holds, which the host answers unchanged when the file is still that one. */
+export const SlatesImageParams = z.object({ threadId: z.string(), src: z.string().max(4096), have: z.string().max(200).optional() });
 
 /** Every slate op by name with its params, which the protocol's op union takes in whole. */
 export const SLATE_OPS = {
@@ -206,6 +209,7 @@ export const SLATE_OPS = {
   "slates.subscribe": SlatesSubscribeParams,
   "slates.unsubscribe": SlatesSubscribeParams,
   "slates.resolve": SlatesResolveParams,
+  "slates.image": SlatesImageParams,
 } as const;
 export type SlateOpName = keyof typeof SLATE_OPS;
 /** Each slate op's params as a client sends them. */
@@ -264,6 +268,18 @@ export type SlateEventAnswer = z.infer<typeof SlateEventAnswer>;
 
 export const SlatesResolveAnswer = z.object({ values: SlateWireValues });
 export type SlatesResolveAnswer = z.infer<typeof SlatesResolveAnswer>;
+
+/** The image's bytes, base64, their type read off them and the version they are (a file's modified time and size, an
+ * address's ETag or Last-Modified); unchanged where the window already holds that version; the domain an address waits on the person to allow for
+ * the thread, before which nothing is fetched; or the problem that refuses it, which the piece draws as one muted
+ * line. */
+export const SlatesImageAnswer = z.union([
+  z.object({ mediaType: z.string(), bytes: z.string(), version: z.string().optional() }),
+  z.object({ unchanged: z.literal(true), version: z.string() }),
+  z.object({ ask: z.object({ domain: z.string() }) }),
+  z.object({ problem: SlateWireProblem }),
+]);
+export type SlatesImageAnswer = z.infer<typeof SlatesImageAnswer>;
 
 // --- events ---
 

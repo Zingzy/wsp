@@ -18,7 +18,8 @@ export interface Harness {
   stop(): void;
 }
 
-export async function serveHarness(): Promise<Harness> {
+/** With files, a folder served under /files/ as the thread's folder the image pieces read through the harness's link. */
+export async function serveHarness(files?: string): Promise<Harness> {
   const out = mkdtempSync(join(tmpdir(), "wsp-slate-harness-"));
   const built = spawnSync(process.execPath, [join(WEB_DIR, "node_modules/vite/bin/vite.js"), "build", "test/slate-render", "--config", "vite.config.ts", "--base", "./", "--outDir", out, "--emptyOutDir", "--logLevel", "error"], { cwd: WEB_DIR, encoding: "utf8" });
   if (built.status !== 0) throw new Error(`the harness did not build: ${built.stderr}`);
@@ -26,8 +27,9 @@ export async function serveHarness(): Promise<Harness> {
   const server: Server = createServer((req, res) => {
     const path = decodeURIComponent(new URL(req.url ?? "/", "http://x").pathname);
     fetched.push(path);
-    const file = join(out, path);
-    if (!file.startsWith(out) || !existsSync(file)) return void res.writeHead(404).end();
+    const root = files !== undefined && path.startsWith("/files/") ? files : out;
+    const file = join(root, root === out ? path : path.slice("/files/".length));
+    if (!file.startsWith(root) || !existsSync(file)) return void res.writeHead(404).end();
     res.writeHead(200, { "content-type": TYPES[extname(file)] ?? "application/octet-stream" });
     createReadStream(file).pipe(res);
   });

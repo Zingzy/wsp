@@ -1,0 +1,13 @@
+[
+  {
+    "id": 1,
+    "op": "fs.image",
+    "path": "/tmp/home.png"
+  },
+  {
+    "id": 1,
+    "op": "fs.image",
+    "path": "/root/repo/shots/home.png",
+    "machineId": "wsp-a"
+  }
+]

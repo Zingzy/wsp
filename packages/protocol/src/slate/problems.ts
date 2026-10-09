@@ -26,7 +26,7 @@ export const SLATE_CODES = {
   Z800: "thread-not-yours", Z801: "thread-not-in-tree", Z802: "no-slate", Z803: "sub-thread", Z804: "rewound-before",
   R900: "data-missing", R901: "data-late", R902: "eval-failed", R903: "source-unavailable", R904: "consent-refused", R905: "draw-failed",
   R906: "tool-error", R907: "over-budget", R908: "piece-fallback", R910: "reaction-runaway", R911: "run-runaway", R912: "reaction-failed",
-  R913: "run-held",
+  R913: "run-held", R914: "not-a-file", R915: "image-too-big", R916: "not-an-image", R917: "address-refused",
   W001: "content-looks-like-path", W002: "tone-alone", W003: "series-as-bars", W004: "copy-style", W006: "deprecated", W010: "short-secret",
   W011: "secret-in-argv", W012: "joined-by-mark", W013: "chart-x-index", W014: "mono-on-sentence", W015: "file-undeclared", W017: "emoji", W018: "title-case",
   W019: "run-never-started", W020: "value-beside-series", W021: "time-in-seconds",

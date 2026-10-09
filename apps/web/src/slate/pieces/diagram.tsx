@@ -17,7 +17,7 @@ import type { PieceView } from "../SlateView.js";
 import { str } from "./look.js";
 import { KEYCAP_FILTER } from "./keycap.js";
 import { SHAPE_TOKEN, withShapes } from "./shapes.js";
-import { ZoomFrame, type ZoomControls } from "./zoom.js";
+import { EXPANDED_POPUP, ZoomFrame, type ZoomControls } from "./zoom.js";
 
 const MermaidBlock = lazy(() => import("../../components/chat/MermaidBlock.js"));
 
@@ -113,7 +113,7 @@ export const diagram: PieceView = {
           <Drawing code={withShapes(code)} source={source} />
         </ZoomFrame>
         <Dialog open={open} onOpenChange={setOpen}>
-          <DialogPopup ref={popup} initialFocus={popup} data-slate-diagram-expanded className="h-[85vh] w-[90vw] max-w-[min(90vw,1400px)] sm:max-w-[min(90vw,1400px)]" bottomStickOnMobile={false}>
+          <DialogPopup ref={popup} initialFocus={popup} data-slate-diagram-expanded className={EXPANDED_POPUP} bottomStickOnMobile={false}>
             <div className="flex items-center gap-1 px-5 pt-4 pb-3">
               <DialogTitle className="min-w-0 flex-1 truncate">{label ?? "Diagram"}</DialogTitle>
               <IconButton label="Zoom out" onClick={() => big.current?.zoom(1 / 1.25)}>
