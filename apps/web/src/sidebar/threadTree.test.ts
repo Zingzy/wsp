@@ -370,12 +370,13 @@ describe("Needs you as an inbox", () => {
       ["threads", [["lead", [["c-rev", ["g-probe"]], "c-answered", "c-ask", "c-put-away", "c-resumes", "c-fail"]]]],
     ]);
     const inbox = sidebarTiles(marathon(), { picked: null, nowMs: NOW }).sections[0]!.roots;
-    // One under a tree names the thread that started it and the whole path down to it; a root of its own names none.
+    // One under a tree names the thread that started it and the whole path down to it; a root that stands nowhere else
+    // is its own tile there, with no mark.
     expect(inbox.map(node => node.thread.inboxOf)).toEqual([
       { parent: "Review 1822", path: ["Coordinator", "Review 1822"] },
       { parent: "Coordinator", path: ["Coordinator"] },
       { parent: "Coordinator", path: ["Coordinator"] },
-      { parent: null, path: [] },
+      undefined,
     ]);
   });
 

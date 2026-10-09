@@ -232,7 +232,8 @@ export function sidebarTiles(
   const trees = [...listed.filter(node => !inboxOnly.includes(node)), ...snoozedWorking];
   const sections = [
     { id: "pinned" as const, roots: pinned },
-    { id: "needs-you" as const, roots: inbox },
+    // A root with nothing drawn under it stands nowhere else, so its inbox tile is its own tile, under its own row id.
+    { id: "needs-you" as const, roots: inbox.map(tile => inboxOnly.find(node => node.thread.id === tile.thread.id) ?? tile) },
     { id: "threads" as const, roots: trees },
   ].filter(section => section.roots.length > 0);
   const bySettle = new Map(settled.map(node => [node.thread.thread!, node]));

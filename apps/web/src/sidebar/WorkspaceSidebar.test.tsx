@@ -721,7 +721,7 @@ describe("the sidebar's list of thread tiles", () => {
     mount({ projects: [project("pr_1", "spoo")], workspaces: [workspace("ws_a", "pricing page", "pr_1")] });
     const failed = { ws: "ws_a", id: "th_broke", prompt: "it broke", status: "failed", startedAgo: 30 * HOUR, endedAgo: 29 * HOUR, readAgo: 28 * HOUR };
     await act(async () => useStore.setState({ sessions: sessions([failed]) } as never));
-    await waitFor(() => expect(rowIds()).toEqual(["inbox:thread:th_broke"]));
+    await waitFor(() => expect(rowIds()).toEqual(["thread:th_broke"]));
     expect(rowOf("it broke").querySelector("[data-thread-status]")!.getAttribute("aria-label")).toBe("Failed");
     await act(async () => useStore.setState({ sessions: sessions([{ ...failed, settledAgo: HOUR }]) } as never));
     await waitFor(() => expect(rowIds()).toEqual(["settled"]));
@@ -802,8 +802,8 @@ describe("the sidebar's list of thread tiles", () => {
       // Every head names its section in words, Needs you as Pinned and Settled do; the state glyph is the tiles' alone.
       expect([...document.querySelectorAll("[data-section-head]")].map(head => head.textContent)).toEqual(["Pinned (1)", "Needs you (1)"]);
       expect(document.querySelector("[data-section-head=needs-you] svg.lucide-message-circle-question")).toBeNull();
-      expect(rowIds()).toEqual(["thread:th_pinned", "inbox:thread:th_asks", "thread:th_works", "thread:th_done", "thread:th_idle"]);
-      expect(walkIds()).toEqual(["section:pinned", "thread:th_pinned", "section:needs-you", "inbox:thread:th_asks", "thread:th_works", "thread:th_done", "thread:th_idle"]);
+      expect(rowIds()).toEqual(["thread:th_pinned", "thread:th_asks", "thread:th_works", "thread:th_done", "thread:th_idle"]);
+      expect(walkIds()).toEqual(["section:pinned", "thread:th_pinned", "section:needs-you", "thread:th_asks", "thread:th_works", "thread:th_done", "thread:th_idle"]);
       expect(screen.queryByText("snoozed away")).toBeNull();
       const slot = (title: string): HTMLElement => rowOf(title).querySelector<HTMLElement>("[data-thread-status]")!;
       // Every state is its icon alone, its word on the label: the crab while it works.
@@ -813,6 +813,21 @@ describe("the sidebar's list of thread tiles", () => {
       expect(slot("finished unseen").getAttribute("aria-label")).toBe("Done");
       expect(slot("finished unseen").textContent).toBe("");
       expect(slot("read already").textContent).toBe("11m");
+    });
+
+    it("a thread with nothing under it that starts asking keeps its own row id in Needs you, one row through every later update", async () => {
+      mount({ projects: [project("pr_1", "spoo")], workspaces: [workspace("ws_a", "pricing page", "pr_1")] });
+      const working = { ws: "ws_a", id: "th_one", prompt: "one thread", startedAgo: 5 * 60_000 };
+      await act(async () => useStore.setState({ sessions: sessions([working]) } as never));
+      await waitFor(() => expect(document.querySelector("[data-section=threads] [data-row-id='thread:th_one']")).not.toBeNull());
+      await act(async () => useStore.setState({ sessions: sessions([{ ...working, asking: "Permission for Bash: ls" }]) } as never));
+      await waitFor(() => expect(heads()).toEqual(["needs-you"]));
+      const row = document.querySelector("[data-row-id='thread:th_one']");
+      expect(row?.closest("[data-section]")?.getAttribute("data-section")).toBe("needs-you");
+      expect(rowIds()).toEqual(["thread:th_one"]);
+      await act(async () => useStore.setState({ sessions: sessions([{ ...working, asking: "Permission for Bash: ls" }]) } as never));
+      await act(async () => useStore.setState({ sessions: sessions([{ ...working, asking: "Permission for Bash: ls" }]) } as never));
+      expect(document.querySelector("[data-row-id='thread:th_one']")).toBe(row);
     });
 
     it("keeps the rows that call for the person bright and lets working and read rows recede, as T3 Code's shouldRecede", async () => {
@@ -985,7 +1000,7 @@ describe("a lead's tree in the sidebar", () => {
     const head = document.querySelector<HTMLElement>("[data-section-head=needs-you]")!;
     expect(head.textContent).toBe("Needs you (4)");
     const inbox = [...document.querySelectorAll<HTMLElement>("[data-section=needs-you] li [data-sidebar-row]")];
-    expect(inbox.map(row => row.dataset["rowId"])).toEqual(["inbox:thread:g-probe", "inbox:thread:c-ask", "inbox:thread:c-fail", "inbox:thread:relay"]);
+    expect(inbox.map(row => row.dataset["rowId"])).toEqual(["inbox:thread:g-probe", "inbox:thread:c-ask", "inbox:thread:c-fail", "thread:relay"]);
     const probe = inbox[0]!;
     // Row one keeps the project's glyph, the starter's mark on its corner, and names the thread that started it.
     expect(probe.querySelector("[data-tile-where]")!.textContent).toBe("review the carry");
@@ -998,10 +1013,10 @@ describe("a lead's tree in the sidebar", () => {
     // Its card says the whole path down to it.
     fireEvent.mouseEnter(probe);
     expect(document.querySelector("[data-tile-card-line=started-by]")!.textContent).toBe("Started by coordinator / review the carry");
-    // The tree stays in the list, whatever under it asks; the relay, alone, stands in the inbox only.
+    // The tree stays in the list, whatever under it asks; the relay, alone, stands in the inbox only, as its own tile.
     expect(document.querySelector("[data-section=threads] [data-row-id='thread:lead']")).not.toBeNull();
     expect(document.querySelector("[data-section=threads] [data-row-id='thread:c-ask']")).not.toBeNull();
-    expect(document.querySelector("[data-row-id='thread:relay']")).toBeNull();
+    expect(document.querySelector("[data-section=threads] [data-row-id='thread:relay']")).toBeNull();
     fireEvent.click(inbox[1]!);
     expect(useStore.getState().selectedThreadId).toBe("c-ask");
     await waitFor(() => expect(document.querySelector("[data-row-id='inbox:thread:c-ask']")!.getAttribute("data-active")).toBe("true"));

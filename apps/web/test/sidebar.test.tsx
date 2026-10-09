@@ -227,7 +227,7 @@ describe("tiles from the fixture wire", () => {
       "fix the port list",
     );
     // The failure waits on the person, so it heads the list over the working thread, and the read one rests last.
-    expect(rowIds()).toEqual(["inbox:thread:s3", "thread:s1", "thread:s2"]);
+    expect(rowIds()).toEqual(["thread:s3", "thread:s1", "thread:s2"]);
     expect(rowOf("fix the port list").querySelector("[data-tile-where]")!.textContent).toBe(`the-project @ ${BOX_NAME}`);
     // The one slot at row one's right edge: the state's icon while a thread is one a person acts on, the age once it rests.
     expect(threadState(rowOf("fix the port list"))).toBe("Working");
