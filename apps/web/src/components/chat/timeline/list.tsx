@@ -14,6 +14,7 @@ import { AssistantSelectionToolbar, type QuotedSelection } from "../AssistantSel
 import { type TimelineRowSharedState, type ReplyRuns, type MachineWait, type TimelineRowActivityState, TimelineRowCtx, TimelineRowActivityCtx, type WorkGroupViewState } from "./context";
 import { deriveTimelineMinimapItems, resolveTimelineRowTop, resolveTimelineRowHeight, TimelineMinimap } from "./minimap";
 import { TimelineRowContent } from "./rows";
+import { useSpawnedChildren } from "../../threads/SpawnTiles";
 import type { AnswerPrompt } from "../answerPrompt";
 
 const NOOP_OPEN_TURN_DIFF = (_turnId: TurnId, _filePath?: string) => {};
@@ -271,6 +272,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     });
   }, [latestTurn]);
 
+  // A thread with no runtime id is nobody's lead: a child names its lead by that id.
+  const spawned = useSpawnedChildren(threadKey.includes("/") ? threadKey.slice(threadKey.indexOf("/") + 1) : null);
   const rawRows = useMemo(
     () =>
       deriveMessagesTimelineRows({
@@ -281,8 +284,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         isWorking,
         activeTurnStartedAt,
         waitingOn,
+        ...(spawned !== undefined ? { children: spawned } : {}),
       }),
-    [timelineEntries, turns, expandedTurnIds, expandedWorkGroupIds, isWorking, activeTurnStartedAt, waitingOn],
+    [timelineEntries, turns, expandedTurnIds, expandedWorkGroupIds, isWorking, activeTurnStartedAt, waitingOn, spawned],
   );
   const rows = useStableRows(rawRows);
   const minimapItems = useMemo(() => deriveTimelineMinimapItems(rows), [rows]);
@@ -440,6 +444,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     };
   }, [timelineViewportElement]);
 
+  const leadKey = spawned?.lead ?? null;
   const sharedState = useMemo<TimelineRowSharedState>(
     () => ({
       timestampFormat,
@@ -462,6 +467,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onToggleWorkEntry: suspendEndScrollMaintenanceForDisclosure,
       workGroupViewState,
       replyRuns,
+      leadKey,
     }),
     [
       timestampFormat,
@@ -484,6 +490,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       suspendEndScrollMaintenanceForDisclosure,
       workGroupViewState,
       replyRuns,
+      leadKey,
     ],
   );
   const activityState = useMemo<TimelineRowActivityState>(

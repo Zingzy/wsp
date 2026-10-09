@@ -38,6 +38,8 @@ export interface TimelineRowSharedState {
   dockedAskId: string | null;
   workGroupViewState: WorkGroupViewState;
   replyRuns: ReplyRuns | null;
+  /** The thread whose children the transcript's spawn rows draw, by its key; null where it holds none. */
+  leadKey: string | null;
 }
 
 /** What a reply's shell blocks need to run where they stand: the thread they belong to, its folder and its runs. */

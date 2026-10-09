@@ -7,7 +7,8 @@
 // entries are unstamped on our wire.
 import { fmtDuration, isCodeSearchTool, waitingAskerLine, type ThreadWaitingOn } from "@wsp/protocol";
 import { isPromptOpen } from "./session.js";
-import type { MessagesTimelineRow, PermissionPrompt, TimelineEntry, ToolGroupAction, ToolGroupSummaryKind, TurnSummary, WorkLogEntry, WorkLogTone } from "./view-model.js";
+import { spawnCallOf, type SpawnedChildren } from "./spawned.js";
+import type { MessagesTimelineRow, PermissionPrompt, SpawnCall, TimelineEntry, ToolGroupAction, ToolGroupSummaryKind, TurnSummary, WorkLogEntry, WorkLogTone } from "./view-model.js";
 
 const LIVE_ACTIVITY_ROW_ID = "live-activity-row";
 
@@ -22,11 +23,14 @@ export interface DeriveRowsInput {
    * nobody. The question is drawn here, at the tail, because this is the screen the person is reading and the wait
    * ends the moment they answer it. */
   readonly waitingOn?: ThreadWaitingOn | null;
+  /** The children this thread holds, whose starting calls draw as the children's rows. */
+  readonly children?: SpawnedChildren;
 }
 
 export function deriveMessagesTimelineRows(input: DeriveRowsInput): MessagesTimelineRow[] {
   const rows: MessagesTimelineRow[] = [];
   const entries = input.timelineEntries;
+  const spawnOf = (entry: TimelineEntry): SpawnCall | null => spawnCallOf(entry, input.children);
   const durationStartByMessageId = computeMessageDurationStart(entries);
   const terminalAssistantIds = terminalAssistantMessageIds(entries);
   const latest = input.turns[input.turns.length - 1] ?? null;
@@ -58,7 +62,7 @@ export function deriveMessagesTimelineRows(input: DeriveRowsInput): MessagesTime
   const activeToolEntries: Array<Extract<TimelineEntry, { kind: "work" }>> = [];
   for (let i = entries.length - 1; i >= activeTurnHeaderIndex; i--) {
     const entry = entries[i]!;
-    if (!belongsToActiveTurn(entry, i) || entry.kind !== "work" || standsAlone(entry.entry)) break;
+    if (!belongsToActiveTurn(entry, i) || entry.kind !== "work" || standsAlone(entry.entry) || spawnOf(entry) !== null) break;
     activeToolEntries.unshift(entry);
   }
   const visibleActive = activeToolEntries.filter(e => isVisibleInGroup(e.entry, true));
@@ -125,6 +129,22 @@ export function deriveMessagesTimelineRows(input: DeriveRowsInput): MessagesTime
     }
     if (collapsed.has(entry.id) || activeIds.has(entry.id)) continue;
 
+    const spawn = spawnOf(entry);
+    if (spawn !== null) {
+      const calls = [spawn];
+      let cursor = index + 1;
+      while (cursor < entries.length) {
+        const next = entries[cursor]!;
+        const call = spawnOf(next);
+        if (call === null || collapsed.has(next.id) || activeIds.has(next.id) || folds.has(next.id) || entryTurnId(next) !== entryTurnId(entry)) break;
+        calls.push(call);
+        cursor++;
+      }
+      rows.push({ kind: "spawn", id: `spawn:${entry.id}`, createdAt: entry.createdAt, calls });
+      index = cursor - 1;
+      continue;
+    }
+
     if (entry.kind === "work") {
       if (standsAlone(entry.entry)) {
         rows.push({ kind: "work", id: entry.id, createdAt: entry.createdAt, groupedEntries: [entry.entry], isExpandedToolGroup: false });
@@ -134,7 +154,7 @@ export function deriveMessagesTimelineRows(input: DeriveRowsInput): MessagesTime
       let cursor = index + 1;
       while (cursor < entries.length) {
         const next = entries[cursor]!;
-        if (next.kind !== "work" || standsAlone(next.entry) || activeIds.has(next.id) || collapsed.has(next.id) || folds.has(next.id) || next.entry.turnId !== entry.entry.turnId) break;
+        if (next.kind !== "work" || standsAlone(next.entry) || spawnOf(next) !== null || activeIds.has(next.id) || collapsed.has(next.id) || folds.has(next.id) || next.entry.turnId !== entry.entry.turnId) break;
         grouped.push(next.entry);
         cursor++;
       }
