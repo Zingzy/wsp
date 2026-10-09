@@ -34,12 +34,15 @@ pub struct Script {
 pub async fn scripted(token: &'static str, script: Script) -> (u16, Arc<Mutex<Vec<Value>>>) {
     let asked_all = Arc::new(Mutex::new(Vec::new()));
     let noted = asked_all.clone();
+    // How many times each op was asked, so the frame recorded under `<op> #<n>` answers its nth ask.
+    let seen = Arc::new(Mutex::new(std::collections::HashMap::<String, usize>::new()));
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     tokio::spawn(async move {
         while let Ok((mut tcp, _)) = listener.accept().await {
             let script = script.clone();
             let noted = noted.clone();
+            let seen = seen.clone();
             tokio::spawn(async move {
                 let mut head = [0u8; 2048];
                 let read = tcp.peek(&mut head).await.unwrap();
@@ -67,7 +70,15 @@ pub async fn scripted(token: &'static str, script: Script) -> (u16, Arc<Mutex<Ve
                     let reply = if op == "auth" {
                         assert_eq!(asked["token"], token);
                         json!({ "id": id, "ok": true }).to_string()
-                    } else if let Some(recorded) = script.replies.get(op) {
+                    } else if let Some(recorded) = {
+                        let nth = {
+                            let mut seen = seen.lock().unwrap();
+                            let count = seen.entry(op.to_owned()).or_insert(0);
+                            *count += 1;
+                            *count
+                        };
+                        script.replies.get(&format!("{op} #{nth}")).or_else(|| script.replies.get(op))
+                    } {
                         // The recorded frame opens with the id it was recorded under; the rest is the host's bytes.
                         let rest = recorded.strip_prefix(r#"{"id":1,"#).expect("a frame recorded with its id first");
                         format!(r#"{{"id":{id},{rest}"#)

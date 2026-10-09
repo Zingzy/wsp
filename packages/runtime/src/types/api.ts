@@ -41,7 +41,6 @@ import type {
   McpServerSpec,
   SysSample,
   Caller,
-  WorkspaceAgents,
   WorkspaceLook,
   WorkspaceView,
   WorkspaceCreatingEvent,
@@ -135,7 +134,8 @@ export interface Runtime {
      * refusal for a computer that forks nothing comes in one sentence before any stage is streamed. `sized` says the
      * create to follow names a size, which a thread is refused here, before the sizes are read. */
     landing(o: { project: string; sized?: true }, origin?: Caller): Promise<{ place?: string; name: string; capabilities: Capabilities; kind?: WorkspaceKind }>;
-    get(id: string, origin?: Caller): Promise<WorkspaceView>;
+    /** `threadId` is the thread the caller named, which a refusal names in place of the record. */
+    get(id: string, origin?: Caller, threadId?: string): Promise<WorkspaceView>;
     /** Where a thread runs, as every refusal to its own token names it: its computer by name where it runs in a
      * folder, else its kind's machine; nothing for a thread whose workspace this host no longer holds. */
     threadPlace(scope: ThreadScope): string | undefined;
@@ -145,7 +145,7 @@ export interface Runtime {
      * person or an agent comes through here, so what the listing shows and what a verb accepts are one thing. A name
      * nothing here carries is refused as absent, and one the caller may not drive with the sentence of the rule that
      * hides it rather than as missing. */
-    resolve(ref: string, origin?: Caller, verb?: "exec"): Promise<WorkspaceView>;
+    resolve(ref: string, origin?: Caller): Promise<WorkspaceView>;
     nap(id: string, origin?: Caller): Promise<WorkspaceView>;
     wake(id: string, origin?: Caller): Promise<WorkspaceView>;
     /** Stops a wake that is asking the provider again on its own, and answers with the record it leaves behind. The
@@ -181,9 +181,6 @@ export interface Runtime {
      * written again so the next reach opens it. The runtime runs it by itself when a machine's daemon is older than
      * this wsp. Throws on a workspace that is not running or a runtime without the deploy. */
     updateDaemon(id: string, origin?: Caller): Promise<void>;
-    /** Turns the workspace's agents switch on or off and names its caps; a key left out keeps what the record holds.
-     * Never a thread's own act: what agents may do is the person's to decide. */
-    agents(id: string, patch: Partial<WorkspaceAgents>, origin?: Caller): Promise<WorkspaceView>;
     delete(id: string, origin?: Caller): Promise<void>;
     /** Drops a workspace whose machine the provider no longer has: its record, transcripts and sessions go and nothing
      * is asked of the provider. Refused with the reason (kind conflict) while the machine still exists. */
@@ -223,14 +220,14 @@ export interface Runtime {
     checkout(id: string, origin?: Caller): Promise<CheckoutReply>;
     /** Puts one changed file of the copy back as HEAD has it, then reads the checkout again. With check, refuses a file
      * with no change as the discard would and puts nothing back. */
-    discard(o: { workspaceId: string; path: string; check?: boolean }, origin?: Caller): Promise<GitDiscardReply>;
+    discard(o: { workspaceId: string; path: string; check?: boolean; threadId?: string }, origin?: Caller): Promise<GitDiscardReply>;
     /** Commits the files named in the copy with the message given, then reads the checkout again; no paths is every
      * changed file. A thread commits under the same guard a bring back passes. */
-    commit(o: { workspaceId: string; message: string; paths?: string[] }, origin?: Caller): Promise<GitCommitReply>;
+    commit(o: { workspaceId: string; message: string; paths?: string[]; threadId?: string }, origin?: Caller): Promise<GitCommitReply>;
     /** A commit message for the files named, or every changed file, from their diff against HEAD and the task the
      * workspace's newest thread was opened with, drafted by that thread's agent with no thread and no tool; none with
      * the line saying why. */
-    commitDraft(o: { workspaceId: string; paths?: string[] }, origin?: Caller): Promise<CommitDraft>;
+    commitDraft(o: { workspaceId: string; paths?: string[]; threadId?: string }, origin?: Caller): Promise<CommitDraft>;
     /** The workspace's viewed marks; with a path, the mark on that file set against the blob or taken off at null. */
     viewed(o: { workspaceId: string; path?: string; blob?: string | null }, origin?: Caller): Promise<ViewedMarks>;
     /** The workspace's pull request page, read through the git host's command line on this computer, or the running
@@ -251,19 +248,19 @@ export interface Runtime {
     /** Asks the workspace's agent to fix a failed check, named, with the failed steps of its log; with none, updates the
      * copy from its base and asks it to fix the conflicts where the merge had any, sending nothing when it merged
      * clean. Answers once the message is on its way, the turn going on without the caller. */
-    fix(o: { workspaceId: string; check?: string; child?: string }, origin?: Caller): Promise<FixResult>;
+    fix(o: { workspaceId: string; check?: string; child?: string; threadId?: string; childThreadId?: string }, origin?: Caller): Promise<FixResult>;
     /** Merges the workspace's pull request by the method named, or the repository's default, only while its head is
      * the commit named, which is the one the window drew, else the one the host holds; or arms it to merge once its
      * checks pass; then reads it again. A person's act: a thread's own token is refused. */
-    merge(o: { workspaceId: string; method?: MergeMethod; whenChecksPass?: boolean; head?: string }, origin?: Caller): Promise<MergeResult>;
+    merge(o: { workspaceId: string; method?: MergeMethod; whenChecksPass?: boolean; head?: string; threadId?: string }, origin?: Caller): Promise<MergeResult>;
     /** Merges the base's latest commits into the copy's branch, or answers the files that conflict with the copy left
      * as it was; then reads the branch line and the pull request again. */
-    update(o: { workspaceId: string }, origin?: Caller): Promise<GitUpdateReply>;
+    update(o: { workspaceId: string; threadId?: string }, origin?: Caller): Promise<GitUpdateReply>;
     /** Merges a child's branch into the lead's copy with a merge commit through the lead's own daemon, from the remote,
      * or from the child's folder where the project has none and both copies sit on this computer; keeps what it came
      * to on the child's record, then reads the lead's branch line and its tree again. Refused for a workspace that is
      * not the lead's child, while a turn runs on the lead, and for a thread merging into any workspace but its own. */
-    mergeIn(o: { workspaceId: string; child: string }, origin?: Caller): Promise<MergeInResult>;
+    mergeIn(o: { workspaceId: string; child: string; threadId?: string; childThreadId?: string }, origin?: Caller): Promise<MergeInResult>;
     /** A workspace started off a GitHub issue or pull request link: the project whose remote names the link's
      * repository, the text read on this computer, the copy made and, for a pull request, put on its head branch, and
      * a thread opened with the composed task. A person's act: a thread's own token is refused. */
@@ -276,7 +273,7 @@ export interface Runtime {
     reviewDraft(o: { workspaceId: string; summary?: string; verdict?: ReviewVerdict; on?: readonly { id: string; on: boolean }[] }, origin?: Caller): Promise<{ review?: ReviewDraft }>;
     /** Posts the draft on its pull request in one call as the person, the ticked comments alone, pinned to the head the
      * review was written against. A person's act. */
-    reviewPost(o: { workspaceId: string }, origin?: Caller): Promise<ReviewPostResult>;
+    reviewPost(o: { workspaceId: string; threadId?: string }, origin?: Caller): Promise<ReviewPostResult>;
     /** How a browser dials this workspace's daemon; throws on backends without preview URLs. */
     daemonReach(id: string, origin?: Caller): Promise<DaemonReachView>;
     /** One channel to the daemon answering for this workspace, frame by frame, with every event that daemon

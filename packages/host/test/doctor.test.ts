@@ -1099,13 +1099,13 @@ describe("the words wsp doctor says about itself", () => {
     // a host has to be up for it.
     expect(row.about).toContain("proved by the host that computer dials");
     // The line a person reads when they aim this at a host somewhere else: what it does here is what it says.
-    expect("cliOnly" in row ? row.cliOnly : undefined).toBe("runs for minutes, makes and deletes a workspace on the computer you named, and on a cloud account forks a live machine that bills while it runs; a person decides that at a terminal");
+    expect("cliOnly" in row ? row.cliOnly : undefined).toBe("runs for minutes, makes and deletes a machine on the computer you named, and on a cloud account forks a live machine that bills while it runs; a person decides that at a terminal");
   });
 
   it("carries a row of its own for the two flags that shape which road it takes", () => {
     const says = (name: string): string | undefined => SHARED_FLAGS.find(f => f.name === name && f.on.includes("doctor"))?.says;
     expect(says("local")).toBe("prove this computer alone: a thread here and its reply, with no machine, no key, nothing forked and nothing billed");
-    expect(says("project")).toBe("the project the doctor's workspace is made of, by name, on the computer named; the first project there whose checkout stands when absent");
+    expect(says("project")).toBe("the project the doctor's machine is made of, by name, on the computer named; the first project there whose checkout stands when absent");
     // And the flag rows are in the page a person reads for this line.
     for (const flag of ["--local", "--project", "--yes"]) expect(commandPage("doctor", row)).toContain(flag);
   });

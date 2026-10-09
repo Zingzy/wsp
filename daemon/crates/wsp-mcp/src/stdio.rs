@@ -217,14 +217,17 @@ mod tests {
     #[test]
     fn a_call_is_refused_before_its_tool_runs_as_the_sdk_refuses_it() {
         let listed = tools::entry_in(include_str!(concat!(env!("OUT_DIR"), "/record/tools/exec.json")), false).unwrap();
-        let refused = refused_before_call("exec", listed, Some(json!({ "workspace": 5, "argv": [] }))).unwrap_err();
-        assert_eq!(refused, "MCP error -32602: Input validation error: Invalid arguments for tool exec: Expected string, received number at workspace\nArray must contain at least 1 element(s) at argv");
+        let refused = refused_before_call("exec", listed, Some(json!({ "thread": 5, "argv": [] }))).unwrap_err();
+        assert_eq!(refused, "MCP error -32602: Input validation error: Invalid arguments for tool exec: Expected string, received number at thread\nArray must contain at least 1 element(s) at argv");
+        // The input's old name is no alias: a call naming only it lacks the thread.
+        let old = refused_before_call("exec", listed, Some(json!({ "workspace": "w", "argv": ["ls"] }))).unwrap_err();
+        assert_eq!(old, "MCP error -32602: Input validation error: Invalid arguments for tool exec: Required at thread");
         let refused = refused_before_call("exec", listed, None).unwrap_err();
         assert_eq!(
             refused,
             "MCP error -32602: Input validation error: Invalid arguments for tool exec: Invalid input: expected object, received undefined"
         );
-        let taken = json!({ "workspace": "w", "argv": ["ls"] });
+        let taken = json!({ "thread": "t", "argv": ["ls"] });
         assert_eq!(refused_before_call("exec", listed, Some(taken.clone())), Ok(taken));
     }
 

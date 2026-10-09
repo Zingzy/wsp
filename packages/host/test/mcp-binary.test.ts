@@ -14,7 +14,7 @@ import { promisify } from "node:util";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { CLOUD_ENV, EXIT_CODES, execOutsideFix, execOutsideRefusal, HERE_PLACE_ID, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, jsonLine, refusalLine, scopedNoPairLine, spawnRepositoryRefusal, SPAWN_REPOSITORY_FIX, TURN_TOKEN_ENV } from "@wsp/protocol";
+import { CLOUD_ENV, EXIT_CODES, HERE_PLACE_ID, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, jsonLine, refusalLine, scopedNoPairLine, spawnRepositoryRefusal, SPAWN_REPOSITORY_FIX, TURN_TOKEN_ENV } from "@wsp/protocol";
 import { copyKey, createRuntime, memoryStore, type PlaceWiring } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cli, localWiring, serve } from "../src/cli.js";
@@ -255,7 +255,7 @@ const CALLED: readonly Called[] = [
   { tool: "run", argv: ["run", "nope", "t"], arguments: { project: "nope", message: "t" }, refused: true },
   { tool: "run", argv: ["run", "nope", "--branch", "b", "t"], arguments: { project: "nope", branch: "b", message: "t" }, refused: true },
   { tool: "merge_in", argv: ["merge", "in", "nope", "beta"], arguments: { lead: "nope", child: "beta" }, refused: true },
-  { tool: "exec", argv: ["exec", "nope"], after: ["--", "true"], arguments: { workspace: "nope", argv: ["true"] }, refused: true },
+  { tool: "exec", argv: ["exec", "nope"], after: ["--", "true"], arguments: { thread: "nope", argv: ["true"] }, refused: true },
   { tool: "slate_catalog", argv: ["slate", "catalog"], arguments: {}, text: "prose" },
   { tool: "slate_catalog", argv: ["slate", "catalog", "meter"], arguments: { name: "meter" }, text: "prose" },
   { tool: "slate_write", argv: ["slate", "write", "nope", "x.slate"], arguments: { thread: "nope", text: "<clear />" }, refused: true },
@@ -480,13 +480,13 @@ suite(`the tool server in the daemon binary${MCP_BIN === undefined ? " (set WSP_
       return { cloud, turn, lead: turn.view().threadId!, pair };
     }
 
-    it("lists its repository's projects, starts a child on a cloud one with notify me, and refuses another repository's by the rule, in exec's own words for exec", async () => {
+    it("lists its repository's projects, starts a child on a cloud one with notify me, refuses another repository's by the rule, and exec finds no thread there", async () => {
       const { cloud, turn, lead, pair } = await leadHere();
       const { out, code } = await served([MCP_BIN!, "mcp", "--state", statePath], { ...env, ...pair }, [
         callOf(1, "projects"),
         callOf(2, "run", { project: "lab-cloud", message: "build it", notify: ["me"], detach: true }),
         callOf(3, "run", { project: "other-cloud", message: "build it", detach: true }),
-        callOf(4, "exec", { workspace: "other-cloud", argv: ["true"] }),
+        callOf(4, "exec", { thread: "other-cloud", argv: ["true"] }),
         callOf(5, "run", { project: "other-cloud", branch: "kid", message: "build it", detach: true }),
       ]);
       expect(code).toBe(0);
@@ -499,8 +499,8 @@ suite(`the tool server in the daemon binary${MCP_BIN === undefined ? " (set WSP_
       expect((await runtime.workspaces.list()).find(w => w.id === row.workspaceId)?.project.id).toBe(cloud.id);
       expect(refused).toMatchObject({ isError: true, structuredContent: { error: refusalLine(spawnRepositoryRefusal(lead, "lab", "other-cloud"), SPAWN_REPOSITORY_FIX), class: "usage" } });
       expect(branchRefused).toMatchObject({ isError: true, structuredContent: { error: refusalLine(spawnRepositoryRefusal(lead, "lab", "other-cloud"), SPAWN_REPOSITORY_FIX), class: "usage" } });
-      // Exec starts nothing, so the binary's exec tool is refused in exec's words with the road on the lead's own machine.
-      expect(execRefused).toMatchObject({ isError: true, structuredContent: { error: refusalLine(execOutsideRefusal(lead, "other-cloud", "project"), execOutsideFix("lab")), class: "usage" } });
+      // Exec takes a thread, and a project the lead's listing does not hold names none.
+      expect(execRefused).toMatchObject({ isError: true, structuredContent: { error: "no thread other-cloud", class: "usage" } });
       held.release(1, "Built it.");
       await vi.waitFor(() => expect(held.steered).toEqual([`thread ${child.slice(0, 8)} finished (completed): Built it.`]));
       held.release(0, "read it");

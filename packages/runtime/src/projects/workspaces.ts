@@ -5,7 +5,7 @@ import { remoteHost } from "@wsp/catalog";
 import { NotFirstLifeError, RestoreUnfinishedError, ResumeUnansweredError, isMissing, readGone, MachineAliveError, answerOf, diskUse, projectSnapshotName, syncDisk, CHECK_MS, INLINE_EXEC_MS, checkScripts, projectInstalls } from "@wsp/engine";
 import type { ProjectGolden, ProjectView, WorkspaceProject } from "@wsp/protocol";
 import { noParentWorkspaceLine, parentProjectRefusal, BringBackResult, GitPrReply, GitPushReply, GitCommitReply, GitDiscardReply, noChangeLine, GitDiffReply, GitRunLogReply, GitPrMergeReply, GitMergeInReply, DETACHED_HEAD, leadBusyRefusal, FIX_CHECK_OR_CHILD, childOnNoBranchRefusal, mergeChildPrompt, mergeIntoOwnRefusal, noRemoteForTreeLine, type TreeRecord, GitPrReplyReply, GitPrResolveReply, GitPrReactReply, REPLY_EMPTY_LINE, type PullRequestItem, GIT_DIFF_CAP_BYTES, pullRequestSendPrompt, checkFailedPrompt, conflictsPrompt, checkNotFailedRefusal, childPushedLine, isPullRequestFact, mergeMethodRefusal, noPullRequestRefusal, noSuchCheckRefusal, notOpenRefusal, AUTO_MERGE_OFF_LINE, DRAFT_NOTES, cleanCheckoutLine, commitMessage, cutDiff, draftPrompt, agentsFrom, agentsKindRefusal, agentsMayDrive, askerOf, scopeOf, spawnGoldenRefusal, workspaceIdOf } from "@wsp/protocol";
-import { isLocalWorkspace, kindWords, noCommandsYetLine, readingRoad, forgetUndrivenRefusal, goneRefusal, goneWords, inFolder, machineWord, deleteRefusedLine, snapshotRefusedLine, snapshotManagerLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, refusalLine, notOnThisComputerLine, noBranchesLine, notMadeWorktreeLine, WORKTREE_FORCE_LINE, copiesFolder, copyTakesNone, placeBranchLine, runsInFolder, workspaceLands, shellQuote, WAKE_STOPPED, wakeAsksIn, wakeGaveUpLine, HERE_PLACE_ID, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, refusal, execOutsideFix, execOutsideRefusal, spawnFolderRefusal, spawnReachFix, spawnReachRefusal, spawnRepositoryWorkspaceRefusal, SPAWN_FOLDER_FIX, SPAWN_REPOSITORY_WORKSPACE_FIX, folderForkRefusal, folderForkFix } from "@wsp/protocol";
+import { isLocalWorkspace, kindWords, noCommandsYetLine, readingRoad, forgetUndrivenRefusal, goneRefusal, goneWords, inFolder, machineWord, deleteRefusedLine, snapshotRefusedLine, snapshotManagerLine, noWorkspaceRefusal, threadElsewhereLine, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, refusalLine, notOnThisComputerLine, noBranchesLine, notMadeWorktreeLine, WORKTREE_FORCE_LINE, copiesFolder, copyTakesNone, placeBranchLine, runsInFolder, workspaceLands, shellQuote, WAKE_STOPPED, wakeAsksIn, wakeGaveUpLine, HERE_PLACE_ID, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, refusal, spawnFolderRefusal, spawnReachFix, spawnReachRefusal, spawnRepositoryWorkspaceRefusal, SPAWN_FOLDER_FIX, SPAWN_REPOSITORY_WORKSPACE_FIX, folderForkRefusal, folderForkFix } from "@wsp/protocol";
 import { harnessExec, putFiles } from "@wsp/engine";
 import { ownerRepoOf, WorkspaceTalked } from "@wsp/protocol";
 import { providerSaid } from "../status.js";
@@ -15,7 +15,7 @@ import { TITLE_MAKE_TIMEOUT_MS } from "../types/events.js";
 import { type LiveWorkspace, settled, lastLineOf, PORT_PROBE_TIMEOUT_MS, PORT_PROBE_BODY_CAP, VAULTS } from "../types/wiring.js";
 import { loginEnvOn } from "../types/harness.js";
 import type { Runtime } from "../types/api.js";
-import { PROJECT_GOLDENS, WORKSPACE_NAMES, DELETED_REASON, type NamedWorkspace, CREATES, readBodyUpTo, isNoHostCli, isNoGitCredential, isOnDefaultBranch, defaultBranchRefused } from "../types/internal.js";
+import { PROJECT_GOLDENS, WORKSPACE_NAMES, DELETED_REASON, type NamedWorkspace, CREATES, labelOf, readBodyUpTo, isNoHostCli, isNoGitCredential, isOnDefaultBranch, defaultBranchRefused } from "../types/internal.js";
 import type { RuntimeContext, WorkspacesArea } from "../context.js";
 
 export function workspacesArea(ctx: RuntimeContext): WorkspacesArea {
@@ -156,31 +156,18 @@ export function workspacesArea(ctx: RuntimeContext): WorkspacesArea {
       }
     },
 
-    async get(id, origin) {
-      return ctx.view((await ctx.entryOf(id, origin)).record);
+    async get(id, origin, threadId) {
+      return ctx.view((await ctx.entryOf(id, origin, threadId === undefined ? {} : { thread: threadId })).record);
     },
 
     threadPlace: scope => ctx.placeOfThread(scope),
-
-    async agents(id, patch, origin) {
-      ctx.spawnGuard("agents", origin);
-      const entry = await ctx.entryOf(id, origin);
-      // The same rule the create that names the switch reads, off the one table of what each kind's machines are:
-      // a kind whose agents could not drive this host is refused the switch rather than given one that does nothing.
-      if (patch.spawn === true && !agentsMayDrive(entry.record.kind)) throw new Error(agentsKindRefusal(entry.record.kind));
-      const next = agentsFrom(ctx.agentsHeld(entry.record), patch);
-      entry.record.agents = next;
-      await ctx.persist(entry.record);
-      bus.emit({ type: "workspace.agents", workspaceId: id, agents: next });
-      return ctx.view(entry.record);
-    },
 
     async list(origin) {
       await ctx.ready();
       return ctx.listedFor(origin).map(e => ctx.view(e.record));
     },
 
-    async resolve(ref, origin, verb) {
+    async resolve(ref, origin) {
       await ctx.ready();
       const scope = scopeOf(origin);
       const rows = scope === undefined ? ctx.held() : ctx.listedFor(origin);
@@ -188,9 +175,8 @@ export function workspacesArea(ctx: RuntimeContext): WorkspacesArea {
       // most, since the create and the rename both refuse a name another already holds, and a word that is one is
       // that workspace whatever else it starts. Only a word that is neither reaches the prefix, where enough of an
       // id is the way round quoting a name with spaces and a word that starts two is refused with both ids.
-      // A thread on a computer the person joined names by its id the workspace its lead's message goes to, and an exec
-      // is never that message.
-      const tree = scope === undefined || verb === "exec" ? undefined : ctx.held().find(e => e.record.id === ref && ctx.talksToTreeOn(ref, origin));
+      // A thread on a computer the person joined names by its id the workspace its lead's message goes to.
+      const tree = scope === undefined ? undefined : ctx.held().find(e => e.record.id === ref && ctx.talksToTreeOn(ref, origin));
       const exact = rows.find(e => e.record.id === ref) ?? tree ?? rows.find(e => e.record.name === ref);
       const started = exact === undefined && ref.length >= ID_PREFIX_MIN ? rows.filter(e => e.record.id.startsWith(ref)) : [];
       if (started.length > 1) throw new Error(idPrefixRefusal(ref, started.map(e => e.record.id)));
@@ -201,40 +187,19 @@ export function workspacesArea(ctx: RuntimeContext): WorkspacesArea {
           // by the rule that keeps it out, so a lead learns what to do instead, in words that carry the word the
           // thread typed and nothing of the workspace it may not see. A word that names nothing, or only starts an
           // id, reads as absent. A run names a project here when the thread's listing did not carry it, and the
-          // project door refuses one the thread may not use in its own words. Exec starts nothing, so its refusal
-          // says what the word is and its road is exec on the machine the thread runs on. A thread on a box naming a
-          // workspace of another computer reads the computer rule: a folder, for any verb but exec, as its project
-          // reads on the run road; otherwise a message to its lead where the lead acts there itself, in the act's
-          // words, and else exec's own words for an exec and the person for a machine.
+          // project door refuses one the thread may not use in its own words. A thread on a box naming a workspace of
+          // another computer reads the computer rule: a folder as its project reads on the run road; otherwise a
+          // message to its lead where the lead acts there itself, in the act's words, and else the person.
           const mine = ctx.projectOfScope(scope);
-          const own = verb === "exec" && mine !== undefined ? ctx.live.get(scope.workspaceId)?.record.name : undefined;
-          const execFix = own === undefined ? undefined : execOutsideFix(own);
-          const outside = (is: "folder" | "project" | "workspace", fix: string): Error => refusal(execOutsideRefusal(scope.threadId, ref, is), fix, "usage");
           const theirs = ctx.held().find(e => e.record.id === ref) ?? ctx.held().find(e => e.record.name === ref);
           if (theirs !== undefined && mine !== undefined && ctx.refusalFor(theirs.record, origin) !== undefined) {
             const project = ctx.projectHeld(theirs.record.project);
-            if (!ctx.ofThreadsRepository(origin, project.id)) throw execFix !== undefined ? outside("workspace", execFix) : refusal(spawnRepositoryWorkspaceRefusal(scope.threadId, ctx.projectHeld(mine).name, ref), SPAWN_REPOSITORY_WORKSPACE_FIX, "usage");
-            const away =
-              execFix !== undefined
-                ? ctx.leadActsOn(theirs.record, origin) !== undefined
-                  ? ctx.awayFor(theirs.record, origin, "exec", ref)
-                  : undefined
-                : runsInFolder(theirs.record.kind)
-                  ? ctx.elsewhereRefusal(origin, project, ref)
-                  : ctx.awayFor(theirs.record, origin, "work", ref);
+            if (!ctx.ofThreadsRepository(origin, project.id)) throw refusal(spawnRepositoryWorkspaceRefusal(scope.threadId, ctx.projectHeld(mine).name, ref), SPAWN_REPOSITORY_WORKSPACE_FIX, "usage");
+            const away = runsInFolder(theirs.record.kind) ? ctx.elsewhereRefusal(origin, project, ref) : ctx.awayFor(theirs.record, origin, "work", ref);
             if (away !== undefined) throw away;
             const folder = runsInFolder(ctx.kindOf(project.computer));
-            if (!ctx.projectReached(origin, project.id) && folder) throw execFix !== undefined ? outside("folder", execFix) : refusal(spawnFolderRefusal(scope.threadId, ref), SPAWN_FOLDER_FIX, "usage");
-            throw refusal(spawnReachRefusal(scope.threadId, ref), execFix ?? spawnReachFix(project.name, !folder), "usage");
-          }
-          if (execFix !== undefined) {
-            const held = [...ctx.projectsHeld.values()];
-            const project = held.find(p => p.id === ref) ?? held.find(p => p.name === ref);
-            if (project !== undefined && !ctx.projectReached(origin, project.id)) {
-              if (!ctx.ofThreadsRepository(origin, project.id)) throw outside("project", execFix);
-              if (runsInFolder(ctx.kindOf(project.computer))) throw outside("folder", execFix);
-            }
-            throw notFoundRefusal(noWorkspaceRefusal(ref));
+            if (!ctx.projectReached(origin, project.id) && folder) throw refusal(spawnFolderRefusal(scope.threadId, ref), SPAWN_FOLDER_FIX, "usage");
+            throw refusal(spawnReachRefusal(scope.threadId, ref), spawnReachFix(project.name, !folder), "usage");
           }
           await ctx.projectsDoor.resolve(ref, origin).catch((e: unknown) => {
             if ((e as { kind?: unknown }).kind !== "not-found") throw e;
@@ -748,8 +713,8 @@ export function workspacesArea(ctx: RuntimeContext): WorkspacesArea {
       return checkout === undefined ? {} : { checkout };
     },
 
-    async discard({ workspaceId, path, check }, origin) {
-      const entry = await ctx.entryOf(workspaceId, origin);
+    async discard({ workspaceId, path, check, threadId }, origin) {
+      const entry = await ctx.entryOf(workspaceId, origin, threadId === undefined ? {} : { thread: threadId });
       await ctx.copyBlocked(entry);
       if (check === true) {
         const said = GitStatusReply.parse(await ctx.withDaemon(entry, ask => ask({ op: "git.status", cwd: ctx.checkoutOf(entry.record) })));
@@ -761,9 +726,9 @@ export function workspacesArea(ctx: RuntimeContext): WorkspacesArea {
       return put;
     },
 
-    async commit({ workspaceId, message, paths }, origin) {
+    async commit({ workspaceId, message, paths, threadId }, origin) {
       ctx.spawnGuard("commit", origin);
-      const entry = await ctx.entryOf(workspaceId, origin, { act: "commit" });
+      const entry = await ctx.entryOf(workspaceId, origin, { act: "commit", ...(threadId !== undefined ? { thread: threadId } : {}) });
       await ctx.copyBlocked(entry);
       const cwd = ctx.checkoutOf(entry.record);
       const made = GitCommitReply.parse(
@@ -771,7 +736,7 @@ export function workspacesArea(ctx: RuntimeContext): WorkspacesArea {
           ctx.withDaemon(entry, async ask => {
             // Every changed file, each untracked one on its own, as the Changes pane lists them.
             const named = paths ?? GitDiffReply.parse(await ask({ op: "git.diff", cwd, scope: "head" })).files.map(f => f.path);
-            if (paths === undefined && named.length === 0) throw new Error(cleanCheckoutLine(entry.record.name));
+            if (paths === undefined && named.length === 0) throw new Error(cleanCheckoutLine(labelOf(entry, threadId)));
             return ask({ op: "git.commit", cwd, message, paths: named });
           }),
         ),
@@ -780,15 +745,16 @@ export function workspacesArea(ctx: RuntimeContext): WorkspacesArea {
       return made;
     },
 
-    async commitDraft({ workspaceId, paths }, origin) {
+    async commitDraft({ workspaceId, paths, threadId }, origin) {
       ctx.spawnGuard("commit", origin);
       if (paths !== undefined && paths.length === 0) return { message: null, note: DRAFT_NOTES.nothing };
       const entry = await ctx.entryOf(workspaceId, origin, { act: "commit" });
       await ctx.copyBlocked(entry);
-      // The workspace's newest thread drafts, on its own agent and from the task it was opened with; a workspace
-      // with no thread yet drafts on the default agent from the diff alone.
+      // The thread named drafts, else the folder's newest, on its own agent and from the message it was opened with;
+      // a folder with no thread yet drafts on the default agent from the diff alone.
       const rows = [...sessions.values()].map(s => s.view).filter(v => v.workspaceId === workspaceId).sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0));
-      const newest = rows.at(-1);
+      if (threadId !== undefined && !rows.some(v => v.threadId === threadId)) throw notFoundRefusal(threadElsewhereLine(threadId));
+      const newest = threadId === undefined ? rows.at(-1) : rows.filter(v => v.threadId === threadId).at(-1);
       const opening = newest?.threadId === undefined ? undefined : rows.find(v => v.threadId === newest.threadId)?.prompt;
       const named = newest?.harness ?? ctx.defaultAgentOf(await ctx.preferences.get(), entry);
       if (adapters[named] === undefined || ctx.agentOff(entry, named)) return { message: null, note: DRAFT_NOTES.noAgent };
@@ -869,17 +835,18 @@ export function workspacesArea(ctx: RuntimeContext): WorkspacesArea {
       return { outcome: said.outcome, threadId: said.threadId, agent: said.harness, ...(said.capped !== undefined ? { capped: said.capped } : {}), sent: entry.record.prSent };
     },
 
-    async fix({ workspaceId, check, child }, origin) {
+    async fix({ workspaceId, check, child, threadId, childThreadId }, origin) {
       ctx.spawnGuard("fix", origin);
       if (check !== undefined && child !== undefined) throw Object.assign(new Error(FIX_CHECK_OR_CHILD), { kind: "invalid" });
-      const entry = await ctx.entryOf(workspaceId, origin, { act: "fix" });
+      const entry = await ctx.entryOf(workspaceId, origin, { act: "fix", ...(threadId !== undefined ? { thread: threadId } : {}) });
+      if (threadId !== undefined && ![...sessions.values()].some(s => s.view.workspaceId === workspaceId && s.view.threadId === threadId)) throw notFoundRefusal(threadElsewhereLine(threadId));
       await ctx.copyBlocked(entry);
       const project = ctx.projectHeld(entry.record.project);
       let prompt: string;
       let base: string;
       if (child !== undefined) {
         // A merge that stopped goes to the lead's agent as a message, and nothing is merged here.
-        const kid = await ctx.childOf(entry, child, origin);
+        const kid = await ctx.childOf(entry, child, origin, { ...(threadId !== undefined ? { lead: threadId } : {}), ...(childThreadId !== undefined ? { child: childThreadId } : {}) });
         const leadBranch = (await ctx.readCheckout(entry, false))?.branch ?? entry.record.base ?? project.base ?? project.defaultBranch;
         const childBranch = (await ctx.readCheckout(kid, false))?.branch ?? kid.record.worktree?.branch ?? "";
         // With no remote the child's branch is in its folder, which is where the merge took it from.
@@ -895,7 +862,7 @@ export function workspacesArea(ctx: RuntimeContext): WorkspacesArea {
       } else {
         // Read whole: a check that failed since the last read moves nothing a lighter read compares.
         const fact = await ctx.readPullRequest(entry, true, true);
-        if (!isPullRequestFact(fact)) throw new Error(noPullRequestRefusal(entry.record.name));
+        if (!isPullRequestFact(fact)) throw new Error(noPullRequestRefusal(labelOf(entry, threadId)));
         const failed = fact.checks.find(c => c.name === check);
         if (failed === undefined) throw new Error(noSuchCheckRefusal(check, fact.checks.map(c => c.name)));
         if (failed.state !== "fail") throw new Error(checkNotFailedRefusal(check, failed.state));
@@ -908,19 +875,19 @@ export function workspacesArea(ctx: RuntimeContext): WorkspacesArea {
         prompt = checkFailedPrompt({ check: failed, commit: { oid: fact.headOid, subject: fact.headSubject }, ...(log !== undefined ? { log } : {}) });
         base = fact.base;
       }
-      const said = await ctx.toFirstThread(workspaceId, prompt, origin);
+      const said = threadId === undefined ? await ctx.toFirstThread(workspaceId, prompt, origin) : await ctx.sendDetached(workspaceId, { prompt, thread: threadId }, origin);
       return { outcome: said.outcome, threadId: said.threadId, ...(check !== undefined ? { check } : {}), ...(child !== undefined ? { child } : {}), base, agent: said.harness, ...(said.capped !== undefined ? { capped: said.capped } : {}) };
     },
 
-    async merge({ workspaceId, method, whenChecksPass, head }, origin) {
+    async merge({ workspaceId, method, whenChecksPass, head, threadId }, origin) {
       ctx.spawnGuard("merge", origin);
-      const entry = await ctx.entryOf(workspaceId, origin);
+      const entry = await ctx.entryOf(workspaceId, origin, threadId === undefined ? {} : { thread: threadId });
       // The fact the host holds is the one every window drew, however old it is: a fresh read here would hand the
       // guard below whatever the agent pushed since the person looked. Read only where nothing was ever read.
       const fact = isPullRequestFact(entry.pr) ? entry.pr : await ctx.readPullRequest(entry, false);
       if (!isPullRequestFact(fact)) {
         const kept = entry.record.pr;
-        throw new Error(kept !== undefined && kept.state !== "open" ? notOpenRefusal(kept.number, kept.state) : noPullRequestRefusal(entry.record.name));
+        throw new Error(kept !== undefined && kept.state !== "open" ? notOpenRefusal(kept.number, kept.state) : noPullRequestRefusal(labelOf(entry, threadId)));
       }
       if (fact.state !== "open") throw new Error(notOpenRefusal(fact.number, fact.state));
       const remote = ctx.projectHeld(entry.record.project).remote;
@@ -939,29 +906,29 @@ export function workspacesArea(ctx: RuntimeContext): WorkspacesArea {
       return { number: fact.number, method: by, merged: done.merged, autoArmed: done.autoArmed };
     },
 
-    async update({ workspaceId }, origin) {
+    async update({ workspaceId, threadId }, origin) {
       ctx.spawnGuard("update", origin);
-      const entry = await ctx.entryOf(workspaceId, origin, { act: "update" });
+      const entry = await ctx.entryOf(workspaceId, origin, { act: "update", ...(threadId !== undefined ? { thread: threadId } : {}) });
       await ctx.copyBlocked(entry);
       return ctx.updateCopy(entry);
     },
 
-    async mergeIn({ workspaceId, child }, origin) {
+    async mergeIn({ workspaceId, child, threadId, childThreadId }, origin) {
       ctx.spawnGuard("merge_in", origin);
-      const lead = await ctx.entryOf(workspaceId, origin);
+      const lead = await ctx.entryOf(workspaceId, origin, threadId === undefined ? {} : { thread: threadId });
       // A thread merges only into the workspace it runs on: a child merging into its lead is a merge nobody there asked.
       const asked = scopeOf(origin);
       if (asked !== undefined && asked.workspaceId !== lead.record.id) throw new Error(mergeIntoOwnRefusal(asked.threadId));
-      const kid = await ctx.childOf(lead, child, origin);
+      const kid = await ctx.childOf(lead, child, origin, { ...(threadId !== undefined ? { lead: threadId } : {}), ...(childThreadId !== undefined ? { child: childThreadId } : {}) });
       // The lead's copy is its agent's working tree, and a merge under a turn is one that agent was never asked about;
       // the asking thread's own turn is the one a tool call runs inside, so it is the one turn left out.
       const busy = [...sessions.values()]
         .map(s => s.view)
         .filter(v => v.workspaceId === lead.record.id && v.status === "running" && v.threadId !== undefined && v.threadId !== asked?.threadId);
-      if (busy.length > 0) throw new Error(leadBusyRefusal(lead.record.name, busy.map(v => v.threadId!)));
+      if (busy.length > 0) throw new Error(leadBusyRefusal(labelOf(lead, threadId), busy.map(v => v.threadId!)));
       await ctx.copyBlocked(lead);
       const branch = (await ctx.readCheckout(kid, true))?.branch ?? kid.record.worktree?.branch ?? "";
-      if (branch === "" || branch === DETACHED_HEAD) throw new Error(childOnNoBranchRefusal(kid.record.name));
+      if (branch === "" || branch === DETACHED_HEAD) throw new Error(childOnNoBranchRefusal(labelOf(kid, childThreadId)));
       const project = ctx.projectHeld(lead.record.project);
       // Through the remote, the one place both copies always reach; with none, from the child's folder only where
       // both copies sit on this computer, since a copy on a box is visible to nothing but its own workspace.
@@ -1046,12 +1013,12 @@ export function workspacesArea(ctx: RuntimeContext): WorkspacesArea {
       return entry.record.review === undefined ? {} : { review: entry.record.review };
     },
 
-    async reviewPost({ workspaceId }, origin) {
+    async reviewPost({ workspaceId, threadId }, origin) {
       ctx.spawnGuard("review_post", origin);
-      const entry = await ctx.entryOf(workspaceId, origin);
+      const entry = await ctx.entryOf(workspaceId, origin, threadId === undefined ? {} : { thread: threadId });
       const draft = entry.record.review;
       const from = entry.record.from;
-      if (!isReviewRead(draft) || from === undefined) throw new Error(START_WORDS.noReviewYet(entry.record.name));
+      if (!isReviewRead(draft) || from === undefined) throw new Error(START_WORDS.noReviewYet(labelOf(entry, threadId)));
       const ticked = draft.comments.filter(c => c.on).map(({ id, path, line, side, body }) => ({ id, path, line, side, body }));
       const remote = ctx.projectHeld(entry.record.project).remote;
       // One call on this computer as the person, pinned to the head the review was written against, so a push since

@@ -75,6 +75,14 @@ import {
   noThreadTargetLine,
   threadOpenedLine,
   threadWord,
+  notAThreadLine,
+  NAME_A_THREAD_FIX,
+  CHILD_BESIDE_LEAD_FIX,
+  noProjectLine,
+  READ_PROJECTS_FIX,
+  GUEST_NAMES_FIX,
+  refusal,
+  childBesideLeadLine,
   ProjectView,
   copiesFolder,
   kindForComputer,
@@ -88,6 +96,7 @@ import {
   capWaitLine,
 } from "@wsp/protocol";
 import { mainWorktreeOf } from "../repo-root.js";
+import { CLOUD_ON } from "../cloud.js";
 import { SERVICE_WAIT_MS } from "../host-lock.js";
 import { type Frame, type HostClient, stoppedUnder, HOST_RESTARTING_LINE, hostBack, untilSettled, pushedFrames, type Flags, type VerbDeps, type VerbContext, PICK_FLAGS, flag, absoluteFolder, accessWordOf, under, otherVersion, threadIdOf, openedThreadSaid } from "./client.js";
 import { workspaces, threads, workspaceOf, threadOf, projectsOf, projectOf, projectsHere, createFor } from "./workspaces-help.js";
@@ -215,8 +224,8 @@ export interface ForkTarget {
 
 type RunTarget = FolderTarget | ForkTarget | { workspace: WorkspaceOut; opened?: (threadId: string, folder?: string) => string };
 
-/** Where a run goes: the project named when it is on this computer, a new machine of the project named when it lives
- * on a box or a cloud account and no machine carries its name, else the machine the word names, which goes on as
+/** Where a run goes: the project named, in its folder on this computer or on a box; with a cloud, a new machine of a
+ * project that lives on one where no machine carries its name, else the machine the word names, which goes on as
  * before; with no word, beside the thread asking, or the project whose folder, or a worktree of whose repo, the
  * caller's own folder is in. */
 export async function runTarget(
@@ -241,9 +250,16 @@ export async function runTarget(
     const branchRefused = () => usageRefusal(BRANCH_HERE_ONLY_LINE, "Name a project on this computer.");
     if (project !== undefined) {
       if (where.branch !== undefined) throw branchRefused();
-      if (!(await workspaces(client)).some(w => w.name === ref)) return { fork: project };
+      if (!CLOUD_ON || !(await workspaces(client)).some(w => w.name === ref)) return { fork: project };
     }
-    // The host answers a word the listing lacks first (a workspace, a typo, a project hidden from a thread), then the branch line.
+    // Without a cloud a word is a project or nothing; the project door answers one hidden from a thread in its own words.
+    if (!CLOUD_ON) {
+      await projectOf(client, ref).catch((e: unknown) => {
+        if ((e as { kind?: unknown }).kind !== "not-found") throw e;
+      });
+      throw refusal(noProjectLine(ref), READ_PROJECTS_FIX, "not-found");
+    }
+    // The host answers a word the listing lacks first (a machine, a typo, a project hidden from a thread), then the branch line.
     const workspace = await workspaceOf(client, ref);
     if (where.branch !== undefined) throw branchRefused();
     return { workspace };
@@ -252,9 +268,9 @@ export async function runTarget(
   // whichever computer that thread runs: the host reads where off the token, never off the folder it was typed in.
   const fromThread = turnTokenOf(env) !== undefined || (env[HOST_TOKEN_ENV] ?? "") !== "";
   if (fromThread) return { here: asked, opened: said(undefined) };
-  if (elsewhere === true) throw usageRefusal(guestNamesWorkspaceLine, "Name the workspace on the line.");
+  if (elsewhere === true) throw usageRefusal(guestNamesWorkspaceLine, GUEST_NAMES_FIX);
   const project = callerCwd === undefined ? undefined : projectOfFolder(await projectsOf(client).catch(() => []), callerCwd);
-  if (project === undefined) throw usageRefusal(noThreadTargetLine("<project>"), "Run wsp projects to read the names.");
+  if (project === undefined) throw usageRefusal(noThreadTargetLine("<project>"), READ_PROJECTS_FIX);
   const inside = callerCwd !== undefined && !under(callerCwd, project.path);
   return { here: { project, ...asked, ...(inside && where.cwd === undefined && where.branch === undefined ? { cwd: callerCwd } : {}) }, opened: said(project.name) };
 }
@@ -307,6 +323,45 @@ export async function refuseMachineThread(client: HostClient, ref: string): Prom
   if (thread === undefined) return;
   const at = (await workspaces(client)).find(w => w.id === thread.workspaceId);
   if (at !== undefined && !runsInFolder(workspaceKind(at))) throw Object.assign(new Error(threadOnMachineLine(at.name)), { kind: "usage" });
+}
+
+/** A thread a line names and the record of the folder it works in: the thread by its id or a prefix naming one, then
+ * its record through the host, which refuses one the caller may not drive. A word that names no thread is read once
+ * more, so a project's name, or with a cloud a machine's, is refused saying the line takes a thread, in the same
+ * words on the command line and the tool. */
+export async function threadAt(client: HostClient, ref: string, line: string, orComputer = false): Promise<{ thread: ThreadView; workspace: WorkspaceOut }> {
+  let thread: ThreadView;
+  try {
+    thread = await threadOf(client, ref);
+  } catch (e) {
+    if ((e as { kind?: unknown }).kind === "not-found") await refuseNotAThread(client, ref, line, orComputer);
+    throw e;
+  }
+  const { workspace } = await client.request<{ workspace?: unknown }>("workspaces.get", { workspaceId: thread.workspaceId, threadId: threadIdOf(thread) });
+  const read = WorkspaceOut.safeParse(workspace);
+  if (!read.success) throw new Error(otherVersion("workspaces.get"));
+  return { thread, workspace: read.data };
+}
+
+/** A child thread named to merge into its lead's folder: one in that same folder has nothing apart to merge. */
+export async function childOf(client: HostClient, lead: { thread: ThreadView; workspace: WorkspaceOut }, ref: string, line: string): Promise<{ thread: ThreadView; workspace: WorkspaceOut }> {
+  const kid = await threadAt(client, ref, line);
+  if (kid.workspace.id === lead.workspace.id) throw usageRefusal(childBesideLeadLine(threadIdOf(kid.thread), threadIdOf(lead.thread)), CHILD_BESIDE_LEAD_FIX);
+  return kid;
+}
+
+/** Refuses a word that names a project, or with a cloud a machine, in the words of a line that takes a thread;
+ * nothing for any other word, so the line's own refusal stands. */
+async function refuseNotAThread(client: HostClient, ref: string, line: string, orComputer: boolean): Promise<void> {
+  if ((await projectsHere(client).catch(() => [])).some(p => p.id === ref || p.name === ref)) throw usageRefusal(notAThreadLine(ref, "project", line, orComputer), NAME_A_THREAD_FIX);
+  if (!CLOUD_ON) return;
+  if ((await workspaces(client).catch(() => [])).some(w => !runsInFolder(workspaceKind(w)) && (w.id === ref || w.name === ref))) throw usageRefusal(notAThreadLine(ref, "machine", line, orComputer), NAME_A_THREAD_FIX);
+}
+
+/** The other threads in a thread's folder, by id, which a commit, a discard or an update acted for too. */
+export async function sharingWith(client: HostClient, at: { thread: ThreadView; workspace: WorkspaceOut }): Promise<string[]> {
+  const mine = threadIdOf(at.thread);
+  return (await threads(client, at.workspace.id)).filter(t => t.workspaceId === at.workspace.id).map(threadIdOf).filter(id => id !== mine);
 }
 
 /** What the host took with a thread it deleted: the record's id, the worktree that went with it, and how many threads. */

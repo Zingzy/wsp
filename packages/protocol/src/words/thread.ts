@@ -3,6 +3,7 @@ import type { HarnessCatalog, MachineSizeOffer, MachineState, WorkspaceSize, Wor
 import { namesPlace } from "../place-word.js";
 import { shellLine } from "../shell-quote.js";
 import { plural } from "./base.js";
+import { threadWord } from "./computer.js";
 import { chargesNothing, fmtBytes, fmtBytesOf, fmtDuration, fmtRate, fmtSize, fmtUptime } from "./units.js";
 /** A limit as one unit: whole hours when it is hours, else whole minutes. */
 export function fmtLimit(ms: number): string {
@@ -61,7 +62,6 @@ export interface HarnessEnded {
  * names are never printed: a person types flags and words, not fields. A field with no row here is one no line
  * names on its own, and the refusal says the line instead. */
 const REQUEST_WORDS: Readonly<Record<string, string>> = {
-  workspaceId: "the workspace",
   threadId: "the thread",
   sessionId: "the thread",
   argv: "the command",
@@ -487,7 +487,7 @@ export const EMPTY_TITLE_LINE = "the name is empty; say what the thread is calle
  * what the composer's model menu shows in place of its footer's source line, which is why it names the workspace
  * rather than the machine it runs on. */
 export function codexNotSignedInLine(login: string): string {
-  return `Codex is not signed in where this workspace runs; run ${login} there`;
+  return `Codex is not signed in where this thread runs; run ${login} there`;
 }
 
 /** The line when codex's provider reads its key from an environment variable the machine does not set. */
@@ -749,3 +749,36 @@ export const imageBuiltOnLine = (place: string): string => `your image is built 
 /** The line beside it when --on named a place other than the image's own: a rebuild never moves the image's home. */
 export const imageHomeKeptLine = (on: string | undefined, home: { id: string; name: string }): string | undefined =>
   on === undefined || namesPlace(home, on) ? undefined : `your image lives on ${home.name}, so it is built there and not on ${on}`;
+
+/** What a line that takes a thread answers a word naming no thread but a project, or with a cloud a machine: what the
+ * word is, the line's own name and where its threads are listed. The lines that read an agent's config take a
+ * computer too. */
+export function notAThreadLine(word: string, is: "project" | "machine", line: string, orComputer = false): string {
+  const takes = `${line} takes a thread${orComputer ? ", or a computer with --on" : ""}`;
+  return is === "project" ? `${word} is a project; ${takes}, as wsp threads ${word} lists them.` : `${word} is a machine; ${takes}, as wsp threads lists them.`;
+}
+
+/** Its fix, the same on the command line and the tool. */
+export const NAME_A_THREAD_FIX = "Name a thread by its id.";
+
+/** The line under a commit, a discard or an update where other threads work in the same folder, since the act was
+ * the folder's and took in their changes too; each thread by the short id a person reads. */
+export function sharedFolderLine(others: readonly string[]): string {
+  return others.length === 1 ? `thread ${others[0]!} works in this folder too` : `threads ${others.slice(0, -1).join(", ")} and ${others.at(-1)!} work in this folder too`;
+}
+
+/** A thread named to act in a folder it does not work in. */
+export const threadElsewhereLine = (threadId: string): string => `thread ${threadWord(threadId)} does not work in this folder`;
+
+/** A thread named to merge that works in the lead's own folder, its child or not: nothing of it is apart to merge. */
+export const childBesideLeadLine = (child: string, lead: string): string => `thread ${threadWord(child)} works in the same folder as thread ${threadWord(lead)}; there is nothing apart to merge.`;
+export const CHILD_BESIDE_LEAD_FIX = "Name a child that works in a folder of its own.";
+
+/** A run beside a thread starts in that thread's folder, so it names no project and no branch of its own. */
+export const BESIDE_ALONE_LINE = "--beside starts the thread in the folder another thread works in, so it takes no project and no --branch.";
+/** Its fix where a tool was called, which has no usage line to show. */
+export const BESIDE_ALONE_FIX = "Drop project and branch, or beside.";
+
+/** What a run or a listing naming no project answers, and its fix. */
+export const noProjectLine = (word: string): string => `no project ${word}`;
+export const READ_PROJECTS_FIX = "Run wsp projects to read the names.";

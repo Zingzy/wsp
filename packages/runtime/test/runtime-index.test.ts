@@ -252,8 +252,8 @@ describe("runtime session index", () => {
     expect(starts[2]!.resume).toBe(sessionId);
     expect(third.view().threadId).toBe(thread);
 
-    await expect(rt.sessions.start(ws.id, { prompt: "x", thread: "no-such-thread" })).rejects.toThrow("no thread no-such-thread on this workspace");
-    await expect(rt.sessions.start(other.id, { prompt: "x", thread })).rejects.toThrow(`no thread ${thread} on this workspace`);
+    await expect(rt.sessions.start(ws.id, { prompt: "x", thread: "no-such-thread" })).rejects.toThrow("no thread no-such-thread in this folder");
+    await expect(rt.sessions.start(other.id, { prompt: "x", thread })).rejects.toThrow(`no thread ${thread} in this folder`);
     expect(starts).toHaveLength(3);
   });
 

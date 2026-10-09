@@ -13,11 +13,11 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Runtime } from "@wsp/runtime";
+import { HARNESS_ADAPTERS, type HarnessAdapterFactory, type Runtime } from "@wsp/runtime";
 import { cli, localWiring, makeRuntime, serve } from "../src/cli.js";
 import { LAUNCHD_PATH, takeLoginPath } from "../src/login-path.js";
 import type { HostHandle } from "../src/server.js";
-import { PAGE, captured, copyingFake, createOn, fakeDaemonStart, projectOn } from "./verbs-fixture.js";
+import { PAGE, captured, copyingFake, createOn, doneOnlyAgent, fakeDaemonStart, projectOn, threadOn } from "./verbs-fixture.js";
 import { writeStub } from "../../protocol/test/stub-script.js";
 
 describe("the login shell PATH and the runtime built over it", () => {
@@ -60,17 +60,21 @@ describe("the login shell PATH and the runtime built over it", () => {
 
   it("serve on launchd's PATH builds its runtime after the read, so a turn on this computer runs under the person's PATH", async () => {
     const io = captured();
-    // The runtime the desktop's host builds, with the copy road alone faked, since every workspace here is a copy
-    // and this checkout stages no daemon binary; its environment is read at every call, so the PATH the read moves
-    // is the one a turn runs under.
-    handle = await serve(io, { port: 0, statePath, webDir, runtime: makeRuntime({}, statePath, undefined, process.env, undefined, localWiring(homedir(), process.env, fakeDaemonStart, statePath, copyingFake())) });
+    // The runtime the desktop's host builds, with the copy road and claude's turn alone faked, since every workspace
+    // here is a copy and this checkout stages no daemon binary; exec runs under claude's own launch environment, read
+    // at every call, so the PATH the read moves is the one a turn runs under.
+    const turn = doneOnlyAgent(() => "done").adapter;
+    const claude: HarnessAdapterFactory = c => Object.assign(HARNESS_ADAPTERS["claude"]!(c), { start: turn(c).start, steers: false });
+    const built = makeRuntime({}, statePath, undefined, process.env, undefined, localWiring(homedir(), process.env, fakeDaemonStart, statePath, copyingFake()), undefined, undefined, { ...HARNESS_ADAPTERS, claude });
+    handle = await serve(io, { port: 0, statePath, webDir, runtime: built });
     const folder = mkdtempSync(join(tmpdir(), "wsp-login-path-"));
     execFileSync("git", ["init", "-q", folder]);
     const project = await handle.addProject(folder);
     const workspace = await handle.createWorkspace(project.name, undefined, project.id);
+    const thread = await threadOn(built, workspace.id);
 
     const ran = captured();
-    const code = await cli(["exec", "--state", statePath, workspace.id, "--", "sh", "-c", 'printf %s "$PATH"'], ran);
+    const code = await cli(["exec", "--state", statePath, thread, "--", "sh", "-c", 'printf %s "$PATH"'], ran);
     expect(code).toBe(0);
     expect(ran.lines.join("")).toContain(shellPath);
   });

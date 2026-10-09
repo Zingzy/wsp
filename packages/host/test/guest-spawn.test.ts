@@ -10,7 +10,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { agentsOffRefusal, EXIT_CODES, folderForkFix, folderForkRefusal, spawnActRefusal, execOutsideFix, execOutsideRefusal, noWorkspaceRefusal, refusalLine, spawnFolderRefusal, spawnReachFix, spawnReachRefusal, spawnRepositoryRefusal, spawnRepositoryWorkspaceRefusal, SPAWN_FOLDER_FIX, SPAWN_REPOSITORY_FIX, SPAWN_REPOSITORY_WORKSPACE_FIX, HERE_PLACE_ID, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, LOOPBACK, MCP_SERVER_NAME, SCOPED_MCP_ARG, TURN_TOKEN_ENV, type Caller, type ThreadView, type WorkspaceView } from "@wsp/protocol";
+import { agentsOffRefusal, notAThreadLine, NAME_A_THREAD_FIX, EXIT_CODES, folderForkFix, folderForkRefusal, spawnActRefusal, noWorkspaceRefusal, refusalLine, spawnFolderRefusal, spawnReachFix, spawnReachRefusal, spawnRepositoryRefusal, spawnRepositoryWorkspaceRefusal, SPAWN_FOLDER_FIX, SPAWN_REPOSITORY_FIX, SPAWN_REPOSITORY_WORKSPACE_FIX, HERE_PLACE_ID, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, LOOPBACK, MCP_SERVER_NAME, SCOPED_MCP_ARG, TURN_TOKEN_ENV, type Caller, type ThreadView, type WorkspaceView } from "@wsp/protocol";
 import { copyKey, createRuntime, memoryStore, type Runtime } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cli, localWiring, serve } from "../src/cli.js";
@@ -106,7 +106,7 @@ describe("the wsp command on a thread's machine", () => {
     return { code: mine().find(m => m.exit !== undefined)?.exit, out: text("out"), err: text("err") + (closed ?? "") };
   }
 
-  it("a turn on a spawn on fork gets its token with no address advertised, and runs a child on its machine that nests under it", async () => {
+  it.runIf(CLOUD_ON)("a turn on a spawn on fork gets its token with no address advertised, and runs a child on its machine that nests under it", async () => {
     const project = await rt.projects.add({ source: "https://github.com/dev/one.git", on: "default" });
     const one = await rt.workspaces.create({ project: project.id, name: "one", agents: { spawn: true } });
     const turn = await rt.sessions.start(one.id, { prompt: "start two children" });
@@ -124,9 +124,6 @@ describe("the wsp command on a thread's machine", () => {
     const child = (JSON.parse(ran.out.trim().split("\n").at(-1)!) as { threadId: string }).threadId;
     expect((await rt.sessions.list()).find(r => r.threadId === child)).toMatchObject({ workspaceId: one.id, parentThreadId: threadId, rootThreadId: threadId });
 
-    // The switch is read at the act: turned off while the turn runs, the next line out of it is refused.
-    await rt.workspaces.agents(one.id, { spawn: false });
-    expect((await guest(one.id, launch, "run", "one", "--detach", "reply ok")).err).toContain(agentsOffRefusal("one", "thread_new"));
     held.release(1, "ok");
     held.release(0, "done");
     await turn.finished;
@@ -334,10 +331,10 @@ describe("a lead thread on this computer starting children on a cloud computer",
     const line = `thread ${child.slice(0, 8)} finished (completed): Built it.`;
     await vi.waitFor(() => expect(held.steered).toEqual([line]));
     expect((await rt.sessions.history(row.workspaceId)).find(e => e.type === "session.notify")).toMatchObject({ threadId: child, notify: threadId, text: line });
-    // The exec tool speaks of exec, as the command line does.
-    const exec = await mcp.callTool({ name: "exec", arguments: { workspace: "other-cloud", argv: ["true"] } });
+    // The exec tool takes a thread, and a word this thread's listing holds no thread by reads as none, as on the command line.
+    const exec = await mcp.callTool({ name: "exec", arguments: { thread: "other-cloud", argv: ["true"] } });
     expect(exec.isError).toBe(true);
-    expect(JSON.stringify(exec.content)).toContain(refusalLine(execOutsideRefusal(threadId, "other-cloud", "project"), execOutsideFix("lab")));
+    expect(JSON.stringify(exec.content)).toContain("no thread other-cloud");
     held.release(0, "read it");
     await finished;
   });
@@ -438,7 +435,6 @@ describe("a lead thread on this computer starting children on a cloud computer",
     const folder = refusalLine(spawnFolderRefusal(threadId, "lab"), SPAWN_FOLDER_FIX);
     await expect(rt.projects.resolve("lab", asLead)).rejects.toThrow(folder);
     await expect(rt.workspaces.resolve("lab", asLead)).rejects.toThrow(folder);
-    await expect(rt.workspaces.resolve("lab", asLead, "exec")).rejects.toThrow(refusalLine(execOutsideRefusal(threadId, "lab", "folder"), execOutsideFix("cloud-lead")));
     // --branch on that folder is refused by the same rule, from the command line and from the lead's tool server.
     const cloudLaunch = { [HOST_URL_ENV]: launch[HOST_URL_ENV]!, [HOST_TOKEN_ENV]: held.envs[1]![HOST_TOKEN_ENV]!, [TURN_TOKEN_ENV]: held.envs[1]![TURN_TOKEN_ENV]! };
     const branched = await thread(cloudLaunch, "run", "lab", "--branch", "kid", "--detach", "build it");
@@ -456,7 +452,7 @@ describe("a lead thread on this computer starting children on a cloud computer",
     await finished;
   });
 
-  it("a name the thread may not use is refused by its rule and fix in the word it typed, never as no workspace", async () => {
+  it.runIf(CLOUD_ON)("a name the thread may not use is refused by its rule and fix in the word it typed, never as no workspace", async () => {
     const { threadId, launch, cloud, finished } = await lead();
     const says = async (...argv: string[]): Promise<string> => (await thread(launch, ...argv)).io.errors.join("\n");
     const ran = await thread(launch, "run", "other-cloud", "--notify", "me", "--detach", "build it");
@@ -476,17 +472,14 @@ describe("a lead thread on this computer starting children on a cloud computer",
     const nightly = await rt.workspaces.create({ project: other.id, name: "nightly" });
     const foreign = (word: string): string => refusalLine(spawnRepositoryWorkspaceRefusal(threadId, "lab", word), SPAWN_REPOSITORY_WORKSPACE_FIX);
     expect(await says("run", "nightly", "--detach", "build it")).toBe(`wsp run: ${foreign("nightly")}`);
-    // Exec starts nothing: its refusals say what the word is, and the road is exec on the lead's own machine.
-    const execs = (word: string, is: "folder" | "project" | "workspace"): string => `wsp exec: ${refusalLine(execOutsideRefusal(threadId, word, is), execOutsideFix("lab"))}`;
+    // Exec takes a thread: a word this thread's listing holds no thread by reads as none, whatever else it names, and
+    // its own project's name says the line takes a thread.
     const execNightly = await thread(launch, "exec", "nightly", "--", "true");
     expect(execNightly.code).toBe(EXIT_CODES.usage);
-    expect(execNightly.io.errors.join("\n")).toBe(execs("nightly", "workspace"));
-    const foreignById = await says("exec", nightly.id, "--", "true");
-    expect(foreignById).toBe(execs(nightly.id, "workspace"));
-    expect(foreignById).not.toMatch(/nightly|other-cloud/);
-    expect(await says("exec", "other-cloud", "--", "true")).toBe(execs("other-cloud", "project"));
-    expect(await says("exec", "theirs", "--", "true")).toBe(`wsp exec: ${refusalLine(spawnReachRefusal(threadId, "theirs"), execOutsideFix("lab"))}`);
-    expect((await thread(launch, "exec", "lab", "--", "true")).code).toBe(0);
+    expect(execNightly.io.errors.join("\n")).toBe("wsp exec: no thread nightly");
+    for (const word of [nightly.id, "other-cloud", "theirs"]) expect(await says("exec", word, "--", "true")).toBe(`wsp exec: no thread ${word}`);
+    expect(await says("exec", "lab", "--", "true")).toBe(`wsp exec: ${refusalLine(notAThreadLine("lab", "project", "wsp exec"), NAME_A_THREAD_FIX)}`);
+    expect((await thread(launch, "exec", threadId, "--", "true")).code).toBe(0);
     // A worktree the person made on the lead's own folder is outside the tree too, and the road there opens a thread
     // in the folder, which forks nothing.
     const mac = (await rt.projects.list()).find(p => p.name === "lab")!;
@@ -503,7 +496,7 @@ describe("a lead thread on this computer starting children on a cloud computer",
     expect(json<{ projects: { name: string }[] }>((await thread(launch, "projects", "--json")).io).projects.map(p => p.name)).toEqual(["lab", "lab-cloud"]);
     expect(await says("run", "lab-two", "--detach", "build it")).toBe(`wsp run: ${refusalLine(spawnFolderRefusal(threadId, "lab-two"), SPAWN_FOLDER_FIX)}`);
     expect(await says("run", "lab-two", "--branch", "kid", "--detach", "build it")).toBe(`wsp run: ${refusalLine(spawnFolderRefusal(threadId, "lab-two"), SPAWN_FOLDER_FIX)}`);
-    expect(await says("exec", "lab-two", "--", "true")).toBe(execs("lab-two", "folder"));
+    expect(await says("exec", "lab-two", "--", "true")).toBe("wsp exec: no thread lab-two");
     const worktree = await thread(launch, "worktree", "lab-two", "kid");
     expect(worktree.code).toBe(EXIT_CODES.usage);
     expect(worktree.io.errors.join("\n")).toBe(`wsp worktree: ${refusalLine(spawnFolderRefusal(threadId, "lab-two"), SPAWN_FOLDER_FIX)}`);

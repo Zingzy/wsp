@@ -547,9 +547,9 @@ example: {pct(usage.week.percent)}
 ### cost
 
 ```text
-cost (core): The workspace's cost: the rate now and what it has run up.
+cost (core): What the thread's computer costs: the rate now and what it has run up.
   cost.rateUsdPerHour cost.accruedUsd: number
-update: push; scope: the thread's workspace; cost: none beyond today
+update: push; scope: the computer the thread runs on; cost: none beyond today
 note cost.rateUsdPerHour: 0 on this computer, which usd() reads as free
 example: {usd(cost.accruedUsd)}
 ```

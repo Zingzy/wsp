@@ -3,13 +3,13 @@
 {/* Written by apps/docs-next/scripts/cli.ts: change the script or its source and run pnpm --filter @wsp/docs-next generate. */}
 
 ```text
-usage: wsp servers [<workspace>] [--on <computer>]
-  the MCP servers the agents on this computer, a box you added or a workspace
-  are set up with: how each is reached, the file it is defined in and its
+usage: wsp servers [<thread>] [--on <computer>]
+  the MCP servers the agents on this computer, a box you added or where a thread
+  runs are set up with: how each is reached, the file it is defined in and its
   sign-in as its config says it
 
   --on       the computer to read, by the name wsp computers shows; this
-             computer without it, and a workspace names its own
+             computer without it, and a thread names its own
   --json     print the raw protocol values, one JSON object per line, with
              everything else on stderr
   --state    the state file the host serves

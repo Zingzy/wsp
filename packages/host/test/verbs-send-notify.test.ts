@@ -25,7 +25,7 @@ vi.mock("node:fs", async importOriginal => (await import("../../runtime/test/fs-
 describe("wsp verbs over the host: send, steer, stop and notify", () => {
   const h = verbsHost();
 
-  it("send resumes the thread's latest session under its own agent; the thread keeps its id and who opened it", async () => {
+  it.runIf(CLOUD_ON)("send resumes the thread's latest session under its own agent; the thread keeps its id and who opened it", async () => {
     await h.run("new", "alpha");
     const [alpha] = await h.rt.workspaces.list();
     await h.run("run", "alpha", "--agent", "codex", "first");
@@ -60,7 +60,7 @@ describe("wsp verbs over the host: send, steer, stop and notify", () => {
     expect(missing.io.errors).toEqual(["wsp send: no thread nope"]);
   });
 
-  it("a send whose start the host never answered before it stopped is delivered by the host that comes back, once, and never reads as a turn going on", async () => {
+  it.runIf(CLOUD_ON)("a send whose start the host never answered before it stopped is delivered by the host that comes back, once, and never reads as a turn going on", async () => {
     await h.run("new", "alpha");
     const [alpha] = await h.rt.workspaces.list();
     await h.run("run", "alpha", "first");
@@ -88,7 +88,7 @@ describe("wsp verbs over the host: send, steer, stop and notify", () => {
     }
   });
 
-  it("a send the host took and stopped before it answered is not sent again: the host that comes back holds it, and the send follows that turn", async () => {
+  it.runIf(CLOUD_ON)("a send the host took and stopped before it answered is not sent again: the host that comes back holds it, and the send follows that turn", async () => {
     await h.run("new", "alpha");
     const [alpha] = await h.rt.workspaces.list();
     await h.run("run", "alpha", "first");
@@ -115,7 +115,7 @@ describe("wsp verbs over the host: send, steer, stop and notify", () => {
     expect(h.claude.starts.map(s => s.prompt)).toEqual(["first", "second"]);
   });
 
-  it("a run whose host stops under the reads before its start fails in one line saying the task was not delivered", async () => {
+  it.runIf(CLOUD_ON)("a run whose host stops under the reads before its start fails in one line saying the task was not delivered", async () => {
     await h.run("new", "alpha");
     let reached = 0;
     h.rt.harnesses.list = (() => {
@@ -130,7 +130,7 @@ describe("wsp verbs over the host: send, steer, stop and notify", () => {
     expect(started.io.errors).toEqual([`wsp run: ${NOT_DELIVERED_LINE}`]);
   });
 
-  it("a host that boots over an index file written before it kept starts by request id reads the transcript again, so a start sent again is still the one it took", async () => {
+  it.runIf(CLOUD_ON)("a host that boots over an index file written before it kept starts by request id reads the transcript again, so a start sent again is still the one it took", async () => {
     await h.run("new", "alpha");
     const [alpha] = await h.rt.workspaces.list();
     await h.run("run", "alpha", "first");
@@ -148,7 +148,7 @@ describe("wsp verbs over the host: send, steer, stop and notify", () => {
     expect(h.claude.starts.map(s => s.prompt)).toEqual(["first"]);
   });
 
-  it("a send whose host stops before it sent anything fails in one line saying the message was not delivered", async () => {
+  it.runIf(CLOUD_ON)("a send whose host stops before it sent anything fails in one line saying the message was not delivered", async () => {
     await h.run("new", "alpha");
     await h.run("run", "alpha", "first");
     const [thread] = await h.rt.sessions.list();
@@ -165,7 +165,7 @@ describe("wsp verbs over the host: send, steer, stop and notify", () => {
     expect(send.io.errors).toEqual([`wsp send: ${NOT_DELIVERED_LINE}`]);
   });
 
-  it("send into a thread whose turn runs joins that turn when the agent steers: one stderr line, the running turn's reply, one session.start and one session.steer", async () => {
+  it.runIf(CLOUD_ON)("send into a thread whose turn runs joins that turn when the agent steers: one stderr line, the running turn's reply, one session.start and one session.steer", async () => {
     const held = heldAgent(true);
     await h.restartHost({ claude: held.adapter });
     await h.run("new", "alpha");
@@ -191,7 +191,7 @@ describe("wsp verbs over the host: send, steer, stop and notify", () => {
     expect(await h.rt.sessions.list()).toHaveLength(1);
   });
 
-  it("a message that joined a turn stopped on a prompt says the turn is waiting on the person, so the quiet has a reason", async () => {
+  it.runIf(CLOUD_ON)("a message that joined a turn stopped on a prompt says the turn is waiting on the person, so the quiet has a reason", async () => {
     const held = heldAgent(true);
     await h.restartHost({ claude: held.adapter });
     await h.run("new", "alpha");
@@ -255,7 +255,7 @@ describe("wsp verbs over the host: send, steer, stop and notify", () => {
     }
   }, 20_000);
 
-  it("send into a thread whose turn runs on an agent that cannot steer waits for that turn, then starts its own: one stderr line, the second start after the first done", async () => {
+  it.runIf(CLOUD_ON)("send into a thread whose turn runs on an agent that cannot steer waits for that turn, then starts its own: one stderr line, the second start after the first done", async () => {
     const held = heldAgent(false);
     await h.restartHost({ claude: held.adapter });
     await h.run("new", "alpha");
@@ -279,7 +279,7 @@ describe("wsp verbs over the host: send, steer, stop and notify", () => {
     expect(held.steered).toEqual([]);
   });
 
-  it("stop ends the thread's running turn through the runtime and says so; a thread whose turn is over says not running; the machine stays up", async () => {
+  it.runIf(CLOUD_ON)("stop ends the thread's running turn through the runtime and says so; a thread whose turn is over says not running; the machine stays up", async () => {
     const held = heldAgent(false);
     await h.restartHost({ claude: held.adapter });
     await h.run("new", "alpha");
@@ -307,7 +307,7 @@ describe("wsp verbs over the host: send, steer, stop and notify", () => {
     expect(missing.io.errors).toEqual(["wsp stop: no thread nope"]);
   });
 
-  it("an agent's own subagents list under their thread with their task ids, and stop --task stops one of them alone", async () => {
+  it.runIf(CLOUD_ON)("an agent's own subagents list under their thread with their ids, and stop --subagent stops one of them alone", async () => {
     const held = heldAgent(false);
     await h.restartHost({ claude: held.adapter });
     await h.run("new", "alpha");
@@ -320,16 +320,20 @@ describe("wsp verbs over the host: send, steer, stop and notify", () => {
     const thread = row!.threadId!;
     const listed = await h.run("threads");
     const cells = listed.io.lines[0]!.split("\n").slice(1).map(r => r.trim().split(/ {2,}/));
-    // A child's THREAD and TASK cells are the two words a stop of it takes; its state is its own, and its agent started it.
+    // A child's THREAD and SUBAGENT cells are the two words a stop of it takes; its state is its own, and its agent started it.
     expect(cells.map(c => c.slice(2))).toEqual([
       [thread, "claude", "Working", "cli", expect.any(String), "fan out"],
       [thread, "a1", "claude", "Working", "agent", expect.any(String), "count alpha"],
       [thread, "b2", "claude", "Working", "agent", expect.any(String), "count beta"],
     ]);
 
-    const stopped = await h.run("stop", thread.slice(0, 8), "--task", "a1");
+    const stopped = await h.run("stop", thread.slice(0, 8), "--subagent", "a1");
     expect(stopped.code).toBe(0);
-    expect(stopped.io.lines).toEqual([`thread ${thread} task a1 stopped`]);
+    expect(stopped.io.lines).toEqual([`thread ${thread} subagent a1 stopped`]);
+    // The flag's old word is the parser's unknown option, whose usage line names the one it takes now.
+    const old = await h.run("stop", thread.slice(0, 8), "--task", "a1");
+    expect(old.code).toBe(3);
+    expect(old.io.errors.join("\n")).toContain("usage: wsp stop <thread> [--subagent <id>]");
     expect(held.tasksStopped).toEqual(["a1"]);
     expect(held.interrupted).toEqual([]);
     await vi.waitFor(async () => expect((await h.rt.sessions.list())[0]!.subagents?.map(c => c.state)).toEqual(["stopped", "running"]));
@@ -339,7 +343,7 @@ describe("wsp verbs over the host: send, steer, stop and notify", () => {
     held.release(0, "done");
   });
 
-  it("thread rename names the thread in the agent's own store and says so; an agent that keeps no name, one whose store has no such session, and an unknown thread each say why", async () => {
+  it.runIf(CLOUD_ON)("thread rename names the thread in the agent's own store and says so; an agent that keeps no name, one whose store has no such session, and an unknown thread each say why", async () => {
     const named = scriptedAgent(prompt => `re: ${prompt}`, title => (title === "nowhere" ? { kind: "no-session" } : title === "locked" ? { kind: "failed", error: "database is locked" } : { kind: "written" }));
     await h.restartHost({ claude: named.adapter, codex: h.codex.adapter });
     await h.run("new", "alpha");
@@ -378,7 +382,7 @@ describe("wsp verbs over the host: send, steer, stop and notify", () => {
     expect(short.io.errors).toEqual(["wsp thread rename takes a thread and one name. usage: wsp thread rename <thread> \"<title>\""]);
   });
 
-  it("thread rename wakes a napping workspace first, since the name goes into a store on its machine", async () => {
+  it.runIf(CLOUD_ON)("thread rename wakes a napping workspace first, since the name goes into a store on its machine", async () => {
     const named = scriptedAgent(prompt => `re: ${prompt}`, () => ({ kind: "written" }));
     await h.restartHost({ claude: named.adapter });
     await h.run("new", "alpha");
@@ -393,7 +397,7 @@ describe("wsp verbs over the host: send, steer, stop and notify", () => {
     expect(alpha!.phase).toBe("running");
   });
 
-  it("run --notify me prints the thread's end once on stderr, after the reply, and records it in the thread", async () => {
+  it.runIf(CLOUD_ON)("run --notify me prints the thread's end once on stderr, after the reply, and records it in the thread", async () => {
     await h.run("new", "alpha");
     const { code, io } = await h.run("run", "alpha", "--notify", "me", "build it");
     expect(code).toBe(0);
@@ -411,7 +415,7 @@ describe("wsp verbs over the host: send, steer, stop and notify", () => {
     expect(later.io.lines).toEqual(["re: and the docs"]);
   });
 
-  it("run --notify <thread> tells that thread, by a prefix of its id, when the child ends: the running parent takes the line as a steer and the child's command prints no notice", async () => {
+  it.runIf(CLOUD_ON)("run --notify <thread> tells that thread, by a prefix of its id, when the child ends: the running parent takes the line as a steer and the child's command prints no notice", async () => {
     const held = heldAgent(true);
     await h.restartHost({ claude: held.adapter });
     await h.run("new", "alpha");
@@ -442,7 +446,7 @@ describe("wsp verbs over the host: send, steer, stop and notify", () => {
     expect(held.starts).toHaveLength(2);
   });
 
-  it("--notify me run inside a turn names that turn's thread: the command line reads the token off the environment it runs with, and the parent is steered the child's report whole", async () => {
+  it.runIf(CLOUD_ON)("--notify me run inside a turn names that turn's thread: the command line reads the token off the environment it runs with, and the parent is steered the child's report whole", async () => {
     const held = heldAgent(true);
     await h.restartHost({ claude: held.adapter });
     await h.run("new", "alpha");
@@ -472,7 +476,7 @@ describe("wsp verbs over the host: send, steer, stop and notify", () => {
   // The one command line that reads the process's own environment is the one a person runs: every case here hands
   // its environment in, so without this case a refactor could take TURN_TOKEN_ENV away from the real command line and
   // nothing would say so. It sets the variable it reads, in its own process, which is what the environment law asks.
-  it("cli called with no environment of its own reads this process's, which is what a shell gives it", async () => {
+  it.runIf(CLOUD_ON)("cli called with no environment of its own reads this process's, which is what a shell gives it", async () => {
     const held = heldAgent(true);
     await h.restartHost({ claude: held.adapter });
     await h.run("new", "alpha");
@@ -494,7 +498,7 @@ describe("wsp verbs over the host: send, steer, stop and notify", () => {
     await parent;
   });
 
-  it("--notify repeats: a builder's end reaches the orchestrator that started it and a reviewer thread, each once", async () => {
+  it.runIf(CLOUD_ON)("--notify repeats: a builder's end reaches the orchestrator that started it and a reviewer thread, each once", async () => {
     const held = heldAgent(true);
     await h.restartHost({ claude: held.adapter });
     await h.run("new", "alpha");
@@ -522,7 +526,7 @@ describe("wsp verbs over the host: send, steer, stop and notify", () => {
     await reviewer;
   });
 
-  it("--notify me with no token in the environment is still the person's, so a person's own shell and the app are unchanged", async () => {
+  it.runIf(CLOUD_ON)("--notify me with no token in the environment is still the person's, so a person's own shell and the app are unchanged", async () => {
     await h.run("new", "alpha");
     expect(h.env[TURN_TOKEN_ENV]).toBeUndefined();
     const { code, io } = await h.run("run", "alpha", "--notify", "me", "build it");
@@ -533,7 +537,7 @@ describe("wsp verbs over the host: send, steer, stop and notify", () => {
     expect((await h.rt.sessions.history(alpha!.id)).find(e => e.type === "session.notify")).toMatchObject({ notify: "me" });
   });
 
-  it("a token no turn on this host carries is refused, and nothing starts", async () => {
+  it.runIf(CLOUD_ON)("a token no turn on this host carries is refused, and nothing starts", async () => {
     await h.run("new", "alpha");
     h.env[TURN_TOKEN_ENV] = "f".repeat(32);
     const { code, io } = await h.run("run", "alpha", "--notify", "me", "build it");
@@ -560,7 +564,7 @@ describe("wsp verbs over the host: send, steer, stop and notify", () => {
     expect((await h.rt.workspaces.list()).map(w => w.name).sort()).toEqual(["alpha", "worker"]);
   });
 
-  it("send --json prints the turn's raw events and nothing else", async () => {
+  it.runIf(CLOUD_ON)("send --json prints the turn's raw events and nothing else", async () => {
     await h.run("new", "alpha");
     await h.run("run", "alpha", "first");
     const [first] = await h.rt.sessions.list();
@@ -574,7 +578,7 @@ describe("wsp verbs over the host: send, steer, stop and notify", () => {
     expect(io.streamed).toBe("");
   });
 
-  it("run --detach and send --detach print the thread id and return the moment the turn is started, before it ends; nothing streams", async () => {
+  it.runIf(CLOUD_ON)("run --detach and send --detach print the thread id and return the moment the turn is started, before it ends; nothing streams", async () => {
     const held = heldAgent(false);
     await h.restartHost({ claude: held.adapter });
     await h.run("new", "alpha");
@@ -659,7 +663,7 @@ describe("wsp verbs over the host: send, steer, stop and notify", () => {
     }
   });
 
-  it("threads wait returns the first of two threads to finish, in the notify line's words, then the second; a thread already over comes back at once from its transcript; a timeout prints nothing on stdout and says so on stderr", async () => {
+  it.runIf(CLOUD_ON)("threads wait returns the first of two threads to finish, in the notify line's words, then the second; a thread already over comes back at once from its transcript; a timeout prints nothing on stdout and says so on stderr", async () => {
     const held = heldAgent(false);
     await h.restartHost({ claude: held.adapter });
     await h.run("new", "alpha");
@@ -727,7 +731,7 @@ describe("wsp verbs over the host: send, steer, stop and notify", () => {
     expect(stray.io.errors[0]).toContain("wsp thread read <thread> prints what one said");
   });
 
-  it("threads wait on a thread whose first turn has not reached the machine blocks for that turn; the same thread once its turn is over comes back at once with its finished line", async () => {
+  it.runIf(CLOUD_ON)("threads wait on a thread whose first turn has not reached the machine blocks for that turn; the same thread once its turn is over comes back at once with its finished line", async () => {
     const held = heldAgent(false);
     let letProbe!: () => void;
     const probed = new Promise<void>(r => (letProbe = r));

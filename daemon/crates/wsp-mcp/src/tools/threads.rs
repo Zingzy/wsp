@@ -407,7 +407,6 @@ struct Project {
 #[derive(Deserialize)]
 struct Workspace {
     id: String,
-    name: String,
     #[serde(default)]
     kind: Option<String>,
     #[serde(default)]
@@ -454,14 +453,17 @@ async fn rows(client: &Client, within: Option<&str>) -> Result<Vec<Row>, Failure
     let sessions = client.request::<Sessions>("sessions.list", Map::new()).await?.sessions;
     let stood: HashMap<String, (Option<Stood>, Option<String>)> =
         sessions.iter().map(|s| (s.workspace_id.clone(), (s.project.clone(), s.computer_name.clone()))).collect();
+    let named = |id: &str, name: &str| within.is_some_and(|within| id == within || name == within);
+    // A word is a project's: one naming none is refused, rather than listing nothing.
+    if let Some(within) = within {
+        let listed = sessions.iter().any(|s| s.project.as_ref().is_some_and(|p| named(&p.id, &p.name)));
+        if !listed && !super::turn::projects_here(client).await.unwrap_or_default().iter().any(|p| named(&p.id, &p.name)) {
+            return Err(Failure::of_kind(fill(&super::workspace::words().no_project, &[("word", within)]), "not-found"));
+        }
+    }
     let threads: Vec<Thread> = fold(sessions)
         .into_iter()
-        .filter(|t| {
-            within.is_none_or(|within| {
-                stood.get(&t.workspace_id).and_then(|(p, _)| p.as_ref()).is_some_and(|p| p.id == within || p.name == within)
-                    || all.iter().find(|w| w.id == t.workspace_id).is_some_and(|w| w.id == within || w.name == within)
-            })
-        })
+        .filter(|t| within.is_none() || stood.get(&t.workspace_id).and_then(|(p, _)| p.as_ref()).is_some_and(|p| named(&p.id, &p.name)))
         .collect();
     let mut branches: HashMap<String, String> = HashMap::new();
     Ok(threads

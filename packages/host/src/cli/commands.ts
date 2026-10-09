@@ -320,7 +320,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
       "prove a computer end to end. With no word, this computer and then every computer you added, forking nothing and billing nothing. With a computer's name, that one: a joined computer is proved by the host that computer dials, which makes a short-lived machine there and reads the recipe's tools inside it, and this line prints what the host says; a cloud account gets your image forked, wsp put on the fork, a file coming back and the teardown, which forks a live machine and bills while it runs. --local proves this computer alone: a thread here and its reply, no machine, no key. --project names the project the machine is made of, by name, on the computer named",
     json: false,
     host: "refused",
-    cliOnly: "runs for minutes, makes and deletes a workspace on the computer you named, and on a cloud account forks a live machine that bills while it runs; a person decides that at a terminal",
+    cliOnly: "runs for minutes, makes and deletes a machine on the computer you named, and on a cloud account forks a live machine that bills while it runs; a person decides that at a terminal",
     run: async (io, opts, values, args, deps) => {
       await adoptLoginPath(line => io.log(line));
       // One wiring for this computer, so the daemon the copy road would run and the one the doctor reads the
@@ -352,7 +352,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
       }
       // A project is the one a workspace on the computer named is made of, so it means nothing spread over every
       // computer this host holds: a run with no word would hand it to each of them and fail on any without it.
-      if (values.project !== undefined && word === undefined) throw usageRefusal("wsp doctor --project names the project the workspace on the computer you named is made of, and no computer was named.", DOCTOR_USAGE);
+      if (values.project !== undefined && word === undefined) throw usageRefusal("wsp doctor --project names the project the machine on the computer you named is made of, and no computer was named.", DOCTOR_USAGE);
       const project = values.project === undefined ? {} : { project: values.project };
       /** The roads this terminal walks itself: this computer, whose files and threads are here, and a cloud
        * account, whose fork bills and whose key is asked for where a person is sitting. The runtime is this
@@ -563,32 +563,32 @@ export const SHARED_FLAGS: readonly SharedFlag[] = [
   { name: "recipe", on: ["add"], says: "the saved recipe a computer added over ssh is set up from once it joins, or with --resume the one it is set up from now; wsp recipes lists them. Without it a computer joins and waits on what goes on it, with the base tools going on meanwhile" },
   { name: "later", on: ["add"], says: "go on past a sign-in that waits on you and leave it waiting, rather than waiting here for it; wsp add <computer> --resume follows it again, and asks for a fresh page and code only where the last one ran out" },
   { name: "resume", on: ["add"], says: "the computer named is already added, or joined and waits on what goes on it: set it up, from --recipe where given, else from what it holds, running only what is missing" },
-  { name: "update", on: ["add"], says: "the place named is already in this wsp: put the daemon this wsp deploys on it, over the link it is holding or over the ssh road it was added on, restart its agent and keep the workspaces standing on it" },
-  { name: "sign-in", on: ["add"], says: "the agent to sign in on the place named, once, outside every workspace on it: the sign-in runs on that computer and every workspace there shares the one login. Offered by the join itself; this is the same road for a computer already in" },
-  { name: "yes", on: ["init"], says: "take every default and ask nothing, which a run off a terminal needs; a login with a browser or device sign-in, or one held in the Keychain, is left to the first time you need it on the workspace unless a saved recipe answered copy, so macOS has nothing to ask either and the build waits on nobody" },
+  { name: "update", on: ["add"], says: "the place named is already in this wsp: put the daemon this wsp deploys on it, over the link it is holding or over the ssh road it was added on, restart its agent and keep the threads and machines standing on it" },
+  { name: "sign-in", on: ["add"], says: "the agent to sign in on the place named, once: the sign-in runs on that computer and every thread there shares the one login. Offered by the join itself; this is the same road for a computer already in" },
+  { name: "yes", on: ["init"], says: "take every default and ask nothing, which a run off a terminal needs; a login with a browser or device sign-in, or one held in the Keychain, is left to the first time you need it on the machine unless a saved recipe answered copy, so macOS has nothing to ask either and the build waits on nobody" },
   { name: "yes", on: ["remove", PLACE_LEAVE_VERB], says: FLAG_WORDS["yes"]! },
   { name: "force", on: ["remove"], says: "remove it even where a fork or a project folder there holds work no remote has, which goes with it" },
-  { name: "force", on: [PLACE_LEAVE_VERB], says: "leave even where a workspace or a project checkout on this computer holds work no remote has, which goes with it" },
+  { name: "force", on: [PLACE_LEAVE_VERB], says: "leave even where a project checkout on this computer holds work no remote has, which goes with it" },
   { name: "yes", on: ["doctor"], says: "also delete the snapshots and templates this host left behind, which is not reversible" },
   { name: "recipe", on: ["init"], says: "tick the agents and tools from this recipe (wsp recipe writes it) and go straight to the sign-ins" },
   { name: "project", on: ["init"], says: "the project folder you are bringing first; its own files say what it needs, and those rows are ticked first" },
   { name: "on", on: ["init"], says: "the computer the image is built on, by the name wsp computers lists, a box you joined included; the default place without it" },
   { name: "on", on: ["add"], says: "the computer a project lives on, by the name wsp computers lists: a repo a computer clones needs one, and a folder here takes one to have that computer clone the folder's own remote, with the folder seeding what git ignores; without it a folder here, or a repo cloned --into a folder here, is worked where it sits" },
   { name: "into", on: ["add"], says: "the empty folder on this computer to clone a repo into, one that does not exist yet or holds nothing; the project is then that folder, worked where it sits" },
-  { name: "base", on: ["add"], says: "the branch a workspace of the project starts on; the remote's own default branch at the clone without it" },
+  { name: "base", on: ["add"], says: "the branch a thread of the project starts on; the remote's own default branch at the clone without it" },
   { name: "yes", on: ["add"], says: "send the ticked rows of the seed menu; without it a folder seeding a project on another computer prints the menu and sends nothing, since what git ignores in your folder is yours" },
   { name: "keep", on: ["add"], says: "one more path off the seed menu that travels, however the catalogue ticked it; given once per path" },
   { name: "cut", on: ["add"], says: "one path off the seed menu that does not travel; given once per path" },
   { name: "no-memory", on: ["add"], says: "leave this folder's Claude Code memory here; the project's own memory on that computer then starts empty" },
   { name: "no-commits", on: ["add"], says: "leave the commits the remote does not have here; the computer's clone then starts at the remote's own tip" },
   { name: "remember", on: ["add"], says: "keep these ticks for this folder, so the next add of it starts with them rather than the catalogue's" },
-  { name: "first-workspace", on: ["init"], says: "fork the first workspace under this name once the image seals, without asking (default first)" },
-  { name: "import", on: ["init"], says: "import this folder's project onto that first workspace, with the consent the app's import starts from" },
+  { name: "first-workspace", on: ["init"], says: "fork the first machine under this name once the image seals, without asking (default first)" },
+  { name: "import", on: ["init"], says: "import this folder's project onto that first machine, with the consent the app's import starts from" },
   { name: "rebuild", on: ["init"], says: "seal the next version from a fresh machine rather than from your image plus the changes, which is the question a run at a terminal is asked; without it a run that asks nothing takes whichever road the changes call for" },
-  { name: "no-local", on: ["init"], says: "leave this computer alone; the workspace step ticks it by default, since a workspace here forks nothing and bills nothing" },
+  { name: "no-local", on: ["init"], says: "leave this computer alone; the machine step ticks it by default, since a thread here forks nothing and bills nothing" },
   { name: "non-interactive", on: ["init"], says: "ask nothing, but still run the sign-ins on the machine: each prints the page to open on this computer, the code when the flow shows one, and the command that opens it, then waits for you" },
   { name: "local", on: ["doctor"], says: "prove this computer alone: a thread here and its reply, with no machine, no key, nothing forked and nothing billed" },
-  { name: "project", on: ["doctor"], says: "the project the doctor's workspace is made of, by name, on the computer named; the first project there whose checkout stands when absent" },
+  { name: "project", on: ["doctor"], says: "the project the doctor's machine is made of, by name, on the computer named; the first project there whose checkout stands when absent" },
 ];
 
 /** Every command that reads one flag, over each of its rows: a word with a row per command is read by all of them,

@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 //! The tools that change one workspace's machine or its record and answer with the record after: pause, wake,
-//! snapshot, rename, rebuild and the agents switch.
+//! snapshot, rename and rebuild.
 
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
-use serde_json::{Number, Value};
+use serde_json::Value;
 
-use super::workspace::{self, agents_asked, agents_line, awake, params, read, rebuilt_line, state_of, workspace_of, Agents, Phase};
-use super::{input, refused_field, Answer, Refused, Tool};
+use super::workspace::{self, awake, params, read, rebuilt_line, state_of, workspace_of, Phase};
+use super::{input, Answer, Refused, Tool};
 use crate::failure::Failure;
 use crate::host::Host;
 use crate::record::fill;
@@ -41,8 +41,6 @@ struct Named {
     name: String,
     machine_id: String,
     phase: Phase,
-    #[serde(default)]
-    agents: Option<Agents>,
 }
 
 async fn acted(host: &Host, reference: &str, op: &str) -> Result<Box<RawValue>, Failure> {
@@ -183,41 +181,6 @@ async fn rename(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
     Ok(Answer::text(said, &RenameOut { was: source.name, workspace: reply.workspace }))
 }
 
-const AGENTS_NAME: &str = "workspaces_agents";
-
-const AGENTS_LISTED: &str = include_str!(concat!(env!("OUT_DIR"), "/record/tools/workspaces_agents.json"));
-
-pub const AGENTS: Tool = Tool { name: AGENTS_NAME, listed: AGENTS_LISTED, call: |host, args| Box::pin(set_agents(host, args)) };
-
-#[derive(Debug, Serialize, Deserialize)]
-#[cfg_attr(test, derive(schemars::JsonSchema))]
-pub struct AgentsIn {
-    pub workspace: String,
-    #[serde(default)]
-    pub spawn: Option<String>,
-    #[serde(default)]
-    #[cfg_attr(test, schemars(with = "Option<u64>"))]
-    pub max_machines: Option<Number>,
-    #[serde(default)]
-    #[cfg_attr(test, schemars(with = "Option<u64>"))]
-    pub max_depth: Option<Number>,
-}
-
-async fn set_agents(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
-    let AgentsIn { workspace, spawn, max_machines, max_depth } = input(AGENTS_NAME, arguments)?;
-    let asked = agents_asked(spawn.as_deref(), max_machines.as_ref(), max_depth.as_ref())
-        .map_err(|word| refused_field(AGENTS_NAME, AGENTS_LISTED, host.cloud(), "spawn", Value::from(word)))?
-        .ok_or_else(|| Failure::usage(workspace::words().agents_nothing))?;
-    let client = host.client().await?;
-    let source = workspace_of(&client, &workspace).await?;
-    let mut frame = params([("workspaceId", Value::from(source.id))]);
-    frame.extend(asked);
-    let reply: Reply = client.request("workspaces.agents", frame).await?;
-    let now: Named = read(&reply.workspace, "workspaces.agents")?;
-    let said = fill(&workspace::words().agents_set, &[("name", &now.name), ("agents", &agents_line(now.agents.as_ref()))]);
-    Ok(Answer::text(said, &WorkspaceOut { workspace: reply.workspace }))
-}
-
 #[cfg(test)]
 mod tests {
     use super::super::held::to_the_record;
@@ -230,6 +193,5 @@ mod tests {
         }
         to_the_record::<WorkspaceIn, SnapshotOut>(SNAPSHOT.listed);
         to_the_record::<RenameIn, RenameOut>(RENAME.listed);
-        to_the_record::<AgentsIn, WorkspaceOut>(AGENTS.listed);
     }
 }

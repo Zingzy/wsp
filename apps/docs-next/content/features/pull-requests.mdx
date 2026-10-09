@@ -51,7 +51,7 @@ Click **Ask your agent to fix** on a failed check. wsp sends one message to the 
 
 If the thread is idle, the message starts a turn at once. If the thread is working, the message joins the running turn where the agent takes one, and otherwise waits as the thread's next turn. If the computer already runs as many threads as it takes at once, the turn waits for a free place.
 
-The command line does the same with `wsp fix <workspace> --check "<name>"`. Without `--check`, `wsp fix` first updates the branch from its base. If that merge conflicts, it sends the agent the files to resolve.
+The command line does the same with `wsp fix <thread> --check "<name>"`. Without `--check`, `wsp fix` first updates the branch from its base. If that merge conflicts, it sends the agent the files to resolve.
 
 ## Send review comments to the agent
 
@@ -65,7 +65,7 @@ The command line does the same with `wsp fix <workspace> --check "<name>"`. With
 
 The reviewer runs in the worktree that holds the pull request's branch. wsp makes that worktree if none holds the branch. Often the branch is already in the worktree of the thread that wrote it, so the reviewer reads that thread's folder. It changes nothing. On a computer you added, a review is refused. Its review waits in the pane as a **Draft review**. Tick the comments you want to keep, pick **Comment**, **Approve** or **Request changes**, and click **Post review**. Nothing reaches GitHub until you post.
 
-From the command line, `wsp review <link>` starts the reviewer, and `wsp review post <workspace>` posts its review as you.
+From the command line, `wsp review <link>` starts the reviewer, and `wsp review post <thread>` posts its review as you.
 
 ## Merge
 
@@ -83,7 +83,7 @@ While the checks run, and the repository allows it, **Merge when checks pass** s
 
 wsp merges only while the head of the branch is still the commit wsp last read. If someone pushed since then, the merge fails in GitHub's own words, so no code lands that nobody saw.
 
-From the command line: `wsp merge <workspace> [--method merge|squash|rebase] [--when-checks-pass]`. An agent cannot merge. Only you can.
+From the command line: `wsp merge <thread> [--method merge|squash|rebase] [--when-checks-pass]`. An agent cannot merge. Only you can.
 
 ## Open a pull request
 

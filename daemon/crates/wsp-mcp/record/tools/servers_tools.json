@@ -1,7 +1,7 @@
 {
   "cloudOff": {
     "name": "servers_tools",
-    "description": "One MCP server's tools with their descriptions, and its sign-in as that one connect found it (open, signed in, needs a sign-in, failed, or unknown), with why nothing came back where nothing did. Starts that one server once on that computer or workspace, as the login it was added with and with the command and variables its agent's config gives it, or asks its address once from there, and stops it within 20 seconds; the answer is the server's state, the one the app shows, and stands three minutes unless refreshed or a sign-in there ends; an edited entry is asked again. A server behind a sign-in its agent holds brings no list, since no login file is read: Claude Code is asked for its word on it, and for any other agent it answers unknown, naming that agent as the one holding the sign-in. A napping workspace is not woken.",
+    "description": "One MCP server's tools with their descriptions, and its sign-in as that one connect found it (open, signed in, needs a sign-in, failed, or unknown), with why nothing came back where nothing did. Starts that one server once on that computer or where the thread runs, as the login it was added with and with the command and variables its agent's config gives it, or asks its address once from there, and stops it within 20 seconds; the answer is the server's state, the one the app shows, and stands three minutes unless refreshed or a sign-in there ends; an edited entry is asked again. A server behind a sign-in its agent holds brings no list, since no login file is read: Claude Code is asked for its word on it, and for any other agent it answers unknown, naming that agent as the one holding the sign-in. A napping machine is not woken.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -13,17 +13,17 @@
           "type": "string",
           "description": "the catalog id of the agent whose config names it, as servers lists it"
         },
-        "workspace": {
+        "thread": {
           "type": "string",
-          "description": "the workspace to read, by its name, or its id when two share a name; absent reads a computer"
+          "description": "a thread, by its id or a prefix of it, whose computer and project to read; absent reads a computer"
         },
         "on": {
           "type": "string",
-          "description": "the computer to read, by the name computers lists; absent with no workspace is the computer the app runs on"
+          "description": "the computer to read, by the name computers lists; absent with no thread is the computer the app runs on"
         },
         "project": {
           "type": "string",
-          "description": "the project on that computer whose server it is, by the name projects lists, with on; a workspace finds its own project's servers"
+          "description": "the project on that computer whose server it is, by the name projects lists, with on; a thread finds its own project's servers"
         },
         "refresh": {
           "type": "boolean",
@@ -121,7 +121,7 @@
   },
   "cloudOn": {
     "name": "servers_tools",
-    "description": "One MCP server's tools with their descriptions, and its sign-in as that one connect found it (open, signed in, needs a sign-in, failed, or unknown), with why nothing came back where nothing did. Starts that one server once on that computer or workspace, as the login it was added with and with the command and variables its agent's config gives it, or asks its address once from there, and stops it within 20 seconds; the answer is the server's state, the one the app shows, and stands three minutes unless refreshed or a sign-in there ends; an edited entry is asked again. A server behind a sign-in its agent holds brings no list, since no login file is read: Claude Code is asked for its word on it, and for any other agent it answers unknown, naming that agent as the one holding the sign-in. A napping workspace is not woken.",
+    "description": "One MCP server's tools with their descriptions, and its sign-in as that one connect found it (open, signed in, needs a sign-in, failed, or unknown), with why nothing came back where nothing did. Starts that one server once on that computer or where the thread runs, as the login it was added with and with the command and variables its agent's config gives it, or asks its address once from there, and stops it within 20 seconds; the answer is the server's state, the one the app shows, and stands three minutes unless refreshed or a sign-in there ends; an edited entry is asked again. A server behind a sign-in its agent holds brings no list, since no login file is read: Claude Code is asked for its word on it, and for any other agent it answers unknown, naming that agent as the one holding the sign-in. A napping machine is not woken.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -133,17 +133,17 @@
           "type": "string",
           "description": "the catalog id of the agent whose config names it, as servers lists it"
         },
-        "workspace": {
+        "thread": {
           "type": "string",
-          "description": "the workspace to read, by its name, or its id when two share a name; absent reads a computer"
+          "description": "a thread, by its id or a prefix of it, whose computer and project to read; absent reads a computer"
         },
         "on": {
           "type": "string",
-          "description": "the computer to read, by the name computers lists; absent with no workspace is the computer the app runs on"
+          "description": "the computer to read, by the name computers lists; absent with no thread is the computer the app runs on"
         },
         "project": {
           "type": "string",
-          "description": "the project on that computer whose server it is, by the name projects lists, with on; a workspace finds its own project's servers"
+          "description": "the project on that computer whose server it is, by the name projects lists, with on; a thread finds its own project's servers"
         },
         "refresh": {
           "type": "boolean",

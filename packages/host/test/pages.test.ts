@@ -10,6 +10,7 @@ import { EXIT_CODES } from "@wsp/protocol";
 import { agentPage, cli, COMMAND_LINES, devPage, HELP, HOST_STARTS_ITSELF, hostPage, MCP_OPTIONS, SHARED_FLAGS, type CliIO } from "../src/cli.js";
 import { wspSkill, instructions } from "../src/skill.js";
 import { CLI_VERBS, hasTool, THREAD_PREFIX_WORD, VERBS } from "../src/verbs.js";
+import { CLOUD_ON } from "../src/cloud.js";
 
 const noPrompt = (q: string): Promise<string> => Promise.reject(new Error(`unexpected prompt: ${q}`));
 const captured = (): CliIO & { lines: string[]; errors: string[] } => {
@@ -19,7 +20,7 @@ const captured = (): CliIO & { lines: string[]; errors: string[] } => {
 };
 
 /** The sixteen words, in the order the front page prints them. */
-const FRONT = ["init", "add", "computers", "remove", "projects", "threads", "run", "send", "stop", "pause", "wake", "delete", "status", "mcp"];
+const FRONT = ["init", "add", "computers", "remove", "projects", "threads", "run", "send", "stop", ...(CLOUD_ON ? ["pause", "wake"] : []), "delete", "status", "mcp"];
 
 /** The three lines about the person's own account, which print in the block under the sixteen rather than among
  * them: they are not work on a workspace, and a person meets them once. */
@@ -40,13 +41,15 @@ const REPO = fileURLToPath(new URL("../../..", import.meta.url));
 
 describe("the pages wsp prints", () => {
   it("the front page is the sixteen words on five nouns and nothing else a person has to read past", () => {
-    expect(frontLines()).toHaveLength(14);
+    expect(frontLines()).toHaveLength(FRONT.length);
     expect(frontLines().map(line => line.trim().split(" ")[1])).toEqual(FRONT);
     // Each of the sixteen is a line that declares the front page, and no other line does.
     expect(COMMAND_LINES.filter(l => l.page === "front").map(l => l.words).sort()).toEqual([...FRONT, ...ACCOUNT].sort());
     // The three rules and the two pages behind it, which is what makes "nothing else" findable.
     expect(HELP).toContain("A project or a thread comes right after the verb.");
-    expect(HELP).toContain("Sleeping is automatic.");
+    // Only a cloud's machines sleep, so the rule is said only where a cloud is registered.
+    if (CLOUD_ON) expect(HELP).toContain("Sleeping is automatic.");
+    else expect(HELP).not.toContain("Sleeping");
     expect(HELP).toContain("wsp --help agent");
     expect(HELP).toContain("wsp host --help");
   });
@@ -261,7 +264,7 @@ describe("the pages wsp prints", () => {
   it("no page, tool description, skill, instruction, AGENTS.md, README or doc carries a word wsp no longer answers to", () => {
     // "--in <" alone let three rows of the skill keep the flag in backticks with no value after it.
     // wsp hosts is a line wsp answers to, so it is no banned word; the ones below are gone for good.
-    const banned = ["thread new", "thread_new", "--in <", "`--in`", "--to <", "new --local", "new --ssh", "wsp connect", "wsp relay", "wsp pair", "wsp devices", "wsp disconnect", "wsp host list", "wsp host linked", "wsp host clients", "run wsp up first", "wsp image move"];
+    const banned = ["thread new", "thread_new", "--in <", "`--in`", "--to <", "new --local", "new --ssh", "wsp connect", "wsp relay", "wsp pair", "wsp devices", "wsp disconnect", "wsp host list", "wsp host linked", "wsp host clients", "run wsp up first", "wsp image move", "workspaces agents", "workspaces_agents"];
     // The changelog is the published release notes, which name the words each release retired.
     const docs = filesUnder(join(REPO, "apps/docs-next/content")).filter(p => (p.endsWith(".mdx") || p.endsWith(".md")) && !p.endsWith("project/changelog.mdx"));
     const texts: [string, string][] = [

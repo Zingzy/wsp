@@ -1,13 +1,13 @@
 {
   "cloudOff": {
     "name": "exec",
-    "description": "Runs a command on the workspace's machine as argv (each word as given; use sh -c for a shell line), in the folder cwd names or the one a thread would start in (the workspace's last used or only project, else its own folder), and returns its output lines, exit code and the folder it ran in. A non-zero exit is a result; the machine going away is an error.",
+    "description": "Runs a command on the computer the thread runs on as argv (each word as given; use sh -c for a shell line), in the folder cwd names or the folder the thread works in, and returns its output lines, exit code and the folder it ran in. A non-zero exit is a result; the computer going away is an error.",
     "inputSchema": {
       "type": "object",
       "properties": {
-        "workspace": {
+        "thread": {
           "type": "string",
-          "description": "the workspace's name, or its id when two share a name"
+          "description": "the thread, by its id or a prefix of it that names one, as threads lists them"
         },
         "argv": {
           "type": "array",
@@ -18,11 +18,11 @@
         },
         "cwd": {
           "type": "string",
-          "description": "the folder on the machine the thread works in or the command runs in, absolute. Absent means the workspace's own project, which is where a thread there starts unless it says otherwise"
+          "description": "the folder the command runs in, absolute; absent means the folder the thread works in"
         }
       },
       "required": [
-        "workspace",
+        "thread",
         "argv"
       ],
       "additionalProperties": false,
@@ -49,7 +49,7 @@
         },
         "cwd": {
           "type": "string",
-          "description": "the folder the command ran in, as the host resolved it; absent only on a machine whose kind names no folder, where its own home is where the command ran"
+          "description": "the folder the command ran in, as the host resolved it; absent only where the thread's computer names no folder, where its own home is where the command ran"
         }
       },
       "required": [
@@ -68,13 +68,13 @@
   },
   "cloudOn": {
     "name": "exec",
-    "description": "Runs a command on the workspace's machine as argv (each word as given; use sh -c for a shell line), in the folder cwd names or the one a thread would start in (the workspace's last used or only project, else its own folder), and returns its output lines, exit code and the folder it ran in. A non-zero exit is a result; the machine going away is an error.",
+    "description": "Runs a command on the computer the thread runs on as argv (each word as given; use sh -c for a shell line), in the folder cwd names or the folder the thread works in, and returns its output lines, exit code and the folder it ran in. A non-zero exit is a result; the computer going away is an error.",
     "inputSchema": {
       "type": "object",
       "properties": {
-        "workspace": {
+        "thread": {
           "type": "string",
-          "description": "the workspace's name, or its id when two share a name"
+          "description": "the thread, by its id or a prefix of it that names one, as threads lists them"
         },
         "argv": {
           "type": "array",
@@ -85,11 +85,11 @@
         },
         "cwd": {
           "type": "string",
-          "description": "the folder on the machine the thread works in or the command runs in, absolute. Absent means the workspace's own project, which is where a thread there starts unless it says otherwise"
+          "description": "the folder the command runs in, absolute; absent means the folder the thread works in"
         }
       },
       "required": [
-        "workspace",
+        "thread",
         "argv"
       ],
       "additionalProperties": false,
@@ -116,7 +116,7 @@
         },
         "cwd": {
           "type": "string",
-          "description": "the folder the command ran in, as the host resolved it; absent only on a machine whose kind names no folder, where its own home is where the command ran"
+          "description": "the folder the command ran in, as the host resolved it; absent only where the thread's computer names no folder, where its own home is where the command ran"
         }
       },
       "required": [

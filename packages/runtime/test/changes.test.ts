@@ -3,7 +3,7 @@
 // after a write and never on a timer; a discard and a commit sent down that same road; a commit message drafted by
 // the workspace's own agent with no thread; and the viewed marks kept on the workspace's record.
 import { afterEach, describe, expect, it } from "vitest";
-import { agentsOffRefusal, noChangeLine, cleanCheckoutLine, DRAFT_NOTES, type AdapterEvent, type Caller, type DaemonFrame, type DaemonResponse, type EventUnion, type TurnResult } from "@wsp/protocol";
+import { agentsOffRefusal, threadElsewhereLine, noChangeLine, cleanCheckoutLine, DRAFT_NOTES, type AdapterEvent, type Caller, type DaemonFrame, type DaemonResponse, type EventUnion, type TurnResult } from "@wsp/protocol";
 import { CHECKOUT_TTL_MS, createRuntime, type HarnessAdapter, type HarnessAdapterFactory, type Runtime } from "../src/runtime.js";
 import type { DaemonChannel, DaemonChannelOptions } from "../src/daemon-channel.js";
 import { memoryStore, type Store } from "../src/store.js";
@@ -60,19 +60,23 @@ function drafting(o: { asked?: { promptFile: string; model?: string }[]; answer?
     o.asked?.push(ask);
     return exec(`wsp-draft ${ask.promptFile}`).then(() => o.answer ?? "Round the cart total once\n\nThe total rounded per line.");
   };
+  let started = 0;
   return () => ({
     steers: false,
     draftFor,
     start: s => {
+      // Each turn is a session of its own, so two threads in one folder stay two.
+      const session = (started++).toString(16).padStart(12, "0");
+      const sessionId = `${SESSION.slice(0, -12)}${session}`;
       const result: TurnResult = { status: "completed", text: "ok" };
       const emit = (e: AdapterEvent): void => s.onEvent(e);
       const finished = (async () => {
-        emit({ type: "session.start", sessionId: SESSION });
-        emit({ type: "turn.done", sessionId: SESSION, result });
-        emit({ type: "session.end", sessionId: SESSION, exitCode: 0, sawResult: true });
+        emit({ type: "session.start", sessionId });
+        emit({ type: "turn.done", sessionId, result });
+        emit({ type: "session.end", sessionId, exitCode: 0, sawResult: true });
         return result;
       })();
-      return { localId: SESSION, finished, interrupt: async () => {} };
+      return { localId: sessionId, finished, interrupt: async () => {} };
     },
   });
 }
@@ -235,11 +239,12 @@ describe("a discard and a commit", () => {
     ]);
   });
 
-  it("says a clean checkout has nothing to commit, rather than that no file was named", async () => {
+  it("says a clean checkout has nothing to commit, rather than that no file was named, naming the thread the commit was asked by", async () => {
     const daemon = fakeDaemon({ "git.diff": () => ({ id: 1, ok: true, base: null, files: [], truncated: false }) });
     const { id, name } = await withWorkspace(daemon);
     await expect(rt!.workspaces.commit({ workspaceId: id, message: "m" })).rejects.toThrow(cleanCheckoutLine(name));
     expect(daemon.frames.map(f => f["op"])).toEqual(["git.diff"]);
+    await expect(rt!.workspaces.commit({ workspaceId: id, message: "m", threadId: "5c2d0e14-0000-4000-8000-000000000000" })).rejects.toThrow(cleanCheckoutLine("thread 5c2d0e14"));
   });
 
   it("is refused to a thread whose workspace lets its agents do nothing, by the act's own word", async () => {
@@ -270,6 +275,21 @@ describe("a drafted commit message", () => {
     expect(question).toContain("The task the agent was given:\nFix the flaky cart test");
     expect(log.some(cmd => cmd === `wsp-draft ${file}`)).toBe(true);
     expect(log.findIndex(cmd => cmd.includes("rm -f") && cmd.includes(file))).toBeGreaterThan(log.indexOf(`wsp-draft ${file}`));
+  });
+
+  it("is asked of the thread named where two share the folder, from the message that thread was opened with", async () => {
+    const daemon = fakeDaemon();
+    const asked: { promptFile: string; model?: string }[] = [];
+    const { backend, id } = await withWorkspace(daemon, { adapters: { claude: drafting({ asked }) } });
+    const first = await rt!.sessions.start(id, { prompt: "Fix the flaky cart test" });
+    await first.finished;
+    await (await rt!.sessions.start(id, { prompt: "Write the docs" })).finished;
+    await rt!.workspaces.commitDraft({ workspaceId: id, paths: ["a.ts"], threadId: first.view().threadId! });
+    const file = asked[0]!.promptFile;
+    const upload = backend.machines[0]!.execLog.find(cmd => cmd.includes(file) && cmd.includes("base64 -d"))!;
+    const question = Buffer.from(/printf %s '([^']+)'/.exec(upload)![1]!, "base64").toString("utf8");
+    expect(question).toContain("The task the agent was given:\nFix the flaky cart test");
+    await expect(rt!.workspaces.commitDraft({ workspaceId: id, paths: ["a.ts"], threadId: "t_elsewhere" })).rejects.toThrow(threadElsewhereLine("t_elsewhere"));
   });
 
   it("is none with the line saying why where no agent here drafts, or where nothing is named", async () => {

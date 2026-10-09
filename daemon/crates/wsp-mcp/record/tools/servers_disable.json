@@ -1,7 +1,7 @@
 {
   "cloudOff": {
     "name": "servers_disable",
-    "description": "Turns one MCP server off in one agent's own config on one computer or workspace, by the switch that agent reads (Codex's enabled line, OpenCode's enabled field, Gemini CLI's mcp.excluded); Claude Code keeps no such switch per server and is refused. Written as the login the computer was added with, into that agent's own file, which keeps its mode; a file that is a link out of the home, or out of the project for a project's file, is not written through, and a file the agent wrote meanwhile is left as it was. A napping workspace is not woken. The report there reads again at once.",
+    "description": "Turns one MCP server off in one agent's own config on one computer or where a thread runs, by the switch that agent reads (Codex's enabled line, OpenCode's enabled field, Gemini CLI's mcp.excluded); Claude Code keeps no such switch per server and is refused. Written as the login the computer was added with, into that agent's own file, which keeps its mode; a file that is a link out of the home, or out of the project for a project's file, is not written through, and a file the agent wrote meanwhile is left as it was. A napping machine is not woken. The report there reads again at once.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -13,13 +13,13 @@
           "type": "string",
           "description": "the catalog id of the agent whose config names it, as servers lists it"
         },
-        "workspace": {
+        "thread": {
           "type": "string",
-          "description": "the workspace to read, by its name, or its id when two share a name; absent reads a computer"
+          "description": "a thread, by its id or a prefix of it, whose computer and project to read; absent reads a computer"
         },
         "on": {
           "type": "string",
-          "description": "the computer to read, by the name computers lists; absent with no workspace is the computer the app runs on"
+          "description": "the computer to read, by the name computers lists; absent with no thread is the computer the app runs on"
         },
         "scope": {
           "type": "string",
@@ -35,7 +35,7 @@
             "boolean",
             "string"
           ],
-          "description": "the project's server of that name: true from a workspace, or the project's name, as projects lists it, with on"
+          "description": "the project's server of that name: true with a thread, the thread's own project, or the project's name, as projects lists it, with on"
         }
       },
       "required": [
@@ -67,7 +67,7 @@
   },
   "cloudOn": {
     "name": "servers_disable",
-    "description": "Turns one MCP server off in one agent's own config on one computer or workspace, by the switch that agent reads (Codex's enabled line, OpenCode's enabled field, Gemini CLI's mcp.excluded); Claude Code keeps no such switch per server and is refused. Written as the login the computer was added with, into that agent's own file, which keeps its mode; a file that is a link out of the home, or out of the project for a project's file, is not written through, and a file the agent wrote meanwhile is left as it was. A napping workspace is not woken. The report there reads again at once.",
+    "description": "Turns one MCP server off in one agent's own config on one computer or where a thread runs, by the switch that agent reads (Codex's enabled line, OpenCode's enabled field, Gemini CLI's mcp.excluded); Claude Code keeps no such switch per server and is refused. Written as the login the computer was added with, into that agent's own file, which keeps its mode; a file that is a link out of the home, or out of the project for a project's file, is not written through, and a file the agent wrote meanwhile is left as it was. A napping machine is not woken. The report there reads again at once.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -79,13 +79,13 @@
           "type": "string",
           "description": "the catalog id of the agent whose config names it, as servers lists it"
         },
-        "workspace": {
+        "thread": {
           "type": "string",
-          "description": "the workspace to read, by its name, or its id when two share a name; absent reads a computer"
+          "description": "a thread, by its id or a prefix of it, whose computer and project to read; absent reads a computer"
         },
         "on": {
           "type": "string",
-          "description": "the computer to read, by the name computers lists; absent with no workspace is the computer the app runs on"
+          "description": "the computer to read, by the name computers lists; absent with no thread is the computer the app runs on"
         },
         "scope": {
           "type": "string",
@@ -101,7 +101,7 @@
             "boolean",
             "string"
           ],
-          "description": "the project's server of that name: true from a workspace, or the project's name, as projects lists it, with on"
+          "description": "the project's server of that name: true with a thread, the thread's own project, or the project's name, as projects lists it, with on"
         }
       },
       "required": [

@@ -302,7 +302,7 @@ export const START_WORDS = {
   forkNotPushable: (login: string): string => `can't push to ${login}'s fork: they did not allow edits from maintainers`,
   noReadOnly: (agent: string, others: readonly string[]): string => `${agent} has no read-only access wsp can give a reviewer; review with ${others.join(" or ")}`,
   noReviewYet: (workspace: string): string => `${workspace} has no review to post yet`,
-  notAPullRequest: "a review needs a pull request's link, or a workspace with a pull request",
+  notAPullRequest: "a review needs a pull request's link, or a thread with a pull request",
   notALink: (text: string): string => `${oneLine(text).slice(0, 80)} is not a link to a GitHub issue or pull request`,
   made: (workspace: string, from: WorkspaceFrom | undefined): string =>
     from === undefined ? `made ${workspace}` : `made ${workspace} from ${from.kind === "issue" ? "issue" : "pull request"} #${from.number}`,

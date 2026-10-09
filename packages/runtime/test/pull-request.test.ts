@@ -9,6 +9,8 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  threadWord,
+  noPullRequestRefusal,
   AUTO_MERGE_OFF_LINE,
   HERE_PLACE_ID,
   GIT_DIFF_CAP_BYTES,
@@ -32,6 +34,7 @@ import {
   type PullRequest,
   type ThreadScope,
   type TurnResult,
+  threadElsewhereLine,
 } from "@wsp/protocol";
 import { LocalBackend } from "@wsp/engine";
 import { CHECKOUT_TTL_MS, PR_PAGE_HOLD_MS, RATE_LIMIT_HOLD_MS, copyKey, createRuntime, type HarnessAdapterFactory, type LocalWiring, type Runtime } from "../src/runtime.js";
@@ -776,6 +779,36 @@ describe("the acts on a pull request", () => {
     expect(await rt!.workspaces.fix({ workspaceId: id })).toMatchObject({ outcome: "started", base: "main" });
     expect(agent.prompts[1]).toBe("Merge the latest main into fix/ci, and resolve the conflicts in README.md. Run the tests, commit the merge, and push.");
     agent.end(1);
+  });
+
+  it("sends the conflicts to the thread named where two threads share the folder, never the folder's first, and refuses one of another folder", async () => {
+    const daemons = fakeDaemons({ copy: { "git.update": () => ({ id: 1, ok: true, base: "main", merged: false, commits: 0, conflicts: ["README.md"] }) } });
+    const agent = heldAgent();
+    const { id } = await withWorkspace(daemons, { adapters: { claude: agent.factory } });
+    const first = await rt!.sessions.start(id, { prompt: "change the readme" });
+    agent.end(0);
+    await first.finished;
+    const second = await rt!.sessions.start(id, { prompt: "change the docs" });
+    agent.end(1);
+    await second.finished;
+    const named = second.view().threadId!;
+    expect(await rt!.workspaces.fix({ workspaceId: id, threadId: named })).toMatchObject({ outcome: "started", threadId: named });
+    expect(agent.prompts[2]).toBe("Merge the latest main into fix/ci, and resolve the conflicts in README.md. Run the tests, commit the merge, and push.");
+    await expect(rt!.workspaces.fix({ workspaceId: id, threadId: "t_elsewhere" })).rejects.toThrow(threadElsewhereLine("t_elsewhere"));
+    agent.end(2);
+  });
+
+  it("refuses a merge and a check's fix where the copy has no pull request, naming the thread they were asked by", async () => {
+    const daemons = fakeDaemons({ here: { "git.prRead": () => ({ id: 1, ok: true }) } });
+    const agent = heldAgent();
+    const { id } = await withWorkspace(daemons, { adapters: { claude: agent.factory } });
+    const opened = await rt!.sessions.start(id, { prompt: "change the readme" });
+    agent.end(0);
+    await opened.finished;
+    const thread = opened.view().threadId!;
+    const said = noPullRequestRefusal(`thread ${threadWord(thread)}`);
+    await expect(rt!.workspaces.merge({ workspaceId: id, threadId: thread })).rejects.toThrow(said);
+    await expect(rt!.workspaces.fix({ workspaceId: id, check: "ci", threadId: thread })).rejects.toThrow(said);
   });
 
   it("merges the head the host read by the repository's default, refuses a method it does not allow and a wait it does not offer, then reads again", async () => {

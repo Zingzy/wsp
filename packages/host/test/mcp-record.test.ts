@@ -111,11 +111,14 @@ const REFUSED: readonly [string, Record<string, unknown>][] = [
   ["run", { project: "w", message: 3, agent: true }],
   ["run", { project: {}, message: [] }],
   ["run", { message: "m", branch: 7 }],
-  ["exec", { workspace: "w", argv: [] }],
-  ["exec", { workspace: "w", argv: [1, "a", null] }],
-  ["exec", { workspace: "w", argv: "ls" }],
+  ["exec", { thread: "t", argv: [] }],
+  ["exec", { thread: "t", argv: [1, "a", null] }],
+  ["exec", { thread: "t", argv: "ls" }],
+  ["exec", { workspace: "w", argv: ["ls"] }],
+  ["commit", { workspace: "w" }],
   ["stop", { thread: null }],
-  ["delete", { workspace: "w", confirm: "yes" }],
+  ["stop", { thread: "t", subagent: 3 }],
+  ["delete", { thread: "w", confirm: "yes" }],
   ["delete", { thread: 3 }],
   ["worktree", { project: "p" }],
   ["worktree_remove", { project: "p", branch: "b", force: "yes" }],
@@ -126,12 +129,6 @@ const REFUSED: readonly [string, Record<string, unknown>][] = [
   ["computers_set", { computer: "attic", turn_limit: 1.5 }],
   ["computers_set", { computer: "attic", turn_limit: -1 }],
   ["computers_set", { computer: "attic", turn_limit: 25 }],
-  ["workspaces_agents", { workspace: "w", max_machines: -1 }],
-  ["workspaces_agents", { workspace: "w", max_machines: 1.5 }],
-  ["workspaces_agents", { workspace: "w", max_machines: -0.5 }],
-  ["workspaces_agents", { workspace: "w", max_machines: "2" }],
-  ["workspaces_agents", { workspace: "w", spawn: "maybe" }],
-  ["workspaces_agents", { workspace: "w", spawn: 3 }],
   ["skills_search", { query: "q", limit: 0 }],
   ["skills_search", { query: "q", limit: 1000 }],
   ["threads_wait", { threads: [] }],
@@ -218,7 +215,6 @@ async function words(): Promise<Record<string, unknown>> {
     hostExited: hostExitedLine("{state}", "{ended}", "{log}"),
     herePlaceId: HERE_PLACE_ID,
     agentNames: Object.fromEntries(CATALOG.map(e => [e.id, agentName(e.id)])),
-    otherVersion: otherVersion("{op}"),
     // The binary fills these and picks its road's line off its own path, held to the node line's reading by roadSamples.
     release: {
       said: RELEASE_WORDS.said("{mine}", "{host}", "{theirs}"),
@@ -266,7 +262,7 @@ async function words(): Promise<Record<string, unknown>> {
     serverToolColumns: SERVER_TOOL_COLUMNS,
     commandWords: Object.fromEntries(COMMAND_LINES.map(line => [line, commandWords(line) ?? null])),
     hostWouldNotRead: refusalLine(validatorRefusal(JSON.stringify([{ code: "custom", path: [] }]))!, "usage: {usage}"),
-    bothTargets: Object.fromEntries(await Promise.all(["agents", "skills", "servers"].map(async tool => [tool, await toolText(tool, { workspace: "w", on: "c" }, {})]))),
+    bothTargets: Object.fromEntries(await Promise.all(["agents", "skills", "servers"].map(async tool => [tool, await toolText(tool, { thread: "w", on: "c" }, {})]))),
     folderHere: await toolText("folders", { folder: "{path}" }, {}),
     folderOn: await toolText("folders", { folder: "{path}", on: "{name}" }, { "places.list": reply({ places: [{ id: "p", kind: "computer", name: "{name}" }] }) }),
     noThread: await thrown(() => threadOf(answering({ "sessions.list": reply({ sessions: [] }) }), "{ref}")),
@@ -337,7 +333,8 @@ function host(): Record<string, unknown> {
 }
 
 /** A host as far as one tool call asks it: each op answered with the frame a host would send, parsed as the dial
- * parses it, a refusal thrown with its kind as the dial throws it. Each op it is asked lands in `asked` with its
+ * parses it, a refusal thrown with its kind as the dial throws it; the frame under `<op> #<n>` answers that op's nth
+ * ask where a case names one, so two records read through one op can differ. Each op it is asked lands in `asked` with its
  * fields as they cross the socket. The frames `pushed` names for an op reach every listener while it is under way,
  * before its reply, and after the reply to `closes` the host lets the socket go as it stops. */
 function answeringHost(replies: Record<string, string>, asked: Record<string, unknown>[], pushed: Record<string, string[]> = {}, closes?: string): HostClient & { gone(): boolean } {
@@ -346,13 +343,16 @@ function answeringHost(replies: Record<string, string>, asked: Record<string, un
   let code: number | undefined;
   let close: (code: number) => void = () => {};
   const closed = new Promise<number>(done => (close = done));
+  const seen = new Map<string, number>();
   return {
     request: async <T extends Record<string, unknown>>(op: string, params: Record<string, unknown> = {}): Promise<T> => {
+      const nth = (seen.get(op) ?? 0) + 1;
+      seen.set(op, nth);
       const fields = JSON.parse(JSON.stringify({ op, ...params })) as Record<string, unknown>;
       // A start's request id is minted fresh on every call, so it is noted as the one stand-in both sides write.
       if ("requestId" in fields) fields["requestId"] = "<request id>";
       asked.push(fields);
-      const frame = JSON.parse(replies[op] ?? JSON.stringify({ ok: false, error: `${op} is not in this record` })) as Record<string, unknown>;
+      const frame = JSON.parse(replies[`${op} #${nth}`] ?? replies[op] ?? JSON.stringify({ ok: false, error: `${op} is not in this record` })) as Record<string, unknown>;
       for (const f of pushed[op] ?? []) for (const fn of [...listeners]) fn(JSON.parse(f) as Frame);
       if (op === closes) {
         setImmediate(() => {
@@ -478,7 +478,9 @@ type Answered = Record<string, TurnCase[]>;
 
 /** A workspace and a computer a tool aims at by name. */
 const WORKSPACE = { id: "ws_1", name: "landing", machineId: "m1", phase: "running", golden: "snap_gold", createdAt: "2026-09-25T00:00:00.000Z", project: { id: "pr_1", name: "api", path: "/root/api", computer: "place-9" } };
-const AIMED = { "workspaces.resolve": reply({ workspace: WORKSPACE }), "places.list": reply({ places: [PLACE, CLOUD] }) };
+/** The thread the aimed cases name, on WORKSPACE. */
+const AIMED_THREAD = reply({ sessions: [{ id: "s-1", workspaceId: WORKSPACE.id, harness: "claude", status: "completed", threadId: "t-landing \u0085" }] });
+const AIMED = { "sessions.list": AIMED_THREAD, "workspaces.get": reply({ workspace: WORKSPACE }), "places.list": reply({ places: [PLACE, CLOUD] }) };
 
 const RECIPE = { name: "laptop \u0085 \"one\" 🧪", slug: "laptop-one", summary: "2 agents, 1 CLI", machines: ["attic"], file: RecipeFile.parse({ name: "laptop \u0085 \"one\" 🧪", agents: { claude: { signin: "vault" }, codex: { signin: "machine" } }, clis: { "cargo-nextest": { via: "cargo", needs: ["build-essential"] } } }) };
 
@@ -551,13 +553,13 @@ const SKILLS_AND_SERVERS: Answered = {
     { case: "skills.sh", arguments: { skill: "o/r/s" }, replies: { "skills.get": reply({ preview: { text: "# S\n\u001b[31mred\u0085\tend\r", size: 70000 } }) } },
     { case: "here", arguments: { skill: "review" }, replies: { "skills.preview": reply({ preview: { size: 12, text: "# Review 🧪", more: 1 } }) } },
     { case: "on a project", arguments: { skill: "review", on: "attic", project: "api" }, replies: { ...AIMED, "skills.preview": reply({ preview: { text: "x", size: 65536 } }) } },
-    { case: "in a workspace", arguments: { skill: "review", workspace: "landing", project: true }, replies: { ...AIMED, "skills.preview": reply({ preview: { text: "x", size: 65537 } }) } },
+    { case: "in a workspace", arguments: { skill: "review", thread: "t-landing", project: true }, replies: { ...AIMED, "skills.preview": reply({ preview: { text: "x", size: 65537 } }) } },
     { case: "skills.sh on a computer", arguments: { skill: "o/r/s", on: "attic" }, replies: {} },
-    { case: "both aimed", arguments: { skill: "review", workspace: "landing", on: "attic" }, replies: {} },
+    { case: "both aimed", arguments: { skill: "review", thread: "t-landing", on: "attic" }, replies: {} },
     { case: "project unnamed", arguments: { skill: "review", on: "attic", project: true }, replies: {} },
     { case: "project off a computer", arguments: { skill: "review", project: "api" }, replies: {} },
     { case: "no such computer", arguments: { skill: "review", on: "nowhere" }, replies: AIMED },
-    { case: "another version", arguments: { skill: "review", workspace: "landing" }, replies: { "workspaces.resolve": reply({}) } },
+    { case: "another version", arguments: { skill: "review", thread: "t-landing" }, replies: { "sessions.list": AIMED_THREAD, "workspaces.get": reply({}) } },
     { case: "refused", arguments: { skill: "gone" }, replies: { "skills.preview": refused("There is no skill named gone there.", "not-found") } },
   ],
   skills_add: [
@@ -568,11 +570,11 @@ const SKILLS_AND_SERVERS: Answered = {
     },
     { case: "alone", arguments: { skill: "plain" }, replies: { "skills.add": reply({ added: { path: "~/.agents/skills/plain", agents: [] } }) } },
     { case: "a project on a computer", arguments: { skill: "o/r/s", on: "place-solari", project: "api", agent: [] }, replies: { ...AIMED, "skills.add": reply({ added: { path: "/root/api/.agents/skills/s", agents: [] } }) } },
-    { case: "refused", arguments: { skill: "o/r/s", workspace: "landing" }, replies: { ...AIMED, "skills.add": refused("landing is napping, and its skills are read and changed only while it runs; wake it first") } },
+    { case: "refused", arguments: { skill: "o/r/s", thread: "t-landing" }, replies: { ...AIMED, "skills.add": refused("landing is napping, and its skills are read and changed only while it runs; wake it first") } },
   ],
   skills_remove: [
-    { case: "removed", arguments: { name: "review\tx", workspace: "landing", project: true }, replies: { ...AIMED, "skills.remove": reply({ removed: ["~/.agents/skills/review", "~/.claude/skills/review\u0085"] }) } },
-    { case: "both aimed", arguments: { name: "review", workspace: "landing", on: "attic" }, replies: {} },
+    { case: "removed", arguments: { name: "review\tx", thread: "t-landing", project: true }, replies: { ...AIMED, "skills.remove": reply({ removed: ["~/.agents/skills/review", "~/.claude/skills/review\u0085"] }) } },
+    { case: "both aimed", arguments: { name: "review", thread: "t-landing", on: "attic" }, replies: {} },
     { case: "refused", arguments: { name: "wsp" }, replies: { "skills.remove": refused("wsp's own skill is always on", "usage") } },
   ],
   skills_disable: [
@@ -599,7 +601,7 @@ const SKILLS_AND_SERVERS: Answered = {
       },
     },
     { case: "held", arguments: { name: "notion", agent: "codex", refresh: true }, replies: { "servers.tools": reply({ answer: { auth: "unknown", holder: "codex", readAt: "2026-09-27T00:00:00.000Z" } }) } },
-    { case: "refused by the server", arguments: { name: "slow", agent: "zed-x", workspace: "landing" }, replies: { ...AIMED, "servers.tools": reply({ answer: { auth: "failed", refused: "Did not answer in 20 s.", readAt: "2026-09-27T00:00:00.000Z" } }) } },
+    { case: "refused by the server", arguments: { name: "slow", agent: "zed-x", thread: "t-landing" }, replies: { ...AIMED, "servers.tools": reply({ answer: { auth: "failed", refused: "Did not answer in 20 s.", readAt: "2026-09-27T00:00:00.000Z" } }) } },
     { case: "no tools", arguments: { name: "empty", agent: "claude", on: "attic", project: "api", refresh: false }, replies: { ...AIMED, "servers.tools": reply({ answer: { auth: "open", tools: [], readAt: "2026-09-27T00:00:00.000Z" } }) } },
     { case: "not yet asked", arguments: { name: "empty", agent: "claude" }, replies: { "servers.tools": reply({ answer: { auth: "open", readAt: "2026-09-27T00:00:00.000Z" } }) } },
     { case: "project bare", arguments: { name: "x", agent: "claude", on: "attic", project: "" }, replies: {} },
@@ -613,7 +615,7 @@ const SKILLS_AND_SERVERS: Answered = {
       env: { WSP_RECORD_KEY: "sk-ant-x" },
       replies: { "servers.add": reply({ file: "~/.claude.json" }) },
     },
-    { case: "address", arguments: { name: "remote", agent: "codex", url: "https://mcp.example/sse", header: ["Authorization=WSP_RECORD_KEY"], workspace: "landing", project: true }, env: { WSP_RECORD_KEY: "sk-ant-x" }, replies: { ...AIMED, "servers.add": reply({ file: "/root/api/.codex/config.toml" }) } },
+    { case: "address", arguments: { name: "remote", agent: "codex", url: "https://mcp.example/sse", header: ["Authorization=WSP_RECORD_KEY"], thread: "t-landing", project: true }, env: { WSP_RECORD_KEY: "sk-ant-x" }, replies: { ...AIMED, "servers.add": reply({ file: "/root/api/.codex/config.toml" }) } },
     { case: "unset variable", arguments: { name: "x", agent: "claude", command: "x", env: ["WSP_RECORD_UNSET"] }, replies: {} },
     { case: "not a header", arguments: { name: "x", agent: "claude", url: "https://x.example", header: ["Authorization"] }, replies: {} },
     { case: "header with no variable", arguments: { name: "x", agent: "claude", url: "https://x.example", header: ["Authorization="] }, replies: {} },
@@ -628,7 +630,7 @@ const SKILLS_AND_SERVERS: Answered = {
     { case: "refused", arguments: { name: "linear", agent: "claude" }, replies: { "servers.remove": refused("claude has no MCP server named linear", "not-found") } },
   ],
   servers_disable: [
-    { case: "off", arguments: { name: "linear", agent: "codex", workspace: "landing", scope: "project", project: true }, replies: { ...AIMED, "servers.toggle": reply({ file: "/root/api/.codex/config.toml" }) } },
+    { case: "off", arguments: { name: "linear", agent: "codex", thread: "t-landing", scope: "project", project: true }, replies: { ...AIMED, "servers.toggle": reply({ file: "/root/api/.codex/config.toml" }) } },
     { case: "refused", arguments: { name: "linear", agent: "claude" }, replies: { "servers.toggle": refused("Claude Code keeps no switch per server that wsp turns, so nothing was changed.", "usage") } },
   ],
   servers_enable: [{ case: "on", arguments: { name: "linear", agent: "gemini" }, replies: { "servers.toggle": reply({ file: "~/.gemini/settings.json" }) } }],

@@ -13,7 +13,7 @@ import { type AddressInfo } from "node:net";
 import { promisify } from "node:util";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { HOST_TOKEN_ENV, HOST_URL_ENV, NOT_UNDER_FIX, notUnderLine, replacesWorkingFix, replacesWorkingLine, CLOUD_ENV, DAEMON_TOKEN_PATH, deniedLine, noSuchAccountLine, PERMISSION_DENY, pushedForChildLine, EXIT_CODES, refusalLine, SCOPED_MCP_ARG, scopedNoPairLine, HERE_PLACE_ID, shellQuote, TURN_TOKEN_ENV, VerbFailure, WS_PATH } from "@wsp/protocol";
+import { HOST_TOKEN_ENV, HOST_URL_ENV, notAThreadLine, NAME_A_THREAD_FIX, NOT_UNDER_FIX, notUnderLine, replacesWorkingFix, replacesWorkingLine, CLOUD_ENV, DAEMON_TOKEN_PATH, deniedLine, noSuchAccountLine, PERMISSION_DENY, pushedForChildLine, EXIT_CODES, refusalLine, SCOPED_MCP_ARG, scopedNoPairLine, HERE_PLACE_ID, shellQuote, TURN_TOKEN_ENV, VerbFailure, WS_PATH } from "@wsp/protocol";
 import { CLOUD_ON } from "../src/cloud.js";
 import { copyKey, createRuntime, DAEMON_TOKEN_SET, localExecStream, memoryStore, type Runtime, type Store } from "@wsp/runtime";
 import { fakeCopier, LocalBackend } from "@wsp/engine";
@@ -321,6 +321,10 @@ describe("the agent contract on the command line and the tool door", () => {
 
     expect((await run("new", "alpha")).code).toBe(0);
     const alpha = (await rt.workspaces.list()).find(w => w.name === "alpha")!.id;
+    // The thread every line that acts where a thread works names: alpha's own.
+    const opening = await rt.sessions.start(alpha, { prompt: "lead the work" });
+    await opening.finished;
+    const lead = opening.view().threadId!;
     // The one verb that asks the workspace's own daemon anything: the guest carries this host's token and the
     // machine has a route, which is what the channel behind a bring back is opened on.
     const machine = backend.machines[0]!;
@@ -328,17 +332,17 @@ describe("the agent contract on the command line and the tool door", () => {
     const guestSoFar = backend.execImpl;
     machine.previewUrl = async () => ({ url: "http://127.0.0.1:7070", token: "e", expiresAt: Date.now() + 3_600_000 });
     backend.execImpl = (m, cmd) => (cmd.includes(DAEMON_TOKEN_PATH) ? { exitCode: 0, stdout: `${DAEMON_TOKEN_SET}\n`, stderr: "" } : guestSoFar(m, cmd));
-    expect(await last("commit", "commit", "alpha", "--message", "Round the cart total once", "--file", "a.ts")).toEqual({
+    expect(await last("commit", "commit", lead, "--message", "Round the cart total once", "--file", "a.ts")).toEqual({
       oid: "5f1c0e2b9a7d4c3e8f6a1b2c3d4e5f60718293a4",
       subject: "Round the cart total once",
       filesChanged: 1,
       insertions: 1,
       deletions: 1,
     });
-    expect(await last("discard", "discard", "alpha", "a.ts")).toEqual({ path: "a.ts" });
-    expect(await last("update", "update", "alpha")).toEqual({ base: "main", merged: true, commits: 2, conflicts: [] });
-    expect(await last("fix", "fix", "alpha")).toEqual({ outcome: "updated", base: "main" });
-    expect(await last("merge", "merge", "alpha", "--method", "squash")).toEqual({ number: 3, method: "squash", merged: true, autoArmed: false });
+    expect(await last("discard", "discard", lead, "a.ts")).toEqual({ path: "a.ts" });
+    expect(await last("update", "update", lead)).toEqual({ base: "main", merged: true, commits: 2, conflicts: [] });
+    expect(await last("fix", "fix", lead)).toEqual({ outcome: "updated", base: "main" });
+    expect(await last("merge", "merge", lead, "--method", "squash")).toEqual({ number: 3, method: "squash", merged: true, autoArmed: false });
     // A child of alpha, made as a thread's fork makes one, with a road to its own daemon from the moment it exists:
     // its copy is put on the branch alpha pushed inside the create that made it.
     const make = backend.create.bind(backend);
@@ -347,9 +351,11 @@ describe("the agent contract on the command line and the tool door", () => {
       Object.assign(m, { previewUrl: machine.previewUrl, daemonAnswers: async () => true });
       return m;
     };
-    await rt!.workspaces.create({ project: "alpha", golden: "snap_g", name: "beta", parent: alpha });
+    const beta = await rt!.workspaces.create({ project: "alpha", golden: "snap_g", name: "beta", parent: alpha });
     backend.create = make;
-    expect(await last("merge in", "merge", "in", "alpha", "beta")).toEqual({ lead: "alpha", child: "beta", branch: "work", merged: true, commits: 1, conflicts: [] });
+    const building = await rt.sessions.start(beta.id, { prompt: "build it" });
+    await building.finished;
+    expect(await last("merge in", "merge", "in", lead, building.view().threadId!)).toEqual({ lead: "alpha", child: "beta", branch: "work", merged: true, commits: 1, conflicts: [] });
     // A start and a review make workspaces of their own, whose machines answer their daemons at the same route.
     const routed = rt.events.on("workspace.created", e => {
       if (e.type !== "workspace.created") return;
@@ -358,19 +364,15 @@ describe("the agent contract on the command line and the tool door", () => {
     });
     const started = (await last("start", "start", "https://github.com/dev/alpha/issues/3", "--agent", "claude")) as { workspace: { name: string; from: { kind: string } } };
     expect(started.workspace).toMatchObject({ name: "#3 Do the work", from: { kind: "issue" } });
-    const reviewing = (await last("review", "review", "https://github.com/dev/alpha/pull/3", "--agent", "claude")) as { workspace: { id: string } };
+    const reviewing = (await last("review", "review", "https://github.com/dev/alpha/pull/3", "--agent", "claude")) as { workspace: { id: string }; threadId: string };
     const drafted = async (): Promise<boolean> => "verdict" in ((await rt.workspaces.reviewDraft({ workspaceId: reviewing.workspace.id })).review ?? {});
     for (let tries = 0; tries < 200 && !(await drafted()); tries++) await new Promise(r => setTimeout(r, 10));
-    expect(await last("review post", "review", "post", reviewing.workspace.id)).toEqual({ url: "https://github.com/dev/alpha/pull/3#pullrequestreview-1", number: 3, comments: 1, folded: 0 });
+    expect(await last("review post", "review", "post", reviewing.threadId)).toEqual({ url: "https://github.com/dev/alpha/pull/3#pullrequestreview-1", number: 3, comments: 1, folded: 0 });
     routed();
     // The route goes again with the guest that answered for it: a machine wearing one has every later verb wait on
     // a daemon that is not there, which is the rest of this run.
     machine.previewUrl = noRoute;
     backend.execImpl = guestSoFar;
-    expect(await last("workspaces agents", "workspaces", "agents", "alpha", "--spawn", "on", "--max-machines", "2")).toEqual({
-      workspace: expect.objectContaining({ name: "alpha", agents: { spawn: true, maxMachines: 2, maxDepth: 2 } }),
-    });
-    await last("workspaces agents", "workspaces", "agents", "alpha", "--spawn", "off");
     await last("threads", "threads");
     await last("computers", "computers");
     expect(await last("computers set", "computers", "set", HERE_PLACE_ID, "--threads", "2")).toEqual({ computer: expect.objectContaining({ id: HERE_PLACE_ID, cap: { threads: 2 }, settings: { threads: 2 } }) });
@@ -430,12 +432,16 @@ describe("the agent contract on the command line and the tool door", () => {
     // what went on the computer holding it.
     expect(await last("projects remove", "projects", "remove", "spare")).toEqual({ project: expect.objectContaining({ name: "spare" }), said: expect.stringContaining("is no longer a project") });
     // Renamed and named back, so the rest of this run still addresses it as alpha.
-    expect(await last("rename", "rename", "alpha", "renamed")).toMatchObject({ was: "alpha", workspace: { name: "renamed" } });
-    await last("rename", "rename", "renamed", "alpha");
+    if (CLOUD_ON) {
+      expect(await last("rename", "rename", "alpha", "renamed")).toMatchObject({ was: "alpha", workspace: { name: "renamed" } });
+      await last("rename", "rename", "renamed", "alpha");
+    }
     // A snapshot takes a first-life machine, so it comes before the pause that resumes it.
     const snapped = CLOUD_ON ? ((await last("snapshot", "snapshot", "alpha")) as { projectGolden: { snapshotId: string } }) : undefined;
-    await last("pause", "pause", "alpha");
-    await last("wake", "wake", "alpha");
+    if (CLOUD_ON) {
+      await last("pause", "pause", "alpha");
+      await last("wake", "wake", "alpha");
+    }
     // The seeded golden was sealed before records existed, so the record reads off its head and holds no sign-ins.
     expect(await last("image", "image")).toMatchObject({ image: expect.objectContaining({ version: 1 }), copies: [expect.objectContaining({ place: "default" })], projects: expect.any(Array) });
     if (snapped !== undefined) {
@@ -447,7 +453,7 @@ describe("the agent contract on the command line and the tool door", () => {
       await store.put("goldens", copyKey("elsewhere", "default"), { ...SEALED_GOLDEN, versions: [{ ...SEALED_GOLDEN.versions[0]!, snapshotId: "snap_elsewhere", imageHash: RECORD.hash }] });
       expect(await last("image build", "image", "build", "elsewhere")).toEqual({ copy: expect.objectContaining({ place: "elsewhere", version: 1, hash: RECORD.hash }), built: false });
     }
-    const opened = (await last("run", "run", "alpha", "hello")) as { threadId: string; text: string };
+    const opened = (await last("run", "run", "--beside", lead, "hello")) as { threadId: string; text: string };
     expect(opened).toMatchObject({ threadId: expect.any(String), text: "re: hello", outcome: "started" });
     await last("send", "send", opened.threadId, "again");
     // The turn is over, so the wait answers off the transcript at once.
@@ -457,15 +463,15 @@ describe("the agent contract on the command line and the tool door", () => {
     await last("thread read", "thread", "read", opened.threadId);
     expect(await last("thread head", "thread", "head", opened.threadId)).toMatchObject({ facts: { id: opened.threadId, status: "completed" }, pos: expect.any(Number), total: expect.any(Number) });
     await last("stop", "stop", opened.threadId);
-    // One subagent of a turn that is over: nothing to stop, which is an answer, and it names the task.
-    expect(await last("stop", "stop", opened.threadId, "--task", "a1b2")).toEqual({ threadId: opened.threadId, task: "a1b2", outcome: "not-running" });
+    // One subagent of a turn that is over: nothing to stop, which is an answer, and it names the subagent.
+    expect(await last("stop", "stop", opened.threadId, "--subagent", "a1b2")).toEqual({ threadId: opened.threadId, task: "a1b2", outcome: "not-running" });
     // A thread stopped on a permission question, answered from here the way the app's own buttons answer it.
     for (const [verb, task] of [["thread allow", "allow"], ["thread deny", "deny"]] as const) {
-      const asking = (await last("run", "run", "alpha", "--detach", ASKS)) as { threadId: string };
+      const asking = (await last("run", "run", "--beside", lead, "--detach", ASKS)) as { threadId: string };
       await vi.waitFor(async () => expect((await rt.sessions.list()).find(v => v.threadId === asking.threadId)!.asking).toBeDefined());
       // A running turn on an agent that stops no subagent by itself says so, and still succeeds.
       if (verb === "thread allow") {
-        expect(await last("stop", "stop", asking.threadId, "--task", "a1b2")).toEqual({ threadId: asking.threadId, task: "a1b2", outcome: "unsupported", error: "Stop is not available for Claude Code subagents; stop the thread to stop them all" });
+        expect(await last("stop", "stop", asking.threadId, "--subagent", "a1b2")).toEqual({ threadId: asking.threadId, task: "a1b2", outcome: "unsupported", error: "Stop is not available for Claude Code subagents; stop the thread to stop them all" });
       }
       const reason = verb === "thread deny" ? ["--reason", "count the lines with awk instead"] : [];
       expect(await last(verb, "thread", task, asking.threadId, ...reason)).toEqual({ threadId: asking.threadId, askId: SCRIPTED_ASK.askId, optionId: expect.any(String) });
@@ -507,14 +513,14 @@ describe("the agent contract on the command line and the tool door", () => {
     const inFolder = (await last("run", "run", "here", "hello here")) as { threadId: string };
     expect(await last("delete", "delete", inFolder.threadId, "--yes")).toEqual({ threadId: inFolder.threadId, workspaceId: expect.any(String), threads: 1 });
     // A launch that never started its agent leaves a row with no turn on it, which is the one a forget takes.
-    const dead = await run("run", "alpha", "--agent", "codex", "never gets going", "--json");
+    const dead = await run("run", "--beside", lead, "--agent", "codex", "never gets going", "--json");
     expect(dead.code).toBe(1);
     const junk = (await rt.sessions.list()).find(v => v.harness === "codex")!.threadId!;
     expect(await last("thread forget", "thread", "forget", junk)).toEqual({ threadId: junk, workspaceId: alpha });
-    await last("export", "export", "alpha", join(dir, "out", "proj"), "--from", EXPORT_SOURCE);
+    if (CLOUD_ON) await last("export", "export", "alpha", join(dir, "out", "proj"), "--from", EXPORT_SOURCE);
     execGuest(backend, "ok\n", 0);
     // A streamed verb's frames carry the output and its result leaves it out, so no line prints twice.
-    const ran = await run("exec", "alpha", "--json", "--", "true");
+    const ran = await run("exec", lead, "--json", "--", "true");
     expect(ran.code).toBe(0);
     expect(objects(ran.io)).toEqual([{ type: "exec.output", execId: expect.any(String), text: "ok" }, { exitCode: 0, cwd: "/root/alpha" }]);
     covered.set("exec", objects(ran.io).at(-1));
@@ -543,10 +549,6 @@ describe("the agent contract on the command line and the tool door", () => {
       backend.create = make;
       backend.execImpl = guestNow;
       machine.previewUrl = noRoute;
-    } else {
-      expect((await run("new", "worker")).code).toBe(0);
-      // The rebuild below is the cloud's, so with none the delete runs on a machine that still answers.
-      await last("delete", "delete", alpha, "--yes");
     }
     // Recipe verbs read the computer HOME and PATH name: an empty one here, so nothing of this box is read.
     const empty = join(dir, "empty");
@@ -556,11 +558,11 @@ describe("the agent contract on the command line and the tool door", () => {
     await last("recipe scan", "recipe", "scan");
     await last("recipe", "recipe", "--tick", "default");
     for (const m of backend.machines) m.killed = true;
-    const worker = (await rt.workspaces.list()).find(w => w.name === "worker")!;
-    await last("forget", "forget", worker.id, "--yes");
     // A machine killed at the provider settles its record on the next verb that reads the machine, and gone is the
     // one state a rebuild takes; the workspace comes back on a fresh machine under the same id.
     if (CLOUD_ON) {
+      const worker = (await rt.workspaces.list()).find(w => w.name === "worker")!;
+      await last("forget", "forget", worker.id, "--yes");
       const stale = await run("wake", "alpha", "--json");
       expect(stale.code).toBe(1);
       const rebuilt = (await last("rebuild", "rebuild", alpha)) as { workspace: { id: string; machineId: string } };
@@ -582,11 +584,14 @@ describe("the agent contract on the command line and the tool door", () => {
     expect([...refusedUnasked].sort()).toEqual(served.filter(v => takesAway(v.name)).map(v => v.name).sort());
   }, 60_000);
 
-  it("the lists of what stands on a computer refuse a workspace and a computer together, and a computer nobody holds, as usage", async () => {
+  it("the lists of what stands on a computer refuse a thread and a computer together, a project named for a thread, and a computer nobody holds, as usage", async () => {
     await run("new", "alpha");
     const both = await run("agents", "alpha", "--on", HERE_PLACE_ID, "--json");
     expect(both.code).toBe(EXIT_CODES.usage);
-    expect(failure(both.io).error).toContain("give the workspace or --on <computer>, not both");
+    expect(failure(both.io).error).toContain("give the thread or --on <computer>, not both");
+    const project = await run("skills", "alpha", "--json");
+    expect(project.code).toBe(EXIT_CODES.usage);
+    expect(failure(project.io).error).toBe(refusalLine(notAThreadLine("alpha", "project", "wsp skills", true), NAME_A_THREAD_FIX));
     const nobody = await run("skills", "--on", "nowhere", "--json");
     expect(nobody.code).toBe(EXIT_CODES.usage);
     expect(failure(nobody.io).error).toContain("nowhere");
@@ -611,8 +616,15 @@ describe("the agent contract on the command line and the tool door", () => {
     await run("new", "alpha");
     const unasked = await run("delete", "alpha", "--json");
     expect(unasked.code).toBe(3);
-    expect(failure(unasked.io)).toEqual({ error: "Delete alpha? There is no terminal to answer on. Pass --yes to say yes.", class: "usage", exit: 3 });
+    // With no cloud a delete takes a thread, and a word naming none is refused; with one, the machine of that name is
+    // asked about first.
+    const asked = CLOUD_ON ? "Delete alpha? There is no terminal to answer on. Pass --yes to say yes." : "no thread alpha. Name a thread wsp threads lists.";
+    expect(failure(unasked.io)).toEqual({ error: asked, class: "usage", exit: 3 });
     expect((await rt.workspaces.list()).map(w => w.name)).toEqual(["alpha"]);
+    // A line that takes a thread refuses a project's name in its own words, the usage line its fix.
+    const commitProject = await run("commit", "alpha", "--json");
+    expect(commitProject.code).toBe(3);
+    expect(failure(commitProject.io)).toEqual({ error: refusalLine(notAThreadLine("alpha", "project", "wsp commit"), NAME_A_THREAD_FIX), class: "usage", exit: 3 });
 
     const relative = await run("exec", "alpha", "--cwd", "packages", "--json", "--", "true");
     expect(relative.code).toBe(3);
@@ -626,7 +638,7 @@ describe("the agent contract on the command line and the tool door", () => {
     const missing = await run("pause", "nope", "--json");
     expect(missing.code).toBe(EXIT_CODES.usage);
     expect(missing.io.lines).toEqual([]);
-    expect(failure(missing.io)).toEqual({ error: "no workspace nope", class: "usage", exit: 3 });
+    expect(failure(missing.io)).toEqual({ error: CLOUD_ON ? "no workspace nope" : `wsp pause needs the cloud, which is off on this computer: start the host with ${CLOUD_ENV}=1 to turn it on.`, class: "usage", exit: 3 });
 
     // A spend names an account the host holds, or is refused before anything is asked or spent.
     const account = await run("usage", "reset", "nope", "--yes", "--json");
@@ -679,16 +691,16 @@ describe("the agent contract on the command line and the tool door", () => {
     const [stuck, beside] = [await kid("build it"), await kid("review it")];
     const minted = await rt.devices.mint(`thread ${beside.slice(0, 8)}`, { ...scope, threadId: beside }, Date.now(), { road: "relayed" });
     const io = captured();
-    const fromBeside = await cli(["run", "alpha", "--replaces", stuck, "--detach", "build it again", "--json"], io, undefined, { [HOST_URL_ENV]: `http://127.0.0.1:${handle!.port}`, [HOST_TOKEN_ENV]: minted.deviceToken, HOME: join(dir, "agent"), WSP_HOME: join(dir, "agent", ".wsp") });
+    const fromBeside = await cli(["run", "--replaces", stuck, "--detach", "build it again", "--json"], io, undefined, { [HOST_URL_ENV]: `http://127.0.0.1:${handle!.port}`, [HOST_TOKEN_ENV]: minted.deviceToken, HOME: join(dir, "agent"), WSP_HOME: join(dir, "agent", ".wsp") });
     expect(fromBeside).toBe(EXIT_CODES.usage);
     expect(failure(io)).toEqual({ error: refusalLine(notUnderLine(stuck), NOT_UNDER_FIX), class: "usage", exit: EXIT_CODES.usage });
-    const asking = objects((await run("run", "alpha", "--detach", ASKS, "--json")).io).at(-1) as { threadId: string };
+    const asking = objects((await run("run", "--beside", leadId, "--detach", ASKS, "--json")).io).at(-1) as { threadId: string };
     await vi.waitFor(async () => expect((await rt.sessions.list()).find(v => v.threadId === asking.threadId)!.asking).toBeDefined());
-    const working = await run("run", "alpha", "--replaces", asking.threadId, "--detach", "again", "--json");
+    const working = await run("run", "--beside", leadId, "--replaces", asking.threadId, "--detach", "again", "--json");
     expect(working.code).toBe(EXIT_CODES.usage);
     expect(failure(working.io)).toEqual({ error: refusalLine(replacesWorkingLine(asking.threadId), replacesWorkingFix(asking.threadId)), class: "usage", exit: EXIT_CODES.usage });
     await run("thread", "deny", asking.threadId);
-    const restart = await run("run", "alpha", "--replaces", stuck.slice(0, 8), "--detach", "build it again", "--json");
+    const restart = await run("run", "--beside", leadId, "--replaces", stuck.slice(0, 8), "--detach", "build it again", "--json");
     expect(restart.code).toBe(0);
     const { threadId: again } = objects(restart.io).at(-1) as { threadId: string };
     await vi.waitFor(async () => {
@@ -773,13 +785,16 @@ describe("the agent contract on the command line and the tool door", () => {
 
   it("a provider failure exits 1: the machine cap, no host serving, and a turn that failed", async () => {
     await run("new", "alpha");
-    const died = await run("run", "alpha", "die");
+    const opening = await rt.sessions.start((await rt.workspaces.list()).find(w => w.name === "alpha")!.id, { prompt: "lead the work" });
+    await opening.finished;
+    const lead = opening.view().threadId!;
+    const died = await run("run", "--beside", lead, "die");
     expect(died.code).toBe(1);
     expect(died.io.errors).toEqual(["wsp run: the harness died"]);
     // The line that says the agent is starting is a wait's, held back under --json as the reply's stream is.
-    const slow = await run("run", "alpha", STARTS_THEN_DIES);
+    const slow = await run("run", "--beside", lead, STARTS_THEN_DIES);
     expect(slow.io.errors).toEqual(["Starting Claude Code", "wsp run: the harness died"]);
-    const slowJson = await run("run", "alpha", STARTS_THEN_DIES, "--json");
+    const slowJson = await run("run", "--beside", lead, STARTS_THEN_DIES, "--json");
     expect(slowJson.code).toBe(1);
     expect(failure(slowJson.io)).toEqual({ error: "the harness died", class: "provider", exit: 1 });
 
@@ -871,9 +886,9 @@ describe("the agent contract on the command line and the tool door", () => {
         const r = await client.callTool({ name, arguments: args });
         return { text: (r.content as { text?: string }[]).map(p => p.text ?? "").join(""), structured: r.structuredContent, isError: r.isError === true };
       };
-      expect(await call("pause", { workspace: "nope" })).toEqual({ text: "no workspace nope", structured: { error: "no workspace nope", class: "usage", exit: 3 }, isError: true });
+      expect(await call("commit", { thread: "nope" })).toEqual({ text: "no thread nope", structured: { error: "no thread nope", class: "usage", exit: 3 }, isError: true });
       await call("new", { name: "alpha" });
-      const relative = await call("exec", { workspace: "alpha", argv: ["true"], cwd: "packages" });
+      const relative = await call("exec", { thread: "alpha", argv: ["true"], cwd: "packages" });
       const cwdRefusal = '--cwd is a path on the machine, absolute, and got "packages". Give a path that opens with /, since whoever reads it works in a folder this line cannot see.';
       expect(relative).toEqual({ text: cwdRefusal, structured: { error: cwdRefusal, class: "usage", exit: 3 }, isError: true });
       const blank = refusalLine(afterWorktreeBlankLine, AFTER_WORKTREE_BLANK_FIX);

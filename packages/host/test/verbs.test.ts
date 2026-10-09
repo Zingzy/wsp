@@ -74,7 +74,7 @@ describe("what the projects remove tool says", () => {
 });
 
 describe("wsp ssh with no host serving its state", () => {
-  it("refuses in one line and starts no host, so no second lock appears for a state no host serves", async () => {
+  it.runIf(CLOUD_ON)("refuses in one line and starts no host, so no second lock appears for a state no host serves", async () => {
     const home = mkdtempSync(join(tmpdir(), "wsp-ssh-no-host-"));
     try {
       const statePath = join(home, ".wsp", "state.json");

@@ -83,9 +83,9 @@ Several threads can work in one folder. If other threads worked there too, the l
 
 | Command | What it does |
 |---|---|
-| `wsp commit <workspace> [--message "<message>"] [--file <path>]...` | Commits the changed files, or only the ones that `--file` names. Without `--message`, the agent drafts the message. |
-| `wsp discard <workspace> <path> [--yes]` | Puts one file back as its last commit has it. It asks first, unless you pass `--yes`. |
-| `wsp update <workspace>` | Merges the newest commits of the base branch from the remote into the branch, with a merge commit. |
+| `wsp commit <thread> [--message "<message>"] [--file <path>]...` | Commits the changed files, or only the ones that `--file` names. Without `--message`, the agent drafts the message. |
+| `wsp discard <thread> <path> [--yes]` | Puts one file back as its last commit has it. It asks first, unless you pass `--yes`. |
+| `wsp update <thread>` | Merges the newest commits of the base branch from the remote into the branch, with a merge commit. |
 
 `wsp update` never rewrites a branch, so a branch you already pushed stays safe to push again. If the folder has changes no commit holds, it stops and names the files. If the merge conflicts, it takes the merge back at once and names the files. [`wsp fix`](/reference/cli/fix) then hands those files to the agent. None of the three commands pushes.
 

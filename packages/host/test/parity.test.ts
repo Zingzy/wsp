@@ -345,7 +345,7 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
       "status",
       "up",
       "usage reset",
-    ].filter(words => CLOUD_ON || words !== "image export"));
+    ].filter(words => CLOUD_ON || (words !== "image export" && words !== "ssh")));
     // A tool with no command line of its own is held to a stated reason: recording a project is the one, since the
     // command line's `wsp add` also hands out a join code and takes a provider's key, neither of which is an agent's.
     expect(VERBS.filter(v => "toolOnly" in v).map(v => v.name)).toEqual(["projects add"]);
@@ -443,7 +443,6 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
     };
     // The workspace ops a window sends that are no pane's: a row's buttons and a window's own bookkeeping.
     const ROW_ONLY: Record<string, string> = {
-      "workspaces.get": "a window reads one workspace by its id; a verb names a workspace by the person's word through workspaces.resolve",
       "workspaces.restartDaemon": "the row's restart of this computer's own daemon, a repair a person makes in front of the row",
       "workspaces.stopWake": "the row's stop on a wake that keeps asking the provider, a person's call while they watch it",
       "workspaces.upgrade": "the row's upgrade of a machine onto a fresh fork of its image, a person's call on a stale machine",
@@ -563,7 +562,7 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
     // Read off the line's last word, so a new line that removes, deletes, forgets, discards or leaves fails here until it asks.
     const takesAway = COMMAND_LINES.filter(line => /(^| )(remove|delete|forget|discard|leave)$/.test(line.words));
     expect(takesAway.map(line => line.words).sort()).toEqual(
-      ["delete", "discard", "forget", ...(CLOUD_ON ? ["image remove"] : []), "leave", "projects remove", "recipes remove", "remove", "servers remove", "skills remove", "thread forget", "worktree remove"].sort(),
+      ["delete", "discard", ...(CLOUD_ON ? ["forget", "image remove"] : []), "leave", "projects remove", "recipes remove", "remove", "servers remove", "skills remove", "thread forget", "worktree remove"].sort(),
     );
     for (const line of takesAway) {
       expect(line.options["yes"], `wsp ${line.words} reads --yes`).toMatchObject({ type: "boolean" });
@@ -601,6 +600,7 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
       .join("\n");
     expect(flagDrift(stale, COMMAND_LINES)).toEqual([
       "wsp run reads --access, which its row does not show",
+      "wsp run reads --beside, which its row does not show",
       "wsp run reads --detach, which its row does not show",
       "wsp run reads --effort, which its row does not show",
       "wsp run reads --fast, which its row does not show",
@@ -614,7 +614,7 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
       "wsp send reads --file, which its row does not show",
       "wsp send reads --model, which its row does not show",
     ]);
-    expect(flagDrift(stale.replace("| `wsp stop <thread> [--task <id>]`", "| `wsp stop <thread> [--task <id>] [--now]`"), COMMAND_LINES)).toContain("the row for wsp stop shows --now, which it does not read");
+    expect(flagDrift(stale.replace("| `wsp stop <thread> [--subagent <id>]`", "| `wsp stop <thread> [--subagent <id>] [--now]`"), COMMAND_LINES)).toContain("the row for wsp stop shows --now, which it does not read");
   });
 
   it("every list a tool takes is a flag the command line reads again, or a command that reads its values another way", async () => {

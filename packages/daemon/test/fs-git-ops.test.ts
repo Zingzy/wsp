@@ -390,7 +390,7 @@ describe("roots beyond home", () => {
       expect(names(await c2.request("fs.list", { path: project }))).toEqual(["README.md"]);
       expect(await c2.request("fs.read", { path: join(project, "README.md") })).toMatchObject({ ok: true, content: "# proj\n" });
       expect(await c2.request("fs.list", { path: "." })).toMatchObject({ ok: true });
-      expect(await c2.request("fs.list", { path: outside })).toMatchObject({ ok: false, code: "outside-root", error: `${outside} resolves outside the workspace root` });
+      expect(await c2.request("fs.list", { path: outside })).toMatchObject({ ok: false, code: "outside-root", error: `${outside} resolves outside the folders wsp serves here` });
       expect(await c2.request("git.status", { cwd: outside })).toMatchObject({ ok: false, code: "outside-root" });
       writeFileSync(rootsPath, `${project}\n${outside}\n`);
       expect(await c2.request("fs.list", { path: outside })).toMatchObject({ ok: true });

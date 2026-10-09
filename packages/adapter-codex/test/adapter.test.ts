@@ -597,7 +597,7 @@ describe("a Codex turn that does not complete", () => {
     const launch = launcher(server(fixtureLines("no-login-app-server")));
     const { events, onEvent } = collect();
     const result = await adapterOver(launch).start({ prompt: "hi", onEvent }).finished;
-    expect(NOT_SIGNED_IN).toBe("Codex is not signed in where this workspace runs; run codex login --device-auth there");
+    expect(NOT_SIGNED_IN).toBe("Codex is not signed in where this thread runs; run codex login --device-auth there");
     expect(result).toMatchObject({ status: "failed", error: NOT_SIGNED_IN, refusal: "sign-in" });
     expect(events.map(e => e.type)).toEqual(["session.start", "session.start", "turn.anchor", "turn.delta", "turn.done", "session.end"]);
     expect(events.at(-1)).toEqual({ type: "session.end", sessionId: NO_LOGIN_THREAD, exitCode: 0, sawResult: true });

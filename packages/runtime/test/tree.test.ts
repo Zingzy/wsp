@@ -16,6 +16,9 @@ import {
   childStartedLine,
   forkNeedsPushLine,
   leadBusyRefusal,
+  childOnNoBranchRefusal,
+  DETACHED_HEAD,
+  threadWord,
   mergeChildPrompt,
   mergeIntoOwnRefusal,
   nothingAheadLine,
@@ -373,11 +376,11 @@ describe("what the lead sees", () => {
 describe("merge into lead", () => {
   const merged = (f: Record<string, unknown>): DaemonResponse => ok({ branch: String(f["branch"]), merged: true, commits: 2, oid: "d00d", conflicts: [] });
 
-  async function leadWithChild(extra: Partial<Record<string, Answer>> = {}) {
+  async function leadWithChild(extra: Partial<Record<string, Answer>> = {}, kid: Partial<Record<string, Answer>> = {}) {
     const daemons = fakeDaemons({
       here: { "git.branchCompare": () => ok({ pushed: true, aheadBy: 2, behindBy: 0, status: "ahead" }), "git.prRead": () => ok({}) },
       m1: { "git.status": () => status("tree/lead", { upstream: "origin/tree/lead" }), "git.mergeIn": merged, ...extra },
-      m2: { "git.startOn": STARTED, "git.status": () => status("child/one") },
+      m2: { "git.startOn": STARTED, "git.status": () => status("child/one"), ...kid },
     });
     const at = await withLead(daemons);
     const child = await createOn(rt!, { name: "helper" }, asThread(at.scope));
@@ -392,6 +395,8 @@ describe("merge into lead", () => {
     const second = await rt!.sessions.start(lead.id, { prompt: "a second thread on the lead" }, asThread(scope));
     const other = second.view().threadId!;
     await expect(rt!.workspaces.mergeIn({ workspaceId: lead.id, child: child.id }, asThread(scope))).rejects.toThrow(leadBusyRefusal("lead", [other]));
+    // Asked by a thread, the lead is named as that thread rather than its folder's record.
+    await expect(rt!.workspaces.mergeIn({ workspaceId: lead.id, child: child.id, threadId: scope.threadId }, asThread(scope))).rejects.toThrow(leadBusyRefusal(`thread ${threadWord(scope.threadId)}`, [other]));
     expect(daemons.sent("m1", "git.mergeIn")).toHaveLength(1);
   });
 
@@ -437,11 +442,22 @@ describe("merge into lead", () => {
     await until(() => seen.get(lead.id)?.children[0]?.aheadOfLead === 1);
   });
 
+  it("is refused for a child on no branch, naming the child's thread", async () => {
+    const { lead, child, agent } = await leadWithChild({}, { "git.status": () => status(DETACHED_HEAD) });
+    agent.end(0);
+    await until(async () => (await rt!.sessions.list(lead.id)).every(s => s.status !== "running"));
+    const kid = "5c2d0e14-0000-4000-8000-000000000000";
+    await expect(rt!.workspaces.mergeIn({ workspaceId: lead.id, child: child.id, childThreadId: kid })).rejects.toThrow(childOnNoBranchRefusal("thread 5c2d0e14"));
+  });
+
   it("is refused for a workspace that is not the lead's child", async () => {
     const { lead, agent } = await leadWithChild();
     agent.end(0);
     await until(async () => (await rt!.sessions.list(lead.id)).every(s => s.status !== "running"));
     await expect(rt!.workspaces.mergeIn({ workspaceId: lead.id, child: lead.id })).rejects.toThrow(notTheLeadsChildRefusal("lead", "lead"));
+    // Named by the threads the person typed, never by the folders' records.
+    const threads = { threadId: "1a2b3c4d-0000-4000-8000-000000000000", childThreadId: "5c2d0e14-0000-4000-8000-000000000000" };
+    await expect(rt!.workspaces.mergeIn({ workspaceId: lead.id, child: lead.id, ...threads })).rejects.toThrow(notTheLeadsChildRefusal("thread 5c2d0e14", "thread 1a2b3c4d"));
   });
 
   it("lets a lead's own thread merge into its own workspace and refuses a child's thread merging into its lead", async () => {

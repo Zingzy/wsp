@@ -8,7 +8,7 @@ import { harnessCatalog } from "../harness-catalog.js";
 import { accountOnComputer } from "../usage.js";
 import { phaseLeavingGone, providerSaid } from "../status.js";
 import type { WorkspaceRecord, LiveWorkspace, FoundMachine } from "../types/wiring.js";
-import { WORKSPACES, PROJECTS, TRANSCRIPTS, SESSIONS, HELD_STARTS, type HeldStartRecord, READS, READS_ID, RESTARTED_REASON, goneLogLine, restartCutLine, turnWritten, type TranscriptRecord, type TurnLive, type TurnAsked, readAsked, readScope, readRoad, readSteered, type ThreadRecord, type ThreadStamps, type TreeTalk, type SessionIndexRecord, BUILDERS, OWNER, HELD_TTL_MS, pidAlive, type BuilderRecord, type LiveBuilder, deadMachine, isAbsentMachine, absentMachine, type StoredBuilder } from "../types/internal.js";
+import { WORKSPACES, PROJECTS, TRANSCRIPTS, SESSIONS, HELD_STARTS, type HeldStartRecord, READS, READS_ID, RESTARTED_REASON, goneLogLine, labelOf, restartCutLine, turnWritten, type TranscriptRecord, type TurnLive, type TurnAsked, readAsked, readScope, readRoad, readSteered, type ThreadRecord, type ThreadStamps, type TreeTalk, type SessionIndexRecord, BUILDERS, OWNER, HELD_TTL_MS, pidAlive, type BuilderRecord, type LiveBuilder, deadMachine, isAbsentMachine, absentMachine, type StoredBuilder } from "../types/internal.js";
 import type { RuntimeContext, BootArea } from "../context.js";
 
 export function bootArea(ctx: RuntimeContext): BootArea {
@@ -470,21 +470,23 @@ export function bootArea(ctx: RuntimeContext): BootArea {
   /** Every verb that names a workspace comes through here, so the origin rule is read once for all of them. A verb
    * may start a run on the machine, so it waits for what the boot still has out there; `now` is for a read that
    * walks every workspace, which no one machine may hold, and `act` is what the verb asks there, as a refusal names it. */
-  const entryOf = async (id: string, origin?: Caller, o: { now?: true; act?: AcrossAct } = {}): Promise<LiveWorkspace> => {
+  const entryOf = async (id: string, origin?: Caller, o: { now?: true; act?: AcrossAct; thread?: string } = {}): Promise<LiveWorkspace> => {
     await ready();
     const entry = live.get(id);
     // A workspace this host does not hold and one outside the caller's tree read alike to a thread: telling the two
     // apart is how a thread walks what else stands here.
     if (!entry || entry.creating) throw notFoundRefusal(scopeOf(origin) !== undefined ? noWorkspaceRefusal() : `${noWorkspaceRefusal()}: ${id}`);
-    ctx.refuseRelayed(entry.record, origin, o.act);
+    // A thread named here words a refusal only where it is of the caller's tree and on this record, which it knows.
+    const thread = o.thread !== undefined && ctx.threadRecords.get(o.thread)?.workspaceId === id && ctx.drivesThread(o.thread, origin) ? o.thread : undefined;
+    ctx.refuseRelayed(entry.record, origin, o.act, thread);
     if (o.now !== true) await ctx.bootWork.get(id);
     return entry;
   };
   /** A lead's child named by id or by name, refused for a workspace that is not that lead's child. */
-  const childOf = async (lead: LiveWorkspace, ref: string, origin?: Caller): Promise<LiveWorkspace> => {
+  const childOf = async (lead: LiveWorkspace, ref: string, origin?: Caller, threads: { lead?: string; child?: string } = {}): Promise<LiveWorkspace> => {
     const named = await ctx.workspaces.resolve(ref, origin);
-    const kid = await entryOf(named.id, origin);
-    if (kid.record.parentWorkspaceId !== lead.record.id) throw Object.assign(new Error(notTheLeadsChildRefusal(kid.record.name, lead.record.name)), { kind: "invalid" });
+    const kid = await entryOf(named.id, origin, threads.child === undefined ? {} : { thread: threads.child });
+    if (kid.record.parentWorkspaceId !== lead.record.id) throw Object.assign(new Error(notTheLeadsChildRefusal(labelOf(kid, threads.child), labelOf(lead, threads.lead))), { kind: "invalid" });
     return kid;
   };
   /** Which rows a caller reaches, for the verbs that name a thread rather than a workspace: the thread tree, then

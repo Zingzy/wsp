@@ -60,12 +60,13 @@ const EMPTY_REPORT = { target: { workspaceId: "ws-1" }, home: "/root", user: "ro
 
 const reportCases = (tool: string): Case[] => [
   { case: "here", arguments: {}, replies: { "agents.read": reply({ report: REPORT }) } },
-  { case: "a workspace", arguments: { workspace: "ws one" }, replies: { "workspaces.resolve": reply({ workspace: WORKSPACE }), "agents.read": reply({ report: EMPTY_REPORT }) } },
+  { case: "a thread", arguments: { thread: "t-1" }, replies: { "sessions.list": reply({ sessions: [{ id: "s-1", workspaceId: "ws-1", harness: "claude", status: "completed", threadId: "t-1 one" }] }), "workspaces.get": reply({ workspace: WORKSPACE }), "agents.read": reply({ report: EMPTY_REPORT }) } },
+  { case: "a project's name", arguments: { thread: "wsp" }, replies: { "sessions.list": reply({ sessions: [] }), "projects.list": reply({ projects: [WORKSPACE.project] }) } },
   { case: "a computer", arguments: { on: "attic" }, replies: { "places.list": PLACES, "agents.read": reply({ report: { ...REPORT, stale: undefined, target: { placeId: "place-9", project: "wsp" } } }) } },
-  { case: "both", arguments: { workspace: "w", on: "attic" }, replies: {} },
+  { case: "both", arguments: { thread: "w", on: "attic" }, replies: {} },
   { case: "no such computer", arguments: { on: "cellar" }, replies: { "places.list": PLACES } },
   { case: "a report this build cannot read", arguments: {}, replies: { "agents.read": reply({ report: { ...REPORT, [tool]: [{ name: 5 }] } }) } },
-  { case: "refused", arguments: { workspace: "gone" }, replies: { "workspaces.resolve": refused("no workspace gone", "not-found") } },
+  { case: "no such thread", arguments: { thread: "gone" }, replies: { "sessions.list": reply({ sessions: [] }), "projects.list": reply({ projects: [] }) } },
 ];
 
 const SETUP = {
@@ -315,7 +316,7 @@ export const READS: Record<string, Case[]> = {
     { case: "rows", arguments: {}, replies: { "workspaces.list": WORKSPACES, "sessions.list": reply({ sessions: SESSIONS }) } },
     { case: "within a project", arguments: { project: "wsp" }, replies: { "workspaces.list": WORKSPACES, "sessions.list": reply({ sessions: SESSIONS }) } },
     { case: "within a project by id", arguments: { project: "proj-2" }, replies: { "workspaces.list": WORKSPACES, "sessions.list": reply({ sessions: SESSIONS }) } },
-    { case: "within a workspace by name", arguments: { project: "wsp@feat" }, replies: { "workspaces.list": WORKSPACES, "sessions.list": reply({ sessions: SESSIONS }) } },
+    { case: "a word naming no project", arguments: { project: "wsp@feat" }, replies: { "workspaces.list": WORKSPACES, "sessions.list": reply({ sessions: SESSIONS }) } },
     { case: "a lead's child in a box folder", arguments: {}, replies: { "workspaces.list": WORKSPACES, "sessions.list": reply({ sessions: BOX_CHILD }) } },
     { case: "a thread on a cloud project", arguments: {}, replies: { "workspaces.list": WITH_CLOUD, "sessions.list": reply({ sessions: ON_CLOUD }) } },
     { case: "within a box folder's project", arguments: { project: "lab-box" }, replies: { "workspaces.list": WORKSPACES, "sessions.list": reply({ sessions: BOX_CHILD }) } },

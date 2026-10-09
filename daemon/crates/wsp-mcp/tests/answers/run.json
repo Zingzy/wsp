@@ -24,7 +24,7 @@
           "{\"type\":\"session.done\",\"workspaceId\":\"ws-1\",\"sessionId\":\"sess-9\",\"threadId\":\"thread-9d8c7b6a5f4e\",\"turnId\":\"turn-9\",\"result\":{\"status\":\"completed\",\"durationMs\":83456,\"waitedMs\":2000,\"costUsd\":0.30000000000000004,\"text\":\"Fixed \\\"it\\\" \u0085 é\\n\\nlast   line of the reply  \\n\"}}"
         ]
       },
-      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"previous turn was cut; resuming\\nFixed \\\"it\\\" \\u0085 é\\n\\nlast   line of the reply  \\n\"}],\"structuredContent\":{\"threadId\":\"thread-9d8c7b6a5f4e\",\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"text\":\"Fixed \\\"it\\\" \\u0085 é\\n\\nlast   line of the reply  \\n\",\"outcome\":\"started\",\"afterCut\":true}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"projects.resolve is not in this record\"}],\"structuredContent\":{\"error\":\"projects.resolve is not in this record\",\"class\":\"provider\",\"exit\":1},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
         {
           "op": "projects.resolve",
@@ -34,27 +34,8 @@
           "op": "projects.list"
         },
         {
-          "op": "workspaces.resolve",
+          "op": "projects.resolve",
           "ref": "attic-work"
-        },
-        {
-          "op": "harnesses.list",
-          "workspaceId": "ws-1"
-        },
-        {
-          "op": "workspaces.wake",
-          "workspaceId": "ws-1"
-        },
-        {
-          "op": "sessions.start",
-          "workspaceId": "ws-1",
-          "prompt": "fix it",
-          "model": "claude-opus-5-5",
-          "effort": "max",
-          "followed": true,
-          "startedBy": "agent",
-          "requestId": "<request id>",
-          "answerHeld": true
         }
       ]
     },
@@ -78,7 +59,7 @@
         "sessions.list": "{\"id\":1,\"ok\":true,\"sessions\":[{\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"completed\",\"id\":\"sess-1\",\"threadId\":\"thread-7f3a9c21e4b5\",\"claudeSessionId\":\"cs-1\",\"prompt\":\"fix the \u0085 build\",\"costUsd\":0.1},{\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"running\",\"id\":\"sess-2\",\"threadId\":\"thread-7f3a9c21e4b5\",\"claudeSessionId\":\"cs-1\",\"costUsd\":0.2},{\"workspaceId\":\"ws-1\",\"harness\":\"codex\",\"status\":\"completed\",\"id\":\"sess-3\",\"threadId\":\"thread-b0b0b0b0c1c1\"}]}",
         "sessions.start": "{\"id\":1,\"ok\":true,\"session\":{\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"running\",\"id\":\"sess-9\",\"threadId\":\"thread-9d8c7b6a5f4e\",\"startedBy\":\"agent\"},\"outcome\":\"started\",\"turnId\":\"turn-9\"}"
       },
-      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"thread thread-9d8c7b6a5f4e\"}],\"structuredContent\":{\"threadId\":\"thread-9d8c7b6a5f4e\",\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"outcome\":\"started\"}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"projects.resolve is not in this record\"}],\"structuredContent\":{\"error\":\"projects.resolve is not in this record\",\"class\":\"provider\",\"exit\":1},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
         {
           "op": "projects.resolve",
@@ -88,32 +69,8 @@
           "op": "projects.list"
         },
         {
-          "op": "workspaces.resolve",
+          "op": "projects.resolve",
           "ref": "attic-work"
-        },
-        {
-          "op": "harnesses.list",
-          "workspaceId": "ws-1"
-        },
-        {
-          "op": "sessions.list"
-        },
-        {
-          "op": "workspaces.wake",
-          "workspaceId": "ws-1"
-        },
-        {
-          "op": "sessions.start",
-          "workspaceId": "ws-1",
-          "prompt": "fix it",
-          "harness": "codex",
-          "notify": [
-            "me",
-            "thread-7f3a9c21e4b5"
-          ],
-          "startedBy": "agent",
-          "requestId": "<request id>",
-          "answerHeld": true
         }
       ]
     },
@@ -134,7 +91,7 @@
         "sessions.list": "{\"id\":1,\"ok\":true,\"sessions\":[{\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"completed\",\"id\":\"sess-1\",\"threadId\":\"thread-7f3a9c21e4b5\",\"claudeSessionId\":\"cs-1\",\"prompt\":\"fix the \u0085 build\",\"costUsd\":0.1},{\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"running\",\"id\":\"sess-2\",\"threadId\":\"thread-7f3a9c21e4b5\",\"claudeSessionId\":\"cs-1\",\"costUsd\":0.2},{\"workspaceId\":\"ws-1\",\"harness\":\"codex\",\"status\":\"completed\",\"id\":\"sess-3\",\"threadId\":\"thread-b0b0b0b0c1c1\"}]}",
         "sessions.start": "{\"id\":1,\"ok\":true,\"session\":{\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"running\",\"id\":\"sess-9\",\"threadId\":\"thread-9d8c7b6a5f4e\",\"startedBy\":\"agent\"},\"outcome\":\"started\",\"turnId\":\"turn-9\"}"
       },
-      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"thread thread-9d8c7b6a5f4e\"}],\"structuredContent\":{\"threadId\":\"thread-9d8c7b6a5f4e\",\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"outcome\":\"started\"}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"projects.resolve is not in this record\"}],\"structuredContent\":{\"error\":\"projects.resolve is not in this record\",\"class\":\"provider\",\"exit\":1},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
         {
           "op": "projects.resolve",
@@ -144,32 +101,8 @@
           "op": "projects.list"
         },
         {
-          "op": "workspaces.resolve",
+          "op": "projects.resolve",
           "ref": "attic-work"
-        },
-        {
-          "op": "harnesses.list",
-          "workspaceId": "ws-1"
-        },
-        {
-          "op": "sessions.list"
-        },
-        {
-          "op": "sessions.replaceable",
-          "threadId": "thread-b0b0b0b0c1c1"
-        },
-        {
-          "op": "workspaces.wake",
-          "workspaceId": "ws-1"
-        },
-        {
-          "op": "sessions.start",
-          "workspaceId": "ws-1",
-          "prompt": "fix it",
-          "replaces": "thread-b0b0b0b0c1c1",
-          "startedBy": "agent",
-          "requestId": "<request id>",
-          "answerHeld": true
         }
       ]
     },
@@ -188,7 +121,7 @@
         "sessions.list": "{\"id\":1,\"ok\":true,\"sessions\":[{\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"completed\",\"id\":\"sess-1\",\"threadId\":\"thread-7f3a9c21e4b5\",\"claudeSessionId\":\"cs-1\",\"prompt\":\"fix the \u0085 build\",\"costUsd\":0.1},{\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"running\",\"id\":\"sess-2\",\"threadId\":\"thread-7f3a9c21e4b5\",\"claudeSessionId\":\"cs-1\",\"costUsd\":0.2},{\"workspaceId\":\"ws-1\",\"harness\":\"codex\",\"status\":\"completed\",\"id\":\"sess-3\",\"threadId\":\"thread-b0b0b0b0c1c1\"}]}",
         "sessions.replaceable": "{\"id\":1,\"ok\":false,\"error\":\"thread thread-b is still working, and a restart replaces only a thread that stopped. stop it first: wsp stop thread-b.\",\"kind\":\"usage\"}"
       },
-      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"thread thread-b is still working, and a restart replaces only a thread that stopped. stop it first: wsp stop thread-b.\"}],\"structuredContent\":{\"error\":\"thread thread-b is still working, and a restart replaces only a thread that stopped. stop it first: wsp stop thread-b.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"projects.resolve is not in this record\"}],\"structuredContent\":{\"error\":\"projects.resolve is not in this record\",\"class\":\"provider\",\"exit\":1},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
         {
           "op": "projects.resolve",
@@ -198,19 +131,8 @@
           "op": "projects.list"
         },
         {
-          "op": "workspaces.resolve",
+          "op": "projects.resolve",
           "ref": "attic-work"
-        },
-        {
-          "op": "harnesses.list",
-          "workspaceId": "ws-1"
-        },
-        {
-          "op": "sessions.list"
-        },
-        {
-          "op": "sessions.replaceable",
-          "threadId": "thread-b0b0b0b0c1c1"
         }
       ]
     },
@@ -227,7 +149,7 @@
         "harnesses.list": "{\"id\":1,\"ok\":true,\"harnesses\":[{\"harness\":\"claude\",\"label\":\"Claude Code\",\"source\":\"harness\",\"version\":\"2.1.0\",\"models\":[{\"value\":\"claude-sonnet-5\",\"label\":\"Sonnet 5\",\"isDefault\":true},{\"value\":\"claude-opus-5-5\",\"label\":\"Opus 5.5\",\"efforts\":[\"high\",\"max\"]},{\"value\":\"claude-haiku\",\"label\":\"Haiku\",\"efforts\":[]}],\"legacyModels\":[{\"value\":\"claude-3\",\"label\":\"Claude 3\"}],\"efforts\":[{\"value\":\"low\",\"label\":\"Low\"},{\"value\":\"high\",\"label\":\"High\",\"isDefault\":true},{\"value\":\"max\",\"label\":\"Max\"}],\"contextWindows\":[],\"permissionModes\":[{\"value\":\"acceptEdits\",\"label\":\"Accept edits\"},{\"value\":\"bypassPermissions\",\"label\":\"Bypass \u0085\",\"isDefault\":true}],\"access\":{\"auto-edit\":\"acceptEdits\",\"full\":\"bypassPermissions\"},\"steers\":true,\"renames\":true,\"images\":true,\"isDefault\":true},{\"harness\":\"codex\",\"label\":\"Codex\",\"source\":\"table\",\"version\":\"2.1.0\",\"models\":[{\"value\":\"gpt-5\",\"label\":\"GPT-5\",\"isDefault\":true}],\"efforts\":[{\"value\":\"low\",\"label\":\"Low\"},{\"value\":\"high\",\"label\":\"High\",\"isDefault\":true},{\"value\":\"max\",\"label\":\"Max\"}],\"contextWindows\":[],\"permissionModes\":[{\"value\":\"acceptEdits\",\"label\":\"Accept edits\"},{\"value\":\"bypassPermissions\",\"label\":\"Bypass \u0085\",\"isDefault\":true}],\"access\":{\"auto-edit\":\"acceptEdits\",\"full\":\"bypassPermissions\"},\"steers\":true,\"renames\":true,\"images\":true,\"isDefault\":false}]}",
         "sessions.list": "{\"id\":1,\"ok\":true,\"sessions\":[{\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"completed\",\"id\":\"sess-1\",\"threadId\":\"thread-7f3a9c21e4b5\",\"claudeSessionId\":\"cs-1\",\"prompt\":\"fix the \u0085 build\",\"costUsd\":0.1},{\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"running\",\"id\":\"sess-2\",\"threadId\":\"thread-7f3a9c21e4b5\",\"claudeSessionId\":\"cs-1\",\"costUsd\":0.2},{\"workspaceId\":\"ws-1\",\"harness\":\"codex\",\"status\":\"completed\",\"id\":\"sess-3\",\"threadId\":\"thread-b0b0b0b0c1c1\"}]}"
       },
-      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"no thread nope\"}],\"structuredContent\":{\"error\":\"no thread nope\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"projects.resolve is not in this record\"}],\"structuredContent\":{\"error\":\"projects.resolve is not in this record\",\"class\":\"provider\",\"exit\":1},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
         {
           "op": "projects.resolve",
@@ -237,15 +159,8 @@
           "op": "projects.list"
         },
         {
-          "op": "workspaces.resolve",
+          "op": "projects.resolve",
           "ref": "attic-work"
-        },
-        {
-          "op": "harnesses.list",
-          "workspaceId": "ws-1"
-        },
-        {
-          "op": "sessions.list"
         }
       ]
     },
@@ -269,7 +184,7 @@
           "{\"type\":\"session.done\",\"workspaceId\":\"ws-1\",\"sessionId\":\"sess-9\",\"threadId\":\"thread-9d8c7b6a5f4e\",\"turnId\":\"turn-9\",\"result\":{\"status\":\"failed\",\"error\":\"the agent crashed \u0085\"}}"
         ]
       },
-      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"the agent crashed \\u0085\\nattic-work is asleep again\"}],\"structuredContent\":{\"error\":\"the agent crashed \\u0085\\nattic-work is asleep again\",\"class\":\"provider\",\"exit\":1},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"projects.resolve is not in this record\"}],\"structuredContent\":{\"error\":\"projects.resolve is not in this record\",\"class\":\"provider\",\"exit\":1},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
         {
           "op": "projects.resolve",
@@ -279,33 +194,8 @@
           "op": "projects.list"
         },
         {
-          "op": "workspaces.resolve",
+          "op": "projects.resolve",
           "ref": "attic-work"
-        },
-        {
-          "op": "harnesses.list",
-          "workspaceId": "ws-1"
-        },
-        {
-          "op": "workspaces.wake",
-          "workspaceId": "ws-1"
-        },
-        {
-          "op": "sessions.start",
-          "workspaceId": "ws-1",
-          "prompt": "fix it",
-          "followed": true,
-          "startedBy": "agent",
-          "requestId": "<request id>",
-          "answerHeld": true
-        },
-        {
-          "op": "sessions.list",
-          "workspaceId": "ws-1"
-        },
-        {
-          "op": "workspaces.nap",
-          "workspaceId": "ws-1"
         }
       ]
     },
@@ -329,7 +219,7 @@
           "{\"type\":\"session.end\",\"workspaceId\":\"ws-1\",\"sessionId\":\"sess-9\",\"threadId\":\"thread-9d8c7b6a5f4e\",\"turnId\":\"turn-9\"}"
         ]
       },
-      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"turn ended without a result\\nattic-work stays awake\"}],\"structuredContent\":{\"error\":\"turn ended without a result\\nattic-work stays awake\",\"class\":\"provider\",\"exit\":1},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"projects.resolve is not in this record\"}],\"structuredContent\":{\"error\":\"projects.resolve is not in this record\",\"class\":\"provider\",\"exit\":1},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
         {
           "op": "projects.resolve",
@@ -339,32 +229,8 @@
           "op": "projects.list"
         },
         {
-          "op": "workspaces.resolve",
+          "op": "projects.resolve",
           "ref": "attic-work"
-        },
-        {
-          "op": "harnesses.list",
-          "workspaceId": "ws-1"
-        },
-        {
-          "op": "workspaces.wake",
-          "workspaceId": "ws-1"
-        },
-        {
-          "op": "sessions.start",
-          "workspaceId": "ws-1",
-          "prompt": "fix it",
-          "followed": true,
-          "startedBy": "agent",
-          "requestId": "<request id>",
-          "answerHeld": true
-        },
-        {
-          "op": "sessions.list",
-          "workspaceId": "ws-1"
-        },
-        {
-          "op": "status.list"
         }
       ]
     },
@@ -386,7 +252,7 @@
           "{\"type\":\"session.done\",\"workspaceId\":\"ws-1\",\"sessionId\":\"sess-9\",\"threadId\":\"thread-9d8c7b6a5f4e\",\"turnId\":\"turn-9\",\"result\":{\"status\":\"failed\",\"error\":\"claude is not signed in\",\"refusal\":\"sign-in\"}}"
         ]
       },
-      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"claude is not signed in\"}],\"structuredContent\":{\"error\":\"claude is not signed in\",\"class\":\"auth\",\"exit\":2},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"projects.resolve is not in this record\"}],\"structuredContent\":{\"error\":\"projects.resolve is not in this record\",\"class\":\"provider\",\"exit\":1},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
         {
           "op": "projects.resolve",
@@ -396,25 +262,8 @@
           "op": "projects.list"
         },
         {
-          "op": "workspaces.resolve",
+          "op": "projects.resolve",
           "ref": "attic-work"
-        },
-        {
-          "op": "harnesses.list",
-          "workspaceId": "ws-1"
-        },
-        {
-          "op": "workspaces.wake",
-          "workspaceId": "ws-1"
-        },
-        {
-          "op": "sessions.start",
-          "workspaceId": "ws-1",
-          "prompt": "fix it",
-          "followed": true,
-          "startedBy": "agent",
-          "requestId": "<request id>",
-          "answerHeld": true
         }
       ]
     },
@@ -433,7 +282,7 @@
         "sessions.history": "{\"id\":1,\"ok\":true,\"events\":[{\"type\":\"session.start\",\"workspaceId\":\"ws-1\",\"sessionId\":\"sess-9\",\"threadId\":\"thread-9d8c7b6a5f4e\",\"turnId\":\"turn-9\"},{\"type\":\"session.done\",\"workspaceId\":\"ws-1\",\"sessionId\":\"sess-9\",\"threadId\":\"thread-9d8c7b6a5f4e\",\"turnId\":\"turn-9\",\"result\":{\"status\":\"completed\",\"text\":\"after the restart\"}}]}"
       },
       "closes": "sessions.start",
-      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"after the restart\"}],\"structuredContent\":{\"threadId\":\"thread-9d8c7b6a5f4e\",\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"text\":\"after the restart\",\"outcome\":\"started\"}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"projects.resolve is not in this record\"}],\"structuredContent\":{\"error\":\"projects.resolve is not in this record\",\"class\":\"provider\",\"exit\":1},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
         {
           "op": "projects.resolve",
@@ -443,29 +292,8 @@
           "op": "projects.list"
         },
         {
-          "op": "workspaces.resolve",
+          "op": "projects.resolve",
           "ref": "attic-work"
-        },
-        {
-          "op": "harnesses.list",
-          "workspaceId": "ws-1"
-        },
-        {
-          "op": "workspaces.wake",
-          "workspaceId": "ws-1"
-        },
-        {
-          "op": "sessions.start",
-          "workspaceId": "ws-1",
-          "prompt": "fix it",
-          "followed": true,
-          "startedBy": "agent",
-          "requestId": "<request id>",
-          "answerHeld": true
-        },
-        {
-          "op": "sessions.history",
-          "workspaceId": "ws-1"
         }
       ]
     },
@@ -479,7 +307,7 @@
         "projects.list": "{\"id\":1,\"ok\":true,\"projects\":[{\"id\":\"p-1\",\"name\":\"wsp\",\"computer\":\"here\",\"source\":{\"kind\":\"folder\",\"path\":\"/Users/me/wsp\"},\"path\":\"/Users/me/wsp\",\"git\":{\"top\":\"/Users/me/wsp\"}},{\"id\":\"p-2\",\"name\":\"site\",\"computer\":\"pl-attic\",\"source\":{\"kind\":\"folder\",\"path\":\"/Users/me/wsp\"},\"path\":\"/root/site\",\"git\":{\"top\":\"/Users/me/wsp\"}}]}",
         "workspaces.resolve": "{\"id\":1,\"ok\":true,\"workspace\":{\"id\":\"ws-1\",\"name\":\"attic-work\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"default\",\"createdAt\":\"2026-09-27T00:00:00.000Z\",\"project\":{\"id\":\"p-1\",\"name\":\"wsp\",\"path\":\"/root/wsp\",\"computer\":\"here\"},\"home\":\"/root\"}}"
       },
-      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"the message is empty; say what the thread is to do. Put it in quotes after the flags.\"}],\"structuredContent\":{\"error\":\"the message is empty; say what the thread is to do. Put it in quotes after the flags.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"projects.resolve is not in this record\"}],\"structuredContent\":{\"error\":\"projects.resolve is not in this record\",\"class\":\"provider\",\"exit\":1},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
         {
           "op": "projects.resolve",
@@ -489,7 +317,7 @@
           "op": "projects.list"
         },
         {
-          "op": "workspaces.resolve",
+          "op": "projects.resolve",
           "ref": "attic-work"
         }
       ]
@@ -506,7 +334,7 @@
         "workspaces.resolve": "{\"id\":1,\"ok\":true,\"workspace\":{\"id\":\"ws-1\",\"name\":\"attic-work\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"default\",\"createdAt\":\"2026-09-27T00:00:00.000Z\",\"project\":{\"id\":\"p-1\",\"name\":\"wsp\",\"path\":\"/root/wsp\",\"computer\":\"here\"},\"home\":\"/root\"}}",
         "harnesses.list": "{\"id\":1,\"ok\":true,\"harnesses\":[{\"harness\":\"claude\",\"label\":\"Claude Code\",\"source\":\"harness\",\"version\":\"2.1.0\",\"models\":[{\"value\":\"claude-sonnet-5\",\"label\":\"Sonnet 5\",\"isDefault\":true},{\"value\":\"claude-opus-5-5\",\"label\":\"Opus 5.5\",\"efforts\":[\"high\",\"max\"]},{\"value\":\"claude-haiku\",\"label\":\"Haiku\",\"efforts\":[]}],\"legacyModels\":[{\"value\":\"claude-3\",\"label\":\"Claude 3\"}],\"efforts\":[{\"value\":\"low\",\"label\":\"Low\"},{\"value\":\"high\",\"label\":\"High\",\"isDefault\":true},{\"value\":\"max\",\"label\":\"Max\"}],\"contextWindows\":[],\"permissionModes\":[{\"value\":\"acceptEdits\",\"label\":\"Accept edits\"},{\"value\":\"bypassPermissions\",\"label\":\"Bypass \u0085\",\"isDefault\":true}],\"access\":{\"auto-edit\":\"acceptEdits\",\"full\":\"bypassPermissions\"},\"steers\":true,\"renames\":true,\"images\":true,\"isDefault\":true},{\"harness\":\"codex\",\"label\":\"Codex\",\"source\":\"table\",\"version\":\"2.1.0\",\"models\":[{\"value\":\"gpt-5\",\"label\":\"GPT-5\",\"isDefault\":true}],\"efforts\":[{\"value\":\"low\",\"label\":\"Low\"},{\"value\":\"high\",\"label\":\"High\",\"isDefault\":true},{\"value\":\"max\",\"label\":\"Max\"}],\"contextWindows\":[],\"permissionModes\":[{\"value\":\"acceptEdits\",\"label\":\"Accept edits\"},{\"value\":\"bypassPermissions\",\"label\":\"Bypass \u0085\",\"isDefault\":true}],\"access\":{\"auto-edit\":\"acceptEdits\",\"full\":\"bypassPermissions\"},\"steers\":true,\"renames\":true,\"images\":true,\"isDefault\":false}]}"
       },
-      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"model \\\"gpt-9\\\" is not one claude takes; one of: Sonnet 5 (claude-sonnet-5), Opus 5.5 (claude-opus-5-5), Haiku (claude-haiku); legacy: Claude 3 (claude-3). Drop the flag, or give it a value the agent offers.\"}],\"structuredContent\":{\"error\":\"model \\\"gpt-9\\\" is not one claude takes; one of: Sonnet 5 (claude-sonnet-5), Opus 5.5 (claude-opus-5-5), Haiku (claude-haiku); legacy: Claude 3 (claude-3). Drop the flag, or give it a value the agent offers.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"projects.resolve is not in this record\"}],\"structuredContent\":{\"error\":\"projects.resolve is not in this record\",\"class\":\"provider\",\"exit\":1},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
         {
           "op": "projects.resolve",
@@ -516,12 +344,8 @@
           "op": "projects.list"
         },
         {
-          "op": "workspaces.resolve",
+          "op": "projects.resolve",
           "ref": "attic-work"
-        },
-        {
-          "op": "harnesses.list",
-          "workspaceId": "ws-1"
         }
       ]
     },
@@ -538,7 +362,7 @@
         "workspaces.resolve": "{\"id\":1,\"ok\":true,\"workspace\":{\"id\":\"ws-1\",\"name\":\"attic-work\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"default\",\"createdAt\":\"2026-09-27T00:00:00.000Z\",\"project\":{\"id\":\"p-1\",\"name\":\"wsp\",\"path\":\"/root/wsp\",\"computer\":\"here\"},\"home\":\"/root\"}}",
         "harnesses.list": "{\"id\":1,\"ok\":true,\"harnesses\":[{\"harness\":\"claude\",\"label\":\"Claude Code\",\"source\":\"harness\",\"version\":\"2.1.0\",\"models\":[{\"value\":\"claude-sonnet-5\",\"label\":\"Sonnet 5\",\"isDefault\":true},{\"value\":\"claude-opus-5-5\",\"label\":\"Opus 5.5\",\"efforts\":[\"high\",\"max\"]},{\"value\":\"claude-haiku\",\"label\":\"Haiku\",\"efforts\":[]}],\"legacyModels\":[{\"value\":\"claude-3\",\"label\":\"Claude 3\"}],\"efforts\":[{\"value\":\"low\",\"label\":\"Low\"},{\"value\":\"high\",\"label\":\"High\",\"isDefault\":true},{\"value\":\"max\",\"label\":\"Max\"}],\"contextWindows\":[],\"permissionModes\":[{\"value\":\"acceptEdits\",\"label\":\"Accept edits\"},{\"value\":\"bypassPermissions\",\"label\":\"Bypass \u0085\",\"isDefault\":true}],\"access\":{\"auto-edit\":\"acceptEdits\",\"full\":\"bypassPermissions\"},\"steers\":true,\"renames\":true,\"images\":true,\"isDefault\":true},{\"harness\":\"codex\",\"label\":\"Codex\",\"source\":\"table\",\"version\":\"2.1.0\",\"models\":[{\"value\":\"gpt-5\",\"label\":\"GPT-5\",\"isDefault\":true}],\"efforts\":[{\"value\":\"low\",\"label\":\"Low\"},{\"value\":\"high\",\"label\":\"High\",\"isDefault\":true},{\"value\":\"max\",\"label\":\"Max\"}],\"contextWindows\":[],\"permissionModes\":[{\"value\":\"acceptEdits\",\"label\":\"Accept edits\"},{\"value\":\"bypassPermissions\",\"label\":\"Bypass \u0085\",\"isDefault\":true}],\"access\":{\"auto-edit\":\"acceptEdits\",\"full\":\"bypassPermissions\"},\"steers\":true,\"renames\":true,\"images\":true,\"isDefault\":false}]}"
       },
-      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"Haiku takes no effort. Drop the flag, or give it a value the agent offers.\"}],\"structuredContent\":{\"error\":\"Haiku takes no effort. Drop the flag, or give it a value the agent offers.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"projects.resolve is not in this record\"}],\"structuredContent\":{\"error\":\"projects.resolve is not in this record\",\"class\":\"provider\",\"exit\":1},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
         {
           "op": "projects.resolve",
@@ -548,12 +372,8 @@
           "op": "projects.list"
         },
         {
-          "op": "workspaces.resolve",
+          "op": "projects.resolve",
           "ref": "attic-work"
-        },
-        {
-          "op": "harnesses.list",
-          "workspaceId": "ws-1"
         }
       ]
     },
@@ -570,7 +390,7 @@
         "workspaces.resolve": "{\"id\":1,\"ok\":true,\"workspace\":{\"id\":\"ws-1\",\"name\":\"attic-work\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"default\",\"createdAt\":\"2026-09-27T00:00:00.000Z\",\"project\":{\"id\":\"p-1\",\"name\":\"wsp\",\"path\":\"/root/wsp\",\"computer\":\"here\"},\"home\":\"/root\"}}",
         "harnesses.list": "{\"id\":1,\"ok\":true,\"harnesses\":[{\"harness\":\"claude\",\"label\":\"Claude Code\",\"source\":\"harness\",\"version\":\"2.1.0\",\"models\":[{\"value\":\"claude-sonnet-5\",\"label\":\"Sonnet 5\",\"isDefault\":true},{\"value\":\"claude-opus-5-5\",\"label\":\"Opus 5.5\",\"efforts\":[\"high\",\"max\"]},{\"value\":\"claude-haiku\",\"label\":\"Haiku\",\"efforts\":[]}],\"legacyModels\":[{\"value\":\"claude-3\",\"label\":\"Claude 3\"}],\"efforts\":[{\"value\":\"low\",\"label\":\"Low\"},{\"value\":\"high\",\"label\":\"High\",\"isDefault\":true},{\"value\":\"max\",\"label\":\"Max\"}],\"contextWindows\":[],\"permissionModes\":[{\"value\":\"acceptEdits\",\"label\":\"Accept edits\"},{\"value\":\"bypassPermissions\",\"label\":\"Bypass \u0085\",\"isDefault\":true}],\"access\":{\"auto-edit\":\"acceptEdits\",\"full\":\"bypassPermissions\"},\"steers\":true,\"renames\":true,\"images\":true,\"isDefault\":true},{\"harness\":\"codex\",\"label\":\"Codex\",\"source\":\"table\",\"version\":\"2.1.0\",\"models\":[{\"value\":\"gpt-5\",\"label\":\"GPT-5\",\"isDefault\":true}],\"efforts\":[{\"value\":\"low\",\"label\":\"Low\"},{\"value\":\"high\",\"label\":\"High\",\"isDefault\":true},{\"value\":\"max\",\"label\":\"Max\"}],\"contextWindows\":[],\"permissionModes\":[{\"value\":\"acceptEdits\",\"label\":\"Accept edits\"},{\"value\":\"bypassPermissions\",\"label\":\"Bypass \u0085\",\"isDefault\":true}],\"access\":{\"auto-edit\":\"acceptEdits\",\"full\":\"bypassPermissions\"},\"steers\":true,\"renames\":true,\"images\":true,\"isDefault\":false}]}"
       },
-      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"effort \\\"low\\\" is not one Opus 5.5 takes; one of: High (high), Max (max). Drop the flag, or give it a value the agent offers.\"}],\"structuredContent\":{\"error\":\"effort \\\"low\\\" is not one Opus 5.5 takes; one of: High (high), Max (max). Drop the flag, or give it a value the agent offers.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"projects.resolve is not in this record\"}],\"structuredContent\":{\"error\":\"projects.resolve is not in this record\",\"class\":\"provider\",\"exit\":1},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
         {
           "op": "projects.resolve",
@@ -580,12 +400,8 @@
           "op": "projects.list"
         },
         {
-          "op": "workspaces.resolve",
+          "op": "projects.resolve",
           "ref": "attic-work"
-        },
-        {
-          "op": "harnesses.list",
-          "workspaceId": "ws-1"
         }
       ]
     },
@@ -602,7 +418,7 @@
         "workspaces.resolve": "{\"id\":1,\"ok\":true,\"workspace\":{\"id\":\"ws-1\",\"name\":\"attic-work\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"default\",\"createdAt\":\"2026-09-27T00:00:00.000Z\",\"project\":{\"id\":\"p-1\",\"name\":\"wsp\",\"path\":\"/root/wsp\",\"computer\":\"here\"},\"home\":\"/root\"}}",
         "harnesses.list": "{\"id\":1,\"ok\":true,\"harnesses\":[{\"harness\":\"claude\",\"label\":\"Claude Code\",\"source\":\"harness\",\"version\":\"2.1.0\",\"models\":[{\"value\":\"claude-sonnet-5\",\"label\":\"Sonnet 5\",\"isDefault\":true},{\"value\":\"claude-opus-5-5\",\"label\":\"Opus 5.5\",\"efforts\":[\"high\",\"max\"]},{\"value\":\"claude-haiku\",\"label\":\"Haiku\",\"efforts\":[]}],\"legacyModels\":[{\"value\":\"claude-3\",\"label\":\"Claude 3\"}],\"efforts\":[{\"value\":\"low\",\"label\":\"Low\"},{\"value\":\"high\",\"label\":\"High\",\"isDefault\":true},{\"value\":\"max\",\"label\":\"Max\"}],\"contextWindows\":[],\"permissionModes\":[{\"value\":\"acceptEdits\",\"label\":\"Accept edits\"},{\"value\":\"bypassPermissions\",\"label\":\"Bypass \u0085\",\"isDefault\":true}],\"access\":{\"auto-edit\":\"acceptEdits\",\"full\":\"bypassPermissions\"},\"steers\":true,\"renames\":true,\"images\":true,\"isDefault\":true},{\"harness\":\"codex\",\"label\":\"Codex\",\"source\":\"table\",\"version\":\"2.1.0\",\"models\":[{\"value\":\"gpt-5\",\"label\":\"GPT-5\",\"isDefault\":true}],\"efforts\":[{\"value\":\"low\",\"label\":\"Low\"},{\"value\":\"high\",\"label\":\"High\",\"isDefault\":true},{\"value\":\"max\",\"label\":\"Max\"}],\"contextWindows\":[],\"permissionModes\":[{\"value\":\"acceptEdits\",\"label\":\"Accept edits\"},{\"value\":\"bypassPermissions\",\"label\":\"Bypass \u0085\",\"isDefault\":true}],\"access\":{\"auto-edit\":\"acceptEdits\",\"full\":\"bypassPermissions\"},\"steers\":true,\"renames\":true,\"images\":true,\"isDefault\":false}]}"
       },
-      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"--access takes ask, auto-edit, full or plan, and got yolo. Name one of those; which of its own modes each one is, is the agent's row's to say.\"}],\"structuredContent\":{\"error\":\"--access takes ask, auto-edit, full or plan, and got yolo. Name one of those; which of its own modes each one is, is the agent's row's to say.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"projects.resolve is not in this record\"}],\"structuredContent\":{\"error\":\"projects.resolve is not in this record\",\"class\":\"provider\",\"exit\":1},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
         {
           "op": "projects.resolve",
@@ -612,12 +428,8 @@
           "op": "projects.list"
         },
         {
-          "op": "workspaces.resolve",
+          "op": "projects.resolve",
           "ref": "attic-work"
-        },
-        {
-          "op": "harnesses.list",
-          "workspaceId": "ws-1"
         }
       ]
     },
@@ -633,7 +445,7 @@
         "workspaces.resolve": "{\"id\":1,\"ok\":true,\"workspace\":{\"id\":\"ws-1\",\"name\":\"attic-work\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"default\",\"createdAt\":\"2026-09-27T00:00:00.000Z\",\"project\":{\"id\":\"p-1\",\"name\":\"wsp\",\"path\":\"/root/wsp\",\"computer\":\"here\"},\"home\":\"/root\"}}",
         "harnesses.list": "{\"id\":1,\"ok\":true,\"harnesses\":[{\"harness\":\"claude\",\"label\":\"Claude Code\",\"source\":\"harness\",\"version\":\"2.1.0\",\"models\":[{\"value\":\"claude-sonnet-5\",\"label\":\"Sonnet 5\",\"isDefault\":true},{\"value\":\"claude-opus-5-5\",\"label\":\"Opus 5.5\",\"efforts\":[\"high\",\"max\"]},{\"value\":\"claude-haiku\",\"label\":\"Haiku\",\"efforts\":[]}],\"legacyModels\":[{\"value\":\"claude-3\",\"label\":\"Claude 3\"}],\"efforts\":[{\"value\":\"low\",\"label\":\"Low\"},{\"value\":\"high\",\"label\":\"High\",\"isDefault\":true},{\"value\":\"max\",\"label\":\"Max\"}],\"contextWindows\":[],\"permissionModes\":[{\"value\":\"acceptEdits\",\"label\":\"Accept edits\"},{\"value\":\"bypassPermissions\",\"label\":\"Bypass \u0085\",\"isDefault\":true}],\"access\":{\"auto-edit\":\"acceptEdits\",\"full\":\"bypassPermissions\"},\"steers\":true,\"renames\":true,\"images\":true,\"isDefault\":true},{\"harness\":\"codex\",\"label\":\"Codex\",\"source\":\"table\",\"version\":\"2.1.0\",\"models\":[{\"value\":\"gpt-5\",\"label\":\"GPT-5\",\"isDefault\":true}],\"efforts\":[{\"value\":\"low\",\"label\":\"Low\"},{\"value\":\"high\",\"label\":\"High\",\"isDefault\":true},{\"value\":\"max\",\"label\":\"Max\"}],\"contextWindows\":[],\"permissionModes\":[{\"value\":\"acceptEdits\",\"label\":\"Accept edits\"},{\"value\":\"bypassPermissions\",\"label\":\"Bypass \u0085\",\"isDefault\":true}],\"access\":{\"auto-edit\":\"acceptEdits\",\"full\":\"bypassPermissions\"},\"steers\":true,\"renames\":true,\"images\":true,\"isDefault\":false}]}"
       },
-      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"Claude Code takes no plan access; it takes auto-edit, full. Name one it takes, or drop --access.\"}],\"structuredContent\":{\"error\":\"Claude Code takes no plan access; it takes auto-edit, full. Name one it takes, or drop --access.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"projects.resolve is not in this record\"}],\"structuredContent\":{\"error\":\"projects.resolve is not in this record\",\"class\":\"provider\",\"exit\":1},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
         {
           "op": "projects.resolve",
@@ -643,12 +455,8 @@
           "op": "projects.list"
         },
         {
-          "op": "workspaces.resolve",
+          "op": "projects.resolve",
           "ref": "attic-work"
-        },
-        {
-          "op": "harnesses.list",
-          "workspaceId": "ws-1"
         }
       ]
     },
@@ -671,7 +479,7 @@
           "{\"type\":\"session.done\",\"workspaceId\":\"ws-1\",\"sessionId\":\"sess-9\",\"threadId\":\"thread-9d8c7b6a5f4e\",\"turnId\":\"turn-9\",\"result\":{\"status\":\"completed\",\"text\":\"edited\"}}"
         ]
       },
-      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"edited\"}],\"structuredContent\":{\"threadId\":\"thread-9d8c7b6a5f4e\",\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"text\":\"edited\",\"outcome\":\"started\"}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"projects.resolve is not in this record\"}],\"structuredContent\":{\"error\":\"projects.resolve is not in this record\",\"class\":\"provider\",\"exit\":1},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
         {
           "op": "projects.resolve",
@@ -681,26 +489,8 @@
           "op": "projects.list"
         },
         {
-          "op": "workspaces.resolve",
+          "op": "projects.resolve",
           "ref": "attic-work"
-        },
-        {
-          "op": "harnesses.list",
-          "workspaceId": "ws-1"
-        },
-        {
-          "op": "workspaces.wake",
-          "workspaceId": "ws-1"
-        },
-        {
-          "op": "sessions.start",
-          "workspaceId": "ws-1",
-          "prompt": "t",
-          "access": "auto-edit",
-          "followed": true,
-          "startedBy": "agent",
-          "requestId": "<request id>",
-          "answerHeld": true
         }
       ]
     },
@@ -716,7 +506,7 @@
         "workspaces.resolve": "{\"id\":1,\"ok\":true,\"workspace\":{\"id\":\"ws-1\",\"name\":\"attic-work\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"default\",\"createdAt\":\"2026-09-27T00:00:00.000Z\",\"project\":{\"id\":\"p-1\",\"name\":\"wsp\",\"path\":\"/root/wsp\",\"computer\":\"here\"},\"home\":\"/root\"}}",
         "harnesses.list": "{\"id\":1,\"ok\":true,\"harnesses\":[{\"harness\":\"claude\",\"label\":\"Claude Code\",\"source\":\"harness\",\"version\":\"2.1.0\",\"models\":[{\"value\":\"claude-sonnet-5\",\"label\":\"Sonnet 5\",\"isDefault\":true},{\"value\":\"claude-opus-5-5\",\"label\":\"Opus 5.5\",\"efforts\":[\"high\",\"max\"]},{\"value\":\"claude-haiku\",\"label\":\"Haiku\",\"efforts\":[]}],\"legacyModels\":[{\"value\":\"claude-3\",\"label\":\"Claude 3\"}],\"efforts\":[{\"value\":\"low\",\"label\":\"Low\"},{\"value\":\"high\",\"label\":\"High\",\"isDefault\":true},{\"value\":\"max\",\"label\":\"Max\"}],\"contextWindows\":[],\"permissionModes\":[{\"value\":\"acceptEdits\",\"label\":\"Accept edits\"},{\"value\":\"bypassPermissions\",\"label\":\"Bypass \u0085\",\"isDefault\":true}],\"access\":{\"auto-edit\":\"acceptEdits\",\"full\":\"bypassPermissions\"},\"steers\":true,\"renames\":true,\"images\":true,\"isDefault\":true},{\"harness\":\"codex\",\"label\":\"Codex\",\"source\":\"table\",\"version\":\"2.1.0\",\"models\":[{\"value\":\"gpt-5\",\"label\":\"GPT-5\",\"isDefault\":true}],\"efforts\":[{\"value\":\"low\",\"label\":\"Low\"},{\"value\":\"high\",\"label\":\"High\",\"isDefault\":true},{\"value\":\"max\",\"label\":\"Max\"}],\"contextWindows\":[],\"permissionModes\":[{\"value\":\"acceptEdits\",\"label\":\"Accept edits\"},{\"value\":\"bypassPermissions\",\"label\":\"Bypass \u0085\",\"isDefault\":true}],\"access\":{\"auto-edit\":\"acceptEdits\",\"full\":\"bypassPermissions\"},\"steers\":true,\"renames\":true,\"images\":true,\"isDefault\":false}]}"
       },
-      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"no adapter registered for harness \\\"nope\\\"; agents on this host: claude, codex. Name one of those with --agent.\"}],\"structuredContent\":{\"error\":\"no adapter registered for harness \\\"nope\\\"; agents on this host: claude, codex. Name one of those with --agent.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"projects.resolve is not in this record\"}],\"structuredContent\":{\"error\":\"projects.resolve is not in this record\",\"class\":\"provider\",\"exit\":1},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
         {
           "op": "projects.resolve",
@@ -726,15 +516,8 @@
           "op": "projects.list"
         },
         {
-          "op": "workspaces.resolve",
+          "op": "projects.resolve",
           "ref": "attic-work"
-        },
-        {
-          "op": "harnesses.list",
-          "workspaceId": "ws-1"
-        },
-        {
-          "op": "harnesses.list"
         }
       ]
     },
@@ -750,7 +533,7 @@
         "workspaces.resolve": "{\"id\":1,\"ok\":true,\"workspace\":{\"id\":\"ws-1\",\"name\":\"attic-work\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"default\",\"createdAt\":\"2026-09-27T00:00:00.000Z\",\"project\":{\"id\":\"p-1\",\"name\":\"wsp\",\"path\":\"/root/wsp\",\"computer\":\"here\"},\"home\":\"/root\"}}",
         "harnesses.list": "{\"id\":1,\"ok\":true,\"harnesses\":[]}"
       },
-      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"no adapter registered for harness \\\"nope\\\"; agents on this host: none. Name one of those with --agent.\"}],\"structuredContent\":{\"error\":\"no adapter registered for harness \\\"nope\\\"; agents on this host: none. Name one of those with --agent.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"projects.resolve is not in this record\"}],\"structuredContent\":{\"error\":\"projects.resolve is not in this record\",\"class\":\"provider\",\"exit\":1},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
         {
           "op": "projects.resolve",
@@ -760,15 +543,8 @@
           "op": "projects.list"
         },
         {
-          "op": "workspaces.resolve",
+          "op": "projects.resolve",
           "ref": "attic-work"
-        },
-        {
-          "op": "harnesses.list",
-          "workspaceId": "ws-1"
-        },
-        {
-          "op": "harnesses.list"
         }
       ]
     },
@@ -785,7 +561,7 @@
         "harnesses.list": "{\"id\":1,\"ok\":true,\"harnesses\":[{\"harness\":\"claude\",\"label\":\"Claude Code\",\"source\":\"harness\",\"version\":\"2.1.0\",\"models\":[{\"value\":\"claude-sonnet-5\",\"label\":\"Sonnet 5\",\"isDefault\":true},{\"value\":\"claude-opus-5-5\",\"label\":\"Opus 5.5\",\"efforts\":[\"high\",\"max\"]},{\"value\":\"claude-haiku\",\"label\":\"Haiku\",\"efforts\":[]}],\"legacyModels\":[{\"value\":\"claude-3\",\"label\":\"Claude 3\"}],\"efforts\":[{\"value\":\"low\",\"label\":\"Low\"},{\"value\":\"high\",\"label\":\"High\",\"isDefault\":true},{\"value\":\"max\",\"label\":\"Max\"}],\"contextWindows\":[],\"permissionModes\":[{\"value\":\"acceptEdits\",\"label\":\"Accept edits\"},{\"value\":\"bypassPermissions\",\"label\":\"Bypass \u0085\",\"isDefault\":true}],\"access\":{\"auto-edit\":\"acceptEdits\",\"full\":\"bypassPermissions\"},\"steers\":true,\"renames\":true,\"images\":true,\"isDefault\":true},{\"harness\":\"codex\",\"label\":\"Codex\",\"source\":\"table\",\"version\":\"2.1.0\",\"models\":[{\"value\":\"gpt-5\",\"label\":\"GPT-5\",\"isDefault\":true}],\"efforts\":[{\"value\":\"low\",\"label\":\"Low\"},{\"value\":\"high\",\"label\":\"High\",\"isDefault\":true},{\"value\":\"max\",\"label\":\"Max\"}],\"contextWindows\":[],\"permissionModes\":[{\"value\":\"acceptEdits\",\"label\":\"Accept edits\"},{\"value\":\"bypassPermissions\",\"label\":\"Bypass \u0085\",\"isDefault\":true}],\"access\":{\"auto-edit\":\"acceptEdits\",\"full\":\"bypassPermissions\"},\"steers\":true,\"renames\":true,\"images\":true,\"isDefault\":false}]}",
         "workspaces.wake": "{\"id\":1,\"ok\":true,\"workspace\":{\"id\":\"ws-1\",\"name\":\"attic-work\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"default\",\"createdAt\":\"2026-09-27T00:00:00.000Z\",\"project\":{\"id\":\"p-1\",\"name\":\"wsp\",\"path\":\"/root/wsp\",\"computer\":\"here\"},\"home\":\"/root\"}}"
       },
-      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"--cwd is a path on the machine, absolute, and got \\\"src\\\". Give a path that opens with /, since whoever reads it works in a folder this line cannot see.\"}],\"structuredContent\":{\"error\":\"--cwd is a path on the machine, absolute, and got \\\"src\\\". Give a path that opens with /, since whoever reads it works in a folder this line cannot see.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"projects.resolve is not in this record\"}],\"structuredContent\":{\"error\":\"projects.resolve is not in this record\",\"class\":\"provider\",\"exit\":1},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
         {
           "op": "projects.resolve",
@@ -795,12 +571,8 @@
           "op": "projects.list"
         },
         {
-          "op": "workspaces.resolve",
+          "op": "projects.resolve",
           "ref": "attic-work"
-        },
-        {
-          "op": "harnesses.list",
-          "workspaceId": "ws-1"
         }
       ]
     },
@@ -819,7 +591,7 @@
         "harnesses.list": "{\"id\":1,\"ok\":true,\"harnesses\":[{\"harness\":\"claude\",\"label\":\"Claude Code\",\"source\":\"harness\",\"version\":\"2.1.0\",\"models\":[{\"value\":\"claude-sonnet-5\",\"label\":\"Sonnet 5\",\"isDefault\":true},{\"value\":\"claude-opus-5-5\",\"label\":\"Opus 5.5\",\"efforts\":[\"high\",\"max\"]},{\"value\":\"claude-haiku\",\"label\":\"Haiku\",\"efforts\":[]}],\"legacyModels\":[{\"value\":\"claude-3\",\"label\":\"Claude 3\"}],\"efforts\":[{\"value\":\"low\",\"label\":\"Low\"},{\"value\":\"high\",\"label\":\"High\",\"isDefault\":true},{\"value\":\"max\",\"label\":\"Max\"}],\"contextWindows\":[],\"permissionModes\":[{\"value\":\"acceptEdits\",\"label\":\"Accept edits\"},{\"value\":\"bypassPermissions\",\"label\":\"Bypass \u0085\",\"isDefault\":true}],\"access\":{\"auto-edit\":\"acceptEdits\",\"full\":\"bypassPermissions\"},\"steers\":true,\"renames\":true,\"images\":true,\"isDefault\":true},{\"harness\":\"codex\",\"label\":\"Codex\",\"source\":\"table\",\"version\":\"2.1.0\",\"models\":[{\"value\":\"gpt-5\",\"label\":\"GPT-5\",\"isDefault\":true}],\"efforts\":[{\"value\":\"low\",\"label\":\"Low\"},{\"value\":\"high\",\"label\":\"High\",\"isDefault\":true},{\"value\":\"max\",\"label\":\"Max\"}],\"contextWindows\":[],\"permissionModes\":[{\"value\":\"acceptEdits\",\"label\":\"Accept edits\"},{\"value\":\"bypassPermissions\",\"label\":\"Bypass \u0085\",\"isDefault\":true}],\"access\":{\"auto-edit\":\"acceptEdits\",\"full\":\"bypassPermissions\"},\"steers\":true,\"renames\":true,\"images\":true,\"isDefault\":false}]}",
         "workspaces.wake": "{\"id\":1,\"ok\":true,\"workspace\":{\"id\":\"ws-1\",\"name\":\"attic-work\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"default\",\"createdAt\":\"2026-09-27T00:00:00.000Z\",\"project\":{\"id\":\"p-1\",\"name\":\"wsp\",\"path\":\"/root/wsp\",\"computer\":\"here\"},\"home\":\"/root\"}}"
       },
-      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"there is no file at no-such-shot.png on this computer. Name a file that is already here.\"}],\"structuredContent\":{\"error\":\"there is no file at no-such-shot.png on this computer. Name a file that is already here.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"projects.resolve is not in this record\"}],\"structuredContent\":{\"error\":\"projects.resolve is not in this record\",\"class\":\"provider\",\"exit\":1},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
         {
           "op": "projects.resolve",
@@ -829,34 +601,10 @@
           "op": "projects.list"
         },
         {
-          "op": "workspaces.resolve",
+          "op": "projects.resolve",
           "ref": "attic-work"
-        },
-        {
-          "op": "harnesses.list",
-          "workspaceId": "ws-1"
         }
-      ],
-      "guest": {
-        "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"a path on this line would be read on the person's computer, not on the machine the line was typed on. Name a file on the machine the line runs on, or none.\"}],\"structuredContent\":{\"error\":\"a path on this line would be read on the person's computer, not on the machine the line was typed on. Name a file on the machine the line runs on, or none.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
-        "asked": [
-          {
-            "op": "projects.resolve",
-            "ref": "attic-work"
-          },
-          {
-            "op": "projects.list"
-          },
-          {
-            "op": "workspaces.resolve",
-            "ref": "attic-work"
-          },
-          {
-            "op": "harnesses.list",
-            "workspaceId": "ws-1"
-          }
-        ]
-      }
+      ]
     },
     {
       "case": "fast on a model with none",
@@ -870,7 +618,7 @@
         "workspaces.resolve": "{\"id\":1,\"ok\":true,\"workspace\":{\"id\":\"ws-1\",\"name\":\"attic-work\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"default\",\"createdAt\":\"2026-09-27T00:00:00.000Z\",\"project\":{\"id\":\"p-1\",\"name\":\"wsp\",\"path\":\"/root/wsp\",\"computer\":\"here\"},\"home\":\"/root\"}}",
         "harnesses.list": "{\"id\":1,\"ok\":true,\"harnesses\":[{\"harness\":\"claude\",\"label\":\"Claude Code\",\"source\":\"harness\",\"version\":\"2.1.0\",\"models\":[{\"value\":\"claude-sonnet-5\",\"label\":\"Sonnet 5\",\"isDefault\":true},{\"value\":\"claude-opus-5-5\",\"label\":\"Opus 5.5\",\"efforts\":[\"high\",\"max\"]},{\"value\":\"claude-haiku\",\"label\":\"Haiku\",\"efforts\":[]}],\"legacyModels\":[{\"value\":\"claude-3\",\"label\":\"Claude 3\"}],\"efforts\":[{\"value\":\"low\",\"label\":\"Low\"},{\"value\":\"high\",\"label\":\"High\",\"isDefault\":true},{\"value\":\"max\",\"label\":\"Max\"}],\"contextWindows\":[],\"permissionModes\":[{\"value\":\"acceptEdits\",\"label\":\"Accept edits\"},{\"value\":\"bypassPermissions\",\"label\":\"Bypass \u0085\",\"isDefault\":true}],\"access\":{\"auto-edit\":\"acceptEdits\",\"full\":\"bypassPermissions\"},\"steers\":true,\"renames\":true,\"images\":true,\"isDefault\":true},{\"harness\":\"codex\",\"label\":\"Codex\",\"source\":\"table\",\"version\":\"2.1.0\",\"models\":[{\"value\":\"gpt-5\",\"label\":\"GPT-5\",\"isDefault\":true}],\"efforts\":[{\"value\":\"low\",\"label\":\"Low\"},{\"value\":\"high\",\"label\":\"High\",\"isDefault\":true},{\"value\":\"max\",\"label\":\"Max\"}],\"contextWindows\":[],\"permissionModes\":[{\"value\":\"acceptEdits\",\"label\":\"Accept edits\"},{\"value\":\"bypassPermissions\",\"label\":\"Bypass \u0085\",\"isDefault\":true}],\"access\":{\"auto-edit\":\"acceptEdits\",\"full\":\"bypassPermissions\"},\"steers\":true,\"renames\":true,\"images\":true,\"isDefault\":false}]}"
       },
-      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"Sonnet 5 has no fast mode; pick a model that offers it, or send without it. Drop the flag, or give it a value the agent offers.\"}],\"structuredContent\":{\"error\":\"Sonnet 5 has no fast mode; pick a model that offers it, or send without it. Drop the flag, or give it a value the agent offers.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"projects.resolve is not in this record\"}],\"structuredContent\":{\"error\":\"projects.resolve is not in this record\",\"class\":\"provider\",\"exit\":1},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
         {
           "op": "projects.resolve",
@@ -880,12 +628,8 @@
           "op": "projects.list"
         },
         {
-          "op": "workspaces.resolve",
+          "op": "projects.resolve",
           "ref": "attic-work"
-        },
-        {
-          "op": "harnesses.list",
-          "workspaceId": "ws-1"
         }
       ]
     },
@@ -1070,7 +814,7 @@
         "projects.list": "{\"id\":1,\"ok\":true,\"projects\":[{\"id\":\"p-1\",\"name\":\"wsp\",\"computer\":\"here\",\"source\":{\"kind\":\"folder\",\"path\":\"/Users/me/wsp\"},\"path\":\"/Users/me/wsp\",\"git\":{\"top\":\"/Users/me/wsp\"}},{\"id\":\"p-2\",\"name\":\"site\",\"computer\":\"pl-attic\",\"source\":{\"kind\":\"folder\",\"path\":\"/Users/me/wsp\"},\"path\":\"/root/site\",\"git\":{\"top\":\"/Users/me/wsp\"}}]}",
         "workspaces.resolve": "{\"id\":1,\"ok\":true,\"workspace\":{\"id\":\"ws-1\",\"name\":\"attic-work\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"default\",\"createdAt\":\"2026-09-27T00:00:00.000Z\",\"project\":{\"id\":\"p-1\",\"name\":\"wsp\",\"path\":\"/root/wsp\",\"computer\":\"here\"},\"home\":\"/root\"}}"
       },
-      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"--branch takes a project on this computer, where wsp makes worktrees. Name a project on this computer.\"}],\"structuredContent\":{\"error\":\"--branch takes a project on this computer, where wsp makes worktrees. Name a project on this computer.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"projects.resolve is not in this record\"}],\"structuredContent\":{\"error\":\"projects.resolve is not in this record\",\"class\":\"provider\",\"exit\":1},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
         {
           "op": "projects.resolve",
@@ -1080,7 +824,7 @@
           "op": "projects.list"
         },
         {
-          "op": "workspaces.resolve",
+          "op": "projects.resolve",
           "ref": "attic-work"
         }
       ]
@@ -1174,7 +918,7 @@
         "projects.list": "{\"id\":1,\"ok\":true,\"projects\":[{\"id\":\"p-1\",\"name\":\"wsp\",\"computer\":\"here\",\"source\":{\"kind\":\"folder\",\"path\":\"/Users/me/wsp\"},\"path\":\"/Users/me/wsp\",\"git\":{\"top\":\"/Users/me/wsp\"}},{\"id\":\"p-2\",\"name\":\"site\",\"computer\":\"pl-attic\",\"source\":{\"kind\":\"folder\",\"path\":\"/Users/me/wsp\"},\"path\":\"/root/site\",\"git\":{\"top\":\"/Users/me/wsp\"}}]}",
         "workspaces.resolve": "{\"id\":1,\"ok\":false,\"error\":\"thread thread-7 may not start children in lab-two: it is a folder the person keeps of this repository, and a thread started there would stand outside your tree. Name a project wsp projects lists, or ask the person to start this one.\",\"kind\":\"usage\"}"
       },
-      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"thread thread-7 may not start children in lab-two: it is a folder the person keeps of this repository, and a thread started there would stand outside your tree. Name a project wsp projects lists, or ask the person to start this one.\"}],\"structuredContent\":{\"error\":\"thread thread-7 may not start children in lab-two: it is a folder the person keeps of this repository, and a thread started there would stand outside your tree. Name a project wsp projects lists, or ask the person to start this one.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"projects.resolve is not in this record\"}],\"structuredContent\":{\"error\":\"projects.resolve is not in this record\",\"class\":\"provider\",\"exit\":1},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
         {
           "op": "projects.resolve",
@@ -1184,7 +928,7 @@
           "op": "projects.list"
         },
         {
-          "op": "workspaces.resolve",
+          "op": "projects.resolve",
           "ref": "lab-two"
         }
       ]
@@ -1218,9 +962,6 @@
         {
           "op": "workspaces.landing",
           "project": "p-2"
-        },
-        {
-          "op": "workspaces.list"
         },
         {
           "op": "harnesses.list"
@@ -1281,9 +1022,6 @@
           "project": "p-2"
         },
         {
-          "op": "workspaces.list"
-        },
-        {
           "op": "harnesses.list"
         },
         {
@@ -1320,9 +1058,6 @@
           "project": "p-2"
         },
         {
-          "op": "workspaces.list"
-        },
-        {
           "op": "harnesses.list"
         },
         {
@@ -1342,9 +1077,6 @@
           {
             "op": "workspaces.landing",
             "project": "p-2"
-          },
-          {
-            "op": "workspaces.list"
           },
           {
             "op": "harnesses.list"
@@ -1370,7 +1102,7 @@
         "workspaces.wake": "{\"id\":1,\"ok\":true,\"workspace\":{\"id\":\"ws-1\",\"name\":\"attic-work\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"default\",\"createdAt\":\"2026-09-27T00:00:00.000Z\",\"project\":{\"id\":\"p-1\",\"name\":\"wsp\",\"path\":\"/root/wsp\",\"computer\":\"here\"},\"home\":\"/root\"}}",
         "sessions.start": "{\"id\":1,\"ok\":true,\"session\":{\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"running\",\"id\":\"sess-9\",\"threadId\":\"thread-9d8c7b6a5f4e\",\"startedBy\":\"agent\"},\"outcome\":\"started\",\"turnId\":\"turn-9\"}"
       },
-      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"thread thread-9d8c7b6a5f4e\"}],\"structuredContent\":{\"threadId\":\"thread-9d8c7b6a5f4e\",\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"outcome\":\"started\"}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"projects.defaults is not in this record\"}],\"structuredContent\":{\"error\":\"projects.defaults is not in this record\",\"class\":\"provider\",\"exit\":1},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
         {
           "op": "projects.resolve",
@@ -1384,27 +1116,10 @@
           "project": "p-2"
         },
         {
-          "op": "workspaces.list"
+          "op": "harnesses.list"
         },
         {
-          "op": "workspaces.resolve",
-          "ref": "site"
-        },
-        {
-          "op": "harnesses.list",
-          "workspaceId": "ws-1"
-        },
-        {
-          "op": "workspaces.wake",
-          "workspaceId": "ws-1"
-        },
-        {
-          "op": "sessions.start",
-          "workspaceId": "ws-1",
-          "prompt": "t",
-          "startedBy": "agent",
-          "requestId": "<request id>",
-          "answerHeld": true
+          "op": "projects.defaults"
         }
       ]
     },
@@ -1422,7 +1137,7 @@
         "workspaces.wake": "{\"id\":1,\"ok\":true,\"workspace\":{\"id\":\"ws-1\",\"name\":\"attic-work\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"default\",\"createdAt\":\"2026-09-27T00:00:00.000Z\",\"project\":{\"id\":\"p-1\",\"name\":\"wsp\",\"path\":\"/root/wsp\",\"computer\":\"here\"},\"home\":\"/root\"}}",
         "sessions.start": "{\"id\":1,\"ok\":true,\"session\":{\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"running\",\"id\":\"sess-9\",\"threadId\":\"thread-9d8c7b6a5f4e\",\"startedBy\":\"agent\"},\"outcome\":\"started\",\"turnId\":\"turn-9\"}"
       },
-      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"thread thread-9d8c7b6a5f4e\"}],\"structuredContent\":{\"threadId\":\"thread-9d8c7b6a5f4e\",\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"outcome\":\"started\"}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"projects.resolve is not in this record\"}],\"structuredContent\":{\"error\":\"projects.resolve is not in this record\",\"class\":\"provider\",\"exit\":1},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
         {
           "op": "projects.resolve",
@@ -1435,24 +1150,8 @@
           "op": "workspaces.list"
         },
         {
-          "op": "workspaces.resolve",
+          "op": "projects.resolve",
           "ref": "attic-work"
-        },
-        {
-          "op": "harnesses.list",
-          "workspaceId": "ws-1"
-        },
-        {
-          "op": "workspaces.wake",
-          "workspaceId": "ws-1"
-        },
-        {
-          "op": "sessions.start",
-          "workspaceId": "ws-1",
-          "prompt": "t",
-          "startedBy": "agent",
-          "requestId": "<request id>",
-          "answerHeld": true
         }
       ]
     },
@@ -1569,7 +1268,7 @@
         "workspaces.wake": "{\"id\":1,\"ok\":true,\"workspace\":{\"id\":\"ws-1\",\"name\":\"attic-work\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"default\",\"createdAt\":\"2026-09-27T00:00:00.000Z\",\"project\":{\"id\":\"p-1\",\"name\":\"wsp\",\"path\":\"/root/wsp\",\"computer\":\"here\"},\"home\":\"/root\"}}",
         "sessions.start": "{\"id\":1,\"ok\":true,\"session\":{\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"running\",\"id\":\"sess-9\"},\"outcome\":\"started\",\"turnId\":\"turn-9\"}"
       },
-      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"the runtime stamped no thread on the session\"}],\"structuredContent\":{\"error\":\"the runtime stamped no thread on the session\",\"class\":\"provider\",\"exit\":1},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"projects.resolve is not in this record\"}],\"structuredContent\":{\"error\":\"projects.resolve is not in this record\",\"class\":\"provider\",\"exit\":1},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
         {
           "op": "projects.resolve",
@@ -1579,24 +1278,8 @@
           "op": "projects.list"
         },
         {
-          "op": "workspaces.resolve",
+          "op": "projects.resolve",
           "ref": "attic-work"
-        },
-        {
-          "op": "harnesses.list",
-          "workspaceId": "ws-1"
-        },
-        {
-          "op": "workspaces.wake",
-          "workspaceId": "ws-1"
-        },
-        {
-          "op": "sessions.start",
-          "workspaceId": "ws-1",
-          "prompt": "t",
-          "startedBy": "agent",
-          "requestId": "<request id>",
-          "answerHeld": true
         }
       ]
     },
@@ -1614,7 +1297,7 @@
         "workspaces.wake": "{\"id\":1,\"ok\":true,\"workspace\":{\"id\":\"ws-1\",\"name\":\"attic-work\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"default\",\"createdAt\":\"2026-09-27T00:00:00.000Z\",\"project\":{\"id\":\"p-1\",\"name\":\"wsp\",\"path\":\"/root/wsp\",\"computer\":\"here\"},\"home\":\"/root\"}}",
         "sessions.start": "{\"id\":1,\"ok\":true,\"outcome\":\"started\"}"
       },
-      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"the host answered sessions.start in a shape this wsp does not read; it runs another version of wsp, restart it with wsp restart\"}],\"structuredContent\":{\"error\":\"the host answered sessions.start in a shape this wsp does not read; it runs another version of wsp, restart it with wsp restart\",\"class\":\"provider\",\"exit\":1},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"projects.resolve is not in this record\"}],\"structuredContent\":{\"error\":\"projects.resolve is not in this record\",\"class\":\"provider\",\"exit\":1},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
         {
           "op": "projects.resolve",
@@ -1624,24 +1307,8 @@
           "op": "projects.list"
         },
         {
-          "op": "workspaces.resolve",
+          "op": "projects.resolve",
           "ref": "attic-work"
-        },
-        {
-          "op": "harnesses.list",
-          "workspaceId": "ws-1"
-        },
-        {
-          "op": "workspaces.wake",
-          "workspaceId": "ws-1"
-        },
-        {
-          "op": "sessions.start",
-          "workspaceId": "ws-1",
-          "prompt": "t",
-          "startedBy": "agent",
-          "requestId": "<request id>",
-          "answerHeld": true
         }
       ]
     },

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 //! The skill tools: skills.sh searched and read through the host, and a skill added, removed, or turned off and on
-//! on one computer or workspace. Each answers a line of its own with the value beside it, as asText does. The host's
+//! on one computer or where a thread runs. Each answers a line of its own with the value beside it, as asText does. The host's
 //! rows are read into the shapes the TypeScript tool parses them with, so a key no schema holds is dropped there as
 //! it is here and the fields go in the schema's order.
 
@@ -94,7 +94,7 @@ async fn search(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
 pub struct ShowIn {
     pub skill: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub workspace: Option<String>,
+    pub thread: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub on: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -115,20 +115,22 @@ struct Previewed {
 }
 
 async fn show(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
-    let ShowIn { skill, workspace, on, project } = input("skills_show", arguments)?;
+    let ShowIn { skill, thread, on, project } = input("skills_show", arguments)?;
     let client = host.client().await?;
     let words = record::words();
     let usage = target::usage(&words, "skills_show");
     let asked = target::project_asked(&words, project.as_ref(), on.as_deref(), "skills_show")?;
     let Previewed { preview } = if skill.split('/').count() == 3 {
-        if workspace.is_some() || on.is_some() || asked.project {
+        if thread.is_some() || on.is_some() || asked.project {
             return Err(refused(&words.skills_sh_placeless, &[("skill", &skill)], &usage).into());
         }
         let mut get = Map::new();
         get.insert("skill".to_owned(), Value::from(skill));
         client.request("skills.get", get).await?
     } else {
-        let aimed = target::target(&client, &words, workspace.as_deref(), on.as_deref(), &usage, asked.name.as_deref()).await?;
+        let aimed =
+            target::target(&client, &words, thread.as_deref(), on.as_deref(), &usage, asked.name.as_deref(), "skills_show", host.cloud())
+                .await?;
         let mut read = Map::new();
         read.insert("target".to_owned(), aimed);
         read.insert("name".to_owned(), Value::from(skill));
@@ -156,7 +158,7 @@ fn project_field(asked_host: &mut Map<String, Value>, asked: &Asked) {
 pub struct AddIn {
     pub skill: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub workspace: Option<String>,
+    pub thread: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub on: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -185,12 +187,14 @@ async fn add(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
     struct Answered {
         added: Added,
     }
-    let AddIn { skill, workspace, on, agent, project } = input("skills_add", arguments)?;
+    let AddIn { skill, thread, on, agent, project } = input("skills_add", arguments)?;
     let client = host.client().await?;
     let words = record::words();
     let asked = target::project_asked(&words, project.as_ref(), on.as_deref(), "skills_add")?;
     let usage = target::usage(&words, "skills_add");
-    let aimed = target::target(&client, &words, workspace.as_deref(), on.as_deref(), &usage, asked.name.as_deref()).await?;
+    let aimed =
+        target::target(&client, &words, thread.as_deref(), on.as_deref(), &usage, asked.name.as_deref(), "skills_add", host.cloud())
+            .await?;
     let mut adding = Map::new();
     adding.insert("target".to_owned(), aimed);
     adding.insert("skill".to_owned(), Value::from(skill.as_str()));
@@ -220,7 +224,7 @@ async fn add(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
 pub struct RemoveIn {
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub workspace: Option<String>,
+    pub thread: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub on: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -234,12 +238,14 @@ pub struct RemoveOut {
 }
 
 async fn remove(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
-    let RemoveIn { name, workspace, on, project } = input("skills_remove", arguments)?;
+    let RemoveIn { name, thread, on, project } = input("skills_remove", arguments)?;
     let client = host.client().await?;
     let words = record::words();
     let asked = target::project_asked(&words, project.as_ref(), on.as_deref(), "skills_remove")?;
     let usage = target::usage(&words, "skills_remove");
-    let aimed = target::target(&client, &words, workspace.as_deref(), on.as_deref(), &usage, asked.name.as_deref()).await?;
+    let aimed =
+        target::target(&client, &words, thread.as_deref(), on.as_deref(), &usage, asked.name.as_deref(), "skills_remove", host.cloud())
+            .await?;
     let mut removing = Map::new();
     removing.insert("target".to_owned(), aimed);
     removing.insert("name".to_owned(), Value::from(name.as_str()));
@@ -254,7 +260,7 @@ async fn remove(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
 pub struct ToggleIn {
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub workspace: Option<String>,
+    pub thread: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub on: Option<String>,
 }
@@ -267,11 +273,11 @@ pub struct ToggleOut {
 
 /// A project's skill lives in the repo, so a toggle never names one.
 async fn toggle(host: Arc<Host>, arguments: Value, tool: &'static str, turn_on: bool) -> Result<Answer, Refused> {
-    let ToggleIn { name, workspace, on } = input(tool, arguments)?;
+    let ToggleIn { name, thread, on } = input(tool, arguments)?;
     let client = host.client().await?;
     let words = record::words();
     let usage = target::usage(&words, tool);
-    let aimed = target::target(&client, &words, workspace.as_deref(), on.as_deref(), &usage, None).await?;
+    let aimed = target::target(&client, &words, thread.as_deref(), on.as_deref(), &usage, None, tool, host.cloud()).await?;
     let mut turning = Map::new();
     turning.insert("target".to_owned(), aimed);
     turning.insert("name".to_owned(), Value::from(name.as_str()));

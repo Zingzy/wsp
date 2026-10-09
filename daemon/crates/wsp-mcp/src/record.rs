@@ -77,7 +77,6 @@ pub struct Words {
     pub here_place_id: String,
     /// Each catalog entry's name by its id: what a line calls an agent.
     pub agent_names: HashMap<String, String>,
-    pub other_version: String,
     pub release: Release,
     pub no_such_place: String,
     pub places_fix: String,

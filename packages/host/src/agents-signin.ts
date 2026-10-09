@@ -121,7 +121,7 @@ export async function planSignIn(on: AgentsOn, ask: SignInAsk, o: { terminal?: b
   const byCode = signInRoadOf(row) === "code";
   const plan = { name: entry.name, questions: questionsOf(row), ...(row.code !== undefined ? { code: row.code } : {}), ...(row.status !== undefined ? { status: row.status } : {}), paste: (url: string) => byCode && !(on.kind === "here" && redirectsToMachine(url)) };
   if (shared !== undefined && on.kind === "box") {
-    if (on.logins === undefined) throw new Error("this computer has not said where it keeps the logins its workspaces share, so there is nowhere to sign one in");
+    if (on.logins === undefined) throw new Error("this computer has not said where it keeps the logins its threads share, so there is nowhere to sign one in");
     const home = loginHomeIn(on.logins, shared);
     return { ...plan, ...(on.name !== undefined ? { where: on.name } : {}), line: { command, env: { [shared.homeEnv]: home }, prepare: `mkdir -p ${shellQuote(home)}`, ...(status !== undefined ? { status } : {}) } };
   }

@@ -228,11 +228,11 @@ export function signInRowCommand(computer: string, row: Pick<PlaceProvisionRow, 
 /** The refusal for a name with no sign-in to run on a computer. The agents are the catalog's own. */
 export const signInAgentRefusal = (agent: string): string => `wsp add --sign-in takes an agent with a sign-in to run on a computer, or gh for GitHub, and ${agent} is neither: name ${loginAgents().join(", ")} or ${GITHUB_CLI}.`;
 
-/** A computer that has not told this host where it keeps the logins its workspaces share. It says so on every
+/** A computer that has not told this host where it keeps the logins its threads share. It says so on every
  * link, so the two causes left are a computer that is not connected and one whose agent is older than the one
  * this host deploys, which shared no login at all; the second names its own way out. */
 export const placeNoLoginsLine = (name: string): string =>
-  `${name} has not said where it keeps the logins its workspaces share, so there is nowhere to sign one in: it is not connected, or the agent on it is older than the one this host deploys. wsp add ${name} --update puts this one on it.`;
+  `${name} has not said where it keeps the logins its threads share, so there is nowhere to sign one in: it is not connected, or the agent on it is older than the one this host deploys. wsp add ${name} --update puts this one on it.`;
 
 export const boxSignedInLine = (name: string, agent: string, detail?: string): string =>
   `${agentName(agent)} is signed in on ${name}${detail === undefined ? "" : ` (${detail})`}${sharedOn(agent) === undefined ? "." : "; every workspace there shares that login."}`;

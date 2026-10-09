@@ -1,17 +1,17 @@
 {
   "cloudOff": {
     "name": "commit",
-    "description": "Commits the files the workspace's copy changed against its last commit, untracked ones added, with the message given, running the copy's hooks as git does; files names some of them by path from the checkout's top and leaves the rest uncommitted. Without a message the workspace's own agent drafts one from the diff and the task its newest thread was opened with, on its own command line with no thread and no tool, and the commit is made with that. Refused in one line when a file named has no change, when git knows no author in the copy (with the command that sets one), when a hook said no (with its last line), and when another git in the copy holds the index after one wait. Nothing reaches a remote: the app's Push is what pushes.",
+    "description": "Commits the files changed in the folder the thread works in against its last commit, untracked ones added, with the message given, running the folder's hooks as git does. Other threads working in the same folder share its changes, so a commit of every file takes theirs too and the answer names them in sharedWith; files names some by path from the checkout's top and leaves the rest uncommitted. Without a message the thread's own agent drafts one from the diff and the message the thread was opened with, on its own command line with no thread and no tool, and the commit is made with that. Refused in one line when a file named has no change, when git knows no author in the folder (with the command that sets one), when a hook said no (with its last line), and when another git in the folder holds the index after one wait. Nothing reaches a remote: the app's Push is what pushes.",
     "inputSchema": {
       "type": "object",
       "properties": {
-        "workspace": {
+        "thread": {
           "type": "string",
-          "description": "the workspace's name, or its id when two share a name"
+          "description": "the thread, by its id or a prefix of it that names one, as threads lists them"
         },
         "message": {
           "type": "string",
-          "description": "the commit message, a subject line then a blank line and the body; without one the workspace's agent drafts it"
+          "description": "the commit message, a subject line then a blank line and the body; without one the thread's agent drafts it"
         },
         "files": {
           "type": "array",
@@ -22,7 +22,7 @@
         }
       },
       "required": [
-        "workspace"
+        "thread"
       ],
       "additionalProperties": false,
       "$schema": "http://json-schema.org/draft-07/schema#"
@@ -44,6 +44,13 @@
         },
         "deletions": {
           "type": "integer"
+        },
+        "sharedWith": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "the other threads working in the same folder, by id, whose changes the act took in too; absent where none do"
         }
       },
       "required": [
@@ -65,17 +72,17 @@
   },
   "cloudOn": {
     "name": "commit",
-    "description": "Commits the files the workspace's copy changed against its last commit, untracked ones added, with the message given, running the copy's hooks as git does; files names some of them by path from the checkout's top and leaves the rest uncommitted. Without a message the workspace's own agent drafts one from the diff and the task its newest thread was opened with, on its own command line with no thread and no tool, and the commit is made with that. Refused in one line when a file named has no change, when git knows no author in the copy (with the command that sets one), when a hook said no (with its last line), and when another git in the copy holds the index after one wait. Nothing reaches a remote: the app's Push is what pushes.",
+    "description": "Commits the files changed in the folder the thread works in against its last commit, untracked ones added, with the message given, running the folder's hooks as git does. Other threads working in the same folder share its changes, so a commit of every file takes theirs too and the answer names them in sharedWith; files names some by path from the checkout's top and leaves the rest uncommitted. Without a message the thread's own agent drafts one from the diff and the message the thread was opened with, on its own command line with no thread and no tool, and the commit is made with that. Refused in one line when a file named has no change, when git knows no author in the folder (with the command that sets one), when a hook said no (with its last line), and when another git in the folder holds the index after one wait. Nothing reaches a remote: the app's Push is what pushes.",
     "inputSchema": {
       "type": "object",
       "properties": {
-        "workspace": {
+        "thread": {
           "type": "string",
-          "description": "the workspace's name, or its id when two share a name"
+          "description": "the thread, by its id or a prefix of it that names one, as threads lists them"
         },
         "message": {
           "type": "string",
-          "description": "the commit message, a subject line then a blank line and the body; without one the workspace's agent drafts it"
+          "description": "the commit message, a subject line then a blank line and the body; without one the thread's agent drafts it"
         },
         "files": {
           "type": "array",
@@ -86,7 +93,7 @@
         }
       },
       "required": [
-        "workspace"
+        "thread"
       ],
       "additionalProperties": false,
       "$schema": "http://json-schema.org/draft-07/schema#"
@@ -108,6 +115,13 @@
         },
         "deletions": {
           "type": "integer"
+        },
+        "sharedWith": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "the other threads working in the same folder, by id, whose changes the act took in too; absent where none do"
         }
       },
       "required": [

@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-//! The tree of branches' one tool: a child's branch merged into its lead's copy with a merge commit, the lead woken
-//! first where it sleeps.
+//! The tree of branches' one tool: a child thread's branch merged into the folder its lead thread works in with a
+//! merge commit, the lead woken first where it sleeps.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Number, Value};
 
-use super::workspace::{self, awake, counted_number, params, read, workspace_of};
+use super::named::{child_of, thread_at, thread_label, Aim};
+use super::workspace::{self, awake, counted_number, params, read, Workspace};
 use super::{input, Answer, Refused, Tool};
 use crate::host::Host;
 use crate::record::fill;
@@ -20,7 +21,7 @@ pub struct MergeInIn {
 }
 
 /// packages/protocol's MergeInResult, in its order.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct MergeInOut {
     lead: String,
@@ -60,11 +61,22 @@ async fn merge_in(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> 
     }
     let MergeInIn { lead, child } = input(MERGE_IN_NAME, arguments)?;
     let client = host.client().await?;
-    let source = workspace_of(&client, &lead).await?;
+    let aim = Aim { line: "wsp merge in", or_computer: false, cloud: host.cloud() };
+    let (lead, source): (_, Workspace) = thread_at(&client, &lead, &aim).await?;
+    let (kid, _, kid_workspace) = child_of::<Value>(&client, &lead, &source.id, &child, &aim).await?;
     let woken: Woken = read(&awake(&client, &source, "merge in").await?, "workspaces.wake")?;
-    let done: MergeInOut =
-        client.request("workspaces.mergeIn", params([("workspaceId", Value::from(woken.id)), ("child", Value::from(child))])).await?;
-    Ok(Answer::text(merge_in_line(&done), &done))
+    let done: MergeInOut = client
+        .request(
+            "workspaces.mergeIn",
+            params([
+                ("workspaceId", Value::from(woken.id)),
+                ("child", Value::from(kid_workspace)),
+                ("threadId", Value::from(lead.runtime_id())),
+                ("childThreadId", Value::from(kid.runtime_id())),
+            ]),
+        )
+        .await?;
+    Ok(Answer::text(merge_in_line(&MergeInOut { lead: thread_label(&lead), child: thread_label(&kid), ..done.clone() }), &done))
 }
 
 #[cfg(test)]

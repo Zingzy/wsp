@@ -137,9 +137,10 @@ async fn delete(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
     let client = host.client().await?;
     let words = workspace::words();
     if let Some(named) = thread {
-        return delete_thread(&client, &named, confirm == Some(true)).await;
+        return delete_thread(&client, &named, confirm == Some(true), host.cloud()).await;
     }
-    let Some(workspace) = workspace else { return Err(Failure::usage(words.delete_names_nothing).into()) };
+    let nothing = if host.cloud() { words.delete_names_nothing_cloud } else { words.delete_names_nothing };
+    let Some(workspace) = workspace else { return Err(Failure::usage(nothing).into()) };
     let dropped = workspace_of(&client, &workspace).await?;
     refuse_folder(&dropped)?;
     let threads = thread_count(&client, &dropped.id).await?;
@@ -174,9 +175,9 @@ fn refuse_folder(workspace: &Workspace) -> Result<(), Failure> {
     Err(Failure::usage(fill(template, &[("name", &workspace.name)])))
 }
 
-/// A thread on this computer, with the worktree wsp made that it runs in; nothing where the word names no thread, or
-/// one on a box, which a workspace delete takes.
-async fn delete_thread(client: &Client, named: &str, confirm: bool) -> Result<Answer, Refused> {
+/// A thread, with the worktree wsp made that it runs in; nothing where the word names no thread, or with a cloud one
+/// on a machine, which a workspace delete takes.
+async fn delete_thread(client: &Client, named: &str, confirm: bool, cloud: bool) -> Result<Answer, Refused> {
     #[derive(Deserialize)]
     struct Folder {
         id: String,
@@ -209,8 +210,11 @@ async fn delete_thread(client: &Client, named: &str, confirm: bool) -> Result<An
         Ok(Some((thread, at)))
     };
     let Some((thread, Some(at))) = found().await?.filter(|(_, at)| at.as_ref().is_some_and(|w| w.kind.is_some_and(Kind::in_folder))) else {
-        // As the command line: a word that names a thread on a box's machine says the thread goes with its machine,
-        // read again as that line reads it, and any other word names no thread here.
+        // As the command line: with a cloud, a word that names a thread on a machine says the thread goes with its
+        // machine, read again as that line reads it, and any other word names no thread.
+        if !cloud {
+            return Err(not_here().into());
+        }
         return match found().await? {
             Some((_, Some(at))) if !at.kind.is_some_and(Kind::in_folder) => {
                 Err(Failure::usage(fill(&words.thread_on_machine, &[("name", &at.name)])).into())

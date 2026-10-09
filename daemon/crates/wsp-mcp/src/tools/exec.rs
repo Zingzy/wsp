@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-//! `exec`: a command on the workspace's machine, each word as given, followed to its exit through the frames the host
+//! `exec`: a command where a thread works, each word as given, followed to its exit through the frames the host
 //! pushes for it; the output lines, the exit code and the folder it ran in are the answer.
 
 use std::sync::Arc;
@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 use serde_json::Value;
 
-use super::named::{absolute_folder, awake, params, workspace_for_exec};
+use super::named::{absolute_folder, awake, other_version, params, thread_at, thread_cwd, Aim, Workspace};
 use super::{input, Answer, Refused, Tool};
 use crate::failure::Failure;
 use crate::host::Host;
@@ -24,7 +24,7 @@ pub const TOOL: Tool = Tool {
 #[derive(Debug, Serialize, Deserialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct In {
-    pub workspace: String,
+    pub thread: String,
     pub argv: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
@@ -66,10 +66,14 @@ struct Pushed {
 }
 
 async fn call(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
-    let In { workspace, argv, cwd } = input(NAME, arguments)?;
+    let In { thread, argv, cwd } = input(NAME, arguments)?;
     let asked = absolute_folder(cwd.as_deref())?.map(str::to_owned);
     let client = host.client().await?;
-    let target = awake(&client, &workspace_for_exec(&client, &workspace).await?, NAME).await?.workspace;
+    let aim = Aim { line: "wsp exec", or_computer: false, cloud: host.cloud() };
+    let (thread, record): (_, Value) = thread_at(&client, &thread, &aim).await?;
+    let folder: Workspace = serde_json::from_value(record.clone()).map_err(|_| other_version("workspaces.get"))?;
+    let asked = asked.or_else(|| thread_cwd(&thread, &record));
+    let target = awake(&client, &folder, NAME).await?.workspace;
     let mut frames = client.frames();
     let mut run = params([("workspaceId", Value::from(target.id.as_str())), ("argv", Value::from(argv))]);
     if let Some(folder) = asked {

@@ -12,7 +12,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { copyKey } from "@wsp/runtime";
-import { childToLeadsComputerLine, elsewhereWorkspaceLine, EXIT_CODES, threadOpRefusal, HERE_PLACE_ID, HOST_TOKEN_ENV, refusalLine, sendFilesAcrossLine, SEND_FILES_ACROSS_FIX, TURN_TOKEN_ENV, threadOpenedLine, waitAcrossLine, WAIT_ACROSS_FIX, type ThreadView } from "@wsp/protocol";
+import { childToLeadsComputerLine, elsewhereWorkspaceLine, EXIT_CODES, treeThreadOutOfReachLine, threadOpRefusal, HERE_PLACE_ID, HOST_TOKEN_ENV, refusalLine, sendFilesAcrossLine, SEND_FILES_ACROSS_FIX, TURN_TOKEN_ENV, threadOpenedLine, waitAcrossLine, WAIT_ACROSS_FIX, type ThreadView } from "@wsp/protocol";
 import { ctx, sockets, placesOf } from "../../runtime/test/places-fixture.js";
 import { FAIL, HOLD, leadAndBox } from "../../runtime/test/box-fixture.js";
 import { HERE } from "../../runtime/test/place-join.js";
@@ -129,6 +129,27 @@ describe("a lead thread on this computer starting a child on a computer the pers
     starts[1]!.answer("built");
   });
 
+  it("the lead naming its child there to commit or exec is told that thread works in a folder it cannot act on, with the message road, never as no such workspace", async () => {
+    const { starts, threadId, launch } = await lead();
+    const ran = await wsp(launch, "run", "lab-box", "--detach", `${HOLD}build it`, "--json");
+    const child = ran.json<{ threadId: string }>().threadId;
+    const said = treeThreadOutOfReachLine(child, threadId);
+    for (const argv of [["commit", child, "--message", "m"], ["exec", child, "--", "true"]]) {
+      const refused = await wsp(launch, ...argv);
+      expect(refused.errors).toEqual([`wsp ${argv[0]}: ${said}`]);
+      expect(refused.code).toBe(EXIT_CODES.usage);
+    }
+    const env = { [HOST_TOKEN_ENV]: launch[HOST_TOKEN_ENV]!, [TURN_TOKEN_ENV]: launch[TURN_TOKEN_ENV]! };
+    const client = await asToken(env[HOST_TOKEN_ENV]);
+    const [toClient, toServer] = InMemoryTransport.createLinkedPair();
+    await mcpServer(join(root!, "state.json"), { env, scoped: true, dial: Object.assign(async () => client, { close: async () => {} }) }).connect(toServer);
+    mcp = new Client({ name: "lead", version: "0.0.0" });
+    await mcp.connect(toClient);
+    const tool = await mcp.callTool({ name: "commit", arguments: { thread: child, message: "m" } });
+    expect(tool).toMatchObject({ isError: true, content: [{ type: "text", text: said }] });
+    starts[1]!.answer("built");
+  });
+
   it("a child there naming the lead's project here is refused with the road back to its lead, from the command line", async () => {
     const { starts, threadId, launch } = await lead();
     // The child's own token stands while its turn runs, which is when its wsp asks.
@@ -152,9 +173,10 @@ describe("a lead thread on this computer starting a child on a computer the pers
     const asked = await wsp(starts[1]!.env, "run", "lab-cloud", "--detach", "fork one");
     expect(asked.code).toBe(EXIT_CODES.usage);
     expect(asked.errors.join("\n")).toBe(`wsp run: ${road}`);
+    // Exec takes a thread, and a machine's name is none.
     const execd = await wsp(starts[1]!.env, "exec", "lab-cloud-one", "--", "true");
     expect(execd.code).toBe(EXIT_CODES.usage);
-    expect(execd.errors.join("\n")).toBe(`wsp exec: ${elsewhereWorkspaceLine("lab-cloud-one", "default", "hetzner", "exec", threadId)}`);
+    expect(execd.errors.join("\n")).toBe("wsp exec: no thread lab-cloud-one");
     starts[1]!.answer("asked the lead");
   });
 

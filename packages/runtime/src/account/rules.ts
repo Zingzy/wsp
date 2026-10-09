@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { type Capabilities, type PreferencesPatch, type ProjectView, type McpServerSpec, type Caller, type WorkspaceAgents, type WorkspaceKind, ThreadScope, phaseHoldsSlot, SPAWN_ACTS_ALLOWED, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnDepthRefusal, spawnRepositoryRefusal, spawnReachRefusal, type SpawnAct, threadPlace, forksNoMachines, kindWords, NO_PROVIDER_LINE, providerCannotRefusal, machineWord, noWorkspaceRefusal, notFoundRefusal, type WorktreeFolder, runsInFolder, copiesFolder, childOnAnotherComputerLine, childToLeadsComputerLine, elsewhereWorkspaceLine, type AcrossAct, agentsOffComputerRefusal, rootGoneRefusal, refusal, spawnFolderRefusal, SPAWN_FOLDER_FIX, SPAWN_REPOSITORY_FIX, relayedRecordRefusal, relayedRefusal, undrivenRefusal, workspaceState, HERE_PLACE_ID } from "@wsp/protocol";
+import { type Capabilities, type PreferencesPatch, type ProjectView, type McpServerSpec, type Caller, type WorkspaceAgents, type WorkspaceKind, ThreadScope, phaseHoldsSlot, SPAWN_ACTS_ALLOWED, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnDepthRefusal, spawnRepositoryRefusal, spawnReachRefusal, type SpawnAct, threadPlace, forksNoMachines, kindWords, NO_PROVIDER_LINE, providerCannotRefusal, machineWord, noWorkspaceRefusal, notFoundRefusal, type WorktreeFolder, runsInFolder, copiesFolder, childOnAnotherComputerLine, childToLeadsComputerLine, elsewhereWorkspaceLine, treeThreadOutOfReachLine, threadWord, folderGoneRefusal, type AcrossAct, agentsOffComputerRefusal, rootGoneRefusal, refusal, spawnFolderRefusal, SPAWN_FOLDER_FIX, SPAWN_REPOSITORY_FIX, relayedRecordRefusal, relayedRefusal, undrivenRefusal, workspaceState, HERE_PLACE_ID } from "@wsp/protocol";
 import type { WorkspaceRecord, LiveWorkspace } from "../types/wiring.js";
 import { PROJECTS, type WorkspaceLike } from "../types/internal.js";
 import type { RuntimeContext, RulesArea } from "../context.js";
@@ -183,14 +183,16 @@ export function rulesArea(ctx: RuntimeContext): RulesArea {
   /** The rule as the caller reads it, `act` being what the verb asked. A person is told which rule hid the workspace,
    * since what this host holds is theirs; a thread is told absence and nothing more, since a sentence naming a
    * workspace or a project outside its tree is how a thread learns what else stands here, but for a workspace on
-   * another computer its lead acts on, its tree's or the lead's own, which it already knows and reads the computer
-   * rule's words for. No word rides the thread's: every verb that reaches this found the workspace itself rather
-   * than being handed it. The name door, `workspaces.resolve`, differs: a whole word the thread typed is refused by
-   * its rule there, carrying that word and nothing else. */
-  const refuseRelayed = (record: WorkspaceLike | undefined, caller: Caller | undefined, act: AcrossAct = "work"): void => {
+   * another computer its lead acts on, which it already knows and reads the computer rule's words for, and for the
+   * record a thread of its own tree works on, named by `thread`, which it knows by that thread. The name door,
+   * `workspaces.resolve`, differs: a whole word the thread typed is refused by its rule there, carrying that word and
+   * nothing else. */
+  const refuseRelayed = (record: WorkspaceLike | undefined, caller: Caller | undefined, act: AcrossAct = "work", thread?: string): void => {
     const line = refusalFor(record, caller);
     if (line === undefined) return;
-    if (scopeOf(caller) === undefined) throw new Error(line);
+    const scope = scopeOf(caller);
+    if (scope === undefined) throw new Error(line);
+    if (record !== undefined && thread !== undefined) throw awayFor(record, caller, act, `thread ${threadWord(thread)}`) ?? usage(treeThreadOutOfReachLine(thread, scope.threadId));
     throw (record !== undefined && leadActsOn(record, caller) !== undefined ? awayFor(record, caller, act, record.name) : undefined) ?? notFoundRefusal(noWorkspaceRefusal());
   };
   /** The rule for a workspace a caller named by id rather than one a verb found for itself: a thread reads one
@@ -237,13 +239,11 @@ export function rulesArea(ctx: RuntimeContext): RulesArea {
     const placeId = ctx.placeIdOf(held) ?? HERE_PLACE_ID;
     return { computer: placeDoor?.nameOf(placeId) ?? placeId };
   };
-  /** The refusal for a switch that is off, naming where it is held: the workspace whose switch governs a tree, and for a
-   * folder a thread shares with the person's own threads, its own switch where it holds one and its computer's
-   * where it does not. */
-  const agentsOffLine = (record: WorkspaceRecord, act: SpawnAct, shared: boolean): string => {
-    if (!shared) return agentsOffRefusal((agentsRecordOf(record) ?? record).name, act);
+  /** The refusal for a switch that is off, naming where it is held: a record made with its own switch, or else the
+   * computer whose switch it reads, with the line that turns that one on. */
+  const agentsOffLine = (record: WorkspaceRecord, act: SpawnAct, threadId: string): string => {
     const held = agentsHeldAt(record);
-    return "workspace" in held ? agentsOffRefusal(held.workspace, act) : agentsOffComputerRefusal(held.computer, act);
+    return "workspace" in held ? agentsOffRefusal(held.workspace, act) : agentsOffComputerRefusal(threadId, held.computer, act);
   };
   /** The tree a thread sits in, read off its record, which no cap trims, and off its rows for a thread from before the
    * record: its parent, then its parent's, up to the thread a person opened. The walk is bounded by the threads there
@@ -288,14 +288,14 @@ export function rulesArea(ctx: RuntimeContext): RulesArea {
     const scope = scopeOf(caller);
     if (scope === undefined) return free;
     const own = live.get(scope.workspaceId)?.record;
-    if (own === undefined) throw new Error(agentsOffRefusal(scope.workspaceId, act));
+    if (own === undefined) throw new Error(folderGoneRefusal(scope.threadId, act));
     // Every switch over the thread holds, each read at the act and not at the mint, since a person who turns one off
     // while a turn runs has turned it off: the one on the workspace its root runs on, which a fork carries, and where
     // it runs in a folder its root does not, that folder's own, which is its computer's where the folder holds none.
     const rooted = scope.rootThreadId === scope.threadId ? own : recordOfThread(scope.rootThreadId);
     const over = rooted === undefined ? undefined : [{ record: rooted, policy: agentsOf(rooted) }, ...(rooted.id !== own.id && runsInFolder(own.kind) ? [{ record: own, policy: agentsOf(own) }] : [])];
     if (over === undefined) throw new Error(rootGoneRefusal(scope.threadId, act));
-    for (const { record, policy } of over) if (policy?.spawn !== true) throw new Error(agentsOffLine(record, act, record === own && record !== rooted));
+    for (const { record, policy } of over) if (policy?.spawn !== true) throw new Error(agentsOffLine(record, act, scope.threadId));
     if (!SPAWN_ACTS_ALLOWED.includes(act)) throw actRefusal(scope, act);
     // The depth cap counts what a thread starts under itself; a send and a bring back start nothing, so a thread
     // at the cap still talks to its tree and still gets its work out.

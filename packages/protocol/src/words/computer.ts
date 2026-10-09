@@ -144,7 +144,7 @@ export const SPAWN_ACTS = {
   start: "start work from a link",
   review: "start a review",
   review_post: "post a review",
-  delete: "delete a workspace",
+  delete: "delete anything",
   pause: "pause a machine",
   import: "import a folder",
   export: "export a folder",
@@ -156,15 +156,21 @@ export type SpawnAct = keyof typeof SPAWN_ACTS;
 /** The acts a thread may ask for at all; every other act in the table is refused whatever the caps say. */
 export const SPAWN_ACTS_ALLOWED: readonly SpawnAct[] = ["thread_new", "fork", "send", "bring_back", "commit", "fix", "update", "merge_in"];
 
-/** The one sentence a thread's own token is refused with when the workspace it runs on lets its agents spawn
- * nothing. Off is what every workspace reads as until a person turns it on. */
+/** The one sentence a thread's own token is refused with when the folder or machine it runs on was made with its
+ * agents' switch off, which no line turns on again. */
 export function agentsOffRefusal(workspace: string, act: SpawnAct): string {
-  return `agents on ${workspace} may not ${SPAWN_ACTS[act]}; turn it on with wsp workspaces agents ${workspace} --spawn on`;
+  return `agents on ${workspace} may not ${SPAWN_ACTS[act]}, since it was made with them off; ask the person`;
 }
 
-/** The same refusal where the switch that is off is a computer's, over a folder there that holds none of its own. */
-export function agentsOffComputerRefusal(computer: string, act: SpawnAct): string {
-  return `agents on ${computer} may not ${SPAWN_ACTS[act]}; turn it on with ${shellLine(["wsp", "computers", "set", computer, "--spawn", "on"])}`;
+/** The refusal where the switch that is off is a computer's, over a folder there that holds none of its own: the
+ * thread refused, and the line that turns the switch back on. */
+export function agentsOffComputerRefusal(threadId: string, computer: string, act: SpawnAct): string {
+  return `thread ${threadWord(threadId)} may not ${SPAWN_ACTS[act]}, since agents on ${computer} are off; turn them on with ${shellLine(["wsp", "computers", "set", computer, "--spawn", "on"])}`;
+}
+
+/** Why a thread may not act where this host no longer holds the folder it works in. */
+export function folderGoneRefusal(threadId: string, act: SpawnAct): string {
+  return `thread ${threadWord(threadId)} may not ${SPAWN_ACTS[act]}, since this host no longer holds the folder it works in; ask the person`;
 }
 
 /** The refusal where no switch is off but the thread a tree started from was deleted, so nothing governs it. */
@@ -234,17 +240,18 @@ export const guestNoFileLine = "a path on this line would be read on the person'
 
 /** What a line from inside a machine is told when it leaves the workspace to the folder it was typed in: that folder
  * is on the machine, and reading it here would answer about the person's own checkouts instead. */
-export const guestNamesWorkspaceLine = "a line from a workspace names the workspace it means, since the folder it was typed in is not one this host can read";
+export const guestNamesWorkspaceLine = "a line from a machine names the project it means, since the folder it was typed in is not one this host can read";
+export const GUEST_NAMES_FIX = "Name the project on the line.";
 
 /** What a line typed inside a workspace is told when it names a verb that runs at the person's own keyboard: the
  * guest road carries the verbs an agent has business with, and the rest happen where the person is. */
 export function guestPersonsComputerLine(word: string): string {
-  return `wsp ${word} runs on the person's computer, not from a workspace`;
+  return `wsp ${word} runs on the person's computer, not from a thread on another computer`;
 }
 
 /** What a line typed inside a workspace is told when it tries to aim itself somewhere else. The host a turn's
  * launch named is the one a line from that turn reaches, and the state file it would name is on another computer. */
-export const guestHostFlagLine = "a line from a workspace goes to the host that launched it; --host and --state are not read here";
+export const guestHostFlagLine = "a line from a thread goes to the host that started it; --host and --state are not read here";
 
 /** Thread and where it runs, as a refusal to a thread's own token names it; `on` absent for a thread whose workspace
  * this host no longer holds. */
@@ -288,7 +295,7 @@ export function folderForkFix(project: string): string {
 /** The one sentence a token scoped to a thread is refused with for arriving on a road this host does not serve its
  * own workspaces' guests on. Which road that is, and why, is on the host's own `ownRoad`. */
 export const SCOPED_TOKEN_ROAD_REFUSAL =
-  "a thread's token opens this host over the road its own workspace's guest is served on, and this request came by another";
+  "a thread's token opens this host over the road its own computer's guest is served on, and this request came by another";
 
 /** The one sentence a thread naming the image its fork starts from is refused with: a thread forks the image its
  * own workspace's project runs, and the manifests that hold every snapshot id are not a thread's to read, so an id
@@ -312,14 +319,14 @@ export function spendCapRefusal(name: string, todayUsd: number, capUsd: number):
 }
 
 /** The one sentence a spawn deeper than the tree allows is refused with, and how to raise it where the cap is held:
- * the computer's Levels deep, or the switch of a workspace that holds one of its own. */
+ * the computer's Levels deep, or the cap a machine was made with, which stands for its life. */
 export function spawnDepthRefusal(threadId: string, depth: number, cap: number, held: { computer: string } | { workspace: string }): string {
   const deeper = String(depth + 1);
   const raise =
     "computer" in held
       ? `raise Levels deep in Settings > Computers or run ${shellLine(["wsp", "computers", "set", held.computer, "--max-depth", deeper])}`
-      : `raise it with ${shellLine(["wsp", "workspaces", "agents", held.workspace, "--max-depth", deeper])}`;
-  return `thread ${threadWord(threadId)} is ${depth} deep under its root and ${"computer" in held ? "this computer" : "its workspace"} allows ${cap}, so a thread this deep may not spawn; ${raise}`;
+      : `${held.workspace} was made with that cap; ask the person`;
+  return `thread ${threadWord(threadId)} is ${depth} deep under its root and ${"computer" in held ? "this computer" : held.workspace} allows ${cap}, so a thread this deep may not spawn; ${raise}`;
 }
 
 /** The one sentence a thread is refused with for naming a project of another repository than the one its own
@@ -351,18 +358,6 @@ export function spawnFolderRefusal(threadId: string, word: string): string {
 /** What a thread does about that refusal. */
 export const SPAWN_FOLDER_FIX = "Name a project wsp projects lists, or ask the person to start this one.";
 
-/** The one sentence a thread's exec is refused with for naming a workspace or a project the person holds that stands
- * outside its tree: what the word is, in the word typed alone. Exec starts nothing, so it speaks of no child. */
-export function execOutsideRefusal(threadId: string, word: string, is: "folder" | "project" | "workspace"): string {
-  const what = is === "folder" ? "a folder the person keeps of this repository" : `a ${is} of another repository`;
-  return `thread ${threadWord(threadId)} may not exec in ${word}: it is ${what}, outside your tree`;
-}
-
-/** What a thread does about a refused exec: run it on a machine of its own tree, the one it runs on first. */
-export function execOutsideFix(own: string): string {
-  return `Run the command in your own tree with ${shellLine(["wsp", "exec", own, "--"])} <command>, or ask the person.`;
-}
-
 /** The one sentence a thread is refused with for reaching a workspace outside its own tree. */
 export function spawnReachRefusal(threadId: string, name: string): string {
   return `thread ${threadWord(threadId)} may drive the workspace it runs on and the ones it forked, and ${name} is neither`;
@@ -379,6 +374,12 @@ export function childToLeadsComputerLine(from: string, to: string, lead: string)
  * it: `work` where the door it came in by does not know the verb. */
 export const ACROSS_ACTS = { start: "start a thread", exec: "run commands", commit: "commit", update: "update a copy", fix: "ask for a fix", wake: "wake it", work: "work" } as const;
 export type AcrossAct = keyof typeof ACROSS_ACTS;
+
+/** The sentence a thread is refused with for a thread of its own tree working in a folder it may not act on: the
+ * road is a message to that thread, which may. */
+export function treeThreadOutOfReachLine(thread: string, caller: string): string {
+  return `thread ${threadWord(thread)} works in a folder thread ${threadWord(caller)} cannot act on; ask it with ${shellLine(["wsp", "send", threadWord(thread)])} "<message>"`;
+}
 
 /** The sentence a thread on a computer the person joined is refused with for acting on a workspace of another
  * computer: a message to its lead where the lead may do that act there itself, the person otherwise. */
@@ -452,9 +453,9 @@ export function agentsWord(agents: { spawn: boolean; maxMachines: number } | und
   return agents?.spawn !== true ? "" : `${agents.maxMachines} ${agents.maxMachines === 1 ? "machine" : "machines"}`;
 }
 
-/** What a listing and the workspace card say about a workspace's switch, one line either way. */
+/** What a listing and a computer's row say about a switch, one line either way. */
 export function agentsLine(agents: { spawn: boolean; maxMachines: number; maxDepth: number } | undefined): string {
-  return agents?.spawn !== true ? "agents may not spawn" : `agents may spawn: up to ${agents.maxMachines} ${agents.maxMachines === 1 ? "workspace" : "workspaces"}`;
+  return agents?.spawn !== true ? "agents may not spawn" : `agents may spawn: up to ${agents.maxMachines} ${agents.maxMachines === 1 ? "machine" : "machines"}`;
 }
 
 /** Where the ssh client on this computer writes the key a machine first answered with under its own default
@@ -546,7 +547,7 @@ export function sshHostKeyNotice(hostKey: string): string {
 
 /** What a verb is refused with when this host wired no module for the kind it names. */
 export function noKindLine(kind: string): string {
-  return `this host has no ${kind} backend wired, so it serves no ${kind} workspace`;
+  return `this host has no ${kind} backend wired, so it serves nothing of that kind`;
 }
 
 /** What import is refused with on a kind no road lands a folder on, said before the folder is read. Every kind

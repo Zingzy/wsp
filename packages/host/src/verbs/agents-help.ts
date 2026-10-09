@@ -37,8 +37,8 @@ import {
 import { relaySignIn, targetLink, type BoxSignedIn } from "../place-signin.js";
 import { watchBlock, watchOn } from "../watch.js";
 import { type HostClient, table, type VerbContext, placeNamed, absolutePath, accessWordOf, printable, cell } from "./client.js";
-import { workspaceOf, projectOf } from "./workspaces-help.js";
-import { preferencesOf, projectDefaultsOf } from "./turns-help.js";
+import { projectOf } from "./workspaces-help.js";
+import { preferencesOf, projectDefaultsOf, threadAt } from "./turns-help.js";
 
 /** A verb's rows, drawn once or redrawn where they stand until Ctrl-C. The rows come back from one call so a frame
  * is one reading of the host and never half of two, and the socket is handed to the frame rather than asked for
@@ -58,35 +58,36 @@ export async function drawRows(ctx: VerbContext, words: string, frame: (client: 
   return 0;
 }
 
-export const aimedBothLine = "A workspace already names its computer; give the workspace or --on <computer>, not both.";
+export const aimedBothLine = "A thread already names its computer; give the thread or --on <computer>, not both.";
 
-/** What a tool that takes a workspace or a computer answers after a refusal of what it was given. */
-export const aimedUsage = (tool: string): string => `${tool} takes a workspace or on, not both`;
+/** What a tool that takes a thread or a computer answers after a refusal of what it was given. */
+export const aimedUsage = (tool: string): string => `${tool} takes a thread or on, not both`;
 
-/** The computer or workspace a list of what stands there names: a workspace by its name, a computer by the name
- * wsp computers shows it under, and this computer where neither is given. Refused where both are, since a workspace
- * already names the computer it is on. */
-export async function agentsTarget(client: HostClient, workspace: string | undefined, on: string | undefined, usage: string, project?: string): Promise<AgentsTarget> {
-  if (workspace !== undefined && on !== undefined) throw usageRefusal(aimedBothLine, usage);
-  if (workspace !== undefined) return { workspaceId: (await workspaceOf(client, workspace)).id };
+/** The computer a list of what stands there names: where a thread runs, with that thread's own project, by the
+ * thread's id; a computer by the name wsp computers shows it under; and this computer where neither is given.
+ * Refused where both are, since a thread already names the computer it is on. `line` is the line's own name, which
+ * a word naming a project rather than a thread is refused with. */
+export async function agentsTarget(client: HostClient, thread: string | undefined, on: string | undefined, usage: string, line: string, project?: string): Promise<AgentsTarget> {
+  if (thread !== undefined && on !== undefined) throw usageRefusal(aimedBothLine, usage);
+  if (thread !== undefined) return { workspaceId: (await threadAt(client, thread, line, true)).workspace.id };
   if (on !== undefined) return { placeId: (await placeNamed(client, on)).id, ...(project !== undefined ? { project } : {}) };
   return { placeId: HERE_PLACE_ID };
 }
 
 /** A line's --project, or a tool's project, as the act reads it: absent, not a project's; bare or true, the
- * workspace's own project; a name, with --on, that computer's project of the name. */
+ * thread's own project; a name, with --on, that computer's project of the name. */
 interface ProjectAsked {
   project: boolean;
   name?: string;
 }
 
 export const projectUnnamedLine = "--project with --on names the project: --project <name>, as wsp projects shows it.";
-export const projectOffComputerLine = (value: string): string => `--project ${value} names a project on a computer, which --on names; a workspace's own project is --project alone.`;
-export const toolsProjectBareLine = "--project on wsp servers tools names a project on --on <computer>; a workspace finds its own project's servers.";
+export const projectOffComputerLine = (value: string): string => `--project ${value} names a project on a computer, which --on names; a thread's own project is --project alone.`;
+export const toolsProjectBareLine = "--project on wsp servers tools names a project on --on <computer>; a thread finds its own project's servers.";
 
-/** Reads --project against the target the line names: a name needs --on, since a workspace names its own project,
+/** Reads --project against the target the line names: a name needs --on, since a thread names its own project,
  * and --on needs a name, since a computer holds several. */
-export function projectAsked(value: string | boolean | undefined, workspace: string | undefined, on: string | undefined, usage: string): ProjectAsked {
+export function projectAsked(value: string | boolean | undefined, thread: string | undefined, on: string | undefined, usage: string): ProjectAsked {
   if (value === undefined || value === false) return { project: false };
   if (value === true || value === "") {
     if (on !== undefined) throw usageRefusal(projectUnnamedLine, usage);
@@ -96,18 +97,18 @@ export function projectAsked(value: string | boolean | undefined, workspace: str
   return { project: true, name: value };
 }
 
-/** The project a server's tools are asked in: only by name, with --on, since a workspace finds its own project's
+/** The project a server's tools are asked in: only by name, with --on, since a thread finds its own project's
  * servers by itself. */
-export function toolsProject(value: string | undefined, workspace: string | undefined, on: string | undefined, usage: string): string | undefined {
+export function toolsProject(value: string | undefined, thread: string | undefined, on: string | undefined, usage: string): string | undefined {
   if (value === undefined) return undefined;
   if (value === "") throw usageRefusal(toolsProjectBareLine, usage);
-  return projectAsked(value, workspace, on, usage).name;
+  return projectAsked(value, thread, on, usage).name;
 }
 
 
-/** One read of what stands on a computer or workspace, which each of the three lists prints its own part of. */
-export async function agentsReport(client: HostClient, workspace: string | undefined, on: string | undefined, usage: string): Promise<AgentsReport> {
-  const target = await agentsTarget(client, workspace, on, usage);
+/** One read of what stands on a computer or where a thread runs, which each of the three lists prints its own part of. */
+export async function agentsReport(client: HostClient, thread: string | undefined, on: string | undefined, usage: string, line: string): Promise<AgentsReport> {
+  const target = await agentsTarget(client, thread, on, usage, line);
   return AgentsReport.parse((await client.request<{ report: unknown }>("agents.read", { target })).report);
 }
 
@@ -119,7 +120,7 @@ export function reportFacts(r: AgentsReport): Pick<AgentsReport, "target" | "hom
   return { target: r.target, home: r.home, user: r.user, readAt: r.readAt, ...(r.stale !== undefined ? { stale: r.stale } : {}), refused: r.refused, ...(r.projects !== undefined ? { projects: r.projects } : {}) };
 }
 
-/** The lines under every list: a napping workspace's report is the one it last had, and each reader that could not
+/** The lines under every list: a napping machine's report is the one it last had, and each reader that could not
  * answer is named. */
 function reportTail(r: AgentsReport): string[] {
   return [...(r.stale === "napping" ? ["napping: this is what stood there when it last ran"] : []), ...r.refused.map(line => `refused: ${cell(line)}`)];
@@ -155,14 +156,14 @@ export function toolLines(name: string, a: ServerToolsAnswer): string[] {
   return [head, ...(a.tools.length === 0 ? ["no tools"] : table([SERVER_TOOL_COLUMNS, ...a.tools.map((t: McpTool) => [t.name, (t.description ?? "-").split("\n")[0]!])]))];
 }
 
-export async function serverToolsOf(client: HostClient, name: string, agent: string, workspace: string | undefined, on: string | undefined, refresh: boolean, usage: string, project?: string): Promise<ServerToolsAnswer> {
-  const target = await agentsTarget(client, workspace, on, usage, project);
+export async function serverToolsOf(client: HostClient, name: string, agent: string, thread: string | undefined, on: string | undefined, refresh: boolean, usage: string, line: string, project?: string): Promise<ServerToolsAnswer> {
+  const target = await agentsTarget(client, thread, on, usage, line, project);
   return ServerToolsAnswer.parse((await client.request<{ answer: unknown }>("servers.tools", { target, agent, name, ...(refresh ? { refresh } : {}) })).answer);
 }
 
 /** A server there added, removed or turned off or on; the answer names the file written. */
-export async function serverChanged(client: HostClient, op: "servers.add" | "servers.remove" | "servers.toggle", body: Record<string, unknown>, workspace: string | undefined, on: string | undefined, usage: string, project?: string): Promise<{ file: string }> {
-  const target = await agentsTarget(client, workspace, on, usage, project);
+export async function serverChanged(client: HostClient, op: "servers.add" | "servers.remove" | "servers.toggle", body: Record<string, unknown>, thread: string | undefined, on: string | undefined, usage: string, line: string, project?: string): Promise<{ file: string }> {
+  const target = await agentsTarget(client, thread, on, usage, line, project);
   return z.object({ file: z.string() }).parse(await client.request(op, { target, ...body }));
 }
 
@@ -215,12 +216,12 @@ export const ServerScopeIn = McpScope.optional().describe("the scope servers lis
 export const ServerProjectIn = z
   .union([z.boolean(), z.string()])
   .optional()
-  .describe("the project's server of that name: true from a workspace, or the project's name, as projects lists it, with on");
+  .describe("the project's server of that name: true with a thread, the thread's own project, or the project's name, as projects lists it, with on");
 export const SERVER_CHANGE_WORDS =
-  "Written as the login the computer was added with, into that agent's own file, which keeps its mode; a file that is a link out of the home, or out of the project for a project's file, is not written through, and a file the agent wrote meanwhile is left as it was. A napping workspace is not woken. The report there reads again at once.";
+  "Written as the login the computer was added with, into that agent's own file, which keeps its mode; a file that is a link out of the home, or out of the project for a project's file, is not written through, and a file the agent wrote meanwhile is left as it was. A napping machine is not woken. The report there reads again at once.";
 
 export const SERVER_TOOLS_WORDS =
-  "Starts that one server once on that computer or workspace, as the login it was added with and with the command and variables its agent's config gives it, or asks its address once from there, and stops it within 20 seconds; the answer is the server's state, the one the app shows, and stands three minutes unless refreshed or a sign-in there ends; an edited entry is asked again. A server behind a sign-in its agent holds brings no list, since no login file is read: Claude Code is asked for its word on it, and for any other agent it answers unknown, naming that agent as the one holding the sign-in. A napping workspace is not woken.";
+  "Starts that one server once on that computer or where the thread runs, as the login it was added with and with the command and variables its agent's config gives it, or asks its address once from there, and stops it within 20 seconds; the answer is the server's state, the one the app shows, and stands three minutes unless refreshed or a sign-in there ends; an edited entry is asked again. A server behind a sign-in its agent holds brings no list, since no login file is read: Claude Code is asked for its word on it, and for any other agent it answers unknown, naming that agent as the one holding the sign-in. A napping machine is not woken.";
 
 export const toolsAddedLine = (agent: string, file: string): string => `${agent} now has the wsp tools: ${file}`;
 
@@ -272,12 +273,12 @@ const onSkillsSh = (skill: string): boolean => skill.split("/").length === 3;
 export const skillsShPlacelessLine = (skill: string): string => `${skill} is read off skills.sh, which names no computer or project.`;
 
 /** A skill's SKILL.md: off skills.sh by its id, else off the target by its name. */
-export async function skillShown(client: HostClient, skill: string, workspace: string | undefined, on: string | undefined, project: ProjectAsked, usage: string): Promise<SkillPreview> {
+export async function skillShown(client: HostClient, skill: string, thread: string | undefined, on: string | undefined, project: ProjectAsked, usage: string, line: string): Promise<SkillPreview> {
   if (onSkillsSh(skill)) {
-    if (workspace !== undefined || on !== undefined || project.project) throw usageRefusal(skillsShPlacelessLine(skill), usage);
+    if (thread !== undefined || on !== undefined || project.project) throw usageRefusal(skillsShPlacelessLine(skill), usage);
     return SkillPreview.parse((await client.request<{ preview: unknown }>("skills.get", { skill })).preview);
   }
-  const target = await agentsTarget(client, workspace, on, usage, project.name);
+  const target = await agentsTarget(client, thread, on, usage, line, project.name);
   return SkillPreview.parse((await client.request<{ preview: unknown }>("skills.preview", { target, name: skill, ...(project.project ? { project: true } : {}) })).preview);
 }
 
@@ -288,8 +289,8 @@ export const shownText = (p: SkillPreview): string => {
   return p.size > SKILL_PREVIEW_BYTES ? `${text}\n\n${previewCutLine(Math.ceil(p.size / 1024))}` : text;
 };
 
-export async function skillAdded(client: HostClient, skill: string, workspace: string | undefined, on: string | undefined, agents: readonly string[] | undefined, project: ProjectAsked, usage: string): Promise<SkillAdded> {
-  const target = await agentsTarget(client, workspace, on, usage, project.name);
+export async function skillAdded(client: HostClient, skill: string, thread: string | undefined, on: string | undefined, agents: readonly string[] | undefined, project: ProjectAsked, usage: string, line: string): Promise<SkillAdded> {
+  const target = await agentsTarget(client, thread, on, usage, line, project.name);
   return SkillAdded.parse((await client.request<{ added: unknown }>("skills.add", { target, skill, ...(agents !== undefined && agents.length > 0 ? { agents } : {}), ...(project.project ? { project: true } : {}) })).added);
 }
 
@@ -308,8 +309,8 @@ export const turnedInLine = (name: string, on: boolean, file: string): string =>
 export const removedLine = (name: string, removed: readonly string[]): string => goneFromLine(cell(name), removed.map(cell).join(", "));
 
 /** A skill there turned off, on, or removed, by its name. */
-export async function skillChanged(client: HostClient, op: "skills.remove" | "skills.toggle", name: string, workspace: string | undefined, on: string | undefined, project: ProjectAsked, turn: boolean | undefined, usage: string): Promise<string[]> {
-  const target = await agentsTarget(client, workspace, on, usage, project.name);
+export async function skillChanged(client: HostClient, op: "skills.remove" | "skills.toggle", name: string, thread: string | undefined, on: string | undefined, project: ProjectAsked, turn: boolean | undefined, usage: string, line: string): Promise<string[]> {
+  const target = await agentsTarget(client, thread, on, usage, line, project.name);
   const said = await client.request<{ removed?: unknown; paths?: unknown }>(op, { target, name, ...(project.project ? { project: true } : {}), ...(turn !== undefined ? { on: turn } : {}) });
   return z.array(z.string()).parse(op === "skills.remove" ? said.removed : said.paths);
 }
@@ -320,9 +321,9 @@ export const SkillNameIn = z.string().describe("the skill's name, as skills list
 export const SkillProjectIn = z
   .union([z.boolean(), z.string()])
   .optional()
-  .describe("the project's skill of that name rather than the one that is not a project's: true from a workspace, or the project's name, as projects lists it, with on");
+  .describe("the project's skill of that name rather than the one that is not a project's: true with a thread, the thread's own project, or the project's name, as projects lists it, with on");
 export const SKILL_CHANGE_WORDS =
-  "The skill wsp writes and a plugin's are always on and are refused; a napping workspace is not woken. The report there reads again at once.";
+  "The skill wsp writes and a plugin's are always on and are refused; a napping machine is not woken. The report there reads again at once.";
 
 /** Each field a --reset puts back on the layer below, by the verb that takes it. */
 export const AGENT_SET_RESETS = ["model", "effort", "access", "models"] as const;
@@ -427,7 +428,7 @@ export const agentSetupNothingLine = "wsp agents setup takes --enable or --disab
 /** How one agent runs on one computer changed there, and its row as that computer's read now gives it, names only. */
 export async function agentSetupSet(client: HostClient, agent: string, ask: AgentSetupAsk, values: Readonly<Record<string, string>>, usage: string): Promise<AgentRow> {
   const resets = resetsOf(AGENT_SETUP_RESETS, ask.reset ?? []);
-  const target = await agentsTarget(client, undefined, ask.on, usage);
+  const target = await agentsTarget(client, undefined, ask.on, usage, "wsp agents setup");
   const unset = (ask.unsetEnv ?? []).map(name => envNameOf(name, "--unset-env"));
   const env = { ...values, ...Object.fromEntries(unset.map(name => [name, null])) };
   const change: AgentSetupSet = {
@@ -515,7 +516,7 @@ export const defaultsCell = (d: ThreadDefaults | undefined): string =>
   d === undefined ? "-" : [d.agent, d.model, d.access].flatMap(pick => (pick === undefined ? [] : [pick.from === "project" ? `${pick.value} (project)` : pick.value])).join(" ");
 
 
-export const AgentsWorkspaceIn = z.string().optional().describe("the workspace to read, by its name, or its id when two share a name; absent reads a computer");
-export const AgentsOnIn = z.string().optional().describe("the computer to read, by the name computers lists; absent with no workspace is the computer the app runs on");
-export const AGENTS_ON_WORDS = "the computer to read, by the name wsp computers shows; this computer without it, and a workspace names its own";
-export const AGENTS_READ_WORDS = "Read as the login the computer was added with, off each agent's config and whether its files are there: no MCP server is started and no login file is opened. A napping workspace answers what stood there when it last ran, marked stale, and is not woken.";
+export const AgentsThreadIn = z.string().optional().describe("a thread, by its id or a prefix of it, whose computer and project to read; absent reads a computer");
+export const AgentsOnIn = z.string().optional().describe("the computer to read, by the name computers lists; absent with no thread is the computer the app runs on");
+export const AGENTS_ON_WORDS = "the computer to read, by the name wsp computers shows; this computer without it, and a thread names its own";
+export const AGENTS_READ_WORDS = "Read as the login the computer was added with, off each agent's config and whether its files are there: no MCP server is started and no login file is opened. A napping machine answers what stood there when it last ran, marked stale, and is not woken.";

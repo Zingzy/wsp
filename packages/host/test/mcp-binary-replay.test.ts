@@ -48,6 +48,8 @@ async function hostFor(c: Case): Promise<{ port: number; asked: Record<string, u
   const asked: Record<string, unknown>[] = [];
   const http: Server = createServer((_, res) => res.end());
   const wss = new WebSocketServer({ server: http, path: "/ws" });
+  // How many times each op was asked, so the frame recorded under `<op> #<n>` answers its nth ask.
+  const seen = new Map<string, number>();
   wss.on("connection", ws => {
     ws.on("message", raw => {
       const frame = JSON.parse(String(raw)) as Record<string, unknown>;
@@ -58,7 +60,9 @@ async function hostFor(c: Case): Promise<{ port: number; asked: Record<string, u
         asked.push(fields);
       }
       for (const pushed of c.pushed?.[op] ?? []) ws.send(pushed);
-      const recorded = c.replies[op];
+      const nth = (seen.get(op) ?? 0) + 1;
+      seen.set(op, nth);
+      const recorded = c.replies[`${op} #${nth}`] ?? c.replies[op];
       if (op === "auth") ws.send(JSON.stringify({ id, ok: frame["token"] === TOKEN }));
       else if (recorded !== undefined) ws.send(`{"id":${id},${recorded.slice('{"id":1,'.length)}`);
       else if (op === "events.subscribe") ws.send(JSON.stringify({ id, ok: true }));

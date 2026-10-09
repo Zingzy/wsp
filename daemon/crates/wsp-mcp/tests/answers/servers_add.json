@@ -40,7 +40,7 @@
         }
       ],
       "guest": {
-        "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"WSP_RECORD_KEY is not set in this environment, so there is no value to write. servers_add takes a workspace or on, not both\"}],\"structuredContent\":{\"error\":\"WSP_RECORD_KEY is not set in this environment, so there is no value to write. servers_add takes a workspace or on, not both\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+        "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"WSP_RECORD_KEY is not set in this environment, so there is no value to write. servers_add takes a thread or on, not both\"}],\"structuredContent\":{\"error\":\"WSP_RECORD_KEY is not set in this environment, so there is no value to write. servers_add takes a thread or on, not both\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
         "asked": []
       }
     },
@@ -53,22 +53,27 @@
         "header": [
           "Authorization=WSP_RECORD_KEY"
         ],
-        "workspace": "landing",
+        "thread": "t-landing",
         "project": true
       },
       "env": {
         "WSP_RECORD_KEY": "sk-ant-x"
       },
       "replies": {
-        "workspaces.resolve": "{\"id\":1,\"ok\":true,\"workspace\":{\"id\":\"ws_1\",\"name\":\"landing\",\"machineId\":\"m1\",\"phase\":\"running\",\"golden\":\"snap_gold\",\"createdAt\":\"2026-09-25T00:00:00.000Z\",\"project\":{\"id\":\"pr_1\",\"name\":\"api\",\"path\":\"/root/api\",\"computer\":\"place-9\"}}}",
+        "sessions.list": "{\"id\":1,\"ok\":true,\"sessions\":[{\"id\":\"s-1\",\"workspaceId\":\"ws_1\",\"harness\":\"claude\",\"status\":\"completed\",\"threadId\":\"t-landing \u0085\"}]}",
+        "workspaces.get": "{\"id\":1,\"ok\":true,\"workspace\":{\"id\":\"ws_1\",\"name\":\"landing\",\"machineId\":\"m1\",\"phase\":\"running\",\"golden\":\"snap_gold\",\"createdAt\":\"2026-09-25T00:00:00.000Z\",\"project\":{\"id\":\"pr_1\",\"name\":\"api\",\"path\":\"/root/api\",\"computer\":\"place-9\"}}}",
         "places.list": "{\"id\":1,\"ok\":true,\"places\":[{\"id\":\"place-9\",\"kind\":\"computer\",\"name\":\"attic\",\"label\":\"zingzy's \u0085box\u007f \\\"one\\\" \\\\ two\\nthree 🧪\",\"default\":false,\"os\":\"linux\",\"shape\":{\"cpu\":8,\"memMb\":16384},\"diskFreeBytes\":123456789012,\"present\":true,\"agentVersions\":{\"2\":\"an index key\",\"claude\":\"2.1.0\"},\"forks\":{\"running\":1,\"room\":2}},{\"id\":\"place-solari\",\"kind\":\"provider\",\"name\":\"solari\",\"default\":true,\"rateUsdPerHour\":0.30000000000000004}]}",
         "servers.add": "{\"id\":1,\"ok\":true,\"file\":\"/root/api/.codex/config.toml\"}"
       },
       "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"remote is in /root/api/.codex/config.toml.\"}],\"structuredContent\":{\"file\":\"/root/api/.codex/config.toml\"}},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
         {
-          "op": "workspaces.resolve",
-          "ref": "landing"
+          "op": "sessions.list"
+        },
+        {
+          "op": "workspaces.get",
+          "workspaceId": "ws_1",
+          "threadId": "t-landing \u0085"
         },
         {
           "op": "servers.add",
@@ -85,7 +90,7 @@
         }
       ],
       "guest": {
-        "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"WSP_RECORD_KEY is not set in this environment, so there is no value to write. servers_add takes a workspace or on, not both\"}],\"structuredContent\":{\"error\":\"WSP_RECORD_KEY is not set in this environment, so there is no value to write. servers_add takes a workspace or on, not both\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+        "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"WSP_RECORD_KEY is not set in this environment, so there is no value to write. servers_add takes a thread or on, not both\"}],\"structuredContent\":{\"error\":\"WSP_RECORD_KEY is not set in this environment, so there is no value to write. servers_add takes a thread or on, not both\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
         "asked": []
       }
     },
@@ -100,7 +105,7 @@
         ]
       },
       "replies": {},
-      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"WSP_RECORD_UNSET is not set in this environment, so there is no value to write. servers_add takes a workspace or on, not both\"}],\"structuredContent\":{\"error\":\"WSP_RECORD_UNSET is not set in this environment, so there is no value to write. servers_add takes a workspace or on, not both\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"WSP_RECORD_UNSET is not set in this environment, so there is no value to write. servers_add takes a thread or on, not both\"}],\"structuredContent\":{\"error\":\"WSP_RECORD_UNSET is not set in this environment, so there is no value to write. servers_add takes a thread or on, not both\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": []
     },
     {
@@ -114,7 +119,7 @@
         ]
       },
       "replies": {},
-      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"Authorization is not <header>=<variable>. servers_add takes a workspace or on, not both\"}],\"structuredContent\":{\"error\":\"Authorization is not <header>=<variable>. servers_add takes a workspace or on, not both\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"Authorization is not <header>=<variable>. servers_add takes a thread or on, not both\"}],\"structuredContent\":{\"error\":\"Authorization is not <header>=<variable>. servers_add takes a thread or on, not both\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": []
     },
     {
@@ -128,7 +133,7 @@
         ]
       },
       "replies": {},
-      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"Authorization= is not <header>=<variable>. servers_add takes a workspace or on, not both\"}],\"structuredContent\":{\"error\":\"Authorization= is not <header>=<variable>. servers_add takes a workspace or on, not both\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"Authorization= is not <header>=<variable>. servers_add takes a thread or on, not both\"}],\"structuredContent\":{\"error\":\"Authorization= is not <header>=<variable>. servers_add takes a thread or on, not both\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": []
     },
     {
@@ -139,7 +144,7 @@
         "command": "npx 'x"
       },
       "replies": {},
-      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"The command has a quote it never closes, so nothing was written. servers_add takes a workspace or on, not both\"}],\"structuredContent\":{\"error\":\"The command has a quote it never closes, so nothing was written. servers_add takes a workspace or on, not both\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"The command has a quote it never closes, so nothing was written. servers_add takes a thread or on, not both\"}],\"structuredContent\":{\"error\":\"The command has a quote it never closes, so nothing was written. servers_add takes a thread or on, not both\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": []
     },
     {
@@ -152,7 +157,7 @@
         "project": true
       },
       "replies": {},
-      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"--project with --on names the project: --project <name>, as wsp projects shows it. servers_add takes a workspace or on, not both\"}],\"structuredContent\":{\"error\":\"--project with --on names the project: --project <name>, as wsp projects shows it. servers_add takes a workspace or on, not both\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"--project with --on names the project: --project <name>, as wsp projects shows it. servers_add takes a thread or on, not both\"}],\"structuredContent\":{\"error\":\"--project with --on names the project: --project <name>, as wsp projects shows it. servers_add takes a thread or on, not both\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": []
     },
     {
