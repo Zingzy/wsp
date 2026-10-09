@@ -1,0 +1,456 @@
+{
+  "scenes": [
+    {
+      "name": "hero",
+      "pages": [
+        "/"
+      ],
+      "fixture": "site",
+      "kind": "still",
+      "exists": true
+    },
+    {
+      "name": "docs-first-launch",
+      "pages": [
+        "/install/mac"
+      ],
+      "fixture": "empty home",
+      "kind": "still"
+    },
+    {
+      "name": "docs-install-linux",
+      "pages": [
+        "/install/linux"
+      ],
+      "fixture": "a Debian box",
+      "kind": "tape",
+      "seconds": 15
+    },
+    {
+      "name": "docs-first-thread",
+      "pages": [
+        "/start/first-thread"
+      ],
+      "fixture": "site",
+      "kind": "recording",
+      "seconds": 15
+    },
+    {
+      "name": "wizard",
+      "pages": [
+        "/start/first-computer",
+        "/features/add-a-computer",
+        "/guides/rented-server",
+        "/guides/home-computer"
+      ],
+      "fixture": "site",
+      "kind": "still",
+      "exists": true,
+      "steps": true
+    },
+    {
+      "name": "docs-mcp-install",
+      "pages": [
+        "/start/with-your-agent",
+        "/agents/tools"
+      ],
+      "fixture": "throwaway host",
+      "kind": "tape",
+      "seconds": 15
+    },
+    {
+      "name": "docs-composer",
+      "pages": [
+        "/features/threads"
+      ],
+      "fixture": "site",
+      "kind": "still",
+      "clip": "composer"
+    },
+    {
+      "name": "docs-queue",
+      "pages": [
+        "/features/threads"
+      ],
+      "fixture": "site",
+      "kind": "recording",
+      "seconds": 12
+    },
+    {
+      "name": "sidebar",
+      "pages": [
+        "/features/leads"
+      ],
+      "fixture": "site",
+      "kind": "still",
+      "exists": true,
+      "clip": "sidebar"
+    },
+    {
+      "name": "docs-lead-spawn",
+      "pages": [
+        "/features/leads",
+        "/agents/coordinating"
+      ],
+      "fixture": "site",
+      "kind": "recording",
+      "seconds": 15
+    },
+    {
+      "name": "docs-prompt",
+      "pages": [
+        "/features/needs-you"
+      ],
+      "fixture": "needs-you",
+      "kind": "still"
+    },
+    {
+      "name": "docs-question",
+      "pages": [
+        "/features/needs-you"
+      ],
+      "fixture": "needs-you",
+      "kind": "still",
+      "clip": "question card"
+    },
+    {
+      "name": "docs-inbox",
+      "pages": [
+        "/features/needs-you"
+      ],
+      "fixture": "needs-you",
+      "kind": "still",
+      "clip": "sidebar"
+    },
+    {
+      "name": "agents",
+      "pages": [
+        "/features/agents"
+      ],
+      "fixture": "site",
+      "kind": "still",
+      "exists": true,
+      "clip": "pane"
+    },
+    {
+      "name": "docs-branch",
+      "pages": [
+        "/features/projects"
+      ],
+      "fixture": "site",
+      "kind": "still"
+    },
+    {
+      "name": "setup",
+      "pages": [
+        "/features/add-a-computer"
+      ],
+      "fixture": "site",
+      "kind": "recording",
+      "exists": true,
+      "seconds": 30
+    },
+    {
+      "name": "docs-firewall-computer",
+      "pages": [
+        "/features/behind-a-firewall",
+        "/guides/behind-a-firewall"
+      ],
+      "fixture": "firewall",
+      "kind": "still",
+      "clip": "computers list"
+    },
+    {
+      "name": "docs-join",
+      "pages": [
+        "/features/behind-a-firewall",
+        "/guides/behind-a-firewall"
+      ],
+      "fixture": "throwaway host",
+      "kind": "tape"
+    },
+    {
+      "name": "computers",
+      "pages": [
+        "/features/computers"
+      ],
+      "fixture": "site",
+      "kind": "still",
+      "exists": true
+    },
+    {
+      "name": "docs-computer-page",
+      "pages": [
+        "/features/computers"
+      ],
+      "fixture": "site",
+      "kind": "still"
+    },
+    {
+      "name": "docs-recipes",
+      "pages": [
+        "/features/recipes"
+      ],
+      "fixture": "site",
+      "kind": "still"
+    },
+    {
+      "name": "slate-pr",
+      "pages": [
+        "/features/slate"
+      ],
+      "fixture": "site-slates",
+      "kind": "still",
+      "exists": true
+    },
+    {
+      "name": "slate-deploy",
+      "pages": [
+        "/features/slate"
+      ],
+      "fixture": "site-slates",
+      "kind": "still",
+      "exists": true
+    },
+    {
+      "name": "slate-cart",
+      "pages": [
+        "/features/slate"
+      ],
+      "fixture": "site-slates",
+      "kind": "still",
+      "exists": true
+    },
+    {
+      "name": "slate-traffic",
+      "pages": [
+        "/features/slate"
+      ],
+      "fixture": "site-slates",
+      "kind": "still",
+      "exists": true
+    },
+    {
+      "name": "slate-explain",
+      "pages": [
+        "/features/slate"
+      ],
+      "fixture": "site-slates",
+      "kind": "still",
+      "exists": true
+    },
+    {
+      "name": "docs-slate-live",
+      "pages": [
+        "/features/slate"
+      ],
+      "fixture": "site-slates",
+      "kind": "recording",
+      "seconds": 10
+    },
+    {
+      "name": "terminal",
+      "pages": [
+        "/features/terminal"
+      ],
+      "fixture": "site",
+      "kind": "still",
+      "exists": true,
+      "clip": "pane"
+    },
+    {
+      "name": "browser",
+      "pages": [
+        "/features/browser"
+      ],
+      "fixture": "site",
+      "kind": "still",
+      "exists": true,
+      "clip": "pane"
+    },
+    {
+      "name": "editor",
+      "pages": [
+        "/features/editor"
+      ],
+      "fixture": "site",
+      "kind": "still",
+      "exists": true,
+      "clip": "menu"
+    },
+    {
+      "name": "docs-changes",
+      "pages": [
+        "/features/changes"
+      ],
+      "fixture": "site",
+      "kind": "still",
+      "clip": "pane"
+    },
+    {
+      "name": "pr",
+      "pages": [
+        "/features/pull-requests"
+      ],
+      "fixture": "site",
+      "kind": "still",
+      "exists": true,
+      "clip": "pane"
+    },
+    {
+      "name": "docs-pr-fix",
+      "pages": [
+        "/features/pull-requests"
+      ],
+      "fixture": "site, one failed check",
+      "kind": "recording",
+      "seconds": 10
+    },
+    {
+      "name": "docs-files",
+      "pages": [
+        "/features/files"
+      ],
+      "fixture": "site",
+      "kind": "still",
+      "clip": "pane"
+    },
+    {
+      "name": "docs-computer-pane",
+      "pages": [
+        "/features/computer-pane"
+      ],
+      "fixture": "site",
+      "kind": "still",
+      "clip": "pane"
+    },
+    {
+      "name": "docs-processes",
+      "pages": [
+        "/features/computer-pane"
+      ],
+      "fixture": "site",
+      "kind": "still",
+      "clip": "pane"
+    },
+    {
+      "name": "docs-side-question",
+      "pages": [
+        "/features/side-question"
+      ],
+      "fixture": "site",
+      "kind": "still",
+      "clip": "pane"
+    },
+    {
+      "name": "docs-rewind",
+      "pages": [
+        "/features/rewind"
+      ],
+      "fixture": "rewind",
+      "kind": "still"
+    },
+    {
+      "name": "usage",
+      "pages": [
+        "/features/usage"
+      ],
+      "fixture": "usage",
+      "kind": "still",
+      "exists": true
+    },
+    {
+      "name": "docs-usage-limits",
+      "pages": [
+        "/features/usage"
+      ],
+      "fixture": "usage",
+      "kind": "still"
+    },
+    {
+      "name": "context",
+      "pages": [
+        "/features/context-window"
+      ],
+      "fixture": "site",
+      "kind": "still",
+      "exists": true,
+      "clip": "ring and popover"
+    },
+    {
+      "name": "switcher",
+      "pages": [
+        "/features/switcher"
+      ],
+      "fixture": "site",
+      "kind": "still",
+      "exists": true
+    },
+    {
+      "name": "docs-palette",
+      "pages": [
+        "/features/switcher"
+      ],
+      "fixture": "site",
+      "kind": "still"
+    },
+    {
+      "name": "docs-menu-bar",
+      "pages": [
+        "/features/desktop-app"
+      ],
+      "fixture": "site",
+      "kind": "still",
+      "byHand": true
+    },
+    {
+      "name": "docs-devices",
+      "pages": [
+        "/features/devices"
+      ],
+      "fixture": "devices",
+      "kind": "still"
+    },
+    {
+      "name": "docs-settings-general",
+      "pages": [
+        "/features/settings"
+      ],
+      "fixture": "site",
+      "kind": "still"
+    },
+    {
+      "name": "docs-settings-appearance",
+      "pages": [
+        "/features/settings"
+      ],
+      "fixture": "site",
+      "kind": "still"
+    },
+    {
+      "name": "docs-keybindings",
+      "pages": [
+        "/features/shortcuts"
+      ],
+      "fixture": "site",
+      "kind": "still"
+    },
+    {
+      "name": "docs-ssh-add",
+      "pages": [
+        "/guides/rented-server",
+        "/guides/home-computer"
+      ],
+      "fixture": "throwaway host",
+      "kind": "tape"
+    },
+    {
+      "name": "docs-doctor",
+      "pages": [
+        "/reference/troubleshooting"
+      ],
+      "fixture": "throwaway host",
+      "kind": "tape"
+    }
+  ]
+}

@@ -1,0 +1,965 @@
+{
+  "$schema": "https://registry.scalar.com/@scalar/schemas/config",
+  "scalar": "2.0.0",
+  "info": {
+    "title": "wsp docs",
+    "description": "Coding agents on every computer you own."
+  },
+  "assetsDir": "assets",
+  "siteConfig": {
+    "logo": "assets/logo.svg",
+    "colorScheme": {
+      "default": "dark",
+      "showToggle": false
+    },
+    "layout": {
+      "lastUpdated": true
+    },
+    "head": {
+      "title": "wsp docs",
+      "meta": [
+        {
+          "name": "description",
+          "content": "How to run coding agents on every computer you own with wsp: threads, leads, computers, the app, the command line and the MCP tools."
+        }
+      ],
+      "links": [
+        {
+          "rel": "icon",
+          "type": "image/svg+xml",
+          "href": "/favicon.svg"
+        },
+        {
+          "rel": "icon",
+          "type": "image/png",
+          "sizes": "32x32",
+          "href": "/favicon.png"
+        }
+      ]
+    },
+    "routing": {
+      "redirects": [
+        {
+          "from": "/start/install",
+          "to": "/install/mac"
+        },
+        {
+          "from": "/start/first-workspace",
+          "to": "/"
+        },
+        {
+          "from": "/start/the-model",
+          "to": "/"
+        },
+        {
+          "from": "/setup/init",
+          "to": "/reference/cli/init"
+        },
+        {
+          "from": "/setup/recipes",
+          "to": "/features/recipes"
+        },
+        {
+          "from": "/setup/sign-ins",
+          "to": "/features/agents"
+        },
+        {
+          "from": "/setup/keys",
+          "to": "/how/network"
+        },
+        {
+          "from": "/setup/the-host",
+          "to": "/how/host"
+        },
+        {
+          "from": "/setup/reach-your-box",
+          "to": "/guides/behind-a-firewall"
+        },
+        {
+          "from": "/work/workspaces",
+          "to": "/"
+        },
+        {
+          "from": "/work/threads",
+          "to": "/features/threads"
+        },
+        {
+          "from": "/work/the-app",
+          "to": "/features/desktop-app"
+        },
+        {
+          "from": "/work/import-export",
+          "to": "/"
+        },
+        {
+          "from": "/work/costs",
+          "to": "/"
+        },
+        {
+          "from": "/agents/inside",
+          "to": "/how/agents"
+        },
+        {
+          "from": "/agents/mcp",
+          "to": "/agents/tools"
+        },
+        {
+          "from": "/agents/driving",
+          "to": "/start/with-your-agent"
+        },
+        {
+          "from": "/agents/building",
+          "to": "/agents/coordinating"
+        },
+        {
+          "from": "/reference/providers",
+          "to": "/"
+        },
+        {
+          "from": "/reference/reach",
+          "to": "/"
+        },
+        {
+          "from": "/reference/configuration",
+          "to": "/reference/files"
+        },
+        {
+          "from": "/project/releases",
+          "to": "/"
+        }
+      ]
+    }
+  },
+  "navigation": {
+    "header": [
+      {
+        "type": "link",
+        "title": "usewsp.com",
+        "align": "end",
+        "to": "https://usewsp.com"
+      },
+      {
+        "type": "link",
+        "title": "GitHub",
+        "align": "end",
+        "to": "https://github.com/wsp-labs/wsp",
+        "newTab": true
+      },
+      {
+        "type": "link",
+        "title": "Install",
+        "style": "button",
+        "align": "end",
+        "to": "/install/mac"
+      }
+    ],
+    "routes": {
+      "/": {
+        "type": "group",
+        "title": "wsp docs",
+        "mode": "flat",
+        "children": {
+          "/": {
+            "type": "group",
+            "title": "Get started",
+            "mode": "folder",
+            "open": true,
+            "children": {
+              "/": {
+                "type": "page",
+                "title": "What wsp is",
+                "filepath": "content/index.mdx"
+              },
+              "/install/mac": {
+                "type": "page",
+                "title": "Install on a Mac",
+                "filepath": "content/install/mac.mdx"
+              },
+              "/install/linux": {
+                "type": "page",
+                "title": "Install on Linux",
+                "filepath": "content/install/linux.mdx"
+              },
+              "/start/first-thread": {
+                "type": "page",
+                "title": "Your first thread",
+                "filepath": "content/start/first-thread.mdx"
+              },
+              "/start/first-computer": {
+                "type": "page",
+                "title": "Add your first computer",
+                "filepath": "content/start/first-computer.mdx"
+              },
+              "/start/with-your-agent": {
+                "type": "page",
+                "title": "Let your agent set you up",
+                "filepath": "content/start/with-your-agent.mdx"
+              }
+            }
+          },
+          "/features": {
+            "type": "group",
+            "title": "Features",
+            "mode": "folder",
+            "open": true,
+            "children": {
+              "/threads": {
+                "type": "page",
+                "title": "Threads",
+                "filepath": "content/features/threads.mdx"
+              },
+              "/leads": {
+                "type": "page",
+                "title": "Leads and sub-threads",
+                "filepath": "content/features/leads.mdx"
+              },
+              "/needs-you": {
+                "type": "page",
+                "title": "Needs you: prompts and questions",
+                "filepath": "content/features/needs-you.mdx"
+              },
+              "/agents": {
+                "type": "page",
+                "title": "Agents and sign-ins",
+                "filepath": "content/features/agents.mdx"
+              },
+              "/projects": {
+                "type": "page",
+                "title": "Projects and worktrees",
+                "filepath": "content/features/projects.mdx"
+              },
+              "/add-a-computer": {
+                "type": "page",
+                "title": "Add a computer, and what it copies",
+                "filepath": "content/features/add-a-computer.mdx"
+              },
+              "/behind-a-firewall": {
+                "type": "page",
+                "title": "Computers behind a firewall",
+                "filepath": "content/features/behind-a-firewall.mdx"
+              },
+              "/computers": {
+                "type": "page",
+                "title": "Computers",
+                "filepath": "content/features/computers.mdx"
+              },
+              "/recipes": {
+                "type": "page",
+                "title": "Recipes",
+                "filepath": "content/features/recipes.mdx"
+              },
+              "/slate": {
+                "type": "page",
+                "title": "Slate",
+                "filepath": "content/features/slate.mdx"
+              },
+              "/terminal": {
+                "type": "page",
+                "title": "The terminal",
+                "filepath": "content/features/terminal.mdx"
+              },
+              "/browser": {
+                "type": "page",
+                "title": "The browser pane",
+                "filepath": "content/features/browser.mdx"
+              },
+              "/editor": {
+                "type": "page",
+                "title": "Open in your editor",
+                "filepath": "content/features/editor.mdx"
+              },
+              "/changes": {
+                "type": "page",
+                "title": "Changes and commits",
+                "filepath": "content/features/changes.mdx"
+              },
+              "/pull-requests": {
+                "type": "page",
+                "title": "The pull request pane",
+                "filepath": "content/features/pull-requests.mdx"
+              },
+              "/files": {
+                "type": "page",
+                "title": "Files",
+                "filepath": "content/features/files.mdx"
+              },
+              "/computer-pane": {
+                "type": "page",
+                "title": "The computer and its processes",
+                "filepath": "content/features/computer-pane.mdx"
+              },
+              "/side-question": {
+                "type": "page",
+                "title": "Side question",
+                "filepath": "content/features/side-question.mdx"
+              },
+              "/rewind": {
+                "type": "page",
+                "title": "Rewind",
+                "filepath": "content/features/rewind.mdx"
+              },
+              "/usage": {
+                "type": "page",
+                "title": "Usage",
+                "filepath": "content/features/usage.mdx"
+              },
+              "/context-window": {
+                "type": "page",
+                "title": "The context window",
+                "filepath": "content/features/context-window.mdx"
+              },
+              "/switcher": {
+                "type": "page",
+                "title": "The switcher and the palette",
+                "filepath": "content/features/switcher.mdx"
+              },
+              "/desktop-app": {
+                "type": "page",
+                "title": "The desktop app on a Mac",
+                "filepath": "content/features/desktop-app.mdx"
+              },
+              "/devices": {
+                "type": "page",
+                "title": "Other devices",
+                "filepath": "content/features/devices.mdx"
+              },
+              "/settings": {
+                "type": "page",
+                "title": "Settings",
+                "filepath": "content/features/settings.mdx"
+              },
+              "/shortcuts": {
+                "type": "page",
+                "title": "Keyboard shortcuts",
+                "filepath": "content/features/shortcuts.mdx"
+              }
+            }
+          },
+          "/agents": {
+            "type": "group",
+            "title": "Agents driving wsp",
+            "mode": "folder",
+            "open": true,
+            "children": {
+              "/tools": {
+                "type": "page",
+                "title": "Give your agent the wsp tools",
+                "filepath": "content/agents/tools.mdx"
+              },
+              "/skill": {
+                "type": "page",
+                "title": "The wsp skill",
+                "filepath": "content/agents/skill.mdx"
+              },
+              "/coordinating": {
+                "type": "page",
+                "title": "Coordinating threads from an agent",
+                "filepath": "content/agents/coordinating.mdx"
+              }
+            }
+          },
+          "/reference": {
+            "type": "group",
+            "title": "Reference",
+            "mode": "folder",
+            "open": true,
+            "children": {
+              "/cli": {
+                "type": "group",
+                "title": "Command line",
+                "mode": "folder",
+                "open": false,
+                "children": {
+                  "/": {
+                    "type": "page",
+                    "title": "Command line",
+                    "filepath": "content/reference/cli/index.mdx"
+                  },
+                  "/add": {
+                    "type": "page",
+                    "title": "wsp add",
+                    "filepath": "content/reference/cli/add.mdx"
+                  },
+                  "/agents": {
+                    "type": "page",
+                    "title": "wsp agents",
+                    "filepath": "content/reference/cli/agents.mdx"
+                  },
+                  "/agents-addtools": {
+                    "type": "page",
+                    "title": "wsp agents addtools",
+                    "filepath": "content/reference/cli/agents-addtools.mdx"
+                  },
+                  "/agents-default": {
+                    "type": "page",
+                    "title": "wsp agents default",
+                    "filepath": "content/reference/cli/agents-default.mdx"
+                  },
+                  "/agents-key": {
+                    "type": "page",
+                    "title": "wsp agents key",
+                    "filepath": "content/reference/cli/agents-key.mdx"
+                  },
+                  "/agents-set": {
+                    "type": "page",
+                    "title": "wsp agents set",
+                    "filepath": "content/reference/cli/agents-set.mdx"
+                  },
+                  "/agents-setup": {
+                    "type": "page",
+                    "title": "wsp agents setup",
+                    "filepath": "content/reference/cli/agents-setup.mdx"
+                  },
+                  "/agents-signin": {
+                    "type": "page",
+                    "title": "wsp agents signin",
+                    "filepath": "content/reference/cli/agents-signin.mdx"
+                  },
+                  "/commit": {
+                    "type": "page",
+                    "title": "wsp commit",
+                    "filepath": "content/reference/cli/commit.mdx"
+                  },
+                  "/computers": {
+                    "type": "page",
+                    "title": "wsp computers",
+                    "filepath": "content/reference/cli/computers.mdx"
+                  },
+                  "/computers-set": {
+                    "type": "page",
+                    "title": "wsp computers set",
+                    "filepath": "content/reference/cli/computers-set.mdx"
+                  },
+                  "/delete": {
+                    "type": "page",
+                    "title": "wsp delete",
+                    "filepath": "content/reference/cli/delete.mdx"
+                  },
+                  "/discard": {
+                    "type": "page",
+                    "title": "wsp discard",
+                    "filepath": "content/reference/cli/discard.mdx"
+                  },
+                  "/doctor": {
+                    "type": "page",
+                    "title": "wsp doctor",
+                    "filepath": "content/reference/cli/doctor.mdx"
+                  },
+                  "/down": {
+                    "type": "page",
+                    "title": "wsp down",
+                    "filepath": "content/reference/cli/down.mdx"
+                  },
+                  "/exec": {
+                    "type": "page",
+                    "title": "wsp exec",
+                    "filepath": "content/reference/cli/exec.mdx"
+                  },
+                  "/export": {
+                    "type": "page",
+                    "title": "wsp export",
+                    "filepath": "content/reference/cli/export.mdx"
+                  },
+                  "/fix": {
+                    "type": "page",
+                    "title": "wsp fix",
+                    "filepath": "content/reference/cli/fix.mdx"
+                  },
+                  "/forget": {
+                    "type": "page",
+                    "title": "wsp forget",
+                    "filepath": "content/reference/cli/forget.mdx"
+                  },
+                  "/host-devices": {
+                    "type": "page",
+                    "title": "wsp host devices",
+                    "filepath": "content/reference/cli/host-devices.mdx"
+                  },
+                  "/host-devices-revoke": {
+                    "type": "page",
+                    "title": "wsp host devices revoke",
+                    "filepath": "content/reference/cli/host-devices-revoke.mdx"
+                  },
+                  "/host-link": {
+                    "type": "page",
+                    "title": "wsp host link",
+                    "filepath": "content/reference/cli/host-link.mdx"
+                  },
+                  "/host-pair": {
+                    "type": "page",
+                    "title": "wsp host pair",
+                    "filepath": "content/reference/cli/host-pair.mdx"
+                  },
+                  "/host-unlink": {
+                    "type": "page",
+                    "title": "wsp host unlink",
+                    "filepath": "content/reference/cli/host-unlink.mdx"
+                  },
+                  "/hosts": {
+                    "type": "page",
+                    "title": "wsp hosts",
+                    "filepath": "content/reference/cli/hosts.mdx"
+                  },
+                  "/image": {
+                    "type": "page",
+                    "title": "wsp image",
+                    "filepath": "content/reference/cli/image.mdx"
+                  },
+                  "/init": {
+                    "type": "page",
+                    "title": "wsp init",
+                    "filepath": "content/reference/cli/init.mdx"
+                  },
+                  "/join": {
+                    "type": "page",
+                    "title": "wsp join",
+                    "filepath": "content/reference/cli/join.mdx"
+                  },
+                  "/leave": {
+                    "type": "page",
+                    "title": "wsp leave",
+                    "filepath": "content/reference/cli/leave.mdx"
+                  },
+                  "/login": {
+                    "type": "page",
+                    "title": "wsp login",
+                    "filepath": "content/reference/cli/login.mdx"
+                  },
+                  "/logout": {
+                    "type": "page",
+                    "title": "wsp logout",
+                    "filepath": "content/reference/cli/logout.mdx"
+                  },
+                  "/mcp": {
+                    "type": "page",
+                    "title": "wsp mcp",
+                    "filepath": "content/reference/cli/mcp.mdx"
+                  },
+                  "/mcp-install": {
+                    "type": "page",
+                    "title": "wsp mcp install",
+                    "filepath": "content/reference/cli/mcp-install.mdx"
+                  },
+                  "/merge": {
+                    "type": "page",
+                    "title": "wsp merge",
+                    "filepath": "content/reference/cli/merge.mdx"
+                  },
+                  "/merge-in": {
+                    "type": "page",
+                    "title": "wsp merge in",
+                    "filepath": "content/reference/cli/merge-in.mdx"
+                  },
+                  "/pause": {
+                    "type": "page",
+                    "title": "wsp pause",
+                    "filepath": "content/reference/cli/pause.mdx"
+                  },
+                  "/projects": {
+                    "type": "page",
+                    "title": "wsp projects",
+                    "filepath": "content/reference/cli/projects.mdx"
+                  },
+                  "/projects-remove": {
+                    "type": "page",
+                    "title": "wsp projects remove",
+                    "filepath": "content/reference/cli/projects-remove.mdx"
+                  },
+                  "/projects-set": {
+                    "type": "page",
+                    "title": "wsp projects set",
+                    "filepath": "content/reference/cli/projects-set.mdx"
+                  },
+                  "/recipe": {
+                    "type": "page",
+                    "title": "wsp recipe",
+                    "filepath": "content/reference/cli/recipe.mdx"
+                  },
+                  "/recipe-scan": {
+                    "type": "page",
+                    "title": "wsp recipe scan",
+                    "filepath": "content/reference/cli/recipe-scan.mdx"
+                  },
+                  "/recipes": {
+                    "type": "page",
+                    "title": "wsp recipes",
+                    "filepath": "content/reference/cli/recipes.mdx"
+                  },
+                  "/recipes-remove": {
+                    "type": "page",
+                    "title": "wsp recipes remove",
+                    "filepath": "content/reference/cli/recipes-remove.mdx"
+                  },
+                  "/recipes-save": {
+                    "type": "page",
+                    "title": "wsp recipes save",
+                    "filepath": "content/reference/cli/recipes-save.mdx"
+                  },
+                  "/recipes-show": {
+                    "type": "page",
+                    "title": "wsp recipes show",
+                    "filepath": "content/reference/cli/recipes-show.mdx"
+                  },
+                  "/remove": {
+                    "type": "page",
+                    "title": "wsp remove",
+                    "filepath": "content/reference/cli/remove.mdx"
+                  },
+                  "/rename": {
+                    "type": "page",
+                    "title": "wsp rename",
+                    "filepath": "content/reference/cli/rename.mdx"
+                  },
+                  "/restart": {
+                    "type": "page",
+                    "title": "wsp restart",
+                    "filepath": "content/reference/cli/restart.mdx"
+                  },
+                  "/review": {
+                    "type": "page",
+                    "title": "wsp review",
+                    "filepath": "content/reference/cli/review.mdx"
+                  },
+                  "/review-post": {
+                    "type": "page",
+                    "title": "wsp review post",
+                    "filepath": "content/reference/cli/review-post.mdx"
+                  },
+                  "/run": {
+                    "type": "page",
+                    "title": "wsp run",
+                    "filepath": "content/reference/cli/run.mdx"
+                  },
+                  "/send": {
+                    "type": "page",
+                    "title": "wsp send",
+                    "filepath": "content/reference/cli/send.mdx"
+                  },
+                  "/servers": {
+                    "type": "page",
+                    "title": "wsp servers",
+                    "filepath": "content/reference/cli/servers.mdx"
+                  },
+                  "/servers-add": {
+                    "type": "page",
+                    "title": "wsp servers add",
+                    "filepath": "content/reference/cli/servers-add.mdx"
+                  },
+                  "/servers-disable": {
+                    "type": "page",
+                    "title": "wsp servers disable",
+                    "filepath": "content/reference/cli/servers-disable.mdx"
+                  },
+                  "/servers-enable": {
+                    "type": "page",
+                    "title": "wsp servers enable",
+                    "filepath": "content/reference/cli/servers-enable.mdx"
+                  },
+                  "/servers-remove": {
+                    "type": "page",
+                    "title": "wsp servers remove",
+                    "filepath": "content/reference/cli/servers-remove.mdx"
+                  },
+                  "/servers-signin": {
+                    "type": "page",
+                    "title": "wsp servers signin",
+                    "filepath": "content/reference/cli/servers-signin.mdx"
+                  },
+                  "/servers-tools": {
+                    "type": "page",
+                    "title": "wsp servers tools",
+                    "filepath": "content/reference/cli/servers-tools.mdx"
+                  },
+                  "/skills": {
+                    "type": "page",
+                    "title": "wsp skills",
+                    "filepath": "content/reference/cli/skills.mdx"
+                  },
+                  "/skills-add": {
+                    "type": "page",
+                    "title": "wsp skills add",
+                    "filepath": "content/reference/cli/skills-add.mdx"
+                  },
+                  "/skills-disable": {
+                    "type": "page",
+                    "title": "wsp skills disable",
+                    "filepath": "content/reference/cli/skills-disable.mdx"
+                  },
+                  "/skills-enable": {
+                    "type": "page",
+                    "title": "wsp skills enable",
+                    "filepath": "content/reference/cli/skills-enable.mdx"
+                  },
+                  "/skills-remove": {
+                    "type": "page",
+                    "title": "wsp skills remove",
+                    "filepath": "content/reference/cli/skills-remove.mdx"
+                  },
+                  "/skills-search": {
+                    "type": "page",
+                    "title": "wsp skills search",
+                    "filepath": "content/reference/cli/skills-search.mdx"
+                  },
+                  "/skills-show": {
+                    "type": "page",
+                    "title": "wsp skills show",
+                    "filepath": "content/reference/cli/skills-show.mdx"
+                  },
+                  "/slate-catalog": {
+                    "type": "page",
+                    "title": "wsp slate catalog",
+                    "filepath": "content/reference/cli/slate-catalog.mdx"
+                  },
+                  "/slate-read": {
+                    "type": "page",
+                    "title": "wsp slate read",
+                    "filepath": "content/reference/cli/slate-read.mdx"
+                  },
+                  "/slate-state": {
+                    "type": "page",
+                    "title": "wsp slate state",
+                    "filepath": "content/reference/cli/slate-state.mdx"
+                  },
+                  "/slate-write": {
+                    "type": "page",
+                    "title": "wsp slate write",
+                    "filepath": "content/reference/cli/slate-write.mdx"
+                  },
+                  "/ssh": {
+                    "type": "page",
+                    "title": "wsp ssh",
+                    "filepath": "content/reference/cli/ssh.mdx"
+                  },
+                  "/start": {
+                    "type": "page",
+                    "title": "wsp start",
+                    "filepath": "content/reference/cli/start.mdx"
+                  },
+                  "/status": {
+                    "type": "page",
+                    "title": "wsp status",
+                    "filepath": "content/reference/cli/status.mdx"
+                  },
+                  "/stop": {
+                    "type": "page",
+                    "title": "wsp stop",
+                    "filepath": "content/reference/cli/stop.mdx"
+                  },
+                  "/thread-allow": {
+                    "type": "page",
+                    "title": "wsp thread allow",
+                    "filepath": "content/reference/cli/thread-allow.mdx"
+                  },
+                  "/thread-deny": {
+                    "type": "page",
+                    "title": "wsp thread deny",
+                    "filepath": "content/reference/cli/thread-deny.mdx"
+                  },
+                  "/thread-forget": {
+                    "type": "page",
+                    "title": "wsp thread forget",
+                    "filepath": "content/reference/cli/thread-forget.mdx"
+                  },
+                  "/thread-head": {
+                    "type": "page",
+                    "title": "wsp thread head",
+                    "filepath": "content/reference/cli/thread-head.mdx"
+                  },
+                  "/thread-read": {
+                    "type": "page",
+                    "title": "wsp thread read",
+                    "filepath": "content/reference/cli/thread-read.mdx"
+                  },
+                  "/thread-restore": {
+                    "type": "page",
+                    "title": "wsp thread restore",
+                    "filepath": "content/reference/cli/thread-restore.mdx"
+                  },
+                  "/thread-settle": {
+                    "type": "page",
+                    "title": "wsp thread settle",
+                    "filepath": "content/reference/cli/thread-settle.mdx"
+                  },
+                  "/threads": {
+                    "type": "page",
+                    "title": "wsp threads",
+                    "filepath": "content/reference/cli/threads.mdx"
+                  },
+                  "/threads-wait": {
+                    "type": "page",
+                    "title": "wsp threads wait",
+                    "filepath": "content/reference/cli/threads-wait.mdx"
+                  },
+                  "/up": {
+                    "type": "page",
+                    "title": "wsp up",
+                    "filepath": "content/reference/cli/up.mdx"
+                  },
+                  "/update": {
+                    "type": "page",
+                    "title": "wsp update",
+                    "filepath": "content/reference/cli/update.mdx"
+                  },
+                  "/usage": {
+                    "type": "page",
+                    "title": "wsp usage",
+                    "filepath": "content/reference/cli/usage.mdx"
+                  },
+                  "/usage-reset": {
+                    "type": "page",
+                    "title": "wsp usage reset",
+                    "filepath": "content/reference/cli/usage-reset.mdx"
+                  },
+                  "/wake": {
+                    "type": "page",
+                    "title": "wsp wake",
+                    "filepath": "content/reference/cli/wake.mdx"
+                  },
+                  "/workspaces-agents": {
+                    "type": "page",
+                    "title": "wsp workspaces agents",
+                    "filepath": "content/reference/cli/workspaces-agents.mdx"
+                  },
+                  "/worktree": {
+                    "type": "page",
+                    "title": "wsp worktree",
+                    "filepath": "content/reference/cli/worktree.mdx"
+                  },
+                  "/worktree-remove": {
+                    "type": "page",
+                    "title": "wsp worktree remove",
+                    "filepath": "content/reference/cli/worktree-remove.mdx"
+                  }
+                }
+              },
+              "/mcp-tools": {
+                "type": "page",
+                "title": "MCP tools",
+                "filepath": "content/reference/mcp-tools.mdx"
+              },
+              "/slate": {
+                "type": "page",
+                "title": "Slate catalog",
+                "filepath": "content/reference/slate.mdx"
+              },
+              "/environment": {
+                "type": "page",
+                "title": "Environment variables",
+                "filepath": "content/reference/environment.mdx"
+              },
+              "/files": {
+                "type": "page",
+                "title": "Files and folders",
+                "filepath": "content/reference/files.mdx"
+              },
+              "/contract": {
+                "type": "page",
+                "title": "Exit codes and the contract",
+                "filepath": "content/reference/contract.mdx"
+              },
+              "/troubleshooting": {
+                "type": "page",
+                "title": "Troubleshooting and the doctor",
+                "filepath": "content/reference/troubleshooting.mdx"
+              }
+            }
+          },
+          "/how": {
+            "type": "group",
+            "title": "How it works",
+            "mode": "folder",
+            "open": true,
+            "children": {
+              "/overview": {
+                "type": "page",
+                "title": "The host, the daemon and the relay",
+                "filepath": "content/how/overview.mdx"
+              },
+              "/host": {
+                "type": "page",
+                "title": "The host",
+                "filepath": "content/how/host.mdx"
+              },
+              "/sign-ins": {
+                "type": "page",
+                "title": "How sign-ins reach your browser",
+                "filepath": "content/how/sign-ins.mdx"
+              },
+              "/agents": {
+                "type": "page",
+                "title": "How wsp runs each agent",
+                "filepath": "content/how/agents.mdx"
+              },
+              "/storage": {
+                "type": "page",
+                "title": "What is stored where",
+                "filepath": "content/how/storage.mdx"
+              },
+              "/network": {
+                "type": "page",
+                "title": "What leaves your computer",
+                "filepath": "content/how/network.mdx"
+              }
+            }
+          },
+          "/guides": {
+            "type": "group",
+            "title": "Guides",
+            "mode": "folder",
+            "open": true,
+            "children": {
+              "/rented-server": {
+                "type": "page",
+                "title": "A rented server",
+                "filepath": "content/guides/rented-server.mdx"
+              },
+              "/home-computer": {
+                "type": "page",
+                "title": "A computer at home",
+                "filepath": "content/guides/home-computer.mdx"
+              },
+              "/behind-a-firewall": {
+                "type": "page",
+                "title": "A box behind a firewall",
+                "filepath": "content/guides/behind-a-firewall.mdx"
+              },
+              "/own-relay": {
+                "type": "page",
+                "title": "Run your own relay",
+                "filepath": "content/guides/own-relay.mdx"
+              }
+            }
+          },
+          "/project": {
+            "type": "group",
+            "title": "The project",
+            "mode": "folder",
+            "open": true,
+            "children": {
+              "/changelog": {
+                "type": "page",
+                "title": "Changelog",
+                "filepath": "content/project/changelog.mdx"
+              },
+              "/contributing": {
+                "type": "page",
+                "title": "Contributing",
+                "filepath": "content/project/contributing.mdx"
+              },
+              "/security": {
+                "type": "page",
+                "title": "Security",
+                "filepath": "content/project/security.mdx"
+              },
+              "/license": {
+                "type": "page",
+                "title": "Licence",
+                "filepath": "content/project/license.mdx"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
