@@ -15,6 +15,7 @@ import { CATALOG, CATALOG_AGENTS, MCP_AGENTS, type CatalogEntry, asksThePerson, 
 import { asLogin, targetLogin, type TargetLogin } from "@wsp/engine";
 import {
   addToolsHereRefusal,
+  addToolsNoConfigRefusal,
   controlSignInRefusal,
   hasControlChar,
   callbackPortOf,
@@ -315,7 +316,7 @@ export function hostActs(o: HostActsOptions): AgentsActs {
     },
     addTools: async (on, agent) => {
       if (on.kind !== "here") throw new Error(addToolsHereRefusal);
-      if (!MCP_AGENTS.some(a => a.id === agent)) throw new Error(`${agentOf(agent).name} has no MCP config wsp knows, so the wsp tools were not written`);
+      if (!MCP_AGENTS.some(a => a.id === agent)) throw new Error(addToolsNoConfigRefusal(agentOf(agent).name));
       const placed = installMcp(agent, o.wspServer(), o.home());
       return { file: placed.path! };
     },

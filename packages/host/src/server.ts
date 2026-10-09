@@ -4,9 +4,9 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { isIP, type Socket } from "node:net";
 import { homedir, networkInterfaces, platform } from "node:os";
-import { extname, join, resolve as resolvePath, sep } from "node:path";
+import { basename, dirname, extname, join, resolve as resolvePath, sep } from "node:path";
 import { CREATED_AT_LABEL, HOST_LABEL, SMOKE_LABEL, WSP_LABEL, type ProvisionPlan } from "@wsp/engine";
-import { BOOT_SCRIPT, DEFAULT_PORT, PAIR_CODE_TTL_MS, PLACES_WORDS, PLACE_PORT_OFFSET, WILDCARD, WS_PATH, authority, doorPortHeldLine, isLoopback, joinAddressOf, servedHostname, noSuchPlaceRefusal, recordRestoredLine, peerAddress, relayUrlOf, scopeOf, type BootPayload, type ProductUsageOff, type DoctorLineEvent, type Caller, type PlaceDoorView, type ProjectImportResult, type ProjectPlan, type PlaceView, type ProjectView, type WorkspaceView, kindForComputer, nameTheProjectLine, copiesFolder, runsInFolder } from "@wsp/protocol";
+import { BOOT_SCRIPT, DEFAULT_PORT, PAIR_CODE_TTL_MS, PLACES_WORDS, PLACE_PORT_OFFSET, WILDCARD, WS_PATH, authority, doorPortHeldLine, doorPortMovedLine, isLoopback, joinAddressOf, servedHostname, noSuchPlaceRefusal, recordRestoredLine, peerAddress, relayUrlOf, scopeOf, type BootPayload, type ProductUsageOff, type DoctorLineEvent, type Caller, type PlaceDoorView, type ProjectImportResult, type ProjectPlan, type PlaceView, type ProjectView, type WorkspaceView, kindForComputer, nameTheProjectLine, copiesFolder, runsInFolder } from "@wsp/protocol";
 import { sshHostsIn } from "./ssh-hosts.js";
 import { LOOPBACK, describeAge, goldenHead, serveRuntime, tokenDigest, type AdmittedDevices, type CreatedWorkspace, type GoldenBuilderView, type GoldenVersion, type HostSsh, type InitDoor, type PlaceBackHolder, type PlaceDoctor, type PlaceDoorControl, type ProjectBundler, type ProjectImportOptions, type ProjectLander, type ReapedMachine, type RestartDoor, type Runtime, type RuntimeServer, type SparedMachine } from "@wsp/runtime";
 import { computerDoctor } from "./doctor.js";
@@ -32,6 +32,8 @@ import { NO_PROVIDER } from "./providers.js";
 import type { ReleaseWatch } from "./release.js";
 import { describeStorage, noProviderStorageLine } from "./storage.js";
 import { VERSION } from "./version.js";
+import { doorPortPath } from "./host-lock.js";
+import { writeOwn } from "@wsp/own-file";
 import type { HostRoad } from "./restart.js";
 
 // The enriched status now lives in @wsp/runtime (every client reads one
@@ -204,6 +206,16 @@ function loadPage(webDir: string, boot: BootPayload): string {
  * computer, and adding them only takes the token away from itself. */
 function throughConnector(req: IncomingMessage): boolean {
   return req.headers["cf-connecting-ip"] !== undefined || req.headers["cf-ray"] !== undefined;
+}
+
+/** The door port a host asked for any free port bound at its last start, or nothing where it bound none yet. */
+function lastDoorPort(statePath: string): number | undefined {
+  try {
+    const port = Number(readFileSync(doorPortPath(statePath), "utf8").trim());
+    return Number.isInteger(port) && port > 0 && port < 65_536 ? port : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Whether a request reached this host over the road it serves its own workspaces' guests on: a process on the
@@ -539,9 +551,15 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
     if (!boundHere) return viewOf(port, address);
     if (doorAt !== undefined) return viewOf(doorAt, WILDCARD);
     doorOpening ??= (async () => {
-      let at = doorPort;
+      const last = doorPort === 0 && opts.statePath !== undefined ? lastDoorPort(opts.statePath) : undefined;
+      let at = last ?? doorPort;
       try {
-        await listenOn(doorServer, doorPort, WILDCARD);
+        await listenOn(doorServer, at, WILDCARD).catch(async (e: unknown) => {
+          if (last === undefined || (e as NodeJS.ErrnoException).code !== "EADDRINUSE") throw e;
+          log(doorPortMovedLine(last));
+          at = 0;
+          await listenOn(doorServer, 0, WILDCARD);
+        });
         const bound = doorServer.address();
         at = typeof bound === "object" && bound !== null ? bound.port : doorPort;
         if (doorLoopback !== undefined) await listenOn(doorLoopback, at, LOOPBACK).catch(async (e: unknown) => {
@@ -553,6 +571,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
         throw (e as NodeJS.ErrnoException).code === "EADDRINUSE" ? new Error(doorPortHeldLine(at)) : e;
       }
       doorAt = at;
+      if (doorPort === 0 && opts.statePath !== undefined && last === undefined) writeOwn(dirname(opts.statePath), basename(doorPortPath(opts.statePath)), `${at}\n`);
       // Said on a Mac alone: it is the application firewall's prompt, and no other computer here shows one.
       if (platform() === "darwin") opts.doorLine?.(PLACES_WORDS.sheet.firewall);
       return viewOf(at, WILDCARD);

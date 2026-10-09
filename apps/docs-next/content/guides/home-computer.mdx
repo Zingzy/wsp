@@ -85,7 +85,7 @@ The add installs the daemon. Then you choose what goes on the computer in the ap
 
 ## How the computer reaches yours
 
-The daemon on the computer at home dials your host. When a computer has joined, the host opens a second port on every address of your computer. For the app's host, and a host that you start with `wsp up`, it is 20 above the app port. For the default app port `4400`, that is `4420`. A host that a `wsp` command starts by itself takes a new free port at each start, and the computer at home then loses it. So if you do not use the app, run `wsp up --service` before you add the computer. So a computer on your network can dial it directly. The install's `starting the agent` row names the address that it dials.
+The daemon on the computer at home dials your host. When a computer has joined, the host opens a second port on every address of your computer, so a computer on your network can dial it directly. For the app's host, and a host that you start with `wsp up`, it is 20 above the app port. For the default app port `4400`, that is `4420`. A host that a `wsp` command starts by itself takes a free port at its first start and asks for the same port at every start after, so the computer at home keeps reaching it. The install's `starting the agent` row names the address that it dials.
 
 If a firewall on your computer blocks that port, the host keeps an ssh connection to the computer at home open. The daemon dials back through it. The install then says `dials back over ssh`. The computer works the same way, but only while your computer is awake and on the network.
 

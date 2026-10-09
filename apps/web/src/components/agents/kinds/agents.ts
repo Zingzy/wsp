@@ -4,8 +4,8 @@
 // state under its name, and offers Sign in where none stands, else Open in
 // terminal; the detail says who the agent is and the rest, next step first.
 import { CircleArrowUpIcon, DownloadIcon, SquareTerminalIcon, Trash2Icon } from "lucide-react";
-import { catalogEntry, installShown, runsThreads, type AgentEntry } from "@wsp/catalog";
-import { compareVersions, FIRST_RUN_WORD, MCP_SERVER_NAME, VERSION_UNREAD_WORD, type AgentRow, type AgentsReport } from "@wsp/protocol";
+import { catalogEntry, installShown, MCP_AGENTS, runsThreads, type AgentEntry } from "@wsp/catalog";
+import { addToolsNoConfigRefusal, compareVersions, FIRST_RUN_WORD, MCP_SERVER_NAME, VERSION_UNREAD_WORD, type AgentRow, type AgentsReport } from "@wsp/protocol";
 import { AGENTS_LIST_WORDS as W, agentSignInStart, editImageAct, heldReason, holdAll, notYet, onImage, signInAct, waitingFlow, type RowAct, type RowsContext } from "../agentsRows.js";
 import { kind, matchesAny, rowKey, type Fact, type KindModule, type Status } from "./kind.js";
 
@@ -65,8 +65,9 @@ function actsOf(item: AgentItem, ctx: RowsContext) {
   const hold = ownHold(row);
   const signIn = signInAct(rowId(row), agentSignInStart(row, ctx), ctx);
   const adding = ctx.acts?.adding(row.id) === true;
-  const addTools: RowAct =
-    ctx.where !== "here"
+  const addTools: RowAct = !MCP_AGENTS.some(a => a.id === row.id)
+    ? { id: "add-tools", label: W.addTools, add: true, hover: addToolsNoConfigRefusal(row.name) }
+    : ctx.where !== "here"
       ? { id: "add-tools", label: W.addTools, add: true, hover: W.addToolsHereOnly }
       : { id: "add-tools", label: W.addTools, add: true, ...(adding ? { busy: true } : ctx.acts === undefined ? {} : { run: () => ctx.acts!.addTools(row.id) }) };
   const update = notYet("update", W.update, CircleArrowUpIcon, hold === undefined ? {} : { hover: hold });

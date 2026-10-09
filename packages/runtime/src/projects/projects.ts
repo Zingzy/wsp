@@ -159,9 +159,10 @@ export function projectsArea(ctx: RuntimeContext): ProjectsArea {
       scratch: () => GUEST_TMP,
       ...(joined !== undefined ? { computer: { machine: joined.machine, home: joined.home } } : {}),
       imageHead: () => ctx.imageHeadOrNone(),
+      // The vault's GitHub token only where GitHub was set up from the vault there, as that computer's turns read it.
       cloneEnv: (): Record<string, string> => {
         const token = opts.vault?.()[GITHUB_TOKEN_ENV];
-        return token === undefined ? {} : { [GITHUB_TOKEN_ENV]: token };
+        return token === undefined || placeId === undefined || placeDoor?.githubFromVault(placeId) !== true ? {} : { [GITHUB_TOKEN_ENV]: token };
       },
       // Where Claude Code keeps its projects on this computer, which is the memory folder of a project worked in
       // place here; read the way every other road on this computer reads that store.

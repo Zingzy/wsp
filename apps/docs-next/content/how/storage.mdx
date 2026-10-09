@@ -20,6 +20,7 @@ The state file is `~/.wsp/state.json` unless you name another one with `--state`
 | `agent-latest.json` | Each agent's newest version, kept for a day | The host, for the Agents page |
 | `icons/` | Icons of remote MCP servers, kept for 30 days | The app |
 | `recipe.json`, `recipes/` | Your recipes: what a computer gets when you add it | The host |
+| `door-port` | The second port that a host a `wsp` command started took at its first start, which it asks for again at every start | The host |
 | `relay.json` | The link to the relay, when you linked this host. Mode 600. | The host |
 | `place-host-key.json` | The host's own ed25519 key pair, private key included. Every box pins its public key when it joins. Mode 600. | The host |
 | `init.log` | The last five runs of `wsp init`, with values whose names say key, token, secret or password blanked | You |

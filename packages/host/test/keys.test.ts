@@ -11,6 +11,7 @@ import { SERVE_FLAGS, SHARED_FLAGS, cli, jsonCliIO, keySources, loadKeys, optsFo
 import { BOX_API_URL, BoxBackend, type KeyCheck } from "@wsp/engine";
 import { keysOf, savedEnv, serverVault, vaultOf, writeEnvFile } from "../src/env-keys.js";
 import { vaultNow } from "../src/cli.js";
+import { vaultGitHubToken } from "../src/places/install.js";
 import { BOX_KEY_ENV, PROVIDER_ENV, SOLARI_KEY_ENV, providerBackendFor, wiredProviderId } from "../src/providers.js";
 import { CLOUD_ON } from "../src/cloud.js";
 
@@ -178,6 +179,18 @@ describe("a host's own keys, the ones the app's setup reads", () => {
       process.chdir(here);
       delete process.env["CLAUDE_CODE_OAUTH_TOKEN"];
     }
+  });
+
+  it("the GitHub token a box's setup saves from gh is in the vault the next turn launches with", async () => {
+    setup();
+    mkdirSync(home);
+    const gh = vi.fn(async () => ({ exitCode: 0, stdout: "gho_TESTONLYfromgh\n", stderr: "" }));
+    await vaultGitHubToken(state, gh);
+    expect(gh).toHaveBeenCalledWith("gh", ["auth", "token", "--hostname", "github.com"], expect.anything());
+    expect(vaultNow(state)["GH_TOKEN"]).toBe("gho_TESTONLYfromgh");
+    // A server's own GH_TOKEN, typed when it was added, is the one it reads: the box setup's only fills in.
+    serverVault(state).hold({ GH_TOKEN: "ghp_TESTONLYserversown" }, "gh");
+    expect(vaultNow(state)["GH_TOKEN"]).toBe("ghp_TESTONLYserversown");
   });
 
   it("the vault is cut to the variables the catalog declares, empty values dropped, and the provider's key is not among them", () => {

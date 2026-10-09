@@ -9,7 +9,7 @@
 // photographed in the render test.
 import { act, cleanup, fireEvent, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { AgentsReport, SealedImage, ServerToolsAnswer } from "@wsp/protocol";
+import { addToolsNoConfigRefusal, type AgentsReport, type SealedImage, type ServerToolsAnswer } from "@wsp/protocol";
 import { AGENTS_LIST_WORDS as W, imageAgentsReport, NOT_ANSWERING_AFTER_MS, refusedLines, saysNotAnswering, type RowsContext, type ServerTools, type ToolsState } from "../src/components/agents/agentsRows.js";
 import { AGENTS_KIND } from "../src/components/agents/kinds/agents.js";
 import { foldServers, rowState } from "../src/components/agents/kinds/servers.js";
@@ -226,6 +226,21 @@ describe("the tool servers and the skills", () => {
     back();
     openRow("opencode");
     expect(factsOf()).toContainEqual(["wsp tools", W.notAdded]);
+  });
+
+  it("holds Add the wsp tools with the host's own reason for an agent whose MCP config wsp does not know, here and on a box", () => {
+    const report: AgentsReport = { ...AGENTS_REPORT, agents: [...AGENTS_REPORT.agents, { id: "goose", name: "Goose", installed: true, version: "1.9.0", road: "own", signIn: "unknown", signInRoad: "terminal", wspTools: false }] };
+    const added: string[] = [];
+    const acts = { flowOf: () => undefined, start: () => {}, cancel: () => {}, code: () => {}, save: () => {}, addTools: (id: string) => void added.push(id), adding: () => false };
+    for (const ctx of [{ where: "here", acts }, { where: "box", computer: "spoo" }] as RowsContext[]) {
+      const goose = AGENTS_KIND.items(report, ctx).find(i => i.row.id === "goose")!;
+      const tools = AGENTS_KIND.detail(goose, ctx).acts.find(a => a.id === "add-tools");
+      expect(tools?.hover, ctx.where).toBe(addToolsNoConfigRefusal("Goose"));
+      expect(tools?.run, ctx.where).toBeUndefined();
+    }
+    const here: RowsContext = { where: "here", acts };
+    AGENTS_KIND.detail(AGENTS_KIND.items(report, here).find(i => i.row.id === "opencode")!, here).acts.find(a => a.id === "add-tools")!.run!();
+    expect(added).toEqual(["opencode"]);
   });
 
   it("reads a server whose token comes from the environment as the environment's key, with no Sign in", () => {

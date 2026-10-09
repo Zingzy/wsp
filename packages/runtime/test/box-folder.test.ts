@@ -14,7 +14,7 @@ import { memoryStore, type Store } from "../src/store.js";
 import { ctx, sockets, relink, serving } from "./places-fixture.js";
 import { until } from "./until.js";
 import { report } from "./place-join.js";
-import { answering, asThread, box, handedLine, HETZNER, joined, type Box, type Started } from "./box-fixture.js";
+import { answering, asThread, box, handedLine, HETZNER, joined, pickGitHub, type Box, type Started } from "./box-fixture.js";
 
 /** A harness whose turn is a real launch on the computer, read until it is stopped. */
 function launching(launched: string[]): HarnessAdapterFactory {
@@ -219,13 +219,6 @@ describe("a thread on a project of a computer the person joined", () => {
 });
 
 /** The GitHub pick that computer was set up with, and the row its setup left, as a setup writes them. */
-async function pickGitHub(store: Store, placeId: string, signin: "vault" | "machine" | "skip"): Promise<void> {
-  const record = (await store.get("places", placeId)) as Record<string, unknown>;
-  const outcome = signin === "skip" ? "skipped" : "present";
-  await store.put("places", placeId, { ...record, picks: { configs: { github: { signin } } }, applied: { at: new Date().toISOString(), rows: [{ id: "github", label: "GitHub", outcome }] } });
-  await ctx.runtime!.places!.load();
-}
-
 /** A turn there run to its end, and a terminal opened in the same thread: the environment each started under. */
 async function turnAndTerminal(rt: Awaited<ReturnType<typeof joined>>["rt"], project: { id: string }, seen: Box, starts: { env: Readonly<Record<string, string>> }[]) {
   const at = await rt.workspaces.folderFor({ project: project.id });
@@ -481,14 +474,22 @@ describe("the MCP servers a thread on a computer you joined starts", () => {
 });
 
 describe("what a computer you joined holds back of a thread in a folder on it", () => {
-  it("clones a private repo with the vault's GitHub token on the clone's own input and nowhere in its command", async () => {
-    const { seen } = await joined({ vault: { GH_TOKEN: "ghp_private_fake", OPENAI_API_KEY: "sk-other-fake" } });
+  it("clones a private repo with the vault's GitHub token on the clone's own input and nowhere in its command, where GitHub was set up from the vault", async () => {
+    const { seen } = await joined({ vault: { GH_TOKEN: "ghp_private_fake", OPENAI_API_KEY: "sk-other-fake" }, github: "vault" });
     const clone = seen.execs.find(e => e.cmd.includes("git clone"))!;
     expect(clone.stdin).toContain("GH_TOKEN=ghp_private_fake\0");
     expect(clone.stdin).not.toContain("sk-other-fake");
     expect(seen.execs.map(e => e.cmd).join("\n")).not.toContain("ghp_private_fake");
     expect(clone.cmd).not.toContain("setup-git");
   });
+
+  for (const github of ["skip", "machine", undefined] as const) {
+    it(`clones with none of the vault's GitHub token where GitHub was ${github === undefined ? "never set up" : `set up as ${github}`} there, as its turns get none`, async () => {
+      const { seen } = await joined({ vault: { GH_TOKEN: "ghp_private_fake" }, ...(github !== undefined ? { github } : {}) });
+      const clone = seen.execs.find(e => e.cmd.includes("git clone"))!;
+      expect(`${clone.stdin ?? ""}\n${seen.execs.map(e => e.cmd).join("\n")}`).not.toContain("ghp_private_fake");
+    });
+  }
 
   it("runs a thread there although its doctor came to say it boots no container: nothing of one is in the way", async () => {
     const starts: Started[] = [];

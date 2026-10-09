@@ -386,6 +386,11 @@ export const CODE_EXPIRED_LINE = "the code expired; press New code";
 export const doorPortHeldLine = (port: number): string =>
   `port ${port} is held by another program on this computer, so no computer you own can reach this wsp; free it and open Add a computer again`;
 
+/** Said when the door port of a host's last start is taken and it opens on another: a computer joined at the old one
+ * dials it for good. */
+export const doorPortMovedLine = (port: number): string =>
+  `port ${port}, where computers you joined last reached this wsp, is held by another program, so the door opened on another; free it and start this wsp again`;
+
 /** What a computer joined as a place keeps about the wsp it belongs to, in the file the join writes and the agent
  * reads on every attempt: the id its host knows it by, the addresses to dial in order, the host's public key pinned
  * at that join, and where its own private key is. The shape and the two readings of it live here because the join

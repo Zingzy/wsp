@@ -61,6 +61,8 @@ describe("a computer joining a wsp", () => {
     // The home is stated in the unit: the daemon keeps its files under the home its place file sits in, and a
     // manager handing it the login's own default would put them somewhere else.
     expect(written).toContain(`HOME=${home}`);
+    // A box's browser shim is under the login's home, not at the path a fork's image ships it.
+    expect(written).toContain(`BROWSER=${home}/.local/bin/wsp-open`);
     expect(io.lines.join("\n")).toContain("old-macbook joined the wsp at");
     expect(io.lines.join("\n")).toContain("wsp leave takes this computer back out.");
     // Frame one carries public values only; the report names this computer and the address it dialled, and it
