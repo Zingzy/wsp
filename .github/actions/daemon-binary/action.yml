@@ -1,0 +1,65 @@
+name: The daemon this runner runs
+description: >-
+  The static x86_64 musl daemon at daemon/target/x86_64-unknown-linux-musl/release/wsp-daemon, restored when the
+  same daemon/ tree built it before and built with cargo otherwise.
+
+runs:
+  using: composite
+  steps:
+    # The tree hash covers every source, the lock, the toolchain pin and the libseccomp script; this file's own hash
+    # covers the cargo line below, and PUBLIC_BUILD, which wsp-mcp's build script reads, picks which binary it makes.
+    - name: The built binary's key
+      id: key
+      shell: bash
+      run: echo "key=daemon-binary-x86_64-unknown-linux-musl-public${PUBLIC_BUILD:-0}-$(git rev-parse HEAD:daemon)-$(git rev-parse HEAD:.github/actions/daemon-binary/action.yml)" >> "$GITHUB_OUTPUT"
+    - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      name: The binary this daemon tree built before
+      id: built
+      with:
+        path: daemon/target/x86_64-unknown-linux-musl/release/wsp-daemon
+        key: ${{ steps.key.outputs.key }}
+    - name: Toolchain from rust-toolchain.toml
+      if: steps.built.outputs.cache-hit != 'true'
+      working-directory: daemon
+      shell: bash
+      run: |
+        rustup toolchain install
+        rustup show
+    # The daemon workflow's x86_64 musl build is this one, flags and all, and its cache holds that target alone: about
+    # 270 MB, where the daemon gate's holds every profile in 8 GB and took four minutes to restore. Read only, so the
+    # daemon workflow stays the one that writes it.
+    - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      if: steps.built.outputs.cache-hit != 'true'
+      with:
+        path: |
+          ~/.cargo/registry/index
+          ~/.cargo/registry/cache
+          ~/.cargo/git/db
+          daemon/target
+        key: daemon-artifacts-x86_64-unknown-linux-musl-${{ hashFiles('daemon/Cargo.lock', 'daemon/rust-toolchain.toml') }}
+        restore-keys: |
+          daemon-artifacts-x86_64-unknown-linux-musl-
+    # Cargo rebuilds what is older than its sources, so a cache saved after this checkout never passes for this build.
+    - name: The daemon's sources newer than anything restored
+      if: steps.built.outputs.cache-hit != 'true'
+      shell: bash
+      run: git ls-files -z daemon | xargs -0 touch
+    # ring carries C, which musl-tools compiles for the musl target; libcontainer links libseccomp statically, and
+    # the archive has to be one built against musl, so the script builds it from its pinned release first.
+    - name: C compiler for the musl target, and libseccomp built against musl
+      if: steps.built.outputs.cache-hit != 'true'
+      working-directory: daemon
+      shell: bash
+      run: |
+        sudo apt-get install -y --no-install-recommends musl-tools gperf
+        ./scripts/libseccomp-archive.sh musl
+    - name: Build
+      if: steps.built.outputs.cache-hit != 'true'
+      working-directory: daemon
+      shell: bash
+      run: LIBSECCOMP_LIB_PATH=$PWD/target/libseccomp/musl cargo build --locked --release --target x86_64-unknown-linux-musl -p wsp-daemon-bin
+    - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      if: steps.built.outputs.cache-hit != 'true'
+      with:
+        path: daemon/target/x86_64-unknown-linux-musl/release/wsp-daemon
+        key: ${{ steps.key.outputs.key }}

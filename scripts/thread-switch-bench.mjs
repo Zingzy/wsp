@@ -672,7 +672,7 @@ async function main() {
     await waitHttp(`http://127.0.0.1:${a.vitePort}/src/main.tsx`, 60_000);
   } else {
     webDir = join(WEB_DIR, "dist");
-    if (!existsSync(join(webDir, "index.html"))) throw new Error("apps/web/dist is not built: pnpm --filter @wsp/web build");
+    if (!existsSync(join(webDir, "index.html"))) throw new Error("apps/web/dist is not built: pnpm --filter @wsp/web... build");
   }
 
   // The project and the workspace are the host's own to record, so their records are in the shape it reads: a

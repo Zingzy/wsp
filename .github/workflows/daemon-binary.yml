@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+name: daemon binary
+
+# A land branch reads the caches of main and of its own branch alone, so main saves the daemon each landing built,
+# and ci's next landing whose daemon/ is the same restores it instead of running cargo. A file of its own, so a cold
+# build here never holds or cancels ci's check on the same push.
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  daemon:
+    name: The daemon binary cached for the next landing
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/daemon-binary

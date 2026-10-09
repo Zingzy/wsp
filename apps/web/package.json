@@ -5,7 +5,7 @@
   "license": "AGPL-3.0-only",
   "scripts": {
     "dev": "pnpm --filter @wsp/protocol --filter @wsp/catalog build && vite",
-    "build": "pnpm --filter @wsp/protocol --filter @wsp/catalog build && tsc -b && vite build",
+    "build": "vite build",
     "screenshots": "node screenshots/run.mjs",
     "test": "vitest run"
   },
