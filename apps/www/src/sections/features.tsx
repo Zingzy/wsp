@@ -40,7 +40,7 @@ const FEATURES: Feature[] = [
     alt: "Pull request #1161 beside the thread that built it: approved, eight checks passed, ready to merge, with its description.",
   },
   {
-    title: "Every agent on every computer.",
+    title: "All your agents in one place.",
     line: "See which agents are signed in where, and install another from the same pane.",
     src: agents,
     at: "tr",
