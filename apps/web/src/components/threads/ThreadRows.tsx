@@ -3,13 +3,12 @@
 // thread, and the one status slot at a fixed width so times and words line up
 // down the list. A lead's rows add the line under the title (what it asks, why
 // it failed, what holds it, its last line), led by the computer where that is
-// not the lead's; the child's branch with one fact beside it and the one merge
-// act there is to take; and the acts the status slot yields to on hover, from
-// md up. A subagent's row is the same box, led by the glyph the timeline gives
-// the call that launched it.
+// not the lead's; and the acts the status slot yields to on hover, from md up.
+// A subagent's row is the same box, led by the glyph the timeline gives the
+// call that launched it.
 import { agentName } from "@wsp/catalog";
 import { appHash, type PlaceView, type SubagentView } from "@wsp/protocol";
-import { BotIcon, EllipsisIcon, GitBranchIcon, type LucideIcon } from "lucide-react";
+import { BotIcon, EllipsisIcon, type LucideIcon } from "lucide-react";
 import { memo, useState, type MouseEvent, type ReactNode } from "react";
 import { CHILD_WORDS } from "../../actions/format.js";
 import { openContextMenu, runAction } from "../../actions/contextMenu.js";
@@ -39,12 +38,8 @@ export interface ThreadRowItem {
   readonly place: string;
   /** That computer's record, its glyph read off it; undefined until the places list holds it. */
   readonly at?: PlaceView | undefined;
-  /** The branch the thread's workspace is on, with the one fact about it a person reads beside it. */
-  readonly branch?: { readonly name: string; readonly fact: string };
   /** A line under the title, for what the row cannot say in its cells. */
   readonly note?: string;
-  /** The one merge act the row offers, drawn in the status slot in place of the status while there is one to take. */
-  readonly act?: { readonly label: string; readonly run: () => void };
 }
 
 /** How long the pointer rests on a subagent's row before its card opens, the tile card's own delay. */
@@ -146,7 +141,7 @@ type ThreadRowProps = ThreadRowItem & {
 };
 
 /** One thread's line; a press anywhere on it opens the thread, as its title does, except on its acts and its field. */
-export const ThreadRow = memo(function ThreadRow({ thread, place, at, branch, note, act, target, kind, sending = false, onSending, className }: ThreadRowProps) {
+export const ThreadRow = memo(function ThreadRow({ thread, place, at, note, target, kind, sending = false, onSending, className }: ThreadRowProps) {
   const select = useStore(s => s.select);
   const api = useStore(s => s.api);
   const verbs = useChildVerbs();
@@ -199,22 +194,7 @@ export const ThreadRow = memo(function ThreadRow({ thread, place, at, branch, no
           <SecondLine place={place} at={at} note={note} />
         )}
       </span>
-      {branch === undefined ? null : (
-        <span className="flex min-w-0 max-w-[260px] shrink-0 items-center gap-1 text-xs">
-          <GitBranchIcon aria-hidden className="size-3 shrink-0 text-[var(--top-row-meta)]" />
-          <span data-tree-branch className="min-w-8 shrink-[100000] truncate text-foreground">
-            {branch.name}
-          </span>
-          <span data-tree-fact className="ms-2 shrink-0 whitespace-nowrap text-muted-foreground">
-            {branch.fact}
-          </span>
-        </span>
-      )}
-      {act !== undefined ? (
-        <Button type="button" size="xs" variant="outline" className="shrink-0" onClick={act.run}>
-          {act.label}
-        </Button>
-      ) : sending ? (
+      {sending ? (
         status
       ) : (
         <Slot status={status} acts={acts} menu={menu} more={target !== undefined && target.task === null} />
@@ -252,9 +232,6 @@ function sameRow(a: ThreadRowProps, b: ThreadRowProps): boolean {
     a.className === b.className &&
     a.sending === b.sending &&
     a.onSending === b.onSending &&
-    a.branch?.name === b.branch?.name &&
-    a.branch?.fact === b.branch?.fact &&
-    a.act?.label === b.act?.label &&
     sameTarget(a.target, b.target)
   );
 }
