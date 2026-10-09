@@ -12,7 +12,8 @@ import { createRuntime, memoryStore, type Runtime } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { stubBackend } from "../../../packages/host/test/stub-backend.js";
 import { copyingFake, fakeDaemonStart } from "../../../packages/host/test/verbs-fixture.js";
-import { KeptOtherRelease, ensureService, firstLaunch, homeOf, hostTokenMatches, loginStart, openHost, openHostReady, runningHere, setLoginStart, statePathIn, stopWsp, userDataIn, workingHere, type HostSession, type OpenHostOptions, type ReplacePrompt, type ServiceRoad } from "../src/host-lifecycle.js";
+import { hostFeed, type FeedState } from "../src/host-feed.js";
+import { KeptOtherRelease, ensureService, firstLaunch, homeOf, hostTokenMatches, loginStart, openHost, openHostReady, earlierHostCheck, oneAtATime, servesAgainNotice, runningHere, setLoginStart, statePathIn, stopWsp, userDataIn, workingHere, type HostSession, type OpenHostOptions, type ReplacePrompt, type ServiceRoad } from "../src/host-lifecycle.js";
 
 const PAGE = `<!doctype html>
 <html><head><title>wsp</title></head>
@@ -928,8 +929,8 @@ describe("openHost", () => {
       const session = await open({ dial: hostAnswering([], []).dial });
       expect(stopped).toEqual([old.pid]);
       expect(old.alive()).toBe(false);
-      // wsp down's own road: the manager is asked first, and holds nothing, so the pid the lock names is stopped.
-      expect(launchd.ran.map(argv => argv[1])).toEqual(["print", "enable", "bootstrap"]);
+      // The pid the lock names is stopped, and the manager is asked for nothing but the service after it.
+      expect(launchd.ran.map(argv => argv[1])).toEqual(["enable", "bootstrap"]);
       expect(session.url).toBe(`http://127.0.0.1:${launchd.host()!.port}`);
       expect((await bootOf(session.url))?.version).toBe(VERSION);
     } finally {
@@ -1134,6 +1135,177 @@ describe("openHost", () => {
       expect(later.alive()).toBe(true);
     } finally {
       await later.stop();
+    }
+  });
+
+  it("replaces a host of an earlier release that comes up while the window is open, on the feed's next dial", async () => {
+    const lines: string[] = [];
+    const opts: OpenHostOptions = { statePath, home, shim, io: quietIO(lines), ask: noAsk, service: launchd.road, dial: hostAnswering([], []).dial };
+    await openHost(opts);
+    const check = earlierHostCheck();
+    const states: FeedState[] = [];
+    // The dial main.ts hands the menu bar's feed on this computer's host.
+    const feed = hostFeed({ dial: () => check(opts).then(() => dialHost(statePath, { aim: { kind: "here" }, home })), changed: state => states.push(state), retryMs: 100 });
+    let old: Awaited<ReturnType<typeof olderHost>> | undefined;
+    const stopped: number[] = [];
+    launchd.road.stop = pid => void (stopped.push(pid), pid === old?.pid && old.stop());
+    try {
+      await vi.waitFor(() => expect(states.at(-1)?.lost).toBe(false), { timeout: 10_000 });
+      // The app's service stops with its unit left (stopped by hand, or off at login across a restart), and an older
+      // wsp on PATH starts a host of its own release.
+      await launchd.road.run(["launchctl", "bootout"]);
+      old = await olderHost(statePath, "verb");
+      await vi.waitFor(() => expect(states.some(state => state.lost)).toBe(true), { timeout: 10_000 });
+      await vi.waitFor(() => expect(stopped).toEqual([old!.pid]), { timeout: 20_000 });
+      await vi.waitFor(() => expect(states.at(-1)?.lost).toBe(false), { timeout: 10_000 });
+      expect(old.alive()).toBe(false);
+      expect(lines).toContain(`wsp ${OLDER} (pid ${old.pid}, started by verb) serves ${statePath}; restarting it as ${VERSION}`);
+      expect((await bootOf(`http://127.0.0.1:${launchd.host()!.port}`))?.version).toBe(VERSION);
+      // A dial with this release serving replaces nothing.
+      expect(await check(opts)).toEqual({ kind: "none" });
+      expect(stopped).toHaveLength(1);
+    } finally {
+      feed.close();
+      await old?.stop();
+    }
+  });
+
+  it("asks before it replaces an earlier host that comes up with a turn running, and leaves a later one serving", async () => {
+    const working = hostAnswering([{ id: "s_mac", workspaceId: "ws_mac", status: "running" }], [{ id: "ws_mac", kind: "local" }]).dial;
+    const stopped: number[] = [];
+    launchd.road.stop = pid => void stopped.push(pid);
+    const old = await olderHost(statePath, "verb");
+    try {
+      const asked: ReplacePrompt[] = [];
+      await expect(earlierHostCheck()({ statePath, home, shim, io: quietIO(), service: launchd.road, dial: working, ask: async prompt => (asked.push(prompt), false) })).rejects.toBeInstanceOf(KeptOtherRelease);
+      expect(asked.map(p => p.message)).toEqual([`wsp ${OLDER} is still serving your threads; restart it as ${VERSION}?`]);
+      expect(old.alive()).toBe(true);
+    } finally {
+      await old.stop();
+    }
+    const later = await olderHost(statePath, "verb", "99.0.0");
+    try {
+      expect(await earlierHostCheck()({ statePath, home, shim, io: quietIO(), service: launchd.road, dial: working, ask: noAsk })).toEqual({ kind: "none" });
+      expect(later.alive()).toBe(true);
+      expect(stopped).toEqual([]);
+      expect(launchd.ran).toEqual([]);
+    } finally {
+      await later.stop();
+    }
+  });
+
+  it("replaces an older release once per run: when the service comes up as that release again, the feed stops restarting it and says so once", async () => {
+    // An install rolled back under the open app: the unit's program now runs the older files, so every start of the
+    // service serves the older release.
+    const olders: Awaited<ReturnType<typeof olderHost>>[] = [];
+    let starts = 0;
+    const run = launchd.road.run;
+    launchd.road.run = async (argv, waitMs) => {
+      if (argv[1] !== "bootstrap") return run(argv, waitMs);
+      launchd.ran.push([...argv]);
+      starts++;
+      olders.push(await olderHost(statePath, "service"));
+      return { code: 0, output: "" };
+    };
+    launchd.road.stop = pid => void olders.find(o => o.pid === pid)?.stop();
+    olders.push(await olderHost(statePath, "verb"));
+    const opts: OpenHostOptions = { statePath, home, shim, io: quietIO(), ask: noAsk, service: launchd.road, dial: hostAnswering([], []).dial };
+    const check = earlierHostCheck();
+    const found: string[] = [];
+    const feed = hostFeed({
+      dial: () =>
+        check(opts).then(
+          r => (found.push(r.kind === "again" ? `again ${r.release} ${r.first ? "first" : "after"}` : r.kind), dialHost(statePath, { aim: { kind: "here" }, home })),
+          (e: unknown) => (found.push(`failed: ${e instanceof Error ? e.message : String(e)}`), Promise.reject(e)),
+        ),
+      changed: () => {},
+      retryMs: 100,
+    });
+    try {
+      await vi.waitFor(() => expect(found.length).toBeGreaterThanOrEqual(6), { timeout: 15_000 });
+      expect(found[0]).toBe(`failed: this app is wsp ${VERSION} and the host serving ${statePath} came up as wsp ${OLDER}; its log is ${join(home, "host.log")}`);
+      expect(found[1]).toBe(`again ${OLDER} first`);
+      expect(found.slice(2).every(f => f === `again ${OLDER} after`)).toBe(true);
+      // One start of the service, for the one replace; every dial after it leaves the older host serving.
+      expect(starts).toBe(1);
+      expect(olders.at(-1)!.alive()).toBe(true);
+      expect(`${servesAgainNotice(OLDER).message} ${servesAgainNotice(OLDER).detail}`).not.toMatch(/Mac|\u2014/);
+    } finally {
+      feed.close();
+      for (const o of olders) await o.stop();
+    }
+  });
+
+  it("a replace that failed is tried no more, and its notice says what failed rather than that the app restarted it", async () => {
+    // Served inside a process nothing marked, which the replace refuses before it stops anything.
+    const unmarked = await olderHost(statePath, undefined);
+    const opts: OpenHostOptions = { statePath, home, shim, io: quietIO(), ask: noAsk, service: launchd.road, dial: hostAnswering([], []).dial };
+    try {
+      const check = earlierHostCheck();
+      const why = `this app is wsp ${VERSION} and wsp ${OLDER} (pid ${unmarked.pid}) serves ${statePath} from a process wsp did not start: stop it, then open wsp again`;
+      await expect(check(opts)).rejects.toThrow(why);
+      expect(await check(opts)).toEqual({ kind: "again", release: OLDER, first: true, failed: why });
+      expect(await check(opts)).toEqual({ kind: "again", release: OLDER, first: false, failed: why });
+      const notice = servesAgainNotice(OLDER, why);
+      expect(notice.message).toBe(`wsp ${OLDER} still serves your threads; this app could not restart it as ${VERSION}`);
+      expect(notice.detail).toBe(`The restart failed: ${why}. This app leaves wsp ${OLDER} serving and tries no more until it opens again.`);
+      expect(`${notice.message} ${notice.detail}`).not.toMatch(/restarted|Mac|\u2014/);
+      expect(unmarked.alive()).toBe(true);
+      expect(launchd.ran).toEqual([]);
+    } finally {
+      await unmarked.stop();
+    }
+    // A verb's host that outlives its stop.
+    const stubborn = await olderHost(statePath, "verb");
+    launchd.road.stop = () => {};
+    launchd.road.waitMs = 600;
+    try {
+      const check = earlierHostCheck();
+      await expect(check(opts)).rejects.toThrow(`wsp ${OLDER} (pid ${stubborn.pid}) was stopped and still serves ${statePath} after 600ms`);
+      const again = await check(opts);
+      expect(again).toMatchObject({ kind: "again", release: OLDER, first: true });
+      expect(servesAgainNotice(OLDER, again.kind === "again" ? again.failed : undefined).detail).toMatch(/^The restart failed: wsp 0\.3\.0 \(pid \d+\) was stopped and still serves /);
+      expect(launchd.ran).toEqual([]);
+    } finally {
+      await stubborn.stop();
+    }
+  });
+
+  it("replaces a host a verb started beside a unit file by its pid, so the unit keeps the words given to wsp up --service and stays off at login", async () => {
+    olderUnit([shim]);
+    launchd.setAtLogin(false);
+    const old = await olderHost(statePath, "verb");
+    launchd.road.stop = pid => void (pid === old.pid && old.stop());
+    try {
+      const found = await earlierHostCheck()({ statePath, home, shim, io: quietIO(), ask: noAsk, service: launchd.road, dial: hostAnswering([], []).dial });
+      expect(found.kind).toBe("replaced");
+      expect(old.alive()).toBe(false);
+      expect(unitWords()).toEqual([shim, "up", "--state", statePath, ...FLAGS]);
+      expect(launchd.atLogin()).toBe(false);
+      expect(launchd.ran.map(argv => argv[1])).not.toContain("bootout");
+      expect((await bootOf(`http://127.0.0.1:${launchd.host()!.port}`))?.version).toBe(VERSION);
+    } finally {
+      await old.stop();
+    }
+  });
+
+  it("asks one question when a window opens and the feed's check meet one older host with a turn running, and replaces it once", async () => {
+    const old = await olderHost(statePath, "verb");
+    const stopped: number[] = [];
+    launchd.road.stop = pid => void (stopped.push(pid), pid === old.pid && old.stop());
+    const asked: ReplacePrompt[] = [];
+    // The turn runs on the older host; the host after it is asked nothing.
+    const working = hostAnswering([{ id: "s_mac", workspaceId: "ws_mac", status: "running" }], [{ id: "ws_mac", kind: "local" }]).dial;
+    const opts: OpenHostOptions = { statePath, home, shim, io: quietIO(), service: launchd.road, dial: working, ask: async prompt => (asked.push(prompt), await new Promise(r => setTimeout(r, 200)), true) };
+    const turn = oneAtATime();
+    try {
+      const [session, found] = await Promise.all([turn(() => openHost(opts)), turn(() => earlierHostCheck()(opts))]);
+      expect(asked).toHaveLength(1);
+      expect(stopped).toEqual([old.pid]);
+      expect(found).toEqual({ kind: "none" });
+      expect((await bootOf(session.url))?.version).toBe(VERSION);
+    } finally {
+      await old.stop();
     }
   });
 

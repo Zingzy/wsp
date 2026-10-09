@@ -3,13 +3,13 @@
 // that runs this app's own binary as node on the bundled command, written
 // where the MCP install's one constant says, rewritten when the app moved.
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { daemonBinaryHere, shimPath } from "@wsp/host";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { VERSION, daemonBinaryHere, shimPath } from "@wsp/host";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { writeStub } from "../../../packages/protocol/test/stub-script.js";
-import { installShim, keepAppImage, shimText } from "../src/shim.js";
+import { installShim, keepAppImage, replaceOlderOnPath, shimText } from "../src/shim.js";
 
 describe("the wsp shim", () => {
   let home: string;
@@ -109,5 +109,104 @@ describe("the wsp shim", () => {
     const moved = shimText({ execPath: "/Users/me/Downloads/wsp.app/Contents/MacOS/wsp", script: "/Users/me/Downloads/wsp.app/Contents/Resources/app/main/cli.mjs" });
     expect(installShim(path, moved)).toBe("written");
     expect(readFileSync(path, "utf8")).toBe(moved);
+  });
+
+  /** A global npm install of @wsp-labs/wsp of `version` under `prefix`, as npm lays one out: the package under
+   * lib/node_modules and its bin link at bin/wsp, relative as npm writes it. */
+  function npmGlobal(prefix: string, version: string): string {
+    const pkg = join(prefix, "lib", "node_modules", "@wsp-labs", "wsp");
+    mkdirSync(join(pkg, "dist"), { recursive: true });
+    mkdirSync(join(prefix, "bin"));
+    writeFileSync(join(pkg, "package.json"), JSON.stringify({ name: "@wsp-labs/wsp", version }));
+    writeStub(join(pkg, "dist", "bin.js"), `#!/bin/sh\necho 'wsp ${version}'\n`);
+    // The stub runner reads its script beside the name it was started by, which is npm's link.
+    writeFileSync(join(prefix, "bin", ".wsp.stub"), `#!/bin/sh\necho 'wsp ${version}'\n`);
+    symlinkSync(join("..", "lib", "node_modules", "@wsp-labs", "wsp", "dist", "bin.js"), join(prefix, "bin", "wsp"));
+    return join(prefix, "bin", "wsp");
+  }
+
+  it("makes npm's link of an older global install a link to the shim, by where it points, and leaves every other wsp", () => {
+    const wspHome = join(home, ".wsp");
+    writeFileSync(join(home, "cli.mjs"), `console.log("wsp ${VERSION}");\n`);
+    const shim = shimPath(wspHome);
+    installShim(shim, shimText({ execPath: process.execPath, script: join(home, "cli.mjs") }));
+    // The owner's ~/.local/bin/wsp, and a later one.
+    const older = npmGlobal(join(home, ".local"), "0.3.0");
+    const later = npmGlobal(join(home, "npm-later"), "99.0.0");
+    // A person's own wrapper, which answers as an older wsp, and the wsp a host writes on a machine: files, not links.
+    const wrapper = join(home, "bin", "wsp");
+    const machine = join(home, "usr-local-bin", "wsp");
+    for (const [file, text] of [
+      [wrapper, '#!/bin/sh\nWSP_HOME="$HOME/.wsp-pinned" exec /opt/pinned/wsp "$@"\n'],
+      [machine, '#!/bin/sh\nexec /root/wsp-daemon/wsp/assets/daemon/x86_64-unknown-linux-musl/wsp-daemon wsp "$@"\n'],
+    ] as const) {
+      mkdirSync(join(file, ".."), { recursive: true });
+      writeFileSync(file, text, { mode: 0o755 });
+    }
+    // A project that pins an older wsp as a dev dependency: a real npm link, but no global install.
+    const project = join(home, "proj", "node_modules");
+    mkdirSync(join(project, "@wsp-labs", "wsp", "dist"), { recursive: true });
+    mkdirSync(join(project, ".bin"));
+    writeFileSync(join(project, "@wsp-labs", "wsp", "package.json"), JSON.stringify({ name: "@wsp-labs/wsp", version: "0.2.0" }));
+    symlinkSync(join("..", "@wsp-labs", "wsp", "dist", "bin.js"), join(project, ".bin", "wsp"));
+    // A link into the shim's own folder, which is already this app's.
+    mkdirSync(join(home, "linked"));
+    symlinkSync(shim, join(home, "linked", "wsp"));
+    const dirs = [join(home, "linked"), join(home, "bin"), join(home, "usr-local-bin"), join(project, ".bin"), "node_modules/.bin", join(home, ".local", "bin"), join(home, "npm-later", "bin"), join(wspHome, "bin")];
+    const path = [...dirs, "/usr/bin", "/bin"].join(":");
+    const onPath = (): string => spawnSync("wsp", ["--version"], { encoding: "utf8", env: { PATH: [join(home, ".local", "bin"), "/usr/bin", "/bin"].join(":") } }).stdout;
+    expect(onPath()).toBe("wsp 0.3.0\n");
+
+    expect(replaceOlderOnPath(wspHome, path, VERSION, wspHome)).toEqual([
+      `${wrapper} is a file of its own, not npm's link to wsp, so it stays`,
+      `${machine} is a file of its own, not npm's link to wsp, so it stays`,
+      `${join(project, ".bin", "wsp")} points at ${join(project, "@wsp-labs", "wsp", "dist", "bin.js")}, not an npm install of wsp, so it stays`,
+      `${older} was npm's wsp 0.3.0; it now runs ${shim}, wsp ${VERSION}`,
+      `${later} is wsp 99.0.0, later than this app's ${VERSION}, so it stays`,
+    ]);
+    expect(readlinkSync(older)).toBe(shim);
+    expect(onPath()).toBe(`wsp ${VERSION}\n`);
+    expect(readFileSync(wrapper, "utf8")).toContain("/opt/pinned/wsp");
+    expect(readFileSync(machine, "utf8")).toContain("wsp-daemon wsp");
+    expect(readlinkSync(later)).toBe(join("..", "lib", "node_modules", "@wsp-labs", "wsp", "dist", "bin.js"));
+    expect(readlinkSync(join(project, ".bin", "wsp"))).toBe(join("..", "@wsp-labs", "wsp", "dist", "bin.js"));
+    expect(readlinkSync(join(home, "linked", "wsp"))).toBe(shim);
+    expect(readdirSync(join(home, ".local", "bin")).filter(name => name.endsWith(".part"))).toEqual([]);
+    // A second launch finds nothing to replace.
+    expect(replaceOlderOnPath(wspHome, path, VERSION, wspHome).filter(line => line.includes(" was "))).toEqual([]);
+  });
+
+  it("touches no wsp on PATH from a home other than the person's own, as a test or a lab runs on", () => {
+    const older = npmGlobal(join(home, ".local"), "0.3.0");
+    const lab = join(home, "lab-home");
+    installShim(shimPath(lab), shimText({ execPath: process.execPath, script: join(home, "cli.mjs") }));
+    expect(replaceOlderOnPath(lab, join(home, ".local", "bin"), VERSION, join(home, ".wsp"))).toEqual([]);
+    expect(readlinkSync(older)).toBe(join("..", "lib", "node_modules", "@wsp-labs", "wsp", "dist", "bin.js"));
+  });
+
+  it("reads the person's own home off the password file, so a launch with HOME on a temp folder touches no wsp on PATH", () => {
+    const older = npmGlobal(join(home, "npm"), "0.3.0");
+    const temp = join(home, "temp-home");
+    vi.stubEnv("HOME", temp);
+    try {
+      installShim(shimPath(join(temp, ".wsp")), shimText({ execPath: process.execPath, script: join(home, "cli.mjs") }));
+      expect(replaceOlderOnPath(join(temp, ".wsp"), join(home, "npm", "bin"), VERSION)).toEqual([]);
+      expect(readlinkSync(older)).toBe(join("..", "lib", "node_modules", "@wsp-labs", "wsp", "dist", "bin.js"));
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("writes the shim over a link left at its path rather than through it, so a link into a folder that went does not stop the app", () => {
+    const path = shimPath(join(home, ".wsp"));
+    mkdirSync(join(path, ".."), { recursive: true });
+    const gone = join(home, "gone-lab-home", "bin", "wsp");
+    symlinkSync(gone, path);
+    const text = shimText({ execPath: "/opt/wsp/wsp", script: "/opt/wsp/resources/app/main/cli.mjs" });
+    expect(installShim(path, text)).toBe("written");
+    expect(lstatSync(path).isSymbolicLink()).toBe(false);
+    expect(readFileSync(path, "utf8")).toBe(text);
+    expect(existsSync(join(home, "gone-lab-home"))).toBe(false);
+    expect(installShim(path, text)).toBe("kept");
   });
 });

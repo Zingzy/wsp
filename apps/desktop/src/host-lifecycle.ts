@@ -290,11 +290,78 @@ export async function openHost(opts: OpenHostOptions): Promise<HostSession> {
     if (away !== undefined) return away;
     await ensureService(opts);
   }
+  return ownServed(opts);
+}
+
+/** The session on the host serving after this app started or replaced one, which has to be this app's release. */
+async function ownServed(opts: OpenHostOptions): Promise<HostSession> {
   const served = await lockedHost(opts.statePath);
   if (served === undefined) throw new Error(`wsp started and stopped again; its log is ${hostLogPath(opts.statePath)}`);
   const other = otherRelease(served.release);
   if (other !== undefined) throw new Error(`this app is wsp ${VERSION} and the host serving ${opts.statePath} came up as wsp ${other}; its log is ${hostLogPath(opts.statePath)}`);
   return served.session;
+}
+
+/** What the menu bar's check found: nothing to replace, a host it replaced, or a release it tried once already in this
+ * run serving again, which it leaves (`first` the one time it says so, `failed` why that try failed where it did). */
+export type Recheck = { kind: "none" } | { kind: "replaced"; session: HostSession } | { kind: "again"; release: string; first: boolean; failed?: string };
+
+/** The check every dial of the menu bar's feed makes, its reconnects included, kept for one run of the app: a host of
+ * an earlier release that came up after the window opened (an older wsp on PATH starting one once this app's had
+ * stopped) is replaced as at start, asking first while turns run. Each older release is replaced once per run. One
+ * that serves again after that is what this computer's wsp runs now (an install rolled back under the app), and
+ * restarting it on every dial would stop every client each time, so it is left serving and said once. A lock this
+ * window would refuse is left to the dial, which says why. */
+export function earlierHostCheck(): (opts: OpenHostOptions) => Promise<Recheck> {
+  // Each release tried, with why its replace failed where it did; a release is replaced only once replaceHost returns.
+  const tried = new Map<string, string | undefined>();
+  const told = new Set<string>();
+  return async opts => {
+    const held = await lockedHost(opts.statePath).catch(() => undefined);
+    const theirs = otherRelease(held?.release);
+    if (held === undefined || theirs === undefined || compareVersions(theirs, VERSION) > 0) return { kind: "none" };
+    if (tried.has(theirs)) {
+      const first = !told.has(theirs);
+      told.add(theirs);
+      const failed = tried.get(theirs);
+      return { kind: "again", release: theirs, first, ...(failed !== undefined ? { failed } : {}) };
+    }
+    try {
+      await replaceHost(opts, held.lock, theirs);
+    } catch (e) {
+      // The person kept it serving, which quits the app; any other failure is said once and not tried again.
+      if (!(e instanceof KeptOtherRelease)) tried.set(theirs, e instanceof Error ? e.message : String(e));
+      throw e;
+    }
+    tried.set(theirs, undefined);
+    return { kind: "replaced", session: await ownServed(opts) };
+  };
+}
+
+/** The notice for a release the check tried once and found serving again: what failed where the replace did, else
+ * that it came back after the restart. */
+export function servesAgainNotice(theirs: string, failed?: string): { message: string; detail: string } {
+  if (failed !== undefined) {
+    return {
+      message: `wsp ${theirs} still serves your threads; this app could not restart it as ${VERSION}`,
+      detail: `The restart failed: ${failed}. This app leaves wsp ${theirs} serving and tries no more until it opens again.`,
+    };
+  }
+  return {
+    message: `wsp ${theirs} is serving again after this app restarted it as ${VERSION}`,
+    detail: `The wsp command on ${THIS_COMPUTER} runs ${theirs} now, so this app leaves it serving and restarts it no more. Open the app of that release, or install ${VERSION} again.`,
+  };
+}
+
+/** Runs what it is handed one at a time, in the order handed: the open a launch or a Dock click makes and the menu
+ * bar's check may each ask the person about an older host, and two at once asked twice and replaced twice. */
+export function oneAtATime(): <T>(run: () => Promise<T>) => Promise<T> {
+  let last: Promise<unknown> = Promise.resolve();
+  return run => {
+    const next = last.catch(() => {}).then(run);
+    last = next;
+    return next;
+  };
 }
 
 /** The release a page names where it is not this app's own; nothing where it is, or where a host bound beyond this
@@ -331,7 +398,8 @@ export function replacePrompt(theirs: string, working: number | undefined): Repl
  * nothing is stopped until they answer. A host nothing marked is served inside some process wsp cannot stop, and is
  * refused. A service keeps its unit, the words given to wsp up --service and its login setting: one running this
  * shim is restarted, which brings it back on this app's files, and one running another program has only that
- * program written over. Any other host is stopped by wsp down's own road and the service starts after it. */
+ * program written over. Any other host is stopped by its pid and the service starts after it, from the unit already
+ * there where there is one. */
 async function replaceHost(opts: OpenHostOptions, lock: HostLock, theirs: string): Promise<void> {
   const { statePath, service } = opts;
   if (lock.startedBy === undefined) {
@@ -341,8 +409,12 @@ async function replaceHost(opts: OpenHostOptions, lock: HostLock, theirs: string
   if (working !== 0 && !(await opts.ask(replacePrompt(theirs, working)))) throw new KeptOtherRelease(`wsp ${theirs} keeps serving ${statePath}`);
   opts.io.log(`wsp ${theirs} (pid ${lock.pid}, started by ${lock.startedBy}) serves ${statePath}; restarting it as ${VERSION}`);
   if (lock.startedBy !== "service") {
-    const said: string[] = [];
-    if ((await downCommand(quietIO(said), { statePath }, service)) !== 0) throw new Error(said.join("\n"));
+    // Stopped by its own pid, read again off the lock just before the signal. wsp down would also take the unit file
+    // beside it, and the words and the login setting the service below keeps with it.
+    if (servingHost(statePath)?.pid === lock.pid) service.stop(lock.pid);
+    for (const until = Date.now() + service.waitMs; servingHost(statePath)?.pid === lock.pid; await pause()) {
+      if (Date.now() >= until) throw new Error(`wsp ${theirs} (pid ${lock.pid}) was stopped and still serves ${statePath} after ${fmtDuration(service.waitMs)}`);
+    }
     return ensureService(opts);
   }
   const unit = service.manager?.unit(serviceAddressHere(statePath));

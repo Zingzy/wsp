@@ -4,15 +4,16 @@
 // sha256 per asset, and the asset under the repo's download path. The computer
 // it installs on is a temporary home, and uname, plus each mac tool on a mac
 // run, is a stub on PATH.
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chownSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { chownSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { REPO, bundleNames } from "../../../packages/protocol/src/bundles.mjs";
+import { compareVersions } from "../../../packages/protocol/src/semver.mjs";
 import { writeStub } from "../../../packages/protocol/test/stub-script.js";
 import { shimText } from "../src/shim.js";
 
@@ -61,6 +62,17 @@ interface Ran {
   stdout: string;
   stderr: string;
 }
+
+describe("the install line's release order", () => {
+  it("is compareVersions' order, prerelease numbers as numbers, so it never takes a later prerelease for an earlier one", () => {
+    const releases = ["0.3.0", "0.3.1", "0.4.0", "0.10.0", "0.4.0-rc.1", "0.4.0-beta.9", "0.4.0-beta.10", "0.4.0-dev", "1.0.0-alpha", "1.0.0-alpha.1", "1.0.0-alpha.beta", "1.0.0-beta", "1.0.0"];
+    const pairs = releases.flatMap(a => releases.map(b => [a, b] as const));
+    const script = `eval "$(sed -n '/^earlier() {/,/^}/p' "$1")"\nshift\nwhile [ $# -gt 0 ]; do if earlier "$1" "$2"; then echo yes; else echo no; fi; shift 2; done\n`;
+    const ran = spawnSync("/bin/sh", ["-c", script, "sh", SCRIPT, ...pairs.flat()], { encoding: "utf8" });
+    expect(ran.status, ran.stderr).toBe(0);
+    expect(ran.stdout.trim().split("\n")).toEqual(pairs.map(([a, b]) => (compareVersions(a, b) < 0 ? "yes" : "no")));
+  });
+});
 
 describe("the install line", () => {
   let root: string;
@@ -153,6 +165,51 @@ describe("the install line", () => {
         });
         expect(shell, flags).toMatchObject({ code: 0, stdout: "wsp 0.4.0\n" });
       }
+    });
+
+    /** A global npm install of @wsp-labs/wsp of `version` under `prefix`, as npm lays one out. */
+    function npmGlobal(prefix: string, version: string): string {
+      const pkg = join(prefix, "lib", "node_modules", "@wsp-labs", "wsp");
+      mkdirSync(join(pkg, "dist"), { recursive: true });
+      mkdirSync(join(prefix, "bin"));
+      writeFileSync(join(pkg, "package.json"), JSON.stringify({ name: "@wsp-labs/wsp", version }, null, 2));
+      writeStub(join(pkg, "dist", "bin.js"), `#!/bin/sh\necho 'wsp ${version}'\n`);
+      // The stub runner reads its script beside the name it was started by, which is npm's link.
+      writeFileSync(join(prefix, "bin", ".wsp.stub"), `#!/bin/sh\necho 'wsp ${version}'\n`);
+      symlinkSync(join("..", "lib", "node_modules", "@wsp-labs", "wsp", "dist", "bin.js"), join(prefix, "bin", "wsp"));
+      return join(prefix, "bin", "wsp");
+    }
+
+    it("makes npm's link of an older global install a link to the command it wrote, and leaves a later one, a file and a link of a project, running none of them", async () => {
+      publish("0.4.0", { [bundleNames("0.4.0").appImage]: appImage("0.4.0") }, { latest: true });
+      // The owner's ~/.local/bin/wsp, a later one, a person's wrapper that would hang if it were run, and a project
+      // that pins an older wsp.
+      const older = npmGlobal(join(home, ".local"), "0.3.0");
+      const later = npmGlobal(join(root, "npm-later"), "0.5.0-dev");
+      const wrapper = join(root, "wrapper", "wsp");
+      mkdirSync(join(root, "wrapper"));
+      writeFileSync(wrapper, "#!/bin/sh\nsleep 30\necho 'wsp 0.3.0'\n", { mode: 0o755 });
+      const project = join(root, "proj", "node_modules");
+      mkdirSync(join(project, "@wsp-labs", "wsp"), { recursive: true });
+      mkdirSync(join(project, ".bin"));
+      writeFileSync(join(project, "@wsp-labs", "wsp", "package.json"), JSON.stringify({ name: "@wsp-labs/wsp", version: "0.2.0" }));
+      symlinkSync(join("..", "@wsp-labs", "wsp", "dist", "bin.js"), join(project, ".bin", "wsp"));
+      const onPath = (): string => spawnSync("wsp", ["--version"], { encoding: "utf8", env: { PATH: `${join(home, ".local", "bin")}:/usr/bin:/bin` } }).stdout;
+      expect(onPath()).toBe("wsp 0.3.0\n");
+
+      const installed = await run({ PATH: `${bin}:${join(root, "wrapper")}:${join(project, ".bin")}:${join(home, ".local", "bin")}:${join(root, "npm-later", "bin")}:/usr/bin:/bin` });
+      expect(installed.code, installed.stderr).toBe(0);
+      const shim = join(home, ".wsp", "bin", "wsp");
+      expect(installed.stdout).toContain(`wsp install: ${older} was npm's wsp 0.3.0; it now runs ${shim}\n`);
+      expect(installed.stdout).toContain(`wsp install: ${later} is wsp 0.5.0-dev, later than 0.4.0, so it stays\n`);
+      expect(installed.stdout).not.toContain(wrapper);
+      expect(installed.stdout).not.toContain(project);
+      expect(readlinkSync(older)).toBe(shim);
+      expect(onPath()).toBe("wsp 0.4.0\n");
+      expect(readlinkSync(later)).toBe(join("..", "lib", "node_modules", "@wsp-labs", "wsp", "dist", "bin.js"));
+      expect(readFileSync(wrapper, "utf8")).toContain("sleep 30");
+      expect(readlinkSync(join(project, ".bin", "wsp"))).toBe(join("..", "@wsp-labs", "wsp", "dist", "bin.js"));
+      expect(readdirSync(join(home, ".local", "bin")).filter(name => name.endsWith(".part"))).toEqual([]);
     });
 
     it("says it installs the libraries the app links where they are missing, under the names this computer's apt knows", async () => {
