@@ -521,7 +521,7 @@ built app against a fixture host on free ports with a throwaway home, never a
 running dev app:
 
 ```
-pnpm --filter @wsp/web build && pnpm --filter @wsp/host build
+pnpm --filter @wsp/web... build && pnpm --filter @wsp/host build
 pnpm --filter @wsp/web screenshots -- --out <folder> [--surfaces <file.json>]
 ```
 

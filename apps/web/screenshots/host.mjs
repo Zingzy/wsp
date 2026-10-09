@@ -54,7 +54,7 @@ const notBuilt = (what, path, how) => `${what} is not built: ${path} is missing.
  * the process list and the composer's own reading of the machine all do. */
 export async function whatIsNotBuilt({ exists = existsSync, daemon = daemonBinaryHere, version = daemonVersionOf } = {}) {
   for (const [what, path, how] of [
-    ["the web app", APP_PAGE, "pnpm --filter @wsp/web build"],
+    ["the web app", APP_PAGE, "pnpm --filter @wsp/web... build"],
     ["the wsp command", HOST_BIN, "pnpm --filter @wsp/host build"],
   ]) {
     if (!exists(path)) return notBuilt(what, path, how);

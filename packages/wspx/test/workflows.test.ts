@@ -9,14 +9,17 @@ import { describe, expect, it } from "vitest";
 
 const repo = fileURLToPath(new URL("../../..", import.meta.url));
 const read = (...path: string[]): string => readFileSync(join(repo, ...path), "utf8");
-/** Every workflow the folder carries, so a file added later is held to the rules below without an edit here. */
-const workflows = readdirSync(join(repo, ".github", "workflows"))
-  .filter(name => /\.ya?ml$/.test(name))
-  .sort()
-  .map(name => ({ name, text: read(".github", "workflows", name) }));
+/** Every workflow the folder carries and every action of this repository's own they run, so a file added later is
+ * held to the rules below without an edit here. `folder` is the directory Dependabot is pointed at to find it. */
+const workflows = [
+  ...readdirSync(join(repo, ".github", "workflows"))
+    .filter(name => /\.ya?ml$/.test(name))
+    .map(name => ({ name, folder: "/", text: read(".github", "workflows", name) })),
+  ...readdirSync(join(repo, ".github", "actions")).map(name => ({ name: `${name}/action.yml`, folder: `/.github/actions/${name}`, text: read(".github", "actions", name, "action.yml") })),
+].sort((a, b) => a.name.localeCompare(b.name));
 /** A `uses:` line the run time cannot move: a full commit sha, and the version it was resolved from beside it, which
- * is what the update service rewrites as a pair. */
-const PINNED = /^ *- uses: [\w./-]+@[0-9a-f]{40} # v\d+\.\d+\.\d+$/;
+ * is what the update service rewrites as a pair, or an action of this repository's own, read from the same commit. */
+const PINNED = /^ *- uses: (?:[\w./-]+@[0-9a-f]{40} # v\d+\.\d+\.\d+|\.\/\.github\/actions\/[\w-]+)$/;
 /** What each release job may hold, and nothing else: no job holds the identity token npm trusts beside a write. */
 const RELEASE_GRANTS: Record<string, Record<string, string>> = {
   daemon: {},
@@ -56,6 +59,10 @@ describe("every workflow's actions, grants, cargo lines and images", () => {
     const dependabot = read(".github", "dependabot.yml");
     expect(dependabot).toContain("package-ecosystem: github-actions");
     expect(dependabot).toContain("interval: weekly");
+    const scanned = [...(/^ {4}directories:\n((?: {6}- .*\n)+)/m.exec(dependabot)?.[1] ?? "").matchAll(/- "([^"]+)"/g)].map(m => m[1]!);
+    for (const { name, folder } of new Map(uses.map(({ name }) => [name, workflows.find(w => w.name === name)!])).values()) {
+      expect(touches(scanned, folder), `${name}: Dependabot scans no folder matching ${folder}`).toBe(true);
+    }
   });
 
   it("starts every job at contents read and grants each release job the one thing its steps use", () => {
