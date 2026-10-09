@@ -90,6 +90,8 @@ export interface ServiceManager {
   text(plan: ServicePlan): string;
   /** Whether a unit file this manager wrote runs this program, whatever else it says. */
   runs(text: string, program: string): boolean;
+  /** The words a unit file this manager wrote runs, program first; nothing where the text holds none it can read. */
+  argv(text: string): string[] | undefined;
   /** Run in order once the file is written, so it serves now and again at login. */
   load(at: ServiceAddress): ReadonlyArray<readonly string[]>;
   /** Run in order to have a loaded unit start again at every login, or start only when asked, leaving it running. */
@@ -107,11 +109,13 @@ export interface ServiceManager {
    * stops nothing, and one that keeps a link of its own beside that file would be left holding one that points at
    * nothing. */
   held(at: ServiceAddress): readonly HeldUnit[];
-  /** Exits 0 when the manager holds it, non-zero when it does not. */
+  /** The command whose answer says whether the manager holds the unit: loaded to start at login, or running. */
   holds(at: ServiceAddress): readonly string[];
-  /** Whether a non-zero `holds` answer is this manager saying it does not have the unit. A manager that is not on
-   * PATH, or one that never reached the thing it asks, answers non-zero too and that is not the same sentence: wsp
-   * leaves a service it cannot read alone rather than throwing away the file that names it. */
+  /** That answer read: whether the manager holds the unit. */
+  holding(answer: RunResult): boolean;
+  /** Whether a `holds` answer that is not holding is this manager saying it does not have the unit. A manager that is
+   * not on PATH, or one that never reached the thing it asks, answers otherwise and that is not the same sentence:
+   * wsp leaves a service it cannot read alone rather than throwing away the file that names it. */
   absent(answer: RunResult): boolean;
   /** One line a person still has to act on after the load, for what this manager alone asks; nothing where this
    * manager leaves them none. */
@@ -149,6 +153,27 @@ export function serviceEnv(env: Record<string, string | undefined>): Record<stri
 }
 
 const xml = (value: string): string => value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+const unxml = (value: string): string => value.replaceAll("&lt;", "<").replaceAll("&gt;", ">").replaceAll("&amp;", "&");
+
+/** The words of a line of sh words each quoted as shellQuote quotes them, or bare; nothing where a quote never closes. */
+function shellWords(line: string): string[] | undefined {
+  const words: string[] = [];
+  let word: string | undefined;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i]!;
+    if (c === " ") {
+      if (word !== undefined) words.push(word);
+      word = undefined;
+    } else if (c === "'") {
+      const end = line.indexOf("'", i + 1);
+      if (end < 0) return undefined;
+      word = (word ?? "") + line.slice(i + 1, end);
+      i = end;
+    } else if (c === "\\" && i + 1 < line.length) word = (word ?? "") + line[++i];
+    else word = (word ?? "") + c;
+  }
+  return word === undefined ? words : [...words, word];
+}
 
 const launchdName = (at: ServiceAddress): string => `com.wsp.${roleWord(at)}.${serviceTag(at.statePath)}`;
 const launchdUnit = (at: ServiceAddress): ServiceUnit => ({ name: launchdName(at), path: join(at.home, "Library", "LaunchAgents", `${launchdName(at)}.plist`) });
@@ -186,6 +211,10 @@ const launchd: ServiceManager = {
       "",
     ].join("\n"),
   runs: (text, program) => text.includes(`<key>ProgramArguments</key>\n  <array>\n    <string>${xml(program)}</string>\n`),
+  argv: text => {
+    const array = /<key>ProgramArguments<\/key>\s*<array>([\s\S]*?)<\/array>/.exec(text)?.[1];
+    return array === undefined ? undefined : [...array.matchAll(/<string>([^<]*)<\/string>/g)].map(m => unxml(m[1]!));
+  },
   load: at => [launchdAtLogin(at, true), ["launchctl", "bootstrap", `gui/${at.uid}`, launchdUnit(at).path]],
   unload: launchdUnload,
   atLogin: (at, on) => [launchdAtLogin(at, on)],
@@ -193,6 +222,7 @@ const launchd: ServiceManager = {
   // A disabled label reads `"label" => disabled`, or `=> true` on macOS before 13; a label never switched is absent.
   startsAtLogin: (answer, at) => (answer.code !== 0 ? undefined : !new RegExp(`"${launchdName(at).replaceAll(".", "\\.")}" => (disabled|true)`).test(answer.output)),
   holds: at => ["launchctl", "print", `gui/${at.uid}/${launchdName(at)}`],
+  holding: answer => answer.code === 0,
   // One domain per login, so one file; launchd reads its units off that file alone and has nothing to forget and
   // nothing to reload once it has gone.
   held: at => [{ unit: launchdUnit(at), words: "launchd agent", stop: launchdUnload(at), forget: [], reload: [] }],
@@ -231,6 +261,11 @@ const systemdForget = (at: ServiceAddress, scope: SystemdScope): ReadonlyArray<r
 const systemdStop = (at: ServiceAddress, scope: SystemdScope): ReadonlyArray<readonly string[]> => [[...systemctlIn(scope), "stop", systemdName(at)]];
 const systemdReload = (scope: SystemdScope): ReadonlyArray<readonly string[]> => [[...systemctlIn(scope), "daemon-reload"]];
 
+/** The ActiveStates of a unit that has a process or is about to, an auto-restart's wait among them (activating). */
+const SYSTEMD_RUNNING: ReadonlySet<string> = new Set(["active", "activating", "deactivating", "reloading", "refreshing"]);
+/** The UnitFileStates of a unit systemd starts at login. */
+const SYSTEMD_ENABLED: ReadonlySet<string> = new Set(["enabled", "enabled-runtime", "linked", "linked-runtime"]);
+
 const systemd: ServiceManager = {
   words: "systemd unit",
   unit: systemdUnit,
@@ -259,6 +294,10 @@ const systemd: ServiceManager = {
       "",
     ].join("\n"),
   runs: (text, program) => text.split("\n").some(line => line === `ExecStart=${shellQuote(program)}` || line.startsWith(`ExecStart=${shellQuote(program)} `)),
+  argv: text => {
+    const line = text.split("\n").find(l => l.startsWith("ExecStart="));
+    return line === undefined ? undefined : shellWords(line.slice("ExecStart=".length));
+  },
   // A restart rather than a start: an install writes the unit file over whatever was there and puts a new binary
   // beside it, and a unit whose old process is still up would go on running the binary that was replaced. Restart
   // starts a unit that is stopped, so the one line covers both.
@@ -274,7 +313,14 @@ const systemd: ServiceManager = {
     const said = answer.output.trim().split("\n").at(-1)?.trim();
     return said === "enabled" ? true : said === "disabled" ? false : undefined;
   },
-  holds: at => [...systemctlArgs(at), "is-enabled", systemdName(at)],
+  // Both facts, since is-enabled answers about login alone: a unit the person set not to start at login is disabled
+  // and still running, and a stop that read it as not held left it running with Restart=always behind it.
+  holds: at => [...systemctlArgs(at), "show", systemdName(at), "--property=ActiveState,UnitFileState"],
+  holding: answer => {
+    if (answer.code !== 0) return false;
+    const said = (name: string): string => new RegExp(`^${name}=(.*)$`, "m").exec(answer.output)?.[1]?.trim() ?? "";
+    return SYSTEMD_RUNNING.has(said("ActiveState")) || SYSTEMD_ENABLED.has(said("UnitFileState"));
+  },
   // systemd enables a unit by a symlink beside its file, so the file alone is not the whole of what it holds: a
   // stop and a disable while the unit file is still there take the process and that link with them, and the reload
   // after the file has gone leaves systemd holding nothing. Both scopes, the one this role writes today first: a
@@ -290,13 +336,9 @@ const systemd: ServiceManager = {
       reload: systemdReload(scope),
     }));
   },
-  // is-enabled exits 1 both for a unit systemd does not have and for a systemctl that never reached the user bus
-  // ("Failed to connect to bus: No medium found" on a box without one), so the word it printed is the answer and
-  // the code is not.
-  absent: answer => {
-    const said = answer.output.trim().split("\n").at(-1)?.trim() ?? "";
-    return said === "disabled" || said === "not-found" || /no such file or directory/i.test(said);
-  },
+  // show answers 0 for a unit systemd does not have (inactive, no file state), and 1 for a systemctl that never
+  // reached the user bus ("Failed to connect to bus: No medium found" on a box without one).
+  absent: answer => answer.code === 0,
   // A user unit runs while the person is logged in and no longer, which is what default.target means; the system
   // unit a place installs is the machine's and has nothing left for the person to do.
   afterLoad: at => (systemdScoped(at) === "user" ? "It comes back at every login; `loginctl enable-linger` keeps it up between them." : undefined),
@@ -445,7 +487,7 @@ export async function stopService(manager: ServiceManager, at: ServiceAddress, r
   const unit = manager.unit(at);
   const argv = manager.holds(at);
   const answer = await run(argv);
-  const held = answer.code === 0;
+  const held = manager.holding(answer);
   if (!held && !manager.absent(answer)) return { unit, held, unsure: { argv, result: answer } };
   const failure = held ? await runAll(manager.unload(at), run) : undefined;
   if (failure === undefined) rmSync(unit.path, { force: true });
@@ -457,7 +499,7 @@ export async function serviceReading(manager: ServiceManager | undefined, at: Se
   if (manager === undefined) return `none; wsp writes no service on ${platform}`;
   const unit = manager.unit(at);
   if (!existsSync(unit.path)) return `none; wsp up --service installs a ${manager.words}`;
-  const held = (await run(manager.holds(at))).code === 0;
+  const held = manager.holding(await run(manager.holds(at)));
   return `${manager.words} ${unit.name}, ${held ? "loaded" : "installed and not loaded"} (${unit.path})`;
 }
 

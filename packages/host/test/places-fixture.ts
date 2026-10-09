@@ -121,6 +121,7 @@ function fakeRunner(): { run: ServiceRunner; ran: string[][]; holds: boolean } {
     state.ran.push([...argv]);
     // `holds` is the one answer a stop turns on: a manager that says it has the unit is asked to unload it.
     if (argv.includes("print") || argv.includes("is-enabled")) return Promise.resolve({ code: state.holds ? 0 : 113, output: state.holds ? "" : "could not find service" });
+    if (argv.includes("show")) return Promise.resolve({ code: 0, output: `ActiveState=${state.holds ? "active" : "inactive"}\nUnitFileState=\n` });
     return Promise.resolve({ code: 0, output: "" });
   };
   return state;
