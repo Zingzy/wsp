@@ -430,6 +430,11 @@ export interface SidebarThreadSnapshot {
   readonly failure: string | null;
   /** When the person folded the thread's tree in the sidebar, as the host keeps it; null while it stands open. */
   readonly foldedAt: string | null;
+  /** The thread this one restarts, with whether it failed and when it ended where its workspace's rows hold it; null
+   * on a thread that restarts none. */
+  readonly replaces: { readonly threadId: string; readonly failed: boolean; readonly endedAt: string | null } | null;
+  /** The thread that restarts this one; null while none does. */
+  readonly replacedBy: string | null;
 }
 
 /** A send whose thread the runtime has written no row for yet: what the sidebar draws in place of that row, so the

@@ -553,6 +553,7 @@ export const FLAG_WORDS: Readonly<Record<string, string>> = {
   "recipe project": "a folder on this computer to weigh the histories by; repeats",
   "recipe scan project": "a folder on this computer to weigh the histories by; repeats",
   replace: "overwrite what is already at the destination",
+  replaces: "a stopped or failed thread this one restarts, by id or a prefix; the host settles it once this one starts",
   scheme: `which side of a light:...,dark:... theme to read; ${TerminalScheme.options.join(" or ")}`,
   send: "a task for the new workspace's first thread, with run's own flags after it",
   set: "<id>=on|off flipping one row of the recipe by its id; repeats",

@@ -385,6 +385,10 @@ export interface Runtime {
         /** The name the thread takes as a person's: it stands from the first second, the harness is told it too, and
          * no generated title ever replaces it. Rejects on a blank one. */
         title?: string;
+        /** The thread the thread this start opens restarts: kept on the new thread's record, and settled once its first
+         * turn starts. Rejects on a send into a thread that has run, for a thread working or asking, for one that already
+         * has a restart and for one the caller may not settle, all before the machine is asked for anything. */
+        replaces?: string;
         /** The images the message carries. Rejects over the caps, and rejects naming the agent when that agent's
          * adapter reads no image, both before the machine is asked for anything. */
         attachments?: readonly Attachment[];
@@ -448,6 +452,9 @@ export interface Runtime {
     /** Stamps a thread as shown by a window now, by its fold key, and tells every window with thread.marked. Reads
      * the absence a name nothing holds reads for a thread the caller cannot reach. */
     read(threadId: string, origin?: Caller): Promise<void>;
+    /** Whether a start may name this thread in replaces, read alone and refused as that start would refuse it: a
+     * thread working or asking anywhere in its tree, one the caller may not settle, and one that already has a restart. */
+    replaceable(threadId: string, origin?: Caller): Promise<void>;
     /** Stamps each thread and every thread under it settled and read, now, and tells every window as read does; a
      * thread whose tree works or asks is left whole, and one the fold holds already is left too. With finished, each
      * thread named stays and the finished threads under it settle, a failed one staying and one with work under it

@@ -35,6 +35,8 @@ import {
   threadMovedLine,
   threadWithoutIdRefusal,
   usageRefusal,
+  replacesWorkingLine,
+  replacesWorkingFix,
   verbFailure,
   TURN_TOKEN_ENV,
   UNKNOWN_SIZE,
@@ -509,6 +511,9 @@ export const TURN_ANSWERED: Record<string, TurnCase[]> = {
   run: [
     { case: "followed to its reply", arguments: { project: "attic-work", message: "fix it", model: "claude-opus-5-5", effort: "max" }, replies: { ...PROJECTS, "workspaces.resolve": resolved(), "harnesses.list": HARNESSES, "workspaces.wake": resolved(), "sessions.start": START }, pushed: { "sessions.start": TURN } },
     { case: "detached", arguments: { project: "attic-work", message: "fix it", detach: true, agent: "codex", notify: ["me", "thread-7f"] }, replies: { ...PROJECTS, "workspaces.resolve": resolved(), "harnesses.list": HARNESSES, "workspaces.wake": resolved(), "sessions.list": listed(), "sessions.start": START } },
+    { case: "a restart of a stopped thread, named by a prefix", arguments: { project: "attic-work", message: "fix it", detach: true, replaces: "thread-b0b0" }, replies: { ...PROJECTS, "workspaces.resolve": resolved(), "harnesses.list": HARNESSES, "sessions.replaceable": ok({}), "workspaces.wake": resolved(), "sessions.list": listed(), "sessions.start": START } },
+    { case: "a restart of a thread still working, refused before the machine is woken", arguments: { project: "attic-work", message: "fix it", detach: true, replaces: "thread-b0b0" }, replies: { ...PROJECTS, "workspaces.resolve": resolved(), "harnesses.list": HARNESSES, "sessions.list": listed(), "sessions.replaceable": no(usageRefusal(replacesWorkingLine("thread-b0b0b0b0c1c1"), replacesWorkingFix("thread-b0b0b0b0c1c1")).message, "usage") } },
+    { case: "a restart naming no thread", arguments: { project: "attic-work", message: "fix it", replaces: "nope" }, replies: { ...PROJECTS, "workspaces.resolve": resolved(), "harnesses.list": HARNESSES, "sessions.list": listed() } },
     { case: "a failed turn on a machine it woke goes back to sleep", arguments: { project: "attic-work", message: "fix it" }, replies: { ...PROJECTS, "workspaces.resolve": resolved(NAPPING), "harnesses.list": HARNESSES, "workspaces.wake": resolved(), "sessions.start": START, "sessions.list": listed([]), "workspaces.nap": ok({}) }, pushed: { "sessions.start": [done({ status: "failed", error: "the agent crashed \u0085" })] } },
     { case: "a failed turn beside a running one stays awake", arguments: { project: "attic-work", message: "fix it" }, replies: { ...PROJECTS, "workspaces.resolve": resolved(NAPPING), "harnesses.list": HARNESSES, "workspaces.wake": resolved(), "sessions.start": START, "sessions.list": listed(), "status.list": ok({ statuses: [] }) }, pushed: { "sessions.start": [frame({ type: "session.end", ...scope, turnId: "turn-9" })] } },
     { case: "refused for a sign-in", arguments: { project: "attic-work", message: "fix it" }, replies: { ...PROJECTS, "workspaces.resolve": resolved(), "harnesses.list": HARNESSES, "workspaces.wake": resolved(), "sessions.start": START }, pushed: { "sessions.start": [done({ status: "failed", error: "claude is not signed in", refusal: "sign-in" })] } },

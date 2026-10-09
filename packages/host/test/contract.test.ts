@@ -13,7 +13,7 @@ import { type AddressInfo } from "node:net";
 import { promisify } from "node:util";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { HOST_TOKEN_ENV, HOST_URL_ENV, NOT_UNDER_FIX, notUnderLine, CLOUD_ENV, DAEMON_TOKEN_PATH, deniedLine, noSuchAccountLine, PERMISSION_DENY, pushedForChildLine, EXIT_CODES, refusalLine, SCOPED_MCP_ARG, scopedNoPairLine, HERE_PLACE_ID, shellQuote, TURN_TOKEN_ENV, VerbFailure, WS_PATH } from "@wsp/protocol";
+import { HOST_TOKEN_ENV, HOST_URL_ENV, NOT_UNDER_FIX, notUnderLine, replacesWorkingFix, replacesWorkingLine, CLOUD_ENV, DAEMON_TOKEN_PATH, deniedLine, noSuchAccountLine, PERMISSION_DENY, pushedForChildLine, EXIT_CODES, refusalLine, SCOPED_MCP_ARG, scopedNoPairLine, HERE_PLACE_ID, shellQuote, TURN_TOKEN_ENV, VerbFailure, WS_PATH } from "@wsp/protocol";
 import { CLOUD_ON } from "../src/cloud.js";
 import { copyKey, createRuntime, DAEMON_TOKEN_SET, localExecStream, memoryStore, type Runtime, type Store } from "@wsp/runtime";
 import { fakeCopier, LocalBackend } from "@wsp/engine";
@@ -662,6 +662,63 @@ describe("the agent contract on the command line and the tool door", () => {
     const own = await asChild("thread", "settle", childId, "--json");
     expect(own.code).toBe(0);
     expect(objects(own.io)).toEqual([{ settled: [{ threadId: childId, title: "build it" }], left: [] }]);
+  });
+
+  it("run --replaces links a restart to the thread it replaced and settles that one; a working thread and one a token does not reach exit 3", async () => {
+    const [project] = await rt.projects.list();
+    const made = await rt.workspaces.create({ project: project!.id, golden: SEALED_GOLDEN.versions[0]!.snapshotId, name: "alpha" });
+    const lead = await rt.sessions.start(made.id, { prompt: "lead the work" });
+    await lead.finished;
+    const leadId = lead.view().threadId!;
+    const scope = { kind: "thread", threadId: leadId, workspaceId: made.id, rootThreadId: leadId } as const;
+    const kid = async (prompt: string): Promise<string> => {
+      const started = await rt.sessions.start(made.id, { prompt }, { origin: "relayed", by: scope });
+      await started.finished;
+      return started.view().threadId!;
+    };
+    const [stuck, beside] = [await kid("build it"), await kid("review it")];
+    const minted = await rt.devices.mint(`thread ${beside.slice(0, 8)}`, { ...scope, threadId: beside }, Date.now(), { road: "relayed" });
+    const io = captured();
+    const fromBeside = await cli(["run", "alpha", "--replaces", stuck, "--detach", "build it again", "--json"], io, undefined, { [HOST_URL_ENV]: `http://127.0.0.1:${handle!.port}`, [HOST_TOKEN_ENV]: minted.deviceToken, HOME: join(dir, "agent"), WSP_HOME: join(dir, "agent", ".wsp") });
+    expect(fromBeside).toBe(EXIT_CODES.usage);
+    expect(failure(io)).toEqual({ error: refusalLine(notUnderLine(stuck), NOT_UNDER_FIX), class: "usage", exit: EXIT_CODES.usage });
+    const asking = objects((await run("run", "alpha", "--detach", ASKS, "--json")).io).at(-1) as { threadId: string };
+    await vi.waitFor(async () => expect((await rt.sessions.list()).find(v => v.threadId === asking.threadId)!.asking).toBeDefined());
+    const working = await run("run", "alpha", "--replaces", asking.threadId, "--detach", "again", "--json");
+    expect(working.code).toBe(EXIT_CODES.usage);
+    expect(failure(working.io)).toEqual({ error: refusalLine(replacesWorkingLine(asking.threadId), replacesWorkingFix(asking.threadId)), class: "usage", exit: EXIT_CODES.usage });
+    await run("thread", "deny", asking.threadId);
+    const restart = await run("run", "alpha", "--replaces", stuck.slice(0, 8), "--detach", "build it again", "--json");
+    expect(restart.code).toBe(0);
+    const { threadId: again } = objects(restart.io).at(-1) as { threadId: string };
+    await vi.waitFor(async () => {
+      const { threads } = objects((await run("threads", "--json")).io).at(-1) as { threads: { threadId: string; replaces?: string; replacedBy?: string; settledAt?: number }[] };
+      expect(threads.find(t => t.threadId === again)).toMatchObject({ replaces: stuck });
+      expect(threads.find(t => t.threadId === stuck)).toMatchObject({ replacedBy: again, settledAt: expect.any(Number) });
+    });
+  });
+
+  it.runIf(CLOUD_ON)("a restart refused on the fork road answers before a machine is forked, on the command line and at the tool door", async () => {
+    await run("new", "beta");
+    const asking = objects((await run("run", "beta", "--detach", ASKS, "--json")).io).at(-1) as { threadId: string };
+    await vi.waitFor(async () => expect((await rt.sessions.list()).find(v => v.threadId === asking.threadId)!.asking).toBeDefined());
+    const refused = { error: refusalLine(replacesWorkingLine(asking.threadId), replacesWorkingFix(asking.threadId)), class: "usage", exit: EXIT_CODES.usage };
+    const forked = await run("run", "alpha", "--replaces", asking.threadId, "--detach", "again", "--json");
+    expect(forked.code).toBe(EXIT_CODES.usage);
+    expect(failure(forked.io)).toEqual(refused);
+    const server = mcpServer(statePath, { env: {} });
+    const [toClient, toServer] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "contract", version: "0" });
+    await server.connect(toServer);
+    await client.connect(toClient);
+    try {
+      const r = await client.callTool({ name: "run", arguments: { project: "alpha", replaces: asking.threadId, detach: true, message: "again" } });
+      expect({ structured: r.structuredContent, isError: r.isError }).toEqual({ structured: refused, isError: true });
+    } finally {
+      await client.close();
+    }
+    expect((await rt.workspaces.list()).map(w => w.name)).toEqual(["beta"]);
+    await run("thread", "deny", asking.threadId);
   });
 
   it("an auth refusal exits 2: the host refusing the token, or no token file to read", async () => {

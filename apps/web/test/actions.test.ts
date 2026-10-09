@@ -8,7 +8,7 @@ import { agentName } from "@wsp/catalog";
 import { PauseIcon, PlayIcon, SquareIcon } from "lucide-react";
 import { describe, expect, it, vi } from "vitest";
 import { taskStopRefusedLine, taskStopUnsupportedLine, goneRefusal, kindWords, machineWord, notAnsweringYet, ownDaemonDown, threadForgetRefusal, threadMarkdown, threadMessages, workspaceState, workspaceWord, type HarnessCatalog, type PlaceView, type SessionEvent, type SessionSettleResult, type SessionStatus, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
-import { TERMINAL_WORDS, THREAD_WORDS, WORKSPACE_WORDS, terminalRefusedLine } from "../src/actions/format.js";
+import { CLIENT_CANNOT_OPEN, TERMINAL_WORDS, THREAD_WORDS, WORKSPACE_WORDS, terminalRefusedLine } from "../src/actions/format.js";
 import { placeMenu } from "../src/actions/menuPlacement.js";
 import { actionById, actionIfAny, resolveActions, toMenuItems } from "../src/actions/registry.js";
 import { terminalActions, type TerminalVerbs } from "../src/actions/terminalActions.js";
@@ -321,7 +321,7 @@ describe("thread actions", () => {
     ran = true,
   ): ThreadTarget =>
     threadTarget(
-      { id: "thr_1", sessionId: "s1", threadId, workspaceId: "ws_a", harness, title: "fix the port list", status, ran, startedAt: null, endedAt: null, indicator: null, startedBy: "person", project: null, parentThreadId: null, attempt: null, model: null, asking: null, costUsd: null, unread: false, readAt: null, settledAt: null, needsYou: false, pinnedAt: null, snoozedUntil: null, section: null, subagents: [], lastLine: null, failure: null, foldedAt: null },
+      { id: "thr_1", sessionId: "s1", threadId, workspaceId: "ws_a", harness, title: "fix the port list", status, ran, startedAt: null, endedAt: null, indicator: null, startedBy: "person", project: null, parentThreadId: null, attempt: null, model: null, asking: null, costUsd: null, unread: false, readAt: null, settledAt: null, needsYou: false, pinnedAt: null, snoozedUntil: null, section: null, subagents: [], lastLine: null, failure: null, foldedAt: null, replaces: null, replacedBy: null },
       { catalog: machine.catalog === undefined ? row(harness) : machine.catalog, state: machine.state ?? "running", ...(machine.goneWords !== undefined ? { goneWords: machine.goneWords } : {}) },
     );
   const threadVerbs = (over: Partial<ThreadVerbs> = {}): ThreadVerbs => ({ stop: vi.fn(async () => {}), rename: vi.fn(), forget: vi.fn(), readEvents: vi.fn(async () => []), copyText: vi.fn(async () => {}), ...over });
@@ -575,11 +575,28 @@ describe("a lead's child", () => {
     subagents: [],
     lastLine: null,
     failure: null,
-    foldedAt: null,
+    foldedAt: null, replaces: null, replacedBy: null,
     ...over,
   });
   const tree: Tree<Node> = { threadOf: n => n.thread, kidsOf: n => n.kids, nowMs: Date.parse("2026-10-09T12:00:00Z"), settleMs: null };
   const at = (node: Node) => ({ node, thread: node.thread });
+
+  it("a restart's menu opens the thread it replaced, and the replaced one's menu opens its restart", async () => {
+    const open = vi.fn((_threadId: string) => {});
+    const restart = snapshot("thr_redo", "running", { replaces: { threadId: "thr_old", failed: false, endedAt: "2026-10-09T11:52:00.000Z" } });
+    const back = actionById(childActs(at({ thread: restart, kids: [] }), "live", tree, { open }), "open-replaced");
+    expect(back).toMatchObject({ title: "Open the thread it replaced", refusal: null });
+    await back.run();
+    expect(open).toHaveBeenCalledWith("thr_old");
+    const old = snapshot("thr_old", "interrupted", { replacedBy: "thr_redo", readAt: "2026-10-09T11:53:00.000Z", settledAt: "2026-10-09T11:53:00.000Z" });
+    const forward = actionById(childActs(at({ thread: old, kids: [] }), "settled", tree, { open }), "open-restart");
+    expect(forward).toMatchObject({ title: "Open its restart", refusal: null });
+    await forward.run();
+    expect(open).toHaveBeenLastCalledWith("thr_redo");
+    // A thread with no link has neither entry, and a client that cannot open a thread says so.
+    expect(childActs(at({ thread: snapshot("thr_plain", "running"), kids: [] }), "live", tree, { open }).map(a => a.id)).not.toContain("open-replaced");
+    expect(actionById(childActs(at({ thread: restart, kids: [] }), "live", tree, {}), "open-replaced").refusal).toBe(CLIENT_CANNOT_OPEN);
+  });
 
   it("Stop subagent sends the task to its thread's session and words a refusal as the host does", async () => {
     useNotices.getState().clear();

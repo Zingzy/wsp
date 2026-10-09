@@ -315,7 +315,7 @@
     "image": "wsp image",
     "forget": "wsp forget <workspace> [--yes]",
     "delete": "wsp delete <thread>|<workspace> [--yes]",
-    "run": "wsp run [<project>] [--branch <branch>] [--cwd <path>] [--agent <id>] [--model, --effort, --access <word>] [--fast] [--notify <thread|me>] [--title <title>] [--file <path>] [--detach] \"<message>\"",
+    "run": "wsp run [<project>] [--branch <branch>] [--cwd <path>] [--agent <id>] [--model, --effort, --access <word>] [--fast] [--notify <thread|me>] [--title <title>] [--replaces <thread>] [--file <path>] [--detach] \"<message>\"",
     "worktree": "wsp worktree <project> <branch>",
     "worktree_remove": "wsp worktree remove <project> <branch> [--force] [--yes]",
     "thread_read": "wsp thread read <thread> [--last]",

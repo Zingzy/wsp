@@ -180,6 +180,23 @@
       ]
     },
     {
+      "case": "a restart and the thread it replaced",
+      "arguments": {},
+      "replies": {
+        "workspaces.list": "{\"id\":1,\"ok\":true,\"workspaces\":[{\"id\":\"ws-1\",\"name\":\"parser\",\"project\":{\"id\":\"proj-1\",\"name\":\"wsp\",\"computer\":\"place-9\"}},{\"id\":\"ws-2\",\"name\":\"look\",\"project\":{\"id\":\"proj-2\",\"name\":\"site\",\"computer\":\"place-unnamed\"}},{\"id\":\"ws-3\",\"name\":\"wsp@feat\",\"kind\":\"local\",\"project\":{\"id\":\"proj-1\",\"name\":\"wsp\",\"path\":\"/nowhere/wsp\",\"computer\":\"here\"},\"worktree\":{\"path\":\"/nowhere/worktrees/proj-1/feat\",\"branch\":\"feat/é\",\"made\":true},\"folder\":\"/nowhere/worktrees/proj-1/feat\"},{\"id\":\"ws-4\",\"name\":\"wsp\",\"kind\":\"local\",\"project\":{\"id\":\"proj-1\",\"name\":\"wsp\",\"path\":\"/nowhere/wsp\",\"computer\":\"here\"}},{\"id\":\"ws-5\",\"name\":\"wsp@old\",\"kind\":\"local\",\"project\":{\"id\":\"proj-1\",\"name\":\"wsp\",\"path\":\"/nowhere/wsp\",\"computer\":\"here\"},\"worktree\":{\"path\":\"/nowhere/worktrees/proj-1/old\",\"branch\":\"old\",\"made\":true,\"gone\":true},\"folder\":\"/nowhere/wsp\"},{\"id\":\"ws-6\",\"name\":\"wsp@gone\",\"kind\":\"local\",\"project\":{\"id\":\"proj-1\",\"name\":\"wsp\",\"path\":\"/nowhere/wsp-two\",\"computer\":\"here\"},\"worktree\":{\"path\":\"/nowhere/worktrees/proj-1/gone\",\"branch\":\"gone\",\"made\":true,\"gone\":true},\"folder\":\"/nowhere/wsp-two\"}]}",
+        "sessions.list": "{\"id\":1,\"ok\":true,\"sessions\":[{\"id\":\"s-5\",\"workspaceId\":\"ws-3\",\"harness\":\"claude\",\"status\":\"interrupted\",\"threadId\":\"t-5\",\"project\":{\"id\":\"proj-1\",\"name\":\"wsp\"},\"computerName\":\"this mac\",\"settledAt\":1727431300000,\"replacedBy\":\"t-6\"},{\"id\":\"s-6\",\"workspaceId\":\"ws-3\",\"harness\":\"codex\",\"status\":\"running\",\"threadId\":\"t-6\",\"project\":{\"id\":\"proj-1\",\"name\":\"wsp\"},\"computerName\":\"this mac\",\"replaces\":\"t-5\"}]}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\n  \\\"threads\\\": [\\n    {\\n      \\\"id\\\": \\\"t-5\\\",\\n      \\\"threadId\\\": \\\"t-5\\\",\\n      \\\"workspaceId\\\": \\\"ws-3\\\",\\n      \\\"harness\\\": \\\"claude\\\",\\n      \\\"startedBy\\\": \\\"person\\\",\\n      \\\"status\\\": \\\"interrupted\\\",\\n      \\\"title\\\": \\\"s-5\\\",\\n      \\\"sessionId\\\": \\\"s-5\\\",\\n      \\\"settledAt\\\": 1727431300000,\\n      \\\"replacedBy\\\": \\\"t-6\\\",\\n      \\\"turns\\\": 1,\\n      \\\"ran\\\": false,\\n      \\\"projectName\\\": \\\"wsp\\\",\\n      \\\"folder\\\": \\\"/nowhere/worktrees/proj-1/feat\\\",\\n      \\\"branch\\\": \\\"feat/é\\\",\\n      \\\"computerName\\\": \\\"this mac\\\"\\n    },\\n    {\\n      \\\"id\\\": \\\"t-6\\\",\\n      \\\"threadId\\\": \\\"t-6\\\",\\n      \\\"workspaceId\\\": \\\"ws-3\\\",\\n      \\\"harness\\\": \\\"codex\\\",\\n      \\\"startedBy\\\": \\\"person\\\",\\n      \\\"status\\\": \\\"running\\\",\\n      \\\"title\\\": \\\"s-6\\\",\\n      \\\"sessionId\\\": \\\"s-6\\\",\\n      \\\"replaces\\\": \\\"t-5\\\",\\n      \\\"turns\\\": 1,\\n      \\\"ran\\\": true,\\n      \\\"projectName\\\": \\\"wsp\\\",\\n      \\\"folder\\\": \\\"/nowhere/worktrees/proj-1/feat\\\",\\n      \\\"branch\\\": \\\"feat/é\\\",\\n      \\\"computerName\\\": \\\"this mac\\\"\\n    }\\n  ]\\n}\"}],\"structuredContent\":{\"threads\":[{\"id\":\"t-5\",\"threadId\":\"t-5\",\"workspaceId\":\"ws-3\",\"harness\":\"claude\",\"startedBy\":\"person\",\"status\":\"interrupted\",\"title\":\"s-5\",\"sessionId\":\"s-5\",\"settledAt\":1727431300000,\"replacedBy\":\"t-6\",\"turns\":1,\"ran\":false,\"projectName\":\"wsp\",\"folder\":\"/nowhere/worktrees/proj-1/feat\",\"branch\":\"feat/é\",\"computerName\":\"this mac\"},{\"id\":\"t-6\",\"threadId\":\"t-6\",\"workspaceId\":\"ws-3\",\"harness\":\"codex\",\"startedBy\":\"person\",\"status\":\"running\",\"title\":\"s-6\",\"sessionId\":\"s-6\",\"replaces\":\"t-5\",\"turns\":1,\"ran\":true,\"projectName\":\"wsp\",\"folder\":\"/nowhere/worktrees/proj-1/feat\",\"branch\":\"feat/é\",\"computerName\":\"this mac\"}]}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "workspaces.list"
+        },
+        {
+          "op": "sessions.list"
+        }
+      ]
+    },
+    {
       "case": "no such project",
       "arguments": {
         "project": "nope"
