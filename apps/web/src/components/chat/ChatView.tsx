@@ -10,6 +10,8 @@
 // Under the transcript stand the threads this one's agent opened, one line each
 // with where it runs and its status, and the footer weighs the turn's own cost
 // against what those threads spent.
+// A subagent's page is the same view over the lead's transcript cut to that
+// subagent's lines, with no turn of its own to fold, count or close.
 import { HeroField, HeroMark } from "./EmptyHero.js";
 import { SetupCard, SetupRoom } from "./SetupCard.js";
 import { holdEndOnFooterShrink } from "./footerHold.js";
@@ -27,7 +29,7 @@ import { useMachineLine } from "../../notices/workspaceLines.js";
 import { openNamedFile } from "../../files/open";
 import { threadFolderOf } from "../../files/root";
 import { cn } from "../../lib/utils";
-import { DEFAULT_TIMESTAMP_FORMAT, turnWait, type MessageId, type TimestampFormat, type TurnDiffSummary, type TurnSummary } from "./adapt";
+import { DEFAULT_TIMESTAMP_FORMAT, launchIn, subagentEntries, subagentRunOf, turnWait, type MessageId, type TimestampFormat, type TurnDiffSummary, type TurnSummary } from "./adapt";
 import { onlyOf, useDiffStore } from "../../diffs/store";
 import { useRightPanelStore } from "../../rightPanelStore";
 import { useReadStamp } from "./useReadStamp";
@@ -39,6 +41,7 @@ import { useBrowserTabs } from "../../browser/tabs";
 import { MessagesTimeline, type MachineWait, type ReplyRuns } from "./MessagesTimeline";
 import { useNewThreadRequests } from "./newThreadRequests";
 import { useChatThread, type ChatThreadHandle } from "./useChatThread";
+import { useOpenSubagentRun } from "./openSubagent";
 import { lastReplies, rewindableReplies, type RewindableReply } from "./RewindDialog";
 import { requestRewind } from "../../shell/shellRequests";
 import { TRANSCRIPT_LOADING } from "../../transcript-words";
@@ -48,16 +51,22 @@ import { quoteText } from "../../composer-editor-mentions";
 import type { QuotedSelection } from "./AssistantSelectionToolbar";
 
 const noopImageExpand = () => {};
+const NO_TURNS: ReadonlyArray<TurnSummary> = [];
+const NO_IDS: ReadonlySet<string> = new Set();
+const NO_DIFFS = new Map<MessageId, TurnDiffSummary>();
 
 export function ChatView({
   workspaceId,
   threadId = null,
   timestampFormat = DEFAULT_TIMESTAMP_FORMAT,
   docked,
+  subagent = null,
   children,
 }: {
   workspaceId: string;
   threadId?: string | null;
+  /** One of the thread's subagents, by the call that launched it, whose page this is; null on the thread's own. */
+  subagent?: string | null;
   timestampFormat?: TimestampFormat;
   /** The prompt the composer's slot is answering, by ask id, read off the thread it is shown for; that prompt's
    * timeline row then keeps the record alone. Absent, or null for a thread, and every row keeps its buttons. */
@@ -85,8 +94,40 @@ export function ChatView({
   // A turn its computer's threads at once holds back has no start in the transcript yet, and still reads as working:
   // the timeline's working row says what holds it, with the setting that lets it start.
   const capped = turnRows.at(-1)?.capped;
-  const working = view.running || capped !== undefined;
-  const empty = view.entries.length === 0 && !working;
+  // The subagent's own fold in the lead's transcript, and what the listing says it was asked while that fold is unread.
+  const run = useMemo(() => (subagent === null ? null : subagentRunOf(view.entries, subagent)), [subagent, view.entries]);
+  const listed = subagent === null ? undefined : turnRows.flatMap(row => row.subagents ?? []).find(sub => sub.parentToolUseId === subagent);
+  const listedAsk = listed?.asked ?? null;
+  const pageState = listed?.state ?? run?.state ?? null;
+  const pageEntries = useMemo(() => (subagent === null ? null : subagentEntries(run, listedAsk, pageState)), [subagent, run, listedAsk, pageState]);
+  // The lead's first read is its newest page, which an older subagent's launch is past: its page reads back a page at
+  // a time until the launch is in or nothing older is left. A call neither the transcript nor the listing knows then
+  // opens the lead.
+  const [readWhole, setReadWhole] = useState<string | null>(null);
+  const pageKey = subagent === null ? null : `${threadId}/a/${subagent}`;
+  const launched = subagent !== null && launchIn(view.entries, subagent);
+  const { older } = thread;
+  useEffect(() => {
+    if (pageKey === null || !thread.hydrated || launched) return;
+    let live = true;
+    void older().then(more => {
+      if (live && !more) setReadWhole(pageKey);
+    });
+    return () => {
+      live = false;
+    };
+  }, [pageKey, thread.hydrated, launched, older, view.entries]);
+  const unknown = pageKey !== null && readWhole === pageKey && run === null && listed === undefined;
+  useEffect(() => {
+    if (unknown && threadId !== null) useStore.getState().select(workspaceId, threadId);
+  }, [unknown, workspaceId, threadId]);
+  useEffect(() => {
+    if (run === null) return;
+    useOpenSubagentRun.setState({ run });
+    return () => useOpenSubagentRun.setState({ run: null });
+  }, [run]);
+  const working = subagent === null && (view.running || capped !== undefined);
+  const empty = pageEntries === null && view.entries.length === 0 && !working;
   // A workspace an agent forked out of a thread stands before its thread's row is listed. The fork opens that thread
   // inside the parent's own turn, so it is on its way while that turn runs; after it, nothing is coming. The host
   // stamps the fork's createdAt and each row's startedAt off one clock, so a later turn of the parent never counts.
@@ -264,7 +305,7 @@ export function ChatView({
     view.settled?.state === "completed" || (view.settled?.state === "error" && view.settled.error !== null && (view.settled.limit ?? null) === null);
   // What the machine needs from the person, said here on the thread they are reading and nowhere else.
   const machine = useMachineLine(workspaceId);
-  const footer = thread.hydrated ? (
+  const footer = thread.hydrated && pageEntries === null ? (
     <div ref={footerRef} className="mx-auto w-full min-w-0 max-w-3xl">
       {opened.length > 0 ? <OpenedThreads workspaceId={workspaceId} leadKey={thread.threadKey} /> : null}
       {view.settled !== null && !settledOnReply ? <SettledFooter turn={view.settled} /> : null}
@@ -285,22 +326,23 @@ export function ChatView({
     setupStands || !thread.hydrated || empty
       ? null
       : {
-          key: thread.drawKey,
+          key: pageEntries === null ? thread.drawKey : `${thread.drawKey}/a/${subagent}`,
           node: (
             <MessagesTimeline
               isWorking={working}
-              machineWait={machineWait}
-              activeTurnStartedAt={view.activeTurnStartedAt}
-              waitingOn={turnRows.at(-1)?.waitingOn ?? null}
+              openRun={run?.state === "running"}
+              machineWait={pageEntries === null ? machineWait : null}
+              activeTurnStartedAt={pageEntries === null ? view.activeTurnStartedAt : null}
+              waitingOn={pageEntries === null ? (turnRows.at(-1)?.waitingOn ?? null) : null}
               listRef={listRef}
-              timelineEntries={view.entries}
-              turns={view.turns}
-              turnDiffSummaryByAssistantMessageId={turnDiffs}
+              timelineEntries={pageEntries ?? view.entries}
+              turns={pageEntries === null ? view.turns : NO_TURNS}
+              turnDiffSummaryByAssistantMessageId={pageEntries === null ? turnDiffs : NO_DIFFS}
               onOpenTurnDiff={onOpenTurnDiff}
-              threadKey={threadId === null ? workspaceId : `${workspaceId}/${threadId}`}
+              threadKey={`${threadId === null ? workspaceId : `${workspaceId}/${threadId}`}${pageEntries === null ? "" : `/a/${subagent}`}`}
               onImageExpand={noopImageExpand}
               onAnswerPermission={onAnswerPermission}
-              dockedAskId={docked?.(thread) ?? null}
+              dockedAskId={pageEntries === null ? (docked?.(thread) ?? null) : null}
               onOpenFile={onOpenFile}
               onIsAtEndChange={onIsAtEndChange}
               footer={footer}
@@ -309,11 +351,11 @@ export function ChatView({
               resolvedTheme={appDark ? "dark" : "light"}
               timestampFormat={timestampFormat}
               onQuote={onQuote}
-              rewindableMessageIds={rewindableIds}
-              slatedMessageIds={slatedIds}
+              rewindableMessageIds={pageEntries === null ? rewindableIds : NO_IDS}
+              slatedMessageIds={pageEntries === null ? slatedIds : NO_IDS}
               onRewind={onRewind}
-              replyRuns={replyRuns}
-              onReachTop={thread.older}
+              replyRuns={pageEntries === null ? replyRuns : null}
+              {...(pageEntries === null ? { onReachTop: thread.older } : {})}
             />
           ),
         };
@@ -326,7 +368,7 @@ export function ChatView({
   );
 
   return (
-    <div ref={rootRef} data-chat-view className="relative isolate h-full min-h-0 text-foreground [--empty-lift:calc((100%-var(--chat-composer-inset,0px)-5.5rem)/2)]">
+    <div ref={rootRef} data-chat-view {...(subagent === null ? {} : { "data-subagent-page": subagent })} className="relative isolate h-full min-h-0 text-foreground [--empty-lift:calc((100%-var(--chat-composer-inset,0px)-5.5rem)/2)]">
       <div className="absolute inset-0">
         {setupStands ? (
           <SetupRoom>

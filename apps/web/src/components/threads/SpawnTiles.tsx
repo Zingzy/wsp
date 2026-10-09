@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The children a run of a lead's calls started, each as its row where its call stands in the transcript: one column
 // with no gap, the marks at the Threads rows' x, and each child in its own state as the lead's tree reads it, so a
-// child that finished or settled still stands at its call. A thread's row opens the thread on a press.
+// child that finished or settled still stands at its call. A thread's row opens the thread on a press, a subagent's
+// its page.
 import { SETTLE_MS, threadKeyOf } from "@wsp/protocol";
 import { memo, useMemo } from "react";
 import type { SpawnCall } from "../../adapt/index.js";
@@ -42,7 +43,10 @@ function SpawnTile({ node, tree, leadPlace }: { node: LeadNode<ChildNode>; tree:
   const note = noteOf(node, part);
   const target = childTarget(node, part, tree);
   const kind = kindOf(node, part);
-  if ("subagent" in node) return <SubagentRow subagent={node.subagent} target={target} kind={kind} note={note} />;
+  if ("subagent" in node) {
+    const { of } = node;
+    return <SubagentRow subagent={node.subagent} target={target} kind={kind} note={note} lead={of.threadId === null ? undefined : { workspaceId: of.workspaceId, threadId: of.threadId }} />;
+  }
   const { thread, place, at } = node.node;
   return <ThreadRow thread={thread} place={place === leadPlace ? "" : place} at={at} {...(note !== undefined ? { note } : {})} target={target} kind={kind} />;
 }

@@ -11,15 +11,21 @@
 // waiting: a question nobody can see is a turn that never moves, and the
 // question arrives long after this row is first drawn, so opening it is a
 // change to the fold's own state and never a default read once at mount.
-// After that the person's own toggle stands, until the next question.
+// After that the person's own toggle stands, until the next question. The
+// arrow beside it opens the subagent's own page.
 import { useState } from "react";
-import { ChevronRightIcon } from "lucide-react";
+import { ArrowUpRightIcon, ChevronRightIcon } from "lucide-react";
 import { fmtDuration, subagentAskerLine } from "@wsp/protocol";
 import type { PermissionPrompt, SubagentRun, SubagentState } from "../../adapt";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 import { PermissionPromptRow } from "./PermissionPromptRow";
 import type { AnswerPrompt } from "./answerPrompt";
 import { Spaced } from "../ui/spaced";
+import { Button } from "../ui/button";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { useStore } from "../../protocol/store";
+
+const OPEN_PAGE = "Open its page";
 
 /** Running holds nothing: the row's own presence says it, which is the rule every state slot here follows. */
 const STATE_WORDS: Record<SubagentState, string> = { running: "", done: "Done", failed: "Failed", stopped: "Stopped" };
@@ -46,11 +52,14 @@ export function SubagentFoldRow({
     setAsked(asking);
     if (asking) setOpen(true);
   }
+  const workspaceId = useStore(s => s.selectedId);
+  const threadId = useStore(s => s.selectedThreadId);
   const elapsed = elapsedLine(subagent);
   const state = STATE_WORDS[subagent.state];
   return (
     <div className="min-w-0 px-1" data-subagent={subagent.parentToolUseId} data-subagent-state={subagent.state}>
       <Collapsible onOpenChange={setOpen} open={open}>
+        <div className="flex min-w-0 items-center gap-1.5">
         <CollapsibleTrigger className="group flex w-full min-w-0 items-center gap-1.5 text-left" data-subagent-trigger="">
           <ChevronRightIcon aria-hidden className="size-3 shrink-0 text-muted-foreground transition-transform duration-150 group-data-panel-open:rotate-90" />
           <span className="min-w-0 flex-1 truncate text-sm leading-5 text-foreground/80" data-subagent-title="">
@@ -60,6 +69,19 @@ export function SubagentFoldRow({
             <Spaced parts={[state, elapsed].filter(part => part !== null && part !== "")} />
           </span>
         </CollapsibleTrigger>
+        {workspaceId === null || threadId === null ? null : (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button size="icon-micro" variant="ghost" data-subagent-open aria-label={OPEN_PAGE} onClick={() => useStore.getState().select(workspaceId, threadId, subagent.parentToolUseId)} />
+              }
+            >
+              <ArrowUpRightIcon aria-hidden />
+            </TooltipTrigger>
+            <TooltipPopup side="top">{OPEN_PAGE}</TooltipPopup>
+          </Tooltip>
+        )}
+        </div>
         <CollapsiblePanel>
           {/* The rail hangs from the chevron's centre (half of size-3) and the body starts under the title (size-3
               plus the trigger's gap), so the fold's own header is what its contents line up with. */}

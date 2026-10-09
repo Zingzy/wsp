@@ -25,6 +25,9 @@ export interface DeriveRowsInput {
   readonly waitingOn?: ThreadWaitingOn | null;
   /** The children this thread holds, whose starting calls draw as the children's rows. */
   readonly children?: SpawnedChildren;
+  /** A subagent's page while the subagent runs: its lines carry no turn, its last message is not its answer yet, and
+   * its call in progress is live. */
+  readonly openRun?: boolean;
 }
 
 export function deriveMessagesTimelineRows(input: DeriveRowsInput): MessagesTimelineRow[] {
@@ -56,7 +59,8 @@ export function deriveMessagesTimelineRows(input: DeriveRowsInput): MessagesTime
   const belongsToActiveTurn = (entry: TimelineEntry, index: number): boolean =>
     input.isWorking && index >= activeTurnHeaderIndex && (unsettledTurnId === null || entryTurnId(entry) === unsettledTurnId);
   const inActiveRun = (entry: WorkLogEntry): boolean =>
-    input.isWorking && unsettledTurnId !== null && entry.toolLifecycleStatus === "inProgress" && entry.turnId === unsettledTurnId;
+    entry.toolLifecycleStatus === "inProgress" &&
+    ((input.isWorking && unsettledTurnId !== null && entry.turnId === unsettledTurnId) || (input.openRun === true && entry.turnId === null));
 
   // The trailing run of tool rows in the active turn renders as one live row.
   const activeToolEntries: Array<Extract<TimelineEntry, { kind: "work" }>> = [];
@@ -205,7 +209,7 @@ export function deriveMessagesTimelineRows(input: DeriveRowsInput): MessagesTime
     }
 
     const m = entry.message;
-    const stillInProgress = m.role === "assistant" && unsettledTurnId !== null && m.turnId === unsettledTurnId;
+    const stillInProgress = m.role === "assistant" && ((unsettledTurnId !== null && m.turnId === unsettledTurnId) || (input.openRun === true && m.turnId === null));
     const showAssistantMeta = m.role === "assistant" && terminalAssistantIds.has(m.id) && !stillInProgress;
     rows.push({
       kind: "message", id: entry.id, createdAt: entry.createdAt, message: m,

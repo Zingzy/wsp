@@ -411,6 +411,12 @@ export function subagentTaskLine(input: string): string | undefined {
   return described === undefined ? undefined : titleLine(described);
 }
 
+/** What the call that launched a subagent asked it, whole: the first message of that subagent's own page. */
+export function subagentPrompt(input: string): string | undefined {
+  const fields = toolInput(input);
+  return fields === undefined ? undefined : toolField(fields, "prompt");
+}
+
 /** What a prompt raised inside a subagent's own run says above it, so a person answering knows which of them is
  * asking rather than reading one unowned question. */
 export const subagentAskerLine = (task: string): string => `${task} asks`;

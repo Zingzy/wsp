@@ -130,8 +130,8 @@ suite("the marathon lead, as the host serving it lists it", () => {
   it("lists the subagents with their models, what they were asked and the call that launched each", () => {
     const of = id => (named(id).subagents ?? []).map(s => [s.title, s.state, s.model, s.parentToolUseId !== undefined, s.asked !== undefined]);
     expect(of("c-sheet")).toEqual([
-      ["Check the sheet's tests for the step order", "done", "claude-haiku-4-5", true, true],
-      ["Find where the add sheet reads its steps", "running", "claude-haiku-4-5", true, true],
+      ["Check the sheet's tests for the step order", "done", "claude-haiku-4-5-20251001", true, true],
+      ["Find where the add sheet reads its steps", "running", "claude-haiku-4-5-20251001", true, true],
     ]);
     // The lead's own running one and the one that failed, and the two of its earlier turn.
     expect(of("lead").map(([title, state]) => [title, state])).toEqual([

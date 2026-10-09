@@ -49,6 +49,8 @@ const TIMELINE_MAINTAIN_SCROLL_AT_END = {
 
 export interface MessagesTimelineProps {
   isWorking: boolean;
+  /** A subagent's page while the subagent runs, whose last message is not its answer yet. */
+  openRun?: boolean;
   /** Set while the workspace is paused, waking or unreachable under a running turn. */
   machineWait?: MachineWait | null;
   isPreparingWorktree?: boolean;
@@ -107,6 +109,7 @@ export interface MessagesTimelineProps {
 
 export const MessagesTimeline = memo(function MessagesTimeline({
   isWorking,
+  openRun = false,
   machineWait = null,
   isPreparingWorktree = false,
   activeTurnStartedAt,
@@ -284,9 +287,10 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         isWorking,
         activeTurnStartedAt,
         waitingOn,
+        openRun,
         ...(spawned !== undefined ? { children: spawned } : {}),
       }),
-    [timelineEntries, turns, expandedTurnIds, expandedWorkGroupIds, isWorking, activeTurnStartedAt, waitingOn, spawned],
+    [timelineEntries, turns, expandedTurnIds, expandedWorkGroupIds, isWorking, activeTurnStartedAt, waitingOn, openRun, spawned],
   );
   const rows = useStableRows(rawRows);
   const minimapItems = useMemo(() => deriveTimelineMinimapItems(rows), [rows]);

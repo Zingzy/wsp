@@ -7,7 +7,7 @@
 // session id repeats across turns. Wire order is the timeline order. createdAt
 // is the wire's `at` (ms epoch) as ISO, else the caller's receipt clock, else
 // "" for unstamped history.
-import { AFTER_CUT_LINE, LIMIT_WORDS, NOTIFY_ME, compactedLine, spawnsThread, internalToolResult, subagentTaskLine, toolActivityLine, toolCallFacts, toolDoneLine, toolResultLine, type PlanStep, type SessionEvent, type SessionHarness, type SessionRunEvent, type TurnResult } from "@wsp/protocol";
+import { AFTER_CUT_LINE, LIMIT_WORDS, NOTIFY_ME, compactedLine, spawnsThread, internalToolResult, subagentPrompt, subagentTaskLine, toolActivityLine, toolCallFacts, toolDoneLine, toolResultLine, type PlanStep, type SessionEvent, type SessionHarness, type SessionRunEvent, type SubagentView, type TurnResult } from "@wsp/protocol";
 import { spawnedThreadOf } from "./spawned.js";
 import type {
   ChatMessage,
@@ -208,6 +208,7 @@ export function createSessionFold(): SessionFold {
       parentToolUseId,
       turnId: t.summary.turnId,
       title: (call === undefined ? undefined : subagentTaskLine(call.input)) ?? launched?.detail ?? launched?.label ?? "Subagent",
+      prompt: (call === undefined ? undefined : subagentPrompt(call.input)) ?? null,
       lines: [],
       prompts: [],
       state: ended === undefined ? "running" : ended.failed ? "failed" : "done",
@@ -561,7 +562,7 @@ export function createSessionFold(): SessionFold {
         const open = key === undefined ? undefined : t.childCalls.get(key);
         const call = { name: e.toolName ?? open?.name ?? "tool", input: (open?.input ?? "") + e.text };
         if (key !== undefined) t.childCalls.set(key, call);
-        addFoldLine(t, parent, at, { createdAt: at, kind: "tool", label: toolActivityLine(call.name, call.input), status: "inProgress" }, key);
+        addFoldLine(t, parent, at, { createdAt: at, kind: "tool", label: toolActivityLine(call.name, call.input), status: "inProgress", call }, key);
         return;
       }
       case "note":
@@ -607,8 +608,9 @@ export function createSessionFold(): SessionFold {
     if (e.kind === "tool_result" && e.toolUseId !== undefined && t.subagents.has(e.toolUseId)) {
       if (internalToolResult(e.text)) return;
       const answer = toolResultLine(e.text, e.isError === true);
-      if (answer !== undefined) addFoldLine(t, e.toolUseId, at, { createdAt: at, kind: "text", label: answer });
-      changeFold(t, e.toolUseId, at, run => ({ ...run, state: e.isError === true ? "failed" : "done", endedAt: at || null }));
+      if (answer !== undefined) addFoldLine(t, e.toolUseId, at, { createdAt: at, kind: "text", label: answer, answer: true });
+      const failure = e.isError === true ? toolResultLine(e.text) : undefined;
+      changeFold(t, e.toolUseId, at, run => ({ ...run, state: e.isError === true ? "failed" : "done", endedAt: at || null, ...(failure === undefined ? {} : { failure }) }));
       t.tools.delete(e.toolUseId);
       return;
     }
@@ -734,6 +736,74 @@ export function createSessionFold(): SessionFold {
     return { turns: [...turns], messages, workEntries, timeline: [...timeline], latestTurn, running, model: modelName, harness, agent, permissionMode, cwd, shellCwd, runs: runsSeen, plan };
   };
   return { add, model, size: () => taken };
+}
+
+/** The fold of one subagent in a lead's transcript, by the call that launched it; null where none is in view. */
+export function subagentRunOf(entries: ReadonlyArray<TimelineEntry>, call: string): SubagentRun | null {
+  const entry = entries.find(e => e.kind === "subagent" && e.subagent.parentToolUseId === call);
+  return entry?.kind === "subagent" ? entry.subagent : null;
+}
+
+/** Whether the call that launched a subagent is in view: its fold with what it was asked, or the call's own row. */
+export function launchIn(entries: ReadonlyArray<TimelineEntry>, call: string): boolean {
+  return entries.some(e => (e.kind === "subagent" && e.subagent.parentToolUseId === call && e.subagent.prompt !== null) || (e.kind === "work" && e.entry.toolCallId === call));
+}
+
+/** A subagent as a listing would carry it, read off its own fold, for a page whose lead's listing does not carry it. */
+export function subagentOfRun(run: SubagentRun): SubagentView {
+  const failure = run.state === "failed" ? run.failure : undefined;
+  const ended = run.endedAt === null ? undefined : Date.parse(run.endedAt);
+  return {
+    id: run.parentToolUseId,
+    parentToolUseId: run.parentToolUseId,
+    title: run.title,
+    state: run.state,
+    startedAt: Date.parse(run.startedAt),
+    ...(ended === undefined || Number.isNaN(ended) ? {} : { endedAt: ended }),
+    ...(failure === undefined ? {} : { failure }),
+  };
+}
+
+/** A subagent's own page, read off its fold in the lead's transcript: what its lead asked it as a person's message,
+ * then its lines as a thread's own are drawn, its prose as the agent's, its calls as work rows, and the questions its
+ * run raised. No entry belongs to a turn, so the page draws no turn's fold, working row or stop line: its bar says
+ * those. A fold not read yet leaves the prompt the listing carries. The launching call's answer is the first line of
+ * a done run's own last words, and a failed run's bar says it; it stands only where the run said nothing itself or
+ * where it is the mark of the stop that cut the run. */
+export function subagentEntries(run: SubagentRun | null, asked: string | null, state: SubagentView["state"] | null): TimelineEntry[] {
+  const id = run?.parentToolUseId ?? "subagent";
+  const prompt = run?.prompt ?? asked;
+  const at = run?.startedAt ?? "";
+  const out: TimelineEntry[] = [];
+  if (prompt !== null) out.push(messageEntry({ id: `${id}:asked`, role: "user", text: prompt, turnId: null, streaming: false, createdAt: at, updatedAt: at }));
+  const spoke = run?.lines.some(line => line.kind === "text" && line.answer !== true) === true;
+  const keepsAnswer = state === "stopped" || (state !== "failed" && !spoke);
+  for (const line of run?.lines ?? []) {
+    if (line.answer === true && !keepsAnswer) continue;
+    if (line.kind === "text") out.push(messageEntry({ id: line.id, role: "assistant", text: line.label, turnId: null, streaming: false, createdAt: line.createdAt, updatedAt: line.createdAt }));
+    else if (line.kind === "thinking") out.push(workEntry({ id: line.id, turnId: null, ...thinkingEntry({ createdAt: line.createdAt, label: "Thinking", tone: "thinking", sourceActivityKind: "reasoning" }, line.label) }, line.createdAt));
+    else out.push(workEntry(subagentCall(line), line.createdAt));
+  }
+  for (const permission of run?.prompts ?? []) out.push({ id: `permission:${permission.askId}`, kind: "permission", createdAt: permission.createdAt, permission });
+  return out;
+}
+
+/** One of a subagent's tool lines as the work row the thread's own call would be: named and grouped by its call. */
+function subagentCall(line: SubagentLine): WorkLogEntry {
+  const facts = line.call === undefined ? {} : toolCallFacts(line.call.name, line.call.input);
+  const named = facts.title ?? line.call?.name ?? line.label;
+  return {
+    id: line.id,
+    turnId: null,
+    createdAt: line.createdAt,
+    label: named,
+    toolTitle: named,
+    tone: "tool",
+    sourceActivityKind: line.status === "inProgress" ? "tool.started" : "tool.completed",
+    ...(line.status !== undefined ? { toolLifecycleStatus: line.status } : {}),
+    ...facts,
+    ...(line.detail !== undefined ? { detail: line.detail } : {}),
+  };
 }
 
 /** Reasoning renders as one collapsed line (preview) that opens onto the text (detail). */

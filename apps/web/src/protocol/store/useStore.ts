@@ -413,6 +413,7 @@ export const useStore = create<State>((set, get) => {
     selectedId: null,
     projectHome: readProjectHome(),
     selectedThreadId: null,
+    selectedSubagent: null,
     freshThread: false,
     creations: keptAtLoad,
     landed: null,
@@ -474,19 +475,20 @@ export const useStore = create<State>((set, get) => {
       const api = get().api;
       if (conn === "live" && api) pull(api);
     },
-    select(id, threadId = null) {
-      set(s => ({ selectedId: id, selectedThreadId: threadId, freshThread: false, settingsOpen: false, projectHome: null, landed: s.landed?.workspaceId === id ? s.landed : null }));
-      writeAddress(id === null || get().creations.some(c => c.key === id) ? null : { workspaceId: id, ...(threadId === null ? {} : { threadId }) });
+    select(id, threadId = null, subagent = null) {
+      const sub = threadId === null ? null : subagent;
+      set(s => ({ selectedId: id, selectedThreadId: threadId, selectedSubagent: sub, freshThread: false, settingsOpen: false, projectHome: null, landed: s.landed?.workspaceId === id ? s.landed : null }));
+      writeAddress(id === null || get().creations.some(c => c.key === id) ? null : { workspaceId: id, ...(threadId === null ? {} : { threadId }), ...(sub === null ? {} : { subagent: sub }) });
     },
     dropLanded(workspaceId) {
       set(s => (s.landed?.workspaceId === workspaceId ? { landed: null } : {}));
     },
     openProjectHome(projectId) {
-      set({ selectedId: null, selectedThreadId: null, freshThread: false, settingsOpen: false, projectHome: projectId, landed: null });
+      set({ selectedId: null, selectedThreadId: null, selectedSubagent: null, freshThread: false, settingsOpen: false, projectHome: projectId, landed: null });
       writeProjectHome(projectId);
     },
     newThread(workspaceId) {
-      set({ selectedId: workspaceId, selectedThreadId: null, freshThread: true, settingsOpen: false, projectHome: null, landed: null });
+      set({ selectedId: workspaceId, selectedThreadId: null, selectedSubagent: null, freshThread: true, settingsOpen: false, projectHome: null, landed: null });
       writeAddress({ workspaceId, fresh: true });
       requestNewThread({ workspaceId });
     },
@@ -546,6 +548,7 @@ export const useStore = create<State>((set, get) => {
         ],
         selectedId: key,
         selectedThreadId: null,
+        selectedSubagent: null,
       }));
       return runCreation(key, project, name, picked);
     },
@@ -631,6 +634,7 @@ export const useStore = create<State>((set, get) => {
         ready: true,
         selectedId,
         selectedThreadId: open.threadId,
+        selectedSubagent: open.subagent,
         freshThread: open.fresh,
         // A list the runtime answered is the whole of what threads there are: a send it has since written a row for
         // is that row now, and one it has not is a turn that died while this client was away, so neither may keep a
@@ -648,7 +652,7 @@ export const useStore = create<State>((set, get) => {
       if (selectedId === null || !workspaces.some(w => w.id === selectedId)) return;
       // The chat for the workspace clears itself when it takes this, whether it is mounted yet or not.
       if (open.fresh && !s.freshThread) requestNewThread({ workspaceId: selectedId });
-      writeAddress({ workspaceId: selectedId, ...(open.threadId === null ? {} : { threadId: open.threadId }), ...(open.fresh ? { fresh: true } : {}) });
+      writeAddress({ workspaceId: selectedId, ...(open.threadId === null ? {} : { threadId: open.threadId }), ...(open.subagent === null ? {} : { subagent: open.subagent }), ...(open.fresh ? { fresh: true } : {}) });
     },
     async reloadSessions(workspaceId) {
       const api = get().api;
@@ -707,7 +711,7 @@ export const useStore = create<State>((set, get) => {
       if (!api?.forgetThread) return false;
       try {
         await api.forgetThread(threadId);
-        if (get().selectedThreadId === threadId) set({ selectedThreadId: null });
+        if (get().selectedThreadId === threadId) set({ selectedThreadId: null, selectedSubagent: null });
         await get().reloadSessions(workspaceId);
         return true;
       } catch (e: unknown) {
@@ -892,7 +896,7 @@ export const useStore = create<State>((set, get) => {
             const creation = s.creations.find(c => c.workspaceId === e.workspaceId);
             const workspaces = s.workspaces.filter(x => x.id !== e.workspaceId);
             // A page open on the workspace goes with it, or the centre keeps drawing a thread the host no longer has.
-            const left = s.selectedId === e.workspaceId ? { selectedId: firstRow({ workspaces, statuses, sessions }), selectedThreadId: null } : {};
+            const left = s.selectedId === e.workspaceId ? { selectedId: firstRow({ workspaces, statuses, sessions }), selectedThreadId: null, selectedSubagent: null } : {};
             return {
               workspaces,
               creations: s.creations.filter(c => c !== creation),

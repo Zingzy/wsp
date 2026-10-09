@@ -36,23 +36,25 @@ export function addressed(address: AppAddress | undefined, workspaces: readonly 
 }
 
 /** What the centre opens on after a refresh, the address being the one record of it: the thread it names while the
- * rows still carry it, else the pick standing, which every road wrote the address with. A thread the rows do not
- * carry opens the workspace and says so. The screen a next thread is written on keeps its own address and no thread. */
+ * rows still carry it, with the subagent it names of that thread, else the pick standing, which every road wrote the
+ * address with. A thread the rows do not carry opens the workspace and says so. The screen a next thread is written
+ * on keeps its own address and no thread. */
 export function openThreadOf(
   address: AppAddress | undefined,
   workspaceId: string | null,
   pinned: string | null,
   rows: readonly SessionView[],
-): { threadId: string | null; fresh: boolean; toast?: string } {
+): { threadId: string | null; subagent: string | null; fresh: boolean; toast?: string } {
   const own = address?.workspaceId === workspaceId ? address : undefined;
-  if (own?.fresh === true) return { threadId: null, fresh: true };
-  if (own?.threadId === undefined) return { threadId: pinned, fresh: false };
-  if (rows.some(r => r.workspaceId === workspaceId && r.threadId === own.threadId)) return { threadId: own.threadId, fresh: false };
+  if (own?.fresh === true) return { threadId: null, subagent: null, fresh: true };
+  if (own?.threadId === undefined) return { threadId: pinned, subagent: null, fresh: false };
+  const subagent = own.subagent ?? null;
+  if (rows.some(r => r.workspaceId === workspaceId && r.threadId === own.threadId)) return { threadId: own.threadId, subagent, fresh: false };
   // A session list is best-effort: the one a refused call leaves behind carries no rows at all, and reading that as
   // the thread being gone would move the person off the pick they are holding and write the loss into the address.
   // Only a list that answered can say a thread is not there, which is what a pick nobody is holding meets.
-  if (pinned === own.threadId) return { threadId: pinned, fresh: false };
-  return { threadId: null, fresh: false, toast: noSuchThreadLine() };
+  if (pinned === own.threadId) return { threadId: pinned, subagent, fresh: false };
+  return { threadId: null, subagent: null, fresh: false, toast: noSuchThreadLine() };
 }
 
 /** The workspace and thread the person had open last, when the list still has the workspace. */

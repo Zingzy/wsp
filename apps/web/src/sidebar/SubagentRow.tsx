@@ -2,7 +2,7 @@
 // One of an agent's own subagents in the sidebar, under the thread whose agent runs it: the slim one-line row with
 // the bot's glyph, its title and its status, its card on rest, and while it runs Stop subagent beside the row in
 // the status's place on hover and alone in its menu. It names no project or computer of its own for a tile's first
-// row to carry.
+// row to carry. A press opens its own page; the row of the page open is marked.
 import type { SubagentView } from "@wsp/protocol";
 import { BotIcon, SquareIcon } from "lucide-react";
 import { memo, type MouseEvent } from "react";
@@ -19,14 +19,26 @@ import { sameSubagentRow } from "../components/threads/ThreadRows.js";
 import { SidebarMenuAction, SidebarMenuButton } from "../components/ui/sidebar.js";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.js";
 import { cn } from "../lib/utils.js";
+import { useStore } from "../protocol/store.js";
 import { GLYPH_ROW_CLASS, HOVER_GLYPH_CLASS, ONE_LINE_ROW_CLASS, SLOT_YIELDS_CLASS, SLOT_ACT_CLASS } from "./rowGrammar.js";
 
 /** How long the pointer rests on the row before its card opens, the tile card's own delay. */
 const CARD_DELAY_MS = 450;
 
-type SubagentRowProps = { subagent: SubagentView; target: ChildTarget; kind: StatusKind; note: string | undefined; depth: number; rowId?: string };
+type SubagentRowProps = {
+  subagent: SubagentView;
+  target: ChildTarget;
+  kind: StatusKind;
+  note: string | undefined;
+  depth: number;
+  rowId?: string;
+  /** The lead thread whose page holds the subagent's lines, where the row opens it; absent, the row opens nothing. */
+  lead?: { workspaceId: string; threadId: string } | undefined;
+  /** Whether its page is the one open. */
+  active?: boolean;
+};
 
-export const SubagentRow = memo(function SubagentRow({ subagent, target, kind, note, depth, rowId }: SubagentRowProps) {
+export const SubagentRow = memo(function SubagentRow({ subagent, target, kind, note, depth, rowId, lead, active = false }: SubagentRowProps) {
   const verbs = useChildVerbs();
   const acts = resolveActions(childActions, target, verbs);
   const stop = acts.find(act => act.id === "stop-subagent" && act.refusal === null);
@@ -46,7 +58,9 @@ export const SubagentRow = memo(function SubagentRow({ subagent, target, kind, n
               data-depth={depth}
               data-subagent-row={subagent.id}
               data-child-part={target.part}
+              isActive={active}
               className={cn(ONE_LINE_ROW_CLASS, GLYPH_ROW_CLASS, "gap-1.5")}
+              {...(lead !== undefined && subagent.parentToolUseId !== undefined ? { onClick: () => useStore.getState().select(lead.workspaceId, lead.threadId, subagent.parentToolUseId) } : {})}
               {...(acts.length > 0 ? { onContextMenu: (event: MouseEvent<HTMLElement>) => void openContextMenu(event, acts) } : {})}
             />
           }
@@ -69,4 +83,4 @@ export const SubagentRow = memo(function SubagentRow({ subagent, target, kind, n
       )}
     </div>
   );
-}, (a, b) => a.depth === b.depth && a.rowId === b.rowId && sameSubagentRow(a, b));
+}, (a, b) => a.depth === b.depth && a.rowId === b.rowId && a.active === b.active && a.lead?.workspaceId === b.lead?.workspaceId && a.lead?.threadId === b.lead?.threadId && sameSubagentRow(a, b));

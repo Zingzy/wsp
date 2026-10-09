@@ -112,7 +112,7 @@ const SUBAGENTS = {
       title: "Find where the add sheet reads its steps",
       state: "running",
       started: 4,
-      model: "claude-haiku-4-5",
+      model: "claude-haiku-4-5-20251001",
       prompt: "Find every place the add sheet reads its list of steps: the component, the logic file and any test that pins the order. Report the files and lines, and nothing else.",
       work: [
         { say: "I'll find where the add sheet builds its list of steps, then every test that pins their order." },
@@ -134,7 +134,7 @@ const SUBAGENTS = {
       state: "done",
       started: 9,
       ended: 6,
-      model: "claude-haiku-4-5",
+      model: "claude-haiku-4-5-20251001",
       prompt: "Read the add sheet's tests and say whether any of them pins the order of the steps.",
       summary: "add-sheet.test.tsx:41 pins the order in three cases, all green.",
       work: [
@@ -176,7 +176,7 @@ const SUBAGENTS = {
       state: "failed",
       started: 1.9,
       ended: 1.5,
-      model: "claude-haiku-4-5",
+      model: "claude-haiku-4-5-20251001",
       prompt: "Fetch the landing page and list its Content-Security-Policy header, directive by directive.",
       failure: "WebFetch could not reach https://acme.dev: connect ETIMEDOUT",
       work: [
@@ -196,7 +196,7 @@ const SUBAGENTS = {
       state: "stopped",
       started: 6,
       ended: 4,
-      model: "claude-haiku-4-5",
+      model: "claude-haiku-4-5-20251001",
       prompt: "Run pnpm gate:csp and report each failing rule with its file.",
       work: [
         { say: "The gate builds the landing first, so I'll build it and then run the gate." },
@@ -215,8 +215,8 @@ const EARLIER = {
   ended: 56,
   said: "11 pull requests are open and main is green, so the builders can start from main.",
   subagents: [
-    { id: "sa-prs", title: "List the open pull requests", state: "done", started: 60, ended: 58, model: "claude-haiku-4-5", prompt: "List the open pull requests on acme/lab with their review state.", summary: "11 open, 4 approved, 7 waiting on a reviewer.", work: [{ say: "11 open, 4 approved, 7 waiting on a reviewer." }] },
-    { id: "sa-gate", title: "Check main's gate", state: "done", started: 62, ended: 57, model: "claude-haiku-4-5", prompt: "Run the gate on main and report what fails.", summary: "Main is green at 4c5d84d.", work: [{ say: "Main is green at 4c5d84d." }] },
+    { id: "sa-prs", title: "List the open pull requests", state: "done", started: 60, ended: 58, model: "claude-haiku-4-5-20251001", prompt: "List the open pull requests on acme/lab with their review state.", summary: "11 open, 4 approved, 7 waiting on a reviewer.", work: [{ say: "11 open, 4 approved, 7 waiting on a reviewer." }] },
+    { id: "sa-gate", title: "Check main's gate", state: "done", started: 62, ended: 57, model: "claude-haiku-4-5-20251001", prompt: "Run the gate on main and report what fails.", summary: "Main is green at 4c5d84d.", work: [{ say: "Main is green at 4c5d84d." }] },
   ],
 };
 
