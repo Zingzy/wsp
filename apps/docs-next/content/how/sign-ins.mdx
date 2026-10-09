@@ -1,3 +1,61 @@
 # How sign-ins reach your browser
 
-Written from the browser shim and callback forward in `daemon/` (`open.sock`).
+Many tools sign in through a web page. The tool opens the page in a browser, and you sign in. Then the page sends the browser back to a port on `localhost`, where the tool waits. On the computer that the app runs on, this works as usual. On a box, there is no browser, and `localhost` in your browser is your own computer, not the box.
+
+wsp opens the page in your browser and carries the callback back to the box. Only the URL and a port number travel through wsp. wsp does not read a code or a token from the page, and the host never logs the URL.
+
+## The steps
+
+1. The tool asks for a browser. On a box, wsp sets `BROWSER` to its shim, `~/.local/bin/wsp-open`, and puts the same shim at `~/.local/bin/xdg-open`. Some tools read `BROWSER`, and others run `xdg-open` by name, so both names lead to the shim. wsp also unsets `DISPLAY`, so no tool thinks that a screen is there. The shim is a few lines of shell. It posts the URL to the daemon's socket, `~/.wsp/open.sock`, and exits at once, because tools such as gh, gcloud and aws wait for it.
+
+2. The daemon finds the port. The daemon reads the callback port from the URL's `redirect_uri`, when it names `localhost`, `127.0.0.1` or `[::1]` with a port. If the URL names no port, the daemon waits up to 5 seconds for the next new listener on the box's loopback. A listener that was there before the request is not the tool's, so a dev server on port 3000 never takes your computer's port 3000. A port under 1024 is never used, because your computer needs root to listen there.
+
+3. The host listens on your computer. The host on your computer listens on the same port, on `127.0.0.1` and `::1`. It sends each connection to that port through its link to the box's daemon.
+
+4. You open the page. The app shows a bar: "A sign-in page for github.com is ready on" and the workspace's name, with Open and Dismiss. Nothing opens without your click. In a terminal, the link shows with a key to open it. For an agent, the page comes as a JSON line.
+
+5. The callback comes back. You sign in. The provider sends your browser to `localhost:<port>` on your computer. The host carries it to the tool on the box, and the tool finishes.
+
+Some tools print the URL and do not ask for a browser. The daemon also reads the output of a terminal for URLs. It removes hyperlink escapes, color codes and the line breaks of a narrow terminal first, so the same forward works for those tools.
+
+## How long a forward lives
+
+- A forward lives 3 minutes when no listener is found, and at most 15 minutes when one is.
+- If the callback comes while the link to the box is dialing again, the host holds it for up to one minute.
+- A restart of the host ends every sign-in in progress.
+
+## In a terminal
+
+When `wsp add` or `wsp agents signin` runs a sign-in in your terminal, the tool runs on the box and its output shows in your terminal, as over ssh. A URL that the tool prints shows again as a link with one line:
+
+```
+  link  https://github.com/login/device  o opens it on this computer
+```
+
+Press `o` within 60 seconds to open the page on your computer. Any printable key ends the offer. Enter and the arrow keys do not, because gh asks for Enter before it opens its own page.
+
+When `wsp add` runs at a terminal, it opens a waiting sign-in page by itself.
+
+## For an agent
+
+With `--json`, `wsp add` prints one `waiting` line for each sign-in that waits for you:
+
+```json
+{"waiting":{"row":"github","label":"GitHub","expiresAt":"2026-10-09T17:10:00.000Z","state":"waiting","url":"https://github.com/login/device","code":"8F4A-C21B"}}
+```
+
+A sign-in waits 10 minutes. Then its state is `expired`, and a retry asks for a new code. The `add` tool returns at the first sign-in that waits, so the agent can give you the page and the code.
+
+## Where a sign-in on a box ends up
+
+wsp copies no sign-in file to a box. You sign in on the box, or wsp gives the turn a key from your own computer:
+
+- The agents' keys and tokens stay in the `.env` beside the state file on your computer. The host puts them in each turn's environment, on this computer and on your boxes. Claude Code signs in with the token that `claude setup-token` prints on your computer, as `CLAUDE_CODE_OAUTH_TOKEN`. Nothing of the Claude Code login on your computer goes to a box.
+- For GitHub, the default is to take your token with `gh auth token` on your computer and keep it in the same `.env` as `GH_TOKEN`. Every thread on the box then gets it. To keep it off the box, choose a sign-in on the box or skip GitHub when you add the box.
+- Codex signs in once on the box. Its `auth.json` sits in `/wsp/logins/codex/`, and every thread on the box shares it.
+- Each tool checks a sign-in with its own status command, for example `gh auth status`, `wrangler whoami` or `codex login status`. wsp never reads what the login printed.
+
+## Next
+
+- [The host, the daemon and the relay](/how/overview) shows the link that the callback travels on.
+- [A rented server](/guides/rented-server) shows a box's sign-ins during `wsp add`.

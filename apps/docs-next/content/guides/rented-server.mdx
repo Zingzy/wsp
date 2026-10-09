@@ -1,3 +1,185 @@
 # A rented server
 
-Written from `wsp add user@host` on a VPS, the host key check (`--host-key`) and threads at once.
+This guide adds a server that you rent from a hosting company to wsp, over ssh. After that, threads run on the server in its own project folders, and you work with them in the app on your own computer. The host stays on your computer. The server runs only the wsp daemon.
+
+## Before you start
+
+The server must have:
+
+- Linux on `x86_64` or `aarch64`. A Mac cannot be a box.
+- systemd, and cgroup v2.
+- Node 22 or newer, for the `wsp` command that sits beside the daemon.
+- A root login over ssh with a key. wsp runs threads on a box only as root for now. wsp never types an ssh password, so the key must work without one.
+- Root's login shell set to bash or sh.
+- Free space on `/opt/wsp` for the base tools, plus 1 GiB.
+
+On your computer, you need wsp and a running host. The app starts the host. Without the app, the first `wsp` command starts it.
+
+## Step 1: Make sure that ssh works
+
+Run this on your computer. Replace the address with your server's:
+
+```sh
+ssh root@203.0.113.7 node --version
+```
+
+If the command asks for a password, add your public key to `/root/.ssh/authorized_keys` on the server first. If it prints a version below `v22`, install Node 22 or newer on the server with its package manager.
+
+## Step 2: Read the server's host key
+
+The first time wsp dials a server, it shows the server's host key and asks you to trust it. To check that key, read it on the server itself, through the web console of your hosting company:
+
+```sh
+ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
+```
+
+Keep the `SHA256:` fingerprint for step 3.
+
+## Step 3: Add the server
+
+You can add the server in the app or on the command line.
+
+In the app, open Settings > Computers and click Add a computer. In the first step, pick the server from the hosts in your ssh configuration, or type `root@203.0.113.7`. Then go through the steps of the dialog, from the checks to the summary.
+
+<Image src="/shots/wizard-00-where.webp" alt="The first step of Add a computer: the hosts from your ssh configuration, and a field for a new address" />
+
+On the command line, name the server and the recipe to set it up from:
+
+```sh
+wsp add root@203.0.113.7 --name vps --recipe mine
+```
+
+wsp asks about the host key:
+
+```
+root@203.0.113.7 answers with the key ssh-ed25519 SHA256:... ; trust it and continue?
+```
+
+Compare the fingerprint with the one from step 2. Answer yes only if they are the same.
+
+If you run the add without a terminal, for example from an agent, wsp cannot ask. Give the key on the line instead:
+
+```sh
+wsp add root@203.0.113.7 --name vps --recipe mine --host-key 'SHA256:...'
+```
+
+`--host-key` takes the fingerprint alone or the whole `ssh-ed25519 SHA256:...` word. If the server answers with another key, the add stops before it sends anything.
+
+<video src="/shots/docs-ssh-add.mp4" muted loop playsinline />
+
+Other flags of the add:
+
+- `--ssh-port <port>` for an ssh port other than 22.
+- `--ssh-key <path>` for a key that your ssh configuration does not name.
+- `--later` to go past sign-ins that wait for you, and finish them afterwards.
+
+## Step 4: Watch the install
+
+The add prints each step as it goes:
+
+```
+connecting over ssh
+remembering the box's host key in ~/.ssh/known_hosts
+checking it can run wsp
+checking it can reach this computer
+installing wsp
+starting the agent
+waiting for it to connect to this computer
+```
+
+wsp installs the daemon under `/root/.wsp`, a system unit `wsp-place-<tag>.service` and the base tools under `/opt/wsp`. Then it sets the server up from the recipe, in this order:
+
+1. The base tools.
+2. The agents, and their sign-ins.
+3. The command line tools and the skills.
+4. The agents' own files and MCP servers, and the plugins.
+5. git and the shell.
+6. The folders, as projects.
+7. The GitHub sign-in.
+
+If one step fails, the add says why and goes on with the others. Only the base tools and the agents stop it.
+
+When it is done, it prints:
+
+```
+vps joined this wsp, 4 cores, 8 GB, 61 GB free
+its ssh key      ssh-ed25519 SHA256:...
+wsp remove vps takes it back out and sweeps wsp off it.
+```
+
+If you added the server without `--recipe`, the base tools go on, and the server waits for you to choose the rest. Choose it in the app's Add a computer, or run `wsp add vps --resume --recipe mine`.
+
+## Step 5: Sign in on the server
+
+The agents and gh sign in on the server, not on your computer. When a sign-in waits for you, the add prints a line with the page and the code, and it opens the page in your browser:
+
+```
+  ? GitHub waits on you to sign in at https://github.com/login/device with code 8F4A-C21B
+```
+
+Sign in in your browser. The add goes on when the tool says that it is signed in. If you used `--later`, run `wsp add vps --resume` to finish the sign-ins. [How sign-ins reach your browser](/how/sign-ins) explains the path of the page.
+
+## Step 6: Add a project and start a thread
+
+Clone a repo on the server as a project:
+
+```sh
+wsp add https://github.com/acme/api --on vps
+```
+
+wsp clones it into a folder in root's home on the server. `wsp projects` lists the project with its name. Start a thread on it by that name:
+
+```sh
+wsp run api "Read the README and run the tests."
+```
+
+The thread runs in the project's folder on the server, as root, and it shows in your sidebar.
+
+## If the server cannot reach your computer
+
+The daemon on the server always dials your host. A rented server usually cannot reach a computer at your home or office. Then the host keeps an ssh connection to the server open, with a reverse forward, and the daemon dials back through it. The install says `dials back over ssh`. For this, the server's sshd must allow TCP forwarding, which it does by default.
+
+If the forward fails too, the add stops before it installs anything:
+
+```
+root@203.0.113.7 cannot reach this computer at ...; link this host to your relay, or start it with --advertise naming an address root@203.0.113.7 can reach
+```
+
+Then link your host to the relay with `wsp host link`, as [A box behind a firewall](/guides/behind-a-firewall) shows, and add the server again.
+
+## Set how many threads run at once
+
+A box runs a limited number of threads at once. The default is one thread for each 2 GB of memory, at least one, and at most twice the number of cores. To change it:
+
+```sh
+wsp computers set vps --threads 4
+```
+
+A thread over the limit waits for a slot and starts by itself. It says why it waits:
+
+```
+waiting while vps is running 2 of 2 threads
+```
+
+In the app, the waiting thread has Raise threads at once. `wsp computers set vps --reset threads` goes back to the default.
+
+## Update and remove the server
+
+When the host is newer than the daemon on the server, the server's row says so. To update the daemon:
+
+```sh
+wsp add vps --update
+```
+
+To take wsp off the server:
+
+```sh
+wsp remove vps
+```
+
+The remove asks first. It stops if work on the server is on no remote, unless you add `--force`. It deletes wsp's files on the server and leaves your project folders.
+
+## Next
+
+- [A computer at home](/guides/home-computer) adds a computer on your own network.
+- [What is stored where](/how/storage) lists what wsp puts on a box.

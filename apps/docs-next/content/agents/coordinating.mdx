@@ -1,3 +1,109 @@
 # Coordinating threads from an agent
 
-Written from the skill's "Running work well" and "The loop for building with wsp".
+A thread can start other threads. The thread that starts them is the lead, and each thread it starts is a child in its tree. A lead can give each ticket to a builder, give each branch a reviewer on another agent, and read every report when it comes in. You see the whole tree in the sidebar, and you can read or answer any thread in it.
+
+This page is for the agent in the lead thread. It follows the skill's sections "Running work well" and "The loop for building with wsp".
+
+<video src="/shots/docs-lead-spawn.mp4" muted loop playsinline />
+
+## Start each child with `--notify me`, then end the turn
+
+```sh
+wsp run acme --branch ticket/42-login --detach --notify me --title "42 login" "Read ticket 42 and build it. ..."
+```
+
+- `--detach` prints `thread <id>` and returns at once. The child's turn runs on.
+- `--notify me` names the caller. When the host launched you as a thread, `me` is your thread.
+- `--title` names the child in the sidebar.
+
+Then end your turn. Do not wait, and do not poll `wsp threads`. When a child finishes, its finished line comes into your thread as a message, and that message starts your next turn. Lines come in the order the children finish. Each line carries the facts and then the child's final message whole:
+
+```
+thread 1a2b3c4d finished (completed, 12m 4s, $0.41)
+```
+
+So you can act on the report without reading anything else. If the report that you need is longer than what reached you, `wsp thread read <id> --last` prints the child's final reply.
+
+The child joins your tree wherever it runs. `wsp threads` lists it, and `wsp send <id> "<message>"` reaches it.
+
+## Give each ticket its own worktree
+
+Two threads that write in one checkout collide. Give each builder its own branch:
+
+```sh
+wsp run acme --branch ticket/42-login --detach --notify me "..."
+```
+
+wsp runs the thread in a worktree of the project's repo on that branch. It uses the worktree that git already has for the branch. If there is none, it makes one from the project folder's current commit, with the `.env` files and the dependencies carried in. Threads that only read, plan or answer can share the project folder.
+
+## Write a brief that names everything
+
+A brief that says "fix the bug" comes back with a guess. Name these in the brief:
+
+- The ticket.
+- The files to read whole.
+- The laws, for example the repo's review skill.
+- The exact test commands.
+- The proof that you want back.
+
+Also tell the child to wait for every command it runs. If the agent replies while a command that it started is still running, the turn stays open until that command ends. The report then lands minutes after the reply.
+
+## Review on another agent
+
+A review is its own thread in the builder's worktree, often on another agent or a cheaper model:
+
+```sh
+wsp run acme --cwd <builder-folder> --agent codex --detach --notify me "Review the branch ticket/42-login with the review skill."
+```
+
+`--cwd` starts the thread in a folder inside the project or one of its worktrees. For `<builder-folder>`, use the folder that `wsp threads` shows for the builder. The builder fixes what the review finds, in its own thread, through `wsp send`.
+
+`--notify` repeats, and each target gets the line once. `--notify me --notify <reviewer>` sends the builder's end to you and to the reviewer. This saves you the relay by hand. It decides nothing, so you still read every report and make the calls.
+
+## Settle what you have read
+
+When you have acted on a child's report, settle it:
+
+```sh
+wsp thread settle 1a2b3c4d
+```
+
+The child and every thread under it fold into Settled in the person's sidebar. A thread that is still working or asking stays where it is. A finished child whose report you took reads as read, and it settles by itself after the person's quiet time.
+
+## Restart a stuck child
+
+Stop the child, then start its replacement with `--replaces`:
+
+```sh
+wsp stop 1a2b3c4d
+wsp run acme --branch ticket/42-login --replaces 1a2b3c4d --detach --notify me "..."
+```
+
+The person then sees one row for the job, not two rows under one title.
+
+## Send into a running thread
+
+A send never opens a second turn. Some agents, such as Claude Code, take input in the middle of a turn. If the thread's turn is running on such an agent, the message joins that turn. Otherwise it waits and runs as the next turn. Never start a second thread to hurry a running one.
+
+## Keep a slate as the board
+
+A lead can own one slate, a live panel beside the chat. A slate is a good board for a tree. Give it one row for each child with its branch and its state, and a button for each decision that is the person's. Only a press on a button reaches you. A child that another thread started has no slate.
+
+Build and read a slate with the slate tools (`slate_catalog`, `slate_write`, `slate_state`, `slate_read`). The [Slate catalog](/reference/slate) lists what a slate can hold.
+
+## When you are not a thread
+
+An agent that you started yourself in a terminal is not a wsp thread, so nothing can wake it. It gets the reply of one turn as the call returns. For work of more than one turn, start one coordinator thread in the project's folder on this computer. Give it the whole job in its brief, and tell the person where to read it.
+
+`wsp threads wait` is for a shell script, which has nothing else to do while its builders run. Do not call it in a conversation. It spends minutes of a turn on nothing.
+
+## Keep the computer free
+
+- On a box with 2 vCPU and 4 GB, run one build or one test run at a time. A second one starves the computer, and the app reads it as not answering.
+- Restarting the host cuts every turn that is running. Finish or stop the running turns before `wsp down` and `wsp up`.
+
+## Next
+
+- [Give your agent the wsp tools](/agents/tools) installs the tools and the skill.
+- [The wsp skill](/agents/skill) has every verb with its flags.
+- [Leads and sub-threads](/features/leads) shows the same tree in the app.

@@ -1,3 +1,116 @@
 # How wsp runs each agent
 
-Written from each adapter's launch line in `packages/adapter-claude`, `adapter-codex` and their siblings.
+wsp does not include an agent of its own. A thread runs one of four coding agents through that agent's own command line: Claude Code, Codex, OpenCode or Cursor. An adapter in wsp starts the command, reads what it prints and answers its questions. This page shows the command each adapter starts and how the parts of a thread map to it.
+
+The catalog knows other agents too: Amp, Crush, Gemini CLI, Goose, Hermes Agent, Pi and Qwen Code. wsp can install them and give them the wsp skill, but it has no adapter for them, so they cannot run threads.
+
+## What every turn gets
+
+Each command starts in the thread's folder: the project's folder, or a worktree of it.
+
+Each turn's environment carries four wsp variables:
+
+- `WSP_TURN` is a random token for this one turn.
+- `WSP_HOST_TOKEN` is a token for this thread, which the host takes back when the turn's process ends.
+- `WSP_HOST_URL` and `WSP_HOST_KEY` say where the host is, when the turn runs on another computer.
+
+So a `wsp` command that the agent runs, such as `wsp run --notify me`, acts as this thread.
+
+Claude Code and Codex also get the wsp tools in the launch, as an MCP server. On the computer that the app runs on, the server is `wsp mcp --state <state> --scoped`. A thread that another thread started also gets `--no-slate`, because it has no slate. OpenCode and Cursor get no wsp tools.
+
+The agent reads and writes its own session files where it always does. On the computer that the app runs on, these are your own files, for example `~/.claude/projects` and `~/.codex/sessions`. wsp copies nothing for a turn.
+
+You can set your own program or arguments for an agent on a computer. Your program then takes the place of the command's name, and your arguments come right after it.
+
+## Where the process runs
+
+- On the computer that the app runs on, the turn runs as you. The Claude Code and Codex processes stay up between turns.
+- On a box, the turn runs as the login that the box was added with, in the thread's own cgroup. wsp's own folder is first on the `PATH`. That login must be root for now. A box has no worktrees yet. The process ends with each turn.
+
+## Access
+
+wsp has four access words, the same for every agent. Each agent maps them to its own modes. An agent with no mode for a word refuses it and names the words that it takes.
+
+| wsp word | Claude Code | Codex | OpenCode | Cursor |
+|---|---|---|---|---|
+| `ask` | `default` | `workspace-write` | none | none |
+| `auto-edit` | `acceptEdits` | none | none | none |
+| `full` | `bypassPermissions` | `danger-full-access` | `auto` | `force` |
+| `plan` | none | `read-only` | none | `default` |
+
+## Claude Code
+
+```sh
+claude -p --input-format stream-json --output-format stream-json --verbose \
+  --permission-mode default --permission-prompt-tool stdio \
+  --model <model> --effort <effort> --name <title> \
+  --mcp-config '<json>' --settings '<json>' \
+  --session-id <uuid>
+```
+
+- The message goes in on stdin as a stream-json line. Images go in the same line.
+- With `full` access, the command has `--dangerously-skip-permissions` in place of `--permission-mode`. It keeps `--permission-prompt-tool stdio`, so a question from the agent still reaches you.
+- A thread with a slate also gets `--append-system-prompt` with the slate's brief.
+- A permission question comes out on stdout as a control request. Your answer in the app goes back on stdin.
+- A message that you send while the turn runs goes in on stdin as one more line. The turn takes it at its next tool round.
+- A later turn resumes with `--resume <uuid>`. After a rewind, it resumes with `--resume-session-at <message>` too, which cuts the conversation at that message.
+- A stop sends an interrupt request to the running process. If the turn does not stop, wsp ends the process.
+- The access of a running turn can change without a restart.
+- wsp removes inherited `CLAUDE_CODE_*` variables and sets its own. It signs the turn in with `CLAUDE_CODE_OAUTH_TOKEN`, the token that `claude setup-token` prints, or with `ANTHROPIC_API_KEY`, from the keys file of the host. It never sets `CLAUDE_CONFIG_DIR`. If your shell sets it, it comes through.
+- The session file is `<config folder>/projects/<folder>/<uuid>.jsonl`. Sessions and memory follow the project, not the worktree.
+
+## Codex
+
+```sh
+codex app-server -c tools.update_plan.enabled=true \
+  -c mcp_servers.wsp.command=... -c mcp_servers.wsp.args=[...]
+```
+
+- wsp talks to Codex's app server in JSON-RPC over stdin and stdout. It opens the thread with `thread/start` or `thread/resume`, then starts each turn with `turn/start`. The model, the sandbox and the approval policy go in `thread/start`. The message, its images and the effort go in `turn/start`.
+- A sandboxed mode asks for approval on request. Full access never asks.
+- A permission question comes as `item/commandExecution/requestApproval` or `item/fileChange/requestApproval`. wsp answers accept or decline for that one action. A reason that you give with a deny goes into the turn as your next message.
+- A message that you send while the turn runs goes in with `turn/steer`.
+- A stop sends `turn/interrupt`. If the turn does not stop, wsp ends the process.
+- A rewind runs `thread/revert` on a separate, read-only app server, which cuts the conversation at that turn.
+- The wsp tools get `tool_timeout_sec=3600`. The slate tools sit in a second server, `wsp_slate`, whose calls need no approval.
+- An API key from the keys file goes in as both `CODEX_API_KEY` and `OPENAI_API_KEY`.
+- The session file is under `$CODEX_HOME/sessions`. A rename goes through `thread/name/set`.
+
+## OpenCode
+
+```sh
+opencode run --format json --print-logs --log-level ERROR --dir <folder> \
+  -s <session> -m <provider/model> --variant <effort> --title=<title> --auto
+```
+
+- The message goes in on stdin.
+- OpenCode takes only `full` access. Its run mode asks nobody, and it refuses every permission question that its own settings raise. So no question reaches you.
+- A message that you send while the turn runs waits and runs as the next turn.
+- A later turn resumes with `-s <session>`. The sessions are in `~/.local/share/opencode/opencode.db`.
+- A stop ends the process. A rewind puts back the files only.
+
+## Cursor
+
+```sh
+cursor-agent -p --output-format stream-json --stream-partial-output --trust \
+  --workspace <folder> --model <model> --resume <chat> --force
+```
+
+- The message goes in on stdin. Cursor takes no images.
+- Cursor takes the effort as part of the model's name, so wsp does not pass a separate effort.
+- `--force` is there only for `full` access.
+- No permission question reaches you.
+- A message that you send while the turn runs waits and runs as the next turn.
+- The key goes in as `CURSOR_API_KEY`, never on the command line.
+- A stop ends the process. A rewind puts back the files only.
+
+## Stop and rewind for every agent
+
+When an interrupt does not end a turn, wsp sends SIGTERM to the turn's process group, then SIGKILL 5 seconds later.
+
+A rewind puts the files back from the checkpoint that the daemon keeps for each turn. If another thread worked in the same folder after that checkpoint, wsp leaves the files alone. Only Claude Code and Codex also cut the conversation.
+
+## Next
+
+- [The host, the daemon and the relay](/how/overview) shows where the host and the daemon run.
+- [Agents and sign-ins](/features/agents) shows how to install and sign in each agent.

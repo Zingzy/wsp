@@ -1,3 +1,107 @@
 # A computer at home
 
-Written from `wsp add user@host` for an old laptop or a desktop on your own network.
+An old laptop or a desktop under your desk can run threads for you. This guide puts Linux on it, adds it to wsp over ssh from the computer that you use, and keeps it awake. The host stays on your computer. The computer at home runs only the wsp daemon.
+
+## Before you start
+
+The computer at home must have:
+
+- Linux on `x86_64` or `aarch64`, with systemd and cgroup v2. A recent Debian, Ubuntu or Fedora has both.
+- Node 22 or newer.
+- An ssh server, and your public key in `/root/.ssh/authorized_keys`. wsp runs threads on a box only as root for now, and it never types an ssh password.
+- Root's login shell set to bash or sh.
+- Free space on `/opt/wsp` for the base tools, plus 1 GiB.
+
+Both computers must be on the same network for the steps below.
+
+## Step 1: Find its address
+
+On the computer at home, print its addresses:
+
+```sh
+hostname -I
+```
+
+Pick the address on your home network, for example `192.168.1.40`. A router can give the computer a new address after a restart. To keep the address, reserve it for this computer in your router's settings.
+
+## Step 2: Make sure that ssh works
+
+Run this on your own computer:
+
+```sh
+ssh root@192.168.1.40 node --version
+```
+
+If the command asks for a password, put your public key in `/root/.ssh/authorized_keys` on the computer at home. If it prints a version below `v22`, install Node 22 or newer there.
+
+To use a short name, add a host to `~/.ssh/config` on your computer:
+
+```
+Host den
+  HostName 192.168.1.40
+  User root
+```
+
+wsp reads that file. The app's Add a computer lists the hosts in it, and `wsp add den` works too.
+
+## Step 3: Keep it awake
+
+A computer that sleeps cannot run threads. On the computer at home, turn off sleep:
+
+```sh
+sudo systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target
+```
+
+For a laptop, also set `HandleLidSwitch=ignore` in `/etc/systemd/logind.conf`, then run `sudo systemctl restart systemd-logind`. Then the laptop keeps running with its lid closed.
+
+## Step 4: Add it
+
+In the app, open Settings > Computers and click Add a computer. Pick the host from your ssh configuration, or type `root@192.168.1.40`, and go through the steps.
+
+<Image src="/shots/wizard-00-where.webp" alt="The first step of Add a computer: the hosts from your ssh configuration, and a field for a new address" />
+
+On the command line:
+
+```sh
+wsp add root@192.168.1.40 --name den --recipe mine
+```
+
+wsp shows the host key of the computer and asks you to trust it:
+
+```
+root@192.168.1.40 answers with the key ssh-ed25519 SHA256:... ; trust it and continue?
+```
+
+To check the key, run `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` on the computer at home and compare the `SHA256:` fingerprint. Without a terminal, give the key with `--host-key 'SHA256:...'`.
+
+<video src="/shots/docs-ssh-add.mp4" muted loop playsinline />
+
+The add installs the daemon, sets the computer up from the recipe and asks you to finish the sign-ins in your browser. [A rented server](/guides/rented-server) shows each step and its output.
+
+## How the computer reaches yours
+
+The daemon on the computer at home dials your host. When a computer has joined, the host listens on port `4420` on every address of your computer. So a computer on your network can dial it directly. The install says which address it dials, in a line that starts with `it dials this computer at`.
+
+If a firewall on your computer blocks port `4420`, the host keeps an ssh connection to the computer at home open. The daemon dials back through it. The install then says `dials back over ssh`. The computer works the same way, but only while your computer is awake and on the network.
+
+## Add a project and start a thread
+
+```sh
+wsp add https://github.com/acme/api --on den
+wsp projects
+wsp run api "Read the README and run the tests."
+```
+
+The thread runs in the project's folder on the computer at home, as root, and it shows in your sidebar.
+
+A computer at home runs one thread for each 2 GB of memory by default, at least one, and at most twice its cores. An old laptop with 8 GB runs four threads at once. To change it, run `wsp computers set den --threads <n>`.
+
+## Update and remove it
+
+- `wsp add den --update` puts the host's daemon version on the computer.
+- `wsp remove den` takes wsp off the computer and leaves your project folders.
+
+## Next
+
+- [A box behind a firewall](/guides/behind-a-firewall) adds a computer that your computer cannot reach.
+- [Computers](/features/computers) shows the computers in the app.
