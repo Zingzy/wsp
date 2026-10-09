@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { act, cleanup, fireEvent, render } from "@testing-library/react";
+import { Profiler } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SidebarThreadSnapshot } from "../adapt/index.js";
 import { threadIndicator } from "../adapt/index.js";
 import { SidebarProvider } from "../components/ui/sidebar.js";
-import { ThreadTile, WorkspaceTile, type TilePlace } from "./ThreadTile.js";
+import { ThreadTile, WorkspaceTile, useTileHandlers, type TilePlace } from "./ThreadTile.js";
 import type { TileCheckout } from "./tileCheckout.js";
 import type { PlaceView } from "@wsp/protocol";
 
@@ -65,7 +66,8 @@ describe("a thread tile", () => {
       mount({ over: { status: "running", capped: { placeId: "p_hetzner", place: "hetzner", running: 2, atOnce: 2 } } });
       expect(slot().dataset["threadStatus"]).toBe("waiting");
       expect(slot().dataset["tone"]).toBeUndefined();
-      expect(slot().textContent).toBe("Waiting");
+      expect(slot().getAttribute("aria-label")).toBe("Waiting");
+      expect(slot().textContent).toBe("");
       expect(slot().querySelector("svg")!.getAttribute("class")).toContain("lucide-hourglass");
       expect(tile().querySelector("[data-crab]")).toBeNull();
       fireEvent.pointerEnter(tile(), { pointerType: "mouse" });
@@ -105,7 +107,8 @@ describe("a thread tile", () => {
 
   it("a finish nobody has seen says Done in the slot and keeps its title in the foreground ink; opened, it rests with its age and a muted title", () => {
     mount({ over: { status: "completed", endedAt: "2026-09-17T00:05:00.000Z", unread: true } });
-    expect(slot().textContent).toBe("Done");
+    expect(slot().getAttribute("aria-label")).toBe("Done");
+    expect(slot().textContent).toBe("");
     expect(slot().dataset["tone"]).toBe("done");
     const title = tile().querySelector("[data-thread-title]")!;
     expect(title.className).toContain("text-sidebar-foreground");
@@ -124,7 +127,8 @@ describe("a thread tile", () => {
     expect(one!.querySelector("svg")).not.toBeNull();
     expect(one!.querySelector("[data-tile-where]")!.textContent).toBe("spoo-landing @ zingzy's MacBook Pro");
     expect(one!.lastElementChild).toBe(slot());
-    expect(slot().textContent).toBe("Failed");
+    expect(slot().getAttribute("aria-label")).toBe("Failed");
+    expect(slot().textContent).toBe("");
     expect(two!.firstElementChild!.matches("[data-harness-mark=claude]")).toBe(true);
     expect(two!.querySelector("[data-thread-title]")!.textContent).toBe("Cart total rounding");
     expect(tile().querySelector(".lucide-git-branch, [data-tile-branch]")).toBeNull();
@@ -143,11 +147,15 @@ describe("a thread tile", () => {
     expect(two!.querySelector("[data-thread-title]")!.className).toContain("text-sm");
   });
 
-  it("walks the crab at row two's right end while working, never in the status slot, and the slot holds the elapsed time", () => {
+  it("walks one crab while working, in row one's status slot as its icon alone, and row two ends in none", () => {
     mount();
-    expect(rows()[1]!.lastElementChild!.matches("canvas[data-crab]")).toBe(true);
-    expect(slot().querySelector("canvas")).toBeNull();
+    expect(tile().querySelectorAll("canvas[data-crab]")).toHaveLength(1);
+    expect(slot().querySelector("canvas[data-crab]")).not.toBeNull();
+    expect(rows()[0]!.lastElementChild).toBe(slot());
+    expect(rows()[1]!.querySelector("canvas")).toBeNull();
     expect(slot().dataset["tone"]).toBe("working");
+    expect(slot().getAttribute("aria-label")).toBe("Working");
+    expect(slot().textContent).toBe("");
     cleanup();
     for (const over of [{ status: "failed" as const }, { status: "completed" as const }, { asking: "Write out.txt" }]) {
       mount({ over });
@@ -229,6 +237,67 @@ describe("a thread tile", () => {
     cleanup();
     mount({ active: true });
     expect(rows()[1]!.querySelector("[data-thread-title]")!.className).toContain("text-sidebar-foreground");
+  });
+
+  it("a thread a stop ended reads Stopped in the row's muted ink, not Done, and its title recedes", () => {
+    mount({ over: { status: "interrupted", endedAt: "2026-09-17T00:05:00.000Z", unread: true } });
+    expect(slot().dataset["threadStatus"]).toBe("stopped");
+    expect(slot().getAttribute("aria-label")).toBe("Stopped");
+    expect(slot().dataset["tone"]).toBeUndefined();
+    expect(slot().querySelector("svg")!.getAttribute("class")).toContain("lucide-circle-stop");
+    expect(rows()[1]!.querySelector("[data-thread-title]")!.className).toContain("text-sidebar-muted-foreground");
+  });
+
+  it("the slot's tooltip ticks the time a turn has run on its own node, and the tile is drawn no more while it does", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] });
+    try {
+      vi.setSystemTime(new Date("2026-09-17T00:01:22.000Z"));
+      const commits = vi.fn();
+      render(
+        <Profiler id="tile" onRender={commits}>
+          <SidebarProvider defaultOpen>
+            <ThreadTile thread={thread()} place={PLACE} model={null} time="3m" depth={0} active={false} renaming={false} saving={false} onSelect={() => {}} onContextMenu={() => {}} onRename={() => {}} onRenameCancel={() => {}} />
+          </SidebarProvider>
+        </Profiler>,
+      );
+      fireEvent.pointerEnter(slot(), { pointerType: "mouse" });
+      fireEvent.mouseEnter(slot());
+      fireEvent.mouseMove(slot());
+      await act(async () => void vi.advanceTimersByTime(1_000));
+      const tip = (): string => document.querySelector("[data-slot=tooltip-popup]")?.textContent ?? "";
+      expect(tip()).toBe("Working 1m 22s");
+      const drawn = commits.mock.calls.length;
+      for (const want of ["Working 1m 23s", "Working 1m 24s", "Working 1m 25s"]) {
+        act(() => vi.advanceTimersByTime(1_000));
+        expect(tip()).toBe(want);
+      }
+      expect(commits.mock.calls.length).toBe(drawn);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("through useTileHandlers a tile calls the handlers the latest draw passed, keeps one function per handler across draws, and draws again when a change shows", () => {
+    const first = vi.fn();
+    const last = vi.fn();
+    const seen: Array<() => void> = [];
+    function Sidebar({ onSelect, over = {} }: { onSelect: () => void; over?: Partial<SidebarThreadSnapshot> }) {
+      const handlers = useTileHandlers()("thread:th_1", { onSelect, onContextMenu: () => {}, onRename: () => {}, onRenameCancel: () => {} });
+      seen.push(handlers.onSelect);
+      return (
+        <SidebarProvider defaultOpen>
+          <ThreadTile thread={thread({ status: "completed", ...over })} place={{ ...PLACE }} model={null} time="3m" depth={0} active={false} renaming={false} saving={false} {...handlers} />
+        </SidebarProvider>
+      );
+    }
+    const view = render(<Sidebar onSelect={first} />);
+    view.rerender(<Sidebar onSelect={last} />);
+    expect(seen[1]).toBe(seen[0]);
+    fireEvent.click(tile());
+    expect(first).not.toHaveBeenCalled();
+    expect(last).toHaveBeenCalledTimes(1);
+    view.rerender(<Sidebar onSelect={last} over={{ status: "failed" }} />);
+    expect(slot().dataset["threadStatus"]).toBe("failed");
   });
 
   it("a failed thread and one waiting on the person keep the foreground ink, whatever their session says", () => {

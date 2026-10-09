@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // A thread's status in one slot, the same wherever a thread shows: the kind's
-// glyph, its word, the elapsed time of a working turn, a resting thread's age,
-// and the crab where the caller has no other place for it. The kind's tone
-// inks the whole slot; a slot with none keeps the row's own ink.
+// glyph alone (the crab while it works), its word on the slot's label and on a
+// tooltip that adds the time, how long the turn has run or how long ago it
+// ended, and a resting thread's age. The kind's tone inks the whole slot; a
+// slot with none keeps the row's own ink.
 import { cn } from "../../lib/utils.js";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip.js";
 import { Crab } from "./Crab.js";
@@ -12,13 +13,12 @@ import { threadStatusOf } from "./threadStatusOf.js";
 import { useMinuteClock } from "./useMinuteClock.js";
 import { WorkingSince } from "./WorkingSince.js";
 
-/** The slot in a one-line row: 88px, right-aligned, 12px, so times and words line up down a list. */
-export const LINE_SLOT_CLASS = "w-22 justify-end text-muted-foreground text-xs";
+/** The slot in a one-line row: as wide as the icon, growing for an age, right-aligned, 12px. */
+export const LINE_SLOT_CLASS = "min-w-4 justify-end text-muted-foreground text-xs";
 
 export function ThreadStatus({
   thread,
   age,
-  crab = false,
   settled = false,
   kind: given,
   className,
@@ -26,8 +26,6 @@ export function ThreadStatus({
   thread: ThreadStatusInput;
   /** How long ago the thread last moved, as the surface words it; what a resting thread shows. */
   age?: string;
-  /** Draw the crab inside the slot, for a surface with no row end of its own to put it at. */
-  crab?: boolean;
   /** The thread sits in the Settled fold, where the design's Settled row reads the age in the row's ink whatever the
    * thread's state: the fold holds what a person has put away, so nothing in it calls for them. */
   settled?: boolean;
@@ -36,33 +34,46 @@ export function ThreadStatus({
   className?: string;
 }) {
   const kind = given ?? (settled ? RESTING : threadStatusOf(thread));
+  const slot = cn("inline-flex shrink-0 items-center whitespace-nowrap tabular-nums", className, kind.tone !== undefined && "font-medium", kind.ink);
   const Glyph = kind.glyph;
-  // A state drawn as its glyph alone says its word on the hover, as the design's state marks do.
-  const glyph = Glyph === undefined ? null : <Glyph aria-hidden className="size-3 shrink-0" />;
-  return (
-    <span
-      data-thread-status={kind.id}
-      data-tone={kind.tone}
-      className={cn("inline-flex shrink-0 items-center gap-1 whitespace-nowrap tabular-nums", className, kind.tone !== undefined && "font-medium", kind.ink)}
-    >
-      {glyph !== null && kind.glyphOnly && kind.word !== undefined ? (
-        <Tooltip>
-          <TooltipTrigger render={<span className="inline-flex shrink-0 items-center" />}>{glyph}</TooltipTrigger>
-          <TooltipPopup side="top">{kind.word}</TooltipPopup>
-        </Tooltip>
-      ) : (
-        glyph
-      )}
-      {kind.word !== undefined && <span data-status-word className={kind.timed || kind.glyphOnly ? "sr-only" : undefined}>{kind.word}</span>}
-      {kind.wordOf !== undefined && <TickingWord word={now => kind.wordOf!(thread, now)} />}
-      {kind.timed && <WorkingSince since={thread.startedAt} />}
-      {kind.aged && age !== undefined && <span>{age}</span>}
-      {crab && kind.crab && <Crab />}
-    </span>
+  if (Glyph === undefined && kind.crab !== true)
+    return (
+      <span data-thread-status={kind.id} data-tone={kind.tone} className={slot}>
+        {kind.aged ? age : null}
+      </span>
+    );
+  return kind.wordOf === undefined ? (
+    <Mark thread={thread} kind={kind} word={kind.word ?? ""} age={age} className={slot} />
+  ) : (
+    <TickingMark thread={thread} kind={kind} word={now => kind.wordOf!(thread, now)} age={age} className={slot} />
   );
 }
 
 /** A word read off the minute clock, so a reset's "resets in 14 min" moves while it stands. */
-function TickingWord({ word }: { word: (now: number) => string }) {
-  return <span>{word(useMinuteClock())}</span>;
+function TickingMark({ word, ...mark }: { thread: ThreadStatusInput; kind: StatusKind; word: (now: number) => string; age: string | undefined; className: string }) {
+  return <Mark {...mark} word={word(useMinuteClock())} />;
+}
+
+function Mark({ thread, kind, word, age, className }: { thread: ThreadStatusInput; kind: StatusKind; word: string; age: string | undefined; className: string }) {
+  const Glyph = kind.glyph;
+  return (
+    <Tooltip>
+      <TooltipTrigger render={<span data-thread-status={kind.id} data-tone={kind.tone} role="img" aria-label={word} className={className} />}>
+        {Glyph === undefined ? <Crab /> : <Glyph aria-hidden className="size-3 shrink-0" />}
+      </TooltipTrigger>
+      <TooltipPopup side="top">
+        <span className="tabular-nums">
+          {word}
+          {kind.timed ? (
+            <>
+              {" "}
+              <WorkingSince since={thread.startedAt} />
+            </>
+          ) : kind.aged && age !== undefined ? (
+            <span className="text-muted-foreground"> {age}</span>
+          ) : null}
+        </span>
+      </TooltipPopup>
+    </Tooltip>
+  );
 }

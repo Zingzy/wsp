@@ -57,7 +57,7 @@ import { SIDEBAR_SECTIONS, dropMarks, settleableRoots, sidebarTiles, treeSettle,
 import { SnoozeDialog } from "./SnoozeDialog.js";
 import { SidebarCorner } from "./SidebarCorner.js";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./SidebarChrome.js";
-import { CreationTile, ThreadLaunchTile, ThreadTile, WorkspaceTile, type TilePlace } from "./ThreadTile.js";
+import { CreationTile, ThreadLaunchTile, ThreadTile, WorkspaceTile, useTileHandlers, type TilePlace } from "./ThreadTile.js";
 import { newThreadTitle, computerName, computerOf, copyName, placeNames } from "./workspaceRows.js";
 import { tileCheckout, useCheckoutAsks } from "./tileCheckout.js";
 import { restingAge } from "../components/status/restingAge.js";
@@ -173,6 +173,7 @@ export function WorkspaceSidebar() {
   const [snoozing, setSnoozing] = useState<string | null>(null);
   /** The root tile being dragged, by fold key, and the place under the pointer it would land in. */
   const [dragging, setDragging] = useState<string | null>(null);
+  const tileHandlers = useTileHandlers();
   const [over, setOver] = useState<SidebarSection | "settled" | null>(null);
   const [forgetting, setForgetting] = useState<{ workspaceIds: ReadonlyArray<string>; act: "forget" | "delete"; copies?: true } | null>(null);
   /** The tile whose name is being typed, by the row id every tile carries, and whether that name is on its way; one
@@ -383,30 +384,32 @@ export function WorkspaceSidebar() {
           snoozedWorking={item.snoozedWorking}
           renaming={renaming?.rowId === rowId}
           saving={renaming?.rowId === rowId && renaming.saving}
-          onSelect={() => select(thread.workspaceId, thread.threadId)}
-          onContextMenu={event => void openContextMenu(event, [...actionsOf, ...copyActions])}
-          onRename={title => void sendName(rowId, () => renameThread({ sessionId: thread.sessionId, workspaceId: thread.workspaceId, harness: thread.harness, title }))}
-          onRenameCancel={() => setRenaming(null)}
-          onRenameOpen={openerOf(actionById(actionsOf, "rename"))}
           {...(group.length > 0 && thread.model !== null ? { label: catalog === null ? thread.model : modelOf(catalog, modelPicks(thread.model).model)?.label } : {})}
-          {...(depth === 0 && !settled
-            ? {
-                onDragStart: (event: DragEvent<HTMLElement>) => {
-                  event.dataTransfer.setData("text/plain", thread.title);
-                  event.dataTransfer.effectAllowed = "move";
-                  setDragging(item.id);
-                },
-                onDragEnd: () => {
-                  setDragging(null);
-                  setOver(null);
-                },
-              }
-            : {})}
+          {...tileHandlers(rowId, {
+            onSelect: () => select(thread.workspaceId, thread.threadId),
+            onContextMenu: event => void openContextMenu(event, [...actionsOf, ...copyActions]),
+            onRename: title => void sendName(rowId, () => renameThread({ sessionId: thread.sessionId, workspaceId: thread.workspaceId, harness: thread.harness, title })),
+            onRenameCancel: () => setRenaming(null),
+            onRenameOpen: openerOf(actionById(actionsOf, "rename")),
+            ...(depth === 0 && !settled
+              ? {
+                  onDragStart: (event: DragEvent<HTMLElement>) => {
+                    event.dataTransfer.setData("text/plain", thread.title);
+                    event.dataTransfer.effectAllowed = "move";
+                    setDragging(item.id);
+                  },
+                  onDragEnd: () => {
+                    setDragging(null);
+                    setOver(null);
+                  },
+                }
+              : {}),
+          })}
         />
       );
     }
     return (
-      <li key={item.id} data-thread-item data-workspace-id={runs.id} className={cn("min-w-0", depth > 0 && RAIL_ITEM_CLASS)}>
+      <li key={item.id} data-thread-item data-workspace-id={runs.id} {...(settled && thread !== null ? { "data-slim": "" } : {})} className={cn("min-w-0", depth > 0 && RAIL_ITEM_CLASS)}>
         {tile}
         {children.length > 0 ? <ul className={CHILD_LIST_CLASS}>{children.map(child => tileItem(child, depth + 1, runs.id, settled))}</ul> : null}
       </li>

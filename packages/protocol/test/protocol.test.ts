@@ -78,6 +78,7 @@ import {
   threadState,
   threadStateWord,
   threadNeedsYou,
+  needsYouCount,
   threadUnread,
   DEVICE_OPS,
   threadWordOf,
@@ -1756,6 +1757,14 @@ describe("thread provenance", () => {
     expect(threadNeedsYou({ status: "failed", endedAt: 2_000, readAt: 2_000 })).toBe(false);
     expect(threadNeedsYou({ status: "completed", endedAt: 2_000, readAt: 2_000 })).toBe(false);
     expect(threadNeedsYou({ status: "completed", endedAt: 2_000, readAt: 3_000, wokeAt: 4_000 })).toBe(true);
+  });
+
+  it("a turn the person stopped asks nothing of them, seen or not; a snooze ending on it still does", () => {
+    expect(threadNeedsYou({ status: "interrupted", endedAt: 2_000, readAt: 1_000 })).toBe(false);
+    expect(threadNeedsYou({ status: "interrupted", endedAt: 2_000 })).toBe(false);
+    expect(threadNeedsYou({ status: "interrupted", endedAt: 2_000, readAt: 3_000, wokeAt: 4_000 })).toBe(true);
+    expect(threadNeedsYou({ status: "interrupted", endedAt: 2_000, asking: "Permission for Bash: ls" })).toBe(true);
+    expect(needsYouCount([{ id: "s_1", workspaceId: "ws_a", harness: "claude", status: "interrupted", threadId: "thr_1", endedAt: 2_000 }])).toBe(0);
   });
 
   it("the marks, the restore and the search are ops a paired device sends; a thread's token searches its own tree and marks nothing", () => {

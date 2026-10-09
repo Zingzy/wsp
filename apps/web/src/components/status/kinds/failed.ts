@@ -11,4 +11,5 @@ export const FAILED: StatusKind = {
   ink: "text-status-failed",
   glyph: CircleAlertIcon,
   word: threadStateWord("failed"),
+  aged: true,
 };

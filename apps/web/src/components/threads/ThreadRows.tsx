@@ -96,7 +96,7 @@ export function ThreadRow({ thread, place, branch, note, act, className }: Threa
         </span>
       )}
       {act === undefined ? (
-        <ThreadStatus thread={thread} age={restingAge(thread)} crab className={LINE_SLOT_CLASS} />
+        <ThreadStatus thread={thread} age={restingAge(thread)} className={LINE_SLOT_CLASS} />
       ) : (
         <Button type="button" size="xs" variant="outline" className="shrink-0" onClick={act.run}>
           {act.label}

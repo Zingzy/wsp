@@ -104,7 +104,7 @@ function SwitcherCardView({ card, highlighted }: { card: SwitcherCard; highlight
       <span className="flex min-w-0 items-center gap-2 text-muted-foreground text-xs" data-card-thread>
         <HarnessMark harness={card.thread.harness} label={agentName(card.thread.harness)} className="size-3 shrink-0" />
         <span className="min-w-0 flex-1 truncate">{card.place}</span>
-        <ThreadStatus thread={card.thread} age={restingAge(card.thread)} crab />
+        <ThreadStatus thread={card.thread} age={restingAge(card.thread)} />
       </span>
     </div>
   );
