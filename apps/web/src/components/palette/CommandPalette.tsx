@@ -8,7 +8,7 @@
 // first nine rows while it is open.
 // The workspace rows come from the workspace registry, so they run what the
 // sidebar's buttons and menus run.
-import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { isLocalWorkspace, threadMarkdown, threadMessages, type SessionSearchHit } from "@wsp/protocol";
 import { useWorkspaceVerbs } from "../../actions/verbs.js";
 import { isCommandPaletteOpen, onOpenCommandPalette } from "../../commandPaletteBus.js";
@@ -34,10 +34,11 @@ import {
 } from "./CommandPalette.logic.js";
 import { CommandPaletteContent } from "./CommandPaletteContent.js";
 import { CommandPaletteResults } from "./CommandPaletteResults.js";
-import { NEW_THREAD_PAGE, buildPaletteItems, pickedRow, type PaletteHandlers } from "./paletteItems.js";
+import { NEW_THREAD_PAGE, buildPaletteItems, pickedRow, type PaletteHandlers, type PaletteItems } from "./paletteItems.js";
 
 const NO_ITEMS: ReadonlyArray<CommandPaletteActionItem> = [];
 const NO_HITS: ReadonlyArray<SessionSearchHit> = [];
+const SHUT: PaletteItems = { actionItems: [], workspaceItems: [], recentThreadItems: [], threadSearchItems: [], messageSearchItems: [] };
 /** How long the typing rests before the words go to the host. */
 const MESSAGE_SEARCH_WAIT_MS = 200;
 const PAGES = { "new-thread": NEW_THREAD_PAGE } as const;
@@ -124,10 +125,13 @@ export function CommandPalette({ keybindings: given }: { keybindings?: ResolvedK
     }),
     [api, openAddComputer, openProjectHome, openSettings, select, selectedId, selectedThreadId, toggleRightPanel, toggleSidebar],
   );
-  const items = useMemo(
-    () => buildPaletteItems({ projects, selectedId, query, messageHits, canCreate: api !== null, recorded, picks, asks, handlers, verbs, places }),
-    [api, asks, handlers, messageHits, picks, places, projects, query, recorded, selectedId, verbs],
-  );
+  // Built only while open, since the items read every thread and a shut palette draws none of them; a shut one keeps
+  // what it last drew for its closing frames.
+  const built = useRef<PaletteItems>(SHUT);
+  const items = useMemo(() => {
+    if (open) built.current = buildPaletteItems({ projects, selectedId, query, messageHits, canCreate: api !== null, recorded, picks, asks, handlers, verbs, places });
+    return built.current;
+  }, [api, asks, handlers, messageHits, open, picks, places, projects, query, recorded, selectedId, verbs]);
   // A page whose row is gone or held, as the last project's removal leaves it, reads as the root.
   const page = useMemo(() => {
     const at = pages.at(-1);
