@@ -31,7 +31,7 @@ The command line, **Settings > Agents** and a project's settings use four words 
 | `full` | Runs every action without asking. | Claude Code, Codex, OpenCode, Cursor |
 | `plan` | Reads and proposes. It changes nothing. | Codex, Cursor |
 
-Claude Code has no `plan`. An agent refuses a word it does not take and names the words it takes. For example, `wsp run lab --access ask "Fix the login test."` starts a Claude Code thread that asks before each action.
+Claude Code has no `plan`. An agent refuses a word it does not take and names the words it takes. For example, `wsp run lab --access ask "Fix the login test."` starts a Claude Code thread in Default, which asks in the chat about each action that needs permission.
 
 ## Answer a prompt
 

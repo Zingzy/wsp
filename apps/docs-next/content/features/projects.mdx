@@ -93,7 +93,7 @@ After the installs, wsp runs the project's own command at the top of the worktre
 
 ## Remove a worktree
 
-wsp removes a worktree it made by itself. It does so 6 hours after the branch's pull request is merged or closed, or after the branch is deleted on the remote. A worktree where a turn runs stays. If wsp cannot remove a worktree, it tries again for a week, and then leaves it for you.
+wsp removes a worktree it made by itself. It does so 6 hours after the branch's pull request is merged or closed, or after the branch is deleted on the remote. wsp keeps the worktree while a turn runs in it, or while `git status` there shows any changed or untracked file. So wsp does not delete uncommitted work. Files that git ignores, such as `.env`, do not keep a worktree, and go with it. If wsp cannot remove a worktree, it tries again for a week, and then leaves it for you.
 
 To remove a worktree now, run:
 
