@@ -1,3 +1,82 @@
 # Your first thread
 
-Written from the app's new-thread screen and composer, and `wsp add .` and `wsp run` in `packages/host/src/verbs.ts`.
+{/* Written from apps/web/src/shell/ProjectHome.tsx, NewThreadPicks.tsx, FirstRun.tsx, sidebar/AddProjectDialog.tsx, sidebar/words.ts, keybindingDefaults.ts, packages/protocol/src/general-prefs.ts, packages/protocol/src/projects.ts (sourceKind), wsp add --help, wsp run --help and the run section of skills/wsp/SKILL.md. */}
+
+A thread is one conversation with a coding agent. The agent works in a project, which is a repo or a folder on one computer. On this page, you add a project on your computer and start a thread in it. You do it first in the app, then from the command line.
+
+Before you start, install wsp ([on a Mac](/install/mac) or [on Linux](/install/linux)). You also need one agent on this computer that is signed in: Claude Code, Codex, OpenCode or Cursor.
+
+<video src="/shots/docs-first-thread.mp4" controls muted loop playsinline />
+
+## In the app
+
+### Add a project
+
+1. Open wsp. If wsp has no project, the window says "Add a project to get started".
+2. Select **Add a project**.
+3. Pick a repo from the list. The list shows the git repos on this computer, the most recently used first.
+4. If the folder is not in the list, type a path that starts with `/` or `~`, or select **Choose**.
+5. Select **Add**.
+
+A thread on this computer runs in the project's folder itself. wsp does not make a copy of the folder.
+
+### Start the thread
+
+1. Press Cmd+N, or select **New thread** at the top of the sidebar. On Linux, press Ctrl+N.
+2. If wsp lists your projects, pick the project.
+3. The page asks what to build in the project. Under the box, it names the computer that the thread runs on.
+4. Optional: with the pickers at the bottom of the box, pick the model, the reasoning effort and the access. The model list also picks the agent. Access sets how far the agent goes before it asks you.
+5. Type your message in the box, and press Enter.
+
+The thread opens and the reply streams in. The agent names the thread from your message, and the thread shows in the sidebar. To type a new line without sending, press Shift+Enter.
+
+To send on Cmd+Enter instead of Enter, go to **Settings**, then **General**, then **Send with**.
+
+## From the command line
+
+1. Go to the project's folder, and record it as a project. The folder can be a git repo or a folder that is not a repo.
+
+   ```sh
+   cd ~/code/acme
+   wsp add .
+   ```
+
+2. Run `wsp projects`. It lists the project with its name and its folder.
+3. Start a thread with the project's name and your message:
+
+   ```sh
+   wsp run acme "Read the README and list the three biggest gaps in it."
+   ```
+
+The first line that `wsp run` prints is `thread <id> on <project> in <folder>`. The reply streams in your terminal, and the same thread shows in the app's sidebar. You can read it and answer it there.
+
+If no host runs yet, the first command starts one and tells you on stderr. That is normal.
+
+## Choose the agent and the model
+
+`wsp run` runs the project's agent. If the project has no agent set, it runs the default agent, which is Claude Code until you change it. To pick another agent or model for one thread, add flags:
+
+```sh
+wsp run acme --agent codex "Review the last commit."
+wsp run acme --model claude-sonnet-5 --effort low "Fix the typo in the README."
+```
+
+- `--agent` takes `claude`, `codex`, `opencode` or `cursor`.
+- `--effort` takes the effort words of the agent and the model. They are not the same for every model. For Claude, the words are `low`, `medium`, `high`, `xhigh` and `max`.
+- `--access` takes `ask`, `auto-edit`, `full` or `plan`. Without it, the thread runs with the project's access, then the agent's default, then `full`.
+- `--branch <branch>` runs the thread in a worktree of the project's repo on that branch. The project's own folder does not change.
+
+## Send the next message
+
+To continue the thread, send it a message with its id. `wsp threads` lists your threads with their ids.
+
+```sh
+wsp send 1a2b3c4d "Now fix the first gap."
+```
+
+In the app, type in the box at the bottom of the thread. If you send while the agent works, your message waits in a queue above the box. It goes as the next turn when the current turn ends.
+
+## Next
+
+- [Add your first computer](/start/first-computer) to run threads on another computer.
+- [Threads](/features/threads) tells you more about the composer and the queue.
