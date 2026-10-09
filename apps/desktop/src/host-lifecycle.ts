@@ -2,8 +2,8 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { STARTED_BY_ENV, accountAim, claudeKeyOnlyInThisShell, aimedAlias, aimedHost, computerNameHere, defaultHomeIn, devCheckoutState, dialAddress, dialHost, downCommand, homeNamed, hostLogPath, hostTokenFor, httpProbe, installService, keyOnlyInThisShell, lockPathFor, logTail, noManagerLine, ownPid, readHost, runAll, runFailureLine, serviceAddressHere, serviceEnv, serviceStartsAtLogin, servingHost, severalAccountHostsLine, stopService, vanishedHost, type CliIO, type HostLock, type HostRecord, type HostProbe, type RunFailure, type ServiceDeps, type ServicePlan } from "@wsp/host";
-import { LOOPBACK, authority, bootLineOf, fmtDuration, holdsNothing, isLocalWorkspace, isLoopback, type BootPayload, type GoldenManifest, type SessionView, type WorkspaceView } from "@wsp/protocol";
+import { STARTED_BY_ENV, accountAim, claudeKeyOnlyInThisShell, aimedAlias, aimedHost, computerNameHere, defaultHomeIn, devCheckoutState, dialAddress, dialHost, downCommand, homeNamed, hostLogPath, hostTokenFor, httpProbe, installService, keyOnlyInThisShell, lockPathFor, logTail, noManagerLine, ownPid, readHost, runAll, runFailureLine, serviceAddressHere, serviceEnv, serviceStartsAtLogin, servingHost, severalAccountHostsLine, stopService, vanishedHost, VERSION, type CliIO, type HostLock, type HostRecord, type HostProbe, type RunFailure, type ServiceDeps, type ServicePlan } from "@wsp/host";
+import { BOOT_SCRIPT, LOOPBACK, THIS_COMPUTER, authority, bootLineOf, compareVersions, fmtDuration, holdsNothing, isLocalWorkspace, isLoopback, type BootPayload, type GoldenManifest, type SessionView, type WorkspaceView } from "@wsp/protocol";
 import { safeEqual, tokenDigest } from "@wsp/runtime";
 
 export interface HostSession {
@@ -41,17 +41,25 @@ export interface OpenHostOptions {
   io: CliIO;
   /** How a host on the account is dialled, which is the command line's own dial. */
   dial?: typeof dialHost;
-  service: ServiceRoad;
+  service: ServiceDeps;
+  /** Asks the person the question a host of another release with turns running puts, and answers whether to restart. */
+  ask(prompt: ReplacePrompt): Promise<boolean>;
+}
+
+/** The page served at this authority, or nothing where nothing there answers. */
+async function pageAt(at: string): Promise<string | undefined> {
+  try {
+    const res = await fetch(`http://${at}/`, { signal: AbortSignal.timeout(2000) });
+    return res.ok ? await res.text() : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** The boot object of the page served at this authority, or nothing where nothing there answers as a wsp host. */
 async function bootAt(at: string): Promise<BootPayload | undefined> {
-  try {
-    const res = await fetch(`http://${at}/`, { signal: AbortSignal.timeout(2000) });
-    return res.ok ? bootLineOf(await res.text()) : undefined;
-  } catch {
-    return undefined;
-  }
+  const page = await pageAt(at);
+  return page === undefined ? undefined : bootLineOf(page);
 }
 
 /** Which port a url answers on, read by every session built from an address rather than from a port this app
@@ -93,24 +101,31 @@ export function statePathIn(home: string, launch: Launch): string {
   return dev ?? join(home, "state.json");
 }
 
-/** The host whose lock sits beside this state file, once this window has proof it is the owner's own. The lock is
- * the whole road in: a page on a port carrying the boot line is anything any login on this computer cares to
- * serve. Its pid is this login's, and then one of two readings by the address it bound. A host on loopback serves
- * its page with the digest of its own token inlined, so the page is held to the digest of the token file beside
- * the state. A host bound beyond this computer serves a page with no digest by design, and the lock alone is the
- * reading for it. Either road is dialled where the lock says that host answers, which for a host on ::1 or on
- * 127.0.0.2 is there and nowhere else. Anything else is a refusal: this window starts no service on a state file
- * another process holds. */
-async function lockedHost(statePath: string): Promise<HostSession | undefined> {
+/** The host whose lock sits beside this state file, once this window has proof it is the owner's own, and the release
+ * its page says it is. The lock is the whole road in: a page on a port carrying the boot line is anything any login
+ * on this computer cares to serve. Its pid is this login's, and then one of two readings by the address it bound. A
+ * host on loopback serves its page with the digest of its own token inlined, so the page is held to the digest of
+ * the token file beside the state. A host bound beyond this computer serves a page with no digest by design, and the
+ * lock alone is the reading for it. Either road is dialled where the lock says that host answers, which for a host
+ * on ::1 or on 127.0.0.2 is there and nowhere else. Anything else is a refusal: this window starts no service on a
+ * state file another process holds. */
+async function lockedHost(statePath: string): Promise<{ session: HostSession; lock: HostLock; release?: string } | undefined> {
   const held = servingHost(statePath);
   if (held === undefined) return undefined;
   if (!ownPid(held.pid)) throw wontAttach(statePath, held, "that process is not this login's");
   const at = authority(dialAddress(held), held.port);
-  if (!isLoopback(held.address ?? LOOPBACK)) return attached(held.port, `http://${at}`);
-  const boot = await bootAt(at);
-  if (boot === undefined) throw wontAttach(statePath, held, "no wsp host answers there");
-  if (boot.tokenHash === undefined || !hostTokenMatches(statePath, boot.tokenHash)) throw wontAttach(statePath, held, "the page it serves carries another token's digest than the file beside this state");
-  return attached(held.port, `http://${at}`);
+  const page = await pageAt(at);
+  const boot = page === undefined ? undefined : bootLineOf(page);
+  // A boot line of a shape this release does not read, or one naming no release, is a wsp from before pages named
+  // theirs (0.2.0 wrote its token into the page and marked no lock), which wsp down cannot stop either.
+  if (page !== undefined && BOOT_SCRIPT.test(page) && boot?.version === undefined) {
+    throw new Error(`a wsp older than this app's ${VERSION} (pid ${held.pid}) serves ${statePath} on port ${held.port}, and its page names no release: stop that process, then open wsp again`);
+  }
+  if (isLoopback(held.address ?? LOOPBACK)) {
+    if (boot === undefined) throw wontAttach(statePath, held, "no wsp host answers there");
+    if (boot.tokenHash === undefined || !hostTokenMatches(statePath, boot.tokenHash)) throw wontAttach(statePath, held, "the page it serves carries another token's digest than the file beside this state");
+  }
+  return { session: attached(held.port, `http://${at}`), lock: held, ...(boot !== undefined ? { release: boot.version } : {}) };
 }
 
 /** The wsp home a launch means: WSP_HOME when it is set, else this computer's own. A window that should open on
@@ -165,11 +180,11 @@ async function accountSession(opts: OpenHostOptions): Promise<HostSession | unde
 /** What the service this app installs is told: the shim serving this state file, with the service mark, so every
  * other client on this computer starts this unit rather than a host of its own. HOME rides along because a unit is
  * started with the manager's own environment, and the unit sits under that home. */
-function servicePlan(opts: Pick<OpenHostOptions, "statePath" | "home" | "shim">): ServicePlan {
+function servicePlan(opts: Pick<OpenHostOptions, "statePath" | "home" | "shim">, words?: readonly string[]): ServicePlan {
   const at = serviceAddressHere(opts.statePath);
   return {
     ...at,
-    argv: [opts.shim, "up", "--state", opts.statePath],
+    argv: [opts.shim, ...(words ?? ["up", "--state", opts.statePath])],
     cwd: opts.home,
     env: { ...serviceEnv(process.env), HOME: at.home, [STARTED_BY_ENV]: "service" },
     logPath: hostLogPath(opts.statePath),
@@ -192,24 +207,27 @@ const answersAsOwn =
 
 /** Makes this computer's own manager serve the state file with the shim, and waits until wsp answers. A unit that
  * runs another program (another app's shim, the node a terminal's wsp up --service named) is stopped and written
- * again; one that runs this shim is kept as it stands, whatever words a terminal gave it, and loaded where the
- * manager has let it go, or where what it runs is a host whose program has gone, which the manager reads as up.
- * A unit the person set not to start at login is loaded all the same and left that way. Read only when nothing
- * serves, so a rewrite never restarts wsp under a window on it. */
-export async function ensureService(opts: Pick<OpenHostOptions, "statePath" | "home" | "shim" | "service" | "io">): Promise<void> {
+ * again to run the shim, with the words it gave wsp up kept (its port, its address, its relay); one that runs this
+ * shim is kept as it stands, and loaded where the manager has let it go, or where what it runs is a host whose
+ * program has gone, which the manager reads as up. `rewrite` writes even that one again, which restarts the host it
+ * serves. A unit the person set not to start at login is loaded all the same and left that way. Read only when
+ * nothing serves, or to replace a host of another release, so a rewrite never restarts wsp under a window on it. */
+export async function ensureService(opts: Pick<OpenHostOptions, "statePath" | "home" | "shim" | "service" | "io">, rewrite = false): Promise<void> {
   const { manager, run } = opts.service;
   if (manager === undefined) throw new Error(noManagerLine(opts.service.platform));
   // The service reads keys off the .env beside the state and in its own folder, never off the shell that launched
   // this app; a launch from a terminal holding one is told, as wsp up --service tells it.
   const sources = { env: process.env, cwd: opts.home, statePath: opts.statePath };
   for (const line of [keyOnlyInThisShell(sources), claudeKeyOnlyInThisShell(sources)]) if (line !== undefined) opts.io.error(line);
-  const plan = servicePlan(opts);
-  const unit = manager.unit(plan);
+  const unit = manager.unit(serviceAddressHere(opts.statePath));
   const written = existsSync(unit.path) ? readFileSync(unit.path, "utf8") : undefined;
-  const held = async (): Promise<boolean> => (await run(manager.holds(plan))).code === 0;
+  const words = written === undefined ? undefined : manager.argv(written);
+  const up = words?.indexOf("up") ?? -1;
+  const plan = servicePlan(opts, up < 0 ? undefined : words!.slice(up));
+  const held = async (): Promise<boolean> => manager.holding(await run(manager.holds(plan)));
   // A load starts the unit at login too, so a unit set to start only when asked is set back once it is loaded.
   const offAtLogin = written !== undefined && (await serviceStartsAtLogin(manager, plan, run)) === false;
-  if (written === undefined || !manager.runs(written, opts.shim)) {
+  if (written === undefined || rewrite || !manager.runs(written, opts.shim)) {
     if (written !== undefined) {
       const stopped = await stopService(manager, plan, run);
       const failure = stopped.unsure ?? stopped.failure;
@@ -255,18 +273,104 @@ export async function setLoginStart(statePath: string, on: boolean, service: Ser
 /** The service's host did not answer within the start's wait, which already covered a host still binding. */
 class StartTimeout extends Error {}
 
-/** Attaches to the host already serving this state file, which its lock names and this window has proof of, else
- * opens on the host a line with no name on it takes, else makes this computer's own service serve it and attaches
- * to that. The window never serves a host itself, so closing it stops nothing. */
+/** Attaches to the host already serving this state file, which its lock names and this window has proof of, once it
+ * is not of an earlier release, else opens on the host a line with no name on it takes, else makes this computer's
+ * own service serve it and attaches to that. The window never serves a host itself, so closing it stops nothing, and
+ * never draws the page of an earlier release: a host left by an older install is replaced first. A host of a later
+ * release is the person's newer wsp, which this app would downgrade, so it is attached to and its page says the app
+ * is older. */
 export async function openHost(opts: OpenHostOptions): Promise<HostSession> {
   const held = await lockedHost(opts.statePath);
-  if (held !== undefined) return held;
-  const away = await accountSession(opts);
-  if (away !== undefined) return away;
-  await ensureService(opts);
+  if (held !== undefined) {
+    const theirs = otherRelease(held.release);
+    if (theirs === undefined || compareVersions(theirs, VERSION) > 0) return held.session;
+    await replaceHost(opts, held.lock, theirs);
+  } else {
+    const away = await accountSession(opts);
+    if (away !== undefined) return away;
+    await ensureService(opts);
+  }
   const served = await lockedHost(opts.statePath);
   if (served === undefined) throw new Error(`wsp started and stopped again; its log is ${hostLogPath(opts.statePath)}`);
-  return served;
+  const other = otherRelease(served.release);
+  if (other !== undefined) throw new Error(`this app is wsp ${VERSION} and the host serving ${opts.statePath} came up as wsp ${other}; its log is ${hostLogPath(opts.statePath)}`);
+  return served.session;
+}
+
+/** The release a page names where it is not this app's own; nothing where it is, or where a host bound beyond this
+ * computer served no page to read. */
+const otherRelease = (release: string | undefined): string | undefined => (release === undefined || release === VERSION ? undefined : release);
+
+/** The person said to leave the host of another release serving, so this app opens no window on it. */
+export class KeptOtherRelease extends Error {}
+
+export interface ReplacePrompt {
+  message: string;
+  detail: string;
+  buttons: string[];
+  defaultId: number;
+  cancelId: number;
+}
+
+/** The question for a host of release `theirs` with `working` turns running on this computer, or a count it would
+ * not give. */
+export function replacePrompt(theirs: string, working: number | undefined): ReplacePrompt {
+  const running = working === undefined ? "" : working === 1 ? `A thread is working on ${THIS_COMPUTER}. ` : `${working} threads are working on ${THIS_COMPUTER}. `;
+  return {
+    message: `wsp ${theirs} is still serving your threads; restart it as ${VERSION}?`,
+    detail: `${running}Running turns carry on while wsp restarts. This app opens only on wsp ${VERSION}, so Quit leaves wsp ${theirs} serving and closes the app.`,
+    buttons: [`Restart as ${VERSION}`, "Quit"],
+    defaultId: 0,
+    cancelId: 1,
+  };
+}
+
+/** Replaces a host of another release than this app's by the road its lock names, so this app's own release serves
+ * the state file after it. A turn on this computer leads a process group of its own, so the stop leaves it running and
+ * the next host picks it up; while any runs, or where the old host would not say, the person is asked once and
+ * nothing is stopped until they answer. A host nothing marked is served inside some process wsp cannot stop, and is
+ * refused. A service keeps its unit, the words given to wsp up --service and its login setting: one running this
+ * shim is restarted, which brings it back on this app's files, and one running another program has only that
+ * program written over. Any other host is stopped by wsp down's own road and the service starts after it. */
+async function replaceHost(opts: OpenHostOptions, lock: HostLock, theirs: string): Promise<void> {
+  const { statePath, service } = opts;
+  if (lock.startedBy === undefined) {
+    throw new Error(`this app is wsp ${VERSION} and wsp ${theirs} (pid ${lock.pid}) serves ${statePath} from a process wsp did not start: stop it, then open wsp again`);
+  }
+  const working = await workingHere(statePath, opts.home, opts.dial).catch(() => undefined);
+  if (working !== 0 && !(await opts.ask(replacePrompt(theirs, working)))) throw new KeptOtherRelease(`wsp ${theirs} keeps serving ${statePath}`);
+  opts.io.log(`wsp ${theirs} (pid ${lock.pid}, started by ${lock.startedBy}) serves ${statePath}; restarting it as ${VERSION}`);
+  if (lock.startedBy !== "service") {
+    const said: string[] = [];
+    if ((await downCommand(quietIO(said), { statePath }, service)) !== 0) throw new Error(said.join("\n"));
+    return ensureService(opts);
+  }
+  const unit = service.manager?.unit(serviceAddressHere(statePath));
+  const runsShim = unit !== undefined && existsSync(unit.path) && service.manager!.runs(readFileSync(unit.path, "utf8"), opts.shim);
+  if (!runsShim || !(await restarted(opts, lock))) return ensureService(opts, runsShim);
+  for (const until = Date.now() + service.waitMs; servingHost(statePath)?.pid === lock.pid; await pause()) {
+    if (Date.now() >= until) throw new Error(`wsp ${theirs} (pid ${lock.pid}) took the restart and still serves ${statePath} after ${fmtDuration(service.waitMs)}`);
+  }
+  return ensureService(opts);
+}
+
+/** Asks the host the lock names to restart on the road it came up on, which for a service is its manager starting the
+ * unit again; whether that host took the ask and closed. A host of another release is dialled all the same, since the
+ * restart is what brings it level. */
+async function restarted(opts: OpenHostOptions, lock: HostLock): Promise<boolean> {
+  try {
+    const client = await (opts.dial ?? dialHost)(opts.statePath, { aim: { kind: "here" }, home: opts.home, anyRelease: true });
+    try {
+      await client.request("host.restart");
+      await Promise.race([client.closed, new Promise((_, no) => setTimeout(() => no(new Error("it took the ask and stayed open")), opts.service.waitMs))]);
+      return true;
+    } finally {
+      client.close();
+    }
+  } catch (e) {
+    opts.io.log(`wsp (pid ${lock.pid}) did not restart itself (${e instanceof Error ? e.message : String(e)}); its unit is written again`);
+    return false;
+  }
 }
 
 /** Whether the host here holds nothing to show, which is the app's first launch: asked of the host, since the state
@@ -355,7 +459,8 @@ export function runningHere(sessions: readonly Pick<SessionView, "id" | "workspa
 
 async function runningOn(statePath: string, home: string, dial: typeof dialHost): Promise<{ client: Awaited<ReturnType<typeof dialHost>>; running: string[] } | undefined> {
   if (servingHost(statePath) === undefined) return undefined;
-  const client = await dial(statePath, { aim: { kind: "here" }, home });
+  // Any release: a host of another one is counted before it is replaced, and stopped by the quit all the same.
+  const client = await dial(statePath, { aim: { kind: "here" }, home, anyRelease: true });
   try {
     const { sessions } = await client.request<{ sessions: SessionView[] }>("sessions.list");
     const { workspaces } = await client.request<{ workspaces: WorkspaceView[] }>("workspaces.list");
@@ -373,6 +478,9 @@ export async function workingHere(statePath: string, home: string, dial: typeof 
   return on?.running.length ?? 0;
 }
 
+/** What wsp down's own road is handed here: its refusals kept for the error the caller throws, and nothing asked. */
+const quietIO = (said: string[]): CliIO => ({ log: () => {}, error: line => said.push(line), ask: q => Promise.reject(new Error(q)), askSecret: q => Promise.reject(new Error(q)) });
+
 /** Quit and stop wsp: every turn on this computer's workspaces is interrupted, then wsp down's own road stops what
  * serves the state file, the service and its unit or a host a line started. The lines it says are the answer where
  * something still serves after it. */
@@ -386,6 +494,5 @@ export async function stopWsp(statePath: string, home: string, service: ServiceD
     }
   }
   const said: string[] = [];
-  const quiet: CliIO = { log: () => {}, error: line => said.push(line), ask: q => Promise.reject(new Error(q)), askSecret: q => Promise.reject(new Error(q)) };
-  if ((await downCommand(quiet, { statePath }, service)) !== 0 && servingHost(statePath) !== undefined) throw new Error(said.join("\n"));
+  if ((await downCommand(quietIO(said), { statePath }, service)) !== 0 && servingHost(statePath) !== undefined) throw new Error(said.join("\n"));
 }

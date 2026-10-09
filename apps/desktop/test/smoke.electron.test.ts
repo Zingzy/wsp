@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Drives the packaged app (pnpm --filter @wsp/desktop build first). Gated on
 // WSP_DESKTOP_SMOKE=1 so the unit suite stays free of a 200 MB binary.
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { connect } from "node:net";
@@ -111,9 +111,9 @@ function seedAccountHost(home: string, alias: string, url: string, token: string
 
 /** The lock and the token file a host serving this home left beside its state, which is what the window reads to
  * attach to it: a page on a port is no reason to, whoever is serving there. */
-function seedServingLock(home: string, at: { port: number; token: string }): void {
+function seedServingLock(home: string, at: { port: number; token: string }, over: { pid?: number; startedBy?: string } = {}): void {
   mkdirSync(home, { recursive: true });
-  writeFileSync(join(home, "host.lock"), JSON.stringify({ pid: process.pid, port: at.port, startedAt: new Date().toISOString() }));
+  writeFileSync(join(home, "host.lock"), JSON.stringify({ pid: process.pid, port: at.port, startedAt: new Date().toISOString(), ...over }));
   writeFileSync(join(home, "host-token"), `${at.token}\n`);
 }
 
@@ -349,9 +349,9 @@ async function registerWorker(frame: Frame): Promise<string> {
   return frame.evaluate(() => (window as unknown as { registerWorker(): Promise<string> }).registerWorker());
 }
 
-async function bootOf(page: Page): Promise<{ tokenHash: string; token?: string }> {
+async function bootOf(page: Page): Promise<{ tokenHash: string; token?: string; version: string }> {
   await page.waitForLoadState("domcontentloaded");
-  return page.evaluate(() => (window as unknown as { __WSP__: { tokenHash: string; token?: string } }).__WSP__);
+  return page.evaluate(() => (window as unknown as { __WSP__: { tokenHash: string; token?: string; version: string } }).__WSP__);
 }
 
 interface DesktopWindow {
@@ -614,7 +614,7 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
       const ran = spawnSync(cmd!, args, { encoding: "utf8", timeout: 20_000 });
       return { code: ran.status ?? -1, output: `${ran.stdout}${ran.stderr}` };
     };
-    expect(holds().code).toBe(0);
+    expect(manager.holding(holds())).toBe(true);
     const host = servingHost(statePath)!;
     expect(host.startedBy).toBe("service");
     const parent = Number(spawnSync("ps", ["-o", "ppid=", "-p", String(host.pid)], { encoding: "utf8", timeout: 20_000 }).stdout.trim());
@@ -1222,16 +1222,27 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     expect(await win.locator("[data-k=host-version] [data-settings-word]").textContent()).toBe("9.9.9");
   });
 
-  it("attached to a host of an earlier release, asks for the app's own host and offers nothing to download", async () => {
+  it("attached to a host of an earlier release a verb started, replaces it with its own service and opens on its own release", async () => {
     existing = await startHost({ runtime: testRuntime(true), webDir: workspaceAsset("web"), port: 0 });
     const stand = await hostOfVersion(existing, "0.0.1");
     standIn = stand.server;
-    launched = await launch({ WSP_HOME: undefined }, home => seedServingLock(join(home, ".wsp"), { port: stand.port, token: existing!.authToken }));
-    const win = await windowAt(launched.app, APP_URL);
-    const notice = win.locator("[data-notice]", { hasText: VERSION_LINE });
-    await notice.waitFor();
-    expect(await notice.textContent()).toContain(`this app is ${VERSION}, the host is 0.0.1: run the app's own host`);
-    expect(await notice.locator("[data-notice-action]").count()).toBe(0);
+    // The older host's own process: the app stops it by the pid its lock names, as wsp down does.
+    const older = spawn("sleep", ["300"], { stdio: "ignore" });
+    try {
+      launched = await launch({ WSP_HOME: undefined }, home => {
+        seedLocalWorkspace(join(home, ".wsp"));
+        seedServingLock(join(home, ".wsp"), { port: stand.port, token: existing!.authToken }, { pid: older.pid!, startedBy: "verb" });
+      });
+      const win = await windowAt(launched.app, APP_URL);
+      await openedOnSeeded(win);
+      expect((await bootOf(win)).version).toBe(VERSION);
+      expect(new URL(win.url()).port).not.toBe(String(stand.port));
+      expect(servingHost(launched.statePath)?.startedBy).toBe("service");
+      expect(alive(older.pid!)).toBe(false);
+      expect(await win.locator("[data-notice]", { hasText: VERSION_LINE }).count()).toBe(0);
+    } finally {
+      older.kill();
+    }
   });
 
   it("attached to a host of its own release, says nothing at all", async () => {

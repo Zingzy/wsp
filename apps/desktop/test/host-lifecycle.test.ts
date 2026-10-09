@@ -5,14 +5,14 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFile
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import { createServer as createTcpServer, type Server as TcpServer } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { SERVICE_MANAGERS, dialHost, httpProbe, localWiring, localWorkFolder, makeRuntime, noManagerLine, serve, serviceAddressHere, serviceTag, severalAccountHostsLine, startHost, writeHost, type CliIO, type HostHandle, type HostRecord, type ServiceDeps, type ServiceRunner } from "@wsp/host";
+import { dirname, join } from "node:path";
+import { SERVICE_MANAGERS, dialHost, httpProbe, localWiring, localWorkFolder, makeRuntime, noManagerLine, serve, serviceAddressHere, serviceTag, severalAccountHostsLine, startHost, writeHost, VERSION, type CliIO, type HostHandle, type HostRecord, type ServiceDeps, type ServiceRunner } from "@wsp/host";
 import { hostNoKeyLine } from "@wsp/protocol";
 import { createRuntime, memoryStore, type Runtime } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { stubBackend } from "../../../packages/host/test/stub-backend.js";
 import { copyingFake, fakeDaemonStart } from "../../../packages/host/test/verbs-fixture.js";
-import { ensureService, firstLaunch, homeOf, hostTokenMatches, loginStart, openHost, openHostReady, runningHere, setLoginStart, statePathIn, stopWsp, userDataIn, workingHere, type HostSession, type OpenHostOptions, type ServiceRoad } from "../src/host-lifecycle.js";
+import { KeptOtherRelease, ensureService, firstLaunch, homeOf, hostTokenMatches, loginStart, openHost, openHostReady, runningHere, setLoginStart, statePathIn, stopWsp, userDataIn, workingHere, type HostSession, type OpenHostOptions, type ReplacePrompt, type ServiceRoad } from "../src/host-lifecycle.js";
 
 const PAGE = `<!doctype html>
 <html><head><title>wsp</title></head>
@@ -29,6 +29,7 @@ function fakeWebDir(): string {
 }
 
 const noPrompt = (q: string): Promise<string> => Promise.reject(new Error(`unexpected prompt: ${q}`));
+const noAsk = (prompt: { message: string }): Promise<boolean> => Promise.reject(new Error(`unexpected ask: ${prompt.message}`));
 function quietIO(lines: string[] = []): CliIO {
   return { log: l => lines.push(l), error: l => lines.push(l), ask: noPrompt, askSecret: noPrompt };
 }
@@ -50,10 +51,10 @@ function closeServer(server: Server | TcpServer): Promise<void> {
   return new Promise(resolve => server.close(() => resolve()));
 }
 
-async function bootOf(url: string): Promise<{ tokenHash?: string; token?: string } | undefined> {
+async function bootOf(url: string): Promise<{ tokenHash?: string; token?: string; version?: string } | undefined> {
   const html = await (await fetch(url)).text();
   const m = html.match(/window\.__WSP__ = (\{[^<]*\});<\/script>/);
-  return m ? (JSON.parse(m[1]!) as { tokenHash?: string; token?: string }) : undefined;
+  return m ? (JSON.parse(m[1]!) as { tokenHash?: string; token?: string; version?: string }) : undefined;
 }
 
 const digestOf = (token: string): string => createHash("sha256").update(token).digest("hex");
@@ -71,6 +72,56 @@ async function recording(upstream: number): Promise<{ port: number; requests: { 
   });
   const port = await listen(server);
   return { port, requests, close: () => closeServer(server) };
+}
+
+/** A socket to the host here answering the two lists and taking each interrupt it is sent. */
+function hostAnswering(sessions: readonly { id: string; workspaceId: string; status: string }[], workspaces: readonly { id: string; kind: string }[], restart?: () => void): { dial: typeof dialHost; interrupted: string[] } {
+  const interrupted: string[] = [];
+  const client = {
+    request: async <T extends Record<string, unknown>>(op: string, params?: Record<string, unknown>): Promise<T> => {
+      if (op === "sessions.list") return { sessions } as unknown as T;
+      if (op === "workspaces.list") return { workspaces } as unknown as T;
+      if (op === "sessions.interrupt") interrupted.push(String(params?.["sessionId"]));
+      if (op === "host.restart") {
+        if (restart === undefined) throw new Error("unknown op host.restart");
+        restart();
+      }
+      return {} as T;
+    },
+    events: async () => {},
+    onFrame: () => () => {},
+    closed: Promise.resolve(),
+    closeWords: () => "",
+    close: () => {},
+    terminate: () => {},
+  };
+  return { interrupted, dial: async () => client };
+}
+
+/** The oldest release whose page names itself, which is the oldest a replace reads. */
+const OLDER = "0.3.0";
+
+/** A host of an older release as an install before this app left it serving the state file: a process of its own
+ * holding the lock with the mark of the road that started it, and a page carrying the digest of the token beside the
+ * state and that release. A stop ends the process and the page with it. */
+async function olderHost(statePath: string, startedBy: string | undefined, version = OLDER): Promise<{ pid: number; port: number; alive(): boolean; stop(): Promise<void> }> {
+  const token = "token-of-an-older-host";
+  const proc = spawn("sleep", ["30"], { stdio: "ignore" });
+  const page = createServer((_req, res) => res.end(`<html><script>window.__WSP__ = ${JSON.stringify({ tokenHash: digestOf(token), wsPath: "/ws", paired: true, version })};</script></html>`));
+  const port = await listen(page);
+  writeFileSync(join(statePath, "..", "host.lock"), JSON.stringify({ pid: proc.pid, port, startedAt: new Date().toISOString(), ...(startedBy !== undefined ? { startedBy } : {}) }));
+  writeFileSync(join(statePath, "..", "host-token"), `${token}\n`);
+  const alive = (): boolean => proc.exitCode === null && proc.signalCode === null;
+  return {
+    pid: proc.pid!,
+    port,
+    alive,
+    stop: async () => {
+      proc.kill();
+      page.closeAllConnections();
+      await closeServer(page);
+    },
+  };
 }
 
 /** A pid that was real a moment ago and is not alive now. */
@@ -187,7 +238,7 @@ describe("openHost", () => {
   const unitPath = (): string => SERVICE_MANAGERS.launchd.unit(serviceAddressHere(statePath)).path;
 
   function open(over: Partial<OpenHostOptions> = {}, lines: string[] = []): Promise<HostSession> {
-    return openHost({ statePath, home, shim, io: quietIO(lines), service: launchd.road, ...over });
+    return openHost({ statePath, home, shim, io: quietIO(lines), ask: noAsk, service: launchd.road, ...over });
   }
 
   it("installs the unit running the shim with the service mark when none is registered, loads it, waits for the lock, attaches", async () => {
@@ -357,7 +408,7 @@ describe("openHost", () => {
       }
       return dialHost(path, o);
     };
-    const ready = await openHostReady({ statePath, home, shim, io: quietIO(), service: launchd.road }, dial);
+    const ready = await openHostReady({ statePath, home, shim, io: quietIO(), ask: noAsk, service: launchd.road }, dial);
     expect(ready.session.url).toBe(`http://127.0.0.1:${launchd.host()!.port}`);
     // Read off the host it ended on, which holds nothing, as the fake manager's host does.
     expect(ready.first).toBe(true);
@@ -372,7 +423,7 @@ describe("openHost", () => {
     // The lock still names a live process, whose page no longer answers: the refusal a squatter gets, which here is
     // a host on its way out that has not yet let go.
     setTimeout(() => rmSync(join(home, "host.lock"), { force: true }), 300);
-    const ready = await openHostReady({ statePath, home, shim, io: quietIO(), service: launchd.road });
+    const ready = await openHostReady({ statePath, home, shim, io: quietIO(), ask: noAsk, service: launchd.road });
     expect(ready.session.url).toBe(`http://127.0.0.1:${launchd.host()!.port}`);
   });
 
@@ -382,7 +433,7 @@ describe("openHost", () => {
     try {
       writeFileSync(join(home, "host.lock"), JSON.stringify({ pid: process.pid, port, startedAt: new Date().toISOString() }));
       const t0 = Date.now();
-      await expect(openHostReady({ statePath, home, shim, io: quietIO(), service: { ...launchd.road, waitMs: 2_000 } })).rejects.toThrow(/but no wsp host answers there/);
+      await expect(openHostReady({ statePath, home, shim, io: quietIO(), ask: noAsk, service: { ...launchd.road, waitMs: 2_000 } })).rejects.toThrow(/but no wsp host answers there/);
       expect(Date.now() - t0).toBeLessThan(1_000);
       expect(launchd.ran).toEqual([]);
     } finally {
@@ -395,7 +446,7 @@ describe("openHost", () => {
     serving(statePath, existing);
     writeFileSync(join(home, "host-token"), "a-token-of-some-other-host\n");
     const t0 = Date.now();
-    await expect(openHostReady({ statePath, home, shim, io: quietIO(), service: { ...launchd.road, waitMs: 2_000 } })).rejects.toThrow(/another token's digest/);
+    await expect(openHostReady({ statePath, home, shim, io: quietIO(), ask: noAsk, service: { ...launchd.road, waitMs: 2_000 } })).rejects.toThrow(/another token's digest/);
     expect(Date.now() - t0).toBeLessThan(1_000);
   });
 
@@ -403,7 +454,7 @@ describe("openHost", () => {
     existing = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0 });
     serving(statePath, existing, { pid: 1 });
     const t0 = Date.now();
-    await expect(openHostReady({ statePath, home, shim, io: quietIO(), service: { ...launchd.road, waitMs: 2_000 } })).rejects.toThrow(/not this login's/);
+    await expect(openHostReady({ statePath, home, shim, io: quietIO(), ask: noAsk, service: { ...launchd.road, waitMs: 2_000 } })).rejects.toThrow(/not this login's/);
     expect(Date.now() - t0).toBeLessThan(1_000);
   });
 
@@ -421,7 +472,7 @@ describe("openHost", () => {
         serving(at, h, { startedBy: "service" });
       });
     }, 600);
-    const ready = await openHostReady({ statePath, home, shim, io: quietIO(), service: { ...launchd.road, waitMs: 2_000 } });
+    const ready = await openHostReady({ statePath, home, shim, io: quietIO(), ask: noAsk, service: { ...launchd.road, waitMs: 2_000 } });
     expect(ready.session.url).toBe(`http://127.0.0.1:${port}`);
     expect(launchd.ran).toEqual([]);
   });
@@ -452,7 +503,7 @@ describe("openHost", () => {
         return { code: 0, output: "" };
       },
     };
-    const ready = await openHostReady({ statePath, home, shim, io: quietIO(), service: road });
+    const ready = await openHostReady({ statePath, home, shim, io: quietIO(), ask: noAsk, service: road });
     expect(ready.session.url).toBe(`http://127.0.0.1:${port}`);
   });
 
@@ -464,7 +515,7 @@ describe("openHost", () => {
     try {
       writeFileSync(join(home, "host.lock"), JSON.stringify({ pid: process.pid, port, startedAt: new Date().toISOString(), startedBy: "service" }));
       const t0 = Date.now();
-      await expect(openHostReady({ statePath, home, shim, io: quietIO(), service: { ...launchd.road, waitMs: 200 } })).rejects.toThrow(/^after 1\.\ds of waiting, a host .* but no wsp host answers there/);
+      await expect(openHostReady({ statePath, home, shim, io: quietIO(), ask: noAsk, service: { ...launchd.road, waitMs: 200 } })).rejects.toThrow(/^after 1\.\ds of waiting, a host .* but no wsp host answers there/);
       expect(Date.now() - t0).toBeLessThan(2_000);
     } finally {
       await closeServer(silent);
@@ -489,7 +540,7 @@ describe("openHost", () => {
       },
     };
     const t0 = Date.now();
-    await expect(openHostReady({ statePath, home, shim, io: quietIO(), service: road })).rejects.toThrow(/did not start within 1\.\ds/);
+    await expect(openHostReady({ statePath, home, shim, io: quietIO(), ask: noAsk, service: road })).rejects.toThrow(/did not start within 1\.\ds/);
     expect(Date.now() - t0).toBeLessThan(2_000);
   });
 
@@ -500,7 +551,7 @@ describe("openHost", () => {
     existing = undefined;
     const next = await handedOn(statePath, 300);
     try {
-      const ready = await openHostReady({ statePath, home, shim, io: quietIO(), service: { ...launchd.road, waitMs: 2_000 } });
+      const ready = await openHostReady({ statePath, home, shim, io: quietIO(), ask: noAsk, service: { ...launchd.road, waitMs: 2_000 } });
       expect(ready.session.url).toBe(`http://127.0.0.1:${next.port}`);
       expect(launchd.ran).toEqual([]);
     } finally {
@@ -523,7 +574,7 @@ describe("openHost", () => {
       return dialHost(path, o);
     };
     try {
-      const ready = await openHostReady({ statePath, home, shim, io: quietIO(), service: { ...launchd.road, waitMs: 2_000 } }, dial);
+      const ready = await openHostReady({ statePath, home, shim, io: quietIO(), ask: noAsk, service: { ...launchd.road, waitMs: 2_000 } }, dial);
       expect(ready.session.url).toBe(`http://127.0.0.1:${next!.port}`);
       expect(launchd.ran).toEqual([]);
     } finally {
@@ -547,7 +598,7 @@ describe("openHost", () => {
       }
       return dialHost(path, o);
     };
-    const ready = await openHostReady({ statePath, home, shim, io: quietIO(), service: launchd.road }, dial);
+    const ready = await openHostReady({ statePath, home, shim, io: quietIO(), ask: noAsk, service: launchd.road }, dial);
     expect(ready.session.url).toBe(`http://127.0.0.1:${launchd.host()!.port}`);
   });
 
@@ -559,7 +610,7 @@ describe("openHost", () => {
       dials++;
       throw new Error("the host refused this computer");
     };
-    await expect(openHostReady({ statePath, home, shim, io: quietIO(), service: launchd.road }, refusing)).rejects.toThrow("the host refused this computer");
+    await expect(openHostReady({ statePath, home, shim, io: quietIO(), ask: noAsk, service: launchd.road }, refusing)).rejects.toThrow("the host refused this computer");
     expect(dials).toBe(1);
     expect(launchd.ran).toEqual([]);
   });
@@ -579,7 +630,7 @@ describe("openHost", () => {
     mkdirSync(other);
     const second = fakeLaunchd(join(other, "state.json"));
     try {
-      await openHost({ statePath: join(other, "state.json"), home: other, shim, io: quietIO(), service: second.road });
+      await openHost({ statePath: join(other, "state.json"), home: other, shim, io: quietIO(), ask: noAsk, service: second.road });
       const units = readdirSync(join(home, "Library", "LaunchAgents")).sort();
       expect(units).toEqual([`com.wsp.host.${serviceTag(statePath)}.plist`, `com.wsp.host.${serviceTag(join(other, "state.json"))}.plist`].sort());
     } finally {
@@ -869,9 +920,237 @@ describe("openHost", () => {
     expect(session.port).toBe(launchd.host()!.port);
     expect(launchd.ran.map(argv => argv[1])).toEqual(["enable", "bootstrap"]);
   });
+  it("replaces a host of an older release a verb started with this app's service, and draws this release's page", async () => {
+    const old = await olderHost(statePath, "verb");
+    const stopped: number[] = [];
+    launchd.road.stop = pid => void (stopped.push(pid), pid === old.pid && old.stop());
+    try {
+      const session = await open({ dial: hostAnswering([], []).dial });
+      expect(stopped).toEqual([old.pid]);
+      expect(old.alive()).toBe(false);
+      // wsp down's own road: the manager is asked first, and holds nothing, so the pid the lock names is stopped.
+      expect(launchd.ran.map(argv => argv[1])).toEqual(["print", "enable", "bootstrap"]);
+      expect(session.url).toBe(`http://127.0.0.1:${launchd.host()!.port}`);
+      expect((await bootOf(session.url))?.version).toBe(VERSION);
+    } finally {
+      await old.stop();
+    }
+  });
+
+  it("asks once while a thread is working on the older host, stops nothing until answered, and keeps it serving on a no", async () => {
+    const old = await olderHost(statePath, "verb");
+    const stopped: number[] = [];
+    launchd.road.stop = pid => void (stopped.push(pid), pid === old.pid && old.stop());
+    const { dial } = hostAnswering([{ id: "s_mac", workspaceId: "ws_mac", status: "running" }], [{ id: "ws_mac", kind: "local" }]);
+    try {
+      const asked: ReplacePrompt[] = [];
+      let answer!: (yes: boolean) => void;
+      const ask = (prompt: ReplacePrompt): Promise<boolean> => (asked.push(prompt), new Promise(resolve => (answer = resolve)));
+      const kept = openHostReady({ statePath, home, shim, io: quietIO(), service: launchd.road, dial, ask });
+      await vi.waitFor(() => expect(asked).toHaveLength(1));
+      expect(asked[0]!.message).toBe(`wsp ${OLDER} is still serving your threads; restart it as ${VERSION}?`);
+      expect(asked[0]!.detail).toMatch(/^A thread is working on this computer\. /);
+      expect(asked[0]!.buttons).toEqual([`Restart as ${VERSION}`, "Quit"]);
+      expect(`${asked[0]!.message} ${asked[0]!.detail}`).not.toMatch(/Mac|\u2014/);
+      // Unanswered: the older host serves on, and nothing has been stopped, written or loaded.
+      await new Promise(r => setTimeout(r, 500));
+      expect(stopped).toEqual([]);
+      expect(launchd.ran).toEqual([]);
+      expect(old.alive()).toBe(true);
+      expect((await bootOf(`http://127.0.0.1:${old.port}`))?.version).toBe(OLDER);
+      answer(false);
+      await expect(kept).rejects.toBeInstanceOf(KeptOtherRelease);
+      expect(stopped).toEqual([]);
+      expect(launchd.ran).toEqual([]);
+      expect(old.alive()).toBe(true);
+
+      asked.length = 0;
+      const ready = openHostReady({ statePath, home, shim, io: quietIO(), service: launchd.road, dial, ask });
+      await vi.waitFor(() => expect(asked).toHaveLength(1));
+      answer(true);
+      const { session } = await ready;
+      expect(asked).toHaveLength(1);
+      expect(stopped).toEqual([old.pid]);
+      expect((await bootOf(session.url))?.version).toBe(VERSION);
+    } finally {
+      await old.stop();
+    }
+  });
+
+  it("asks where the older host would not list its turns, since it cannot say none run", async () => {
+    const old = await olderHost(statePath, "up");
+    try {
+      const asked: ReplacePrompt[] = [];
+      const refusing: typeof dialHost = () => Promise.reject(new Error("an older wire"));
+      await expect(open({ dial: refusing, ask: async prompt => (asked.push(prompt), false) })).rejects.toBeInstanceOf(KeptOtherRelease);
+      expect(asked.map(p => p.detail)).toEqual([`Running turns carry on while wsp restarts. This app opens only on wsp ${VERSION}, so Quit leaves wsp ${OLDER} serving and closes the app.`]);
+      expect(old.alive()).toBe(true);
+    } finally {
+      await old.stop();
+    }
+  });
+
+  /** A launchd unit the older host's service runs: `program` with the words a person gave wsp up --service. */
+  const FLAGS = ["--port", "4500", "--listen", "0.0.0.0", "--no-relay"];
+  function olderUnit(program: readonly string[]): void {
+    const unit = { ...serviceAddressHere(statePath), argv: [...program, "up", "--state", statePath, ...FLAGS], cwd: home, env: {}, logPath: join(home, "host.log") };
+    mkdirSync(join(home, "Library", "LaunchAgents"), { recursive: true });
+    writeFileSync(unitPath(), SERVICE_MANAGERS.launchd.text(unit));
+  }
+  const unitWords = (): string[] | undefined => SERVICE_MANAGERS.launchd.argv(readFileSync(unitPath(), "utf8"));
+
+  it("restarts an older service whose unit runs this shim through the host's own restart, keeping its unit, its words and its login setting", async () => {
+    const old = await olderHost(statePath, "service");
+    olderUnit([shim]);
+    const before = readFileSync(unitPath(), "utf8");
+    launchd.setAtLogin(false);
+    // The older host exits and launchd's KeepAlive starts the unit again, which runs this app's files now.
+    const { dial } = hostAnswering([], [], () => void old.stop().then(() => launchd.load()));
+    try {
+      const session = await open({ dial });
+      expect(old.alive()).toBe(false);
+      expect(readFileSync(unitPath(), "utf8")).toBe(before);
+      expect(launchd.ran.map(argv => argv[1])).not.toContain("bootout");
+      expect(launchd.atLogin()).toBe(false);
+      expect((await bootOf(session.url))?.version).toBe(VERSION);
+    } finally {
+      await old.stop();
+    }
+  });
+
+  /** launchd holding the older host's unit until its bootout, which ends that host. */
+  function holdingOlder(old: { stop(): Promise<void> }): void {
+    const run = launchd.road.run;
+    let oldLoaded = true;
+    launchd.road.run = async (argv, waitMs) => {
+      if (!oldLoaded || (argv[1] !== "print" && argv[1] !== "bootout")) return run(argv, waitMs);
+      launchd.ran.push([...argv]);
+      if (argv[1] === "bootout") {
+        oldLoaded = false;
+        await old.stop();
+      }
+      return { code: 0, output: "state = running" };
+    };
+  }
+
+  it("an older service whose unit runs another program has that program written over, keeping the words given to wsp up --service and its login setting", async () => {
+    const old = await olderHost(statePath, "service");
+    olderUnit(["/usr/local/bin/node", "/Users/z/.npm/_npx/0f5c/node_modules/@wsp-labs/wsp/dist/bin.js"]);
+    launchd.setAtLogin(false);
+    holdingOlder(old);
+    try {
+      const session = await open({ dial: hostAnswering([], []).dial });
+      expect(old.alive()).toBe(false);
+      expect(unitWords()).toEqual([shim, "up", "--state", statePath, ...FLAGS]);
+      expect(launchd.ran.map(argv => argv[1])).toEqual(["print-disabled", "print", "bootout", "enable", "bootstrap", "disable"]);
+      expect(launchd.atLogin()).toBe(false);
+      expect((await bootOf(session.url))?.version).toBe(VERSION);
+    } finally {
+      await old.stop();
+    }
+  });
+
+  it("an older service running this shim whose host refuses the restart has its unit written again, its words kept", async () => {
+    const old = await olderHost(statePath, "service");
+    olderUnit([shim]);
+    holdingOlder(old);
+    try {
+      const session = await open({ dial: hostAnswering([], []).dial });
+      expect(old.alive()).toBe(false);
+      expect(unitWords()).toEqual([shim, "up", "--state", statePath, ...FLAGS]);
+      expect(launchd.ran.map(argv => argv[1])).toContain("bootout");
+      expect((await bootOf(session.url))?.version).toBe(VERSION);
+    } finally {
+      await old.stop();
+    }
+  });
+
+  it("on systemd, an older service set not to start at login while it runs is stopped before its unit is written again, and stays off at login", async () => {
+    const old = await olderHost(statePath, "service");
+    const systemd = SERVICE_MANAGERS.systemd;
+    const at = serviceAddressHere(statePath);
+    const unit = systemd.unit(at);
+    mkdirSync(dirname(unit.path), { recursive: true });
+    writeFileSync(unit.path, systemd.text({ ...at, argv: ["/usr/bin/node", "/opt/wsp/bin.js", "up", "--state", statePath, ...FLAGS], cwd: home, env: {}, logPath: join(home, "host.log") }));
+    // systemctl --user as it answers for a unit disabled at login and running under Restart=always.
+    let active = true;
+    let enabled = false;
+    const ran: string[][] = [];
+    const run = async (argv: readonly string[]): Promise<{ code: number; output: string }> => {
+      ran.push([...argv]);
+      const [verb, arg] = [argv[2], argv[3]];
+      if (verb === "is-enabled") return { code: enabled ? 0 : 1, output: enabled ? "enabled" : "disabled" };
+      if (verb === "show") return { code: 0, output: `ActiveState=${active ? "active" : "inactive"}\nUnitFileState=${enabled ? "enabled" : "disabled"}\n` };
+      if (verb === "disable" && arg === "--now") {
+        await old.stop();
+        active = false;
+      }
+      if (verb === "enable") enabled = true;
+      if (verb === "disable" && arg !== "--now") enabled = false;
+      if (verb === "restart") {
+        active = true;
+        await launchd.load();
+      }
+      return { code: 0, output: "" };
+    };
+    try {
+      const session = await open({ dial: hostAnswering([], []).dial, service: { ...launchd.road, platform: "linux", manager: systemd, run } });
+      expect(old.alive()).toBe(false);
+      expect(ran.map(argv => argv.slice(2, 4).join(" "))).toContain("disable --now");
+      expect(systemd.argv(readFileSync(unit.path, "utf8"))).toEqual([shim, "up", "--state", statePath, ...FLAGS]);
+      expect(enabled).toBe(false);
+      expect((await bootOf(session.url))?.version).toBe(VERSION);
+    } finally {
+      await old.stop();
+    }
+  });
+
+  it("refuses a host whose page names no release, as a wsp older than 0.3.0 serves it, saying so rather than that nothing answers", async () => {
+    const proc = spawn("sleep", ["30"], { stdio: "ignore" });
+    // The boot line a 0.2.0 host wrote: its token in the page and no release, on a lock no road marked.
+    const page = createServer((_req, res) => res.end(`<html><script>window.__WSP__ = ${JSON.stringify({ wsPort: 4401, token: "t", statePath })};</script></html>`));
+    const port = await listen(page);
+    writeFileSync(join(home, "host.lock"), JSON.stringify({ pid: proc.pid, port, startedAt: new Date().toISOString() }));
+    try {
+      await expect(open()).rejects.toThrow(`a wsp older than this app's ${VERSION} (pid ${proc.pid}) serves ${statePath} on port ${port}, and its page names no release: stop that process, then open wsp again`);
+      expect(launchd.ran).toEqual([]);
+    } finally {
+      proc.kill();
+      page.closeAllConnections();
+      await closeServer(page);
+    }
+  });
+
+  it("leaves a host of a later release serving and attaches to it, since replacing it would downgrade the person's wsp", async () => {
+    const later = await olderHost(statePath, "service", "99.0.0");
+    const stopped: number[] = [];
+    launchd.road.stop = pid => void stopped.push(pid);
+    try {
+      const session = await open({ dial: hostAnswering([{ id: "s_mac", workspaceId: "ws_mac", status: "running" }], [{ id: "ws_mac", kind: "local" }], () => stopped.push(-1)).dial });
+      expect(session.url).toBe(`http://127.0.0.1:${later.port}`);
+      expect((await bootOf(session.url))?.version).toBe("99.0.0");
+      expect(stopped).toEqual([]);
+      expect(launchd.ran).toEqual([]);
+      expect(later.alive()).toBe(true);
+    } finally {
+      await later.stop();
+    }
+  });
+
+  it("refuses an older host nothing marked, which some process serves inside itself, and stops nothing", async () => {
+    const old = await olderHost(statePath, undefined);
+    try {
+      await expect(open({ dial: hostAnswering([], []).dial })).rejects.toThrow(`this app is wsp ${VERSION} and wsp ${OLDER} (pid ${old.pid}) serves ${statePath} from a process wsp did not start`);
+      expect(old.alive()).toBe(true);
+      expect(launchd.ran).toEqual([]);
+    } finally {
+      await old.stop();
+    }
+  });
 });
 
 describe("the first launch, read off the host", () => {
+
   let home: string;
   let statePath: string;
   let host: HostHandle | undefined;
@@ -947,25 +1226,7 @@ describe("quit and stop wsp", () => {
     { id: "ws_box", kind: "cloud" as const },
   ];
 
-  /** A socket to the host here answering the two lists and taking each interrupt it is sent. */
-  function hostHere(): { dial: typeof dialHost; interrupted: string[] } {
-    const interrupted: string[] = [];
-    const client = {
-      request: async <T extends Record<string, unknown>>(op: string, params?: Record<string, unknown>): Promise<T> => {
-        if (op === "sessions.list") return { sessions } as unknown as T;
-        if (op === "workspaces.list") return { workspaces } as unknown as T;
-        if (op === "sessions.interrupt") interrupted.push(String(params?.["sessionId"]));
-        return {} as T;
-      },
-      events: async () => {},
-      onFrame: () => () => {},
-      closed: Promise.resolve(),
-      closeWords: () => "",
-      close: () => {},
-      terminate: () => {},
-    };
-    return { interrupted, dial: async () => client };
-  }
+  const hostHere = (): { dial: typeof dialHost; interrupted: string[] } => hostAnswering(sessions, workspaces);
 
   it("counts the turns running on this computer's own workspaces, never a box's, whose turns go on without wsp here", () => {
     expect(runningHere(sessions, workspaces)).toEqual(["s_mac", "s_asks"]);
