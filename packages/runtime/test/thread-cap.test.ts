@@ -656,6 +656,11 @@ describe("a held start that never launches tells whoever it was to report to", (
       expect(await store.list("held-starts")).toEqual([]);
     } finally {
       for (const end of [...first.ends.values(), ...(second?.ends.values() ?? [])]) end();
+      // The second host's boot writes the daemon's roots file into root without waiting; its close waits for that.
+      await ctx.srv?.close();
+      ctx.srv = undefined;
+      await ctx.runtime?.close();
+      ctx.runtime = undefined;
       rmSync(root, { recursive: true, force: true });
     }
   });
