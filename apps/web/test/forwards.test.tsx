@@ -6,6 +6,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PortForward, WorkspaceView } from "@wsp/protocol";
 import { SidebarProvider } from "../src/components/ui/sidebar.js";
+import { TooltipProvider } from "../src/components/ui/tooltip.js";
 import { RequestError, type Api, type ProtocolEvent } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { ForwardsList } from "../src/sidebar/ForwardsList.js";
@@ -156,6 +157,27 @@ describe("ForwardsList", () => {
     expect(within(list).getByText("localhost:5173")).toBeDefined();
     emit({ type: "forward.close", workspaceId: "ws_b", port: 5173 });
     expect(screen.queryByTestId("forwards-list")).toBeNull();
+  });
+
+  it("a forward's Stop says Stop forwarding on the app's tooltip once the pointer rests on it", async () => {
+    const { api } = fakeApi([WS_A], [fwd("ws_a", 8123, THREE_MIN_AGO, "api")]);
+    await act(async () => useStore.getState().bind(api));
+    render(<TooltipProvider><SidebarProvider defaultOpen><ForwardsList /></SidebarProvider></TooltipProvider>);
+    const stop = within(await screen.findByTestId("forwards-list")).getByRole("button", { name: "Stop forwarding localhost:8123" });
+    vi.useFakeTimers();
+    try {
+      fireEvent.pointerEnter(stop, { pointerType: "mouse" });
+      fireEvent.mouseEnter(stop);
+      fireEvent.mouseMove(stop);
+      const tips = async (ms: number) => {
+        await act(async () => void vi.advanceTimersByTime(ms));
+        return [...document.querySelectorAll("[data-slot=tooltip-popup]")].map(popup => popup.textContent);
+      };
+      expect(await tips(300)).toEqual([]);
+      expect(await tips(400)).toEqual(["Stop forwarding"]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("a sign-in callback forward is a label with a stop and no link; a url forward keeps its link", async () => {

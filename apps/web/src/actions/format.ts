@@ -32,6 +32,7 @@ export const THREAD_WORDS = {
   copyLink: "Copy thread link",
   forget: "Forget thread",
   settle: "Settle thread",
+  settleTip: "Settle",
   settleRead: "Settle all read",
   restore: "Restore thread",
   pin: "Pin thread",

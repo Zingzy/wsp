@@ -105,4 +105,6 @@ export const CAP_WAIT_WORDS = {
 /** The card's line on a thread in the Needs you inbox that names the threads it hangs under, from its tree's top down. */
 export const TREE_WORDS = {
   startedBy: (path: ReadonlyArray<string>): string => `Started by ${path.join(" / ")}`,
+  fold: "Fold",
+  unfold: "Unfold",
 } as const;

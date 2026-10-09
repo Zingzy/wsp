@@ -113,10 +113,10 @@ function TileRows({ place, status, title, harness, pr, startedBy, end }: { place
         {startedBy === undefined ? (
           <ProjectGlyph projectId={place.projectId} className="size-3" />
         ) : (
-          // The project's glyph keeps its slot, the starter's mark on its corner, so row one's words do not move.
+          // The glyph keeps a top-level tile's slot, so row one's words do not move.
           <span data-tile-started-by className="relative flex size-3 shrink-0">
-            <ProjectGlyph projectId={place.projectId} className="size-3" />
-            <CornerDownRightIcon aria-hidden className="absolute top-0 right-0 size-2 text-sidebar-muted-foreground" />
+            <ProjectGlyph projectId={place.projectId} className={STARTED_BY_GLYPH_CLASS} />
+            <CornerDownRightIcon aria-hidden strokeWidth={3} className={STARTED_BY_MARK_CLASS} />
           </span>
         )}
         <span data-tile-where className="min-w-0 flex-1 truncate">
@@ -134,24 +134,37 @@ function TileRows({ place, status, title, harness, pr, startedBy, end }: { place
   );
 }
 
+/** A sub-thread's glyph in the inbox gives up its top right corner to the "↳" over it: drawn on the glyph's own strokes,
+ * the mark cannot be seen at 12 px. */
+const STARTED_BY_GLYPH_CLASS = "size-3 [mask-image:linear-gradient(to_bottom,transparent_4px,black_4px),linear-gradient(to_right,black_6px,transparent_6px)]";
+/** The "↳" as a superscript on that corner, its line thickened to a css pixel at 8 px. */
+const STARTED_BY_MARK_CLASS = "absolute -top-1.25 -right-0.5 size-2 text-sidebar-muted-foreground";
+
 /** The fold's control at row two's end: shut, how many rows the tile would draw under it and the chevron, muted; open,
  * the chevron alone on hover, its room kept so the title never moves. The tile's button says which with
  * aria-expanded, and the arrow keys fold it too, so the control is the pointer's alone. */
 function FoldControl({ fold, onFold }: { fold: Fold; onFold: (() => void) | undefined }) {
   const shut = fold !== "open";
   return (
-    <span
-      aria-hidden
-      data-tile-fold={shut ? "shut" : "open"}
-      className={cn("flex shrink-0 items-center gap-1 text-sidebar-muted-foreground transition-opacity duration-150 hover:text-sidebar-foreground", !shut && "opacity-0 group-hover/menu-item:opacity-100 group-focus-within/menu-item:opacity-100")}
-      onClick={event => {
-        event.stopPropagation();
-        onFold?.();
-      }}
-    >
-      {shut ? <span className={ROW_META_CLASS}>{fold}</span> : null}
-      {shut ? <ChevronRightIcon className="size-3.5" /> : <ChevronDownIcon className="size-3.5" />}
-    </span>
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <span
+            aria-hidden
+            data-tile-fold={shut ? "shut" : "open"}
+            className={cn("flex shrink-0 items-center gap-1 text-sidebar-muted-foreground transition-opacity duration-150 hover:text-sidebar-foreground", !shut && "opacity-0 group-hover/menu-item:opacity-100 group-focus-within/menu-item:opacity-100")}
+            onClick={event => {
+              event.stopPropagation();
+              onFold?.();
+            }}
+          />
+        }
+      >
+        {shut ? <span className={ROW_META_CLASS}>{fold}</span> : null}
+        {shut ? <ChevronRightIcon className="size-3.5" /> : <ChevronDownIcon className="size-3.5" />}
+      </TooltipTrigger>
+      <TooltipPopup side="top">{shut ? TREE_WORDS.unfold : TREE_WORDS.fold}</TooltipPopup>
+    </Tooltip>
   );
 }
 
@@ -344,9 +357,12 @@ export const ThreadTile = memo(function ThreadTile(props: ThreadTileProps) {
   const settles = onSettle !== undefined && !renaming;
   // Settle stands beside the button, never in it, where the status slot is; the item says it has an act.
   const settle = settles ? (
-    <SidebarMenuAction showOnHover data-tile-settle aria-label={THREAD_WORDS.settle} className={cn(HOVER_GLYPH_CLASS, SLOT_ACT_CLASS, !slim && "top-3.75")} onClick={onSettle}>
-      <ArchiveIcon aria-hidden className="size-3.5" />
-    </SidebarMenuAction>
+    <Tooltip>
+      <TooltipTrigger render={<SidebarMenuAction showOnHover data-tile-settle aria-label={THREAD_WORDS.settle} className={cn(HOVER_GLYPH_CLASS, SLOT_ACT_CLASS, !slim && "top-3.75")} onClick={onSettle} />}>
+        <ArchiveIcon aria-hidden className="size-3.5" />
+      </TooltipTrigger>
+      <TooltipPopup side="top">{THREAD_WORDS.settleTip}</TooltipPopup>
+    </Tooltip>
   ) : null;
   const item = (tile: ReactNode) => (
     <div className="group/menu-item relative min-w-0" {...(settles ? { "data-has-action": "" } : {})}>

@@ -10,11 +10,14 @@ import { useState } from "react";
 import { loopbackUrl } from "../browser/url.js";
 import { Spaced } from "../components/ui/spaced.js";
 import { SidebarGroup, SidebarGroupContent, SidebarMenu, SidebarMenuAction, SidebarMenuButton, SidebarMenuItem } from "../components/ui/sidebar.js";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.js";
 import { useNowMinute } from "../hooks/useNowMinute.js";
 import { useForwards, useStore } from "../protocol/store.js";
 import { sectionRowId } from "./rowGrammar.js";
 import { SectionRow } from "./SectionRow.js";
 import { compactTimeLabel } from "./workspaceRows.js";
+
+const STOP_FORWARDING = "Stop forwarding";
 
 export function ForwardsList() {
   // An editor's ssh rides a port of its own that nothing but wsp ssh dials; its tile says it is attached instead.
@@ -57,9 +60,12 @@ export function ForwardsList() {
                       </span>
                     </SidebarMenuButton>
                   )}
-                  <SidebarMenuAction aria-label={`Stop forwarding localhost:${f.port}`} onClick={() => void stop(f.workspaceId, f.port)}>
-                    <XIcon />
-                  </SidebarMenuAction>
+                  <Tooltip>
+                    <TooltipTrigger render={<SidebarMenuAction aria-label={`${STOP_FORWARDING} localhost:${f.port}`} onClick={() => void stop(f.workspaceId, f.port)} />}>
+                      <XIcon />
+                    </TooltipTrigger>
+                    <TooltipPopup side="top">{STOP_FORWARDING}</TooltipPopup>
+                  </Tooltip>
                 </SidebarMenuItem>
               );
             })}
