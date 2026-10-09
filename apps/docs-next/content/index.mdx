@@ -1,3 +1,62 @@
 # What wsp is
 
-Written from the site's words in `apps/www` (the hero, the features, the FAQ) and the AGENTS.md glossary for project, thread, lead and computer.
+wsp runs coding agents on every computer you own. You run Claude Code, Codex and more on your Mac, an old laptop or a server you rent, all from one window. The agents can start each other on any of those computers.
+
+<Image src="/shots/hero.webp" alt="The wsp app on a MacBook Pro. A lead thread handed its tickets to Claude Code and Codex threads on five computers. Its slate beside it shows the night's landings." />
+
+## Threads run on the agents you already pay for
+
+wsp runs Claude Code, Codex, OpenCode and Cursor. Each agent uses the subscription that it is signed in to, so you do not need an API key.
+
+## Your agents hand work to each other
+
+A Claude Code thread can start a Codex thread to review its branch, on your Mac or on another computer. When the Codex thread is done, the Claude Code thread reads what it found. Every agent gets the same tools, so every agent can start threads. Each of those threads is in your sidebar. [Leads and sub-threads](/features/leads) tells you more.
+
+## Add a computer, and your setup comes with it
+
+You point wsp at a Linux computer that you can reach over SSH. You pick what goes on it, and the computer joins your sidebar, ready for threads. You can copy these items from your Mac:
+
+- Your coding agents, signed in. You copy your key over or you sign in again on the new computer.
+- The MCP servers that your agents call, with their sign-ins.
+- Command line tools. One click picks the tools that your agents ran on your Mac.
+- Skills and plugins, so a skill does the same job on both computers.
+- Your GitHub sign-in: the token from your Mac, or a new sign-in on the other computer.
+- Your repos, cloned with the name, icon and color that you gave each one.
+- Your git name and email, your shell prompt, your tmux configuration and your other git and shell settings.
+
+A computer behind a firewall can dial out to you instead. Then no port on it has to be open. [Add your first computer](/start/first-computer) shows the steps.
+
+## A slate in every thread
+
+The slate is a panel beside the thread. The agent builds it and keeps it current: checklists, live numbers, charts, forms and buttons. When you press a button on the slate, the agent reads what you pressed. A slate can refresh its numbers every minute and spend no turn to do it. [The slate](/features/slate) tells you more.
+
+## Everything around the thread
+
+- The terminal pane reads your Ghostty configuration, so the font, the colors and the transparency are yours. This is also true on your other computers.
+- VS Code, Cursor, Zed or JetBrains open the thread's folder. When the folder is on another computer, they open it over SSH.
+- The pull request pane shows checks and reviews, and you merge from it. One press sends a failed check back to the agent.
+- The Agents pane shows which agents are signed in on which computer. You install another agent from the same pane.
+- The browser pane shows the page that the thread builds, next to the thread.
+
+## The words
+
+| Word | What it means |
+|---|---|
+| Project | A repo or a folder on one computer that threads run in. |
+| Thread | One conversation with an agent, one row in the sidebar. |
+| Lead | The thread at the top of a tree. It started the other threads in that tree. |
+| Computer | A real computer that you own or sit at, named by its own name. |
+
+## Questions
+
+- Do I need API keys? No. Your agents use the subscriptions that they are already signed in to.
+- Which agents does it run? Claude Code, Codex, OpenCode and Cursor. A thread can use any of them, and one thread can start another thread on a different agent.
+- Which computers? Your Mac, and any Linux computer that you can reach over SSH or that can dial out to you. That includes a server you rent, an old laptop and a desktop under the desk.
+- Does my code go through your servers? Only if you turn on the relay. Threads run on your computers, and the app reaches them over your own network or SSH. If you link the relay to reach a computer from anywhere, that connection goes through Cloudflare, which can read it on the way. You can skip the relay or run your own.
+- What does it cost? Nothing. wsp is free and open source.
+
+## Start here
+
+1. [Install on a Mac](/install/mac) or [install on Linux](/install/linux).
+2. Start [your first thread](/start/first-thread).
+3. [Add your first computer](/start/first-computer).

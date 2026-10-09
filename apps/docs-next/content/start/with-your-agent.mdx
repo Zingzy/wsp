@@ -1,3 +1,76 @@
 # Let your agent set you up
 
-Written from `wsp mcp install --agent <id>` and the setup section of `skills/wsp/SKILL.md`.
+Your coding agent can set wsp up for you and open your first thread. It uses the wsp tools and the wsp skill, which is a file that tells the agent how to use wsp. You give the agent both with one command.
+
+Before you start, install wsp ([on a Mac](/install/mac) or [on Linux](/install/linux)) so that `wsp` runs in your terminal.
+
+## Give your agent the wsp tools
+
+1. Go to the folder of the project that you want to work on.
+2. Run `wsp mcp install` with the agent's id:
+
+   ```sh
+   cd ~/code/acme
+   wsp mcp install --agent claude
+   ```
+
+3. Restart the agent, so that it loads the new tools.
+
+<video src="/shots/docs-mcp-install.mp4" controls muted loop playsinline />
+
+`--agent` takes `claude`, `codex`, `gemini` or `opencode`. To set up more than one agent, give `--agent` again for each one. If one agent fails, the others still get the tools.
+
+The command writes three things:
+
+| What | Where |
+|---|---|
+| The wsp MCP server | The agent's own MCP configuration, for example `~/.claude.json` for Claude Code. |
+| The wsp skill | The agent's skills folder, for example `~/.claude/skills/wsp/SKILL.md`. |
+| A short wsp section | `AGENTS.md` in the folder where you ran the command, and `CLAUDE.md` beside it for Claude Code. |
+
+If you run the command again, it replaces the wsp section and leaves the other lines of the file as they are. To take the section out, run `wsp mcp install --agent <id> --remove`. That leaves the MCP configuration and the skill in place.
+
+The last line that the command prints tells you what to say to the agent next.
+
+## Ask the agent to set you up
+
+Start the agent in the same folder, and ask it to set you up. In Claude Code, type:
+
+```text
+/wsp set up wsp for me
+```
+
+In another agent, type:
+
+```text
+Use the wsp skill and set up wsp for me.
+```
+
+The agent follows the setup steps in the skill. It stops at the first step whose result is not what the skill expects, and tells you.
+
+1. It runs `wsp --version` and `wsp threads --json`. If no host runs, the second command starts one.
+2. It records your project with `wsp add`.
+3. It opens your first thread with `wsp run`. The thread shows in your sidebar, and you can read and answer it there.
+
+The agent can also add a computer for you with the same tools. Before it does, it reads what this computer has with `wsp recipe scan`, which writes nothing. Then it asks you two questions: which large tools go on the computer, and how each sign-in happens.
+
+Until the agent restarts, it can do the same work with the `wsp` command line.
+
+## What stays with you
+
+Two things are yours, and the agent cannot do them for you:
+
+- Sign-ins. When a tool must sign in, the agent gives you a page and a code. You finish the sign-in in your own browser.
+- Keys. If you pay Anthropic by the token, write `ANTHROPIC_API_KEY=<key>` in `~/.wsp/.env` yourself. On a Claude subscription, you sign in instead. Do not paste a key into the conversation. The host reads the key from that file.
+
+A `sudo` password also stays with you. If a computer's `sudo` asks for one, the agent tells you where to type it: in a terminal or in the app.
+
+## Start work from your agent
+
+After the setup, ask the agent for work in plain words. For example:
+
+```text
+Use the wsp skill and open a thread on acme that adds a dark mode to the settings page.
+```
+
+The agent starts the thread with `wsp run`, and the thread shows in your sidebar. [Coordinating threads from an agent](/agents/coordinating) tells you more.

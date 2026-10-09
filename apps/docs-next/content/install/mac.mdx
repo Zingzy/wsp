@@ -1,3 +1,60 @@
 # Install on a Mac
 
-Written from `apps/www/public/install` and `apps/www/src/downloads.ts`: the app in `/Applications`, `wsp` in `~/.wsp/bin`, the host as a launchd service.
+wsp is one app for every Mac, with Apple silicon or an Intel chip. The app also gives you the `wsp` command line.
+
+## Install with one line
+
+1. Open Terminal.
+2. Run the install line. Do not put `sudo` in front of it.
+
+   ```sh
+   curl --proto '=https' --tlsv1.2 -fsSL https://usewsp.com/install | sh
+   ```
+
+3. Open a new terminal window, and run `wsp --version`. It prints `wsp` and the version that you installed.
+
+The install line does these steps:
+
+1. It reads the latest release of [wsp-labs/wsp](https://github.com/wsp-labs/wsp/releases) from GitHub.
+2. It downloads the app and compares its sha256 with the sha256 that GitHub publishes for the release. If they do not match, it stops before it unpacks anything.
+3. It makes sure that the app's signature is valid.
+4. It puts `wsp.app` in `/Applications`. If your user cannot write to `/Applications`, it puts the app in `~/Applications`.
+5. It writes the `wsp` command at `~/.wsp/bin/wsp`.
+6. It adds `~/.wsp/bin` to your `PATH` in the file that your shell reads. The table below names the file.
+7. It opens the app.
+
+| Shell | File |
+|---|---|
+| zsh | `~/.zshrc` |
+| bash | `~/.bash_profile` |
+| fish | `~/.config/fish/conf.d/wsp.fish` |
+| Any other shell | `~/.profile` |
+
+If wsp is open when you run the line, the line quits wsp first.
+
+## Install from the download
+
+1. Download [wsp-mac.dmg](https://github.com/wsp-labs/wsp/releases/latest/download/wsp-mac.dmg).
+2. Open the file, and drag wsp to the Applications folder.
+3. Open wsp from the Applications folder.
+
+The app writes the `wsp` command at `~/.wsp/bin/wsp` each time it opens. The download does not change your `PATH`. To run `wsp` by name, add `~/.wsp/bin` to your `PATH` yourself, or run the install line once.
+
+## What happens when wsp opens
+
+When the app opens for the first time, it installs the host. The host is the process that keeps your projects and threads and serves the app and the command line.
+
+The host runs as a launchd agent at `~/Library/LaunchAgents/com.wsp.host.<tag>.plist`. launchd starts it now and again at every login. If the host stops, launchd starts it again. When you quit the app, it asks if your threads keep running or if wsp stops too. To change that answer, go to **Settings**, then **General**, then **When you quit**.
+
+wsp keeps its state in `~/.wsp/state.json`. The host writes its log to `~/.wsp/host.log`.
+
+<Image src="/shots/docs-first-launch.webp" alt="The first wsp window on a new Mac: Add a project to get started, with one Add a project button." />
+
+The first window says "Add a project to get started". The next page, [Your first thread](/start/first-thread), starts from there.
+
+The first window also says that wsp sends anonymous usage counts to PostHog. To turn the counts off, select **Privacy settings**.
+
+## Install a given version or update
+
+- To install one release instead of the latest, set `WSP_VERSION` for the `sh` that runs the line: `curl --proto '=https' --tlsv1.2 -fsSL https://usewsp.com/install | WSP_VERSION=1.2.3 sh`.
+- To move to the latest release, run the install line again. It replaces the app where it is and restarts the host on the new version.
