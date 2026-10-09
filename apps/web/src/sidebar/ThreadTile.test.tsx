@@ -6,6 +6,12 @@ import type { SidebarThreadSnapshot } from "../adapt/index.js";
 import { threadIndicator } from "../adapt/index.js";
 import { SidebarProvider } from "../components/ui/sidebar.js";
 import { ThreadTile, WorkspaceTile, useTileHandlers, type TilePlace } from "./ThreadTile.js";
+import { SubagentRow } from "./SubagentRow.js";
+import { settlesOnHover } from "./LeadTree.js";
+import { tileTree, type TileNode } from "./threadTree.js";
+import { childTarget, kindOf, noteOf } from "../components/threads/leadTree.js";
+import type { SubagentView } from "@wsp/protocol";
+import { useStore } from "../protocol/store.js";
 import type { TileCheckout } from "./tileCheckout.js";
 import type { PlaceView } from "@wsp/protocol";
 
@@ -75,7 +81,8 @@ describe("a thread tile", () => {
       fireEvent.mouseMove(tile());
       await act(async () => void vi.advanceTimersByTime(600));
       const notes = [...document.querySelectorAll<HTMLElement>('[data-tile-card] [data-tile-card-line="note"]')].map(line => line.textContent);
-      expect(notes).toEqual(["hetzner is running 2 of 2 threads", "Raise threads at once on hetzner in Settings to start it now"]);
+      expect(document.querySelector("[data-tile-card] [data-status-line=waiting] [data-status-reason]")!.textContent).toBe("hetzner is running 2 of 2 threads");
+      expect(notes).toEqual(["Raise threads at once on hetzner in Settings to start it now"]);
     } finally {
       vi.useRealTimers();
     }
@@ -195,8 +202,11 @@ describe("a thread tile", () => {
         ["agent", "Opus 5.5"],
         ["pr", "Pull request #42, merged"],
         ["changed", "3 changed"],
-        ["note", "Permission for Bash: pnpm install"],
       ]);
+      // The card leads with the status row, what it waits on whole under the word.
+      const status = card.querySelector("ul")!.firstElementChild as HTMLElement;
+      expect(status.dataset["statusLine"]).toBe("needs-you");
+      expect(status.querySelector("[data-status-reason]")!.textContent).toBe("Permission for Bash: pnpm install");
       // The computer's icon is the registry's, the one the Computers page draws for this Mac.
       expect(card.querySelector('[data-tile-card-line="computer"] [data-computer-glyph]')?.getAttribute("data-computer-glyph")).toBe("laptop");
     } finally {
@@ -340,5 +350,107 @@ describe("a workspace with no thread yet", () => {
     expect(rows()[1]!.textContent).toBe("pricing page");
     expect(rows()[1]!.querySelector("[data-thread-title]")!.className).toContain("text-sidebar-muted-foreground");
     expect(tile().textContent).not.toContain("agent/pricing-page");
+  });
+});
+
+describe("a tile's acts on hover", () => {
+  const settleOn = (over: Partial<SidebarThreadSnapshot>, onSettle = vi.fn(), onSelect = vi.fn()) => {
+    render(
+      <SidebarProvider defaultOpen>
+        <ThreadTile thread={thread(over)} place={PLACE} model={null} time="3m" depth={0} active={false} renaming={false} saving={false} onSelect={onSelect} onContextMenu={() => {}} onRename={() => {}} onRenameCancel={() => {}} onSettle={onSettle} />
+      </SidebarProvider>,
+    );
+    return { onSettle, onSelect };
+  };
+
+  it("a quiet tile's Settle stands beside its button, not in it, in the status slot's place: nothing at rest, faded in by opacity on hover, its item saying it has an act", () => {
+    const { onSettle, onSelect } = settleOn({ status: "completed", endedAt: "2026-09-17T00:05:00.000Z" });
+    const item = tile().parentElement!;
+    expect(item.hasAttribute("data-has-action")).toBe(true);
+    expect(item.className).toContain("group/menu-item");
+    const settle = item.querySelector<HTMLElement>(":scope > [data-tile-settle]")!;
+    expect(tile().contains(settle)).toBe(false);
+    expect(settle.dataset["slot"]).toBe("sidebar-menu-action");
+    expect(settle.getAttribute("aria-label")).toBe("Settle thread");
+    expect(settle.querySelector("svg.lucide-archive")).not.toBeNull();
+    expect(settle.className).toContain("opacity-0");
+    expect(settle.className).toContain("group-hover/menu-item:opacity-100");
+    expect(settle.className).toContain("transition-opacity");
+    // The slot gives the act its place on hover, and the tile's own room stays as it was.
+    expect(slot().parentElement!.className).toContain("group-hover/menu-item:invisible");
+    expect(tile().className).toContain("group-data-has-action/menu-item:pe-2");
+    fireEvent.click(settle);
+    expect(onSettle).toHaveBeenCalledTimes(1);
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it("offers Settle only where the thread and everything under it is quiet: a working, waiting or asking tile, or one over a working child, offers nothing", () => {
+    const node = (t: SidebarThreadSnapshot, children: TileNode[] = []): TileNode => ({ thread: { id: t.id, parentThreadId: t.parentThreadId, startedAt: t.startedAt, runs: {} as never, thread: t }, children });
+    const tree = tileTree({ nowMs: Date.parse("2026-09-17T01:00:00.000Z"), settleMs: null });
+    const ended = { status: "completed" as const, endedAt: "2026-09-17T00:05:00.000Z" };
+    expect(settlesOnHover(node(thread(ended)), tree)).toBe(true);
+    expect(settlesOnHover(node(thread({ status: "failed", endedAt: "2026-09-17T00:05:00.000Z" })), tree)).toBe(true);
+    expect(settlesOnHover(node(thread()), tree)).toBe(false);
+    expect(settlesOnHover(node(thread({ capped: { placeId: "p", place: "hetzner", running: 2, atOnce: 2 } })), tree)).toBe(false);
+    expect(settlesOnHover(node(thread({ ...ended, asking: "Permission for Bash: ls" })), tree)).toBe(false);
+    expect(settlesOnHover(node(thread(ended), [node(thread({ id: "th_2", parentThreadId: "th_1" }))]), tree)).toBe(false);
+    const running: SubagentView = { id: "sa", title: "Read the map", state: "running", startedAt: 0 };
+    expect(settlesOnHover(node(thread({ ...ended, subagents: [running] })), tree)).toBe(false);
+    // A failed child holds nothing, as the menu's Settle reads it; one that asks or waits on the threads at once does.
+    const failed = thread({ id: "th_2", parentThreadId: "th_1", status: "failed", endedAt: "2026-09-17T00:06:00.000Z" });
+    expect(settlesOnHover(node(thread(ended), [node(failed)]), tree)).toBe(true);
+    expect(settlesOnHover(node(thread(ended), [node(thread({ id: "th_2", parentThreadId: "th_1", ...ended, asking: "Run pnpm install" }))]), tree)).toBe(false);
+    expect(settlesOnHover(node(thread(ended), [node(failed, [node(thread({ id: "th_3", parentThreadId: "th_2", capped: { placeId: "p", place: "hetzner", running: 2, atOnce: 2 } }))])]), tree)).toBe(false);
+  });
+
+  it("a running subagent's row offers Stop subagent beside it in its status's place, and an ended one nothing", () => {
+    const of = thread();
+    const draw = (subagent: SubagentView) => {
+      const leaf = { subagent, of };
+      const part = subagent.state === "running" ? ("live" as const) : ("finished" as const);
+      const tree = tileTree({ nowMs: Date.now(), settleMs: null });
+      render(
+        <SidebarProvider defaultOpen>
+          <SubagentRow subagent={subagent} target={childTarget(leaf, part, tree)} kind={kindOf(leaf, part)} note={undefined} depth={1} />
+        </SidebarProvider>,
+      );
+    };
+    useStore.setState({ api: { interruptSession: async () => ({}) } } as never);
+    draw({ id: "sa", title: "Read the map", state: "running", startedAt: Date.now() - 60_000 });
+    const row = document.querySelector<HTMLElement>("[data-subagent-row]")!;
+    expect(row.querySelector("svg.lucide-bot")).not.toBeNull();
+    const stop = row.parentElement!.querySelector<HTMLElement>(":scope > [data-subagent-stop]")!;
+    expect(stop.getAttribute("aria-label")).toBe("Stop subagent");
+    expect(stop.className).toContain("opacity-0");
+    expect(row.contains(stop)).toBe(false);
+    cleanup();
+    draw({ id: "sa", title: "Read the map", state: "done", startedAt: Date.now() - 60_000, endedAt: Date.now() - 30_000 });
+    expect(document.querySelector("[data-subagent-stop]")).toBeNull();
+    expect(document.querySelector("[data-has-action]")).toBeNull();
+    useStore.setState({ api: null } as never);
+  });
+
+  it("a failed subagent's card leads with Failed and why, whole under the word", async () => {
+    vi.useFakeTimers();
+    try {
+      const subagent: SubagentView = { id: "sa", title: "Check the CSP headers", state: "failed", startedAt: Date.now() - 60_000, endedAt: Date.now() - 30_000, failure: "WebFetch could not reach https://acme.dev: connect ETIMEDOUT" };
+      const leaf = { subagent, of: thread() };
+      const tree = tileTree({ nowMs: Date.now(), settleMs: null });
+      render(
+        <SidebarProvider defaultOpen>
+          <SubagentRow subagent={subagent} target={childTarget(leaf, "finished", tree)} kind={kindOf(leaf, "finished")} note={noteOf(leaf, "finished")} depth={1} />
+        </SidebarProvider>,
+      );
+      const row = document.querySelector<HTMLElement>("[data-subagent-row]")!;
+      fireEvent.pointerEnter(row, { pointerType: "mouse" });
+      fireEvent.mouseEnter(row);
+      fireEvent.mouseMove(row);
+      await act(async () => void vi.advanceTimersByTime(600));
+      const status = document.querySelector<HTMLElement>("[data-subagent-card] [data-status-line]")!;
+      expect(status.dataset["statusLine"]).toBe("failed");
+      expect(status.querySelector("[data-status-reason]")!.textContent).toBe("WebFetch could not reach https://acme.dev: connect ETIMEDOUT");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

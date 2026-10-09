@@ -38,6 +38,12 @@ export const GLYPH_ROW_CLASS = "group-data-has-action/menu-item:pe-2";
  * breakpoint, where a phone's sheet would then show every plus and chevron at once; under that width it is not
  * drawn at all, so a control nobody can see is neither a tap target nor a tab stop. */
 export const HOVER_GLYPH_CLASS = "opacity-0 max-md:hidden";
+/** A row's status slot that gives its place to the row's one act while the pointer or the focus is on the row, from
+ * md up, where the act is drawn. */
+export const SLOT_YIELDS_CLASS = "md:group-hover/menu-item:invisible md:group-focus-within/menu-item:invisible";
+/** That act, a `SidebarMenuAction` beside the row: centred on the slot's 12 px glyph, which ends 8 px in, in the
+ * row's quiet ink, fading in by opacity. A tile moves it up to its first row. */
+export const SLOT_ACT_CLASS = "right-1 text-sidebar-muted-foreground transition-opacity duration-150 hover:text-sidebar-foreground";
 // The tree's connector, one rule for every tree in the sidebar and the transcript. A child list stands so its line
 // falls under the centre of the parent's mark, and each child sits 8 px past the line. Each item draws its own part
 // and no column is drawn twice: the elbow (::after) runs from the item's top into its row at the mark line, its

@@ -101,3 +101,8 @@ export const SNOOZE_WORDS = {
 export const CAP_WAIT_WORDS = {
   raise: (place: string): string => `${CAP_RAISE_ACT} on ${place} in Settings to start it now`,
 } as const;
+
+/** The card's line on a thread in the Needs you inbox that names the threads it hangs under, from its tree's top down. */
+export const TREE_WORDS = {
+  startedBy: (path: ReadonlyArray<string>): string => `Started by ${path.join(" / ")}`,
+} as const;

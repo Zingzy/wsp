@@ -9,20 +9,25 @@
 // flight and a workspace being made. A resting title takes the muted ink, so the
 // tiles a person is waiting on stand out. Renaming turns the title into the
 // sidebar's one name box in the same row, so the tile keeps its height.
+// A quiet tile offers Settle beside its button on hover; a tile with a tree
+// under it folds it by the control at row two's end; a tile in the Needs you
+// inbox under a tree names the thread that started it in row one.
 import { memo, useLayoutEffect, useRef, type ComponentProps, type DragEvent, type MouseEvent, type ReactNode } from "react";
-import { AlarmClockIcon, FileDiffIcon, FolderIcon, GitBranchIcon, GitPullRequestIcon } from "lucide-react";
+import { AlarmClockIcon, ArchiveIcon, ChevronDownIcon, ChevronRightIcon, CornerDownRightIcon, FileDiffIcon, FolderIcon, GitBranchIcon, GitPullRequestIcon } from "lucide-react";
 import { agentName } from "@wsp/catalog";
-import { capRunningLine, type PlaceView, type ThreadCapWait } from "@wsp/protocol";
+import type { PlaceView, ThreadCapWait } from "@wsp/protocol";
 import { THREAD_WORDS, WORKSPACE_WORDS } from "../actions/format.js";
 import type { Launch, SidebarThreadSnapshot } from "../adapt/index.js";
 import { HarnessMark } from "../components/chat/HarnessMark.js";
-import type { ThreadStatusInput } from "../components/status/kinds/index.js";
+import type { StatusKind, ThreadStatusInput } from "../components/status/kinds/index.js";
+import { StatusLine } from "../components/status/StatusLine.js";
+import { noteOf } from "../components/threads/leadTree.js";
 import { ThreadStatus } from "../components/status/ThreadStatus.js";
 import { threadStatusOf } from "../components/status/threadStatusOf.js";
 import { FAILED } from "../components/status/kinds/failed.js";
 import { RESTING } from "../components/status/kinds/resting.js";
 import { STARTING } from "../components/status/kinds/starting.js";
-import { SidebarMenuButton } from "../components/ui/sidebar.js";
+import { SidebarMenuAction, SidebarMenuButton } from "../components/ui/sidebar.js";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.js";
 import { ProjectGlyph } from "../projects/look.js";
 import { ComputerGlyph } from "../settings/ComputerGlyph.js";
@@ -30,9 +35,10 @@ import { cn } from "../lib/utils.js";
 import { RowNameInput } from "./RowNameInput.js";
 import { tileCardLines, tilePrIcon, type TileCardLine } from "./tileCard.js";
 import type { TileCheckout } from "./tileCheckout.js";
-import { CAP_WAIT_WORDS, SNOOZE_WORDS } from "./words.js";
+import { CAP_WAIT_WORDS, SNOOZE_WORDS, TREE_WORDS } from "./words.js";
+import type { InboxMark } from "./threadTree.js";
 import { LINK_DOWN_WORDS } from "../adapt/terminal-pane.js";
-import { ONE_LINE_ROW_CLASS, TILE_CLASS, TILE_ROW_ONE_CLASS, TILE_ROW_TWO_CLASS, TILE_TITLE_CLASS, threadRowId } from "./rowGrammar.js";
+import { GLYPH_ROW_CLASS, HOVER_GLYPH_CLASS, ONE_LINE_ROW_CLASS, ROW_META_CLASS, SLOT_ACT_CLASS, SLOT_YIELDS_CLASS, TILE_CLASS, TILE_ROW_ONE_CLASS, TILE_ROW_TWO_CLASS, TILE_TITLE_CLASS, threadRowId } from "./rowGrammar.js";
 
 /** Where a tile's thread runs, as row one names it: the project and the computer by the names a person reads, either
  * empty while it is not known yet. */
@@ -49,10 +55,11 @@ const whereWords = (place: TilePlace): string => [place.project, place.computer]
 /** How long the pointer rests on a tile before its card opens, so a pass of the pointer down the list opens none. */
 const CARD_DELAY_MS = 450;
 
-const CARD_GLYPHS: Partial<Record<TileCardLine["kind"], typeof FolderIcon>> = { folder: FolderIcon, branch: GitBranchIcon, pr: GitPullRequestIcon, changed: FileDiffIcon };
+const CARD_GLYPHS: Partial<Record<TileCardLine["kind"], typeof FolderIcon>> = { "started-by": CornerDownRightIcon, folder: FolderIcon, branch: GitBranchIcon, pr: GitPullRequestIcon, changed: FileDiffIcon };
 
-/** The card a tile opens to its right: the full title, then one line per fact with its glyph, then what holds it. */
-function TileCard({ card, place, harness }: { card: ReturnType<typeof tileCardLines>; place: TilePlace; harness: string | null }) {
+/** The card a tile opens to its right: the full title, its status row, then one line per fact with its glyph, then
+ * what holds it. */
+function TileCard({ card, place, harness, status }: { card: ReturnType<typeof tileCardLines>; place: TilePlace; harness: string | null; status?: ReactNode }) {
   return (
     <TooltipPopup side="right" align="start" sideOffset={6} data-tile-card className="max-w-72 text-left whitespace-normal">
       <div className="flex min-w-0 flex-col gap-1.5 py-1">
@@ -60,6 +67,7 @@ function TileCard({ card, place, harness }: { card: ReturnType<typeof tileCardLi
           {card.title}
         </p>
         <ul className="flex min-w-0 flex-col gap-1 text-muted-foreground">
+          {status}
           {card.lines.map(line => {
             const Glyph = CARD_GLYPHS[line.kind];
             const glyph =
@@ -82,7 +90,7 @@ function TileCard({ card, place, harness }: { card: ReturnType<typeof tileCardLi
 }
 
 /** The tile's button and, once the pointer rests on it, its card. A tile being renamed opens no card. */
-function TileFrame({ card, place, harness, renaming, children, ...button }: ComponentProps<typeof SidebarMenuButton> & { card: ReturnType<typeof tileCardLines>; place: TilePlace; harness: string | null; renaming: boolean }) {
+function TileFrame({ card, place, harness, renaming, status, children, ...button }: ComponentProps<typeof SidebarMenuButton> & { card: ReturnType<typeof tileCardLines>; place: TilePlace; harness: string | null; renaming: boolean; status?: ReactNode }) {
   const frame = <SidebarMenuButton size="sm" {...button} />;
   if (renaming) return <SidebarMenuButton size="sm" {...button}>{children}</SidebarMenuButton>;
   return (
@@ -90,19 +98,29 @@ function TileFrame({ card, place, harness, renaming, children, ...button }: Comp
       <TooltipTrigger delay={CARD_DELAY_MS} render={frame} data-slot="sidebar-menu-button">
         {children}
       </TooltipTrigger>
-      <TileCard card={card} place={place} harness={harness} />
+      <TileCard card={card} place={place} harness={harness} status={status} />
     </Tooltip>
   );
 }
 
-/** The two rows every tile draws. Row two is the agent's mark and the title, then an open pull request's icon. */
-function TileRows({ place, status, title, harness, pr }: { place: TilePlace; status: ReactNode; title: ReactNode; harness: string | null; pr?: TileCheckout["pr"] }) {
+/** The two rows every tile draws. Row one is the project's glyph and where the thread runs, or in the inbox the thread
+ * that started it, then the status. Row two is the agent's mark and the title, then an open pull request's icon and
+ * the fold's control. */
+function TileRows({ place, status, title, harness, pr, startedBy, end }: { place: TilePlace; status: ReactNode; title: ReactNode; harness: string | null; pr?: TileCheckout["pr"]; startedBy?: string | undefined; end?: ReactNode }) {
   return (
     <>
       <span className={TILE_ROW_ONE_CLASS}>
-        <ProjectGlyph projectId={place.projectId} className="size-3" />
+        {startedBy === undefined ? (
+          <ProjectGlyph projectId={place.projectId} className="size-3" />
+        ) : (
+          // The project's glyph keeps its slot, the starter's mark on its corner, so row one's words do not move.
+          <span data-tile-started-by className="relative flex size-3 shrink-0">
+            <ProjectGlyph projectId={place.projectId} className="size-3" />
+            <CornerDownRightIcon aria-hidden className="absolute top-0 right-0 size-2 text-sidebar-muted-foreground" />
+          </span>
+        )}
         <span data-tile-where className="min-w-0 flex-1 truncate">
-          {whereWords(place)}
+          {startedBy ?? whereWords(place)}
         </span>
         {status}
       </span>
@@ -110,10 +128,35 @@ function TileRows({ place, status, title, harness, pr }: { place: TilePlace; sta
         {harness === null ? null : <HarnessMark harness={harness} label={agentName(harness)} className="size-3" />}
         {title}
         {tilePrIcon(pr) ? <GitPullRequestIcon aria-hidden data-tile-pr className="size-3 shrink-0 text-[var(--top-row-meta)]" /> : null}
+        {end}
       </span>
     </>
   );
 }
+
+/** The fold's control at row two's end: shut, how many rows the tile would draw under it and the chevron, muted; open,
+ * the chevron alone on hover, its room kept so the title never moves. The tile's button says which with
+ * aria-expanded, and the arrow keys fold it too, so the control is the pointer's alone. */
+function FoldControl({ fold, onFold }: { fold: Fold; onFold: (() => void) | undefined }) {
+  const shut = fold !== "open";
+  return (
+    <span
+      aria-hidden
+      data-tile-fold={shut ? "shut" : "open"}
+      className={cn("flex shrink-0 items-center gap-1 text-sidebar-muted-foreground transition-opacity duration-150 hover:text-sidebar-foreground", !shut && "opacity-0 group-hover/menu-item:opacity-100 group-focus-within/menu-item:opacity-100")}
+      onClick={event => {
+        event.stopPropagation();
+        onFold?.();
+      }}
+    >
+      {shut ? <span className={ROW_META_CLASS}>{fold}</span> : null}
+      {shut ? <ChevronRightIcon className="size-3.5" /> : <ChevronDownIcon className="size-3.5" />}
+    </span>
+  );
+}
+
+/** A tile's tree: open, or folded with how many rows it would draw. */
+type Fold = "open" | number;
 
 /** The slot of a snoozed root while threads of its tree run: the snooze's glyph and how many, in the row's own ink,
  * so the tree stays reachable without calling for the person. */
@@ -149,8 +192,8 @@ const NameBox = ({ name, label, saving, onRename, onCancel }: { name: string; la
 
 const NO_CHECKOUT: TileCheckout = { branch: "", counts: [] };
 
-/** A held thread's reason and the setting that ends its wait, the card's lines while its computer holds it back. */
-const capNotes = (capped: ThreadCapWait | undefined): string[] => (capped === undefined ? [] : [capRunningLine(capped), CAP_WAIT_WORDS.raise(capped.place)]);
+/** The setting that ends a held thread's wait, the card's line under the status row's reason. */
+const capNotes = (capped: ThreadCapWait | undefined): string[] => (capped === undefined ? [] : [CAP_WAIT_WORDS.raise(capped.place)]);
 
 /** What a tile is drawn from. */
 type ThreadTileProps = {
@@ -186,10 +229,23 @@ type ThreadTileProps = {
   /** What row two says in place of the title, where the title is already said over the tile: the model, in a group
    * of threads one send opened. */
   label?: string | undefined;
+  /** The tile stands in the Needs you inbox: where its thread hangs, which row one and the card name. */
+  inboxOf?: InboxMark | undefined;
+  /** The titles from its tree's top down to the thread that opened it, which the card names: set on a tile past the
+   * second level, which stands at its opener's x. */
+  openers?: ReadonlyArray<string> | undefined;
+  /** The tile is a slim row in a Finished fold, ending in this status. */
+  finished?: StatusKind | undefined;
+  /** The tree under the tile, open or folded with how many rows it would draw; absent where nothing is drawn under it. */
+  fold?: Fold | undefined;
+  /** Settles the tile's tree, where the thread and everything under it is quiet: drawn beside the tile on hover. */
+  onSettle?: (() => void) | undefined;
+  /** Folds or opens the tree under the tile. */
+  onFold?: (() => void) | undefined;
 };
 
 /** What a tile does when it is pressed, opened, renamed or dragged. */
-export type TileHandlers = Pick<ThreadTileProps, "onSelect" | "onContextMenu" | "onRename" | "onRenameCancel" | "onRenameOpen" | "onDragStart" | "onDragEnd">;
+export type TileHandlers = Pick<ThreadTileProps, "onSelect" | "onContextMenu" | "onRename" | "onRenameCancel" | "onRenameOpen" | "onDragStart" | "onDragEnd" | "onSettle" | "onFold">;
 
 /** Handlers for the tiles a draw makes: each is the same function from draw to draw and calls what the latest
  * committed draw passed for its row, so a tile's memo compares them by identity and a tile it skips still acts on the
@@ -215,6 +271,8 @@ export function useTileHandlers(): (rowId: string, handlers: TileHandlers) => Ti
         onRenameOpen: () => at().onRenameOpen?.(),
         onDragStart: event => at().onDragStart?.(event),
         onDragEnd: () => at().onDragEnd?.(),
+        onSettle: () => at().onSettle?.(),
+        onFold: () => at().onFold?.(),
       };
       fixed.current.set(rowId, row);
     }
@@ -226,6 +284,8 @@ export function useTileHandlers(): (rowId: string, handlers: TileHandlers) => Ti
       ...(handlers.onRenameOpen === undefined ? {} : { onRenameOpen: row.onRenameOpen }),
       ...(handlers.onDragStart === undefined ? {} : { onDragStart: row.onDragStart }),
       ...(handlers.onDragEnd === undefined ? {} : { onDragEnd: row.onDragEnd }),
+      ...(handlers.onSettle === undefined ? {} : { onSettle: row.onSettle }),
+      ...(handlers.onFold === undefined ? {} : { onFold: row.onFold }),
     };
   };
 }
@@ -240,22 +300,29 @@ function sameData(a: unknown, b: unknown): boolean {
 
 /** A tile, drawn again only when what it is given changes; the sidebar passes its handlers through `useTileHandlers`. */
 export const ThreadTile = memo(function ThreadTile(props: ThreadTileProps) {
-  const { thread, place, checkout = NO_CHECKOUT, model = null, time, depth, active, settled = false, snoozedWorking, renaming, saving, onSelect, onContextMenu, onRename, onRenameCancel, onRenameOpen, onDragStart, onDragEnd, label } = props;
+  const { thread, place, checkout = NO_CHECKOUT, model = null, time, depth, active, settled = false, snoozedWorking, renaming, saving, onSelect, onContextMenu, onRename, onRenameCancel, onRenameOpen, onDragStart, onDragEnd, label, inboxOf, openers, finished, fold, onSettle, onFold } = props;
   const snoozed = snoozedWorking !== undefined;
+  const slim = settled || finished !== undefined;
   const status = settled || snoozed ? RESTING : threadStatusOf(thread);
   // A working or read row recedes unless it is the one open, as T3 Code's shouldRecede; a row that calls for the
   // person keeps the foreground ink, and the label keeps its hue either way.
   const recede = !active && (status === RESTING || status.id === "working" || status.id === "resuming" || status.id === "stopped");
+  const startedBy = inboxOf === undefined || inboxOf.parent === null ? undefined : inboxOf.parent;
+  const path = startedBy === undefined ? openers : inboxOf!.path;
   const card = tileCardLines({
     title: thread.title,
     place,
+    ...(path === undefined ? {} : { startedBy: TREE_WORDS.startedBy(path) }),
     folder: checkout.folder, branch: checkout.branch,
     harness: thread.harness,
     model,
     pr: checkout.pr,
     changed: checkout.changed,
-    notes: [snoozed ? SNOOZE_WORDS.workingHover(snoozedWorking) : thread.asking, ...capNotes(thread.capped), thread.setupRefusal ?? null, ...checkout.counts, checkout.why ?? null],
+    notes: [snoozed ? SNOOZE_WORDS.workingHover(snoozedWorking) : null, ...capNotes(thread.capped), thread.setupRefusal ?? null, ...checkout.counts, checkout.why ?? null],
   });
+  // The card leads with the status row, the reason whole under its word; a settled tile's card has none.
+  const reason = noteOf({ node: null, thread }, finished !== undefined ? "finished" : "live");
+  const statusRow = settled || snoozed ? undefined : <StatusLine thread={thread} {...(finished !== undefined ? { kind: finished } : {})} age={time} {...(reason !== undefined ? { reason } : {})} />;
   // An agent the host refuses to start there says so in the slot, over a resting or failed thread's own status.
   const setupRefused = thread.setupRefusal !== undefined && (status === RESTING || status.id === FAILED.id) ? thread.setupRefusal : undefined;
   const frame = {
@@ -263,49 +330,65 @@ export const ThreadTile = memo(function ThreadTile(props: ThreadTileProps) {
     place,
     harness: thread.harness,
     renaming,
+    status: statusRow,
     // An input may not sit inside a button, so a tile being renamed is a plain box with the same grammar.
     render: renaming ? <div /> : <button type="button" />,
     isActive: active,
     "data-sidebar-row": true,
-    "data-row-id": threadRowId(thread.id),
+    "data-row-id": inboxOf === undefined ? threadRowId(thread.id) : `inbox:${threadRowId(thread.id)}`,
     "data-depth": depth,
+    ...(fold === undefined ? {} : { "aria-expanded": fold === "open" }),
     ...(renaming ? {} : { onClick: onSelect, onContextMenu }),
   };
   const titleOrBox = renaming ? <NameBox name={thread.title} label={THREAD_WORDS.rename} saving={saving} onRename={onRename} onCancel={onRenameCancel} /> : null;
-  if (settled)
-    return (
-      <TileFrame {...frame} data-slim="true" className={ONE_LINE_ROW_CLASS}>
+  const settles = onSettle !== undefined && !renaming;
+  // Settle stands beside the button, never in it, where the status slot is; the item says it has an act.
+  const settle = settles ? (
+    <SidebarMenuAction showOnHover data-tile-settle aria-label={THREAD_WORDS.settle} className={cn(HOVER_GLYPH_CLASS, SLOT_ACT_CLASS, !slim && "top-3.75")} onClick={onSettle}>
+      <ArchiveIcon aria-hidden className="size-3.5" />
+    </SidebarMenuAction>
+  ) : null;
+  const item = (tile: ReactNode) => (
+    <div className="group/menu-item relative min-w-0" {...(settles ? { "data-has-action": "" } : {})}>
+      {tile}
+      {settle}
+    </div>
+  );
+  const slot = snoozed ? (
+    <SnoozedWorking count={snoozedWorking} />
+  ) : setupRefused !== undefined ? (
+    <span data-thread-status="setup-refused" title={setupRefused} className="inline-flex shrink-0 items-center whitespace-nowrap">
+      {LINK_DOWN_WORDS.refused}
+    </span>
+  ) : (
+    <ThreadStatus thread={thread} age={time} settled={settled} />
+  );
+  if (slim)
+    return item(
+      <TileFrame {...frame} data-slim="true" className={cn(ONE_LINE_ROW_CLASS, GLYPH_ROW_CLASS)}>
         <ProjectGlyph projectId={place.projectId} className={cn("size-3 shrink-0", !active && "opacity-40 grayscale")} />
         {titleOrBox ?? (
           <span className="flex min-w-0 flex-1">
             <Title text={label ?? thread.title} idle active={active} onDoubleClick={onRenameOpen} />
           </span>
         )}
-        <span className="shrink-0 text-xs text-sidebar-muted-foreground">
-          <ThreadStatus thread={thread} age={time} settled />
+        <span className={cn("shrink-0 text-xs text-sidebar-muted-foreground", settles && SLOT_YIELDS_CLASS)}>
+          {finished !== undefined ? <ThreadStatus thread={thread} age={time} kind={finished} /> : <ThreadStatus thread={thread} age={time} settled />}
         </span>
-      </TileFrame>
+      </TileFrame>,
     );
-  return (
-    <TileFrame {...frame} className={TILE_CLASS} {...(renaming || onDragStart === undefined ? {} : { draggable: true, onDragStart, onDragEnd })}>
+  return item(
+    <TileFrame {...frame} className={cn(TILE_CLASS, GLYPH_ROW_CLASS)} {...(renaming || onDragStart === undefined ? {} : { draggable: true, onDragStart, onDragEnd })}>
       <TileRows
         place={place}
-        status={
-          snoozed ? (
-            <SnoozedWorking count={snoozedWorking} />
-          ) : setupRefused !== undefined ? (
-            <span data-thread-status="setup-refused" title={setupRefused} className="inline-flex shrink-0 items-center whitespace-nowrap">
-              {LINK_DOWN_WORDS.refused}
-            </span>
-          ) : (
-            <ThreadStatus thread={thread} age={time} settled={settled} />
-          )
-        }
+        startedBy={startedBy}
+        status={settles ? <span className={cn("flex shrink-0", SLOT_YIELDS_CLASS)}>{slot}</span> : slot}
         title={titleOrBox ?? <Title text={label ?? thread.title} idle={recede} active={active} onDoubleClick={onRenameOpen} />}
         harness={thread.harness}
         pr={checkout.pr}
+        end={fold === undefined ? null : <FoldControl fold={fold} onFold={onFold} />}
       />
-    </TileFrame>
+    </TileFrame>,
   );
 }, sameData);
 
