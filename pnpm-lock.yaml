@@ -73,6 +73,8 @@ importers:
 
   apps/docs: {}
 
+  apps/docs-next: {}
+
   apps/web:
     dependencies:
       '@base-ui/react':
