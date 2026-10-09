@@ -1,3 +1,85 @@
 # What is stored where
 
-Written from the inventory of wsp-map#1915: each item, where it sits, who reads it.
+wsp keeps what it knows on your own computers. It has no server that holds your projects, prompts, transcripts or keys. This page lists each thing that wsp writes, where it sits and who reads it.
+
+wsp encrypts nothing at rest. Keys and tokens sit in plain files that only your user can read (mode 600). wsp never writes to the macOS Keychain.
+
+## Beside the state file
+
+The state file is `~/.wsp/state.json` unless you name another one with `--state` or `WSP_HOME`. The host writes everything below in the same folder as the state file, so a moved state file takes all of it along.
+
+| File | What it holds | Who reads it |
+|---|---|---|
+| `state.db` | A SQLite database: your projects, threads and their transcripts, images in messages, computers (name, ssh login, key path, host key), preferences, the usage history and the hashed tokens of your devices. Mode 600. | The host |
+| `.env` | Your keys: `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, `OPENAI_API_KEY`, `CURSOR_API_KEY`, `GEMINI_API_KEY` and `GH_TOKEN`, where you set them. When you add a box with GitHub on its default, wsp runs `gh auth token` on your computer and writes `GH_TOKEN` here itself. Plain text, mode 600. | The host, at each turn's launch. It puts them in the turn's environment, on this computer and on your boxes. |
+| `servers.env`, `servers.owners.json` | Values for the headers and variables of your MCP servers, and which server owns each name | The host, for each turn's servers |
+| `host.lock` | The process id and the ports of the host that serves this state file | Every `wsp` command and the app, to find the host |
+| `host-token` | The token that the app sends when it connects. The host makes a new one at each start. Mode 600. | The app |
+| `host.log` | What the host prints: addresses, paths and warnings. It is never rotated. | You |
+| `release.json` | The last answer of the check for a new wsp release | `wsp status`, `wsp doctor`, Settings |
+| `agent-latest.json` | Each agent's newest version, kept for a day | The host, for the Agents page |
+| `icons/` | Icons of remote MCP servers, kept for 30 days | The app |
+| `recipe.json`, `recipes/` | Your recipes: what a computer gets when you add it | The host |
+| `relay.json` | The link to the relay, when you linked this host. Mode 600. | The host |
+| `place-host-key.json` | The host's own ed25519 key pair, private key included. Every box pins its public key when it joins. Mode 600. | The host |
+| `init.log` | The last five runs of `wsp init`, with values whose names say key, token, secret or password blanked | You |
+| `desktop/` | The desktop app's own profile: unsent drafts, up to 20 stashed prompts with their files and images, and window state. Also `update.log` from the app's updates. | The desktop app |
+
+Transcripts have a limit for each workspace. When a transcript is over it, the oldest events go first. The usage history keeps 90 days.
+
+## In your wsp folder
+
+`~/.wsp` also holds the files that belong to this computer, not to one state file:
+
+- `bin/wsp`, the command that the desktop app installs.
+- `device-key.json` and `relay-client.json`, this computer's key and its sign-in to the relay. Mode 600.
+- `ssh/` and `ssh_config`, the ssh key that the app uses to open a box's folder in your editor. That key has no passphrase.
+- `hosts/`, one file for each host on another computer that this computer drives, by the name that `wsp hosts` lists.
+
+## Outside the wsp folder
+
+- An install id and a computer id, in `analytics-id` and `host-id` under `~/Library/Application Support/wsp` on a Mac or `~/.config/wsp` on Linux. They never move with `WSP_HOME`. Usage counts carry the install id.
+- The service unit that starts the host at login: `~/Library/LaunchAgents/com.wsp.host.<tag>.plist` on a Mac, `~/.config/systemd/user/wsp-host-<tag>.service` on Linux.
+- The wsp server and the wsp skill in each agent's own configuration, after you give the agent the tools. [Give your agent the wsp tools](/agents/tools) lists the files.
+- One line in `~/.ssh/known_hosts` for each box that you add.
+- Each agent's own session files, in the agent's own folder, for example `~/.claude/projects` or `~/.codex/sessions`. The agent writes them. wsp writes two things in Claude Code's folder:
+  - A title line, appended to a session's file when you name or rename the thread, or when wsp names a thread itself. `/rename` in Claude Code writes the same line.
+  - A copy of the session beside it while a side question runs. wsp deletes the copy after the side question.
+
+## On a box
+
+When you add a box, the setup copies what you pick from your computer to the box. The copies go over the daemon's sealed link, not over ssh, so a box that joined with `wsp join` gets the same copies:
+
+- The agents' own configuration, including `~/.claude.json` as it is. wsp removes no account field from it.
+- The configuration of your MCP servers, with their values moved into environment variables.
+- Your skills.
+- Your git configuration, with secret-named keys, token-shaped values and URLs with a login cut out.
+- Your shell configuration, with exported variables cut by name only. wsp cuts a variable when one word of its name, between underscores, is `KEY`, `APIKEY`, `TOKEN`, `SECRET` or `PASSWORD`. So `GITHUB_TOKEN` and `APIKEY` are cut. `DB_PASS`, `PASSWD` and a `DATABASE_URL` with a password in it are not, so they travel.
+
+wsp never copies a sign-in file. You sign in on the box.
+
+wsp also writes these files on the box:
+
+| Path | What it holds |
+|---|---|
+| `~/.wsp/` under the login's home | The daemon, the box's record (`place.json`), its key (`place-key.pem`), the token that the host signs in with (`daemon-token`, mode 600), its log (`place.log`, never rotated) and readings of the box's load (14 days or 8 MiB). |
+| `/etc/systemd/system/wsp-place-<tag>.service` | The system unit that keeps the daemon running |
+| `/etc/apparmor.d/wsp-workspace` | The AppArmor profile for workspaces |
+| `/opt/wsp` | The base tools |
+| `/wsp` | The daemon's runtime folder. `/wsp/logins/codex/auth.json` is the Codex sign-in that the box's threads share. |
+| `~/wsp-work` | The folder that a turn or a command starts in when it names no project |
+
+The daemon also keeps a checkpoint for each turn in the project's own `.git`, up to 100 refs for each thread. Terminal scrollback stays in memory only.
+
+Every thread on a box can read the login's home folder, except `.ssh`. So a sign-in file in that home is readable by every thread there.
+
+## What a delete takes
+
+- Deleting a thread removes its transcript, its checkpoints, its images and its slate from wsp. The agent's own session file stays in the agent's folder. Delete it by hand if you want it gone.
+- `wsp remove <computer>` deletes wsp's files on the box: the listed items in `~/.wsp`, the token and `/wsp`, with `logins/`. It keeps your work folders, `~/.wsp/logs` and the sign-in files that tools wrote in the home folder.
+- `wsp down` stops the host and removes its service unit. The files above stay until you delete them.
+
+## Next
+
+- [What leaves your computer](/how/network) lists each request that wsp makes on its own.
+- [The host](/how/host) says how the host starts and stops.

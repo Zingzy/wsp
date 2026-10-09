@@ -1,3 +1,133 @@
 # Give your agent the wsp tools
 
-Written around a table generated from `mcpServerSpec()` in `packages/host/src/mcp-install.ts` and the catalog's config paths.
+An agent that you run yourself in a terminal, such as Claude Code or Codex, can drive wsp. It needs two things: the wsp tools, which is an MCP server, and the wsp skill, which tells it how to use them. One command writes both.
+
+The tools talk to the host on this computer. So a thread that your agent starts shows in the app's sidebar, and you can read it and answer it there.
+
+## Install them with one command
+
+Run this in the folder of the project that you work on with the agent:
+
+```sh
+wsp mcp install --agent claude
+```
+
+The command does three things:
+
+1. It writes a server named `wsp` into the agent's own MCP configuration.
+2. It writes the wsp skill to `wsp/SKILL.md` in the agent's skills folder. It replaces a copy that is already there.
+3. It adds a short wsp section to the instruction files in the current folder: `AGENTS.md`, and also `CLAUDE.md` for Claude Code. The section names the skill and the three verbs to start with. Two marker lines bound it, and the text outside them does not change:
+
+   ```
+   <!-- wsp:begin -->
+   ## wsp
+   ...
+   <!-- wsp:end -->
+   ```
+
+Then it says what it wrote, and what to do next:
+
+```
+Claude Code now has the wsp tools: ~/.claude.json
+The wsp skill went to ~/.claude/skills/wsp/SKILL.md
+The wsp section is in /Users/you/acme/AGENTS.md and /Users/you/acme/CLAUDE.md
+The server command is ...
+Next: run claude in this folder and say: /wsp set up wsp for me
+```
+
+<video src="/shots/docs-mcp-install.mp4" autoPlay muted loop playsInline aria-label="wsp mcp install --agent claude in a terminal, and the lines that say what it wrote" />
+
+Give `--agent` once for each agent. Each agent gets its own lines. If one agent fails, the others still get the tools.
+
+Sometimes there is no terminal, for example when a script or another agent runs the command. Then, without `--agent`, every agent of the catalog whose command is on the `PATH` gets the tools. At a terminal, the command refuses and tells you to name one with `--agent`.
+
+With `--json`, the command prints one JSON object: the server command, each agent with its files, and each failure with its reason.
+
+## The files each agent's install writes
+
+The file names are relative to your home folder.
+
+| Agent | Id | MCP configuration | Skill |
+|---|---|---|---|
+| Claude Code | `claude` | `~/.claude.json` | `~/.claude/skills/wsp/SKILL.md` |
+| Codex | `codex` | `~/.codex/config.toml` | `~/.codex/skills/wsp/SKILL.md` |
+| Gemini CLI | `gemini` | `~/.gemini/settings.json` | `~/.gemini/skills/wsp/SKILL.md` |
+| OpenCode | `opencode` | `~/.config/opencode/opencode.json`, or `opencode.jsonc` in the same folder when only that file exists | `~/.config/opencode/skills/wsp/SKILL.md` |
+| Pi | `pi` | none | `~/.pi/agent/skills/wsp/SKILL.md` |
+| Hermes Agent | `hermes` | none | `~/.hermes/skills/wsp/SKILL.md` |
+| Crush | `crush` | none | `~/.config/crush/skills/wsp/SKILL.md` |
+| Qwen Code | `qwen` | none | `~/.qwen/skills/wsp/SKILL.md` |
+| Goose | `goose` | none | `~/.config/goose/skills/wsp/SKILL.md` |
+| Amp | `amp` | none | `~/.config/amp/skills/wsp/SKILL.md` |
+| Cursor | `cursor` | none | `~/.cursor/skills/wsp/SKILL.md` |
+
+For an agent with no MCP configuration in the catalog, the install writes the skill and the wsp section, but not the server. It says so in one line:
+
+```
+Cursor: the catalog has no MCP config for it yet, so the server was not written; add it by hand.
+```
+
+To add the server by hand, run the install with `--json` and copy the command in `server`.
+
+## What the server line runs
+
+The server entry is one of two lines. Both carry `--state <path>`, so the folder where the agent starts never picks another state file.
+
+On a computer whose wsp release carries the tool server in its daemon binary, as the Mac release does, the entry runs that binary. Then no Node process stays up for each session of the agent:
+
+```
+<folder of the release>/wsp-daemon mcp --wsp-argv <word> --wsp-argv <word> ... --state <path>
+```
+
+Each `--wsp-argv` is one word of the command that starts this same wsp. The tool server runs that command to start a host when none serves the state file, and to run the recipe tools.
+
+Everywhere else, the entry runs this same wsp with the word `mcp`:
+
+```
+<the wsp command> mcp --state <path>
+```
+
+A wsp that runs from the desktop app's command, or from the npm cache through `npx`, always takes this second line, because those binaries can move.
+
+For Codex, the entry also sets `tool_timeout_sec = 3600`, so Codex waits up to one hour for a wsp tool call.
+
+## The host keeps them current
+
+Each time the host starts, it looks at every agent configuration that names its state file:
+
+- The host moves a wsp line that this wsp wrote with Node to the binary's tool server, where this computer has one.
+- The host writes again a skill copy that differs from the running wsp's skill.
+
+The host writes no skill for an agent that never took one. It leaves alone an entry that names another state file or another host.
+
+## From the app
+
+In the app, open Settings > Agents. The row of an agent without the tools has Add the wsp tools. For an agent with an MCP configuration in the table above, it writes the same server entry and the skill as the command. It writes no section in a project's instruction files. After that, the agent's details show the file under wsp tools.
+
+`wsp agents addtools <agent>` does the same from the command line. Both work only for agents on the computer that the app runs on.
+
+For an agent with no MCP configuration in the table, the button and `wsp agents addtools` refuse and write nothing, not even the skill:
+
+```
+Cursor has no MCP config wsp knows, so the wsp tools were not written
+```
+
+For those agents, run `wsp mcp install --agent <id>`, which writes the skill and the wsp section.
+
+## Threads already have them
+
+You do not need the install for a Claude Code or Codex thread that wsp starts. The host gives each turn of such a thread its own wsp tools in the turn's launch. An OpenCode or Cursor thread gets no wsp tools. The install is for an agent that you start yourself.
+
+## Take the section out
+
+```sh
+wsp mcp install --remove --agent claude
+```
+
+This takes the wsp section out of the instruction files in the current folder. It does not change the agent's MCP configuration or the skill. To remove those, delete the `wsp` entry from the file in the table and the `wsp` folder from the skills folder.
+
+## Next
+
+- [Let your agent set you up](/start/with-your-agent) is the first conversation after the install.
+- [The wsp skill](/agents/skill) is the whole text that the install writes.
+- [Coordinating threads from an agent](/agents/coordinating) shows how an agent runs several threads at once.
