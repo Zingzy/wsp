@@ -125,7 +125,7 @@ export function preferencesArea(ctx: RuntimeContext): PreferencesArea {
     setupWrite: async (placeId, agent, change) => {
       if (adapters[agent] === undefined) throw Object.assign(new Error(noAdapterLine(agent, Object.keys(adapters))), { kind: "usage" });
       await setups.set(placeId, agent, change, { folder: path => ctx.configFolderOn(placeId, path), agentName: ctx.agentLabel(agent) });
-      ctx.setupRefusals.delete(keyOf(placeId, agent));
+      if (ctx.setupRefusals.delete(keyOf(placeId, agent))) ctx.setupRefusalMoved(placeId, agent);
     },
     relayed: () => backend.capabilities.callbackRelay,
     now: () => clock.now(),

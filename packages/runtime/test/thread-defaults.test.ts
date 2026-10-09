@@ -8,9 +8,9 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LocalBackend } from "@wsp/engine";
-import { HERE_PLACE_ID, PLACES_TICKET_REFUSAL, effortsFor, everyModel, markedDefault, modelOf, unmarked, type AgentLaunch, type HarnessCatalog, type TurnResult } from "@wsp/protocol";
+import { HERE_PLACE_ID, PLACES_TICKET_REFUSAL, effortsFor, everyModel, markedDefault, modelOf, unmarked, type AgentLaunch, type SessionRowEvent, type HarnessCatalog, type TurnResult } from "@wsp/protocol";
 import { createRuntime, serveRuntime, type AgentsReader, type HarnessAdapterFactory, type LocalWiring, type Runtime, type RuntimeServer } from "../src/index.js";
 import { localExecStream } from "../src/local-exec.js";
 import { memoryStore, type Store } from "../src/store.js";
@@ -287,6 +287,8 @@ describe("an agent's setup on a computer", () => {
 
   it("keeps the folder its links lead to, and refuses the next launch once that folder leads out of the home", async () => {
     const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
+    const pushed: SessionRowEvent[] = [];
+    rt.events.on("*", e => void (e.type === "session.row" && pushed.push(e)));
     const outside = mkdtempSync(join(tmpdir(), "wsp-outside-"));
     try {
       mkdirSync(join(root, "real"));
@@ -315,6 +317,14 @@ describe("an agent's setup on a computer", () => {
       expect((await rt.harnesses.list(ws.id)).find(c => c.harness === "claude")?.refusal).toBe(words);
       expect((await rt.harnesses.list(ws.id)).find(c => c.harness === "codex")?.refusal).toBeUndefined();
       expect((await rt.sessions.list(ws.id)).find(r => r.harness === "claude")?.setupRefusal).toBe(words);
+      // A window holding the row hears the word come and go with no listing read.
+      const latest = (): SessionRowEvent | undefined => pushed.filter(p => p.id === row.id).at(-1);
+      await vi.waitFor(() => expect(latest()?.row?.setupRefusal).toBe(words));
+      await rt.agents.setup(HERE_PLACE_ID, "claude", { configDir: join(root, "claude-wsp") });
+      await vi.waitFor(() => {
+        expect(latest()?.row).toBeDefined();
+        expect(latest()!.row).not.toHaveProperty("setupRefusal");
+      });
     } finally {
       rmSync(outside, { recursive: true, force: true });
     }

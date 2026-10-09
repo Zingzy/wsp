@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The store's session folding: rows come from the sessions.list op, the
-// session.* events decide when to refetch and what to patch in between.
+// The store's session folding: rows come from the sessions.list op at a bind
+// or a reconnect, and each row that moves after that lands as the host pushes it.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CLOUD_SETUP_WORDS, DEFAULT_THEME, HOSTNAME_KEPT, type GoldenManifest, type InitJob, type PlaceView, type ProjectView, type ReleaseView, type SessionView, type WorkspaceView } from "@wsp/protocol";
 import { readProjectHome } from "../src/protocol/address.js";
@@ -73,6 +73,8 @@ function fakeApi(workspaces: WorkspaceView[], sessions: SessionView[]) {
 }
 
 const flush = () => new Promise(r => setTimeout(r, 0));
+/** The row the host pushes after the event that moved it, as sessions.list would answer it. */
+const rowPushed = (row: SessionView): ProtocolEvent => ({ type: "session.row", workspaceId: row.workspaceId, ...(row.threadId !== undefined ? { threadId: row.threadId } : {}), id: row.id, row });
 
 beforeEach(() => {
   useStore.setState({ api: null, conn: "connecting", capabilities: null, workspaces: [], projects: [], places: [], placesRead: false, projectsRead: false, placesRefused: null, projectsRefused: null, statuses: {}, costs: {}, spending: {}, selectedId: null, selectedThreadId: null, freshThread: false, projectHome: null, creations: [], sessions: {}, launches: {}, ready: false, gaps: 0 });
@@ -561,7 +563,7 @@ describe("store sessions", () => {
     expect(useStore.getState().capabilities).toEqual(CAPS);
   });
 
-  it("a thread marked read or settled in any window rereads that workspace's rows, so every window shows the new stamp", async () => {
+  it("a thread marked read or settled in any window lands as the row the host pushes, so every window shows the new stamp", async () => {
     const sessions: SessionView[] = [{ id: "s1", workspaceId: "ws_a", harness: "claude", status: "completed", threadId: "thr_a", endedAt: 2_000, readAt: 1_000 }];
     const { api, emit, listCalls } = fakeApi([view("ws_a"), view("ws_b")], sessions);
     const settled: (readonly string[])[] = [];
@@ -572,16 +574,15 @@ describe("store sessions", () => {
     useStore.getState().bind(api);
     await flush();
     listCalls.length = 0;
-    sessions[0] = { ...sessions[0]!, readAt: 3_000 };
     emit({ type: "thread.marked", workspaceId: "ws_a", threadIds: ["thr_a"] });
+    emit(rowPushed({ ...sessions[0]!, readAt: 3_000 }));
     await flush();
-    expect(listCalls).toEqual(["ws_a"]);
+    expect(listCalls).toEqual([]);
     expect(useStore.getState().sessions["ws_a"]![0]!.readAt).toBe(3_000);
     await useStore.getState().settleThreads(["thr_a", "thr_b"]);
     expect(settled).toEqual([["thr_a", "thr_b"]]);
   });
-
-  it("a thread started from the command line reaches its tile on the event that holds its row, before its harness is up and with no timer", async () => {
+  it("a thread started from the command line reaches its tile on the row its hold pushes, before its harness is up and with no timer", async () => {
     const sessions: SessionView[] = [];
     const { api, emit, listCalls } = fakeApi([view("ws_a")], sessions);
     useStore.getState().bind(api);
@@ -589,39 +590,38 @@ describe("store sessions", () => {
     listCalls.length = 0;
     vi.useFakeTimers();
     try {
-      sessions.push({ id: "s1", workspaceId: "ws_a", harness: "claude", status: "running", startedBy: "cli", threadId: "thr_cli" });
+      const held: SessionView = { id: "s1", workspaceId: "ws_a", harness: "claude", status: "running", startedBy: "cli", threadId: "thr_cli" };
       emit({ type: "session.held", workspaceId: "ws_a", threadId: "thr_cli" });
-      for (let i = 0; i < 5; i++) await Promise.resolve();
-      expect(listCalls).toEqual(["ws_a"]);
-      expect(useStore.getState().sessions["ws_a"]).toEqual(sessions);
+      emit(rowPushed(held));
+      expect(listCalls).toEqual([]);
+      expect(useStore.getState().sessions["ws_a"]).toEqual([held]);
       expect(vi.getTimerCount()).toBe(0);
     } finally {
       vi.useRealTimers();
     }
   });
-
-  it("session.start remembers the claude session id on the workspace and refetches that workspace's rows", async () => {
+  it("session.start remembers the claude session id on the workspace, and the row it moved lands with no read", async () => {
     const sessions: SessionView[] = [];
     const { api, emit, listCalls } = fakeApi([view("ws_a")], sessions);
     useStore.getState().bind(api);
     await flush();
     listCalls.length = 0;
 
-    sessions.push({ id: "s1", workspaceId: "ws_a", harness: "claude", status: "running", claudeSessionId: "c1" });
-    emit({ type: "session.start", workspaceId: "ws_a", sessionId: "c1", model: "claude-sonnet-4-5" });
+    const started: SessionView = { id: "s1", workspaceId: "ws_a", harness: "claude", status: "running", claudeSessionId: "c1", threadId: "thr_1" };
+    emit({ type: "session.start", workspaceId: "ws_a", sessionId: "c1", threadId: "thr_1", model: "claude-sonnet-4-5" });
     expect(useStore.getState().workspaces[0]!.claudeSessionId).toBe("c1");
+    emit(rowPushed(started));
     await flush();
-    expect(listCalls).toEqual(["ws_a"]);
-    expect(useStore.getState().sessions["ws_a"]).toEqual(sessions);
+    expect(listCalls).toEqual([]);
+    expect(useStore.getState().sessions["ws_a"]).toEqual([started]);
   });
-
-  it("a thread another client starts while a reconnect's read of every row is still out stays: the older read does not replace the rows its start reread", async () => {
+  it("a thread another client starts while a reconnect's read of every row is still out stays: the older read does not replace the row its start pushed", async () => {
     const sessions: SessionView[] = [];
     const { api, emit } = fakeApi([view("ws_a")], sessions);
     useStore.getState().bind(api);
     await flush();
     // The reconnect's read: the rows are read at once and the workspaces answer late, as a host listing
-    // computers that do not answer does, so the rows it holds are older than anything read after it.
+    // computers that do not answer does, so the rows it holds are older than anything pushed after it.
     let answer = (): void => {};
     const rowsNow = api.listSessions;
     api.listSessions = async id => [...(await rowsNow(id))];
@@ -629,15 +629,15 @@ describe("store sessions", () => {
     api.listWorkspaces = () => new Promise(resolve => (answer = () => void listed().then(resolve)));
     const reading = useStore.getState().refresh();
     await flush();
-    sessions.push({ id: "s1", workspaceId: "ws_a", harness: "claude", status: "running", claudeSessionId: "c1", threadId: "thr_cli", startedBy: "cli" });
+    const started: SessionView = { id: "s1", workspaceId: "ws_a", harness: "claude", status: "running", claudeSessionId: "c1", threadId: "thr_cli", startedBy: "cli" };
     emit({ type: "session.start", workspaceId: "ws_a", sessionId: "c1", threadId: "thr_cli" });
+    emit(rowPushed(started));
     await flush();
-    expect(useStore.getState().sessions["ws_a"]).toEqual(sessions);
+    expect(useStore.getState().sessions["ws_a"]).toEqual([started]);
     answer();
     await reading;
-    expect(useStore.getState().sessions["ws_a"]).toEqual(sessions);
+    expect(useStore.getState().sessions["ws_a"]).toEqual([started]);
   });
-
   it("of two reads of one workspace's rows, the one asked later stands, whichever answers last", async () => {
     const { api } = fakeApi([view("ws_a")], []);
     useStore.getState().bind(api);
@@ -685,7 +685,7 @@ describe("store sessions", () => {
     expect(useStore.getState().sessions["ws_a"] ?? []).toEqual([]);
   });
 
-  it("holds a send the runtime has no row for and drops it only once the rows that replace it are in", async () => {
+  it("holds a send the runtime has no row for and drops it only once the row that replaces it is in", async () => {
     const sessions: SessionView[] = [];
     const { api, emit } = fakeApi([view("ws_a")], sessions);
     useStore.getState().bind(api);
@@ -694,16 +694,15 @@ describe("store sessions", () => {
     useStore.getState().launching("ws_a", { requestId: "r1", title: "read the port list", harness: "claude" });
     expect(useStore.getState().launches["ws_a"]?.title).toBe("read the port list");
 
-    sessions.push({ id: "s1", workspaceId: "ws_a", harness: "claude", status: "running", claudeSessionId: "c1" });
-    emit({ type: "session.start", workspaceId: "ws_a", sessionId: "c1", requestId: "r1" });
-    // The rows land first: dropping the send before them would leave the workspace reading as having no thread at
+    const started: SessionView = { id: "s1", workspaceId: "ws_a", harness: "claude", status: "running", claudeSessionId: "c1", threadId: "thr_1" };
+    emit({ type: "session.start", workspaceId: "ws_a", sessionId: "c1", threadId: "thr_1", requestId: "r1" });
+    // The row lands first: dropping the send before it would leave the workspace reading as having no thread at
     // all in the moment between the two.
     expect(useStore.getState().launches["ws_a"]).toBeDefined();
-    await flush();
-    expect(useStore.getState().sessions["ws_a"]).toEqual(sessions);
+    emit(rowPushed(started));
+    expect(useStore.getState().sessions["ws_a"]).toEqual([started]);
     expect(useStore.getState().launches["ws_a"]).toBeUndefined();
   });
-
   it("drops a send once the row that holds its thread is in, before the agent announces itself", async () => {
     const sessions: SessionView[] = [];
     const { api, emit } = fakeApi([view("ws_a")], sessions);
@@ -713,13 +712,13 @@ describe("store sessions", () => {
 
     // Codex takes seconds to answer its first thread; the held row is the thread from the moment it lands, and the
     // send standing beside it would draw one thread as two tiles until then.
-    sessions.push({ id: "t1", workspaceId: "ws_a", harness: "codex", status: "running", threadId: "th_1", prompt: "read the port list" });
+    const held: SessionView = { id: "t1", workspaceId: "ws_a", harness: "codex", status: "running", threadId: "th_1", prompt: "read the port list" };
     emit({ type: "session.held", workspaceId: "ws_a", threadId: "th_1", requestId: "r1" });
-    await flush();
-    expect(useStore.getState().sessions["ws_a"]).toEqual(sessions);
+    expect(useStore.getState().launches["ws_a"]).toBeDefined();
+    emit(rowPushed(held));
+    expect(useStore.getState().sessions["ws_a"]).toEqual([held]);
     expect(useStore.getState().launches["ws_a"]).toBeUndefined();
   });
-
   it("drops only the send a held row or a start answers, by its request id, not every send on the workspace", async () => {
     const sessions: SessionView[] = [{ id: "t0", workspaceId: "ws_a", harness: "codex", status: "completed", threadId: "th_A", prompt: "older" }];
     const { api, emit } = fakeApi([view("ws_a")], sessions);
@@ -727,17 +726,16 @@ describe("store sessions", () => {
     await flush();
     useStore.getState().launching("ws_a", { requestId: "r_B", title: "a new thread", harness: "codex" });
     // A send into thread A on the same folder holds A while B's codex is still starting: B's tile stands.
-    sessions.push({ id: "t1", workspaceId: "ws_a", harness: "codex", status: "running", threadId: "th_A", prompt: "more" });
     emit({ type: "session.held", workspaceId: "ws_a", threadId: "th_A", requestId: "r_A" });
+    emit(rowPushed({ id: "t1", workspaceId: "ws_a", harness: "codex", status: "running", threadId: "th_A", prompt: "more" }));
     emit({ type: "session.start", workspaceId: "ws_a", sessionId: "c_A", threadId: "th_A", prompt: "more", requestId: "r_A" });
-    await flush();
+    emit(rowPushed({ id: "t1", workspaceId: "ws_a", harness: "codex", status: "running", threadId: "th_A", claudeSessionId: "c_A" }));
     expect(useStore.getState().launches["ws_a"]?.requestId).toBe("r_B");
-    sessions.push({ id: "t2", workspaceId: "ws_a", harness: "codex", status: "running", threadId: "th_B", prompt: "a new thread" });
     emit({ type: "session.held", workspaceId: "ws_a", threadId: "th_B", requestId: "r_B" });
-    await flush();
+    emit(rowPushed({ id: "t2", workspaceId: "ws_a", harness: "codex", status: "running", threadId: "th_B", prompt: "a new thread" }));
     expect(useStore.getState().launches["ws_a"]).toBeUndefined();
+    expect(useStore.getState().sessions["ws_a"]!.map(r => [r.id, r.prompt])).toEqual([["t0", "older"], ["t1", "more"], ["t2", "a new thread"]]);
   });
-
   it("a refresh answers which threads there are, so a send the runtime has since written a row for stops standing twice", async () => {
     const sessions: SessionView[] = [];
     const { api } = fakeApi([view("ws_a")], sessions);
@@ -771,9 +769,9 @@ describe("store sessions", () => {
     expect(useStore.getState().launches["ws_a"]).toBeUndefined();
   });
 
-  it("session.done keeps the row running with no round trip; session.end refetches it to the settled status", async () => {
+  it("session.done keeps the row running with no round trip; session.end's pushed row settles it, with no read either", async () => {
     const sessions: SessionView[] = [
-      { id: "s1", workspaceId: "ws_a", harness: "claude", status: "running", claudeSessionId: "c1" },
+      { id: "s1", workspaceId: "ws_a", harness: "claude", status: "running", claudeSessionId: "c1", threadId: "thr_1" },
     ];
     const { api, emit, listCalls } = fakeApi([view("ws_a")], sessions);
     useStore.getState().bind(api);
@@ -783,70 +781,49 @@ describe("store sessions", () => {
     // The reply is in, but the row stays running until the process exits; a send that met it would be refused.
     emit({ type: "session.done", workspaceId: "ws_a", sessionId: "c1", result: { status: "completed" } });
     expect(useStore.getState().sessions["ws_a"]![0]!.status).toBe("running");
-    expect(listCalls).toEqual([]);
 
-    sessions[0]!.status = "completed";
-    emit({ type: "session.end", workspaceId: "ws_a", sessionId: "c1", exitCode: 0, sawResult: true });
+    emit({ type: "session.end", workspaceId: "ws_a", sessionId: "c1", threadId: "thr_1", exitCode: 0, sawResult: true });
+    emit(rowPushed({ ...sessions[0]!, status: "completed" }));
     await flush();
-    expect(listCalls).toEqual(["ws_a"]);
+    expect(listCalls).toEqual([]);
     expect(useStore.getState().sessions["ws_a"]![0]!.status).toBe("completed");
   });
-
-  it("a prompt opening or closing refetches that workspace's rows, so a sidebar row that is not the open thread's says what it is waiting on", async () => {
-    const sessions: SessionView[] = [{ id: "s1", workspaceId: "ws_a", harness: "claude", status: "running", claudeSessionId: "c1" }];
+  it("a prompt opening or closing lands as the rows the host pushes, so a sidebar row that is not the open thread's says what it is waiting on", async () => {
+    const sessions: SessionView[] = [{ id: "s1", workspaceId: "ws_a", harness: "claude", status: "running", claudeSessionId: "c1", threadId: "thr_1" }];
     const { api, emit, listCalls } = fakeApi([view("ws_a")], sessions);
     useStore.getState().bind(api);
     await flush();
     listCalls.length = 0;
 
     const scope = { workspaceId: "ws_a", sessionId: "c1", turnId: "turn_1", threadId: "thr_1" };
-    sessions[0]!.asking = "Permission for Bash: Check wsp version";
     emit({ ...scope, type: "session.permission", askId: "ask_1", toolName: "Bash", detail: "Check wsp version", input: "{}", options: [{ id: "allow", label: "Allow", effect: "allow" }] });
-    await flush();
-    expect(listCalls).toEqual(["ws_a"]);
+    emit(rowPushed({ ...sessions[0]!, asking: "Permission for Bash: Check wsp version" }));
     expect(useStore.getState().sessions["ws_a"]![0]!.asking).toBe("Permission for Bash: Check wsp version");
 
-    delete sessions[0]!.asking;
     emit({ ...scope, type: "session.permission.closed", askId: "ask_1", outcome: "allowed", optionId: "allow" });
+    emit(rowPushed(sessions[0]!));
     await flush();
-    expect(listCalls).toEqual(["ws_a", "ws_a"]);
+    expect(listCalls).toEqual([]);
     expect(useStore.getState().sessions["ws_a"]![0]!.asking).toBeUndefined();
   });
-
-  it("a subagent starting or ending re-reads that workspace's rows at once and then at most once a quarter second, so eight children in a second cost a handful of lists", async () => {
+  it("a subagent starting or ending lands as its thread's pushed row, so eight children cost no list at all", async () => {
     const sessions: SessionView[] = [{ id: "s1", workspaceId: "ws_a", harness: "claude", status: "running", claudeSessionId: "c1", threadId: "thr_1" }];
     const { api, emit, listCalls } = fakeApi([view("ws_a")], sessions);
     useStore.getState().bind(api);
     await flush();
     listCalls.length = 0;
-    vi.useFakeTimers();
-    try {
-      const scope = { workspaceId: "ws_a", sessionId: "c1", turnId: "turn_1", threadId: "thr_1" };
-      emit({ ...scope, type: "session.subagent", task: "t0", state: "running", title: "child 0" });
-      await vi.advanceTimersByTimeAsync(0);
-      // The first child in a quiet workspace is read at once, not a quarter second later.
-      expect(listCalls).toEqual(["ws_a"]);
-      await vi.advanceTimersByTimeAsync(125);
-      for (let i = 1; i < 8; i++) {
-        emit({ ...scope, type: "session.subagent", task: `t${i}`, state: "running", title: `child ${i}` });
-        await vi.advanceTimersByTimeAsync(125);
-      }
-      await vi.advanceTimersByTimeAsync(250);
-      expect(listCalls.length).toBeLessThanOrEqual(5);
-      expect(new Set(listCalls)).toEqual(new Set(["ws_a"]));
-      // The last child's start is in the rows the store ends on: the re-read trails the burst rather than leading it.
-      sessions[0]!.subagents = [{ id: "t7", title: "child 7", state: "running", startedAt: 1 }];
-      emit({ ...scope, type: "session.subagent", task: "t7", state: "done" });
-      await vi.advanceTimersByTimeAsync(250);
-      expect(useStore.getState().sessions["ws_a"]![0]!.subagents?.[0]?.id).toBe("t7");
-    } finally {
-      vi.useRealTimers();
+    const scope = { workspaceId: "ws_a", sessionId: "c1", turnId: "turn_1", threadId: "thr_1" };
+    for (let i = 0; i < 8; i++) {
+      emit({ ...scope, type: "session.subagent", task: `t${i}`, state: "running", title: `child ${i}` });
+      emit(rowPushed({ ...sessions[0]!, subagents: [{ id: `t${i}`, title: `child ${i}`, state: "running", startedAt: 1 }] }));
     }
+    await flush();
+    expect(listCalls).toEqual([]);
+    expect(useStore.getState().sessions["ws_a"]![0]!.subagents?.[0]?.id).toBe("t7");
   });
-
-  it("renameThread names the session through the runtime and reloads that workspace's rows, so the row shows the new name", async () => {
+  it("renameThread names the session through the runtime and reads no rows, since the host pushes the renamed one", async () => {
     const sessions: SessionView[] = [{ id: "s1", workspaceId: "ws_a", harness: "claude", status: "completed", claudeSessionId: "c1", prompt: "fix the port list", threadId: "thr_1" }];
-    const { api, listCalls } = fakeApi([view("ws_a")], sessions);
+    const { api, emit, listCalls } = fakeApi([view("ws_a")], sessions);
     const renames: [string, string][] = [];
     api.renameSession = async (sessionId, title) => {
       renames.push([sessionId, title]);
@@ -859,8 +836,10 @@ describe("store sessions", () => {
 
     expect(await useStore.getState().renameThread({ sessionId: "s1", workspaceId: "ws_a", harness: "claude", title: "the name he typed" })).toBe(true);
     expect(renames).toEqual([["s1", "the name he typed"]]);
-    expect(listCalls).toEqual(["ws_a"]);
-    expect(useStore.getState().sessions["ws_a"]![0]!.harnessTitle).toBe("the name he typed");
+    expect(listCalls).toEqual([]);
+    const { prompt: _told, ...renamed } = sessions[0]!;
+    emit({ type: "session.row", workspaceId: "ws_a", threadId: "thr_1", id: "s1", row: renamed });
+    expect(useStore.getState().sessions["ws_a"]![0]).toMatchObject({ harnessTitle: "the name he typed", prompt: "fix the port list" });
     expect(lastNotice()).toBeNull();
   });
 
@@ -1371,7 +1350,7 @@ describe("a status written outside the event stream while a frame is held", () =
   });
 });
 
-describe("a prompt's reread of every workspace", () => {
+describe("a prompt's pushed row while a read is out", () => {
   /** Three workspaces with a running thread each, whose host can hold back the reads of one of them. */
   function slowHost() {
     const workspaces = [view("ws_a"), view("ws_b"), view("ws_c")];
@@ -1384,36 +1363,42 @@ describe("a prompt's reread of every workspace", () => {
       if (id !== undefined && id === holding) return new Promise(resolve => held.push(() => resolve(value)));
       return Promise.resolve(value);
     };
-    const prompt = (workspaceId: string) =>
+    /** A prompt opens on the workspace's thread, and the host pushes the row it moved. */
+    const prompt = (workspaceId: string, asking: string) => {
+      const row = { ...rows.get(workspaceId)![0]!, asking };
+      rows.set(workspaceId, [row]);
       host.emit({ type: "session.permission", workspaceId, sessionId: `s_${workspaceId}`, threadId: `thr_${workspaceId}`, askId: "k1", toolName: "Bash", toolUseId: "tu", input: "{}", options: [] } as unknown as ProtocolEvent);
-    return { ...host, rows, prompt, hold: (id: string | null) => (holding = id), release: () => held.splice(0).forEach(go => go()) };
+      host.emit({ type: "session.row", workspaceId, threadId: row.threadId, id: row.id, row } as ProtocolEvent);
+    };
+    return { ...host, prompt, hold: (id: string | null) => (holding = id), release: () => held.splice(0).forEach(go => go()) };
   }
 
   it("shows the asking row while another workspace's read is still out", async () => {
     const host = slowHost();
     useStore.getState().bind(host.api);
     await vi.waitFor(() => expect(Object.keys(useStore.getState().sessions)).toHaveLength(3));
-    host.rows.set("ws_a", [{ ...host.rows.get("ws_a")![0]!, asking: "Run x" }]);
     host.hold("ws_c");
-    host.prompt("ws_a");
-    await flush();
+    const reading = useStore.getState().reloadSessions("ws_c");
+    host.prompt("ws_a", "Run x");
     expect(useStore.getState().sessions["ws_a"]![0]!.asking).toBe("Run x");
     host.release();
+    await reading;
   });
 
-  it("does not bring back a workspace deleted while the reread is out", async () => {
+  it("does not bring back a workspace deleted while a read is out", async () => {
     const host = slowHost();
     useStore.getState().bind(host.api);
     await vi.waitFor(() => expect(Object.keys(useStore.getState().sessions)).toHaveLength(3));
-    host.rows.set("ws_b", [{ ...host.rows.get("ws_b")![0]!, asking: "Run y" }]);
     host.hold("ws_c");
-    host.prompt("ws_b");
-    await flush();
+    const reading = useStore.getState().reloadSessions("ws_c");
+    host.prompt("ws_b", "Run y");
     host.emit({ type: "workspace.deleted", workspaceId: "ws_b" } as unknown as ProtocolEvent);
     await flush();
     host.hold(null);
     host.release();
+    await reading;
     await flush();
     expect(useStore.getState().sessions["ws_b"]).toBeUndefined();
   });
 });
+

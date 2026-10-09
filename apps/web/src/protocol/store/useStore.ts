@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { create } from "zustand";
-import { applyPreferencesPatch, threadsFollowed, goldenHead, copyBuildOf, type AccountRow, type Preferences, type ReviewDraft, type SessionView, type WorkspacePhase, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { applyPreferencesPatch, goldenHead, copyBuildOf, withPushedRow, type AccountRow, type Preferences, type ReviewDraft, type SessionRowEvent, type SessionView, type WorkspacePhase, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { renameNotTakenLine } from "../../actions/format.js";
 import { readAddress, readProjectHome, writeAddress, writeProjectHome } from "../address.js";
 import { sidebarWorkspaceOrder } from "../../adapt/workspaces.js";
@@ -254,20 +254,14 @@ export const useStore = create<State>((set, get) => {
    * the thread another client started meanwhile, and nothing reads that workspace again until the turn ends. */
   let rowReads = 0;
   const rowsFrom = new Map<string, number>();
-  /** Each workspace whose rows a subagent's start or end read in the last quarter second, and whether another came
-   * since: the first is read at once and the rest once the quarter second is out, so eight children starting inside
-   * a second cost a handful of reads, not one each. */
-  const subagentReads = new Map<string, { again: boolean }>();
-  const SUBAGENT_READ_MS = 250;
-  const readForSubagents = (workspaceId: string): void => {
-    const window = { again: false };
-    subagentReads.set(workspaceId, window);
-    void get().reloadSessions(workspaceId);
-    setTimeout(() => {
-      if (window.again) readForSubagents(workspaceId);
-      else subagentReads.delete(workspaceId);
-    }, SUBAGENT_READ_MS);
-  };
+  /** Rows pushed while a read of the rows was out, by the read count at the push: a read asked before the push may
+   * answer without it, so it lands again on what that read draws. Kept while any read older than it is out. */
+  let pushedDuringReads: { at: number; e: SessionRowEvent }[] = [];
+  const readsOut = new Set<number>();
+  const repushed = (asked: number, workspaceId: string, rows: SessionView[]): SessionView[] =>
+    pushedDuringReads.reduce((held, p) => (p.at >= asked && p.e.workspaceId === workspaceId ? withPushedRow(held, p.e) : held), rows);
+  /** The send each thread's row is awaited for: its own tile goes once the host pushes the thread's row. */
+  const rowAwaited = new Map<string, { workspaceId: string; requestId: string }>();
   /** The rows a read of every workspace answered, less the workspaces a newer read has already drawn. A read that
    * answered covers every workspace, those it found no rows for too, so each is stamped with it: an older read landing
    * later may not put back rows this one found gone. */
@@ -617,10 +611,12 @@ export const useStore = create<State>((set, get) => {
       const api = get().api;
       if (!api) return;
       const asked = ++rowReads;
-      const [workspaces, answered] = await Promise.all([api.listWorkspaces(), api.listSessions().then(rows => rows, () => null)]);
+      readsOut.add(asked);
+      const [workspaces, answered] = await Promise.all([api.listWorkspaces(), api.listSessions().then(rows => rows, () => null)]).finally(() => readsOut.delete(asked));
       const s = get();
       const rows = answered ?? NO_SESSIONS;
-      const sessions = newerKept(answered === null ? null : groupSessions(rows, workspaces.map(w => w.id)), asked, workspaces.map(w => w.id), s.sessions);
+      const grouped = answered === null ? null : Object.fromEntries(Object.entries(groupSessions(rows, workspaces.map(w => w.id))).map(([id, held]) => [id, repushed(asked, id, held)]));
+      const sessions = newerKept(grouped, asked, workspaces.map(w => w.id), s.sessions);
       // The address is read on every refresh, not only the first: a reconnect after the host restarted rebuilds this
       // store from nothing, and what the person is reading is recorded there rather than here.
       const address = readAddress();
@@ -659,12 +655,13 @@ export const useStore = create<State>((set, get) => {
       if (!api) return;
       try {
         const asked = ++rowReads;
-        const rows = await api.listSessions(workspaceId);
+        readsOut.add(asked);
+        const rows = await api.listSessions(workspaceId).finally(() => readsOut.delete(asked));
         if ((rowsFrom.get(workspaceId) ?? 0) > asked) return;
         rowsFrom.set(workspaceId, asked);
         // A list the host answered unchanged writes nothing, so a reread of every workspace changes only what moved.
         set(s => {
-          const kept = keptRows(s.sessions[workspaceId], rows);
+          const kept = keptRows(s.sessions[workspaceId], repushed(asked, workspaceId, rows));
           return kept === s.sessions[workspaceId] ? s : { sessions: { ...s.sessions, [workspaceId]: kept } };
         });
       } catch (e) {
@@ -699,20 +696,18 @@ export const useStore = create<State>((set, get) => {
           addNotice({ kind: "error", text: renameNotTakenLine(harness, outcome, error) });
           return false;
         }
-        await get().reloadSessions(workspaceId);
         return true;
       } catch (e: unknown) {
         noticeFailure(e, said => `${title}: ${said}`);
         return false;
       }
     },
-    async forgetThread({ threadId, workspaceId }) {
+    async forgetThread({ threadId }) {
       const api = get().api;
       if (!api?.forgetThread) return false;
       try {
         await api.forgetThread(threadId);
         if (get().selectedThreadId === threadId) set({ selectedThreadId: null, selectedSubagent: null });
-        await get().reloadSessions(workspaceId);
         return true;
       } catch (e: unknown) {
         noticeFailure(e);
@@ -862,10 +857,32 @@ export const useStore = create<State>((set, get) => {
     },
     applyEvent(e) {
       switch (e.type) {
-        case "thread.marked":
         case "thread.rewound":
           void get().reloadSessions(e.workspaceId);
           return;
+        case "session.row": {
+          const oldest = Math.min(...readsOut);
+          pushedDuringReads = readsOut.size === 0 ? [] : [...pushedDuringReads.filter(p => p.at >= oldest), { at: rowReads, e }];
+          const awaited = e.threadId === undefined || e.row === undefined ? undefined : rowAwaited.get(e.threadId);
+          const landed = (): void => {
+            if (awaited === undefined) return;
+            rowAwaited.delete(e.threadId!);
+            get().launched(awaited.workspaceId, awaited.requestId);
+          };
+          // A workspace with no rows read yet is read whole, since one row is not all of its rows, unless a read that
+          // will draw it with this row is out already.
+          if (get().sessions[e.workspaceId] === undefined) {
+            if (readsOut.size === 0) void get().reloadSessions(e.workspaceId).then(landed);
+            return;
+          }
+          set(s => {
+            const rows = s.sessions[e.workspaceId] ?? [];
+            const next = withPushedRow(rows, e);
+            return next === rows ? s : { sessions: { ...s.sessions, [e.workspaceId]: next } };
+          });
+          landed();
+          return;
+        }
         case "workspace.renamed":
           // The record alone changed: the row and its status take the name, and nothing about the machine moves.
           set(s => ({
@@ -1062,14 +1079,10 @@ export const useStore = create<State>((set, get) => {
             costs: { ...s.costs, [e.workspaceId]: { rateUsdPerHour: e.rateUsdPerHour, accruedUsd: e.accruedUsd, at: e.at } },
           }));
           return;
-        case "session.capped":
-          // The row says what holds its turn back, and the event that says so is the moment that changed.
-          void get().reloadSessions(e.workspaceId);
-          return;
         case "session.held":
-          // A thread is spoken for before its harness is up, from this window or any other client: its row is read
-          // now, and the send it answers, by its request id, has its own tile go once the row is in.
-          void get().reloadSessions(e.workspaceId).then(() => (e.requestId === undefined ? undefined : get().launched(e.workspaceId, e.requestId)));
+          // A thread is spoken for before its harness is up, from this window or any other client: the host pushes
+          // its row next, and the send it answers, by its request id, has its own tile go once the row is in.
+          if (e.requestId !== undefined) rowAwaited.set(e.threadId, { workspaceId: e.workspaceId, requestId: e.requestId });
           return;
         case "session.start": {
           // The next send resumes this id; the runtime persists it, the view learns it here.
@@ -1079,7 +1092,10 @@ export const useStore = create<State>((set, get) => {
             workspaces: s.workspaces.map(remember),
             statuses: s.statuses[e.workspaceId] ? { ...s.statuses, [e.workspaceId]: remember(s.statuses[e.workspaceId]!) } : s.statuses,
           }));
-          void get().reloadSessions(e.workspaceId).then(() => (e.requestId === undefined ? undefined : get().launched(e.workspaceId, e.requestId)));
+          if (e.requestId !== undefined) {
+            if (e.threadId === undefined) get().launched(e.workspaceId, e.requestId);
+            else rowAwaited.set(e.threadId, { workspaceId: e.workspaceId, requestId: e.requestId });
+          }
           // The runtime re-asks the binary at a start, so a Claude Code upgrade on the machine shows within its TTL.
           void get().loadHarnesses(e.workspaceId);
           return;
@@ -1093,33 +1109,9 @@ export const useStore = create<State>((set, get) => {
           set(s => ({ spending: { ...s.spending, [e.workspaceId]: Math.max(0, (s.spending[e.workspaceId] ?? 0) - 1) } }));
           // An end without a start of its own is a harness that died before it announced itself: the send it stood
           // for has no row coming, so the row it was drawn as goes with it.
-          void get().reloadSessions(e.workspaceId).then(() => get().launched(e.workspaceId));
+          if (e.threadId !== undefined) rowAwaited.delete(e.threadId);
+          get().launched(e.workspaceId);
           return;
-        case "session.subagent":
-          // A thread's subagents ride its row, so a child starting or ending is a row that changed.
-          {
-            const window = subagentReads.get(e.workspaceId);
-            if (window === undefined) readForSubagents(e.workspaceId);
-            else window.again = true;
-          }
-          return;
-        case "session.permission":
-        case "session.permission.closed":
-          // The row the sidebar reads carries what the thread is waiting on, so a prompt opening or closing is a row
-          // that changed: every workspace's rows are read here, not only the open thread's. Every workspace and not
-          // only this one, since a thread waiting behind this one carries the same question and may run anywhere.
-          for (const id of Object.keys(get().sessions)) void get().reloadSessions(id);
-          return;
-        case "session.delta": {
-          // A call that follows another thread to the end of its turn is what puts a thread behind a question it
-          // never asked, so the row moves when such a call opens, with no prompt of its own in sight. A call
-          // answering moves it back, but only where a row here is already behind something: every other turn writes
-          // hundreds of results that change no row at all.
-          const opens = e.kind === "tool_use" && e.toolName !== undefined && threadsFollowed({ toolName: e.toolName, input: e.text }) !== undefined;
-          const closes = e.kind === "tool_result" && (get().sessions[e.workspaceId] ?? []).some(row => row.waitingOn !== undefined);
-          if (opens || closes) void get().reloadSessions(e.workspaceId);
-          return;
-        }
         case "preferences.changed":
           if (preferenceSetsInFlight === 0) preferencesLanded(e.preferences, get().preferences);
           return;
