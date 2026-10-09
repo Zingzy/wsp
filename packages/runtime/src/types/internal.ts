@@ -90,6 +90,13 @@ export const SESSIONS = "sessions";
 /** A child's finished line into a thread, kept from the child's end until a turn of that thread takes it, so a host
  * that stops in between delivers it when it starts again. */
 export const NOTIFY_OWED = "notify-owed";
+/** How long a line its thread's computer did not answer waits before it goes again, doubling as tries keep failing
+ * up to the most it waits, since a launch that fails is a failed turn on the thread; and how long it is tried in all:
+ * an hour of wall time from when it first became owed, kept on the line with its tries so a restart neither starts it
+ * over nor spaces it anew, at which the try still out is stopped and the person is told instead. */
+export const OWED_RETRY_MS = 30_000;
+export const OWED_RETRY_MAX_MS = 10 * 60_000;
+export const OWED_FOR_MS = 60 * 60_000;
 /** The starts a computer's threads at once holds back, by turn id, written as each first waits and gone once it is let
  * through or given up. The start itself lives in the host's memory, so the next host ends each one it finds here and
  * tells whoever it was to report to. */
@@ -300,6 +307,10 @@ export function foldEvent(index: TranscriptIndex, e: SessionEvent): void {
   if ((e.type === "session.start" || e.type === "session.steer") && e.requestId !== undefined && e.threadId !== undefined && e.turnId !== undefined) {
     index.taken.set(e.requestId, { sessionId: e.sessionId, threadId: e.threadId, turnId: e.turnId, outcome: e.type === "session.start" ? "started" : "steered" });
   }
+  // A turn whose agent was never handed its prompt took no request, so the one its start row carries may go again.
+  if (e.type === "session.end" && e.promptless === true) {
+    for (const [requestId, taken] of index.taken) if (taken.turnId === e.turnId && taken.outcome === "started") index.taken.delete(requestId);
+  }
   if (e.type === "session.start") {
     if (e.threadId !== undefined) index.starts.set(e.threadId, e.sessionId);
     const facts = index.facts.get(e.sessionId) ?? {};
@@ -428,6 +439,8 @@ export interface TurnLive {
    * with these words and as its steerer, past a host restart too, and an id missing here is a line this host never
    * wrote, which goes nowhere. */
   steered?: Record<string, Steered>;
+  /** What failed the turn's stream, as its transport threw it: a line's try reads its class. In memory alone. */
+  failure?: unknown;
 }
 
 /** A message steered into a turn: its words as the host wrote them, the thread scope and road of the caller, as a
@@ -437,6 +450,8 @@ export interface Steered {
   by?: ThreadScope;
   road?: WorkspaceOrigin;
   startedBy: SessionOrigin;
+  /** The request it came under, which a next host asks after before it sends that request again. */
+  requestId?: string;
 }
 
 /** The steered messages a row kept, read back entry by entry: one whose words, scope, road or opener do not read is
@@ -450,7 +465,7 @@ export function readSteered(raw: unknown): Record<string, Steered> | undefined {
     const by = readScope(e?.by);
     const road = readRoad(e?.road);
     if (typeof e?.prompt !== "string" || !startedBy.success || (e.by !== undefined && by === undefined) || (e.road !== undefined && road === undefined)) continue;
-    steered[id] = { prompt: e.prompt, startedBy: startedBy.data, ...(by !== undefined ? { by } : {}), ...(road !== undefined ? { road } : {}) };
+    steered[id] = { prompt: e.prompt, startedBy: startedBy.data, ...(by !== undefined ? { by } : {}), ...(road !== undefined ? { road } : {}), ...(typeof e.requestId === "string" ? { requestId: e.requestId } : {}) };
   }
   return steered;
 }
@@ -464,6 +479,15 @@ export interface TurnAsked {
   /** The message as the person typed it, where the agent was handed more (the paths of the files it carried): what
    * the turn's own start row shows, written by a host that re-opens a turn before its first row went. */
   typed?: string;
+  /** The request the turn was started under: a host that re-opens the turn writes it on the start row it owes, so a
+   * caller sending that request again finds the turn rather than starting a second. */
+  requestId?: string;
+  /** The turn carries a line the host keeps until a turn of its thread takes it: until its agent holds the line it is
+   * that line's try, and its end tells the thread's targets nothing. */
+  owed?: true;
+  /** The agent announced itself and has not yet been handed the prompt (Codex, between its thread's answer and
+   * turn/started): the turn's start row is written, and its request is not taken yet. */
+  awaitsPrompt?: true;
 }
 
 /** How long a closing host waits for the agents it kept to exit on their EOF before it lets go of reading them. */
@@ -549,8 +573,8 @@ export function sameSessionFile(at: KeptAgent<unknown>["sessionFile"], stamp: Se
 /** A turn's message read back off the host's own session index, nothing where the document holds anything else. */
 export function readAsked(raw: unknown): TurnAsked | undefined {
   if (typeof raw !== "object" || raw === null) return undefined;
-  const { prompt, effort, typed } = raw as Record<string, unknown>;
-  return typeof prompt === "string" ? { prompt, ...(typeof effort === "string" ? { effort } : {}), ...(typeof typed === "string" ? { typed } : {}) } : undefined;
+  const { prompt, effort, typed, requestId, owed, awaitsPrompt } = raw as Record<string, unknown>;
+  return typeof prompt === "string" ? { prompt, ...(typeof effort === "string" ? { effort } : {}), ...(typeof typed === "string" ? { typed } : {}), ...(typeof requestId === "string" ? { requestId } : {}), ...(owed === true ? { owed: true as const } : {}), ...(awaitsPrompt === true ? { awaitsPrompt: true as const } : {}) } : undefined;
 }
 
 /** A thread scope read back off the host's own session index: the shape the runtime minted, and nothing where the

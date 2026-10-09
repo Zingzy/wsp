@@ -63,6 +63,10 @@ export type AdapterEvent =
       cwd?: string;
       tools?: string[];
       harness?: SessionHarness;
+      /** False where the agent announced itself before it was handed the turn's prompt (Codex opens its thread, then
+       * takes turn/start); a later session.start says it holds the prompt. The turn's start row is written at the
+       * first, and its request reads as taken only from the later one. */
+      prompted?: false;
     }
   | {
       type: "turn.delta";
@@ -178,7 +182,15 @@ export type AdapterEvent =
       /** The option that closed it, where one did. */
       optionId?: string;
     }
-  | { type: "session.end"; sessionId: string; exitCode: number | null; sawResult: boolean };
+  | {
+      type: "session.end";
+      sessionId: string;
+      exitCode: number | null;
+      sawResult: boolean;
+      /** What failed the run's stream, as its transport threw it, where the stream failed rather than ended: a launch
+       * the machine never ran among them. Read by the runtime alone, off its class and never its words. */
+      failure?: unknown;
+    };
 
 /** What asking a running turn to stop one of its own subagents came to: the agent took the request, the turn or that
  * subagent was already over, the agent refused in its own words (`error`), or it offers no stop for one subagent. */
@@ -200,6 +212,9 @@ export interface AdapterAttachOptions {
   /** Where the turn starts in the run's log, on a process that served earlier turns of the thread; absent reads the
    * log from its first byte, which is where a process's first turn starts. */
   from?: number;
+  /** The ids of the messages the row kept as steered into the turn: one the run's input never took, its write's
+   * answer lost, is still the turn's to tell unread. */
+  steered?: readonly string[];
   onEvent: (event: AdapterEvent) => void;
 }
 

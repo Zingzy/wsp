@@ -403,6 +403,14 @@ export interface Runtime {
         /** Set by a child's finished line into its lead alone: no computer's threads at once holds it, since it is
          * how a tree waiting on its children moves. */
         wakesLead?: true;
+        /** Set by a line the host keeps until a turn of its thread takes it: a turn of it that ends before its agent
+         * announced itself is the line's try and tells the thread's targets nothing, since the line's own road tells
+         * the person if it gives up. */
+        owed?: true;
+        /** Set by such a line's try while its hour runs: a launch whose posts got no answer asks after its run until
+         * the line's hour stops the turn, since launching the line again beside a run that is there would deliver it
+         * twice. */
+        asksUntilStopped?: true;
         /** Called once, as its computer's threads at once first holds the turn back, with the row it waits on: a
          * caller that answers a held start at once reads it here, and the start goes on to its launch. */
         onHeld?: (held: { view: SessionView; turnId: string; wait: ThreadCapWait }) => void;

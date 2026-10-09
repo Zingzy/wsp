@@ -175,6 +175,9 @@ export const SessionEndEvent = z.object({
   unstarted: z.literal(true).optional(),
   /** On an unstarted end, the words the turn was sent, which no session.start recorded. */
   prompt: z.string().optional(),
+  /** Set on the end of a turn whose agent announced itself and was never handed its prompt (a Codex turn that ended
+   * before turn/started): the request its start row carries was not taken, and may be sent again. */
+  promptless: z.literal(true).optional(),
 });
 
 /** A message the person sent into the turn while it ran; stamped by the runtime once the harness took it, so a

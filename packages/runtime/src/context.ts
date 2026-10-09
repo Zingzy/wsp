@@ -570,7 +570,7 @@ export interface AgentsArea {
   readonly threadEnv: (entry: LiveWorkspace, harness?: string) => Readonly<Record<string, string>>;
   readonly placeStores: (place: string, home: string) => Readonly<Record<string, string>>;
   readonly serverValuesFor: (entry: LiveWorkspace, harness: string, folder: string) => Promise<HarnessStartOptions["serverValues"]>;
-  readonly adapterFor: (entry: LiveWorkspace, named?: string, turnEnv?: Readonly<Record<string, string>>, waiting?: TurnWaiting, servers?: Readonly<Record<string, string>>, thread?: string) => { harness: string; adapter: HarnessAdapter };
+  readonly adapterFor: (entry: LiveWorkspace, named?: string, turnEnv?: Readonly<Record<string, string>>, waiting?: TurnWaiting, servers?: Readonly<Record<string, string>>, thread?: string, asksUntilStopped?: true) => { harness: string; adapter: HarnessAdapter };
 }
 
 /** What a message sent without its caller waiting answers: where it went, and the wait where its computer holds it. */
@@ -627,11 +627,17 @@ export interface ThreadsArea {
   readonly notifyEnd: (s: { view: SessionView; turnId: string; turnLive?: TurnLive }, notify: readonly string[], named: { by?: ThreadScope; road?: WorkspaceOrigin }, result: TurnResult) => void;
   readonly deliverOwed: () => Promise<void>;
   readonly sendBack: (s: { view: SessionView; turnId: string; turnLive?: TurnLive }, ids: readonly string[], stopped: boolean) => void;
-  readonly settleCut: (s: { view: SessionView; turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin; turnLive?: TurnLive; snapshot?: string }, reason: string, cutLine: (endedAt: number) => string, stopped?: boolean) => void;
+  readonly settleCut: (s: { view: SessionView; turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin; turnLive?: TurnLive; snapshot?: string; asked?: TurnAsked }, reason: string, cutLine: (endedAt: number) => string, stopped?: boolean) => void;
   readonly notARepo: (r: WorkspaceRecord) => boolean;
   readonly checkpointsLanding: Map<string, Promise<void>>;
   readonly keepCheckpoint: (entry: LiveWorkspace, turn: { sessionId: string; threadId: string; turnId: string; anchor?: string; kept?: string }) => Promise<void>;
   readonly takenTurn: (workspaceId: string, taken: Taken) => Promise<SessionHandle | undefined>;
+  readonly keepSteer: (s: { view: SessionView; turnLive?: TurnLive }, o: { prompt: string; requestId?: string; startedBy?: SessionOrigin }, caller: Caller | undefined, steerId: string) => Promise<void>;
+  readonly steerLost: (s: { view: SessionView; turnLive?: TurnLive }, steerId: string) => void;
+  readonly lineTry: (s: { view: SessionView; turnId: string; asked?: TurnAsked }) => boolean;
+  readonly promptHeld: (requestId: string) => void;
+  readonly tryStopped: (turnId: string) => void;
+  readonly steerAnswered: (s: { view: SessionView; turnId: string; turnLive?: TurnLive }, handleId: string, o: { prompt: string; requestId?: string; via?: "slate"; startedBy?: SessionOrigin }, caller: Caller | undefined, steerId: string, landed: boolean) => boolean;
   readonly recordSteer: (s: { view: SessionView; turnId: string; turnLive?: TurnLive }, handleId: string, o: { prompt: string; requestId?: string; via?: "slate"; startedBy?: SessionOrigin }, caller: Caller | undefined, steerId: string) => void;
   readonly snapshotOf: (entry: LiveWorkspace, cwd: string) => Promise<string | undefined>;
   readonly readTurnChanges: (entry: LiveWorkspace, turn: { sessionId: string; turnId: string; threadId: string; cwd: string; from: string; startedAt: number; wrote?: ReadonlySet<string> }) => Promise<boolean>;
@@ -701,6 +707,10 @@ export interface SessionsArea {
   readonly sessionsApi: Runtime["sessions"];
   /** Whether a stop's end of the thread's group holds the thread's next turn, which has put nothing there yet. */
   readonly stopHolds: (threadId: string) => boolean;
+  /** Ends one turn by the road a person's stop ends it, without what the person's stop does beside (the tree under
+   * the thread, a held start's mark): a line's try at its hour, whose end a computer that is away owes at its next
+   * link. */
+  readonly stopTry: (rowId: string) => Promise<void>;
 }
 
 export interface BuildersArea {

@@ -25,6 +25,13 @@ export interface DaemonChannel {
   readonly closed: Promise<{ code: number; reason: string }>;
 }
 
+/** The link to the daemon gave out with no answer from it: a dial that timed out, a socket that was not open, one
+ * that closed under a frame. Its own class and no kind, since a kind is what the wire carries and these say nothing
+ * to anyone but the host, which tells them from the daemon's own refusal by the class. */
+class DaemonUnanswered extends Error {}
+const daemonUnanswered = (message: string, cause?: unknown): Error => new DaemonUnanswered(message, cause === undefined ? undefined : { cause });
+export const isDaemonUnanswered = (e: unknown): boolean => e instanceof DaemonUnanswered;
+
 /** The door answered the upgrade with a status: the socket never opened. kind is what the wire carries. The message
  * is shown under the pane's own sentence, so it carries the status and the door's words and none of ours: a person
  * never reads machine or daemon. */
@@ -78,11 +85,11 @@ export function openDaemonChannel(o: DaemonChannelOptions): Promise<DaemonChanne
       if (settled) return;
       settled = true;
       ws.terminate();
-      reject(new Error(`daemon connect timed out after ${timeoutMs}ms`));
+      reject(daemonUnanswered(`daemon connect timed out after ${timeoutMs}ms`));
     }, timeoutMs);
 
     const send = (frame: DaemonFrame): Promise<DaemonResponse> => {
-      if (ws.readyState !== ws.OPEN) return Promise.reject(new Error("daemon unreachable"));
+      if (ws.readyState !== ws.OPEN) return Promise.reject(daemonUnanswered("daemon unreachable"));
       const id = nextId++;
       return new Promise((res, rej) => {
         pending.set(id, { resolve: res, reject: rej });
@@ -149,7 +156,7 @@ export function openDaemonChannel(o: DaemonChannelOptions): Promise<DaemonChanne
     ws.on("close", (code: number, reasonBuf: Buffer) => {
       clearTimeout(connectTimer);
       const reason = reasonBuf.toString("utf8");
-      for (const p of pending.values()) p.reject(new Error("connection lost"));
+      for (const p of pending.values()) p.reject(daemonUnanswered("connection lost"));
       pending.clear();
       resolveClosed({ code, reason });
       if (settled) return;
@@ -157,7 +164,7 @@ export function openDaemonChannel(o: DaemonChannelOptions): Promise<DaemonChanne
       if (refusal !== undefined) reject(refusal);
       else if (code === 4401) reject(new DaemonTokenError(reason));
       // The close code is for the log, never for the person's eyes.
-      else reject(new Error("the link to the computer ended before it opened", { cause: { code, reason } }));
+      else reject(daemonUnanswered("the link to the computer ended before it opened", { code, reason }));
     });
   });
 }

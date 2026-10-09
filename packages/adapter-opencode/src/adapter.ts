@@ -159,6 +159,7 @@ export function createOpenCodeAdapter(deps: OpenCodeAdapterDeps): OpenCodeAdapte
 
     const finished = (async (): Promise<TurnResult> => {
       let streamError: string | undefined;
+      let streamFailure: unknown;
       try {
         for await (const raw of stream.lines) {
           const event = parseLine(raw);
@@ -204,6 +205,7 @@ export function createOpenCodeAdapter(deps: OpenCodeAdapterDeps): OpenCodeAdapte
         }
       } catch (cause) {
         streamError = cause instanceof Error ? cause.message : String(cause);
+        streamFailure = cause;
       }
       const exitCode = await stream.exited;
       const sawResult = turnResult !== undefined;
@@ -218,7 +220,7 @@ export function createOpenCodeAdapter(deps: OpenCodeAdapterDeps): OpenCodeAdapte
               : { status: "failed", error: streamError ?? `opencode exited with code ${String(exitCode)} before its turn ended${said}` };
         emit({ type: "turn.done", sessionId, result: turnResult });
       }
-      emit({ type: "session.end", sessionId, exitCode, sawResult });
+      emit({ type: "session.end", sessionId, exitCode, sawResult, ...(streamFailure !== undefined ? { failure: streamFailure } : {}) });
       return turnResult;
     })();
 
