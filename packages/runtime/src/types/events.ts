@@ -29,6 +29,9 @@ export const CATALOG_TTL_MS = 5 * 60_000;
 export const CATALOG_PROBE_TIMEOUT_MS = 25_000;
 /** A look at the agent's command and its installer's record, which runs nothing; past this the agent is just starting. */
 export const FIRST_RUN_READ_MS = 3_000;
+/** Asking an agent its version alone, under 20 ms measured on Claude Code 2.1.295; past this nothing says the lists held
+ * from before are still its lists, and the probe answers. */
+export const AGENT_VERSION_READ_MS = 3_000;
 
 /** How long a harness's title for a session stands before its store is read again on a refresh. A row that moves
  * asks again for its workspace's rows, so a rename made in the harness shows at the first move past this. */

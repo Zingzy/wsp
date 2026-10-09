@@ -14,9 +14,18 @@ const MODEL_LINE = /^[A-Za-z0-9][\w.-]*\/\S+$/;
 /** The login PATH rides the line, since a host with a bare one would find no opencode. */
 export function catalogProbeCommand(options: { baseEnv?: Readonly<Record<string, string | undefined>>; launch?: AgentLaunch }): string {
   const opencode = programWord("opencode", options.launch);
-  const path = options.baseEnv?.["PATH"];
-  return `cd ~ && ${path === undefined ? "" : `export PATH=${shellQuote(path)}; `}${opencode} --version; echo ${SEP}; ${opencode} models --verbose`;
+  return `${versionProbeCommand(options)}; echo ${SEP}; ${opencode} models --verbose`;
 }
+
+/** The probe's first command alone, under the same PATH: what says whether lists read off the binary before are
+ * still its lists. */
+export function versionProbeCommand(options: { baseEnv?: Readonly<Record<string, string | undefined>>; launch?: AgentLaunch }): string {
+  const path = options.baseEnv?.["PATH"];
+  return `cd ~ && ${path === undefined ? "" : `export PATH=${shellQuote(path)}; `}${programWord("opencode", options.launch)} --version`;
+}
+
+/** The version `opencode --version` prints on its last line, the one the probe records; null where it printed none. */
+export const parseVersion = (stdout: string): string | null => stdout.trim().split("\n").at(-1)?.trim() || null;
 
 function rec(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
@@ -37,7 +46,7 @@ function modelOf(slug: string, body: readonly string[]): HarnessCatalogModelProb
 export function parseCatalogProbe(stdout: string): HarnessCatalogAnswer {
   const at = stdout.indexOf(SEP);
   if (at === -1) return null;
-  const version = stdout.slice(0, at).trim().split("\n").at(-1)?.trim() || null;
+  const version = parseVersion(stdout.slice(0, at));
   const models: HarnessCatalogModelProbe[] = [];
   let slug: string | undefined;
   let body: string[] = [];

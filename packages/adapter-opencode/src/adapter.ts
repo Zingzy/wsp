@@ -10,7 +10,7 @@
 import { randomUUID } from "node:crypto";
 import { INTERRUPT_GRACE_MS, RUN_EXIT_MS, endAfterResult, endRun, refusedTurn } from "@wsp/protocol";
 import type { AdapterAttachOptions, AdapterEvent, AgentLaunch, ExecStream, ExecStreamFactory, HarnessCatalogAnswer, TurnImage, TurnRefusal, TurnResult, TurnTokens } from "@wsp/protocol";
-import { catalogProbeCommand, parseCatalogProbe } from "./catalog.js";
+import { catalogProbeCommand, parseCatalogProbe, versionProbeCommand, parseVersion } from "./catalog.js";
 import { buildCommand, buildEnv } from "./command.js";
 
 export interface OpenCodeStartOptions {
@@ -60,6 +60,8 @@ export interface OpenCodeAdapter {
   /** -f reads each file off the machine; an image goes through its Read tool, which hands the model the image. */
   readonly attachments: "file";
   probeCatalog(exec: (command: string) => Promise<string>): Promise<HarnessCatalogAnswer>;
+  /** Asks the binary only its version, under the same environment as the probe; null where it printed none. */
+  probeVersion(exec: (command: string) => Promise<string>): Promise<string | null>;
   readonly env: Readonly<Record<string, string>>;
 }
 
@@ -296,6 +298,7 @@ export function createOpenCodeAdapter(deps: OpenCodeAdapterDeps): OpenCodeAdapte
     steers: false,
     attachments: "file",
     probeCatalog: exec => exec(catalogProbeCommand({ ...(deps.baseEnv !== undefined ? { baseEnv: deps.baseEnv } : {}), ...(deps.launch !== undefined ? { launch: deps.launch } : {}) })).then(parseCatalogProbe),
+    probeVersion: exec => exec(versionProbeCommand({ ...(deps.baseEnv !== undefined ? { baseEnv: deps.baseEnv } : {}), ...(deps.launch !== undefined ? { launch: deps.launch } : {}) })).then(parseVersion),
     env,
   };
 }
