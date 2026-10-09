@@ -8,7 +8,7 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { BREW_ID_PREFIX, MCP_ID_PREFIX, packageOf, shellLine, shellQuote, TOOLS_PATH, toolRowId, toolRowPrefix, type LoginChoice, type RecipeCustomRow, type RecipeDigest } from "@wsp/protocol";
 import { APT, PRELUDE } from "./dotfiles-presets.js";
-import { APT_ENV, APT_INDEX, APT_UPDATE, asLinuxbrew, atCatalogPin, belowLine, pinnedNote, asLinuxbrewScript, BASE_FLOOR, BASE_IMAGE_COMMANDS, baseEntryFor, BREW, BREW_ENV, BREW_PREFIX, BREW_REAL, BREW_REPO, brewHasCheck, LINUXBREW_HOME, MAC_BIN_DIRS, MAC_BREW, MAC_ONLY, CATALOG_AGENTS, CATALOG_TOOLS, catalogEntry, catalogToolFor, editJson, GUEST_HOME, installEnv, installHomes, loginSignIn, mintsToken, HOMEBREW, HOMEBREW_STEP, fixesVersion, installAfter, installLine, LINUXBREW_SHIM, NODE_BIN, NODE_PATH_LINE, NODE_RELEASES, nodeInstallScript, parseJsonc, ROAD_MODULES, roadModule, ROADS, rowRoadReader, smokeOf, standingPin, unpinned, UV_INSTALL, versionOf, type AgentEntry, type InstallRoad, type NodeMajor, type RoadName, type ToolEntry, type ToolPin } from "@wsp/catalog";
+import { APT_ENV, APT_INDEX, APT_UPDATE, asLinuxbrew, atCatalogPin, belowLine, pinnedNote, asLinuxbrewScript, BASE_FLOOR, BASE_IMAGE_COMMANDS, baseEntryFor, BREW, BREW_ENV, BREW_PREFIX, BREW_REAL, BREW_REPO, brewHasCheck, LINUXBREW_HOME, MAC_BIN_DIRS, MAC_BREW, MAC_ONLY, CATALOG_AGENTS, CATALOG_TOOLS, catalogEntry, catalogToolFor, editJson, GUEST_HOME, installEnv, installHomes, loginSignIn, mintsToken, HOMEBREW, HOMEBREW_STEP, fixesVersion, installAfter, installLine, LINUXBREW_SHIM, NODE_BIN, NODE_PATH_LINE, NODE_RELEASES, nodeInstallScript, parseJsonc, ROAD_MODULES, roadModule, ROADS, rewrittenRel, rowRoadReader, smokeOf, standingPin, unpinned, UV_INSTALL, versionOf, type AgentEntry, type InstallRoad, type NodeMajor, type RoadName, type ToolEntry, type ToolPin } from "@wsp/catalog";
 
 export { CLAUDE_KEY_FILE, HOMEBREW, NODE_PATH_LINE, NODE_RELEASES, UV, UV_INSTALL, nodeInstallScript, type NodeMajor, type NodeRelease, type ToolPin } from "@wsp/catalog";
 export { packageOf } from "@wsp/protocol";
@@ -479,14 +479,7 @@ function tokenInstead(id: string): string | undefined {
 
 export function planFiles(entries: readonly RecipeEntry[], opts: PlanFilesOptions): FilesPlan {
   const rewrites = [...(opts.rewrites ?? []), ...(opts.platform === "darwin" ? MAC_REWRITES : [])];
-  // A prefix rewrite also moves the directory itself when a row names it bare.
-  const rewrite = (rel: string): string => {
-    for (const [from, to] of rewrites) {
-      if (rel.startsWith(from)) return to + rel.slice(from.length);
-      if (from.endsWith("/") && rel === from.slice(0, -1)) return to.endsWith("/") ? to.slice(0, -1) : to;
-    }
-    return rel;
-  };
+  const rewrite = (rel: string): string => rewrittenRel(rel, rewrites);
   const plan: FilesPlan = { files: [], secrets: [], skipped: [], rewrites, bytes: 0, rungs: {} };
   for (const e of entries) {
     if (!ticked(e) || e.rung === "tools") continue;
