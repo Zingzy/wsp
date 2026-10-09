@@ -115,7 +115,11 @@ function nextPlan(earlier: PlanState | undefined, steps: ReadonlyArray<PlanStep>
     const from = began.get(key);
     if (step.state === "done" && !took.has(key) && from !== undefined) took.set(key, now - from);
   }
-  return { began, took, steps: keyed.map(({ key, step }) => ({ ...step, key, ...(took.has(key) ? { durationMs: took.get(key)! } : {}) })) };
+  return {
+    began,
+    took,
+    steps: keyed.map(({ key, step }) => ({ ...step, key, ...(took.has(key) ? { durationMs: took.get(key)! } : step.state === "working" && began.has(key) ? { startedAt: began.get(key)! } : {}) })),
+  };
 }
 
 /** The fold under deriveSession, kept open: each event folds onto what the ones before it built, so a thread that

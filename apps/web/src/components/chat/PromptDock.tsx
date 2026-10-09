@@ -12,10 +12,10 @@
 // head; an edit is its file as a row with the lines that change under it in
 // the step-log mono. Digits pick a row, arrows move the pick, Space ticks,
 // Enter is the foot's primary button, Esc leaves the field and then folds the
-// dock to one row over the composer. Other and Deny take their words in a
+// dock to the first row of the composer's drawer. Other and Deny take their words in a
 // field in the row's own right column, so no row moves. Once answered the dock
 // goes and the composer comes back; the timeline keeps the record.
-import { FileIcon, MessageCircleQuestionIcon } from "lucide-react";
+import { FileIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { agentName } from "@wsp/catalog";
 import { otherOptionId, permissionPromptWords, pickedOptionId, type AskedQuestion } from "@wsp/protocol";
@@ -24,7 +24,6 @@ import { ownsKeys } from "../../keyOwners";
 import { cn } from "../../lib/utils";
 import { Choice } from "../../settings/add/PickLists";
 import { PickRow } from "../../settings/add/PickRow";
-import { STEP_BODY, STEP_HEAD, StepFoot } from "../../settings/add/StepDialog";
 import { FACT } from "../../settings/format";
 import { GlyphFrame, Grid } from "../../settings/grid";
 import { CARD_INSET, GLYPH, LIST_TITLE, NOTE, ROW_FIELD, SETTING_TITLE } from "../../settings/layout";
@@ -33,7 +32,7 @@ import { CopyRow } from "../../settings/sheetParts";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { RadioGroup } from "../ui/radio-group";
-import { ComposerSurface } from "./ComposerSurface";
+import { Dock, DockBack } from "./Dock";
 import { usePromptRefusal, type AnswerPrompt } from "./answerPrompt";
 import { HarnessMark } from "./HarnessMark";
 import { PromptRefusal } from "./PermissionPromptRow";
@@ -57,15 +56,10 @@ export interface ModeWords {
 const OTHER: MenuRow = { id: "other", label: "Other", description: "", field: "Type your answer" };
 const DENY_FIELD = "What to do instead";
 const WRITE_INSTEAD = "Write a message instead";
-const FOLDED_TITLE = "Waiting for you";
 const ANSWER_WORD = "Answer";
 const NEXT_WORD = "Next";
 const BACK_WORD = "Back";
 
-/** The question's title, a step larger than a dialog's, as the question panel was locked. */
-const TITLE_CLASS = "text-base leading-6 font-semibold text-foreground";
-/** The foot as the question panel was locked: no top padding and pb-5, where the dialog's foot has pt-3 pb-4. */
-const DOCK_FOOT = "pt-0 pb-5";
 /** The field a row opens, in its right column, wide enough for a sentence; under 640 px it takes the row's width. */
 const FIELD_CLASS = cn(ROW_FIELD, "w-96 max-sm:w-full");
 /** The step-log mono block the computer's page opens under a row, on the words' left edge past a glyph frame. */
@@ -345,155 +339,107 @@ export function PromptDock({
   const rest = question === undefined && words.body === undefined && filePath === null ? restLines(words.rest) : [];
 
   return (
-    <div className="px-3 pb-3 sm:px-4 sm:pb-4">
-      <ComposerSurface.Shell data-prompt-dock={permission.askId}>
-        <ComposerSurface.Host>
-          <ComposerSurface.Main>
-            <div ref={rootRef} tabIndex={-1} data-prompt-root data-owns-keys={DOCK_KEYS} aria-label={title} className="flex min-w-0 flex-col outline-none" onKeyDown={onKeyDown}>
-              <div data-slot="dialog-header" className={STEP_HEAD}>
-                <div className="flex min-w-0 flex-col gap-1">
-                  <h2 data-prompt-title className={cn(TITLE_CLASS, "flex min-w-0 items-center gap-2")}>
-                    {agent === null ? null : <HarnessMark harness={agent} label={agentName(agent)} className={cn(GLYPH, "shrink-0")} />}
-                    <span className="min-w-0 break-words">{title}</span>
-                  </h2>
-                  {note === undefined ? null : (
-                    <p data-prompt-note className={cn(NOTE, "break-words")}>
-                      {note}
-                    </p>
-                  )}
-                  {earlier.map((q, at) => (
-                    <p key={q.key} data-prompt-answered={q.key} title={`${q.question} ${[...(answers[at]?.ids ?? []).map(id => q.options.find(o => o.id === id)?.label ?? id), ...(answers[at]?.typed === undefined ? [] : [answers[at]!.typed!])].join(", ")}`} className={cn(NOTE, "truncate")}>
-                      {q.header === "" ? q.question : q.header}: {[...(answers[at]?.ids ?? []).map(id => q.options.find(o => o.id === id)?.label ?? id), ...(answers[at]?.typed === undefined ? [] : [answers[at]!.typed!])].join(", ")}
-                    </p>
-                  ))}
-                </div>
-                {count === null ? null : (
-                  <span data-prompt-count className={cn(FACT, "shrink-0")}>
-                    {count}
-                  </span>
-                )}
-              </div>
-              <div data-slot="dialog-panel" className={STEP_BODY}>
-                {words.code === undefined || question !== undefined ? null : (
-                  <div className="flex flex-col gap-2">
-                    <CopyRow k="prompt-code" value={words.code} />
-                    {runsIn === null ? null : <p className={cn(FACT, "truncate")}>in {runsIn}</p>}
-                  </div>
-                )}
-                {filePath === null || question !== undefined ? null : (
-                  <Grid id="prompt-file">
-                    <div className="flex flex-col">
-                      <div className={cn("flex items-center gap-3 py-3 min-h-15", CARD_INSET)}>
-                        <GlyphFrame>
-                          <FileIcon aria-hidden className={GLYPH} />
-                        </GlyphFrame>
-                        <span className="flex min-w-0 flex-col">
-                          <span className={cn(LIST_TITLE, "truncate")}>{fileName(filePath)}</span>
-                          <span className={cn(FACT, "truncate")} title={filePath}>
-                            {pathIn(filePath, cwd)}
-                          </span>
-                        </span>
-                      </div>
-                      {edit !== null ? (
-                        <EditLines edit={edit} />
-                      ) : words.body === undefined ? null : (
-                        <pre data-prompt-body className={cn(LOG_CLASS, LOG_EDGE)}>
-                          {words.body.text}
-                        </pre>
-                      )}
-                    </div>
-                  </Grid>
-                )}
-                {rest.length === 0 ? null : (
-                  <Grid id="prompt-fields">
-                    {rest.map(line => (
-                      <Line key={line.key} id={line.key} label={line.key} value={line.value} valueClass="fact" />
-                    ))}
-                  </Grid>
-                )}
-                {textOnly ? (
-                  <Input key={step} ref={fieldRef} nativeInput data-prompt-field size="lg" autoComplete="off" defaultValue={answers[step]?.typed ?? ""} placeholder={OTHER.field} aria-label={OTHER.field} onChange={event => setTypedSome(event.target.value.trim() !== "")} onKeyDown={event => {
-                    if (event.key === "Enter") {
-                      event.preventDefault();
-                      confirm();
-                    } else if (event.key === "Escape") {
-                      event.preventDefault();
-                      leaveField();
-                    }
-                    event.stopPropagation();
-                  }} />
-                ) : multi ? (
-                  <Grid id="prompt-options">
-                    {rows.map((row, at) => (
-                      <PickRow key={row.id} id={row.id} checked={ticked.includes(row.id)} dim={false} title={SETTING_TITLE} onCheckedChange={on => tick(row.id, on)} name={row.label} {...(row.description === "" ? {} : { note: row.description })} hover={rowHover(at, true)} attrs={{ "data-prompt-option": row.id }} {...(row.field !== undefined && ticked.includes(row.id) ? { slot: field(row) } : {})} />
-                    ))}
-                  </Grid>
-                ) : (
-                  <RadioGroup value={picked} onValueChange={next => setPicked(String(next))} className="gap-0">
-                    <Grid id="prompt-options">
-                      {rows.map((row, at) => (
-                        <Choice key={row.id} id={row.id} picked={picked === row.id} title={SETTING_TITLE} name={row.label} {...(row.description === "" ? {} : { note: row.description })} hover={rowHover(at, false)} attrs={{ "data-prompt-option": row.id }} {...(row.field !== undefined && picked === row.id ? { slot: field(row) } : {})} />
-                      ))}
-                    </Grid>
-                  </RadioGroup>
-                )}
-                {refused === null ? null : <PromptRefusal refused={refused} />}
-              </div>
-              <StepFoot
-                data-prompt-foot
-                className={DOCK_FOOT}
-                left={
-                  onWriteInstead === undefined ? null : (
-                    <Button size="xs" variant="ghost" data-prompt-write className="px-0 [:hover,[data-pressed]]:bg-transparent" onClick={onWriteInstead}>
-                      {WRITE_INSTEAD}
-                    </Button>
-                  )
-                }
-              >
-                {step === 0 || questions === undefined ? null : (
-                  <Button variant="outline" data-prompt-back onClick={() => goTo(step - 1, questions[step - 1]!)}>
-                    {BACK_WORD}
-                  </Button>
-                )}
-                <Button data-prompt-answer held={held} onClick={confirm}>
-                  {primaryWord}
-                </Button>
-              </StepFoot>
-            </div>
-          </ComposerSurface.Main>
-        </ComposerSurface.Host>
-      </ComposerSurface.Shell>
-    </div>
-  );
-}
+    <Dock
+      shell={{ "data-prompt-dock": permission.askId }}
+      rootRef={rootRef}
+      root={{ tabIndex: -1, "data-prompt-root": true, "data-owns-keys": DOCK_KEYS, "aria-label": title, onKeyDown }}
+      mark={agent === null ? null : <HarnessMark harness={agent} label={agentName(agent)} className={cn(GLYPH, "shrink-0")} />}
+      title={title}
+      titleAttrs={{ "data-prompt-title": true }}
+      under={
+        <>
+          {note === undefined ? null : (
+            <p data-prompt-note className={cn(NOTE, "break-words")}>
+              {note}
+            </p>
+          )}
+          {earlier.map((q, at) => (
+            <p key={q.key} data-prompt-answered={q.key} title={`${q.question} ${[...(answers[at]?.ids ?? []).map(id => q.options.find(o => o.id === id)?.label ?? id), ...(answers[at]?.typed === undefined ? [] : [answers[at]!.typed!])].join(", ")}`} className={cn(NOTE, "truncate")}>
+              {q.header === "" ? q.question : q.header}: {[...(answers[at]?.ids ?? []).map(id => q.options.find(o => o.id === id)?.label ?? id), ...(answers[at]?.typed === undefined ? [] : [answers[at]!.typed!])].join(", ")}
+            </p>
+          ))}
+        </>
+      }
+      aside={count === null ? null : <span data-prompt-count>{count}</span>}
+      back={onWriteInstead === undefined ? null : <DockBack word={WRITE_INSTEAD} onClick={onWriteInstead} attrs={{ "data-prompt-write": true }} />}
+      acts={
+        <>
+          {step === 0 || questions === undefined ? null : (
+            <Button variant="outline" data-prompt-back onClick={() => goTo(step - 1, questions[step - 1]!)}>
+              {BACK_WORD}
+            </Button>
+          )}
+          <Button data-prompt-answer held={held} onClick={confirm}>
+            {primaryWord}
+          </Button>
+        </>
+      }
+    >
 
-/** The prompt folded to one row over the composer, for the person who chose to write first: the question glyph in
- * its frame, the timeline's own words for the wait, what is asked, and the way back to the dock. */
-export function PromptStrip({ permission, onOpen }: { permission: PermissionPrompt; onOpen: () => void }) {
-  const words = permissionPromptWords(permission.toolName, permission.input, permission.detail);
-  const line = words.questions !== undefined ? words.questions[0]!.question : words.lead;
-  return (
-    <div className="px-3 pb-2 sm:px-4">
-      <ComposerSurface.Shell data-prompt-strip>
-        <ComposerSurface.Host>
-          <ComposerSurface.Main>
-            <div className="flex min-h-15 items-center gap-3 px-5 py-3">
+      {words.code === undefined || question !== undefined ? null : (
+        <div className="flex flex-col gap-2">
+          <CopyRow k="prompt-code" value={words.code} />
+          {runsIn === null ? null : <p className={cn(FACT, "truncate")}>in {runsIn}</p>}
+        </div>
+      )}
+      {filePath === null || question !== undefined ? null : (
+        <Grid id="prompt-file">
+          <div className="flex flex-col">
+            <div className={cn("flex items-center gap-3 py-3 min-h-15", CARD_INSET)}>
               <GlyphFrame>
-                <MessageCircleQuestionIcon aria-hidden className={GLYPH} />
+                <FileIcon aria-hidden className={GLYPH} />
               </GlyphFrame>
-              <span className="flex min-w-0 flex-1 flex-col">
-                <span className={LIST_TITLE}>{FOLDED_TITLE}</span>
-                <span className={cn(NOTE, "truncate")} title={line}>
-                  {line}
+              <span className="flex min-w-0 flex-col">
+                <span className={cn(LIST_TITLE, "truncate")}>{fileName(filePath)}</span>
+                <span className={cn(FACT, "truncate")} title={filePath}>
+                  {pathIn(filePath, cwd)}
                 </span>
               </span>
-              <Button size="xs" variant="outline" data-prompt-open onClick={onOpen}>
-                {ANSWER_WORD}
-              </Button>
             </div>
-          </ComposerSurface.Main>
-        </ComposerSurface.Host>
-      </ComposerSurface.Shell>
-    </div>
+            {edit !== null ? (
+              <EditLines edit={edit} />
+            ) : words.body === undefined ? null : (
+              <pre data-prompt-body className={cn(LOG_CLASS, LOG_EDGE)}>
+                {words.body.text}
+              </pre>
+            )}
+          </div>
+        </Grid>
+      )}
+      {rest.length === 0 ? null : (
+        <Grid id="prompt-fields">
+          {rest.map(line => (
+            <Line key={line.key} id={line.key} label={line.key} value={line.value} valueClass="fact" />
+          ))}
+        </Grid>
+      )}
+      {textOnly ? (
+        <Input key={step} ref={fieldRef} nativeInput data-prompt-field size="lg" autoComplete="off" defaultValue={answers[step]?.typed ?? ""} placeholder={OTHER.field} aria-label={OTHER.field} onChange={event => setTypedSome(event.target.value.trim() !== "")} onKeyDown={event => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            confirm();
+          } else if (event.key === "Escape") {
+            event.preventDefault();
+            leaveField();
+          }
+          event.stopPropagation();
+        }} />
+      ) : multi ? (
+        <Grid id="prompt-options">
+          {rows.map((row, at) => (
+            <PickRow key={row.id} id={row.id} checked={ticked.includes(row.id)} dim={false} title={SETTING_TITLE} onCheckedChange={on => tick(row.id, on)} name={row.label} {...(row.description === "" ? {} : { note: row.description })} hover={rowHover(at, true)} attrs={{ "data-prompt-option": row.id }} {...(row.field !== undefined && ticked.includes(row.id) ? { slot: field(row) } : {})} />
+          ))}
+        </Grid>
+      ) : (
+        <RadioGroup value={picked} onValueChange={next => setPicked(String(next))} className="gap-0">
+          <Grid id="prompt-options">
+            {rows.map((row, at) => (
+              <Choice key={row.id} id={row.id} picked={picked === row.id} title={SETTING_TITLE} name={row.label} {...(row.description === "" ? {} : { note: row.description })} hover={rowHover(at, false)} attrs={{ "data-prompt-option": row.id }} {...(row.field !== undefined && picked === row.id ? { slot: field(row) } : {})} />
+            ))}
+          </Grid>
+        </RadioGroup>
+      )}
+      {refused === null ? null : <PromptRefusal refused={refused} />}
+    </Dock>
   );
 }

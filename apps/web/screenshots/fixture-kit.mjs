@@ -310,6 +310,7 @@ export const turn = (thread, minutes, workspaceId = "ws_api") => ({
   // The last line of the turn's reply and why it failed, as the runtime writes them on the row when it ends.
   ...(thread.lastLine === undefined ? {} : { lastLine: thread.lastLine }),
   ...(thread.failure === undefined ? {} : { failure: thread.failure }),
+  ...(thread.limit === undefined ? {} : { limit: thread.limit }),
   // The agent's own session, which a side question copies; only a thread a shot asks one of names it.
   ...(thread.session === undefined ? {} : { claudeSessionId: thread.session }),
   cwd: thread.cwd ?? projectDest("spoo"),
@@ -325,8 +326,9 @@ export const turn = (thread, minutes, workspaceId = "ws_api") => ({
 export const event = (thread, rest, workspaceId = "ws_api") => ({ workspaceId, sessionId: sessionId(thread.id), threadId: threadId(thread.id), turnId: turnId(thread.id), ...rest });
 
 /** A whole turn as the transcript holds it: the person's words, a thought, one tool call and its result, the step
- * list or the plan where the agent kept one, the reply, the two events that close it, and what the turn changed in
- * its folder where it changed something. */
+ * list or the plan where the agent kept one (each rewrite of a timed list at its own second, `plans`), the reply, a
+ * question it is stopped on, the two events that close it, and what the turn changed in its folder where it changed
+ * something. A turn its usage limit stopped closes failed with the limit. */
 export const replay = (thread, minutes, workspaceId = "ws_api") => {
   const events = [
     event(thread, { type: "session.start", at: ago(minutes), prompt: thread.prompt, model: "opus", cwd: thread.cwd ?? projectDest("spoo"), ...(thread.harness === undefined ? {} : { harness: thread.harness }) }, workspaceId),
@@ -340,13 +342,15 @@ export const replay = (thread, minutes, workspaceId = "ws_api") => {
     ]),
     ...(thread.steps === undefined ? [] : [event(thread, { type: "session.plan", at: ago(minutes - 2), steps: thread.steps }, workspaceId)]),
     ...(thread.proposed === undefined ? [] : [event(thread, { type: "session.plan", at: ago(minutes - 2), text: thread.proposed }, workspaceId)]),
+    ...(thread.plans ?? []).map(([at, steps]) => event(thread, { type: "session.plan", at, steps }, workspaceId)),
     event(thread, { type: "session.delta", at: ago(minutes - 2), kind: "text", text: thread.reply }, workspaceId),
+    ...(thread.permission === undefined ? [] : [event(thread, { type: "session.permission", at: ago(minutes - 2), ...thread.permission }, workspaceId)]),
     event(
       thread,
       {
         type: "session.done",
         at: ago(minutes - 3),
-        result: { status: "completed", durationMs: 178_000, costUsd: thread.costUsd, text: thread.reply, ...(thread.model === undefined ? {} : { model: thread.model }), ...(thread.tokens === undefined ? {} : { tokens: thread.tokens }) },
+        result: { status: thread.limit === undefined ? "completed" : "failed", durationMs: 178_000, costUsd: thread.costUsd, text: thread.reply, ...(thread.limit === undefined ? {} : { error: "You've hit your limit", limit: thread.limit }), ...(thread.model === undefined ? {} : { model: thread.model }), ...(thread.tokens === undefined ? {} : { tokens: thread.tokens }) },
       },
       workspaceId,
     ),

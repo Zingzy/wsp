@@ -16,6 +16,6 @@
     "type:open a pull request once they pass",
     "key:Enter"
   ],
-  "wait": "composer-queue",
+  "wait": "drawer-row=queue",
   "settleMs": 800
 }

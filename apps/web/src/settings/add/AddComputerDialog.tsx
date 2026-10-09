@@ -44,9 +44,9 @@ import { STEP_TITLES, askedHostKey, askedSudo, closeAdd, connect, firstCloseOf, 
 import { everything, folderKey, fromRecipe, githubPick, noPicks, servable, tickUsedClis } from "./choices.js";
 import { AgentsPicks, Choice, ClisPicks, GitHubPicks, OtherPicks, PluginsPicks, ProjectsPicks, ServersPicks, SkillsPicks, type FolderOption } from "./PickLists.js";
 import { PickLine, PickRow } from "./PickRow.js";
-import { checkRows, opensLog, runningMs, setupCount, setupRows, setupStanding, stepLogs, type StepLine } from "./setup.js";
+import { checkRows, opensLog, runningSince, setupCount, setupRows, setupStanding, stepLogs, type StepLine } from "./setup.js";
 import { STEP_BODY, STEP_HEAD, STEP_WIDTH, StepFoot } from "./StepDialog.js";
-import { RetryActs, SkipAct, StepRow, useNow } from "./StepRow.js";
+import { RetryActs, SkipAct, StepRow } from "./StepRow.js";
 import { keyTakenAt } from "../../keyOwners.js";
 
 const sshLogin = (host: SshHostSuggestion): string => [host.user, host.hostName ?? host.alias].filter(Boolean).join("@");
@@ -408,11 +408,10 @@ export function SetupList({ place, id = "setup", rows = setupRows(place, placeNa
 
 function RunningView({ place }: { place: PlaceView }) {
   const drawn = setupRows(place, placeName(place));
-  const now = useNow(drawn.some(row => row.state === "working"));
   const rows = drawn.map(row => {
     if (row.state !== "working") return row;
-    const ms = runningMs(place.setup, row.id, now);
-    return { ...row, ticking: true as const, ...(ms === undefined ? {} : { ms }) };
+    const since = runningSince(place.setup, row.id);
+    return since === undefined ? row : { ...row, since };
   });
   const asks = rows.find(row => row.state === "needs-you" || row.state === "failed")?.id;
   const shown = useRef(false);

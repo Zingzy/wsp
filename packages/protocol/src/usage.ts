@@ -377,12 +377,17 @@ export function creditsWord(credits: { count: number; nextExpiresAt?: number | u
   return `${banked}, ${credits.count === 1 ? "expires" : "first expires"} in ${spanWord(credits.nextExpiresAt - now)}`;
 }
 
+/** A moment as a clock reads it: the time on `now`'s day, else the weekday and time. */
+export function clockWord(at: number, now: number, timeZone?: string): string {
+  const zone = timeZone !== undefined ? { timeZone } : {};
+  const time = new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", hourCycle: "h23", ...zone }).format(at);
+  if (dayKeyOf(at, timeZone) === dayKeyOf(now, timeZone)) return time;
+  return `${new Intl.DateTimeFormat("en-US", { weekday: "short", ...zone }).format(at)} ${time}`;
+}
+
 /** When a limit was last read, as the row's quiet word: the time today, else the weekday and time. */
 export function asOfWord(readAt: number, now: number, timeZone?: string): string {
-  const zone = timeZone !== undefined ? { timeZone } : {};
-  const time = new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", hourCycle: "h23", ...zone }).format(readAt);
-  if (dayKeyOf(readAt, timeZone) === dayKeyOf(now, timeZone)) return `as of ${time}`;
-  return `as of ${new Intl.DateTimeFormat("en-US", { weekday: "short", ...zone }).format(readAt)} ${time}`;
+  return `as of ${clockWord(readAt, now, timeZone)}`;
 }
 
 /** A used row's price as a row reads it: the figure, with not priced where any of its tokens had no price, since
@@ -422,6 +427,8 @@ export const LIMIT_WORDS = {
   stopped: (agent: string): string => `${agent} stopped this turn until its plan resets.`,
   stoppedUnknown: (agent: string): string => `${agent} stopped this turn and did not say when its plan resets.`,
   armed: (agent: string): string => `${agent} goes on with this turn when its plan resets.`,
+  /** The drawer's row: the clock time the agent's plan lets it go on, from `clockWord()`. */
+  resumesAt: (agent: string, clock: string): string => `${agent} resumes at ${clock}`,
   resume: "Resume at reset",
   cancel: "Cancel",
   /** The timeline's record of the turn going on, in the runtime notice's mono; the fold above it says when. */

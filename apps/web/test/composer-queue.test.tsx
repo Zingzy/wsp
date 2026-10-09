@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Messages entered while a turn runs: Enter queues instead of failing, each
-// message a card above the composer with the files it goes with, going one per
+// Messages entered while a turn runs: Enter queues instead of failing, the
+// composer's drawer saying how many wait and the first, each message a row of
+// the queue's bar with the files it goes with, going one per
 // turn end in order; a card's edit puts it back in the box and its remove drops
 // it; with steer picked in Settings a send goes now, into the turn where the
 // harness steers and queued like any other where it does not, never by
@@ -18,8 +19,9 @@ import type { Api, ProtocolEvent, StartSessionOptions } from "../src/protocol/cl
 import { WorkspaceThread } from "../src/shell/WorkspaceThread.js";
 import { requestNewThread } from "../src/shell/shellRequests.js";
 import { useComposerDraftStore } from "../src/components/chat/composerDraftStore.js";
+import { useComposerBarStore } from "../src/components/chat/composerBar.js";
 import { COMPOSER_WORDS } from "../src/components/chat/composerWords.js";
-import { QUEUE_WORDS } from "../src/components/chat/ComposerQueue.js";
+import { QUEUE_WORDS } from "../src/components/chat/bars/QueueBar.js";
 import { clearNotices, lastNotice } from "./notice-text.js";
 import { CHAT_STREAM, CHAT_TURN, CHAT_WS } from "./fixtures/chat-stream.js";
 import { caps } from "./caps.js";
@@ -31,6 +33,7 @@ afterAll(() => restoreLayout());
 beforeEach(() => {
   window.localStorage.clear();
   useComposerDraftStore.setState({ drafts: {}, queues: {}, held: {} });
+  useComposerBarStore.setState({ open: {}, folded: {} });
   useStore.setState({ preferences: DEFAULT_PREFERENCES });
 });
 
@@ -103,9 +106,33 @@ async function setup(api: Api) {
 }
 
 const draft = () => useComposerDraftStore.getState().drafts[WS]?.prompt ?? "";
-const cards = () => [...document.querySelectorAll<HTMLElement>("[data-queued-id]")];
-const queued = () => cards().map(li => li.querySelector("[data-queued-text]")?.textContent ?? "");
-const rowFor = (text: string) => cards().find(li => li.querySelector("[data-queued-text]")?.textContent === text)!;
+/** The queue's bar, opened from the drawer's row where it is not open already; null while no message waits. */
+function openQueue(): HTMLElement | null {
+  const open = document.querySelector<HTMLElement>("[data-composer-bar=queue]");
+  if (open !== null) return open;
+  const row = document.querySelector<HTMLElement>("[data-drawer-row=queue]");
+  if (row === null) return null;
+  fireEvent.click(row);
+  return document.querySelector<HTMLElement>("[data-composer-bar=queue]");
+}
+/** The queue's bar folded back to the composer, where it stands. */
+const foldQueue = () => {
+  const back = document.querySelector<HTMLElement>("[data-composer-bar=queue] [data-dock-back]");
+  if (back !== null) fireEvent.click(back);
+};
+const titleOf = (row: HTMLElement) => row.querySelector("[data-settings-title]")?.textContent ?? "";
+/** The messages waiting, oldest first, as the queue's bar lists them; the composer stands again after. */
+const queued = (): string[] => {
+  const bar = openQueue();
+  if (bar === null) return [];
+  const rows = [...bar.querySelectorAll<HTMLElement>("[data-queued-id]")].map(titleOf);
+  foldQueue();
+  return rows;
+};
+/** One message's row in the queue's bar, which stays open for the act on it. */
+const rowFor = (text: string) => [...openQueue()!.querySelectorAll<HTMLElement>("[data-queued-id]")].find(row => titleOf(row) === text)!;
+/** What the drawer's row says of the queue: how many wait, or the word for the one going now. */
+const queueWord = () => document.querySelector("[data-drawer-row=queue] [data-drawer-name]")?.textContent;
 /** The composer has no line above its box, in any state. */
 const noLineAbove = () => {
   expect(document.querySelector("[data-composer-refusal]")).toBeNull();
@@ -158,11 +185,12 @@ describe("composer queue", () => {
     expect(draft()).toBe("");
     expect(composerEditor().textContent).toBe("");
     expect(queued()).toEqual(["what model are you?"]);
-    expect(rowFor("what model are you?").querySelector("[data-queued-word]")?.textContent).toBe(QUEUE_WORDS.waiting(1));
+    expect([queueWord(), document.querySelector("[data-drawer-row=queue] [data-drawer-line]")?.textContent]).toEqual([QUEUE_WORDS.waiting(1), "what model are you?"]);
+    // Nothing over the box: the drawer's row on its edge is the one place the queue shows until its bar opens.
+    expect(document.querySelectorAll("[data-chat-composer] [data-queued-id]")).toHaveLength(0);
     expect(within(rowFor("what model are you?"), "Edit queued message")).not.toBeNull();
     expect(within(rowFor("what model are you?"), "Cancel queued message")).not.toBeNull();
-    // A quiet row in the column: no box, no fill, no shadow, never a menu's glass.
-    expect([...rowFor("what model are you?").classList].filter(c => /^(rounded|border|bg-|shadow|dropdown-glass)/.test(c))).toEqual([]);
+    foldQueue();
     noLineAbove();
     expect(screen.queryByText(/Turn in flight/)).toBeNull();
 
@@ -196,6 +224,27 @@ describe("composer queue", () => {
     expect(queued()).toEqual([]);
   });
 
+  it("keeps sending while the queue's bar stands in the composer's place, and gives the place back once the last has gone", async () => {
+    const { api, started, emit } = fixtureApi();
+    await setup(api);
+    emit({ type: "session.start", ...scope, prompt: "go" });
+    await enter("one");
+    await enter("two");
+    const titles = () => [...document.querySelectorAll<HTMLElement>("[data-composer-bar=queue] [data-queued-id]")].map(titleOf);
+    expect(openQueue()).not.toBeNull();
+    expect(document.querySelector("[data-chat-composer]")).toBeNull();
+    emit(done("completed"));
+    emit(end());
+    await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["one"]));
+    expect(titles()).toEqual(["two"]);
+    emit({ type: "session.start", ...scope, turnId: "turn_0002", prompt: "one" });
+    emit(done("completed", "turn_0002"));
+    emit(end("turn_0002"));
+    await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["one", "two"]));
+    await waitFor(() => expect(document.querySelector("[data-composer-bar]")).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(composerEditor()));
+  });
+
   it("a message's Edit puts its words back in the box and takes it off the queue; Cancel drops it", async () => {
     const { api, started, emit } = fixtureApi();
     await setup(api);
@@ -225,7 +274,8 @@ describe("composer queue", () => {
     await waitFor(() => expect(document.querySelector('[data-composer-files] [data-chat-file="notes.md"]')).not.toBeNull());
     await enter("read the notes");
     await waitFor(() => expect(queued()).toEqual(["read the notes"]));
-    expect(rowFor("read the notes").querySelector('[data-queued-file="notes.md"]')).not.toBeNull();
+    expect(rowFor("read the notes").querySelector("[data-settings-description]")?.textContent).toBe("notes.md");
+    foldQueue();
     expect(document.querySelector('[data-composer-files] [data-chat-file="notes.md"]')).toBeNull();
     emit(done("completed"));
     emit(end());
@@ -246,7 +296,7 @@ describe("composer queue", () => {
     await waitFor(() => expect(queued()).toEqual(["one", "two"]));
     expect(interrupted).toEqual([]);
     expect(started).toHaveLength(0);
-    expect(document.querySelector("[data-composer-queue] summary [data-queued-word]")?.textContent).toBe(QUEUE_WORDS.waiting(2));
+    expect(queueWord()).toBe(QUEUE_WORDS.waiting(2));
     noLineAbove();
     emit(done("completed"));
     emit(end());
@@ -328,7 +378,7 @@ describe("composer queue", () => {
     await waitFor(() => expect(queued()).toEqual(["read the notes now"]));
     expect(steered).toEqual([]);
     expect(interrupted).toEqual([]);
-    expect(rowFor("read the notes now").querySelector("[data-queued-word]")?.textContent).toBe(QUEUE_WORDS.waiting(1));
+    expect(queueWord()).toBe(QUEUE_WORDS.waiting(1));
     emit(done("completed"));
     emit(end());
     await waitFor(() => expect(started).toHaveLength(1));

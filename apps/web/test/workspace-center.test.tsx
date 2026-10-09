@@ -160,7 +160,7 @@ describe("workspace creation view", () => {
     const editor = within(view).getByTestId("composer-editor");
     await typeInto(editor, "add a LICENSE file");
     await press(editor, "Enter");
-    expect(within(view).getByRole("list", { name: "Queued messages" }).textContent).toContain("add a LICENSE file");
+    expect(view.querySelector("[data-drawer-row=queue]")?.textContent).toContain("add a LICENSE file");
     expect(started).toEqual([]);
     const key = useStore.getState().selectedId!;
     act(() => useComposerOptionsStore.getState().pick(key, "effort", "low"));
@@ -389,7 +389,7 @@ describe("a new thread's first send", () => {
     await waitFor(() => expect(starts).toHaveLength(1));
     await typeInto(editor(), "and then this");
     await press(editor(), "Enter");
-    const queued = () => screen.getByRole("list", { name: "Queued messages" }).textContent;
+    const queued = () => document.querySelector("[data-drawer-row=queue]")?.textContent;
     expect(queued()).toContain("and then this");
     bus({ type: "session.held", workspaceId: WS, threadId: "th_1", requestId: starts[0]!.requestId! });
     await waitFor(() => expect(useStore.getState().selectedThreadId).toBe("th_1"));
@@ -398,6 +398,6 @@ describe("a new thread's first send", () => {
     expect(useComposerDraftStore.getState().held).toEqual({ th_1: true });
     act(() => useStore.getState().newThread(WS));
     await waitFor(() => expect(screen.getByRole("heading", { level: 1 })).toBeDefined());
-    expect(screen.queryByRole("list", { name: "Queued messages" })).toBeNull();
+    expect(document.querySelector("[data-drawer-row=queue]")).toBeNull();
   });
 });

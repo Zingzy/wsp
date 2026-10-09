@@ -1,14 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // One row of a list of steps, before and while they run: the state mark (a
 // muted empty circle for a step not started, a muted minus for one the person
-// set aside), the name with its quiet note, and the time it took in the mono
-// at the right. A row that needs the person
-// opens under itself, inside the card, with what happened and the acts, in the
-// refusal slot's two inks; a step that ran opens on a click to its last lines
-// of output, its chevron turning. An item under a step (one sign-in, one skill
-// that did not land) steps in by the mark's width.
+// set aside, the crab for an agent's step at work), the name with its quiet
+// note, and the time it took in the mono at the right. A row that needs the
+// person opens under itself, inside the card, with what happened and the acts,
+// in the refusal slot's two inks; a step that ran opens on a click to its last
+// lines of output, its chevron turning. An item under a step (one sign-in, one
+// skill that did not land) steps in by the mark's width.
 import { ChevronRightIcon, CircleIcon, CircleMinusIcon } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
+import { fmtDuration, fmtElapsed } from "@wsp/protocol";
+import { Crab } from "../../components/status/Crab.js";
 import { StateMark } from "../../components/status/StateMark.js";
 import { Button } from "../../components/ui/button.js";
 import { cn } from "../../lib/utils.js";
@@ -16,24 +18,32 @@ import { FACT } from "../format.js";
 import { CARD_INSET, LINE_FLOOR, NOTE, SETTING_TITLE } from "../layout.js";
 import type { StepLine } from "./setup.js";
 
-/** A step's time in the mono: tenths under a second, seconds under a minute, then minutes and seconds. A time that
- * climbs while the step runs is whole seconds, so it ticks once a second. */
-export function fmtStepMs(ms: number, ticking = false): string {
-  if (!ticking && ms < 950) return `${(ms / 1000).toFixed(1)} s`;
-  const s = ticking ? Math.floor(ms / 1000) : Math.round(ms / 1000);
-  return s < 60 ? `${s} s` : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
-}
+/** Every running step's node on the page, rewritten off one interval while any is mounted. */
+const ticking = new Set<() => void>();
+let clock: ReturnType<typeof setInterval> | undefined;
 
-/** The time now, moved once a second while `on`: one interval for every row that ticks, never one per row. */
-export function useNow(on: boolean): number {
-  const [now, setNow] = useState(Date.now);
+/** A running step's time since `since`, in whole seconds, written to its own node once a second so no row draws
+ * again for the clock. */
+function Ticking({ since }: { since: number }) {
+  const ref = useRef<HTMLSpanElement>(null);
   useEffect(() => {
-    if (!on) return;
-    setNow(Date.now());
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, [on]);
-  return now;
+    const write = () => {
+      if (ref.current !== null) ref.current.textContent = fmtElapsed(Date.now() - since);
+    };
+    write();
+    ticking.add(write);
+    clock ??= setInterval(() => {
+      for (const fn of ticking) fn();
+    }, 1000);
+    return () => {
+      ticking.delete(write);
+      if (ticking.size === 0 && clock !== undefined) {
+        clearInterval(clock);
+        clock = undefined;
+      }
+    };
+  }, [since]);
+  return <span ref={ref}>{fmtElapsed(Date.now() - since)}</span>;
 }
 
 /** Where a row's words start: the mark and its gap. */
@@ -46,7 +56,8 @@ export interface StepToggle {
   onToggle?: () => void;
 }
 
-export function StepRow({ row, why, acts, toggle, children }: { row: StepLine; why?: string; acts?: ReactNode; toggle?: StepToggle; children?: ReactNode }) {
+/** `agent` says the steps are an agent's own, whose step at work is the crab; a setup step's is the spinner. */
+export function StepRow({ row, why, acts, toggle, agent = false, children }: { row: StepLine; why?: string; acts?: ReactNode; toggle?: StepToggle; agent?: boolean; children?: ReactNode }) {
   const quiet = row.state === "waiting";
   const line = (
     <>
@@ -55,6 +66,10 @@ export function StepRow({ row, why, acts, toggle, children }: { row: StepLine; w
           <CircleIcon data-state-mark="waiting" role="img" aria-label="Not started" className="size-3.5 text-muted-foreground/60" />
         ) : row.state === "skipped" ? (
           <CircleMinusIcon data-state-mark="skipped" role="img" aria-label="Skipped" className="size-3.5 text-muted-foreground" />
+        ) : agent && row.state === "working" ? (
+          <span data-state-mark="working" role="img" aria-label="Working" className="inline-flex text-status-working">
+            <Crab />
+          </span>
         ) : (
           <StateMark state={row.state} {...(why === undefined ? {} : { why })} />
         )}
@@ -64,8 +79,8 @@ export function StepRow({ row, why, acts, toggle, children }: { row: StepLine; w
         {row.note === undefined ? null : <span className={NOTE}>{row.note}</span>}
       </span>
       <span className="flex min-w-0 items-center justify-end gap-2">
-        <span data-step-time className={cn(FACT, "min-w-0 text-right")}>
-          {row.ms === undefined ? "" : fmtStepMs(row.ms, row.ticking === true)}
+        <span data-step-time className={cn(FACT, "min-w-0 text-right font-mono")}>
+          {row.since !== undefined ? <Ticking since={row.since} /> : row.ms === undefined ? "" : fmtDuration(row.ms)}
         </span>
         {toggle === undefined ? null : toggle.onToggle === undefined ? <span aria-hidden className="size-3.5 shrink-0" /> : <ChevronRightIcon aria-hidden className={cn("size-3.5 shrink-0 text-muted-foreground transition-transform duration-150", toggle.open && "rotate-90")} />}
       </span>
