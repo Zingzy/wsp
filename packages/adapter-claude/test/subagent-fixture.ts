@@ -19,6 +19,14 @@ export const AGENT_B_CALL = launches[1]!["tool_use_id"] as string;
 export const AGENT_A_ID = launches[0]!["task_id"] as string;
 export const AGENT_B_ID = launches[1]!["task_id"] as string;
 
+/** What a subagent's launching call asked, off the call's own input. */
+const promptOf = (call: string): string => {
+  const blocks = frames().flatMap(e => (e["message"] as { content?: Record<string, unknown>[] } | undefined)?.content ?? []);
+  return (blocks.find(block => block["id"] === call)!["input"] as { prompt: string }).prompt;
+};
+export const AGENT_A_PROMPT = promptOf(AGENT_A_CALL);
+export const AGENT_B_PROMPT = promptOf(AGENT_B_CALL);
+
 /** One frame of that fixture, by whatever tells it from the rest. */
 export const subagentFixtureFrame = (holds: (event: Record<string, unknown>) => boolean): string =>
   subagentFixtureLines().find(line => holds(JSON.parse(line) as Record<string, unknown>))!;

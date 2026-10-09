@@ -217,6 +217,12 @@
             "costUsd": {
               "type": "number"
             },
+            "lastLine": {
+              "type": "string"
+            },
+            "failure": {
+              "type": "string"
+            },
             "pid": {
               "type": "integer"
             },
@@ -227,6 +233,9 @@
               "type": "number"
             },
             "pinnedAt": {
+              "type": "number"
+            },
+            "foldedAt": {
               "type": "number"
             },
             "snoozedUntil": {
@@ -1423,6 +1432,12 @@
                   "depth": {
                     "type": "integer",
                     "exclusiveMinimum": 0
+                  },
+                  "model": {
+                    "type": "string"
+                  },
+                  "asked": {
+                    "type": "string"
                   },
                   "line": {
                     "type": "integer",
@@ -1758,6 +1773,12 @@
             "costUsd": {
               "type": "number"
             },
+            "lastLine": {
+              "type": "string"
+            },
+            "failure": {
+              "type": "string"
+            },
             "pid": {
               "type": "integer"
             },
@@ -1768,6 +1789,9 @@
               "type": "number"
             },
             "pinnedAt": {
+              "type": "number"
+            },
+            "foldedAt": {
               "type": "number"
             },
             "snoozedUntil": {
@@ -2964,6 +2988,12 @@
                   "depth": {
                     "type": "integer",
                     "exclusiveMinimum": 0
+                  },
+                  "model": {
+                    "type": "string"
+                  },
+                  "asked": {
+                    "type": "string"
                   },
                   "line": {
                     "type": "integer",

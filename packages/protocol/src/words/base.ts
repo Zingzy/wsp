@@ -33,7 +33,14 @@ export const ELLIPSIS = "\u2026";
 export function cutLine(text: string, room: number): string {
   if (text.length <= room) return text;
   const head = room - ELLIPSIS.length;
-  return `${wordsWithin(text, head) ?? text.slice(0, head).replace(SEPARATOR_TAIL, "")}${ELLIPSIS}`;
+  return `${wordsWithin(text, head) ?? wholeCharacters(text, head).replace(SEPARATOR_TAIL, "")}${ELLIPSIS}`;
+}
+
+/** The text's first units up to room, with a pair the edge would split left out whole: half of one is no character,
+ * and a JSON reader such as the Rust tool server's refuses the escape it is written as. */
+function wholeCharacters(text: string, room: number): string {
+  const head = text.slice(0, room);
+  return /[\uD800-\uDBFF]$/.test(head) ? head.slice(0, -1) : head;
 }
 
 /** What a cut leaves dangling at its edge: the space it broke on and the punctuation that hung off the word before. */

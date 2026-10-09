@@ -29,6 +29,7 @@ import {
   limitKindOfMinutes,
   RESET_CREDIT_STATUSES,
   SLATE_SERVER_NAME,
+  subagentAsked,
   titlePrompt,
 } from "@wsp/protocol";
 import type {
@@ -442,6 +443,8 @@ interface Child {
   title?: string;
   /** The spawn's prompt, which the title is read off; the agent's call carries it, never the subagent's own rows. */
   prompt?: string;
+  /** The model the spawn named, where it named one. */
+  model?: string;
   depth?: number;
   summary?: string;
 }
@@ -645,29 +648,35 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
         state: c.state,
         parentToolUseId: c.parent,
         ...(c.state === "running"
-          ? { ...(c.title !== undefined ? { title: c.title } : {}), ...(c.depth !== undefined ? { depth: c.depth } : {}) }
+          ? {
+              ...(c.title !== undefined ? { title: c.title } : {}),
+              ...(c.depth !== undefined ? { depth: c.depth } : {}),
+              ...(c.model !== undefined ? { model: c.model } : {}),
+              ...(c.prompt !== undefined ? { asked: subagentAsked(c.prompt) } : {}),
+            }
           : c.summary !== undefined ? { summary: c.summary } : {}),
       });
     /** A sign of a subagent: a new one starts running, and one already running is said again where the sign adds to
      * what was said of it. */
-    const learn = (task: string, said: { parent?: string; prompt?: string; name?: string; depth?: number } = {}): void => {
+    const learn = (task: string, said: { parent?: string; prompt?: string; model?: string; name?: string; depth?: number } = {}): void => {
       if (task === threadId) return;
       const c = children.get(task);
       const title = said.prompt?.split("\n")[0]?.trim() || said.name;
       if (c === undefined) {
-        const fresh: Child = { state: "running", parent: said.parent ?? task, ...(title !== undefined ? { title } : {}), ...(said.prompt !== undefined ? { prompt: said.prompt } : {}), ...(said.depth !== undefined ? { depth: said.depth } : {}) };
+        const fresh: Child = { state: "running", parent: said.parent ?? task, ...(title !== undefined ? { title } : {}), ...(said.prompt !== undefined ? { prompt: said.prompt } : {}), ...(said.model !== undefined ? { model: said.model } : {}), ...(said.depth !== undefined ? { depth: said.depth } : {}) };
         children.set(task, fresh);
         sayChild(task, fresh);
         sayTasks();
         return;
       }
-      const adds = (said.parent !== undefined && c.parent === task) || (said.prompt !== undefined && c.prompt === undefined) || (said.depth !== undefined && c.depth === undefined) || (title !== undefined && c.title === undefined);
+      const adds = (said.parent !== undefined && c.parent === task) || (said.prompt !== undefined && c.prompt === undefined) || (said.model !== undefined && c.model === undefined) || (said.depth !== undefined && c.depth === undefined) || (title !== undefined && c.title === undefined);
       if (said.parent !== undefined && c.parent === task) c.parent = said.parent;
       if (said.prompt !== undefined && c.prompt === undefined) {
         c.prompt = said.prompt;
         c.title = title;
       }
       c.depth ??= said.depth;
+      c.model ??= said.model;
       c.title ??= title;
       if (adds && c.state === "running") sayChild(task, c);
     };
@@ -684,7 +693,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
     const childSigns = (item: Item, done: boolean): void => {
       if (item.type === "collabAgentToolCall") {
         const receivers = Array.isArray(item.receiverThreadIds) ? item.receiverThreadIds.filter((t): t is string => typeof t === "string") : [];
-        if (item.tool === "spawnAgent" && item.status !== "failed") for (const task of receivers) learn(task, { parent: item.id, ...(str(item.prompt) !== undefined ? { prompt: str(item.prompt) } : {}) });
+        if (item.tool === "spawnAgent" && item.status !== "failed") for (const task of receivers) learn(task, { parent: item.id, ...(str(item.prompt) !== undefined ? { prompt: str(item.prompt) } : {}), ...(str(item.model) ? { model: str(item.model)! } : {}) });
         if (item.tool === "closeAgent" && done && item.status === "completed") for (const task of receivers) endChild(task, "done");
       }
       if (item.type === "subAgentActivity") {

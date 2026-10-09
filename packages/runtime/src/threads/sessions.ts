@@ -18,7 +18,7 @@ import {
   threadSeed, taskStopRefusedLine, taskStopUnsupportedLine, agentOffLine, HEAD_BYTES, HISTORY_PAGE_BYTES,
   HISTORY_PAGE_EVENTS, AGENT_STARTING_MS, ASIDE_EMPTY_LINE, capStoppedLine, deletedBeforeStartLine, type AsideQuestion,
   type McpServerSpec, type SessionAsker, refusal, sendFilesAcrossLine, SEND_FILES_ACROSS_FIX, waitAcrossLine, WAIT_ACROSS_FIX,
-  TURN_STOPPED_LINE, workspacePlace, STOP_REACH_MS, sendGivenUpLine, threadResult,
+  TURN_STOPPED_LINE, workspacePlace, STOP_REACH_MS, sendGivenUpLine, threadResult, listedFailure, turnLines,
 } from "@wsp/protocol";
 import { harnessCatalog } from "../harness-catalog.js";
 import { headShape } from "../transcript-reader.js";
@@ -26,7 +26,7 @@ import type { HarnessAdapter, HarnessStartOptions } from "../types/harness.js";
 import { SESSION_TITLE_TIMEOUT_MS } from "../types/events.js";
 import type { Runtime } from "../types/api.js";
 import {
-  ATTACHMENTS, ATTACHMENT_KEYS, snippetAround, type KeptProcess, type KeptLaunch, type ThreadRecord, type KeptImages,
+  ATTACHMENTS, ATTACHMENT_KEYS, snippetAround, namedOnly, writeLines, type KeptProcess, type KeptLaunch, type ThreadRecord, type KeptImages,
   type LiveSession, type SessionEntry,
 } from "../types/internal.js";
 import type { RuntimeContext, SessionsArea } from "../context.js";
@@ -766,6 +766,13 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
             // thread is still working: the turn that is running is the one a wait here is waiting on.
             if (failure !== undefined && !ctx.threadRuns(threadId)) {
               bus.emit({ type: "session.end", workspaceId, sessionId: view.id, turnId, threadId, exitCode: null, sawResult: false, reason: failure, at: Date.now() });
+              // A sender told the start was held left before it failed, so why it never ran rides the thread's latest
+              // row, where a listing reads it; a sender that waited heard the refusal, and the thread did not fail.
+              const before = toldHeld && o.onHeld !== undefined ? ctx.latestOn(threadId) : undefined;
+              if (before !== undefined) {
+                before.failure = listedFailure(failure);
+                void ctx.persistSessions(before.workspaceId);
+              }
             }
           }
           // After the row is gone and its end is out, so a send that waited on it finds the thread as it now is.
@@ -799,7 +806,7 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
       const rowed = new Set([...sessions.values()].map(s => threadKeyOf(s.view)));
       const trimmed = ctx.treeRecords(origin, "list", workspaceId).filter(([threadId]) => !rowed.has(threadId));
       const ends = await Promise.all(trimmed.map(async ([threadId, r]) => r.ended ?? threadResult(await ctx.openTranscript(r.workspaceId), threadId)?.status));
-      const listed = [...ctx.listedRows(held), ...trimmed.map(([threadId, r], i) => trimmedRow(threadId, r, ends[i]))];
+      const listed = [...ctx.listedRows(held).map(view => (ctx.reachesRow(view, origin) ? view : namedOnly(view))), ...trimmed.map(([threadId, r], i) => trimmedRow(threadId, r, ends[i]))];
       const computers = listed.length === 0 ? [] : await ctx.computerRows();
       return listed.map(view => {
         const id = ctx.live.get(view.workspaceId)?.record.project;
@@ -984,6 +991,7 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
       if (marks.resumeAtReset !== undefined) await ctx.armResume(threadIds, marks.resumeAtReset, origin);
       const stamps = {
         ...(marks.pinned !== undefined ? { pinnedAt: marks.pinned ? at : undefined } : {}),
+        ...(marks.folded !== undefined ? { foldedAt: marks.folded ? at : undefined } : {}),
         ...(marks.snoozedUntil === undefined ? {} : marks.snoozedUntil === null ? { snoozedUntil: undefined } : { snoozedUntil: marks.snoozedUntil, readAt: at }),
         ...(marks.section !== undefined ? { section: marks.section ?? undefined } : {}),
       };
@@ -1195,7 +1203,12 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
         await done();
         throw conflict(rewindKeptLine(keptWhy, before !== undefined));
       }
-      if (cutsConversation) await ctx.dropFromTranscript(workspaceId, e => e.threadId === threadId && cut.includes(e.turnId ?? ""));
+      if (cutsConversation) {
+        await ctx.dropFromTranscript(workspaceId, e => e.threadId === threadId && cut.includes(e.turnId ?? ""));
+        // The turn now last is the thread's word: the row lists its last line and failure, never a cut turn's.
+        const now = threadResult(await ctx.openTranscript(workspaceId), threadId);
+        if (latest !== undefined) writeLines(latest, now === undefined ? {} : turnLines(now));
+      }
       await ctx.slates.rewound({ threadId, turnId: order[at]!, cut });
       await done();
       return { turns: cutsConversation ? cut.length : 0, ...(moved !== undefined ? { files: Number(moved["files"] ?? 0) } : {}), ...(shared ? { kept: REWIND_SHARED_LINE } : {}) };

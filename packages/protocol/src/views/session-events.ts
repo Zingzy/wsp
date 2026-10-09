@@ -350,6 +350,10 @@ export const SessionSubagentEvent = z.object({
   title: z.string().optional(),
   summary: z.string().optional(),
   depth: z.number().int().positive().optional(),
+  /** The model it runs on and the start of what it was asked, on a running row where the agent said them; the model
+   * arrives on a running row of its own once the subagent's first line names it. */
+  model: z.string().optional(),
+  asked: z.string().optional(),
   /** Where this row sits among its turn's subagent rows, counting from one, as a delta's line does among the deltas:
    * what a host re-opening the run reads past. */
   line: z.number().int().positive().optional(),

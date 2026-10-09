@@ -28,15 +28,23 @@ const HOST_DAY_CAP_MB = 5;
 /** The one page that quotes the budget. */
 const PAGE = join("apps", "www", "src", "sections", "story.tsx");
 
-/** The scripted day: four threads a person keeps open in the project's folder, thirty turns each, forty deltas a turn,
- * and four subagents a turn that each start, say ten lines and end, then one thread on a branch in a worktree of its
- * own with one turn. That is past the transcript ring's 5000 events, so the host is measured with every cap it has
+/** The scripted day: ten threads that run one turn first thing, each replying 18 KB that ends on one word, then four
+ * threads a person keeps open in the project's folder, thirty turns each, forty deltas a turn
+ * and a reply whose last line runs to the 200 characters a row keeps, and four subagents a turn that each start with
+ * the 280 characters of what they were asked, name their model, say ten lines and end, then one thread on a branch in
+ * a worktree of its own with one turn. That is past the transcript ring's 5000 events, so the host is measured with every cap it has
  * already full and every child the ring still holds kept under its thread. */
 const THREADS = 4;
 const TURNS_PER_THREAD = 30;
 const DELTAS_PER_TURN = 40;
 const SUBAGENTS_PER_TURN = 4;
 const SUBAGENT_DELTAS = 10;
+/** Threads that ran one turn first thing and finished, each reply about 18 KB ending on one word. Each row also holds
+ * its latest turn's whole result through the turn's handle until the thread's next turn, so the day reads the same
+ * whatever the line keeps; what the line keeps is read on its own below. */
+const MORNING_THREADS = 10;
+const MORNING_REPLY_WORDS = 3000;
+const DAY_TURNS = MORNING_THREADS + THREADS * TURNS_PER_THREAD + 1;
 
 interface Reading {
   heldMb: number;
@@ -71,7 +79,7 @@ mkdirSync(join(home, "state"), { recursive: true });
 let nth = 0;
 const scripted = () => ({
   steers: false,
-  start: ({ onEvent }) => {
+  start: ({ onEvent, prompt }) => {
     const sessionId = \`00000000-0000-4000-8000-\${String(++nth).padStart(12, "0")}\`;
     const finished = (async () => {
       onEvent({ type: "session.start", sessionId });
@@ -79,11 +87,15 @@ const scripted = () => ({
       for (let c = 0; c < ${SUBAGENTS_PER_TURN}; c++) {
         const task = \`a\${nth.toString(16).padStart(12, "0")}\${c}\`;
         const parentToolUseId = \`toolu_\${task}\`;
-        onEvent({ type: "subagent", sessionId, task, state: "running", parentToolUseId, title: "Count to thirty with one Bash call per number", depth: 1 });
+        onEvent({ type: "subagent", sessionId, task, state: "running", parentToolUseId, title: "Count to thirty with one Bash call per number", depth: 1, asked: "count ".repeat(47).slice(0, 280) });
+        onEvent({ type: "subagent", sessionId, task, state: "running", parentToolUseId, model: "claude-haiku-4-5" });
         for (let i = 0; i < ${SUBAGENT_DELTAS}; i++) onEvent({ type: "turn.delta", sessionId, kind: "text", text: "token ".repeat(16), parentToolUseId });
         onEvent({ type: "subagent", sessionId, task, state: "done", parentToolUseId, summary: "COUNT-FINISHED" });
       }
-      const result = { status: "completed", text: "done" };
+      // A morning thread's reply runs long and ends on one word, a pull request's address: the line its row keeps is
+      // cut from it, and the day's turns after it push the reply itself out of the transcript.
+      const text = prompt === "morning" ? "reply ".repeat(${MORNING_REPLY_WORDS}) + "\\nhttps://example.invalid/acme/lab/pull/" + nth : "done\\n" + "reply ".repeat(40);
+      const result = { status: "completed", text };
       onEvent({ type: "turn.done", sessionId, result });
       onEvent({ type: "session.end", sessionId, exitCode: 0, sawResult: true });
       return result;
@@ -138,11 +150,12 @@ const quiet = async () => {
 };
 const start = (await quiet()).at(-1);
 
-const turn = async (at, thread) => {
-  const handle = await runtime.sessions.start(at.id, { prompt: "go", harness: "claude", ...(thread === undefined ? {} : { thread }) });
+const turn = async (at, thread, prompt = "go") => {
+  const handle = await runtime.sessions.start(at.id, { prompt, harness: "claude", ...(thread === undefined ? {} : { thread }) });
   await handle.finished?.catch(() => {});
   return { at, thread: handle.view().threadId ?? handle.view().id };
 };
+for (let t = 0; t < ${MORNING_THREADS}; t++) await turn(workspace, undefined, "morning");
 const threads = [];
 for (let t = 0; t < ${THREADS}; t++) threads.push(await turn(workspace, undefined));
 for (let n = 1; n < ${TURNS_PER_THREAD}; n++) for (const { at, thread } of threads) await turn(at, thread);
@@ -165,7 +178,7 @@ await store.put("pending-computers", "a_mem", { id: "a_mem", address: "root@10.0
 
 const readings = await quiet();
 const after = readings.at(-1);
-console.log(\`measured \${JSON.stringify({ heldMb: +after.toFixed(1), startMb: +start.toFixed(1), rssMb: +(process.memoryUsage().rss / 1048576).toFixed(1), turns: ${THREADS * TURNS_PER_THREAD + 1}, readings: readings.map(r => +r.toFixed(1)) })}\`);
+console.log(\`measured \${JSON.stringify({ heldMb: +after.toFixed(1), startMb: +start.toFixed(1), rssMb: +(process.memoryUsage().rss / 1048576).toFixed(1), turns: ${DAY_TURNS}, readings: readings.map(r => +r.toFixed(1)) })}\`);
 await host.close();
 process.exit(0);
 `;
@@ -248,6 +261,42 @@ describeWithDists("what the host loads to start", ["host", "runtime", "protocol"
   });
 });
 
+/** The lines a row keeps from replies, failures and prompts that run long and end or start on one word, such as an
+ * address: past 12 characters V8 answers a piece of a string as a view into the whole. */
+const LINES_KEPT = 500;
+
+describeWithDists("what a row's line keeps of the text it was cut from", ["protocol"], () => {
+  let home: string;
+
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), "wsp-lines-"));
+  });
+  afterEach(() => {
+    rmSync(home, { recursive: true, force: true });
+  });
+
+  it(`holds ${LINES_KEPT * 3} last lines, failures and asks cut from 50 KB texts on one word in under 2 MB`, async () => {
+    const script = `
+import { listedFailure, listedLastLine, subagentAsked } from ${JSON.stringify(distOf("protocol"))};
+global.gc();
+const before = process.memoryUsage().heapUsed;
+const kept = [];
+for (let i = 0; i < ${LINES_KEPT}; i++) {
+  kept.push(listedLastLine("reply ".repeat(8000) + "\\nhttps://example.invalid/acme/lab/pull/" + i));
+  kept.push(listedFailure("https://example.invalid/acme/lab/runs/" + i + "\\n" + "x ".repeat(25000)));
+  kept.push(subagentAsked("https://example.invalid/acme/lab/issues/" + i + "y".repeat(50000)));
+}
+global.gc();
+global.gc();
+console.log(\`measured \${JSON.stringify({ heldMb: +((process.memoryUsage().heapUsed - before) / 1048576).toFixed(1), rssMb: 0, turns: kept.length })}\`);
+`;
+    const run = await ran(script, home);
+    expect(run.code, run.out).toBe(0);
+    const held = reading(run.out, "the lines");
+    expect(held.heldMb, `${held.turns} lines held ${held.heldMb} MB`).toBeLessThan(2);
+  }, 120_000);
+});
+
 describeWithDists("what the host holds after a day of agents", ["host", "runtime", "engine"], () => {
   let home: string;
 
@@ -258,7 +307,7 @@ describeWithDists("what the host holds after a day of agents", ["host", "runtime
     rmSync(home, { recursive: true, force: true });
   });
 
-  it(`stays under ${HOST_MEMORY_BUDGET_MB} MB and gains under ${HOST_DAY_CAP_MB} MB with ${THREADS * TURNS_PER_THREAD + 1} turns through it, the last in a worktree`, async () => {
+  it(`stays under ${HOST_MEMORY_BUDGET_MB} MB and gains under ${HOST_DAY_CAP_MB} MB with ${DAY_TURNS} turns through it, the last in a worktree`, async () => {
     const empty = await ran('global.gc(); console.log(`measured ${JSON.stringify({ heldMb: 0, rssMb: +(process.memoryUsage().rss / 1048576).toFixed(1), turns: 0 })}`)', home);
     expect(empty.code, `an empty node on this runner said: ${empty.out}`).toBe(0);
     const floor = reading(empty.out, "an empty node");

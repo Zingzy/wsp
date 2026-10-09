@@ -89,6 +89,16 @@ import {
   WorkspaceSize,
   WorkspaceStatus,
   WorkspaceView,
+  LISTED_LINE_CHARS,
+  NO_RESULT_LINE,
+  SUBAGENT_ASKED_CHARS,
+  SubagentView,
+  listedFailure,
+  listedLastLine,
+  subagentAsked,
+  turnLines,
+  cutLine,
+  ELLIPSIS,
 } from "../src/index.js";
 
 import * as wire from "../src/index.js";
@@ -1687,6 +1697,53 @@ describe("thread provenance", () => {
       { ...row, id: "s2", threadId: "thr_a", status: "completed", endedAt: 2_000, pinnedAt: 10, snoozedUntil: 20, wokeAt: 15, section: placed },
     ]);
     expect(ThreadView.parse(thread!)).toMatchObject({ pinnedAt: 10, snoozedUntil: 20, wokeAt: 15, section: placed });
+  });
+
+  it("foldThreads carries the latest turn's last line, its failure and the fold mark, so a lead's tree reads them off the listing", () => {
+    const [thread] = foldThreads([
+      { ...row, id: "s1", threadId: "thr_a", status: "failed", endedAt: 1_000, failure: "the model refused" },
+      { ...row, id: "s2", threadId: "thr_a", status: "completed", endedAt: 2_000, lastLine: "Pushed the branch.", foldedAt: 30 },
+    ]);
+    expect(ThreadView.parse(thread!)).toMatchObject({ lastLine: "Pushed the branch.", foldedAt: 30 });
+    expect(thread).not.toHaveProperty("failure");
+    const [failed] = foldThreads([{ ...row, id: "s3", threadId: "thr_b", status: "failed", failure: "the model refused" }]);
+    expect(failed).toMatchObject({ failure: "the model refused" });
+    expect(failed).not.toHaveProperty("lastLine");
+  });
+
+  it("a turn's end leaves its reply's last line cut to 200 characters, and a failure's first line, else the end's reason, else the words for no result", () => {
+    const long = "word ".repeat(80).trim();
+    const done = turnLines({ status: "completed", text: `Working.\n\n${long}\n` });
+    expect(done.lastLine!.length).toBeLessThanOrEqual(LISTED_LINE_CHARS);
+    expect(done.lastLine).toMatch(/^word word .*…$/);
+    expect(done).not.toHaveProperty("failure");
+    expect(turnLines({ status: "completed", text: "  " })).toEqual({});
+    expect(turnLines({ status: "failed", error: "\nthe model refused\nmore of it" })).toEqual({ failure: "the model refused" });
+    expect(turnLines({ status: "failed" }, "host restarted")).toEqual({ failure: "host restarted" });
+    expect(turnLines({ status: "failed" })).toEqual({ failure: NO_RESULT_LINE });
+    expect(turnLines({ status: "interrupted", text: "half" })).toEqual({ lastLine: "half" });
+    expect(listedFailure("x".repeat(500)).length).toBe(LISTED_LINE_CHARS);
+    expect(subagentAsked(`  ${"brief ".repeat(100)}`).length).toBeLessThanOrEqual(SUBAGENT_ASKED_CHARS);
+    expect(subagentAsked("Count to three.")).toBe("Count to three.");
+  });
+
+  it("a cut through a line with no space, CJK with an emoji at the edge, ends on a whole character and never half of a pair", () => {
+    const line = `${"完成".repeat(99)}🎉${"了".repeat(60)}`;
+    for (const cut of [listedLastLine(line)!, listedFailure(line), subagentAsked(`${"完成".repeat(139)}🎉${"了".repeat(60)}`), cutLine(line, 200)]) {
+      expect(() => encodeURIComponent(cut)).not.toThrow();
+      expect(cut.endsWith(ELLIPSIS)).toBe(true);
+    }
+    expect(listedLastLine(line)).toBe(`${"完成".repeat(99)}${ELLIPSIS}`);
+    expect(cutLine(`ab🎉cd`, 4)).toBe(`ab${ELLIPSIS}`);
+    expect(cutLine(`a🎉cd`, 4)).toBe(`a🎉${ELLIPSIS}`);
+  });
+
+  it("folded is a mark a paired device sends, and the view carries what an agent's subagent ran on and was asked", () => {
+    expect(RuntimeRequest.safeParse({ id: 1, op: "sessions.mark", threadIds: ["thr_a"], marks: { folded: true } }).success).toBe(true);
+    expect(RuntimeRequest.safeParse({ id: 1, op: "sessions.mark", threadIds: ["thr_a"], marks: { folded: "yes" } }).success).toBe(false);
+    const child = { id: "a1", title: "count", state: "done" as const, model: "claude-haiku-4-5", asked: "Count to three.", startedAt: 1, endedAt: 2, lastLine: "3" };
+    expect(SubagentView.parse(child)).toEqual(child);
+    expect(SessionEvent.parse({ type: "session.subagent", workspaceId: "ws_a", sessionId: "s1", task: "a1", state: "running", model: "claude-haiku-4-5", asked: "Count to three." })).toMatchObject({ model: "claude-haiku-4-5", asked: "Count to three." });
   });
 
   it("a thread needs the person while it asks, while a finish or a failure sits unseen, and not once a window has shown it", () => {

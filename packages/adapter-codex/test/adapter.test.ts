@@ -890,6 +890,7 @@ describe("a subagent's frames on its lead's stream", () => {
       state: "running",
       parentToolUseId: SPAWN,
       title: "Sleep 20 s and say done.",
+      asked: "Sleep 20 s and say done.\nEnd without waiting.",
     });
     expect(subagents(events).at(-1)).toMatchObject({ task: CHILD, state: "running", depth: 1 });
     expect(deltasOf(events).filter(d => d.toolUseId === SPAWN)).toEqual([
@@ -1077,13 +1078,13 @@ describe("a recorded Codex turn whose lead spawned an agent and ended first", ()
   const LEAD = "01a100dc-e1f0-7183-94f1-048611cff500";
   const CHILD = "01a100dd-0379-7f91-bd7d-76a0d1bcb962";
 
-  it("holds the lead's reply until the child's own turn completes, and says the child's start and end once each", async () => {
+  it("holds the lead's reply until the child's own turn completes, and says the child's start, with what its spawn asked and the model it named, and its end once each", async () => {
     const launch = launcher(server(fixtureLines("app-server-subagent")));
     const { events, onEvent } = collect();
     const result = await adapterOver(launch).start({ prompt: "spawn one agent and end your turn", onEvent }).finished;
     const said = events.filter((e): e is Extract<AdapterEvent, { type: "subagent" }> => e.type === "subagent");
     expect(said).toEqual([
-      { type: "subagent", sessionId: LEAD, task: CHILD, state: "running", parentToolUseId: "exec-c2242f64-3c99-4c9b-be0d-2132497b24ef", title: "Reply with the single word done and nothing else." },
+      { type: "subagent", sessionId: LEAD, task: CHILD, state: "running", parentToolUseId: "exec-c2242f64-3c99-4c9b-be0d-2132497b24ef", title: "Reply with the single word done and nothing else.", model: "gpt-5.6-luna", asked: "Reply with the single word done and nothing else." },
       { type: "subagent", sessionId: LEAD, task: CHILD, state: "done", parentToolUseId: "exec-c2242f64-3c99-4c9b-be0d-2132497b24ef", summary: "done" },
     ]);
     const at = (type: string) => events.findIndex(e => e.type === type);

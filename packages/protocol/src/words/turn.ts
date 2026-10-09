@@ -27,6 +27,44 @@ export function notifyBody(result: TurnResult, length: NotifyLength = "tail"): s
   return result.status === "completed" ? reply ?? result.error : result.error ?? reply;
 }
 
+/** A turn that ended with no result and no reason from the runtime. */
+export const NO_RESULT_LINE = "turn ended without a result";
+
+/** How long a line a listing carries for a turn or a subagent runs, in characters: what a lead's tree draws under a
+ * child. */
+export const LISTED_LINE_CHARS = 200;
+
+/** How much of what a subagent was asked its listing carries, in characters: enough to name the job, never the whole
+ * brief, which the call that launched it already holds in the transcript. */
+export const SUBAGENT_ASKED_CHARS = 280;
+
+/** A line cut from a longer text as a string of its own: V8 answers a piece of 13 characters or more as a view into the
+ * whole, so a row keeping the piece would keep the whole reply for as long as the row lives (measured 2026-10-09: 2000
+ * one-word last lines of 50 KB replies held 100 MB). */
+const ownCopy = (line: string): string => line.split("").join("");
+
+/** The last line of a reply as a listing carries it; nothing where the reply has no words. */
+export function listedLastLine(text: string | undefined): string | undefined {
+  const last = lastLine(text ?? "");
+  return last === undefined ? undefined : ownCopy(cutLine(last, LISTED_LINE_CHARS));
+}
+
+/** Why something failed as a listing carries it: the first line of the words, or the words a turn with none ends on. */
+export function listedFailure(why: string | undefined): string {
+  const first = (why ?? "").split(/\r?\n/).find(line => line.trim().length > 0)?.replace(/\s+/g, " ").trim();
+  return ownCopy(cutLine(first ?? NO_RESULT_LINE, LISTED_LINE_CHARS));
+}
+
+/** What a subagent was asked, as its listing carries it. */
+export const subagentAsked = (prompt: string): string => ownCopy(cutLine(prompt.trim(), SUBAGENT_ASKED_CHARS));
+
+/** What a turn's end leaves on its row: the reply's last line, and why it failed where it did, off the result's error
+ * else the end's reason, as a read of the thread words the same end. A turn that did not fail leaves no failure. */
+export function turnLines(result: Pick<TurnResult, "status" | "text" | "error">, reason?: string): { lastLine?: string; failure?: string } {
+  const last = listedLastLine(result.text);
+  return { ...(last !== undefined ? { lastLine: last } : {}), ...(result.status === "failed" ? { failure: listedFailure(result.error ?? reason) } : {}) };
+}
+
 /** The tail alone: the length a person's sidebar row and a wait's reply field read. */
 export function notifyTail(result: TurnResult): string | undefined {
   return notifyBody(result, "tail");
