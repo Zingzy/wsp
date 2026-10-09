@@ -2,7 +2,7 @@
 // What a lab is made of, checked without a host, a build or a browser: the
 // fixtures a tester picks between, the provider and the environment each one
 // needs, the lines a lab prints, and the rules the driver reads a page with.
-import { CLOUD_ENV, DAEMON_VERSION, FAKE_AS_ENV, FAKE_RECORDS_ENV, FAKE_ROOT_ENV, HOST_ASLEEP_SEND, PERSON_HOME_ENV, SEND_BLOCK_WORDS, WEB_DIR_ENV } from "@wsp/protocol";
+import { CLOUD_ENV, DAEMON_VERSION, FAKE_AS_ENV, FAKE_RECORDS_ENV, FAKE_ROOT_ENV, folderOnJoined, HOST_ASLEEP_SEND, PERSON_HOME_ENV, SEND_BLOCK_WORDS, WEB_DIR_ENV, WorkspaceKind } from "@wsp/protocol";
 import { COMPOSER_STATE_WORDS } from "../src/composer-state-words.js";
 import { TRANSCRIPT_LOADING } from "../src/transcript-words.js";
 import { spawnSync } from "node:child_process";
@@ -52,7 +52,9 @@ describe("the fixtures a lab serves", () => {
         if (w.kind !== "local") continue;
         folders.push(w.home, w.folder);
       }
-      folders.push(...fixtureFolders(state), ...Object.values(state.sessions).flatMap(doc => doc.sessions.map(row => row.cwd)));
+      // A thread on a box's project folder runs in that folder on the box, which the lab never stands in for.
+      const here = Object.values(state.sessions).filter(doc => !folderOnJoined(state.workspaces[doc.workspaceId].kind));
+      folders.push(...fixtureFolders(state), ...here.flatMap(doc => doc.sessions.map(row => row.cwd)));
       for (const folder of folders) {
         expect([name, folder, folder === lab || folder.startsWith(`${lab}/`)]).toEqual([name, folder, true]);
         expect([name, folder, folder.startsWith(`${homedir()}/`)]).toEqual([name, folder, false]);
@@ -77,7 +79,7 @@ describe("the fixtures a lab serves", () => {
         // The key is the id: the store reads a collection as one document per id, so a row filed under another
         // key would load as a workspace nothing can name.
         expect([name, state.workspaces[w.id]]).toEqual([name, w]);
-        expect([name, ["local", "cloud"].includes(w.kind)]).toEqual([name, true]);
+        expect([name, WorkspaceKind.safeParse(w.kind).success]).toEqual([name, true]);
         expect([name, typeof w.name, typeof w.machineId, typeof w.phase]).toEqual([name, "string", "string", "string"]);
         // Every workspace is a copy of one project, and the host refuses a record naming none it holds.
         expect([name, w.id, state.projects[w.project]?.id]).toEqual([name, w.id, w.project]);
@@ -278,6 +280,8 @@ describe("the fixtures a lab serves", () => {
       "tiles-snoozed": "solari",
       "tiles-attempt": "no cloud",
       "image-built": "no cloud",
+      "lead-marathon": "no cloud",
+      "lead-small": "no cloud",
       "long-prompt": "no cloud",
       changes: "no cloud",
       "pull-request": "no cloud",
@@ -442,6 +446,8 @@ describe("the provider a fixture's host runs under", () => {
       "tiles-snoozed": "fake",
       "tiles-attempt": "none",
       "image-built": "fake",
+      "lead-marathon": "none",
+      "lead-small": "none",
       "long-prompt": "fake",
       changes: "none",
       "pull-request": "none",

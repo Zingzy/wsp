@@ -18,14 +18,14 @@
 // same run: one state file cannot hold both a person whose image is built and
 // one whose image never was.
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { chromium } from "playwright";
-import { fixtureAgents, fixtureChanges, fixtureCloud, fixtureCompares, fixtureFiles, fixtureFleet, fixtureFolders, fixtureKeys, fixturePulls, fixtureRepos, fixtureState, HERE_AGENTS, HERE_HOST_ITEMS, HERE_PROJECT_FILES } from "./fixture-state.mjs";
+import { fixtureAgents, fixtureChanges, fixtureClock, fixtureCloud, fixtureCompares, fixtureFiles, fixtureFleet, fixtureFolders, fixtureKeys, fixturePulls, fixtureRepos, fixtureState, fixtureStorage, HERE_AGENTS, HERE_HOST_ITEMS, HERE_PROJECT_FILES } from "./fixture-state.mjs";
 import { BROWSER_ARGS, freePort, REPO, startHost, stopHost, whatIsNotBuilt } from "./host.mjs";
 import { leaveMidWork, writeKeys, writeStandIn, writeWorkFolder } from "./lab-home.mjs";
-import { indexMarkdown, readSurfaces, shippedSurfaces, shotPlan } from "./plan.mjs";
+import { indexMarkdown, readSurfaces, shippedSurfaces, shotPlan, surfacesIn } from "./plan.mjs";
 import { APP_UP, failuresToCheck, STILL_LOADING } from "./ready.mjs";
 
 function usage(why) {
@@ -157,6 +157,12 @@ function scrollAround(el, by) {
  * where an earlier shot's remembered panel meant the launcher was never drawn. */
 async function shoot(context, shot, base, out, token) {
   await letIn(context, token);
+  const clock = fixtureClock(shot.fixture);
+  // Fixed, not installed: the page's timers still run, so a socket, a poll and the settle waits go on as they would.
+  if (clock !== undefined) await context.clock.setFixedTime(clock);
+  await context.addInitScript(stored => {
+    for (const [key, value] of stored) window.localStorage.setItem(key, value);
+  }, Object.entries(fixtureStorage(shot.fixture)));
   if (shot.remote) await asAnotherComputer(context);
   if (shot.mac) await asMacWindow(context);
   const page = await context.newPage();
@@ -170,6 +176,7 @@ async function shoot(context, shot, base, out, token) {
     // The socket going is the whole of "the computer running wsp fell asleep": nothing new arrives, nothing answers
     // the redial, and the window keeps every row it was last told about.
     if (step.offline === true) fallAsleep();
+    else if (step.pointerOff === true) await page.mouse.move(0, 0);
     else if (step.key !== undefined) await page.keyboard.press(step.key);
     else if (step.scroll !== undefined) await page.locator(step.scroll.within).first().evaluate(scrollAround, step.scroll.by);
     else if (step.type !== undefined) await page.keyboard.type(step.type);
@@ -231,7 +238,7 @@ async function unmeantFailures(page, shot) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  const list = readSurfaces(args.surfaces === undefined ? shippedSurfaces() : JSON.parse(readFileSync(args.surfaces, "utf8")));
+  const list = readSurfaces(args.surfaces === undefined ? shippedSurfaces() : surfacesIn(args.surfaces));
   const unbuilt = await whatIsNotBuilt();
   if (unbuilt !== undefined) {
     console.error(unbuilt);

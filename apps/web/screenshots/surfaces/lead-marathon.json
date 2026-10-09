@@ -1,0 +1,15 @@
+{
+  "at": "/",
+  "fixture": "lead-marathon",
+  "steps": [
+    "390:key:Escape",
+    "390:sidebar=trigger",
+    "row-id=thread:lead",
+    "390:key:Escape",
+    "390:pointer-off",
+    "1440:key:ControlOrMeta+Alt+b",
+    "1280:key:ControlOrMeta+Alt+b"
+  ],
+  "wait": "at-end=true",
+  "settleMs": 1200
+}
