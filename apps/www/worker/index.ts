@@ -5,6 +5,8 @@ const CANONICAL = "usewsp.com";
 /** Scalar's host for the docs; the path under /docs is kept. */
 const DOCS_ORIGIN = "wsp.apidocumentation.com";
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+/** Where to report a vulnerability, as RFC 9116 asks; Expires is renewed with the security page. */
+const SECURITY_TXT = ["Contact: mailto:aditya@usewsp.com", "Contact: https://github.com/wsp-labs/wsp/security/advisories/new", "Expires: 2027-10-09T00:00:00.000Z", "Policy: https://usewsp.com/security", "Preferred-Languages: en", ""].join("\n");
 
 export interface Env {
   ASSETS: { fetch(request: Request): Promise<Response> };
@@ -43,6 +45,7 @@ export default {
       url.hostname = CANONICAL;
       return Response.redirect(url.toString(), 301);
     }
+    if (url.pathname === "/.well-known/security.txt") return new Response(SECURITY_TXT, { headers: { "content-type": "text/plain; charset=utf-8" } });
     if (url.pathname === "/api/waitlist") return waitlist(request, env);
     if (url.pathname === "/docs" || url.pathname.startsWith("/docs/")) return docs(request, url);
     const served = await env.ASSETS.fetch(request);

@@ -69,6 +69,15 @@ export function Footer() {
           <a className="transition-colors hover:text-foreground" href={X}>
             X
           </a>
+          <a className="transition-colors hover:text-foreground" href="/privacy">
+            Privacy
+          </a>
+          <a className="transition-colors hover:text-foreground" href="/terms">
+            Terms
+          </a>
+          <a className="transition-colors hover:text-foreground" href="/security">
+            Security
+          </a>
           <a className="transition-colors hover:text-foreground" href={`mailto:${EMAIL}`}>
             {EMAIL}
           </a>

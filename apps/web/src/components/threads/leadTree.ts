@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// A lead's tree, read once for every place that draws it (the transcript's rows, the sidebar, the live tiles, the
-// Threads bar): the part each child stands in and its order there, read off its whole subtree so trouble deep in the
+// A lead's tree, read once for every place that draws it (the transcript's Threads section, the sidebar, the live
+// tiles): the part each child stands in and its order there, read off its whole subtree so trouble deep in the
 // tree is never folded away; the line under its title; its status; the acts it takes; and what a settle of it takes.
 // A place hands its own nodes in through Tree; a subagent is a node under the thread whose agent runs it, built from
 // that thread's subagents, and every subagent of a thread stands flat under it whatever its depth.
@@ -101,7 +101,8 @@ export function childParts<N>(nodes: ReadonlyArray<LeadNode<N>>, tree: Tree<N>):
   return parts;
 }
 
-/** Every live thread and subagent in the tree at any depth by what it does, and the finished children at its top. */
+/** Every live thread and subagent in the tree at any depth by what it does, and the finished threads the lead's
+ * Settle N finished takes, so the counts and the act say one figure. */
 export interface TreeCounts {
   readonly needsYou: number;
   readonly failed: number;
@@ -112,8 +113,8 @@ export interface TreeCounts {
 }
 
 export function countTree<N>(nodes: ReadonlyArray<LeadNode<N>>, tree: Tree<N>): TreeCounts {
-  const c = { needsYou: 0, failed: 0, working: 0, workingSubagents: 0, waiting: 0, finished: 0 };
-  const walk = (node: LeadNode<N>, top: boolean): void => {
+  const c = { needsYou: 0, failed: 0, working: 0, workingSubagents: 0, waiting: 0 };
+  const walk = (node: LeadNode<N>): void => {
     const part = ownPart(node, tree);
     if (part === "live") {
       const rank = ownRank(node, part);
@@ -122,11 +123,27 @@ export function countTree<N>(nodes: ReadonlyArray<LeadNode<N>>, tree: Tree<N>): 
       else if (rank === 3) c.waiting++;
       else if ("subagent" in node) c.workingSubagents++;
       else c.working++;
-    } else if (top && part === "finished") c.finished++;
-    for (const kid of kidsOf(node, tree)) walk(kid, false);
+    }
+    for (const kid of kidsOf(node, tree)) walk(kid);
   };
-  for (const node of nodes) walk(node, true);
-  return { ...c, working: c.working + c.workingSubagents };
+  for (const node of nodes) walk(node);
+  return { ...c, working: c.working + c.workingSubagents, finished: finishedTake(nodes, tree).threads };
+}
+
+/** The one live thread or subagent anywhere in the tree a shut Threads section shows: the most pressing by its own
+ * rank, as countTree counts it (asks, failed, works, waits), newest first within a rank. */
+export function mostPressing<N>(nodes: ReadonlyArray<LeadNode<N>>, tree: Tree<N>): LeadNode<N> | undefined {
+  let best: { node: LeadNode<N>; rank: number } | undefined;
+  const walk = (node: LeadNode<N>): void => {
+    const part = ownPart(node, tree);
+    if (part === "live") {
+      const rank = ownRank(node, part);
+      if (best === undefined || rank < best.rank || (rank === best.rank && startOf(node) > startOf(best.node))) best = { node, rank };
+    }
+    for (const kid of kidsOf(node, tree)) walk(kid);
+  };
+  for (const node of nodes) walk(node);
+  return best?.node;
 }
 
 /** The line under a child's title: what it asks, why it failed, the threads at once that hold it, the thread a

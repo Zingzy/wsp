@@ -5,6 +5,7 @@ import type { ComponentType } from "react";
 import { DOWNLOADS } from "./downloads";
 import { EMAIL, ORG, SITE, X } from "./links";
 import { Home } from "./pages/home";
+import { Privacy, Security, Terms } from "./pages/legal";
 import { NotFound } from "./pages/not-found";
 
 export type Route = {
@@ -57,6 +58,9 @@ export const ROUTES: readonly Route[] = [
     ],
     Page: Home,
   },
+  { path: "/privacy", title: "Privacy: wsp", description: "What wsp collects and sends, where it goes, and how to turn each part off.", image: MAIN_IMAGE, index: true, Page: Privacy },
+  { path: "/terms", title: "Terms: wsp", description: "The terms for usewsp.com, the docs, the relay and the waitlist.", image: MAIN_IMAGE, index: true, Page: Terms },
+  { path: "/security", title: "Security: wsp", description: "How the parts of wsp trust each other, what it does with your keys, and how to report a problem.", image: MAIN_IMAGE, index: true, Page: Security },
   {
     path: "/404",
     title: "Not found: wsp",

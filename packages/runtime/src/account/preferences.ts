@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { homedir } from "node:os";
 import { CATALOG_AGENTS } from "@wsp/catalog";
-import { type Preferences, type PreferencesPatch, type Caller, THIS_COMPUTER, isLocalWorkspace, applyPreferencesPatch, serverIconsLeftLine, homeShortened, labsFromEnv, noAdapterLine, preferencesFrom, bareNoSuchProjectLine, absentComputer, HERE_PLACE_ID, accessRefusal, modelIdRefusal, setupView, type AccessChoice } from "@wsp/protocol";
+import { type Preferences, type PreferencesPatch, type Caller, THIS_COMPUTER, threadKeyOf, isLocalWorkspace, applyPreferencesPatch, serverIconsLeftLine, homeShortened, labsFromEnv, noAdapterLine, preferencesFrom, bareNoSuchProjectLine, absentComputer, HERE_PLACE_ID, accessRefusal, modelIdRefusal, setupView, type AccessChoice } from "@wsp/protocol";
 import { agentsReads, type ServerIcons } from "../agents-read.js";
 import { keyOf } from "../agent-setup.js";
 import { harnessCatalog } from "../harness-catalog.js";
@@ -61,12 +61,19 @@ export function preferencesArea(ctx: RuntimeContext): PreferencesArea {
       word(kept?.agent ?? ctx.defaultAgentOf(next, undefined), set.access);
     }
   };
+  /** The shut entries of leads the host still holds: a lead stands while its rows or its thread record do. A thread
+   * kept from before thread records has rows alone, and one whose rows fell off the index cap has its record alone. */
+  const heldLeads = (shut: Record<string, true>): Record<string, true> => {
+    const rows = new Set([...ctx.sessions.values()].map(row => threadKeyOf(row.view)));
+    return Object.fromEntries(Object.entries(shut).filter(([lead]) => rows.has(lead) || ctx.threadRecords.has(lead)));
+  };
   const preferences: Runtime["preferences"] = {
     get: async () => (ctx.state.preferencesHeld ??= { ...preferencesFrom(await store.get(PREFERENCES, PREFERENCES_ID)), labs }),
     set: patch => {
       const write = preferenceWrites.then(async () => {
         await ctx.ready();
-        const next = applyPreferencesPatch(await preferences.get(), patch);
+        const merged = applyPreferencesPatch(await preferences.get(), patch);
+        const next = patch.threadsShut === undefined || merged.threadsShut === undefined ? merged : { ...merged, threadsShut: heldLeads(merged.threadsShut) };
         defaultsRefusal(patch, next);
         await store.put(PREFERENCES, PREFERENCES_ID, next);
         ctx.state.preferencesHeld = next;
