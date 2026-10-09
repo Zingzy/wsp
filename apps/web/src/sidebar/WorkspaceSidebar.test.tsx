@@ -448,9 +448,9 @@ describe("the sidebar's list of thread tiles", () => {
     const rootItem = rowOf("move the pricing table").closest("li[data-thread-item]")!;
     expect(rootItem.contains(rowOf("write the migration"))).toBe(true);
     expect(rootItem.className).not.toContain("before:");
-    expect(rowOf("write the migration").closest("li")!.className).toContain("before:bg-[var(--sidebar-rail)]");
-    expect(rowOf("write the migration").closest("li")!.className).toContain("after:top-[15px]");
-    expect(rowOf("write the migration").closest("ul")!.className).toContain("ml-3");
+    expect(rowOf("write the migration").closest("li")!.className).toContain("before:border-[var(--sidebar-rail)]");
+    expect(rowOf("write the migration").closest("li")!.className).toContain("after:rounded-bl-sm");
+    expect(rowOf("write the migration").closest("ul")!.className).toContain("ml-3.25");
   });
 
   it("keeps a thread whose opener was forgotten as a root of its own, so no thread the host holds loses its tile", async () => {
@@ -558,7 +558,7 @@ describe("the sidebar's list of thread tiles", () => {
     await act(async () => useStore.setState({ sessions: sessions([{ ...turn, readAgo: HOUR }]) } as never));
     await waitFor(() => expect(screen.getByText("boat check")).toBeDefined());
     const slot = (): HTMLElement => rowOf("boat check").querySelector<HTMLElement>("[data-thread-status]")!;
-    expect(slot().textContent).toBe("Done");
+    expect(slot().getAttribute("aria-label")).toBe("Done");
     expect(slot().dataset["tone"]).toBe("done");
     expect(rowOf("boat check").textContent).not.toMatch(/Paused|Stopped|Unreachable|Waking|Failed/);
     expect(rowOf("boat check").querySelector("[data-tone=warning], [data-tone=failed]")).toBeNull();
@@ -717,7 +717,7 @@ describe("the sidebar's list of thread tiles", () => {
     const failed = { ws: "ws_a", id: "th_broke", prompt: "it broke", status: "failed", startedAgo: 30 * HOUR, endedAgo: 29 * HOUR, readAgo: 28 * HOUR };
     await act(async () => useStore.setState({ sessions: sessions([failed]) } as never));
     await waitFor(() => expect(rowIds()).toEqual(["thread:th_broke"]));
-    expect(rowOf("it broke").querySelector("[data-thread-status]")!.textContent).toBe("Failed");
+    expect(rowOf("it broke").querySelector("[data-thread-status]")!.getAttribute("aria-label")).toBe("Failed");
     await act(async () => useStore.setState({ sessions: sessions([{ ...failed, settledAgo: HOUR }]) } as never));
     await waitFor(() => expect(rowIds()).toEqual(["settled"]));
     fireEvent.click(document.querySelector<HTMLElement>("[data-row-id=settled]")!);
@@ -801,10 +801,12 @@ describe("the sidebar's list of thread tiles", () => {
       expect(walkIds()).toEqual(["section:pinned", "thread:th_pinned", "section:needs-you", "thread:th_asks", "thread:th_works", "thread:th_done", "thread:th_idle"]);
       expect(screen.queryByText("snoozed away")).toBeNull();
       const slot = (title: string): HTMLElement => rowOf(title).querySelector<HTMLElement>("[data-thread-status]")!;
-      // A working row's word is for a screen reader; the time ticking is what it shows.
-      expect(slot("still going").querySelector(".sr-only")?.textContent).toBe("Working");
-      expect(slot("still going").textContent).toBe("Working6m");
-      expect(slot("finished unseen").textContent).toBe("Done");
+      // Every state is its icon alone, its word on the label: the crab while it works.
+      expect(slot("still going").getAttribute("aria-label")).toBe("Working");
+      expect(slot("still going").querySelector("canvas[data-crab]")).not.toBeNull();
+      expect(slot("still going").textContent).toBe("");
+      expect(slot("finished unseen").getAttribute("aria-label")).toBe("Done");
+      expect(slot("finished unseen").textContent).toBe("");
       expect(slot("read already").textContent).toBe("11m");
     });
 

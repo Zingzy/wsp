@@ -69,7 +69,7 @@ describe("a reset's words on the minute clock", () => {
     const at = Date.now() + 14 * 60_000 + 10_000;
     const s = strip({ resetsAt: at, resumeAt: at });
     const { container } = render(<ThreadStatus thread={{ status: "failed", asking: null, startedAt: null, unread: false, limit: { resetsAt: at }, resumeAt: at }} />);
-    const tile = () => container.querySelector("[data-thread-status]")!.textContent;
+    const tile = () => container.querySelector("[data-thread-status]")!.getAttribute("aria-label");
     expect([s.q("[data-limit-reset]")!.textContent, tile()]).toEqual(["resets in 14 min", "resets in 14 min"]);
     act(() => vi.advanceTimersByTime(59_000));
     expect(s.q("[data-limit-reset]")!.textContent).toBe("resets in 14 min");

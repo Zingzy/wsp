@@ -941,7 +941,8 @@ describe("buildSwitcherCards", () => {
     expect(render(<>{item.icon}</>).container.querySelector("[data-harness-mark='claude']")).not.toBeNull();
     const slot = render(<>{item.titleTrailingContent}</>).container.querySelector<HTMLElement>("[data-thread-status]")!;
     expect(slot.dataset.threadStatus).toBe("working");
-    expect(slot.className).toContain("w-22");
+    expect(slot.className).toContain("min-w-4");
+    expect(slot.querySelector("[data-crab]")).not.toBeNull();
     for (const workspace of items.workspaceItems) expect(render(<>{workspace.icon}</>).container.querySelector(".rounded-full")).toBeNull();
   });
 

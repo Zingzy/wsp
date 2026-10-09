@@ -292,7 +292,7 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
         expect(row.markSize).toEqual([12, 12]);
         expect(row.bare).toBe(true);
       }
-      // A working thread's slot carries how long it has run after its word; a finished one says Done until it is seen.
+      // A resting thread's slot carries its age; every other state is its icon alone.
       expect(rows.some(row => /\d+[smh]$/.test(row.slot))).toBe(true);
       // Claude's mark is its terracotta; OpenAI's is monochrome by design, so it takes the row's ink.
       const colours = new Map(rows.map(r => [r.mark, r.markColor]));

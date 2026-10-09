@@ -359,7 +359,7 @@ function threadItem(thread: SidebarThreadSnapshot, project: SidebarProjectSnapsh
     // The workspace it runs on and where that runs: a thread an agent opened somewhere else is told apart from its
     // opener by these two words and nothing else.
     description: <Facts parts={[project.displayName, computerName(places, project)]} className="overflow-hidden" />,
-    titleTrailingContent: <ThreadStatus thread={thread} age={restingAge(thread)} crab className={LINE_SLOT_CLASS} />,
+    titleTrailingContent: <ThreadStatus thread={thread} age={restingAge(thread)} className={LINE_SLOT_CLASS} />,
     run: sync(() => handlers.selectThread(thread.workspaceId, thread.threadId)),
   };
 }

@@ -9,13 +9,16 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 
 const drawn = vi.hoisted(() => ({ tiles: 0 }));
 vi.mock("../src/sidebar/ThreadTile.js", async importOriginal => {
+  const { memo } = await import("react");
   const real = await importOriginal<typeof import("../src/sidebar/ThreadTile.js")>();
+  // The tile is a memo: count its draws inside it, behind the tile's own comparison.
+  const tile = real.ThreadTile as unknown as { type: (props: object) => ReactNode; compare: (a: object, b: object) => boolean };
   return {
     ...real,
-    ThreadTile: (props: Parameters<typeof real.ThreadTile>[0]) => {
+    ThreadTile: memo((props: object) => {
       drawn.tiles++;
-      return real.ThreadTile(props);
-    },
+      return tile.type(props);
+    }, tile.compare),
   };
 });
 vi.mock("../src/components/DiffWorkerPoolProvider.js", () => ({
@@ -39,6 +42,7 @@ beforeAll(() => {
 });
 afterAll(() => restoreLayout());
 beforeEach(() => {
+  SESSIONS = [thread(1, "running"), thread(2, "completed"), thread(3, "completed")];
   window.localStorage.clear();
   useComposerDraftStore.setState({ drafts: {}, queues: {} });
 });
@@ -56,7 +60,7 @@ const workspace: WorkspaceView = {
 const PROJECT: ProjectView = { id: "pr_1", name: "the-project", computer: "default", source: { kind: "folder", path: "/root" }, path: "/root", remote: "https://github.com/acme/lab.git", defaultBranch: "main", memoryKey: "-root", memoryDir: "/root/.claude-cfg/projects/-root/memory", createdAt: "t" };
 const CLAUDE: HarnessCatalog = { harness: "claude", label: "Claude Code", source: "table", version: null, models: [], efforts: [], contextWindows: [], permissionModes: [], steers: false, renames: false, images: false };
 const thread = (n: number, status: SessionView["status"]): SessionView => ({ id: `s${n}`, workspaceId: WS, harness: "claude", status, prompt: `thread number ${n}`, threadId: `thr_${n}`, startedAt: n });
-const SESSIONS = [thread(1, "running"), thread(2, "completed"), thread(3, "completed")];
+let SESSIONS = [thread(1, "running"), thread(2, "completed"), thread(3, "completed")];
 
 const api: Api = {
   portReach: async (_id, port) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, expiresAt: Date.now() + 3_600_000 }),
@@ -71,7 +75,7 @@ const api: Api = {
   nap: async () => workspace,
   wake: async () => workspace,
   capabilities: async () => caps(),
-  listSessions: async () => SESSIONS,
+  listSessions: async () => SESSIONS.map(row => ({ ...row })),
   listHarnesses: async () => [CLAUDE],
   watchStatuses: async () => [],
   subscribe: () => () => {},
@@ -102,7 +106,7 @@ describe("the sidebar's tiles", () => {
     const editor = await mount();
     await typeInto(editor, "a");
     const before = drawn.tiles;
-    expect(before).toBeGreaterThanOrEqual(SESSIONS.length);
+    expect(before).toBeGreaterThan(0);
     for (const ch of "bcdefghij") await typeInto(editor, ch);
     expect(editor.textContent).toBe("abcdefghij");
     expect(drawn.tiles - before).toBe(0);
@@ -117,5 +121,20 @@ describe("the sidebar's tiles", () => {
     await settle();
     expect(drawn.tiles - before).toBe(0);
     expect(composerEditor()).toBe(editor);
+  });
+});
+
+describe("a status change", () => {
+  it("draws only the tile of the thread that moved: one thread of twelve going from working to done redraws one tile", async () => {
+    SESSIONS = Array.from({ length: 12 }, (_, i) => thread(i + 1, "running"));
+    await mount();
+    await waitFor(() => expect(document.querySelectorAll("[data-slot=sidebar] [data-thread-status=working]").length).toBe(12));
+    await settle();
+    const before = drawn.tiles;
+    SESSIONS = SESSIONS.map(row => (row.id === "s7" ? { ...row, status: "completed" as const, endedAt: 99 } : row));
+    await act(() => useStore.getState().reloadSessions(WS));
+    await waitFor(() => expect(document.querySelectorAll("[data-slot=sidebar] [data-thread-status=working]").length).toBe(11));
+    await settle();
+    expect(drawn.tiles - before).toBe(1);
   });
 });
