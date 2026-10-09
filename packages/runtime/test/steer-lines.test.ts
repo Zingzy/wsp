@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The finished lines a child sends its lead when a message is steered into the child's last words: the runtime and
 // the real Claude adapter, fed the lines Claude Code 2.1.280 printed for each case (recorded 2026-10-08, trimmed to the
-// fields the adapter reads). A turn sends each reply's line once: one held over background work goes as it is given,
-// one held for a steered message alone goes at the turn's end, and a slash command's answer is never the reply.
+// fields the adapter reads), and 2.1.295 for a message a woken agent takes at a tool's end (recorded 2026-10-09). A
+// turn sends each reply's line once: one held over background work goes as it is given, one held for a steered
+// message alone goes at the turn's end, and a slash command's answer is never the reply.
 import { randomBytes } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
 import { createClaudeAdapter } from "@wsp/adapter-claude";
@@ -20,11 +21,12 @@ const LINE = "thread 1234abcd finished (completed): reply with the single word B
 const init = JSON.stringify({ type: "system", subtype: "init", cwd: "/work", session_id: SID, tools: ["Bash"], model: "claude-haiku-4-5-20251001", claude_code_version: "2.1.280", capabilities: ["interrupt_receipt_v1", "interrupt_cancel_queued_v1", "msg_lifecycle_v1"] });
 const said = (id: string, text: string, model = "claude-haiku-4-5-20251001"): string =>
   JSON.stringify({ type: "assistant", message: { model, id, type: "message", role: "assistant", content: [{ type: "text", text }], usage: { input_tokens: 10, output_tokens: 300 } }, parent_tool_use_id: null, session_id: SID });
-const result = (text: string, turns = 1): string =>
-  JSON.stringify({ type: "result", subtype: "success", is_error: false, duration_ms: 4000, num_turns: turns, result: text, session_id: SID, total_cost_usd: 0.0128, usage: { input_tokens: 10, output_tokens: 300 } });
+const result = (text: string, turns = 1, origin?: { kind: string }): string =>
+  JSON.stringify({ type: "result", subtype: "success", is_error: false, duration_ms: 4000, num_turns: turns, result: text, session_id: SID, total_cost_usd: 0.0128, usage: { input_tokens: 10, output_tokens: 300 }, ...(origin !== undefined ? { origin } : {}) });
 const lifecycle = (uuid: string, state: string): string => JSON.stringify({ type: "command_lifecycle", command_uuid: uuid, state, session_id: SID });
 const tasks = (ids: readonly string[]): string =>
   JSON.stringify({ type: "system", subtype: "background_tasks_changed", tasks: ids.map(id => ({ task_id: id, task_type: "local_bash", description: "pnpm exec vitest run" })), session_id: SID });
+const taskDone = (id: string): string => JSON.stringify({ type: "system", subtype: "task_notification", task_id: id, status: "completed", session_id: SID });
 const COST = "Total cost:            $0.0128\nTotal duration (API):  5s";
 
 /** Every run the adapter launches, fed by hand: its opening line, the lines written into it, and its output. An
@@ -200,6 +202,18 @@ describe("a child's finished lines into its lead, with a message steered into th
     const uuid = await steer(LINE);
     run.push(tasks([]), lifecycle(uuid, "queued"), lifecycle(uuid, "started"), init, said("msg_2", ANSWER), result(ANSWER), lifecycle(uuid, "completed"));
     await over();
+    expect(await toLead()).toEqual([REPORT, ANSWER]);
+  });
+
+  it("a steer the woken agent takes at a tool's end, completed before its result as 2.1.295 prints it, sends the answer's line at the end, once", async () => {
+    const { kid, run, steer, toLead, over } = await setup();
+    run.push(tasks(["bk1"]), said("msg_1", REPORT), result(REPORT, 2));
+    await until(async () => (await toLead()).length === 1);
+    run.push(tasks([]), taskDone("bk1"), init);
+    const uuid = await steer(LINE);
+    run.push(lifecycle(uuid, "queued"), lifecycle(uuid, "started"), said("msg_2", ANSWER), lifecycle(uuid, "completed"), result(ANSWER, 2, { kind: "task-notification" }));
+    await over();
+    expect((await kid.finished).text).toBe(ANSWER);
     expect(await toLead()).toEqual([REPORT, ANSWER]);
   });
 

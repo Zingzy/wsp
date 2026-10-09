@@ -904,9 +904,10 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
               clearTimeout(settleTimer);
               settleTimer = undefined;
             }
-            // The last message the reply waited on is answered: the CLI prints its completion right after the
-            // answer's own result, so this is the turn's end.
-            if (heldReply !== undefined && backgroundTasks === 0 && !steers.open) deliver(interruptRequested ? { ...withCallsAfter(heldReply), status: "interrupted" } : heldWithFinished(heldReply), claudeSessionId, heldTold);
+            // The last message the reply waited on is answered. A message the CLI started as a turn of its own is
+            // completed right after that turn's result; one a woken agent took at a tool's end is completed before
+            // it (2.1.295), and the woken agent's result, still to come, is the turn's end.
+            if (heldReply !== undefined && backgroundTasks === 0 && !steers.open && !woken) deliver(interruptRequested ? { ...withCallsAfter(heldReply), status: "interrupted" } : heldWithFinished(heldReply), claudeSessionId, heldTold);
             continue;
           }
           if (event.type === "result" && !drainedNotice(event)) {
