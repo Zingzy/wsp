@@ -128,7 +128,8 @@
           "to": "/"
         }
       ]
-    }
+    },
+    "subpath": "/docs"
   },
   "navigation": {
     "header": [

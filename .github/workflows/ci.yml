@@ -113,7 +113,7 @@ jobs:
         background: true
         run: |
           pnpm install --frozen-lockfile
-          pnpm -r --filter '!./apps/www' --filter '!./apps/docs' --filter '!@wsp/desktop' --filter '!@wsp-labs/wsp' build
+          pnpm -r --filter '!./apps/www' --filter '!@wsp/desktop' --filter '!@wsp-labs/wsp' build
       - uses: ./.github/actions/daemon-binary
       - run: node packages/wspx/scripts/daemon-binary.mjs --triple x86_64-unknown-linux-musl
       - wait: packages
@@ -280,7 +280,7 @@ jobs:
           name: build
           path: ${{ runner.temp }}
       - run: tar -xf "$RUNNER_TEMP/build.tar"
-      - run: pnpm -r --filter '!./apps/www' --filter '!./apps/docs' exec tsc --noEmit
+      - run: pnpm -r --filter '!./apps/www' exec tsc --noEmit
 
   desktop:
     name: Stage the desktop app
