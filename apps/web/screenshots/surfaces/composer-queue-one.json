@@ -12,6 +12,6 @@
     "file:refund-cases.md:640",
     "key:Enter"
   ],
-  "wait": "queued-id",
+  "wait": "drawer-row=queue",
   "settleMs": 800
 }

@@ -7,7 +7,7 @@
 import type { ReactNode } from "react";
 import { Button } from "../ui/button.js";
 import { useStore, type Creation } from "../../protocol/store.js";
-import { RetryActs, StepRow, useNow } from "../../settings/add/StepRow.js";
+import { RetryActs, StepRow } from "../../settings/add/StepRow.js";
 import { Card } from "../../settings/rows.js";
 import { CREATE_STEP_WORDS, creationSteps } from "../../shell/creationLog.js";
 
@@ -21,7 +21,6 @@ export const SETUP_HEADS = {
 export function SetupCard({ creation, landedAt }: { creation: Creation; landedAt?: number }) {
   const retry = useStore(s => s.retryCreation);
   const dismiss = useStore(s => s.dismissCreation);
-  const now = useNow(creation.failed === null && landedAt === undefined);
   const acts = (
     <>
       <RetryActs onRetry={() => void retry(creation.key)} />
@@ -34,7 +33,7 @@ export function SetupCard({ creation, landedAt }: { creation: Creation; landedAt
   return (
     <div className="mx-auto w-full min-w-0 max-w-3xl">
       <Card id="setting-up" head={head}>
-        {creationSteps(creation, landedAt ?? now, landedAt !== undefined).map(row => (
+        {creationSteps(creation, landedAt).map(row => (
           <StepRow key={row.id} row={row} {...(row.state === "failed" ? { acts } : {})} />
         ))}
       </Card>

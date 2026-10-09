@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { AT_ITS_TERMINAL, copiedFromLine, GITHUB_SKIPPED_LINE, waitsForInstallLine, RecipeFile, SIGNED_IN_THERE, SKIPPED_FOR_NOW, type EventUnion, type PendingComputer, type PlaceAddJob, type PlaceProvisionRow, type PlaceSetup, type PlaceSetupStep, type PlaceView } from "@wsp/protocol";
 import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
-import { checkRows, foldSetup, runningMs, setupCount, setupRows, setupStanding } from "../src/settings/add/setup.js";
+import { checkRows, foldSetup, runningSince, setupCount, setupRows, setupStanding } from "../src/settings/add/setup.js";
 import { caps } from "./caps.js";
 import { resetSettings, settingsApi, settle } from "./settings-harness.js";
 
@@ -70,10 +70,10 @@ describe("a setup's frames in the store", () => {
     const midway: PlaceView = { ...studio, setup: { ...RUNNING, steps: [{ step: "floor", state: "done", ms: 72_000 }, { step: "clis", state: "running", startedAt: "2026-10-03T10:00:00.000Z" }] } };
     const { push } = bound({ placesList: async () => ({ places: [midway], adds: [], pending: [] }) } as Partial<Api>);
     await settle();
-    expect(runningMs(useStore.getState().places[0]?.setup, "clis", now)).toBe(300_000);
+    expect(now - runningSince(useStore.getState().places[0]?.setup, "clis")!).toBe(300_000);
     push({ type: "place.setup", addId: "a_1", placeId: "p_studio", line: { step: "skills", state: "running", startedAt: "2026-10-03T10:04:00.000Z" }, running: ["clis", "skills"] } as EventUnion);
-    expect(runningMs(useStore.getState().places[0]?.setup, "clis", now)).toBe(300_000);
-    expect(runningMs(useStore.getState().places[0]?.setup, "skills", now)).toBe(60_000);
+    expect(now - runningSince(useStore.getState().places[0]?.setup, "clis")!).toBe(300_000);
+    expect(now - runningSince(useStore.getState().places[0]?.setup, "skills")!).toBe(60_000);
   });
 
   it("leaves a setup alone for a frame of another run", () => {

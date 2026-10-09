@@ -25,8 +25,8 @@ export interface StepLine {
   readonly fix?: string;
   readonly wait?: PlaceWait;
   readonly sub?: true;
-  /** A running step's time so far, which climbs, rather than the time an ended step took. */
-  readonly ticking?: true;
+  /** When a running step began, its time climbing from there, rather than the time an ended step took. */
+  readonly since?: number;
   /** The catalog id whose sign-in the row offers on the computer, on one that was skipped or failed; how it signs in
    * there is the agents list's own rule. */
   readonly signIn?: string;
@@ -53,10 +53,10 @@ export function foldSetup(setup: PlaceSetup | undefined, e: PlaceSetupEvent): Pl
   return next;
 }
 
-/** How long a running step has run as of `now`, from when the host started it. */
-export function runningMs(setup: PlaceSetup | undefined, step: string, now: number): number | undefined {
+/** When the host started a running step, so a window that first sees it mid-run counts its real time. */
+export function runningSince(setup: PlaceSetup | undefined, step: string): number | undefined {
   const at = setup?.steps.find(s => s.step === step)?.startedAt;
-  return at === undefined ? undefined : Math.max(0, now - Date.parse(at));
+  return at === undefined ? undefined : Date.parse(at);
 }
 
 /** Whether a frame ends something the places list carries more of than the frame does: a step's rows, a row that

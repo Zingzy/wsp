@@ -1,0 +1,20 @@
+{
+  "at": "/",
+  "fixture": "composer-drawer",
+  "steps": [
+    "390:key:Escape",
+    "390:sidebar=trigger",
+    "row-id=thread:lead",
+    "390:key:Escape",
+    "1440:prompt-write",
+    "1280:prompt-write",
+    "testid=composer-editor",
+    "type:When 1811 lands, rebase 1866 onto it before its review.",
+    "key:Enter",
+    "type:Skip 1830's build until the owner locks the design.",
+    "key:Enter",
+    "drawer-row=queue"
+  ],
+  "wait": "composer-bar=queue",
+  "settleMs": 800
+}

@@ -111,7 +111,7 @@ describe("the creation page", () => {
     expect(rows[3]!.querySelector("[data-state-mark=working] .animate-spin")).not.toBeNull();
     expect(card.querySelector("[data-crab], canvas")).toBeNull();
     // How long each ended step took, off the gap to the next one, in the step list's own spelling.
-    expect(rows.slice(0, 3).map(row => row.querySelector("[data-step-time]")!.textContent)).toEqual(["6 s", "0.6 s", "58 s"]);
+    expect(rows.slice(0, 3).map(row => row.querySelector("[data-step-time]")!.textContent)).toEqual(["6.0s", "600ms", "58s"]);
     for (const row of rows) expect(row.querySelector("[data-step-time]")!.className).toContain("tabular-nums");
     // Nothing that does no work, and no runtime sentence on the page or its hovers.
     expect(within(view).queryByRole("progressbar")).toBeNull();
@@ -221,9 +221,8 @@ describe("the creation page", () => {
     await typeInto(editor, "add a LICENSE file");
     await press(editor, "Enter");
     expect(useComposerDraftStore.getState().queues["creating:beta"]?.map(r => r.prompt)).toEqual(["add a LICENSE file"]);
-    const queued = within(view).getByRole("list", { name: "Queued messages" });
-    // Nothing stands above the box: the card's own word carries why it waits.
-    expect(queued.querySelector("[data-queued-word]")!.getAttribute("title")).toBe("Sends once beta is up");
+    // Nothing stands above the box: the drawer's row carries why it waits on its name.
+    expect(view.querySelector('[data-drawer-row="queue"] [data-drawer-name]')!.getAttribute("title")).toBe("Sends once beta is up");
     expect(view.querySelector("[data-composer-refusal]")).toBeNull();
     await typeInto(editor, "and a README");
     await press(editor, "Enter");
