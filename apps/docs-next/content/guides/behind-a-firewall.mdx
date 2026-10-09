@@ -6,7 +6,7 @@ Your computer cannot reach some computers over ssh. Examples are a computer at t
 
 The box must have:
 
-- Linux on `x86_64` or `aarch64`, with systemd and cgroup v2.
+- Linux on `x86_64` or `aarch64`, with systemd, cgroup v2 with the `memory` and `cpu` controllers, and the overlay filesystem.
 - Node 22 or newer, and npm.
 - A root shell. `wsp join` installs the daemon as a system service.
 - A way out to the internet over HTTPS, or a way to your computer on a shared network.
@@ -26,19 +26,19 @@ wsp host link https://relay.usewsp.com
 It prints a code and a page:
 
 ```
-code        ABCD-EFGH
+code        K7QXM2PD
 open        https://relay.usewsp.com/link/verify
-type        ABCD-EFGH on that page
+type        K7QXM2PD on that page
 Open that page and sign in to approve <name>. ...
 ```
 
-Open the page, sign in with GitHub and approve the computer. The host asks the relay for a tunnel each time it starts, so restart it:
+Open the page, sign in with GitHub, type the code exactly as printed and approve the computer. The code has 8 characters and no dash. The host asks the relay for a tunnel each time it starts, so restart it:
 
 ```sh
 wsp restart
 ```
 
-`wsp status` then shows a `public` row with your host's address, for example `https://h1a2b3c4.usewsp.com`.
+`wsp status` then shows a `public` row with your host's address, for example `https://h1a2b3c4d5e6f7a8b.usewsp.com`. The name is `h` and 16 hex characters.
 
 ## Step 2: Make a join line on your computer
 
@@ -53,11 +53,11 @@ It prints the line to type on the box, once for each address that your host answ
 ```
 wsp add: a computer you own joins by dialing this host. On that computer, with wsp installed:
   wsp join http://192.168.1.12:4420 --code <code>
-  wsp join https://h1a2b3c4.usewsp.com --code <code>      (when the host is linked to your relay)
+  wsp join https://h1a2b3c4d5e6f7a8b.usewsp.com --code <code>      (when the host is linked to your relay)
 The code is spent by the first join and stops working in 10m. ...
 ```
 
-The code is the join code and the fingerprint of your host's key, in one word. It works once, for 10 minutes. Anyone who has the code in that time can join a computer to your host, so do not post it anywhere.
+The code is the join code and the fingerprint of your host's key, in one word. It works once, for 10 minutes. Do not post it anywhere. The join code and the pairing code for a device share one store. So anyone who has the code in that time can join a computer to your host, or pair a device with it.
 
 ## Step 3: Join from the box
 
@@ -66,7 +66,7 @@ On the box, open a root shell, install wsp, then run the join line:
 ```sh
 sudo -i
 npm i -g @wsp-labs/wsp
-wsp join https://h1a2b3c4.usewsp.com --code <code> --name office
+wsp join https://h1a2b3c4d5e6f7a8b.usewsp.com --code <code> --name office
 ```
 
 `--name` is the name that the box has in your app. Without it, the box uses its host name in lower case.
@@ -74,12 +74,15 @@ wsp join https://h1a2b3c4.usewsp.com --code <code> --name office
 The join dials each address in turn. It checks that the host proves the key that the code names, and it stops if the key is another one. When it is done, it prints:
 
 ```
-office joined the wsp at https://h1a2b3c4.usewsp.com; it dials that host on its own from now on.
+office joined the wsp at https://h1a2b3c4d5e6f7a8b.usewsp.com; it dials that host on its own from now on.
 systemd unit wsp-place-<tag>.service is loaded; it dials again at every start
+log         /root/.wsp/place.log
 wsp leave takes this computer back out.
 ```
 
-<video src="/shots/docs-join.mp4" muted loop playsinline />
+<video src="/shots/docs-join.mp4" autoPlay muted loop playsInline aria-label="wsp join on the box: it dials the host, checks its key and loads the service" />
+
+The box keeps the addresses on its join line for good. The join writes them into the box's record once, and the daemon dials only those. So a box that joined through the relay's address alone loses your host when you unlink the host from the relay. To keep a second way in, give the join line every address that the box can reach, for example `wsp join http://192.168.1.12:4420 https://h1a2b3c4d5e6f7a8b.usewsp.com --code <code>`. If the box loses your host, take it out with `wsp leave` and join it again.
 
 The box now shows in Settings > Computers on your computer, beside the computers that you added over ssh.
 
@@ -87,10 +90,10 @@ The box now shows in Settings > Computers on your computer, beside the computers
 
 ## Step 4: Set it up and start a thread
 
-The join installs only the daemon. To give the box its tools and agents, open it in Settings > Computers on your computer and choose what goes on it, or run:
+The join installs only the daemon. To give the box its tools and agents, open it in Settings > Computers on your computer and choose what goes on it. If you saved a [recipe](/features/recipes) from another computer with `wsp recipes save <name> --from <computer>`, you can run this instead:
 
 ```sh
-wsp add office --resume --recipe mine
+wsp add office --resume --recipe <name>
 ```
 
 Then add a project on the box and start a thread, as on any computer:
@@ -102,11 +105,11 @@ wsp run api "Read the README and run the tests."
 
 ## What the relay sees
 
-The box needs no relay account and no open port. It opens a connection out to your host's address, and the relay's Cloudflare tunnel carries it to your host. The box and the host check each other's keys, then seal every frame with X25519, HKDF and AES-256-GCM. The join code and the box's report travel inside that seal. So Cloudflare and the relay's operator see only ciphertext of the box's link.
+The box needs no relay account and no open port. It opens a connection out to your host's address, and the relay's Cloudflare tunnel carries it to your host. The box and the host check each other's keys. They seal every frame after that key exchange with X25519, HKDF and AES-256-GCM. The first frame each way travels in the clear, with the host's name, the box's id and the public keys. The join code and the box's report travel inside that seal. So Cloudflare and the relay's operator see only ciphertext of the box's link.
 
 The app's own connection through the relay is another case. A Cloudflare tunnel ends TLS at Cloudflare. So when you open your host through its relay address, Cloudflare can read that connection, with the device token in it. The relay's operator holds the Cloudflare account that the tunnel lives on, and can point your host's name somewhere else.
 
-To avoid both, put the box and your computer on one network, or [run your own relay](/guides/own-relay) on your own Cloudflare account. [What leaves your computer](/how/network) lists what the relay stores.
+Only one network avoids both. Put the box and your computer on one network, and open your host at its address there. [Your own relay](/guides/own-relay) removes the third-party operator only. Its tunnels still run through Cloudflare, so TLS still ends at Cloudflare. [What leaves your computer](/how/network) lists what the relay stores.
 
 ## Take it back out
 
@@ -118,7 +121,7 @@ wsp leave
 
 It asks first. It stops if work on the box is on no remote, unless you add `--force`. Then run `wsp remove office` on your computer, because your host lists the box until you remove it there.
 
-To take your host off the relay, run `wsp host unlink` on your computer. It stops the tunnel and deletes the host's name.
+To take your host off the relay, run `wsp host unlink` on your computer. It stops the tunnel and deletes the host's name. Every box that joined through the relay's address alone then loses your host.
 
 ## Next
 

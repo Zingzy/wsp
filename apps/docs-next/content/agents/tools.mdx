@@ -35,7 +35,7 @@ The server command is ...
 Next: run claude in this folder and say: /wsp set up wsp for me
 ```
 
-<video src="/shots/docs-mcp-install.mp4" muted loop playsinline />
+<video src="/shots/docs-mcp-install.mp4" autoPlay muted loop playsInline aria-label="wsp mcp install --agent claude in a terminal, and the lines that say what it wrote" />
 
 Give `--agent` once for each agent. Each agent gets its own lines. If one agent fails, the others still get the tools.
 
@@ -71,9 +71,23 @@ To add the server by hand, run the install with `--json` and copy the command in
 
 ## What the server line runs
 
-The server entry starts this same wsp with the word `mcp` and `--state <path>`. The state path is in the line, so the folder where the agent starts never picks another state file.
+The server entry is one of two lines. Both carry `--state <path>`, so the folder where the agent starts never picks another state file.
 
-On a computer whose wsp binary carries the tool server, which the Mac release does, the entry runs that binary directly. Then no Node process stays up for each session of the agent. A wsp that runs from the desktop app's command, or from the npm cache through `npx`, keeps its own line, because those binaries can move.
+On a computer whose wsp release carries the tool server in its daemon binary, as the Mac release does, the entry runs that binary. Then no Node process stays up for each session of the agent:
+
+```
+<folder of the release>/wsp-daemon mcp --wsp-argv <word> --wsp-argv <word> ... --state <path>
+```
+
+Each `--wsp-argv` is one word of the command that starts this same wsp. The tool server runs that command to start a host when none serves the state file, and to run the recipe tools.
+
+Everywhere else, the entry runs this same wsp with the word `mcp`:
+
+```
+<the wsp command> mcp --state <path>
+```
+
+A wsp that runs from the desktop app's command, or from the npm cache through `npx`, always takes this second line, because those binaries can move.
 
 For Codex, the entry also sets `tool_timeout_sec = 3600`, so Codex waits up to one hour for a wsp tool call.
 
@@ -88,9 +102,17 @@ The host writes no skill for an agent that never took one. It leaves alone an en
 
 ## From the app
 
-In the app, open Settings > Agents. The row of an agent without the tools has Add the wsp tools. It writes the same server entry and the skill as the command, but no section in a project's instruction files. After that, the agent's details show the file under wsp tools.
+In the app, open Settings > Agents. The row of an agent without the tools has Add the wsp tools. For an agent with an MCP configuration in the table above, it writes the same server entry and the skill as the command. It writes no section in a project's instruction files. After that, the agent's details show the file under wsp tools.
 
 `wsp agents addtools <agent>` does the same from the command line. Both work only for agents on the computer that the app runs on.
+
+For an agent with no MCP configuration in the table, the button and `wsp agents addtools` refuse and write nothing, not even the skill:
+
+```
+Cursor has no MCP config wsp knows, so the wsp tools were not written
+```
+
+For those agents, run `wsp mcp install --agent <id>`, which writes the skill and the wsp section.
 
 ## Threads already have them
 

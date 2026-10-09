@@ -8,19 +8,19 @@ The catalog knows other agents too: Amp, Crush, Gemini CLI, Goose, Hermes Agent,
 
 Each command starts in the thread's folder: the project's folder, or a worktree of it.
 
-Each turn's environment carries four wsp variables:
+Each turn's environment carries these wsp variables:
 
 - `WSP_TURN` is a random token for this one turn.
 - `WSP_HOST_TOKEN` is a token for this thread, which the host takes back when the turn's process ends.
-- `WSP_HOST_URL` and `WSP_HOST_KEY` say where the host is, when the turn runs on another computer.
+- `WSP_HOST_URL` and `WSP_HOST_KEY` say where the host is and which key it proves, for a turn on the computer that the app runs on. The URL is the host's own loopback address. A turn on a box gets neither, because its `wsp` reaches the host through the daemon's link.
 
 So a `wsp` command that the agent runs, such as `wsp run --notify me`, acts as this thread.
 
-Claude Code and Codex also get the wsp tools in the launch, as an MCP server. On the computer that the app runs on, the server is `wsp mcp --state <state> --scoped`. A thread that another thread started also gets `--no-slate`, because it has no slate. OpenCode and Cursor get no wsp tools.
+Claude Code and Codex also get the wsp tools in the launch, as an MCP server. On the computer that the app runs on, the server is `wsp mcp --state <state> --scoped`. On a box, the daemon serves the tools and carries them up its link to the host. A thread that another thread started also gets `--no-slate`, because it has no slate. OpenCode and Cursor get no wsp tools.
 
-The agent reads and writes its own session files where it always does. On the computer that the app runs on, these are your own files, for example `~/.claude/projects` and `~/.codex/sessions`. wsp copies nothing for a turn.
+The agent reads and writes its own session files where it always does. On the computer that the app runs on, these are your own files, for example `~/.claude/projects` and `~/.codex/sessions`. On a box, wsp points each agent's own variable, `CLAUDE_CONFIG_DIR` for Claude Code and `CODEX_HOME` for Codex, at the folder that it keeps for that agent there. wsp copies nothing for a turn.
 
-You can set your own program or arguments for an agent on a computer. Your program then takes the place of the command's name, and your arguments come right after it.
+You can set your own program or arguments for an agent on a computer. Your program then takes the place of the command's name. Your arguments come after the subcommand or the print flag, for example after `claude -p` or `codex app-server`.
 
 ## Where the process runs
 
@@ -54,10 +54,10 @@ claude -p --input-format stream-json --output-format stream-json --verbose \
 - A permission question comes out on stdout as a control request. Your answer in the app goes back on stdin.
 - A message that you send while the turn runs goes in on stdin as one more line. The turn takes it at its next tool round.
 - A later turn resumes with `--resume <uuid>`. After a rewind, it resumes with `--resume-session-at <message>` too, which cuts the conversation at that message.
-- A stop sends an interrupt request to the running process. If the turn does not stop, wsp ends the process.
+- On the computer that the app runs on, the process stays up between turns, so a stop sends it an interrupt request. If the turn does not stop, wsp ends the process. On a box, a stop ends the process at once.
 - The access of a running turn can change without a restart.
-- wsp removes inherited `CLAUDE_CODE_*` variables and sets its own. It signs the turn in with `CLAUDE_CODE_OAUTH_TOKEN`, the token that `claude setup-token` prints, or with `ANTHROPIC_API_KEY`, from the keys file of the host. It never sets `CLAUDE_CONFIG_DIR`. If your shell sets it, it comes through.
-- The session file is `<config folder>/projects/<folder>/<uuid>.jsonl`. Sessions and memory follow the project, not the worktree.
+- wsp removes inherited `CLAUDE_CODE_*` variables and sets its own. It signs the turn in with `CLAUDE_CODE_OAUTH_TOKEN`, the token that `claude setup-token` prints, or with `ANTHROPIC_API_KEY`, from the keys file of the host. On the computer that the app runs on, it does not set `CLAUDE_CONFIG_DIR`, and a value that your shell sets comes through. On a box, it sets `CLAUDE_CONFIG_DIR` to the folder that it keeps for Claude Code there.
+- The session file is `<config folder>/projects/<folder>/<uuid>.jsonl`. In the project folder and in a worktree that you made, sessions and memory take the key of the repo's main checkout. Your own terminal does the same. A worktree that wsp made keys them off its own folder, so a builder there does not load the notes of the person and of its lead.
 
 ## Codex
 

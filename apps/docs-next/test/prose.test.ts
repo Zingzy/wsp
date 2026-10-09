@@ -61,6 +61,12 @@ function problems(path: string, text: string): string[] {
     ...[...text.matchAll(/!\[[^\]]*\]\(([^)\s]+)/g)].map(m => m[1]!),
   ];
   for (const src of pictures) if (!isScene(src)) found.push(`${path}: ${src} names no scene in shots.json`);
+  // Scalar keeps a JSX attribute only in its React spelling, so a lowercase one renders a video that never plays.
+  for (const [video] of text.matchAll(/<video\b[^>]*>/g)) {
+    for (const [lower, react] of [["autoplay", "autoPlay"], ["playsinline", "playsInline"]] as const)
+      if (new RegExp(`\\s${lower}\\b`).test(video)) found.push(`${path}: <video> writes ${lower}, which Scalar drops; write ${react}`);
+    if (!/\baria-label=/.test(video)) found.push(`${path}: a <video> with no aria-label`);
+  }
   return found;
 }
 
@@ -89,13 +95,25 @@ describe("the prose checker", () => {
   });
 
   it("fails a picture or a recording that names no scene", () => {
-    expect(problems("content/features/threads.mdx", '<Image src="/shots/docs-composer.png" />\n<video src="/shots/docs-queue.mp4" muted loop playsinline />\n')).toEqual([]);
+    expect(problems("content/features/threads.mdx", '<Image src="/shots/docs-composer.png" />\n<video src="/shots/docs-queue.mp4" autoPlay muted loop playsInline aria-label="A message queued behind a running turn" />\n')).toEqual([]);
     expect(problems("content/start/first-computer.mdx", '<Image src="/shots/wizard-00-where.png" />\n')).toEqual([]);
     expect(problems("content/features/threads.mdx", '<Image src="/shots/composer-old.png" />\n')).toEqual(["content/features/threads.mdx: /shots/composer-old.png names no scene in shots.json"]);
-    expect(problems("content/features/threads.mdx", '<video muted src="/shots/queue.mp4" />\n')).toEqual(["content/features/threads.mdx: /shots/queue.mp4 names no scene in shots.json"]);
+    expect(problems("content/features/threads.mdx", '<video muted src="/shots/queue.mp4" aria-label="The queue" />\n')).toEqual(["content/features/threads.mdx: /shots/queue.mp4 names no scene in shots.json"]);
     expect(problems("content/features/threads.mdx", "![The composer](/shots/hero-two.png)\n")).toEqual(["content/features/threads.mdx: /shots/hero-two.png names no scene in shots.json"]);
     expect(problems("content/features/threads.mdx", '<Image src={"/shots/x.png"} />\n')).toEqual(["content/features/threads.mdx: /shots/x.png names no scene in shots.json"]);
     expect(problems("content/features/threads.mdx", '<img src="/shots/y.png" />\n')).toEqual(["content/features/threads.mdx: /shots/y.png names no scene in shots.json"]);
+  });
+});
+
+describe("a video slot", () => {
+  it("fails the lowercase attributes Scalar drops, and a video with no aria-label", () => {
+    const path = "content/features/threads.mdx";
+    expect(problems(path, '<video src="/shots/docs-queue.mp4" autoplay muted loop playsinline aria-label="The queue" />\n')).toEqual([
+      `${path}: <video> writes autoplay, which Scalar drops; write autoPlay`,
+      `${path}: <video> writes playsinline, which Scalar drops; write playsInline`,
+    ]);
+    expect(problems(path, '<video src="/shots/docs-queue.mp4" autoPlay muted loop playsInline />\n')).toEqual([`${path}: a <video> with no aria-label`]);
+    expect(problems(path, '<video src="/shots/docs-queue.mp4" autoPlay muted loop playsInline aria-label="The queue" />\n')).toEqual([]);
   });
 });
 

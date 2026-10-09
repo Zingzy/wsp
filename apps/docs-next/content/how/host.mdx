@@ -12,7 +12,7 @@ When the desktop app opens and nothing serves the state file, the app installs t
 ~/.wsp/bin/wsp up --state ~/.wsp/state.json
 ```
 
-The service starts again at every login. If you close the window or quit the app, the host keeps running. Quit asks you first:
+By default, the service starts again at every login, and the host keeps running when you close the window or quit the app. Quit asks you first:
 
 ```
 Quit wsp?
@@ -20,6 +20,8 @@ wsp keeps running in the background after the app quits, so your threads carry o
 ```
 
 Quit and stop wsp stops the threads that work on this computer, and then stops the host.
+
+To change these defaults, open Settings > General. Start wsp at login turns the start at login off. When you quit has three choices: Ask each time, Keep threads running and Stop wsp too.
 
 ## A command starts one when there is no app
 
@@ -61,7 +63,7 @@ state       /Users/you/.wsp/state.json
 - `--port 0` takes any free port.
 - `--listen <addr>` binds another address. Then anyone who can reach that address can load the page, and pairing is the gate. `wsp host pair` prints a code, and `wsp host devices` shows who took one.
 
-When a computer has joined, the host also opens a second port, `4420`, on every address. A joined computer's daemon dials that port.
+When a computer has joined, the host also opens a second port on every address, 20 above its app port. For the default app port `4400`, that is `4420`. A joined computer's daemon dials that port.
 
 A second host on the same state file does not start. It names the one that is serving:
 
@@ -82,7 +84,7 @@ A lock whose process is gone is left over from a crash, and a new host takes it.
 
 The `<tag>` is the first 8 characters of the SHA-256 of the state file's path, so each state file has its own unit. The unit file has mode 600. The service writes its output to `host.log` beside the state file. On Linux, the service starts again 5 seconds after it stops, and a restart of the service does not stop running turns. The service starts at every login. On Linux, `loginctl enable-linger` keeps it running between logins.
 
-The unit holds no key. It carries `WSP_HOME`, `WSP_LABS`, `WSP_UPDATE_CHECK`, `WSP_ANALYTICS`, `WSP_STATE_STORE` and `SHELL`, each only when the shell that installs it sets it. The host reads its keys from the `.env` file beside the state file. A service starts without your shell. So if a key is only in your shell's environment, the install refuses and tells you to put it in that `.env` first.
+The unit holds no key. It carries `WSP_HOME`, `WSP_LABS`, `WSP_UPDATE_CHECK`, `WSP_ANALYTICS`, `WSP_STATE_STORE` and `SHELL`, each only when the shell that installs it sets it. The host reads its keys from the `.env` file beside the state file. A service starts without your shell, so the service does not get a key that is only in your shell's environment. For `ANTHROPIC_API_KEY`, the install prints a note and goes on. Every other key that is only in your shell, such as `CLAUDE_CODE_OAUTH_TOKEN` or `GH_TOKEN`, is left out without a word. Before you install the service, put each key that the host needs in that `.env`.
 
 After it loads the unit, `wsp up --service` waits up to 20 seconds for the lock file and for an answer on the port. On success, it prints the address lines and `Stop it with wsp down.` On failure, it prints the last 20 lines of the log.
 
@@ -99,7 +101,7 @@ After it loads the unit, `wsp up --service` waits up to 20 seconds for the lock 
 `wsp status` prints one row for each fact:
 
 ```
-host        running (pid 4123, up 2h 10m)
+host        running (pid 4123, up 130m)
 app         http://127.0.0.1:4400
 runtime ws  ws://127.0.0.1:4400/ws (token: /Users/you/.wsp/host-token)
 state       /Users/you/.wsp/state.json
@@ -132,7 +134,7 @@ The fix depends on how the host started. For a host that the app holds, it tells
 
 ## When its program file is gone
 
-On Linux, the host checks every 5 seconds that its own program file is still there. When the file is gone, for example after you uninstall wsp, the host stops, so the next start runs what the `wsp` command names now. An update that puts a new file at the same path does not stop the host. On a Mac, the host keeps serving.
+On Linux, the host checks every 5 seconds that its own program file is still there. The file is the program that runs the host: node for a wsp from npm, or a program inside the app for the desktop app's host. An AppImage's mount that goes away and a copy of the app that you remove are two examples. When the file is gone, the host stops, so the next start runs what the `wsp` command names now. An update that puts a new file at the same path does not stop the host. On a Mac, the host keeps serving.
 
 ## Next
 

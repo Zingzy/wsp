@@ -8,18 +8,18 @@ flowchart LR
   host --> d0["Daemon on your computer"]
   d1["Daemon on a box you reach"] -- "dials the host, sealed" --> host
   d2["Daemon on a box behind a firewall"] -- "dials out, sealed" --> relay["Relay"]
-  relay -- "Cloudflare Tunnel" --> host
+  host -- "cloudflared dials out" --> relay
 ```
 
 ## The host
 
 The host is the process that holds a state file and serves the app, the command line and the MCP tools. There is one host for each state file. It holds your keys and the records of your projects, threads, transcripts and computers. The app, the `wsp` command and the wsp tools in an agent are all clients of the same host. So a thread that an agent starts shows in your sidebar at once.
 
-The host listens on `127.0.0.1:4400` by default. When a computer has joined, it also listens on port `4420` on every address, for the daemons of your other computers. [The host](/how/host) says how it starts, stops and restarts.
+The host listens on `127.0.0.1:4400` by default. When a computer has joined, it also listens on a second port on every address, for the daemons of your other computers. That port is 20 above the app port, `4420` for the default `4400`. [The host](/how/host) says how it starts, stops and restarts.
 
 ## The daemon
 
-The daemon is a Rust binary on every computer that wsp works on. It serves files, git, terminals and ports to the host. The host does not run commands on a box itself. It asks the daemon there.
+The daemon is a Rust binary on every computer that wsp works on. It serves files, git, terminals and ports to the host. Once a box has joined, the host runs nothing on it over ssh. It asks the daemon there. Over ssh, the host runs only the scripts of an add, and of an update when the box's link is down.
 
 On a box, the daemon runs as root under systemd. It listens only on the box's own loopback, and it dials out to the host. So the box needs no open port. First the two sides prove their keys to each other. The box knows the host's key from the add or the join line, and the host keeps the box's key. After that, they seal every frame between them (X25519, HKDF and AES-256-GCM).
 
@@ -50,4 +50,4 @@ A Cloudflare tunnel ends TLS at Cloudflare. Frames between a box and the host st
 
 ## The agents
 
-The agents are the coding agents that threads run: Claude Code, Codex, OpenCode and Cursor. The host starts each agent's own command line through the daemon on the computer where the project is. The agent talks to its own company under your sign-in. wsp does not sit between them. [How wsp runs each agent](/how/agents) has each launch line.
+The agents are the coding agents that threads run: Claude Code, Codex, OpenCode and Cursor. On the computer that the app runs on, the host starts each agent's own command line itself, as a process of that computer. On a box, it starts the command through the daemon there. The agent talks to its own company under your sign-in. wsp does not sit between them. [How wsp runs each agent](/how/agents) has each launch line.

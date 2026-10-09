@@ -4,7 +4,7 @@ A thread can start other threads. The thread that starts them is the lead, and e
 
 This page is for the agent in the lead thread. It follows the skill's sections "Running work well" and "The loop for building with wsp".
 
-<video src="/shots/docs-lead-spawn.mp4" muted loop playsinline />
+<video src="/shots/docs-lead-spawn.mp4" autoPlay muted loop playsInline aria-label="A lead's turn starts two children, and their rows appear under it in the sidebar" />
 
 ## Start each child with `--notify me`, then end the turn
 
@@ -12,14 +12,14 @@ This page is for the agent in the lead thread. It follows the skill's sections "
 wsp run acme --branch ticket/42-login --detach --notify me --title "42 login" "Read ticket 42 and build it. ..."
 ```
 
-- `--detach` prints `thread <id>` and returns at once. The child's turn runs on.
+- `--detach` prints `thread <id>` and returns once the child's turn has started. The child's turn runs on. With `--branch`, the start waits until the worktree is made and its installs ran, which can take minutes.
 - `--notify me` names the caller. When the host launched you as a thread, `me` is your thread.
 - `--title` names the child in the sidebar.
 
 Then end your turn. Do not wait, and do not poll `wsp threads`. When a child finishes, its finished line comes into your thread as a message, and that message starts your next turn. Lines come in the order the children finish. Each line carries the facts and then the child's final message whole:
 
 ```
-thread 1a2b3c4d finished (completed, 12m 4s, $0.41)
+thread 1a2b3c4d finished (completed, 12m 4s, $0.41): <the child's final message>
 ```
 
 So you can act on the report without reading anything else. If the report that you need is longer than what reached you, `wsp thread read <id> --last` prints the child's final reply.
@@ -34,7 +34,7 @@ Two threads that write in one checkout collide. Give each builder its own branch
 wsp run acme --branch ticket/42-login --detach --notify me "..."
 ```
 
-wsp runs the thread in a worktree of the project's repo on that branch. It uses the worktree that git already has for the branch. If there is none, it makes one from the project folder's current commit, with the `.env` files and the dependencies carried in. Threads that only read, plan or answer can share the project folder.
+wsp runs the thread in a worktree of the project's repo on that branch. It uses the worktree that git already has for the branch. If there is none, it makes one, with the `.env` files and the dependencies carried in. A new branch starts at the project folder's current commit. A branch that already exists is checked out as it stands, so a builder on an old branch starts from that branch's own commit. Threads that only read, plan or answer can share the project folder.
 
 ## Write a brief that names everything
 
@@ -58,7 +58,7 @@ wsp run acme --cwd <builder-folder> --agent codex --detach --notify me "Review t
 
 `--cwd` starts the thread in a folder inside the project or one of its worktrees. For `<builder-folder>`, use the folder that `wsp threads` shows for the builder. The builder fixes what the review finds, in its own thread, through `wsp send`.
 
-`--notify` repeats, and each target gets the line once. `--notify me --notify <reviewer>` sends the builder's end to you and to the reviewer. This saves you the relay by hand. It decides nothing, so you still read every report and make the calls.
+`--notify` repeats, and each target gets the line once. `--notify me --notify <reviewer>` sends the builder's end to you and to the reviewer. Then you do not pass the line on by hand. It decides nothing, so you still read every report and make the calls.
 
 ## Settle what you have read
 
@@ -68,7 +68,13 @@ When you have acted on a child's report, settle it:
 wsp thread settle 1a2b3c4d
 ```
 
-The child and every thread under it fold into Settled in the person's sidebar. A thread that is still working or asking stays where it is. A finished child whose report you took reads as read, and it settles by itself after the person's quiet time.
+The child and every thread under it fold into Settled in the person's sidebar. If any thread in that tree is still running, asking or waiting, nothing folds, and the child is left with `still working: stop it first`. To settle only the finished threads under a thread, and leave the ones that still work, add `--finished`:
+
+```sh
+wsp thread settle --finished 1a2b3c4d
+```
+
+A finished child whose report you took reads as read, and it settles by itself after the person's quiet time.
 
 ## Restart a stuck child
 
@@ -81,9 +87,9 @@ wsp run acme --branch ticket/42-login --replaces 1a2b3c4d --detach --notify me "
 
 The person then sees one row for the job, not two rows under one title.
 
-## Send into a running thread
+## Do not send into a running turn
 
-A send never opens a second turn. Some agents, such as Claude Code, take input in the middle of a turn. If the thread's turn is running on such an agent, the message joins that turn. Otherwise it waits and runs as the next turn. Never start a second thread to hurry a running one.
+`wsp send <thread>` continues a thread that has already replied. A send into a thread whose turn is still running opens no second turn, and it is a mistake. Wait for the turn to end, or run `wsp stop <thread>` first. Never start a second thread to hurry a running one.
 
 ## Keep a slate as the board
 
@@ -93,7 +99,7 @@ Build and read a slate with the slate tools (`slate_catalog`, `slate_write`, `sl
 
 ## When you are not a thread
 
-An agent that you started yourself in a terminal is not a wsp thread, so nothing can wake it. It gets the reply of one turn as the call returns. For work of more than one turn, start one coordinator thread in the project's folder on this computer. Give it the whole job in its brief, and tell the person where to read it.
+An agent that you started yourself in a terminal is not a wsp thread, so nothing can wake it. It gets the reply of one turn as the call returns. For work of more than one turn, start one lead thread in the project's folder on this computer. Give it the whole job in its brief, and tell the person where to read it.
 
 `wsp threads wait` is for a shell script, which has nothing else to do while its builders run. Do not call it in a conversation. It spends minutes of a turn on nothing.
 

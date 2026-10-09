@@ -4,15 +4,15 @@ wsp runs on computers that you own. Your code, prompts, transcripts and keys sta
 
 [usewsp.com/privacy](https://usewsp.com/privacy) is the privacy policy. This page gives the technical detail behind it.
 
-## Four requests the host makes on its own
+## Five requests the host makes on its own
 
-The host makes these four requests without an action from you. None of them carries a key, a path, a prompt or a file of yours.
+The host makes these five requests without an action from you. The first four carry no key, path, prompt or file of yours. The fifth goes through your own `gh` sign-in.
 
 ### wsp's newest release
 
 The host asks `api.github.com` for the newest wsp release 30 seconds after it starts and every six hours after that. It also asks when you open the Version card in Settings. It never asks twice in ten minutes. The request names `wsp/<version>` as its user agent and sends nothing else. The host keeps the answer in `release.json` beside the state file.
 
-When this check finds a newer wsp, the desktop app downloads it from GitHub's release page. On a Mac where the app can replace itself, the download starts without a click, and the app then asks you to restart.
+When this check finds a newer wsp, a Mac app that can replace itself downloads the update from GitHub's release page. It needs no click, and then it asks you to restart. Every other app shows a notice that opens the release page.
 
 To turn this off, set `WSP_UPDATE_CHECK=0` in the host's environment, or put the line `WSP_UPDATE_CHECK=0` in the `.env` beside the state file. The desktop app's host reads only the `.env`. Settings has no switch for this check.
 
@@ -24,7 +24,7 @@ The Agents page, a computer's page and `wsp agents` read the agents list. When o
 - `api.github.com` for an agent that installs from a GitHub release.
 - `downloads.claude.ai` for Claude Code.
 
- It asks for every agent of the catalog, installed or not, so the requests say nothing about what you have. A vendor that did not answer is not asked again for ten minutes. The answers are kept in `agent-latest.json`.
+It asks for every agent of the catalog, installed or not, so the requests say nothing about what you have. A vendor that did not answer is not asked again for ten minutes. The answers are kept in `agent-latest.json`.
 
 To turn this off, switch off Newest agent versions in Settings > Privacy. `WSP_UPDATE_CHECK=0` also turns it off, whatever the switch says.
 
@@ -36,24 +36,30 @@ To turn this off, switch off Server icons from Google in Settings > Privacy. Off
 
 ### Anonymous usage counts
 
-A release build of wsp sends counts to PostHog's EU cloud (`eu.i.posthog.com`). These are the events:
+A release build of wsp sends counts to PostHog's EU cloud (`eu.i.posthog.com`). The counts are on by default. These are the events:
 
 | Event | What it carries |
 |---|---|
-| `thread.started` | The agent, the model as a catalog id, the access and who started it |
-| `turn.done` | How the turn ended, its time, its wait, its cost and five token counts |
+| `thread.started` | The agent, the model as a catalog id, the agent's own permission mode (for example `bypassPermissions`) and who started it |
+| `turn.done` | The agent, the model, who started the turn, how it ended, a refusal word, how many models it used, its time, its wait, its cost and five token counts |
 | `computer.added` | The system (linux, darwin or other) and how many agents |
 | `computer.setup.ended` | How the setup ended, the steps that failed and its time |
 | `project.added` | Whether it came from a folder or a repo, and whether it is on this computer |
-| `init.ended` | How a `wsp init` ended, and its time |
+| `init.ended` | How a `wsp init` ended, where it stopped, and its time |
 | `op.failed` | The name of the operation and its class, at most once a minute |
-| `host.started` | How many projects, computers and workspaces the host holds |
+| `host.started` | How many projects, computers and workspaces the host holds, and whether this is its first run |
 
-Every event also carries the wsp version, the system, the chip and how the host started. Nothing else goes with it: no path, prompt, reply, error text, name, host name, account or key. Each event carries a random install id from `analytics-id` (see [What is stored where](/how/storage)). PostHog sees the address of the request.
+Every event also carries the wsp version, the system, the chip, how the host started and `surface: "app"`. Nothing else goes with it: no path, prompt, reply, error text, name, host name, account or key. Each event carries a random install id from `analytics-id` (see [What is stored where](/how/storage)). PostHog sees the address of the request.
 
 The host sends the events in batches of up to 20, every ten seconds. No thread or turn waits for them. A build from source has no PostHog key and sends nothing.
 
 To turn this off, switch off Anonymous usage counts in Settings > Privacy. `WSP_ANALYTICS=0`, in the host's environment or on a line of the `.env` beside the state file, turns it off whatever the switch says.
+
+### Pull requests, through your `gh`
+
+The host reads a thread's pull request with your own `gh` sign-in, through the daemon of the computer where the thread runs. It reads it after every turn that ends by itself, because a turn can push. It also reads an open pull request again every 3 minutes while a window is open, and every 15 minutes while none is. It never reads a merged or closed one again.
+
+To stop it, sign out of `gh` on the computer where the thread runs.
 
 ## Requests when you use a feature
 
@@ -61,7 +67,7 @@ These requests happen only when you use the feature:
 
 - The app asks Google's icon service for the host name of each external link in an agent's reply. Settings has no switch for this.
 - An image in a reply with an `http` or `https` source loads from its own host.
-- In the pull request pane, avatars and images load from GitHub. The pane reads pull requests, checks and reviews with your own `gh` sign-in, through the daemon.
+- In the pull request pane, avatars and images load from GitHub.
 - When the Usage page needs prices, the host downloads LiteLLM's table of model prices from `raw.githubusercontent.com` and keeps it for a day. Settings has no switch for this, and `WSP_UPDATE_CHECK=0` does not stop it.
 - A search for skills sends your words to `skills.sh`.
 - To name a new thread, the host sends its opening message once more through the agent's own command line. It uses the agent's smallest model, under your sign-in.
@@ -72,9 +78,10 @@ Each agent's traffic, with your prompts, your code and its replies, goes from `c
 
 ## Between your computers
 
+- When you add a box, the setup copies what you pick to it over ssh. That is the agents' configuration, including `~/.claude.json` as it is, your MCP servers' configuration, your skills, and your git and shell configuration after their cuts. The shell's variables are cut by name only, so a `DATABASE_URL` with a password in it travels. [What is stored where](/how/storage) lists the cuts.
 - `wsp add user@host` reaches a box over ssh. The box's host key goes into your `~/.ssh/known_hosts`. A sudo password goes only to sudo on the box, and wsp keeps it nowhere.
 - The daemon on a box dials your host. The two sides check each other's keys, then seal every frame with X25519, HKDF and AES-256-GCM.
-- When a computer has joined, the host listens on port `4420` on every address of your computer, so a box on your network can dial it.
+- When a computer has joined, the host listens on a second port on every address of your computer. The port is 20 above the app port, `4420` for the default `4400`. So a box on your network can dial it.
 - At each dial, a box reports its name, system, CPU, memory, disk, `HOME`, `USER`, `PATH`, its agents' versions and the names of their sign-in files.
 - The daemon has no telemetry and no update server. A new daemon comes only from your host.
 
@@ -91,7 +98,7 @@ Two cookies hold a sign-in: one for 15 minutes and one for 7 days. Cloudflare ke
 
 The relay holds no pairing code, no device token and nothing that your agents say. No command deletes a relay account yet. To delete yours, write to aditya@usewsp.com.
 
-A Cloudflare tunnel ends TLS at Cloudflare. Frames between a box and the host stay sealed, so Cloudflare sees only ciphertext of them. The app's own connection through the relay is not sealed in this way. Cloudflare can read it, and the device token in it. The relay's operator holds the Cloudflare account that the tunnel lives on. To avoid both, reach your host on your own network, or [run your own relay](/guides/own-relay).
+A Cloudflare tunnel ends TLS at Cloudflare. Frames between a box and the host stay sealed, so Cloudflare sees only ciphertext of them. The app's own connection through the relay is not sealed in this way. Cloudflare can read it, and the device token in it. The relay's operator holds the Cloudflare account that the tunnel lives on. Only your own network avoids both. Reach your host at its address there. [Your own relay](/guides/own-relay) removes the third-party operator only. Its tunnels still run through Cloudflare, so TLS still ends at Cloudflare.
 
 `cloudflared` comes from GitHub, and the host checks it against a SHA-256 in wsp before it runs it.
 
@@ -103,6 +110,7 @@ A Cloudflare tunnel ends TLS at Cloudflare. Frames between a box and the host st
 | Each agent's newest version | Settings > Privacy > Newest agent versions, or `WSP_UPDATE_CHECK=0` |
 | Icons of MCP servers | Settings > Privacy > Server icons from Google |
 | Usage counts | Settings > Privacy > Anonymous usage counts, or `WSP_ANALYTICS=0` |
+| Pull request reads | Sign out of `gh` on the computer where the thread runs |
 | The relay | Do not run `wsp host link`. `wsp host unlink` takes a linked host off. |
 
 Settings > Privacy also has Agent logs. That switch decides whether the Usage page counts what the agents logged on your computers. Those counts stay on your computers.

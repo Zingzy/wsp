@@ -11,7 +11,7 @@ The state file is `~/.wsp/state.json` unless you name another one with `--state`
 | File | What it holds | Who reads it |
 |---|---|---|
 | `state.db` | A SQLite database: your projects, threads and their transcripts, images in messages, computers (name, ssh login, key path, host key), preferences, the usage history and the hashed tokens of your devices. Mode 600. | The host |
-| `.env` | Your keys: `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, `OPENAI_API_KEY`, `CURSOR_API_KEY`, `GEMINI_API_KEY` and `GH_TOKEN`, where you set them. Plain text, mode 600. | The host, at each turn's launch. It puts them in the turn's environment, on this computer and on your boxes. |
+| `.env` | Your keys: `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, `OPENAI_API_KEY`, `CURSOR_API_KEY`, `GEMINI_API_KEY` and `GH_TOKEN`, where you set them. When you add a box with GitHub on its default, wsp runs `gh auth token` on your computer and writes `GH_TOKEN` here itself. Plain text, mode 600. | The host, at each turn's launch. It puts them in the turn's environment, on this computer and on your boxes. |
 | `servers.env`, `servers.owners.json` | Values for the headers and variables of your MCP servers, and which server owns each name | The host, for each turn's servers |
 | `host.lock` | The process id and the ports of the host that serves this state file | Every `wsp` command and the app, to find the host |
 | `host-token` | The token that the app sends when it connects. The host makes a new one at each start. Mode 600. | The app |
@@ -21,6 +21,8 @@ The state file is `~/.wsp/state.json` unless you name another one with `--state`
 | `icons/` | Icons of remote MCP servers, kept for 30 days | The app |
 | `recipe.json`, `recipes/` | Your recipes: what a computer gets when you add it | The host |
 | `relay.json` | The link to the relay, when you linked this host. Mode 600. | The host |
+| `place-host-key.json` | The host's own ed25519 key pair, private key included. Every box pins its public key when it joins. Mode 600. | The host |
+| `init.log` | The last five runs of `wsp init`, with values whose names say key, token, secret or password blanked | You |
 | `desktop/` | The desktop app's own profile: unsent drafts, up to 20 stashed prompts with their files and images, and window state. Also `update.log` from the app's updates. | The desktop app |
 
 Transcripts have a limit for each workspace. When a transcript is over it, the oldest events go first. The usage history keeps 90 days.
@@ -40,11 +42,21 @@ Transcripts have a limit for each workspace. When a transcript is over it, the o
 - The service unit that starts the host at login: `~/Library/LaunchAgents/com.wsp.host.<tag>.plist` on a Mac, `~/.config/systemd/user/wsp-host-<tag>.service` on Linux.
 - The wsp server and the wsp skill in each agent's own configuration, after you give the agent the tools. [Give your agent the wsp tools](/agents/tools) lists the files.
 - One line in `~/.ssh/known_hosts` for each box that you add.
-- Each agent's own session files, in the agent's own folder, for example `~/.claude/projects` or `~/.codex/sessions`. wsp does not write them. The agent does.
+- Each agent's own session files, in the agent's own folder, for example `~/.claude/projects` or `~/.codex/sessions`. The agent writes them. wsp writes one thing there. When you name or rename a Claude Code thread in wsp, it appends a title line to that session's file, as `/rename` in Claude Code does.
 
 ## On a box
 
-When you add a box, wsp writes these files on it:
+When you add a box, the setup copies what you pick from your computer to the box over ssh:
+
+- The agents' own configuration, including `~/.claude.json` as it is. wsp removes no account field from it.
+- The configuration of your MCP servers, with their values moved into environment variables.
+- Your skills.
+- Your git configuration, with secret-named keys, token-shaped values and URLs with a login cut out.
+- Your shell configuration, with exported variables cut by name only. A variable whose name says key, token, secret or password is cut. A `DATABASE_URL` with a password in it is not, so it travels.
+
+wsp never copies a sign-in file. You sign in on the box.
+
+wsp also writes these files on the box:
 
 | Path | What it holds |
 |---|---|

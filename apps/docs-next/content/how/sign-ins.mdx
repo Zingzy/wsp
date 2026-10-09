@@ -2,7 +2,9 @@
 
 Many tools sign in through a web page. The tool opens the page in a browser, and you sign in. Then the page sends the browser back to a port on `localhost`, where the tool waits. On the computer that the app runs on, this works as usual. On a box, there is no browser, and `localhost` in your browser is your own computer, not the box.
 
-wsp opens the page in your browser and carries the callback back to the box. Only the URL and a port number travel through wsp. wsp does not read a code or a token from the page, and the host never logs the URL.
+wsp opens the page in your browser and carries the callback back to the box. The host never logs the URL. The callback request itself travels through the host's link to the box, with the code that the provider put in it. A device code travels to you in the line that says a sign-in waits.
+
+This works only for a sign-in that wsp starts on a box. Those are the sign-ins in the app's Add a computer, the app's Sign in for an agent, `wsp agents signin` and `wsp add <computer> --sign-in <agent>`. While one of them runs, the host acts on a sign-in page or a callback port from that box. At any other time, the host ignores them and logs `ignored a sign-in page from the computer; no sign-in runs there`. So `gh auth login` that you type in a box's terminal gets no forward. The host also never forwards a local URL that a box prints.
 
 ## The steps
 
@@ -53,7 +55,7 @@ wsp copies no sign-in file to a box. You sign in on the box, or wsp gives the tu
 - The agents' keys and tokens stay in the `.env` beside the state file on your computer. The host puts them in each turn's environment, on this computer and on your boxes. Claude Code signs in with the token that `claude setup-token` prints on your computer, as `CLAUDE_CODE_OAUTH_TOKEN`. Nothing of the Claude Code login on your computer goes to a box.
 - For GitHub, the default is to take your token with `gh auth token` on your computer and keep it in the same `.env` as `GH_TOKEN`. Every thread on the box then gets it. To keep it off the box, choose a sign-in on the box or skip GitHub when you add the box.
 - Codex signs in once on the box. Its `auth.json` sits in `/wsp/logins/codex/`, and every thread on the box shares it.
-- Each tool checks a sign-in with its own status command, for example `gh auth status`, `wrangler whoami` or `codex login status`. wsp never reads what the login printed.
+- wsp reads the login's output for its URL, its device code and its questions. To decide that a sign-in stood, it reads only the tool's own status command, for example `gh auth status`, `wrangler whoami` or `codex login status`.
 
 ## Next
 

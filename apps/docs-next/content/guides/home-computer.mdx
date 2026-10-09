@@ -6,7 +6,7 @@ An old laptop or a desktop under your desk can run threads for you. This guide p
 
 The computer at home must have:
 
-- Linux on `x86_64` or `aarch64`, with systemd and cgroup v2. A recent Debian, Ubuntu or Fedora has both.
+- Linux on `x86_64` or `aarch64`, with systemd, cgroup v2 with the `memory` and `cpu` controllers, and the overlay filesystem. A recent Debian, Ubuntu or Fedora has all three.
 - Node 22 or newer.
 - An ssh server, and your public key in `/root/.ssh/authorized_keys`. wsp runs threads on a box only as root for now, and it never types an ssh password.
 - Root's login shell set to bash or sh.
@@ -24,15 +24,20 @@ hostname -I
 
 Pick the address on your home network, for example `192.168.1.40`. A router can give the computer a new address after a restart. To keep the address, reserve it for this computer in your router's settings.
 
-## Step 2: Make sure that ssh works
+## Step 2: Read its host key and prepare root
 
-Run this on your own computer:
+wsp shows the key that the computer answers with the first time it dials it. Compare that key with one that you read on the computer itself, at its own keyboard. Do not test the login with `ssh` first. Your ssh client then stores the key at its own prompt, and `wsp add` asks nothing.
+
+On the computer at home, run:
 
 ```sh
-ssh root@192.168.1.40 node --version
+ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
+node --version
 ```
 
-If the command asks for a password, put your public key in `/root/.ssh/authorized_keys` on the computer at home. If it prints a version below `v22`, install Node 22 or newer there.
+Keep the `SHA256:` fingerprint for step 4. If the version is below `v22`, install Node 22 or newer. Put your public key in `/root/.ssh/authorized_keys`.
+
+If your ssh client already connected to this computer once, `wsp add` asks nothing. Then compare the key that your computer holds with the fingerprint, with `ssh-keygen -l -F 192.168.1.40` on your computer.
 
 To use a short name, add a host to `~/.ssh/config` on your computer:
 
@@ -63,26 +68,26 @@ In the app, open Settings > Computers and click Add a computer. Pick the host fr
 On the command line:
 
 ```sh
-wsp add root@192.168.1.40 --name den --recipe mine
+wsp add root@192.168.1.40 --name den
 ```
 
 wsp shows the host key of the computer and asks you to trust it:
 
 ```
-root@192.168.1.40 answers with the key ssh-ed25519 SHA256:... ; trust it and continue?
+root@192.168.1.40 answers with the key ssh-ed25519 SHA256:...; trust it and continue?
 ```
 
-To check the key, run `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` on the computer at home and compare the `SHA256:` fingerprint. Without a terminal, give the key with `--host-key 'SHA256:...'`.
+Compare the fingerprint with the one from step 2. Answer `yes` only if they are the same. Without a terminal, give the key with `--host-key 'SHA256:...'`. If the computer answers with another key, run the `ssh-keygen -R` line that the refusal prints before you add it again.
 
-<video src="/shots/docs-ssh-add.mp4" muted loop playsinline />
+<video src="/shots/docs-ssh-add.mp4" autoPlay muted loop playsInline aria-label="wsp add in a terminal: the host key question, then each step of the install" />
 
-The add installs the daemon, sets the computer up from the recipe and asks you to finish the sign-ins in your browser. [A rented server](/guides/rented-server) shows each step and its output.
+The add installs the daemon. Then you choose what goes on the computer in the app's Add a computer, or you give a saved [recipe](/features/recipes) with `--recipe <name>`. The add asks you to finish the sign-ins in your browser. [A rented server](/guides/rented-server) shows each step, its output and how to save a recipe.
 
 ## How the computer reaches yours
 
-The daemon on the computer at home dials your host. When a computer has joined, the host listens on port `4420` on every address of your computer. So a computer on your network can dial it directly. The install says which address it dials, in a line that starts with `it dials this computer at`.
+The daemon on the computer at home dials your host. When a computer has joined, the host opens a second port on every address of your computer, 20 above its app port. For the default app port `4400`, that is `4420`. So a computer on your network can dial it directly. The install's `starting the agent` row names the address that it dials.
 
-If a firewall on your computer blocks port `4420`, the host keeps an ssh connection to the computer at home open. The daemon dials back through it. The install then says `dials back over ssh`. The computer works the same way, but only while your computer is awake and on the network.
+If a firewall on your computer blocks that port, the host keeps an ssh connection to the computer at home open. The daemon dials back through it. The install then says `dials back over ssh`. The computer works the same way, but only while your computer is awake and on the network.
 
 ## Add a project and start a thread
 
