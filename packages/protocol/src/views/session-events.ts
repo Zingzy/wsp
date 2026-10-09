@@ -253,8 +253,9 @@ export const withPushedRow = (rows: SessionView[], e: SessionRowEvent): SessionV
   return at < 0 ? [...rows, row] : rows.map((r, i) => (i === at ? row : r));
 };
 
-/** Pushed once when a start has waited AGENT_STARTING_MS on its agent with no session from it yet, so a client says
- * the agent is starting rather than showing a bare wait; not a session event, never in history. */
+/** Pushed once when a start launches a new process of its agent, or has waited AGENT_STARTING_MS without one, and no
+ * session from it has come yet, so a client says the agent is starting rather than showing a bare wait; not a session
+ * event, never in history. */
 export const SessionStartingEvent = z.object({
   type: z.literal("session.starting"),
   workspaceId: z.string(),
@@ -267,8 +268,8 @@ export const SessionStartingEvent = z.object({
 });
 export type SessionStartingEvent = z.infer<typeof SessionStartingEvent>;
 
-/** How long a start waits on its agent before it says the agent is starting: a normal start measured 1.5 to 7 s, the
- * first run of a wrapper that installs the agent 97 s (Omarchy, 2026-10-05). */
+/** How long a start that has launched nothing yet waits before it says the agent is starting: a normal start measured
+ * 1.5 to 7 s, the first run of a wrapper that installs the agent 97 s (Omarchy, 2026-10-05). */
 export const AGENT_STARTING_MS = 4_000;
 
 /** The word an agent's row takes in place of its version where its command installs it on its first run. */

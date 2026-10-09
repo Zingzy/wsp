@@ -44,10 +44,19 @@ type ClaudeModel = HarnessCatalogModelProbe & { efforts: string[]; contextWindow
  */
 export function catalogProbeCommand(options: { launch?: AgentLaunch } = {}): string {
   const claude = programWord("claude", options.launch);
-  const clean = `unset \${!CLAUDE_CODE_@} CLAUDECODE FORCE_CODE_TERMINAL; ${ENV_FROM_INPUT}`;
   const handshake = `printf '%s\\n' "${INIT_REQUEST.replaceAll('"', '\\"')}" | ${claude} -p --bare --output-format stream-json --input-format stream-json --verbose`;
-  return `cd ~ && ${clean}; ${claude} --version; echo ${SEP}; ${claude} --help; echo ${SEP}; ${handshake}`;
+  return `${versionProbeCommand(options)}; echo ${SEP}; ${claude} --help; echo ${SEP}; ${handshake}`;
 }
+
+/** The probe's first command alone, under the same environment: what says whether lists read off the binary before
+ * are still its lists. */
+export function versionProbeCommand(options: { launch?: AgentLaunch } = {}): string {
+  const claude = programWord("claude", options.launch);
+  return `cd ~ && unset \${!CLAUDE_CODE_@} CLAUDECODE FORCE_CODE_TERMINAL; ${ENV_FROM_INPUT}; ${claude} --version`;
+}
+
+/** The version `claude --version` prints, the one the probe records; null where it printed none. */
+export const parseVersion = (stdout: string): string | null => /(\d+\.\d+\.\d+)/.exec(stdout)?.[1] ?? null;
 
 function quotedList(help: string, flag: string): string[] {
   const at = help.indexOf(flag);
@@ -139,7 +148,7 @@ export function parseCatalogProbe(stdout: string): HarnessCatalogProbe | null {
   if (init === undefined) return null;
   const models = modelsOf(init);
   if (models === undefined) return null;
-  const version = /(\d+\.\d+\.\d+)/.exec(versionPart)?.[1] ?? null;
+  const version = parseVersion(versionPart);
   const listed = quotedList(help, "--permission-mode <mode>");
   return {
     version,

@@ -29,8 +29,17 @@ const REQUESTS = [initializeRequest(INIT), request(MODELS, "model/list"), reques
 export function catalogProbeCommand(options: { launch?: AgentLaunch } = {}): string {
   const codex = programWord("codex", options.launch);
   const server = appServerScript(codex, [{ lines: REQUESTS, answers: REQUESTS.length }]);
-  return `cd ~ && ${ENV_FROM_INPUT}; ${codex} --version; echo ${SEP}; ${codex} --help; echo ${SEP}\n${server}`;
+  return `${versionProbeCommand(options)}; echo ${SEP}; ${codex} --help; echo ${SEP}\n${server}`;
 }
+
+/** The probe's first command alone, under the same environment: what says whether lists read off the binary before
+ * are still its lists. */
+export function versionProbeCommand(options: { launch?: AgentLaunch } = {}): string {
+  return `cd ~ && ${ENV_FROM_INPUT}; ${programWord("codex", options.launch)} --version`;
+}
+
+/** The version `codex --version` prints, the one the probe records; null where it printed none. */
+export const parseVersion = (stdout: string): string | null => /(\d+\.\d+\.\d+)/.exec(stdout)?.[1] ?? null;
 
 /** The `[possible values: ...]` list `codex --help` prints under a flag; empty when the flag or the list is missing. */
 function possibleValues(help: string, flag: string): string[] {
@@ -109,7 +118,7 @@ export function parseCatalogProbe(stdout: string, login: string): HarnessCatalog
     return wantsSignIn ? { refused: codexNotSignedInLine(login) } : null;
   }
   const probe: HarnessCatalogProbe = {
-    version: /(\d+\.\d+\.\d+)/.exec(versionPart)?.[1] ?? null,
+    version: parseVersion(versionPart),
     models,
     efforts: effortsOf(models),
     permissionModes: possibleValues(help, "--sandbox <SANDBOX_MODE>"),

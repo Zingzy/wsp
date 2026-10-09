@@ -7,7 +7,7 @@ import { backstopMs, createIdlePolicy } from "../idle.js";
 import { POLL_INTERVAL_MS, phaseLeavingGone, providerSaid } from "../status.js";
 import { loginEnvOn } from "../types/harness.js";
 import { type WorkspaceSpec, type WorkspaceRecord, type LiveWorkspace, type StageReport, type GoldenExec, type GoneOutcome, settled, VAULTS, shapeFault, setHostname } from "../types/wiring.js";
-import { WORKSPACES, TRANSCRIPTS, TRANSCRIPT_HEADS, TRANSCRIPT_INDEX, SESSIONS, WORKSPACE_NAMES, DROPPED, PAUSED_REASON, GONE_REASON, goneLogLine, type DroppedMachine, CREATES, KEY_PURPOSE_MAX, type PendingCreate, fingerprint, pidAlive, forwardedCalls } from "../types/internal.js";
+import { AGENT_LISTS, WORKSPACES, TRANSCRIPTS, TRANSCRIPT_HEADS, TRANSCRIPT_INDEX, SESSIONS, WORKSPACE_NAMES, DROPPED, PAUSED_REASON, GONE_REASON, goneLogLine, type DroppedMachine, CREATES, KEY_PURPOSE_MAX, type PendingCreate, fingerprint, pidAlive, forwardedCalls } from "../types/internal.js";
 import type { RuntimeContext, MachinesArea } from "../context.js";
 
 export function machinesArea(ctx: RuntimeContext): MachinesArea {
@@ -437,6 +437,11 @@ export function machinesArea(ctx: RuntimeContext): MachinesArea {
     await store.delete(SESSIONS, id);
     await store.delete(CREATES, `workspace/${id}`);
     await store.deleteBlob(VAULTS, id);
+    // The lists its agents answered go with the last workspace on that machine.
+    const machineId = going?.machine.id;
+    if (machineId !== undefined && ![...live.values()].some(e => e.machine.id === machineId)) {
+      for (const key of await store.keys(AGENT_LISTS)) if (key.startsWith(`${machineId}:`)) await store.delete(AGENT_LISTS, key);
+    }
     bus.emit({ type: "workspace.deleted", workspaceId: id });
   };
 

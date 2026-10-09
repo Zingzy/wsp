@@ -30,7 +30,7 @@ function waitingHost(waits: ReadonlyArray<string | undefined>): HostClient {
 
 const saidBy = async (road: "detach" | "follow", waits: Array<string | undefined>): Promise<string[]> => {
   const errors: string[] = [];
-  const ctx = { io: { error: (line: string) => errors.push(line) }, out: { emit: () => {}, stream: () => {} } } as unknown as VerbContext;
+  const ctx = { io: { error: (line: string) => errors.push(line) }, out: { emit: () => {}, stream: () => {} }, flags: {} } as unknown as VerbContext;
   const start = { workspaceId: "ws_1", prompt: "and then", thread: "thr_1" };
   if (road === "detach") await detachVerb(ctx, waitingHost(waits), start);
   else await followVerb(ctx, waitingHost(waits), start, false);

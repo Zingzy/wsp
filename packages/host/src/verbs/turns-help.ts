@@ -902,6 +902,12 @@ interface SaidAbout {
  * and stdout adds only the lines around it; where stdout parts from the stream it carries the finished text whole,
  * with --json every event of the turn up to its done instead; a turn that did not complete is the verb's failure,
  * in the harness's words. */
+/** A line about the wait before a turn, which --json holds back as it holds the reply's stream, so a turn that fails
+ * leaves its failure object the one line on stderr. */
+function waitSaid(ctx: VerbContext, line: string): void {
+  if (ctx.flags.json !== true) ctx.io.error(line);
+}
+
 export async function followVerb(ctx: VerbContext, client: HostClient, start: Record<string, unknown>, announce: boolean, picks: Picks = {}, said: SaidAbout = {}, onTurn?: (turn: Turn) => void): Promise<Turn> {
   const { opened, spend } = said;
   const stream = turnStream(ctx);
@@ -921,9 +927,9 @@ export async function followVerb(ctx: VerbContext, client: HostClient, start: Re
     turn = await follow(client, start, "cli", {
       queued: e => {
         waitedFor = e.waitsFor;
-        ctx.io.error(waitingLine(e));
+        waitSaid(ctx, waitingLine(e));
       },
-      starting: event => ctx.io.error(agentStartingLine(agentName(event.harness), event.installs === true)),
+      starting: event => waitSaid(ctx, agentStartingLine(agentName(event.harness), event.installs === true)),
       steered: event => {
         joinedWaiting = event.waiting === true;
       },
@@ -997,7 +1003,7 @@ export async function detachVerb(ctx: VerbContext, client: HostClient, start: Re
   let waitedFor: string | undefined;
   const turn = await startDetached(client, start, "cli", e => {
     waitedFor = e.waitsFor;
-    ctx.io.error(waitingLine(e));
+    waitSaid(ctx, waitingLine(e));
   }, () => hostBack(ctx));
   if (turn.outcome === "held" && turn.session.capped !== undefined) ctx.io.error(capWaitLine(turn.session.capped));
   else if (turn.outcome !== "started" && turn.outcome !== "held") ctx.io.error(JOINED[turn.outcome](picks, waitedFor));

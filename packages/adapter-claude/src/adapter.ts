@@ -7,7 +7,7 @@ import { randomUUID } from "node:crypto";
 import { ASIDE_WALL_MS, baseModel, INTERRUPT_GRACE_MS, LOST_SESSION_NOTE, PERMISSION_ALLOW, PERMISSION_DENY, QUESTION_TOOL, RUN_EXIT_MS, asideWallLine, backgroundTasksLine, claudeMemoryDir, endAfterResult, endRun, fmtDuration, keepRun, harnessExitLine, lostSessionPrompt, refusedTurn, subagentAsked, taskFinishedLine, titlePrompt } from "@wsp/protocol";
 import type { AdapterAttachOptions, AdapterEvent, AgentLaunch, KeptAgent, KeptRun, KeptTurn, SubagentState, TaskStop, AsideAnswer, AsideQuestion, ExecStream, ExecStreamFactory, HarnessCatalogProbe, HarnessExec, McpServerSpec, PermissionAsk, PermissionOutcome, ScreenCommand, SessionAsker, SessionHarness, SessionRenamer, SessionTitleMaker, SessionTitleReader, TurnImage, TurnRefusal, TurnResult, TurnStatus, CommitDrafter, TurnTokens } from "@wsp/protocol";
 import { SKIP_PROMPTS_MODE, controlAllowLine, controlAnswerLine, controlErrorLine, controlLine, interruptLine, modeOptionOn, setModeLine, stopTaskLine } from "./permissions.js";
-import { CLAUDE_SCREEN_COMMANDS, catalogProbeCommand, parseCatalogProbe } from "./catalog.js";
+import { CLAUDE_SCREEN_COMMANDS, catalogProbeCommand, parseCatalogProbe, versionProbeCommand, parseVersion } from "./catalog.js";
 import { rec, str, num, strArr } from "./fields.js";
 import { limitOf, noteRejected, withLimit } from "./limits.js";
 import { ASIDE_HOOKS_ID, asideAnswer, asideCommand, asideCut, asideHooksLine, asidePrompt, asideTailCommand, asideTextOf, forkCleanupCommand, hookDenyLine, noConversationLine, promptDenyLine } from "./aside.js";
@@ -171,6 +171,8 @@ export interface ClaudeAdapter {
   /** Makes the binary describe itself under the same config dir as a session; null when it did not answer. The
    * handshake carries no reason of its own, so this probe has no refusal to hand the footer. */
   probeCatalog(exec: HarnessExec): Promise<HarnessCatalogProbe | null>;
+  /** Asks the binary only its version, under the same environment as the probe; null where it printed none. */
+  probeVersion(exec: HarnessExec): Promise<string | null>;
   /** What the CLI's own session file calls a session: its generated title, or the person's rename inside the CLI. */
   sessionTitle: SessionTitleReader;
   /** Names the session in that same file, with the record the CLI's own rename appends. */
@@ -1466,6 +1468,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
     waitsForPrompt: true,
     screenCommands: CLAUDE_SCREEN_COMMANDS,
     probeCatalog: exec => exec(catalogProbeCommand(deps.launch !== undefined ? { launch: deps.launch } : {}), buildEnv({ base: deps.baseEnv })).then(parseCatalogProbe),
+    probeVersion: exec => exec(versionProbeCommand(deps.launch !== undefined ? { launch: deps.launch } : {}), buildEnv({ base: deps.baseEnv })).then(parseVersion),
     sessionTitle: (sessionId, exec) => exec(sessionTitleCommand({ configDir: deps.configDir, sessionId })).then(parseSessionTitle),
     renameSession: (sessionId, title, exec) => exec(renameCommand({ configDir: deps.configDir, sessionId, title })).then(parseRename),
     titleFor: (turn, exec) =>

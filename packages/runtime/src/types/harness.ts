@@ -216,6 +216,9 @@ export interface HarnessAdapter {
   /** Asks the binary on the workspace's machine what it takes: its lists, its own words for why it has none, or null
    * when it does not answer at all; absent, the table alone answers and nothing runs. */
   probeCatalog?(exec: HarnessExec): Promise<HarnessCatalogAnswer>;
+  /** Asks the same binary its version alone, which says whether lists it answered before are still its lists; absent,
+   * nothing can say so and lists held from before wait for the probe. */
+  probeVersion?(exec: HarnessExec): Promise<string | null>;
   /** Reads the harness's own title for a session out of its store on the machine; absent on a harness that keeps none. */
   sessionTitle?: SessionTitleReader;
   /** Writes a person's name for a session into that same store; absent on a harness that keeps no name of a person's. */
