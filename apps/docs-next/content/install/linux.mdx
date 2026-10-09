@@ -1,5 +1,7 @@
 # Install on Linux
 
+{/* Written from apps/www/public/install (install_linux, missing_libraries, apt_packages, put_on_path, restart_service), apps/www/src/downloads.ts, packages/protocol/src/bundles.mjs, packages/host/src/service.ts and wsp up --help. */}
+
 wsp for Linux is an AppImage for x86_64 computers. The AppImage also gives you the `wsp` command line. The install line below installs both.
 
 ## Install with one line
@@ -71,7 +73,7 @@ wsp keeps its state in `~/.wsp/state.json`. The host writes its log to `~/.wsp/h
 
 ## Install a given version or update
 
-- To install one release instead of the latest, set `WSP_VERSION` for the `sh` that runs the line: `curl --proto '=https' --tlsv1.2 -fsSL https://usewsp.com/install | WSP_VERSION=1.2.3 sh`.
+- To install one release instead of the latest, set `WSP_VERSION` for the `sh` that runs the line. For example: `curl --proto '=https' --tlsv1.2 -fsSL https://usewsp.com/install | WSP_VERSION=1.2.3 sh`.
 - To move to the latest release, run the install line again. It replaces the files and restarts the host unit on the new version.
 
 Next, start [your first thread](/start/first-thread).

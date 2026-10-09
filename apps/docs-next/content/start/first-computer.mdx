@@ -1,5 +1,7 @@
 # Add your first computer
 
+{/* Written from apps/web/src/settings/add/addFlow.ts (ADD_STEPS, STEP_TITLES, stepLine), AddComputerDialog.tsx, choices.ts (everything), apps/web/src/settings/format.ts (ADD_COMPUTER_WORDS), packages/host/src/verbs/computers.ts (add) and wsp add --help. */}
+
 When you add a computer, wsp installs itself there and copies the setup that you pick from this computer. Then threads can run on that computer, and you see them in the same sidebar.
 
 Before you start, make sure that you have these items:
@@ -14,22 +16,25 @@ If the computer is behind a firewall and you cannot reach it over SSH, read [Com
 
 1. Go to **Settings**, then **Computers**, and select **Add a computer**. You can also select **Add a computer** in the computer filter at the top of the sidebar.
 2. Type the login as `user@host` or as an alias from your SSH configuration. You can also pick a host from the list **From your ssh config**.
+
+   <Image src="/shots/wizard-00-where.webp" alt="The Add a computer dialog: a field for user@host or an SSH alias, and the hosts from the SSH configuration below it." />
+
 3. Select **Connect**.
 4. If the computer's host key is new to this computer, the dialog shows the key. Compare it with the key that the other computer shows for itself. If the keys are the same, select **Trust and connect**. If they are not the same, select **Cancel**.
 5. Wait for the checks. wsp makes sure that it can reach the computer and run there. Then it installs itself on the computer.
-6. If the login's `sudo` asks for a password, type it in the field under the check that failed, and select **Try again**. The password goes to `sudo` on that computer, and wsp does not keep it.
+6. If the login's `sudo` asks for a password, type it in the field under the check that failed. Then select **Try again**. The password goes to `sudo` on that computer, and wsp does not keep it.
 7. Select **Continue**.
 
-<Image src="/shots/wizard-00-where.webp" alt="The Add a computer dialog: a field for user@host or an SSH alias, and the hosts from the SSH configuration below it." />
-
 Next, the dialog asks what goes on the computer, one step at a time. By default, each step ticks the items that this computer has. Untick the items that you do not want.
+
+The CLIs step is different. It starts with nothing ticked. If your agents ran some of the tools, the step shows a **Select the ones your agents used** button, which ticks those tools.
 
 | Step | What it puts on the computer |
 |---|---|
 | Start from | Everything on this computer, a recipe that you saved, or nothing. This step shows only if you saved a recipe. |
 | Agents | The coding agents to install, signed in so that threads run there. |
 | MCP servers | The tool servers that your agents use, set up for them. |
-| CLIs | The command line tools that your agents run. The tools that your agents used most come first. |
+| CLIs | The command line tools that your agents run. Nothing is ticked at first, and the tools that your agents used most come first. |
 | Skills | Your agents' skills, copied so that they work the same on the new computer. |
 | Plugins | Claude Code plugins. |
 | GitHub | How the computer signs in to GitHub to clone and push your repos. |
@@ -78,7 +83,7 @@ A project lives on one computer. To run threads on the new computer, use a proje
 
 - The projects that you picked in the Import projects step are on the computer when the setup ends.
 - In the app, select **Add a project**, paste a repository address and pick the computer. The computer clones the repo.
-- From the command line, run `wsp add <url> --on <computer>`, or `wsp add <owner/repo> --on <computer>` to clone with the GitHub sign-in on that computer.
+- From the command line, run `wsp add <url> --on <computer>`. To clone with the GitHub sign-in on that computer, run `wsp add <owner/repo> --on <computer>`.
 
 Then start a thread on that project as on [your first thread](/start/first-thread). Under the box, the app names the computer that the thread runs on.
 

@@ -1,5 +1,7 @@
 # Your first thread
 
+{/* Written from apps/web/src/shell/ProjectHome.tsx, NewThreadPicks.tsx, FirstRun.tsx, sidebar/AddProjectDialog.tsx, sidebar/words.ts, keybindingDefaults.ts, packages/protocol/src/general-prefs.ts, packages/protocol/src/projects.ts (sourceKind), wsp add --help, wsp run --help and the run section of skills/wsp/SKILL.md. */}
+
 A thread is one conversation with a coding agent. The agent works in a project, which is a repo or a folder on one computer. On this page, you add a project on your computer and start a thread in it. You do it first in the app, then from the command line.
 
 Before you start, install wsp ([on a Mac](/install/mac) or [on Linux](/install/linux)). You also need one agent on this computer that is signed in: Claude Code, Codex, OpenCode or Cursor.
@@ -12,8 +14,9 @@ Before you start, install wsp ([on a Mac](/install/mac) or [on Linux](/install/l
 
 1. Open wsp. If wsp has no project, the window says "Add a project to get started".
 2. Select **Add a project**.
-3. Pick a repo from the list. The list shows the git repos on this computer, the most recently used first. To find a folder that is not in the list, type a path that starts with `/` or `~`, or select **Choose**.
-4. Select **Add**.
+3. Pick a repo from the list. The list shows the git repos on this computer, the most recently used first.
+4. If the folder is not in the list, type a path that starts with `/` or `~`, or select **Choose**.
+5. Select **Add**.
 
 A thread on this computer runs in the project's folder itself. wsp does not make a copy of the folder.
 
@@ -59,9 +62,9 @@ wsp run acme --model claude-sonnet-5 --effort low "Fix the typo in the README."
 ```
 
 - `--agent` takes `claude`, `codex`, `opencode` or `cursor`.
-- `--effort` takes `low`, `medium`, `high`, `xhigh` or `max`.
+- `--effort` takes the effort words of the agent and the model. They are not the same for every model. For Claude, the words are `low`, `medium`, `high`, `xhigh` and `max`.
 - `--access` takes `ask`, `auto-edit`, `full` or `plan`. Without it, the thread runs with the project's access, then the agent's default, then `full`.
-- `--branch <branch>` runs the thread in a worktree of the project's repo on that branch, so the project's own folder does not change.
+- `--branch <branch>` runs the thread in a worktree of the project's repo on that branch. The project's own folder does not change.
 
 ## Send the next message
 

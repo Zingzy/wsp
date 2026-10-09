@@ -1,5 +1,7 @@
 # Let your agent set you up
 
+{/* Written from skills/wsp/SKILL.md (Setting a person up from nothing, and the wsp mcp install paragraph), packages/host/src/mcp-install.ts, and wsp mcp install run against a throwaway home for claude and cursor. */}
+
 Your coding agent can set wsp up for you and open your first thread. It uses the wsp tools and the wsp skill, which is a file that tells the agent how to use wsp. You give the agent both with one command.
 
 Before you start, install wsp ([on a Mac](/install/mac) or [on Linux](/install/linux)) so that `wsp` runs in your terminal.
@@ -18,9 +20,11 @@ Before you start, install wsp ([on a Mac](/install/mac) or [on Linux](/install/l
 
 <video src="/shots/docs-mcp-install.mp4" controls muted loop playsinline />
 
-`--agent` takes `claude`, `codex`, `gemini` or `opencode`. To set up more than one agent, give `--agent` again for each one. If one agent fails, the others still get the tools.
+`--agent` takes `claude`, `codex`, `gemini`, `opencode` or `cursor`. To set up more than one agent, give `--agent` again for each one. If one agent fails, the others still get the tools.
 
-The command writes three things:
+For Cursor, the command writes the skill to `~/.cursor/skills/wsp/SKILL.md` and the wsp section to `AGENTS.md`. It does not write the MCP server. To give Cursor the tools, add an MCP server in Cursor that runs `wsp mcp`.
+
+For the other four agents, the command writes three things:
 
 | What | Where |
 |---|---|
@@ -52,7 +56,7 @@ The agent follows the setup steps in the skill. It stops at the first step whose
 2. It records your project with `wsp add`.
 3. It opens your first thread with `wsp run`. The thread shows in your sidebar, and you can read and answer it there.
 
-The agent can also add a computer for you with the same tools. Before it does, it reads what this computer has with `wsp recipe scan`, which writes nothing. Then it asks you two questions: which large tools go on the computer, and how each sign-in happens.
+The agent can also add a computer for you. It runs `wsp add user@host`, and you pick what goes on the computer in the app. [Add your first computer](/start/first-computer) shows those steps.
 
 Until the agent restarts, it can do the same work with the `wsp` command line.
 

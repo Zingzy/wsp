@@ -1,30 +1,32 @@
 # What wsp is
 
-wsp runs coding agents on every computer you own. You run Claude Code, Codex and more on your Mac, an old laptop or a server you rent, all from one window. The agents can start each other on any of those computers.
+{/* Written from apps/www/src/sections (hero.tsx, agents.tsx, handoff.tsx, computers.tsx, slate.tsx, features.tsx, close.tsx), the glossary in AGENTS.md, packages/host/src/editor.ts and packages/catalog/src/signin.ts. */}
+
+wsp runs coding agents on every computer you own. You run Claude Code, Codex and more on your own computer, an old laptop or a server you rent, all from one window. The agents can start each other on any of those computers.
 
 <Image src="/shots/hero.webp" alt="The wsp app on a MacBook Pro. A lead thread handed its tickets to Claude Code and Codex threads on five computers. Its slate beside it shows the night's landings." />
 
 ## Threads run on the agents you already pay for
 
-wsp runs Claude Code, Codex, OpenCode and Cursor. Each agent uses the subscription that it is signed in to, so you do not need an API key.
+wsp runs Claude Code, Codex, OpenCode and Cursor. Claude Code, Codex and Cursor use the subscription that they are signed in to, so they need no API key. OpenCode takes an API key.
 
 ## Your agents hand work to each other
 
-A Claude Code thread can start a Codex thread to review its branch, on your Mac or on another computer. When the Codex thread is done, the Claude Code thread reads what it found. Every agent gets the same tools, so every agent can start threads. Each of those threads is in your sidebar. [Leads and sub-threads](/features/leads) tells you more.
+A Claude Code thread can start a Codex thread to review its branch, on your computer or on another computer. When the Codex thread is done, the Claude Code thread reads what it found. Every agent gets the same tools, so every agent can start threads. Each of those threads is in your sidebar. [Leads and sub-threads](/features/leads) tells you more.
 
 ## Add a computer, and your setup comes with it
 
-You point wsp at a Linux computer that you can reach over SSH. You pick what goes on it, and the computer joins your sidebar, ready for threads. You can copy these items from your Mac:
+You point wsp at a Linux computer that you can reach over SSH. You pick what goes on it, and the computer joins your sidebar, ready for threads. You can copy these items from your computer:
 
 - Your coding agents, signed in. You copy your key over or you sign in again on the new computer.
 - The MCP servers that your agents call, with their sign-ins.
-- Command line tools. One click picks the tools that your agents ran on your Mac.
+- Command line tools. One click picks the tools that your agents ran on your computer.
 - Skills and plugins, so a skill does the same job on both computers.
-- Your GitHub sign-in: the token from your Mac, or a new sign-in on the other computer.
+- Your GitHub sign-in: the token from your computer, or a new sign-in on the other computer.
 - Your repos, cloned with the name, icon and color that you gave each one.
 - Your git name and email, your shell prompt, your tmux configuration and your other git and shell settings.
 
-A computer behind a firewall can dial out to you instead. Then no port on it has to be open. [Add your first computer](/start/first-computer) shows the steps.
+A computer behind a firewall can dial out to you instead. Then no port on it has to be open. [Computers behind a firewall](/features/behind-a-firewall) tells you more. [Add your first computer](/start/first-computer) shows the steps for a computer that you reach over SSH.
 
 ## A slate in every thread
 
@@ -33,7 +35,7 @@ The slate is a panel beside the thread. The agent builds it and keeps it current
 ## Everything around the thread
 
 - The terminal pane reads your Ghostty configuration, so the font, the colors and the transparency are yours. This is also true on your other computers.
-- VS Code, Cursor, Zed or JetBrains open the thread's folder. When the folder is on another computer, they open it over SSH.
+- VS Code, Cursor, Zed or a JetBrains IDE opens the thread's folder. When the folder is on another computer, VS Code, Cursor and Zed open it over SSH. A JetBrains IDE opens folders on your computer only.
 - The pull request pane shows checks and reviews, and you merge from it. One press sends a failed check back to the agent.
 - The Agents pane shows which agents are signed in on which computer. You install another agent from the same pane.
 - The browser pane shows the page that the thread builds, next to the thread.
@@ -49,9 +51,9 @@ The slate is a panel beside the thread. The agent builds it and keeps it current
 
 ## Questions
 
-- Do I need API keys? No. Your agents use the subscriptions that they are already signed in to.
+- Do I need API keys? Not for Claude Code, Codex and Cursor. They use the subscriptions that they are already signed in to. OpenCode takes an API key.
 - Which agents does it run? Claude Code, Codex, OpenCode and Cursor. A thread can use any of them, and one thread can start another thread on a different agent.
-- Which computers? Your Mac, and any Linux computer that you can reach over SSH or that can dial out to you. That includes a server you rent, an old laptop and a desktop under the desk.
+- Which computers? The Mac or the Linux computer that runs the app. Also any Linux computer that you can reach over SSH or that can dial out to you. That includes a server you rent, an old laptop and a desktop under the desk.
 - Does my code go through your servers? Only if you turn on the relay. Threads run on your computers, and the app reaches them over your own network or SSH. If you link the relay to reach a computer from anywhere, that connection goes through Cloudflare, which can read it on the way. You can skip the relay or run your own.
 - What does it cost? Nothing. wsp is free and open source.
 

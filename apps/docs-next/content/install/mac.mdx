@@ -1,5 +1,7 @@
 # Install on a Mac
 
+{/* Written from apps/www/public/install (install_mac, put_on_path, restart_service), apps/www/src/downloads.ts, packages/protocol/src/bundles.mjs, apps/desktop/electron-builder.yml, apps/desktop/src/shim.ts, apps/desktop/src/host-lifecycle.ts (the service install on launch), packages/host/src/service.ts, apps/web/src/shell/FirstRun.tsx. */}
+
 wsp is one app for every Mac, with Apple silicon or an Intel chip. The app also gives you the `wsp` command line.
 
 ## Install with one line
@@ -56,5 +58,5 @@ The first window also says that wsp sends anonymous usage counts to PostHog. To 
 
 ## Install a given version or update
 
-- To install one release instead of the latest, set `WSP_VERSION` for the `sh` that runs the line: `curl --proto '=https' --tlsv1.2 -fsSL https://usewsp.com/install | WSP_VERSION=1.2.3 sh`.
+- To install one release instead of the latest, set `WSP_VERSION` for the `sh` that runs the line. For example: `curl --proto '=https' --tlsv1.2 -fsSL https://usewsp.com/install | WSP_VERSION=1.2.3 sh`.
 - To move to the latest release, run the install line again. It replaces the app where it is and restarts the host on the new version.
