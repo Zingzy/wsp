@@ -641,8 +641,9 @@ export interface Api {
   /** Stops the session's running turn; takes the runtime's session id (SessionView.id), not the harness id the events carry.
    * accepted means the turn's done is already on the wire; not-running and not-found are answers, not errors. Optional so
    * fixtures that never stop a turn need not fake it; the composer offers no stop without it. left says what the stop
-   * could not end on a computer the person added. */
-  interruptSession?(sessionId: string): Promise<{ outcome: SessionInterruptOutcome; left?: string }>;
+   * could not end on a computer the person added. With task it stops that one subagent of the turn alone, and error
+   * says in the host's words why the agent would not or could not. */
+  interruptSession?(sessionId: string, task?: string): Promise<{ outcome: SessionInterruptOutcome; left?: string; error?: string }>;
   /** Sends a message into the session's running turn; takes the runtime's session id, as interruptSession does. accepted
    * means a session.steer event is on the wire; not-running means the turn beat it and the caller starts a turn instead.
    * Optional so fixtures without a steering harness need not fake it; the composer keeps the stop road without it. */
@@ -998,9 +999,9 @@ export function makeApi(c: ProtocolClient): Api {
     listSessions: async id =>
       (await c.request<{ sessions: SessionView[] }>("sessions.list", id !== undefined ? { workspaceId: id } : {})).sessions,
     // Parsed, not trusted: an outcome outside the enum must not read as accepted.
-    interruptSession: async sessionId => {
-      const { outcome, left } = SessionInterruptResult.pick({ outcome: true, left: true }).parse(await c.request("sessions.interrupt", { sessionId }));
-      return { outcome, ...(left !== undefined ? { left } : {}) };
+    interruptSession: async (sessionId, task) => {
+      const { outcome, left, error } = SessionInterruptResult.pick({ outcome: true, left: true, error: true }).parse(await c.request("sessions.interrupt", { sessionId, ...(task !== undefined ? { task } : {}) }));
+      return { outcome, ...(left !== undefined ? { left } : {}), ...(error !== undefined ? { error } : {}) };
     },
     steerSession: async (sessionId, prompt, requestId) =>
       SessionSteerOutcome.parse((await c.request<{ outcome?: unknown }>("sessions.steer", { sessionId, prompt, requestId })).outcome),

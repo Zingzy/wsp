@@ -23,7 +23,7 @@ import {
   type PlaceProveRequest,
   macKindOf,
 } from "@wsp/protocol";
-import { LinkBackend, PlaceMachine, machineServerPort, serversOutLines, storesReached, unmergeServers, type MachineBackend } from "@wsp/engine";
+import { LinkBackend, PlaceMachine, landedAt, machineServerPort, serversOutLines, storeRoots, storesReached, unlandFiles, unmergeServers, type MachineBackend } from "@wsp/engine";
 import { verifyPlaceBytes } from "@wsp/keys";
 import { PLACES, CAPS, DEFAULT_COLLECTION, DEFAULT_ID, type PlaceRecord, madeBySetup, appliedView, type PlaceLogin } from "./types.js";
 import {
@@ -114,13 +114,32 @@ export function placeViews(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, 
     const home = held.report.login["HOME"];
     if (home === undefined) return [];
     const machine = new PlaceMachine(linkTo(placeId), { id: held.name, home });
-    const stores = ctx.recording.storesOn?.(placeId, home);
-    const unmerged = async () => {
-      const login = stores === undefined ? undefined : await ctx.door.folderComputer(placeId)?.machine.loginOf();
-      return unmergeServers(machineServerPort(machine), home, stores === undefined || login === undefined ? {} : storesReached(login, stores));
-    };
+    const unmerged = async () => unmergeServers(machineServerPort(machine), home, await storesOver(placeId, home));
     const took = await bounded(unmerged(), UNMERGE_MS, `the servers wsp merged into the agents' files on ${held.name}`).catch(() => []);
     return took.flatMap(serversOutLines);
+  };
+
+  /** The folder each agent's threads there are pointed at that the computer's login reaches, read over the link. */
+  const storesOver = async (placeId: string, home: string): Promise<Readonly<Record<string, string>>> => {
+    const stores = ctx.recording.storesOn?.(placeId, home);
+    const login = stores === undefined ? undefined : await ctx.door.folderComputer(placeId)?.machine.loginOf();
+    return stores === undefined || login === undefined ? {} : storesReached(login, stores);
+  };
+
+  /** The files wsp landed in an agent's store outside the home there, taken off over the link before either leave
+   * runs: the leave on that computer reads the list under the home alone, and only this host knows where it points
+   * an agent's threads. A file the person has written since stays. Nothing here fails the leave. */
+  const storeFilesOff = async (placeId: string, held: PlaceRecord): Promise<string[]> => {
+    const home = held.report.login["HOME"];
+    if (home === undefined) return [];
+    const machine = new PlaceMachine(linkTo(placeId), { id: held.name, home });
+    const off = async (): Promise<string[]> => {
+      const stores = await storesOver(placeId, home);
+      const roots = storeRoots(home, stores);
+      const out = await unlandFiles(machine, home, roots.map(([from]) => from), stores);
+      return out?.gone.map(rel => landedAt(home, roots, rel)) ?? [];
+    };
+    return bounded(off(), UNMERGE_MS, `the files wsp landed in the agents' stores on ${held.name}`).catch(() => []);
   };
 
   /** The plugins the setup put on that computer, each taken off by its agent's own command, the way a sync takes
@@ -404,7 +423,7 @@ export function placeViews(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, 
   };
 
   return {
-    pendingRecords, putPending, dropPending, flooring, floorOnce, takenBack, unmergedOver, pluginsOff, factsOn,
+    pendingRecords, putPending, dropPending, flooring, floorOnce, takenBack, unmergedOver, storeFilesOff, pluginsOff, factsOn,
     backendFrom, tunnelled, cut, forksOf, viewOf, joining, joined, forget, hereRow, rowsOf, joinedRow, providerRow,
   };
 }

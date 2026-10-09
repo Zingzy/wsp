@@ -1,9 +1,27 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { cleanup, fireEvent, render } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const drawn = vi.hoisted(() => ({ rows: new Map<string, number>() }));
+vi.mock("../src/components/threads/ThreadRows.js", async importOriginal => {
+  const { memo } = await import("react");
+  const real = await importOriginal<typeof import("../src/components/threads/ThreadRows.js")>();
+  // The row is a memo: count its draws inside it, behind the row's own comparison, where the tree draws it.
+  const row = real.ThreadRow as unknown as { type: (props: { thread: { id: string } }) => ReactNode; compare: (a: object, b: object) => boolean };
+  return {
+    ...real,
+    ThreadRow: memo((props: { thread: { id: string } }) => {
+      drawn.rows.set(props.thread.id, (drawn.rows.get(props.thread.id) ?? 0) + 1);
+      return row.type(props);
+    }, row.compare),
+  };
+});
+
 import type { SidebarThreadSnapshot } from "../src/adapt/index.js";
 import { ThreadRows } from "../src/components/threads/ThreadRows.js";
 import { useStore } from "../src/protocol/store.js";
+import { TreeRows, type ChildNode } from "../src/tree/TreeRows.js";
 
 const NOW = new Date("2026-09-26T12:00:00Z");
 
@@ -33,6 +51,10 @@ const thread = (id: string, over: Partial<SidebarThreadSnapshot> = {}): SidebarT
   pinnedAt: null,
   snoozedUntil: null,
   section: null,
+  subagents: [],
+  lastLine: null,
+  failure: null,
+  foldedAt: null,
   ...over,
 });
 
@@ -56,7 +78,7 @@ describe("ThreadRows", () => {
   });
 
   it("heads the list with its label in sentence case sans and draws one 36px line per thread", () => {
-    render(<ThreadRows label="Threads" rows={ROWS} />);
+    render(<ThreadRows label="Threads" rows={ROWS.map(row => ({ ...row, place: "" }))} />);
     const head = document.querySelector<HTMLElement>("[data-thread-rows-head]")!;
     expect(head.textContent).toBe("Threads");
     expect(head.className).not.toMatch(/uppercase|font-mono|tracking/);
@@ -65,7 +87,7 @@ describe("ThreadRows", () => {
     for (const row of rows()) expect(row.className).toContain("h-9");
   });
 
-  it("each line is the agent's mark, the title as the way to the thread, the place in muted sans and the status slot", () => {
+  it("each line is the agent's mark, the title as the way to the thread, the computer leading its second line in muted sans and the status slot", () => {
     render(<ThreadRows label="Threads" rows={ROWS} />);
     const [working, resting, asking, failed] = rows();
     expect(working!.querySelector("[data-harness-mark]")).not.toBeNull();
@@ -74,9 +96,11 @@ describe("ThreadRows", () => {
     expect(link.textContent).toBe("Cart total rounding");
     const place = working!.querySelector<HTMLElement>("[data-thread-place]")!;
     expect(place.textContent).toBe("Solari");
-    expect(place.className).toContain("text-xs");
-    expect(place.className).toContain("text-muted-foreground");
-    expect(place.className).not.toContain("font-mono");
+    const line = place.closest<HTMLElement>("[data-tree-note-line]")!;
+    expect(line.className).toContain("text-[11px]");
+    expect(line.className).toContain("text-muted-foreground");
+    expect(line.className).not.toContain("font-mono");
+    expect(working!.className).toContain("min-h-12");
     expect(asking!.querySelector("[data-thread-place]")!.textContent).toBe("zingzy's MacBook Pro");
     const status = (row: HTMLElement) => row.querySelector<HTMLElement>("[data-thread-status]")!;
     expect(rows().map(row => status(row).dataset.threadStatus)).toEqual(["working", "resting", "needs-you", "failed"]);
@@ -96,9 +120,10 @@ describe("ThreadRows", () => {
     expect(list.querySelector(".bg-border, hr")).toBeNull();
   });
 
-  it("leaves the place out where the caller has no name for it", () => {
+  it("leaves the place out where the caller has no name for it, and the row one line high", () => {
     render(<ThreadRows label="Threads" rows={[{ thread: thread("Local"), place: "" }]} />);
     expect(document.querySelector("[data-thread-place]")).toBeNull();
+    expect(rows()[0]!.className).toContain("h-9");
   });
 
   it("a click on the title opens that thread", () => {
@@ -107,5 +132,140 @@ describe("ThreadRows", () => {
     render(<ThreadRows label="Threads" rows={ROWS} />);
     fireEvent.click(rows()[1]!.querySelector("a")!);
     expect(select).toHaveBeenCalledWith("ws_api", "thr_Coupon expiry test");
+  });
+});
+
+const LEAD = { id: "ws_lead", name: "lead" };
+const at = (minutes: number): string => new Date(NOW.getTime() - minutes * 60_000).toISOString();
+const nodeOf = (t: SidebarThreadSnapshot, children: ChildNode[] = []): ChildNode => ({ thread: t, place: "", children });
+const working = (id: string, minutes = 5): SidebarThreadSnapshot => thread(id, { status: "running", startedAt: at(minutes), endedAt: null });
+const finished = (id: string, minutes: number): SidebarThreadSnapshot => thread(id, { startedAt: at(minutes + 10), endedAt: at(minutes), readAt: at(minutes), lastLine: `${id} is pushed.` });
+const tree = (nodes: ChildNode[], lead: SidebarThreadSnapshot | null = null) => <TreeRows lead={LEAD} tree={undefined} leadThread={lead} leadPlace="" nodes={nodes} />;
+
+describe("a lead's children as rows", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
+    vi.setSystemTime(NOW);
+    drawn.rows.clear();
+  });
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+    useStore.setState({ api: null } as never);
+  });
+
+  it("keeps the acts' room beside the status from md up, shows the acts on the row's own hover with no pill, and none under md", () => {
+    useStore.setState({ api: { interruptSession: vi.fn() } } as never);
+    render(tree([nodeOf(working("Cart total rounding"))]));
+    const row = rows()[0]!;
+    expect(row.className).toContain("group/row");
+    expect(row.className).toContain("hover:bg-accent");
+    const acts = row.querySelector<HTMLElement>("[data-child-acts]")!;
+    expect([...acts.querySelectorAll("button")].map(b => b.getAttribute("aria-label"))).toEqual(["Send a message", "Stop thread", "More"]);
+    // At rest and under md nothing is drawn; on hover or focus they fade in, on no fill of their own.
+    expect(acts.className).toContain("opacity-0");
+    expect(acts.className).toContain("max-md:hidden");
+    expect(acts.className).toContain("group-hover/row:opacity-100");
+    expect(acts.className).toContain("group-focus-within/row:opacity-100");
+    expect(acts.className).not.toMatch(/(^|\s)bg-|rounded-full|border/);
+    // Each glyph is the 24 px ghost button, its own hover square the only fill it takes.
+    for (const button of acts.querySelectorAll("button")) expect(button.className).toMatch(/size-6.*border-transparent|border-transparent.*size-6/);
+    // The room is the three 24 px glyphs and their gaps, kept from md up, so the title's width never moves.
+    const room = acts.parentElement!;
+    expect(room.className).toContain("md:min-w-20");
+    expect(room.querySelector("[data-thread-status]")!.parentElement!.className).toContain("md:group-hover/row:invisible");
+    // A client that cannot stop a turn draws no Stop, and the room shrinks to what is drawn.
+    cleanup();
+    useStore.setState({ api: null } as never);
+    render(tree([nodeOf(working("Cart total rounding"))]));
+    expect(rows()[0]!.querySelector("[data-child-acts]")!.parentElement!.className).toContain("md:min-w-13");
+  });
+
+  it("Send a message opens the field in the second line's place: Enter sends to that thread and closes it, Escape cancels", () => {
+    const startSession = vi.fn(async () => ({}) as never);
+    useStore.setState({ api: { startSession } } as never);
+    render(tree([nodeOf(finished("Coupon expiry test", 30), []), nodeOf(working("Cart total rounding"))]));
+    const row = document.querySelector<HTMLElement>('[data-thread-row="Cart total rounding"]')!;
+    fireEvent.click(row.querySelector<HTMLElement>('[aria-label="Send a message"]')!);
+    const field = row.querySelector<HTMLInputElement>("[data-row-name-input]")!;
+    expect(field.placeholder).toBe("Send a message");
+    expect(field.getAttribute("aria-label")).toBe("Message to Cart total rounding");
+    expect(row.querySelector("[data-child-acts]")).toBeNull();
+    fireEvent.change(field, { target: { value: "rebase onto main first" } });
+    fireEvent.keyDown(field, { key: "Enter" });
+    expect(startSession).toHaveBeenCalledWith(expect.objectContaining({ workspaceId: "ws_api", thread: "thr_Cart total rounding", prompt: "rebase onto main first", harness: "claude" }));
+    expect(row.querySelector("[data-row-name-input]")).toBeNull();
+    fireEvent.click(row.querySelector<HTMLElement>('[aria-label="Send a message"]')!);
+    fireEvent.keyDown(row.querySelector<HTMLInputElement>("[data-row-name-input]")!, { key: "Escape" });
+    expect(row.querySelector("[data-row-name-input]")).toBeNull();
+    expect(startSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("counts the open message field as the row's second line, so the elbow meets a nested row at its middle", () => {
+    useStore.setState({ api: { startSession: vi.fn() } } as never);
+    render(tree([nodeOf(working("Cart total rounding"), [nodeOf(working("Rounding probe"))])]));
+    const row = document.querySelector<HTMLElement>('[data-thread-row="Rounding probe"]')!;
+    const item = row.closest("li")!;
+    expect(item.hasAttribute("data-two")).toBe(false);
+    fireEvent.click(row.querySelector<HTMLElement>('[aria-label="Send a message"]')!);
+    expect(row.querySelector("[data-row-name-input]")).not.toBeNull();
+    expect(item.hasAttribute("data-two")).toBe(true);
+  });
+
+  it("a fold row draws its icon, count and chevron; shut it mounts no row, open it mounts twenty and a row for the rest", () => {
+    const done = Array.from({ length: 25 }, (_, i) => nodeOf(finished(`done ${i}`, 10 + i)));
+    const put = [nodeOf(thread("put away", { endedAt: at(50), readAt: at(50), settledAt: at(40) })), nodeOf(thread("put away too", { endedAt: at(60), readAt: at(60), settledAt: at(55) }))];
+    render(tree([...done, nodeOf(working("Cart total rounding")), ...put]));
+    const fold = (name: string) => document.querySelector<HTMLElement>(`[data-child-fold="${name}"]`)!;
+    const partRows = (part: string) => document.querySelectorAll(`[data-child-part="${part}"]`).length;
+    expect(fold("finished").querySelector("[data-fold-icon]")!.getAttribute("class")).toContain("lucide-circle-check");
+    expect(fold("finished").textContent).toBe("Finished25");
+    expect(fold("finished").getAttribute("aria-expanded")).toBe("false");
+    expect(fold("finished").querySelector("[data-fold-chevron]")!.getAttribute("class")).toContain("-rotate-90");
+    expect(fold("settled").querySelector("[data-fold-icon]")!.getAttribute("class")).toContain("lucide-archive");
+    expect(fold("settled").textContent).toBe("Settled2");
+    expect(partRows("finished")).toBe(0);
+    expect(partRows("settled")).toBe(0);
+    fireEvent.click(fold("finished"));
+    expect(fold("finished").getAttribute("aria-expanded")).toBe("true");
+    expect(fold("finished").querySelector("[data-fold-chevron]")!.getAttribute("class")).not.toContain("-rotate-90");
+    expect(partRows("finished")).toBe(20);
+    expect(fold("more").textContent).toBe("5 more");
+    expect(fold("more").querySelector("[data-fold-icon]")!.getAttribute("class")).toContain("lucide-chevrons-down");
+    fireEvent.click(fold("more"));
+    expect(partRows("finished")).toBe(25);
+    expect(document.querySelector('[data-child-fold="more"]')).toBeNull();
+    // Newest end first, each with its last line under its title.
+    expect(document.querySelector('[data-child-part="finished"] [data-tree-note]')!.textContent).toBe("done 0 is pushed.");
+    fireEvent.click(fold("settled"));
+    expect(partRows("settled")).toBe(2);
+  });
+
+  it("stands a subagent under the thread whose agent runs it, led by the bot, with Stop subagent alone while it runs", () => {
+    const lead = thread("lead", { status: "running", startedAt: at(20), endedAt: null, subagents: [{ id: "task_1", title: "Read the open tickets", state: "running", startedAt: NOW.getTime() - 60_000, asked: "Read every open ticket." }] });
+    useStore.setState({ api: { interruptSession: vi.fn() } } as never);
+    render(tree([nodeOf(working("Cart total rounding"))], lead));
+    const row = document.querySelector<HTMLElement>('[data-subagent-row="task_1"]')!;
+    expect(row.querySelector("[data-subagent-mark]")!.getAttribute("class")).toContain("lucide-bot");
+    expect(row.textContent).toContain("Read the open tickets");
+    expect([...row.querySelectorAll("[data-child-acts] button")].map(b => b.getAttribute("aria-label"))).toEqual(["Stop subagent"]);
+    expect(row.querySelector("[data-child-acts]")!.parentElement!.className).toContain("md:min-w-6");
+  });
+
+  it("redraws only the row whose thread moved, among twelve", () => {
+    const twelve = (moved?: (t: SidebarThreadSnapshot) => SidebarThreadSnapshot) =>
+      Array.from({ length: 12 }, (_, i) => {
+        const t = working(`child ${i}`, 30 - i);
+        return nodeOf(i === 5 && moved !== undefined ? moved(t) : { ...t });
+      });
+    const view = render(tree(twelve()));
+    expect([...drawn.rows.values()].reduce((a, b) => a + b, 0)).toBe(12);
+    drawn.rows.clear();
+    // Every listing reads every row again as new objects; only the one that asks now draws again.
+    view.rerender(tree(twelve(t => ({ ...t, asking: "Bash: pnpm install" }))));
+    expect(Object.fromEntries(drawn.rows)).toEqual({ "child 5": 1 });
+    drawn.rows.clear();
+    view.rerender(tree(twelve(t => ({ ...t, asking: "Bash: pnpm install" }))));
+    expect(drawn.rows.size).toBe(0);
   });
 });

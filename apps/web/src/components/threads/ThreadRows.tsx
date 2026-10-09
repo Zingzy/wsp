@@ -1,84 +1,219 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // A list of threads as one-line rows under a quiet sans head: the agent's
-// mark, the title as the way to the thread, where it runs in muted sans, and
-// the one status slot at a fixed width so times and words line up down the
-// list. The THREADS block under a reply and a computer's or cloud's threads
-// running there are the same list; the caller names the place each row shows.
-// A lead's rows add its child's branch with one fact beside it, a note under
-// the title, and in the status slot the one act there is to take, where there is.
+// mark, the title as the way to the thread, and the one status slot at a fixed
+// width so times and words line up down the list. A lead's rows add the line
+// under the title (what it asks, why it failed, what holds it, its last line),
+// led by the computer where that is not the lead's; the child's branch with one
+// fact beside it and the one merge act there is to take; and the acts the
+// status slot yields to on hover, from md up. A subagent's row is the same box,
+// led by the glyph the timeline gives the call that launched it.
 import { agentName } from "@wsp/catalog";
-import { GitBranchIcon } from "lucide-react";
-import type { MouseEvent } from "react";
+import type { PlaceView, SubagentView } from "@wsp/protocol";
+import { BotIcon, EllipsisIcon, GitBranchIcon, type LucideIcon } from "lucide-react";
+import { memo, useState, type MouseEvent, type ReactNode } from "react";
+import { CHILD_WORDS } from "../../actions/format.js";
+import { openContextMenu, runAction } from "../../actions/contextMenu.js";
+import { resolveActions, type ResolvedAction } from "../../actions/registry.js";
+import { childActions, type ChildTarget } from "../../actions/threadActions.js";
+import { sendToThread, useChildVerbs } from "../../actions/verbs.js";
 import type { SidebarThreadSnapshot } from "../../adapt/index.js";
 import { GROUP_LABEL } from "../../lib/microLabel.js";
 import { cn } from "../../lib/utils.js";
 import { useStore } from "../../protocol/store.js";
+import { ComputerGlyph } from "../../settings/ComputerGlyph.js";
+import { HOVER_GLYPH_CLASS } from "../../sidebar/rowGrammar.js";
+import { RowNameInput } from "../../sidebar/RowNameInput.js";
 import { HarnessMark } from "../chat/HarnessMark.js";
+import type { StatusKind } from "../status/kinds/index.js";
 import { restingAge } from "../status/restingAge.js";
 import { LINE_SLOT_CLASS, ThreadStatus } from "../status/ThreadStatus.js";
 import { ThreadLink } from "../ThreadLink.js";
 import { Button } from "../ui/button.js";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip.js";
+import { subagentStatus } from "./leadTree.js";
+import { SubagentCard } from "./SubagentCard.js";
 
 export interface ThreadRowItem {
   readonly thread: SidebarThreadSnapshot;
-  /** Where the thread runs as a person reads it: the computer by its name, or the project on a computer's own page. */
+  /** The computer the thread runs on by its name, where that is not the lead's; empty where it is. It leads the
+   * second line. */
   readonly place: string;
+  /** That computer's record, its glyph read off it; undefined until the places list holds it. */
+  readonly at?: PlaceView | undefined;
   /** The branch the thread's workspace is on, with the one fact about it a person reads beside it. */
   readonly branch?: { readonly name: string; readonly fact: string };
   /** A line under the title, for what the row cannot say in its cells. */
   readonly note?: string;
-  /** The one act the row offers, drawn in the status slot in place of the status while there is one to take. */
+  /** The one merge act the row offers, drawn in the status slot in place of the status while there is one to take. */
   readonly act?: { readonly label: string; readonly run: () => void };
 }
 
-export function ThreadRows({ label, rows, className }: { label: string; rows: ReadonlyArray<ThreadRowItem>; className?: string }) {
+export function ThreadRows({ label, rows, children, className }: { label: string; rows?: ReadonlyArray<ThreadRowItem>; children?: ReactNode; className?: string }) {
   return (
     <div data-thread-rows className={cn("flex flex-col", className)}>
       <span data-thread-rows-head className={cn(GROUP_LABEL, "flex h-8 items-center px-2 text-muted-foreground")}>
         {label}
       </span>
-      {rows.map(row => (
+      {rows?.map(row => (
         <ThreadRow key={row.thread.id} {...row} />
       ))}
+      {children}
     </div>
   );
 }
 
-/** One thread's line; a press anywhere on it opens the thread, as its title does, except on the act it offers. */
-export function ThreadRow({ thread, place, branch, note, act, className }: ThreadRowItem & { className?: string }) {
+/** How long the pointer rests on a subagent's row before its card opens, the tile card's own delay. */
+const CARD_DELAY_MS = 450;
+
+/** The acts' room from md up, as wide as the ghost buttons it holds with 4 px between, so the title's width never
+ * moves when they fade in. */
+const ACTS_ROOM = ["", "md:min-w-6", "md:min-w-13", "md:min-w-20"] as const;
+
+/** One of the row's acts on its hover: a ghost glyph button, its word on the tooltip. */
+function Act({ icon: Icon, label, run }: { icon: LucideIcon; label: string; run: (event: MouseEvent<HTMLButtonElement>) => void }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            type="button"
+            size="icon-xs"
+            variant="ghost"
+            aria-label={label}
+            data-child-act={label}
+            onClick={event => {
+              event.stopPropagation();
+              run(event);
+            }}
+          />
+        }
+      >
+        <Icon aria-hidden />
+      </TooltipTrigger>
+      <TooltipPopup side="top">{label}</TooltipPopup>
+    </Tooltip>
+  );
+}
+
+/** The status slot and, where the row takes acts, the acts it yields to while the pointer or the focus is on the row
+ * or its menu is open: Send a message and the state act, then More, which opens the right-click's menu. */
+function Slot({ status, acts, menu, more }: { status: ReactNode; acts: ReadonlyArray<ResolvedAction>; menu: (event: MouseEvent<HTMLElement>) => void; more: boolean }) {
+  const shown = acts.filter(act => act.refusal === null && act.icon !== undefined).slice(0, 2);
+  const count = shown.length + (more ? 1 : 0);
+  if (count === 0) return status;
+  return (
+    <span className={cn("relative flex shrink-0 items-center justify-end", ACTS_ROOM[count])}>
+      <span className="inline-flex md:group-hover/row:invisible md:group-focus-within/row:invisible md:group-data-[acts=shown]/row:invisible">{status}</span>
+      <span data-child-acts className={cn("absolute inset-y-0 right-0 flex items-center justify-end gap-1 transition-opacity duration-150 group-hover/row:opacity-100 group-focus-within/row:opacity-100 group-data-[acts=shown]/row:opacity-100", HOVER_GLYPH_CLASS)}>
+        {shown.map(act => (
+          <Act key={act.id} icon={act.icon!} label={act.title} run={() => void runAction(act)} />
+        ))}
+        {more ? <Act icon={EllipsisIcon} label={CHILD_WORDS.more} run={menu} /> : null}
+      </span>
+    </span>
+  );
+}
+
+/** The computer a child runs on, where that is not its lead's: its glyph and its name, the second line's first fact. */
+function RunsOn({ at, name }: { at: PlaceView | undefined; name: string }) {
+  return (
+    <span data-thread-place className="inline-flex shrink-0 items-center gap-1" title={CHILD_WORDS.runsOn(name)}>
+      {at === undefined ? null : <ComputerGlyph place={at} className="size-3" />}
+      {name}
+    </span>
+  );
+}
+
+/** The second line: the computer where it is not the lead's, then the note; or the message field in its place. */
+function SecondLine({ place, at, note }: { place: string; at: PlaceView | undefined; note: string | undefined }) {
+  if (place === "" && note === undefined) return null;
+  return (
+    <span data-tree-note-line className="flex min-w-0 items-center gap-3 text-[11px] leading-[14px] text-muted-foreground">
+      {place === "" ? null : <RunsOn at={at} name={place} />}
+      {note === undefined ? null : (
+        <span data-tree-note className="min-w-0 truncate" title={note}>
+          {note}
+        </span>
+      )}
+    </span>
+  );
+}
+
+/** The row's box: the mark column, the title over its second line, then what stands at the right. One box for a
+ * thread, a subagent and a fold, so the three line up down the list. */
+function rowBox(twoLines: boolean, extra?: string): string {
+  return cn(
+    "group/row flex min-w-0 items-center gap-2.5 rounded-[var(--control-radius)] px-2 text-sm transition-colors duration-150 hover:bg-accent data-[acts=shown]:bg-accent",
+    twoLines ? "min-h-12 py-1.5" : "h-9",
+    extra,
+  );
+}
+
+type ThreadRowProps = ThreadRowItem & {
+  /** The child as its acts read it, where the row stands in a lead's tree; a row outside one takes no acts. */
+  readonly target?: ChildTarget;
+  /** The status it ends in, where the tree reads it otherwise than the thread alone would. */
+  readonly kind?: StatusKind;
+  /** Whether the message field stands in the second line's place; the tree holds it, since it moves the connector. */
+  readonly sending?: boolean;
+  readonly onSending?: (open: boolean) => void;
+  readonly className?: string;
+};
+
+/** One thread's line; a press anywhere on it opens the thread, as its title does, except on its acts and its field. */
+export const ThreadRow = memo(function ThreadRow({ thread, place, at, branch, note, act, target, kind, sending = false, onSending, className }: ThreadRowProps) {
   const select = useStore(s => s.select);
+  const api = useStore(s => s.api);
+  const verbs = useChildVerbs();
+  const [shown, setShown] = useState(false);
   const threadId = thread.threadId;
+  const acts = target === undefined ? [] : resolveActions(childActions, target, { ...verbs, message: onSending === undefined ? undefined : () => onSending(true) });
+  const menu = (event: MouseEvent<HTMLElement>): void => {
+    if (acts.length === 0) return;
+    setShown(true);
+    void openContextMenu(event, acts).finally(() => setShown(false));
+  };
+  const twoLines = sending || note !== undefined || place !== "";
+  const status = <ThreadStatus thread={thread} age={restingAge(thread)} settled={target?.part === "settled"} {...(kind !== undefined ? { kind } : {})} className={LINE_SLOT_CLASS} />;
   return (
     <div
       data-thread-row={thread.id}
-      className={cn(
-        "flex min-w-0 items-center gap-2.5 rounded-[var(--control-radius)] px-2 text-sm transition-colors duration-150 hover:bg-accent",
-        note === undefined ? "h-9" : "min-h-12 py-1.5",
-        threadId !== null && "cursor-pointer",
-        className,
-      )}
+      {...(target !== undefined ? { "data-child-part": target.part } : {})}
+      {...(shown ? { "data-acts": "shown" } : {})}
+      className={rowBox(twoLines, cn(threadId !== null && "cursor-pointer", className))}
       {...(threadId === null
         ? {}
         : {
             onClick: (event: MouseEvent<HTMLDivElement>) => {
-              if (!(event.target instanceof Element) || event.target.closest("a, button") === null) select(thread.workspaceId, threadId);
+              if (!(event.target instanceof Element) || event.target.closest("a, button, input") === null) select(thread.workspaceId, threadId);
             },
           })}
+      {...(acts.length > 0 ? { onContextMenu: menu } : {})}
     >
       {/* The muted ink is the wrapper's, so a mark with inks of its own keeps them and a bare one takes the row's quiet ink. */}
       <span className="inline-flex shrink-0 text-muted-foreground">
         <HarnessMark harness={thread.harness} label={agentName(thread.harness)} className="size-[13px]" />
       </span>
-      {note === undefined ? (
-        <ThreadLink thread={thread} className={cn("min-w-0 flex-1 truncate text-foreground", branch !== undefined && "min-w-28")} />
-      ) : (
-        <span className="flex min-w-28 flex-1 flex-col">
-          <ThreadLink thread={thread} className="min-w-0 truncate text-foreground" />
-          <span data-tree-note className="truncate text-[11px] leading-[14px] text-muted-foreground" title={note}>
-            {note}
+      <span className="flex min-w-28 flex-1 flex-col">
+        <ThreadLink thread={thread} className={cn("min-w-0 truncate", target?.part === "settled" ? "text-muted-foreground" : "text-foreground")} />
+        {sending ? (
+          <span className="flex h-4.5 min-w-0 text-xs">
+            <RowNameInput
+              name=""
+              label={CHILD_WORDS.messageTo(thread.title)}
+              placeholder={CHILD_WORDS.send}
+              saving={false}
+              onRename={text => {
+                onSending?.(false);
+                sendToThread(api, thread, text);
+              }}
+              onCancel={() => onSending?.(false)}
+            />
           </span>
-        </span>
-      )}
+        ) : (
+          <SecondLine place={place} at={at} note={note} />
+        )}
+      </span>
       {branch === undefined ? null : (
         <span className="flex min-w-0 max-w-[260px] shrink-0 items-center gap-1 text-xs">
           <GitBranchIcon aria-hidden className="size-3 shrink-0 text-[var(--top-row-meta)]" />
@@ -90,18 +225,86 @@ export function ThreadRow({ thread, place, branch, note, act, className }: Threa
           </span>
         </span>
       )}
-      {place === "" ? null : (
-        <span data-thread-place className={cn("max-w-[220px] truncate text-muted-foreground text-xs", branch === undefined ? "shrink-0" : "min-w-0 shrink")}>
-          {place}
-        </span>
-      )}
-      {act === undefined ? (
-        <ThreadStatus thread={thread} age={restingAge(thread)} className={LINE_SLOT_CLASS} />
-      ) : (
+      {act !== undefined ? (
         <Button type="button" size="xs" variant="outline" className="shrink-0" onClick={act.run}>
           {act.label}
         </Button>
+      ) : sending ? (
+        status
+      ) : (
+        <Slot status={status} acts={acts} menu={menu} more={target !== undefined && target.task === null} />
       )}
     </div>
   );
+}, sameRow);
+
+/** The fields of a thread a row draws or acts on: anything else moving leaves the row as it is. */
+const DRAWN = ["id", "title", "status", "asking", "startedAt", "endedAt", "readAt", "settledAt", "unread", "harness", "threadId", "sessionId", "workspaceId", "resumeAt", "limit"] as const;
+
+const sameTarget = (a: ChildTarget | undefined, b: ChildTarget | undefined): boolean =>
+  a === b ||
+  (a !== undefined &&
+    b !== undefined &&
+    a.part === b.part &&
+    a.running === b.running &&
+    a.working === b.working &&
+    a.task === b.task &&
+    a.title === b.title &&
+    a.sessionId === b.sessionId &&
+    a.settles.join("\n") === b.settles.join("\n"));
+
+/** A row draws again only when something it draws moved, so a status change elsewhere in the list leaves it alone. */
+function sameRow(a: ThreadRowProps, b: ThreadRowProps): boolean {
+  return (
+    DRAWN.every(field => a.thread[field] === b.thread[field]) &&
+    a.thread.capped?.running === b.thread.capped?.running &&
+    a.place === b.place &&
+    a.at === b.at &&
+    a.note === b.note &&
+    a.kind === b.kind &&
+    a.className === b.className &&
+    a.sending === b.sending &&
+    a.onSending === b.onSending &&
+    a.branch?.name === b.branch?.name &&
+    a.branch?.fact === b.branch?.fact &&
+    a.act?.label === b.act?.label &&
+    sameTarget(a.target, b.target)
+  );
+}
+
+/** One of an agent's own subagents, in the row's box under the thread whose agent runs it: the launching call's
+ * glyph, its title with its card on rest, its status, and Stop subagent on hover while it runs. */
+export const SubagentRow = memo(function SubagentRow({ subagent, target, kind, note }: { subagent: SubagentView; target: ChildTarget; kind: StatusKind; note: string | undefined }) {
+  const verbs = useChildVerbs();
+  const acts = resolveActions(childActions, target, verbs);
+  const menu = (event: MouseEvent<HTMLElement>): void => {
+    if (acts.length > 0) void openContextMenu(event, acts);
+  };
+  const ended = subagent.endedAt === undefined ? null : new Date(subagent.endedAt).toISOString();
+  const status = (
+    <ThreadStatus thread={subagentStatus(subagent)} age={restingAge({ startedAt: new Date(subagent.startedAt).toISOString(), endedAt: ended })} kind={kind} className={LINE_SLOT_CLASS} />
+  );
+  return (
+    <div data-subagent-row={subagent.id} data-child-part={target.part} className={rowBox(note !== undefined)} {...(acts.length > 0 ? { onContextMenu: menu } : {})}>
+      <span className="inline-flex shrink-0 text-muted-foreground">
+        <BotIcon aria-hidden data-subagent-mark className="size-3.25" />
+      </span>
+      <span className="flex min-w-28 flex-1 flex-col">
+        <Tooltip>
+          <TooltipTrigger delay={CARD_DELAY_MS} render={<span className="flex min-w-0" />}>
+            <span className={cn("min-w-0 truncate", target.part === "settled" ? "text-muted-foreground" : "text-foreground")}>{subagent.title}</span>
+          </TooltipTrigger>
+          <SubagentCard subagent={subagent} harness={target.harness} kind={kind} reason={note} />
+        </Tooltip>
+        <SecondLine place="" at={undefined} note={note} />
+      </span>
+      <Slot status={status} acts={acts} menu={menu} more={false} />
+    </div>
+  );
+}, sameSubagentRow);
+
+const SUBAGENT_DRAWN = ["id", "title", "state", "startedAt", "endedAt", "asked", "model", "lastLine", "failure"] as const;
+
+function sameSubagentRow(a: { subagent: SubagentView; target: ChildTarget; kind: StatusKind; note: string | undefined }, b: typeof a): boolean {
+  return SUBAGENT_DRAWN.every(field => a.subagent[field] === b.subagent[field]) && a.kind === b.kind && a.note === b.note && a.target.harness === b.target.harness && sameTarget(a.target, b.target);
 }

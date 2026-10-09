@@ -109,6 +109,22 @@ export const LOCAL_BIN = TOOL_LINKS_DIR;
 export const APT_ENV = "export DEBIAN_FRONTEND=noninteractive";
 /** Claude Code's config dir on the guest under the guest home, which the pack rewrites `.claude/` to. */
 export const CLAUDE_CONFIG_REL = ".claude-cfg";
+/** The home-relative prefixes the files plan moves before anything travels to a computer wsp sets up: Claude Code's
+ * own folder and file land under its config dir there. Every road that names a path the plan landed reads these. */
+export const GUEST_REWRITES: readonly [string, string][] = [
+  [".claude/", `${CLAUDE_CONFIG_REL}/`],
+  [".claude.json", `${CLAUDE_CONFIG_REL}/.claude.json`],
+];
+
+/** Where a home-relative path lands under prefix rewrites; a prefix also moves the folder itself named bare. */
+export function rewrittenRel(rel: string, rewrites: readonly (readonly [string, string])[] = GUEST_REWRITES): string {
+  for (const [from, to] of rewrites) {
+    if (rel.startsWith(from)) return to + rel.slice(from.length);
+    if (from.endsWith("/") && rel === from.slice(0, -1)) return to.endsWith("/") ? to.slice(0, -1) : to;
+  }
+  return rel;
+}
+
 /** Claude Code's config dir on the guest, always CLAUDE_CONFIG_DIR and never HOME. */
 export const CLAUDE_CONFIG_DIR = `${GUEST_HOME}/${CLAUDE_CONFIG_REL}`;
 /** The file under Claude Code's config dir that the apiKeyHelper's key is placed in and the copied settings read. */

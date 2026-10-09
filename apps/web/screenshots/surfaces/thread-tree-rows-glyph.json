@@ -1,0 +1,14 @@
+{
+  "at": "/",
+  "fixture": "lead-rows",
+  "widths": [
+    1440
+  ],
+  "reason": "The pointer on one of a row's acts, which only a pointer reaches: its own hover square on the row's fill and its word above it. At 390 no act is drawn, which thread-tree-rows shoots.",
+  "steps": [
+    "row-id=thread:tree-lead",
+    "hover:child-act=Send a message"
+  ],
+  "wait": "child-acts",
+  "settleMs": 1200
+}

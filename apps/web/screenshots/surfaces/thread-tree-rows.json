@@ -1,13 +1,18 @@
 {
   "at": "/",
-  "fixture": "tree",
+  "fixture": "lead-rows",
   "widths": [
-    1440
+    1440,
+    390
   ],
-  "reason": "The lead's thread sits in the thread's column, whose 1280 and 390 layouts composer-thread already shoots; this pins the THREADS rows the tree of branches adds under the lead's reply.",
+  "reason": "The lead's thread sits in the thread's column, whose 1280 layout composer-thread already shoots; this pins the rows of its tree under its reply with the pointer on the first live row, whose acts show from md up and not at 390.",
   "steps": [
-    "row-id=thread:tree-lead"
+    "390:key:Escape",
+    "390:sidebar=trigger",
+    "row-id=thread:tree-lead",
+    "390:key:Escape",
+    "1440:hover:child-part=live"
   ],
-  "wait": "tree-branch",
+  "wait": "child-part",
   "settleMs": 1200
 }
