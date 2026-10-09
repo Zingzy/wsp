@@ -22,7 +22,7 @@ import type { LegendListRef } from "@legendapp/list/react";
 import { CAP_RAISE_ACT, threadKeyOf, USAGE_WORDS, WAKE_ACT, capWaitLine, folderOnJoined, workspaceKind, workspaceWord } from "@wsp/protocol";
 import { openComputerSettings } from "../../settings/openAt";
 import { Button } from "../ui/button";
-import { useCapabilities, useHarnessCatalog, usePlaces, useSidebarProjects, useStatus, useStore, useThreadSessions, useWorkspace, useWorkspaceState } from "../../protocol/store";
+import { useCapabilities, useHarnessCatalog, usePlaces, useSidebarProjects, useStore, useThreadSessions, useWorkspace, useWorkspaceState } from "../../protocol/store";
 import { childNodesOf, TreeRows } from "../../tree/TreeRows.js";
 import { Facts } from "../Facts.js";
 import { useMachineLine } from "../../notices/workspaceLines.js";
@@ -307,7 +307,7 @@ export function ChatView({
   const machine = useMachineLine(workspaceId);
   const footer = thread.hydrated && pageEntries === null ? (
     <div ref={footerRef} className="mx-auto w-full min-w-0 max-w-3xl">
-      {opened.length > 0 ? <OpenedThreads workspaceId={workspaceId} leadKey={thread.threadKey} /> : null}
+      {opened.length > 0 ? <OpenedThreads leadKey={thread.threadKey} /> : null}
       {view.settled !== null && !settledOnReply ? <SettledFooter turn={view.settled} /> : null}
       {paused !== null ? (
         <TimelineRuleLine data-workspace-paused line={paused}>
@@ -485,17 +485,14 @@ export function EmptyThread({ name, projectId, picker }: { name: string; project
 }
 
 /** The threads this thread's agent opened, wherever each runs, one line each under the reply, so a person reading the
- * opener can reach every thread it started without hunting the sidebar for it; each with its workspace's branch against
- * this workspace's where the host read this workspace's children. Drawn again only when what it reads moves, never
- * on the opener's own streamed events. */
-const OpenedThreads = memo(function OpenedThreads({ workspaceId, leadKey }: { workspaceId: string; leadKey: string }) {
+ * opener can reach every thread it started without hunting the sidebar for it. Drawn again only when what it reads
+ * moves, never on the opener's own streamed events. */
+const OpenedThreads = memo(function OpenedThreads({ leadKey }: { leadKey: string }) {
   const places = usePlaces();
   const projects = useSidebarProjects();
-  const tree = useStatus(workspaceId)?.tree;
-  const name = useWorkspace(workspaceId)?.name ?? workspaceId;
   const lead = projects.flatMap(runs => runs.threads.map(thread => ({ thread, runs }))).find(({ thread }) => thread.id === leadKey);
   const nodes = useMemo(() => childNodesOf(projects, places, leadKey), [projects, places, leadKey]);
-  return <TreeRows lead={{ id: workspaceId, name }} tree={tree} leadThread={lead?.thread ?? null} leadPlace={lead === undefined ? "" : computerName(places, lead.runs)} nodes={nodes} className="mt-2" />;
+  return <TreeRows leadThread={lead?.thread ?? null} leadPlace={lead === undefined ? "" : computerName(places, lead.runs)} nodes={nodes} className="mt-2" />;
 });
 
 const TURN_STATUS: Record<TurnSummary["state"], string> = {

@@ -33,7 +33,6 @@ import {
   GitDiscardReply,
   ViewedMarks,
   FixResult,
-  MergeInResult,
   PullRequestPage,
   GitPrDiffReply,
   PullRequestSendResult,
@@ -516,11 +515,8 @@ export interface Api {
   pullRequestResolve?(id: string, threadId: string, resolved: boolean): Promise<GitPrResolveReply>;
   /** Adds a reaction to the item a node id names, or takes it off, as the person. */
   pullRequestReact?(id: string, o: { subject: string; content: ReactionContent; on: boolean }): Promise<GitPrReactReply>;
-  /** Asks the workspace's agent to fix a failed check, or to merge a child whose merge stopped, or, with neither, updates it
-   * from its base and sends the conflicts. */
-  fix?(id: string, check?: string, child?: string): Promise<FixResult>;
-  /** Merges a child's branch into the lead's copy with a merge commit, or names the files that conflict. */
-  mergeIn?(id: string, child: string): Promise<MergeInResult>;
+  /** Asks the workspace's agent to fix a failed check, or, with none, updates it from its base and sends the conflicts. */
+  fix?(id: string, check?: string): Promise<FixResult>;
   /** Merges the workspace's pull request by the method named, or the repository's default, or once its checks pass, only while
    * its head is the one the window drew. */
   merge?(id: string, o: { method?: MergeMethod; whenChecksPass?: boolean; head: string }): Promise<MergeResult>;
@@ -960,8 +956,7 @@ export function makeApi(c: ProtocolClient): Api {
     pullRequestResolve: async (id, threadId, resolved) => GitPrResolveReply.parse(await c.request("workspaces.pullRequestResolve", { workspaceId: id, threadId, resolved })),
     pullRequestReact: async (id, o) => GitPrReactReply.parse(await c.request("workspaces.pullRequestReact", { workspaceId: id, ...o })),
     pullRequestSend: async (id, items) => PullRequestSendResult.parse(await c.request("workspaces.pullRequestSend", { workspaceId: id, items: [...items] })),
-    fix: async (id, check, child) => FixResult.parse(await c.request("workspaces.fix", { workspaceId: id, ...(check !== undefined ? { check } : {}), ...(child !== undefined ? { child } : {}) })),
-    mergeIn: async (id, child) => MergeInResult.parse(await c.request("workspaces.mergeIn", { workspaceId: id, child })),
+    fix: async (id, check) => FixResult.parse(await c.request("workspaces.fix", { workspaceId: id, ...(check !== undefined ? { check } : {}) })),
     merge: async (id, o) => MergeResult.parse(await c.request("workspaces.merge", { workspaceId: id, ...o })),
     start: async o => StartResult.parse(await c.request("workspaces.start", o)),
     review: async o => StartResult.parse(await c.request("workspaces.review", o)),

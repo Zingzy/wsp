@@ -244,6 +244,53 @@ describe("the sidebar's list of thread tiles", () => {
       await waitFor(async () => expect(await card("ws_f")).toMatchObject({ branch: ["fix/cart-rounding"], changed: ["3 changed"] }));
     });
 
+    /** A lead on ws_lead and its fork ws_kid, the lead's status carrying its tree as the host pushes it. */
+    const forked = async (child: Record<string, unknown>, kid: Record<string, unknown> = {}) => {
+      const lead = workspace("ws_lead", "coordinator", "pr_1");
+      const copy: WorkspaceView = { ...workspace("ws_kid", "cart rounding", "pr_1"), parentWorkspaceId: "ws_lead" };
+      const tree = { leadBranch: "main", children: [{ workspaceId: "ws_kid", branch: "fix/cart-rounding", pushed: true, aheadOfLead: 2, ...child }], readAt: 1 };
+      mount({ projects: [project("pr_1", "spoo")], workspaces: [lead, copy] });
+      await act(async () =>
+        useStore.setState({
+          sessions: sessions([{ ws: "ws_lead", id: "lead", prompt: "run the marathon" }, { ws: "ws_kid", id: "kid", prompt: "round the cart", parent: "lead", ...kid }]),
+          statuses: { ws_lead: { ...statusOf(lead), tree }, ws_kid: statusOf(copy, { ...fact, branch: String(child["branch"] ?? "fix/cart-rounding") }) },
+        } as never),
+      );
+    };
+    /** The branch lines on the card of the tile whose row id is given. */
+    const branchLines = (rowId: string): string[] => {
+      const tile = document.querySelector<HTMLElement>(`[data-row-id='${rowId}']`)!;
+      fireEvent.mouseEnter(tile);
+      const lines = [...document.querySelectorAll<HTMLElement>("[data-tile-card] [data-tile-card-line=branch]")].map(line => line.textContent ?? "");
+      fireEvent.mouseLeave(tile);
+      return lines;
+    };
+
+    it("says a fork's own branch and its one fact on its thread's card, and neither on its tile", async () => {
+      await forked({ pushRefused: "this computer has no git credential for github.com; sign gh in on it" });
+      const tile = await waitFor(() => rowOf("round the cart"));
+      expect(tile.textContent).not.toMatch(/fix\/cart-rounding|ahead|push/);
+      fireEvent.mouseEnter(tile);
+      const card = document.querySelector<HTMLElement>("[data-tile-card]")!;
+      expect([...card.querySelectorAll("[data-tile-card-line=branch]")].map(line => line.textContent)).toEqual(["fix/cart-rounding, 2 ahead of main"]);
+      expect(card.querySelector("[data-tile-card-line=branch] svg.lucide-git-branch")).not.toBeNull();
+      // The fact line is the whole of it: no push sentence and no steps ride the card.
+      expect(card.textContent).not.toMatch(/credential|sign gh|this computer/);
+    });
+
+    it("names no branch on the card of a fork on its lead's own branch", async () => {
+      await forked({ branch: "main", pushed: false, aheadOfLead: undefined });
+      await waitFor(() => rowOf("round the cart"));
+      expect(branchLines("thread:kid")).toEqual([]);
+    });
+
+    it("says the same branch line on a fork's tile in Needs you as on its tile under its lead", async () => {
+      await forked({}, { asking: "Bash: pnpm install" });
+      await waitFor(() => expect(document.querySelector("[data-row-id='inbox:thread:kid']")).not.toBeNull());
+      expect(branchLines("inbox:thread:kid")).toEqual(["fix/cart-rounding, 2 ahead of main"]);
+      expect(branchLines("thread:kid")).toEqual(["fix/cart-rounding, 2 ahead of main"]);
+    });
+
     it("says on the card that an editor is attached while one is connected over ssh", async () => {
       mount({ projects: [project("pr_1", "spoo")], workspaces: [fork] });
       await waitFor(() => expect(rowIds()).toEqual(["ws:ws_f"]));

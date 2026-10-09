@@ -333,6 +333,13 @@ export function WorkspaceSidebar() {
     return { state: workspaceState(workspace), ...(workspace.reason !== null ? { goneWords: workspace.reason } : {}) };
   };
 
+  /** A copy's checkout as its tiles' card says it, with what the tree of the workspace it was forked out of holds of it. */
+  const checkoutOf = (runs: SidebarProjectSnapshot) => {
+    const from = runs.workspace.parentWorkspaceId;
+    const tree = from === undefined ? undefined : statuses[from]?.tree;
+    return tileCheckout(runs, { attached: editorsAttached.has(runs.id), ...(tree === undefined ? {} : { lead: tree }) });
+  };
+
   /** Where a copy runs, as row one names it. */
   const placeOf = (runs: SidebarProjectSnapshot): TilePlace => ({ projectId: runs.workspace.project.id, project: runs.workspace.project.name, computer: computerName(places, runs), at: computerOf(places, runs) });
 
@@ -361,7 +368,7 @@ export function WorkspaceSidebar() {
     const real = inbox === undefined ? node : (nodeOf(tiles.live, item.id) ?? node);
     const copyActions = above === runs.id ? [] : resolveActions(workspaceActions, workspaceTarget(runs.workspace, runs.status, places), verbs);
     const place = placeOf(runs);
-    const checkout = tileCheckout(runs, { attached: editorsAttached.has(runs.id) });
+    const checkout = checkoutOf(runs);
     const slim = settled || part === "finished";
     let tile: ReactNode;
     let under: ReactNode = null;
@@ -497,7 +504,7 @@ export function WorkspaceSidebar() {
     if (launch === undefined || (picked !== null && runs.workspace.project.id !== picked.project.id)) return [];
     return [
       <li key={`launch:${runs.id}`} data-thread-selection-safe>
-        <ThreadLaunchTile launch={launch} place={placeOf(runs)} checkout={tileCheckout(runs, { attached: editorsAttached.has(runs.id) })} />
+        <ThreadLaunchTile launch={launch} place={placeOf(runs)} checkout={checkoutOf(runs)} />
       </li>,
     ];
   });
