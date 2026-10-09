@@ -12,6 +12,23 @@ export function groupSessions(rows: SessionView[], listed: readonly string[]): R
   return out;
 }
 
+/** A workspace's rows as read again, each row the host answered unchanged kept as the object already held, and the
+ * held list itself where none changed: the host answers every read with fresh objects, and a fresh object is a thread
+ * every derivation and every row reads as changed. */
+export function keptRows(held: SessionView[] | undefined, read: SessionView[]): SessionView[] {
+  if (held === undefined) return read;
+  const byId = new Map(held.map(row => [row.id, row]));
+  let same = held.length === read.length;
+  const rows = read.map((row, i) => {
+    const was = byId.get(row.id);
+    // Only a copy can be compared: the very object held may have been changed in place since it was drawn.
+    const kept = was !== undefined && was !== row && JSON.stringify(was) === JSON.stringify(row) ? was : row;
+    if (kept === row || kept !== held[i]) same = false;
+    return kept;
+  });
+  return same ? held : rows;
+}
+
 /** The workspace the page's address opens on, when the list still has it: wsp init writes it after its first fork.
  * An id that is gone falls through to the first row, as an address with no workspace in it does. */
 export function addressed(address: AppAddress | undefined, workspaces: readonly WorkspaceView[]): string | undefined {

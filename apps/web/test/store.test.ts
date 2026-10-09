@@ -1370,3 +1370,50 @@ describe("a status written outside the event stream while a frame is held", () =
     expect(useStore.getState().statuses["ws_a"]!.name).toBe("renamed");
   });
 });
+
+describe("a prompt's reread of every workspace", () => {
+  /** Three workspaces with a running thread each, whose host can hold back the reads of one of them. */
+  function slowHost() {
+    const workspaces = [view("ws_a"), view("ws_b"), view("ws_c")];
+    const rows = new Map(workspaces.map(w => [w.id, [{ id: `s_${w.id}`, workspaceId: w.id, threadId: `thr_${w.id}`, harness: "claude", status: "running" } as SessionView]]));
+    const host = fakeApi(workspaces, []);
+    const held: Array<() => void> = [];
+    let holding: string | null = null;
+    host.api.listSessions = id => {
+      const value = structuredClone(id === undefined ? [...rows.values()].flat() : (rows.get(id) ?? []));
+      if (id !== undefined && id === holding) return new Promise(resolve => held.push(() => resolve(value)));
+      return Promise.resolve(value);
+    };
+    const prompt = (workspaceId: string) =>
+      host.emit({ type: "session.permission", workspaceId, sessionId: `s_${workspaceId}`, threadId: `thr_${workspaceId}`, askId: "k1", toolName: "Bash", toolUseId: "tu", input: "{}", options: [] } as unknown as ProtocolEvent);
+    return { ...host, rows, prompt, hold: (id: string | null) => (holding = id), release: () => held.splice(0).forEach(go => go()) };
+  }
+
+  it("shows the asking row while another workspace's read is still out", async () => {
+    const host = slowHost();
+    useStore.getState().bind(host.api);
+    await vi.waitFor(() => expect(Object.keys(useStore.getState().sessions)).toHaveLength(3));
+    host.rows.set("ws_a", [{ ...host.rows.get("ws_a")![0]!, asking: "Run x" }]);
+    host.hold("ws_c");
+    host.prompt("ws_a");
+    await flush();
+    expect(useStore.getState().sessions["ws_a"]![0]!.asking).toBe("Run x");
+    host.release();
+  });
+
+  it("does not bring back a workspace deleted while the reread is out", async () => {
+    const host = slowHost();
+    useStore.getState().bind(host.api);
+    await vi.waitFor(() => expect(Object.keys(useStore.getState().sessions)).toHaveLength(3));
+    host.rows.set("ws_b", [{ ...host.rows.get("ws_b")![0]!, asking: "Run y" }]);
+    host.hold("ws_c");
+    host.prompt("ws_b");
+    await flush();
+    host.emit({ type: "workspace.deleted", workspaceId: "ws_b" } as unknown as ProtocolEvent);
+    await flush();
+    host.hold(null);
+    host.release();
+    await flush();
+    expect(useStore.getState().sessions["ws_b"]).toBeUndefined();
+  });
+});
