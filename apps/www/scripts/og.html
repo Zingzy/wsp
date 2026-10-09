@@ -1,0 +1,34 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-only -->
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      @font-face { font-family: "Inter Variable"; font-weight: 100 900; src: url({{inter}}) format("woff2"); }
+      @font-face { font-family: "Geist Mono Variable"; font-weight: 100 900; src: url({{mono}}) format("woff2"); }
+      * { box-sizing: border-box; margin: 0; }
+      body { width: 1200px; height: 630px; overflow: hidden; background: #121110; color: #ece6dc; font-family: "Inter Variable", sans-serif; font-feature-settings: "cv11", "ss01"; -webkit-font-smoothing: antialiased; }
+      .card { position: relative; width: 1200px; height: 630px; overflow: hidden; }
+      .words { position: absolute; left: 72px; top: 64px; bottom: 64px; width: 500px; display: flex; flex-direction: column; }
+      .lockup { font-size: 40px; display: flex; }
+      .lockup .sr-only { display: none; }
+      .lockup > span { display: inline-flex; align-items: center; gap: 0.32em; }
+      .lockup svg:first-child { height: 0.86em; width: auto; }
+      .lockup svg:nth-child(2) { height: 0.78em; width: auto; }
+      h1 { margin-top: auto; font-size: 66px; font-weight: 600; letter-spacing: -0.034em; line-height: 1.02; text-wrap: balance; }
+      .site { margin-top: 28px; font-family: "Geist Mono Variable", monospace; font-size: 22px; color: #9c9288; }
+      .panel { position: absolute; left: 628px; top: 64px; width: 760px; height: 640px; border-radius: 24px; overflow: hidden; border: 1px solid rgb(255 255 255 / 0.08); background: url({{wall}}) center / cover; }
+      .shot { position: absolute; left: 36px; top: 36px; width: 1040px; border-radius: 12px; box-shadow: 0 30px 70px -16px rgb(0 0 0 / 0.7), 0 0 0 1px rgb(0 0 0 / 0.45); }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <div class="words">
+        <div class="lockup">{{lockup}}</div>
+        <h1>{{line}}</h1>
+        <p class="site">usewsp.com</p>
+      </div>
+      <div class="panel"><img class="shot" src="{{shot}}" alt="" /></div>
+    </div>
+  </body>
+</html>

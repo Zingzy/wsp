@@ -3,11 +3,9 @@ import { track } from "@/lib/analytics";
 import { useState, type FormEvent } from "react";
 import { ArrowRight, Check } from "lucide-react";
 import { CopyCommand } from "@/components/copy-command";
-import { DOWNLOADS, platformOf, type Platform } from "@/downloads";
-import { INSTALL } from "@/links";
+import { DOWNLOADS, useVisitor } from "@/downloads";
+import { EMAIL, INSTALL } from "@/links";
 import { cn } from "@/lib/utils";
-
-const visitor = (): Platform => (typeof navigator === "undefined" ? "mac" : platformOf(navigator.userAgent));
 
 function AppleGlyph({ className }: { className?: string }) {
   return (
@@ -74,7 +72,7 @@ export function Waitlist({ className }: { className?: string }) {
         </button>
       </form>
       <p className="mt-3 text-[13px] text-muted-foreground">
-        {state === "failed" ? "That didn't go through. Write to hello@usewsp.com and we'll add you." : "wsp for Windows is on the way. Mac and Linux run it today."}
+        {state === "failed" ? `That didn't go through. Write to ${EMAIL} and we'll add you.` : "wsp for Windows is on the way. Mac and Linux run it today."}
       </p>
     </div>
   );
@@ -82,7 +80,7 @@ export function Waitlist({ className }: { className?: string }) {
 
 /** The install, matched to the visitor: the app's own download on a Mac or Linux, the waitlist on Windows. */
 export function Install({ className, align = "start" }: { className?: string; align?: "start" | "center" }) {
-  const platform = visitor();
+  const platform = useVisitor();
   if (platform === "windows") return <Waitlist className={cn(align === "center" && "flex flex-col items-center text-center", className)} />;
   const other = platform === "mac" ? "linux" : "mac";
   return (
