@@ -80,7 +80,13 @@ const PICK = { question: "Which ticket should the next free builder take?", head
 const input = JSON.stringify({ questions: [PICK] });
 const asked: SessionEvent = { type: "session.permission", ...sc, at: T0 + 110_000, askId: "ask_next", toolName: QUESTION_TOOL, toolUseId: "toolu_next", input, options: questionOptions(QUESTION_TOOL, input) };
 
-function fixture(over: { asks?: boolean; steps?: boolean } = {}) {
+/** Two threads the lead's agent opened, one at work and one failed. */
+const CHILDREN: SessionView[] = [
+  { id: "sess_build", threadId: "thr_build", workspaceId: WS, harness: "claude", status: "running", startedBy: "agent", parentThreadId: THREAD, prompt: "Build: box thread in the project folder", startedAt: T0 },
+  { id: "sess_fix", threadId: "thr_fix", workspaceId: WS, harness: "claude", status: "failed", startedBy: "agent", parentThreadId: THREAD, prompt: "Fix: main's desktop smoke", startedAt: T0 },
+];
+
+function fixture(over: { asks?: boolean; steps?: boolean; children?: boolean } = {}) {
   const listeners = new Set<(e: ProtocolEvent) => void>();
   const history: SessionEvent[] = [
     { type: "session.start", ...sc, at: T0, model: "claude-opus-5-5", prompt: "run the marathon" },
@@ -101,7 +107,7 @@ function fixture(over: { asks?: boolean; steps?: boolean } = {}) {
     nap: async () => workspace,
     wake: async () => workspace,
     capabilities: async () => caps(),
-    listSessions: async () => [running],
+    listSessions: async () => [running, ...(over.children === true ? CHILDREN : [])],
     listHarnesses: async () => [TABLE_CATALOG],
     watchStatuses: async () => [],
     markThreads: async (...args) => {
@@ -195,6 +201,16 @@ describe("the composer's drawer", () => {
     // One drawer on the box's edge: no card over the box, no strip, no second glass.
     expect(document.querySelector("[data-composer-queue], [data-prompt-strip], [data-limit-strip], [data-composer-tasks]")).toBeNull();
     expect(document.querySelectorAll("[data-composer-drawer]")).toHaveLength(1);
+  });
+
+  it("stands no Threads row for a lead with threads under it and opens no Threads bar: the tree stays at the transcript's end", async () => {
+    const { api } = fixture({ children: true });
+    await setup(api);
+    await fold();
+    await waitFor(() => expect([...document.querySelectorAll<HTMLElement>("[data-thread-rows] [data-thread-row]")].map(r => r.dataset["threadRow"])).toEqual(["thr_fix", "thr_build"]));
+    expect(rows().map(r => r.dataset["drawerRow"])).toEqual(["question", "tasks"]);
+    expect(document.querySelector('[data-drawer-row="threads"], [data-composer-bar="threads"]')).toBeNull();
+    expect(document.querySelector("[data-composer-drawer]")!.textContent).not.toContain("Threads");
   });
 
   it("draws no drawer while nothing waits around the composer", async () => {

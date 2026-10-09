@@ -1,0 +1,20 @@
+{
+  "at": "/",
+  "fixture": "lead-marathon",
+  "fresh": true,
+  "steps": [
+    "390:key:Escape",
+    "390:sidebar=trigger",
+    "row-id=thread:lead",
+    "390:key:Escape",
+    "1440:key:ControlOrMeta+Alt+b",
+    "1280:key:ControlOrMeta+Alt+b",
+    "1440:prompt-write",
+    "1280:prompt-write",
+    "threads-toggle",
+    "key:End",
+    "pointer-off"
+  ],
+  "wait": "shut-row",
+  "settleMs": 1200
+}

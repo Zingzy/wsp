@@ -153,4 +153,36 @@ describe("how a thread's turns ended, on its listing", () => {
     expect(foldThreads(await rt2.sessions.list(ws.id))[0]).not.toHaveProperty("foldedAt");
     await rt2.close();
   });
+
+  it("keeps a lead's shut Threads section on the preferences record apart from its fold, and a write drops a lead the host does not hold", async () => {
+    const h = endedByHand();
+    const { rt, ws } = await begin(h, memoryStore(), stubBackend());
+    h.turns[0]!.end({ status: "completed", text: "ok" });
+    await settledAs(rt, ws.id, "completed");
+    const lead = foldThreads(await rt.sessions.list(ws.id))[0]!;
+    const { preferences } = await rt.preferences.set({ threadsShut: { [lead.id]: true, thr_gone: true } });
+    expect(preferences.threadsShut).toEqual({ [lead.id]: true });
+    expect(foldThreads(await rt.sessions.list(ws.id))[0]).not.toHaveProperty("foldedAt");
+    expect((await rt.preferences.set({ threadsShut: { [lead.id]: null } })).preferences.threadsShut).toEqual({});
+    await rt.close();
+  });
+
+  it("keeps a shut Threads section for a lead whose rows fell off the index cap, while its thread record stands", async () => {
+    const h = endedByHand();
+    const store = memoryStore();
+    const backend = stubBackend();
+    const { rt, ws } = await begin(h, store, backend);
+    h.turns[0]!.end({ status: "completed", text: "ok" });
+    await settledAs(rt, ws.id, "completed");
+    const lead = foldThreads(await rt.sessions.list(ws.id))[0]!;
+    await rt.close();
+    // The state the cap leaves: no row of the thread in the index, its record still kept.
+    const doc = (await store.get("sessions", ws.id)) as { sessions: unknown[] };
+    await store.put("sessions", ws.id, { ...doc, sessions: [] });
+    const rt2 = createRuntime({ backend, store, adapters: { claude: h.adapter } });
+    expect(await rt2.sessions.list(ws.id)).toEqual([]);
+    const { preferences } = await rt2.preferences.set({ threadsShut: { [lead.id]: true, thr_gone: true } });
+    expect(preferences.threadsShut).toEqual({ [lead.id]: true });
+    await rt2.close();
+  });
 });

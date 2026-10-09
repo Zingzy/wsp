@@ -113,6 +113,9 @@ export const Preferences = z.object({
   /** How each recipe is drawn, by its slug. Absent until one is picked, so a record from a host that kept none reads
    * as it always did. */
   recipeLook: z.record(z.string(), RecipeLook).optional(),
+  /** The leads whose Threads section a person shut, by the lead's thread id; apart from the sidebar's fold of the
+   * same tree. Absent until one is shut, and a write keeps only the leads the host still holds. */
+  threadsShut: z.record(z.string(), z.literal(true)).optional(),
   /** Whether the host asks Google for each remote MCP server's icon by its host name. On unless the person turns it
    * off; defaulted so a record from a host older than the switch reads as on. */
   serverIcons: z.boolean().default(true),
@@ -179,6 +182,7 @@ export const PreferencesPatch = Preferences.omit({ labs: true })
     projectLook: z.record(z.string(), ProjectLook.nullable()).optional(),
     computerLook: z.record(z.string(), ComputerLook.nullable()).optional(),
     recipeLook: z.record(z.string(), RecipeLook.nullable()).optional(),
+    threadsShut: z.record(z.string(), z.literal(true).nullable()).optional(),
     target: PreferencesTarget.nullable().optional(),
     keybindings: z.record(z.string(), ChordText.nullable()).optional(),
     textSize: sizeOf(TEXT_SIZES).nullable().optional(),
@@ -216,6 +220,7 @@ export function applyPreferencesPatch(current: Preferences, patch: PreferencesPa
   const codeSize = patch.codeSize === undefined ? current.codeSize : patch.codeSize;
   const defaultAgent = patch.defaultAgent === undefined ? current.defaultAgent : patch.defaultAgent;
   const recipeLook = patch.recipeLook === undefined ? current.recipeLook : perWorkspace(current.recipeLook ?? {}, patch.recipeLook);
+  const threadsShut = patch.threadsShut === undefined ? current.threadsShut : perWorkspace(current.threadsShut ?? {}, patch.threadsShut);
   const fieldsById = <T extends object>(kept: Record<string, T>, moved: Record<string, { [K in keyof T]?: T[K] | null } | null> | undefined): Record<string, T> => {
     const next = { ...kept };
     for (const [id, value] of Object.entries(moved ?? {})) {
@@ -256,6 +261,7 @@ export function applyPreferencesPatch(current: Preferences, patch: PreferencesPa
     ...(codeSize === null || codeSize === undefined ? {} : { codeSize }),
     ...(defaultAgent === null || defaultAgent === undefined ? {} : { defaultAgent }),
     ...(recipeLook === undefined ? {} : { recipeLook }),
+    ...(threadsShut === undefined ? {} : { threadsShut }),
   };
 }
 

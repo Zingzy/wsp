@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { cleanup, fireEvent, render } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -19,7 +19,8 @@ vi.mock("../src/components/threads/ThreadRows.js", async importOriginal => {
 });
 
 import type { SidebarThreadSnapshot } from "../src/adapt/index.js";
-import { ThreadRows } from "../src/components/threads/ThreadRows.js";
+import { ThreadRow, type ThreadRowItem } from "../src/components/threads/ThreadRows.js";
+import { useNotices } from "../src/notices/store.js";
 import { useStore } from "../src/protocol/store.js";
 import { TreeRows, type ChildNode } from "../src/tree/TreeRows.js";
 
@@ -65,9 +66,17 @@ const ROWS = [
   { thread: thread("Checkout end to end on Firefox", { status: "failed" }), place: "spoo" },
 ];
 
+const list = (items: ReadonlyArray<ThreadRowItem>) =>
+  render(
+    <div>
+      {items.map(row => (
+        <ThreadRow key={row.thread.id} {...row} />
+      ))}
+    </div>,
+  );
 const rows = (): HTMLElement[] => [...document.querySelectorAll<HTMLElement>("[data-thread-row]")];
 
-describe("ThreadRows", () => {
+describe("a thread's row", () => {
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
     vi.setSystemTime(NOW);
@@ -77,18 +86,14 @@ describe("ThreadRows", () => {
     vi.useRealTimers();
   });
 
-  it("heads the list with its label in sentence case sans and draws one 36px line per thread", () => {
-    render(<ThreadRows label="Threads" rows={ROWS.map(row => ({ ...row, place: "" }))} />);
-    const head = document.querySelector<HTMLElement>("[data-thread-rows-head]")!;
-    expect(head.textContent).toBe("Threads");
-    expect(head.className).not.toMatch(/uppercase|font-mono|tracking/);
-    expect(head.className).toContain("h-8");
+  it("draws one 36px line per thread", () => {
+    list(ROWS.map(row => ({ ...row, place: "" })));
     expect(rows()).toHaveLength(4);
     for (const row of rows()) expect(row.className).toContain("h-9");
   });
 
   it("each line is the agent's mark, the title as the way to the thread, the computer leading its second line in muted sans and the status slot", () => {
-    render(<ThreadRows label="Threads" rows={ROWS} />);
+    list(ROWS);
     const [working, resting, asking, failed] = rows();
     expect(working!.querySelector("[data-harness-mark]")).not.toBeNull();
     expect(asking!.querySelector<SVGElement>("[data-harness-mark]")!.dataset.harnessMark).toBe("codex");
@@ -114,14 +119,13 @@ describe("ThreadRows", () => {
   });
 
   it("joins nothing: no dot, no rule between the lines", () => {
-    render(<ThreadRows label="Threads" rows={ROWS} />);
-    const list = document.querySelector<HTMLElement>("[data-thread-rows]")!;
-    expect(list.textContent).not.toContain("·");
-    expect(list.querySelector(".bg-border, hr")).toBeNull();
+    const { container } = list(ROWS);
+    expect(container.textContent).not.toContain("·");
+    expect(container.querySelector(".bg-border, hr")).toBeNull();
   });
 
   it("leaves the place out where the caller has no name for it, and the row one line high", () => {
-    render(<ThreadRows label="Threads" rows={[{ thread: thread("Local"), place: "" }]} />);
+    list([{ thread: thread("Local"), place: "" }]);
     expect(document.querySelector("[data-thread-place]")).toBeNull();
     expect(rows()[0]!.className).toContain("h-9");
   });
@@ -129,7 +133,7 @@ describe("ThreadRows", () => {
   it("a click on the title opens that thread", () => {
     const select = vi.fn();
     useStore.setState({ select } as never);
-    render(<ThreadRows label="Threads" rows={ROWS} />);
+    list(ROWS);
     fireEvent.click(rows()[1]!.querySelector("a")!);
     expect(select).toHaveBeenCalledWith("ws_api", "thr_Coupon expiry test");
   });
@@ -282,5 +286,60 @@ describe("a lead's children as rows", () => {
     drawn.rows.clear();
     view.rerender(tree(twelve(t => ({ ...t, replacedBy: "thr_redo", replaces: { threadId: "thr_old", failed: false, endedAt: null } }))));
     expect(Object.fromEntries(drawn.rows)).toEqual({ "child 5": 1 });
+  });
+});
+
+describe("the Threads section's head", () => {
+  const LEAD_THREAD = working("lead", 40);
+  const CAP = { placeId: "here", place: "Solari", running: 6, atOnce: 6 };
+  const shutFor = (shut: boolean) =>
+    useStore.setState(s => ({ api: { ...(s.api ?? {}), setPreferences: vi.fn() }, preferences: { ...s.preferences, threadsShut: shut ? { [LEAD_THREAD.id]: true } : {} } }) as never);
+  const head = () => document.querySelector<HTMLElement>("[data-threads-head]")!;
+  const counts = () => [...head().querySelectorAll<HTMLElement>("[data-tree-count]")].map(c => [c.dataset.treeCount, c.textContent, c.title]);
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
+    vi.setSystemTime(NOW);
+    useNotices.setState({ notices: [], toasts: [] } as never);
+  });
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+    useStore.setState(s => ({ api: null, preferences: { ...s.preferences, threadsShut: {} } }) as never);
+  });
+
+  it("offers Settle N finished while open, over every finished thread in the tree, and its toast's Undo brings them back", async () => {
+    const settleThreads = vi.fn(async (ids: readonly string[]) => ({ settled: [...ids, "c"].map(threadId => ({ threadId, title: threadId })), left: [] }));
+    const restoreThreads = vi.fn(async () => undefined);
+    useStore.setState({ api: { settleThreads, restoreThreads, setPreferences: vi.fn() } } as never);
+    render(tree([nodeOf(finished("a", 5)), nodeOf(finished("b", 6), [nodeOf(finished("c", 7))]), nodeOf(working("w"))], LEAD_THREAD));
+    // Open, the head says no counts.
+    expect(counts()).toEqual([]);
+    const settle = head().querySelector<HTMLButtonElement>("[data-settle-finished]")!;
+    expect(settle.textContent).toBe("Settle 3 finished");
+    await act(async () => fireEvent.click(settle));
+    expect(settleThreads).toHaveBeenCalledWith(["a", "b"]);
+    const notice = await waitFor(() => useNotices.getState().notices.find(n => n.text === "Settled 3 threads")!);
+    expect(notice.action?.word).toBe("Undo");
+    notice.action!.run();
+    expect(restoreThreads).toHaveBeenCalledWith(["a", "b", "c"]);
+  });
+
+  it("says the tree's counts only while shut, each hover in its own words, and offers no Settle there", () => {
+    shutFor(true);
+    render(tree([nodeOf(thread("ask", { status: "running", startedAt: at(3), endedAt: null, asking: "Bash: pnpm install" })), nodeOf(thread("held 1", { status: "running", startedAt: at(4), endedAt: null, capped: CAP })), nodeOf(thread("held 2", { status: "running", startedAt: at(5), endedAt: null, capped: CAP })), nodeOf(finished("done", 5))], LEAD_THREAD));
+    expect(counts()).toEqual([
+      ["needs-you", "1", "1 needs you"],
+      ["waiting", "2", "2 waiting"],
+    ]);
+    expect(head().querySelector("[data-settle-finished]")).toBeNull();
+  });
+
+  it("with nothing live, says how many finished in words, in the muted ink", () => {
+    shutFor(true);
+    render(tree([nodeOf(finished("a", 5)), nodeOf(finished("b", 6), [nodeOf(finished("c", 7)), nodeOf(finished("d", 8))])], LEAD_THREAD));
+    const count = head().querySelector<HTMLElement>('[data-tree-count="finished"]')!;
+    expect(count.textContent).toBe("4 finished");
+    expect(count.className).toContain("text-muted-foreground");
+    expect(count.querySelector("svg")).toBeNull();
   });
 });
