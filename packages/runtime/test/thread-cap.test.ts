@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join as joinPath } from "node:path";
 import { describe, expect, it } from "vitest";
-import { HERE_PLACE_ID, HOST_TOKEN_ENV, NOTIFY_ME, TURN_TOKEN_ENV, threadMessages, type TurnResult } from "@wsp/protocol";
+import { foldThreads, HERE_PLACE_ID, HOST_TOKEN_ENV, NOTIFY_ME, TURN_TOKEN_ENV, threadMessages, type TurnResult } from "@wsp/protocol";
 import { createRuntime, wiredPlace, type HarnessAdapterFactory } from "../src/runtime.js";
 import { newPlaceKeyPair } from "../src/places.js";
 import { serveRuntime } from "../src/serve.js";
@@ -1016,6 +1016,43 @@ describe("a turn that lent its slot on ends while the turn in its slot runs", ()
     } finally {
       for (const c of clients) c.close();
       for (const end of [...t.ends.values()]) end();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("a restart a computer's threads at once holds", () => {
+  it("lists its link from the moment it is held, settles the thread it replaced once it starts, and drops the link with that thread", async () => {
+    const root = mkdtempSync(joinPath(tmpdir(), "wsp-cap-restart-"));
+    const { ends, adapter } = heldTurns();
+    try {
+      const { host, set } = await onHere(root, adapter);
+      const rt = ctx.runtime!;
+      const mac = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
+      const old = await rt.sessions.start(mac.id, { prompt: "parser" });
+      const A = old.view().threadId!;
+      ends.get("parser")!();
+      await old.finished;
+      await set(1);
+      await rt.sessions.start(mac.id, { prompt: "blocker" });
+      const again = rt.sessions.start(mac.id, { prompt: "parser again", replaces: A });
+      await until(async () => (await rowsOf(mac.id)).some(r => r.capped !== undefined));
+      const waiting = foldThreads(await rowsOf(mac.id));
+      const A2 = waiting.find(t => t.capped !== undefined)!.id;
+      expect(waiting.find(t => t.id === A2)).toMatchObject({ replaces: A });
+      expect(waiting.find(t => t.id === A)).toMatchObject({ replacedBy: A2 });
+      expect(waiting.find(t => t.id === A)!.settledAt).toBeUndefined();
+      await expect(rt.sessions.start(mac.id, { prompt: "parser once more", replaces: A })).rejects.toMatchObject({ kind: "usage" });
+      ends.get("blocker")!();
+      await again;
+      await until(() => ends.has("parser again"));
+      await until(async () => foldThreads(await rowsOf(mac.id)).find(t => t.id === A)?.settledAt !== undefined);
+      ends.get("parser again")!();
+      await rt.sessions.delete(A);
+      expect(foldThreads(await rowsOf(mac.id)).find(t => t.id === A2)).not.toHaveProperty("replaces");
+      host.close();
+    } finally {
+      for (const end of ends.values()) end();
       rmSync(root, { recursive: true, force: true });
     }
   });

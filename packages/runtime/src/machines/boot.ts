@@ -315,6 +315,7 @@ export function bootArea(ctx: RuntimeContext): BootArea {
             ...(typeof held.settleNamedAt === "number" ? { settleNamedAt: held.settleNamedAt } : {}),
             ...(typeof held.pinnedAt === "number" ? { pinnedAt: held.pinnedAt } : {}),
             ...(typeof held.foldedAt === "number" ? { foldedAt: held.foldedAt } : {}),
+            ...(typeof held.replaces === "string" ? { replaces: held.replaces } : {}),
             ...(typeof held.snoozedUntil === "number" ? { snoozedUntil: held.snoozedUntil } : {}),
             ...(placed.success ? { section: placed.data } : {}),
             ...(typeof held.resumeAt === "string" ? { resumeAt: held.resumeAt } : {}),
@@ -516,6 +517,7 @@ export function bootArea(ctx: RuntimeContext): BootArea {
     // A thread's subagents ride its latest row alone, the one foldThreads reads, so a thread of several rows lists
     // each child once.
     const latest = new Map(held.map(s => [threadKeyOf(s.view), s] as const));
+    const replacedBy = ctx.restarts();
     // The turn's process and what its calls are stopped behind ride the answer and never the row itself: both are
     // this host's to know while the turn runs, and a pid written down outlives the process it named while a wait
     // written down outlives the question it was on.
@@ -523,6 +525,9 @@ export function bootArea(ctx: RuntimeContext): BootArea {
       const behind = s.view.status === "running" ? ctx.stoppedBehind(s) : undefined;
       const capped = ctx.capHeld.get(s.turnId)?.waiting?.wait;
       const marks = threadRecords.get(threadKeyOf(s.view));
+      const restart = replacedBy.get(threadKeyOf(s.view));
+      // A restart names the thread it replaced while that thread stands; once it is deleted there is nothing to open.
+      const replaces = marks?.replaces ?? s.replaces;
       const children = latest.get(threadKeyOf(s.view)) === s && s.view.threadId !== undefined ? transcriptIndex.get(s.view.workspaceId)?.children.get(s.view.threadId) : undefined;
       return {
         ...s.view,
@@ -542,6 +547,8 @@ export function bootArea(ctx: RuntimeContext): BootArea {
         ...(marks?.settledAt !== undefined ? { settledAt: marks.settledAt } : {}),
         ...(marks?.pinnedAt !== undefined ? { pinnedAt: marks.pinnedAt } : {}),
         ...(marks?.foldedAt !== undefined ? { foldedAt: marks.foldedAt } : {}),
+        ...(replaces !== undefined && (threadRecords.has(replaces) || ctx.latestOn(replaces) !== undefined) ? { replaces } : {}),
+        ...(restart !== undefined ? { replacedBy: restart } : {}),
         ...(marks?.snoozedUntil === undefined ? {} : marks.snoozedUntil > clock.now() ? { snoozedUntil: marks.snoozedUntil } : { wokeAt: marks.snoozedUntil }),
         ...(marks?.section !== undefined ? { section: marks.section } : {}),
         ...(marks?.rewound !== undefined ? { rewoundAt: marks.rewound.at } : {}),

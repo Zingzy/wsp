@@ -607,6 +607,7 @@ export interface ThreadsArea {
   readonly holdKept: (threadId: string, o: Omit<KeptProcess, "file" | "usedAt" | "cancel">) => boolean;
   readonly threadOfToken: (token: string) => string;
   readonly treeUnder: (threadId: string) => string[];
+  readonly restarts: () => Map<string, string>;
   readonly drivesThread: (threadId: string | undefined, caller: Caller | undefined) => boolean;
   readonly settlesThread: (threadId: string, caller: Caller | undefined) => boolean;
   readonly leadAsks: Map<string, PermissionAsk>;

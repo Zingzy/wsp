@@ -251,6 +251,8 @@ const sameTarget = (a: ChildTarget | undefined, b: ChildTarget | undefined): boo
     a.task === b.task &&
     a.title === b.title &&
     a.sessionId === b.sessionId &&
+    a.replaces === b.replaces &&
+    a.replacedBy === b.replacedBy &&
     a.settles.join("\n") === b.settles.join("\n"));
 
 /** A row draws again only when something it draws moved, so a status change elsewhere in the list leaves it alone. */

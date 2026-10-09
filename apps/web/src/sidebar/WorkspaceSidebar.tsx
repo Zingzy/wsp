@@ -389,10 +389,12 @@ export function WorkspaceSidebar() {
       const target = threadTarget(thread, { catalog, ...machineOf(runs) }, root, group);
       const actionsOf = resolveActions(threadActions, target, inbox === undefined || !canRename ? threadVerbs : { ...threadVerbs, rename: () => setRenaming({ rowId, saving: false }) });
       const lead = { node: real, thread };
-      const settle = settled ? undefined : root !== null ? actionIfAny(actionsOf, "settle") : actionIfAny(childActs(lead, part, tree, childVerbs), "settle");
+      const asChild = childActs(lead, part, tree, childVerbs);
+      const settle = settled ? undefined : root !== null ? actionIfAny(actionsOf, "settle") : actionIfAny(asChild, "settle");
+      const restartOpens = asChild.filter(action => action.id === "open-replaced" || action.id === "open-restart");
       const quiet = !settled && settle !== undefined && settle.refusal === null && settlesOnHover(real, tree);
       const kids = leadNodes(thread, real.children, tree);
-      const own = [...actionsOf, ...(root === null && settle !== undefined ? [settle] : []), ...leadActs(thread, finishedTake(kids, tree), childVerbs)];
+      const own = [...actionsOf, ...restartOpens, ...(root === null && settle !== undefined ? [settle] : []), ...leadActs(thread, finishedTake(kids, tree), childVerbs)];
       // The tree under the tile: drawn while it stands open, counted while it is folded, and folded only where the host
       // can open it again.
       const drawsTree = !settled && part === "live" && inbox === undefined && item.snoozedWorking === undefined && drawsUnder(real, tree);

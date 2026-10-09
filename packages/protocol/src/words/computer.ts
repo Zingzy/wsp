@@ -113,6 +113,16 @@ export const SUBAGENT_SETTLE_FIX = "settle the thread it runs in.";
 export const notUnderLine = (threadId: string): string => `thread ${threadWord(threadId)} is not under this thread, and a thread settles and restores only itself and the threads it started`;
 export const NOT_UNDER_FIX = "leave its lead and the threads beside it to the person.";
 
+/** A restart naming a thread that still works or asks, which would leave two rows doing one job. */
+export const replacesWorkingLine = (threadId: string): string => `thread ${threadWord(threadId)} is still working, and a restart replaces only a thread that stopped`;
+export const replacesWorkingFix = (threadId: string): string => `stop it first: wsp stop ${threadWord(threadId)}.`;
+/** A restart naming a thread that already has one, which would split one job across two restarts. */
+export const replacedAlreadyLine = (threadId: string, restart: string): string => `thread ${threadWord(threadId)} was restarted as ${threadWord(restart)}, and a thread has one restart`;
+export const replacedAlreadyFix = (restart: string): string => `name its restart instead: --replaces ${threadWord(restart)}.`;
+/** A restart named on a send into a thread that has run. */
+export const RESTART_OPENS_LINE = "a restart opens a thread, and this send goes into one that has run";
+export const RESTART_OPENS_FIX = "leave out --replaces, or run the restart as a new thread.";
+
 /** The one sentence a forget is refused with for a row from before threads: the fold keys such a row by its own
  * turn id, so no thread here answers to it and nothing a forget could take is named. */
 export function threadWithoutIdRefusal(rowId: string): string {

@@ -216,6 +216,10 @@ export const SessionView = z.object({
   pinnedAt: z.number().optional(),
   /** When the person folded this row's thread's tree in the sidebar, kept and stamped as readAt is. */
   foldedAt: z.number().optional(),
+  /** The thread this row's thread restarts, as its start named it, and the thread that restarts this one, both off the
+   * threads' records and stamped as readAt is. */
+  replaces: z.string().optional(),
+  replacedBy: z.string().optional(),
   /** When a snooze on this row's thread ends, while it has not: the sidebar leaves the thread out until then. Once
    * the host's clock passes it the listing carries wokeAt instead, and every window is told at that moment. */
   snoozedUntil: z.number().optional(),
@@ -281,6 +285,8 @@ export const ThreadView = z.object({
   settledAt: z.number().optional(),
   pinnedAt: z.number().optional(),
   foldedAt: z.number().optional(),
+  replaces: z.string().optional(),
+  replacedBy: z.string().optional(),
   snoozedUntil: z.number().optional(),
   wokeAt: z.number().optional(),
   section: ThreadPlacement.optional(),
@@ -349,6 +355,8 @@ export function foldThreads(sessions: ReadonlyArray<SessionView>): ThreadView[] 
       ...(latest.settledAt !== undefined ? { settledAt: latest.settledAt } : {}),
       ...(latest.pinnedAt !== undefined ? { pinnedAt: latest.pinnedAt } : {}),
       ...(latest.foldedAt !== undefined ? { foldedAt: latest.foldedAt } : {}),
+      ...(latest.replaces !== undefined ? { replaces: latest.replaces } : {}),
+      ...(latest.replacedBy !== undefined ? { replacedBy: latest.replacedBy } : {}),
       ...(latest.snoozedUntil !== undefined ? { snoozedUntil: latest.snoozedUntil } : {}),
       ...(latest.wokeAt !== undefined ? { wokeAt: latest.wokeAt } : {}),
       ...(latest.section !== undefined ? { section: latest.section } : {}),

@@ -6,11 +6,11 @@
 // restore take a root thread with every thread under it; a pin and a snooze
 // mark the root alone, which carries its tree with it. Keep this one, on a
 // thread one send to several models opened, deletes the copies the others run in.
-import { AlarmClockIcon, ArchiveIcon, ArchiveRestoreIcon, CheckIcon, FileTextIcon, LinkIcon, MessageSquareIcon, PencilIcon, PinIcon, PinOffIcon, SquareIcon, Trash2Icon, Undo2Icon } from "lucide-react";
+import { AlarmClockIcon, ArchiveIcon, ArchiveRestoreIcon, CheckIcon, FileTextIcon, HistoryIcon, LinkIcon, MessageSquareIcon, PencilIcon, PinIcon, PinOffIcon, RotateCwIcon, SquareIcon, Trash2Icon, Undo2Icon } from "lucide-react";
 import { threadMarkdown, threadMessages, type SessionSettleResult, type HarnessCatalog, type SessionEvent, type SessionStatus, type ThreadMarks, type WorkspaceState } from "@wsp/protocol";
 import type { SidebarThreadSnapshot } from "../adapt/index.js";
 import { addressLink } from "../protocol/address.js";
-import { CHILD_WORDS, CLIENT_CANNOT_SEND, CLIENT_CANNOT_REWIND, CLIENT_CANNOT_DELETE, CLIENT_CANNOT_MARK, CLIENT_CANNOT_RESTORE, CLIENT_CANNOT_SETTLE, CLIENT_CANNOT_STOP, NOTHING_READ_TO_SETTLE, THREAD_HAS_NO_ID, THREAD_NOT_RUNNING, THREAD_TREE_WORKING, THREAD_WORDS, threadForgetRefusalFor, threadRenameRefusal, CLIENT_CANNOT_READ } from "./format.js";
+import { CHILD_WORDS, CLIENT_CANNOT_OPEN, CLIENT_CANNOT_SEND, CLIENT_CANNOT_REWIND, CLIENT_CANNOT_DELETE, CLIENT_CANNOT_MARK, CLIENT_CANNOT_RESTORE, CLIENT_CANNOT_SETTLE, CLIENT_CANNOT_STOP, NOTHING_READ_TO_SETTLE, THREAD_HAS_NO_ID, THREAD_NOT_RUNNING, THREAD_TREE_WORKING, THREAD_WORDS, threadForgetRefusalFor, threadRenameRefusal, CLIENT_CANNOT_READ } from "./format.js";
 import type { ChildPart } from "../components/threads/leadTree.js";
 import { addNotice } from "../notices/store.js";
 import type { ActionEntry } from "./registry.js";
@@ -273,11 +273,16 @@ export interface ChildTarget {
   /** What a settle of the thread takes, and whether anything in it works, which holds the settle. */
   readonly settles: ReadonlyArray<string>;
   readonly working: boolean;
+  /** The thread a restart replaced and the thread that restarts this one, by id; null where there is none. */
+  readonly replaces: string | null;
+  readonly replacedBy: string | null;
 }
 
 export interface ChildVerbs {
   /** Opens the message field on the child's own row; the surface that draws the row puts its opener here. */
   readonly message?: (() => void) | undefined;
+  /** Opens a thread in the centre, by its id. */
+  readonly open?: ((threadId: string) => void) | undefined;
   readonly stop?: ((sessionId: string) => Promise<void>) | undefined;
   readonly stopTask?: ((task: { sessionId: string; task: string; harness: string; title: string }) => Promise<void>) | undefined;
   readonly settle?: ((threadIds: ReadonlyArray<string>) => Promise<SessionSettleResult | undefined>) | undefined;
@@ -349,6 +354,24 @@ export const childActions: ReadonlyArray<ActionEntry<ChildTarget, ChildVerbs>> =
     title: () => CHILD_WORDS.stopSubagent,
     refusal: (_target, verbs) => (verbs.stopTask === undefined ? CLIENT_CANNOT_STOP : null),
     run: (target, verbs) => (target.task === null ? undefined : verbs.stopTask?.({ sessionId: target.sessionId, task: target.task, harness: target.harness, title: target.title })),
+  },
+  {
+    id: "open-replaced",
+    group: "open",
+    icon: () => HistoryIcon,
+    applies: target => target.replaces !== null,
+    title: () => CHILD_WORDS.openReplaced,
+    refusal: (_target, verbs) => (verbs.open === undefined ? CLIENT_CANNOT_OPEN : null),
+    run: (target, verbs) => (target.replaces === null ? undefined : verbs.open?.(target.replaces)),
+  },
+  {
+    id: "open-restart",
+    group: "open",
+    icon: () => RotateCwIcon,
+    applies: target => target.replacedBy !== null,
+    title: () => CHILD_WORDS.openRestart,
+    refusal: (_target, verbs) => (verbs.open === undefined ? CLIENT_CANNOT_OPEN : null),
+    run: (target, verbs) => (target.replacedBy === null ? undefined : verbs.open?.(target.replacedBy)),
   },
 ];
 

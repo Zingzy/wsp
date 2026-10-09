@@ -54,7 +54,7 @@ const thread = (id: string, over: Partial<SidebarThreadSnapshot> = {}): SidebarT
   subagents: [],
   lastLine: null,
   failure: null,
-  foldedAt: null,
+  foldedAt: null, replaces: null, replacedBy: null,
   ...over,
 });
 
@@ -267,5 +267,20 @@ describe("a lead's children as rows", () => {
     drawn.rows.clear();
     view.rerender(tree(twelve(t => ({ ...t, asking: "Bash: pnpm install" }))));
     expect(drawn.rows.size).toBe(0);
+  });
+
+  it("redraws a row whose restart link moved, since its menu reads both ends", () => {
+    const twelve = (moved?: (t: SidebarThreadSnapshot) => SidebarThreadSnapshot) =>
+      Array.from({ length: 12 }, (_, i) => {
+        const t = working(`child ${i}`, 30 - i);
+        return nodeOf(i === 5 && moved !== undefined ? moved(t) : { ...t });
+      });
+    const view = render(tree(twelve()));
+    drawn.rows.clear();
+    view.rerender(tree(twelve(t => ({ ...t, replacedBy: "thr_redo" }))));
+    expect(Object.fromEntries(drawn.rows)).toEqual({ "child 5": 1 });
+    drawn.rows.clear();
+    view.rerender(tree(twelve(t => ({ ...t, replacedBy: "thr_redo", replaces: { threadId: "thr_old", failed: false, endedAt: null } }))));
+    expect(Object.fromEntries(drawn.rows)).toEqual({ "child 5": 1 });
   });
 });

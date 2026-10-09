@@ -237,6 +237,12 @@
               "foldedAt": {
                 "type": "number"
               },
+              "replaces": {
+                "type": "string"
+              },
+              "replacedBy": {
+                "type": "string"
+              },
               "snoozedUntil": {
                 "type": "number"
               },
@@ -611,6 +617,12 @@
               },
               "foldedAt": {
                 "type": "number"
+              },
+              "replaces": {
+                "type": "string"
+              },
+              "replacedBy": {
+                "type": "string"
               },
               "snoozedUntil": {
                 "type": "number"

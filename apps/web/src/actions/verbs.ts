@@ -127,6 +127,11 @@ export function useChildVerbs(): ChildVerbs {
               if (left !== undefined) addNotice({ kind: "error", text: left });
             },
       stopTask: stop === undefined ? undefined : task => stopSubagent({ interruptSession: stop }, task),
+      open: threadId => {
+        const { sessions, select } = useStore.getState();
+        const at = Object.entries(sessions).find(([, rows]) => rows.some(row => row.threadId === threadId))?.[0];
+        if (at !== undefined) select(at, threadId);
+      },
       settle: canSettle ? settle : undefined,
       restore: canRestore ? restore : undefined,
     }),

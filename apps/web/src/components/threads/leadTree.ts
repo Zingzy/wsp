@@ -5,6 +5,7 @@
 // A place hands its own nodes in through Tree; a subagent is a node under the thread whose agent runs it, built from
 // that thread's subagents, and every subagent of a thread stands flat under it whatever its depth.
 import { capRunningLine, type SubagentView } from "@wsp/protocol";
+import { CHILD_WORDS } from "../../actions/format.js";
 import { childActions, leadActions, type ChildTarget, type ChildVerbs } from "../../actions/threadActions.js";
 import { resolveActions, type ResolvedAction } from "../../actions/registry.js";
 import type { SidebarThreadSnapshot } from "../../adapt/index.js";
@@ -12,6 +13,7 @@ import { isThreadSettled, isThreadWorking } from "../../sidebar/Sidebar.logic.js
 import { FINISHED } from "../status/kinds/finished.js";
 import type { StatusKind, ThreadStatusInput } from "../status/kinds/index.js";
 import { RESTING } from "../status/kinds/resting.js";
+import { restingAge } from "../status/restingAge.js";
 import { threadStatusOf } from "../status/threadStatusOf.js";
 
 type Thread = SidebarThreadSnapshot;
@@ -127,8 +129,8 @@ export function countTree<N>(nodes: ReadonlyArray<LeadNode<N>>, tree: Tree<N>): 
   return { ...c, working: c.working + c.workingSubagents };
 }
 
-/** The line under a child's title: what it asks, why it failed, the threads at once that hold it, or a finished
- * child's last line. A settled child has none. */
+/** The line under a child's title: what it asks, why it failed, the threads at once that hold it, the thread a
+ * running restart replaced where the rows hold it, or a finished child's last line. A settled child has none. */
 export function noteOf<N>(node: LeadNode<N>, part: ChildPart): string | undefined {
   if (part === "settled") return undefined;
   if ("subagent" in node) {
@@ -141,6 +143,8 @@ export function noteOf<N>(node: LeadNode<N>, part: ChildPart): string | undefine
   if (thread.asking !== null) return thread.asking;
   if (thread.status === "failed") return thread.failure ?? undefined;
   if (thread.capped !== undefined) return capRunningLine(thread.capped);
+  const replaced = thread.replaces;
+  if (replaced !== null && replaced.endedAt !== null && thread.status === "running") return CHILD_WORDS.restartOf(replaced.failed, restingAge({ startedAt: null, endedAt: replaced.endedAt }));
   return part === "finished" ? (thread.lastLine ?? undefined) : undefined;
 }
 
@@ -181,7 +185,7 @@ export function childTarget<N>(node: LeadNode<N>, part: ChildPart, tree: Tree<N>
   const take = settleTake(node, tree);
   if ("subagent" in node) {
     const { subagent, of } = node;
-    return { title: subagent.title, sessionId: of.sessionId, harness: of.harness, task: subagent.id, part, running: subagent.state === "running", settles: [], working: take.working };
+    return { title: subagent.title, sessionId: of.sessionId, harness: of.harness, task: subagent.id, part, running: subagent.state === "running", settles: [], working: take.working, replaces: null, replacedBy: null };
   }
   const thread = node.thread;
   return {
@@ -193,6 +197,8 @@ export function childTarget<N>(node: LeadNode<N>, part: ChildPart, tree: Tree<N>
     running: thread?.status === "running",
     settles: take.threadIds,
     working: take.working,
+    replaces: thread?.replaces?.threadId ?? null,
+    replacedBy: thread?.replacedBy ?? null,
   };
 }
 
