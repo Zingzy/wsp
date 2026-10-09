@@ -322,6 +322,8 @@
     "thread_head": "wsp thread head <thread>",
     "thread_rename": "wsp thread rename <thread> \"<title>\"",
     "thread_forget": "wsp thread forget <thread> [--yes]",
+    "thread_settle": "wsp thread settle <thread>... [--finished]",
+    "thread_restore": "wsp thread restore <thread>...",
     "thread_allow": "wsp thread allow <thread>",
     "thread_deny": "wsp thread deny <thread> [--reason \"<words>\"]",
     "slate_catalog": "wsp slate catalog [<name>]",

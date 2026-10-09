@@ -4,6 +4,7 @@
 // and the Tab pair means what the sidebar body it is read in means by it.
 import { describe, expect, it, vi } from "vitest";
 import { compileResolvedKeybindingsConfig, DEFAULT_KEYBINDINGS, DEFAULT_RESOLVED_KEYBINDINGS, parseKeybindingShortcut, parseKeybindingWhenExpression } from "../src/keybindingDefaults.js";
+import { useNotices } from "../src/notices/store.js";
 import { useStore } from "../src/protocol/store.js";
 import { runShellCommand } from "../src/shell/shellCommands.js";
 import { chordRefusal, keybindingFromKeyboardEvent, keybindingsFor, rulesWith } from "../src/keybindingOverrides.js";
@@ -373,15 +374,17 @@ describe("the hold a chord carries", () => {
 });
 
 describe("the settle chord's command", () => {
-  it("settles the open thread's whole root tree, and nothing while a thread of it works", async () => {
-    const settleThreads = vi.fn(async (_ids: readonly string[]) => {});
+  it("settles the open thread's root, the host taking its whole tree, says what the host left, and nothing while a thread of it works", async () => {
+    useNotices.getState().clear();
+    const settleThreads = vi.fn(async (_ids: readonly string[]) => ({ settled: [{ threadId: "th_lead", title: "lead" }], left: [{ threadId: "th_builder", why: "already settled" }] }));
     const row = (id: string, over: Record<string, unknown> = {}) => ({ id: `s_${id}`, workspaceId: "ws_a", threadId: id, harness: "claude", status: "completed", startedAt: Date.now() - 60_000, endedAt: Date.now() - 30_000, readAt: Date.now() - 30_000, ...over });
     const workspace = { id: "ws_a", name: "a", machineId: "m", phase: "running", golden: "", createdAt: "2026-09-27T00:00:00Z", project: { id: "pr", name: "pr", path: "/root", computer: "here" } };
     const put = (builder: Record<string, unknown>) =>
       useStore.setState({ workspaces: [workspace], statuses: {}, selectedId: "ws_a", selectedThreadId: "th_builder", settleThreads, sessions: { ws_a: [row("th_lead"), row("th_builder", { parentThreadId: "th_lead", ...builder })] } } as never);
     put({});
     runShellCommand("thread.settle", { workspaceId: "ws_a", toggleSidebar: () => {} } as never, []);
-    expect(settleThreads).toHaveBeenCalledWith(["th_lead", "th_builder"]);
+    expect(settleThreads).toHaveBeenCalledWith(["th_lead"]);
+    await vi.waitFor(() => expect(useNotices.getState().notices[0]).toMatchObject({ kind: "done", text: "Settled 1 thread. Left 1 thread: already settled" }));
     settleThreads.mockClear();
     put({ status: "running", endedAt: undefined });
     runShellCommand("thread.settle", { workspaceId: "ws_a", toggleSidebar: () => {} } as never, []);

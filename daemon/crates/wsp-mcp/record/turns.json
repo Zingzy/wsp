@@ -41,6 +41,11 @@
   },
   "threadWithoutId": "{row} is a turn from before threads and carries no thread id of its own; no forget can name it",
   "threadForgot": "forgot thread {thread}: no turn ever ran on it, so nothing of its work is gone",
+  "threadSettled": "settled {thread} {title}",
+  "threadLeft": "left {thread}: {why}",
+  "nothingSettled": "nothing settled",
+  "threadRestored": "restored {thread} {title}",
+  "nothingRestored": "nothing restored",
   "noOpenAsk": "thread {thread} is waiting on no prompt; wsp threads says which threads need you",
   "answerRoads": [
     {

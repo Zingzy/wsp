@@ -1610,16 +1610,14 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               send({ id: msg.id, ok: true });
               return;
             case "sessions.settle":
-              await rt.sessions.settle(msg.threadIds, origin);
-              send({ id: msg.id, ok: true });
+              send({ id: msg.id, ok: true, ...(await rt.sessions.settle(msg.threadIds, origin, msg.finished === true ? { finished: true } : {})) });
               return;
             case "sessions.mark":
               await rt.sessions.mark(msg.threadIds, msg.marks, origin);
               send({ id: msg.id, ok: true });
               return;
             case "sessions.restore":
-              await rt.sessions.restore(msg.threadIds, origin);
-              send({ id: msg.id, ok: true });
+              send({ id: msg.id, ok: true, ...(await rt.sessions.restore(msg.threadIds, origin)) });
               return;
             case "sessions.search":
               send({ id: msg.id, ok: true, ...(await rt.sessions.search(msg.query, origin)) });

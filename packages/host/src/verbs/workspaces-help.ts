@@ -31,6 +31,8 @@ import {
   SessionInterruptResult,
   SessionRenameOutcome,
   SessionRenameResult,
+  SessionRestoreResult,
+  SessionSettleResult,
   ThreadView,
   WorkspaceAgents,
   WorkspaceListing,
@@ -549,6 +551,28 @@ export async function forgetThread(client: HostClient, thread: ThreadView, o: { 
 /** The line every director prints for a forget, naming what nobody loses: no turn of the thread did any work. */
 export function threadForgotLine(thread: ThreadView): string {
   return `forgot thread ${thread.id}: no turn ever ran on it, so nothing of its work is gone`;
+}
+
+/** Settles the threads a person names and every thread under each, or with finished the finished threads under each
+ * and not it, through the host, which answers what it settled and what it left with why. */
+export async function settleThreads(client: HostClient, threads: readonly ThreadView[], finished: boolean): Promise<SessionSettleResult> {
+  return SessionSettleResult.parse(await client.request("sessions.settle", { threadIds: threads.map(t => t.id), ...(finished ? { finished: true } : {}) }));
+}
+
+/** Brings the threads a person names back out of the fold, each with what the latest settle naming it moved. */
+export async function restoreThreads(client: HostClient, threads: readonly ThreadView[]): Promise<SessionRestoreResult> {
+  return SessionRestoreResult.parse(await client.request("sessions.restore", { threadIds: threads.map(t => t.id) }));
+}
+
+/** A settle as every director prints it: a line per thread it settled and per thread it left, or that it moved none. */
+export function settledLines(answer: SessionSettleResult): string {
+  const lines = [...answer.settled.map(t => `settled ${threadWord(t.threadId)} ${t.title}`), ...answer.left.map(t => `left ${threadWord(t.threadId)}: ${t.why}`)];
+  return lines.length === 0 ? "nothing settled" : lines.join("\n");
+}
+
+/** A restore as every director prints it. */
+export function restoredLines(answer: SessionRestoreResult): string {
+  return answer.restored.length === 0 ? "nothing restored" : answer.restored.map(t => `restored ${threadWord(t.threadId)} ${t.title}`).join("\n");
 }
 
 /** What a rename came to, as every director prints it: the runtime's five answers, none an error. `error` is the

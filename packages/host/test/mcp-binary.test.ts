@@ -246,6 +246,8 @@ const CALLED: readonly Called[] = [
   { tool: "stop", argv: ["stop", "nope"], arguments: { thread: "nope" }, refused: true },
   { tool: "thread_rename", argv: ["thread", "rename", "nope", "t"], arguments: { thread: "nope", title: "t" }, refused: true },
   { tool: "thread_forget", argv: ["thread", "forget", "nope"], arguments: { thread: "nope" }, refused: true },
+  { tool: "thread_settle", argv: ["thread", "settle", "nope"], arguments: { threads: ["nope"] }, refused: true },
+  { tool: "thread_restore", argv: ["thread", "restore", "nope"], arguments: { threads: ["nope"] }, refused: true },
   { tool: "thread_allow", argv: ["thread", "allow", "nope"], arguments: { thread: "nope" }, refused: true },
   { tool: "thread_deny", argv: ["thread", "deny", "nope"], arguments: { thread: "nope" }, refused: true },
   { tool: "threads_wait", argv: ["threads", "wait", "nope"], arguments: { threads: ["nope"] }, refused: true },

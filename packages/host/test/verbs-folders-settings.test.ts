@@ -223,7 +223,7 @@ describe("wsp verbs over the host: folders, export and what a person sets", () =
     const half = await h.run("thread");
     expect(half.code).toBe(3);
     expect(half.io.errors).toEqual([
-      'wsp thread opens a line rather than being one. usage: wsp thread read <thread> [--last]\nusage: wsp thread head <thread>\nusage: wsp thread rename <thread> "<title>"\nusage: wsp thread forget <thread> [--yes]\nusage: wsp thread allow <thread>\nusage: wsp thread deny <thread> [--reason "<words>"]',
+      'wsp thread opens a line rather than being one. usage: wsp thread read <thread> [--last]\nusage: wsp thread head <thread>\nusage: wsp thread rename <thread> "<title>"\nusage: wsp thread forget <thread> [--yes]\nusage: wsp thread settle <thread>... [--finished]\nusage: wsp thread restore <thread>...\nusage: wsp thread allow <thread>\nusage: wsp thread deny <thread> [--reason "<words>"]',
     ]);
   });
 

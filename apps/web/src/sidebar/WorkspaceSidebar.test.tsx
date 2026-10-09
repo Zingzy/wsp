@@ -9,6 +9,7 @@ import { clearNotices, lastNotice } from "../../test/notice-text.js";
 import { SidebarProvider } from "../components/ui/sidebar.js";
 import type { Api } from "../protocol/client.js";
 import { provideDaemonWire } from "../files/wire.js";
+import { useNotices } from "../notices/store.js";
 import { useStore } from "../protocol/store.js";
 import { provideTerminals, WorkspaceTerminals, type TerminalWire } from "../terminal/link.js";
 import { WorkspaceSidebar } from "./WorkspaceSidebar.js";
@@ -592,9 +593,13 @@ describe("the sidebar's list of thread tiles", () => {
     const picked: string[][] = [];
     const choose = (id: string) => (window.wsp = { contextMenu: async (items: Array<{ id: string; enabled?: boolean }>) => (picked.push(items.map(item => item.id)), id) } as never);
     try {
+      useNotices.getState().clear();
+      // The host's answer is said: what it left, beside what it settled.
+      settleThreads.mockResolvedValueOnce({ settled: [{ threadId: "th_lead", title: "the lead" }], left: [{ threadId: "th_builder", why: "still working: stop it first" }] } as never);
       choose("settle");
       fireEvent.contextMenu(rowOf("the lead"));
-      await waitFor(() => expect(settleThreads).toHaveBeenCalledWith(["th_lead", "th_builder"]));
+      await waitFor(() => expect(settleThreads).toHaveBeenCalledWith(["th_lead"]));
+      await waitFor(() => expect(useNotices.getState().notices[0]).toMatchObject({ kind: "done", text: "Settled 1 thread. Left 1 thread: still working: stop it first" }));
       expect(picked[0]).toContain("settle");
       // A finished thread under a root stands behind the lead's Finished fold, and settles alone from its own menu.
       expect(picked[0]).toContain("settle-finished");
@@ -606,7 +611,7 @@ describe("the sidebar's list of thread tiles", () => {
       settleThreads.mockClear();
       choose("settle-read");
       fireEvent.contextMenu(fold);
-      await waitFor(() => expect(settleThreads).toHaveBeenCalledWith(["th_lead", "th_builder"]));
+      await waitFor(() => expect(settleThreads).toHaveBeenCalledWith(["th_lead"]));
     } finally {
       delete (window as { wsp?: unknown }).wsp;
     }

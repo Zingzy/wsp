@@ -10,7 +10,7 @@ import { CHILD_WORDS } from "../actions/format.js";
 import { openContextMenu } from "../actions/contextMenu.js";
 import type { ChildVerbs } from "../actions/threadActions.js";
 import type { SidebarThreadSnapshot } from "../adapt/index.js";
-import { childParts, childTarget, finishedKeys, kindOf, leadActs, leadNodes, noteOf, partOf, type LeadNode, type Tree } from "../components/threads/leadTree.js";
+import { childParts, childTarget, finishedTake, kindOf, leadActs, leadNodes, noteOf, partOf, type LeadNode, type Tree } from "../components/threads/leadTree.js";
 import { SidebarMenuButton } from "../components/ui/sidebar.js";
 import { isThreadWorking } from "./Sidebar.logic.js";
 import { cn } from "../lib/utils.js";
@@ -89,7 +89,7 @@ export function LeadTree({
               setOpen(!open);
               setShown(PAGE);
             }}
-            onContextMenu={event => void openContextMenu(event, leadActs(lead, finishedKeys(nodes, tree), verbs))}
+            onContextMenu={event => void openContextMenu(event, leadActs(lead, finishedTake(nodes, tree), verbs))}
           >
             <CircleCheckIcon aria-hidden className="size-3 shrink-0 text-sidebar-muted-foreground" />
             <span className="min-w-0 flex-1 truncate text-sidebar-muted-foreground">{CHILD_WORDS.finished}</span>

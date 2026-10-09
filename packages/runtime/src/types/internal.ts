@@ -587,6 +587,8 @@ export interface ThreadRecord {
    * since every row of the thread shares them and a row falls off the cap while the thread lives on. */
   readAt?: number;
   settledAt?: number;
+  /** The settledAt of the latest settle that named the thread, which a restore of it takes back under it. */
+  settleNamedAt?: number;
   /** The person's marks on the thread, kept here for the same reason; snoozedUntil is kept after it passes, since
    * the thread reads Done off it until a window shows it. */
   pinnedAt?: number;
@@ -612,6 +614,9 @@ export interface ThreadRecord {
    * this record once its rows are all gone says that end. */
   ended?: TurnStatus;
 }
+
+/** The stamps a mark moves on a thread's record; one left undefined is taken off. */
+export type ThreadStamps = Partial<Omit<ThreadRecord, "harness" | "permissionMode">>;
 
 export interface SessionIndexRecord {
   workspaceId: string;

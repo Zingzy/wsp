@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-//! The tools that act on one thread and answer at once: `stop`, `thread_rename`, `thread_forget`, and `thread_allow`
-//! and `thread_deny`, which answer the prompt a thread is stopped on off the transcript the host holds.
+//! The tools that act on threads and answer at once: `stop`, `thread_rename`, `thread_forget`, `thread_settle` and
+//! `thread_restore`, and `thread_allow` and `thread_deny`, which answer the prompt a thread is stopped on off the
+//! transcript the host holds.
 
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-use super::named::{awake, history, params, thread_of, with_outcome, workspace_of};
+use super::named::{awake, history, params, thread_of, threads_of, with_outcome, workspace_of};
 use super::said::{fmt_bytes, js_trim, thread_word, turns};
 use super::{input, Answer, Refused, Tool};
 use crate::failure::Failure;
@@ -28,6 +29,16 @@ pub const FORGET: Tool = Tool {
     name: "thread_forget",
     listed: include_str!(concat!(env!("OUT_DIR"), "/record/tools/thread_forget.json")),
     call: |host, args| Box::pin(forget(host, args)),
+};
+pub const SETTLE: Tool = Tool {
+    name: "thread_settle",
+    listed: include_str!(concat!(env!("OUT_DIR"), "/record/tools/thread_settle.json")),
+    call: |host, args| Box::pin(settle(host, args)),
+};
+pub const RESTORE: Tool = Tool {
+    name: "thread_restore",
+    listed: include_str!(concat!(env!("OUT_DIR"), "/record/tools/thread_restore.json")),
+    call: |host, args| Box::pin(restore(host, args)),
 };
 pub const ALLOW: Tool = Tool {
     name: "thread_allow",
@@ -186,6 +197,90 @@ async fn forget(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
     client.request::<Value>("sessions.forget", params([("threadId", Value::from(runtime))])).await?;
     let line = fill(&turns().thread_forgot, &[("thread", &thread.id)]);
     Ok(Answer::text(line, &ForgetOut { thread_id: thread.id, workspace_id: thread.workspace_id }))
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+pub struct SettleIn {
+    pub threads: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finished: Option<bool>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+pub struct ThreadsIn {
+    pub threads: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct Moved {
+    pub thread_id: String,
+    pub title: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct Left {
+    pub thread_id: String,
+    pub why: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+pub struct SettleOut {
+    pub settled: Vec<Moved>,
+    pub left: Vec<Left>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+pub struct RestoreOut {
+    pub restored: Vec<Moved>,
+}
+
+/// The fold keys of the threads named, by the rule every thread tool names one by.
+async fn named_ids(client: &crate::client::Client, named: &[String]) -> Result<Value, Refused> {
+    Ok(Value::from(threads_of(client, named).await?.into_iter().map(|t| Value::from(t.id)).collect::<Vec<_>>()))
+}
+
+async fn settle(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
+    let SettleIn { threads, finished } = input("thread_settle", arguments)?;
+    let client = host.client().await?;
+    let mut asked = params([("threadIds", named_ids(&client, &threads).await?)]);
+    if finished == Some(true) {
+        asked.insert("finished".to_owned(), Value::Bool(true));
+    }
+    let out: SettleOut = client.request("sessions.settle", asked).await?;
+    let words = turns();
+    let lines: Vec<String> = out
+        .settled
+        .iter()
+        .map(|t| fill(&words.thread_settled, &[("thread", &thread_word(&t.thread_id)), ("title", &t.title)]))
+        .chain(out.left.iter().map(|t| fill(&words.thread_left, &[("thread", &thread_word(&t.thread_id)), ("why", &t.why)])))
+        .collect();
+    let line = if lines.is_empty() { words.nothing_settled.clone() } else { lines.join("\n") };
+    Ok(Answer::text(line, &out))
+}
+
+async fn restore(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
+    let ThreadsIn { threads } = input("thread_restore", arguments)?;
+    let client = host.client().await?;
+    let out: RestoreOut = client.request("sessions.restore", params([("threadIds", named_ids(&client, &threads).await?)])).await?;
+    let words = turns();
+    let line = if out.restored.is_empty() {
+        words.nothing_restored.clone()
+    } else {
+        out.restored
+            .iter()
+            .map(|t| fill(&words.thread_restored, &[("thread", &thread_word(&t.thread_id)), ("title", &t.title)]))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    Ok(Answer::text(line, &out))
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -372,6 +467,8 @@ mod tests {
         to_the_record::<StopIn, StopOut>(STOP.listed);
         to_the_record::<RenameIn, RenameOut>(RENAME.listed);
         to_the_record::<ThreadIn, ForgetOut>(FORGET.listed);
+        to_the_record::<SettleIn, SettleOut>(SETTLE.listed);
+        to_the_record::<ThreadsIn, RestoreOut>(RESTORE.listed);
         to_the_record::<ThreadIn, AnswerOut>(ALLOW.listed);
         to_the_record::<DenyIn, AnswerOut>(DENY.listed);
     }
