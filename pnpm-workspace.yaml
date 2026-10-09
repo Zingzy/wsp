@@ -11,3 +11,5 @@ patchedDependencies:
   "@legendapp/list@3.3.11": patches/@legendapp__list@3.3.11.patch
   "@pierre/diffs@1.3.0-beta.10": patches/@pierre%2Fdiffs@1.3.0-beta.10.patch
   zod@3.25.76: patches/zod@3.25.76.patch
+overrides:
+  "@typescript/typescript6>@typescript/old": npm:typescript@6.0.3

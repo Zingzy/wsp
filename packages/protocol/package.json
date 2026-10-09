@@ -7,11 +7,14 @@
     "./slate": "./dist/slate.js"
   },
   "scripts": {
-    "build": "tsup --entry.index src/index.ts --entry.slate src/slate/index.ts --format esm --dts",
+    "build": "tsup --entry.index src/index.ts --entry.slate src/slate/index.ts --format esm",
     "test": "vitest run packages/protocol"
   },
   "dependencies": {
     "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "typescript": "npm:@typescript/typescript6@6.0.2"
   },
   "license": "AGPL-3.0-only"
 }
