@@ -1,0 +1,10 @@
+{
+  "name": "@wsp/docs-next",
+  "type": "module",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "scripts": {
+    "preview": "npx -y -p node@24.21.0 -p @scalar/cli@2.10.0 -c 'scalar project preview --no-open'",
+    "check": "npx -y -p node@24.21.0 -p @scalar/cli@2.10.0 -c 'scalar project check-config'"
+  }
+}
