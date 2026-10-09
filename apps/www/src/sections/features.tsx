@@ -41,12 +41,12 @@ const FEATURES: Feature[] = [
   },
   {
     title: "All your agents in one place.",
-    line: "See which agents are signed in where, and install another from the same pane.",
+    line: "See which agents are signed in on which computer, and sign one in from the same pane.",
     src: agents,
     at: "tr",
     scale: 2.1,
     wall: "30% 70%",
-    alt: "The Agents pane: Claude Code and Codex signed in, and Gemini CLI, OpenCode, Pi, Hermes, Crush and more to install.",
+    alt: "The Agents pane: Claude Code and Codex signed in, and Gemini CLI, OpenCode, Pi, Hermes, Crush and more in the catalog.",
   },
   {
     title: "A browser for the dev server.",
