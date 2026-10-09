@@ -594,6 +594,14 @@ export function placeSetup(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea) 
       setupFrame({ addId, placeId, ...(failed === undefined ? outcome() : { end: "failed", said: failed }) });
     };
 
+    /** The folder each agent's threads there are pointed at that the computer's login reaches, where the servers
+     * step merges and lands their files and a sync takes those files back off. */
+    const storesHere = async (): Promise<Readonly<Record<string, string>> | undefined> => {
+      const stores = recording.storesOn?.(placeId, home);
+      const login = stores === undefined ? undefined : await ctx.door.folderComputer(placeId)?.machine.loginOf();
+      return stores === undefined || login === undefined ? undefined : storesReached(login, stores);
+    };
+
     /** A sync's removals, before anything is planned: each row the recipe took out comes off by its own road, a row
      * the computer had before wsp stays, and a file the person has written since stays and its row says so. */
     const undo = async (): Promise<void> => {
@@ -608,7 +616,7 @@ export function placeSetup(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea) 
         const left: PlaceProvisionRow[] = [];
         if (owned === "present") left.push({ id: u.key, label: u.label, outcome: "skipped", note: wasThereLine(record.name) });
         if (u.dests !== undefined) {
-          const out = await unlandFiles(machine, home, u.dests);
+          const out = await unlandFiles(machine, home, u.dests, await storesHere());
           if (out === undefined) left.push({ id: u.key, label: u.label, outcome: "failed", note: UNLAND_FAILED_LINE });
           else if (out.kept.length > 0) left.push({ id: u.key, label: u.label, outcome: "skipped", note: editedThereLine(record.name, out.kept) });
           stage(`${u.label}: ${out === undefined ? "its files were not taken off" : `${out.gone.length} files taken off, ${out.kept.length} kept`}`);
@@ -644,11 +652,9 @@ export function placeSetup(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea) 
         if (w.row === GITHUB_ROW) await githubSignIn(plan);
         else await agentSignIn(signInOfRow(w.row)!, plan);
       }
-      const stores = recording.storesOn?.(placeId, home);
       const engine = (s: EngineStep) => async () => {
-        const login = stores === undefined || s !== "mcp" ? undefined : await ctx.door.folderComputer(placeId)?.machine.loginOf();
-        const reached = stores === undefined || login === undefined ? {} : { stores: storesReached(login, stores) };
-        return ours(await provisioner.step(machine, plan, s, run, stageOf(s), { home, held: new Set(Object.keys(serverValuesOf(vault()))), ...reached }));
+        const stores = s === "mcp" ? await storesHere() : undefined;
+        return ours(await provisioner.step(machine, plan, s, run, stageOf(s), { home, held: new Set(Object.keys(serverValuesOf(vault()))), ...(stores !== undefined ? { stores } : {}) }));
       };
       const floor = await step("floor", engine("floor"));
       if (floor?.failed === true) return await end(floorFailedLine(floor.rows));

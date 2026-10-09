@@ -8,6 +8,7 @@ import {
   type WorkLogEntry,
 } from "./adapt";
 import { formatWorkspaceRelativePath } from "../../lib/filePathDisplay";
+import { spawnKey } from "../../adapt/spawned";
 
 export const TIMELINE_MINIMAP_ITEM_SPACING = 8;
 export const TIMELINE_MINIMAP_MIN_ITEMS = 2;
@@ -308,6 +309,9 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
 
     case "subagent":
       return a.subagent === (b as typeof a).subagent;
+
+    case "spawn":
+      return a.calls.map(spawnKey).join("\n") === (b as typeof a).calls.map(spawnKey).join("\n");
 
     case "work": {
       const bw = b as typeof a;

@@ -649,7 +649,7 @@ describe("taking a row's files off a computer once the recipe drops it", () => {
     ].join(""));
 
     const out = await unlandFiles(g.machine, g.root, [".claude/skills/a"]);
-    expect(out).toEqual({ gone: [".claude/skills/a/SKILL.md"], kept: [".claude/skills/a/notes.md", ".claude/skills/a/link/victim"] });
+    expect(out).toEqual({ gone: [".claude/skills/a/SKILL.md"], kept: [".claude/skills/a/link/victim", ".claude/skills/a/notes.md"] });
     expect(existsSync(join(g.root, ".claude/skills/a/SKILL.md"))).toBe(false);
     expect(read(g.root, ".claude/skills/a/notes.md")).toBe("edited there\n");
     expect(readFileSync(join(outside, "victim"), "utf8")).toBe("v\n");

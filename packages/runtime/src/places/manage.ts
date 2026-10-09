@@ -92,7 +92,7 @@ export function manageDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, 
     syncTimers, syncOf, markSync, syncSoon, startedOrSaid, linkTo,
   } = setupArea;
   const {
-    pendingRecords, putPending, dropPending, floorOnce, unmergedOver, pluginsOff, factsOn, cut, forksOf, viewOf,
+    pendingRecords, putPending, dropPending, floorOnce, unmergedOver, storeFilesOff, pluginsOff, factsOn, cut, forksOf, viewOf,
     joining, joined, forget, hereRow, rowsOf, joinedRow, providerRow,
   } = viewArea;
 
@@ -547,6 +547,8 @@ export function manageDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, 
       // Before either road sweeps: a plugin comes off by its agent's own command, which may sit in the install folder
       // the sweep takes, and nothing on that computer knows which plugins were wsp's.
       const plugins = await pluginsOff(placeId, held, reach !== undefined, stands ? login : undefined, sudoPassword);
+      // Before either road sweeps too: the leave there reads wsp's list under the home alone.
+      const stored = reach !== undefined ? await storeFilesOff(placeId, held) : [];
       let swept: string[] = [];
       let note: string | undefined;
       // What the road that logs in did where it did not finish the job, for the lines about the road that followed.
@@ -593,7 +595,7 @@ export function manageDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, 
           }
         }
       }
-      swept = [...plugins.off, ...swept];
+      swept = [...plugins.off, ...stored, ...swept];
       if (plugins.kept.length > 0) note = note === undefined ? pluginsKeptLine(held.name, plugins.kept) : `${note}; ${pluginsKeptLine(held.name, plugins.kept)}`;
       if (reach !== undefined) cut(placeId, "removed from this host");
       // After the sweep, since the link that sweep may ride comes in through the forward.

@@ -99,6 +99,35 @@ describe("taking a place back out", () => {
     });
   }
 
+  it("takes the files wsp landed in a box's Codex store off over the link before it asks that computer to leave", async () => {
+    const { hostKey } = await serving();
+    const sent = report("vps", { login: { HOME: "/root", USER: "root", PATH: "/usr/bin" } });
+    const { client, placeId } = await join(hostKey, { code: await code(), report: sent, answers: saysItsFacts(() => ({ ...PLACE_FACTS, logins: "/var/lib/wsp/logins" }), { count: 0 }) });
+    sockets.push(client.ws);
+    await until(async () => (await placesOf()).find(p => p.id === placeId)?.logins === "/var/lib/wsp/logins");
+    const order: string[] = [];
+    client.onFrame(raw => {
+      const frame = raw as unknown as { id?: number; op?: string; cmd?: string };
+      const say = (body: Record<string, unknown>): void => client.say({ id: frame.id, ok: true, ...body });
+      if (frame.op === "exec") {
+        const cmd = String(frame.cmd);
+        order.push(cmd);
+        if (cmd.includes("command -v runuser")) return say({ exitCode: 0, stdout: "Linux\n0\nroot\nroot\n1\n/root\n/usr/bin\n", stderr: "", truncated: false });
+        return say({ exitCode: 0, stdout: cmd.includes("wsp-unland") ? "wsp-unland\tgone\t.codex/AGENTS.md\n" : "", stderr: "", truncated: false });
+      }
+      if (frame.op === "place.leave") {
+        order.push("place.leave");
+        say({ swept: ["/root/.wsp"] });
+      }
+    });
+    const answer = await remove(placeId);
+    const off = order.findIndex(cmd => cmd.includes("wsp-unland"));
+    expect(off, order.join("\n")).toBeGreaterThanOrEqual(0);
+    expect(order[off]).toContain("('.codex'/*) root='/var/lib/wsp/logins/codex'");
+    expect(off).toBeLessThan(order.indexOf("place.leave"));
+    expect(answer["swept"]).toEqual(["/var/lib/wsp/logins/codex/AGENTS.md", "/root/.wsp"]);
+  });
+
   it("says the agent is still installed when the place was not connected to sweep", async () => {
     const { hostKey } = await serving();
     const { client, placeId } = await join(hostKey, { code: await code() });

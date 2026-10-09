@@ -240,7 +240,7 @@ export interface ProvisionOn {
   /** The names this host's vault holds a server's value under, names only, so a server's row can say where its
    * agent's launch there hands it none. */
   held?: ReadonlySet<string>;
-  /** The folder each agent's threads there are pointed at, by agent id, where its own servers live. */
+  /** The folder each agent's threads there are pointed at, by agent id, where its own servers and files live. */
   stores?: Readonly<Record<string, string>>;
 }
 
@@ -336,10 +336,10 @@ async function toolsStep(machine: Machine, plan: ProvisionPlan, steps: readonly 
  * job. A round the servers do not read is closed at once; the agents' own round stays open for the servers step. */
 async function filesRound(machine: Machine, files: NonNullable<ProvisionPlan["files"]>, label: string, run: SetupRun, stage: ProvisionStage, on: ProvisionOn, close: boolean): Promise<PlaceProvisionRow[]> {
   stage(`${label}: ${plural(files.lands.length, "path")}`);
-  const landed = await provisionFiles(machine, { home: on.home, lands: files.lands, pack: files.pack, say: line => stage(line) });
+  const landed = await provisionFiles(machine, { home: on.home, lands: files.lands, pack: files.pack, say: line => stage(line), ...(on.stores !== undefined ? { stores: on.stores } : {}) });
   for (const row of landed.rows) stage(rowLine(row), undefined, row);
   run.skippedFiles.push(...landed.skipped);
-  if (close) await closeAgentFiles(machine, on.home, oncePathsOf(files.lands));
+  if (close) await closeAgentFiles(machine, on.home, oncePathsOf(files.lands), on.stores);
   else run.landed = landed.owned;
   return landed.rows;
 }
@@ -433,7 +433,7 @@ async function stepRows(machine: Machine, plan: ProvisionPlan, step: EngineStep,
       // What wsp owns in the agents' homes there, written down once the servers are in their configs, so the next
       // run knows its own copy from a file the person has written since. Every run closes, files or none: the close
       // is also where the job's own folder there is swept.
-      await closeAgentFiles(machine, on.home, oncePathsOf(plan.files?.lands ?? []));
+      await closeAgentFiles(machine, on.home, oncePathsOf(plan.files?.lands ?? []), on.stores);
       run.landed = new Map();
       return rows;
     }

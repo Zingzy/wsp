@@ -8,6 +8,7 @@
 // is the wire's `at` (ms epoch) as ISO, else the caller's receipt clock, else
 // "" for unstamped history.
 import { AFTER_CUT_LINE, LIMIT_WORDS, NOTIFY_ME, compactedLine, spawnsThread, internalToolResult, subagentTaskLine, toolActivityLine, toolCallFacts, toolDoneLine, toolResultLine, type PlanStep, type SessionEvent, type SessionHarness, type SessionRunEvent, type TurnResult } from "@wsp/protocol";
+import { spawnedThreadOf } from "./spawned.js";
 import type {
   ChatMessage,
   PermissionPrompt,
@@ -692,11 +693,13 @@ export function createSessionFold(): SessionFold {
           if (e.toolUseId === undefined) t.openAnonymousTool = null;
           return;
         }
+        const spawned = failed ? undefined : spawnedThreadOf(call.name, entry.command, e.text);
         replace(call.entryIndex, workEntry({
           ...entry,
           toolLifecycleStatus: failed ? "failed" : "completed",
           sourceActivityKind: "tool.completed",
           ...(output !== undefined ? { detail: output } : {}),
+          ...(spawned !== undefined ? { spawned } : {}),
         }, timeline[call.entryIndex]!.createdAt));
         if (e.toolUseId === undefined) t.openAnonymousTool = null;
         return;
