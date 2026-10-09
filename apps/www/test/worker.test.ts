@@ -1,0 +1,62 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// The Worker in front of usewsp.com's files: old hosts go home, the waitlist reaches Resend, the docs reach Scalar,
+// and the install script reads as text.
+import { afterEach, describe, expect, it, vi } from "vitest";
+import worker, { type Env } from "../worker/index";
+
+const files = (body = "file", type = "application/octet-stream"): Env["ASSETS"] => ({ fetch: async () => new Response(body, { headers: { "content-type": type } }) });
+const env = (more: Partial<Env> = {}): Env => ({ ASSETS: files(), ...more });
+
+afterEach(() => vi.unstubAllGlobals());
+
+describe("the Worker in front of usewsp.com", () => {
+  it("sends www and usewsp.dev to the same path on usewsp.com", async () => {
+    for (const host of ["www.usewsp.com", "usewsp.dev"]) {
+      const res = await worker.fetch(new Request(`https://${host}/compare?x=1`), env());
+      expect(res.status).toBe(301);
+      expect(res.headers.get("location")).toBe("https://usewsp.com/compare?x=1");
+    }
+  });
+
+  it("refuses the waitlist without its secrets, and a bad email with them", async () => {
+    const post = (email: string) => new Request("https://usewsp.com/api/waitlist", { method: "POST", body: JSON.stringify({ email }) });
+    expect((await worker.fetch(post("a@b.co"), env())).status).toBe(503);
+    expect((await worker.fetch(post("nope"), env({ RESEND_API_KEY: "re_x", RESEND_SEGMENT_ID: "seg" }))).status).toBe(400);
+  });
+
+  it("adds a waitlist email to the Resend segment", async () => {
+    const sent = vi.fn(async () => new Response("{}", { status: 200 }));
+    vi.stubGlobal("fetch", sent);
+    const res = await worker.fetch(new Request("https://usewsp.com/api/waitlist", { method: "POST", body: JSON.stringify({ email: " Dev@Example.com " }) }), env({ RESEND_API_KEY: "re_x", RESEND_SEGMENT_ID: "seg" }));
+    expect(res.status).toBe(204);
+    const [url, init] = sent.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("https://api.resend.com/contacts");
+    expect(JSON.parse(String(init.body))).toEqual({ email: "dev@example.com", unsubscribed: false, segments: [{ id: "seg" }] });
+  });
+
+  it("serves the docs from Scalar with the path kept", async () => {
+    const sent = vi.fn(async (r: Request) => new Response(r.url));
+    vi.stubGlobal("fetch", sent);
+    const res = await worker.fetch(new Request("https://usewsp.com/docs/start/install?q=1"), env());
+    expect(await res.text()).toBe("https://wsp.apidocumentation.com/docs/start/install?q=1");
+  });
+
+  it("serves the install script as text and every other file as the files say", async () => {
+    const install = await worker.fetch(new Request("https://usewsp.com/install"), env());
+    expect(install.headers.get("content-type")).toBe("text/plain; charset=utf-8");
+    const page = await worker.fetch(new Request("https://usewsp.com/"), env({ ASSETS: files("<html>", "text/html") }));
+    expect(page.headers.get("content-type")).toBe("text/html");
+  });
+
+  it("answers a byte range, as Safari asks for a video", async () => {
+    const res = await worker.fetch(new Request("https://usewsp.com/assets/setup.webm", { headers: { range: "bytes=2-5" } }), env({ ASSETS: files("0123456789", "video/webm") }));
+    expect(res.status).toBe(206);
+    expect(res.headers.get("content-range")).toBe("bytes 2-5/10");
+    expect(await res.text()).toBe("2345");
+    const tail = await worker.fetch(new Request("https://usewsp.com/a.webm", { headers: { range: "bytes=-3" } }), env({ ASSETS: files("0123456789") }));
+    expect(await tail.text()).toBe("789");
+    const open = await worker.fetch(new Request("https://usewsp.com/a.webm", { headers: { range: "bytes=7-" } }), env({ ASSETS: files("0123456789") }));
+    expect(await open.text()).toBe("789");
+    expect((await worker.fetch(new Request("https://usewsp.com/a.webm", { headers: { range: "bytes=20-" } }), env({ ASSETS: files("0123456789") }))).status).toBe(416);
+  });
+});
