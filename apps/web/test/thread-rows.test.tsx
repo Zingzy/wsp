@@ -139,12 +139,11 @@ describe("a thread's row", () => {
   });
 });
 
-const LEAD = { id: "ws_lead", name: "lead" };
 const at = (minutes: number): string => new Date(NOW.getTime() - minutes * 60_000).toISOString();
 const nodeOf = (t: SidebarThreadSnapshot, children: ChildNode[] = []): ChildNode => ({ thread: t, place: "", children });
 const working = (id: string, minutes = 5): SidebarThreadSnapshot => thread(id, { status: "running", startedAt: at(minutes), endedAt: null });
 const finished = (id: string, minutes: number): SidebarThreadSnapshot => thread(id, { startedAt: at(minutes + 10), endedAt: at(minutes), readAt: at(minutes), lastLine: `${id} is pushed.` });
-const tree = (nodes: ChildNode[], lead: SidebarThreadSnapshot | null = null) => <TreeRows lead={LEAD} tree={undefined} leadThread={lead} leadPlace="" nodes={nodes} />;
+const tree = (nodes: ChildNode[], lead: SidebarThreadSnapshot | null = null) => <TreeRows leadThread={lead} leadPlace="" nodes={nodes} />;
 
 describe("a lead's children as rows", () => {
   beforeEach(() => {

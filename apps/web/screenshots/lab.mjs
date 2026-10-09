@@ -51,7 +51,7 @@ import { appendFileSync, copyFileSync, existsSync, mkdirSync, readdirSync, readF
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { atProvider, fixtureCloud, fixtureFleet, fixtureFolders, FIXTURE_NAMES, fixtureRepos, fixtureState } from "./fixture-state.mjs";
+import { atProvider, fixtureCloud, fixtureCompares, fixtureFleet, fixtureFolders, FIXTURE_NAMES, fixtureRepos, fixtureState, HERE_HOST_ITEMS } from "./fixture-state.mjs";
 import { daemonBinaryHere, freePort, HOST_BIN, localReach, providerFor, sleep, startHost, whatIsNotBuilt } from "./host.mjs";
 import { AGENT_KEYS, binDir, copyApp, keyLayers, keysFound, labHome, labLogs, labShell, standInRoot, treeSha, writeAgentHome, writeKeys, writeShim, writeStandIn, writeWorkFolder } from "./lab-home.mjs";
 
@@ -263,6 +263,9 @@ async function start({ name, fixture, for: keepLogIn }) {
   const key = Object.keys(keys).length > 0;
   if (key) writeKeys(home, keys);
   const cloud = fixtureCloud(fixture);
+  // A fork's branch counts come from gh's compare: a fixture that names them gets the stand-in gh the screenshot run
+  // starts, and every other fixture keeps the gh on the lab's path.
+  const compares = fixtureCompares(fixture);
   const port = await freePort();
   const host = await startHost({
     home,
@@ -281,6 +284,7 @@ async function start({ name, fixture, for: keepLogIn }) {
     advertise: `http://127.0.0.1:${port}`,
     ...(cloud === undefined ? {} : { cloud }),
     ...(key ? { secrets: keys } : {}),
+    ...(Object.keys(compares).length === 0 ? {} : { hostItems: { ...HERE_HOST_ITEMS, compares } }),
   });
   // Detached and let go of: this process wrote the pid down and its job is over, so a tester's shell gets its
   // prompt back rather than holding a lab open for as long as they leave the window there.

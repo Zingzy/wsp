@@ -587,6 +587,7 @@ describe("ChatView", () => {
     // The runtime takes the wait off the row once the question is answered; the row is what this screen reads.
     rows[0] = { ...caller, waitingOn: undefined };
     emit({ type: "session.permission.closed", workspaceId: "ws_other", sessionId: "sess_target", turnId: "turn_target", threadId: "thr_target", at: T0 + 900, askId: "ask_target", outcome: "allowed", optionId: "allow" });
+    emit({ type: "session.row", workspaceId: WS, threadId: "thr_caller", id: "sess_caller", row: rows[0] });
     await waitFor(() => expect(document.querySelector('[data-permission-prompt="ask_target"]')).toBeNull());
     expect(document.body.textContent).toContain("Working for");
   });
@@ -612,6 +613,7 @@ describe("ChatView", () => {
     // The runtime takes the hold off the row as the turn starts, and the line goes with it.
     rows[0] = { ...held, capped: undefined };
     emit({ type: "session.start", ...sc, at: T0 + 60_000, model: "claude-sonnet-5", prompt: "fix the build" });
+    emit({ type: "session.row", workspaceId: WS, threadId: "thr_held", id: "turn_held", row: rows[0] });
     await screen.findByText(/Working for/);
     expect(screen.queryByText(/^waiting while hetzner/)).toBeNull();
     act(() => useStore.setState({ settingsOpen: false }));
@@ -1064,6 +1066,8 @@ describe("the threads a thread opened", () => {
       marks.push([ids, m]);
       for (const [i, row] of listed.entries()) if (ids.includes(row.threadId!)) listed[i] = m.folded === true ? { ...row, foldedAt: Date.now() } : (({ foldedAt: _, ...open }) => open)(row);
       emit({ type: "thread.marked", workspaceId: WS, threadIds: [...ids] });
+      // The host pushes each row the mark moved, as it does after every mark.
+      for (const row of listed) if (ids.includes(row.threadId!)) emit({ type: "session.row", workspaceId: WS, threadId: row.threadId, id: row.id, row });
     };
     const openWindow = async () => {
       useStore.getState().bind(api);
@@ -1147,6 +1151,46 @@ describe("the threads a thread opened", () => {
     for (let n = 1; n <= 10; n++) emit({ type: "session.delta", ...turn, at: T0 + 10_000 + n * 100, kind: "text", text: `Line ${n}. ` });
     await screen.findByText(/Line 10\./);
     expect(sectionDraws.n - before).toBe(0);
+  });
+
+  it("says nothing of a branch, a push or a merge on a child's row, on its own branch or on the lead's, at rest, on hover or in its menu", async () => {
+    const QUIET: WorkspaceView = { ...BENCH, id: "ws_quiet", name: "spoo-quiet" };
+    const quiet: SessionView = { id: "sess_quiet", workspaceId: "ws_quiet", harness: "claude", status: "completed", startedBy: "agent", threadId: "thr_quiet", parentThreadId: PARENT, prompt: "tidy the index names" };
+    // The lead's status as the host pushes it, carrying what it read of its children's branches.
+    const tree = {
+      leadBranch: "fix/fleet",
+      readAt: T0,
+      children: [
+        { workspaceId: "ws_bench", branch: "child/bench", pushed: false, conflicts: ["a.ts"], pushRefused: "no git credential for github.com, so nothing was pushed" },
+        { workspaceId: "ws_quiet", branch: "child/quiet", pushed: true, aheadOfLead: 2, behindLead: 0 },
+      ],
+    };
+    const { api } = fixtureApi([workspace, BENCH, QUIET], { [WS]: lead }, [...rows, quiet]);
+    api.watchStatuses = async () => [{ ...workspace, machineState: "running", reach: { state: "reachable" }, tree }] as never;
+    await setup(api);
+    await waitFor(() => expect(useStore.getState().statuses[WS]?.tree).toBeDefined());
+    const fold = await waitFor(() => document.querySelector<HTMLElement>('[data-child-fold="finished"]')!);
+    fireEvent.click(fold);
+    const words = /child\/|fix\/fleet|ahead|push|merge|conflict|counted|credential/i;
+    const said = (at: Element): string => [at.textContent ?? "", ...[at, ...at.querySelectorAll("*")].flatMap(el => [el.getAttribute("title") ?? "", el.getAttribute("aria-label") ?? ""])].join("\n");
+    for (const id of ["thr_bench", "thr_quiet", "thr_web"]) {
+      const row = await waitFor(() => document.querySelector<HTMLElement>(`[data-thread-row="${id}"]`)!);
+      expect(said(row)).not.toMatch(words);
+      expect([...row.querySelectorAll("button:not([data-child-act])")]).toHaveLength(0);
+      fireEvent.pointerEnter(row, { pointerType: "mouse" });
+      fireEvent.mouseEnter(row);
+      expect(said(document.body)).not.toMatch(words);
+      let menu: string[] = [];
+      window.wsp = { contextMenu: async (items: Array<{ label?: string }>) => ((menu = items.map(item => item.label ?? "")), null) } as never;
+      try {
+        fireEvent.contextMenu(row);
+        await waitFor(() => expect(menu.length).toBeGreaterThan(0));
+      } finally {
+        delete (window as { wsp?: unknown }).wsp;
+      }
+      expect(menu.join("\n")).not.toMatch(words);
+      fireEvent.mouseLeave(row);
+    }
   });
 
   it("leaves the transcript alone on a thread that opened none", async () => {

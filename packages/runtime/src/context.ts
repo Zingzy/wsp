@@ -471,6 +471,9 @@ export interface BootArea {
   readonly reachesRow: (row: { threadId?: string; workspaceId: string }, caller: Caller | undefined, talk?: TreeTalk) => boolean;
   readonly entryOfRow: (row: { threadId?: string; workspaceId: string }, origin: Caller | undefined, talk?: TreeTalk) => Promise<LiveWorkspace | undefined>;
   readonly listedRows: (held: readonly (Map<string, SessionEntry> extends Map<string, infer V> ? V : never)[]) => SessionView[];
+  readonly placedRows: (listed: SessionView[]) => Promise<SessionView[]>;
+  readonly rowGone: (id: string, at: { workspaceId: string; threadId?: string }) => void;
+  readonly setupRefusalMoved: (place: string, harness: string) => void;
   readonly threadFacts: (threadId: string) => ThreadFacts | undefined;
   readonly settledNow: (threadId: string, settleMs: number | null) => boolean;
   readonly pushHead: (threadId: string) => void;

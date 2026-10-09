@@ -538,7 +538,7 @@ describe("serveRuntime session interrupt", () => {
       expect(history[1]).toMatchObject({ type: "session.done", result: { status: row.status } });
       expect(c.events.filter(e => e.type === "session.done")).toMatchObject([{ result: { status: row.status } }]);
       const reply = `reply:${String(res.id)}`;
-      if (row.outcome === "accepted") expect(arrived.slice(0, arrived.indexOf(reply) + 1)).toEqual(["session.done", "session.end", "thread.head", reply]);
+      if (row.outcome === "accepted") expect(arrived.slice(0, arrived.indexOf(reply) + 1)).toEqual(["session.done", "session.end", "thread.head", "session.row", reply]);
     }
     c.close();
   });

@@ -3,9 +3,10 @@
 // tile's card says and whose open pull request is the one mark on the tile itself. The host reads a copy's checkout
 // at a turn's end, on view and after a write, and pushes it on the workspace's status; a tile draws that fact and asks
 // the host for it once a connection, the first time one of the workspace's tiles comes into view, and reads no daemon
-// of its own. A copy the host has not read yet shows the branch it was made on, off its record.
+// of its own. A copy the host has not read yet shows the branch it was made on, off its record. A fork on a branch of its
+// own says beside it the one fact its lead's tree holds of it; a fork on its lead's own branch names no branch at all.
 import { useEffect, type RefObject } from "react";
-import { checkoutCounts, DETACHED_HEAD, isPullRequestNamed, type PullRequestState } from "@wsp/protocol";
+import { checkoutCounts, DETACHED_HEAD, isPullRequestNamed, TREE_WORDS, type PullRequestState, type TreeChild, type TreeFact } from "@wsp/protocol";
 import type { SidebarProjectSnapshot } from "../adapt/index.js";
 import { EDITOR_SSH_WORDS } from "../files/EditorConsent.js";
 import type { Api } from "../protocol/client.js";
@@ -26,10 +27,23 @@ export interface TileCheckout {
   why?: string;
 }
 
-export function tileCheckout(runs: Pick<SidebarProjectSnapshot, "workspace" | "status">, o: { attached?: boolean } = {}): TileCheckout {
+/** The one fact beside a child's branch: its landing where it has one, else how far it stands from the lead's. */
+function childFact(child: TreeChild, leadBranch: string): string {
+  if (child.conflicts !== undefined && child.conflicts.length > 0) return TREE_WORDS.conflictsIn(child.conflicts.length);
+  if (child.merged !== undefined && (child.aheadOfLead ?? 0) === 0) return TREE_WORDS.mergedIntoLead;
+  if (child.pushed === false) return TREE_WORDS.notPushed;
+  if (child.aheadOfLead === undefined) return TREE_WORDS.notCounted;
+  return TREE_WORDS.aheadOf(child.aheadOfLead, leadBranch);
+}
+
+/** A workspace's checkout as its tiles' card says it; `lead` is the tree of the workspace it was forked out of. */
+export function tileCheckout(runs: Pick<SidebarProjectSnapshot, "id" | "workspace" | "status">, o: { attached?: boolean; lead?: TreeFact } = {}): TileCheckout {
   const fact = runs.status?.checkout;
   const pr = runs.status?.pr;
-  const branch = fact === undefined ? branchLine(runs) : fact.branch === DETACHED_HEAD ? "" : fact.branch;
+  const own = fact === undefined ? branchLine(runs) : fact.branch === DETACHED_HEAD ? "" : fact.branch;
+  const child = o.lead?.children.find(c => c.workspaceId === runs.id);
+  const name = own === "" ? (child?.branch ?? "") : own;
+  const branch = child === undefined || name === "" ? own : child.branch === o.lead!.leadBranch ? "" : `${name}, ${childFact(child, o.lead!.leadBranch)}`;
   const changed = fact === undefined ? undefined : checkoutCounts(fact)[0];
   const folder = runs.workspace.folder ?? runs.workspace.project.path;
   return {

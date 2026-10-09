@@ -7,7 +7,7 @@ import { harnessExec } from "@wsp/engine";
 import {
   type SessionEvent, type SessionInterruptOutcome, type SessionInterruptResult, type SessionStartOutcome,
   type SessionSearchResult, type SessionView, type StartPicks, type TurnImage, type TurnResult, foldThreads,
-  MCP_SERVER_NAME, threadForgetRefusal, threadKeyOf, threadRan, threadWord, SCOPED_MCP_ARG, roadOf, scopeOf, tableName,
+  MCP_SERVER_NAME, threadForgetRefusal, threadKeyOf, threadRan, threadWord, SCOPED_MCP_ARG, roadOf, scopeOf,
   RUN_PERSONS_LINE, runOutputTail, type SessionRunEvent, NO_SLATE_MCP_ARG, ASIDE_NO_SESSION_LINE, BLANK_ASIDE_LINE,
   asideUnsupportedLine, isLocalWorkspace, mcpServersBlocked, actionRefusal, homeShortened, EMPTY_TITLE_LINE,
   threadRunsOnLine, keptPicks, listedPick, notFoundRefusal, NOTIFY_ME, noCwdLine,
@@ -810,7 +810,11 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
         if (filesFolder !== undefined && !(thread.filesIn ?? []).includes(filesFolder)) threadRecords.set(threadId, { ...thread, filesIn: [...(thread.filesIn ?? []), filesFolder] });
         launched();
         // The restart is under way, so the thread it replaces folds into Settled, as a settle by the person would.
-        if (replaces !== undefined) await sessionsApi.settle([replaces]).catch((e: unknown) => console.warn(`thread ${threadWord(replaces)} was not settled after its restart: ${e instanceof Error ? e.message : String(e)}`));
+        // Its row names this one as what replaced it, which a thread already settled moves no mark to say.
+        if (replaces !== undefined) {
+          await sessionsApi.settle([replaces]).catch((e: unknown) => console.warn(`thread ${threadWord(replaces)} was not settled after its restart: ${e instanceof Error ? e.message : String(e)}`));
+          ctx.pushHead(replaces);
+        }
         // The turn is running; what the record failed to remember must not read as a start that failed.
         if (resume === undefined) await ctx.rememberTarget(entry.record).catch((e: unknown) => console.warn(`last target for ${workspaceId} not remembered: ${e instanceof Error ? e.message : String(e)}`));
         return handle;
@@ -880,13 +884,7 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
       const trimmed = ctx.treeRecords(origin, "list", workspaceId).filter(([threadId]) => !rowed.has(threadId));
       const ends = await Promise.all(trimmed.map(async ([threadId, r]) => r.ended ?? threadResult(await ctx.openTranscript(r.workspaceId), threadId)?.status));
       const listed = [...ctx.listedRows(held).map(view => (ctx.reachesRow(view, origin) ? view : namedOnly(view))), ...trimmed.map(([threadId, r], i) => trimmedRow(threadId, r, ends[i]))];
-      const computers = listed.length === 0 ? [] : await ctx.computerRows();
-      return listed.map(view => {
-        const id = ctx.live.get(view.workspaceId)?.record.project;
-        const project = id === undefined ? undefined : ctx.projectsHeld.get(id);
-        const computer = computers.find(r => r.id === project?.computer);
-        return project === undefined ? view : { ...view, project: { id: project.id, name: project.name }, computerName: computer === undefined ? project.computer : tableName(computer) };
-      });
+      return ctx.placedRows(listed);
     },
 
     async history(workspaceId, origin) {
@@ -1354,7 +1352,11 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
       await ctx.dropCheckpoints(entry, threadId);
       await ctx.dropThreadFiles(entry, [threadId]);
       await ctx.dropSentImages(workspaceId, [threadId]);
-      for (const [id, s] of [...sessions]) if (s.view.threadId === threadId) sessions.delete(id);
+      for (const [id, s] of [...sessions]) {
+        if (s.view.threadId !== threadId) continue;
+        sessions.delete(id);
+        ctx.rowGone(id, { workspaceId, threadId });
+      }
       threadRecords.delete(threadId);
       await ctx.dropFromTranscript(workspaceId, e => e.threadId === threadId);
       await ctx.persistSessions(workspaceId);
@@ -1381,7 +1383,10 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
       // A launch that never got going can still have landed the files its send carried.
       await ctx.dropThreadFiles(entry, [threadId]);
       await ctx.dropSentImages(workspaceId, [threadId]);
-      for (const [id] of held) sessions.delete(id);
+      for (const [id] of held) {
+        sessions.delete(id);
+        ctx.rowGone(id, { workspaceId, threadId });
+      }
       threadRecords.delete(threadId);
       await ctx.slates.forget(threadId);
       await ctx.dropFromTranscript(workspaceId, e => e.threadId === threadId);
