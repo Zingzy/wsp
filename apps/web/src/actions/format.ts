@@ -57,6 +57,9 @@ export const CHILD_WORDS = {
   settledFold: "Settled",
   moreRows: (n: number): string => `${n} more`,
   asked: "Asked",
+  restartOf: (failed: boolean, age: string): string => `Restart of the one ${failed ? "that failed" : "stopped"} ${age === "now" ? "just now" : `${age} ago`}`,
+  openReplaced: "Open the thread it replaced",
+  openRestart: "Open its restart",
 } as const;
 
 export const FILE_WORDS = {
@@ -174,6 +177,7 @@ export const openBrowserRefusal = (state: WorkspaceState): string | null => acti
 export const THREAD_NOT_RUNNING = "Thread is not running";
 export const CLIENT_CANNOT_STOP = "This client cannot stop a turn";
 export const CLIENT_CANNOT_SEND = "This client cannot send a message";
+export const CLIENT_CANNOT_OPEN = "This client cannot open a thread";
 export const CLIENT_CANNOT_READ = "This client cannot read a thread";
 export const THREAD_HAS_NO_ID = "This thread has no id yet";
 export const CLIENT_CANNOT_RENAME = "This client cannot rename a thread";

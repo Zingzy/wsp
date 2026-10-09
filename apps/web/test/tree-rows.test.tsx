@@ -41,7 +41,7 @@ const thread = (id: string, workspaceId: string, over: Partial<SidebarThreadSnap
   subagents: [],
   lastLine: null,
   failure: null,
-  foldedAt: null,
+  foldedAt: null, replaces: null, replacedBy: null,
   ...over,
 });
 

@@ -115,6 +115,11 @@ suite("the marathon lead, as the host serving it lists it", () => {
     );
   });
 
+  it("links 1805's restart to the builder it replaced, which is settled, both ways", () => {
+    expect(named("c-sec2")).toMatchObject({ status: "running", replaces: threadId("c-sec1") });
+    expect(named("c-sec1")).toMatchObject({ status: "interrupted", replacedBy: threadId("c-sec2"), settledAt: expect.any(Number) });
+  });
+
   it("carries each finished child's last line and the failed one's failure on its row", () => {
     const finished = under("lead").filter(t => t.status === "completed" || t.status === "interrupted");
     expect(finished.filter(t => t.lastLine === undefined)).toEqual([]);

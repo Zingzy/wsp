@@ -1561,6 +1561,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
                 ...(msg.notify !== undefined ? { notify: msg.notify } : {}),
                 ...(msg.turnToken !== undefined ? { turnToken: msg.turnToken } : {}),
                 ...(msg.title !== undefined ? { title: msg.title } : {}),
+                ...(msg.replaces !== undefined ? { replaces: msg.replaces } : {}),
                 ...(msg.attachments !== undefined ? { attachments: msg.attachments } : {}),
               }, origin), reply => send({ id: msg.id, ok: true, ...reply }));
               return;
@@ -1607,6 +1608,10 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               return;
             case "sessions.read":
               await rt.sessions.read(msg.threadId, origin);
+              send({ id: msg.id, ok: true });
+              return;
+            case "sessions.replaceable":
+              await rt.sessions.replaceable(msg.threadId, origin);
               send({ id: msg.id, ok: true });
               return;
             case "sessions.settle":

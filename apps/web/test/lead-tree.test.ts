@@ -7,7 +7,7 @@ import { capRunningLine, type SubagentView, type ThreadCapWait } from "@wsp/prot
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { SidebarThreadSnapshot } from "../src/adapt/index.js";
 import { childActs, childParts, countTree, finishedTake, kindOf, leadActs, leadNodes, noteOf, partOf, settleTake, type LeadNode, type Tree } from "../src/components/threads/leadTree.js";
 
@@ -33,6 +33,8 @@ interface Child {
   lastLine?: string;
   failure?: string;
   subagents?: SubagentView[];
+  replaces?: SidebarThreadSnapshot["replaces"];
+  replacedBy?: string;
 }
 
 const thread = (c: Child): SidebarThreadSnapshot => ({
@@ -68,6 +70,8 @@ const thread = (c: Child): SidebarThreadSnapshot => ({
   lastLine: c.lastLine ?? null,
   failure: c.failure ?? null,
   foldedAt: null,
+  replaces: c.replaces ?? null,
+  replacedBy: c.replacedBy ?? null,
 });
 
 const subagent = (id: string, state: SubagentView["state"], started: number, ended?: number, over: Partial<SubagentView> = {}): SubagentView => ({
@@ -262,6 +266,30 @@ describe("a lead's tree, read once", () => {
     const parent = node({ key: "p", status: "completed", started: 30, ended: 20, read: true }, [node({ key: "k", status: "running", started: 2 })]);
     const held = childActs({ node: parent, thread: parent.thread }, "live", tree(), { settle: async () => undefined }).find(a => a.id === "settle");
     expect(held?.refusal).toBe("A thread in it is still working");
+  });
+
+  it("reads a running restart's line off the thread it replaced, stopped or failed, at its resting age, under what asks of the person", () => {
+    vi.useFakeTimers({ toFake: ["Date"], now: NOW });
+    try {
+      const at = (c: Child): LeadNode<Node> => {
+        const n = node(c);
+        return { node: n, thread: n.thread };
+      };
+      const stopped = { threadId: "thr_c_sec1", failed: false, endedAt: iso(ago(8)) };
+      expect(noteOf(at({ key: "redo", status: "running", started: 2, replaces: stopped }), "live")).toBe("Restart of the one stopped 8m ago");
+      expect(noteOf(at({ key: "redo", status: "running", started: 2, replaces: { ...stopped, failed: true } }), "live")).toBe("Restart of the one that failed 8m ago");
+      // Under a minute the replaced row's own slot says now, and the line says just now.
+      expect(noteOf(at({ key: "redo", status: "running", started: 0, replaces: { ...stopped, endedAt: iso(NOW - 12_000) } }), "live")).toBe("Restart of the one stopped just now");
+      // The thread it replaced is not among the rows: the prototype draws no line.
+      expect(noteOf(at({ key: "redo", status: "running", started: 2, replaces: { ...stopped, endedAt: null } }), "live")).toBeUndefined();
+      expect(noteOf(at({ key: "redo", status: "running", started: 2, replaces: stopped, asking: "Run pnpm install" }), "live")).toBe("Run pnpm install");
+      expect(noteOf(at({ key: "redo", status: "running", started: 2, replaces: stopped, capped: CAP }), "live")).toBe(capRunningLine(CAP));
+      // Once the restart ends it reads as any finished child; the thread it replaced reads as its own.
+      expect(noteOf(at({ key: "redo", status: "completed", started: 2, ended: 1, read: true, replaces: stopped, lastLine: "Pushed the fix." }), "finished")).toBe("Pushed the fix.");
+      expect(noteOf(at({ key: "c_sec1", status: "interrupted", started: 30, ended: 8, read: true, replacedBy: "thr_redo", lastLine: "Running the gate" }), "finished")).toBe("Running the gate");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("counts every live thread and subagent at any depth by what it does, and the finished at the top", () => {

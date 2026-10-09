@@ -59,6 +59,8 @@ pub struct RunIn {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replaces: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub files: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub detach: Option<bool>,
@@ -1063,7 +1065,7 @@ fn opened_thread(thread_id: &str, opened: Option<&Opened>, folder: Option<&str>)
 }
 
 async fn run(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
-    let RunIn { project, branch, cwd, message, agent, model, effort, access, fast, notify, title, files, detach } =
+    let RunIn { project, branch, cwd, message, agent, model, effort, access, fast, notify, title, replaces, files, detach } =
         input("run", arguments)?;
     let client = host.client().await?;
     let picks = Picks { model, effort, access, fast };
@@ -1077,6 +1079,14 @@ async fn run(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
         };
         checked_start(&client, &message, agent.as_deref(), &picks, on, fork_of).await?;
         let notify = notify_of(&client, notify.as_deref().unwrap_or_default()).await?;
+        let replaces = match replaces {
+            Some(named) => {
+                let thread_id = thread_of(&client, &named).await?.runtime_id().to_owned();
+                client.request::<Value>("sessions.replaceable", params([("threadId", Value::from(thread_id.as_str()))])).await?;
+                Some(thread_id)
+            }
+            None => None,
+        };
         let folder = match &target {
             Target::Here { cwd: here, .. } => here.as_deref(),
             _ => cwd.as_deref(),
@@ -1095,10 +1105,10 @@ async fn run(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
             }
             here => (here, None),
         };
-        Ok((target, woken, notify, attachments))
+        Ok((target, woken, notify, replaces, attachments))
     }
     .await;
-    let (target, woken, notify, attachments) = before_sending(&client, read)?;
+    let (target, woken, notify, replaces, attachments) = before_sending(&client, read)?;
     let (mut start, opened) = match target {
         Target::Box(_) | Target::Fork(_) => {
             let folder = absolute_folder(cwd.as_deref())?;
@@ -1120,6 +1130,9 @@ async fn run(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
     };
     if let Some(title) = title {
         start.insert("title".to_owned(), Value::from(title));
+    }
+    if let Some(replaces) = replaces {
+        start.insert("replaces".to_owned(), Value::from(replaces));
     }
     if !attachments.is_empty() {
         start.insert("attachments".to_owned(), Value::from(attachments));

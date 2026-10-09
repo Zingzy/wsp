@@ -186,6 +186,14 @@ export function threadsArea(ctx: RuntimeContext): ThreadsArea {
     }
     return found;
   };
+  /** Each thread that has a restart, by the restart: off the records, and off a held start's entry before its record is
+   * written, so a restart the threads at once hold is linked while it waits. */
+  const restarts = (): Map<string, string> => {
+    const found = new Map<string, string>();
+    for (const s of sessions.values()) if (s.replaces !== undefined && s.view.threadId !== undefined) found.set(s.replaces, s.view.threadId);
+    for (const [id, record] of threadRecords) if (record.replaces !== undefined) found.set(record.replaces, id);
+    return found;
+  };
   /** Which threads a thread's own token reaches: every thread of its own tree, the lead that started it, the ones
    * beside it under that lead and the ones under itself, on whatever workspace each runs, read off the root every
    * row carries. Two trees on one workspace neither read nor drive each other, the person's own thread beside a
@@ -768,7 +776,7 @@ export function threadsArea(ctx: RuntimeContext): ThreadsArea {
   };
   return {
     threadRuns, launchingOn, runningOn, latestOn, keptAgents, reapKept, endKept, hostWrites, writeSession, takeKept,
-    holdKept, threadOfToken, treeUnder, drivesThread, settlesThread, leadAsks, capHeld, capHold, capLend, capFull, capWait, capStop, capStopping, capLeft, stoppedBehind, stopUnder, notifyOn, notifyReach, tellAs,
+    holdKept, threadOfToken, treeUnder, restarts, drivesThread, settlesThread, leadAsks, capHeld, capHold, capLend, capFull, capWait, capStop, capStopping, capLeft, stoppedBehind, stopUnder, notifyOn, notifyReach, tellAs,
     notifyEnd, deliverOwed, sendBack, settleCut, notARepo, checkpointsLanding, keepCheckpoint, takenTurn, recordSteer, snapshotOf,
     readTurnChanges, usageComputerOf, vaultedFor, usageAccountOf, limitDetailsDue,
   };

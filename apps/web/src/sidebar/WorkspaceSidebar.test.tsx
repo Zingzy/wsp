@@ -140,7 +140,7 @@ const ago = (ms: number): string => new Date(Date.now() - ms).toISOString();
 /** Sessions for the store, one per thread, keyed by workspace, every time read off one clock reading so two rows
  * given the same age share it exactly. A turn that ended was shown as it ended unless `readAgo` says the last
  * showing was earlier. */
-const sessions = (rows: Array<{ ws: string; id: string; prompt: string; parent?: string; status?: string; startedAgo?: number; endedAgo?: number; readAgo?: number; settledAgo?: number; asking?: string; pinnedAgo?: number; snoozed?: boolean; section?: { name: string; whileState: string }; foldedAgo?: number; subagents?: unknown[] }>) => {
+const sessions = (rows: Array<{ ws: string; id: string; prompt: string; parent?: string; status?: string; startedAgo?: number; endedAgo?: number; readAgo?: number; settledAgo?: number; asking?: string; pinnedAgo?: number; snoozed?: boolean; section?: { name: string; whileState: string }; foldedAgo?: number; subagents?: unknown[]; replaces?: string; replacedBy?: string }>) => {
   const now = Date.now();
   const before = (ms: number): string => new Date(now - ms).toISOString();
   const by: Record<string, unknown[]> = {};
@@ -163,6 +163,8 @@ const sessions = (rows: Array<{ ws: string; id: string; prompt: string; parent?:
       ...(r.section === undefined ? {} : { section: r.section }),
       ...(r.foldedAgo === undefined ? {} : { foldedAt: now - r.foldedAgo }),
       ...(r.subagents === undefined ? {} : { subagents: r.subagents }),
+      ...(r.replaces === undefined ? {} : { replaces: r.replaces }),
+      ...(r.replacedBy === undefined ? {} : { replacedBy: r.replacedBy }),
     });
   }
   return by;
@@ -612,6 +614,35 @@ describe("the sidebar's list of thread tiles", () => {
       choose("settle-read");
       fireEvent.contextMenu(fold);
       await waitFor(() => expect(settleThreads).toHaveBeenCalledWith(["th_lead"]));
+    } finally {
+      delete (window as { wsp?: unknown }).wsp;
+    }
+  });
+
+  it("a restarted child's tile menu opens the thread it replaced, and the replaced child's opens its restart", async () => {
+    mount({ projects: [project("pr_1", "spoo")], workspaces: [workspace("ws_a", "pricing page", "pr_1")] });
+    await act(async () => {
+      useStore.setState({
+        sessions: sessions([
+          { ws: "ws_a", id: "th_lead", prompt: "the lead", startedAgo: 30 * 60_000 },
+          { ws: "ws_a", id: "th_old", prompt: "security fixes", parent: "th_lead", status: "interrupted", startedAgo: 20 * 60_000, endedAgo: 8 * 60_000, replacedBy: "th_new" },
+          { ws: "ws_a", id: "th_new", prompt: "security fixes again", parent: "th_lead", startedAgo: 7 * 60_000, replaces: "th_old" },
+        ]),
+      } as never);
+    });
+    await waitFor(() => expect(screen.getByText("security fixes again")).toBeDefined());
+    const picked: string[][] = [];
+    window.wsp = { contextMenu: async (items: Array<{ id: string }>) => (picked.push(items.map(item => item.id)), "open-replaced") } as never;
+    try {
+      fireEvent.contextMenu(rowOf("security fixes again"));
+      await waitFor(() => expect(useStore.getState().selectedThreadId).toBe("th_old"));
+      expect(picked[0]).toContain("open-replaced");
+      expect(picked[0]).not.toContain("open-restart");
+      window.wsp = { contextMenu: async (items: Array<{ id: string }>) => (picked.push(items.map(item => item.id)), "open-restart") } as never;
+      fireEvent.click(document.querySelector<HTMLElement>("[data-child-fold=finished]")!);
+      fireEvent.contextMenu(await waitFor(() => rowOf("security fixes")));
+      await waitFor(() => expect(useStore.getState().selectedThreadId).toBe("th_new"));
+      expect(picked[1]).toContain("open-restart");
     } finally {
       delete (window as { wsp?: unknown }).wsp;
     }

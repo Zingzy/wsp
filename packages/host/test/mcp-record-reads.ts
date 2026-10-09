@@ -136,6 +136,13 @@ const LINED = [
   { ...SESSIONS[5]!, status: "failed", lastLine: listedLastLine(CJK_LINE), failure: listedFailure(CJK_LINE) },
 ];
 
+/** A child stopped and started again with replaces: the restart names the thread it replaced, and that thread, settled,
+ * names its restart. */
+const RESTARTED = [
+  { ...SESSIONS[4]!, status: "interrupted", settledAt: 1727431300000, replacedBy: "t-6" },
+  { ...SESSIONS[5]!, status: "running", replaces: "t-5" },
+];
+
 const WORKSPACES = reply({
   workspaces: [
     { id: "ws-1", name: "parser", project: { id: "proj-1", name: "wsp", computer: "place-9" } },
@@ -315,6 +322,7 @@ export const READS: Record<string, Case[]> = {
     { case: "empty", arguments: {}, replies: { "workspaces.list": WORKSPACES, "sessions.list": reply({ sessions: [] }) } },
     { case: "pinned, snoozed and in a section", arguments: {}, replies: { "workspaces.list": WORKSPACES, "sessions.list": reply({ sessions: PLACED }) } },
     { case: "a last line, a failure, a fold and subagents", arguments: {}, replies: { "workspaces.list": WORKSPACES, "sessions.list": reply({ sessions: LINED }) } },
+    { case: "a restart and the thread it replaced", arguments: {}, replies: { "workspaces.list": WORKSPACES, "sessions.list": reply({ sessions: RESTARTED }) } },
     { case: "no such project", arguments: { project: "nope" }, replies: { "workspaces.list": WORKSPACES, "sessions.list": reply({ sessions: SESSIONS }) } },
   ],
   thread_read: [

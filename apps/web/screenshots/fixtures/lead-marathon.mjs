@@ -29,7 +29,7 @@ const install = () => JSON.stringify({ command: "pnpm install --frozen-lockfile"
 const LIVE = [
   { id: "c-ask", title: "Build: box thread in the project folder (#1615 step 1)", status: "running", started: 23, asking: "install" },
   { id: "c-fail", title: "Fix: main's desktop smoke is red (#1827)", status: "failed", started: 31, ended: 4, failure: "pnpm test exited 1: 3 tests failed in apps/desktop/test/smoke.test.ts" },
-  { id: "c-sec2", title: "Landing fix: security fixes (#1805)", status: "running", started: 7 },
+  { id: "c-sec2", title: "Landing fix: security fixes (#1805)", status: "running", started: 7, replaces: "c-sec1" },
   { id: "c-sheet", title: "Fix round: the add sheet (#1815)", status: "running", started: 12 },
   { id: "c-ssh", title: "Landing fix: ssh same-computer check (#1811)", status: "running", started: 3 },
   { id: "c-rev", title: "Review 1822: the worktree carry", status: "running", started: 9, agent: "codex", on: BOX },
@@ -357,10 +357,20 @@ const BOX_FOLDER = () => ({
   idleWindowMs: null,
 });
 
-/** A thread's read and settle marks, as the host keeps them on its record. */
+/** A thread's read and settle marks and the thread a restart replaced, as the host keeps them on its record. */
 const marks = rows =>
   Object.fromEntries(
-    rows.filter(([c]) => c.read === true || c.settled === true).map(([c, r]) => [r.threadId, { harness: r.harness, readAt: r.endedAt + 30_000, ...(c.settled === true ? { settledAt: r.endedAt + 60_000 } : {}) }]),
+    rows
+      .filter(([c]) => c.read === true || c.settled === true || c.replaces !== undefined)
+      .map(([c, r]) => [
+        r.threadId,
+        {
+          harness: r.harness,
+          ...(c.read === true || c.settled === true ? { readAt: r.endedAt + 30_000 } : {}),
+          ...(c.settled === true ? { settledAt: r.endedAt + 60_000 } : {}),
+          ...(c.replaces === undefined ? {} : { replaces: threadId(c.replaces) }),
+        },
+      ]),
   );
 
 /** A lead on the wsp project here, its children here and on the box hetzner, and the project's other threads. */

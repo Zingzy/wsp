@@ -594,6 +594,8 @@ export interface ThreadRecord {
   pinnedAt?: number;
   /** When the person folded the thread's tree in the sidebar; the mark is the host's so every window draws it alike. */
   foldedAt?: number;
+  /** The thread this one restarts, as its start named it; the thread that restarts this one is read off the others. */
+  replaces?: string;
   snoozedUntil?: number;
   section?: ThreadPlacement;
   /** The anchor a rewind kept, held until the next turn of a harness that cuts on its next resume has taken it. */
@@ -1035,4 +1037,4 @@ export type LiveSession = { view: SessionView; turnId: string; handle: SessionHa
  * run this host has no road to at all, and the row reads as a turn the restart cut. */
 export type Reopened = "attached" | "gone" | "unreached" | "cannot";
 
-export type SessionEntry = { view: SessionView; turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin; turnToken?: string; scopeDeviceId?: string; handle?: SessionHandle; end?: (reason: string, stopped?: boolean) => void; turnLive?: TurnLive; run?: string; from?: number; asked?: TurnAsked; snapshot?: string; pid?: number; launch?: Promise<void>; calls?: Map<string, { toolName: string; input: string }> };
+export type SessionEntry = { view: SessionView; turnId: string; replaces?: string; notify?: readonly string[]; notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin; turnToken?: string; scopeDeviceId?: string; handle?: SessionHandle; end?: (reason: string, stopped?: boolean) => void; turnLive?: TurnLive; run?: string; from?: number; asked?: TurnAsked; snapshot?: string; pid?: number; launch?: Promise<void>; calls?: Map<string, { toolName: string; input: string }> };

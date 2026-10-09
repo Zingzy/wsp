@@ -20,7 +20,7 @@ import {
   type McpServerSpec, type SessionAsker, refusal, sendFilesAcrossLine, SEND_FILES_ACROSS_FIX, waitAcrossLine, WAIT_ACROSS_FIX,
   TURN_STOPPED_LINE, workspacePlace, STOP_REACH_MS, sendGivenUpLine, threadResult, listedFailure, turnLines,
   type Caller, type SessionSettleResult, SETTLE_MS, SETTLE_WORKING, SETTLE_ALREADY, subagentSettleLine,
-  SUBAGENT_SETTLE_FIX, notUnderLine, NOT_UNDER_FIX,
+  SUBAGENT_SETTLE_FIX, notUnderLine, NOT_UNDER_FIX, replacesWorkingLine, replacesWorkingFix, replacedAlreadyLine, replacedAlreadyFix, RESTART_OPENS_LINE, RESTART_OPENS_FIX,
 } from "@wsp/protocol";
 import { harnessCatalog } from "../harness-catalog.js";
 import { headShape } from "../transcript-reader.js";
@@ -236,7 +236,18 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
     return { busy, settled, finished, titled };
   };
 
+  /** The rule a restart meets, read before anything starts: the thread it replaces is one the caller may settle, with
+   * nothing in its tree still working or asking, and no restart of its own, so one job stays one line of threads. */
+  const replaceable = async (threadId: string, origin: Caller | undefined): Promise<void> => {
+    const { busy } = await settleReads([threadId], origin);
+    if ([threadId, ...ctx.treeUnder(threadId)].some(busy)) throw refusal(replacesWorkingLine(threadId), replacesWorkingFix(threadId), "usage");
+    const restart = ctx.restarts().get(threadId);
+    if (restart !== undefined) throw refusal(replacedAlreadyLine(threadId, restart), replacedAlreadyFix(restart), "usage");
+  };
+
   const sessionsApi: Runtime["sessions"] = {
+    replaceable,
+
     async start(workspaceId, opened, origin) {
       await ctx.ready();
       const prefs = ctx.state.preferencesHeld ?? (await ctx.preferences.get());
@@ -277,6 +288,12 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
       const reached = opens ? await ctx.entryOf(workspaceId, opensThere ? undefined : origin) : await ctx.entryOfRow({ threadId, workspaceId }, origin, "send");
       if (reached === undefined) throw new Error(`no thread ${opened.thread} on this workspace`);
       const entry = reached;
+      // A restart is read before the machine is asked: a send into a thread that has run replaces nothing.
+      const replaces = opened.replaces;
+      if (replaces !== undefined) {
+        if (!opens) throw refusal(RESTART_OPENS_LINE, RESTART_OPENS_FIX, "usage");
+        await replaceable(replaces, origin);
+      }
       // A send a thread on a computer the person joined makes into its tree on another computer carries its words
       // alone: no file of its lands in that folder, and nothing of the turn it starts comes back to wait on.
       const asking = scopeOf(origin) === undefined || opens || ctx.actsOn(entry.record, origin) ? undefined : live.get(scopeOf(origin)!.workspaceId)?.record;
@@ -328,9 +345,12 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
       ctx.spawnGuard(opens ? "thread_new" : "send", origin);
       // The tree this thread sits in, written on its first row and its record and read off them by every later turn:
       // a thread a person opened is its own root, and one a thread opened hangs under that thread's root.
+      // A restart the person starts stands where the thread it replaces stood, so a lead's child stays in that tree.
       const spawnedBy = opens ? scopeOf(origin) : undefined;
       const tree = opens
-        ? ctx.treeOf(spawnedBy)
+        ? spawnedBy === undefined && replaces !== undefined && ctx.parentOf(replaces) !== undefined
+          ? { parentThreadId: ctx.parentOf(replaces)!, rootThreadId: ctx.rootOf(replaces) }
+          : ctx.treeOf(spawnedBy)
         : { ...(ctx.parentOf(threadId) !== undefined ? { parentThreadId: ctx.parentOf(threadId)! } : {}), ...(ctx.rootOf(threadId) !== threadId ? { rootThreadId: ctx.rootOf(threadId) } : {}) };
       // me is the caller: the thread this request came out of when its token says it came out of one, and the person
       // when there is no token, which is every road that is not a turn. A target named twice is one target, since a
@@ -449,7 +469,7 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
         // The row that says the thread is spoken for also says who its turns tell: a send into the thread reads the
         // opener's notify off its rows, and inside the launch window this is the only one.
         ctx.capHold(entry.record, turnId, lender);
-        sessions.set(turnId, { view, turnId, launch, ...(notify !== undefined ? { notify } : {}), ...(notifyBy !== undefined ? { notifyBy } : {}), ...(notifyRoad !== undefined ? { notifyRoad } : {}) });
+        sessions.set(turnId, { view, turnId, launch, ...(replaces !== undefined ? { replaces } : {}), ...(notify !== undefined ? { notify } : {}), ...(notifyBy !== undefined ? { notifyBy } : {}), ...(notifyRoad !== undefined ? { notifyRoad } : {}) });
         bus.emit({ type: "session.held", workspaceId, threadId, ...(o.requestId !== undefined ? { requestId: o.requestId } : {}) });
       };
       hold();
@@ -758,7 +778,7 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
         // launch that never opened leaves none; a thread from before the record existed gets one here too, off what
         // its rows said this turn runs at, so it is read the one way from now on. Persisted with the row as the turn
         // announces itself and at its end.
-        if (!threadRecords.has(threadId)) threadRecords.set(threadId, { workspaceId, harness, ...tree, ...(picks.permissionMode !== undefined ? { permissionMode: picks.permissionMode } : {}), worked: threadRan(ctx.rowsOn(threadId).filter(r => r.status !== "running")) });
+        if (!threadRecords.has(threadId)) threadRecords.set(threadId, { workspaceId, harness, ...tree, ...(picks.permissionMode !== undefined ? { permissionMode: picks.permissionMode } : {}), ...(replaces !== undefined ? { replaces } : {}), worked: threadRan(ctx.rowsOn(threadId).filter(r => r.status !== "running")) });
         const thread = threadRecords.get(threadId)!;
         // A newer turn leaves Resume at reset nothing to resume.
         if (thread.limitResume !== undefined) {
@@ -767,6 +787,8 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
         }
         if (filesFolder !== undefined && !(thread.filesIn ?? []).includes(filesFolder)) threadRecords.set(threadId, { ...thread, filesIn: [...(thread.filesIn ?? []), filesFolder] });
         launched();
+        // The restart is under way, so the thread it replaces folds into Settled, as a settle by the person would.
+        if (replaces !== undefined) await sessionsApi.settle([replaces]).catch((e: unknown) => console.warn(`thread ${threadWord(replaces)} was not settled after its restart: ${e instanceof Error ? e.message : String(e)}`));
         // The turn is running; what the record failed to remember must not read as a start that failed.
         if (resume === undefined) await ctx.rememberTarget(entry.record).catch((e: unknown) => console.warn(`last target for ${workspaceId} not remembered: ${e instanceof Error ? e.message : String(e)}`));
         return handle;

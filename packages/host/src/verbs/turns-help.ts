@@ -327,7 +327,7 @@ export async function worktreeFor(client: HostClient, project: string, branch: s
  * turn they are running inside on a start: it is what the host reads NOTIFY_ME against, and there is none when the
  * caller is not a turn; the environment it is read off is the caller's, handed in, never this process's. A fork's
  * start carries no workspace until its machine stands, so the files are read before that machine is made. */
-export function openingOf(env: VerbDeps["env"], at: Pick<WorkspaceView, "id"> | FolderTarget | ForkTarget, prompt: string, opts: Picks & { harness?: string; cwd?: string; notify?: readonly string[]; title?: string; files?: readonly string[]; elsewhere?: boolean } = {}): Record<string, unknown> {
+export function openingOf(env: VerbDeps["env"], at: Pick<WorkspaceView, "id"> | FolderTarget | ForkTarget, prompt: string, opts: Picks & { harness?: string; cwd?: string; notify?: readonly string[]; title?: string; replaces?: string; files?: readonly string[]; elsewhere?: boolean } = {}): Record<string, unknown> {
   const cwd = absoluteFolder("here" in at ? at.here.cwd : opts.cwd);
   const attachments = filesFrom(opts.files ?? [], opts.elsewhere);
   const turnToken = turnTokenOf(env);
@@ -343,9 +343,20 @@ export function openingOf(env: VerbDeps["env"], at: Pick<WorkspaceView, "id"> | 
     ...(opts.notify !== undefined ? { notify: opts.notify } : {}),
     ...(turnToken !== undefined ? { turnToken } : {}),
     ...(opts.title !== undefined ? { title: opts.title } : {}),
+    ...(opts.replaces !== undefined ? { replaces: opts.replaces } : {}),
     ...(attachments.length > 0 ? { attachments } : {}),
     ...picksOf(opts),
   };
+}
+
+/** The thread --replaces names, by its full id, once the host has said a start may replace it, so a refusal comes
+ * before a machine is forked or woken; nothing where none was named. */
+export async function replacedOf(client: HostClient, ref: string | undefined): Promise<string | undefined> {
+  if (ref === undefined) return undefined;
+  const thread = await threadOf(client, ref);
+  const threadId = thread.threadId ?? thread.id;
+  await client.request("sessions.replaceable", { threadId });
+  return threadId;
 }
 
 /** What the --notify flags name for the runtime: NOTIFY_ME as given, and every other reference as the thread it

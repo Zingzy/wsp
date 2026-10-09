@@ -96,6 +96,10 @@ struct Session {
     #[serde(default)]
     folded_at: Option<Box<RawValue>>,
     #[serde(default)]
+    replaces: Option<String>,
+    #[serde(default)]
+    replaced_by: Option<String>,
+    #[serde(default)]
     snoozed_until: Option<Box<RawValue>>,
     #[serde(default)]
     woke_at: Option<Box<RawValue>>,
@@ -181,6 +185,10 @@ pub struct Thread {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[cfg_attr(test, schemars(with = "Option<f64>"))]
     pub folded_at: Option<Box<RawValue>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub replaces: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub replaced_by: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[cfg_attr(test, schemars(with = "Option<f64>"))]
     pub snoozed_until: Option<Box<RawValue>>,
@@ -357,6 +365,8 @@ fn fold(sessions: Vec<Session>) -> Vec<Thread> {
                 settled_at: latest.settled_at,
                 pinned_at: latest.pinned_at,
                 folded_at: latest.folded_at,
+                replaces: latest.replaces,
+                replaced_by: latest.replaced_by,
                 snoozed_until: latest.snoozed_until,
                 woke_at: latest.woke_at,
                 section: latest.section,

@@ -28,7 +28,9 @@ const folded = new WeakMap<ReadonlyArray<SessionView>, { project: string; thread
 function threadsOf(rows: ReadonlyArray<SessionView>, workspace: WorkspaceView): SidebarThreadSnapshot[] {
   const held = folded.get(rows);
   if (held !== undefined && held.project === workspace.project.name) return held.threads;
-  const threads = foldThreads(rows).map(thread => deriveThread(thread, workspace, rows.find(row => threadKeyOf(row) === thread.id)?.model));
+  const views = foldThreads(rows);
+  const byId = new Map(views.map(thread => [thread.id, thread] as const));
+  const threads = views.map(thread => deriveThread(thread, workspace, rows.find(row => threadKeyOf(row) === thread.id)?.model, thread.replaces === undefined ? undefined : byId.get(thread.replaces)));
   folded.set(rows, { project: workspace.project.name, threads });
   return threads;
 }
@@ -135,7 +137,7 @@ export function turnWait(state: WorkspaceState, workspace: { readonly name: stri
   }
 }
 
-function deriveThread(thread: ThreadView, workspace: Pick<WorkspaceView, "project">, model: string | undefined): SidebarThreadSnapshot {
+function deriveThread(thread: ThreadView, workspace: Pick<WorkspaceView, "project">, model: string | undefined, replaced: ThreadView | undefined): SidebarThreadSnapshot {
   return {
     id: thread.id,
     threadId: thread.threadId ?? null,
@@ -171,6 +173,11 @@ function deriveThread(thread: ThreadView, workspace: Pick<WorkspaceView, "projec
     lastLine: thread.lastLine ?? null,
     failure: thread.failure ?? null,
     foldedAt: thread.foldedAt !== undefined ? new Date(thread.foldedAt).toISOString() : null,
+    replaces:
+      thread.replaces === undefined
+        ? null
+        : { threadId: thread.replaces, failed: replaced?.status === "failed", endedAt: replaced?.endedAt !== undefined ? new Date(replaced.endedAt).toISOString() : null },
+    replacedBy: thread.replacedBy ?? null,
   };
 }
 

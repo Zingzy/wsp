@@ -492,6 +492,10 @@ const RuntimeOp = z.discriminatedUnion("op", [
     /** The name the thread is opened under, as a person's: it stands in every client at once, the harness is told it
      * too so its own UI says the same, and no generated title ever replaces it. Refused when it is blank. */
     title: z.string().optional(),
+    /** The thread this start's new thread restarts, by its runtime id: the new thread's record keeps it, and once its
+     * first turn starts the host settles the one it replaces. Refused on a send into a thread that has run, for a
+     * thread still working or asking, for one that already has a restart, and for one a thread's token may not settle. */
+    replaces: z.string().optional(),
     /** The files the message carries, in the order the person added them; refused with filesRefusal's line over the
      * caps, and refused naming the agent before the machine is asked when an image goes to an agent that reads none.
      * An image rides its harness's road; any other file lands in the thread's folder and the prompt names it. */
@@ -547,6 +551,9 @@ const RuntimeOp = z.discriminatedUnion("op", [
   /** A window showed the thread, or `wsp thread read` read it: its read stamp moves to now, and every window hears
    * thread.marked. Takes the thread's fold key, as ThreadView.id carries it. */
   z.object({ id: reqId, op: z.literal("sessions.read"), threadId: z.string() }),
+  /** Whether a start may name this thread as the one it restarts, read alone so a verb asks before it forks or wakes a
+   * machine: refused as sessions.start's replaces is, and answers nothing else. Takes the runtime's thread id. */
+  z.object({ id: reqId, op: z.literal("sessions.replaceable"), threadId: z.string() }),
   /** Settles each thread named and every thread under it, each taking a settled stamp and a read stamp of now, and
    * every window hears thread.marked; with finished, each named thread stays and the finished threads under it
    * settle. The named threads keep the settle's stamp, which a restore of them reads. Replies with a
@@ -969,6 +976,7 @@ export const THREAD_OPS: readonly string[] = [
   "workspaces.mergeIn",
   "harnesses.list",
   "sessions.start",
+  "sessions.replaceable",
   "sessions.list",
   "sessions.history",
   "sessions.head",
@@ -1050,6 +1058,7 @@ export const DEVICE_OPS: readonly string[] = [
   "sys.subscribe",
   "sys.unsubscribe",
   "harnesses.list",
+  "sessions.replaceable",
   "sessions.list",
   "sessions.history",
   "sessions.head",
