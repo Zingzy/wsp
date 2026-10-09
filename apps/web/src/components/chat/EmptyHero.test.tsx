@@ -34,6 +34,25 @@ describe("HeroField", () => {
     expect(disconnect).toHaveBeenCalled();
   });
 
+  it("asks for no frame while it is off screen", () => {
+    vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} unobserve() {} });
+    vi.stubGlobal(
+      "IntersectionObserver",
+      class {
+        constructor(private readonly seen: IntersectionObserverCallback) {}
+        observe(target: Element) {
+          this.seen([{ target, isIntersecting: false } as IntersectionObserverEntry], {} as IntersectionObserver);
+        }
+        unobserve() {}
+        disconnect() {}
+      },
+    );
+    vi.stubGlobal("matchMedia", (query: string) => ({ matches: false, media: query, addEventListener() {}, removeEventListener() {} }));
+    const requested = vi.spyOn(window, "requestAnimationFrame").mockImplementation(() => 1);
+    render(<HeroField />);
+    expect(requested).not.toHaveBeenCalled();
+  });
+
   it("paints once and asks for no frames under reduced motion", () => {
     vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} unobserve() {} });
     vi.stubGlobal("matchMedia", (query: string) => ({ matches: query.includes("reduce"), media: query, addEventListener() {}, removeEventListener() {} }));

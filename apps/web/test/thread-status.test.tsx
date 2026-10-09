@@ -242,21 +242,30 @@ describe("WorkingSince", () => {
 describe("Crab", () => {
   let frames: FrameRequestCallback[];
   let reduce: boolean;
-  const draws = vi.fn();
+  const draws = vi.fn<(canvas: HTMLCanvasElement) => void>();
+  const fills = vi.fn<(canvas: HTMLCanvasElement) => void>();
+  const scales = vi.fn<(canvas: HTMLCanvasElement, x: number, y: number) => void>();
 
   beforeEach(() => {
     frames = [];
     reduce = false;
     draws.mockClear();
+    fills.mockClear();
+    scales.mockClear();
     vi.spyOn(window, "requestAnimationFrame").mockImplementation(cb => frames.push(cb));
     vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => {});
     vi.spyOn(window, "matchMedia").mockImplementation(query => ({ matches: query.includes("reduced-motion") && reduce, media: query, addEventListener: () => {}, removeEventListener: () => {} }) as unknown as MediaQueryList);
     vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(function (this: HTMLCanvasElement) {
-      return { clearRect: () => draws(this), fillRect: () => {}, scale: () => {}, fillStyle: "" } as unknown as CanvasRenderingContext2D;
+      return { clearRect: () => draws(this), drawImage: () => {}, fillRect: () => fills(this), scale: (x: number, y: number) => scales(this, x, y), fillStyle: "" } as unknown as CanvasRenderingContext2D;
     } as unknown as typeof HTMLCanvasElement.prototype.getContext);
   });
-  afterEach(() => vi.restoreAllMocks());
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
 
+  /** The crabs on the page that drew, leaving out the canvases a frame is drawn in once and copied from. */
+  const drawn = () => new Set(draws.mock.calls.map(([canvas]) => canvas).filter(canvas => canvas.isConnected));
   const step = () => {
     const due = frames;
     frames = [];
@@ -270,11 +279,52 @@ describe("Crab", () => {
     draws.mockClear();
     step();
     expect(frames).toHaveLength(1);
-    expect(new Set(draws.mock.calls.map(([canvas]) => canvas)).size).toBe(2);
+    expect(drawn().size).toBe(2);
     a.unmount();
     expect(window.cancelAnimationFrame).not.toHaveBeenCalled();
     b.unmount();
     expect(window.cancelAnimationFrame).toHaveBeenCalledTimes(1);
+  });
+
+  it("a crab off screen asks for no frame, and the crabs on screen share one frame and one drawing of it", () => {
+    const watched = new Map<Element, IntersectionObserverCallback>();
+    vi.stubGlobal(
+      "IntersectionObserver",
+      class {
+        constructor(private readonly seen: IntersectionObserverCallback) {}
+        observe(el: Element) {
+          watched.set(el, this.seen);
+        }
+        unobserve() {}
+        disconnect() {}
+      },
+    );
+    const show = (el: Element, on: boolean) => watched.get(el)?.([{ target: el, isIntersecting: on } as IntersectionObserverEntry], {} as IntersectionObserver);
+    const a = render(<Crab />).container.querySelector("canvas")!;
+    const b = render(<Crab />).container.querySelector("canvas")!;
+    show(a, false);
+    show(b, false);
+    expect(frames).toHaveLength(0);
+    show(a, true);
+    show(b, true);
+    expect(frames).toHaveLength(1);
+    draws.mockClear();
+    fills.mockClear();
+    step();
+    expect(drawn()).toEqual(new Set([a, b]));
+    expect(new Set(fills.mock.calls.map(([canvas]) => canvas)).size).toBe(1);
+    show(a, false);
+    show(b, false);
+    step();
+    expect(frames).toHaveLength(0);
+  });
+
+  it("draws its frame at a fractional dpr scaled by the dpr itself, as a crab drawn on its own canvas was", () => {
+    vi.stubGlobal("devicePixelRatio", 1.25);
+    const crab = render(<Crab />).container.querySelector("canvas")!;
+    const sprite = fills.mock.calls[0]![0];
+    expect([crab.width, crab.height, sprite.width, sprite.height]).toEqual([20, 17, 20, 17]);
+    expect(scales.mock.calls.map(([canvas, x, y]) => [canvas === sprite, x, y])).toEqual([[true, 1.25, 1.25]]);
   });
 
   it("reads a crab's tint once, not on every frame, and again when the theme on the root changes", async () => {
