@@ -68,7 +68,7 @@ export function llms(): string {
   return [
     "# wsp",
     "",
-    "> wsp runs coding agents (Claude Code, Codex, OpenCode and Cursor) on every computer you own, from one desktop app on your Mac: the Mac itself, and any Linux computer you reach over ssh or that dials out to you. Agents use the subscriptions they are already signed in to, and one thread can start another on a different computer or agent.",
+    "> wsp runs coding agents (Claude Code, Codex, OpenCode and Cursor) on every computer you own, from one desktop app on your Mac: the Mac itself, and any Linux computer you reach over ssh or that dials out to you. Claude Code, Codex and Cursor use the subscriptions they are already signed in to, and OpenCode uses a key from the model provider you pick. One thread can start another on a different computer or agent.",
     "",
     "wsp is free and open source under the AGPL-3.0. It runs on macOS and Linux; Windows is on a waitlist. Threads run on your computers and the app reaches them over your own network or ssh; a computer reached through the optional relay sends that connection through Cloudflare.",
     "",

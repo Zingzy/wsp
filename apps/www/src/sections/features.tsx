@@ -22,7 +22,7 @@ const FEATURES: Feature[] = [
   },
   {
     title: "Open it in your editor.",
-    line: "VS Code, Cursor, Zed or JetBrains open the thread's folder, even when it's on another computer, over SSH.",
+    line: "VS Code, Cursor or Zed open the thread's folder, even when it's on another computer, over SSH.",
     src: editor,
     at: "tr",
     scale: 2.6,
