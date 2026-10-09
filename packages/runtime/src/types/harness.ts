@@ -155,8 +155,8 @@ export interface HarnessSession {
   kept?(): KeptAgent<HarnessSession> | undefined;
   /** Present on a harness that takes a message mid-turn; absent means it cannot. not-running when the turn had not
    * started or had ended when the message was offered. `id` is what a harness that tells unread messages tells this
-   * one by. */
-  steer?(prompt: string, id?: string): Promise<"accepted" | "not-running">;
+   * one by. `images` reach only an adapter that declares steersImages. */
+  steer?(prompt: string, id?: string, images?: readonly TurnImage[]): Promise<"accepted" | "not-running">;
   /** Whether this turn tells, as it ends, the steered messages its agent never read (`turn.unread`), a turn re-opened
    * after a host restart included: read off what the agent's CLI said it does when it announced itself, so it is
    * false until then. Absent, nothing says whether a steer whose answer never came was read. */
@@ -207,6 +207,9 @@ export interface HarnessAdapter {
   /** Whether an access picked while a turn runs reaches that turn, so the picker says what a pick does before it is
    * made. Absent means it does not, and a pick waits for the person's next message. */
   readonly movesAccess?: true;
+  /** Whether this adapter's steer carries a message's images into the running turn; absent, a message with one waits
+   * for the turn to end. */
+  readonly steersImages?: true;
   /** A start takes promptAfter, so the launch's snapshot is taken while the CLI starts up and the agent, which touches
    * no file before it has its prompt, gets it once the snapshot is in; absent, the snapshot is in before the launch. */
   readonly waitsForPrompt?: true;

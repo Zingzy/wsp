@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The messages entered while a turn ran, in the composer's place: how many
 // wait, then a card of them oldest first, each named by its message with the
-// files it goes with under it, and its Edit, which puts it back in the
+// files it goes with under it, and why it waits where steer would have sent it
+// now, and its Edit, which puts it back in the
 // composer, and its Cancel, which takes it off the queue. A message goes now
 // only where the person picked steer, so nothing here carries a send.
 import { MessageSquareTextIcon } from "lucide-react";
@@ -24,6 +25,8 @@ export const QUEUE_WORDS = {
   editLabel: "Edit queued message",
   cancel: "Cancel",
   cancelLabel: "Cancel queued message",
+  /** A message steer would have sent now, held back by what its files are. */
+  waitsFor: (why: string): string => `Waits for the turn to end, since ${why}`,
 } as const;
 
 /** A message as one line: its first line with words on it. */
@@ -32,6 +35,7 @@ export const firstLine = (prompt: string): string => prompt.split("\n").find(lin
 export function QueueBar({
   rows,
   files,
+  waits,
   threadKey,
   workspaceId,
   onEdit,
@@ -40,6 +44,8 @@ export function QueueBar({
   rows: ReadonlyArray<QueuedMessage>;
   /** Each queued message's files, keyed by its id. */
   files: Readonly<Record<string, ReadonlyArray<ComposerFile>>>;
+  /** Why a message that steer would send now waits instead, or null where nothing holds it. */
+  waits: (files: ReadonlyArray<ComposerFile>) => string | null;
   threadKey: string;
   workspaceId: string;
   onEdit: (id: string) => void;
@@ -55,33 +61,37 @@ export function QueueBar({
       back={<DockBack word={DRAWER_WORDS.write} onClick={() => foldBar(threadKey, workspaceId)} />}
     >
       <Grid id="composer-queue">
-        {rows.map(row => (
-          <Row
-            key={row.id}
-            id={row.id}
-            title={firstLine(row.prompt)}
-            description={(files[row.id] ?? []).map(file => file.name)}
-            attrs={{ "data-queued-id": row.id }}
-            control={
-              <span className="flex shrink-0 items-center gap-2">
-                <Button
-                  size="xs"
-                  variant="outline"
-                  aria-label={QUEUE_WORDS.editLabel}
-                  onClick={() => {
-                    onEdit(row.id);
-                    foldBar(threadKey, workspaceId);
-                  }}
-                >
-                  {QUEUE_WORDS.edit}
-                </Button>
-                <Button size="xs" variant="outline" aria-label={QUEUE_WORDS.cancelLabel} onClick={() => onRemove(row.id)}>
-                  {QUEUE_WORDS.cancel}
-                </Button>
-              </span>
-            }
-          />
-        ))}
+        {rows.map(row => {
+          const carried = files[row.id] ?? [];
+          const why = waits(carried);
+          return (
+            <Row
+              key={row.id}
+              id={row.id}
+              title={firstLine(row.prompt)}
+              description={[...carried.map(file => file.name), ...(why === null ? [] : [QUEUE_WORDS.waitsFor(why)])]}
+              attrs={{ "data-queued-id": row.id }}
+              control={
+                <span className="flex shrink-0 items-center gap-2">
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    aria-label={QUEUE_WORDS.editLabel}
+                    onClick={() => {
+                      onEdit(row.id);
+                      foldBar(threadKey, workspaceId);
+                    }}
+                  >
+                    {QUEUE_WORDS.edit}
+                  </Button>
+                  <Button size="xs" variant="outline" aria-label={QUEUE_WORDS.cancelLabel} onClick={() => onRemove(row.id)}>
+                    {QUEUE_WORDS.cancel}
+                  </Button>
+                </span>
+              }
+            />
+          );
+        })}
       </Grid>
     </Dock>
   );

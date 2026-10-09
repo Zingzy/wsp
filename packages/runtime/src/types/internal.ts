@@ -30,7 +30,7 @@ import type {
   WorkspaceKind,
   WorkspaceSize,
 } from "@wsp/protocol";
-import { type ThreadPlacement, SessionOrigin, ThreadScope, WorkspaceOrigin } from "@wsp/protocol";
+import { AttachmentRecord, type ThreadPlacement, SessionOrigin, ThreadScope, WorkspaceOrigin } from "@wsp/protocol";
 import { EXEC_OUTPUT_MAX, fmtBytes, fmtDuration, type WorktreeFolder, type DefaultBranchRoad, defaultBranchFix, defaultBranchRefusal, refusal } from "@wsp/protocol";
 import type { MachineExecOptions, TurnWaiting } from "../machine-exec.js";
 import { listedFailure, listedLastLine, type SubagentView } from "@wsp/protocol";
@@ -452,6 +452,9 @@ export interface Steered {
   startedBy: SessionOrigin;
   /** The request it came under, which a next host asks after before it sends that request again. */
   requestId?: string;
+  /** The images it carried, as records: the host keeps their bytes under its thread and request id, and a message
+   * sent back goes with them. */
+  attachments?: AttachmentRecord[];
 }
 
 /** The steered messages a row kept, read back entry by entry: one whose words, scope, road or opener do not read is
@@ -465,7 +468,8 @@ export function readSteered(raw: unknown): Record<string, Steered> | undefined {
     const by = readScope(e?.by);
     const road = readRoad(e?.road);
     if (typeof e?.prompt !== "string" || !startedBy.success || (e.by !== undefined && by === undefined) || (e.road !== undefined && road === undefined)) continue;
-    steered[id] = { prompt: e.prompt, startedBy: startedBy.data, ...(by !== undefined ? { by } : {}), ...(road !== undefined ? { road } : {}), ...(typeof e.requestId === "string" ? { requestId: e.requestId } : {}) };
+    const attachments = AttachmentRecord.array().safeParse(e.attachments);
+    steered[id] = { prompt: e.prompt, startedBy: startedBy.data, ...(by !== undefined ? { by } : {}), ...(road !== undefined ? { road } : {}), ...(typeof e.requestId === "string" ? { requestId: e.requestId } : {}), ...(attachments.success && attachments.data.length > 0 ? { attachments: attachments.data } : {}) };
   }
   return steered;
 }

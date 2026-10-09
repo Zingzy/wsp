@@ -55,6 +55,7 @@ export function agentsArea(ctx: RuntimeContext): AgentsArea {
       images: adapter.attachments !== undefined,
       ...(adapter.mcpServers === true ? { mcpServers: true } : {}),
       ...(adapter.movesAccess === true ? { movesAccess: true } : {}),
+      ...(adapter.steersImages === true ? { steersImages: true } : {}),
       asides: adapter.aside !== undefined,
       ...(adapter.compacts !== undefined ? { compacts: adapter.compacts } : {}),
       ...(adapter.resumesAt === true || adapter.revert !== undefined ? { rewindsConversation: true } : {}),
