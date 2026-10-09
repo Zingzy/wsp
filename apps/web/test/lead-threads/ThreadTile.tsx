@@ -3,9 +3,9 @@
 // with four changes the build makes to the shipped tile: the status slot shows each status as its icon alone, the
 // working crab among them at the end of the first row, a thread at rest keeping its age; the card leads with a status row, the
 // icon, the word, the reason and the time; on hover the slot gives way to Settle where a settle can run; and a tile
-// with threads under it folds them away, its agent mark turning into the fold's chevron on hover and staying the
-// chevron while folded, the folded tile carrying over that chevron, in the project glyph's place, the glyph of the
-// most pressing thing under it that needs the person and that its own status does not show, every count on its card. ?tile=before draws the shipped tile, for the owner to compare.
+// with threads under it folds them away by the fold rows' own control at the end of row two (shut, how many threads
+// it holds and the chevron; open, the chevron on hover), its marks as they were and every count on its card; and a
+// tile in the Needs you inbox under a tree reads in row one the thread that started it. ?tile=before draws the shipped tile, for the owner to compare.
 // A thread in the sidebar as one tile of two rows: the project and the
 // computer it runs on with the thread's status at the right, then the agent's
 // mark and the title, with an open pull request's icon and the crab at the
@@ -17,7 +17,7 @@
 // tiles a person is waiting on stand out. Renaming turns the title into the
 // sidebar's one name box in the same row, so the tile keeps its height.
 import type { ComponentProps, DragEvent, MouseEvent, ReactNode } from "react";
-import { AlarmClockIcon, ArchiveIcon, ChevronDownIcon, ChevronRightIcon, FileDiffIcon, FolderIcon, GitBranchIcon, GitPullRequestIcon } from "lucide-react";
+import { AlarmClockIcon, ArchiveIcon, ChevronDownIcon, CornerDownRightIcon, FileDiffIcon, FolderIcon, GitBranchIcon, GitPullRequestIcon } from "lucide-react";
 import { agentName } from "@wsp/catalog";
 import { capRunningLine, type PlaceView, type ThreadCapWait } from "@wsp/protocol";
 import { THREAD_WORDS, WORKSPACE_WORDS } from "../../src/actions/format.js";
@@ -40,9 +40,9 @@ import { tileCardLines, tilePrIcon, type TileCardLine } from "../../src/sidebar/
 import type { TileCheckout } from "../../src/sidebar/tileCheckout.js";
 import { CAP_WAIT_WORDS, SNOOZE_WORDS } from "../../src/sidebar/words.js";
 import { LINK_DOWN_WORDS } from "../../src/adapt/terminal-pane.js";
-import { ONE_LINE_ROW_CLASS, TILE_CLASS, TILE_ROW_ONE_CLASS, TILE_ROW_TWO_CLASS, TILE_TITLE_CLASS, threadRowId } from "../../src/sidebar/rowGrammar.js";
+import { ONE_LINE_ROW_CLASS, ROW_META_CLASS, TILE_CLASS, TILE_ROW_ONE_CLASS, TILE_ROW_TWO_CLASS, TILE_TITLE_CLASS, threadRowId } from "../../src/sidebar/rowGrammar.js";
 import { useStore } from "../../src/protocol/store.js";
-import { StatusIcon, StatusLine, isSubagent, kindOf, partOf, rollupMark, rollupWords, subtreeKeys, toggleFolded, foldedKey, useLeadUi, useSubtree } from "./LeadThreads";
+import { LEAD_WORDS, StatusIcon, StatusLine, isSubagent, kindOf, partOf, rollupWords, subtreeKeys, toggleFolded, foldedKey, useLeadUi, useSubtree, type InboxMark } from "./LeadThreads";
 
 const BEFORE = new URLSearchParams(window.location.search).get("tile") === "before";
 const TILE_WORDS = { settle: "Settle thread", fold: "Fold its threads", unfold: "Show its threads" } as const;
@@ -111,21 +111,22 @@ function TileFrame({ card, place, harness, renaming, status, children, ...button
 
 /** The two rows every tile draws. Row two is the agent's mark and the title, then an open pull request's icon and
  * the crab while the thread works. */
-function TileRows({ place, status, title, harness, pr, crab, mark, lead }: { place: TilePlace; status: ReactNode; title: ReactNode; harness: string | null; pr?: TileCheckout["pr"]; crab: boolean; mark?: ReactNode; lead?: ReactNode }) {
+function TileRows({ place, status, title, harness, pr, crab, lead, where, end }: { place: TilePlace; status: ReactNode; title: ReactNode; harness: string | null; pr?: TileCheckout["pr"]; crab: boolean; lead?: ReactNode; where?: ReactNode; end?: ReactNode }) {
   return (
     <>
       <span className={TILE_ROW_ONE_CLASS}>
         {lead ?? <ProjectGlyph projectId={place.projectId} className="size-3" />}
         <span data-tile-where className="min-w-0 flex-1 truncate">
-          {whereWords(place)}
+          {where ?? whereWords(place)}
         </span>
         {status}
       </span>
       <span className={TILE_ROW_TWO_CLASS}>
-        {mark ?? (harness === null ? null : <HarnessMark harness={harness} label={agentName(harness)} className="size-3" />)}
+        {harness === null ? null : <HarnessMark harness={harness} label={agentName(harness)} className="size-3" />}
         {title}
         {tilePrIcon(pr) ? <GitPullRequestIcon aria-hidden data-tile-pr className="size-3 shrink-0 text-[var(--top-row-meta)]" /> : null}
         {crab ? <Crab className="shrink-0 text-status-working" /> : null}
+        {end}
       </span>
     </>
   );
@@ -188,6 +189,7 @@ export function ThreadTile({
   onDragStart,
   onDragEnd,
   label,
+  inboxOf,
 }: {
   thread: SidebarThreadSnapshot;
   place: TilePlace;
@@ -221,13 +223,15 @@ export function ThreadTile({
   /** What row two says in place of the title, where the title is already said over the tile: the model, in a group
    * of threads one send opened. */
   label?: string | undefined;
+  /** The tile stands in the Needs you inbox: a thread under a tree reads in row one the thread that started it. */
+  inboxOf?: InboxMark | undefined;
 }) {
   const snoozed = snoozedWorking !== undefined;
   const status = settled || snoozed ? RESTING : threadStatusOf(thread);
   const kind = kindOf(thread, settled || snoozed);
   const under = useSubtree(thread.threadId ?? thread.id);
   const folded = useLeadUi(s => s.open[foldedKey(thread.id)] ?? false);
-  const folds = !BEFORE && !settled && under.drawn;
+  const folds = !BEFORE && !settled && under.drawn && inboxOf === undefined;
   // Settle stands on hover where it can run: nothing in the thread or under it is live, and it is a thread, not a
   // subagent, which folds with its lead's turn. A working or asking thread offers nothing there: Stop is one slip
   // from a lost turn, and it stays in the menu and the composer.
@@ -277,6 +281,14 @@ export function ThreadTile({
           status: (
             <>
               <StatusLine thread={thread} kind={kind} />
+              {inboxOf !== undefined && inboxOf.parent !== null ? (
+                <li data-tile-card-line="started-by" className="flex min-w-0 items-start gap-2">
+                  <span className="mt-[3px] flex shrink-0">
+                    <CornerDownRightIcon aria-hidden className="size-3" />
+                  </span>
+                  <span className="min-w-0 break-words">{LEAD_WORDS.subOf(inboxOf.path.join(" › "))}</span>
+                </li>
+              ) : null}
               {folded && rollupWords(under.counts) !== "" ? (
                 <li data-tile-card-line="under" className="min-w-0 break-words">
                   {rollupWords(under.counts)}
@@ -289,7 +301,7 @@ export function ThreadTile({
     render: renaming ? <div /> : <button type="button" />,
     isActive: active,
     "data-sidebar-row": true,
-    "data-row-id": threadRowId(thread.id),
+    "data-row-id": inboxOf === undefined ? threadRowId(thread.id) : `inbox:${threadRowId(thread.id)}`,
     "data-depth": depth,
     ...(renaming ? {} : { onClick: onSelect, onContextMenu }),
   };
@@ -315,29 +327,6 @@ export function ThreadTile({
     <TileFrame {...frame} className={cn(TILE_CLASS, "group/tile")} {...(renaming || onDragStart === undefined ? {} : { draggable: true, onDragStart, onDragEnd })}>
       <TileRows
         place={place}
-        {...(folds
-          ? {
-              mark: (
-                <span className="relative flex size-3 shrink-0 items-center justify-center">
-                  <HarnessMark harness={thread.harness} label={agentName(thread.harness)} className={cn("size-3", folded ? "invisible" : "group-hover/tile:invisible")} />
-                  <span
-                    role="button"
-                    tabIndex={-1}
-                    data-tile-fold
-                    aria-expanded={!folded}
-                    aria-label={folded ? TILE_WORDS.unfold : TILE_WORDS.fold}
-                    className={cn("absolute inset-0 flex items-center justify-center text-sidebar-muted-foreground hover:text-sidebar-foreground", !folded && "invisible group-hover/tile:visible")}
-                    onClick={event => {
-                      event.stopPropagation();
-                      toggleFolded(thread.id);
-                    }}
-                  >
-                    {folded ? <ChevronRightIcon aria-hidden className="size-3.5" /> : <ChevronDownIcon aria-hidden className="size-3.5" />}
-                  </span>
-                </span>
-              ),
-            }
-          : {})}
         status={
           BEFORE ? (
             <ThreadStatus thread={thread} age={time} settled={settled} />
@@ -354,7 +343,32 @@ export function ThreadTile({
         harness={thread.harness}
         pr={checkout.pr}
         crab={BEFORE && status.crab === true}
-        {...(folds && folded ? { lead: rollupMark(under.counts, kind.id) } : {})}
+        {...(inboxOf !== undefined && inboxOf.parent !== null
+          ? { lead: <CornerDownRightIcon aria-hidden data-tile-started-by className="size-3 shrink-0" />, where: <span title={LEAD_WORDS.subOf(inboxOf.path.join(" › "))}>{inboxOf.parent}</span> }
+          : {})}
+        {...(folds
+          ? {
+              end: (
+                // The fold rows' own shape at the end of row two: shut, how many threads it holds and the chevron;
+                // open, the chevron alone on hover, its room kept so the title does not move.
+                <span
+                  role="button"
+                  tabIndex={-1}
+                  data-tile-fold
+                  aria-expanded={!folded}
+                  aria-label={folded ? TILE_WORDS.unfold : TILE_WORDS.fold}
+                  className={cn("flex shrink-0 items-center gap-1.5 text-sidebar-muted-foreground hover:text-sidebar-foreground", !folded && "opacity-0 group-hover/tile:opacity-100")}
+                  onClick={event => {
+                    event.stopPropagation();
+                    toggleFolded(thread.id);
+                  }}
+                >
+                  {folded ? <span className={ROW_META_CLASS}>{under.live}</span> : null}
+                  <ChevronDownIcon aria-hidden className={cn("size-3.5 shrink-0 transition-transform duration-150", folded && "-rotate-90")} />
+                </span>
+              ),
+            }
+          : {})}
       />
     </TileFrame>
   );

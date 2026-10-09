@@ -3,7 +3,8 @@
 // ChatView's import of src/tree/TreeRows.tsx resolves to LeadThreads.tsx, and every import of
 // src/sidebar/ThreadTile.tsx to the prototype's copy of it; the one line in WorkspaceSidebar.tsx that draws a tile's
 // children becomes LeadThreads, the item around a tile says whether its row is one line, and a section's head counts
-// the tiles it draws; and the sidebar's two connector classes in rowGrammar.ts come from rail.ts, so every tree in
+// the tiles it draws, and Needs you is an inbox of the threads that need the person rather than their trees; and the
+// sidebar's two connector classes in rowGrammar.ts come from rail.ts, so every tree in
 // the sidebar takes the new connector; AppShell hides the lead's panels and the header's buttons that open them while
 // a subagent's page is open, keeping them mounted; on a subagent's page the timeline draws no working line, no
 // settled footer and no turn folds, since its bar carries the state; and under ?around=proposed the timeline draws the
@@ -44,6 +45,11 @@ const SWAPS: Record<string, ReadonlyArray<readonly [string, string]>> = {
       "const tileCount = (node: TileNode): number => drawnCount(node);",
     ],
     ["export function WorkspaceSidebar() {", "export function WorkspaceSidebar() {\n  useLeadUi(s => s.open);"],
+    [
+      "  const sections = SIDEBAR_SECTIONS.flatMap(id => {\n    const found = tiles.sections.find(section => section.id === id);",
+      "  const inbox = inboxSections(tiles.sections);\n  const sections = SIDEBAR_SECTIONS.flatMap(id => {\n    const found = inbox.find(section => section.id === id);",
+    ],
+    ["        <ThreadTile\n          thread={thread}", "        <ThreadTile\n          inboxOf={(item as { inboxOf?: never }).inboxOf}\n          thread={thread}"],
     [
       '<li key={item.id} data-thread-item data-workspace-id={runs.id} className={cn("min-w-0", depth > 0 && RAIL_ITEM_CLASS)}>',
       '<li key={item.id} data-thread-item data-workspace-id={runs.id} {...(settled ? { "data-slim": "" } : {})} className={cn("min-w-0", depth > 0 && RAIL_ITEM_CLASS)}>',
@@ -109,7 +115,7 @@ function swapLeadThreads(): Plugin {
         out = out.replace(from, to);
       }
       const lead = JSON.stringify(PROTO);
-      if (id === SIDEBAR) return `import { LeadThreads, drawnCount, useLeadUi } from ${lead};\n${out}`;
+      if (id === SIDEBAR) return `import { LeadThreads, drawnCount, inboxSections, useLeadUi } from ${lead};\n${out}`;
       if (id === APP_SHELL) return `import { useSubagentPage } from ${lead};\n${out}`;
       if (id === TIMELINE_ROWS) return `import { SpawnTile, SpawnTiles } from ${lead};\nimport { launchedBy } from ${JSON.stringify(MODE)};\n${out}`;
       if (id === TIMELINE_BUILD) return `import { spawnedBy, spawnKeyOf, onSubagentPage } from ${JSON.stringify(MODE)};\n${out}`;

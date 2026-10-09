@@ -63,10 +63,10 @@ import { addNotice } from "../../src/notices/store";
 import { usePlaces, useSidebarProjects, useStore } from "../../src/protocol/store";
 import { ComputerGlyph } from "../../src/settings/ComputerGlyph";
 import { requestComposerFocus } from "../../src/shell/shellRequests";
-import { isThreadSettled, isThreadWorking } from "../../src/sidebar/Sidebar.logic";
+import { isThreadSettled, isThreadWorking, threadSection } from "../../src/sidebar/Sidebar.logic";
 import { CHILD_LIST_CLASS, HOVER_GLYPH_CLASS, ONE_LINE_ROW_CLASS, RAIL_ITEM_CLASS, ROW_META_CLASS, threadRowId } from "../../src/sidebar/rowGrammar";
 import { RowNameInput } from "../../src/sidebar/RowNameInput";
-import type { TileNode } from "../../src/sidebar/threadTree";
+import type { TileNode, TileSection } from "../../src/sidebar/threadTree";
 import { computerName, computerOf } from "../../src/sidebar/workspaceRows";
 import { CHILD_FACTS, type ChildFacts } from "./fixtures";
 import { setSubagentPageCheck } from "./mode";
@@ -111,7 +111,7 @@ export const LEAD_WORDS = {
   stopSubagent: "Stop subagent",
   runsOn: (computer: string) => `Runs on ${computer}`,
   needsYou: (n: number) => `${n} ${n === 1 ? "thread needs" : "threads need"} you`,
-  under: (words: string) => `Under it: ${words}`,
+  subOf: (path: string) => `Started by ${path}`,
   failed: (n: number) => `${n} failed`,
   working: (n: number, threads: number, subagents: number) => (subagents === 0 ? `${n} working` : `${n} working: ${plural(threads, "thread")} and ${plural(subagents, "subagent")}`),
   waiting: (n: number) => `${n} waiting for a slot`,
@@ -672,23 +672,6 @@ export function StatusLine({ thread, kind }: { thread: Thread; kind: StatusKind 
   );
 }
 
-/** What a folded tile says of everything under it, at any depth: the glyph of the most pressing thing under it that
- * needs the person and that the tile's own status does not already show, asking before failed, in its own ink, with no
- * number. It stands in row one's leading slot, over the fold's chevron, in the project glyph's place: the fold's column,
- * which never holds a tile's own state, so it cannot be read as the tile's. Every kind and its count is on the card,
- * and the glyph's name for a screen reader says them all. Undefined when nothing under it needs the person. */
-export function rollupMark(counts: TreeCounts, own: string): ReactNode | undefined {
-  const mark = [
-    { id: "needs-you", n: counts.needsYou, ink: "text-status-input", glyph: <MessageCircleQuestionIcon aria-hidden className="size-3" /> },
-    { id: "failed", n: counts.failed, ink: "text-status-failed", glyph: <CircleAlertIcon aria-hidden className="size-3" /> },
-  ].find(kind => kind.n > 0 && kind.id !== own);
-  if (mark === undefined) return undefined;
-  return (
-    <span data-rollup={mark.id} role="img" aria-label={LEAD_WORDS.under(rollupWords(counts))} className={cn("inline-flex size-3 shrink-0", mark.ink)}>
-      {mark.glyph}
-    </span>
-  );
-}
 
 /** The whole count of a folded tile's tree, for its card: every live status in words. */
 export function rollupWords(counts: TreeCounts): string {
@@ -709,7 +692,7 @@ export interface FleetNode {
 }
 
 /** Everything under one thread off the fleet the sidebar reads, its counts, and what a settle of it takes. */
-export function useSubtree(key: string): { nodes: FleetNode[]; tree: Tree<FleetNode>; counts: TreeCounts; drawn: boolean } {
+export function useSubtree(key: string): { nodes: FleetNode[]; tree: Tree<FleetNode>; counts: TreeCounts; drawn: boolean; live: number } {
   const fleet = useSidebarProjects();
   const settleMs = useSettleMs();
   const all = fleet.flatMap(project => project.threads);
@@ -718,7 +701,43 @@ export function useSubtree(key: string): { nodes: FleetNode[]; tree: Tree<FleetN
     all.filter(thread => thread.parentThreadId === at && !seen.has(keyOf(thread))).map(thread => ({ thread, kids: build(keyOf(thread), new Set([...seen, keyOf(thread)])) }));
   const nodes = build(key, new Set([key]));
   const tree: Tree<FleetNode> = { threadOf: node => node.thread, kidsOf: node => node.kids, byKey, nowMs: Date.now(), settleMs };
-  return { nodes, tree, counts: countTree(nodes, tree), drawn: nodes.some(node => partOf(node, tree) !== "settled") };
+  return { nodes, tree, counts: countTree(nodes, tree), drawn: nodes.some(node => partOf(node, tree) !== "settled"), live: liveCount(nodes, tree) };
+}
+
+/** How many threads stand under a tile when it is open, at any depth: its live ones and theirs, as the section's head
+ * counts drawn tiles; the finished stay in their folds, uncounted, as there. */
+const liveCount = (nodes: ReadonlyArray<FleetNode>, tree: Tree<FleetNode>): number =>
+  nodes.filter(node => partOf(node, tree) === "live").reduce((sum, node) => sum + 1 + liveCount(node.kids, tree), 0);
+
+/** Where a thread in the Needs you inbox lives when it is not a tree's top: the thread that started it, and the whole
+ * path from the top for its card. */
+export interface InboxMark {
+  readonly parent: string | null;
+  readonly path: ReadonlyArray<string>;
+}
+
+/** Needs you as an inbox: every thread that needs the person (asking, or failed and not set to resume), at any depth,
+ * each its own tile with nothing under it, a subagent left out as its failure is quiet; settled, answered or resumed,
+ * it leaves. Every tree with threads under it is drawn in the list too, whatever under it asks, so such a thread stands
+ * in both and selecting it marks both; a thread alone, nothing under it, stands in the inbox alone, as today. */
+export function inboxSections(sections: ReadonlyArray<TileSection>): TileSection[] {
+  const inbox: TileNode[] = [];
+  const walk = (node: TileNode, path: ReadonlyArray<string>): void => {
+    const thread = node.thread.thread;
+    if (thread !== null && !isSubagent(thread) && threadSection(thread) === "needs-you" && !isThreadSettled(thread, Date.now(), false, null)) {
+      const inboxOf: InboxMark = { parent: path.at(-1) ?? null, path };
+      inbox.push({ thread: { ...node.thread, inboxOf } as TileNode["thread"], children: [] });
+    }
+    for (const child of node.children) walk(child, thread === null ? path : [...path, thread.title]);
+  };
+  for (const section of sections) for (const root of section.roots) walk(root, []);
+  const pinned = sections.filter(section => section.id === "pinned");
+  const alone = new Set(inbox.map(node => node.thread.id));
+  const trees = sections
+    .filter(section => section.id !== "pinned")
+    .flatMap(section => section.roots)
+    .filter(root => root.children.length > 0 || !alone.has(root.thread.id));
+  return [...pinned, ...(inbox.length > 0 ? [{ id: "needs-you" as const, roots: inbox }] : []), ...(trees.length > 0 ? [{ id: "threads" as const, roots: trees }] : [])];
 }
 
 /** Whether a tile's tree under it stands folded in the sidebar, and the toggle; each tile folds on its own. */
