@@ -138,3 +138,28 @@ describe("a status change", () => {
     expect(drawn.tiles - before).toBe(1);
   });
 });
+
+describe("over a lead's tree", () => {
+  /** A lead running twelve children, one of them with a child of its own, all working. */
+  const tree = (): SessionView[] => [
+    thread(1, "running"),
+    ...Array.from({ length: 12 }, (_, i) => ({ ...thread(i + 2, "running"), startedBy: "agent" as const, parentThreadId: "thr_1" })),
+    { ...thread(20, "running"), startedBy: "agent" as const, parentThreadId: "thr_2" },
+  ];
+
+  it("one child's status change redraws its tile alone, and a keystroke in the composer redraws none", async () => {
+    SESSIONS = tree();
+    const editor = await mount();
+    await waitFor(() => expect(document.querySelectorAll("[data-slot=sidebar] [data-thread-status=working]").length).toBe(14));
+    await settle();
+    let before = drawn.tiles;
+    for (const ch of "abcdef") await typeInto(editor, ch);
+    expect(drawn.tiles - before).toBe(0);
+    before = drawn.tiles;
+    SESSIONS = SESSIONS.map(row => (row.id === "s7" ? { ...row, capped: { placeId: "here", place: "the Mac", running: 6, atOnce: 6 } } : row));
+    await act(() => useStore.getState().reloadSessions(WS));
+    await waitFor(() => expect(document.querySelectorAll("[data-slot=sidebar] [data-thread-status=waiting]").length).toBe(1));
+    await settle();
+    expect(drawn.tiles - before).toBe(1);
+  });
+});

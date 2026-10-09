@@ -12,6 +12,8 @@ import type { TilePlace } from "./ThreadTile.js";
 export interface TileCardInput {
   readonly title: string;
   readonly place: TilePlace;
+  /** Where a thread in the Needs you inbox hangs, in words, for a thread under a tree. */
+  readonly startedBy?: string | undefined;
   /** The folder the workspace works in: its copy, or the project's own. */
   readonly folder?: string | undefined;
   /** Empty where the workspace is on no branch or none is known. */
@@ -26,13 +28,14 @@ export interface TileCardInput {
   readonly notes: ReadonlyArray<string | null>;
 }
 
-export type TileCardLine = { readonly kind: "project" | "computer" | "folder" | "branch" | "agent" | "pr" | "changed" | "note"; readonly text: string };
+export type TileCardLine = { readonly kind: "started-by" | "project" | "computer" | "folder" | "branch" | "agent" | "pr" | "changed" | "note"; readonly text: string };
 
 export function tileCardLines(o: TileCardInput): { title: string; lines: TileCardLine[] } {
   const line = (kind: TileCardLine["kind"], text: string | null | undefined): TileCardLine[] => (text === null || text === undefined || text === "" ? [] : [{ kind, text }]);
   return {
     title: o.title,
     lines: [
+      ...line("started-by", o.startedBy),
       ...line("project", o.place.project),
       ...line("computer", o.place.computer),
       ...line("folder", o.folder),

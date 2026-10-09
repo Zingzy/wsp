@@ -1,0 +1,18 @@
+{
+  "at": "/",
+  "fixture": "lead-marathon",
+  "steps": [
+    "390:key:Escape",
+    "390:sidebar=trigger",
+    "row-id=inbox:thread:lead",
+    "row-id=finished:thread:c-sheet",
+    "hover:subagent-row=sa-order"
+  ],
+  "wait": "subagent-card",
+  "settleMs": 800,
+  "widths": [
+    1440,
+    1280
+  ],
+  "reason": "what shows on hover is drawn from md up; a phone has no pointer to rest on a row"
+}

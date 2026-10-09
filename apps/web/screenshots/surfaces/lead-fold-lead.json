@@ -1,0 +1,16 @@
+{
+  "at": "/",
+  "fixture": "lead-marathon",
+  "fresh": true,
+  "steps": [
+    "390:key:Escape",
+    "390:sidebar=trigger",
+    "row-id=inbox:thread:lead",
+    "focus:row-id=thread:lead",
+    "key:ArrowLeft",
+    "390:focus:row-id=inbox:thread:lead",
+    "pointer-off"
+  ],
+  "wait": "tile-fold=shut",
+  "settleMs": 1200
+}
