@@ -1,6 +1,6 @@
 # What wsp is
 
-{/* Written from apps/www/src/sections (hero.tsx, agents.tsx, handoff.tsx, computers.tsx, slate.tsx, features.tsx, close.tsx), the glossary in AGENTS.md, packages/host/src/editor.ts and packages/catalog/src/signin.ts. */}
+{/* Written from apps/web/src/components/agents/kinds/agents.ts, infra/relay/src/cloudflare.ts, apps/www/src/sections (hero.tsx, agents.tsx, handoff.tsx, computers.tsx, slate.tsx, features.tsx, close.tsx), the glossary in AGENTS.md, packages/host/src/editor.ts and packages/catalog/src/signin.ts. */}
 
 wsp runs coding agents on every computer you own. You run Claude Code, Codex and more on the computer you sit at, an old laptop or a server you rent, all from one window. The agents can start each other on any of those computers.
 
@@ -37,7 +37,7 @@ The slate is a panel beside the thread. The agent builds it and keeps it current
 - The terminal pane reads your Ghostty configuration, so the font, the colors and the transparency are yours. This is also true on your other computers.
 - On a Mac, VS Code, Cursor, Zed or a JetBrains IDE opens the thread's folder. When the folder is on another computer, VS Code, Cursor and Zed open it over SSH. A JetBrains IDE opens only folders that are on the Mac. On Linux, wsp does not open an editor yet.
 - The pull request pane shows checks and reviews, and you merge from it. One press sends a failed check back to the agent.
-- The Agents pane shows which agents are signed in on which computer. You install another agent from the same pane.
+- The Agents pane shows which agents are signed in on which computer. You sign an agent in from the same pane.
 - The browser pane shows the page that the thread builds, next to the thread.
 
 ## The words
@@ -54,7 +54,7 @@ The slate is a panel beside the thread. The agent builds it and keeps it current
 - Do I need API keys? Not for Claude Code, Codex and Cursor. They use the subscriptions that they are already signed in to. OpenCode uses a key from the model provider you pick.
 - Which agents does it run? Claude Code, Codex, OpenCode and Cursor. A thread can use any of them, and one thread can start another thread on a different agent.
 - Which computers? The Mac or the Linux computer that runs the app. Also any Linux computer that you can reach over SSH or that can dial out to you. That includes a server you rent, an old laptop and a desktop under the desk.
-- Does my code go through your servers? Only if you turn on the relay. Threads run on your computers, and the app reaches them over your own network or SSH. If you link the relay to reach a computer from anywhere, that connection goes through Cloudflare, which can read it on the way. You can skip the relay or run your own.
+- Does my code go through your servers? Only if you turn on the relay. Threads run on your computers, and the app reaches them over your own network or SSH. If you link the relay to reach a computer from anywhere, that connection goes through Cloudflare, which can read it on the way. Only your own network or SSH keeps Cloudflare out. If you [run your own relay](/guides/own-relay), no third party holds the relay account, but the connection still goes through Cloudflare.
 - What does it cost? Nothing. wsp is free and open source.
 
 ## Start here
