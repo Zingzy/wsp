@@ -6,8 +6,16 @@ import mp4 from "@/assets/clips/setup.mp4";
 import webm from "@/assets/clips/setup.webm";
 import poster from "@/assets/clips/setup-poster.jpg";
 
-/** What Add a computer copies, in the order its steps ask. */
-const COPIED = ["Coding agents, signed in", "MCP servers", "Command line tools", "Skills and plugins", "GitHub sign-in", "Your repos", "Git and shell settings"] as const;
+/** What Add a computer copies, in the order its steps ask, each with what the step offers. */
+const COPIED = [
+  ["Coding agents, signed in", "Claude Code, Codex, OpenCode and Cursor. Copy your key over or sign in fresh."],
+  ["MCP servers", "The servers your agents call, along with their sign-ins."],
+  ["Command line tools", "One click picks the ones your agents ran on your Mac."],
+  ["Skills and plugins", "Copied from your Mac, so a skill does the same job on both."],
+  ["GitHub sign-in", "Your Mac's token, or a new sign-in on the other computer."],
+  ["Your repos", "Cloned there with the name, icon and colour you gave each one."],
+  ["Git and shell settings", "Your git name and email, your prompt, tmux and the rest."],
+] as const;
 
 /** The wizard as it was used, recorded in the real app; still, on its first frame, under reduced motion. */
 function Clip() {
@@ -49,13 +57,14 @@ export function Computers() {
           <Clip />
         </div>
         <div className="lg:pt-2">
-          <ul>
-            {COPIED.map(what => (
-              <li key={what} className="border-t border-rule py-3.5 text-[16px] tracking-[-0.01em] text-foreground first:border-t-0 first:pt-0">
-                {what}
-              </li>
+          <dl>
+            {COPIED.map(([what, how]) => (
+              <div key={what} className="border-t border-rule py-3.5 first:border-t-0 first:pt-0">
+                <dt className="text-[16px] tracking-[-0.01em] text-foreground">{what}</dt>
+                <dd className="mt-0.5 text-[14.5px] leading-relaxed text-muted-foreground">{how}</dd>
+              </div>
             ))}
-          </ul>
+          </dl>
           <p className="mt-6 text-[14px] leading-relaxed text-faint">A computer behind a firewall can dial out to you instead, so nothing on it has to be open.</p>
         </div>
       </div>
