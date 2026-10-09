@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The two download buttons: the visitor's platform first, the other beside it
-// as a small link, and the command line under both. Both links reach the
+// The download buttons: the visitor's platform first, the other beside it as a
+// small link, the command line beside both, and the waitlist on Windows. Both links reach the
 // newest release's asset directly, so nobody lands on a releases page and
 // nothing on this page names a version.
 import { render, screen } from "@testing-library/react";
@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { App } from "../src/App";
 import { downloadUrl, STABLE_NAMES } from "../../../packages/protocol/src/bundles.mjs";
 import { INSTALL, RELEASES } from "../src/links";
-import { OTHER, platformOf } from "../src/downloads";
+import { platformOf } from "../src/downloads";
 
 /** What a browser says it is running on, from the shapes that actually reach this page. */
 const AGENTS = {
@@ -26,19 +26,20 @@ const AGENTS = {
   "Chrome on Android": "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36",
 } as const;
 
-const FIRST: Record<keyof typeof AGENTS, "mac" | "linux"> = {
+const FIRST: Record<keyof typeof AGENTS, "mac" | "linux" | "windows"> = {
   "Safari on an M-series Mac": "mac",
   "Chrome on an Intel Mac": "mac",
   "Arc on a Mac": "mac",
   "Firefox on Linux": "linux",
   "Chrome on Linux": "linux",
   "Chrome on a Chromebook": "linux",
-  "Chrome on Windows": "mac",
+  "Chrome on Windows": "windows",
   "Safari on an iPhone": "mac",
   "Chrome on Android": "mac",
 };
 
 const LABEL = { mac: "Download for Mac", linux: "Download for Linux" } as const;
+const OTHER = { mac: "linux", linux: "mac" } as const;
 const HREF = { mac: downloadUrl(STABLE_NAMES.mac), linux: downloadUrl(STABLE_NAMES.appImage) } as const;
 
 const realAgent = navigator.userAgent;
@@ -62,28 +63,37 @@ describe("which download comes first", () => {
 
 describe("the download buttons on the page", () => {
   for (const [browser, agent] of Object.entries(AGENTS)) {
-    it(`shows ${FIRST[browser as keyof typeof AGENTS]} as the button and the other as a link, for ${browser}`, () => {
+    const first = FIRST[browser as keyof typeof AGENTS];
+    if (first === "windows") continue;
+    it(`shows ${first} as the key and the other as a link, for ${browser}`, () => {
       browsing(agent);
-      const first = FIRST[browser as keyof typeof AGENTS];
       const second = OTHER[first];
       render(<App />);
       for (const button of screen.getAllByRole("link", { name: LABEL[first] })) {
         expect(button.getAttribute("href")).toBe(HREF[first]);
-        expect(button.className).toContain("bg-sky");
+        expect(button.className).toContain("key");
       }
       for (const link of screen.getAllByRole("link", { name: LABEL[second] })) {
         expect(link.getAttribute("href")).toBe(HREF[second]);
-        expect(link.className).not.toContain("bg-sky");
+        expect(link.className).not.toContain("key");
       }
     });
   }
 
-  it("keeps the command line under both, in the hero and at the end", () => {
+  it("gives a Windows visitor the waitlist and no download that would not run", () => {
+    browsing(AGENTS["Chrome on Windows"]);
+    render(<App />);
+    expect(screen.queryAllByRole("link", { name: LABEL.mac })).toHaveLength(0);
+    expect(screen.queryAllByRole("link", { name: LABEL.linux })).toHaveLength(0);
+    expect(screen.getAllByRole("button", { name: /Join the waitlist/ })).toHaveLength(2);
+  });
+
+  it("keeps the command line beside both, in the hero and at the end", () => {
     browsing(AGENTS["Firefox on Linux"]);
     render(<App />);
     expect(screen.getAllByRole("link", { name: LABEL.mac }).length).toBe(2);
     expect(screen.getAllByRole("link", { name: LABEL.linux }).length).toBe(2);
-    expect(screen.getAllByRole("button", { name: `Copy ${INSTALL}` }).length).toBe(3);
+    expect(screen.getAllByRole("button", { name: `Copy ${INSTALL}` }).length).toBe(2);
   });
 
   it("reaches the newest release's asset with no releases page in the way", () => {
