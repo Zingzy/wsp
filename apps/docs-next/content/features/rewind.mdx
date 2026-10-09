@@ -40,7 +40,7 @@ Undo works until the next turn in the same folder ends. After that, wsp no longe
 
 Several threads can work in one folder. A checkpoint holds the whole folder.
 
-wsp puts the files back only if no other thread ran a turn in the folder after the reply you picked. So a rewind of the files never takes back another thread's turns. It does take back any edit made outside a turn since that reply, for example an edit you made yourself. The dialog warns you that the whole folder goes back.
+wsp puts the files back only if no other thread ran a turn in the folder after the reply you picked. So a rewind of the files never takes back another thread's turns. It does take back any edit made outside a turn since that reply, for example an edit you made yourself. The dialog says that the files stay if another thread worked in the folder since that reply.
 
 If another thread ran a turn in the folder after that reply, wsp puts back only the conversation and leaves the files. For OpenCode and Cursor, which cannot cut the conversation, wsp refuses the rewind.
 

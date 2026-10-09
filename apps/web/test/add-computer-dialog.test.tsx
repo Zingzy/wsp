@@ -720,14 +720,14 @@ describe("Add a computer's picks read the host's facts", () => {
     expect(row().textContent).toContain("github.com/wsp-labs/wsp, 2 unpushed commits come along.");
   });
 
-  it("says of each project whether it has a remote and what of it is not pushed", async () => {
+  it("says of each project whether it has a remote and what of it is not pushed, and that the add refuses one with none", async () => {
     const spoo: ProjectView = { ...wsp, id: "pr_spoo", name: "spoo", path: "/Users/zingzy/spoo", remote: "github.com/spoo-me/url-shortener" };
     const laya: ProjectView = { ...wsp, id: "pr_laya", name: "laya", path: "/Users/zingzy/laya", remote: "" };
     useStore.setState({ projects: [wsp, spoo, laya] });
     await open("projects", RecipeFile.parse({ name: "studio", configs: { github: { signin: "vault" } } }));
     const note = (key: string): string | null | undefined => dialog()!.querySelector(`[data-pick-row='${key}'] [data-pick-note]`)?.textContent;
     await waitFor(() => expect(note("spoo")).toBe("github.com/spoo-me/url-shortener, clean."));
-    expect(note("laya")).toBe("No remote; copied whole.");
+    expect(note("laya")).toBe("No origin remote, so the add refuses it; push it somewhere first.");
     expect(note("wsp")).toBe("github.com/wsp-labs/wsp, 2 unpushed commits come along.");
   });
 });

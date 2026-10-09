@@ -355,9 +355,9 @@ const RuntimeOp = z.discriminatedUnion("op", [
     effort: z.string().optional(),
     access: AccessChoice.optional(),
   }),
-  /** A reviewer thread on a pull request, off its link or off a workspace's own pull request: a fresh copy at its
-   * head, the agent at its harness's read-only word (Codex where none is named), and the diff in its task. Answered
-   * as a StartResult. The person's act alone. */
+  /** A reviewer thread on a pull request, off its link or off a workspace's own pull request: a worktree on its
+   * head here, a fresh copy on a cloud, the agent at its harness's read-only word (Codex where none is named), and
+   * the diff in its task. Answered as a StartResult. The person's act alone. */
   z.object({
     id: reqId,
     op: z.literal("workspaces.review"),

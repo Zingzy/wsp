@@ -9,6 +9,7 @@ import { Dialog, DialogClose, DialogFooter, DialogHeader, DialogPopup, DialogTit
 import { SegmentedControl } from "../components/ui/segmented-control.js";
 import { RefusalSlot } from "../settings/sheetParts.js";
 import { useStore } from "../protocol/store.js";
+import { PR_WORDS } from "./words.js";
 
 const REVIEWERS = ["codex", "claude"] as const;
 
@@ -39,7 +40,7 @@ export function ReviewDialog({ workspaceId, onClose }: { workspaceId: string; on
         </DialogHeader>
         <div className="flex flex-col gap-2 px-5 pt-1">
           <SegmentedControl aria-label="Reviewer" value={agent} segments={REVIEWERS.map(a => ({ value: a, label: agentName(a) }))} onChange={setAgent} className="self-start" />
-          <RefusalSlot k="review-refusal" {...(refusal !== null ? { said: refusal } : { note: "Reads the pull request in a fresh copy and changes nothing. Its review waits here until you post it." })} />
+          <RefusalSlot k="review-refusal" {...(refusal !== null ? { said: refusal } : { note: PR_WORDS.reviewNote })} />
         </div>
         <DialogFooter>
           <DialogClose render={<Button variant="outline" className={NEUTRAL_RING} />}>Cancel</DialogClose>

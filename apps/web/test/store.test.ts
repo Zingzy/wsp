@@ -405,6 +405,16 @@ describe("store creations", () => {
     expect(useStore.getState().places).toEqual([HERE_PLACE, napped]);
   });
 
+  it("moves a computer's recipe sync off its frames, so the row leaves Behind when the host says the sync ended", () => {
+    const sync = { state: "running" as const, changes: ["ripgrep"], since: "2026-10-09T10:00:00.000Z" };
+    useStore.setState({ places: [HERE_PLACE, { ...HETZNER_PLACE, sync }] });
+    const apply = useStore.getState().applyEvent;
+    apply({ type: "place.sync", placeId: HETZNER_PLACE.id });
+    expect(useStore.getState().places).toEqual([HERE_PLACE, HETZNER_PLACE]);
+    apply({ type: "place.sync", placeId: HETZNER_PLACE.id, sync: { ...sync, state: "behind" } });
+    expect(useStore.getState().places).toEqual([HERE_PLACE, { ...HETZNER_PLACE, sync: { ...sync, state: "behind" } }]);
+  });
+
   it("stamps an image line's elapsed from the moment the create was asked, so the log's right column grows", () => {
     vi.useFakeTimers();
     try {

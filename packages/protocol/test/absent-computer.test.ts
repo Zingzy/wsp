@@ -188,7 +188,7 @@ describe("what the two screens say wsp puts on a computer", () => {
   it("writes the ssh road's install lines from the one list, folder, weight and whose service it is included", () => {
     expect(placeAddSheetWord("wsp", "running")).toBe("installing wsp under ~/.wsp");
     expect(PLACE_INSTALL.weight).toBe("about 40 MB");
-    expect(placeAddSheetWord("service", "running")).toBe("starting the agent as a user service");
+    expect(placeAddSheetWord("service", "running")).toBe("starting the daemon as a system service");
   });
 
   it("calls the command beside wsp's files what it does, on the way in and on the way out, and never a shim", () => {

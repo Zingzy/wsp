@@ -165,7 +165,7 @@
     ]
   },
   "noSuchPlace": "no place named {word}; you have {held}",
-  "placesFix": "Run wsp places.",
+  "placesFix": "Run wsp computers.",
   "aimedUsage": "{tool} takes a workspace or on, not both",
   "aimedBoth": "A workspace already names its computer; give the workspace or --on <computer>, not both. {usage}",
   "projectUnnamed": "--project with --on names the project: --project <name>, as wsp projects shows it. {usage}",

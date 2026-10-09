@@ -950,6 +950,16 @@ export const useStore = create<State>((set, get) => {
           if (api !== null && frameEndsStep(e)) readPlaceRows(api);
           return;
         }
+        case "place.sync":
+          // Every frame of a sync carries it while the computer is out of step; the one that ends it carries none.
+          set(s => ({
+            places: s.places.map(p => {
+              if (p.id !== e.placeId) return p;
+              const { sync: _was, ...rest } = p;
+              return { ...rest, ...(e.sync !== undefined ? { sync: e.sync } : {}), ...(e.applied !== undefined ? { applied: e.applied } : {}) };
+            }),
+          }));
+          return;
         case "place.pending":
           set(s => ({ pending: e.pending === undefined ? s.pending.filter(p => p.id !== e.id) : [...s.pending.filter(p => p.id !== e.id), e.pending] }));
           return;

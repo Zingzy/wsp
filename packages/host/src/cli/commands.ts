@@ -573,7 +573,7 @@ export const SHARED_FLAGS: readonly SharedFlag[] = [
   { name: "recipe", on: ["init"], says: "tick the agents and tools from this recipe (wsp recipe writes it) and go straight to the sign-ins" },
   { name: "project", on: ["init"], says: "the project folder you are bringing first; its own files say what it needs, and those rows are ticked first" },
   { name: "on", on: ["init"], says: "the computer the image is built on, by the name wsp computers lists, a box you joined included; the default place without it" },
-  { name: "on", on: ["add"], says: "the computer a project lives on, by the name wsp computers lists: a repo a computer clones needs one, and a folder here or a repo cloned --into a folder here takes none" },
+  { name: "on", on: ["add"], says: "the computer a project lives on, by the name wsp computers lists: a repo a computer clones needs one, and a folder here takes one to have that computer clone the folder's own remote, with the folder seeding what git ignores; without it a folder here, or a repo cloned --into a folder here, is worked where it sits" },
   { name: "into", on: ["add"], says: "the empty folder on this computer to clone a repo into, one that does not exist yet or holds nothing; the project is then that folder, worked where it sits" },
   { name: "base", on: ["add"], says: "the branch a workspace of the project starts on; the remote's own default branch at the clone without it" },
   { name: "yes", on: ["add"], says: "send the ticked rows of the seed menu; without it a folder seeding a project on another computer prints the menu and sends nothing, since what git ignores in your folder is yours" },

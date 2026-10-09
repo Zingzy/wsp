@@ -3,8 +3,7 @@
 // button open on, or the palette's list of projects where the person asked to
 // pick every time, the heading's picker that changes it, and the line under
 // the box naming the computer the thread will run on. A thread started here
-// makes its own copy of the project, so it never lands inside another
-// thread's workspace.
+// on this computer works in the project's folder itself.
 import { PlusIcon } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type { ProjectView } from "@wsp/protocol";

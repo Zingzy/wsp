@@ -18,7 +18,9 @@ describe("the wsp section a project's instructions carry", () => {
     const text = sectionText();
     expect(text.startsWith(`${SECTION_BEGIN}\n## wsp\n`)).toBe(true);
     expect(text.endsWith(SECTION_END)).toBe(true);
-    expect(text).toContain("wsp runs cloud machines called workspaces");
+    expect(text).toContain("wsp runs coding agents as threads on a project, a folder on one of the person's computers.");
+    // The cloud is off in public builds, so what wsp is says nothing of its machines.
+    expect(text.split("The three to reach for first:")[0]).not.toMatch(/cloud|machine/);
     expect(text).toContain(`under \`${SKILL_NAME}\` in your agent's own`);
     expect(text).toContain("skills folder; read it before opening a thread, sending into one, or setting anyone up on wsp.");
     const named = text.split("\n").filter(l => l.startsWith("- `wsp "));
