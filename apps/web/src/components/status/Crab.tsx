@@ -2,9 +2,10 @@
 // The crab loader from Whimsy Loaders (https://www.whimsically.app/loaders), made by Sasha (x.com/aleksksaa),
 // transcribed from the site's own export with its pixel tables and timings kept as they are; credited in
 // THIRD_PARTY_NOTICES. A 15 by 7 pixel crab drawn in one colour at varying alpha: the claws bob, eight legs walk,
-// the eyes blink once every sixth cycle. Every crab on the page is drawn by one animation frame loop, and under
-// reduced motion each draws one still frame and the loop never starts.
+// the eyes blink once every sixth cycle. Each frame is drawn once per tint and copied into every crab on screen, from
+// the one animation frame loop in lib/frames.ts; under reduced motion each draws one still frame and asks for none.
 import { useEffect, useRef } from "react";
+import { onFrame } from "../../lib/frames.js";
 import { cn } from "../../lib/utils.js";
 
 const BODY = [
@@ -52,23 +53,47 @@ const rgbOf = (el: Element): string => {
 
 const stillQuery = () => window.matchMedia("(prefers-reduced-motion: reduce)");
 
-const crabs = new Set<{ canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D; rgb: string }>();
-let frameId = 0;
+type Drawn = { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D; dpr: number; rgb: string; stop?: () => void };
+
+const crabs = new Set<Drawn>();
+/** One canvas per tint and dpr, drawn once a frame and copied into every crab on screen that frame. */
+const sprites = new Map<string, { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D; t: number }>();
 let startedAt: number | undefined;
 let watching: (() => void) | undefined;
 
-function draw(): void {
-  const still = stillQuery().matches;
-  startedAt ??= performance.now();
-  const t = still ? 0 : performance.now() - startedAt;
-  for (const { ctx, rgb } of crabs) drawCrab(ctx, W, H, t, rgb);
-  frameId = crabs.size > 0 && !still ? requestAnimationFrame(draw) : 0;
+function sprite(crab: Drawn, t: number): HTMLCanvasElement | undefined {
+  const key = `${crab.rgb} ${crab.dpr}`;
+  let held = sprites.get(key);
+  if (held === undefined) {
+    const canvas = document.createElement("canvas");
+    canvas.width = W * crab.dpr;
+    canvas.height = H * crab.dpr;
+    const ctx = canvas.getContext("2d");
+    if (ctx === null) return undefined;
+    ctx.scale(crab.dpr, crab.dpr);
+    held = { canvas, ctx, t: NaN };
+    sprites.set(key, held);
+  }
+  if (held.t !== t) drawCrab(held.ctx, W, H, t, crab.rgb);
+  held.t = t;
+  return held.canvas;
+}
+
+function paint(crab: Drawn, t: number): void {
+  const from = sprite(crab, t);
+  if (from === undefined) return;
+  crab.ctx.clearRect(0, 0, crab.canvas.width, crab.canvas.height);
+  crab.ctx.drawImage(from, 0, 0);
+}
+
+function walk(crab: Drawn): void {
+  crab.stop = onFrame(crab.canvas, now => paint(crab, now - startedAt!));
 }
 
 /** A theme switch moves the tint, so every crab reads its colour again and a still one is drawn again in it. */
 function retint(): void {
   for (const crab of crabs) crab.rgb = rgbOf(crab.canvas);
-  if (frameId === 0) draw();
+  if (stillQuery().matches) for (const crab of crabs) paint(crab, 0);
 }
 
 /** Watches what moves a crab: the theme on the root and the motion preference, for as long as any crab is drawn. */
@@ -76,7 +101,14 @@ function watch(): () => void {
   const themes = new MutationObserver(retint);
   themes.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "data-theme"] });
   const still = stillQuery();
-  const motion = () => frameId === 0 && crabs.size > 0 && draw();
+  const motion = () => {
+    for (const crab of crabs) {
+      crab.stop?.();
+      crab.stop = undefined;
+      if (still.matches) paint(crab, 0);
+      else walk(crab);
+    }
+  };
   still.addEventListener("change", motion);
   return () => {
     themes.disconnect();
@@ -90,16 +122,18 @@ function add(canvas: HTMLCanvasElement): () => void {
   const dpr = window.devicePixelRatio || 2;
   canvas.width = W * dpr;
   canvas.height = H * dpr;
-  ctx.scale(dpr, dpr);
-  const crab = { canvas, ctx, rgb: rgbOf(canvas) };
+  const crab: Drawn = { canvas, ctx, dpr, rgb: rgbOf(canvas) };
   crabs.add(crab);
   watching ??= watch();
-  if (frameId === 0) draw();
+  startedAt ??= performance.now();
+  const still = stillQuery().matches;
+  paint(crab, still ? 0 : performance.now() - startedAt);
+  if (!still) walk(crab);
   return () => {
+    crab.stop?.();
     crabs.delete(crab);
     if (crabs.size > 0) return;
-    if (frameId !== 0) cancelAnimationFrame(frameId);
-    frameId = 0;
+    sprites.clear();
     watching?.();
     watching = undefined;
   };
