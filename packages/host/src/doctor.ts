@@ -376,7 +376,7 @@ export function sshDaemonPlace(login: { home: string; path: string }): DaemonPla
     scope: "user",
     unitPath: `${at.unitDir}/${DAEMON_UNIT}`,
     toolsPath: [at.binDir, login.path].join(":"),
-    unitEnv: { HOME: login.home },
+    unitEnv: { HOME: login.home, BROWSER: at.openShim },
     wantedBy: "default.target",
     // Nothing on a machine somebody else owns may listen past its own loopback: what dials this daemon is on that
     // machine, and this host reaches it only over the link that machine dials out on.

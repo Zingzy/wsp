@@ -159,9 +159,17 @@ export type Ptys = (frame: Record<string, unknown>) => Promise<Record<string, un
 export const HETZNER: BoxLogin = { home: "/root", owner: "root" };
 
 /** A host holding one joined computer, hetzner, its login root unless named, and a project added there by url. */
-export async function joined(o: { login?: BoxLogin; adapters?: Record<string, HarnessAdapterFactory>; taken?: string[]; store?: Store; vault?: Record<string, string>; failClone?: boolean; serversActs?: ServersActs; logins?: string; clock?: Clock; ptys?: Ptys } = {}) {
+/** GitHub set up on that computer as the setup records it: from the vault, by its own login there, or skipped. */
+export async function pickGitHub(store: Store, placeId: string, signin: "vault" | "machine" | "skip"): Promise<void> {
+  const record = (await store.get("places", placeId)) as Record<string, unknown>;
+  const outcome = signin === "skip" ? "skipped" : "present";
+  await store.put("places", placeId, { ...record, picks: { configs: { github: { signin } } }, applied: { at: new Date().toISOString(), rows: [{ id: "github", label: "GitHub", outcome }] } });
+  await ctx.runtime!.places!.load();
+}
+
+export async function joined(o: { login?: BoxLogin; adapters?: Record<string, HarnessAdapterFactory>; taken?: string[]; store?: Store; vault?: Record<string, string>; failClone?: boolean; serversActs?: ServersActs; logins?: string; clock?: Clock; ptys?: Ptys; github?: "vault" | "machine" | "skip" } = {}) {
   const login = o.login ?? HETZNER;
-  const { hostKey } = await serving({ adapters: o.adapters ?? {}, ...(o.store !== undefined ? { store: o.store } : {}), ...(o.vault !== undefined ? { vault: o.vault } : {}), ...(o.serversActs !== undefined ? { serversActs: o.serversActs } : {}), ...(o.clock !== undefined ? { clock: o.clock } : {}) });
+  const { hostKey, store } = await serving({ adapters: o.adapters ?? {}, ...(o.store !== undefined ? { store: o.store } : {}), ...(o.vault !== undefined ? { vault: o.vault } : {}), ...(o.serversActs !== undefined ? { serversActs: o.serversActs } : {}), ...(o.clock !== undefined ? { clock: o.clock } : {}) });
   let seen!: Box;
   const { client, placeId, pair } = await join(hostKey, {
     code: await code(),
@@ -173,6 +181,7 @@ export async function joined(o: { login?: BoxLogin; adapters?: Record<string, Ha
   });
   sockets.push(client.ws);
   const rt = ctx.runtime!;
+  if (o.github !== undefined) await pickGitHub(store, placeId, o.github);
   const project = o.failClone === true ? undefined : await rt.projects.add({ source: "https://github.com/spoo-me/spoo-ts", on: "hetzner", name: "spoo-ts" });
   return { rt, placeId, project: project!, seen, pair, hostKey };
 }

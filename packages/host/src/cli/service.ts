@@ -153,11 +153,11 @@ export function keyOnlyInThisShell(sources: KeySources, env: ProviderEnv = sourc
   return `wsp up --service: a service starts without your shell, so it reads its provider key from a file. ${name} is only in this shell's environment; put it in ${envFileFor(sources.statePath)} first.`;
 }
 
-/** The Claude key is not needed to serve, so it is a word rather than a refusal; without it every workspace the
- * service forks has no claude credentials, and the installing shell is the one place the reading looks complete. */
+/** The Claude key is not needed to serve, so it is a word rather than a refusal; without it no thread the service
+ * runs has a Claude key, and the installing shell is the one place the reading looks complete. */
 export function claudeKeyOnlyInThisShell(sources: KeySources): string | undefined {
   if (!onlyInThisShell("ANTHROPIC_API_KEY", sources)) return undefined;
-  return `note: ANTHROPIC_API_KEY is only in this shell's environment, so the service starts without it and the workspaces it forks get no claude credentials. Put it in ${envFileFor(sources.statePath)} to carry it over.`;
+  return `note: ANTHROPIC_API_KEY is only in this shell's environment, so the service starts without it and its threads get no Claude key. Put it in ${envFileFor(sources.statePath)} to carry it over.`;
 }
 
 export async function upServiceCommand(io: CliIO, opts: ServeAsked & Pick<SharedOpts, "running">, deps: ServiceDeps): Promise<number> {

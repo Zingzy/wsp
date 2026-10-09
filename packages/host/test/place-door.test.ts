@@ -10,7 +10,7 @@ import { join } from "node:path";
 import WebSocket from "ws";
 import { afterEach, describe, expect, it } from "vitest";
 import { freshEphemeral } from "@wsp/keys";
-import { AGENTS_ON, DEFAULT_PLACE_PORT, DEFAULT_PORT, LOOPBACK, PLACE_LINK_NONCE_BYTES, PLACE_PORT_OFFSET, SCOPED_TOKEN_ROAD_REFUSAL, WILDCARD, WS_PATH, doorPortHeldLine, type BootPayload } from "@wsp/protocol";
+import { AGENTS_ON, DEFAULT_PLACE_PORT, DEFAULT_PORT, LOOPBACK, PLACE_LINK_NONCE_BYTES, PLACE_PORT_OFFSET, SCOPED_TOKEN_ROAD_REFUSAL, WILDCARD, WS_PATH, doorPortHeldLine, doorPortMovedLine, type BootPayload } from "@wsp/protocol";
 import { copyKey, createRuntime, memoryStore, newPlaceKeyPair, type PlaceBackHolder, type Runtime } from "@wsp/runtime";
 import { WsClient } from "../../runtime/test/ws-client.js";
 import { placeWiring } from "../src/places.js";
@@ -151,6 +151,31 @@ describe("the door a host opens for computers you own", () => {
     expect(first.addresses.every(at => at.endsWith(`:${port + PLACE_PORT_OFFSET}`))).toBe(true);
     // The door's own listener is what a forward over ssh from a box may land on.
     expect(first.backPort).toBe(port + PLACE_PORT_OFFSET);
+  });
+
+  it("binds the door port of its last start again on a host asked for any free port, since a joined computer dials that port for good", async () => {
+    const state = mkdtempSync(join(tmpdir(), "wsp-door-again-"));
+    dirs.push(state);
+    const statePath = join(state, "state.json");
+    const start = (): Promise<HostHandle> => startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0, statePath });
+    handle = await start();
+    const first = (await handle.door.open()).port;
+    await handle.close();
+    handle = await start();
+    expect((await handle.door.open()).port).toBe(first);
+    await handle.close();
+    // A port somebody else took meanwhile is not waited on: the door opens on a free one and says so.
+    held = await hold(first);
+    const lines: string[] = [];
+    handle = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0, statePath, log: line => void lines.push(line) });
+    expect((await handle.door.open()).port).not.toBe(first);
+    expect(lines).toContain(doorPortMovedLine(first));
+    await handle.close();
+    // The move is for that start alone: once the port is free again, the door is back on it.
+    await letGo(held);
+    held = undefined;
+    handle = await start();
+    expect((await handle.door.open()).port).toBe(first);
   });
 
   it("says who holds the port rather than stepping to a free one", async () => {

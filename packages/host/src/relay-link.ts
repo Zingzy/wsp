@@ -7,6 +7,7 @@
 // admissions signed for them, which this host verifies with keys it holds and
 // the relay does not: no key, no pairing code and no device token is ever sent
 // there, and every admission is bytes the relay stores and cannot make.
+import { existsSync } from "node:fs";
 import { hostname as thisComputer } from "node:os";
 import { dirname, join } from "node:path";
 import {
@@ -57,6 +58,8 @@ import { CLOUDFLARED, connectorRunning, ensureCloudflared, startConnector, stopR
 import { publicAddressLine, stateLine } from "./host-lock.js";
 import { accountRecords, aimedAlias, aliasFrom, readHost, removeHost, writeHost, type HostRecord } from "./hosts.js";
 import { hostKeyHere } from "./places.js";
+import { isPlaceRecord, PLACES, stateDbPath } from "@wsp/runtime";
+import { stateStore } from "./cli/state.js";
 import { servingElsewhere } from "./serving-home.js";
 import { table } from "./verbs.js";
 
@@ -523,9 +526,25 @@ async function codeLink(io: CliIO, deps: RelayDeps, relayUrl: string, name: stri
   return waitApproved(deps, relayUrl, started);
 }
 
+/** Why an unlink stops: a box dials only the addresses it joined at, the unlink deletes this host's name on the
+ * relay, and a new link gets another, so the box would never find this host again. */
+export const unlinkCutsOffLine = (names: readonly string[], address: string): string =>
+  `${names.join(", ")} last reached this host at ${address}, and a joined computer dials only the addresses it joined at; wsp host unlink deletes that name, and a new link gets another.`;
+
+/** The computers whose last link came in at the relay's name for this host, read off the state file. */
+async function joinedAtRelay(statePath: string, hostname: string | undefined): Promise<string[]> {
+  if (hostname === undefined || (!existsSync(statePath) && !existsSync(stateDbPath(statePath)))) return [];
+  const records = (await stateStore(statePath).list(PLACES)).filter(isPlaceRecord);
+  return records.filter(r => URL.parse(r.report?.dialed ?? "")?.host === hostname.toLowerCase()).map(r => r.name);
+}
+
 async function relayUnlink(io: CliIO, opts: RelayCommandOpts, deps: RelayDeps): Promise<number> {
   const record = readRelayRecord(opts.statePath);
   if (record === undefined) throw usageRefusal("this computer is on no account.", "Run wsp host link <url> to put it on one.");
+  const cut = await joinedAtRelay(opts.statePath, record.hostname);
+  if (cut.length > 0) {
+    throw usageRefusal(unlinkCutsOffLine(cut, relayUrlOf(record.hostname!)), `Remove ${cut.length === 1 ? "it" : "them"} with wsp remove first, then join again at an address that reaches this host without the relay; or keep this host linked.`);
+  }
   // The record goes first of all, so the host that is serving starts no connector in place of the one stopped next,
   // and the connector goes before the relay is told: a tunnel with connections still registered cannot be deleted.
   removeRelayRecord(opts.statePath);

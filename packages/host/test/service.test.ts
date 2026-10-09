@@ -1036,13 +1036,16 @@ describe("wsp up --service, wsp down and wsp status", () => {
     expect(lines[0]).toContain(`host        not answering on port 4400 (pid ${process.pid}`);
   });
 
-  it("says so when the Claude key is only in this shell, since the service starts without it and forks workspaces with no claude credentials", async () => {
+  it("says so when the Claude key is only in this shell, since the service starts without it and runs threads with no Claude key", async () => {
     keyInFile();
     vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-only-here");
     const fake = svc();
     const lines: string[] = [];
     expect(await upServiceCommand(quietIO(lines), opts, fake.deps)).toBe(0);
     expect(lines[0]).toContain("ANTHROPIC_API_KEY is only in this shell");
+    // A public build has no cloud: the note names the threads the service runs, not workspaces it forks.
+    expect(lines[0]).toContain("its threads get no Claude key");
+    expect(lines[0]).not.toMatch(/fork|workspace/);
     expect(lines[0]).toContain(join(home, ".wsp", ".env"));
     expect(JSON.stringify(fake.plans[0])).not.toContain("sk-ant-only-here");
     expect(claudeKeyOnlyInThisShell({ env: { ANTHROPIC_API_KEY: "sk-ant-only-here" }, cwd: home, statePath })).toBeDefined();

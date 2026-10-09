@@ -163,6 +163,12 @@ export function hostRootsPath(statePath: string): string {
   return join(dirname(statePath), "roots");
 }
 
+/** Where a host asked for any free port keeps the first door port it bound, beside the state file: a computer that
+ * joined at the door names that port in its place file for good, so every later start asks for it again. */
+export function doorPortPath(statePath: string): string {
+  return join(dirname(statePath), "door-port");
+}
+
 /** Where this computer's daemon keeps its readings, beside the state file, since its own folder lasts one start. */
 export function hostReadingsDir(statePath: string): string {
   return join(dirname(statePath), "readings");

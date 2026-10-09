@@ -66,9 +66,9 @@ state       /Users/you/.wsp/state.json
 When a computer has joined, the host also opens a second port on every address. A joined computer's daemon dials that port.
 
 - The app's host, and a host that you start with `wsp up` or `wsp up --service`, ask for a fixed port. The second port is 20 above that port. That is `4420` for the default `4400`, and `4421` for `wsp up --port 4401`.
-- A host that a `wsp` command starts by itself runs on port 0. Its second port is then any free port, and it changes at each start.
+- A host that a `wsp` command starts by itself runs on port 0. Its second port is any free port at its first start. The host writes that port to `door-port` beside the state file and asks for the same port at every start after.
 
-A box keeps the address that it joined with. So a box that joined a host on port 0 loses that host when the host starts again. If you do not use the app, start the host with `wsp up --service` before a box joins.
+A box keeps the address that it joined with. If another program holds the second port when the host starts again, the host opens another port and says so, and a box that joined at the old port loses the host until you free that port and start the host again.
 
 A second host on the same state file does not start. It names the one that is serving:
 

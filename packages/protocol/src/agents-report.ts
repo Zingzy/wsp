@@ -393,6 +393,9 @@ export const serverSignInCopyRefusal = (agent: string, line: string, why: "insid
 /** Why the wsp tools go only into an agent's config on this computer: a thread elsewhere is handed them on every turn. */
 export const addToolsHereRefusal = "The wsp tools go into an agent's config on this computer; a thread on any other computer is handed them with every turn.";
 
+/** Why the wsp tools are not written for an agent whose MCP config wsp does not know. */
+export const addToolsNoConfigRefusal = (agent: string): string => `${agent} has no MCP config wsp knows, so the wsp tools were not written`;
+
 /** A C0 control character or DEL: what an interactive terminal acts on rather than shows, so a name holding one is
  * never a name wsp runs anything by. */
 export const hasControlChar = (s: string): boolean => /[\x00-\x1f\x7f-\x9f]/.test(s);
