@@ -38,13 +38,25 @@ export const GLYPH_ROW_CLASS = "group-data-has-action/menu-item:pe-2";
  * breakpoint, where a phone's sheet would then show every plus and chevron at once; under that width it is not
  * drawn at all, so a control nobody can see is neither a tap target nor a tab stop. */
 export const HOVER_GLYPH_CLASS = "opacity-0 max-md:hidden";
-/** A child list of the tree: 12 px in, no gap between tiles, so the rail segments read as one line. */
-export const CHILD_LIST_CLASS = "ml-3 flex min-w-0 flex-col";
-/** One item of a child list: the rail down its left edge for its whole height, a tick into its tile's first row at
- * 15 px, and the rail stopping at that tick on the last item, which is the elbow. Its tile starts past the elbow, so
- * a lifted or hovered tile never paints over it. */
-export const RAIL_ITEM_CLASS =
-  "relative pl-1 before:absolute before:top-0 before:left-0 before:h-full before:w-px before:bg-[var(--sidebar-rail)] last:before:h-[15px] after:absolute after:top-[15px] after:left-0 after:h-px after:w-1 after:bg-[var(--sidebar-rail)]";
+// The tree's connector, one rule for every tree in the sidebar and the transcript. A child list stands so its line
+// falls under the centre of the parent's mark, and each child sits 8 px past the line. Each item draws its own part
+// and no column is drawn twice: the elbow (::after) runs from the item's top into its row at the mark line, its
+// corner rounded; on every item but the last the line (::before) carries on from where that corner starts to the
+// item's foot, where the next item's elbow takes it up. Both are borders, never a background, so the browser snaps
+// them to one device column at any zoom; a background line beside a border elbow landed a column apart and read as
+// one bold bar.
+const ELBOW =
+  "relative min-w-0 pl-2 before:pointer-events-none before:absolute before:top-[calc(var(--mark-y)-5px)] before:bottom-0 before:left-0 before:w-0 before:border-l before:border-[var(--sidebar-rail)] last:before:hidden after:pointer-events-none after:absolute after:top-0 after:left-0 after:h-[calc(var(--mark-y)+1px)] after:w-2 after:rounded-bl-sm after:border-b after:border-l after:border-[var(--sidebar-rail)]";
+/** A child list in the sidebar: its line under the centre of the parent's 12 px mark, 13 px in. */
+export const CHILD_LIST_CLASS = "ml-3.25 flex min-w-0 flex-col";
+/** One item of a sidebar child list. The elbow lands on a tile's title row at 35 px, and on a one-line row's middle at
+ * 18 px, which the item says with data-slim; no item reads its children. */
+export const RAIL_ITEM_CLASS = `${ELBOW} [--mark-y:35px] data-[slim]:[--mark-y:18px]`;
+/** A child list in the transcript: the transcript's mark is 13 px at 8 px in, so its centre is 14 px in. */
+export const TRANSCRIPT_LIST_CLASS = "ml-3.5 flex min-w-0 flex-col";
+/** One item of a transcript child list: the elbow at a row's middle, 18 px, and at 24 px on a row with a second line,
+ * which the item says with data-two. */
+export const TRANSCRIPT_ITEM_CLASS = `${ELBOW} [--mark-y:18px] data-[two]:[--mark-y:24px]`;
 
 /** The sidebar footer's own row: 36 px, muted, the whole width, the rows' own pitch. Every row in the foot wears it, so the foot
  * reads as one column whether the row is a button or a line with a link at its edge. */

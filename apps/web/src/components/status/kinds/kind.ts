@@ -23,13 +23,11 @@ export interface StatusKind {
   readonly word?: string;
   /** A word read off the thread itself, the reset it goes on at say, standing where the fixed word would. */
   readonly wordOf?: (thread: ThreadStatusInput, now: number) => string;
-  /** The elapsed time since the latest turn began stands in the word's place, which is then read to a screen
-   * reader alone. */
+  /** The elapsed time since the latest turn began is the time its tooltip adds to its word, ticking. */
   readonly timed?: boolean;
-  /** The glyph alone shows, the word read to a screen reader alone. */
-  readonly glyphOnly?: boolean;
-  /** The crab walks beside it. */
+  /** The crab is its glyph. */
   readonly crab?: boolean;
-  /** The thread's age is its only text. */
+  /** The thread's age is its time: the slot's only text for a kind with no glyph, the tooltip's beside the word for
+   * one with a glyph. */
   readonly aged?: boolean;
 }

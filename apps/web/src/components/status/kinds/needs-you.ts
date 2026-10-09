@@ -13,5 +13,4 @@ export const NEEDS_YOU: StatusKind = {
   ink: "text-status-input",
   glyph: MessageCircleQuestionIcon,
   word: threadStateWord("waiting"),
-  glyphOnly: true,
 };

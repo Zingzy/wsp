@@ -14,6 +14,8 @@ import { placeName } from "../src/settings/places.js";
 import { statusOf } from "./workspace-status.js";
 import { onNewThreadRequest } from "../src/shell/shellRequests.js";
 import { WorkspaceSidebar } from "../src/sidebar/WorkspaceSidebar.js";
+import { CHILD_LIST_CLASS, RAIL_ITEM_CLASS, TRANSCRIPT_ITEM_CLASS, TRANSCRIPT_LIST_CLASS } from "../src/sidebar/rowGrammar.js";
+import { cn } from "../src/lib/utils.js";
 import { useSettingsStore } from "../src/settings/settingsStore.js";
 import { COMPUTER_SWITCHER_WORDS, NEW_WORKSPACE, PROJECT_WORDS, SWITCHER_WORDS } from "../src/sidebar/words.js";
 import { caps } from "./caps.js";
@@ -154,11 +156,11 @@ const rowOf = (text: string): HTMLElement => screen.getByText(text).closest<HTML
 /** The tiles and the Settled row in their order, leaving out the live sections' heads the arrow keys also walk. */
 const rowIds = () => Array.from(document.querySelectorAll<HTMLElement>("[data-sidebar-row]")).map(r => r.dataset["rowId"]).filter(id => !id?.startsWith("section:"));
 const statusSlot = (row: HTMLElement): HTMLElement | null => row.querySelector<HTMLElement>("[data-thread-status]");
-/** A thread row's state word, which a toned status slot carries (a working one for screen readers, beside its time);
- * null on a row at rest. */
+/** A thread row's state word, which a toned status slot carries on its label beside its icon alone; null on a row at
+ * rest. */
 const threadState = (row: HTMLElement): string | null => {
   const slot = statusSlot(row);
-  return slot?.dataset["tone"] === undefined ? null : (slot.querySelector("[data-status-word]")?.textContent ?? null);
+  return slot?.dataset["tone"] === undefined ? null : slot.getAttribute("aria-label");
 };
 /** A thread row's age, which stands in the slot only once the thread rests; null while a state holds it. */
 const threadTime = (row: HTMLElement): string | null => {
@@ -223,7 +225,7 @@ describe("tiles from the fixture wire", () => {
     // The failure waits on the person, so it heads the list over the working thread, and the read one rests last.
     expect(rowIds()).toEqual(["thread:s3", "thread:s1", "thread:s2"]);
     expect(rowOf("fix the port list").querySelector("[data-tile-where]")!.textContent).toBe(`the-project @ ${BOX_NAME}`);
-    // The one slot at row one's right edge: the state word while a thread is one a person acts on, the age once it rests.
+    // The one slot at row one's right edge: the state's icon while a thread is one a person acts on, the age once it rests.
     expect(threadState(rowOf("fix the port list"))).toBe("Working");
     expect(threadTime(rowOf("upgrade node"))).toBe("50m");
     // A session without a prompt falls back to the harness session id.
@@ -329,10 +331,9 @@ describe("new thread", () => {
     expect(launched.querySelector("[data-thread-title]")?.textContent).toBe("read the port list");
     expect(launched.querySelector("[data-tile-where]")!.textContent).toBe(`the-project @ ${BOX_NAME}`);
     expect(threadState(launched)).toBe("Working");
-    // The runtime has stamped no start yet, so the time counts from the send.
-    expect(statusSlot(launched)!.querySelector("[aria-hidden]")!.textContent).toBe("0s");
     expect(launched.querySelector('svg[data-harness-mark="claude"]')).not.toBeNull();
-    expect(launched.querySelector("canvas[data-crab]")).not.toBeNull();
+    expect(launched.querySelectorAll("canvas[data-crab]")).toHaveLength(1);
+    expect(statusSlot(launched)!.querySelector("canvas[data-crab]")).not.toBeNull();
     expect(launched.className).toContain("h-[52px]");
     expect(document.querySelectorAll("[data-thread-launch]")).toHaveLength(1);
   });
@@ -806,16 +807,47 @@ describe("the tree", () => {
     expect(build.contains(rowOf("review the rows"))).toBe(true);
     expect(build.contains(rowOf("move the pricing table"))).toBe(true);
     expect(rowOf("retry the webhook queue").closest("li[data-thread-item]")!.contains(build)).toBe(true);
-    // Every child list is a list with its rail, and every item in one is a rail item; the top list has none.
+    // Every child list stands its line under the centre of the parent's mark, and every item in one draws its elbow
+    // and its line as borders, never a background; the top list has none.
     for (const title of ["build the rows", "review the rows", "move the pricing table"]) {
       const item = rowOf(title).closest("li")!;
-      expect(item.className, title).toContain("before:w-px");
-      expect(item.parentElement!.className, title).toContain("ml-3");
+      expect(item.className, title).toBe(cn("min-w-0", RAIL_ITEM_CLASS));
+      expect(item.parentElement!.className, title).toBe(CHILD_LIST_CLASS);
+      expect(item.hasAttribute("data-slim"), title).toBe(false);
     }
-    expect(rowOf("retry the webhook queue").closest("li")!.className).not.toContain("before:w-px");
+    expect(rowOf("retry the webhook queue").closest("li")!.className).not.toContain("after:");
+    expect(CHILD_LIST_CLASS).toContain("ml-3.25");
+    for (const [part, rule] of [
+      ["the line", /before:border-l\b/],
+      ["the elbow's side", /after:border-l\b/],
+      ["the elbow's foot", /after:border-b\b/],
+      ["the elbow's corner", /after:rounded-bl-sm\b/],
+      ["no line under the last child", /last:before:hidden\b/],
+      ["the elbow on a tile's title row", /\[--mark-y:35px\]/],
+      ["the elbow at a one-line row's middle", /data-\[slim\]:\[--mark-y:18px\]/],
+    ] as const)
+      expect(RAIL_ITEM_CLASS, part).toMatch(rule);
+    expect(RAIL_ITEM_CLASS).not.toMatch(/\bbg-/);
+    expect(TRANSCRIPT_LIST_CLASS).toContain("ml-3.5");
+    expect(TRANSCRIPT_ITEM_CLASS).toMatch(/\[--mark-y:18px\]/);
+    expect(TRANSCRIPT_ITEM_CLASS).toMatch(/data-\[two\]:\[--mark-y:24px\]/);
+    expect(TRANSCRIPT_ITEM_CLASS).not.toMatch(/\bbg-/);
     expect(threadState(rowOf("review the rows"))).toBe("Needs you");
     // The fork's tile names where the fork runs, which is its own copy.
     expect(rowOf("move the pricing table").querySelector("[data-tile-where]")!.textContent).toBe(`the-project @ ${BOX_NAME}`);
+  });
+
+  it("a child in the Settled fold is a one-line row, and its item says so, so its elbow lands at the row's middle", async () => {
+    const quiet = session("s2", "ws_a", { status: "completed", prompt: "done", threadId: "thr_2", startedAt: iso(-3 * 60 * 60_000), endedAt: iso(-90 * 60_000), readAt: iso(-90 * 60_000) });
+    const child = session("s3", "ws_a", { status: "completed", prompt: "helper", threadId: "thr_3", parentThreadId: "thr_2", startedAt: iso(-3 * 60 * 60_000), endedAt: iso(-100 * 60_000), readAt: iso(-100 * 60_000) });
+    act(() => useStore.setState({ preferences: { ...useStore.getState().preferences, settleAfter: "1h" } }));
+    await mount(fakeApi([API], [status(API)], [session("s1", "ws_a", { prompt: "hello", threadId: "thr_1", startedAt: iso(-60_000) }), quiet, child]), "hello");
+    fireEvent.click(screen.getByRole("button", { name: "Settled 2" }));
+    const item = rowOf("helper").closest("li")!;
+    expect(rowOf("helper").className).toContain("h-9");
+    expect(item.hasAttribute("data-slim")).toBe(true);
+    expect(item.className).toBe(cn("min-w-0", RAIL_ITEM_CLASS));
+    expect(rowOf("hello").closest("li")!.hasAttribute("data-slim")).toBe(false);
   });
 
   it("a thread an agent opened on another workspace hangs under its opener and names where it runs itself", async () => {
@@ -1018,15 +1050,16 @@ describe("the creation tile", () => {
     }
     expect(beta.getAttribute("aria-busy")).toBe("true");
     const starting = beta.querySelector<HTMLElement>("[data-thread-status]")!;
-    expect([starting.dataset.threadStatus, starting.textContent, starting.dataset.tone]).toEqual(["starting", "Starting", "working"]);
+    expect([starting.dataset.threadStatus, starting.getAttribute("aria-label"), starting.dataset.tone]).toEqual(["starting", "Starting", "working"]);
     expect(starting.className).toContain("text-status-working");
     expect(starting.className).toContain("font-medium");
-    // The step is its card's, in the step words' table, the runtime's sentence left out, and the crab walks at the
-    // end of row two as it does on a working thread's tile.
+    // The step is its card's, in the step words' table, the runtime's sentence left out, and the crab walks in the
+    // status slot as it does on a working thread's tile.
     expect(beta.dataset["creationLine"]).toBe(CREATE_STEP_WORDS["fork-requested"]);
     expect(beta.textContent).not.toContain(long);
     expect(beta.children).toHaveLength(2);
-    expect(beta.children[1]!.lastElementChild!.matches("[data-crab]")).toBe(true);
+    expect(beta.querySelectorAll("[data-crab]")).toHaveLength(1);
+    expect(starting.querySelector("[data-crab]")).not.toBeNull();
     expect(gamma.querySelector("[data-crab]")).toBeNull();
     expect(gamma.getAttribute("aria-busy")).toBeNull();
     expect(threadState(gamma)).toBe("Failed");
