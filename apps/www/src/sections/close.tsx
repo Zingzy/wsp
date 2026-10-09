@@ -63,6 +63,9 @@ export function Footer() {
           <a className="transition-colors hover:text-foreground" href={DOCS}>
             Docs
           </a>
+          <a className="transition-colors hover:text-foreground" href="/compare">
+            Compare
+          </a>
           <a className="transition-colors hover:text-foreground" href={REPO}>
             GitHub
           </a>

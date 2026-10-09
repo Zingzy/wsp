@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LocalBackend } from "@wsp/engine";
-import { HERE_PLACE_ID, NOTIFY_ME, unreadLine, type Caller, type SessionEvent, type ThreadScope, type TurnResult } from "@wsp/protocol";
+import { HERE_PLACE_ID, NOTIFY_ME, unreadLine, type Attachment, type Caller, type SessionEvent, type ThreadScope, type TurnImage, type TurnResult } from "@wsp/protocol";
 import { writeStub } from "../../protocol/test/stub-script.js";
 import { HARNESS_ADAPTERS } from "../src/adapters.js";
 import { localExecStream } from "../src/local-exec.js";
@@ -21,19 +21,23 @@ import { sweepStrays } from "./strays.js";
 import { until } from "./until.js";
 
 const LINE = "thread 1234abcd finished (completed): reply with the single word BANANA";
+/** A one-pixel PNG. */
+const DOT: Attachment = { mediaType: "image/png", bytes: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", name: "dot.png" };
 /** A thread's own scope, as the door builds one off the token its turn runs with. */
 const scopeOf = (workspaceId: string, threadId: string): ThreadScope => ({ kind: "thread", threadId, workspaceId, rootThreadId: threadId });
 const asThread = (scope: ThreadScope, origin: "relayed" | "here" = "relayed"): Caller => ({ origin, by: scope });
 
 /** A harness whose turns end when the case says, telling the messages steered into them unread as they end; a stop,
- * the person's or a cut's, ends the turn with every message it was steered unread. */
-function driven() {
-  const starts: { prompt: string; resume?: string }[] = [];
+ * the person's or a cut's, ends the turn with every message it was steered unread. With `images` it reads them inline,
+ * on a start and on a steer. */
+function driven(images = false) {
+  const starts: { prompt: string; resume?: string; images?: readonly TurnImage[] }[] = [];
   const turns: { sessionId: string; end: (result: TurnResult, unread: readonly string[]) => void; steered: { id: string; prompt: string }[] }[] = [];
   const adapter: HarnessAdapterFactory = () => ({
     steers: true,
+    ...(images ? { attachments: "inline" as const, steersImages: true as const } : {}),
     start: o => {
-      starts.push({ prompt: o.prompt, ...(o.resume !== undefined ? { resume: o.resume } : {}) });
+      starts.push({ prompt: o.prompt, ...(o.resume !== undefined ? { resume: o.resume } : {}), ...(o.images !== undefined && o.images.length > 0 ? { images: o.images } : {}) });
       const sessionId = o.resume ?? randomUUID();
       let finish!: (r: TurnResult) => void;
       const finished = new Promise<TurnResult>(r => (finish = r));
@@ -75,6 +79,23 @@ describe("a steered message its agent never read", () => {
     await vi.waitFor(() => expect(h.starts).toHaveLength(2));
     expect(h.starts[1]).toEqual({ prompt: LINE, resume: h.turns[0]!.sessionId });
     h.turns[1]!.end({ status: "completed", text: "BANANA" }, []);
+    await rt.close();
+  });
+
+  it("goes again with the images it carried, read from what the host kept of its steer", async () => {
+    const h = driven(true);
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter } });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
+    const lead = await rt.sessions.start(ws.id, { prompt: "orchestrate" });
+    expect(await rt.sessions.steer(lead.id, { prompt: "what colour is this?", requestId: "req_2", attachments: [DOT] })).toEqual({ outcome: "accepted" });
+    h.turns[0]!.end({ status: "failed", error: "claude exited with code 137" }, ["what colour is this?"]);
+    await vi.waitFor(() => expect(h.starts).toHaveLength(2));
+    expect(h.starts[1]).toEqual({ prompt: "what colour is this?", resume: h.turns[0]!.sessionId, images: [{ mediaType: "image/png", bytes: DOT.bytes }] });
+    // The turn it opens names the image too, kept again under its own request, so the thread draws it on that row.
+    const start = (await rt.sessions.history(ws.id)).filter(e => e.type === "session.start").at(-1) as Extract<SessionEvent, { type: "session.start" }>;
+    expect(start.attachments).toEqual([{ mediaType: "image/png", bytes: 70, name: "dot.png" }]);
+    expect(await rt.sessions.attachment(ws.id, start.threadId!, start.requestId!, 0)).toEqual({ mediaType: "image/png", bytes: DOT.bytes });
+    h.turns[1]!.end({ status: "completed", text: "a dot" }, []);
     await rt.close();
   });
 
@@ -162,6 +183,28 @@ describe("a steered message its agent never read", () => {
     await vi.waitFor(() => expect(h.starts).toHaveLength(2));
     expect(h.starts[1]).toEqual({ prompt: LINE, resume: h.turns[0]!.sessionId });
     h.turns[1]!.end({ status: "completed", text: "BANANA" }, []);
+    await rt2.close();
+  });
+
+  it("held for the wake, keeps its images across a host restart", async () => {
+    const h = driven(true);
+    const backend = stubBackend();
+    const store = memoryStore();
+    const rt1 = createRuntime({ backend, store, adapters: { claude: h.adapter } });
+    const ws = await createOn(rt1, { golden: "snap_g", name: "a" });
+    const lead = await rt1.sessions.start(ws.id, { prompt: "orchestrate" });
+    await rt1.sessions.steer(lead.id, { prompt: "what colour is this?", requestId: "req_2", attachments: [DOT] });
+    await rt1.workspaces.nap(ws.id);
+    await new Promise(r => setTimeout(r, 30));
+    expect(h.starts).toHaveLength(1);
+    await rt1.close();
+
+    const rt2 = createRuntime({ backend, store, adapters: { claude: h.adapter } });
+    await rt2.sessions.list(ws.id);
+    await rt2.workspaces.wake(ws.id);
+    await vi.waitFor(() => expect(h.starts).toHaveLength(2));
+    expect(h.starts[1]).toEqual({ prompt: "what colour is this?", resume: h.turns[0]!.sessionId, images: [{ mediaType: "image/png", bytes: DOT.bytes }] });
+    h.turns[1]!.end({ status: "completed", text: "a dot" }, []);
     await rt2.close();
   });
 

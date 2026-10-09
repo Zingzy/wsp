@@ -644,8 +644,9 @@ export interface Api {
   interruptSession?(sessionId: string, task?: string): Promise<{ outcome: SessionInterruptOutcome; left?: string; error?: string }>;
   /** Sends a message into the session's running turn; takes the runtime's session id, as interruptSession does. accepted
    * means a session.steer event is on the wire; not-running means the turn beat it and the caller starts a turn instead.
-   * Optional so fixtures without a steering harness need not fake it; the composer keeps the stop road without it. */
-  steerSession?(sessionId: string, prompt: string, requestId: string): Promise<SessionSteerOutcome>;
+   * Optional so fixtures without a steering harness need not fake it; the composer keeps the stop road without it.
+   * Images go only where the harness's catalog says steersImages. */
+  steerSession?(sessionId: string, prompt: string, requestId: string, attachments?: ReadonlyArray<Attachment>): Promise<SessionSteerOutcome>;
   /** Answers a permission prompt the session's running turn relayed into the chat, by the prompt's id and one of its
    * options; takes the session id the prompt's row carries. answered means the tool call it blocks ran or
    * was refused and the closing event is on the wire; every other outcome closed nothing here. Optional so fixtures
@@ -1001,8 +1002,8 @@ export function makeApi(c: ProtocolClient): Api {
       const { outcome, left, error } = SessionInterruptResult.pick({ outcome: true, left: true, error: true }).parse(await c.request("sessions.interrupt", { sessionId, ...(task !== undefined ? { task } : {}) }));
       return { outcome, ...(left !== undefined ? { left } : {}), ...(error !== undefined ? { error } : {}) };
     },
-    steerSession: async (sessionId, prompt, requestId) =>
-      SessionSteerOutcome.parse((await c.request<{ outcome?: unknown }>("sessions.steer", { sessionId, prompt, requestId })).outcome),
+    steerSession: async (sessionId, prompt, requestId, attachments = []) =>
+      SessionSteerOutcome.parse((await c.request<{ outcome?: unknown }>("sessions.steer", { sessionId, prompt, requestId, ...(attachments.length > 0 ? { attachments } : {}) })).outcome),
     answerPermission: async (sessionId, askId, optionId, reason) =>
       SessionAnswerOutcome.parse((await c.request<{ outcome?: unknown }>("sessions.answer", { sessionId, askId, optionId, ...(reason === undefined ? {} : { reason }) })).outcome),
     setSessionAccess: async (sessionId, permissionMode) =>
