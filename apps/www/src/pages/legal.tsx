@@ -147,7 +147,7 @@ export function Security() {
       <p>Your keys live in a file only your user can read. They are not encrypted, and wsp never writes them to your Keychain. wsp hands them to the threads that need them, on your Mac and on computers you add.</p>
 
       <h2>The relay</h2>
-      <p>A connection through the relay passes through a Cloudflare Tunnel, which ends encryption at Cloudflare and lets Cloudflare read it. Reach your computers over your own network or SSH, or run your own relay, to avoid it.</p>
+      <p>A connection through the relay passes through a Cloudflare Tunnel, which ends encryption at Cloudflare and lets Cloudflare read it. Reach your computers over your own network or SSH to avoid it. Your own relay takes us out of the path, not Cloudflare.</p>
 
       <h2>Releases</h2>
       <p>Releases are built by GitHub Actions from tags. The install script and the app's self-update check each download's sha256, and the npm package carries provenance. The Mac app is signed ad hoc and the Linux AppImage is unsigned for now.</p>
