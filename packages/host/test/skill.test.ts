@@ -150,7 +150,7 @@ describe("the wsp skill", () => {
   });
 
   // The record is what the tool server greets with, a Codex thread's wsp_slate server among them; the brief is Claude's.
-  it("names the slate's chart kinds wherever an agent learns its pieces, and no look the owner dropped", () => {
+  it("names the slate's chart kinds and its image wherever an agent learns its pieces, and no look the owner dropped", () => {
     const served = JSON.parse(readFileSync(new URL("../../../daemon/crates/wsp-mcp/record/server.json", import.meta.url), "utf8")) as { instructions: Record<string, string> };
     const texts: Record<string, string> = {
       catalog: slateCatalog(),
@@ -160,7 +160,7 @@ describe("the wsp skill", () => {
       "served scoped, cloud on": served.instructions["scopedCloudOn"]!,
     };
     for (const [where, text] of Object.entries(texts)) {
-      for (const kind of ["chart", "donut", "timeline", "treemap", "diagram"]) expect(said(text, kind), `${kind} in the ${where}`).toBe(true);
+      for (const kind of ["chart", "donut", "timeline", "treemap", "diagram", "image"]) expect(said(text, kind), `${kind} in the ${where}`).toBe(true);
       for (const dropped of ["ramp", "outlined"]) expect(said(text, dropped), `${dropped} in the ${where}`).toBe(false);
     }
     for (const prop of ["<series", "stack"]) expect(slateCatalog(), prop).toContain(prop);

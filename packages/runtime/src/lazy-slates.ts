@@ -41,6 +41,7 @@ export function lazySlates(deps: SlatesDeps): Slates {
     approve: p => used(s => s.approve(p)),
     cancel: p => used(s => s.cancel(p)),
     resolve: p => used(s => s.resolve(p)),
+    image: p => used(s => s.image(p)),
     subscribe: p => {
       if (real !== undefined) return real.subscribe(p);
       let release: (() => void) | undefined;

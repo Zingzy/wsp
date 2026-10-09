@@ -123,7 +123,7 @@ describe("the slate renderer", () => {
     draw(EVERY_PIECE, VALUES);
     const types = new Set([...document.querySelectorAll<HTMLElement>("[data-slate-type]")].map(el => el.dataset["slateType"]));
     for (const type of ["column", "row", "section", "text", "markdown", "number", "meter", "facts", "table", "chart", "donut", "timeline", "treemap", "button", "input"]) expect(types).toContain(type);
-    expect(Object.keys(SLATE_VIEWS).sort()).toEqual(["bars", "button", "chart", "checklist", "chip", "choices", "column", "diagram", "donut", "empty", "facts", "grid", "heading", "input", "markdown", "meter", "number", "output", "ring", "row", "section", "select", "sparkline", "status", "table", "text", "timeline", "toggle", "treemap"]);
+    expect(Object.keys(SLATE_VIEWS).sort()).toEqual(["bars", "button", "chart", "checklist", "chip", "choices", "column", "diagram", "donut", "empty", "facts", "grid", "heading", "image", "images", "input", "markdown", "meter", "number", "output", "ring", "row", "section", "select", "sparkline", "status", "table", "text", "timeline", "toggle", "treemap"]);
     // Each chart kind draws its own marks, not its fallback or the failed line.
     expect(document.querySelector("[data-slate-failed]")).toBeNull();
     expect(screen.getByText("p99")).toBeTruthy();

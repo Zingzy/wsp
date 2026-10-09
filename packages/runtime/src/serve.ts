@@ -124,6 +124,7 @@ import type { HostEditor, HostFolders, HostSsh, HostTerminalConfig, InitDoor, Pr
 
 import { forwardsOf, type ForwardsSource } from "./forwards.js";
 import { costMoved } from "./status.js";
+import { answerSlate, isSlateRequest, type SlateHolds } from "./serve-slates.js";
 export type { ForwardsSource };
 
 /** The address a host binds when nobody names another and the path the runtime answers upgrades on, both the
@@ -554,8 +555,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
     let sealExpect: Uint8Array | undefined;
 
     const detaches: (() => void)[] = [];
-    /** The slate holds this socket took, by thread and sources, so an unsubscribe lets go of one of them. */
-    const slateHolds = new Map<string, (() => void)[]>();
+    const slateHolds: SlateHolds = { held: new Map(), detaches };
     /** The daemon links this socket holds open, by the id it was answered with. A channel is never reachable from
      * another socket, so a page cannot drive a machine by guessing an id another page was given. */
     const channels = new Map<string, DaemonChannel>();
@@ -870,6 +870,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
           return true;
         };
         try {
+          if (isSlateRequest(msg)) return void send({ id: msg.id, ok: true, ...(await answerSlate(rt.slates, msg, origin, slateHolds)) });
           switch (msg.op) {
             case "auth":
               send({ id: msg.id, ok: true, ...released });
@@ -1639,70 +1640,6 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             }
             case "sessions.rewind":
               send({ id: msg.id, ok: true, ...(await rt.sessions.rewind(msg.threadId, { ...(msg.turnId !== undefined ? { turnId: msg.turnId } : {}), ...(msg.files !== undefined ? { files: msg.files } : {}), ...(msg.undo !== undefined ? { undo: msg.undo } : {}) }, origin)) });
-              return;
-            case "slates.get":
-              send({ id: msg.id, ok: true, slate: await rt.slates.get(msg.threadId) });
-              return;
-            case "slates.write": {
-              const { id, op: _op, origin: _sent, ...params } = msg;
-              send({ id, ok: true, ...(await rt.slates.write(params, origin)) });
-              return;
-            }
-            case "slates.state": {
-              const { id, op: _op, origin: _sent, ...params } = msg;
-              send({ id, ok: true, ...(await rt.slates.state(params, origin)) });
-              return;
-            }
-            case "slates.read": {
-              const { id, op: _op, origin: _sent, ...params } = msg;
-              send({ id, ok: true, ...(await rt.slates.read(params, origin)) });
-              return;
-            }
-            case "slates.catalog": {
-              const { id, op: _op, origin: _sent, ...params } = msg;
-              send({ id, ok: true, ...(await rt.slates.catalog(params, origin)) });
-              return;
-            }
-            case "slates.shown":
-              await rt.slates.shown(msg.threadId);
-              send({ id: msg.id, ok: true });
-              return;
-            case "slates.event": {
-              const { id, op: _op, origin: _sent, ...params } = msg;
-              send({ id, ok: true, ...(await rt.slates.event(params)) });
-              return;
-            }
-            case "slates.approve":
-              await rt.slates.approve({ threadId: msg.threadId, key: msg.key, scope: msg.scope });
-              send({ id: msg.id, ok: true });
-              return;
-            case "slates.cancel":
-              await rt.slates.cancel({ threadId: msg.threadId, run: msg.run });
-              send({ id: msg.id, ok: true });
-              return;
-            case "slates.revoke":
-              await rt.slates.revoke({ threadId: msg.threadId, key: msg.key });
-              send({ id: msg.id, ok: true });
-              return;
-            case "slates.subscribe": {
-              // Held until the window lets go, or its socket closes and every hold it took goes with it.
-              const release = rt.slates.subscribe({ threadId: msg.threadId, sources: msg.sources });
-              const key = `${msg.threadId}\u0000${[...msg.sources].sort().join(",")}`;
-              slateHolds.set(key, [...(slateHolds.get(key) ?? []), release]);
-              detaches.push(release);
-              send({ id: msg.id, ok: true });
-              return;
-            }
-            case "slates.unsubscribe": {
-              const key = `${msg.threadId}\u0000${[...msg.sources].sort().join(",")}`;
-              const held = slateHolds.get(key) ?? [];
-              held.shift()?.();
-              if (held.length === 0) slateHolds.delete(key);
-              send({ id: msg.id, ok: true });
-              return;
-            }
-            case "slates.resolve":
-              send({ id: msg.id, ok: true, ...(await rt.slates.resolve({ threadId: msg.threadId, paths: msg.paths })) });
               return;
             case "sessions.steer":
               send({ id: msg.id, ok: true, ...(await rt.sessions.steer(msg.sessionId, { prompt: msg.prompt, ...(msg.requestId !== undefined ? { requestId: msg.requestId } : {}), ...(msg.attachments !== undefined ? { attachments: msg.attachments } : {}) }, origin)) });

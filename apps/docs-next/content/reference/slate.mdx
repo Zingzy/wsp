@@ -23,6 +23,8 @@ diagram: value! label
 timeline: label! items! name! start end state(done|running|failed|waiting) group now
 treemap: label! items! name! value! group format
 donut: label! items! name! value! format unit
+image: src! caption
+images: items! src! caption layout(strip|gallery|compare)
 sparkline: label! values! tone
 table: items! key empty rows; <col title! value! tone emphasis mono align width(fit|fill)> <action label! onPress>
 checklist: items! key title! done! state(pending|working|done) note editable empty onChange
@@ -39,7 +41,7 @@ toggle: label! value! note held onChange
 empty: title! body
 Every piece: id, when={cond}; items take when too. tone: default muted good warning bad info accent. emphasis: normal strong quiet. format, where a line lists none: plain tokens bytes percent usd inr duration integer.
 section, column, grid: pad none tight normal loose; surface="inset" sets the card ground; align start center end, else children fill the width.
-bars compare categories; time is a chart, x in ms or ISO; shares a donut, sizes a treemap, spans on a clock a timeline; a flow is a diagram.
+bars compare categories; time is a chart, x in ms or ISO; shares a donut, sizes a treemap, spans on a clock a timeline; a flow is a diagram; a screenshot or plot is an image from its path on the thread's computer, or an https address the person allows.
 Sources, read only:
 thread: id title agent model status turns lastTurn cost tokens context changes plan waitingOn subagents[] ...
 usage: account windows[] session week status note ...
@@ -301,6 +303,30 @@ donut (core): Shares of one whole, five parts at most with the rest as Other; ne
 events: none
 sketch: By country  shares of {$countries}  [donut-1 donut format=integer]
 example: <donut label="By country" items={$countries} name={item.name} value={item.n} format="integer" />
+```
+
+### image
+
+```text
+image (core): A picture from a file on the thread's computer, such as a screenshot or a saved plot, or from an https address once the person allows its domain; opens large to zoom.
+  src: string, required, formula; a path on the thread's computer, relative to its folder or whole, or an http(s) address; PNG, JPEG, GIF or WebP up to 10 MB
+  caption: string, formula
+events: none
+sketch: [image /tmp/login-failed.png]  Login, after the redirect  [image-1 image]
+example: <image src="/tmp/login-failed.png" caption="Login, after the redirect" />
+```
+
+### images
+
+```text
+images (core): Several pictures, as image takes them: a row that scrolls, a grid, or a before and after under a slider.
+  items: list, required, formula
+  src: string, required, per row
+  caption: string, per row
+  layout: strip|gallery|compare
+events: none
+sketch: compare of images  [images-1 images]
+example: <images layout="compare" items={[{ p: "shots/before.png", c: "Before" }, { p: "shots/after.png", c: "After" }]} src={item.p} caption={item.c} />
 ```
 
 ### sparkline

@@ -199,6 +199,7 @@ import {
   unknownOpLine,
   boxFullLine,
   workScoreLine,
+  IMAGE_MAX_BYTES,
 } from "../src/index.js";
 
 const CONTRACT = fileURLToPath(new URL("../../../daemon/fixtures/contract/", import.meta.url));
@@ -372,6 +373,8 @@ const numbers = (): Record<string, number | string | readonly string[]> => ({
   authDeadlineMs: AUTH_DEADLINE_MS,
   tunnelCap: TUNNEL_CAP,
   fsReadCapBytes: FS_READ_CAP_BYTES,
+  // The most one fs.image carries is the cap on any image wsp takes.
+  fsImageCapBytes: IMAGE_MAX_BYTES,
   fsWriteCapBytes: FS_WRITE_CAP_BYTES,
   fsListCapEntries: FS_LIST_CAP_ENTRIES,
   fsFilesCapEntries: FS_FILES_CAP_ENTRIES,

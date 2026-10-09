@@ -11,6 +11,8 @@ import { slateOwnName, slateTable } from "./paths.js";
 import type { SlateCode } from "./problems.js";
 import { slateIsSeries } from "./sources.js";
 import { SLATE_LIMITS } from "./limits.js";
+import { slateImageSource, slateListTooLong, SLATE_IMAGE_LAYOUTS } from "./image.js";
+import { IMAGE_MAX_WORDS, IMAGE_TYPE_WORDS } from "../attachments.js";
 
 export const SLATE_TONES = ["default", "muted", "good", "warning", "bad", "info", "accent"] as const;
 const EMPHASIS = ["normal", "strong", "quiet"] as const;
@@ -41,6 +43,8 @@ export interface SlatePropSpec {
   literal?: true;
   /** A list the piece plots, whose every entry is a number. */
   of?: "number";
+  /** A list longer than count draws none of it, refused in the noun's words. */
+  most?: { count: number; noun: string };
   /** A value the piece places on a clock, a time in ms or ISO. */
   time?: true;
   /** A path prop that names a run, never a value. */
@@ -414,6 +418,31 @@ const PIECES: Record<string, SlatePieceModule> = {
       return [join2(shown(v.prop("label")), [figure(format, whole, undefined), unit].filter(Boolean).join(" ")), ...parts.map(p => `  ${p.name}  ${figure(format, p.value, undefined)} ${Math.round((p.value / whole) * 100)}%`)];
     },
     fallback: "bars", example: `<donut label="By country" items={$countries} name={item.name} value={item.n} format="integer" />`,
+  },
+  image: {
+    type: "image", level: "core", purpose: "A picture from a file on the thread's computer, such as a screenshot or a saved plot, or from an https address once the person allows its domain; opens large to zoom.", holdsChildren: false,
+    props: { src: str({ ...req, about: `a path on the thread's computer, relative to its folder or whole, or an http(s) address; ${IMAGE_TYPE_WORDS} up to ${IMAGE_MAX_WORDS}` }), caption: str() }, items: {}, events: [],
+    sketch: v => join2(`[image ${shown(v.prop("src"))}]`, shown(v.prop("caption"))),
+    check: c => {
+      const src = c.props.src;
+      if (typeof src === "string") { const read = slateImageSource(src); if ("problem" in read) c.add(read.problem.code as SlateCode, read.problem.message, "src", 'src="/tmp/home.png"'); }
+    },
+    fallback: "its path as text", example: `<image src="/tmp/login-failed.png" caption="Login, after the redirect" />`,
+  },
+  images: {
+    type: "images", level: "core", purpose: "Several pictures, as image takes them: a row that scrolls, a grid, or a before and after under a slider.", holdsChildren: false, repeating: true,
+    props: { items: { type: "list", binds: "yes", required: true, most: { count: SLATE_LIMITS.imagesPerList, noun: "images" } }, src: { type: "string", binds: "item", required: true }, caption: { type: "string", binds: "item" }, layout: enm(SLATE_IMAGE_LAYOUTS, "gallery") },
+    items: {}, events: [],
+    sketch: v => {
+      const layout = String(v.prop("layout") ?? "gallery");
+      return [`${layout} of images`, ...rows(v, (item, i) => { const r = v.row({ src: v.raw("src") ?? null, caption: v.raw("caption") ?? null }, item, i); return `  ${join2(`[image ${shown(r.src)}]`, shown(r.caption))}`; }, "No images")];
+    },
+    check: c => {
+      const items = c.props.items;
+      if (c.props.layout === "compare" && Array.isArray(items) && items.length !== 2) c.add("T303", `a compare shows exactly two images, before and after, and this list has ${items.length}`, "items");
+      if (Array.isArray(items) && items.length > SLATE_LIMITS.imagesPerList) c.add("R905", slateListTooLong(items.length, SLATE_LIMITS.imagesPerList, "images").message, "items");
+    },
+    fallback: "a list of paths", example: `<images layout="compare" items={[{ p: "shots/before.png", c: "Before" }, { p: "shots/after.png", c: "After" }]} src={item.p} caption={item.c} />`,
   },
   sparkline: {
     type: "sparkline", level: "core", purpose: "A small line beside text, the way to show a figure's trend.", holdsChildren: false,

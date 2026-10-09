@@ -27,6 +27,10 @@ use crate::proc::{kill_process, ProcSampler, ProtectedPids};
 use crate::pty::{passwd_row, process_env, pump, PtyCreateOpts};
 use crate::roads::guest_road_serves;
 use crate::tunnel::Tunnels;
+#[cfg(not(target_os = "linux"))]
+use crate::workspace::no_such_workspace;
+#[cfg(target_os = "linux")]
+use crate::workspace::workspaces_of;
 mod road;
 mod runner;
 use crate::{bring_back, frame_text as text, fs, git, hosts, paths, readings, ssh, tunnel, usage_logs, Ctx, Listener, Outbound, Outgoing};
@@ -266,6 +270,7 @@ async fn handle_op(conn: &Arc<Conn>, ctx: &Arc<Ctx>, frame: &Value, id: Option<R
             | "fs.list"
             | "fs.files"
             | "fs.read"
+            | "fs.image"
             | "fs.search"
             | "fs.folders"
             | "git.status"
@@ -438,23 +443,6 @@ async fn bound_of(ctx: &Ctx, machine: Option<&str>, at: &Path) -> Result<PathBuf
         Ok(real.min_by_key(|r| r.as_os_str().len()).unwrap_or(at))
     })
     .await
-}
-
-/// The workspace a frame names, on the daemon of the computer holding it: a workspace on a computer somebody owns
-/// runs no daemon of its own, so this daemon answers for it. A daemon that runs no workspace, and one that runs
-/// none by this name, answer the same missing refusal every other op answers for a machine it does not know.
-#[cfg(target_os = "linux")]
-fn workspaces_of(ctx: &Ctx, machine: &str) -> Result<std::sync::Arc<wsp_runtime::ops::Ops>, OpError> {
-    match &ctx.runtime {
-        Some(ops) => Ok(std::sync::Arc::clone(ops)),
-        None => Err(no_such_workspace(machine)),
-    }
-}
-
-/// The refusal for a workspace this daemon does not run, in the runtime's own words and with its own code, so the
-/// host reads one sentence whether the workspace is gone or the computer runs none at all.
-fn no_such_workspace(machine: &str) -> OpError {
-    OpError::coded(DaemonErrorCode::NotFound, wsp_runtime::no_such_workspace(machine))
 }
 
 /// A refusal the workspace runtime gave, as this switch answers it: the workspace it does not know carries the
@@ -748,6 +736,7 @@ async fn serve(conn: &Arc<Conn>, ctx: &Arc<Ctx>, id: Option<RequestId>, name: &s
             };
             answer(id, read.await)
         }
+        DaemonOp::FsImage { path, machine_id } => answer(id, crate::image::image_of(ctx, machine_id.as_deref(), path).await),
         DaemonOp::FsSearch { path, query, mode, machine_id } => {
             let found = async {
                 let (_, under, _) = road(ctx, machine_id.as_deref(), &path, Reads).await?;
