@@ -2,7 +2,7 @@
 
 {/* Written from apps/web/src/keybindingDefaults.ts, apps/web/src/shell/ (shellCommands.ts, threadHistory.ts, workspaceSwitcher.ts), apps/web/src/components/palette/, apps/web/src/keybindings.ts. */}
 
-Three ways move you between threads with the keyboard. The switcher steps through the threads you opened last. The palette searches threads and actions. The jump keys open a sidebar row by its number.
+Three ways move you between threads with the keyboard. The switcher steps through the threads you opened last. The palette searches threads and actions. The jump keys open a row of the palette's Tasks group by its number.
 
 In the chords below, `mod` is `Cmd` on a Mac and `Ctrl` elsewhere. You can change every chord in Settings > Keybindings. The [keyboard shortcuts](/features/shortcuts) page lists them all.
 
@@ -35,24 +35,26 @@ Press `mod+k` or `mod+shift+p`, or click **Search** at the top of the sidebar, t
 Before you type, the palette shows three groups:
 
 - **Actions**: things to do, such as **New thread**, **Add a project**, **Settings** and **Report a bug**, and the actions of the open project.
-- **Tasks**: one row for each project in the sidebar, with its jump key.
+- **Tasks**: one row for each project folder that has a thread, and one for each worktree. Each row shows its jump key.
 - **Recent threads**: the 12 threads started last.
 
-When you type, it searches the actions, the projects, the titles of your threads, and the words in their messages. A match in a message shows under **In messages**, with the words around it.
+When you type, it searches the actions, the Tasks rows, the titles of your threads, and the words in their messages. A match in a message shows under **In messages**, with the words around it.
 
 To search the actions only, start with `>`.
 
-An action that cannot run now shows grey, with the reason in place of its description. Every action in a menu is also in the palette, with the same words.
+An action that cannot run now shows grey, with the reason in place of its description.
 
 The palette does not search files. To find a file, press `mod+p`. See [Files](/features/files).
 
 ## Jump to a row
 
-`mod+1` to `mod+9` open the projects in the sidebar by their place in the list. `mod+1` is the first. The order is the order in which you added them. If there is no row at that number, nothing happens.
+`mod+1` to `mod+9` open the rows of the palette's **Tasks** group by their number. `mod+1` is the first row. The rows are in the order in which wsp made them, oldest first, and the order does not change while you work. A project folder with no thread has no row, and each worktree has a row of its own. If there is no row at that number, nothing happens.
+
+The sidebar shows threads, not these rows, so the numbers do not match the sidebar. Open the palette to see which row has which number.
 
 ## Go to the next thread that needs you
 
-Press `mod+alt+u` to open the next thread that waits for you, with a question or a permission prompt. It goes down the sidebar from the open thread and starts again at the top. If no thread waits for you, nothing happens.
+Press `mod+alt+u` to open the next thread that waits for you. A thread waits for you when it asks a question or a permission. It also waits for you when it finished or failed, and no window has shown that yet. It goes down the sidebar from the open thread and starts again at the top. If no thread waits for you, nothing happens.
 
 ## In a browser tab
 

@@ -4,7 +4,7 @@
 
 The Changes pane shows the git changes in the thread's folder, read on the computer the thread runs on. You can read the diff, comment on lines, edit a file, discard a file and commit, without leaving the app.
 
-To open it, press `D` in the right panel, or click **Open diff** on a turn's list of changed files.
+To open it, click **Add a panel**, the **+** at the top of the right panel, and pick **Changes**. In that menu, and in the list an empty right panel shows, `D` picks it too. You can also click **Open diff** on a turn's list of changed files.
 
 <Image src="/shots/docs-changes.webp" alt="The Changes pane: the changed files as a tree and a split diff." />
 
@@ -25,7 +25,7 @@ The pane keeps your pick of scope for each thread's folder.
 
 ## Read the diff
 
-The left side is a tree of the changed files, with a count such as `3 of 7 viewed`. The right side is the diff.
+At the top is a tree of the changed files, with a count such as `3 of 7 viewed`. It folds, and it takes a fixed height. The diff is under it.
 
 - **Stacked view** shows each file as one column. **Split view** shows the old and the new side by side.
 - Tick a file as viewed to fold it. The tick stays until the file changes again.
@@ -64,7 +64,9 @@ A commit stays on the computer. Nothing goes to a remote until you push.
 
 ## Push and open a pull request
 
-The git button in the thread's top bar does the next step for the folder. Its label changes with the state: **Commit**, **Commit and push**, **Push**, **Commit, push and PR**, **Push and create PR**, **Create PR** or **View PR**. Its menu, **More git actions**, has the rest. wsp opens the pull request with the GitHub command line, `gh`.
+The git button in the thread's top bar does the next step for the folder. Its label changes with the state: **Commit**, **Commit and push**, **Push**, **Commit, push and PR**, **Push and create PR**, **Create PR** or **View PR**. Its menu, **More git actions**, has the rest.
+
+**Commit and push** and **Commit, push and PR** commit every changed file, with the message the agent drafts. You do not see the message or the list of files first. To pick the files or read the message, commit from the Changes pane first, then push. wsp opens the pull request with the GitHub command line, `gh`.
 
 The [pull request pane](/features/pull-requests) shows the pull request after that.
 
@@ -72,7 +74,10 @@ The [pull request pane](/features/pull-requests) shows the pull request after th
 
 Under each turn, the thread lists the files that the turn changed. Click **Open diff** to open them in the Changes pane, scoped to that turn.
 
-Several threads can work in one folder. If other threads worked there too, the list says **N changed files in this folder**. A second list, **Also changed in this folder**, holds the files that the agent did not name as its own.
+Several threads can work in one folder. If other threads worked there too, the list shows one of two forms:
+
+- If the agent named the files it edited, the list shows those files. A second list under it, **Also changed in this folder**, holds the other files that changed.
+- If the agent named none, the list says **N changed files in this folder** and holds every file that changed in the folder.
 
 ## From the command line
 

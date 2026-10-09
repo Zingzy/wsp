@@ -8,7 +8,7 @@ Status updates fill up a chat, and a separate file means another window. A slate
 
 ## Open the slate
 
-The Slate tab is in the right panel. Its letter is `S`.
+The Slate tab is in the right panel. To open it, click **Add a panel**, the **+** at the top of the right panel, and pick **Slate**. In that menu, and in the list an empty right panel shows, `S` picks it too.
 
 The tab opens by itself the first time the agent writes a slate for the thread. After that, it stays where you put it. When a turn changes the slate, the line **Updated the slate** shows under the agent's reply. Click it to open the tab.
 
@@ -66,7 +66,7 @@ A command waits for your yes the first time it wants to run. The slate shows **R
 - **Run once** runs it this time and asks again next time.
 - **Always in this thread** runs it from now on. The agent can then start it too.
 
-If a script that the command names changes, the slate asks again. The command can read anything you can read, so read it before you allow it.
+The command can read anything you can read, so read it before you allow it. For a thread on the computer that runs wsp, the slate also asks again if a script that the command names changes. For a thread on a computer you added, it does not. wsp cannot read that computer's files to see the change.
 
 To take back a yes, open the slate's menu, click **Approvals**, and click **Revoke** beside the command.
 
@@ -78,17 +78,17 @@ To forget the secrets a slate kept, open its menu and click **Forget secrets**. 
 
 ## How the agent hears you
 
-A button that sends puts one message into the thread. The message holds the button's text and the values on the slate. Other presses and fields change the slate only. The agent reads them when it next reads the slate.
+A button that sends puts one message into the thread. The message holds the text that the agent wrote for the button. Under it, a `slate:` line holds the button's label and the values that the button names. Other values do not go with it. Other presses and fields change the slate only. The agent reads them when it next reads the slate.
 
 ## The slate menu
 
 The menu at the top of the slate has these items:
 
-- **Undo** takes the slate back one version.
+- **Undo v*N***, for example **Undo v3**, takes back version *N* of the slate.
 - **Clear** empties the slate.
 - **Stop runs** stops every command that runs. It shows only when the slate has commands.
 - **Forget secrets** shows only when the slate kept a secret.
-- **Approvals** lists the commands you allowed in this thread.
+- **Approvals** lists the commands you allowed or refused in this thread. A refused one says **Refused.**
 - **Copy as text** copies the slate's words.
 
 ## What stays and what goes

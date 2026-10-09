@@ -19,7 +19,10 @@ You can ask while the thread works. A side question never starts a turn and neve
 
 ## Who answers
 
-The thread's own agent answers, with the thread's model, effort and context window. It answers on a copy of the conversation. It can run no tools, so it answers from what the conversation already holds. If the answer needs a tool, the side question fails and says so. Send it as a normal message instead, and the thread works on it.
+The thread's own agent answers, on a copy of the conversation. The copy goes away after the answer. Claude Code and Codex answer in different ways.
+
+- Claude Code answers with the thread's model, effort and context window. It can run no tools. wsp refuses every tool call, so it answers from what the conversation already holds. If the answer needs a tool, the side question fails and says so. Send it as a normal message instead, and the thread works on it.
+- Codex answers on a temporary fork of the thread, with the thread's model but not its effort. The fork runs in a read-only sandbox that asks you nothing, so Codex can still run commands that only read. Codex does not send its answer as it writes it. The pane says **Asking** until the whole answer arrives.
 
 Claude Code and Codex take side questions. OpenCode and Cursor do not. In a thread on one of those, the composer says so and asks you to drop the `/btw`.
 

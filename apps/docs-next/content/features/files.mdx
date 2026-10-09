@@ -4,7 +4,7 @@
 
 The Files pane shows the files in the thread's folder, read on the computer the thread runs on. You can browse the tree, read a file, find a file by name and search the files for a word. The pane only reads. To change a file, use your editor or the [Changes pane](/features/changes).
 
-To open it, press `F` in the right panel. The thread must be running.
+To open it, click **Add a panel**, the **+** at the top of the right panel, and pick **Files**. In that menu, and in the list an empty right panel shows, `F` picks it too. The pane opens only while the thread's computer is on.
 
 <Image src="/shots/docs-files.webp" alt="The Files pane with Find a file open and a query typed." />
 
@@ -30,16 +30,22 @@ A file path in the terminal opens here too. `Cmd`-click it on a Mac, or `Ctrl`-c
 
 ## Find a file
 
-Press `mod+p` and type part of the name. The letters you type must come in order in the name, but they do not have to be next to each other. Pick a file to open it.
+Press `mod+p` and type part of the name. The letters you type must come in order in the path, but they do not have to be next to each other. Pick a file to open it.
+
+Find a file shows at most 5,000 files. If more match, it asks you to type more of the name.
 
 ## Search in files
 
 Press `mod+shift+f` and type a word. The search finds every line that holds the word, in any case. Pick a line to open the file at that line.
 
-The search runs on the thread's computer. It works as follows:
+Search in files stops when one of these happens, and asks you to type more of the word:
 
-- It skips the files that `.gitignore` and `.ignore` name, hidden files, and files over 2 MB.
-- It reads at most 5,000 files and shows at most 500 lines. If more match, it asks you to type more.
-- It stops after 5 seconds.
+- It found 500 lines.
+- It read 256 MB of files.
+- It ran for 5 seconds.
 
-Both searches need a running thread. In both, `mod` is `Cmd` on a Mac and `Ctrl` elsewhere. On a computer that is not a Mac, `Ctrl+p` goes to the terminal while the terminal has focus, so click outside the terminal first.
+## What both searches skip
+
+Both searches run on the thread's computer. Both skip the files that `.gitignore` and `.ignore` name, and hidden files and folders, such as a dotfile. Search in files also skips files over 2 MB and binary files.
+
+Both searches need a thread whose computer is on. In both, `mod` is `Cmd` on a Mac and `Ctrl` elsewhere. On a computer that is not a Mac, `Ctrl+p` goes to the terminal while the terminal has focus, so click outside the terminal first.

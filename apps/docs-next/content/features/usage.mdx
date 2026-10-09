@@ -69,4 +69,6 @@ wsp usage --range week --by model
 
 `--range` takes `day`, `week` or `month`, and `day` is the default. `--by` takes `agent`, `account`, `computer`, `project`, `model` or `source`, and `agent` is the default. `source` splits wsp's threads from the work the agents logged outside wsp.
 
+The command reads the agents' own logs only with `--by source`. With any other split, it counts only the turns that wsp ran. So `wsp usage --by agent` can show less than Settings > Usage for the same range, because the page always reads the logs too.
+
 The command prints two tables, the accounts and their limits, then what was used. See [`wsp usage`](/reference/cli/usage) and [`wsp usage reset`](/reference/cli/usage-reset).

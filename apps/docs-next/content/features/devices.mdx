@@ -6,12 +6,55 @@ You can use your wsp from more than one device. A browser on another computer, o
 
 The host is the wsp process that holds your threads and serves the app. It runs on one computer, usually your Mac. Every device talks to that one host.
 
+## Sign in to your account
+
+Your account is at the relay, a service that gives your host an https address. You sign in to it with GitHub. Sign in before you put a host on the relay, because `wsp host link` needs a computer that is signed in.
+
+Settings > Account shows whether this wsp is signed in. The app cannot sign in yet, so use the command line.
+
+On the computer that you want to sign in, run:
+
+```sh
+wsp login
+```
+
+It prints three lines together:
+
+- `word`, for a computer that is already signed in.
+- `code`, for the sign-in page.
+- `open`, the address of the sign-in page.
+
+The code lasts 15 minutes. Then pick one of two ways:
+
+- If another computer of yours is signed in already, run `wsp login <word>` on that computer. This signs the new computer in, and admits it to every host that trusts the computer you ran the command on.
+- If no computer of yours is signed in yet, open the page, sign in with GitHub, and type the code there. This signs the computer in to read the account, but admits it to no host. To admit it, run `wsp login <id>` for it on a computer that is already in.
+
+On a signed-in computer, `wsp login` with nothing after it lists the account's computers, their ids, and who admitted each one. `wsp logout` signs this computer out. `wsp logout <id>` signs another of your computers out.
+
 ## Reach the host from another device
 
-A device must first be able to reach the host. There are two ways:
+A device must be able to reach the host before it can pair. There are two ways.
 
-- On your own network, start the host so that it listens beyond the computer it runs on: `wsp up --listen <address>`.
-- From anywhere, put the host on your account at the relay with `wsp host link`. The relay gives the host an https address, so no port has to be open to the world. See [Computers behind a firewall](/features/behind-a-firewall).
+### On your own network
+
+The host that the Mac app starts listens only on the Mac. To let other devices on your network reach it, stop it and start it again as a service that listens on an address:
+
+```sh
+wsp down
+wsp up --listen <address> --service
+```
+
+While the app's host runs, `wsp up --listen` is refused with `another wsp host ... is already serving`. That is why `wsp down` comes first.
+
+### From anywhere
+
+On the computer that runs the host, put the host on your account at the relay:
+
+```sh
+wsp host link
+```
+
+On a computer that is signed in, `wsp host link` asks nothing. On a computer that is not signed in, give the relay's address, `wsp host link <url>`, and approve the code it prints on the page it names. The relay gives the host an https address, so no port has to be open to the world. See [Computers behind a firewall](/features/behind-a-firewall).
 
 ## Pair a browser or a phone
 
@@ -40,24 +83,9 @@ To take a device out, click **Revoke** beside it. It can no longer reach your ws
 
 From the command line, `wsp host devices` lists the same devices, and `wsp host devices revoke <id>` takes one out. The list says how each device came in: by a code, or by your account.
 
-## Sign in to your account
-
-Your account is at the relay, and you sign in to it with GitHub. A computer that is signed in reaches every host on the account with no code to type.
-
-Settings > Account shows whether this wsp is signed in. The app cannot sign in yet. Use the command line:
-
-1. On the computer you want to sign in, run:
-
-   ```sh
-   wsp login
-   ```
-
-2. If no computer of yours is signed in yet, `wsp login` prints a page and a code. Open the page, sign in with GitHub, and type the code there.
-3. If another computer of yours is signed in already, `wsp login` prints a word. On that other computer, run `wsp login <word>`.
-
-On a signed-in computer, `wsp login` with nothing after it lists the account's computers and who let each one in. `wsp logout` signs this computer out. `wsp logout <id>` signs another of your computers out.
-
 ## Run commands against a host on another computer
+
+A computer reaches a host on your account only after it is admitted, by `wsp login <word>` or `wsp login <id>` on a computer that is already in. The sign-in section above has both ways.
 
 `wsp hosts` lists every host on your account that this computer can reach. It shows each host's address and state, and marks the one that every command uses by default.
 

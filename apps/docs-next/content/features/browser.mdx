@@ -4,7 +4,7 @@
 
 The Browser pane shows a web server that runs on the thread's computer, beside the thread. Use it to look at your dev server while the agent works on it.
 
-To open it, press `B` in the right panel, or press `mod+shift+j`.
+To open it, click **Add a panel**, the **+** at the top of the right panel, and pick **Browser**. In that menu, and in the list an empty right panel shows, `B` picks it too. You can also press `mod+shift+j`.
 
 <Image src="/shots/browser.webp" alt="The Browser pane showing a site served on localhost:5420 beside the thread." />
 
@@ -21,7 +21,7 @@ To open a port that is not in the list, type it in the address bar. The bar take
 - For a thread on the computer you sit at, the pane opens `localhost` and the port, as your own browser does.
 - For a thread on a computer you added, wsp forwards the port to `localhost` on the computer you sit at. It keeps the port number if it is free, and else picks the next free one. The pane then opens the forwarded port.
 
-A forward closes after an hour with nothing connected to it. Open the address again to forward it again. wsp does not forward a port below 1024, since only root can open one.
+A forward with nothing connected to it closes about 2 minutes after the pane stops asking for it. It also closes after an hour with no new connection. Open the address again to forward it again. wsp does not forward a port below 1024, since only root can open one.
 
 While wsp forwards a port, the laptop button, **Open on laptop**, opens it in your own browser on the computer you sit at.
 

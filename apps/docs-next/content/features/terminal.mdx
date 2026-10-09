@@ -13,7 +13,7 @@ The terminal is Ghostty's own terminal code, compiled to WebAssembly so that it 
 There are two places for a terminal:
 
 - The drawer under the thread. Press `mod+j` to open or close it.
-- The right panel. Press `T` there.
+- The right panel. Click **Add a panel**, the **+** at the top of the right panel, and pick **Terminal**. In that menu, and in the list an empty right panel shows, `T` picks it too.
 
 With no thread open, the drawer opens a shell on the computer you sit at, in your home folder.
 
@@ -25,11 +25,13 @@ While a terminal has focus:
 
 | Chord | What it does |
 |---|---|
-| `mod+d` | Split the terminal. |
-| `mod+n` | Open a new terminal. |
+| `mod+d` | Split the terminal. On a Mac only. |
+| `mod+n` | Open a new terminal. On a Mac only. |
 | `mod+=` | Zoom in. |
 | `mod+-` | Zoom out. |
 | `mod+0` | Reset the zoom. |
+
+Off a Mac, `Ctrl+D` and `Ctrl+N` go to the shell. `Ctrl+D` ends the input, which can close the shell. To split or open a terminal there, use the right-click menu.
 
 A group holds up to 4 terminals, stacked or side by side. The zoom changes the terminal only, not the window, and wsp keeps it for each thread's folder.
 
@@ -75,7 +77,7 @@ wsp reads these keys, and leaves the rest:
 | Key | Notes |
 |---|---|
 | `font-family` | Repeat it for fallback fonts. |
-| `font-size` | |
+| `font-size` | Read and shown by `wsp terminal config`. The pane draws it only when the terminal's size setting is the file's. That setting is the app's size by default, and the app has no control to change it. |
 | `background`, `foreground`, `selection-background`, `cursor-color` | Six-digit hex colors. |
 | `palette` | Colors 0 to 15. |
 | `cursor-style`, `cursor-style-blink` | `block`, `bar`, `underline` or `block_hollow`. |
