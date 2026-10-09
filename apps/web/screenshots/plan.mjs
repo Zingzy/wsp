@@ -7,7 +7,7 @@
 // person whose image is built and one whose image never was.
 
 import { readdirSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { threadId } from "./fixture-state.mjs";
 
@@ -49,6 +49,9 @@ const FILE = /^file:([^:]+):(\d+)$/;
 /** The one step that is none of those: the network under the window goes, which is what a window on another computer
  * sees the moment the computer running wsp falls asleep. The rows stay as they were last known. */
 const OFFLINE = "offline";
+/** A step that takes the pointer off every control, to the window's top-left corner: a press that closed a drawer
+ * leaves the pointer over whatever the drawer covered, and that row would draw its hover in the shot. */
+const POINTER_OFF = "pointer-off";
 
 const fail = message => {
   throw new Error(`surfaces list: ${message}`);
@@ -88,6 +91,7 @@ export function stepFor(word, widths) {
   const filed = FILE.exec(typeof bare === "string" ? bare : "");
   const step =
     bare === OFFLINE ? { offline: true }
+    : bare === POINTER_OFF ? { pointerOff: true }
     : scrolled !== null ? { scroll: { by: Number(scrolled[1]), within: selectorFor(scrolled[2]) } }
     : typed !== null ? { type: typed[1] }
     : focused !== null ? { focus: selectorFor(withThreadId(focused[1])) }
@@ -102,6 +106,7 @@ export function stepFor(word, widths) {
 /** What the index says a step was. */
 const stepWords = step =>
   step.offline === true ? "the network going"
+  : step.pointerOff === true ? "the pointer off the page's controls"
   : step.scroll !== undefined ? `scrolling ${step.scroll.by} px around \`${step.scroll.within}\``
   : step.type !== undefined ? `typing \`${step.type}\``
   : step.focus !== undefined ? `focus on \`${step.focus}\``
@@ -162,6 +167,16 @@ export function readSurfaces(raw) {
   return { widths, heights, surfaces };
 }
 
+/** One file of the surfaces folder as a surface: named by its file, which it may not contradict. */
+const shippedSurface = (folder, name) => {
+  const raw = JSON.parse(readFileSync(join(folder, `${name}.json`), "utf8"));
+  if (raw !== null && typeof raw === "object" && "name" in raw) fail(`${name}.json: the file's own name is the surface's name, so it carries no "name"`);
+  return { name, ...raw };
+};
+
+/** The widths a surfaces folder is shot at, from the widths.json beside it. */
+const shippedWidths = folder => JSON.parse(readFileSync(join(folder, "..", "widths.json"), "utf8"));
+
 /** The list this repo ships, in the shape `readSurfaces` takes: one file per surface in `surfaces/`, named by its file,
  * and the widths every surface is shot at from `widths.json`. One file each, so two tickets adding a surface never edit
  * the same file (one shared list conflicted on nine landings). */
@@ -170,12 +185,16 @@ export function shippedSurfaces(folder = join(HERE, "surfaces")) {
     .filter(file => file.endsWith(".json"))
     .map(file => file.slice(0, -".json".length))
     .sort()
-    .map(name => {
-      const raw = JSON.parse(readFileSync(join(folder, `${name}.json`), "utf8"));
-      if (raw !== null && typeof raw === "object" && "name" in raw) fail(`${name}.json: the file's own name is the surface's name, so it carries no "name"`);
-      return { name, ...raw };
-    });
-  return { ...JSON.parse(readFileSync(join(folder, "..", "widths.json"), "utf8")), surfaces };
+    .map(name => shippedSurface(folder, name));
+  return { ...shippedWidths(folder), surfaces };
+}
+
+/** The list a `--surfaces` file names: a list as `readSurfaces` takes one, or one file of the surfaces folder, which is
+ * that surface alone at the folder's widths, so a ticket photographs its own surface by its file. */
+export function surfacesIn(path) {
+  const raw = JSON.parse(readFileSync(path, "utf8"));
+  if (raw !== null && typeof raw === "object" && "surfaces" in raw) return raw;
+  return { ...shippedWidths(dirname(path)), surfaces: [shippedSurface(dirname(path), basename(path, ".json"))] };
 }
 
 export const shotName = (surface, theme, width) => `${surface}-${theme}-${width}.png`;
