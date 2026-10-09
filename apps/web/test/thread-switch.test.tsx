@@ -68,10 +68,14 @@ function fixtureApi(transcript: SessionEvent[] = [...SETTLED_A, ...RUNNING_B], r
     snapshotStorage: async () => null,
     rollbackSnapshot: async () => ({ lineage: { name: "default", head: null, versions: [] }, existingWorkspaces: "untouched" }),
     listSessions: async () => held,
-    // As the host does: the showing stamps every row of the thread, and every window hears it.
+    // As the host does: the showing stamps every row of the thread, and every window hears it and the latest row.
     readThread: async threadId => {
       held = held.map(row => ((row.threadId ?? row.id) === threadId ? { ...row, readAt: Math.max(Date.now(), row.endedAt ?? 0) } : row));
-      act(() => { for (const fn of [...listeners]) fn({ type: "thread.marked", workspaceId: ws.id, threadIds: [threadId] } as EventUnion); });
+      const latest = held.filter(row => (row.threadId ?? row.id) === threadId).at(-1)!;
+      act(() => {
+        for (const fn of [...listeners]) fn({ type: "thread.marked", workspaceId: ws.id, threadIds: [threadId] } as EventUnion);
+        for (const fn of [...listeners]) fn({ type: "session.row", workspaceId: ws.id, threadId, id: latest.id, row: latest } as EventUnion);
+      });
     },
     listHarnesses: async () => [TABLE_CATALOG],
     subscribe: fn => { listeners.add(fn); return () => listeners.delete(fn); },

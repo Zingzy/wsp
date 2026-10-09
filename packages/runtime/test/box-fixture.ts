@@ -62,7 +62,10 @@ export const handedLine = (cmd: string): string => {
   return handed === null ? cmd : handed[1]!.replaceAll("'\\''", "'");
 };
 
-export function box(client: WsClient, login: BoxLogin, o: { failClone?: boolean; logins?: string } = {}): Box {
+/** The frames a pane sends its shells by, which a box whose `ptys` is given hands to that real daemon. */
+const PTY_OPS = new Set(["pty.create", "pty.attach", "pty.write", "pty.resize", "pty.kill", "pty.detach", "pty.list", "pty.tab"]);
+
+export function box(client: WsClient, login: BoxLogin, o: { failClone?: boolean; logins?: string; ptys?: Ptys } = {}): Box {
   let ptys = 0;
   const seen: Box = { ops: [], execs: [], frames: [], taken: new Set(), kills: [], push: event => client.say(event), configs: new Map(), order: [] };
   /** The runs a signal reached, by the run's own path off the command. */
@@ -78,6 +81,7 @@ export function box(client: WsClient, login: BoxLogin, o: { failClone?: boolean;
     if (op === "machine.capacity") return say({ cores: 4, memMb: 8192, memRoomMb: 4096, machineMemMb: 4096, diskFreeBytes: 10 * 1024 ** 3, images: [], machines: { running: 0, paused: 0 } });
     if (op !== "exec") {
       seen.frames.push(frame);
+      if (o.ptys !== undefined && PTY_OPS.has(op)) return void o.ptys(frame).then(reply => client.say({ ...reply, id: frame["id"] }), (e: unknown) => client.say({ id: frame["id"], ok: false, error: String(e) }));
       if (op === "pty.create") return say({ ptyId: `p${++ptys}` });
       if (op === "git.status") return say({ branch: { oid: "abc", head: "main", upstream: "origin/main", ahead: 0, behind: 0 }, entries: [], root: String(frame["cwd"]) });
       return say({});
@@ -149,10 +153,13 @@ export function answering(starts: Started[]): HarnessAdapterFactory {
   });
 }
 
+/** A real daemon answering a box's pty frames, its own events pushed up the link by the test. */
+export type Ptys = (frame: Record<string, unknown>) => Promise<Record<string, unknown>>;
+
 export const HETZNER: BoxLogin = { home: "/root", owner: "root" };
 
 /** A host holding one joined computer, hetzner, its login root unless named, and a project added there by url. */
-export async function joined(o: { login?: BoxLogin; adapters?: Record<string, HarnessAdapterFactory>; taken?: string[]; store?: Store; vault?: Record<string, string>; failClone?: boolean; serversActs?: ServersActs; logins?: string; clock?: Clock } = {}) {
+export async function joined(o: { login?: BoxLogin; adapters?: Record<string, HarnessAdapterFactory>; taken?: string[]; store?: Store; vault?: Record<string, string>; failClone?: boolean; serversActs?: ServersActs; logins?: string; clock?: Clock; ptys?: Ptys } = {}) {
   const login = o.login ?? HETZNER;
   const { hostKey } = await serving({ adapters: o.adapters ?? {}, ...(o.store !== undefined ? { store: o.store } : {}), ...(o.vault !== undefined ? { vault: o.vault } : {}), ...(o.serversActs !== undefined ? { serversActs: o.serversActs } : {}), ...(o.clock !== undefined ? { clock: o.clock } : {}) });
   let seen!: Box;
@@ -160,7 +167,7 @@ export async function joined(o: { login?: BoxLogin; adapters?: Record<string, Ha
     code: await code(),
     report: report("hetzner", { login: { HOME: login.home, USER: "root", PATH: "/usr/bin" } }),
     answers: c => {
-      seen = box(c, login, { ...(o.failClone === true ? { failClone: true } : {}), ...(o.logins !== undefined ? { logins: o.logins } : {}) });
+      seen = box(c, login, { ...(o.failClone === true ? { failClone: true } : {}), ...(o.logins !== undefined ? { logins: o.logins } : {}), ...(o.ptys !== undefined ? { ptys: o.ptys } : {}) });
       for (const path of o.taken ?? []) seen.taken.add(path);
     },
   });

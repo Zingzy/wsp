@@ -2,7 +2,7 @@
 import { randomBytes } from "node:crypto";
 import { hostname } from "node:os";
 import { OWNER_LABEL, goldenHead, isMissing, readGone, sightMachine, type Machine, type MachineBackend, isNoProvider, isPlaceAbsent } from "@wsp/engine";
-import { type AcrossAct, type PlaceKind, type ProjectView, type SessionView, type Caller, type WorkspacePhase, ThreadPlacement, ThreadScope, TurnStatus, WorkspaceOrigin, notTheLeadsChildRefusal, foldThreads, threadKeyOf, threadWord, scopeOf, goneWords, NO_IMAGE_YET, noWorkspaceRefusal, notFoundRefusal, goneUnconfirmedLine, type GoneSeenBy, copiesFolder, kindForComputer, RUN_GONE_LINE, HERE_PLACE_ID, workspaceLands, type ThreadFacts, threadSettled, refusal, LIMIT_RESUME_PROMPT, heldUntil, capRestartedLine } from "@wsp/protocol";
+import { type AcrossAct, type PlaceKind, type ProjectView, type SessionView, type Caller, type WorkspacePhase, ThreadPlacement, ThreadScope, TurnStatus, WorkspaceOrigin, notTheLeadsChildRefusal, foldThreads, threadKeyOf, threadWord, scopeOf, goneWords, NO_IMAGE_YET, noWorkspaceRefusal, notFoundRefusal, goneUnconfirmedLine, type GoneSeenBy, copiesFolder, kindForComputer, RUN_GONE_LINE, HERE_PLACE_ID, workspaceLands, type ThreadFacts, threadSettled, refusal, LIMIT_RESUME_PROMPT, heldUntil, capRestartedLine, tableName, threadsFollowed } from "@wsp/protocol";
 import { keyOf } from "../agent-setup.js";
 import { harnessCatalog } from "../harness-catalog.js";
 import { accountOnComputer } from "../usage.js";
@@ -585,6 +585,125 @@ export function bootArea(ctx: RuntimeContext): BootArea {
     const facts = threadFacts(threadId);
     if (facts !== undefined) bus.emit({ type: "thread.head", workspaceId: facts.workspaceId, threadId, facts, pos: transcriptIndex.get(facts.workspaceId)?.pos ?? 0 });
   };
+  /** Rows with the project and the computer their workspace stands on, as every listing and every pushed row has them. */
+  const placedRows = async (listed: SessionView[]): Promise<SessionView[]> => {
+    const computers = listed.length === 0 ? [] : await computerRows();
+    return listed.map(view => {
+      const id = live.get(view.workspaceId)?.record.project;
+      const project = id === undefined ? undefined : projectsHeld.get(id);
+      const computer = computers.find(r => r.id === project?.computer);
+      return project === undefined ? view : { ...view, project: { id: project.id, name: project.name }, computerName: computer === undefined ? project.computer : tableName(computer) };
+    });
+  };
+  /** The row ids pushed once already, whose opening prompt (a builder's brief of kilobytes, repeated on every row of
+   * its thread) the next push leaves out, and the turns told while stopped behind another thread's prompt. A launch
+   * moves its row from the turn's id to the harness's, so the first push under the new id carries the prompt again. */
+  const toldRows = new Set<string>();
+  const toldBehind = new Set<string>();
+  /** The threads whose latest row moved in this tick, and the row ids the host stopped holding: each goes out once,
+   * after the event that moved it is out, since a push inside that event's own emit would reach a socket before it.
+   * Into no replay ring: a socket that comes back reads every row again, and the ring kept them at 1.8 MB a day. A
+   * batch that fails goes out with the next one. */
+  const rowsMoved = new Map<string, string>();
+  const rowsGone = new Map<string, { workspaceId: string; threadId?: string }>();
+  let rowsQueued = false;
+  let rowsOut = Promise.resolve();
+  const pushRows = (): void => {
+    rowsQueued = false;
+    const moved = [...rowsMoved];
+    const gone = [...rowsGone].filter(([id]) => !sessions.has(id));
+    rowsMoved.clear();
+    rowsGone.clear();
+    const told: string[] = [];
+    const rows = moved.flatMap(([threadId]) => {
+      const held = [...sessions.values()].filter(s => threadKeyOf(s.view) === threadId);
+      const latest = held.at(-1);
+      if (latest === undefined) return [];
+      const view = listedRows(held).at(-1)!;
+      const { prompt: _told, ...rest } = view;
+      told.push(view.id);
+      if (view.waitingOn !== undefined) toldBehind.add(latest.turnId);
+      else toldBehind.delete(latest.turnId);
+      return [toldRows.has(view.id) ? rest : view];
+    });
+    // A rename made inside the harness reaches this host only when it asks, which a listing did on every event: the
+    // rows of each workspace that moved are asked now, each at most once a title's TTL.
+    for (const workspaceId of new Set(moved.map(([, at]) => at))) {
+      if (ctx.bootWork.has(workspaceId)) continue;
+      for (const view of ctx.titleRows([...sessions.values()].flatMap(s => (s.view.workspaceId === workspaceId ? [s.view] : [])))) void ctx.refreshTitle(view, false);
+    }
+    rowsOut = rowsOut.then(async () => {
+      for (const [id, at] of gone) bus.pass({ type: "session.row", ...at, id });
+      for (const row of await placedRows(rows)) bus.pass({ type: "session.row", workspaceId: row.workspaceId, ...(row.threadId !== undefined ? { threadId: row.threadId } : {}), id: row.id, row });
+      for (const id of told) toldRows.add(id);
+      for (const [id] of gone) toldRows.delete(id);
+      if (toldRows.size > 2 * sessions.size + 64) for (const id of toldRows) if (!sessions.has(id)) toldRows.delete(id);
+    }).catch((e: unknown) => {
+      console.warn(`a moved row was not pushed: ${e instanceof Error ? e.message : String(e)}`);
+      for (const [threadId, workspaceId] of moved) if (!rowsMoved.has(threadId)) rowsMoved.set(threadId, workspaceId);
+    });
+  };
+  const queueRows = (): void => {
+    if (rowsQueued) return;
+    rowsQueued = true;
+    queueMicrotask(pushRows);
+  };
+  const rowMoved = (workspaceId: string, threadId: string): void => {
+    queueRows();
+    rowsMoved.set(threadId, workspaceId);
+  };
+  /** A row the host held under this id no longer stands: every window drops it, once the host holds nothing there. */
+  const rowGone = (id: string, at: { workspaceId: string; threadId?: string }): void => {
+    queueRows();
+    rowsGone.set(id, { workspaceId: at.workspaceId, ...(at.threadId !== undefined ? { threadId: at.threadId } : {}) });
+  };
+  /** An agent's setup on a computer was refused or cleared: every thread of that agent there carries the word. */
+  const setupRefusalMoved = (place: string, harness: string): void => {
+    for (const s of sessions.values()) {
+      const entry = live.get(s.view.workspaceId);
+      if (s.view.harness === harness && entry !== undefined && ctx.setupPlace(entry) === place) rowMoved(s.view.workspaceId, threadKeyOf(s.view));
+    }
+  };
+  bus.on("*", e => {
+    switch (e.type) {
+      case "thread.head":
+        // A row stopped behind this thread carries its title.
+        rowMoved(e.workspaceId, e.threadId);
+        for (const s of sessions.values()) {
+          if (toldBehind.has(s.turnId) && ctx.stoppedBehind(s)?.threadId === e.threadId) rowMoved(s.view.workspaceId, threadKeyOf(s.view));
+        }
+        return;
+      case "session.held":
+      case "session.capped":
+      case "session.subagent":
+        if (e.threadId !== undefined) rowMoved(e.workspaceId, e.threadId);
+        return;
+      case "thread.marked":
+        for (const threadId of e.threadIds) rowMoved(e.workspaceId, threadId);
+        return;
+      case "session.start":
+        // The row held under the turn's id while it reached the machine is now under the harness's.
+        if (e.turnId !== undefined && e.turnId !== e.sessionId) rowGone(e.turnId, e);
+        return;
+      case "session.end":
+        if (e.turnId !== undefined && ![...sessions.values()].some(s => s.turnId === e.turnId)) rowGone(e.sessionId, e);
+        return;
+      case "session.permission":
+      case "session.permission.closed":
+        // A prompt moves its own row and every row stopped behind it, which can be on any workspace.
+        if (e.threadId !== undefined) rowMoved(e.workspaceId, e.threadId);
+        for (const s of sessions.values()) {
+          if (s.view.status === "running" && (toldBehind.has(s.turnId) || ctx.stoppedBehind(s) !== undefined)) rowMoved(s.view.workspaceId, threadKeyOf(s.view));
+        }
+        return;
+      case "session.delta":
+        // A call that follows other threads may stop this row behind a prompt one of them has open, and its result
+        // moves it back.
+        if (e.threadId === undefined) return;
+        if (e.kind === "tool_use" ? e.toolName !== undefined && threadsFollowed({ toolName: e.toolName, input: e.text }) !== undefined : e.kind === "tool_result" && e.turnId !== undefined && toldBehind.has(e.turnId)) rowMoved(e.workspaceId, e.threadId);
+        return;
+    }
+  });
   /** Moves the read or settled stamp of each thread, by fold key, on the thread's record, which a thread from before
    * records existed takes here off its latest row; each workspace touched is written once and told once. Every
    * thread is checked before any moves, so a list naming one the caller cannot reach moves nothing. */
@@ -734,7 +853,7 @@ export function bootArea(ctx: RuntimeContext): BootArea {
   };
   return {
     refreshBuilders, isHeldAway, rereadHeld, hydrateWorkspace, ready, entryOf, childOf, reachesRow, entryOfRow,
-    listedRows, threadFacts, settledNow, pushHead, mark, endSnoozeFor, armResume, resumeAfterLimit, treeRecords, treeStandsOn, talksToTreeOn, computerRows, nameOfComputer, imageHeadOrNone,
+    listedRows, placedRows, rowGone, setupRefusalMoved, threadFacts, settledNow, pushHead, mark, endSnoozeFor, armResume, resumeAfterLimit, treeRecords, treeStandsOn, talksToTreeOn, computerRows, nameOfComputer, imageHeadOrNone,
     imageHead, landingPlace,
   };
 }

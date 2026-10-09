@@ -2,6 +2,7 @@
 // The daemon channel over the runtime's own socket: a real daemon binary
 // behind a stub machine whose route names it, driven through WsClient the way
 // a page drives the host.
+import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -17,6 +18,7 @@ import { localExecStream } from "../src/local-exec.js";
 import { createRuntime, type LocalWiring, type Runtime } from "../src/runtime.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
 import { memoryStore } from "../src/store.js";
+import { gitCopier } from "./git-copier.js";
 import { startRefusingDoor, type RefusingDoor } from "./refusing-door.js";
 import { stubBackend, tokenGuest, type StubBackend, copyingFake, createOn, projectOn, testPlatform } from "./stub-backend.js";
 import { startTcpProxy, type TcpProxy } from "./tcp-proxy.js";
@@ -248,6 +250,25 @@ function localOn(port: number): LocalWiring {
   };
 }
 
+/** Opens a shell on the channel naming no folder, as a pane's first tab does, and answers the folder it printed. */
+async function shellFolder(c: WsClient, channel: string): Promise<string> {
+  const created = await c.request("daemon.send", { channel, frame: { op: "pty.create", cols: 200, rows: 24, shell: "/bin/sh" } });
+  expect(created["reply"]).toMatchObject({ ok: true });
+  const ptyId = String((created["reply"] as Record<string, unknown>)["ptyId"]);
+  await c.request("daemon.send", { channel, frame: { op: "pty.attach", ptyId } });
+  await c.request("daemon.send", { channel, frame: { op: "pty.write", ptyId, data: "echo at-$(pwd)-mark\r" } });
+  const printed = (): RegExpExecArray | null =>
+    /at-(\/\S*)-mark/.exec(
+      framesOn(c, channel, "daemon.event")
+        .map(e => e["event"] as Record<string, unknown>)
+        .filter(e => e["type"] === "pty.data" && e["ptyId"] === ptyId)
+        .map(e => String(e["data"]))
+        .join(""),
+    );
+  await until(() => printed() !== null, 10_000);
+  return printed()![1]!;
+}
+
 describe("who may open a channel", () => {
   it("a relayed socket opens a channel only for a workspace it may drive", async () => {
     daemon = await startTestDaemon();
@@ -268,6 +289,31 @@ describe("who may open a channel", () => {
   }, 15_000);
 });
 
+describe("a thread's terminal on this computer", () => {
+  it("starts in the folder the thread works in when the pane names none: the project folder, and a worktree's", async () => {
+    daemon = await startTestDaemon();
+    const local = { ...localOn(daemon.port), copier: gitCopier() };
+    rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {}, daemonToken: DAEMON_TOKEN, local, statePath: join(localRoot!, "state.json") });
+    srv = await serveRuntime(rt, { port: 0, authToken: HOST_TOKEN });
+    const repo = join(localRoot!, "lab");
+    execFileSync("git", ["init", "-q", repo]);
+    execFileSync("git", ["-C", repo, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "--allow-empty", "-m", "one"]);
+    const project = await rt.projects.add({ source: repo });
+    const own = (await rt.workspaces.folderFor({ project: project.id })).workspace;
+    const tree = (await rt.workspaces.folderFor({ project: project.id, branch: "feat/term" })).workspace;
+    expect(own.folder).toBe(project.path);
+    expect(tree.folder).not.toBe(project.path);
+
+    const c = await client();
+    for (const workspace of [own, tree]) {
+      const opened = await c.request("daemon.open", { workspaceId: workspace.id });
+      expect(opened, String(opened["error"])).toMatchObject({ ok: true });
+      expect(await shellFolder(c, String(opened["channel"]))).toBe(workspace.folder);
+    }
+    c.close();
+  }, 30_000);
+});
+
 describe("a channel to this computer's own daemon", () => {
   it("opens by the place this computer is, with no workspace, and a shell there starts in the home folder", async () => {
     daemon = await startTestDaemon();
@@ -281,19 +327,8 @@ describe("a channel to this computer's own daemon", () => {
     expect(framesOn(c, channel, "daemon.event")[0]!["event"]).toMatchObject({ type: "daemon.hello" });
 
     // No cwd named: the pty is the computer's own and opens where its user's home is.
-    const created = await c.request("daemon.send", { channel, frame: { op: "pty.create", cols: 200, rows: 24, shell: "/bin/sh" } });
-    expect(created["reply"]).toMatchObject({ ok: true });
-    const ptyId = String((created["reply"] as Record<string, unknown>)["ptyId"]);
-    await c.request("daemon.send", { channel, frame: { op: "pty.attach", ptyId } });
-    await c.request("daemon.send", { channel, frame: { op: "pty.write", ptyId, data: "echo at-$(pwd)-mark\r" } });
     const home = process.env["HOME"] ?? homedir();
-    const printed = (): string =>
-      framesOn(c, channel, "daemon.event")
-        .map(e => e["event"] as Record<string, unknown>)
-        .filter(e => e["type"] === "pty.data")
-        .map(e => String(e["data"]))
-        .join("");
-    await until(() => printed().includes(`at-${home}-mark`), 10_000);
+    expect(await shellFolder(c, channel)).toBe(home);
     c.close();
   }, 20_000);
 

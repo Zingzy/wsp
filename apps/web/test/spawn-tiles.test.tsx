@@ -177,6 +177,25 @@ describe("a child's tile", () => {
     expect(document.querySelector('[data-thread-row="thr_old"]')?.getAttribute("data-child-part")).toBe("settled");
   });
 
+  it("says nothing of a branch, a push or a merge for a child on its own branch or on the lead's", () => {
+    const fork: WorkspaceView = { ...workspace, id: "ws_fork", name: "fork" };
+    const tree = { leadBranch: "main", children: [{ workspaceId: "ws_fork", branch: "fix/cart", pushed: false, aheadOfLead: 2, conflicts: ["a.ts"], pushRefused: "no git credential" }], readAt: 1 };
+    useStore.setState({
+      workspaces: [workspace, fork],
+      sessions: { [WS]: [leadRow([]), row("sec")], ws_fork: [row("own", { workspaceId: "ws_fork", status: "completed", endedAt: minutes(2) })] },
+      statuses: { [WS]: { ...workspace, machineState: "running", reach: { state: "reachable" }, tree } },
+      landings: {},
+      places: [],
+    } as never);
+    render(<SpawnTiles calls={threadCalls(["sec", "own"])} leadKey={LEAD} />);
+    const rows = [...document.querySelectorAll<HTMLElement>("[data-thread-row]")];
+    expect(rows).toHaveLength(2);
+    for (const tile of rows) {
+      expect(tile.textContent).not.toMatch(/fix\/cart|main|ahead|push|merge|conflict|credential/i);
+      expect(tile.querySelectorAll("button:not([data-child-act])")).toHaveLength(0);
+    }
+  });
+
   it("opens its child on a press", () => {
     seed(EIGHT.map(childRow));
     const select = vi.fn();

@@ -100,9 +100,9 @@ export function agentsArea(ctx: RuntimeContext): AgentsArea {
     return hit.catalog;
   };
 
-  /** One title read per harness session per machine per TTL, a failed one included and one in flight shared: the
-   * clients reload the index on every session event and each reload must not cost an exec. `failed` holds from a
-   * read that failed until one answers, so a store that fails every window is said once. */
+  /** One title read per harness session per machine per TTL, a failed one included and one in flight shared: a row
+   * pushed to the windows asks again for its workspace's rows, and each ask must not cost an exec. `failed` holds from
+   * a read that failed until one answers, so a store that fails every window is said once. */
   const titleReads = new Map<string, { at: number; done: Promise<void>; live: boolean; failed: boolean }>();
   /** Asks the harness what it calls a row's session and keeps the answer on every row that shares it, so the title
    * a client folds a thread by follows a rename made inside the harness. `force` reads past the TTL: a turn has just
@@ -310,8 +310,10 @@ export function agentsArea(ctx: RuntimeContext): AgentsArea {
   const keptRefusal = async (place: string, harness: string, folder: string): Promise<string | null> => {
     const why = configDirRefusal(agentLabel(harness), folder, await configFolderOn(place, folder));
     const refused = why === null ? null : configDirLaunchRefusal(agentLabel(harness), harness, folder, why);
+    const was = setupRefusals.get(keyOf(place, harness));
     if (refused === null) setupRefusals.delete(keyOf(place, harness));
     else setupRefusals.set(keyOf(place, harness), refused);
+    if ((refused ?? undefined) !== was) ctx.setupRefusalMoved(place, harness);
     return refused;
   };
   const homesHere = async (): Promise<Record<string, string>> => {

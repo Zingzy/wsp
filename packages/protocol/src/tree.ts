@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The tree of branches: a lead's children, each on a branch of its own cut from the lead's, read as the lead's
 // status carries them; what a child's record keeps of its landing; the replies of the three git frames the tree
-// takes; and every word the lead's rows, the fork and the merge say.
+// takes; and every word a child's card, the fork and the merge say.
 import { z } from "zod";
 
 const text = z.string();
@@ -30,7 +30,7 @@ export const TreeRecord = z.object({
 });
 export type TreeRecord = z.infer<typeof TreeRecord>;
 
-/** One child as the lead's rows read it: its branch, whether the git host holds that branch, how far it is from what
+/** One child as its card reads it: its branch, whether the git host holds that branch, how far it is from what
  * the lead's copy holds of it, and what its record keeps. That is the lead's branch as the git host holds it until a
  * merge, and the child's commit the merge took after one, since the lead's copy holds that before any push. The
  * counts are absent where nothing could count them. */
@@ -38,7 +38,7 @@ export const TreeChild = TreeRecord.extend({
   workspaceId: text,
   threadId: text.optional(),
   branch: text,
-  /** Whether the git host holds the branch; absent where nothing could ask it, which the row reads as not counted. */
+  /** Whether the git host holds the branch; absent where nothing could ask it, which a child's card reads as not counted. */
   pushed: z.boolean().optional(),
   aheadOfLead: count.optional(),
   behindLead: count.optional(),
@@ -54,15 +54,13 @@ export type TreeFact = z.infer<typeof TreeFact>;
 export const MergeInResult = z.object({ lead: text, child: text, branch: text, merged: z.boolean(), commits: count, conflicts: z.array(text) });
 export type MergeInResult = z.infer<typeof MergeInResult>;
 
-/** One word table for the tree, on the lead's rows, the command line and the fork's reply. */
+/** One word table for the tree, on a child's card, the command line and the fork's reply. */
 export const TREE_WORDS = {
   aheadOf: (n: number, lead: string): string => `${n} ahead of ${lead}`,
   notPushed: "not pushed",
   notCounted: "not counted",
   mergedIntoLead: "merged into lead",
   conflictsIn: (n: number): string => `conflicts in ${n} ${n === 1 ? "file" : "files"}`,
-  mergeIntoLead: "Merge into lead",
-  askTheLead: "Ask the lead to merge it",
 } as const;
 
 /** The one line a fork says once its child's copy stands on the branch the lead pushed. */

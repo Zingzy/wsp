@@ -101,27 +101,29 @@ function labHost() {
     },
     getGolden: async () => undefined,
   };
-  const streamed = (patch: Partial<SessionView>) => rows.set(STREAMED, [{ ...rows.get(STREAMED)![0]!, ...patch }]);
+  /** The streamed thread's row moves, and the host pushes it as it does after every event that moves a row. */
+  const streamed = (patch: Partial<SessionView>): ProtocolEvent => {
+    const { prompt: _told, ...row } = { ...rows.get(STREAMED)![0]!, ...patch };
+    rows.set(STREAMED, [{ ...rows.get(STREAMED)![0]!, ...patch }]);
+    return { type: "session.row", workspaceId: STREAMED, threadId: row.threadId, id: row.id, row } as ProtocolEvent;
+  };
   return { api, emit: (e: ProtocolEvent) => listeners.forEach(fn => fn(e)), streamed, settled: () => reading === 0 };
 }
 
-/** The streamed thread's i-th event: a permission prompt opens at 50 and closes at 150, a subagent starts every
- * tenth, and the rest are lines of its transcript, which change no row. */
-function streamEvent(host: ReturnType<typeof labHost>, i: number): ProtocolEvent {
+/** The streamed thread's i-th events: a permission prompt opens at 50 and closes at 150, a subagent starts every
+ * tenth, each of those followed by the row it moved, and the rest are lines of its transcript, which change no row. */
+function streamEvents(host: ReturnType<typeof labHost>, i: number): ProtocolEvent[] {
   const scope = { workspaceId: STREAMED, sessionId: `s_${STREAMED}`, threadId: `thr_${STREAMED}`, turnId: `turn_${STREAMED}`, at: NOW + i };
   if (i === 50) {
-    host.streamed({ asking: "Run pnpm install" });
-    return { type: "session.permission", ...scope, askId: "ask_1", toolName: "Bash", toolUseId: "tu_ask", input: "{}", options: [{ id: "allow", label: "Allow", effect: "allow" }] } as ProtocolEvent;
+    return [{ type: "session.permission", ...scope, askId: "ask_1", toolName: "Bash", toolUseId: "tu_ask", input: "{}", options: [{ id: "allow", label: "Allow", effect: "allow" }] } as ProtocolEvent, host.streamed({ asking: "Run pnpm install" })];
   }
   if (i === 150) {
-    host.streamed({ asking: undefined });
-    return { type: "session.permission.closed", ...scope, askId: "ask_1" } as ProtocolEvent;
+    return [{ type: "session.permission.closed", ...scope, askId: "ask_1" } as ProtocolEvent, host.streamed({ asking: undefined })];
   }
   if (i % 10 === 0) {
-    host.streamed({ lastLine: `Subagent ${i} reading the files` });
-    return { type: "session.subagent", ...scope, task: `sa_${i}`, state: "running", title: `Read the files ${i}` } as ProtocolEvent;
+    return [{ type: "session.subagent", ...scope, task: `sa_${i}`, state: "running", title: `Read the files ${i}` } as ProtocolEvent, host.streamed({ lastLine: `Subagent ${i} reading the files` })];
   }
-  return { type: "session.delta", ...scope, kind: "text", text: `line ${i}`, messageId: `m_${i}` } as ProtocolEvent;
+  return [{ type: "session.delta", ...scope, kind: "text", text: `line ${i}`, messageId: `m_${i}` } as ProtocolEvent];
 }
 
 beforeEach(() => {
@@ -156,9 +158,9 @@ describe("one thread streaming among 200", () => {
     let askingShown = false;
     const started = performance.now();
     for (let i = 0; i < 200; i++) {
-      const e = streamEvent(host, i);
+      const events = streamEvents(host, i);
       await act(async () => {
-        host.emit(e);
+        for (const e of events) host.emit(e);
         await new Promise<void>(resolve => setTimeout(resolve, 0));
       });
       if (i === 100) askingShown = needsYou();

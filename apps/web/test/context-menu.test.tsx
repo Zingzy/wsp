@@ -36,7 +36,7 @@ import { SidebarProvider } from "../src/components/ui/sidebar.js";
 import { WorkspaceTerminalDrawer } from "../src/components/WorkspaceTerminalDrawer.js";
 import { useDiffRevealStore } from "../src/diffs/reveal.js";
 import { provideDaemonWire } from "../src/files/wire.js";
-import type { Api } from "../src/protocol/client.js";
+import type { Api, ProtocolEvent } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { useSettingsStore } from "../src/settings/settingsStore.js";
 import { selectWorkspaceRightPanelState, useRightPanelStore } from "../src/rightPanelStore.js";
@@ -72,6 +72,8 @@ type FakeApi = Api & {
 };
 
 function fakeApi(workspaces: WorkspaceView[], statuses: WorkspaceStatus[], sessions: SessionView[] = []): FakeApi {
+  const listeners = new Set<(e: ProtocolEvent) => void>();
+  const push = (e: ProtocolEvent): void => listeners.forEach(fn => fn(e));
   return {
     listWorkspaces: async () => workspaces,
     getWorkspace: async id => workspaces.find(w => w.id === id)!,
@@ -81,16 +83,24 @@ function fakeApi(workspaces: WorkspaceView[], statuses: WorkspaceStatus[], sessi
     wake: vi.fn(async (id: string) => view(id, "?", "running")),
     forget: vi.fn(async () => {}),
     deleteWorkspace: vi.fn(async () => {}),
-    // The runtime drops the thread's rows, so the next listing is short of them, as the real one is.
+    // The runtime drops the thread's rows and tells every window each one is gone, as the real one does.
     forgetThread: vi.fn(async (threadId: string) => {
-      for (let i = sessions.length - 1; i >= 0; i--) if (sessions[i]!.threadId === threadId) sessions.splice(i, 1);
+      for (let i = sessions.length - 1; i >= 0; i--) {
+        const row = sessions[i]!;
+        if (row.threadId !== threadId) continue;
+        sessions.splice(i, 1);
+        push({ type: "session.row", workspaceId: row.workspaceId, threadId, id: row.id });
+      }
     }),
     rebuild: async id => ({ ...view(id, "?", "running"), machineId: "m_rebuilt" }),
     interruptSession: vi.fn(async () => ({ outcome: "accepted" as const })),
-    // The runtime keeps the name on the row, so the next listing carries it, as the real one does.
+    // The runtime keeps the name on the row and pushes the row to every window, as the real one does.
     renameSession: vi.fn(async (sessionId: string, title: string) => {
       const row = sessions.find(s => s.id === sessionId);
-      if (row !== undefined) row.harnessTitle = title;
+      if (row !== undefined) {
+        row.harnessTitle = title;
+        push({ type: "session.row", workspaceId: row.workspaceId, ...(row.threadId !== undefined ? { threadId: row.threadId } : {}), id: row.id, row: { ...row } });
+      }
       return { outcome: "renamed" as const };
     }),
     // The runtime holds the name on this computer, so the record it answers with carries it, as the real one does.
@@ -121,7 +131,10 @@ function fakeApi(workspaces: WorkspaceView[], statuses: WorkspaceStatus[], sessi
     snapshotStorage: async () => null,
     rollbackSnapshot: async () => ({ lineage: { name: "default", head: null, versions: [] }, existingWorkspaces: "untouched" }),
     listSessions: async () => sessions,
-    subscribe: () => () => {},
+    subscribe: fn => {
+      listeners.add(fn);
+      return () => listeners.delete(fn);
+    },
     getGolden: async () => undefined,
   };
 }
