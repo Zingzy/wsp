@@ -55,6 +55,7 @@ const SAMPLE_HOME =
   "a sample path copied from a real computer before this scan and read only as text: the MCP record's folder listings and the reads that write them, where a new home means regenerating the record, the dev harness pages, the daemon contract's frames, a report link the renderer must leave unlinked, and test text";
 const ASIDE = "a synthetic id in a recorded mid-turn Claude Code session, linking each line to the one before and each call to its result";
 const CURSOR = "a recorded Cursor turn; the call id is cut short";
+const HANDBACK = "a recorded Claude Code turn ending a subagent or a background command, in auto mode or the default one; the session and tool ids are synthetic and pair each call with its result";
 /** Every recorded id or real home the fixtures and test sources still carry, in whichever file, as many times as count
  * says, each with why it stays. */
 const ALLOWED: readonly Allowed[] = [
@@ -75,6 +76,33 @@ const ALLOWED: readonly Allowed[] = [
   { text: "toolu_01WspFixBashB", count: 2, why: SUBAGENTS },
   { text: "toolu_01WspFixSearch1", count: 3, why: "a synthetic tool id in a recorded WebFetch turn, pairing the call with its result" },
   { text: "toolu_01WspFixFetch1", count: 3, why: "a synthetic tool id in a recorded WebFetch turn, pairing the call with its result" },
+  { text: "21921000-0000-4aaa-8bbb-000000000001", count: 23, why: HANDBACK },
+  { text: "21921000-0000-4aaa-8bbb-000000000002", count: 14, why: HANDBACK },
+  { text: "toolu_01WspFixHandBg", count: 10, why: HANDBACK },
+  { text: "toolu_01WspFixHandBgCall", count: 3, why: HANDBACK },
+  { text: "toolu_01WspFixHandFg", count: 10, why: HANDBACK },
+  { text: "toolu_01WspFixHandFgCall", count: 3, why: HANDBACK },
+  { text: "21921000-0000-4aaa-8bbb-000000000003", count: 22, why: HANDBACK },
+  { text: "21921000-0000-4aaa-8bbb-000000000004", count: 26, why: HANDBACK },
+  { text: "21921000-0000-4aaa-8bbb-000000000005", count: 36, why: HANDBACK },
+  { text: "21921000-0000-4aaa-8bbb-000000000006", count: 18, why: HANDBACK },
+  { text: "21921000-0000-4aaa-8bbb-000000000007", count: 12, why: HANDBACK },
+  { text: "toolu_01WspFixNe1", count: 14, why: HANDBACK },
+  { text: "toolu_01WspFixNe2", count: 10, why: HANDBACK },
+  { text: "toolu_01WspFixNe3", count: 3, why: HANDBACK },
+  { text: "toolu_01WspFixNe4", count: 3, why: HANDBACK },
+  { text: "toolu_01WspFixPb1", count: 8, why: HANDBACK },
+  { text: "toolu_01WspFixPf1", count: 9, why: HANDBACK },
+  { text: "toolu_01WspFixTf1", count: 12, why: HANDBACK },
+  { text: "toolu_01WspFixTf2", count: 3, why: HANDBACK },
+  { text: "toolu_01WspFixWh1", count: 17, why: HANDBACK },
+  { text: "21921000-0000-4aaa-8bbb-000000000008", count: 37, why: HANDBACK },
+  { text: "21921000-0000-4aaa-8bbb-000000000009", count: 15, why: HANDBACK },
+  { text: "toolu_01WspFixBc1", count: 6, why: HANDBACK },
+  { text: "toolu_01WspFixOw1", count: 16, why: HANDBACK },
+  { text: "toolu_01WspFixOw2", count: 5, why: HANDBACK },
+  { text: "toolu_01WspFixOw3", count: 3, why: HANDBACK },
+  { text: "toolu_01WspFixOw4", count: 3, why: HANDBACK },
   { text: "18090a51-0000-4aaa-8bbb-000000000000", count: 5, why: ASIDE },
   { text: "18090a51-0001-4aaa-8bbb-000000000001", count: 2, why: ASIDE },
   { text: "18090a51-0002-4aaa-8bbb-000000000002", count: 2, why: ASIDE },
