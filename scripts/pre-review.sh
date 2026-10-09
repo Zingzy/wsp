@@ -171,7 +171,7 @@ if [ $laws_only -eq 0 ]; then
   fi
 
   # Written so that neither pattern matches its own line here.
-  kills=$(added_lines ':!*.md' ':!*/fixtures/*' | grep -E '(^|[^[:alnum:]_-])(pkil[l][[:space:]]+(-[[:alnum:]]*f|--full)|kill[a]ll)([^[:alnum:]_-]|$)' | head -n 3 | joined)
+  kills=$(added_lines ':!*.md' ':!*.mdx' ':!*/fixtures/*' | grep -E '(^|[^[:alnum:]_-])(pkil[l][[:space:]]+(-[[:alnum:]]*f|--full)|kill[a]ll)([^[:alnum:]_-]|$)' | head -n 3 | joined)
   if [ -n "$kills" ]; then
     fail "no process killed by pattern" "start the process, record its pid and kill that pid: $kills"
   else

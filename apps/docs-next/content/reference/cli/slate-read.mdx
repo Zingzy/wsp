@@ -1,3 +1,25 @@
 # wsp slate read
 
-Generated from `wsp slate read --help` and its line in `COMMAND_LINES` (`packages/host/src/cli/commands.ts`).
+{/* Written by apps/docs-next/scripts/cli.ts: change the script or its source and run pnpm --filter @wsp/docs-next generate. */}
+
+```text
+usage: wsp slate read [<thread>] [--values <path>]... [--no-text] [--no-sketch]
+       [--document]
+  the slate as it stands: the sketch, then the JSX-like form, the values,
+  derived values, runs, problems and the paths named; --no-text leaves out the
+  JSX-like form, --document adds the stored JSON
+
+  --values       a path to resolve now, like '$check.exit' or
+                 usage.week.percent, or * for every bound one; repeats
+  --no-text      leave out the slate in the JSX-like form a patch is written
+                 against
+  --no-sketch    leave the sketch out
+  --document     also print the stored JSON document
+  --json         print the raw protocol values, one JSON object per line, with
+                 everything else on stderr
+  --state        the state file the host serves
+  --host         run the line against a host on your account, by the name wsp
+                 hosts lists it under; WSP_HOST names one for a whole shell
+```
+
+MCP tool: [`slate_read`](/reference/mcp-tools#slateread).

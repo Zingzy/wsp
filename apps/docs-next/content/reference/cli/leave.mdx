@@ -1,3 +1,19 @@
 # wsp leave
 
-Generated from `wsp leave --help` and its line in `COMMAND_LINES` (`packages/host/src/cli/commands.ts`).
+{/* Written by apps/docs-next/scripts/cli.ts: change the script or its source and run pnpm --filter @wsp/docs-next generate. */}
+
+```text
+usage: wsp leave [--yes] [--force]
+  on that computer: take wsp off it, for a computer whose host is gone and
+  cannot run wsp remove; asked once, and stopped by a fork or a project checkout
+  there holding work no remote has, naming each
+
+  --state    the state file: this word first, else WSP_HOME's state.json, else
+             ./.wsp/state.json when the current directory is a checkout of wsp,
+             else state.json in the home the running host serves
+  --yes      go ahead without being asked
+  --force    leave even where a workspace or a project checkout on this computer
+             holds work no remote has, which goes with it
+```
+
+No MCP tool: sweeps wsp off the computer it is typed on, which belongs with the terminal that joined it.

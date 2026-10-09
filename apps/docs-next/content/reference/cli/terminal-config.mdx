@@ -1,0 +1,21 @@
+# wsp terminal config
+
+{/* Written by apps/docs-next/scripts/cli.ts: change the script or its source and run pnpm --filter @wsp/docs-next generate. */}
+
+```text
+usage: wsp terminal config [--scheme light|dark]
+  the Ghostty config on this computer as the app's terminal pane applies it,
+  read from ~/.config/ghostty and Application Support with its includes and
+  theme resolved: the font and its fallbacks, the size, the colors, the cursor,
+  the padding, the background opacity, and the blur, which is read but not
+  applied; --scheme picks the side of a light:...,dark:... theme
+
+  --scheme    which side of a light:...,dark:... theme to read; light or dark
+  --json      print the raw protocol values, one JSON object per line, with
+              everything else on stderr
+  --state     the state file the host serves
+  --host      run the line against a host on your account, by the name wsp hosts
+              lists it under; WSP_HOST names one for a whole shell
+```
+
+MCP tool: [`terminal_config`](/reference/mcp-tools#terminalconfig).

@@ -1,3 +1,19 @@
 # wsp thread head
 
-Generated from `wsp thread head --help` and its line in `COMMAND_LINES` (`packages/host/src/cli/commands.ts`).
+{/* Written by apps/docs-next/scripts/cli.ts: change the script or its source and run pnpm --filter @wsp/docs-next generate. */}
+
+```text
+usage: wsp thread head <thread>
+  the thread's facts and its newest events, what the app draws first on opening
+  it: the title, the agent, model and access it runs on, where it stands and its
+  folder, then as many of its newest events as fit in 64 KB, each tool result
+  past 2 KB cut and marked with its whole length. Reading a head marks nothing
+
+  --json     print the raw protocol values, one JSON object per line, with
+             everything else on stderr
+  --state    the state file the host serves
+  --host     run the line against a host on your account, by the name wsp hosts
+             lists it under; WSP_HOST names one for a whole shell
+```
+
+MCP tool: [`thread_head`](/reference/mcp-tools#threadhead).

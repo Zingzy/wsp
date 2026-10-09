@@ -20,6 +20,8 @@ You can also set the default in Settings > General > **Open files in**.
 
 wsp looks for these editors in `/Applications` and in `~/Applications`, and lists the ones it finds:
 
+{/* generated: editors */}
+
 | Editor | Over ssh |
 |---|---|
 | VS Code | Yes, with the Remote SSH extension |
@@ -36,6 +38,8 @@ wsp looks for these editors in `/Applications` and in `~/Applications`, and list
 | RubyMine | No |
 | Rider | No |
 | Finder | No |
+
+{/* end generated: editors */}
 
 Finder shows the file in its folder. It does not open it.
 
@@ -56,11 +60,15 @@ Click **Add to SSH config** to go on. To take the line out, turn off **Editors o
 
 VS Code, Cursor and VS Code Insiders need their Remote SSH extension. If it is not installed, wsp says so and prints the command that installs it. Each editor has its own command:
 
+{/* generated: editor-extensions */}
+
 | Editor | Command that installs the extension |
 |---|---|
 | VS Code | `code --install-extension ms-vscode-remote.remote-ssh` |
 | Cursor | `cursor --install-extension anysphere.remote-ssh` |
 | VS Code Insiders | `code-insiders --install-extension ms-vscode-remote.remote-ssh` |
+
+{/* end generated: editor-extensions */}
 
 Cursor also works with `ms-vscode-remote.remote-ssh` if it is already installed.
 

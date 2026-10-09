@@ -66,15 +66,15 @@ Then wsp reads the lockfiles the branch tracks. It acts on a lockfile only where
 
 | Ecosystem | Lockfile | Carried in | Never carried | Install that runs |
 |---|---|---|---|---|
-| npm | `package-lock.json`, `npm-shrinkwrap.json` | `node_modules` | `.next`, `.turbo`, `.cache` | `npm install --no-save --prefer-offline --no-audit --no-fund` |
-| pnpm | `pnpm-lock.yaml` | `node_modules` | `.next`, `.turbo`, `.cache` | `pnpm install --frozen-lockfile --prefer-offline` |
-| Yarn | `yarn.lock` | `node_modules`, `.yarn/cache`, `.yarn/unplugged` | `.next`, `.turbo`, `.cache` | `yarn install --frozen-lockfile` |
-| Bun | `bun.lock`, `bun.lockb` | `node_modules` | `.next`, `.turbo`, `.cache` | `bun install --frozen-lockfile` |
-| Composer | `composer.lock` | `vendor` | None | `composer install --no-interaction` |
-| uv | `uv.lock` | None | `.venv` | `uv sync --locked` |
-| Poetry | `poetry.lock` | None | `.venv` | `poetry install --no-interaction` |
-| Cargo | `Cargo.lock` | None | `target` | `cargo fetch --locked` |
-| Go | `go.sum` | None | None | `go list -mod=readonly -deps -test ./... > /dev/null` |
+| `npm` | `package-lock.json`, `npm-shrinkwrap.json` | `node_modules` | `.next`, `.turbo`, `.cache` | `npm install --no-save --prefer-offline --no-audit --no-fund` |
+| `pnpm` | `pnpm-lock.yaml` | `node_modules` | `.next`, `.turbo`, `.cache` | `pnpm install --frozen-lockfile --prefer-offline` |
+| `yarn` | `yarn.lock` | `node_modules`, `.yarn/cache`, `.yarn/unplugged` | `.next`, `.turbo`, `.cache` | `yarn install --frozen-lockfile` |
+| `bun` | `bun.lock`, `bun.lockb` | `node_modules` | `.next`, `.turbo`, `.cache` | `bun install --frozen-lockfile` |
+| `composer` | `composer.lock` | `vendor` | None | `composer install --no-interaction` |
+| `uv` | `uv.lock` | None | `.venv` | `uv sync --locked` |
+| `poetry` | `poetry.lock` | None | `.venv` | `poetry install --no-interaction` |
+| `cargo` | `Cargo.lock` | None | `target` | `cargo fetch --locked` |
+| `go` | `go.sum` | None | None | `go list -mod=readonly -deps -test ./... > /dev/null` |
 
 {/* end generated: ecosystems */}
 

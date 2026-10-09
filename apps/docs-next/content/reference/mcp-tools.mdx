@@ -1,3 +1,2301 @@
 # MCP tools
 
-Generated from `daemon/crates/wsp-mcp/record/tools/*.json` and `record/server.json`.
+{/* Written by apps/docs-next/scripts/mcp-tools.ts: change the script or its source and run pnpm --filter @wsp/docs-next generate. */}
+
+`wsp mcp` serves these 73 tools over stdio to an agent on your computer, and `wsp mcp install --agent <id>` writes it into that agent's own config. A tool answers a failure as a tool error that carries the object `--json` prints.
+
+Each tool but `projects_add` is a line of the command line, its words joined with `_`, and that line's page links here.
+
+## What the server tells an agent
+
+The instructions the server sends when an agent connects:
+
+> When the person asks for another agent, on another model or another harness, start it as a wsp thread with run, so it shows in their sidebar; your own subagent tool is for your own sub-steps. Each thread can own a slate, a live panel the person reads, presses and fills in: when they ask for a panel, dashboard, form, checklist, tracker or walkthrough, call slate_catalog, then slate_write naming the thread. Agents work on a project, a folder on one computer, as threads in the person's sidebar. Setup, every verb and the rules are in the wsp skill (`wsp mcp install --agent <id>` writes it). The agents this host runs threads on, the only values run takes as agent: claude, codex, opencode, cursor.
+> - A wsp thread starts every child with --notify me and ends its turn, and each child's finished line wakes it with that child's whole report, so nothing is polled.
+> - A caller that is not a wsp thread cannot be woken at all, so it takes the reply of one turn as the call returns, and hands work of more than one turn to a single coordinator thread in the project's folder on this computer.
+> - Start long work with your harness's own background road, which wakes you when it ends, and never with a shell &, which nothing tracks and which wakes nobody when it ends.
+
+## add
+
+Adds a computer of the person's over ssh and sets it up from a saved recipe, as `wsp add <user@host> --recipe <name>` does: address is user@host or an alias from the ssh config, and the host logs in, checks it can run wsp there (root, or a login whose sudo runs it as root, systemd with cgroup v2, room on the disk), installs wsp, waits for it to dial back, then puts on the base tools and everything the recipe picks. With resume, address names a computer already added, or one that joined and waits on its picks, and sets it up again: from recipe where one is named, else from what it holds, running only what is missing, a sign-in that waited or ran out among it. This tool never waits on the person: it answers at the first sign-in waiting on them (the page and the code are in waiting, to hand over), at the end, or after ten minutes, and is called again with resume for the next of those; with later it does not stop at a sign-in and leaves it waiting. setup is the setup's steps as the computer's row holds them, each with its state and what it took; an install that fails is refused with the step it failed at. A login whose sudo asks for a password is refused with the line that says where the person types it, at a terminal or in the app, since no password travels through this tool. A computer this host has never dialled needs host_key, as the person read it off that computer, or the add is refused with the key it answered with. A project, a provider's key and the join code are not added here: projects_add records a project, and the other two belong at the host's own terminal.
+
+**Takes**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `address` | string | yes | user@host, an alias from the ssh config, or with resume a computer already added |
+| `recipe` | string |  | the saved recipe to set it up from, as recipes lists it |
+| `later` | boolean |  | go on past a sign-in that waits on the person and leave it waiting |
+| `resume` | boolean |  | set up a computer already added, or one that joined and waits on its picks |
+| `name` | string |  | what to call the computer here; what its address calls it without one |
+| `ssh_port` | integer |  | the port ssh dials it on (default 22) |
+| `ssh_key` | string |  | the key file ssh logs in with |
+| `host_key` | string |  | the host key of a computer this one has never dialled, as read off that computer |
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `computer` | object | yes |  |
+| `computer.id` | string | yes |  |
+| `computer.kind` | `computer`, `provider` | yes |  |
+| `computer.name` | string | yes |  |
+| `computer.label` | string |  |  |
+| `computer.mac` | `macbook`, `imac`, `mac-mini`, `mac-studio`, `mac-pro` |  |  |
+| `computer.default` | boolean | yes |  |
+| `computer.os` | string |  |  |
+| `computer.shape` | object |  |  |
+| `computer.diskFreeBytes` | integer |  |  |
+| `computer.engine` | `none`, `docker`, `podman` |  |  |
+| `computer.copies` | `reflink`, `snapshot`, `plain` |  |  |
+| `computer.present` | boolean |  |  |
+| `computer.takesRuntime` | boolean |  |  |
+| `computer.joinedAt` | string |  |  |
+| `computer.lastSeenAt` | string |  |  |
+| `computer.daemonVersion` | integer |  |  |
+| `computer.behind` | object |  |  |
+| `computer.agents` | string[] |  |  |
+| `computer.agentVersions` | object |  |  |
+| `computer.signIns` | object |  |  |
+| `computer.logins` | string |  |  |
+| `computer.rateUsdPerHour` | number |  |  |
+| `computer.sizes` | object[] |  |  |
+| `computer.forks` | object |  |  |
+| `computer.takesForks` | boolean |  |  |
+| `computer.road` | object |  |  |
+| `computer.home` | string |  |  |
+| `computer.uptimeMs` | integer |  |  |
+| `computer.reportedAt` | string |  |  |
+| `computer.dialled` | object |  |  |
+| `computer.blocked` | string |  |  |
+| `computer.toolsBlocked` | string |  |  |
+| `computer.build` | string |  |  |
+| `computer.buildStopped` | boolean |  |  |
+| `computer.buildsImages` | boolean |  |  |
+| `computer.setup` | object |  |  |
+| `computer.applied` | object |  |  |
+| `computer.picks` | object |  |  |
+| `computer.recipe` | string |  |  |
+| `computer.sync` | object |  |  |
+| `computer.cap` | object or object |  |  |
+| `computer.capDefault` | object or object |  |  |
+| `computer.settings` | object |  |  |
+| `computer.napMs` | integer or null |  |  |
+| `computer.napDefault` | integer |  |  |
+| `computer.turnLimitMs` | integer or null |  |  |
+| `computer.turnLimitDefault` | integer or null |  |  |
+| `computer.spawn` | object |  |  |
+| `computer.spawnDefault` | object |  |  |
+| `computer.running` | integer |  |  |
+| `setup` | object[] | yes |  |
+| `setup[].step` | `connect`, `host-key`, `check`, `chip`, `root`, `system`, `disk`, `reach`, `wsp`, `service`, `join`, `floor`, `agents`, `signins`, `clis`, `skills`, `mcp`, `plugins`, `configs`, `folders`, `github`, `context` | yes |  |
+| `setup[].state` | `running`, `done`, `failed`, `skipped` | yes |  |
+| `setup[].note` | string |  |  |
+| `setup[].ms` | integer |  |  |
+| `setup[].startedAt` | string |  |  |
+| `waiting` | object[] | yes |  |
+| `waiting[].row` | string | yes |  |
+| `waiting[].label` | string | yes |  |
+| `waiting[].url` | string |  |  |
+| `waiting[].code` | string |  |  |
+| `waiting[].expiresAt` | string | yes |  |
+| `waiting[].state` | `waiting`, `expired` | yes |  |
+
+## agents
+
+The coding agents the catalog knows, as they stand on one computer or workspace: whether each is on that login's PATH and where, the version its command answers, the newest its vendor publishes as this host last read it (asked of npm, GitHub or the vendor from this host alone, kept a day, never with Newest agent versions off in Settings > Privacy or WSP_UPDATE_CHECK=0) and the version wsp's install pins, its sign-in there (signed in, your key from this host's vault, not signed in, or unknown) and how it stands in the status command's own words (signInDetail), the kind of that login (signInKind: api-key, subscription or oauth) and the plan it names (signInPlan), how a person signs it in, whether its threads there get the wsp tools (one of its MCP config files names the wsp server, or on any computer but the one the app runs on, its launch hands the server over), the vendor's own command that brings it up to the newest where it is older (update, which wsp shows and never runs), and on a computer how the person set it to run there (setup: on or off, the program, the config folder, the launch words and the names of its variables, never a value). Read as the login the computer was added with, off each agent's config and whether its files are there: no MCP server is started and no login file is opened. A napping workspace answers what stood there when it last ran, marked stale, and is not woken.
+
+**Takes**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `workspace` | string |  | the workspace to read, by its name, or its id when two share a name; absent reads a computer |
+| `on` | string |  | the computer to read, by the name computers lists; absent with no workspace is the computer the app runs on |
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `target` | object or object | yes |  |
+| `home` | string | yes |  |
+| `user` | string | yes |  |
+| `readAt` | string | yes |  |
+| `stale` | `"napping"` |  |  |
+| `refused` | string[] | yes |  |
+| `projects` | object[] |  |  |
+| `projects[].id` | string | yes |  |
+| `projects[].name` | string | yes |  |
+| `projects[].path` | string | yes |  |
+| `reach` | `here`, `relay`, `none` |  |  |
+| `agents` | object[] | yes |  |
+| `agents[].id` | string | yes |  |
+| `agents[].name` | string | yes |  |
+| `agents[].installed` | boolean | yes |  |
+| `agents[].version` | string |  |  |
+| `agents[].latest` | string |  |  |
+| `agents[].pinned` | string |  |  |
+| `agents[].road` | `wsp`, `own`, `shim`, `none` | yes |  |
+| `agents[].installsOnFirstRun` | `true` |  |  |
+| `agents[].versionUnread` | `true` |  |  |
+| `agents[].path` | string |  |  |
+| `agents[].via` | string |  |  |
+| `agents[].signIn` | `signed-in`, `vault-key`, `none` or `"unknown"` | yes |  |
+| `agents[].signInRoad` | `device`, `code`, `key`, `token`, `terminal`, `none` | yes |  |
+| `agents[].wspTools` | boolean | yes |  |
+| `agents[].signInDetail` | string |  |  |
+| `agents[].signInKind` | `api-key`, `subscription`, `oauth` |  |  |
+| `agents[].signInPlan` | string |  |  |
+| `agents[].update` | object |  |  |
+| `agents[].setup` | object |  |  |
+
+## agents_addtools
+
+Writes the wsp server into one agent's own MCP config on the computer the app runs on, the same entry wsp mcp install writes, with the wsp skill beside it, and answers the file. The wsp tools go into an agent's config on this computer; a thread on any other computer is handed them with every turn.
+
+**Takes**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `agent` | string | yes | the catalog id of the agent, as agents lists it |
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `file` | string | yes |  |
+
+## agents_default
+
+Sets the agent a new thread runs when neither its start nor its project names one, on every computer and in the app alike; the catalog's first agent without it. A project's own agent, set with projects_set, wins over it, and an agent turned off on a computer is passed over there. An agent this host runs no thread of is refused naming the ones it runs.
+
+**Takes**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `agent` | string | yes | the catalog id of the agent, one of claude, codex, opencode, cursor |
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `defaultAgent` | string | yes |  |
+
+## agents_set
+
+Sets one agent's defaults, the same on every computer and in the app: the model and effort a new thread on it starts on, its access, and its model picker: models hidden from it (a start still takes one by name), the order it lists models in, and model ids the binary does not list that the person runs anyway, which a start then takes. A project's own model, effort and access, set with projects_set, win over these, and what a start names wins over both. An access word the agent maps to none of its modes is refused naming the ones it takes. reset puts a field back on the agent's own: model, effort, access or models.
+
+**Takes**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `agent` | string | yes | the catalog id of the agent, as agents lists it |
+| `model` | string |  | the model a new thread on it starts on, by the agent's own slug |
+| `effort` | string |  | the effort a new thread on it starts at, by the agent's own word, where its model takes that one |
+| `access` | string |  | how far the agent may go without asking, in wsp's words: ask (asks about each action that needs permission), auto-edit (edits files without asking), full (every action without asking) or plan (reads and proposes, changes nothing); each is mapped to the agent's own mode and refused where the agent has none, and a harness's own spelling is refused. Absent means the project's access, else the one set for that agent, else full |
+| `hide` | string[] |  | models to take off its picker, by slug |
+| `show` | string[] |  | hidden models to put back on its picker, by slug |
+| `order` | string[] |  | the models its picker lists first, in this order, by slug; the rest follow in the agent's own order |
+| `add_model` | string[] |  | model ids the binary does not list that a start may name and the picker shows |
+| `drop_model` | string[] |  | model ids added before, taken back off |
+| `reset` | `model`, `effort`, `access`, `models`[] |  | fields to put back on the agent's own: model, effort, access, models |
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `agent` | string | yes |  |
+| `defaults` | object | yes |  |
+| `defaults.model` | string |  |  |
+| `defaults.effort` | string |  |  |
+| `defaults.access` | `ask`, `auto-edit`, `full`, `plan` |  |  |
+| `defaults.models` | object |  |  |
+
+## agents_setup
+
+Sets how one agent runs on one computer, this computer without on: whether it is offered there at all (off, the app's lists drop it there and a start naming it is refused naming the computer), the program run in its place, the folder it keeps its config, sessions and sign-in in (an agent with no variable for one is refused, and a folder that is not under that computer's home once its links are followed, the home itself, or wsp's own folder; a login kept under the old folder does not follow, so sign it in again there), words added to every turn's launch, and variables taken off its launch. A variable that decides how the process starts or what it loads (PATH, HOME, LD_ and DYLD_ ones, NODE_OPTIONS and the like) is never set, nor one of wsp's own. A variable's value is never taken here: the person types it at wsp agents setup --env, where nothing echoes it. Answers the agent's row as that computer's read now gives it, its variables by name alone. reset puts back the agent's own program, config or args.
+
+**Takes**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `agent` | string | yes | the catalog id of the agent, as agents lists it |
+| `on` | string |  | the computer it runs on, by the name computers lists; absent is the computer the app runs on |
+| `enabled` | boolean |  | false turns the agent off on that computer, true back on |
+| `program` | string |  | the program run in the agent's place there, a path or a word on that computer's PATH |
+| `config` | string |  | the folder on that computer the agent keeps its config, sessions and sign-in in, absolute |
+| `args` | string[] |  | words added to every turn's launch there, each passed as one word; they replace any set before |
+| `unset_env` | string[] |  | variables to take off its launch there, by name |
+| `reset` | `program`, `config`, `args`[] |  | fields to put back on the agent's own: program, config, args |
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `agent` | object | yes |  |
+| `agent.id` | string | yes |  |
+| `agent.name` | string | yes |  |
+| `agent.installed` | boolean | yes |  |
+| `agent.version` | string |  |  |
+| `agent.latest` | string |  |  |
+| `agent.pinned` | string |  |  |
+| `agent.road` | `wsp`, `own`, `shim`, `none` | yes |  |
+| `agent.installsOnFirstRun` | `true` |  |  |
+| `agent.versionUnread` | `true` |  |  |
+| `agent.path` | string |  |  |
+| `agent.via` | string |  |  |
+| `agent.signIn` | `signed-in`, `vault-key`, `none` or `"unknown"` | yes |  |
+| `agent.signInRoad` | `device`, `code`, `key`, `token`, `terminal`, `none` | yes |  |
+| `agent.wspTools` | boolean | yes |  |
+| `agent.signInDetail` | string |  |  |
+| `agent.signInKind` | `api-key`, `subscription`, `oauth` |  |  |
+| `agent.signInPlan` | string |  |  |
+| `agent.update` | object |  |  |
+| `agent.setup` | object |  |  |
+
+## commit
+
+Commits the files the workspace's copy changed against its last commit, untracked ones added, with the message given, running the copy's hooks as git does; files names some of them by path from the checkout's top and leaves the rest uncommitted. Without a message the workspace's own agent drafts one from the diff and the task its newest thread was opened with, on its own command line with no thread and no tool, and the commit is made with that. Refused in one line when a file named has no change, when git knows no author in the copy (with the command that sets one), when a hook said no (with its last line), and when another git in the copy holds the index after one wait. Nothing reaches a remote: the app's Push is what pushes.
+
+**Takes**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `workspace` | string | yes | the workspace's name, or its id when two share a name |
+| `message` | string |  | the commit message, a subject line then a blank line and the body; without one the workspace's agent drafts it |
+| `files` | string[] |  | the files to commit, by path from the checkout's top as git status names them; without it every changed file |
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `oid` | string | yes |  |
+| `subject` | string | yes |  |
+| `filesChanged` | integer | yes |  |
+| `insertions` | integer | yes |  |
+| `deletions` | integer | yes |  |
+
+## computers
+
+Every computer this host holds, which is the whole of where work can run: the computer the app runs on and each box joined to it. A row carries what that computer last reported (cores, memory, free disk, the engine it has for a project's own containers) and whether it is connected right now. Every row carries its cap, threads at once on a computer (the number the person set, else one thread per 2 GB of memory up to twice its cores), and running, every thread running there now on a computer; a row whose running meets its cap is full. A row whose copy of the image is building says which stage it is at, and one whose last build stopped says why. A project lives on a computer: on the computer the app runs on its threads run in the project's folder, and on a box they run on a machine forked from the image with the project inside. pending holds every add that has not reached Set up: how far it got, what was chosen for it, and why it stopped where one did.
+
+**Takes**
+
+Nothing.
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `computers` | object[] | yes |  |
+| `computers[].id` | string | yes |  |
+| `computers[].kind` | `computer`, `provider` | yes |  |
+| `computers[].name` | string | yes |  |
+| `computers[].label` | string |  |  |
+| `computers[].mac` | `macbook`, `imac`, `mac-mini`, `mac-studio`, `mac-pro` |  |  |
+| `computers[].default` | boolean | yes |  |
+| `computers[].os` | string |  |  |
+| `computers[].shape` | object |  |  |
+| `computers[].diskFreeBytes` | integer |  |  |
+| `computers[].engine` | `none`, `docker`, `podman` |  |  |
+| `computers[].copies` | `reflink`, `snapshot`, `plain` |  |  |
+| `computers[].present` | boolean |  |  |
+| `computers[].takesRuntime` | boolean |  |  |
+| `computers[].joinedAt` | string |  |  |
+| `computers[].lastSeenAt` | string |  |  |
+| `computers[].daemonVersion` | integer |  |  |
+| `computers[].behind` | object |  |  |
+| `computers[].agents` | string[] |  |  |
+| `computers[].agentVersions` | object |  |  |
+| `computers[].signIns` | object |  |  |
+| `computers[].logins` | string |  |  |
+| `computers[].rateUsdPerHour` | number |  |  |
+| `computers[].sizes` | object[] |  |  |
+| `computers[].forks` | object |  |  |
+| `computers[].takesForks` | boolean |  |  |
+| `computers[].road` | object |  |  |
+| `computers[].home` | string |  |  |
+| `computers[].uptimeMs` | integer |  |  |
+| `computers[].reportedAt` | string |  |  |
+| `computers[].dialled` | object |  |  |
+| `computers[].blocked` | string |  |  |
+| `computers[].toolsBlocked` | string |  |  |
+| `computers[].build` | string |  |  |
+| `computers[].buildStopped` | boolean |  |  |
+| `computers[].buildsImages` | boolean |  |  |
+| `computers[].setup` | object |  |  |
+| `computers[].applied` | object |  |  |
+| `computers[].picks` | object |  |  |
+| `computers[].recipe` | string |  |  |
+| `computers[].sync` | object |  |  |
+| `computers[].cap` | object or object |  |  |
+| `computers[].capDefault` | object or object |  |  |
+| `computers[].settings` | object |  |  |
+| `computers[].napMs` | integer or null |  |  |
+| `computers[].napDefault` | integer |  |  |
+| `computers[].turnLimitMs` | integer or null |  |  |
+| `computers[].turnLimitDefault` | integer or null |  |  |
+| `computers[].spawn` | object |  |  |
+| `computers[].spawnDefault` | object |  |  |
+| `computers[].running` | integer |  |  |
+| `spend` | object[] | yes |  |
+| `spend[].place` | string | yes |  |
+| `spend[].todayUsd` | number | yes |  |
+| `spend[].monthUsd` | number | yes |  |
+| `spend[].rateUsdPerHour` | number | yes |  |
+| `pending` | object[] | yes |  |
+| `pending[].id` | string | yes |  |
+| `pending[].address` | string | yes |  |
+| `pending[].sshPort` | integer |  |  |
+| `pending[].name` | string |  |  |
+| `pending[].placeId` | string |  |  |
+| `pending[].step` | `connect`, `check`, `wsp`, `floor`, `choosing` | yes |  |
+| `pending[].choices` | object | yes |  |
+| `pending[].recipe` | string |  |  |
+| `pending[].startedAt` | string | yes |  |
+| `pending[].failed` | object |  |  |
+
+## computers_set
+
+Sets what the person may set on one computer and answers its row as it now reads, the same row computers lists: name, what a computer the person added is called from now, in every listing and wherever a computer is named, its id, its projects and its machines staying as they are, refused for the computer the app runs on and for a name another computer answers to; ssh, the login user@host the host reaches it by over ssh from now, for an update or a remove while its link is down and for the forward it dials back through, saved only once the computer that login reaches reads as this same one, its place file naming this computer and this host; threads, how many threads may run there at once, a new one waiting past it, except a turn a thread there follows to its end, not detached, which runs in that thread's slot (one per 2 GB of that computer's memory up to twice its cores until it is set); nap, the minutes a machine there with no window of its own runs with no turn and no work before it naps and stops costing anything, waking on the next message (20 until it is set, 0 never naps it), which every machine there counts again from now and which the computer the app runs on does not take, since its threads run in folders; turn_limit, the hours one turn there may run before it is stopped, a send carrying it on from where it stopped (none on a computer the person owns until it is set, 0 is none), read at each turn's start; spawn, max_machines and max_depth, what the agents there may ask of this host where the folder or the machine they run in holds no switch of its own, as workspaces_agents names it for one (on, up to 3 machines and 2 levels deep, until it is set), read at every ask so one made before the change follows it. A setting left out keeps what stands, and each word under reset takes that setting back to its default. The row carries cap, what runs there now, capDefault, what it reads by default, and settings, what the person set. A setting the computer's kind does not take, and a call that sets nothing, are refused in one line.
+
+**Takes**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `computer` | string | yes | the computer, by the name computers lists or its id |
+| `name` | string |  | what to call a computer the person added from now |
+| `ssh` | string |  | the login user@host the host reaches that computer by over ssh from now, saved once it reads as the same computer |
+| `threads` | integer |  | how many threads may run on that computer at once |
+| `nap` | integer |  | the minutes a quiet machine there runs before it naps; 0 never naps it |
+| `turn_limit` | integer |  | the hours one turn there may run before it is stopped; 0 never stops one |
+| `spawn` | `on`, `off` |  | whether agents there may open threads and fork machines under the thread they run in, capped, where the folder or the machine they run in holds no switch of its own |
+| `max_machines` | integer |  | how many machines may stand at once under one root thread there while spawn is on |
+| `max_depth` | integer |  | how many levels deep the tree under a root thread there may go while spawn is on |
+| `recipe` | string |  | the saved recipe it follows from now, as recipes lists it, or none: one it follows syncs to it, a change to the recipe reaching it with no step, and none keeps what it has |
+| `reset` | `threads`, `nap`, `turn-limit`, `spawn`, `max-depth`[] |  | the settings to take back to their defaults, by the same words |
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `computer` | object | yes |  |
+| `computer.id` | string | yes |  |
+| `computer.kind` | `computer`, `provider` | yes |  |
+| `computer.name` | string | yes |  |
+| `computer.label` | string |  |  |
+| `computer.mac` | `macbook`, `imac`, `mac-mini`, `mac-studio`, `mac-pro` |  |  |
+| `computer.default` | boolean | yes |  |
+| `computer.os` | string |  |  |
+| `computer.shape` | object |  |  |
+| `computer.diskFreeBytes` | integer |  |  |
+| `computer.engine` | `none`, `docker`, `podman` |  |  |
+| `computer.copies` | `reflink`, `snapshot`, `plain` |  |  |
+| `computer.present` | boolean |  |  |
+| `computer.takesRuntime` | boolean |  |  |
+| `computer.joinedAt` | string |  |  |
+| `computer.lastSeenAt` | string |  |  |
+| `computer.daemonVersion` | integer |  |  |
+| `computer.behind` | object |  |  |
+| `computer.agents` | string[] |  |  |
+| `computer.agentVersions` | object |  |  |
+| `computer.signIns` | object |  |  |
+| `computer.logins` | string |  |  |
+| `computer.rateUsdPerHour` | number |  |  |
+| `computer.sizes` | object[] |  |  |
+| `computer.forks` | object |  |  |
+| `computer.takesForks` | boolean |  |  |
+| `computer.road` | object |  |  |
+| `computer.home` | string |  |  |
+| `computer.uptimeMs` | integer |  |  |
+| `computer.reportedAt` | string |  |  |
+| `computer.dialled` | object |  |  |
+| `computer.blocked` | string |  |  |
+| `computer.toolsBlocked` | string |  |  |
+| `computer.build` | string |  |  |
+| `computer.buildStopped` | boolean |  |  |
+| `computer.buildsImages` | boolean |  |  |
+| `computer.setup` | object |  |  |
+| `computer.applied` | object |  |  |
+| `computer.picks` | object |  |  |
+| `computer.recipe` | string |  |  |
+| `computer.sync` | object |  |  |
+| `computer.cap` | object or object |  |  |
+| `computer.capDefault` | object or object |  |  |
+| `computer.settings` | object |  |  |
+| `computer.napMs` | integer or null |  |  |
+| `computer.napDefault` | integer |  |  |
+| `computer.turnLimitMs` | integer or null |  |  |
+| `computer.turnLimitDefault` | integer or null |  |  |
+| `computer.spawn` | object |  |  |
+| `computer.spawnDefault` | object |  |  |
+| `computer.running` | integer |  |  |
+
+## delete
+
+Takes a thread on this computer away, named by thread: its turns and checkpoints go, and where it ran in a worktree wsp made, that worktree goes with every thread in it, refused over files no commit holds; the project folder is never touched. Named by workspace, a workspace on a box goes as before: its machine is deleted at the provider and its record and threads dropped from this computer and the person's sidebar, and everything on that machine's disk that was not exported or pushed goes with it. Called without confirm it deletes nothing and answers with what would go, which is the line to put to the person.
+
+**Takes**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `thread` | string |  | a thread on this computer, by its id or a prefix that names one |
+| `workspace` | string |  | the workspace's name, or its id when two share a name |
+| `confirm` | boolean |  | true deletes the machine; absent or false answers with what would go and deletes nothing, so a person can be asked first |
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `threadId` | string |  |  |
+| `workspaceId` | string | yes |  |
+| `worktree` | string |  |  |
+| `name` | string |  |  |
+| `machineId` | string |  |  |
+| `threads` | integer | yes |  |
+
+## discard
+
+Puts one changed file of the workspace's copy back as its last commit has it: an edit or a deletion is undone, a rename takes its new name away and brings the old one back, and a file the last commit does not have is removed. Only the file named moves, and it cannot be undone. Refused in one line when the file has no change.
+
+**Takes**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `workspace` | string | yes | the workspace's name, or its id when two share a name |
+| `path` | string | yes | the file, by path from the checkout's top as git status names it |
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `path` | string | yes |  |
+
+## exec
+
+Runs a command on the workspace's machine as argv (each word as given; use sh -c for a shell line), in the folder cwd names or the one a thread would start in (the workspace's last used or only project, else its own folder), and returns its output lines, exit code and the folder it ran in. A non-zero exit is a result; the machine going away is an error.
+
+**Takes**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `workspace` | string | yes | the workspace's name, or its id when two share a name |
+| `argv` | string[] | yes |  |
+| `cwd` | string |  | the folder on the machine the thread works in or the command runs in, absolute. Absent means the workspace's own project, which is where a thread there starts unless it says otherwise |
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `exitCode` | integer or null | yes |  |
+| `output` | string[] | yes |  |
+| `cwd` | string |  | the folder the command ran in, as the host resolved it; absent only on a machine whose kind names no folder, where its own home is where the command ran |
+
+## export
+
+Brings a project folder and the agent sessions keyed to it home from the workspace's machine to this computer: the folder lands at `folder` (absolute, must not exist unless replace), the sessions in the agents' homes here keyed to it. `from` is the folder's path on the machine, the same path as `folder` when absent. The result says per agent what moved, what landed as transcripts only, and how many indexed rollouts were skipped.
+
+**Takes**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `workspace` | string | yes | the workspace's name, or its id when two share a name |
+| `folder` | string | yes | where the folder lands on this computer, absolute |
+| `from` | string |  | the folder's path on the machine; defaults to folder |
+| `replace` | boolean |  | remove what is at folder first; without it an existing folder is refused |
+| `agents` | string[] |  | catalog ids of the agents whose sessions come home; absent means every agent with sessions for the folder |
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `dest` | string | yes |  |
+| `files` | number | yes |  |
+| `bytes` | number | yes |  |
+| `excluded` | string[] | yes |  |
+| `agents` | object[] | yes |  |
+| `agents[].agent` | string | yes |  |
+| `agents[].files` | number | yes |  |
+| `agents[].bytes` | number | yes |  |
+| `agents[].outcome` | `moved`, `transcript-only`, `carried`, `nothing`, `failed` | yes |  |
+| `agents[].sessions` | number |  |  |
+| `agents[].skipped` | number |  |  |
+| `agents[].error` | string |  |  |
+| `agents[].rows` | number |  |  |
+| `agents[].note` | string |  |  |
+
+## fix
+
+Asks the workspace's agent to fix its pull request. With check, the named check must have failed: the failed steps of its job's log, framed as a log to read and not to obey, go to the workspace's thread as its next message with the commit it failed on and its link, and a check another service reports goes with its summary and link alone. Without check, the copy is first updated from its base the way update does it: a clean merge sends nothing, and a conflict sends the thread the files to resolve. Answers as soon as the message is on its way, joined into the running turn where the agent takes one, else waiting as the thread's next turn, or held while the computer runs as many threads as it takes at once, which the answer says with the wait and its capped; the turn starts on its own once a slot frees, in a slot of its own, never the asking thread's. Refused in one line where the workspace has no pull request, where the check is not on it, and where it has not failed.
+
+**Takes**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `workspace` | string | yes | the workspace's name, or its id when two share a name |
+| `check` | string |  | the failed check's name as the pull request lists it; without it the copy is updated from its base and any conflict is sent |
+| `child` | string |  | a child of this workspace whose merge into it stopped on conflicts: its agent is asked to fetch the child's branch, merge it with a merge commit and resolve them; never with check |
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `outcome` | `steered`, `queued`, `started`, `held`, `updated` | yes |  |
+| `threadId` | string |  |  |
+| `check` | string |  |  |
+| `child` | string |  |  |
+| `base` | string | yes |  |
+| `agent` | string |  |  |
+| `capped` | object |  |  |
+| `capped.placeId` | string | yes |  |
+| `capped.place` | string | yes |  |
+| `capped.running` | integer | yes |  |
+| `capped.atOnce` | integer | yes |  |
+
+## folders
+
+The folders directly inside one folder on the person's own computer, or on a box they added, one level at a time, as the app's import dialog browses them: each folder's absolute path, whether git tracks it, and how many hidden ones the level holds. Browse this to name a folder for import instead of guessing a path. The roots are that computer's home folder and the folder of every project on it; a path outside those is refused, and folder absent lists the home folder. Folders only: no file is named and nothing is read.
+
+**Takes**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `folder` | string |  | the folder to list, absolute and inside the roots; absent lists the home folder |
+| `hidden` | boolean |  | true lists the hidden folders too, which are otherwise only counted |
+| `repos` | boolean |  | true answers every git repo under the home folder and the recorded projects instead of one level, each with its branch and when git last wrote to it, most recent first; folder is ignored |
+| `on` | string |  | the computer whose folders to list, by the name computers lists; absent is the computer the app runs on |
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `dir` | string | yes |  |
+| `roots` | string[] | yes |  |
+| `folders` | object[] | yes |  |
+| `folders[].path` | string | yes |  |
+| `folders[].repo` | boolean | yes |  |
+| `folders[].branch` | string |  |  |
+| `folders[].touchedAt` | number |  |  |
+| `hidden` | integer | yes |  |
+
+## forget
+
+Drops a workspace whose machine the provider no longer has: its record and its threads leave this computer and the person's sidebar. The provider is read until twelve reads in a row agree the machine is gone, and nothing is asked of the machine. Refused in one line while the machine still exists (pause it, or delete it at the provider, first).
+
+**Takes**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `workspace` | string | yes | the workspace's name, or its id when two share a name |
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `workspaceId` | string | yes |  |
+| `name` | string | yes |  |
+| `threads` | integer | yes |  |
+
+## image
+
+The image this host owns and the copy each place has built of it. The record is the recipe the seal was planned from, the sign-ins it holds and a hash over both; a copy built at that hash is current and any other is stale, whatever version the place's own manifest gave it. A record with no vault was read back off its own copy rather than written at a seal, so it judges none of them and every copy of it asks for the sign-ins again: cutting the next version holds them. The project images taken off workspaces are listed under it, each with its snapshot id, the workspace it was taken off, its size where the provider lists one and its date.
+
+**Takes**
+
+Nothing.
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `image` | object or null | yes |  |
+| `copies` | object[] | yes |  |
+| `copies[].place` | string | yes |  |
+| `copies[].version` | integer | yes |  |
+| `copies[].hash` | string |  |  |
+| `copies[].snapshotId` | string | yes |  |
+| `copies[].templateId` | string |  |  |
+| `copies[].builtAt` | string | yes |  |
+| `copies[].sizeBytes` | integer |  |  |
+| `projects` | object[] | yes |  |
+| `projects[].snapshotId` | string | yes |  |
+| `projects[].projects` | object[] | yes |  |
+| `projects[].golden` | string | yes |  |
+| `projects[].version` | integer |  |  |
+| `projects[].workspaceId` | string | yes |  |
+| `projects[].workspaceName` | string | yes |  |
+| `projects[].createdAt` | string | yes |  |
+| `projects[].place` | string |  |  |
+| `projects[].sizeBytes` | number |  |  |
+
+## merge
+
+Merges the workspace's pull request as the person, by the method named or the repository's own default, and only while its head is still the commit the host last read, so a push since then fails it in the git host's own words. when_checks_pass arms it to merge once its checks pass instead, where the repository allows that. Answers with the number, the method, and whether it merged now or waits on its checks. Refused in one line where the workspace has no open pull request, where the repository does not allow the method or does not merge by itself, and with the git host's own reason where it refused, branch protection included. A thread's own token is refused: merging is the person's act.
+
+**Takes**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `workspace` | string | yes | the workspace's name, or its id when two share a name |
+| `method` | `merge`, `squash`, `rebase` |  | merge, squash or rebase; without it the repository's default |
+| `when_checks_pass` | boolean |  | merge once the checks pass rather than now, where the repository allows it |
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `number` | integer | yes |  |
+| `method` | `merge`, `squash`, `rebase` | yes |  |
+| `merged` | boolean | yes |  |
+| `autoArmed` | boolean | yes |  |
+
+## merge_in
+
+Merges a child workspace's branch into its lead's copy with a merge commit, so the lead's history shows each child landing: fetched from the project's remote, or from the child's own folder where the project has none and both copies sit on this computer. The lead is woken first where it sleeps. A lead with changes no commit holds is refused first with the files named, and a merge that conflicts is taken back at once and answered with the files, the lead's copy left exactly as it was; fix with child hands those to the lead's agent. Refused, naming the thread, while a turn runs on the lead in any thread but the asking one (a lead's thread merges from inside its own turn), for a workspace that is not the lead's child, and for a thread merging into any workspace but its own. Nothing is pushed.
+
+**Takes**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `lead` | string | yes | the workspace's name, or its id when two share a name |
+| `child` | string | yes | the child workspace whose branch is merged in, by name or id |
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `lead` | string | yes |  |
+| `child` | string | yes |  |
+| `branch` | string | yes |  |
+| `merged` | boolean | yes |  |
+| `commits` | integer | yes |  |
+| `conflicts` | string[] | yes |  |
+
+## pause
+
+Naps the workspace's machine; it wakes on the next thread or command.
+
+**Takes**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `workspace` | string | yes | the workspace's name, or its id when two share a name |
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `workspace` | object | yes |  |
+| `workspace.id` | string | yes |  |
+| `workspace.name` | string | yes |  |
+| `workspace.machineId` | string | yes |  |
+| `workspace.phase` | `running`, `pausing`, `napping`, `waking`, `gone` | yes |  |
+| `workspace.kind` | `cloud`, `local`, `place` |  |  |
+| `workspace.golden` | string | yes |  |
+| `workspace.createdAt` | string | yes |  |
+| `workspace.project` | object | yes |  |
+| `workspace.folder` | string |  |  |
+| `workspace.home` | string |  |  |
+| `workspace.claudeSessionId` | string |  |  |
+| `workspace.gone` | string |  |  |
+| `workspace.theme` | object |  |  |
+| `workspace.glyph` | `terminal`, `code`, `bug`, `wrench`, `hammer`, `rocket`, `flask`, `database`, `cloud`, `globe`, `compass`, `map`, `book`, `feather`, `palette`, `leaf`, `star`, `bolt`, `key`, `shield`, `box`, `folder`, `chip`, `lamp` |  |  |
+| `workspace.daemonNote` | string |  |  |
+| `workspace.daemonRefusedAt` | object |  |  |
+| `workspace.vaultedAt` | string |  |  |
+| `workspace.vaultRefused` | string |  |  |
+| `workspace.wakeRefused` | string |  |  |
+| `workspace.agents` | object |  |  |
+| `workspace.parentThreadId` | string |  |  |
+| `workspace.rootThreadId` | string |  |  |
+| `workspace.parentWorkspaceId` | string |  |  |
+| `workspace.place` | string |  |  |
+| `workspace.provider` | string |  |  |
+| `workspace.worktree` | object |  |  |
+| `workspace.from` | object |  |  |
+| `workspace.review` | object or object |  |  |
+
+## projects
+
+Every project this host holds: its name, the computer it lives on, where its code comes from (a folder on the computer the app runs on, or a repo a computer clones), where its folder sits, the branch a machine of it starts on, and its repo's top folder where it is a folder here inside a git repo. The name is what run takes. A project is recorded with add and is one source on one computer; on the computer the app runs on its threads run in its folder, or in a worktree of its repo for another branch. defaults holds, by project id, the agent, model, effort and access a new thread there starts on when its start names none, each with where it came from: the project's own (projects_set), the person's default (agents_set, agents_default) or the agent's own.
+
+**Takes**
+
+Nothing.
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `projects` | object[] | yes |  |
+| `projects[].id` | string | yes |  |
+| `projects[].name` | string | yes |  |
+| `projects[].computer` | string | yes |  |
+| `projects[].source` | object or object or object or object | yes |  |
+| `projects[].path` | string | yes |  |
+| `projects[].remote` | string | yes |  |
+| `projects[].defaultBranch` | string | yes |  |
+| `projects[].memoryKey` | string | yes |  |
+| `projects[].memoryDir` | string | yes |  |
+| `projects[].checkout` | string |  |  |
+| `projects[].seeded` | object |  |  |
+| `projects[].installed` | object |  |  |
+| `projects[].image` | object |  |  |
+| `projects[].base` | string |  |  |
+| `projects[].git` | object |  |  |
+| `projects[].createdAt` | string | yes |  |
+| `defaults` | object | yes |  |
+
+## projects_add
+
+Records a project: one source on one computer. A folder on the computer the app runs on is the project as it stands, a git repo or not, a folder inside a repo being a project of that repo; its threads run in it. A repo is cloned into the empty folder named with into on the computer the app runs on, which is then a folder project there, or by the computer named with on, whose machines then hold a checkout of it. A repo with neither into nor on, a folder to clone into that holds something, and a source already recorded on that computer are each refused in one line, and a clone that fails says git's own last line. The answer is the project, whose name is what run takes.
+
+**Takes**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `source` | string | yes | a folder on the computer the app runs on, or a repo's url |
+| `on` | string |  | the computer that clones the repo, by the name computers lists; a folder, and a repo cloned with into, take none |
+| `into` | string |  | an absolute path on the computer the app runs on, absent or an empty folder, to clone the repo into; the project is then that folder |
+| `name` | string |  | what to call the project here; the folder's or the repo's own last word without it |
+| `base` | string |  | the branch a machine of the project starts on; the remote's own default branch at the clone without it |
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `project` | object | yes |  |
+| `project.id` | string | yes |  |
+| `project.name` | string | yes |  |
+| `project.computer` | string | yes |  |
+| `project.source` | object or object or object or object | yes |  |
+| `project.path` | string | yes |  |
+| `project.remote` | string | yes |  |
+| `project.defaultBranch` | string | yes |  |
+| `project.memoryKey` | string | yes |  |
+| `project.memoryDir` | string | yes |  |
+| `project.checkout` | string |  |  |
+| `project.seeded` | object |  |  |
+| `project.installed` | object |  |  |
+| `project.image` | object |  |  |
+| `project.base` | string |  |  |
+| `project.git` | object |  |  |
+| `project.createdAt` | string | yes |  |
+| `notice` | string |  |  |
+
+## projects_remove
+
+Takes a project's record out of this wsp. Its folder stays exactly where it is, on this computer or on a computer you joined, the memory its agent keeps on that computer stays, and no repo is ever asked for anything. Refused in one line while a machine of it stands, naming them; delete those first. Refused in one line too while its checkout on a computer of yours holds work no remote has, naming it by its path there, unless force.
+
+**Takes**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `project` | string | yes | the project's name, or its id when two share a name |
+| `force` | boolean |  | remove it even where its checkout on a computer of yours holds work no remote has |
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `project` | object | yes |  |
+| `project.id` | string | yes |  |
+| `project.name` | string | yes |  |
+| `project.computer` | string | yes |  |
+| `project.source` | object or object or object or object | yes |  |
+| `project.path` | string | yes |  |
+| `project.remote` | string | yes |  |
+| `project.defaultBranch` | string | yes |  |
+| `project.memoryKey` | string | yes |  |
+| `project.memoryDir` | string | yes |  |
+| `project.checkout` | string |  |  |
+| `project.seeded` | object |  |  |
+| `project.installed` | object |  |  |
+| `project.image` | object |  |  |
+| `project.base` | string |  |  |
+| `project.git` | object |  |  |
+| `project.createdAt` | string | yes |  |
+| `said` | string | yes |  |
+
+## projects_set
+
+Sets what a new thread on one project starts on, over each agent's own defaults and under what a start names: its agent, model, effort and access. Nothing about a computer is a project's to set (threads at once, an agent's program, config folder, launch words, variables, or whether it is on); agents_setup sets those per computer. A model or effort kept for the project's agent drops to the agent's own on a thread that runs another agent, and an access word the project's agent maps to none of its modes is refused naming the ones it takes. after_worktree is a shell line a new worktree of the project runs once at its top, after the locked install of each ecosystem whose lockfile it holds, each run in the folder holding that lockfile (uv sync --locked, cargo fetch --locked, go list -mod=readonly -deps -test ./..., npm install --no-save, pnpm install --frozen-lockfile where the node_modules carried in were installed from another lockfile, and the like), for what none of them knows. Answers what a new thread there now starts on, each value with where it came from, and the after-worktree command. reset puts a field back on the layer below: agent, model, effort or access, and after-worktree takes the command away.
+
+**Takes**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `project` | string | yes | the project's name, or its id when two share a name |
+| `agent` | string |  | the agent a new thread on it runs, one of claude, codex, opencode, cursor |
+| `model` | string |  | the model a new thread on it starts on, by the agent's own slug |
+| `effort` | string |  | the effort a new thread on it starts at, by the agent's own word |
+| `access` | string |  | how far the agent may go without asking, in wsp's words: ask (asks about each action that needs permission), auto-edit (edits files without asking), full (every action without asking) or plan (reads and proposes, changes nothing); each is mapped to the agent's own mode and refused where the agent has none, and a harness's own spelling is refused. Absent means the project's access, else the one set for that agent, else full |
+| `after_worktree` | string |  | a shell line a new worktree of the project runs once at its top, after each ecosystem's own install |
+| `reset` | `agent`, `model`, `effort`, `access`, `after-worktree`[] |  | fields to put back on the layer below: agent, model, effort, access, or after-worktree to take the command away |
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `project` | object | yes |  |
+| `project.id` | string | yes |  |
+| `project.name` | string | yes |  |
+| `project.computer` | string | yes |  |
+| `project.source` | object or object or object or object | yes |  |
+| `project.path` | string | yes |  |
+| `project.remote` | string | yes |  |
+| `project.defaultBranch` | string | yes |  |
+| `project.memoryKey` | string | yes |  |
+| `project.memoryDir` | string | yes |  |
+| `project.checkout` | string |  |  |
+| `project.seeded` | object |  |  |
+| `project.installed` | object |  |  |
+| `project.image` | object |  |  |
+| `project.base` | string |  |  |
+| `project.git` | object |  |  |
+| `project.createdAt` | string | yes |  |
+| `defaults` | object | yes |  |
+| `defaults.agent` | object | yes |  |
+| `defaults.model` | object |  |  |
+| `defaults.effort` | object |  |  |
+| `defaults.access` | object |  |  |
+| `afterWorktree` | string |  |  |
+
+## recipe
+
+The recipe for a machine, read off this computer and written to a file: every catalog agent and tool with its tick, why it has that tick, and what it adds to the machine, plus the commands the person's agents ran that no catalog row carries. tick names the rule: used ticks what their agents actually ran here, installed ticks what is on this computer, default ticks what the catalog ships on; an agent wsp cannot open a thread on is off unless installed. The file is the state, so a second call is not a fresh start: naming tick or project lets the rule decide every tick again and throws away the flips a call before it made, and a call that names neither keeps what the file says and puts its own flips on top. Sign-in answers stand through every call whatever the rule, since nothing but the person decides one. Put the heavy rows to the person with their sizes before anything is built, then flip rows with set and run `wsp init --recipe <out> --non-interactive --json` from a shell, handing the person each sign-in line it prints, since the sign-ins finish in their browser. Only names and counts are read; nothing a session held is returned.
+
+**Takes**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `tick` | `used`, `installed`, `default` |  | which rule decides every tick: used, installed, default. Naming it re-decides every row from the rule, so any flip an earlier call made goes; absent, the file's own rule and its ticks stand, and used decides a first call and any row the file does not carry |
+| `set` | string[] |  | rows to flip, "\<id>=on" or "\<id>=off", applied over whatever decided the row: a catalog id, or the id recipe_scan gives a package one of this computer's own package managers has (alsoHere), which ticks that package as a row of its own and installs it by its own road. On a call that names tick or project they sit over the rule's fresh answer; on any other call they sit over the ticks already in the file |
+| `signin` | string[] |  | what happens to a row's sign-in, "\<id>=copy\|machine\|later\|key\|skip\|token"; key brings the key files beside its login and the login still runs on the machine. An answer already in the file stands until a later call names that row again, whatever tick or project do to the ticks |
+| `add` | string[] |  | tools neither the catalog carries nor this computer has, "\<id>=\<install command>"; the line runs on the machine as given after every catalog install, and such a row is never offered a sign-in. A package recipe_scan already lists under alsoHere is refused here and ticked with set instead, since it is a row of its own. Rows an earlier call added stand, whatever tick or project do to the ticks |
+| `add_check` | string[] |  | what proves an added tool landed, "\<id>=\<command that exits 0>"; without one the id on PATH is the check |
+| `why` | string |  | what the rows this call adds are for, in your own words; absent, they say an agent added them |
+| `engine` | boolean |  | mark the recipe so every machine from its image gets the place's container engine (Docker or podman) through a socket of its own, for a project whose compose file needs one; it stays in the file until edited out |
+| `project` | string[] |  | folders on this computer, absolute, to weigh the histories by: only sessions that ran in one of them or under it count. Naming one re-decides every tick from the rule, as tick does, so any flip an earlier call made goes |
+| `out` | string |  | where the recipe file goes, absolute; absent means the host's own recipe.json beside its state |
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `tick` | `used`, `installed`, `default` |  |  |
+| `at` | string | yes |  |
+| `out` | string | yes |  |
+| `agents` | object[] | yes |  |
+| `agents[].id` | string | yes |  |
+| `agents[].kind` | `agent`, `tool`, `custom` | yes |  |
+| `agents[].name` | string | yes |  |
+| `agents[].on` | boolean | yes |  |
+| `agents[].base` | boolean | yes |  |
+| `agents[].group` | `Always on the image`, `Your project needs`, `You use these`, `Installed here, never used`, `Added by your agent`, `Also in the catalog` | yes |  |
+| `agents[].why` | string | yes |  |
+| `agents[].size` | integer |  |  |
+| `agents[].heavy` | boolean | yes |  |
+| `agents[].note` | string |  |  |
+| `agents[].pin` | object |  |  |
+| `tools` | object[] | yes |  |
+| `tools[].id` | string | yes |  |
+| `tools[].kind` | `agent`, `tool`, `custom` | yes |  |
+| `tools[].name` | string | yes |  |
+| `tools[].on` | boolean | yes |  |
+| `tools[].base` | boolean | yes |  |
+| `tools[].group` | `Always on the image`, `Your project needs`, `You use these`, `Installed here, never used`, `Added by your agent`, `Also in the catalog` | yes |  |
+| `tools[].why` | string | yes |  |
+| `tools[].size` | integer |  |  |
+| `tools[].heavy` | boolean | yes |  |
+| `tools[].note` | string |  |  |
+| `tools[].pin` | object |  |  |
+| `totalBytes` | integer | yes |  |
+| `heavy` | object[] | yes |  |
+| `heavy[].id` | string | yes |  |
+| `heavy[].kind` | `agent`, `tool`, `custom` | yes |  |
+| `heavy[].name` | string | yes |  |
+| `heavy[].on` | boolean | yes |  |
+| `heavy[].base` | boolean | yes |  |
+| `heavy[].group` | `Always on the image`, `Your project needs`, `You use these`, `Installed here, never used`, `Added by your agent`, `Also in the catalog` | yes |  |
+| `heavy[].why` | string | yes |  |
+| `heavy[].size` | integer |  |  |
+| `heavy[].heavy` | boolean | yes |  |
+| `heavy[].note` | string |  |  |
+| `heavy[].pin` | object |  |  |
+| `commands` | object[] | yes |  |
+| `commands[].name` | string | yes |  |
+| `commands[].calls` | integer | yes |  |
+| `commands[].sessions` | integer | yes |  |
+| `custom` | object[] | yes |  |
+| `custom[].kind` | `"custom"` | yes |  |
+| `custom[].id` | string | yes |  |
+| `custom[].name` | string | yes |  |
+| `custom[].install` | string[] | yes |  |
+| `custom[].check` | string | yes |  |
+| `custom[].manager` | string |  |  |
+| `custom[].size` | integer |  |  |
+| `custom[].why` | string | yes |  |
+
+## recipe_scan
+
+Every option this computer offers for a machine, read once and written nowhere: the person's agents and the catalog's tools with the tick their own use reaches and what each adds to the machine, what else a package manager on this computer has that the image could take (alsoHere, by manager, with the line that installs each on the machine, each row's id being the one to hand recipe's set, which ticks that package as a row of its own), whose scanned says whether anything looked, the commands their agents ran that the catalog does not carry, and the sign-in each ticked row brings. Every row carries a recommended value and a one-line reason, so apply those and put only the rows whose reason says worth a question. Run this before recipe, and before asking the person anything. Only names and counts are read.
+
+**Takes**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `project` | string[] |  | folders on this computer, absolute, to weigh the histories by: only sessions that ran in one of them or under it count |
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `tick` | `used`, `installed`, `default` | yes |  |
+| `at` | string | yes |  |
+| `agents` | object[] | yes |  |
+| `agents[].id` | string | yes |  |
+| `agents[].kind` | `agent`, `tool`, `custom` | yes |  |
+| `agents[].name` | string | yes |  |
+| `agents[].on` | boolean | yes |  |
+| `agents[].base` | boolean | yes |  |
+| `agents[].group` | `Always on the image`, `Your project needs`, `You use these`, `Installed here, never used`, `Added by your agent`, `Also in the catalog` | yes |  |
+| `agents[].why` | string | yes |  |
+| `agents[].size` | integer |  |  |
+| `agents[].heavy` | boolean | yes |  |
+| `agents[].note` | string |  |  |
+| `agents[].pin` | object |  |  |
+| `agents[].recommended` | object | yes |  |
+| `tools` | object[] | yes |  |
+| `tools[].id` | string | yes |  |
+| `tools[].kind` | `agent`, `tool`, `custom` | yes |  |
+| `tools[].name` | string | yes |  |
+| `tools[].on` | boolean | yes |  |
+| `tools[].base` | boolean | yes |  |
+| `tools[].group` | `Always on the image`, `Your project needs`, `You use these`, `Installed here, never used`, `Added by your agent`, `Also in the catalog` | yes |  |
+| `tools[].why` | string | yes |  |
+| `tools[].size` | integer |  |  |
+| `tools[].heavy` | boolean | yes |  |
+| `tools[].note` | string |  |  |
+| `tools[].pin` | object |  |  |
+| `tools[].recommended` | object | yes |  |
+| `totalBytes` | integer | yes |  |
+| `heavy` | object[] | yes |  |
+| `heavy[].id` | string | yes |  |
+| `heavy[].kind` | `agent`, `tool`, `custom` | yes |  |
+| `heavy[].name` | string | yes |  |
+| `heavy[].on` | boolean | yes |  |
+| `heavy[].base` | boolean | yes |  |
+| `heavy[].group` | `Always on the image`, `Your project needs`, `You use these`, `Installed here, never used`, `Added by your agent`, `Also in the catalog` | yes |  |
+| `heavy[].why` | string | yes |  |
+| `heavy[].size` | integer |  |  |
+| `heavy[].heavy` | boolean | yes |  |
+| `heavy[].note` | string |  |  |
+| `heavy[].pin` | object |  |  |
+| `heavy[].recommended` | object | yes |  |
+| `alsoHere` | object | yes |  |
+| `alsoHere.scanned` | boolean | yes |  |
+| `alsoHere.managers` | object[] | yes |  |
+| `commands` | object[] | yes |  |
+| `commands[].name` | string | yes |  |
+| `commands[].calls` | integer | yes |  |
+| `commands[].sessions` | integer | yes |  |
+| `signIns` | object[] | yes |  |
+| `signIns[].id` | string | yes |  |
+| `signIns[].name` | string | yes |  |
+| `signIns[].signIn` | string | yes |  |
+| `signIns[].recommended` | object | yes |  |
+
+## recipes
+
+Every recipe this host keeps: a named pick of what goes on a computer of the person's (agents and how each signs in, MCP servers per agent, CLIs by the manager they came from, skills, plugins, folders to move over as projects, and the git, shell and GitHub configs), chosen from what the computer the app runs on has. Each carries summary, one line of what it holds, machines, the computers that follow it, since a recipe edit reaches them, and savedAt, when its file was last written. A recipe holds names and never a secret; a token reaches a computer only in the environment of a run there.
+
+**Takes**
+
+Nothing.
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `recipes` | object[] | yes |  |
+| `recipes[].name` | string | yes |  |
+| `recipes[].slug` | string | yes |  |
+| `recipes[].summary` | string | yes |  |
+| `recipes[].machines` | string[] | yes |  |
+| `recipes[].savedAt` | string |  |  |
+| `recipes[].file` | object | yes |  |
+
+## recipes_remove
+
+Takes a recipe's file away. The computers that followed it keep everything it put there and follow none from then on, so nothing reaches them from it again. The answer is the recipe as it stood, machines naming the computers it was taken off.
+
+**Takes**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `name` | string | yes | the recipe's name, as recipes lists it |
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `recipe` | object | yes |  |
+| `recipe.name` | string | yes |  |
+| `recipe.slug` | string | yes |  |
+| `recipe.summary` | string | yes |  |
+| `recipe.machines` | string[] | yes |  |
+| `recipe.savedAt` | string |  |  |
+| `recipe.file` | object | yes |  |
+
+## recipes_save
+
+Saves the picks one of the person's computers was set up with as a recipe under name, rewriting a recipe of that name whole, and that computer follows it from then on, so an edit to the recipe reaches it. Refused for a name with no letter or digit in it, for the computer the app runs on, and for a computer set up before picks were kept. The answer is the recipe as saved.
+
+**Takes**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `name` | string | yes | what to call the recipe |
+| `from` | string | yes | the computer whose picks to save, by the name computers lists |
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `recipe` | object | yes |  |
+| `recipe.name` | string | yes |  |
+| `recipe.slug` | string | yes |  |
+| `recipe.summary` | string | yes |  |
+| `recipe.machines` | string[] | yes |  |
+| `recipe.savedAt` | string |  |  |
+| `recipe.file` | object | yes |  |
+
+## recipes_show
+
+One recipe by its name: file is the recipe as saved, every row by kind (agents with signin vault or machine, mcp with the agents each server goes to, clis with via, the manager it came from, and needs where it builds with the C toolchain, skills with from, the folder it is read from here, plugins, folders with from, name, icon, hue and keep, configs git, shell and github, github with signin vault, machine or skip), machines the computers that follow it, and hash what it resolves to on the computer the app runs on now: the versions, the skill folders and the configs read there, which a computer that applied it is held against.
+
+**Takes**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `name` | string | yes | the recipe's name, as recipes lists it |
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `recipe` | object | yes |  |
+| `recipe.name` | string | yes |  |
+| `recipe.slug` | string | yes |  |
+| `recipe.summary` | string | yes |  |
+| `recipe.machines` | string[] | yes |  |
+| `recipe.savedAt` | string |  |  |
+| `recipe.file` | object | yes |  |
+| `hash` | string | yes |  |
+
+## rename
+
+Names the workspace on this computer, the name the sidebar and every listing show and the one workspace takes. A name is unique here, since that is how a workspace is addressed, so a name another workspace holds and a blank one are refused in one line and nothing is renamed. Threads on the machine are addressed by id and run on through it, and the machine at the provider keeps the metadata name it was forked under until it is next forked or rebuilt.
+
+**Takes**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `workspace` | string | yes | the workspace's name, or its id when two share a name |
+| `name` | string | yes |  |
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `was` | string | yes |  |
+| `workspace` | object | yes |  |
+| `workspace.id` | string | yes |  |
+| `workspace.name` | string | yes |  |
+| `workspace.machineId` | string | yes |  |
+| `workspace.phase` | `running`, `pausing`, `napping`, `waking`, `gone` | yes |  |
+| `workspace.kind` | `cloud`, `local`, `place` |  |  |
+| `workspace.golden` | string | yes |  |
+| `workspace.createdAt` | string | yes |  |
+| `workspace.project` | object | yes |  |
+| `workspace.folder` | string |  |  |
+| `workspace.home` | string |  |  |
+| `workspace.claudeSessionId` | string |  |  |
+| `workspace.gone` | string |  |  |
+| `workspace.theme` | object |  |  |
+| `workspace.glyph` | `terminal`, `code`, `bug`, `wrench`, `hammer`, `rocket`, `flask`, `database`, `cloud`, `globe`, `compass`, `map`, `book`, `feather`, `palette`, `leaf`, `star`, `bolt`, `key`, `shield`, `box`, `folder`, `chip`, `lamp` |  |  |
+| `workspace.daemonNote` | string |  |  |
+| `workspace.daemonRefusedAt` | object |  |  |
+| `workspace.vaultedAt` | string |  |  |
+| `workspace.vaultRefused` | string |  |  |
+| `workspace.wakeRefused` | string |  |  |
+| `workspace.agents` | object |  |  |
+| `workspace.parentThreadId` | string |  |  |
+| `workspace.rootThreadId` | string |  |  |
+| `workspace.parentWorkspaceId` | string |  |  |
+| `workspace.place` | string |  |  |
+| `workspace.provider` | string |  |  |
+| `workspace.worktree` | object |  |  |
+| `workspace.from` | object |  |  |
+| `workspace.review` | object or object |  |  |
+
+## restart
+
+Stops the host and brings it back on the road it came up on: its service's manager, the verb that started it, or the app. Running turns go on across it and the host that comes back re-opens them, your own turn included, so a coordinator thread lands a host change with this and keeps working. Answers once that host serves, with running the ids of the threads running on it then. A run, send or wait this cut dials the host again and carries on. Refused for a host wsp up holds in a terminal, which only that terminal brings back.
+
+**Takes**
+
+Nothing.
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `running` | string[] | yes |  |
+
+## review
+
+Starts a reviewer thread on a pull request, off its link or off a workspace's own pull request, and returns as soon as the thread is started. The reviewer works in a fresh copy at the pull request's head, at its agent's read-only access (Codex unless another is named; an agent with no read-only access is refused naming the ones that have one), with the description, the diff against the base and the repository's own review rules in its task. Its reply ends in a review the host keeps as the workspace's draft; nothing reaches the git host until review_post. A thread's own token is refused.
+
+**Takes**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `target` | string | yes | a GitHub pull request link, or the workspace whose pull request to review |
+| `agent` | string |  | the reviewing agent, codex or claude; absent is codex |
+| `model` | string |  | the model the turn runs on, by the agent's own slug (claude-sonnet-5); absent on a new thread means the project's, else the one set for that agent, else the catalog's default, on send the thread's own |
+| `effort` | string |  | the reasoning effort, by the agent's own word (low, medium, high, xhigh, max); absent on a new thread means the agent's default, high for claude; on send, the thread's own |
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `workspace` | object | yes |  |
+| `workspace.id` | string | yes |  |
+| `workspace.name` | string | yes |  |
+| `workspace.machineId` | string | yes |  |
+| `workspace.phase` | `running`, `pausing`, `napping`, `waking`, `gone` | yes |  |
+| `workspace.kind` | `cloud`, `local`, `place` |  |  |
+| `workspace.golden` | string | yes |  |
+| `workspace.createdAt` | string | yes |  |
+| `workspace.project` | object | yes |  |
+| `workspace.folder` | string |  |  |
+| `workspace.home` | string |  |  |
+| `workspace.claudeSessionId` | string |  |  |
+| `workspace.gone` | string |  |  |
+| `workspace.theme` | object |  |  |
+| `workspace.glyph` | `terminal`, `code`, `bug`, `wrench`, `hammer`, `rocket`, `flask`, `database`, `cloud`, `globe`, `compass`, `map`, `book`, `feather`, `palette`, `leaf`, `star`, `bolt`, `key`, `shield`, `box`, `folder`, `chip`, `lamp` |  |  |
+| `workspace.daemonNote` | string |  |  |
+| `workspace.daemonRefusedAt` | object |  |  |
+| `workspace.vaultedAt` | string |  |  |
+| `workspace.vaultRefused` | string |  |  |
+| `workspace.wakeRefused` | string |  |  |
+| `workspace.agents` | object |  |  |
+| `workspace.parentThreadId` | string |  |  |
+| `workspace.rootThreadId` | string |  |  |
+| `workspace.parentWorkspaceId` | string |  |  |
+| `workspace.place` | string |  |  |
+| `workspace.provider` | string |  |  |
+| `workspace.worktree` | object |  |  |
+| `workspace.from` | object |  |  |
+| `workspace.review` | object or object |  |  |
+| `threadId` | string | yes |  |
+| `sessionId` | string | yes |  |
+
+## review_post
+
+Posts a review workspace's review on its pull request as the person, in one call: the verdict, the summary and every ticked comment on its line, pinned to the head the review was written against. verdict and summary edit the draft first. A comment on a line outside the diff goes into the summary, since the git host takes none there. Refused in one line where the workspace has no review yet, and with the git host's own reason where it refused, approving one's own pull request included. A thread's own token is refused: posting under the person's name is the person's act.
+
+**Takes**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `workspace` | string | yes | the workspace's name, or its id when two share a name |
+| `verdict` | `comment`, `approve`, `request_changes` |  | comment, approve or request_changes; absent is the draft's |
+| `summary` | string |  | the review's summary; absent is the draft's |
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `url` | string | yes |  |
+| `number` | integer | yes |  |
+| `comments` | integer | yes |  |
+| `folded` | integer | yes |  |
+
+## run
+
+Opens a thread under the named agent, on the model, effort and access mode named or the catalog's defaults (a cheaper model for a review, say), and follows its first turn; returns the reply text as soon as it is complete, with the thread id for send. It runs in the project's folder, on a box in its folder there as the login the box was added with, and on a project anywhere else in a new machine forked from the image, named off the message as the app's New thread names one; with branch, in a worktree of the project's repo on that branch (one that already holds the branch, wherever it is, else one wsp makes under its own folder with the dependencies carried in); with cwd, in that folder, which must be inside the project or one of its worktrees. With no project, from a thread, it runs beside that thread in its folder. With detach true it returns the thread id the moment the turn is started, without the reply: the road for a turn that runs for minutes or an hour. A turn ends when the agent process exits, not at its reply, and the thread reads running until then. With notify, each turn of the thread sends one line (outcome, duration, cost, and the reply whole into a thread or its last line to the person) to every target named, so a caller need not wait here or poll. The notify line goes once, at the reply, and a reply given with background tasks still running goes once they are done. A wsp thread starts every child with --notify me and ends its turn, and each child's finished line wakes it with that child's whole report. With replaces, the thread restarts a stopped or failed one, which settles once it starts, so the person sees one row. A start on a computer already running as many threads as its threads at once waits for a slot and starts on its own when one frees (outcome `held`), with capped beside it, the computer and what runs there against its number, which the thread's row in threads carries while it waits; a thread that follows a run or a send to its end, not detached, lends that thread's next turn its own slot, one turn at a time, a turn already held ahead of the message included, and every other start, a child started detached included, waits for a slot of its own. When the person asks for another agent, on another model or another harness, start it as a wsp thread with run, so it shows in their sidebar; your own subagent tool is for your own sub-steps.
+
+**Takes**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `project` | string |  | the project the thread works on, by the name or the id projects lists; one on another computer gets a new machine forked from the image for the thread, and a machine named in its place runs it there as before. Absent from a thread, the thread runs beside the one asking, in its folder |
+| `branch` | string |  | a branch other than the one the project's folder has checked out: the thread runs in the worktree holding it, made under wsp's folder from the project folder's current commit for a new branch |
+| `cwd` | string |  | a folder inside the project or one of its worktrees, absolute, which the thread starts in |
+| `message` | string | yes |  |
+| `agent` | string |  | the agent to run in the thread, one of claude, codex, opencode, cursor; absent means the host's default |
+| `model` | string |  | the model the turn runs on, by the agent's own slug (claude-sonnet-5); absent on a new thread means the project's, else the one set for that agent, else the catalog's default, on send the thread's own |
+| `effort` | string |  | the reasoning effort, by the agent's own word (low, medium, high, xhigh, max); absent on a new thread means the agent's default, high for claude; on send, the thread's own |
+| `access` | string |  | how far the agent may go without asking, in wsp's words: ask (asks about each action that needs permission), auto-edit (edits files without asking), full (every action without asking) or plan (reads and proposes, changes nothing); each is mapped to the agent's own mode and refused where the agent has none, and a harness's own spelling is refused. Absent means the project's access, else the one set for that agent, else full |
+| `fast` | boolean |  | true runs the turn in the agent's fast mode, on a model that offers one, and is refused naming the model otherwise; absent runs at the agent's usual speed |
+| `notify` | string[] |  | who is told each time a turn of the new thread ends, each one a thread (by id, or a prefix of it) the line goes into as a message carrying that turn's whole reply, or me, which is the thread this call came out of when it came out of one and otherwise the person's app, where the line is its last reply line alone. Several targets each get the line once, which is how a builder's end reaches its orchestrator and a reviewer together; a target whose thread is gone by then falls back to the person, and the new thread's own id is refused. A wsp thread starts every child with --notify me and ends its turn, and each child's finished line wakes it with that child's whole report. |
+| `title` | string |  | the thread's name, as a person's: it shows in the sidebar and in the agent's own list from the first second, and the title the host asks the agent for as the turn starts never replaces it; absent lets the thread be titled by its opening words until, seconds in, the agent names it |
+| `replaces` | string |  | a stopped or failed thread this new thread restarts, by id or a prefix of it, as threads lists them: the new thread's row names it, and once the new one starts the host settles it, so the person sees one row for the job; a restart the person starts of a child stands under that child's lead. Refused while that thread or one under it is working, for a thread that already has a restart (name that restart instead), and from a thread for one that is not under it, each before a machine is forked or woken |
+| `files` | string[] |  | paths on this computer, absolute or relative to the folder wsp runs in, of files to send with the message, at most 5. An image (PNG, JPEG, GIF or WebP, up to 10 MB) goes to the agent as an image; any other file, up to 10 MB, lands in the folder the thread works in, under .wsp-files where git lists none of it, and the message names its path. The host reads each file and sends its bytes, so the machine never reaches back for this computer’s files; an image to an agent that reads none is refused naming that agent. |
+| `detach` | boolean |  | true answers with the thread id the moment the turn is started, without the reply, and the turn's end reaches whoever notify named; for a turn that runs for minutes or an hour, so this call does not block for it. A wsp thread starts every child with --notify me and ends its turn, and each child's finished line wakes it with that child's whole report. |
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `threadId` | string | yes |  |
+| `workspaceId` | string | yes |  |
+| `harness` | string | yes |  |
+| `text` | string |  | the reply, complete; absent under detach, where the turn is still running and its end reaches whoever the start's notify named |
+| `outcome` | `started`, `steered`, `queued`, `held` | yes |  |
+| `capped` | object |  | what holds the start back while outcome is held: the computer and what runs there against its threads at once |
+| `capped.placeId` | string | yes |  |
+| `capped.place` | string | yes |  |
+| `capped.running` | integer | yes |  |
+| `capped.atOnce` | integer | yes |  |
+| `afterCut` | `true` |  |  |
+
+## send
+
+Sends a message to an existing thread (by id, or a prefix of it) and returns the reply when it is complete; a person's message on the same thread lands in order with yours. With detach true it returns the thread id the moment the turn is started, without the reply, and the turn's end reaches whoever the thread's start named. A model or effort named here is the turn's; the thread runs on the agent and at the access its own turns ran at, which a message does not change; a turn that joins a running one keeps that one's. On a thread whose turn is not running the message starts a new turn (outcome `started`); when the turn is still running the message joins it (outcome `steered`) or waits for it and then runs (outcome `queued`), and the reply is that turn's. When the thread's turn has replied but its agent process is still running, the message waits for that process and runs as the thread's next turn (outcome `queued`), which the runtime says as `This thread replied, still working; the message runs as its next turn once that process exits`. A send is never refused for meeting a turn, and two sends keep the order they arrived in. A start on a computer already running as many threads as its threads at once waits for a slot and starts on its own when one frees (outcome `held`), with capped beside it, the computer and what runs there against its number, which the thread's row in threads carries while it waits; a thread that follows a run or a send to its end, not detached, lends that thread's next turn its own slot, one turn at a time, a turn already held ahead of the message included, and every other start, a child started detached included, waits for a slot of its own.
+
+**Takes**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `thread` | string | yes |  |
+| `message` | string | yes |  |
+| `model` | string |  | the model the turn runs on, by the agent's own slug (claude-sonnet-5); absent on a new thread means the project's, else the one set for that agent, else the catalog's default, on send the thread's own |
+| `effort` | string |  | the reasoning effort, by the agent's own word (low, medium, high, xhigh, max); absent on a new thread means the agent's default, high for claude; on send, the thread's own |
+| `fast` | boolean |  | true runs the turn in the agent's fast mode, on a model that offers one, and is refused naming the model otherwise; absent runs at the agent's usual speed |
+| `files` | string[] |  | paths on this computer, absolute or relative to the folder wsp runs in, of files to send with the message, at most 5. An image (PNG, JPEG, GIF or WebP, up to 10 MB) goes to the agent as an image; any other file, up to 10 MB, lands in the folder the thread works in, under .wsp-files where git lists none of it, and the message names its path. The host reads each file and sends its bytes, so the machine never reaches back for this computer’s files; an image to an agent that reads none is refused naming that agent. |
+| `detach` | boolean |  | true answers with the thread id the moment the turn is started, without the reply, and the turn's end reaches whoever notify named; for a turn that runs for minutes or an hour, so this call does not block for it. A wsp thread starts every child with --notify me and ends its turn, and each child's finished line wakes it with that child's whole report. |
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `threadId` | string | yes |  |
+| `workspaceId` | string | yes |  |
+| `harness` | string | yes |  |
+| `text` | string |  | the reply, complete; absent under detach, where the turn is still running and its end reaches whoever the start's notify named |
+| `outcome` | `started`, `steered`, `queued`, `held` | yes |  |
+| `capped` | object |  | what holds the start back while outcome is held: the computer and what runs there against its threads at once |
+| `capped.placeId` | string | yes |  |
+| `capped.place` | string | yes |  |
+| `capped.running` | integer | yes |  |
+| `capped.atOnce` | integer | yes |  |
+| `afterCut` | `true` |  |  |
+
+## servers
+
+Every MCP server each agent's own config file defines on one computer or workspace, and a workspace's project files: the agent, the file, how it is reached (its command with every value hidden, or its url's host), the names of the variables it sets or reads and never their values, whether the file switches it off, whether wsp's recipe put it there on a box, and its sign-in as the config alone says it: open for a command or a fixed header, unknown for a remote server until something connects. On any computer but the one the app runs on it also lists the wsp server each thread's launch there hands an agent that takes servers on its launch, marked launch, with no file, and never turned off or removed. Read as the login the computer was added with, off each agent's config and whether its files are there: no MCP server is started and no login file is opened. A napping workspace answers what stood there when it last ran, marked stale, and is not woken.
+
+**Takes**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `workspace` | string |  | the workspace to read, by its name, or its id when two share a name; absent reads a computer |
+| `on` | string |  | the computer to read, by the name computers lists; absent with no workspace is the computer the app runs on |
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `target` | object or object | yes |  |
+| `home` | string | yes |  |
+| `user` | string | yes |  |
+| `readAt` | string | yes |  |
+| `stale` | `"napping"` |  |  |
+| `refused` | string[] | yes |  |
+| `projects` | object[] |  |  |
+| `projects[].id` | string | yes |  |
+| `projects[].name` | string | yes |  |
+| `projects[].path` | string | yes |  |
+| `reach` | `here`, `relay`, `none` |  |  |
+| `servers` | object[] | yes |  |
+| `servers[].agent` | string | yes |  |
+| `servers[].name` | string | yes |  |
+| `servers[].scope` | `user`, `home`, `project` | yes |  |
+| `servers[].file` | string |  |  |
+| `servers[].launch` | `true` |  |  |
+| `servers[].transport` | object or object | yes |  |
+| `servers[].envNames` | string[] | yes |  |
+| `servers[].auth` | `open`, `env-key`, `connected`, `signed-in`, `needs-sign-in`, `failed`, `unknown` | yes |  |
+| `servers[].enabled` | boolean | yes |  |
+| `servers[].inRecipe` | boolean |  |  |
+| `servers[].tools` | object[] |  |  |
+| `servers[].project` | object |  |  |
+
+## servers_add
+
+Writes one MCP server into one agent's own config on one computer or workspace, the project's file with project from a workspace: a command with its arguments and the variables it is given, or an address with its headers. Every value is read by name off the environment the wsp tools run with and never goes into an answer: on this computer it goes into that file, a variable's value into the vault as well, and on any other the file names a variable and the value goes to the vault, which hands it to each turn there: on a computer the person added only to Claude Code and Codex, in that turn's launch and never its environment, and not to a Codex server whose own config reads its token through its bearer variable; elsewhere in the turn's environment. A header travels as WSP_MCP_\<SERVER>_\<HEADER>, and a Codex copy reads an Authorization: Bearer header whole as WSP_MCP_\<SERVER>_AUTHORIZATION_BEARER, which the vault fills from the token it keeps alone under WSP_MCP_\<SERVER>_AUTHORIZATION. An argument or the address may name one of those variables as $\{NAME\}, an address's variables being only the ones it names: on this computer the value is put in place, on any other the name stays in the agent's own syntax, and an agent that reads no variable there is refused. A name already in the file is refused rather than written over. Written as the login the computer was added with, into that agent's own file, which keeps its mode; a file that is a link out of the home, or out of the project for a project's file, is not written through, and a file the agent wrote meanwhile is left as it was. A napping workspace is not woken. The report there reads again at once.
+
+**Takes**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `name` | string | yes | what to call the server in the agent's config |
+| `agent` | string | yes | the catalog id of the agent whose config takes it |
+| `workspace` | string |  | the workspace to read, by its name, or its id when two share a name; absent reads a computer |
+| `on` | string |  | the computer to read, by the name computers lists; absent with no workspace is the computer the app runs on |
+| `command` | string |  | the line the server runs, the program and its arguments as a shell would split them, nothing expanded; or url |
+| `env` | string[] |  | variables the server is given, or the address names as $\{NAME\}, each by its name, its value read off the same name in the environment the wsp tools run with; an argument or the address may name one as $\{NAME\} |
+| `url` | string |  | the server's https address; or command |
+| `header` | string[] |  | headers sent to the address, each \<name>=\<VARIABLE>, its value read off that variable in the environment the wsp tools run with |
+| `project` | boolean or string |  | put it in a project's file rather than the agent's own: true for the workspace's own project, or the project's name, as projects lists it, with on |
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `file` | string | yes |  |
+
+## servers_disable
+
+Turns one MCP server off in one agent's own config on one computer or workspace, by the switch that agent reads (Codex's enabled line, OpenCode's enabled field, Gemini CLI's mcp.excluded); Claude Code keeps no such switch per server and is refused. Written as the login the computer was added with, into that agent's own file, which keeps its mode; a file that is a link out of the home, or out of the project for a project's file, is not written through, and a file the agent wrote meanwhile is left as it was. A napping workspace is not woken. The report there reads again at once.
+
+**Takes**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `name` | string | yes | the server's name, as servers lists it |
+| `agent` | string | yes | the catalog id of the agent whose config names it, as servers lists it |
+| `workspace` | string |  | the workspace to read, by its name, or its id when two share a name; absent reads a computer |
+| `on` | string |  | the computer to read, by the name computers lists; absent with no workspace is the computer the app runs on |
+| `scope` | `user`, `home`, `project` |  | the scope servers lists it under: user, home or project; user without it |
+| `project` | boolean or string |  | the project's server of that name: true from a workspace, or the project's name, as projects lists it, with on |
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `file` | string | yes |  |
+
+## servers_enable
+
+Turns one MCP server on again in one agent's own config on one computer or workspace, by the switch that agent reads (Codex's enabled line, OpenCode's enabled field, Gemini CLI's mcp.excluded); Claude Code keeps no such switch per server and is refused. Written as the login the computer was added with, into that agent's own file, which keeps its mode; a file that is a link out of the home, or out of the project for a project's file, is not written through, and a file the agent wrote meanwhile is left as it was. A napping workspace is not woken. The report there reads again at once.
+
+**Takes**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `name` | string | yes | the server's name, as servers lists it |
+| `agent` | string | yes | the catalog id of the agent whose config names it, as servers lists it |
+| `workspace` | string |  | the workspace to read, by its name, or its id when two share a name; absent reads a computer |
+| `on` | string |  | the computer to read, by the name computers lists; absent with no workspace is the computer the app runs on |
+| `scope` | `user`, `home`, `project` |  | the scope servers lists it under: user, home or project; user without it |
+| `project` | boolean or string |  | the project's server of that name: true from a workspace, or the project's name, as projects lists it, with on |
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `file` | string | yes |  |
+
+## servers_remove
+
+Takes one MCP server's entry out of one agent's own config on one computer or workspace, in the scope servers lists it under, every other server and line of the file as it was, and, once no agent's config on this computer lists that server, frees the vault's values kept for it that no other server holds. Written as the login the computer was added with, into that agent's own file, which keeps its mode; a file that is a link out of the home, or out of the project for a project's file, is not written through, and a file the agent wrote meanwhile is left as it was. A napping workspace is not woken. The report there reads again at once.
+
+**Takes**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `name` | string | yes | the server's name, as servers lists it |
+| `agent` | string | yes | the catalog id of the agent whose config names it, as servers lists it |
+| `workspace` | string |  | the workspace to read, by its name, or its id when two share a name; absent reads a computer |
+| `on` | string |  | the computer to read, by the name computers lists; absent with no workspace is the computer the app runs on |
+| `scope` | `user`, `home`, `project` |  | the scope servers lists it under: user, home or project; user without it |
+| `project` | boolean or string |  | the project's server of that name: true from a workspace, or the project's name, as projects lists it, with on |
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `file` | string | yes |  |
+
+## servers_tools
+
+One MCP server's tools with their descriptions, and its sign-in as that one connect found it (open, signed in, needs a sign-in, failed, or unknown), with why nothing came back where nothing did. Starts that one server once on that computer or workspace, as the login it was added with and with the command and variables its agent's config gives it, or asks its address once from there, and stops it within 20 seconds; the answer is the server's state, the one the app shows, and stands three minutes unless refreshed or a sign-in there ends; an edited entry is asked again. A server behind a sign-in its agent holds brings no list, since no login file is read: Claude Code is asked for its word on it, and for any other agent it answers unknown, naming that agent as the one holding the sign-in. A napping workspace is not woken.
+
+**Takes**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `name` | string | yes | the server's name, as servers lists it |
+| `agent` | string | yes | the catalog id of the agent whose config names it, as servers lists it |
+| `workspace` | string |  | the workspace to read, by its name, or its id when two share a name; absent reads a computer |
+| `on` | string |  | the computer to read, by the name computers lists; absent with no workspace is the computer the app runs on |
+| `project` | string |  | the project on that computer whose server it is, by the name projects lists, with on; a workspace finds its own project's servers |
+| `refresh` | boolean |  | start it again even where an answer from the last three minutes stands |
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `auth` | `open`, `env-key`, `connected`, `signed-in`, `needs-sign-in`, `failed`, `unknown` | yes |  |
+| `tools` | object[] |  |  |
+| `tools[].name` | string | yes |  |
+| `tools[].description` | string |  |  |
+| `tools[].params` | object[] |  |  |
+| `holder` | string |  |  |
+| `refused` | string |  |  |
+| `readAt` | string | yes |  |
+
+## setup
+
+The setup on this host, as the app's Settings reads it: which keys the host holds (their presence, never a value), the agents on this computer and whether each carries the wsp tools, and the init job when one runs or ran: its road, phase, screens, rows and progress. The rows are the image's stages, each sign-in with the page the person opens on this computer and the code it asks for while it waits, then its state, and the first machine once forked. Read it to tell the person where the build is and which sign-in waits for them; the build is started from the app's Settings, and wsp init --recipe from a shell is the same run.
+
+**Takes**
+
+Nothing.
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `setup` | object | yes |  |
+| `setup.keys` | object | yes |  |
+| `setup.keyProvider` | string |  |  |
+| `setup.home` | string | yes |  |
+| `setup.agents` | object[] | yes |  |
+| `setup.pricing` | object or null | yes |  |
+| `setup.place` | object |  |  |
+| `setup.forksOn` | string |  |  |
+| `setup.buildRefusal` | string |  |  |
+| `setup.job` | object or null | yes |  |
+
+## skills
+
+Every skill on one computer or workspace, one row per folder name: its description off its SKILL.md, every folder it lives in with the agent whose own folder that is (none for the shared ~/.agents/skills) and where a folder links to, and whether it is the person's own, a project's inside a workspace, or a plugin's. Read as the login the computer was added with, off each agent's config and whether its files are there: no MCP server is started and no login file is opened. A napping workspace answers what stood there when it last ran, marked stale, and is not woken.
+
+**Takes**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `workspace` | string |  | the workspace to read, by its name, or its id when two share a name; absent reads a computer |
+| `on` | string |  | the computer to read, by the name computers lists; absent with no workspace is the computer the app runs on |
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `target` | object or object | yes |  |
+| `home` | string | yes |  |
+| `user` | string | yes |  |
+| `readAt` | string | yes |  |
+| `stale` | `"napping"` |  |  |
+| `refused` | string[] | yes |  |
+| `projects` | object[] |  |  |
+| `projects[].id` | string | yes |  |
+| `projects[].name` | string | yes |  |
+| `projects[].path` | string | yes |  |
+| `reach` | `here`, `relay`, `none` |  |  |
+| `skills` | object[] | yes |  |
+| `skills[].name` | string | yes |  |
+| `skills[].description` | string |  |  |
+| `skills[].paths` | object[] | yes |  |
+| `skills[].scope` | `user`, `project`, `plugin` | yes |  |
+| `skills[].project` | object |  |  |
+
+## skills_add
+
+Installs one skill off skills.sh on one computer or workspace, as the login it was added with: its files land once in ~/.agents/skills/\<name> (the project's .agents/skills with project, from a workspace), and each agent named that does not read that folder gets a link to it or a copy in its own skills folder; with no agent named, every agent whose own folder's home is there gets it. The download is checked whole before anything lands: every path plain and inside the skill, at most 200 files, 1 MB each and 5 MB in all, a SKILL.md at its root; every file lands 0644 and nothing in the skill runs. A skill already there is refused rather than written over.
+
+**Takes**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `skill` | string | yes | the skill's \<owner>/\<repo>/\<skill>, as skills_search answers it |
+| `workspace` | string |  | the workspace to read, by its name, or its id when two share a name; absent reads a computer |
+| `on` | string |  | the computer to read, by the name computers lists; absent with no workspace is the computer the app runs on |
+| `agent` | string[] |  | the catalog ids of the agents to put it in; every agent whose folder is there without it |
+| `project` | boolean or string |  | put it in a project rather than the home: true for the workspace's own, or the project's name, as projects lists it, with on |
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `path` | string | yes |  |
+| `agents` | object[] | yes |  |
+| `agents[].agent` | string | yes |  |
+| `agents[].path` | string | yes |  |
+
+## skills_disable
+
+Turns one skill off on one computer or workspace by its name, as the login it was added with: its SKILL.md is renamed SKILL.md.off in each folder it really lives in, which every link to it follows, and no agent config is edited. A project's skill lives in the repo and is refused. The skill wsp writes and a plugin's are always on and are refused; a napping workspace is not woken. The report there reads again at once.
+
+**Takes**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `name` | string | yes | the skill's name, as skills lists it |
+| `workspace` | string |  | the workspace to read, by its name, or its id when two share a name; absent reads a computer |
+| `on` | string |  | the computer to read, by the name computers lists; absent with no workspace is the computer the app runs on |
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `paths` | string[] | yes |  |
+
+## skills_enable
+
+Turns one skill on again on one computer or workspace by its name, as the login it was added with: its SKILL.md is renamed back from SKILL.md.off in each folder it really lives in, which every link to it follows, and no agent config is edited. A project's skill lives in the repo and is refused. The skill wsp writes and a plugin's are always on and are refused; a napping workspace is not woken. The report there reads again at once.
+
+**Takes**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `name` | string | yes | the skill's name, as skills lists it |
+| `workspace` | string |  | the workspace to read, by its name, or its id when two share a name; absent reads a computer |
+| `on` | string |  | the computer to read, by the name computers lists; absent with no workspace is the computer the app runs on |
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `paths` | string[] | yes |  |
+
+## skills_remove
+
+Removes one skill on one computer or workspace by its name, as the login it was added with: every folder skills lists for it and every link to it; a folder a link points to outside the skills folders stays. The skill wsp writes and a plugin's are always on and are refused; a napping workspace is not woken. The report there reads again at once.
+
+**Takes**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `name` | string | yes | the skill's name, as skills lists it |
+| `workspace` | string |  | the workspace to read, by its name, or its id when two share a name; absent reads a computer |
+| `on` | string |  | the computer to read, by the name computers lists; absent with no workspace is the computer the app runs on |
+| `project` | boolean or string |  | the project's skill of that name rather than the one that is not a project's: true from a workspace, or the project's name, as projects lists it, with on |
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `removed` | string[] | yes |  |
+
+## skills_search
+
+Skills on skills.sh whose words match the query, most installed first as skills.sh ranks them: each one's name, the repo it comes from, how many times it was installed, and the id skills_add takes. The host asks skills.sh; an empty query is refused.
+
+**Takes**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `query` | string | yes | the words to search skills.sh for |
+| `limit` | integer |  | how many to answer, 20 without it |
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `skills` | object[] | yes |  |
+| `skills[].id` | string | yes |  |
+| `skills[].source` | string | yes |  |
+| `skills[].skillId` | string | yes |  |
+| `skills[].name` | string | yes |  |
+| `skills[].installs` | integer | yes |  |
+
+## skills_show
+
+A skill's SKILL.md as text, its first 64 KB and the whole file's size: a skill on skills.sh by its \<owner>/\<repo>/\<skill>, read by the host with nothing installed, or a skill already on one computer or workspace by its name. Nothing in it runs.
+
+**Takes**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `skill` | string | yes | an \<owner>/\<repo>/\<skill> off skills_search, or the name of a skill skills lists |
+| `workspace` | string |  | the workspace to read, by its name, or its id when two share a name; absent reads a computer |
+| `on` | string |  | the computer to read, by the name computers lists; absent with no workspace is the computer the app runs on |
+| `project` | boolean or string |  | the project's skill of that name rather than the one that is not a project's: true from a workspace, or the project's name, as projects lists it, with on |
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `text` | string | yes |  |
+| `size` | integer | yes |  |
+
+## slate_catalog
+
+What a slate, the live panel beside the chat, can hold: every piece, and the runs that keep it fresh. Call it first whenever the person wants to see, watch, monitor or keep an eye on something, tick things off as they go, or see what's unread, even when another tool fetches the data.
+
+**Takes**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `name` | string |  | leave out first: the index of every piece; then an entry, like runs |
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `text` | string | yes |  |
+
+## slate_read
+
+Reads this thread's slate: what the person filled in or pressed, live values, run output and logs, and the sketch: the panel's words as the person sees them.
+
+**Takes**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `thread` | string |  | another thread's id |
+| `values` | string[] |  | $run.json, $value, source path, or * |
+| `text` | boolean |  | false: no JSX-like form |
+| `sketch` | boolean |  | false: no sketch |
+| `document` | boolean |  | true: add stored JSON |
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `version` | integer | yes |  |
+| `text` | string | yes |  |
+| `document` | any |  |  |
+| `values` | any |  |  |
+| `derived` | any |  |  |
+| `runs` | any |  |  |
+| `state` | any |  |  |
+| `problems` | any |  |  |
+| `waiting` | any |  |  |
+| `comments` | any |  |  |
+| `approvals` | any |  |  |
+
+## slate_state
+
+Sets the slate's live $values by path, so the person sees progress, status or a checklist tick move as you work; reactions fire. start starts a run the person allowed to run always.
+
+**Takes**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `thread` | string |  | another thread's id |
+| `values` | object |  | $path: new value |
+| `start` | string[] |  | runs allowed always |
+| `if_version` | integer |  | only at this version |
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `version` | integer | yes |  |
+| `text` | string | yes |  |
+| `problems` | any |  |  |
+| `waiting` | any |  |  |
+| `notStarted` | any |  |  |
+
+## slate_write
+
+Writes this thread's slate, the live panel shown here beside the chat. Use it to show the person anything they want to see, watch, monitor or keep an eye on while you work (live data, traffic, metrics, a price, logs, a PR, progress, status), or a dashboard, a form to fill in or a checklist. A run with every= refreshes itself on a timer with no turns, so nothing polls.
+
+**Takes**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `thread` | string |  | another thread's id |
+| `text` | string |  | JSX-like text: a \<slate>, or a patch |
+| `document` | object |  | JSON form from slate_read; not for writing |
+| `check` | boolean |  | validate, write nothing |
+| `values` | object |  | with check: $path: value |
+| `press` | string |  | with check: piece id to press |
+| `row` | integer |  | pressed row, from 0 |
+| `action` | integer |  | row action, from 0 |
+| `if_version` | integer |  | only at this version |
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `version` | integer | yes |  |
+| `text` | string | yes |  |
+| `warnings` | any |  |  |
+| `problems` | any |  |  |
+| `waiting` | any |  |  |
+
+## start
+
+Opens a thread off a GitHub issue or pull request link, returning as soon as the thread is started. The link names the repository, and the project here whose remote is that repository is the one used (project names one where two computers hold it); a link no project matches is refused naming the repository and the add line. The issue's or pull request's title, description, comments and link are the thread's first message, and an issue's thread is asked to have its pull request close the issue. On the computer the app runs on an issue's thread runs in the project folder, and a pull request's head is fetched into the project's repo as a branch and its thread runs in a worktree on it, so the project folder's checkout never moves. A thread's own token is refused: starting work from a link is the person's act.
+
+**Takes**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `link` | string | yes | a GitHub issue or pull request link, `https://github.com/<owner>/<repo>/issues/<n>` or /pull/\<n> |
+| `project` | string |  | the project by name or id where two projects hold the repository; absent is this computer's |
+| `agent` | string |  | the agent to run in the thread, one of claude, codex, opencode, cursor; absent means the host's default |
+| `model` | string |  | the model the turn runs on, by the agent's own slug (claude-sonnet-5); absent on a new thread means the project's, else the one set for that agent, else the catalog's default, on send the thread's own |
+| `effort` | string |  | the reasoning effort, by the agent's own word (low, medium, high, xhigh, max); absent on a new thread means the agent's default, high for claude; on send, the thread's own |
+| `access` | string |  | how far the agent may go without asking, in wsp's words: ask (asks about each action that needs permission), auto-edit (edits files without asking), full (every action without asking) or plan (reads and proposes, changes nothing); each is mapped to the agent's own mode and refused where the agent has none, and a harness's own spelling is refused. Absent means the project's access, else the one set for that agent, else full |
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `workspace` | object | yes |  |
+| `workspace.id` | string | yes |  |
+| `workspace.name` | string | yes |  |
+| `workspace.machineId` | string | yes |  |
+| `workspace.phase` | `running`, `pausing`, `napping`, `waking`, `gone` | yes |  |
+| `workspace.kind` | `cloud`, `local`, `place` |  |  |
+| `workspace.golden` | string | yes |  |
+| `workspace.createdAt` | string | yes |  |
+| `workspace.project` | object | yes |  |
+| `workspace.folder` | string |  |  |
+| `workspace.home` | string |  |  |
+| `workspace.claudeSessionId` | string |  |  |
+| `workspace.gone` | string |  |  |
+| `workspace.theme` | object |  |  |
+| `workspace.glyph` | `terminal`, `code`, `bug`, `wrench`, `hammer`, `rocket`, `flask`, `database`, `cloud`, `globe`, `compass`, `map`, `book`, `feather`, `palette`, `leaf`, `star`, `bolt`, `key`, `shield`, `box`, `folder`, `chip`, `lamp` |  |  |
+| `workspace.daemonNote` | string |  |  |
+| `workspace.daemonRefusedAt` | object |  |  |
+| `workspace.vaultedAt` | string |  |  |
+| `workspace.vaultRefused` | string |  |  |
+| `workspace.wakeRefused` | string |  |  |
+| `workspace.agents` | object |  |  |
+| `workspace.parentThreadId` | string |  |  |
+| `workspace.rootThreadId` | string |  |  |
+| `workspace.parentWorkspaceId` | string |  |  |
+| `workspace.place` | string |  |  |
+| `workspace.provider` | string |  |  |
+| `workspace.worktree` | object |  |  |
+| `workspace.from` | object |  |  |
+| `workspace.review` | object or object |  |  |
+| `threadId` | string | yes |  |
+| `sessionId` | string | yes |  |
+
+## stop
+
+Stops the thread's running turn (by id, or a prefix of it), as the app's stop button does; the machine stays up and the thread takes the next send. outcome accepted means the turn ended interrupted; not-running means it had already ended, which is an answer, not an error. A thread whose agents spawned threads of their own stops as one: under names each of those that was running and was stopped with it. Given the id of one of the agent's own subagents (off threads' subagents), that one is stopped alone and the turn runs on: accepted means the agent took the stop, refused and unsupported carry the reason in error. On a computer the person added, left says what the thread started there that the stop could not end, or that the computer is not answering, in which case the turn reads stopped now and ends there once that computer connects again; a stop on a message waiting for that end gives the message up and says so in left.
+
+**Takes**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `thread` | string | yes |  |
+| `task` | string |  |  |
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `threadId` | string | yes |  |
+| `task` | string |  |  |
+| `outcome` | `accepted`, `not-running`, `not-found`, `refused`, `unsupported` | yes |  |
+| `under` | string[] |  |  |
+| `error` | string |  |  |
+| `left` | string |  |  |
+
+## terminal_config
+
+The person's Ghostty config on this computer as the app's terminal pane applies it: every config file Ghostty would load and the theme it names, read now, with only the keys the pane honours. files is empty when they have no Ghostty config, and each other key is absent when no file sets it, so the pane keeps its default there. backgroundBlur is read and not applied: the desktop window's own material is the blur, and a browser tab has none. Read this to say how their terminal looks or to check what a config change did; nothing is written.
+
+**Takes**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `scheme` | `light`, `dark` |  | which side of a light:...,dark:... theme to resolve; dark when absent |
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `files` | string[] | yes |  |
+| `fontFamily` | string[] | yes |  |
+| `fontSize` | number |  |  |
+| `theme` | string |  |  |
+| `background` | object |  |  |
+| `background.r` | integer | yes |  |
+| `background.g` | integer | yes |  |
+| `background.b` | integer | yes |  |
+| `foreground` | object |  |  |
+| `palette` | object or null[] | yes |  |
+| `selectionBackground` | object |  |  |
+| `cursorColor` | object |  |  |
+| `cursorStyle` | `block`, `bar`, `underline`, `block_hollow` |  |  |
+| `cursorStyleBlink` | boolean |  |  |
+| `windowPaddingX` | object |  |  |
+| `windowPaddingX.left` | number | yes |  |
+| `windowPaddingX.right` | number | yes |  |
+| `windowPaddingY` | object |  |  |
+| `windowPaddingY.top` | number | yes |  |
+| `windowPaddingY.bottom` | number | yes |  |
+| `backgroundOpacity` | number |  |  |
+| `backgroundBlur` | integer |  |  |
+
+## thread_allow
+
+Answers the prompt the thread is stopped on and lets the call run, by thread id or a prefix of it. A thread stopped on a prompt reads Needs you in threads and runs nothing until somebody picks, so this is how a thread you did not open is unstuck; the prompt itself is on the thread's own rows, which thread_read prints. Refused in one line when the thread is waiting on no prompt and when the prompt it is stopped on carries no such answer, which is what a call that asks the person something rather than for consent does.
+
+**Takes**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `thread` | string | yes | the thread's id, or a prefix of it that names one, as threads lists them |
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `threadId` | string | yes |  |
+| `askId` | string | yes |  |
+| `optionId` | string | yes |  |
+
+## thread_deny
+
+Answers the prompt the thread is stopped on and refuses the call, by thread id or a prefix of it. A thread stopped on a prompt reads Needs you in threads and runs nothing until somebody picks, so this is how a thread you did not open is unstuck; the prompt itself is on the thread's own rows, which thread_read prints. Refused in one line when the thread is waiting on no prompt and when the prompt it is stopped on carries no such answer, which is what a call that asks the person something rather than for consent does.
+
+**Takes**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `thread` | string | yes | the thread's id, or a prefix of it that names one, as threads lists them |
+| `reason` | string |  | what the agent should do instead, in your words; the agent reads it with the refusal, as it reads the reason a person types in the app |
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `threadId` | string | yes |  |
+| `askId` | string | yes |  |
+| `optionId` | string | yes |  |
+
+## thread_forget
+
+Drops a thread (by id, or a prefix of it) no turn ever ran on: the row a launch that never got going leaves in threads and in the person's sidebar goes, and nothing is asked of the machine. A launch the agent refused outright, for want of a sign-in, counts as one that ran nothing and goes the same way. Refused in one line once a turn of the thread did work, since that work is written down on it and nowhere else; delete takes a thread that ran, with its turns.
+
+**Takes**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `thread` | string | yes | the thread's id, or a prefix of it that names one, as threads lists them |
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `threadId` | string | yes |  |
+| `workspaceId` | string | yes |  |
+
+## thread_head
+
+The thread's head (by id, or a prefix of it): facts, the thread as threads lists it with the model, effort and context window its latest turn runs on and turnId while a turn runs; events, as many of the thread's newest transcript events as fit in 64 KB, oldest first, each tool result past 2 KB cut with cut set to its whole length; pos, the newest position the transcript has issued, which every event carries as its own pos; and total, how many events of the thread the transcript holds. It is the cheap look at a thread: read the whole conversation with thread_read. Nothing on a machine is touched and the thread is not marked read.
+
+**Takes**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `thread` | string | yes | the thread's id, or a prefix of it that names one, as threads lists them |
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `facts` | object | yes |  |
+| `facts.id` | string | yes |  |
+| `facts.threadId` | string |  |  |
+| `facts.workspaceId` | string | yes |  |
+| `facts.harness` | string | yes |  |
+| `facts.startedBy` | `person`, `cli`, `agent` | yes |  |
+| `facts.status` | `running`, `completed`, `interrupted`, `failed` | yes |  |
+| `facts.title` | string | yes |  |
+| `facts.sessionId` | string | yes |  |
+| `facts.claudeSessionId` | string |  |  |
+| `facts.startedAt` | number |  |  |
+| `facts.endedAt` | number |  |  |
+| `facts.cwd` | string |  |  |
+| `facts.turns` | integer | yes |  |
+| `facts.ran` | boolean | yes |  |
+| `facts.parentThreadId` | string |  |  |
+| `facts.rootThreadId` | string |  |  |
+| `facts.attempt` | string |  |  |
+| `facts.asking` | string |  |  |
+| `facts.waitingOn` | object |  |  |
+| `facts.setupRefusal` | string |  |  |
+| `facts.capped` | object |  |  |
+| `facts.limit` | object |  |  |
+| `facts.resumeAt` | number |  |  |
+| `facts.costUsd` | number |  |  |
+| `facts.lastLine` | string |  |  |
+| `facts.failure` | string |  |  |
+| `facts.pid` | integer |  |  |
+| `facts.readAt` | number |  |  |
+| `facts.settledAt` | number |  |  |
+| `facts.pinnedAt` | number |  |  |
+| `facts.foldedAt` | number |  |  |
+| `facts.replaces` | string |  |  |
+| `facts.replacedBy` | string |  |  |
+| `facts.snoozedUntil` | number |  |  |
+| `facts.wokeAt` | number |  |  |
+| `facts.section` | object |  |  |
+| `facts.rewoundAt` | number |  |  |
+| `facts.permissionMode` | string |  |  |
+| `facts.fast` | boolean |  |  |
+| `facts.model` | string |  |  |
+| `facts.effort` | string |  |  |
+| `facts.contextWindow` | string |  |  |
+| `facts.turnId` | string |  |  |
+| `events` | object or object or object or object or object or object or object or object or object or object or object or object or object or object or object or object or object or object or object[] | yes |  |
+| `pos` | integer | yes |  |
+| `total` | integer | yes |  |
+
+## thread_read
+
+The thread's messages as the app lists them, oldest first: each one's who (person for the message that opened or steered a turn, agent for the agent's own words, tool for one call of its folded to a line, turn for the outcome, duration and cost the turn ended with), at, the ms epoch the runtime recorded it, and its text. With last true, the final reply alone, the whole message the thread's finished line carries, and a row under it saying so when the thread has started another turn since, so a report is never read as the one being written. This is how you read a thread you did not open, and how you read the report behind a line that reached you; the transcript is the host's, so nothing on a machine is touched and a paused machine's thread reads the same as a running one's. A thread of many turns answers with all of them, so read one with last true when the report is what you are after. A call's output and the agent's reasoning are no rows of it. A thread whose rows the transcript's cap has dropped answers with none, which is an answer and not an error. Reading marks the thread read, as the app showing it does, so a finished thread stops reading Done in threads and in the app.
+
+**Takes**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `thread` | string | yes | the thread's id, or a prefix of it that names one, as threads lists them |
+| `last` | boolean |  | true answers with the final reply alone, the whole message the thread's finished line carries, with a row under it where the thread has started another turn since; absent answers with every message |
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `threadId` | string | yes |  |
+| `messages` | object[] | yes |  |
+| `messages[].who` | `person`, `agent`, `tool`, `turn` | yes |  |
+| `messages[].at` | number |  |  |
+| `messages[].text` | string | yes |  |
+
+## thread_rename
+
+Names the thread (by id, or a prefix of it) in the agent's own store on the machine, the field the agent writes when a person renames the session inside it, so the thread reads by that name in wsp and in the agent. outcome renamed means the store took it; unsupported means the thread's agent keeps no name of a person's, which is an answer, not an error; no-session means the agent's store on the machine has no such session; failed means the store refused the write and error carries the machine's own line for it. Whether an agent keeps a name is on its row in harnesses.list, from the adapter on the machine.
+
+**Takes**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `thread` | string | yes |  |
+| `title` | string | yes |  |
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `threadId` | string | yes |  |
+| `title` | string | yes |  |
+| `harness` | string | yes |  |
+| `outcome` | `renamed`, `unsupported`, `no-session`, `failed`, `not-found` | yes |  |
+| `error` | string |  |  |
+
+## thread_restore
+
+Brings each thread (by id, or a prefix of it) back out of the person's Settled in the sidebar, with the threads under it that the latest settle naming it moved: after a settle with finished, the finished threads that settle moved. A thread folded by the quiet time or settled before stays. A thread restores itself and the threads under it, never its lead or a thread beside it. The answer lists what came back.
+
+**Takes**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `threads` | string[] | yes | the threads' ids, or prefixes that each name one, as threads lists them |
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `restored` | object[] | yes |  |
+| `restored[].threadId` | string | yes |  |
+| `restored[].title` | string | yes |  |
+
+## thread_settle
+
+Settles each thread (by id, or a prefix of it) and every thread under it: they fold into the person's Settled in the sidebar, as the app's Settle does, and come back by themselves on their next turn. A thread with a thread working or asking anywhere in its tree is left whole, with why, as is one already settled; with finished, each thread named stays and every finished thread under it settles, a failed one staying for the person to read and one with work under it left with why. A thread settles itself and the threads under it, never its lead or a thread beside it. Settle each child once its report is acted on. The answer lists what settled and what was left, with why.
+
+**Takes**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `threads` | string[] | yes | the threads' ids, or prefixes that each name one, as threads lists them |
+| `finished` | boolean |  | settle the finished threads under each thread named, and not the thread itself |
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `settled` | object[] | yes |  |
+| `settled[].threadId` | string | yes |  |
+| `settled[].title` | string | yes |  |
+| `left` | object[] | yes |  |
+| `left[].threadId` | string | yes |  |
+| `left[].why` | string | yes |  |
+
+## threads
+
+Every thread as the sidebar lists it: its project, the folder it works in (the project folder, or a worktree of the project's repo), that folder's branch as git reads it now, the computer it runs on, the agent inside, its state, who opened it (person, cli or agent) and its title. capped is on a thread waiting for a slot on its computer: the computer and what runs there against its threads at once; it starts on its own when one frees. Optionally within one project. A thread an agent inside another thread opened carries parentThreadId and rootThreadId, which is the tree stop ends as one. lastLine is the last line of the latest turn's reply and failure why that turn failed. subagents lists the agent's own subagents of every turn (id, title, state running, done, failed or stopped, model, asked: the start of what it was asked, lastLine or failure once it ends); stop takes one of them alone by its id.
+
+**Takes**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `project` | string |  | one project's threads, by the name or the id projects lists |
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `threads` | object[] | yes |  |
+| `threads[].id` | string | yes |  |
+| `threads[].threadId` | string |  |  |
+| `threads[].workspaceId` | string | yes |  |
+| `threads[].harness` | string | yes |  |
+| `threads[].startedBy` | `person`, `cli`, `agent` | yes |  |
+| `threads[].status` | `running`, `completed`, `interrupted`, `failed` | yes |  |
+| `threads[].title` | string | yes |  |
+| `threads[].sessionId` | string | yes |  |
+| `threads[].claudeSessionId` | string |  |  |
+| `threads[].startedAt` | number |  |  |
+| `threads[].endedAt` | number |  |  |
+| `threads[].cwd` | string |  |  |
+| `threads[].turns` | integer | yes |  |
+| `threads[].ran` | boolean | yes |  |
+| `threads[].parentThreadId` | string |  |  |
+| `threads[].rootThreadId` | string |  |  |
+| `threads[].attempt` | string |  |  |
+| `threads[].asking` | string |  |  |
+| `threads[].waitingOn` | object |  |  |
+| `threads[].setupRefusal` | string |  |  |
+| `threads[].capped` | object |  |  |
+| `threads[].limit` | object |  |  |
+| `threads[].resumeAt` | number |  |  |
+| `threads[].costUsd` | number |  |  |
+| `threads[].lastLine` | string |  |  |
+| `threads[].failure` | string |  |  |
+| `threads[].pid` | integer |  |  |
+| `threads[].readAt` | number |  |  |
+| `threads[].settledAt` | number |  |  |
+| `threads[].pinnedAt` | number |  |  |
+| `threads[].foldedAt` | number |  |  |
+| `threads[].replaces` | string |  |  |
+| `threads[].replacedBy` | string |  |  |
+| `threads[].snoozedUntil` | number |  |  |
+| `threads[].wokeAt` | number |  |  |
+| `threads[].section` | object |  |  |
+| `threads[].rewoundAt` | number |  |  |
+| `threads[].permissionMode` | string |  |  |
+| `threads[].fast` | boolean |  |  |
+| `threads[].subagents` | object[] |  |  |
+| `threads[].projectName` | string | yes |  |
+| `threads[].folder` | string | yes |  |
+| `threads[].branch` | string | yes |  |
+| `threads[].computerName` | string | yes |  |
+
+## threads_wait
+
+Blocks until one of the named threads leaves running and answers with that thread's end: its id, status (completed, interrupted or failed), how long it worked, what it cost and the last line of its reply, the text being the one line a notify sends. One thread per call: a caller that started three builders calls this three times, dropping each returned id from the list, since a thread already over comes back at once and would come back again. With timeout, the seconds to wait before answering with nothing and timedOut true, so other work fits between calls; keep it under your own tool call limit and call again. This blocks, so it is for a shell script and not for your own conversation. A wsp thread starts every child with --notify me and ends its turn, and each child's finished line wakes it with that child's whole report. A caller that is not a wsp thread cannot be woken at all, so it takes the reply of one turn as the call returns, and hands work of more than one turn to a single coordinator thread in the project's folder on this computer. Never poll threads for a state change.
+
+**Takes**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `threads` | string[] | yes | thread ids, or prefixes that each pick one |
+| `timeout` | number |  | seconds to wait; absent waits until one of the threads finishes |
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `finished` | object |  | the thread that left running; absent when the timeout passed first |
+| `finished.threadId` | string | yes |  |
+| `finished.status` | `completed`, `interrupted`, `failed` | yes |  |
+| `finished.durationMs` | number |  |  |
+| `finished.costUsd` | number |  |  |
+| `finished.reply` | string |  | the last non-empty line of the reply, or the error when there is no reply |
+| `timedOut` | `true` |  | set when the timeout passed with every named thread still running |
+
+## update
+
+Merges the latest commits of the workspace's base from the remote into the branch its copy is on, with a merge commit, so a branch already pushed is never rewritten. A copy with changes no commit holds is refused first with the files named. A merge that conflicts is taken back at once and answered with the files that conflict, the copy left exactly as it was; fix sends those to the agent. Nothing is pushed.
+
+**Takes**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `workspace` | string | yes | the workspace's name, or its id when two share a name |
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `base` | string | yes |  |
+| `merged` | boolean | yes |  |
+| `commits` | integer | yes |  |
+| `conflicts` | string[] | yes |  |
+
+## usage
+
+Two answers that are never added together. accounts: every agent account signed in on any computer, the same one on three computers once, each with how much of its plan's windows is used and when each starts again, as that agent printed them in the last turn wsp ran on it; an agent that prints none reports no plan limit, a sign-in by API key pays per token with no plan window, and an account no turn has run on yet has no reading. used: the tokens the turns used over the range (today, the last seven days or the last thirty), split by agent, account, computer, project, model or source (a model once for each agent that ran it, and a row by agent, account or model naming its agent; by source, the turns wsp's threads ran beside the work the agents on this computer and on each joined one logged outside wsp, as each computer's own daemon read it, which only that split counts), each row with the cost its agent reported, a list price off one table for every token and what the cache saved, input counting the cached and the written tokens, the turns wsp ran, and a series over the range with one line per row.
+
+**Takes**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `range` | `day`, `week`, `month` |  | day (the default), week or month |
+| `by` | `agent`, `account`, `computer`, `project`, `model`, `source` |  | agent (the default), account, computer, project, model or source |
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `accounts` | object[] | yes |  |
+| `accounts[].key` | string | yes |  |
+| `accounts[].agent` | string | yes |  |
+| `accounts[].label` | string | yes |  |
+| `accounts[].computers` | string[] | yes |  |
+| `accounts[].plan` | string |  |  |
+| `accounts[].windows` | object[] |  |  |
+| `accounts[].status` | `ok`, `warning`, `reached` |  |  |
+| `accounts[].readAt` | number |  |  |
+| `accounts[].note` | `reports no plan limit`, `pays per token, no plan limit`, `not read yet: shows after its next turn` |  |  |
+| `accounts[].burn` | object |  |  |
+| `accounts[].address` | string |  |  |
+| `accounts[].credits` | object |  |  |
+| `used` | object | yes |  |
+| `used.range` | `day`, `week`, `month` | yes |  |
+| `used.split` | `agent`, `account`, `computer`, `project`, `model`, `source` | yes |  |
+| `used.rows` | object[] | yes |  |
+| `used.series` | object[] | yes |  |
+| `used.since` | number | yes |  |
+| `used.until` | number | yes |  |
+| `used.logs` | object |  |  |
+| `used.lines` | object[] |  |  |
+
+## wake
+
+Wakes the workspace's machine and returns its view once the runtime has answered; one already running comes back unchanged. run, send and exec do this themselves, so it is only needed to wake a machine ahead of them.
+
+**Takes**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `workspace` | string | yes | the workspace's name, or its id when two share a name |
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `workspace` | object | yes |  |
+| `workspace.id` | string | yes |  |
+| `workspace.name` | string | yes |  |
+| `workspace.machineId` | string | yes |  |
+| `workspace.phase` | `running`, `pausing`, `napping`, `waking`, `gone` | yes |  |
+| `workspace.kind` | `cloud`, `local`, `place` |  |  |
+| `workspace.golden` | string | yes |  |
+| `workspace.createdAt` | string | yes |  |
+| `workspace.project` | object | yes |  |
+| `workspace.folder` | string |  |  |
+| `workspace.home` | string |  |  |
+| `workspace.claudeSessionId` | string |  |  |
+| `workspace.gone` | string |  |  |
+| `workspace.theme` | object |  |  |
+| `workspace.glyph` | `terminal`, `code`, `bug`, `wrench`, `hammer`, `rocket`, `flask`, `database`, `cloud`, `globe`, `compass`, `map`, `book`, `feather`, `palette`, `leaf`, `star`, `bolt`, `key`, `shield`, `box`, `folder`, `chip`, `lamp` |  |  |
+| `workspace.daemonNote` | string |  |  |
+| `workspace.daemonRefusedAt` | object |  |  |
+| `workspace.vaultedAt` | string |  |  |
+| `workspace.vaultRefused` | string |  |  |
+| `workspace.wakeRefused` | string |  |  |
+| `workspace.agents` | object |  |  |
+| `workspace.parentThreadId` | string |  |  |
+| `workspace.rootThreadId` | string |  |  |
+| `workspace.parentWorkspaceId` | string |  |  |
+| `workspace.place` | string |  |  |
+| `workspace.provider` | string |  |  |
+| `workspace.worktree` | object |  |  |
+| `workspace.from` | object |  |  |
+| `workspace.review` | object or object |  |  |
+
+## workspaces_agents
+
+Turns the workspace's agents switch on or off, names its caps, or both; a cap named alone tightens the switch as it stands. Every turn on a workspace is launched with a token into this host scoped to its own thread. With the switch on, which is what every workspace reads as until it is turned off, that thread may open threads and fork machines under itself, up to maxMachines machines at once under one root thread and maxDepth levels deep, and may touch no other workspace, delete nothing, pause nothing and pair no computer. On this Mac the token is identity, not confinement: a thread there runs as the person and can read the host's own token file. Off, each of those acts is refused in one line. A caller that is itself a thread on a machine is refused: what agents may do is the person's to decide.
+
+**Takes**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `workspace` | string | yes | the workspace's name, or its id when two share a name |
+| `spawn` | `on`, `off` |  | whether the agents on this workspace may drive this host: open threads and fork machines under the thread they run in, capped. Absent is on under the default caps, which is what every workspace made without it reads as |
+| `max_machines` | integer |  | how many machines may stand at once under one root thread while spawn is on; defaults to 3 |
+| `max_depth` | integer |  | how many levels deep the tree under a root thread may go while spawn is on, 2 by default; 1 stops at the root's own children |
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `workspace` | object | yes |  |
+| `workspace.id` | string | yes |  |
+| `workspace.name` | string | yes |  |
+| `workspace.machineId` | string | yes |  |
+| `workspace.phase` | `running`, `pausing`, `napping`, `waking`, `gone` | yes |  |
+| `workspace.kind` | `cloud`, `local`, `place` |  |  |
+| `workspace.golden` | string | yes |  |
+| `workspace.createdAt` | string | yes |  |
+| `workspace.project` | object | yes |  |
+| `workspace.folder` | string |  |  |
+| `workspace.home` | string |  |  |
+| `workspace.claudeSessionId` | string |  |  |
+| `workspace.gone` | string |  |  |
+| `workspace.theme` | object |  |  |
+| `workspace.glyph` | `terminal`, `code`, `bug`, `wrench`, `hammer`, `rocket`, `flask`, `database`, `cloud`, `globe`, `compass`, `map`, `book`, `feather`, `palette`, `leaf`, `star`, `bolt`, `key`, `shield`, `box`, `folder`, `chip`, `lamp` |  |  |
+| `workspace.daemonNote` | string |  |  |
+| `workspace.daemonRefusedAt` | object |  |  |
+| `workspace.vaultedAt` | string |  |  |
+| `workspace.vaultRefused` | string |  |  |
+| `workspace.wakeRefused` | string |  |  |
+| `workspace.agents` | object |  |  |
+| `workspace.parentThreadId` | string |  |  |
+| `workspace.rootThreadId` | string |  |  |
+| `workspace.parentWorkspaceId` | string |  |  |
+| `workspace.place` | string |  |  |
+| `workspace.provider` | string |  |  |
+| `workspace.worktree` | object |  |  |
+| `workspace.from` | object |  |  |
+| `workspace.review` | object or object |  |  |
+
+## worktree
+
+A worktree of the project's repo on the branch, answered with its path: the one git already has the branch checked out in, the project folder or a worktree the person or an agent made included, else one wsp makes under its own folder, a new branch starting from the project folder's current commit, with .env files carried in from the project folder and, for each folder of the branch holding an ecosystem's lockfile where the project folder holds that ecosystem's folder there, or at the top for one that carries nothing (uv, Poetry, Cargo, Go), its relocatable dependency folders under it carried in, the folders tied to their path (a virtualenv, target) never copied, and its install run once in that folder, without writing a tracked file, unless what was carried records that it was installed from that very lockfile, then the project's after-worktree command (projects_set). On a Linux disk that shares no blocks a carried folder is a mount, so git clean -fdx there says Device or resource busy once for each and leaves it as it was. made says whether wsp made it, which is the only kind it ever removes. A running session cannot move into it: work there by path, or start a thread in it with run and cwd. git worktree add works too, without the carried files and the cleanup.
+
+**Takes**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `project` | string | yes | the project, by the name or the id projects lists |
+| `branch` | string | yes | the branch, existing or new |
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `path` | string | yes |  |
+| `branch` | string | yes |  |
+| `made` | boolean | yes |  |
+
+## worktree_remove
+
+Takes away the worktree wsp made for the branch, with git: refused while a thread is working in it, and over files no commit holds unless force, which loses them. The branch itself stays, and a detached worktree's commit is kept under refs/rescue. A worktree the person or an agent made is never removed; threads that ran in a removed worktree go on in the project folder.
+
+**Takes**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `project` | string | yes | the project, by the name or the id projects lists |
+| `branch` | string | yes | the branch the worktree holds |
+| `force` | boolean |  | remove it over files no commit holds, which go with it |
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `project` | string | yes |  |
+| `branch` | string | yes |  |
+| `removed` | `true` | yes |  |

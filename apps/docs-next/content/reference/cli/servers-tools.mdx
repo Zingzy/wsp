@@ -1,3 +1,26 @@
 # wsp servers tools
 
-Generated from `wsp servers tools --help` and its line in `COMMAND_LINES` (`packages/host/src/cli/commands.ts`).
+{/* Written by apps/docs-next/scripts/cli.ts: change the script or its source and run pnpm --filter @wsp/docs-next generate. */}
+
+```text
+usage: wsp servers tools <name> --agent <id> [<workspace>] [--on <computer>]
+       [--project <name>] [--refresh]
+  starts one MCP server once where it is set up and lists its tools with their
+  descriptions, and says whether it needs a sign-in
+
+  --agent      the agent whose config names the server, by its catalog id as wsp
+               servers shows it
+  --on         the computer to read, by the name wsp computers shows; this
+               computer without it, and a workspace names its own
+  --project    the project on the computer --on names whose server it is, by
+               name; a workspace finds its own project's servers
+  --refresh    start the server again even where an answer from the last three
+               minutes stands
+  --json       print the raw protocol values, one JSON object per line, with
+               everything else on stderr
+  --state      the state file the host serves
+  --host       run the line against a host on your account, by the name wsp
+               hosts lists it under; WSP_HOST names one for a whole shell
+```
+
+MCP tool: [`servers_tools`](/reference/mcp-tools#serverstools).

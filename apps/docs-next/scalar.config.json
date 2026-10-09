@@ -53,7 +53,7 @@
         },
         {
           "from": "/setup/init",
-          "to": "/reference/cli/init"
+          "to": "/reference/cli"
         },
         {
           "from": "/setup/recipes",
@@ -465,6 +465,11 @@
                     "title": "wsp fix",
                     "filepath": "content/reference/cli/fix.mdx"
                   },
+                  "/folders": {
+                    "type": "page",
+                    "title": "wsp folders",
+                    "filepath": "content/reference/cli/folders.mdx"
+                  },
                   "/forget": {
                     "type": "page",
                     "title": "wsp forget",
@@ -504,11 +509,6 @@
                     "type": "page",
                     "title": "wsp image",
                     "filepath": "content/reference/cli/image.mdx"
-                  },
-                  "/init": {
-                    "type": "page",
-                    "title": "wsp init",
-                    "filepath": "content/reference/cli/init.mdx"
                   },
                   "/join": {
                     "type": "page",
@@ -670,6 +670,11 @@
                     "title": "wsp servers tools",
                     "filepath": "content/reference/cli/servers-tools.mdx"
                   },
+                  "/setup": {
+                    "type": "page",
+                    "title": "wsp setup",
+                    "filepath": "content/reference/cli/setup.mdx"
+                  },
                   "/skills": {
                     "type": "page",
                     "title": "wsp skills",
@@ -745,6 +750,11 @@
                     "title": "wsp stop",
                     "filepath": "content/reference/cli/stop.mdx"
                   },
+                  "/terminal-config": {
+                    "type": "page",
+                    "title": "wsp terminal config",
+                    "filepath": "content/reference/cli/terminal-config.mdx"
+                  },
                   "/thread-allow": {
                     "type": "page",
                     "title": "wsp thread allow",
@@ -769,6 +779,11 @@
                     "type": "page",
                     "title": "wsp thread read",
                     "filepath": "content/reference/cli/thread-read.mdx"
+                  },
+                  "/thread-rename": {
+                    "type": "page",
+                    "title": "wsp thread rename",
+                    "filepath": "content/reference/cli/thread-rename.mdx"
                   },
                   "/thread-restore": {
                     "type": "page",

@@ -207,6 +207,9 @@ export function slateCatalog(name?: string): string {
 const BACK = "The pieces and rules: slate_catalog with no name.";
 const NOT_IN = "is not in the catalog";
 
+/** The entries slate_catalog answers by name besides the pieces and the sources. */
+export const SLATE_CHAPTERS = ["runs", "functions", "steps", "handlers", "patch", "examples"] as const;
+
 function entry(name: string): string {
   const n = name.trim();
   if (n === "file") return `The <file name="x.py"> declaration, code a run calls as $SLATE_DIR/x.py, is in slate_catalog runs.`;
@@ -220,7 +223,7 @@ function entry(name: string): string {
     case "handlers": return handlersEntry();
     case "examples": return SLATE_EXAMPLES.map(e => `${e.title}:\n${e.text}`).join("\n\n");
     default: {
-      const options = [...Object.keys(SLATE_PIECES), ...Object.keys(SLATE_SOURCES), "runs", "functions", "steps", "handlers", "patch", "examples"];
+      const options = [...Object.keys(SLATE_PIECES), ...Object.keys(SLATE_SOURCES), ...SLATE_CHAPTERS];
       const fix = nearest(n, options);
       // A guessed name answers the index too: small models asked for "dashboards" or "rows" and never saw a piece.
       return `${n} is not in the catalog${fix !== undefined ? `; did you mean ${fix}?` : "."} Ask for a piece, a source, runs, patch, functions, steps, handlers or examples; a server's tools are the host's to answer. The whole index:\n\n${index()}`;

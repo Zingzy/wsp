@@ -1,3 +1,29 @@
 # wsp doctor
 
-Generated from `wsp doctor --help` and its line in `COMMAND_LINES` (`packages/host/src/cli/commands.ts`).
+{/* Written by apps/docs-next/scripts/cli.ts: change the script or its source and run pnpm --filter @wsp/docs-next generate. */}
+
+```text
+usage: wsp doctor [<computer>] [--project <name>] [--local] [--yes]
+  prove a computer end to end. With no word, this computer and then every
+  computer you added, forking nothing and billing nothing. With a computer's
+  name, that one: a joined computer is proved by the host that computer dials,
+  which makes a short-lived machine there and reads the recipe's tools inside
+  it, and this line prints what the host says; a cloud account gets your image
+  forked, wsp put on the fork, a file coming back and the teardown, which forks
+  a live machine and bills while it runs. --local proves this computer alone: a
+  thread here and its reply, no machine, no key. --project names the project the
+  machine is made of, by name, on the computer named
+
+  --state      the state file: this word first, else WSP_HOME's state.json, else
+               ./.wsp/state.json when the current directory is a checkout of
+               wsp, else state.json in the home the running host serves
+  --yes        also delete the snapshots and templates this host left behind,
+               which is not reversible
+  --local      prove this computer alone: a thread here and its reply, with no
+               machine, no key, nothing forked and nothing billed
+  --project    the project the doctor's workspace is made of, by name, on the
+               computer named; the first project there whose checkout stands
+               when absent
+```
+
+No MCP tool: runs for minutes, makes and deletes a workspace on the computer you named, and on a cloud account forks a live machine that bills while it runs; a person decides that at a terminal.

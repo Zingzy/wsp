@@ -9,7 +9,7 @@ import { createHash } from "node:crypto";
 import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, platform } from "node:os";
 import { dirname, join } from "node:path";
-import { ANALYTICS_ENV, authority, CLOUD_ENV, fmtDuration, LABS_ENV, shellQuote, STATE_STORE_ENV, UPDATE_CHECK_ENV } from "@wsp/protocol";
+import { ANALYTICS_ENV, authority, CLOUD_ENV, fmtDuration, HOME_ENV, LABS_ENV, shellQuote, STATE_STORE_ENV, UPDATE_CHECK_ENV } from "@wsp/protocol";
 import { addressLines, dialAddress, POLL_MS, servingHost, stateLine, type HostLock } from "./host-lock.js";
 import { providerEnvNames } from "./providers.js";
 import { publicHostname } from "./relay-link.js";
@@ -138,7 +138,7 @@ export function serviceTag(statePath: string): string {
  * shell at its start, and the installing process's PATH can name folders that last only as long as it does, the
  * mount an AppImage runs from among them. */
 export function serviceEnv(env: Record<string, string | undefined>): Record<string, string> {
-  const home = homeNamed(env["WSP_HOME"]);
+  const home = homeNamed(env[HOME_ENV]);
   // Every variable the installing shell holds that the service would be without: the provider ones, since a host
   // that picks its provider out of an environment naming none forks nothing, labs, since a service installed
   // from a shell holding it would come up without the rows that shell was using, the release check's and the usage
@@ -147,7 +147,7 @@ export function serviceEnv(env: Record<string, string | undefined>): Record<stri
   // one rule.
   const carried = [CLOUD_ENV, LABS_ENV, UPDATE_CHECK_ENV, ANALYTICS_ENV, STATE_STORE_ENV, "SHELL", ...providerEnvNames()];
   return {
-    ...(home !== undefined ? { WSP_HOME: home } : {}),
+    ...(home !== undefined ? { [HOME_ENV]: home } : {}),
     ...Object.fromEntries(carried.flatMap(name => ((env[name] ?? "") === "" ? [] : [[name, env[name]!]]))),
   };
 }

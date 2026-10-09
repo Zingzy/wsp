@@ -1,3 +1,21 @@
 # wsp recipe scan
 
-Generated from `wsp recipe scan --help` and its line in `COMMAND_LINES` (`packages/host/src/cli/commands.ts`).
+{/* Written by apps/docs-next/scripts/cli.ts: change the script or its source and run pnpm --filter @wsp/docs-next generate. */}
+
+```text
+usage: wsp recipe scan [--project <folder>]
+  read this computer and print every option, writing nothing: the agents, the
+  tools with why and size, what else a package manager here has that the image
+  could take, the commands your agents ran, and the sign-ins, each with what to
+  do about it and one line of why; --project weighs the histories by a folder
+  and --json prints it as one object
+
+  --project    a folder on this computer to weigh the histories by; repeats
+  --json       print the raw protocol values, one JSON object per line, with
+               everything else on stderr
+  --state      the state file the host serves
+  --host       run the line against a host on your account, by the name wsp
+               hosts lists it under; WSP_HOST names one for a whole shell
+```
+
+MCP tool: [`recipe_scan`](/reference/mcp-tools#recipescan).

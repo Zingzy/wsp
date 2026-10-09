@@ -8,6 +8,7 @@
 import { existsSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
+import { HOME_ENV } from "@wsp/protocol";
 import { servingHost } from "./host-lock.js";
 
 /** The folder wsp keeps a person's things in when nobody names another, under the home directory it is given. */
@@ -19,7 +20,7 @@ export const homeNamed = (value: string | undefined): string | undefined => (val
 
 /** The home a line works on when it names none: WSP_HOME when it names one, else this computer's default. */
 export function servingHome(env: Readonly<Record<string, string | undefined>> = process.env, user: string = homedir()): string {
-  return homeNamed(env["WSP_HOME"]) ?? defaultHomeIn(user);
+  return homeNamed(env[HOME_ENV]) ?? defaultHomeIn(user);
 }
 
 /** A path as the file system knows it, so one folder reached by two names (/tmp and /private/tmp on a Mac) is not

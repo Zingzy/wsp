@@ -1,3 +1,964 @@
 # Slate catalog
 
-Generated from `packages/protocol/src/slate/catalog.ts` and `examples.ts`, what `slate_catalog` answers.
+{/* Written by apps/docs-next/scripts/slate.ts: change the script or its source and run pnpm --filter @wsp/docs-next generate. */}
+
+What `slate_catalog` answers, and `wsp slate catalog` prints: the index with no name, and one entry for each piece, source and chapter named below. A slate is written in this kit with `slate_write`.
+
+## The index
+
+```text
+Slate kit wsp/2, JSX-like text. Pieces (attributes, ! required, (a|b) the only values; <items>):
+column: gap(tight|normal|loose) align; children
+grid: columns! gap(tight|normal|loose) align; children
+row: gap(tight|normal|loose) align wrap; children
+section: title! note collapsible open align onChange; children
+text: value! tone emphasis mono size(small|normal|large) lines placeholder
+heading: value! level(title|section|label)
+markdown: value!
+number: label! value! format unit tone note size(normal|large) trend
+meter: label! value! max note tone format(percent|value|fraction|tokens|bytes|none)
+bars: label! items! key name! value! tone max format(percent|value|none)
+chart: label! items! x value format unit tone height(small|normal|large) stack; <series label! value! tone>
+diagram: value! label
+timeline: label! items! name! start end state(done|running|failed|waiting) group now
+treemap: label! items! name! value! group format
+donut: label! items! name! value! format unit
+sparkline: label! values! tone
+table: items! key empty rows; <col title! value! tone emphasis mono align width(fit|fill)> <action label! onPress>
+checklist: items! key title! done! state(pending|working|done) note editable empty onChange
+facts: layout(line|grid); <fact label! value! tone emphasis mono>
+status: value! tone
+chip: value!
+ring: label! value! max format(percent|value|fraction) tone note
+output: run! label lines wrap
+button: label! variant(default|primary|quiet|danger) held note size(normal|small) onPress
+input: label! value! lines kind(text|number|password) placeholder held mono submit onChange onSubmit
+select: label! value! placeholder held onChange; <option value! label>
+choices: label! value! answer held onChange; <option value! label note>
+toggle: label! value! note held onChange
+empty: title! body
+Every piece: id, when={cond}; items take when too. tone: default muted good warning bad info accent. emphasis: normal strong quiet. format, where a line lists none: plain tokens bytes percent usd inr duration integer.
+section, column, grid: pad none tight normal loose; surface="inset" sets the card ground; align start center end, else children fill the width.
+bars compare categories; time is a chart, x in ms or ISO; shares a donut, sizes a treemap, spans on a clock a timeline; a flow is a diagram.
+Sources, read only:
+thread: id title agent model status turns lastTurn cost tokens context changes plan waitingOn subagents[] ...
+usage: account windows[] session week status note ...
+cost: rateUsdPerHour accruedUsd
+time: now today zone
+git: branch head ahead behind changed ...
+pr: number url state draft branch headSubject mergeable review checks[] word ...
+Declarations: <value name start> <secret name> <derived name value> <run name cmd env args stdin on timeout every always once confirm then tool resource> <file name> <when change={$path} or done={$run} do={steps}>
+Steps: set toggle start cancel send steer queue fill open copy pane. Functions: percent pct tokens bytes usd number duration ago until date time weekday plural word upper lower trim short round floor ceil abs min max clamp str num bool concat json lines split replace contains startsWith endsWith orElse exists isNull coalesce if len count sum avg first last at append pluck join. ago(t) "30s ago", until(t) "in 4m".
+After |: where sortBy groupBy take skip count sum min max avg first last pick map distinct flatten join format. $run reads state exit out err json; a secret only .set .len.
+Rules:
+1. One <slate>, one root piece, declarations beside it. Give an id to a piece you will change.
+2. prop="text" is literal; prop={formula} reads live data or $values with operators, a ? b : c, [lists], {records} and functions, never methods or =>. A text child with {holes} fills a sentence.
+3. Props are meaning, never style. held is a sentence that disables: bind it to a condition; "" or false enables.
+4. A list binds to items; item and index read the row.
+5. A press reaches you only through send("literal text", $path); <when> chains run without you.
+6. Small edit: patch by id, <props id="price" value={$spot.json.v} />; bigger: resend the whole slate with if_version.
+7. Simple and airy unless asked for more: few pieces, one idea per section, short labels, no emoji. Separate things by layout, never by ·, • or |.
+8. One heading per section: its title or a heading, in sentence case, never bold text.
+9. Status and last-checked lines small and muted, beside their subject.
+10. Actions at the end of their row; one primary per section.
+11. mono only for figures, ids, times and paths.
+12. Every live number says its window and unit. Show a run's json fields, never its raw out; times through date(), time() or ago().
+13. Nothing centered but a lone figure or card.
+14. Use the slate tools, never wsp from a shell.
+15. A secret the person types goes in a <secret> input, never a file or the chat. One in a file stays there for the run to read, never you.
+16. A button asked for where the project has no UI goes here: the slate is its UI, and the reply says so.
+<slate title="Issue">
+  <value name="id" start="" />
+  <run name="check" cmd='gh api "repos/{owner}/{repo}/issues/$ID"' env={{ ID: $id }} />
+  <when change={$id} do={start($check)} />
+  <column>
+    <input label="Issue" value={$id} />
+    <text when={$check.exit == 0}>{$check.json.title}</text>
+    <button label="Fix it" onPress={send("Fix this issue.", $id)} />
+  </column>
+</slate>
+More: slate_catalog <piece, source, runs, patch, functions, steps, handlers or examples>.
+```
+
+## Pieces
+
+### column
+
+```text
+column (core): Stacks children top to bottom.
+  gap: tight|normal|loose
+  align: start|center|end|stretch
+  pad: none|tight|normal|loose
+  surface: plain|inset
+events: none; holds children
+sketch: [column-2 column gap=tight]
+example: <column gap="tight"><text>One</text><text>Two</text></column>
+```
+
+### grid
+
+```text
+grid (core): Children in 2 to 4 equal columns, one column under 360 px.
+  columns: integer, required, 2 to 4
+  gap: tight|normal|loose
+  align: start|center|end
+  pad: none|tight|normal|loose
+  surface: plain|inset
+events: none; holds children
+sketch: grid of 3  [grid-1 grid]
+example: <grid columns={3}><number label="Open" value={3} /><number label="Done" value={9} /><number label="Failed" value={0} /></grid>
+```
+
+### row
+
+```text
+row (core): Places children side by side.
+  gap: tight|normal|loose
+  align: start|center|end|between
+  wrap: boolean
+events: none; holds children
+sketch: [row-1 row align=between]
+example: <row align="between"><text>Left</text><text>Right</text></row>
+```
+
+### section
+
+```text
+section (core): A titled group, optionally collapsible.
+  title: string, required, formula
+  note: string, formula
+  collapsible: boolean
+  open: boolean, two-way $value or a literal start; open={false} starts it shut; open={$open} also keeps it
+  align: start|center|end
+  pad: none|tight|normal|loose
+  surface: plain|inset
+events: onChange; holds children
+sketch: Files changed  [section-1 section collapsible]
+example: <section title="Files changed" collapsible><text>None yet</text></section>
+```
+
+### text
+
+```text
+text (core): A line or a paragraph; a text child with {holes} fills a sentence.
+  value: text or number, required, formula
+  tone: tone, formula
+  emphasis: normal|strong|quiet, formula
+  mono: boolean
+  size: small|normal|large
+  lines: integer, 1 to 20
+  placeholder: string, formula
+events: none; a text child fills value
+sketch: {tokens(thread.context.free)} free  [text-1 text muted]
+example: <text tone="muted">{tokens(thread.context.free)} free</text>
+```
+
+### heading
+
+```text
+heading (core): A heading on the app's type ladder: title, section, or label in small caps.
+  value: text or number, required, formula
+  level: title|section|label
+events: none; a text child fills value
+sketch: # Gold price  [heading-1 heading]
+example: <heading level="title">Gold price</heading>
+```
+
+### markdown
+
+```text
+markdown (core): Rich text, sanitised; images are not fetched.
+  value: string, required, formula
+events: none; a text child fills value
+sketch: **Why.** The host keeps the last 5,000 events.  [markdown-1 markdown]
+example: <markdown>**Why.** The host keeps the last 5,000 events.</markdown>
+```
+
+### number
+
+```text
+number (core): A figure with a label.
+  label: string, required, formula
+  value: text or number, required, formula
+  format: plain|tokens|bytes|percent|usd|inr|duration|integer
+  unit: string, formula
+  tone: tone, formula
+  note: string, formula
+  size: normal|large
+  trend: list, formula; read in the sketch alone; the panel's stat cell draws its figure alone, so a trend the person sees is a sparkline beside it
+events: none
+sketch: Spent  {thread.cost.usd}  [number-1 number]
+example: <number label="Spent" value={thread.cost.usd} format="usd" />
+```
+
+### meter
+
+```text
+meter (core): One value against a maximum.
+  label: string, required, formula
+  value: number, required, formula
+  max: number, formula
+  note: string, formula
+  tone: default|good|warning|bad, formula
+  format: percent|value|fraction|tokens|bytes|none
+events: none
+sketch: Weekly  [{usage.week.percent} of 100]  resets {until(usage.week.resetsAt)}  [week meter]
+example: <meter id="week" label="Weekly" value={usage.week.percent} note={`resets ${until(usage.week.resetsAt)}`} />
+```
+
+### bars
+
+```text
+bars (core): Categories compared as rows of name, track and figure; never a series over time.
+  label: string, required, formula
+  items: list, required, formula
+  key: any, per row
+  name: string, required, per row
+  value: number, required, per row
+  tone: tone, per row
+  max: number, formula
+  format: percent|value|none
+events: none
+sketch: Busiest  [bars-1 bars]
+example: <bars label="Busiest" items={processes.list | take(5)} name={item.name} value={item.cpu} />
+```
+
+### chart
+
+```text
+chart (core): Lines over a list, oldest first; stack piles the <series>.
+  label: string, required, formula
+  items: list, required, formula
+  x: any, per row; a time on x (ISO or ms) labels the axis by clock, in this computer's time zone; a number by its value
+  value: number, per row
+  format: plain|tokens|bytes|percent|usd|inr|duration|integer
+  unit: string, formula
+  tone: tone, formula
+  height: small|normal|large
+  stack: boolean
+  <series> label! value! tone when (item and index read the row)
+events: none
+sketch: Gold  line of {$hist}, x {item.at}  [chart-1 chart]
+example: <chart label="Gold" items={$hist} x={item.at} value={item.v} />
+```
+
+### diagram
+
+```text
+diagram (core): A Mermaid diagram: a flow, a sequence or a state machine; value={`...${$step}`} shows the live step.
+  value: string, required, formula; Mermaid source; a text child is taken as written, braces and all. Labels a few words, decisions short questions; detail goes in a text beside it. Under about 15 nodes; past that, split it or summarize
+  label: string, formula
+events: none; a text child fills value
+sketch: Deploy  flowchart LR (+3 lines)  [diagram-1 diagram]
+example: <diagram label="Deploy" value={`flowchart LR
+  build --> test --> ship
+  classDef now stroke-width:3px
+  class ${$step} now`} />
+```
+
+### timeline
+
+```text
+timeline (core): Spans on a clock, Gantt style, such as a run's steps or a deploy's phases.
+  label: string, required, formula
+  items: list, required, formula
+  name: string, required, per row
+  start: any, per row; a time, ISO or ms; none waits
+  end: any, per row; none while it runs
+  state: done|running|failed|waiting, per row
+  group: string, per row; rows of one group sit under its name
+  now: any, formula; where a running span ends; the clock if unset
+events: none
+sketch: CI run  spans of {$steps}  [timeline-1 timeline]
+example: <timeline label="CI run" items={$steps} name={item.name} start={item.started} end={item.ended} group={item.job} />
+```
+
+### treemap
+
+```text
+treemap (core): Sizes of one whole's parts as nested boxes, such as a bundle by module within package.
+  label: string, required, formula
+  items: list, required, formula
+  name: string, required, per row
+  value: number, required, per row
+  group: string, per row
+  format: plain|tokens|bytes|percent|usd|inr|duration|integer
+events: none
+sketch: Bundle  boxes of {$stats.json.modules}  [treemap-1 treemap format=bytes]
+example: <treemap label="Bundle" items={$stats.json.modules} name={item.name} value={item.bytes} group={item.package} format="bytes" />
+```
+
+### donut
+
+```text
+donut (core): Shares of one whole, five parts at most with the rest as Other; never a series over time.
+  label: string, required, formula
+  items: list, required, formula
+  name: string, required, per row
+  value: number, required, per row
+  format: plain|tokens|bytes|percent|usd|inr|duration|integer
+  unit: string, formula
+events: none
+sketch: By country  shares of {$countries}  [donut-1 donut format=integer]
+example: <donut label="By country" items={$countries} name={item.name} value={item.n} format="integer" />
+```
+
+### sparkline
+
+```text
+sparkline (core): A small line beside text, the way to show a figure's trend.
+  label: string, required, formula
+  values: list, required, formula
+  tone: tone, formula
+events: none
+sketch: Load  no points yet  [sparkline-1 sparkline]
+example: <sparkline label="Load" values={pluck($hist, 'v')} />
+```
+
+### table
+
+```text
+table (core): Rows with columns from a bound list: <col> per column, <action> per row button.
+  items: list, required, formula
+  key: any, per row
+  empty: string, formula
+  rows: integer, 1 to 5000
+  <col> title! value! tone emphasis mono align width when (item and index read the row)
+  <action> label! when onPress (item and index read the row, when too)
+events: none
+sketch: | Check |  [checks table]
+example: <table id="checks" items={pr.checks} key={item.name}><col title="Check" value={item.name} /><action label="Fix" when={item.state == 'fail'} onPress={send("Fix this check.", item.name)} /></table>
+```
+
+### checklist
+
+```text
+checklist (core): Rows with a tick; editable writes the tick back to the value.
+  items: list, required, formula
+  key: any, per row
+  title: string, required, per row
+  done: boolean, required, per row
+  state: pending|working|done, per row
+  note: string, per row
+  editable: boolean
+  empty: string, formula
+events: onChange
+sketch: rows of {$steps}  [checklist-1 checklist editable]
+example: <checklist items={$steps} title={item.title} done={item.done} editable />
+```
+
+### facts
+
+```text
+facts (core): Label and value pairs: <fact> per pair.
+  layout: line|grid
+  <fact> label! value! tone emphasis mono when
+events: none
+sketch: State: {pr.word}  Review: {word(pr.review)}  [facts-1 facts]
+example: <facts><fact label="State" value={pr.word} /><fact label="Review" value={word(pr.review)} /></facts>
+```
+
+### status
+
+```text
+status (core): A dot in a tone with a word: Live, Down, Waiting.
+  value: text or number, required, formula
+  tone: default|muted|good|warning|bad|info, formula
+events: none; a text child fills value
+sketch: ({$up ? 'good' : 'bad'}) {$up ? 'Live' : 'Down'}  [status-1 status]
+example: <status tone={$up ? 'good' : 'bad'}>{$up ? 'Live' : 'Down'}</status>
+```
+
+### chip
+
+```text
+chip (core): A short fact in a small framed chip.
+  value: text or number, required, formula
+events: none; a text child fills value
+sketch: [{git.branch}]  [chip-1 chip]
+example: <chip>{git.branch}</chip>
+```
+
+### ring
+
+```text
+ring (core): Progress as a ring with its figure inside.
+  label: string, required, formula
+  value: number, required, formula
+  max: number, formula
+  format: percent|value|fraction
+  tone: default|good|warning|bad, formula
+  note: string, formula
+events: none
+sketch: Done  ({$done})  [ring-1 ring format=fraction]
+example: <ring label="Done" value={$done} max={len($steps)} format="fraction" />
+```
+
+### output
+
+```text
+output (core): A run's output as it streams, with its state and a Cancel.
+  run: $run, required
+  label: string, formula
+  lines: integer, 3 to 40; how many of the newest lines show, out then err, 8 by default
+  wrap: boolean
+events: none
+sketch: output $tests: not run yet  [output-1 output lines=12]
+example: <output run={$tests} lines={12} />
+```
+
+### button
+
+```text
+button (core): An action the person presses. held is a sentence that disables it: bind it to a condition.
+  label: string, required, formula
+  variant: default|primary|quiet|danger
+  held: string, formula
+  note: string, formula
+  size: normal|small
+events: onPress; a text child fills label
+sketch: [ Next ] (held: {$ok ? null : 'Check the id first'})  [button-1 button primary]
+example: <button label="Next" variant="primary" held={$ok ? null : 'Check the id first'} onPress={set($step, 2)} />
+```
+
+### input
+
+```text
+input (core): Text in, written to its $value as the person types; a secret's input is a password field.
+  label: string, required, formula
+  value: text or number, required, two-way $value
+  lines: integer, 1 to 20
+  kind: text|number|password
+  placeholder: string, formula
+  held: string, formula
+  mono: boolean
+  submit: string, formula
+events: onChange, onSubmit
+sketch: Issue number: "{$id}"  [input-1 input mono]
+example: <input label="Issue number" value={$id} mono />
+```
+
+### select
+
+```text
+select (core): One choice from options, written to its $value.
+  label: string, required, formula
+  value: string, required, two-way $value
+  placeholder: string, formula
+  held: string, formula
+  <option> value! label when
+events: onChange
+sketch: Hide: {$hide} (of Done, Canceled)  [select-1 select]
+example: <select label="Hide" value={$hide}><option value="Done" /><option value="Canceled" /></select>
+```
+
+### choices
+
+```text
+choices (core): Large options to pick one, written to its $value; answer marks the right one once picked.
+  label: string, required, formula
+  value: any, required, two-way $value
+  answer: any, formula
+  held: string, formula
+  <option> value! label note when
+events: onChange
+sketch: Which layer routes packets?: {$pick}  [choices-1 choices]
+example: <choices label="Which layer routes packets?" value={$pick} options={$q.options} answer={$q.answer} />
+```
+
+### toggle
+
+```text
+toggle (core): An on/off switch written to its boolean $value.
+  label: string, required, formula
+  value: boolean, required, two-way $value
+  note: string, formula
+  held: string, formula
+events: onChange
+sketch: Show done: off  [toggle-1 toggle]
+example: <toggle label="Show done" value={$showDone} />
+```
+
+### empty
+
+```text
+empty (core): An empty state, with at most one button under it.
+  title: string, required, formula
+  body: string, formula
+events: none; a text child fills body; holds children
+sketch: No pull request yet. This branch has none.  [empty-1 empty]
+example: <empty when={pr.number == null} title="No pull request yet">This branch has none.</empty>
+```
+
+## Sources
+
+### thread
+
+```text
+thread (core): This thread: status, last turn, context, cost, tokens, changes, plan.
+  thread.turns: number
+  thread.id thread.title thread.agent thread.model thread.effort thread.access thread.computer thread.project thread.folder thread.waitingOn: string
+  thread.status: starting|working|needs-you|failed|done|resting
+  thread.lastTurn: { status, durationMs, waitedMs, startedAt, endedAt, model }
+  thread.cost: { usd }
+  thread.tokens: { input, output, cached, cacheWrite, reasoning }
+  thread.context: { used, window, free, percent }
+  thread.changes: { files: { path, kind, additions, deletions }[], from, to, moved: any[], shared }
+  thread.plan: { steps: { text, state: pending|working|done }[], text }
+  thread.subagents: { id, title, state, startedAt, endedAt }[]
+  thread.messages: { recent: { who, at, text }[], last }
+update: push; scope: the slate's own thread; cost: none beyond today
+note thread.context: the latest turn that reports it; null on an agent that does not
+note thread.changes.files: the latest session.changes
+example: {percent(thread.context.used / thread.context.window)}
+```
+
+### tree
+
+```text
+tree (working): The thread's root and every thread under it.
+  tree.root: { id, title, status, agent, computer }
+  tree.parent: { id, title, status, agent, computer }
+  tree.children: { id, title, status, agent, computer, costUsd, startedAt, endedAt }[]
+  tree.all: { id, title, status, agent, computer, depth }[]
+  tree.counts: { working, needsYou, done, failed, resting }
+update: push; scope: the thread's tree; cost: none beyond today
+example: {tree.counts.working}
+```
+
+### usage
+
+```text
+usage (core): The plan windows of the account the thread runs on.
+  usage.readAt: time
+  usage.note: string
+  usage.account: { key, label, agent, plan, address, computers: string[] }
+  usage.windows: { kind: session|week|week_opus|week_sonnet|month|overage, usedPercent, resetsAt }[]
+  usage.session: { percent, resetsAt }
+  usage.week: { percent, resetsAt }
+  usage.status: ok|warning|reached
+  usage.burn: { tokensPerMinute, threads }
+  usage.credits: { count, nextExpiresAt }
+update: push; scope: the account the thread runs on; cost: one event per turn end
+note usage.windows: Claude Code and Codex report them; a keyed sign-in has none and usage.note says why
+example: {pct(usage.week.percent)}
+```
+
+### cost
+
+```text
+cost (core): The workspace's cost: the rate now and what it has run up.
+  cost.rateUsdPerHour cost.accruedUsd: number
+update: push; scope: the thread's workspace; cost: none beyond today
+note cost.rateUsdPerHour: 0 on this computer, which usd() reads as free
+example: {usd(cost.accruedUsd)}
+```
+
+### time
+
+```text
+time (core): The clock, so a countdown or an age moves on its own.
+  time.today time.zone: string
+  time.now: number
+update: tick; scope: none; cost: one re-evaluation a tick
+note time.now: ms epoch; ticks each second while a visible piece reads it
+example: {until(usage.week.resetsAt)}
+```
+
+### git
+
+```text
+git (core): The thread's checkout: branch, head, counts against upstream.
+  git.readAt: time
+  git.editsUnread git.countsUnknown: boolean
+  git.ahead git.behind git.changed git.stashes: number
+  git.branch git.head: string
+  git.status: { entries: { xy, path, origPath }[] }
+update: push; scope: the thread's folder; cost: none for the checkout; status entries poll 15 s while bound
+note git.branch: null on a folder that is not a checkout
+example: {git.branch}
+```
+
+### pr
+
+```text
+pr (core): The pull request of the thread's branch and its checks.
+  pr.readAt: time
+  pr.draft: boolean
+  pr.url pr.base pr.branch pr.headOid pr.headSubject pr.author pr.word pr.unread: string
+  pr.number pr.additions pr.deletions pr.changedFiles pr.commits pr.behindBase: number
+  pr.state: open|merged|closed
+  pr.mergeable: mergeable|conflicting|unknown
+  pr.review: none|approved|changes_asked|required
+  pr.checks: { name, workflow, state: pass|fail|pending|skipped|cancelled, link, description, startedAt, completedAt }[]
+update: push; scope: the thread's folder; cost: one gh read every 3 min; every 30 s while a bound check is pending
+note pr.number: null while the branch has no pull request
+note pr.headSubject: the head commit's subject; there is no pr.title
+example: {pr.checks | where(item.state == 'fail') | count}
+```
+
+### machine
+
+```text
+machine (working): The thread's computer: load, memory, disk and their last minute.
+  machine.at: time
+  machine.cpu machine.load1: number
+  machine.name: string
+  machine.mem: { used, total }
+  machine.disk: { used, total }
+  machine.history: { cpu: { x, y }[], load1: { x, y }[], mem: { x, y }[] }
+update: subscription; scope: the thread's computer; cost: one sample a second while bound
+example: {bytes(machine.mem.used)}
+```
+
+### processes
+
+```text
+processes (working): The thread's computer's processes.
+  processes.at: time
+  processes.total: number
+  processes.list: { pid, name, cpu, mem, cmd }[]
+update: subscription; scope: the thread's computer; cost: one snapshot every 2 s while bound
+example: {processes.list | sortBy(item.cpu, 'desc') | take(5)}
+```
+
+### ports
+
+```text
+ports (working): Ports open on the thread's computer.
+  ports.list: { port, process, url }[]
+update: push; scope: the thread's computer; cost: none beyond today
+example: {ports.list}
+```
+
+### notifications
+
+```text
+notifications (working): The last 20 notices for this thread and its account.
+  notifications.recent: { kind, text, at }[]
+update: push; scope: this thread and its account; cost: none beyond today
+example: {notifications.recent | first}
+```
+
+### mcp
+
+```text
+mcp (working): The thread's agent's MCP servers: consent state, tools, resources.
+  mcp.<server>: { state: unasked|asked|allowed|refused|down, tools: { name, title, description, inputSchema: any, annotations: any, ui }[], resources: { uri, name, mimeType, description }[] }
+update: push; scope: servers configured for the thread's agent; cost: a listing on connect
+example: {mcp.linear.state}
+```
+
+## Chapters
+
+### runs
+
+```text
+runs: a command the slate starts with no turn of yours.
+<run name="check" cmd='gh api "repos/$REPO/issues/$ID"' env={{ REPO: $repo, ID: $id }} every={60} />
+<run name="py">{`python3 -c "print('both quotes')"`}</run>
+Each attribute:
+name: the run is read as $name.
+cmd: the literal command, run by bash -c in the thread's folder. Single quotes outside double ones; the block form above takes any text.
+env={{ ID: $id }}: values it reads as $ID. args={[$a]}: as $1. stdin={$x}: on standard input. A secret goes only in env or stdin; one in a file, the command reads itself, never through you.
+every={60}: starts it again every 60 seconds, at least 10, while the Slate tab is on screen; at once when it comes back.
+always: with every, ticks while the tab is not on screen too.
+once: a start while it still runs is skipped; without once it stops and starts again.
+stream: fills lines as it prints, the last 500, so an output piece shows them live.
+timeout={60}: seconds before it is stopped, at most 600.
+on="host": runs on the host's computer, not the thread's.
+confirm="Stop it?": asks the person every start; a formula works too.
+then='python3 x.py': pipes its raw result to that command; its stdout as JSON becomes json, out stays raw.
+tool="server.tool" args={{ id: $id }}, or resource="server:uri": calls an MCP tool instead; slate_catalog <server> lists its tools.
+start($run) in a handler or <when> starts one. The person allows each command once, on the slate, when it first wants to start: at the write for an every= run, at the first press or <when> for the rest. Until then it reads held; allowing it starts it at once. slate_state start runs only what they allowed "Always in this thread".
+$run reads state why exit out err json lines startedAt endedAt ms runs cut stale refreshing text; state is idle (never started) held running done failed cancelled.
+json is out parsed as JSON. Before a first result or after a failure, out and json are empty and len of them 0: show a figure with when={$run.exit == 0}. stale: the command changed since this result. Output is scrubbed of secrets.
+<value> state and each run's last result outlive an app or host restart.
+Chain: <when done={$check} do={set($ok, $check.exit == 0)} />; done fires on any outcome.
+Code only the slate uses goes in <file name="x.py"> and runs as $SLATE_DIR/x.py; project code runs where it is.
+A tool's json is its structured result, else its text parsed; out is its text; one marked text only keeps json empty unless its text is JSON. The person allows a server once per thread, a destructive tool every start. A secret in args returns as [secret:name].
+```
+
+### functions
+
+```text
+Functions (pure; a null argument gives null unless the function takes one). Times read in this computer's zone: date(t) "Mon 5 Oct", time(t) "14:05", ago(t) "30s ago", until(t) "in 4m".
+percent(fraction, places?): percent(thread.context.used / thread.context.window)
+pct(points, places?): pct(usage.week.percent)
+tokens(n): tokens(thread.context.free)
+bytes(n)
+usd(n, places?): usd(thread.cost.usd)
+number(x, places?)
+duration(ms, style?): duration(thread.lastTurn.durationMs)
+ago(t): ago(pr.readAt)
+until(t): until(usage.week.resetsAt)
+date(t, style?): date(usage.week.resetsAt)
+time(t)
+weekday(t)
+plural(n, one, many?): plural(len(pr.checks), 'check')
+word(x): word(item.state)
+upper(s)
+lower(s)
+trim(s)
+short(s, n): short(pr.headSubject, 40)
+round(x, places?)
+floor(x)
+ceil(x)
+abs(x)
+min(a, b, ...) or min(list)
+max(a, b, ...) or max(list)
+clamp(x, lo, hi)
+str(x)
+num(x): num(item.completedAt)
+bool(x)
+concat(a, b, ...)
+json(s): json($check.out).title
+lines(s)
+split(s, sep)
+replace(s, from, to)
+contains(list or text, value): contains(pluck(pr.checks, 'state'), 'fail')
+startsWith(s, p)
+endsWith(s, p)
+orElse(x, fallback): orElse(pr.word, 'no pull request')
+exists(x)
+isNull(x)
+coalesce(a, b, ...)
+if(cond, a, b)
+len(x): len(pr.checks)
+count(list)
+sum(list, field?)
+avg(list, field?)
+first(list, n?): first(pr.checks).name
+last(list, n?)
+at(list, i)
+append(list, x)
+pluck(list, field): pluck(pr.checks, 'name')
+join(list, sep)
+```
+
+### steps
+
+```text
+List steps, after | (item and index read the element):
+where(cond): keeps the elements where cond is true. pr.checks | where(item.state == 'fail')
+sortBy(expr, 'asc'|'desc'): stable sort; nulls last. processes.list | sortBy(item.cpu, 'desc')
+groupBy(expr): { key, items, count } per group in first-seen order. pr.checks | groupBy(item.state)
+take(n): the first n; n is a literal. pr.checks | take(5)
+skip(n): all but the first n. pr.checks | skip(1)
+count: the length. $steps | where(item.done) | count
+sum(expr): the total of expr; nulls skipped. thread.changes.files | sum(item.additions)
+min(expr): the least expr. pr.checks | min(num(item.startedAt))
+max(expr): the greatest expr. processes.list | max(item.cpu)
+avg(expr): the mean of expr. processes.list | avg(item.mem)
+first: the first element or null. thread.plan.steps | where(item.state == 'working') | first
+last: the last element or null. thread.plan.steps | last
+pick(field, ...): keeps the named fields. processes.list | pick(name, cpu)
+map(name: expr, ...): adds or replaces fields. pr.checks | map(took: num(item.completedAt) - num(item.startedAt))
+distinct(expr?): drops later repeats. pr.checks | distinct(item.workflow)
+flatten(field?): joins inner lists. tree.all | flatten(children)
+join(other, key, otherKey?): attaches the matching element of other. thread.subagents | join(tree.children, id)
+format(expr): expr as text per element. pr.checks | format(`${item.name}: ${word(item.state)}`)
+```
+
+### handlers
+
+```text
+Handler steps, in onPress, onSubmit, onChange and <when do>; one step or [a, b], at most 6:
+set($path, value): writes a value; later steps read the new value. Consent: none. set($step, 2)
+toggle($path): flips a boolean value. Consent: none. toggle($showDone)
+start($run): starts a run; does not wait; its end fires <when done>. Consent: the person approves the command once. start($check)
+cancel($run): stops a running run. Consent: none. cancel($tests)
+send("text", $path, ...): a message to the agent: the text, then slate: {...} with the paths as data. Consent: a press is the consent; from a reaction, one approval per slate. send("Fix the failing check.", item.name)
+steer("text", $path, ...): as send, into the running turn. Consent: as send. steer("Look at the failing check first.")
+queue("text", $path, ...): as send, after the running turn (a send until the flag lands). Consent: as send. queue("Then open the pull request.")
+fill("text", $path, ...): puts the text in the composer, not sent. Window only, on a press. Consent: none; a press only. fill("About this branch:", git.branch)
+open(url): opens an http, https or mailto link. Window only, on a press. Consent: once per domain; a press only. open(pr.url)
+copy(text): copies to the clipboard. Window only, on a press. Consent: none; a press only. copy(git.head)
+pane("kind"): opens a right panel tab. Window only, on a press. Consent: none; a press only. pane("pr")
+```
+
+### patch
+
+```text
+patch: elements without <slate>, sent as text to slate_write; one write may hold several.
+<props id="price" tone="warning" />: merges these props into the piece.
+<text id="eta">Ready</text>: a piece with an id that exists replaces it whole, children too.
+<add under="list" at={0}><text id="new">New</text></add>: adds pieces under a piece, at an index from 0, else last.
+<move id="new" under="other" at={1} />: moves a piece.
+<remove id="new" />: removes a piece and what it holds. <remove name="hist" /> removes a declaration.
+<value name="hist" start={[]} />, <run ...>, <derived ...>, <file name="x.py">...</file>: adds the declaration or replaces the one of that name.
+<clear /> empties the slate; <undo /> goes back one write. Each stands alone in its write.
+For anything bigger, resend the whole <slate> with if_version set to the version you read.
+version, which every write and read answers, counts the slate's edits and is what if_version takes; wsp/2 and schema 2 name the format.
+check with press walks a press and its <when> chain on a copy: nothing runs and nothing is sent, and it says what would start.
+check with values {"$run.json": {...}, "$run.exit": 0} previews the panel for a result the run has not had yet.
+```
+
+### examples
+
+```text
+pull request panel:
+<slate title="Pull request">
+  <derived name="failing" value={pr.checks | where(item.state == 'fail')} />
+  <run name="merge" cmd='gh pr merge --squash --auto "$PR"' env={{ PR: pr.number }} timeout={30}
+    confirm="Enable auto-merge on this pull request? It merges when the checks pass." />
+  <column>
+    <empty when={pr.number == null} title="No pull request yet">This thread's branch has no pull request.</empty>
+    <facts id="head" when={pr.number != null}>
+      <fact label="State" value={pr.word} />
+      <fact label="Review" value={word(pr.review)} />
+      <fact label="Mergeable" value={word(pr.mergeable)} tone={pr.mergeable == 'mergeable' ? 'good' : pr.mergeable == 'conflicting' ? 'warning' : 'muted'} />
+    </facts>
+    <table id="checks" when={pr.number != null} items={pr.checks} key={item.name} empty="No checks yet">
+      <col title="Check" value={item.name} />
+      <col title="State" value={word(item.state)} tone={item.state == 'fail' ? 'bad' : item.state == 'pass' ? 'good' : 'muted'} />
+      <col title="Took" value={item.completedAt ? duration(num(item.completedAt) - num(item.startedAt)) : 'running'} mono align="end" />
+      <action label="Send to agent" when={item.state == 'fail'} onPress={send("A check failed. Read its log and fix it.", item.name, item.link)} />
+    </table>
+    <text id="summary" when={len($failing) > 0} tone="muted">{len($failing)} failing of {len(pr.checks)}</text>
+    <row when={pr.number != null}>
+      <button label="Open on GitHub" onPress={open(pr.url)} />
+      <button label="Checks and comments" variant="quiet" onPress={pane("pr")} />
+      <button id="automerge" label="Auto-merge" when={pr.mergeable == 'mergeable' and pr.review == 'approved' and $merge.state != 'done'} onPress={start($merge)} />
+    </row>
+    <text when={$merge.state == 'done'} tone="good">Auto-merge is on</text>
+    <text when={$merge.state == 'failed'} tone="bad">gh refused: {short($merge.err, 120)}</text>
+  </column>
+</slate>
+
+a long task's progress:
+<slate title="Cart rounding fix">
+  <value name="steps" start={[
+    { title: "Find where the cart rounds totals", done: true },
+    { title: "Round once at the end", done: true },
+    { title: "Fix the two failing tests", done: false },
+    { title: "Open a pull request", done: false }
+  ]} />
+  <derived name="done" value={$steps | where(item.done) | count} />
+  <run name="tests" cmd="pnpm exec vitest run --minWorkers=1 --maxWorkers=2 test/cart.test.ts" stream timeout={300} once />
+  <when done={$tests} do={set($steps[2].done, $tests.exit == 0)} />
+  <column>
+    <meter id="progress" label="Steps" value={$done} max={len($steps)} format="fraction" />
+    <checklist id="todo" items={$steps} key={item.title} title={item.title} done={item.done} editable />
+    <section title="Files changed" collapsible>
+      <table items={thread.changes.files} key={item.path} empty="Nothing changed yet">
+        <col title="File" value={item.path} mono />
+        <col title="Added" value={item.additions} tone="good" align="end" />
+        <col title="Removed" value={item.deletions} tone="bad" align="end" />
+      </table>
+    </section>
+    <row>
+      <button label="Run the cart tests" when={$tests.state != 'running'} onPress={start($tests)} />
+      <button id="next" label="Go on to the next step" variant="primary"
+        when={$done < len($steps) and thread.status != 'working'}
+        onPress={send("Go on to the next unchecked step on the slate.", $steps)} />
+    </row>
+    <output run={$tests} lines={10} />
+  </column>
+</slate>
+
+a setup the person performs, with a secret:
+<slate title="Deploy setup">
+  <value name="step" start={1} />
+  <value name="repo" start="acme/landing" />
+  <value name="project" start="" />
+  <secret name="vercelToken" />
+  <run name="check" cmd='vercel project inspect "$PROJECT" 2>&1 | head -c 4000'
+    env={{ PROJECT: $project, VERCEL_TOKEN: $vercelToken }} on="host" timeout={30} />
+  <run name="env" cmd='grep -v "^VERCEL_TOKEN=" .env > .env.tmp 2>/dev/null; printf "VERCEL_TOKEN=%s\n" "$VERCEL_TOKEN" >> .env.tmp; mv .env.tmp .env'
+    env={{ VERCEL_TOKEN: $vercelToken }} on="host" timeout={10} />
+  <run name="ci" cmd='gh secret set VERCEL_TOKEN --repo "$REPO"' stdin={$vercelToken}
+    env={{ REPO: $repo }} on="host" timeout={60} />
+  <derived name="checked" value={$check.state == 'done' and contains($check.out, $project)} />
+  <derived name="written" value={$env.state == 'done' and $ci.state == 'done'} />
+  <when change={$project} do={start($check)} />
+  <when change={$checked} do={set($step, $checked ? 3 : 2)} />
+  <when change={$written} do={set($step, $written ? 4 : 3)} />
+  <column>
+    <text emphasis="strong">Step {$step} of 4</text>
+
+    <section title="1. The Vercel token" when={$step == 1}>
+      <markdown>Open the Vercel dashboard, make a token with the project's scope, and paste it here. It never reaches the agent.</markdown>
+      <button label="Open Vercel tokens" onPress={open("https://vercel.com/account/tokens")} />
+      <input label="Vercel token" value={$vercelToken} kind="password" />
+      <button label="Next" variant="primary" when={$vercelToken.set} onPress={set($step, 2)} />
+    </section>
+
+    <section title="2. The project" when={$step == 2 or $step == 3}>
+      <input id="project-name" label="Project name on Vercel" value={$project} mono />
+      <text when={$check.state == 'held'} tone="muted">Approve the check to go on</text>
+      <text when={$check.state == 'running'} tone="muted">Checking</text>
+      <text when={$check.state == 'failed'} tone="bad">Vercel did not find it: {short($check.err, 160)}</text>
+      <text when={$checked} tone="good">Found {$project}</text>
+    </section>
+
+    <section title="3. Write it down" when={$step == 3}>
+      <facts>
+        <fact label="Repo" value={$repo} mono />
+        <fact label="Project" value={$project} mono />
+      </facts>
+      <row>
+        <button label="Write .env" when={$env.state != 'done'} onPress={start($env)} />
+        <button label="Set the CI secret" when={$ci.state != 'done'} onPress={start($ci)} />
+      </row>
+      <text when={$env.state == 'done'} tone="good">.env written</text>
+      <text when={$ci.state == 'done'} tone="good">CI secret set</text>
+      <text when={$env.state == 'failed' or $ci.state == 'failed'} tone="bad">{short(concat($env.err, $ci.err), 200)}</text>
+    </section>
+
+    <section title="4. Done" when={$step == 4}>
+      <text tone="good">The token is in .env and in the repo's secrets.</text>
+      <button id="write" label="Tell the agent" variant="primary"
+        onPress={send("The Vercel setup is done on the slate; wire the deploy hook next.", $repo, $project, $vercelToken)} />
+    </section>
+  </column>
+</slate>
+
+a live figure with an hour of history:
+<slate title="Gold">
+  <value name="hist" start={[]} />
+  <run name="spot" cmd="curl -s https://api.gold-api.com/price/XAU" every={60} />
+  <when done={$spot} do={set($hist, if($spot.exit == 0, last(append($hist, { at: time.now, v: $spot.json.price }), 60), $hist))} />
+  <column>
+    <heading level="title">Gold</heading>
+    <grid columns={3}>
+      <number label="Per ounce" value={$spot.json.price} format="usd" trend={pluck($hist, 'v')} />
+      <number label="Low" value={min(pluck($hist, 'v'))} format="usd" />
+      <number label="High" value={max(pluck($hist, 'v'))} format="usd" />
+    </grid>
+    <section title="Feed" surface="inset" pad="normal">
+      <row>
+        <status tone={$spot.exit == 0 ? 'good' : 'muted'}>{$spot.exit == 0 ? 'Live' : 'Waiting'}</status>
+        <chip>every minute</chip>
+      </row>
+      <ring label="Last hour" value={len($hist)} max={60} format="fraction" />
+    </section>
+    <chart label="Per ounce, last hour" items={$hist} x={item.at} value={item.v} format="usd" />
+  </column>
+</slate>
+
+a quiz that logs each answer:
+<slate title="Networking quiz">
+  <value name="qs" start={[
+    { q: "Which layer routes packets between networks?", options: ["Link", "Network", "Transport"], answer: "Network" },
+    { q: "Which port does HTTPS use by default?", options: ["80", "443", "8080"], answer: "443" }
+  ]} />
+  <value name="i" start={0} />
+  <value name="pick" start={null} />
+  <value name="log" start={[]} />
+  <column>
+    <heading level="label">Question {$i + 1} of {len($qs)}</heading>
+    <choices id="answer" label={$qs[$i].q} value={$pick} options={$qs[$i].options} answer={$qs[$i].answer}
+      held={$pick == null ? null : 'Answered'}
+      onChange={set($log, append($log, { q: $qs[$i].q, pick: $pick, right: $pick == $qs[$i].answer }))} />
+    <button label="Next question" when={$i + 1 < len($qs)} held={$pick == null ? 'Pick an answer first' : null}
+      onPress={[set($i, $i + 1), set($pick, null)]} />
+    <number label="Score" value={len($log | where(item.right))} unit={`of ${len($qs)}`} />
+    <table items={$log} empty="No answers yet">
+      <col title="Question" value={item.q} />
+      <col title="Picked" value={item.pick} />
+      <col title="Result" value={item.right ? 'Right' : 'Wrong'} tone={item.right ? 'good' : 'bad'} />
+    </table>
+  </column>
+</slate>
+```

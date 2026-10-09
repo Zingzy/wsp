@@ -1,3 +1,22 @@
 # wsp mcp
 
-Generated from `wsp mcp --help` and its line in `COMMAND_LINES` (`packages/host/src/cli/commands.ts`).
+{/* Written by apps/docs-next/scripts/cli.ts: change the script or its source and run pnpm --filter @wsp/docs-next generate. */}
+
+```text
+usage: wsp mcp [--host <alias>] [--scoped [--no-slate]]
+       wsp mcp install --agent <id> [--agent <id>] [--host <alias>] [--json]
+       [--remove]   (claude, codex, gemini, opencode)
+  serve the verbs as tools over stdio to an agent on this computer
+
+  --state       the state file the host serves
+  --host        write the server against a host on your account, by the name wsp
+                hosts lists it under, so the tools drive that host
+  --scoped      what the host puts on a thread's own tools: without the launch
+                pair in the environment the server refuses rather than dial this
+                computer's host on its own token
+  --no-slate    what the host puts beside it for a thread another thread
+                started, which has no slate: the server's instructions say
+                nothing of one
+```
+
+No MCP tool: is the tool server itself.

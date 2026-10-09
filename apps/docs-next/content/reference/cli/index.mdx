@@ -1,3 +1,580 @@
 # Command line
 
-Generated from the built binary's help: `wsp --help`, `wsp --help agent`, `wsp --help dev` and `wsp host --help`, one page per command.
+{/* Written by apps/docs-next/scripts/cli.ts: change the script or its source and run pnpm --filter @wsp/docs-next generate. */}
+
+Every line `wsp` answers, as its own `--help` prints it. `wsp --help` prints the front page, `wsp --help agent` the lines your agents use, `wsp host --help` the lines for a host outside your account and `wsp --help dev` the doctor.
+
+```text
+wsp - your setup, on your computers, for coding agents
+
+usage: wsp <verb> ...
+
+  wsp init                        set this computer up: your tools and sign-ins,
+                                  copied so a machine starts ready
+  wsp add <user@host|folder|url>  a computer over ssh (user@host or ssh alias);
+                                  or a project: a folder here, or a repo cloned
+                                  --into <folder> here or --on <computer>
+  wsp computers                   your computers: this one, each box you added
+  wsp remove <computer>           take a computer out; the box is left as
+                                  wsp found it
+  wsp projects                    your projects, each on its computer
+  wsp threads [<project>]         who is working, in which folder and on which
+                                  branch and computer
+  wsp run <project> "<message>"   an agent works in the project's folder and
+                                  you read its reply
+  wsp send <thread> "<message>"   the thread's next message
+  wsp stop <thread>               end the thread's running turn
+  wsp pause <machine>             sleep a box's machine now; an idle one sleeps
+                                  by itself
+  wsp wake <machine>              wake it now; run and send wake it anyway
+  wsp delete <thread>             gone with its turns; the folder stays
+  wsp status                      whether a host serves, and where
+  wsp mcp                         the verbs as tools for agents on this computer
+
+A project or a thread comes right after the verb. run and send take the
+agent's own flags, run --help lists them.
+wsp thread read <thread> prints what a thread said.
+Sleeping is automatic. A line that needs a host starts one when none serves.
+
+wsp up                 serve a host in this terminal, to watch it
+wsp down               stop it
+wsp login              sign this computer in to your account
+wsp logout             sign it out; wsp logout <id> signs another out
+wsp hosts              the hosts you can reach, the one lines take marked
+wsp <verb> --help      the verb's own flags
+wsp --help agent       the verbs your agents use
+wsp host --help        a host outside your account: pair, connect, link
+wsp --version
+```
+
+## Every line
+
+| Line | What it does |
+|---|---|
+| [`wsp add`](/reference/cli/add) | a computer of yours over ssh by user@host or by an alias from your ssh config, or a project: a folder on this computer, a git repo or not, whose threads run in it, or a repo cloned into an empty folder here with --into \<folder> or by a computer with --on \<computer>; nothing prints the join line another computer types, a computer with --update puts this wsp's daemon on one already in, and a computer with --sign-in signs that agent in there once, outside every machine on it |
+| [`wsp agents`](/reference/cli/agents) | the coding agents on this computer, a box you added or a workspace: each one's version and the newest out, whether it is signed in there, and whether it carries the wsp tools |
+| [`wsp agents addtools`](/reference/cli/agents-addtools) | writes the wsp server into an agent's own config on this computer, the entry wsp mcp install writes, with the wsp skill beside it |
+| [`wsp agents default`](/reference/cli/agents-default) | the agent a new thread runs when neither the line nor its project names one; the catalog's first without it |
+| [`wsp agents key`](/reference/cli/agents-key) | puts an agent's token or API key into this host's vault, typed where nothing echoes it; Claude Code's token is the one claude setup-token prints |
+| [`wsp agents set`](/reference/cli/agents-set) | an agent's defaults on every computer: the model, effort and access a new thread on it starts on, and which models its picker lists |
+| [`wsp agents setup`](/reference/cli/agents-setup) | how an agent runs on one computer: on or off there, the program run in its place, its config folder, words added to every launch and variables every launch carries, each value typed where nothing echoes it |
+| [`wsp agents signin`](/reference/cli/agents-signin) | signs an agent in on this computer or in a workspace, its own sign-in run there and shown in this terminal; a box you added takes wsp add \<computer> --sign-in \<agent> |
+| [`wsp commit`](/reference/cli/commit) | commits the files the workspace's copy changed, or the ones named; without a message its agent drafts one |
+| [`wsp computers`](/reference/cli/computers) | your computers: this Mac, each box you added, with what each has, whether it is connected, how many machines it holds and what runs there against its cap |
+| [`wsp computers set`](/reference/cli/computers-set) | what you set on one of your computers: its name, the ssh login it is reached by, how many threads run there at once, how long a quiet machine there runs before it naps, how long one turn there may run, whether agents there may start agents, the recipe it follows; --reset takes a setting back to its default |
+| [`wsp delete`](/reference/cli/delete) | takes a thread on this computer away, its turns and checkpoints with it, and the worktree wsp made for it with every thread in it, never the project folder; a workspace on a box goes as before, its machine deleted at the provider and its record and threads dropped from this computer |
+| [`wsp discard`](/reference/cli/discard) | puts one changed file of the workspace's copy back as its last commit has it, or removes it where that has none |
+| [`wsp doctor`](/reference/cli/doctor) | prove a computer end to end. With no word, this computer and then every computer you added, forking nothing and billing nothing. With a computer's name, that one: a joined computer is proved by the host that computer dials, which makes a short-lived machine there and reads the recipe's tools inside it, and this line prints what the host says; a cloud account gets your image forked, wsp put on the fork, a file coming back and the teardown, which forks a live machine and bills while it runs. --local proves this computer alone: a thread here and its reply, no machine, no key. --project names the project the machine is made of, by name, on the computer named |
+| [`wsp down`](/reference/cli/down) | stop the host: the service and its unit where one holds it up, and otherwise the host the command line brought up, whether wsp up or a verb that needed one started it |
+| [`wsp exec`](/reference/cli/exec) | runs the command on the machine, each word as given, in --cwd or the folder a thread would start in |
+| [`wsp export`](/reference/cli/export) | brings a project folder and the agent sessions keyed to it home from the machine |
+| [`wsp fix`](/reference/cli/fix) | asks the workspace's agent to fix a failed check or merge a child, or updates it from its base and asks it to fix what conflicts |
+| [`wsp folders`](/reference/cli/folders) | the folders inside one folder on this computer or on a box you added with --on, or with --repos every git repo under the home folder, most recently used first, for naming one to record |
+| [`wsp forget`](/reference/cli/forget) | drops a gone workspace and its threads from this computer; refused while its machine exists |
+| [`wsp host devices`](/reference/cli/host-devices) | the computers paired with a host and what each token is read as; revoke takes one back out. --host reads a host on your account from another computer signed in to it |
+| [`wsp host devices revoke`](/reference/cli/host-devices-revoke) | take one computer's token away |
+| [`wsp host link`](/reference/cli/host-link) | put the host on this computer onto your account, so it is reachable from anywhere with no port open to the world; on a computer that is signed in it takes no address and asks nothing, and on one that is not it prints a code and a page to approve it on |
+| [`wsp host pair`](/reference/cli/host-pair) | a one time code another computer redeems for a token of its own, when the host listens beyond this computer |
+| [`wsp host unlink`](/reference/cli/host-unlink) | take this computer off the relay account and stop its tunnel |
+| [`wsp hosts`](/reference/cli/hosts) | every host on your account this computer can reach, with a live beat for each and the one every line takes marked |
+| [`wsp image`](/reference/cli/image) | the image this host owns: its version, its hash, whether it holds your sign-ins, and the copy each place has built of it |
+| `wsp init` | seal this computer into your image, one screen at a time: Agents, Tools, Also on this computer, Sign-ins, wsp for your agents on this computer, each shown when it has a row to pick, then Build. Beside a host already serving this state file the screens are the same and the build runs in that host, on the place --on names or its default place, a computer you joined included. With no host serving and no provider key it seals nothing and records a folder here as your first project instead |
+| [`wsp join`](/reference/cli/join) | on the computer you are sitting at: join it to the wsp at that address, then install the daemon as a systemd system unit, which dials again at every boot. A place is a Linux computer; a Mac refuses |
+| [`wsp leave`](/reference/cli/leave) | on that computer: take wsp off it, for a computer whose host is gone and cannot run wsp remove; asked once, and stopped by a fork or a project checkout there holding work no remote has, naming each |
+| [`wsp login`](/reference/cli/login) | sign this computer in to your account, so every host on it is a line away with no code typed. With a word another computer's wsp login printed, or the id of one already signed in, it signs that computer's key for the hosts this one is trusted at; with nothing on a computer already signed in it lists the account's computers |
+| [`wsp logout`](/reference/cli/logout) | sign this computer out of your account, which drops the hosts it reached through it; with an id it signs another of your computers out, and every host drops what it admitted for that one |
+| [`wsp mcp`](/reference/cli/mcp) | serve the verbs as tools over stdio to an agent on this computer |
+| [`wsp mcp install`](/reference/cli/mcp-install) | put the wsp tools, this skill and wsp's own section of this folder's AGENTS.md into that agent (claude, codex, gemini, opencode); --agent repeats, --remove takes it back out, and --json prints what each agent took |
+| [`wsp merge`](/reference/cli/merge) | merges the workspace's pull request, or merges it once its checks pass |
+| [`wsp merge in`](/reference/cli/merge-in) | merges a child's branch into its lead's with a merge commit, or names the files that conflict |
+| [`wsp pause`](/reference/cli/pause) | naps the workspace's machine |
+| [`wsp projects`](/reference/cli/projects) | your projects, each on its computer: where its code comes from, where its folder sits, the branch a machine of it starts on and how many threads it has |
+| [`wsp projects remove`](/reference/cli/projects-remove) | takes a project out of this wsp; its folder is left where it is, on this computer or on a computer you joined, a project with a machine standing on it is refused naming them, and one whose checkout on a computer of yours holds work no remote has is stopped naming it |
+| [`wsp projects set`](/reference/cli/projects-set) | what a new thread on one project starts on, over the agent's own defaults: its agent, model, effort and access; and the shell line a new worktree of it runs once, after each ecosystem's own install, for what none of them knows |
+| [`wsp recipe`](/reference/cli/recipe) | write the recipe and print it as a table: every catalog agent and tool with its tick, why it has it and what it costs on the machine, then the commands your agents ran that no catalog row carries. --tick used\|installed\|default names the rule that decides every tick (used, the default, ticks what your agents actually ran here); --set \<id>=on\|off flips a row by its catalog id, or a package this computer's own package managers have by the id wsp recipe scan gives it, which the build installs by that package's own road; --signin \<id>=copy\|machine\|later\|key\|skip\|token answers a sign-in by catalog id, later leaving it to the first time the tool is needed on the machine and key bringing the key files beside a login and nothing else of it; --add \<id>=\<command> carries a tool neither the catalog nor this computer has, installed by that command on the machine, with --add-check \<id>=\<command> saying it is there and --why \<words> what the rows it adds are for; --engine marks the recipe so every machine from its image gets the place's Docker or podman through a socket of its own (a project whose compose file needs one), and stays in the file until you edit it out; --project reads a folder's own manifests for what it takes to build and weighs the histories by it, --out says where the file goes and --json prints the table as one object. Naming --tick or --project decides every tick again; without either, what the file says stands and the flags flip rows on top of it. A sign-in answer stands either way: no rule decides one. All of them repeat. Review it, then wsp init --recipe |
+| [`wsp recipe scan`](/reference/cli/recipe-scan) | read this computer and print every option, writing nothing: the agents, the tools with why and size, what else a package manager here has that the image could take, the commands your agents ran, and the sign-ins, each with what to do about it and one line of why; --project weighs the histories by a folder and --json prints it as one object |
+| [`wsp recipes`](/reference/cli/recipes) | your saved recipes: what each puts on a computer in one line, and the computers that follow it |
+| [`wsp recipes remove`](/reference/cli/recipes-remove) | takes a recipe away; the computers that followed it keep what they have and follow none |
+| [`wsp recipes save`](/reference/cli/recipes-save) | saves what one of your computers was set up with as a recipe under that name, and that computer follows it from then on |
+| [`wsp recipes show`](/reference/cli/recipes-show) | one recipe whole: every row it holds by kind, the computers that follow it, and the hash it resolves to on this computer now |
+| [`wsp remove`](/reference/cli/remove) | take a computer out, asked once: its forks are deleted and its projects leave this wsp with their threads, then the agent and its files go and the computer is left as wsp found it. Stopped by a fork or a project folder there holding work no remote has, naming each |
+| [`wsp rename`](/reference/cli/rename) | names the workspace on this computer; the name is unique here, so one another workspace holds is refused |
+| [`wsp restart`](/reference/cli/restart) | stops the host and brings it back on the road it came up on, its service, the verb that started it or the app; running turns go on and the host that comes back re-opens them. A host wsp up holds in a terminal refuses |
+| [`wsp review`](/reference/cli/review) | a reviewer thread on a pull request, read-only, whose review waits in wsp until you post it |
+| [`wsp review post`](/reference/cli/review-post) | posts a review workspace's review on its pull request as you, its ticked comments on their lines |
+| [`wsp run`](/reference/cli/run) | an agent works in the project's folder and you read its reply: a thread with the agent, model, effort and access the app offers; a project on a box runs in its folder there as the login the box was added with, and a project anywhere else gets a new machine forked from the image, named off the message as the app's New thread names one; --branch runs it in a worktree of the project's repo on that branch, made under wsp's folder unless one already holds it, and --cwd in a folder inside the project or one of its worktrees; with no project, run from inside one of your project folders, or from a thread, beside it; follows its first turn, or with --detach prints the id and returns |
+| [`wsp send`](/reference/cli/send) | a message to the thread, on a named model or effort, fast or not, with files; the thread keeps its own access and a running turn its own picks; --detach prints the id and returns |
+| [`wsp servers`](/reference/cli/servers) | the MCP servers the agents on this computer, a box you added or a workspace are set up with: how each is reached, the file it is defined in and its sign-in as its config says it |
+| [`wsp servers add`](/reference/cli/servers-add) | writes one MCP server into an agent's own config: a command with its arguments and variables, or an address with its headers, each value read off this terminal's environment and written into that file on this computer, a variable's value kept in the vault as well; on any other the file names a variable and the value goes to the vault, an argument or the address naming a variable as $\{NAME\} keeps that name there, and an agent that reads no variable there refuses it |
+| [`wsp servers disable`](/reference/cli/servers-disable) | turns one MCP server off by the switch its agent reads, so the agent leaves it out until it is turned on |
+| [`wsp servers enable`](/reference/cli/servers-enable) | turns an MCP server that was turned off on again |
+| [`wsp servers remove`](/reference/cli/servers-remove) | takes one MCP server's entry out of an agent's own config, every other line of the file as it was, and, once no agent's config on this computer lists that server, frees the vault's values kept for it that no other server holds |
+| [`wsp servers signin`](/reference/cli/servers-signin) | signs one MCP server in by its agent's own command for it, run where the server is set up and shown in this terminal |
+| [`wsp servers tools`](/reference/cli/servers-tools) | starts one MCP server once where it is set up and lists its tools with their descriptions, and says whether it needs a sign-in |
+| [`wsp setup`](/reference/cli/setup) | the setup on this host as the app's Settings reads it: which keys are held (never their values), the agents here, and the init job's phase, rows and progress when one runs or ran |
+| [`wsp skills`](/reference/cli/skills) | the skills on this computer, a box you added or a workspace, each by name with every folder it lives in and which agent loads it from there |
+| [`wsp skills add`](/reference/cli/skills-add) | installs a skill off skills.sh by its \<owner>/\<repo>/\<skill> into the shared skills folder, with a link or a copy for each agent named that does not read that folder; every file is checked first and lands as a plain file that runs nothing |
+| [`wsp skills disable`](/reference/cli/skills-disable) | turns a skill off by its name, its SKILL.md renamed SKILL.md.off where it lives, so no agent loads it until it is turned on |
+| [`wsp skills enable`](/reference/cli/skills-enable) | turns a skill that was turned off on again, its SKILL.md.off renamed back |
+| [`wsp skills remove`](/reference/cli/skills-remove) | removes a skill by its name: every folder it lives in and every link to it, where a link's own folder elsewhere stays |
+| [`wsp skills search`](/reference/cli/skills-search) | searches skills.sh for skills by their words, each with how often it was installed and the id wsp skills add takes |
+| [`wsp skills show`](/reference/cli/skills-show) | prints a skill's SKILL.md: one on skills.sh by its \<owner>/\<repo>/\<skill> before it is installed, or one already on this computer, a box you added or a workspace by its name |
+| [`wsp slate catalog`](/reference/cli/slate-catalog) | what a slate can hold: the index of pieces, sources, steps, functions and rules, or one entry in full |
+| [`wsp slate read`](/reference/cli/slate-read) | the slate as it stands: the sketch, then the JSX-like form, the values, derived values, runs, problems and the paths named; --no-text leaves out the JSX-like form, --document adds the stored JSON |
+| [`wsp slate state`](/reference/cli/slate-state) | sets the slate's $values by path, like '$steps[2].done=true' or 'i=2', starts runs the person let run every time, and prints its sketch |
+| [`wsp slate write`](/reference/cli/slate-write) | writes the thread's slate from a .slate file (a whole \<slate> or a patch) or a .json document and prints its sketch; --check stores nothing, and with --set or --press rehearses values and a press on a copy, the file optional |
+| [`wsp ssh`](/reference/cli/ssh) | carries one ssh connection to the workspace's own ssh server, starting it there, over this computer's stdin and stdout: the ProxyCommand wsp's ssh config gives every wsp- alias, so `ssh wsp-<name>` and an editor's remote window land inside the workspace |
+| [`wsp start`](/reference/cli/start) | a thread off a GitHub issue or pull request link, the issue or the pull request its first message; an issue's thread runs in the project folder, a pull request's in a worktree on its branch |
+| [`wsp status`](/reference/cli/status) | whether a host serves this state file, on which ports, what keeps it there and the newest release the host last read, with a non-zero exit code when none does; on a computer joined to somebody's wsp it reads the agent there instead, what that computer is doing and what is running on it, and --watch draws the same rows again every second. --host reads a host on another computer |
+| [`wsp stop`](/reference/cli/stop) | stops the thread's running turn, as the app's stop does, or with --task one of its agent's own subagents alone; the machine stays up |
+| [`wsp terminal config`](/reference/cli/terminal-config) | the Ghostty config on this computer as the app's terminal pane applies it, read from ~/.config/ghostty and Application Support with its includes and theme resolved: the font and its fallbacks, the size, the colors, the cursor, the padding, the background opacity, and the blur, which is read but not applied; --scheme picks the side of a light:...,dark:... theme |
+| [`wsp thread allow`](/reference/cli/thread-allow) | answers the prompt the thread is stopped on and lets the call run |
+| [`wsp thread deny`](/reference/cli/thread-deny) | answers the prompt the thread is stopped on and refuses the call |
+| [`wsp thread forget`](/reference/cli/thread-forget) | drops a thread no turn ever ran on, the row a launch that never got going leaves behind; refused once a turn of it did work |
+| [`wsp thread head`](/reference/cli/thread-head) | the thread's facts and its newest events, what the app draws first on opening it: the title, the agent, model and access it runs on, where it stands and its folder, then as many of its newest events as fit in 64 KB, each tool result past 2 KB cut and marked with its whole length. Reading a head marks nothing |
+| [`wsp thread read`](/reference/cli/thread-read) | the thread's messages as the app lists them, oldest first: who each one is, when the runtime recorded it and the text, with every tool call folded to the one line the app's row reads; --last prints the final reply alone, the whole message its finished line carries. A tool's output and the agent's reasoning are no rows of it. Reading marks the thread read, so it stops reading Done here and in the app |
+| [`wsp thread rename`](/reference/cli/thread-rename) | names the thread inside the agent's own store, so the agent shows the same name |
+| [`wsp thread restore`](/reference/cli/thread-restore) | brings each thread back out of the sidebar's Settled with what the latest settle naming it moved |
+| [`wsp thread settle`](/reference/cli/thread-settle) | folds each thread and every thread under it into the sidebar's Settled, leaving a tree with a thread still working or asking in it; a thread settles itself and the threads it started, never its lead |
+| [`wsp threads`](/reference/cli/threads) | who is working, where and on which computer: every thread as the sidebar lists it, with its project, the folder it works in, that folder's branch, the agent, the state and who opened it, and under each thread the agent's own subagents with their TASK id; --tree indents the threads an agent spawned under the one that spawned them, and --watch draws the same table again every second where it stands |
+| [`wsp threads wait`](/reference/cli/threads-wait) | blocks until one of the threads leaves running and prints its finished line, with the reply whole under it; --tail prints the reply's last line alone, which is what a notify sends, and --timeout gives up after so many seconds and says so on stderr |
+| [`wsp up`](/reference/cli/up) | serve the host in this terminal, for a host you want to watch or one that serves beyond this computer; --service hands the same line to this computer's own service manager, which starts it now and again at every login. A line that needs a host starts one when none serves. |
+| [`wsp update`](/reference/cli/update) | merges the latest commits of the workspace's base into its branch, or names the files that conflict |
+| [`wsp usage`](/reference/cli/usage) | what each agent account signed in on any of your computers may still use, and what was used over a day, a week or a month split one way; two answers, never added together |
+| [`wsp usage reset`](/reference/cli/usage-reset) | spends one of the resets a Codex account has banked, on a computer of yours that holds its login, after reading the account there: its five-hour and weekly windows start again now; asks first unless --yes |
+| [`wsp wake`](/reference/cli/wake) | wakes the workspace's machine and prints the state it came up in |
+| [`wsp workspaces agents`](/reference/cli/workspaces-agents) | what the agents inside the workspace may ask of this host: threads and machines under the thread they run in, capped, which is the default, or off |
+| [`wsp worktree`](/reference/cli/worktree) | a worktree of the project's repo on the branch, for an agent to work in by path or to start a thread in: the one git already has the branch checked out in, wherever it is, else one wsp makes under its own folder, from the project folder's current commit for a new branch, with the folder's .env files and installed dependencies carried in; prints its path |
+| [`wsp worktree remove`](/reference/cli/worktree-remove) | takes away a worktree wsp made for the branch, with git: refused while a thread is working in it, and over files no commit holds unless --force; the branch stays, and a worktree wsp did not make is never removed |
+
+## wsp init
+
+```text
+usage: wsp init [--on <place>] [--recipe <path>] [--project <path>]
+       [--first-workspace <name>] [--import <folder>] [--rebuild] [--no-local]
+       [--yes] [--non-interactive] [--json]
+  seal this computer into your image, one screen at a time: Agents, Tools, Also
+  on this computer, Sign-ins, wsp for your agents on this computer, each shown
+  when it has a row to pick, then Build. Beside a host already serving this
+  state file the screens are the same and the build runs in that host, on the
+  place --on names or its default place, a computer you joined included. With no
+  host serving and no provider key it seals nothing and records a folder here as
+  your first project instead
+
+  --state              the state file: this word first, else WSP_HOME's
+                       state.json, else ./.wsp/state.json when the current
+                       directory is a checkout of wsp, else state.json in the
+                       home the running host serves
+  --yes                take every default and ask nothing, which a run off a
+                       terminal needs; a login with a browser or device sign-in,
+                       or one held in the Keychain, is left to the first time
+                       you need it on the workspace unless a saved recipe
+                       answered copy, so macOS has nothing to ask either and the
+                       build waits on nobody
+  --recipe             tick the agents and tools from this recipe (wsp recipe
+                       writes it) and go straight to the sign-ins
+  --project            the project folder you are bringing first; its own files
+                       say what it needs, and those rows are ticked first
+  --on                 the computer the image is built on, by the name wsp
+                       computers lists, a box you joined included; the default
+                       place without it
+  --first-workspace    fork the first workspace under this name once the image
+                       seals, without asking (default first)
+  --import             import this folder's project onto that first workspace,
+                       with the consent the app's import starts from
+  --rebuild            seal the next version from a fresh machine rather than
+                       from your image plus the changes, which is the question a
+                       run at a terminal is asked; without it a run that asks
+                       nothing takes whichever road the changes call for
+  --no-local           leave this computer alone; the workspace step ticks it by
+                       default, since a workspace here forks nothing and bills
+                       nothing
+  --non-interactive    ask nothing, but still run the sign-ins on the machine:
+                       each prints the page to open on this computer, the code
+                       when the flow shows one, and the command that opens it,
+                       then waits for you
+  --json               print the raw protocol values, one JSON object per line,
+                       with everything else on stderr
+```
+
+No MCP tool: builds your image and serves for hours; an agent runs it from a shell and relays the sign-ins it prints.
+
+## wsp --help agent
+
+```text
+the verbs an agent on this computer reaches for, and the lines you type yourself:
+up and down for the host, recipe and image for what a workspace starts from.
+  wsp computers set <computer> [--name <new>] [--ssh <login>] [--threads <n>]
+    [--nap <minutes>|off] [--turn-limit <hours>|off] [--spawn on|off]
+    [--max-machines <n>] [--max-depth <n>] [--recipe <name>|none]
+    [--reset <setting>]...
+      what you set on one of your computers: its name, the ssh login it is
+      reached by, how many threads run there at once, how long a quiet machine
+      there runs before it naps, how long one turn there may run, whether agents
+      there may start agents, the recipe it follows; --reset takes a setting
+      back to its default
+  wsp recipes
+      your saved recipes: what each puts on a computer in one line, and the
+      computers that follow it
+  wsp recipes show <name>
+      one recipe whole: every row it holds by kind, the computers that follow
+      it, and the hash it resolves to on this computer now
+  wsp recipes save <name> --from <computer>
+      saves what one of your computers was set up with as a recipe under that
+      name, and that computer follows it from then on
+  wsp recipes remove <name> [--yes]
+      takes a recipe away; the computers that followed it keep what they have
+      and follow none
+  wsp usage [--range day|week|month]
+    [--by agent|account|computer|project|model|source]
+      what each agent account signed in on any of your computers may still use,
+      and what was used over a day, a week or a month split one way; two
+      answers, never added together
+  wsp usage reset <account> [--credit <id>] [--on <computer>] [--yes]
+      spends one of the resets a Codex account has banked, on a computer of
+      yours that holds its login, after reading the account there: its five-hour
+      and weekly windows start again now; asks first unless --yes
+  wsp agents [<workspace>] [--on <computer>]
+      the coding agents on this computer, a box you added or a workspace: each
+      one's version and the newest out, whether it is signed in there, and
+      whether it carries the wsp tools
+  wsp skills [<workspace>] [--on <computer>]
+      the skills on this computer, a box you added or a workspace, each by name
+      with every folder it lives in and which agent loads it from there
+  wsp skills search <query> [--limit <n>]
+      searches skills.sh for skills by their words, each with how often it was
+      installed and the id wsp skills add takes
+  wsp skills show <skill> [<workspace>] [--on <computer>] [--project [<name>]]
+      prints a skill's SKILL.md: one on skills.sh by its <owner>/<repo>/<skill>
+      before it is installed, or one already on this computer, a box you added
+      or a workspace by its name
+  wsp skills add <skill> [<workspace>] [--on <computer>] [--agent <id>]...
+    [--project [<name>]]
+      installs a skill off skills.sh by its <owner>/<repo>/<skill> into the
+      shared skills folder, with a link or a copy for each agent named that does
+      not read that folder; every file is checked first and lands as a plain
+      file that runs nothing
+  wsp skills remove <name> [<workspace>] [--on <computer>] [--project [<name>]]
+    [--yes]
+      removes a skill by its name: every folder it lives in and every link to
+      it, where a link's own folder elsewhere stays
+  wsp skills disable <name> [<workspace>] [--on <computer>]
+      turns a skill off by its name, its SKILL.md renamed SKILL.md.off where it
+      lives, so no agent loads it until it is turned on
+  wsp skills enable <name> [<workspace>] [--on <computer>]
+      turns a skill that was turned off on again, its SKILL.md.off renamed back
+  wsp servers [<workspace>] [--on <computer>]
+      the MCP servers the agents on this computer, a box you added or a
+      workspace are set up with: how each is reached, the file it is defined in
+      and its sign-in as its config says it
+  wsp agents signin <agent> [<workspace>]
+      signs an agent in on this computer or in a workspace, its own sign-in run
+      there and shown in this terminal; a box you added takes wsp add <computer>
+      --sign-in <agent>
+  wsp agents key <agent>
+      puts an agent's token or API key into this host's vault, typed where
+      nothing echoes it; Claude Code's token is the one claude setup-token
+      prints
+  wsp agents addtools <agent>
+      writes the wsp server into an agent's own config on this computer, the
+      entry wsp mcp install writes, with the wsp skill beside it
+  wsp agents default <agent>
+      the agent a new thread runs when neither the line nor its project names
+      one; the catalog's first without it
+  wsp agents set <agent> [--model <slug>] [--effort <word>] [--access <word>]
+    [--hide <model>]... [--show <model>]... [--order <model,model>]
+    [--add-model <id>]... [--drop-model <id>]... [--reset <field>]...
+      an agent's defaults on every computer: the model, effort and access a new
+      thread on it starts on, and which models its picker lists
+  wsp agents setup <agent> [--on <computer>] [--enable | --disable]
+    [--program <path>] [--config <folder>] [--arg <word>]... [--env <NAME>]...
+    [--unset-env <NAME>]... [--reset <field>]...
+      how an agent runs on one computer: on or off there, the program run in its
+      place, its config folder, words added to every launch and variables every
+      launch carries, each value typed where nothing echoes it
+  wsp servers signin <name> --agent <id> [<workspace>] [--on <computer>]
+      signs one MCP server in by its agent's own command for it, run where the
+      server is set up and shown in this terminal
+  wsp servers tools <name> --agent <id> [<workspace>] [--on <computer>]
+    [--project <name>] [--refresh]
+      starts one MCP server once where it is set up and lists its tools with
+      their descriptions, and says whether it needs a sign-in
+  wsp servers add <name> [<workspace>] [--on <computer>] --agent <id> (--command
+    "<line>" | --url <address> [--header <name>=<VARIABLE>]...)
+    [--env <NAME>]... [--project [<name>]]
+      writes one MCP server into an agent's own config: a command with its
+      arguments and variables, or an address with its headers, each value read
+      off this terminal's environment and written into that file on this
+      computer, a variable's value kept in the vault as well; on any other the
+      file names a variable and the value goes to the vault, an argument or the
+      address naming a variable as ${NAME} keeps that name there, and an agent
+      that reads no variable there refuses it
+  wsp servers remove <name> [<workspace>] [--on <computer>] --agent <id>
+    [--scope <user|home|project>] [--project [<name>]] [--yes]
+      takes one MCP server's entry out of an agent's own config, every other
+      line of the file as it was, and, once no agent's config on this computer
+      lists that server, frees the vault's values kept for it that no other
+      server holds
+  wsp servers disable <name> [<workspace>] [--on <computer>] --agent <id>
+    [--scope <user|home|project>] [--project [<name>]]
+      turns one MCP server off by the switch its agent reads, so the agent
+      leaves it out until it is turned on
+  wsp servers enable <name> [<workspace>] [--on <computer>] --agent <id>
+    [--scope <user|home|project>] [--project [<name>]]
+      turns an MCP server that was turned off on again
+  wsp projects remove <project> [--yes] [--force]
+      takes a project out of this wsp; its folder is left where it is, on this
+      computer or on a computer you joined, a project with a machine standing on
+      it is refused naming them, and one whose checkout on a computer of yours
+      holds work no remote has is stopped naming it
+  wsp projects set <project> [--agent <id>] [--model <slug>] [--effort <word>]
+    [--access <word>] [--after-worktree <command>] [--reset <field>]...
+      what a new thread on one project starts on, over the agent's own defaults:
+      its agent, model, effort and access; and the shell line a new worktree of
+      it runs once, after each ecosystem's own install, for what none of them
+      knows
+  wsp threads wait <thread>... [--timeout <s>] [--tail]
+      blocks until one of the threads leaves running and prints its finished
+      line, with the reply whole under it; --tail prints the reply's last line
+      alone, which is what a notify sends, and --timeout gives up after so many
+      seconds and says so on stderr
+  wsp recipe scan [--project <folder>]
+      read this computer and print every option, writing nothing: the agents,
+      the tools with why and size, what else a package manager here has that the
+      image could take, the commands your agents ran, and the sign-ins, each
+      with what to do about it and one line of why; --project weighs the
+      histories by a folder and --json prints it as one object
+  wsp recipe [--tick used|installed|default] [--set <id>=on|off]
+    [--signin <id>=copy|machine|later|key|skip|token] [--add <id>=<command>]
+    [--add-check <id>=<command>] [--why <words>] [--engine] [--project <folder>]
+    [--out <path>]
+      write the recipe and print it as a table: every catalog agent and tool
+      with its tick, why it has it and what it costs on the machine, then the
+      commands your agents ran that no catalog row carries. --tick
+      used|installed|default names the rule that decides every tick (used, the
+      default, ticks what your agents actually ran here); --set <id>=on|off
+      flips a row by its catalog id, or a package this computer's own package
+      managers have by the id wsp recipe scan gives it, which the build installs
+      by that package's own road; --signin
+      <id>=copy|machine|later|key|skip|token answers a sign-in by catalog id,
+      later leaving it to the first time the tool is needed on the machine and
+      key bringing the key files beside a login and nothing else of it; --add
+      <id>=<command> carries a tool neither the catalog nor this computer has,
+      installed by that command on the machine, with --add-check <id>=<command>
+      saying it is there and --why <words> what the rows it adds are for;
+      --engine marks the recipe so every machine from its image gets the place's
+      Docker or podman through a socket of its own (a project whose compose file
+      needs one), and stays in the file until you edit it out; --project reads a
+      folder's own manifests for what it takes to build and weighs the histories
+      by it, --out says where the file goes and --json prints the table as one
+      object. Naming --tick or --project decides every tick again; without
+      either, what the file says stands and the flags flip rows on top of it. A
+      sign-in answer stands either way: no rule decides one. All of them repeat.
+      Review it, then wsp init --recipe
+  wsp workspaces agents <workspace> [--spawn on|off] [--max-machines <n>]
+    [--max-depth <n>]
+      what the agents inside the workspace may ask of this host: threads and
+      machines under the thread they run in, capped, which is the default, or
+      off
+  wsp rename <workspace> "<name>"
+      names the workspace on this computer; the name is unique here, so one
+      another workspace holds is refused
+  wsp commit <workspace> [--message "<message>"] [--file <path>]...
+      commits the files the workspace's copy changed, or the ones named; without
+      a message its agent drafts one
+  wsp discard <workspace> <path> [--yes]
+      puts one changed file of the workspace's copy back as its last commit has
+      it, or removes it where that has none
+  wsp fix <workspace> [--check "<name>" | --child <workspace>]
+      asks the workspace's agent to fix a failed check or merge a child, or
+      updates it from its base and asks it to fix what conflicts
+  wsp merge in <lead> <child>
+      merges a child's branch into its lead's with a merge commit, or names the
+      files that conflict
+  wsp merge <workspace> [--method merge|squash|rebase] [--when-checks-pass]
+      merges the workspace's pull request, or merges it once its checks pass
+  wsp start <link> [--project <name>] [--agent <id>]
+    [--model, --effort, --access <word>]
+      a thread off a GitHub issue or pull request link, the issue or the pull
+      request its first message; an issue's thread runs in the project folder, a
+      pull request's in a worktree on its branch
+  wsp review <link|workspace> [--agent <id>] [--model, --effort <word>]
+      a reviewer thread on a pull request, read-only, whose review waits in wsp
+      until you post it
+  wsp review post <workspace> [--verdict comment|approve|request-changes]
+    [--summary "<text>"]
+      posts a review workspace's review on its pull request as you, its ticked
+      comments on their lines
+  wsp update <workspace>
+      merges the latest commits of the workspace's base into its branch, or
+      names the files that conflict
+  wsp image
+      the image this host owns: its version, its hash, whether it holds your
+      sign-ins, and the copy each place has built of it
+  wsp forget <workspace> [--yes]
+      drops a gone workspace and its threads from this computer; refused while
+      its machine exists
+  wsp worktree <project> <branch>
+      a worktree of the project's repo on the branch, for an agent to work in by
+      path or to start a thread in: the one git already has the branch checked
+      out in, wherever it is, else one wsp makes under its own folder, from the
+      project folder's current commit for a new branch, with the folder's .env
+      files and installed dependencies carried in; prints its path
+  wsp worktree remove <project> <branch> [--force] [--yes]
+      takes away a worktree wsp made for the branch, with git: refused while a
+      thread is working in it, and over files no commit holds unless --force;
+      the branch stays, and a worktree wsp did not make is never removed
+  wsp thread read <thread> [--last]
+      the thread's messages as the app lists them, oldest first: who each one
+      is, when the runtime recorded it and the text, with every tool call folded
+      to the one line the app's row reads; --last prints the final reply alone,
+      the whole message its finished line carries. A tool's output and the
+      agent's reasoning are no rows of it. Reading marks the thread read, so it
+      stops reading Done here and in the app
+  wsp thread head <thread>
+      the thread's facts and its newest events, what the app draws first on
+      opening it: the title, the agent, model and access it runs on, where it
+      stands and its folder, then as many of its newest events as fit in 64 KB,
+      each tool result past 2 KB cut and marked with its whole length. Reading a
+      head marks nothing
+  wsp thread forget <thread> [--yes]
+      drops a thread no turn ever ran on, the row a launch that never got going
+      leaves behind; refused once a turn of it did work
+  wsp thread settle <thread>... [--finished]
+      folds each thread and every thread under it into the sidebar's Settled,
+      leaving a tree with a thread still working or asking in it; a thread
+      settles itself and the threads it started, never its lead
+  wsp thread restore <thread>...
+      brings each thread back out of the sidebar's Settled with what the latest
+      settle naming it moved
+  wsp thread allow <thread>
+      answers the prompt the thread is stopped on and lets the call run
+  wsp thread deny <thread> [--reason "<words>"]
+      answers the prompt the thread is stopped on and refuses the call
+  wsp slate catalog [<name>]
+      what a slate can hold: the index of pieces, sources, steps, functions and
+      rules, or one entry in full
+  wsp slate write [<thread>] [<file>] [--check] [--set <path>=<json>]...
+    [--press <piece>] [--row <n>] [--action <n>] [--if-version <n>]
+      writes the thread's slate from a .slate file (a whole <slate> or a patch)
+      or a .json document and prints its sketch; --check stores nothing, and
+      with --set or --press rehearses values and a press on a copy, the file
+      optional
+  wsp slate state [<thread>] [<path>=<json>...] [--start <run>]...
+    [--if-version <n>]
+      sets the slate's $values by path, like '$steps[2].done=true' or 'i=2',
+      starts runs the person let run every time, and prints its sketch
+  wsp slate read [<thread>] [--values <path>]... [--no-text] [--no-sketch]
+    [--document]
+      the slate as it stands: the sketch, then the JSX-like form, the values,
+      derived values, runs, problems and the paths named; --no-text leaves out
+      the JSX-like form, --document adds the stored JSON
+  wsp restart
+      stops the host and brings it back on the road it came up on, its service,
+      the verb that started it or the app; running turns go on and the host that
+      comes back re-opens them. A host wsp up holds in a terminal refuses
+  wsp ssh <workspace>
+      carries one ssh connection to the workspace's own ssh server, starting it
+      there, over this computer's stdin and stdout: the ProxyCommand wsp's ssh
+      config gives every wsp- alias, so `ssh wsp-<name>` and an editor's remote
+      window land inside the workspace
+  wsp exec <workspace> [--cwd <dir>] -- <command...>
+      runs the command on the machine, each word as given, in --cwd or the
+      folder a thread would start in
+  wsp export <workspace> <folder> [--from <path on the machine>] [--replace]
+    [--agents <ids>]
+      brings a project folder and the agent sessions keyed to it home from the
+      machine
+  wsp mcp install --agent <id> [--agent <id>] [--host <alias>] [--json]
+    [--remove]   (claude, codex, gemini, opencode)
+      put the wsp tools, this skill and wsp's own section of this folder's
+      AGENTS.md into that agent (claude, codex, gemini, opencode); --agent
+      repeats, --remove takes it back out, and --json prints what each agent
+      took
+  wsp up [--port <n>] [--listen <addr>] [--advertise <url>] [--no-relay]
+    [--service]
+      serve the host in this terminal, for a host you want to watch or one that
+      serves beyond this computer; --service hands the same line to this
+      computer's own service manager, which starts it now and again at every
+      login. A line that needs a host starts one when none serves.
+  wsp down
+      stop the host: the service and its unit where one holds it up, and
+      otherwise the host the command line brought up, whether wsp up or a verb
+      that needed one started it
+  wsp join <url>... --code <code> [--code-file <path>] [--name <name>]
+      on the computer you are sitting at: join it to the wsp at that address,
+      then install the daemon as a systemd system unit, which dials again at
+      every boot. A place is a Linux computer; a Mac refuses
+  wsp leave [--yes] [--force]
+      on that computer: take wsp off it, for a computer whose host is gone and
+      cannot run wsp remove; asked once, and stopped by a fork or a project
+      checkout there holding work no remote has, naming each
+
+  wsp run and wsp send stream the reply as it arrives and print it once: on a
+  terminal the streamed copy is the reply, and into a pipe stdout carries it whole
+  at the end.
+  A turn ends when the agent process exits, not at its reply, and the thread
+  reads running until then.
+  wsp exec streams the command's output and exits with its code. run, send and
+  exec wake a paused workspace first, with one line on stderr saying so.
+
+every verb takes:
+  --json         print the raw protocol values, one JSON object per line, with
+                 everything else on stderr
+  --state        the state file the host serves
+  --host         run the line against a host on your account, by the name wsp
+                 hosts lists it under; WSP_HOST names one for a whole shell
+
+exit codes; every failure is one line on stderr, the failure object with --json:
+  0 ok        it did what its line says; with --json stdout holds the answer
+  1 provider  the host, the runtime, a provider or the machine refused or failed
+  2 auth      no key, no sign-in, or the host refused the token
+  3 usage     the line was refused before anything ran: a missing argument, an
+              unknown flag or a value nothing takes
+```
+
+## wsp host --help
+
+```text
+  wsp host pair
+      a one time code another computer redeems for a token of its own, when the
+      host listens beyond this computer
+  wsp host devices [revoke <id>]
+      the computers paired with a host and what each token is read as; revoke
+      takes one back out. --host reads a host on your account from another
+      computer signed in to it
+  wsp host link [<url>] [--name <name>]
+      put the host on this computer onto your account, so it is reachable from
+      anywhere with no port open to the world; on a computer that is signed in
+      it takes no address and asks nothing, and on one that is not it prints a
+      code and a page to approve it on
+  wsp host unlink
+      take this computer off the relay account and stop its tunnel
+  wsp host devices revoke <id>
+      take one computer's token away
+
+You need these only for a host on a computer that is not the one you are sitting
+at: wsp login signs this computer in to your account and wsp hosts lists the
+hosts on it, which need no code at all. pair hands out the code a browser on
+another computer types to open a host, and it runs at that host's own terminal;
+devices lists the computers that hold a token for a host and takes one back out,
+from that terminal or from any computer signed in to it; link and unlink put the
+host on this computer onto your account, so it is reachable with no port open to
+the world.
+```
+
+## wsp --help dev
+
+```text
+  wsp doctor [<computer>] [--project <name>] [--local] [--yes]
+      prove a computer end to end. With no word, this computer and then every
+      computer you added, forking nothing and billing nothing. With a computer's
+      name, that one: a joined computer is proved by the host that computer
+      dials, which makes a short-lived machine there and reads the recipe's
+      tools inside it, and this line prints what the host says; a cloud account
+      gets your image forked, wsp put on the fork, a file coming back and the
+      teardown, which forks a live machine and bills while it runs. --local
+      proves this computer alone: a thread here and its reply, no machine, no
+      key. --project names the project the machine is made of, by name, on the
+      computer named
+```

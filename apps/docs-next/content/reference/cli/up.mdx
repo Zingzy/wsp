@@ -1,3 +1,35 @@
 # wsp up
 
-Generated from `wsp up --help` and its line in `COMMAND_LINES` (`packages/host/src/cli/commands.ts`).
+{/* Written by apps/docs-next/scripts/cli.ts: change the script or its source and run pnpm --filter @wsp/docs-next generate. */}
+
+```text
+usage: wsp up [--port <n>] [--listen <addr>] [--advertise <url>] [--no-relay]
+       [--service]
+  serve the host in this terminal, for a host you want to watch or one that
+  serves beyond this computer; --service hands the same line to this computer's
+  own service manager, which starts it now and again at every login. A line that
+  needs a host starts one when none serves.
+
+  --state        the state file: this word first, else WSP_HOME's state.json,
+                 else ./.wsp/state.json when the current directory is a checkout
+                 of wsp, else state.json in the home the running host serves
+  --version      print the version of this wsp and stop; typed alone, it is the
+                 whole line
+  --port         the port the app and the runtime websocket are served on
+                 (default 4400)
+  --listen       the address to bind (default 127.0.0.1, this computer alone).
+                 No page carries the host's token on any address: the desktop
+                 attaches by the token file beside the state, the browser wsp
+                 init opens is let in by init, and every other browser pairs for
+                 a device token of its own
+  --advertise    the address a computer being joined dials this host at; without
+                 it, the relay's name or what this computer answers on
+  --no-relay     serve without the tunnel, on a computer that is linked to a
+                 relay
+  --service      install the host as a launchd agent on a Mac or a systemd user
+                 unit on Linux, which serves now and again at every login. The
+                 keys are not written into it: it reads the same .env a terminal
+                 run reads, so they have to be in a file
+```
+
+No MCP tool: starts the host on the person's computer; a tool runs against a host that is already up.

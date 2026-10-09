@@ -1,3 +1,54 @@
 # Keyboard shortcuts
 
-Generated from `apps/web/src/keybindingDefaults.ts`, `KEYBINDING_WORDS` in `apps/web/src/settings/keybindingWords.ts` and `PANES` in `apps/web/src/panes.ts`.
+{/* Written by apps/docs-next/scripts/shortcuts.ts: change the script or its source and run pnpm --filter @wsp/docs-next generate. */}
+
+The chords the app binds by default. Change any of them in Settings > Keybindings, which also says when a chord is taken.
+
+| Action | Mac | Linux | Where |
+|---|---|---|---|
+| Toggle the sidebar | `⇧⌘B` | `Ctrl+Shift+B` | Anywhere |
+| Toggle the sidebar | `⌘B` | `Ctrl+B` | Anywhere on a Mac. On Linux, outside the terminal, which keeps Ctrl for itself |
+| Toggle the terminal drawer | `⌘J` | `Ctrl+J` | Anywhere |
+| Toggle the right panel | `⌥⌘B` | `Ctrl+Alt+B` | Anywhere |
+| Split the terminal | `⌘D` | `Ctrl+D` | In the terminal |
+| New terminal | `⌘N` | `Ctrl+N` | In the terminal |
+| Zoom in | `⌘=` | `Ctrl+=` | In the terminal |
+| Zoom in | `⇧⌘=` | `Ctrl+Shift+=` | In the terminal |
+| Zoom out | `⌘-` | `Ctrl+-` | In the terminal |
+| Reset the zoom | `⌘0` | `Ctrl+0` | In the terminal |
+| Toggle the preview | `⇧⌘J` | `Ctrl+Shift+J` | Anywhere |
+| Search | `⇧⌘P` | `Ctrl+Shift+P` | Anywhere |
+| Search | `⌘K` | `Ctrl+K` | Anywhere on a Mac. On Linux, outside the terminal, which keeps Ctrl for itself |
+| Find a file | `⌘P` | `Ctrl+P` | Anywhere on a Mac. On Linux, outside the terminal, which keeps Ctrl for itself |
+| Search in files | `⇧⌘F` | `Ctrl+Shift+F` | Anywhere |
+| Settings | `⌘,` | `Ctrl+,` | Anywhere |
+| New thread | `⌘N` | `Ctrl+N` | Outside the terminal |
+| New thread | `⌘T` | `Ctrl+T` | Outside the terminal |
+| Previous task | `⌥⌘Left` | `Ctrl+Alt+Left` | Outside the terminal |
+| Next task | `⌥⌘Right` | `Ctrl+Alt+Right` | Outside the terminal |
+| Previous thread | `⌥⌘Up` | `Ctrl+Alt+Up` | Outside the terminal |
+| Next thread | `⌥⌘Down` | `Ctrl+Alt+Down` | Outside the terminal |
+| Settle thread | `⇧⌘E` | `Ctrl+Shift+E` | Outside the terminal |
+| Next thread that needs you | `⌥⌘U` | `Ctrl+Alt+U` | Outside the terminal |
+| Open in editor | `⌘O` | `Ctrl+O` | Anywhere on a Mac. On Linux, outside the terminal, which keeps Ctrl for itself |
+| Next task | `⌃Tab` | `Ctrl+Tab` | Outside the terminal and a right panel of several tabs |
+| Previous task | `⌃⇧Tab` | `Ctrl+Shift+Tab` | Outside the terminal and a right panel of several tabs |
+| Next panel tab | `⌃Tab` | `Ctrl+Tab` | In a right panel of several tabs |
+| Previous panel tab | `⌃⇧Tab` | `Ctrl+Shift+Tab` | In a right panel of several tabs |
+| Jump to a task | `⌘1` to `⌘9` | `Ctrl+1` to `Ctrl+9` | Anywhere |
+
+## Opening a pane
+
+While the right panel shows its launcher, a letter opens a pane:
+
+| Letter | Pane | What it shows |
+|---|---|---|
+| `B` | Browser | Open your dev server or a URL. |
+| `T` | Terminal | Start a shell here. |
+| `D` | Changes | Review the changes here. |
+| `R` | Pull request | Checks, review and comments. |
+| `F` | Files | Browse and read the files here. |
+| `M` | Computer | Load, memory and disk. |
+| `P` | Processes | Inspect and kill what runs. |
+| `A` | Agents | Agents, skills and servers here. |
+| `S` | Slate | What the agent built for this thread. |

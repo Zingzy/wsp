@@ -1,0 +1,24 @@
+# wsp folders
+
+{/* Written by apps/docs-next/scripts/cli.ts: change the script or its source and run pnpm --filter @wsp/docs-next generate. */}
+
+```text
+usage: wsp folders [<folder>] [--hidden] [--repos] [--on <computer>]
+  the folders inside one folder on this computer or on a box you added with
+  --on, or with --repos every git repo under the home folder, most recently used
+  first, for naming one to record
+
+  --hidden    list the folders whose names start with a dot too
+  --repos     every git repo under the home folder instead of one level, most
+              recently used first
+  --on        the computer whose folders to list, by the name wsp computers
+              shows; a box you added answers from its own disk, and this
+              computer is listed without it
+  --json      print the raw protocol values, one JSON object per line, with
+              everything else on stderr
+  --state     the state file the host serves
+  --host      run the line against a host on your account, by the name wsp hosts
+              lists it under; WSP_HOST names one for a whole shell
+```
+
+MCP tool: [`folders`](/reference/mcp-tools#folders).

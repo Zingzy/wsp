@@ -1,3 +1,25 @@
 # wsp servers disable
 
-Generated from `wsp servers disable --help` and its line in `COMMAND_LINES` (`packages/host/src/cli/commands.ts`).
+{/* Written by apps/docs-next/scripts/cli.ts: change the script or its source and run pnpm --filter @wsp/docs-next generate. */}
+
+```text
+usage: wsp servers disable <name> [<workspace>] [--on <computer>] --agent <id>
+       [--scope <user|home|project>] [--project [<name>]]
+  turns one MCP server off by the switch its agent reads, so the agent leaves it
+  out until it is turned on
+
+  --agent      the agent whose config names the server, by its catalog id as wsp
+               servers shows it
+  --on         the computer to read, by the name wsp computers shows; this
+               computer without it, and a workspace names its own
+  --scope      user, home or project, as wsp servers shows it; user without it
+  --project    the project scope: alone for the workspace's own project, or the
+               project's name with --on
+  --json       print the raw protocol values, one JSON object per line, with
+               everything else on stderr
+  --state      the state file the host serves
+  --host       run the line against a host on your account, by the name wsp
+               hosts lists it under; WSP_HOST names one for a whole shell
+```
+
+MCP tool: [`servers_disable`](/reference/mcp-tools#serversdisable).

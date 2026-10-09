@@ -33,6 +33,7 @@ export const GATES: Record<string, string> = {
   WSP_REQUIRE_DAEMON: "fails the staged-daemon case where the build staged no binary, rather than skipping it, so a stale asset cannot ship",
   WSP_DAEMON_CUT: "holds the daemon record to the tree, as the landing gate does once its cut has run",
   WSP_WRITE_RECORD: "writes the record the daemon's tool server serves from over the crate's copy before comparing it",
+  WSP_WRITE_DOCS: "writes the docs' generated pages from their scripts before comparing them",
   PUBLIC_BUILD: "runs the checks over the public build this tree holds, the build input that makes one",
 };
 
