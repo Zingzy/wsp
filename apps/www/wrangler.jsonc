@@ -1,0 +1,23 @@
+{
+  // usewsp.com: the built site as static assets, behind one Worker that answers the waitlist, the docs and the old
+  // hosts before the files. Workers Builds deploys it from main: root apps/www, watch paths apps/www/* and the lockfile.
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "wsp-www",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-10-01",
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "404-page",
+    "html_handling": "auto-trailing-slash",
+    "run_worker_first": true
+  },
+  "routes": [
+    { "pattern": "usewsp.com", "custom_domain": true },
+    { "pattern": "www.usewsp.com", "custom_domain": true },
+    { "pattern": "usewsp.dev", "custom_domain": true }
+  ],
+  "workers_dev": false,
+  "preview_urls": false,
+  "observability": { "enabled": false }
+}
