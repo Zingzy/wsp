@@ -188,8 +188,8 @@ describe("the sidebar's tiles", () => {
     ];
     const { live } = sidebarTiles(rows, { picked: null, nowMs: NOW });
     expect(settleableRoots(live).map(node => node.thread.id)).toEqual(["read"]);
-    expect(treeSettle(rootHolding(live, "read-child")!)).toEqual({ threadIds: ["read", "read-child"], working: false });
-    expect(treeSettle(rootHolding(live, "working")!)).toEqual({ threadIds: ["lead", "working"], working: true });
+    expect(treeSettle(rootHolding(live, "read-child")!)).toEqual({ threadIds: ["read"], working: false });
+    expect(treeSettle(rootHolding(live, "working")!)).toEqual({ threadIds: ["lead"], working: true });
     expect(rootHolding(live, "nobody")).toBeUndefined();
   });
 

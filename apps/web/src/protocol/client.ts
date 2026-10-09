@@ -62,6 +62,8 @@ import {
   SessionInterruptOutcome,
   SessionInterruptResult,
   SessionRenameResult,
+  SessionRestoreResult,
+  SessionSettleResult,
   SessionSearchResult,
   type ThreadMarks,
   SessionSteerOutcome,
@@ -671,14 +673,15 @@ export interface Api {
   /** Stamps a thread as shown now on the host, which tells every window; takes the thread's fold key. Optional so
    * fixtures that never open one need not fake it. */
   readThread?(threadId: string): Promise<void>;
-  /** Stamps threads as settled by the person, and read, on the host, which tells every window; takes fold keys. A
-   * client without it offers no settle. */
-  settleThreads?(threadIds: readonly string[]): Promise<void>;
+  /** Settles each thread and every thread under it on the host, which tells every window and answers what it settled
+   * and what it left; takes fold keys. A client without it offers no settle. */
+  settleThreads?(threadIds: readonly string[]): Promise<SessionSettleResult>;
   /** Pins, snoozes or places threads, or takes one of those back, on the host, which tells every window; takes fold
    * keys. A client without it offers none of them. */
   markThreads?(threadIds: readonly string[], marks: ThreadMarks): Promise<void>;
-  /** Takes settled threads back out of the fold on the host, which tells every window; takes fold keys. */
-  restoreThreads?(threadIds: readonly string[]): Promise<void>;
+  /** Takes each thread back out of the fold on the host with what the latest settle naming it moved, and the host
+   * tells every window; takes fold keys. */
+  restoreThreads?(threadIds: readonly string[]): Promise<SessionRestoreResult>;
   /** The threads whose messages or replies hold the words, searched on the host, one hit each with a snippet. */
   searchMessages?(query: string): Promise<SessionSearchResult>;
   /** Asks the thread's agent a question beside the thread, by any of its session ids, on a copy of its session the
@@ -1013,9 +1016,9 @@ export function makeApi(c: ProtocolClient): Api {
     renameSession: async (sessionId, title) => SessionRenameResult.parse(await c.request<Record<string, unknown>>("sessions.rename", { sessionId, title })),
     forgetThread: async threadId => void (await c.request("sessions.forget", { threadId })),
     readThread: async threadId => void (await c.request("sessions.read", { threadId })),
-    settleThreads: async threadIds => void (await c.request("sessions.settle", { threadIds })),
+    settleThreads: async threadIds => SessionSettleResult.parse(await c.request<Record<string, unknown>>("sessions.settle", { threadIds })),
     markThreads: async (threadIds, marks) => void (await c.request("sessions.mark", { threadIds, marks })),
-    restoreThreads: async threadIds => void (await c.request("sessions.restore", { threadIds })),
+    restoreThreads: async threadIds => SessionRestoreResult.parse(await c.request<Record<string, unknown>>("sessions.restore", { threadIds })),
     // Parsed, not trusted: a hit names a thread the palette opens.
     searchMessages: async query => SessionSearchResult.parse(await c.request<Record<string, unknown>>("sessions.search", { query })),
     askAside: async (sessionId, question, askId) => SessionAsideResult.parse(await c.request<Record<string, unknown>>("sessions.aside", { sessionId, question, ...(askId !== undefined ? { askId } : {}) })),

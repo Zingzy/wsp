@@ -13,7 +13,7 @@ import { openNewThread } from "../shell/NewThreadPicks.js";
 import { showTerminal } from "../shell/shellCommands.js";
 import { requestDeleteWorkspace, requestForgetWorkspace, requestProjectTrip, requestRenameWorkspace, requestUndoRewind } from "../shell/shellRequests.js";
 import { copyText } from "./clipboard.js";
-import type { ChildVerbs, ThreadVerbs } from "./threadActions.js";
+import { settleSaying, type ChildVerbs, type ThreadVerbs } from "./threadActions.js";
 import type { WorkspaceVerbs } from "./workspaceActions.js";
 
 export function useWorkspaceVerbs(): WorkspaceVerbs {
@@ -76,7 +76,7 @@ export function useThreadVerbs(): ThreadVerbs {
               if (left !== undefined) addNotice({ kind: "error", text: left });
             },
       forget: canForget ? thread => void forgetThread(thread) : undefined,
-      settle: canSettle ? async threadIds => void (await settleThreads(threadIds)) : undefined,
+      settle: canSettle ? threadIds => settleSaying(threadIds, { settle: settleThreads, restore: restoreThreads }) : undefined,
       restore: canRestore ? restoreThreads : undefined,
       mark: canMark ? markThreads : undefined,
       undoRewind: canUndoRewind ? requestUndoRewind : undefined,

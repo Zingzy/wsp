@@ -50,6 +50,7 @@ export const CHILD_WORDS = {
   undo: "Undo",
   settleFinished: (n: number): string => `Settle ${n} finished`,
   settled: (n: number): string => `Settled ${n} ${n === 1 ? "thread" : "threads"}`,
+  left: (n: number, why: string): string => `Left ${n} ${n === 1 ? "thread" : "threads"}: ${why}`,
   messageTo: (title: string): string => `Message to ${title}`,
   runsOn: (computer: string): string => `Runs on ${computer}`,
   finished: "Finished",

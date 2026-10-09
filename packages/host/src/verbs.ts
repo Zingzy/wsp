@@ -463,6 +463,7 @@ export const FLAG_WORDS: Readonly<Record<string, string>> = {
   cwd: "the folder on the machine to work in; the project's folder without it",
   detach: "print the thread's id and return, leaving the reply to the thread's finished line",
   "thread deny reason": "what the agent should do instead, in your words; it reads them with the refusal, as it reads the reason typed in the app",
+  "thread settle finished": "settle the finished threads under each thread named, and not the thread itself; a failed one stays for you to read",
   "stop task": "stop one of the agent's own subagents alone, by its TASK id off wsp threads; the turn and its other subagents run on",
   effort: "how hard the agent thinks, by its own word (low, medium, high, xhigh, max); absent on a new thread means the agent's default; on send, the thread's own",
   engine: "give it the place's Docker or podman through a socket that sees its own containers alone",

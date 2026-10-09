@@ -2,7 +2,7 @@
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { threadWord, isLocalWorkspace, SETTLE_MS, threadSettled } from "@wsp/protocol";
+import { threadWord, isLocalWorkspace, SETTLE_MS } from "@wsp/protocol";
 import { lazySlates } from "../lazy-slates.js";
 import type { Slates } from "../slates.js";
 import type { RuntimeContext, SlatesArea } from "../context.js";
@@ -52,14 +52,7 @@ export function slatesArea(ctx: RuntimeContext): SlatesArea {
       if (entry.record.phase !== "running") await ctx.workspaces.wake(entry.record.id);
     },
     loaded: () => ctx.ready(),
-    settled: async threadId => {
-      const latest = ctx.latestOn(threadId);
-      if (latest === undefined) return false;
-      const own = threadRecords.get(threadId);
-      const prefs = await ctx.preferences.get();
-      const facts = { working: latest.status === "running", asking: latest.waitingOn !== undefined, failed: latest.status === "failed", startedAt: latest.startedAt ?? null, endedAt: latest.endedAt ?? null, readAt: own?.readAt ?? null, settledAt: own?.settledAt ?? null };
-      return threadSettled(facts, clock.now(), SETTLE_MS[prefs.settleAfter]);
-    },
+    settled: async threadId => ctx.settledNow(threadId, SETTLE_MS[(await ctx.preferences.get()).settleAfter]),
     under: lead => ctx.treeUnder(lead),
     threadOfToken: token => ctx.threadOfToken(token),
     mcpServer: async (threadId, name) => {

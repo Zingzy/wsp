@@ -9,7 +9,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import type { SidebarThreadSnapshot } from "../src/adapt/index.js";
-import { childActs, childParts, countTree, finishedKeys, kindOf, leadActs, leadNodes, noteOf, partOf, settleTake, type LeadNode, type Tree } from "../src/components/threads/leadTree.js";
+import { childActs, childParts, countTree, finishedTake, kindOf, leadActs, leadNodes, noteOf, partOf, settleTake, type LeadNode, type Tree } from "../src/components/threads/leadTree.js";
 
 const NOW = Date.parse("2026-10-09T12:00:00Z");
 const ago = (m: number): number => NOW - m * 60_000;
@@ -254,13 +254,13 @@ describe("a lead's tree, read once", () => {
     expect(acts("sa_hdr")).toEqual([]);
   });
 
-  it("takes a child's whole subtree in a settle, never a subagent, and holds it while anything under it works", () => {
-    expect(settleTake(find("c_ssh"), tree()).threadIds).toEqual(["thr_c_ssh", "thr_g_rev", "thr_gg_ssh", "thr_g_rebase"]);
-    expect(settleTake(find("c_sheet"), tree()).threadIds).toEqual(["thr_c_sheet"]);
-    expect(settleTake(find("c_rev"), tree())).toEqual({ threadIds: ["thr_c_rev", "thr_g_probe"], working: true });
-    expect(settleTake(find("f0"), tree())).toEqual({ threadIds: ["thr_f0"], working: false });
+  it("sends a child's own id in a settle, the host taking its subtree, never a subagent, and holds it while anything under it works", () => {
+    expect(settleTake(find("c_ssh"), tree())).toMatchObject({ threadIds: ["thr_c_ssh"], threads: 4 });
+    expect(settleTake(find("c_sheet"), tree())).toMatchObject({ threadIds: ["thr_c_sheet"], threads: 1 });
+    expect(settleTake(find("c_rev"), tree())).toEqual({ threadIds: ["thr_c_rev"], threads: 2, working: true });
+    expect(settleTake(find("f0"), tree())).toEqual({ threadIds: ["thr_f0"], threads: 1, working: false });
     const parent = node({ key: "p", status: "completed", started: 30, ended: 20, read: true }, [node({ key: "k", status: "running", started: 2 })]);
-    const held = childActs({ node: parent, thread: parent.thread }, "live", tree(), { settle: async () => true }).find(a => a.id === "settle");
+    const held = childActs({ node: parent, thread: parent.thread }, "live", tree(), { settle: async () => undefined }).find(a => a.id === "settle");
     expect(held?.refusal).toBe("A thread in it is still working");
   });
 
@@ -268,13 +268,17 @@ describe("a lead's tree, read once", () => {
     expect(countTree(top(), tree())).toEqual({ needsYou: 1, failed: 2, working: 8, workingSubagents: 2, waiting: 2, finished: 61 });
   });
 
-  it("gives the lead Settle N finished over every finished thread anywhere in its tree, each once, no subagent", () => {
-    const keys = finishedKeys(top(), tree());
-    expect(keys).toHaveLength(61);
-    expect(keys).toContain("thr_g_rebase");
-    expect(new Set(keys).size).toBe(keys.length);
-    expect(leadActs(LEAD, keys, {}).map(a => a.title)).toEqual(["Settle 61 finished"]);
-    expect(leadActs(LEAD, [], {})).toEqual([]);
+  it("gives the lead Settle N finished over every finished thread anywhere in its tree, each once, no subagent, N counting the threads they hold", () => {
+    const take = finishedTake(top(), tree());
+    expect(take.threadIds).toHaveLength(61);
+    expect(take.threadIds).toContain("thr_g_rebase");
+    expect(new Set(take.threadIds).size).toBe(take.threadIds.length);
+    expect(take.threads).toBe(61);
+    expect(leadActs(LEAD, take, {}).map(a => a.title)).toEqual(["Settle 61 finished"]);
+    // A finished thread with a finished one under it is one id sent and two threads counted.
+    const pair = node({ key: "p", status: "completed", started: 30, ended: 20, read: true }, [node({ key: "k", status: "completed", started: 25, ended: 22, read: true })]);
+    expect(finishedTake([{ node: pair, thread: pair.thread }], tree())).toEqual({ threadIds: ["thr_p"], threads: 2 });
+    expect(leadActs(LEAD, { threadIds: [], threads: 0 }, {})).toEqual([]);
   });
 
   it("ends a read, finished thread in the muted check only in its fold; one that stands live for its child keeps its own status", () => {

@@ -84,6 +84,8 @@ pub const TOOLS: &[Tool] = &[
     turn::SEND,
     thread::RENAME,
     thread::FORGET,
+    thread::SETTLE,
+    thread::RESTORE,
     thread::ALLOW,
     thread::DENY,
     wait::WAIT,

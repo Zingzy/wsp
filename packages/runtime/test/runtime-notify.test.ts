@@ -54,6 +54,31 @@ describe("a thread whose start named who to tell", () => {
     await rt.close();
   });
 
+  it("a child's finished line taken by its lead marks the child read, by steer or by a turn of the lead's own; the child's report is read there", async () => {
+    for (const steers of [true, false]) {
+      const h = held(steers);
+      const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter } });
+      const ws = await createOn(rt, { golden: "snap_g", name: "a" });
+      const parent = await rt.sessions.start(ws.id, { prompt: "orchestrate" });
+      const parentThread = parent.view().threadId!;
+      if (!steers) {
+        h.end(0, "waiting for the builder");
+        await parent.finished;
+      }
+      const kid = await rt.sessions.start(ws.id, { prompt: "build it", notify: [parentThread], startedBy: "agent" });
+      const kidThread = kid.view().threadId!;
+      const kidRow = async () => (await rt.sessions.list(ws.id)).find(r => r.threadId === kidThread)!;
+      const before = (await kidRow()).readAt ?? 0;
+      h.end(1, "all green");
+      await kid.finished;
+      await vi.waitFor(() => expect(steers ? h.steered : h.starts.slice(2)).toHaveLength(1));
+      await vi.waitFor(async () => expect((await kidRow()).readAt).toBeGreaterThanOrEqual((await kidRow()).endedAt!));
+      expect((await kidRow()).readAt).toBeGreaterThan(before);
+      h.end(steers ? 0 : 2, "handled");
+      await rt.close();
+    }
+  });
+
   it("a parent that replied while its process still runs is told once that process exits: the line waits for its session.end, then goes as a turn of its own", async () => {
     const h = held(true);
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter } });

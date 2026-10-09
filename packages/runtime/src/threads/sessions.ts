@@ -19,6 +19,8 @@ import {
   HISTORY_PAGE_EVENTS, AGENT_STARTING_MS, ASIDE_EMPTY_LINE, capStoppedLine, deletedBeforeStartLine, type AsideQuestion,
   type McpServerSpec, type SessionAsker, refusal, sendFilesAcrossLine, SEND_FILES_ACROSS_FIX, waitAcrossLine, WAIT_ACROSS_FIX,
   TURN_STOPPED_LINE, workspacePlace, STOP_REACH_MS, sendGivenUpLine, threadResult, listedFailure, turnLines,
+  type Caller, type SessionSettleResult, SETTLE_MS, SETTLE_WORKING, SETTLE_ALREADY, subagentSettleLine,
+  SUBAGENT_SETTLE_FIX, notUnderLine, NOT_UNDER_FIX,
 } from "@wsp/protocol";
 import { harnessCatalog } from "../harness-catalog.js";
 import { headShape } from "../transcript-reader.js";
@@ -205,6 +207,33 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
     } finally {
       ended();
     }
+  };
+
+  /** What a settle and a restore read of the threads named and the trees under them, once every name is checked: a
+   * subagent's id, a name nothing holds and a thread a token may not settle refuse the whole list before anything
+   * moves. A thread's own token settles itself and the threads under it, never its lead or one beside it. */
+  let lastSettleAt = 0;
+  const settleReads = async (threadIds: readonly string[], origin: Caller | undefined) => {
+    await ctx.ready();
+    for (const id of threadIds) {
+      if (ctx.threadFacts(id) === undefined && !threadRecords.has(id)) {
+        const subagent = [...transcriptIndex.values()].some(index => [...index.children.values()].some(kids => kids.has(id)));
+        throw subagent ? refusal(subagentSettleLine(id), SUBAGENT_SETTLE_FIX, "usage") : notFoundRefusal(`no thread ${threadWord(id)}`);
+      }
+      if (!ctx.settlesThread(id, origin)) throw ctx.drivesThread(id, origin) ? refusal(notUnderLine(id), NOT_UNDER_FIX, "usage") : notFoundRefusal(`no thread ${threadWord(id)}`);
+    }
+    const settleMs = SETTLE_MS[(await ctx.preferences.get()).settleAfter];
+    const busy = (id: string): boolean => {
+      const t = ctx.threadFacts(id);
+      return t !== undefined && (t.status === "running" || t.asking !== undefined || t.waitingOn !== undefined);
+    };
+    const settled = (id: string): boolean => ctx.settledNow(id, settleMs);
+    const finished = (id: string): boolean => {
+      const status = ctx.threadFacts(id)?.status;
+      return status === "completed" || status === "interrupted";
+    };
+    const titled = (ids: readonly string[]) => ids.map(threadId => ({ threadId, title: ctx.threadFacts(threadId)?.title ?? threadWord(threadId) }));
+    return { busy, settled, finished, titled };
   };
 
   const sessionsApi: Runtime["sessions"] = {
@@ -981,9 +1010,36 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
       await ctx.mark([threadId], { readAt: clock.now() }, origin);
     },
 
-    async settle(threadIds, origin) {
-      const at = clock.now();
-      await ctx.mark(threadIds, { readAt: at, settledAt: at }, origin);
+    async settle(threadIds, origin, o = {}) {
+      const { busy, settled, finished, titled } = await settleReads(threadIds, origin);
+      const take: string[] = [];
+      const left: SessionSettleResult["left"] = [];
+      const named: string[] = [];
+      const add = (from: string, ids: readonly string[]): void => {
+        if (ids.length > 0) named.push(from);
+        take.push(...ids.filter(id => !take.includes(id)));
+      };
+      for (const one of new Set(threadIds)) {
+        const tree = [one, ...ctx.treeUnder(one)];
+        if (o.finished === true) {
+          const stays = tree.slice(1).filter(id => finished(id) && !settled(id));
+          const works = (id: string): boolean => [id, ...ctx.treeUnder(id)].some(busy);
+          left.push(...stays.filter(works).map(threadId => ({ threadId, why: SETTLE_WORKING })));
+          add(one, stays.filter(id => !works(id)));
+        } else if (tree.some(busy)) left.push({ threadId: one, why: SETTLE_WORKING });
+        else {
+          if (settled(one)) left.push({ threadId: one, why: SETTLE_ALREADY });
+          add(one, tree.filter(id => !settled(id)));
+        }
+      }
+      // The one stamp a settle writes is its mark: a restore takes back the threads that carry it and nothing else.
+      const at = (lastSettleAt = Math.max(clock.now(), lastSettleAt + 1));
+      if (take.length > 0) {
+        const moved = new Set(take);
+        const marked = [...new Set([...take, ...named])];
+        await ctx.mark(marked, id => ({ ...(moved.has(id) ? { readAt: at, settledAt: at } : {}), ...(named.includes(id) ? { settleNamedAt: at } : {}) }), origin);
+      }
+      return { settled: titled(take), left };
     },
 
     async mark(threadIds, marks, origin) {
@@ -999,7 +1055,18 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
     },
 
     async restore(threadIds, origin) {
-      await ctx.mark(threadIds, { readAt: clock.now(), settledAt: undefined }, origin);
+      const { settled, titled } = await settleReads(threadIds, origin);
+      const back = [
+        ...new Set(
+          threadIds.flatMap(one => {
+            const record = threadRecords.get(one);
+            const at = Math.max(record?.settledAt ?? 0, record?.settleNamedAt ?? 0);
+            return [one, ...ctx.treeUnder(one).filter(id => at > 0 && threadRecords.get(id)?.settledAt === at)];
+          }),
+        ),
+      ].filter(settled);
+      if (back.length > 0) await ctx.mark(back, { readAt: clock.now(), settledAt: undefined }, origin);
+      return { restored: titled(back) };
     },
 
     async search(query, origin) {

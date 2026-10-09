@@ -198,6 +198,12 @@ export function threadsArea(ctx: RuntimeContext): ThreadsArea {
     if (scope === undefined) return true;
     return threadId !== undefined && ctx.rootOf(threadId) === scope.rootThreadId;
   };
+  /** Which threads a caller may settle or restore: a thread's token itself and the threads under it, never its lead
+   * or one beside it, whose fold is the person's; a caller that is no thread, any. */
+  const settlesThread = (threadId: string, caller: Caller | undefined): boolean => {
+    const scope = scopeOf(caller);
+    return scope === undefined || threadId === scope.threadId || treeUnder(scope.threadId).includes(threadId);
+  };
   /** What a thread is called, by the one rule every listing reads it by: its own rows folded, so a thread named in
    * another thread's row reads there exactly as it reads in the sidebar. */
   const threadTitle = (threadId: string): string => {
@@ -479,7 +485,11 @@ export function threadsArea(ctx: RuntimeContext): ThreadsArea {
     // what every row written before the road rode beside the targets holds.
     const asWho: Caller | undefined = by === undefined ? road : { origin: road ?? "here", by };
     // A start answers once the line steered the running turn or launched one of its own, which is when it is taken.
-    ctx.sessionsApi.start(parent.workspaceId, { prompt: text, harness: parent.harness, thread: notify, startedBy: line.startedBy ?? "agent", ...(line.startedBy === undefined ? { wakesLead: true as const } : {}) }, asWho).then(() => owedTaken(line), (e: unknown) => {
+    ctx.sessionsApi.start(parent.workspaceId, { prompt: text, harness: parent.harness, thread: notify, startedBy: line.startedBy ?? "agent", ...(line.startedBy === undefined ? { wakesLead: true as const } : {}) }, asWho).then(() => {
+      owedTaken(line);
+      // A child's finished line is its whole report, so the lead that took it has read the child.
+      if (line.startedBy === undefined) void ctx.mark([from], { readAt: clock.now() }, undefined).catch((e: unknown) => console.warn(`thread ${from.slice(0, 8)} was not marked read: ${e instanceof Error ? e.message : String(e)}`));
+    }, (e: unknown) => {
       // A line queued behind the parent's turn meets the nap that ended that turn: it waits for the wake as well.
       if (holdForWake()) return;
       console.warn(`thread ${from.slice(0, 8)} ended, but its line did not reach thread ${notify.slice(0, 8)}: ${e instanceof Error ? e.message : String(e)}`);
@@ -758,7 +768,7 @@ export function threadsArea(ctx: RuntimeContext): ThreadsArea {
   };
   return {
     threadRuns, launchingOn, runningOn, latestOn, keptAgents, reapKept, endKept, hostWrites, writeSession, takeKept,
-    holdKept, threadOfToken, treeUnder, drivesThread, leadAsks, capHeld, capHold, capLend, capFull, capWait, capStop, capStopping, capLeft, stoppedBehind, stopUnder, notifyOn, notifyReach, tellAs,
+    holdKept, threadOfToken, treeUnder, drivesThread, settlesThread, leadAsks, capHeld, capHold, capLend, capFull, capWait, capStop, capStopping, capLeft, stoppedBehind, stopUnder, notifyOn, notifyReach, tellAs,
     notifyEnd, deliverOwed, sendBack, settleCut, notARepo, checkpointsLanding, keepCheckpoint, takenTurn, recordSteer, snapshotOf,
     readTurnChanges, usageComputerOf, vaultedFor, usageAccountOf, limitDetailsDue,
   };

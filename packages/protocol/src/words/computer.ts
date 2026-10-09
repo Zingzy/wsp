@@ -101,6 +101,18 @@ export function threadForgetRefusal(threadId: string): string {
   return `thread ${threadWord(threadId)} has a turn that ran; only a thread no turn ever ran on can be forgotten`;
 }
 
+/** Why a settle left a thread it was named: something in its tree works or asks, or the fold holds it already. */
+export const SETTLE_WORKING = "still working: stop it first";
+export const SETTLE_ALREADY = "already settled";
+
+/** A settle or a restore naming one of an agent's own subagents, which folds with the thread it runs in. */
+export const subagentSettleLine = (id: string): string => `${id} is a subagent, and a subagent settles with its lead's turn`;
+export const SUBAGENT_SETTLE_FIX = "settle the thread it runs in.";
+
+/** A thread's own token naming its lead or a thread beside it in a settle or a restore. */
+export const notUnderLine = (threadId: string): string => `thread ${threadWord(threadId)} is not under this thread, and a thread settles and restores only itself and the threads it started`;
+export const NOT_UNDER_FIX = "leave its lead and the threads beside it to the person.";
+
 /** The one sentence a forget is refused with for a row from before threads: the fold keys such a row by its own
  * turn id, so no thread here answers to it and nothing a forget could take is named. */
 export function threadWithoutIdRefusal(rowId: string): string {

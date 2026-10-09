@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import type { Attachment, AccountRow, BringBackResult, Capabilities, GoldenStageEvent, HarnessCatalog, InitJob, InitSetup, PendingComputer, PlaceDial, PlaceSetAlso, PlaceSettingsAsk, PlaceSettingWord, PlaceView, PortForward, Preferences, PreferencesPatch, ProjectView, ReleaseView, ReviewDraft, SessionView, ThreadMarks, WorkspaceCreateStage, WorkspaceLanding, WorkspaceLook, WorkspaceSize, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
+import type { Attachment, AccountRow, BringBackResult, Capabilities, GoldenStageEvent, HarnessCatalog, InitJob, InitSetup, PendingComputer, PlaceDial, PlaceSetAlso, PlaceSettingsAsk, PlaceSettingWord, PlaceView, PortForward, Preferences, PreferencesPatch, ProjectView, ReleaseView, ReviewDraft, SessionSettleResult, SessionView, ThreadMarks, WorkspaceCreateStage, WorkspaceLanding, WorkspaceLook, WorkspaceSize, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
 import type { Launch } from "../../adapt/view-model.js";
 import type { Api, ConnStatus, ProtocolEvent } from "../client.js";
 import type { Failure } from "../failure.js";
@@ -272,9 +272,9 @@ export interface State {
   /** Tells the host this window showed the thread; the thread.marked it answers with reloads the rows in every
    * window. A refusal says nothing: nobody asked for it, and the thread reads Done until the next showing. */
   readThread(threadId: string): Promise<void>;
-  /** Settles the threads by hand through the host, a root and every thread under it; a refusal is a toast, and the
-   * answer is whether the host settled them. */
-  settleThreads(threadIds: readonly string[]): Promise<boolean>;
+  /** Settles each thread and every thread under it through the host, answering what it settled and what it left; a
+   * refusal is a toast and answers nothing. */
+  settleThreads(threadIds: readonly string[]): Promise<SessionSettleResult | undefined>;
   /** Pins, snoozes or places threads through the host, or takes one of those back; a refusal is a toast. */
   markThreads(threadIds: readonly string[], marks: ThreadMarks): Promise<void>;
   /** Takes settled threads back out of the fold through the host; a refusal is a toast. */

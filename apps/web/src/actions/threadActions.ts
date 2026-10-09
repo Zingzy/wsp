@@ -7,7 +7,7 @@
 // mark the root alone, which carries its tree with it. Keep this one, on a
 // thread one send to several models opened, deletes the copies the others run in.
 import { AlarmClockIcon, ArchiveIcon, ArchiveRestoreIcon, CheckIcon, FileTextIcon, LinkIcon, MessageSquareIcon, PencilIcon, PinIcon, PinOffIcon, SquareIcon, Trash2Icon, Undo2Icon } from "lucide-react";
-import { threadMarkdown, threadMessages, type HarnessCatalog, type SessionEvent, type SessionStatus, type ThreadMarks, type WorkspaceState } from "@wsp/protocol";
+import { threadMarkdown, threadMessages, type SessionSettleResult, type HarnessCatalog, type SessionEvent, type SessionStatus, type ThreadMarks, type WorkspaceState } from "@wsp/protocol";
 import type { SidebarThreadSnapshot } from "../adapt/index.js";
 import { addressLink } from "../protocol/address.js";
 import { CHILD_WORDS, CLIENT_CANNOT_SEND, CLIENT_CANNOT_REWIND, CLIENT_CANNOT_DELETE, CLIENT_CANNOT_MARK, CLIENT_CANNOT_RESTORE, CLIENT_CANNOT_SETTLE, CLIENT_CANNOT_STOP, NOTHING_READ_TO_SETTLE, THREAD_HAS_NO_ID, THREAD_NOT_RUNNING, THREAD_TREE_WORKING, THREAD_WORDS, threadForgetRefusalFor, threadRenameRefusal, CLIENT_CANNOT_READ } from "./format.js";
@@ -280,15 +280,24 @@ export interface ChildVerbs {
   readonly message?: (() => void) | undefined;
   readonly stop?: ((sessionId: string) => Promise<void>) | undefined;
   readonly stopTask?: ((task: { sessionId: string; task: string; harness: string; title: string }) => Promise<void>) | undefined;
-  /** Whether the host settled them: a refusal is the settle's own toast. */
-  readonly settle?: ((threadIds: ReadonlyArray<string>) => Promise<boolean>) | undefined;
+  readonly settle?: ((threadIds: ReadonlyArray<string>) => Promise<SessionSettleResult | undefined>) | undefined;
   readonly restore?: ((threadIds: ReadonlyArray<string>) => Promise<void>) | undefined;
 }
 
-/** Settles threads and says so with the way back, which restores the same set; a refused settle says the refusal alone. */
-async function settleWithUndo(threadIds: ReadonlyArray<string>, verbs: ChildVerbs, where: string): Promise<void> {
-  if (verbs.settle === undefined || !(await verbs.settle(threadIds))) return;
-  addNotice({ kind: "done", text: CHILD_WORDS.settled(threadIds.length), where, action: { word: CHILD_WORDS.undo, run: () => void verbs.restore?.(threadIds) } });
+/** Settles threads and says what the host settled and what it left with why, with the way back, which restores what
+ * the host settled: every settle the app sends goes through here. A refusal is the store's toast. */
+export async function settleSaying(threadIds: ReadonlyArray<string>, verbs: Pick<ChildVerbs, "settle" | "restore">, where?: string): Promise<void> {
+  if (verbs.settle === undefined) return;
+  const answer = await verbs.settle(threadIds);
+  if (answer === undefined) return;
+  const whys = [...new Set(answer.left.map(t => t.why))].map(why => CHILD_WORDS.left(answer.left.filter(t => t.why === why).length, why));
+  const moved = answer.settled.map(t => t.threadId);
+  addNotice({
+    kind: moved.length > 0 ? "done" : "note",
+    text: [...(moved.length > 0 ? [CHILD_WORDS.settled(moved.length)] : []), ...whys].join(". "),
+    ...(where !== undefined ? { where } : {}),
+    ...(moved.length > 0 ? { action: { word: CHILD_WORDS.undo, run: () => void verbs.restore?.(moved) } } : {}),
+  });
 }
 
 const isThread = (target: ChildTarget): boolean => target.task === null;
@@ -321,7 +330,7 @@ export const childActions: ReadonlyArray<ActionEntry<ChildTarget, ChildVerbs>> =
     applies: target => isThread(target) && target.part !== "settled" && !target.running,
     title: () => THREAD_WORDS.settle,
     refusal: (target, verbs) => (verbs.settle === undefined ? CLIENT_CANNOT_SETTLE : target.working ? THREAD_TREE_WORKING : null),
-    run: (target, verbs) => settleWithUndo(target.settles, verbs, target.title),
+    run: (target, verbs) => settleSaying(target.settles, verbs, target.title),
   },
   {
     id: "restore",
@@ -347,6 +356,8 @@ export const childActions: ReadonlyArray<ActionEntry<ChildTarget, ChildVerbs>> =
 export interface LeadTarget {
   readonly title: string;
   readonly finished: ReadonlyArray<string>;
+  /** How many threads those hold with what is under them, what the act's label counts. */
+  readonly threads: number;
 }
 
 export const leadActions: ReadonlyArray<ActionEntry<LeadTarget, ChildVerbs>> = [
@@ -355,8 +366,8 @@ export const leadActions: ReadonlyArray<ActionEntry<LeadTarget, ChildVerbs>> = [
     group: "state",
     icon: () => ArchiveIcon,
     applies: target => target.finished.length > 0,
-    title: target => CHILD_WORDS.settleFinished(target.finished.length),
+    title: target => CHILD_WORDS.settleFinished(target.threads),
     refusal: (_target, verbs) => (verbs.settle === undefined ? CLIENT_CANNOT_SETTLE : null),
-    run: (target, verbs) => settleWithUndo(target.finished, verbs, target.title),
+    run: (target, verbs) => settleSaying(target.finished, verbs, target.title),
   },
 ];

@@ -29,9 +29,9 @@ import { THREAD_TREE_WORKING, rebuildRefusedLine } from "../actions/format.js";
 import { CREATE_ASKED, CREATE_STEP_WORDS, currentStep, stepWords, stoppedStep } from "../shell/creationLog.js";
 import { actionById, actionIfAny, resolveActions, type ResolvedAction } from "../actions/registry.js";
 import { projectActions, type ProjectVerbs } from "../actions/projectActions.js";
-import { settledFoldActions, threadActions, threadTarget, type ThreadVerbs } from "../actions/threadActions.js";
+import { settleSaying, settledFoldActions, threadActions, threadTarget, type ThreadVerbs } from "../actions/threadActions.js";
 import { useChildVerbs, useThreadVerbs, useWorkspaceVerbs } from "../actions/verbs.js";
-import { childActs, finishedKeys, kindOf, leadActs, leadNodes } from "../components/threads/leadTree.js";
+import { childActs, finishedTake, kindOf, leadActs, leadNodes } from "../components/threads/leadTree.js";
 import { workspaceActions, workspaceTarget } from "../actions/workspaceActions.js";
 import type { SidebarProjectSnapshot } from "../adapt/index.js";
 import { ForgetWorkspaceDialog } from "../components/ForgetWorkspaceDialog.js";
@@ -192,6 +192,7 @@ export function WorkspaceSidebar() {
   const canDelete = useStore(s => s.api?.deleteWorkspace !== undefined);
   const markThreads = useStore(s => s.markThreads);
   const settleThreads = useStore(s => s.settleThreads);
+  const restoreThreads = useStore(s => s.restoreThreads);
   const setPreferences = useStore(s => s.setPreferences);
   const projectOrder = useStore(s => s.preferences.projectOrder);
   const harnesses = useStore(s => s.harnesses);
@@ -391,7 +392,7 @@ export function WorkspaceSidebar() {
       const settle = settled ? undefined : root !== null ? actionIfAny(actionsOf, "settle") : actionIfAny(childActs(lead, part, tree, childVerbs), "settle");
       const quiet = !settled && settle !== undefined && settle.refusal === null && settlesOnHover(real, tree);
       const kids = leadNodes(thread, real.children, tree);
-      const own = [...actionsOf, ...(root === null && settle !== undefined ? [settle] : []), ...leadActs(thread, finishedKeys(kids, tree), childVerbs)];
+      const own = [...actionsOf, ...(root === null && settle !== undefined ? [settle] : []), ...leadActs(thread, finishedTake(kids, tree), childVerbs)];
       // The tree under the tile: drawn while it stands open, counted while it is folded, and folded only where the host
       // can open it again.
       const drawsTree = !settled && part === "live" && inbox === undefined && item.snoozedWorking === undefined && drawsUnder(real, tree);
@@ -507,7 +508,7 @@ export function WorkspaceSidebar() {
       // The menu's Settle is held with this sentence while the tree works, and a drop says the same.
       const tree = treeSettle(node);
       if (tree.working) addNotice({ kind: "error", text: THREAD_TREE_WORKING });
-      else void settleThreads(tree.threadIds);
+      else void settleSaying(tree.threadIds, { settle: settleThreads, restore: restoreThreads });
       return;
     }
     const marks = dropMarks(node, place);

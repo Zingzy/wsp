@@ -124,6 +124,7 @@ import type {
   KeptProcess,
   KeptLaunch,
   ThreadRecord,
+  ThreadStamps,
   TreeTalk,
   BuilderRecord,
   LiveBuilder,
@@ -471,8 +472,9 @@ export interface BootArea {
   readonly entryOfRow: (row: { threadId?: string; workspaceId: string }, origin: Caller | undefined, talk?: TreeTalk) => Promise<LiveWorkspace | undefined>;
   readonly listedRows: (held: readonly (Map<string, SessionEntry> extends Map<string, infer V> ? V : never)[]) => SessionView[];
   readonly threadFacts: (threadId: string) => ThreadFacts | undefined;
+  readonly settledNow: (threadId: string, settleMs: number | null) => boolean;
   readonly pushHead: (threadId: string) => void;
-  readonly mark: (threadIds: readonly string[], stamps: Partial<Omit<ThreadRecord, "harness" | "permissionMode">>, origin: Caller | undefined) => Promise<void>;
+  readonly mark: (threadIds: readonly string[], stamped: ThreadStamps | ((threadId: string) => ThreadStamps), origin: Caller | undefined) => Promise<void>;
   readonly endSnoozeFor: (row: Pick<SessionView, "threadId" | "rootThreadId">) => void;
   readonly armResume: (threadIds: readonly string[], on: boolean, origin: Caller | undefined) => Promise<void>;
   readonly resumeAfterLimit: (threadId: string) => Promise<void>;
@@ -606,6 +608,7 @@ export interface ThreadsArea {
   readonly threadOfToken: (token: string) => string;
   readonly treeUnder: (threadId: string) => string[];
   readonly drivesThread: (threadId: string | undefined, caller: Caller | undefined) => boolean;
+  readonly settlesThread: (threadId: string, caller: Caller | undefined) => boolean;
   readonly leadAsks: Map<string, PermissionAsk>;
   readonly capHeld: Map<string, CapHeld>;
   readonly capHold: (record: WorkspaceRecord, turnId: string, lender: string | undefined) => void;

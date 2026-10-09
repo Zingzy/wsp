@@ -163,15 +163,17 @@ function subtreeKeys<N>(node: LeadNode<N>, tree: Tree<N>): string[] {
 const works = <N>(node: LeadNode<N>, tree: Tree<N>): boolean =>
   ("subagent" in node ? node.subagent.state === "running" : node.thread !== null && isThreadWorking(node.thread)) || kidsOf(node, tree).some(kid => works(kid, tree));
 
-/** What a settle of a thread takes, and whether something in it works, which holds the settle: every settle in the
- * app is read here. It sends the thread and everything under it until the host settles down a tree itself. */
-export function settleTake<N>(node: LeadNode<N>, tree: Tree<N>): { threadIds: string[]; working: boolean } {
-  return { threadIds: subtreeKeys(node, tree), working: works(node, tree) };
+/** What a settle of a thread sends, how many threads it holds, and whether something in it works, which holds the
+ * settle: every settle in the app is read here. It sends the thread alone, since the host settles everything under it. */
+export function settleTake<N>(node: LeadNode<N>, tree: Tree<N>): { threadIds: string[]; threads: number; working: boolean } {
+  return { threadIds: "subagent" in node || node.thread === null ? [] : [node.thread.id], threads: subtreeKeys(node, tree).length, working: works(node, tree) };
 }
 
-/** Every finished thread anywhere in the tree with all it holds, each once: what the lead's Settle N finished takes. */
-export function finishedKeys<N>(nodes: ReadonlyArray<LeadNode<N>>, tree: Tree<N>): string[] {
-  return nodes.flatMap(node => ("subagent" in node ? [] : partOf(node, tree) === "finished" ? settleTake(node, tree).threadIds : finishedKeys(kidsOf(node, tree), tree)));
+/** Every finished thread anywhere in the tree, each once, and how many threads they hold: what the lead's Settle N
+ * finished sends and counts. */
+export function finishedTake<N>(nodes: ReadonlyArray<LeadNode<N>>, tree: Tree<N>): { threadIds: string[]; threads: number } {
+  const takes = nodes.map(node => ("subagent" in node ? { threadIds: [], threads: 0 } : partOf(node, tree) === "finished" ? settleTake(node, tree) : finishedTake(kidsOf(node, tree), tree)));
+  return { threadIds: takes.flatMap(t => t.threadIds), threads: takes.reduce((n, t) => n + t.threads, 0) };
 }
 
 /** The act registry's target for one child. */
@@ -201,6 +203,6 @@ export function childActs<N>(node: LeadNode<N>, part: ChildPart, tree: Tree<N>, 
 }
 
 /** The lead's own act over its tree: Settle N finished. */
-export function leadActs(lead: Thread, finished: ReadonlyArray<string>, verbs: ChildVerbs): ResolvedAction[] {
-  return resolveActions(leadActions, { title: lead.title, finished }, verbs);
+export function leadActs(lead: Thread, finished: { threadIds: ReadonlyArray<string>; threads: number }, verbs: ChildVerbs): ResolvedAction[] {
+  return resolveActions(leadActions, { title: lead.title, finished: finished.threadIds, threads: finished.threads }, verbs);
 }
