@@ -1,3 +1,22 @@
 # wsp slate state
 
-Generated from `wsp slate state --help` and its line in `COMMAND_LINES` (`packages/host/src/cli/commands.ts`).
+{/* Written by apps/docs-next/scripts/cli.ts: change the script or its source and run pnpm --filter @wsp/docs-next generate. */}
+
+```text
+usage: wsp slate state [<thread>] [<path>=<json>...] [--start <run>]...
+       [--if-version <n>]
+  sets the slate's $values by path, like '$steps[2].done=true' or 'i=2', starts
+  runs the person let run every time, and prints its sketch
+
+  --if-version    the version a read printed; refused with V750 when the
+                  document moved past it
+  --start         a run to start now that the person said "Always in this
+                  thread" to; any other answers held; repeats
+  --json          print the raw protocol values, one JSON object per line, with
+                  everything else on stderr
+  --state         the state file the host serves
+  --host          run the line against a host on your account, by the name wsp
+                  hosts lists it under; WSP_HOST names one for a whole shell
+```
+
+MCP tool: [`slate_state`](/reference/mcp-tools#slatestate).

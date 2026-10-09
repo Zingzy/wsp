@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { adoptLoginPath, agentsHere, aimedHost, computerNameHere, daemonBinaryHere, dialHost, installEach, mcpServerSpec, runningWsp, serviceAddressHere, shimPath, systemService, wspHome, type CliIO } from "@wsp/host";
-import { DEFAULT_PREFERENCES, HOST_WORDS, OutsideLine, ThemePreference, hostMenuAction, hostsMenuItems } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, HOME_ENV, HOST_WORDS, OutsideLine, ThemePreference, hostMenuAction, hostsMenuItems } from "@wsp/protocol";
 import { BrowserWindow, Menu, Notification, Tray, app, dialog, ipcMain, nativeImage, nativeTheme, powerSaveBlocker, shell, type IpcMainEvent, type IpcMainInvokeEvent } from "electron";
 import { awakeWanted } from "./awake.js";
 import { chooseFrom, contextMenuTemplate, parseContextMenuItems } from "./context-menu.js";
@@ -48,7 +48,7 @@ const DESKTOP = desktopOf(process.env);
 const newWindow = (preload?: string): BrowserWindow => new BrowserWindow(windowOptions(process.platform, app.getVersion(), preload, updateRoad, DESKTOP));
 
 function launch(): Launch {
-  const env = process.env["WSP_HOME"];
+  const env = process.env[HOME_ENV];
   return { packaged: app.isPackaged, cwd: process.cwd(), ...(env !== undefined ? { env } : {}) };
 }
 

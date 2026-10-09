@@ -1,3 +1,24 @@
 # wsp usage
 
-Generated from `wsp usage --help` and its line in `COMMAND_LINES` (`packages/host/src/cli/commands.ts`).
+{/* Written by apps/docs-next/scripts/cli.ts: change the script or its source and run pnpm --filter @wsp/docs-next generate. */}
+
+```text
+usage: wsp usage [--range day|week|month]
+       [--by agent|account|computer|project|model|source]
+  what each agent account signed in on any of your computers may still use, and
+  what was used over a day, a week or a month split one way; two answers, never
+  added together
+
+  --range    the days what was used is read over: day (today, the default), week
+             (the last seven) or month (the last thirty); the accounts' limits
+             are the same whatever it says
+  --by       how what was used is split: agent (the default), account, computer,
+             project or model
+  --json     print the raw protocol values, one JSON object per line, with
+             everything else on stderr
+  --state    the state file the host serves
+  --host     run the line against a host on your account, by the name wsp hosts
+             lists it under; WSP_HOST names one for a whole shell
+```
+
+MCP tool: [`usage`](/reference/mcp-tools#usage).

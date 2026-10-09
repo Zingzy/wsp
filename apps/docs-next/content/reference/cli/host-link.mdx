@@ -1,3 +1,19 @@
 # wsp host link
 
-Generated from `wsp host link --help` and its line in `COMMAND_LINES` (`packages/host/src/cli/commands.ts`).
+{/* Written by apps/docs-next/scripts/cli.ts: change the script or its source and run pnpm --filter @wsp/docs-next generate. */}
+
+```text
+usage: wsp host link [<url>] [--name <name>]
+  put the host on this computer onto your account, so it is reachable from
+  anywhere with no port open to the world; on a computer that is signed in it
+  takes no address and asks nothing, and on one that is not it prints a code and
+  a page to approve it on
+
+  --state    the state file: this word first, else WSP_HOME's state.json, else
+             ./.wsp/state.json when the current directory is a checkout of wsp,
+             else state.json in the home the running host serves
+  --name     the name to call the computer by here; what its address calls it
+             without one
+```
+
+No MCP tool: puts this computer on a person's relay account, which is theirs to give away.

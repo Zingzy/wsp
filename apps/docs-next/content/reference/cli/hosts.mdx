@@ -1,3 +1,15 @@
 # wsp hosts
 
-Generated from `wsp hosts --help` and its line in `COMMAND_LINES` (`packages/host/src/cli/commands.ts`).
+{/* Written by apps/docs-next/scripts/cli.ts: change the script or its source and run pnpm --filter @wsp/docs-next generate. */}
+
+```text
+usage: wsp hosts
+  every host on your account this computer can reach, with a live beat for each
+  and the one every line takes marked
+
+  --state    the state file: this word first, else WSP_HOME's state.json, else
+             ./.wsp/state.json when the current directory is a checkout of wsp,
+             else state.json in the home the running host serves
+```
+
+No MCP tool: reads which hosts this computer can reach and writes the account's into its own files, which no thread decides for the person.

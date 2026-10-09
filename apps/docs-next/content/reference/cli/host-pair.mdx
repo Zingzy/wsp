@@ -1,3 +1,17 @@
 # wsp host pair
 
-Generated from `wsp host pair --help` and its line in `COMMAND_LINES` (`packages/host/src/cli/commands.ts`).
+{/* Written by apps/docs-next/scripts/cli.ts: change the script or its source and run pnpm --filter @wsp/docs-next generate. */}
+
+```text
+usage: wsp host pair
+  a one time code another computer redeems for a token of its own, when the host
+  listens beyond this computer
+
+  --state    the state file: this word first, else WSP_HOME's state.json, else
+             ./.wsp/state.json when the current directory is a checkout of wsp,
+             else state.json in the home the running host serves
+  --host     read to say this line runs at its own host's terminal; it dials no
+             other
+```
+
+No MCP tool: hands out a code that lets another computer drive this host; only a person at the host's own terminal gives that away.

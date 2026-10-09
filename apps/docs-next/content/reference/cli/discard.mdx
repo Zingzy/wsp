@@ -1,3 +1,18 @@
 # wsp discard
 
-Generated from `wsp discard --help` and its line in `COMMAND_LINES` (`packages/host/src/cli/commands.ts`).
+{/* Written by apps/docs-next/scripts/cli.ts: change the script or its source and run pnpm --filter @wsp/docs-next generate. */}
+
+```text
+usage: wsp discard <workspace> <path> [--yes]
+  puts one changed file of the workspace's copy back as its last commit has it,
+  or removes it where that has none
+
+  --yes      go ahead without being asked
+  --json     print the raw protocol values, one JSON object per line, with
+             everything else on stderr
+  --state    the state file the host serves
+  --host     run the line against a host on your account, by the name wsp hosts
+             lists it under; WSP_HOST names one for a whole shell
+```
+
+MCP tool: [`discard`](/reference/mcp-tools#discard).

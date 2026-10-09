@@ -1,3 +1,20 @@
 # wsp worktree remove
 
-Generated from `wsp worktree remove --help` and its line in `COMMAND_LINES` (`packages/host/src/cli/commands.ts`).
+{/* Written by apps/docs-next/scripts/cli.ts: change the script or its source and run pnpm --filter @wsp/docs-next generate. */}
+
+```text
+usage: wsp worktree remove <project> <branch> [--force] [--yes]
+  takes away a worktree wsp made for the branch, with git: refused while a
+  thread is working in it, and over files no commit holds unless --force; the
+  branch stays, and a worktree wsp did not make is never removed
+
+  --force    remove it over files no commit holds, which go with it
+  --yes      go ahead without being asked
+  --json     print the raw protocol values, one JSON object per line, with
+             everything else on stderr
+  --state    the state file the host serves
+  --host     run the line against a host on your account, by the name wsp hosts
+             lists it under; WSP_HOST names one for a whole shell
+```
+
+MCP tool: [`worktree_remove`](/reference/mcp-tools#worktreeremove).

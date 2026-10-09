@@ -1,3 +1,18 @@
 # wsp skills enable
 
-Generated from `wsp skills enable --help` and its line in `COMMAND_LINES` (`packages/host/src/cli/commands.ts`).
+{/* Written by apps/docs-next/scripts/cli.ts: change the script or its source and run pnpm --filter @wsp/docs-next generate. */}
+
+```text
+usage: wsp skills enable <name> [<workspace>] [--on <computer>]
+  turns a skill that was turned off on again, its SKILL.md.off renamed back
+
+  --on       the computer to read, by the name wsp computers shows; this
+             computer without it, and a workspace names its own
+  --json     print the raw protocol values, one JSON object per line, with
+             everything else on stderr
+  --state    the state file the host serves
+  --host     run the line against a host on your account, by the name wsp hosts
+             lists it under; WSP_HOST names one for a whole shell
+```
+
+MCP tool: [`skills_enable`](/reference/mcp-tools#skillsenable).

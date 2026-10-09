@@ -1,3 +1,195 @@
+---
+changelog: true
+---
+
 # Changelog
 
-Generated from the GitHub release notes (`gh api repos/wsp-labs/wsp/releases`), drafts left out, as a Keep a Changelog file.
+{/* Written by apps/docs-next/scripts/changelog.ts from the release notes on GitHub: run pnpm --filter @wsp/docs-next generate. */}
+
+Every release of wsp, newest first, with the notes it was published with. The downloads are on [GitHub](https://github.com/wsp-labs/wsp/releases).
+
+## [0.3.1] - 2026-10-09
+
+### What changed since v0.3.0
+
+#### Renamed in 0.3.0
+
+The front page of `wsp --help` is sixteen words on five nouns: image, place, workspace, thread, project. Every command is `wsp <verb> <workspace> ...`, the workspace first. Nothing answers to the old words, so here they are, once.
+
+| was | is |
+| --- | --- |
+| `wsp thread new --in <workspace> "<task>"` | `wsp run <workspace> "<task>"` |
+| the MCP tool `thread_new` | the MCP tool `run` |
+| `wsp import <folder> --to <workspace>` | `wsp import <workspace> <folder>` |
+| `wsp threads --in <workspace>` | `wsp threads <workspace>` |
+| `wsp new --local [name]` | `wsp new <name> --on <place>`, naming the computer you are at |
+| `wsp new --ssh <user@host>` | `wsp add user@host` (or an alias from your ssh config), then `wsp new <name> --on <that place>` |
+| `wsp init --provider <id>` | `wsp add <id>` |
+| `wsp pair`, `wsp devices` | `wsp host pair`, `wsp host devices` |
+| `wsp connect <url>` | `wsp login`: a host on your account needs no code |
+| `wsp hosts default`, `wsp disconnect` | nothing: a line goes to your account's one host, `--host` names another, and `wsp logout` drops them |
+| `wsp relay link`, `wsp relay unlink` | `wsp host link`, `wsp host unlink` |
+| `wsp relay hosts`, `wsp host linked`, `wsp host list` | `wsp hosts`, the hosts on your account |
+| `wsp relay clients`, `wsp host clients` | `wsp login`, and `wsp logout <id>` to sign one out |
+| `wsp up` to get going | nothing: the first command that needs a host starts one, and `wsp down` stops it |
+| plain `wsp` serving | plain `wsp` prints the help |
+
+This computer and every computer or provider you add are places, and `wsp places` lists them; `--on <place>` on `wsp new` is the one flag you meet, and only once you have more than one. `wsp add` is the one way a place joins: `wsp add user@host` for a computer over ssh (an alias from your `~/.ssh/config` works as well), `wsp add <provider>` for a provider, `wsp add` alone for the line another computer types. `wsp up` is still there for a host you want to watch in a terminal or one that serves beyond this computer.
+
+Agents on this computer get the new skill the first time the new host starts; a project folder whose `AGENTS.md` carries the old section gets the new one at the next `wsp mcp install` there.
+
+- www: the FAQ says what the relay sees
+- www: the page tells wsp as it is now, shown by the real app
+- feat: a restart names the thread it replaced, which settles
+- fix(release): pin the root vitest setup files to the config folder
+- feat: settle a thread's tree from the host, the verbs and the tools
+- feat(web): a lead's tree in the sidebar, its folds, Needs you as inbox
+- ci: restore the daemon a landing built, build packages beside it
+- feat(web): one drawer around the composer, and the bars its rows open
+- feat(web): a lead's calls stand as its children's live rows
+- feat(web): a lead's tree read once, its rows, folds and acts
+- fix: a box's Codex files land where its threads' Codex reads
+- fix: a woken agent's reply, not a held one, ends a steered turn
+- test(screenshots): a marathon lead fixture the lead shots are taken on
+- test(runtime): box launch cases run on a Mac with Linux unchanged
+- A status is its icon alone, a Stopped mark, one tree line
+- build: type check with TypeScript 7, the native compiler
+- test(runtime): close the restarted host before removing its folder
+- feat: listings carry a turn's last line, failure, subagents and fold
+
+### Downloads
+
+- `wsp-0.3.1-mac.dmg`: macOS on Apple silicon and on Intel, one disk image for both.
+- `wsp-0.3.1.AppImage`: Linux on x64.
+- The command line: `npm i -g @wsp-labs/wsp@0.3.1`.
+
+macOS may ask again for permissions you gave wsp, since each update is signed on its own.
+
+#### Opening a downloaded bundle
+
+Open the macOS disk image and drag wsp onto the Applications folder it shows. One image holds both Apple silicon and Intel.
+
+The bundles are not signed yet, so macOS refuses the first open of `wsp.app`. Open it once, dismiss the refusal, then in System Settings under Privacy & Security find the line saying wsp was blocked and pick Open Anyway. Or from a terminal: `xattr -dr com.apple.quarantine /Applications/wsp.app`. Every open after that is a double click.
+
+Start the Linux AppImage from a terminal in the folder it downloaded to: `chmod +x wsp-*.AppImage && ./wsp-*.AppImage`. A double-click on its icon on Ubuntu's desktop does not start it: the desktop hands an AppImage to Disk Image Mounter, which mounts it and runs nothing. There, set the run bit, then right-click the icon and pick Run as a program. It needs no FUSE 2. It mounts itself with `fusermount3` from the `fuse3` package, which Ubuntu, Fedora and Arch desktops already have. If it says it cannot mount the AppImage, install `fuse3`, or start it with `--appimage-extract-and-run`.
+
+## [0.2.0] - 2026-09-10
+
+### What changed since v0.1.4
+
+- setup: the running estimate, the sign-in slide, and what a live run hit
+- tests own their environment, the first launch waits on its event
+- fix(setup): the build's error states say what happened and lose nothing
+- fix(setup): the Solari key is checked with the provider before it is saved
+- fix(signin): every login runs without questions, or says which it cannot answer
+- fix(setup): the first cloud workspace is forked off the step's answer, not the list
+- feat(app): a build that needs you says so in three places
+- fix(app): the cloud setup screens in the first launch's grammar, measured
+- fix(setup): the agent road launches a thread that can do the job, and shows it
+- feat(host): sign-ins from the app finish by callback, or take the code back
+- feat(app): the cloud setup is full-window screens in the first launch's grammar
+- feat(desktop): the first launch's tilde gets its edges, the screens lose their filler
+- feat(sidebar): the cloud setup row is a keycap button that shows the build
+- build(desktop): one hairline arrow points from the app to Applications
+- feat(sidebar): the kind glyph goes green while the machine runs, this computer shows its size
+- build(desktop): the disk image window on a light ground, one glow, one line
+- test(vault): the export's streaming claims no longer read the disk's flush timing
+- fix(shell): the centre column keeps a floor, the sidebar gives way beside the panel
+- fix(vault): a nap over the cap says so on the row and the tab, not only once
+- fix(threads): a thread is spoken for from the moment its first turn is asked
+- feat(image): a manifest of recipe-owned files decides what an upgrade keeps
+- feat(labs): spaces as icons, a theme colour picker, real settings controls
+- build(desktop): a DMG that moves to Applications, one universal build, stable download URLs
+- feat(app): cloud setup is a job the app draws, and init runs on that job
+- test(desktop): a keyless computer with a local workspace opens on the list
+- feat(cli): wsp thread read prints a thread's messages
+- fix(local): a thread on this computer gets its title with the person's own sign-in
+- fix(web): the composer's pickers stay readable at every width
+- feat(www): the host's memory as one measured line, guarded by a test
+- feat(projects): drag a folder onto a workspace, and a thread finds its project from where you stand
+- feat(local): this computer shows its load, memory, disk and processes
+- test: two flaky cases wait for the event they assert on
+- feat(threads): a thread names itself as a notify target, and nobody waits
+- feat(desktop): first launch is this computer, with a welcome and an agents screen
+- feat(app): rows with fixed slots, an honest machine tab, and a composer that wakes
+- feat(projects): a workspace holds projects, and a thread starts in one
+- fix(protocol): no provider URL rides a workspace view, and a table read leaves the sidebar alone
+- fix(recipe): the ssh config copied to a Linux golden drops macOS-only options
+- feat(host): this computer and ssh machines work with no provider key
+- fix(cli): the workspaces table shows the state the sidebar shows
+- fix(daemon): the daemon runs under systemd and comes back when killed
+- feat(ssh): a machine you already have as a workspace, over ssh
+- feat(init): this computer as a workspace from the first run, with or without a key
+- feat(local): a turn and an exec on this computer start in the workspace's folder
+- build(desktop): sign and notarize mac bundles when the secrets exist
+- feat(threads): the last access pick is the default for the next thread
+- test: the suite is green on a Linux runner
+- fix(web): one capped Chromium launch for every render test
+- feat(www): canonical, robots, sitemap and structured data
+
+### Downloads
+
+- `wsp-0.2.0-mac.dmg`: macOS on Apple silicon and on Intel, one disk image for both.
+- `wsp-0.2.0.AppImage`: Linux on x64.
+- The command line: `npm i -g @zingzy/wsp@0.2.0`.
+
+#### Opening a downloaded bundle
+
+Open the macOS disk image and drag wsp onto the Applications folder it shows. One image holds both Apple silicon and Intel.
+
+The bundles are not signed yet, so macOS refuses the first open of `wsp.app`. Open it once, dismiss the refusal, then in System Settings under Privacy & Security find the line saying wsp was blocked and pick Open Anyway. Or from a terminal: `xattr -dr com.apple.quarantine /Applications/wsp.app`. Every open after that is a double click.
+
+The Linux AppImage needs the run bit before it starts: `chmod +x wsp-*.AppImage`.
+
+## [0.1.4] - 2026-09-08
+
+### What changed since v0.1.3
+
+- docs: community standards for the public repo
+- feat(www): the link card
+- chore: drop three build logs a worktree added, ignore logs
+- build(desktop): re-sign each mac bundle ad hoc after staging node-pty
+- docs: point the README and the docs header at the site
+- build(www): deploy the landing page from main only
+- feat(www): link the docs from the nav, the hero and the footer
+
+### Downloads
+
+- `wsp-0.1.4-mac-arm64.zip`: macOS on Apple silicon.
+- `wsp-0.1.4-mac-x64.zip`: macOS on Intel.
+- `wsp-0.1.4.AppImage`: Linux on x64.
+- The command line: `npm i -g @zingzy/wsp@0.1.4`.
+
+#### Opening a downloaded bundle
+
+The bundles are not signed yet, so the first open of `wsp.app` is refused: right click it in Finder, pick Open, and pick Open again in the dialog. Every open after that is a double click.
+
+The Linux AppImage needs the run bit before it starts: `chmod +x wsp-*.AppImage`.
+
+## [0.1.3] - 2026-09-08
+
+### Opening a downloaded bundle
+
+The macOS bundles are signed ad hoc, not by an Apple developer, so the first open says Apple cannot check the app for malicious software. Right-click `wsp.app` in Finder, choose Open, and choose Open again in the dialog; every open after that is a double-click. If you would rather clear the flag once from a terminal: `xattr -dr com.apple.quarantine ~/Downloads/wsp.app`.
+
+The Linux AppImage needs the run bit: `chmod +x wsp-0.1.3.AppImage`.
+
+### Downloads
+
+- `wsp-0.1.3-mac-arm64.zip`: macOS on Apple silicon.
+- `wsp-0.1.3-mac-x64.zip`: macOS on Intel.
+- `wsp-0.1.3.AppImage`: Linux on x64.
+- The command line: `npm i -g @zingzy/wsp@0.1.3`.
+
+### What changed since 0.1.2
+
+- Onboarding: six init screens ticked from what this computer actually runs, a recipe an agent can write and hand over, `wsp init --recipe`, sign-ins that finish in the browser.
+- Goldens seal as durable templates on the provider and forks come from them; the doctor promotes any version still missing one.
+- Threads carry real titles a few seconds after they start, follow a rename made inside the agent, and can be renamed from the row, the CLI and MCP.
+- Workspaces can be renamed the same way. The switcher card, the rows, the header and the terminal follow one grammar; the terminal uses your Ghostty config and zooms with cmd plus and minus.
+- Images in a message, for Claude Code and Codex: up to four per send, removed from the machine when the turn ends.
+- Your own computer as a workspace, command line only for now: `wsp new --local`, threads under your own login, a terminal and files on this computer, permission prompts in the chat.
+- Threads idle past a day fold into an Archived group.
+- A machine is never marked gone on a metrics gap alone; a wrongly marked one recovers on the next state read. Finished turns end their harness process. Long silent builds are no longer cut at ten minutes.
+- `wsp rebuild` for a machine the provider lost; `wsp thread new --detach` and `wsp threads wait` for agents orchestrating threads.
+- The Codex tab lists Codex's own models and efforts. A host restart no longer cuts running turns.

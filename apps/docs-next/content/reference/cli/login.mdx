@@ -1,3 +1,18 @@
 # wsp login
 
-Generated from `wsp login --help` and its line in `COMMAND_LINES` (`packages/host/src/cli/commands.ts`).
+{/* Written by apps/docs-next/scripts/cli.ts: change the script or its source and run pnpm --filter @wsp/docs-next generate. */}
+
+```text
+usage: wsp login [<relay url>|<word>|<id>]
+  sign this computer in to your account, so every host on it is a line away with
+  no code typed. With a word another computer's wsp login printed, or the id of
+  one already signed in, it signs that computer's key for the hosts this one is
+  trusted at; with nothing on a computer already signed in it lists the
+  account's computers
+
+  --state    the state file: this word first, else WSP_HOME's state.json, else
+             ./.wsp/state.json when the current directory is a checkout of wsp,
+             else state.json in the home the running host serves
+```
+
+No MCP tool: signs a person in to their own account and admits their other computers to their hosts, which is theirs to give away and never a thread's.

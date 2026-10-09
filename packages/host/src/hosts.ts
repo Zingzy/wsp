@@ -8,7 +8,7 @@
 import { existsSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, relative } from "node:path";
-import { authRefusal, hostNoKeyLine, LAUNCHED_WITH, WS_PATH, hostFromEnv, isLoopback, isUrl, runForTheList, servedHostname, usageRefusal } from "@wsp/protocol";
+import { authRefusal, HOME_ENV, HOST_ENV, hostNoKeyLine, LAUNCHED_WITH, WS_PATH, hostFromEnv, isLoopback, isUrl, runForTheList, servedHostname, usageRefusal } from "@wsp/protocol";
 import { writeOwn } from "@wsp/own-file";
 import { readRelayRecord } from "./account.js";
 import { servingHost } from "./host-lock.js";
@@ -46,7 +46,7 @@ export const DEFAULT_HOME = defaultHomeIn(homedir());
  * tool server all have to name the same folder, and the variable itself is read where every other road reads it,
  * so `WSP_HOME=` with nothing after it is a home nobody named rather than the folder the run happens to sit in. */
 export function wspHome(env: Readonly<Record<string, string | undefined>> = process.env): string {
-  return homeNamed(env["WSP_HOME"]) ?? DEFAULT_HOME;
+  return homeNamed(env[HOME_ENV]) ?? DEFAULT_HOME;
 }
 
 export function hostsDir(home: string): string {
@@ -293,7 +293,7 @@ export function namedHost(pick: HostPick = {}): AimElsewhere | undefined {
   // An empty WSP_HOST is a shell that set nothing, but an empty word after --host was typed, and falling through to
   // the environment or this computer would run the line somewhere the person did not name.
   if (pick.host !== undefined && pick.host.trim() === "") throw emptyHostRefusal();
-  const named = [pick.host, env["WSP_HOST"]].map(w => w?.trim()).find(w => w !== undefined && w !== "");
+  const named = [pick.host, env[HOST_ENV]].map(w => w?.trim()).find(w => w !== undefined && w !== "");
   return named === undefined ? undefined : aimAt(named, pick.home ?? wspHome(env), env);
 }
 

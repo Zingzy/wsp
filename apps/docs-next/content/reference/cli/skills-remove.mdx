@@ -1,3 +1,24 @@
 # wsp skills remove
 
-Generated from `wsp skills remove --help` and its line in `COMMAND_LINES` (`packages/host/src/cli/commands.ts`).
+{/* Written by apps/docs-next/scripts/cli.ts: change the script or its source and run pnpm --filter @wsp/docs-next generate. */}
+
+```text
+usage: wsp skills remove <name> [<workspace>] [--on <computer>]
+       [--project [<name>]] [--yes]
+  removes a skill by its name: every folder it lives in and every link to it,
+  where a link's own folder elsewhere stays
+
+  --on         the computer to read, by the name wsp computers shows; this
+               computer without it, and a workspace names its own
+  --project    the project's skill of that name rather than the one that is not
+               a project's: alone from a workspace, or the project's name with
+               --on
+  --yes        go ahead without being asked
+  --json       print the raw protocol values, one JSON object per line, with
+               everything else on stderr
+  --state      the state file the host serves
+  --host       run the line against a host on your account, by the name wsp
+               hosts lists it under; WSP_HOST names one for a whole shell
+```
+
+MCP tool: [`skills_remove`](/reference/mcp-tools#skillsremove).

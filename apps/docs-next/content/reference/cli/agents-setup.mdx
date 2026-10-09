@@ -1,3 +1,39 @@
 # wsp agents setup
 
-Generated from `wsp agents setup --help` and its line in `COMMAND_LINES` (`packages/host/src/cli/commands.ts`).
+{/* Written by apps/docs-next/scripts/cli.ts: change the script or its source and run pnpm --filter @wsp/docs-next generate. */}
+
+```text
+usage: wsp agents setup <agent> [--on <computer>] [--enable | --disable]
+       [--program <path>] [--config <folder>] [--arg <word>]...
+       [--env <NAME>]... [--unset-env <NAME>]... [--reset <field>]...
+  how an agent runs on one computer: on or off there, the program run in its
+  place, its config folder, words added to every launch and variables every
+  launch carries, each value typed where nothing echoes it
+
+  --on           the computer, by the name wsp computers shows; this computer
+                 without it
+  --enable       offer the agent there again
+  --disable      take the agent off that computer: the app's lists drop it there
+                 and a start naming it is refused
+  --program      the program run in the agent's place there, a path or a word on
+                 its PATH
+  --config       the folder there the agent keeps its config, sessions and
+                 sign-in in, absolute and under that computer's home; sign it in
+                 again there
+  --arg          a word added to every turn's launch there; repeats, and
+                 replaces any set before
+  --env          a variable every launch there carries, by name, never one that
+                 decides how the process starts (PATH, LD_*, NODE_OPTIONS and
+                 the like); its value is asked for where nothing echoes it;
+                 repeats
+  --unset-env    a variable to take off its launch there, by name; repeats
+  --reset        put a field back on the agent's own: program, config or args;
+                 repeats
+  --json         print the raw protocol values, one JSON object per line, with
+                 everything else on stderr
+  --state        the state file the host serves
+  --host         run the line against a host on your account, by the name wsp
+                 hosts lists it under; WSP_HOST names one for a whole shell
+```
+
+MCP tool: [`agents_setup`](/reference/mcp-tools#agentssetup).

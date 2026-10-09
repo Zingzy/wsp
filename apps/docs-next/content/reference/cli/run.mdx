@@ -1,3 +1,54 @@
 # wsp run
 
-Generated from `wsp run --help` and its line in `COMMAND_LINES` (`packages/host/src/cli/commands.ts`).
+{/* Written by apps/docs-next/scripts/cli.ts: change the script or its source and run pnpm --filter @wsp/docs-next generate. */}
+
+```text
+usage: wsp run [<project>] [--branch <branch>] [--cwd <path>] [--agent <id>]
+       [--model, --effort, --access <word>] [--fast] [--notify <thread|me>]
+       [--title <title>] [--replaces <thread>] [--file <path>] [--detach]
+       "<message>"
+  an agent works in the project's folder and you read its reply: a thread with
+  the agent, model, effort and access the app offers; a project on a box runs in
+  its folder there as the login the box was added with, and a project anywhere
+  else gets a new machine forked from the image, named off the message as the
+  app's New thread names one; --branch runs it in a worktree of the project's
+  repo on that branch, made under wsp's folder unless one already holds it, and
+  --cwd in a folder inside the project or one of its worktrees; with no project,
+  run from inside one of your project folders, or from a thread, beside it;
+  follows its first turn, or with --detach prints the id and returns
+
+  --branch      a branch other than the one the project's folder has checked
+                out: the thread runs in the worktree holding it, made under
+                wsp's folder from the folder's current commit for a new branch
+  --cwd         a folder inside the project or one of its worktrees, absolute,
+                to start the thread in; the project's folder without it
+  --agent       which agent runs the thread, by its catalog id (claude, codex,
+                opencode, cursor); the project's own default without it
+  --model       the model the turn runs on, by the agent's own slug
+                (claude-sonnet-5); the thread's own without it
+  --effort      how hard the agent thinks, by its own word (low, medium, high,
+                xhigh, max); absent on a new thread means the agent's default;
+                on send, the thread's own
+  --access      how far the agent may go without asking: ask, auto-edit, full or
+                plan, refused where the agent has no such mode; without it, the
+                project's, else the agent's default, else full
+  --fast        run the turn in the agent's fast mode, on a model that offers
+                one; refused naming the model otherwise
+  --notify      where each turn's end is sent, a thread's id or me; repeats
+  --title       what to call the thread; the agent names it from its first
+                message without one
+  --replaces    a stopped or failed thread this one restarts, by id or a prefix;
+                the host settles it once this one starts
+  --file        a file on this computer to send with the message: an image goes
+                as an image, any other file lands in the thread's folder and the
+                message names its path; repeats
+  --detach      print the thread's id and return, leaving the reply to the
+                thread's finished line
+  --json        print the raw protocol values, one JSON object per line, with
+                everything else on stderr
+  --state       the state file the host serves
+  --host        run the line against a host on your account, by the name wsp
+                hosts lists it under; WSP_HOST names one for a whole shell
+```
+
+MCP tool: [`run`](/reference/mcp-tools#run).

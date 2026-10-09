@@ -2,7 +2,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { jsonFileStore, sqliteStore, stateDbPath, type Store } from "@wsp/runtime";
-import { STATE_STORE_ENV } from "@wsp/protocol";
+import { HOME_ENV, STATE_STORE_ENV } from "@wsp/protocol";
 import { savedEnv } from "../env-keys.js";
 import { servingHost } from "../host-lock.js";
 import { homeNamed, realState, servingHome } from "../serving-home.js";
@@ -47,8 +47,8 @@ const passedOverLine = (chosen: string, by: string, cwd: string, dev: string): s
  * moved home reaches that host rather than a state file nothing serves. */
 export function statePick(flag?: string, cwd: string = process.cwd(), env: Readonly<Record<string, string | undefined>> = process.env): StatePick {
   const dev = devCheckoutState(cwd);
-  const home = homeNamed(env["WSP_HOME"]);
-  const named = flag !== undefined ? { path: flag, by: "--state" } : home !== undefined ? { path: join(home, "state.json"), by: "WSP_HOME" } : undefined;
+  const home = homeNamed(env[HOME_ENV]);
+  const named = flag !== undefined ? { path: flag, by: "--state" } : home !== undefined ? { path: join(home, "state.json"), by: HOME_ENV } : undefined;
   if (named === undefined) return { path: dev ?? join(servingHome(env), "state.json") };
   if (dev === undefined || realState(resolve(cwd, dev)) === realState(resolve(cwd, named.path))) return { path: named.path };
   return { path: named.path, note: passedOverLine(resolve(cwd, named.path), named.by, cwd, dev) };

@@ -1,3 +1,18 @@
 # wsp host devices revoke
 
-Generated from `wsp host devices revoke --help` and its line in `COMMAND_LINES` (`packages/host/src/cli/commands.ts`).
+{/* Written by apps/docs-next/scripts/cli.ts: change the script or its source and run pnpm --filter @wsp/docs-next generate. */}
+
+```text
+usage: wsp host devices [revoke <id>]
+  the computers paired with a host and what each token is read as; revoke takes
+  one back out. --host reads a host on your account from another computer signed
+  in to it
+
+  --state    the state file: this word first, else WSP_HOME's state.json, else
+             ./.wsp/state.json when the current directory is a checkout of wsp,
+             else state.json in the home the running host serves
+  --host     run the line against a host on your account, by the name wsp hosts
+             lists it under; WSP_HOST names one for a whole shell
+```
+
+No MCP tool: takes away a computer's token, from the host's terminal or from a computer paired with it; who may drive a host is the person's to cut, never a thread's.

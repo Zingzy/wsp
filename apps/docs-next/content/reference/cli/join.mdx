@@ -1,3 +1,21 @@
 # wsp join
 
-Generated from `wsp join --help` and its line in `COMMAND_LINES` (`packages/host/src/cli/commands.ts`).
+{/* Written by apps/docs-next/scripts/cli.ts: change the script or its source and run pnpm --filter @wsp/docs-next generate. */}
+
+```text
+usage: wsp join <url>... --code <code> [--code-file <path>] [--name <name>]
+  on the computer you are sitting at: join it to the wsp at that address, then
+  install the daemon as a systemd system unit, which dials again at every boot.
+  A place is a Linux computer; a Mac refuses
+
+  --state        the state file: this word first, else WSP_HOME's state.json,
+                 else ./.wsp/state.json when the current directory is a checkout
+                 of wsp, else state.json in the home the running host serves
+  --code         the code the other computer printed: wsp add on the host
+  --code-file    read the code off this file and delete the file before dialing,
+                 so a code never sits on a disk
+  --name         the name to call the computer by here; what its address calls
+                 it without one
+```
+
+No MCP tool: joins the computer it is typed on to somebody's wsp and keeps the key it proves itself with in this person's own files; where their computer belongs is theirs to say.

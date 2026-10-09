@@ -1,3 +1,28 @@
 # wsp slate write
 
-Generated from `wsp slate write --help` and its line in `COMMAND_LINES` (`packages/host/src/cli/commands.ts`).
+{/* Written by apps/docs-next/scripts/cli.ts: change the script or its source and run pnpm --filter @wsp/docs-next generate. */}
+
+```text
+usage: wsp slate write [<thread>] [<file>] [--check] [--set <path>=<json>]...
+       [--press <piece>] [--row <n>] [--action <n>] [--if-version <n>]
+  writes the thread's slate from a .slate file (a whole <slate> or a patch) or a
+  .json document and prints its sketch; --check stores nothing, and with --set
+  or --press rehearses values and a press on a copy, the file optional
+
+  --check         validate and sketch the slate, storing nothing
+  --set           with --check, a value to rehearse against, like '$i=2' or
+                  'picked=1'; repeats
+  --press         with --check, a piece to rehearse a press on, after the --set
+                  values
+  --row           the row index of the --press piece inside a list, from 0
+  --action        which row action of a --press table to rehearse, from 0
+  --if-version    the version a read printed; refused with V750 when the
+                  document moved past it
+  --json          print the raw protocol values, one JSON object per line, with
+                  everything else on stderr
+  --state         the state file the host serves
+  --host          run the line against a host on your account, by the name wsp
+                  hosts lists it under; WSP_HOST names one for a whole shell
+```
+
+MCP tool: [`slate_write`](/reference/mcp-tools#slatewrite).

@@ -1,3 +1,38 @@
 # wsp servers add
 
-Generated from `wsp servers add --help` and its line in `COMMAND_LINES` (`packages/host/src/cli/commands.ts`).
+{/* Written by apps/docs-next/scripts/cli.ts: change the script or its source and run pnpm --filter @wsp/docs-next generate. */}
+
+```text
+usage: wsp servers add <name> [<workspace>] [--on <computer>] --agent <id>
+       (--command "<line>" | --url <address> [--header <name>=<VARIABLE>]...)
+       [--env <NAME>]... [--project [<name>]]
+  writes one MCP server into an agent's own config: a command with its arguments
+  and variables, or an address with its headers, each value read off this
+  terminal's environment and written into that file on this computer, a
+  variable's value kept in the vault as well; on any other the file names a
+  variable and the value goes to the vault, an argument or the address naming a
+  variable as ${NAME} keeps that name there, and an agent that reads no variable
+  there refuses it
+
+  --agent      the agent whose config takes the server, by its catalog id
+  --on         the computer to read, by the name wsp computers shows; this
+               computer without it, and a workspace names its own
+  --command    the line the server runs, its program and arguments in one quoted
+               value, split as a shell splits it and nothing expanded; or --url
+  --env        a variable the server is given, or one the address names as
+               ${NAME}, by its name, its value read off the same name in this
+               terminal's environment; an argument or the address may name it as
+               ${NAME}; repeats
+  --url        the server's https address; or --command
+  --header     <name>=<VARIABLE>, a header sent to the address with its value
+               read off that variable in this terminal's environment; repeats
+  --project    put it in a project's file rather than the agent's own: alone for
+               the workspace's own project, or the project's name with --on
+  --json       print the raw protocol values, one JSON object per line, with
+               everything else on stderr
+  --state      the state file the host serves
+  --host       run the line against a host on your account, by the name wsp
+               hosts lists it under; WSP_HOST names one for a whole shell
+```
+
+MCP tool: [`servers_add`](/reference/mcp-tools#serversadd).

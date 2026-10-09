@@ -4,6 +4,14 @@
 // protocol's schemas: a root config that imports the index pays for zod on every
 // config load, and a second copy of a name is what this file exists to prevent.
 
+/** The folder wsp keeps its things in, in place of ~/.wsp: the state file a line works on is state.json there,
+ * unless --state names another. Unset or empty, it is ~/.wsp. */
+export const HOME_ENV = "WSP_HOME";
+
+/** The host every line of this shell runs against, by the name wsp hosts lists it under, as --host names one for a
+ * single line. Unset or empty, a line runs against your account's one host, or the one on this computer. */
+export const HOST_ENV = "WSP_HOST";
+
 /** The one road that turns labs on: this variable in the host's environment, read once when the runtime starts. */
 export const LABS_ENV = "WSP_LABS";
 
@@ -88,3 +96,7 @@ export const RELEASE_API_ENV = "WSP_RELEASE_API";
 /** Every variable a turn's launch hands its agent for reaching this host, the one list of them: an agent that hands
  * its servers only the variables it is told to pass is told these. */
 export const LAUNCH_ENV = [HOST_URL_ENV, HOST_TOKEN_ENV, HOST_KEY_ENV, TURN_TOKEN_ENV] as const;
+
+/** The variables a person sets or meets, which the docs' environment page lists; every other name here is for a
+ * harness, a test or the cloud. */
+export const PUBLIC_ENV = [HOME_ENV, HOST_ENV, UPDATE_CHECK_ENV, ANALYTICS_ENV, STATE_STORE_ENV, ...LAUNCH_ENV] as const;
