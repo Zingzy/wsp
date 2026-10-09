@@ -106,7 +106,9 @@ function useClampedMaxWidth(hostRef: RefObject<HTMLDivElement | null>, enabled: 
   const [containerWidth, setContainerWidth] = useState<number | undefined>(undefined);
   useLayoutEffect(() => {
     if (!enabled) return;
-    const parent = hostRef.current?.parentElement;
+    let parent = hostRef.current?.parentElement;
+    // A display: contents wrapper (the shell's lead panels) has no box to measure or observe.
+    while (parent && getComputedStyle(parent).display === "contents") parent = parent.parentElement;
     if (!parent) return;
     // Measure before first paint: the persisted width must be clamped
     // against the row on the initial render, not one observer tick later

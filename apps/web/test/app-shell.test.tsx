@@ -189,7 +189,14 @@ describe("app shell", () => {
 
   it("resizes the right panel by its handle and persists the width", async () => {
     // jsdom has no layout, pointer capture or PointerEvent; the hook needs all three to run.
-    Object.defineProperty(HTMLElement.prototype, "clientWidth", { configurable: true, get: () => 1400 });
+    // The lead panels' display: contents wrapper has no box and measures 0, as in a browser (#1957).
+    document.head.insertAdjacentHTML("beforeend", "<style>.contents { display: contents }</style>");
+    Object.defineProperty(HTMLElement.prototype, "clientWidth", {
+      configurable: true,
+      get(this: HTMLElement) {
+        return getComputedStyle(this).display === "contents" ? 0 : 1400;
+      },
+    });
     vi.stubGlobal(
       "PointerEvent",
       class extends MouseEvent {
