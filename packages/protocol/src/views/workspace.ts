@@ -554,11 +554,3 @@ export type WorkspaceTalked = z.infer<typeof WorkspaceTalked>;
 export const WorkspaceListing = WorkspaceStatus.pick({ ...WORKSPACE_OUT, machineState: true, size: true, rateUsdPerHour: true, reason: true, idleAt: true, facts: true }).extend({ reach: ReachView });
 export type WorkspaceListing = z.infer<typeof WorkspaceListing>;
 
-/** What moving a workspace onto a newer image came to: the workspace as it now stands, whether a machine was
- * actually replaced, and which of the files the image's own recipe writes into home this workspace had changed, so
- * its copies travelled instead of the new image's. `moved` is false for a workspace already on the newest version,
- * which is answered untouched and whose empty `kept` means nothing was judged rather than nothing was changed.
- * `fallback` is the image it stood on listing no files of its own, which is every image sealed before they were
- * recorded: nothing was left to the new image and the whole home came across. */
-export const UpgradeResult = z.object({ workspace: WorkspaceView, moved: z.boolean(), kept: z.array(z.string()), fallback: z.boolean().optional() });
-export type UpgradeResult = z.infer<typeof UpgradeResult>;

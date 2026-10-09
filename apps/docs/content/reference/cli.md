@@ -558,8 +558,7 @@ usage: wsp pause <workspace>
 
 ```text
 usage: wsp wake <workspace>
-  wakes the workspace's machine and prints the state the next wsp workspaces
-  will show for it
+  wakes the workspace's machine and prints the state it came up in
 
   --json     print the raw protocol values, one JSON object per line, with
              everything else on stderr

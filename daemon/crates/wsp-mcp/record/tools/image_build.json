@@ -8,7 +8,7 @@
       "properties": {
         "place": {
           "type": "string",
-          "description": "the place to build the copy at, by the name wsp places lists"
+          "description": "the place to build the copy at, by the name wsp computers lists"
         },
         "force": {
           "type": "boolean",

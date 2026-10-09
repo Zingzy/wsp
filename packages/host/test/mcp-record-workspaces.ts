@@ -10,7 +10,6 @@ import {
   COPY_CURRENT,
   COPY_STALE,
   HERE_PLACE_ID,
-  IMAGE_ALREADY_NEWEST,
   IMAGE_NO_VAULT,
   INSTALLS_LATEST,
   LoginState,
@@ -33,7 +32,6 @@ import {
   discardedLine,
   goneRefusal,
   goneRoadRefusal,
-  imageKeptLine,
   noProjectImageLine,
   onDeleteOf,
   UNNAMED_COMPUTER,
@@ -51,7 +49,7 @@ import {
   mergedInLine,
   nothingToMergeLine,
 } from "@wsp/protocol";
-import { absoluteFolder, agentsToolAskedNothing, deletedLine, forgotLine, imageMovedLine, otherVersion, NO_DRAFT_FIX, noDraftLine, rebuiltLine, renamedWorkspaceLine, type HostClient } from "../src/verbs.js";
+import { absoluteFolder, agentsToolAskedNothing, deletedLine, forgotLine, otherVersion, NO_DRAFT_FIX, noDraftLine, rebuiltLine, renamedWorkspaceLine, type HostClient } from "../src/verbs.js";
 import type { TurnCase } from "./mcp-record-turns.js";
 
 type Replies = Record<string, string>;
@@ -140,12 +138,6 @@ export async function workspaceWords(line: LineOf, host: HostOf): Promise<Record
     deletedOne: slot(deletedLine({ workspace: { name: "{name}", id: "{id}", machineId: "{machine}", kind: "cloud" } as never, threads: 1 }), cloud.done("{machine}"), "done"),
     deletedMany: slot(deletedLine({ workspace: { name: "{name}", id: "{id}", machineId: "{machine}", kind: "cloud" } as never, threads: "{count}" as never }), cloud.done("{machine}"), "done"),
     deleteKept: slot(deleteText, deleteNotice(0, "cloud", undefined, "m"), "notice"),
-    keptFallback: imageKeptLine([], true),
-    keptNone: imageKeptLine([]),
-    keptOne: imageKeptLine(["{names}"]),
-    keptMany: slot(slot(imageKeptLine(["{names}", "{names}"]), "{names}, {names}", "names"), "2", "count"),
-    alreadyNewest: IMAGE_ALREADY_NEWEST,
-    moved: slot(slot(imageMovedLine({ workspace: running, moved: false, kept: [] }), rebuiltLine(running), "rebuilt"), IMAGE_ALREADY_NEWEST, "kept"),
     noProjectImage: noProjectImageLine("{id}"),
     removeKept: slot(removeText, projectImageRemoveNotice(golden), "notice"),
     removeNotice: projectImageRemoveNotice({ workspaceName: "{workspace}", createdAt: "{date}" }),
@@ -394,13 +386,6 @@ export const WORKSPACE_ANSWERED: Record<string, TurnCase[]> = {
     { case: "kept", arguments: { project: "alpha", branch: "feat/x", force: false }, replies: { "worktree.remove": reply({ removed: true }) } },
     { case: "refused", arguments: { project: "alpha", branch: "feat/x" }, replies: { "worktree.remove": refused("a thread is working in that worktree; let its turn end or stop it first", "usage") } },
   ],
-  image_move: onCloud([
-    { case: "kept", arguments: { workspace: "alpha" }, replies: { "workspaces.resolve": reply({ workspace: WORKSPACE }), "workspaces.updateImage": reply({ workspace: { ...WORKSPACE, machineId: "m-3" }, moved: true, kept: ["zeta, one", ".bashrc", "Ärger", "~/b"], extra: 1 }) } },
-    { case: "kept one", arguments: { workspace: "alpha" }, replies: { "workspaces.resolve": reply({ workspace: WORKSPACE }), "workspaces.updateImage": reply({ workspace: WORKSPACE, moved: true, kept: [".zshrc"] }) } },
-    { case: "kept none", arguments: { workspace: "alpha" }, replies: { "workspaces.resolve": reply({ workspace: WORKSPACE }), "workspaces.updateImage": reply({ workspace: WORKSPACE, moved: true, kept: [] }) } },
-    { case: "fallback", arguments: { workspace: "alpha" }, replies: { "workspaces.resolve": reply({ workspace: WORKSPACE }), "workspaces.updateImage": reply({ workspace: WORKSPACE, moved: true, kept: [], fallback: true }) } },
-    { case: "newest", arguments: { workspace: "alpha" }, replies: { "workspaces.resolve": reply({ workspace: WORKSPACE }), "workspaces.updateImage": reply({ workspace: NAPPING, moved: false, kept: [], fallback: false }) } },
-  ]),
   image_remove: onCloud([
     { case: "unconfirmed", arguments: { image: "snap-p1" }, replies: { "projectGoldens.list": reply({ projectGoldens: [GOLDEN_SHUFFLED] }) } },
     { case: "removed", arguments: { image: "snap-p1", confirm: true }, replies: { "projectGoldens.list": reply({ projectGoldens: [GOLDEN] }), "projectGoldens.remove": reply({ alreadyGone: false, projectGolden: GOLDEN_SHUFFLED }) } },

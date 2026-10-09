@@ -6,7 +6,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { actionRefusal, goneRefusal, goneRoadRefusal, imageMoveRefusal, notAnsweringYet } from "../src/index.js";
+import { actionRefusal, goneRefusal, goneRoadRefusal, notAnsweringYet } from "../src/index.js";
 import { ROOT, sourceFiles } from "./source-files.js";
 
 interface Call {
@@ -76,10 +76,6 @@ const HELD_REFUSALS = (): ReadonlyArray<string | null> => [
   actionRefusal("paused", "import"),
   actionRefusal("waking", "import"),
   actionRefusal("unreachable", "export"),
-  imageMoveRefusal("api", "running", { knownVersion: false, projectImage: false }),
-  imageMoveRefusal("api", "running", { knownVersion: true, projectImage: true }),
-  imageMoveRefusal("api", "paused", { knownVersion: true, projectImage: false }),
-  imageMoveRefusal("api", "gone", { knownVersion: true, projectImage: false }),
 ];
 
 describe("every refusal the app holds as words", () => {

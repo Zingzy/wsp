@@ -773,7 +773,6 @@ describe("local workspace", () => {
     expect((await rt.workspaces.wake(ws.id)).phase).toBe("running");
     await expect(rt.workspaces.upgrade(ws.id)).rejects.toThrow(cannot);
     await expect(rt.workspaces.rebuild(ws.id)).rejects.toThrow(cannot);
-    await expect(rt.workspaces.updateImage(ws.id)).rejects.toThrow(cannot);
     await expect(rt.workspaces.snapshot(ws.id)).rejects.toThrow(undrivenRefusal("mac", machineWord("local"), "be snapshotted"));
   });
 
@@ -790,7 +789,6 @@ describe("local workspace", () => {
       ["workspaces.nap", () => rt.workspaces.nap(ws.id, "relayed")],
       ["workspaces.wake", () => rt.workspaces.wake(ws.id, "relayed")],
       ["workspaces.upgrade", () => rt.workspaces.upgrade(ws.id, "relayed")],
-      ["workspaces.updateImage", () => rt.workspaces.updateImage(ws.id, "relayed")],
       ["workspaces.rebuild", () => rt.workspaces.rebuild(ws.id, "relayed")],
       ["workspaces.rename", () => rt.workspaces.rename(ws.id, "mac2", "relayed")],
       ["workspaces.look", () => rt.workspaces.look(ws.id, { glyph: "flask" }, "relayed")],

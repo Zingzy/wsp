@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-//! The image tools: the record this host owns with its copies and project images, a copy built at a place, a
-//! workspace moved onto the newest version, and a project image removed. What the TypeScript tool parses through
-//! the protocol's schema is typed here in that schema's order, a field it does not know dropped as the parse drops
-//! it; the recipe a record carries passes through as the host wrote it.
+//! The image tools: the record this host owns with its copies and project images, a copy built at a place, and a
+//! project image removed. What the TypeScript tool parses through the protocol's schema is typed here in that
+//! schema's order, a field it does not know dropped as the parse drops it; the recipe a record carries passes through
+//! as the host wrote it.
 
 use serde::{Deserialize, Serialize};
 use serde_json::value::{to_raw_value, RawValue};
 use serde_json::{Map, Number, Value};
 
-use super::workspace::{self, counted, fmt_bytes, js_prefix, js_sorted, name_list, params, read, rebuilt_line, workspace_of, Phase};
+use super::workspace::{self, fmt_bytes, js_prefix, params, read};
 use super::{input, Answer, Refused, Tool};
 use crate::failure::Failure;
 use crate::host::Host;
@@ -278,60 +278,6 @@ async fn build(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
-pub struct MoveIn {
-    pub workspace: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[cfg_attr(test, derive(schemars::JsonSchema))]
-pub struct MoveOut {
-    #[cfg_attr(test, schemars(with = "serde_json::Value"))]
-    workspace: Box<RawValue>,
-    moved: bool,
-    kept: Vec<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    fallback: Option<bool>,
-}
-
-const MOVE_NAME: &str = "image_move";
-
-pub const MOVE: Tool = Tool {
-    name: MOVE_NAME,
-    listed: include_str!(concat!(env!("OUT_DIR"), "/record/tools/image_move.json")),
-    call: |host, args| Box::pin(move_image(host, args)),
-};
-
-async fn move_image(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
-    #[derive(Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    struct Now {
-        name: String,
-        machine_id: String,
-        phase: Phase,
-    }
-    let MoveIn { workspace } = input(MOVE_NAME, arguments)?;
-    let client = host.client().await?;
-    let source = workspace_of(&client, &workspace).await?;
-    let mut moved: MoveOut = client.request("workspaces.updateImage", params([("workspaceId", Value::from(source.id))])).await?;
-    moved.fallback = moved.fallback.filter(|f| *f);
-    let now: Now = read(&moved.workspace, "workspaces.updateImage")?;
-    let words = workspace::words();
-    let kept = if !moved.moved {
-        words.already_newest
-    } else if moved.fallback == Some(true) {
-        words.kept_fallback
-    } else if moved.kept.is_empty() {
-        words.kept_none
-    } else {
-        let names = name_list(&js_sorted(moved.kept.clone()));
-        fill(&counted(moved.kept.len() as u64, &words.kept_one, &words.kept_many), &[("names", &names)])
-    };
-    let said = fill(&words.moved, &[("rebuilt", &rebuilt_line(&now.name, now.phase, &now.machine_id)), ("kept", &kept)]);
-    Ok(Answer::text(said, &moved))
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct RemoveIn {
     pub image: String,
     #[serde(default)]
@@ -412,7 +358,6 @@ mod tests {
     fn its_structs_are_the_recorded_schemas() {
         to_the_record::<ImageIn, ImageOut>(IMAGE.listed);
         to_the_record::<BuildIn, BuildOut>(BUILD.listed);
-        to_the_record::<MoveIn, MoveOut>(MOVE.listed);
         to_the_record::<RemoveIn, RemoveOut>(REMOVE.listed);
     }
 }

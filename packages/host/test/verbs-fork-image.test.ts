@@ -7,8 +7,8 @@ import { createServer as createHttpServer } from "node:http";
 import { type AddressInfo } from "node:net";
 import { join } from "node:path";
 import { NoProviderBackend, passphraseCipher } from "@wsp/engine";
-import { childStartedLine, HERE_PLACE_ID, goneRoadRefusal, notAnsweringYet, EXIT_CODES, IMAGE_NO_VAULT, IMAGE_PASSPHRASE_ENV, IMAGE_PASSPHRASE_MIN, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, placeBuildsNoImageLine } from "@wsp/protocol";
-import { copyKey, memoryStore } from "@wsp/runtime";
+import { childStartedLine, HERE_PLACE_ID, goneRoadRefusal, notAnsweringYet, EXIT_CODES, IMAGE_NO_VAULT, IMAGE_PASSPHRASE_ENV, IMAGE_PASSPHRASE_MIN, placeBuildsNoImageLine } from "@wsp/protocol";
+import { memoryStore } from "@wsp/runtime";
 import { describe, expect, it, vi } from "vitest";
 import { HELP, agentPage, cli, commandPage, COMMANDS_FOR_HELP } from "../src/cli.js";
 import { CLI_VERBS, runVerb, dialHost } from "../src/verbs.js";
@@ -16,8 +16,7 @@ import { HOST_SIDE_VAULT, THREAD_PREFIX_WORD } from "../src/verbs.js";
 import { hostSideOnlyFix, hostSideOnlyLine } from "../src/hosts.js";
 import type { WatchSignals } from "../src/watch.js";
 import { writeHost } from "../src/hosts.js";
-import { SEALED_GOLDEN } from "./sealed-golden.js";
-import { guestAnswer, stubBackend, withDaemonRoads } from "./stub-backend.js";
+import { stubBackend, withDaemonRoads } from "./stub-backend.js";
 import { captured, type Captured } from "./verbs-fixture.js";
 import { runsFromItsOwnFolder } from "./own-folder.js";
 import { CLOUD_ON } from "../src/cloud.js";
@@ -453,42 +452,6 @@ describe("wsp verbs over the host: fork, new and the image", () => {
     const refused = await h.run("image", "export", taken);
     expect(refused.code).not.toBe(0);
     expect(readFileSync(taken, "utf8")).toBe("mine");
-  });
-
-  it.runIf(CLOUD_ON)("image move puts the workspace on the newest version, says up front what moves, and names the files of the image's own it kept", async () => {
-    const sha = (c: string): string => c.repeat(64);
-    const v1 = { ...h.head(SEALED_GOLDEN), owned: [{ path: ".zshrc", sha256: sha("1") }, { path: ".gitconfig", sha256: sha("2") }] };
-    await h.store.put("goldens", copyKey("default", "default"), { head: 1, versions: [v1] });
-    await h.run("new", "alpha");
-    const [alpha] = await h.rt.workspaces.list();
-    // The fork rewrote its own gitconfig and left the image's zshrc as it was.
-    h.backend.execImpl = (m, cmd) =>
-      cmd.includes("xargs -0 -r sha256sum") ? { exitCode: 0, stdout: `${sha("1")}  .zshrc\n${sha("f")}  .gitconfig\n`, stderr: "" } : guestAnswer(cmd);
-    await h.store.put("goldens", copyKey("default", "default"), {
-      head: 2,
-      versions: [v1, { ...v1, version: 2, snapshotId: "snap_gold2", owned: [{ path: ".zshrc", sha256: sha("9") }, { path: ".gitconfig", sha256: sha("2") }] }],
-    });
-
-    const moved = await h.run("image", "move", "alpha");
-    expect(moved.io.errors).toEqual([IMAGE_MOVE_CONFIRM]);
-    expect(moved.code).toBe(0);
-    // Said once the workspace resolved, so a name nothing here holds hears the refusal alone.
-    expect((await h.run("image", "move", "nope")).io.errors).toEqual(["wsp image move: no workspace nope"]);
-    const after = await h.rt.workspaces.get(alpha!.id);
-    expect(after).toMatchObject({ id: alpha!.id, name: "alpha", phase: "running", golden: "snap_gold2" });
-    expect(moved.io.lines).toEqual([`alpha running on ${after.machineId}; ${imageKeptLine([".gitconfig"])}`]);
-
-    // The answer says for itself whether a machine was replaced, so an agent reading the object never has to compare
-    // the image it read a moment before against the one it got back.
-    const asJson = await h.run("image", "move", "alpha", "--json");
-    expect(h.json(asJson.io)).toEqual([{ workspace: expect.objectContaining({ golden: "snap_gold2" }), moved: false, kept: [] }]);
-    // Nothing to move to now, and the line says that rather than claiming the image's files came across.
-    const again = await h.run("image", "move", "alpha");
-    expect(again.code).toBe(0);
-    expect(again.io.lines).toEqual([`alpha running on ${after.machineId}; ${IMAGE_ALREADY_NEWEST}`]);
-    const extra = await h.run("image", "move", "alpha", "beta");
-    expect(extra.code).toBe(EXIT_CODES.usage);
-    expect(extra.io.errors.at(-1)).toBe("wsp image move takes one workspace. usage: wsp image move <workspace>");
   });
 
   it.runIf(CLOUD_ON)("fork's help says it makes a new machine from the source's image version on the source's branch, on the agent page and in wsp fork --help", async () => {

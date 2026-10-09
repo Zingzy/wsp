@@ -10,7 +10,6 @@ import {
   LOOPBACK,
   SSH_ALIAS_PREFIX,
   sshAlias,
-  IMAGE_ALREADY_NEWEST,
   ProjectGolden,
   ProjectGoldenRemoved,
   SealedImage,
@@ -33,7 +32,6 @@ import {
   SessionRenameOutcome,
   SessionRenameResult,
   ThreadView,
-  UpgradeResult,
   WorkspaceAgents,
   WorkspaceListing,
   WorkspaceOut,
@@ -47,7 +45,6 @@ import {
   forgetNotice,
   goneRefusal,
   goneRoadRefusal,
-  imageKeptLine,
   type MachineOnDelete,
   type StandsOn,
   UNNAMED_COMPUTER,
@@ -347,21 +344,6 @@ export async function imagePassphrase(ctx: VerbContext): Promise<string> {
   const again = await ctx.io.askSecret("The same passphrase again");
   if (again !== typed) throw usageRefusal("the two passphrases are not the same.", "Nothing was exported; run it again and type the same one twice.");
   return typed;
-}
-
-/** Moves a workspace onto the newest version of the image it stands on, by the id a caller already resolved. The
- * runtime alone knows which of the image's own files the workspace changed, so the whole answer, the kept list
- * included, comes back from it. */
-export async function moveImage(client: HostClient, workspaceId: string): Promise<UpgradeResult> {
-  const { workspace, moved, kept, fallback } = await client.request<UpgradeResult>("workspaces.updateImage", { workspaceId });
-  return { workspace, moved, kept, ...(fallback === true ? { fallback: true } : {}) };
-}
-
-/** What every director prints after the move: where the workspace stands, on which machine, and what of the image's
- * own files came across as this workspace's rather than the new image's. One that had nowhere to go says that
- * instead of naming files nothing judged, off the answer's own word for it. */
-export function imageMovedLine(moved: UpgradeResult): string {
-  return `${rebuiltLine(moved.workspace)}; ${moved.moved ? imageKeptLine(moved.kept, moved.fallback) : IMAGE_ALREADY_NEWEST}`;
 }
 
 /** What a workspace rename came to, as every director prints it: the name it went in under and the record after. */

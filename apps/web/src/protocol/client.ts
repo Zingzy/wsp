@@ -123,7 +123,6 @@ import {
   type SnapshotLineage,
   type SnapshotRollbackResult,
   type SnapshotStorage,
-  type UpgradeResult,
   type WorkspaceCreateResult,
   type WorkspaceLook,
   type WorkspaceSize,
@@ -483,9 +482,6 @@ export interface Api {
   /** Starts another daemon for a workspace whose daemon the host holds the process of, in place of one that is not
    * running. Optional so a fixture with no such workspace need not fake it. */
   restartDaemon?(id: string): Promise<void>;
-  /** Moves the workspace onto the golden's head version, carrying its files across and naming the ones of the
-   * image's own it changed. Optional so fixtures that never show the lineage need not fake it. */
-  updateImage?(id: string): Promise<UpgradeResult>;
   /** Replaces a zombie's machine with a fresh golden fork carrying the vault; id and name stay. Optional so fixtures without a zombie need not fake it. */
   rebuild?(id: string): Promise<WorkspaceView>;
   /** The record of a project's folder on this computer, made where no thread has made it yet. Optional so a fixture
@@ -943,7 +939,6 @@ export function makeApi(c: ProtocolClient): Api {
     stopWake: async id => (await c.request<{ workspace: WorkspaceView }>("workspaces.stopWake", { workspaceId: id })).workspace,
     touch: async id => void (await c.request("workspaces.touch", { workspaceId: id })),
     restartDaemon: async id => void (await c.request("workspaces.restartDaemon", { workspaceId: id })),
-    updateImage: async id => await c.request<UpgradeResult>("workspaces.updateImage", { workspaceId: id }),
     rebuild: async id => (await c.request<{ workspace: WorkspaceView }>("workspaces.rebuild", { workspaceId: id })).workspace,
     projectFolder: async project => (await c.request<{ workspace: WorkspaceView }>("folder.make", { project })).workspace,
     forget: async id => void (await c.request("workspaces.forget", { workspaceId: id })),

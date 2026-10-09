@@ -40,12 +40,6 @@ pub struct Words {
     pub deleted_one: String,
     pub deleted_many: String,
     pub delete_kept: String,
-    pub kept_fallback: String,
-    pub kept_none: String,
-    pub kept_one: String,
-    pub kept_many: String,
-    pub already_newest: String,
-    pub moved: String,
     pub no_project_image: String,
     pub remove_kept: String,
     pub remove_notice: String,
@@ -264,7 +258,7 @@ pub fn state_line(name: &str, phase: Phase) -> String {
     fill(&words.state_lines[state_of(phase, None, None)], &[("name", name)])
 }
 
-/// The state line with the machine now under the workspace, which a rebuild and a move change.
+/// The state line with the machine now under the workspace, which a rebuild changes.
 pub fn rebuilt_line(name: &str, phase: Phase, machine: &str) -> String {
     fill(&words().on_machine, &[("state", &state_line(name, phase)), ("machine", machine)])
 }
@@ -378,26 +372,6 @@ pub fn shell_quote(text: &str) -> String {
     format!("'{}'", text.replace('\'', r"'\''"))
 }
 
-/// A name as a list of names prints it: quoted as JSON when a comma in it would read as two.
-fn listed_name(name: &str) -> String {
-    if name.contains(',') {
-        serde_json::to_string(name).unwrap_or_default()
-    } else {
-        name.to_owned()
-    }
-}
-
-pub fn name_list<S: AsRef<str>>(names: &[S]) -> String {
-    names.iter().map(|n| listed_name(n.as_ref())).collect::<Vec<_>>().join(", ")
-}
-
-/// Strings in the order JavaScript's default sort puts them: by UTF-16 code unit, which differs from a byte order
-/// past the Basic Multilingual Plane.
-pub fn js_sorted(mut names: Vec<String>) -> Vec<String> {
-    names.sort_by(|a, b| a.encode_utf16().cmp(b.encode_utf16()));
-    names
-}
-
 /// The first `n` UTF-16 code units of a string, as String.prototype.slice(0, n) takes them.
 pub fn js_prefix(text: &str, n: usize) -> String {
     String::from_utf16_lossy(&text.encode_utf16().take(n).collect::<Vec<_>>())
@@ -509,11 +483,5 @@ mod tests {
         assert_eq!(fmt_rate(0.09000000000000001), "$0.09/hr");
         assert_eq!(fmt_rate(0.018), "$0.018/hr");
         assert_eq!(fmt_rate(1.5), "$1.50/hr");
-    }
-
-    #[test]
-    fn names_sort_by_utf16_and_list_with_commas_quoted() {
-        assert_eq!(js_sorted(vec!["\u{ff5e}".into(), "\u{1f9ea}".into(), "a".into()]), vec!["a", "\u{1f9ea}", "\u{ff5e}"]);
-        assert_eq!(name_list(&["a, b", "c"]), r#""a, b", c"#);
     }
 }
