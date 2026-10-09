@@ -4,7 +4,7 @@ import { dirname, join, posix, resolve as resolvePathOn } from "node:path";
 import { CATALOG_AGENTS, DEFAULT_AGENT, LAUNCH_SERVER_ROADS, MCP_AGENTS, installsOnFirstRun, ownServerConfig, serverValuesOf } from "@wsp/catalog";
 import { INLINE_EXEC_MS, harnessExec, landBytes, agentHomes, parseConfigs, readConfigsCmd, readReason, readWhole } from "@wsp/engine";
 import {
-  type AttachmentRoad, type HarnessCatalog, type Preferences, type SessionView, type TitleSource, type Attachment,
+  type AttachmentRoad, type HarnessCatalog, type HarnessCatalogProbe, type Preferences, type SessionView, type TitleSource, type Attachment,
   type TurnImage, threadKeyOf, isLocalWorkspace, catalogRefused, imagePathIn, noAdapterLine, shellQuote,
   signInRefusalLine, storedTitleSource, workspaceState, HERE_PLACE_ID, filePathIn, landFilesLine, filesNotLandedLine,
   dropFilesLine, accessMode, accessRefusal, configDirLaunchRefusal, configDirRefusal, markedFor, openDefaults,
@@ -16,18 +16,20 @@ import { providerSaid } from "../status.js";
 import { catalogFromProbe, harnessCatalog, smallestModel } from "../harness-catalog.js";
 import type { HarnessAdapter, HarnessStartOptions } from "../types/harness.js";
 import {
-  CATALOG_TTL_MS, CATALOG_PROBE_TIMEOUT_MS, FIRST_RUN_READ_MS, SESSION_TITLE_TTL_MS, SESSION_TITLE_TIMEOUT_MS, SESSION_TITLE_REFRESH_MAX,
+  AGENT_VERSION_READ_MS, CATALOG_TTL_MS, CATALOG_PROBE_TIMEOUT_MS, FIRST_RUN_READ_MS, SESSION_TITLE_TTL_MS, SESSION_TITLE_TIMEOUT_MS, SESSION_TITLE_REFRESH_MAX,
   TITLE_MAKE_TIMEOUT_MS,
 } from "../types/events.js";
 import type { LiveWorkspace } from "../types/wiring.js";
-import { noTitleLogLine, noMadeTitleLogLine, noNameWriteLogLine, serverValuesCutLine, serverValuesUnreadLine } from "../types/internal.js";
+import { AGENT_LISTS, noTitleLogLine, noMadeTitleLogLine, noNameWriteLogLine, serverValuesCutLine, serverValuesUnreadLine } from "../types/internal.js";
 import type { RuntimeContext, AgentsArea } from "../context.js";
 
 export function agentsArea(ctx: RuntimeContext): AgentsArea {
   const { opts, adapters, local, clock, live, setups, threadRecords, sessions } = ctx;
   /** One probe per harness per machine per TTL, a failed one included and one in flight shared: a binary that does
    * not answer costs one exec, not one per composer mount. Past the TTL the lists held answer while the binary is
-   * asked again, so a send waits on a probe only the first time a machine is asked. */
+   * asked again, and the lists a host before this one heard answer its first ask the same way, each only while the
+   * binary answers the version they were read off. A send waits on the probe where nothing says what the binary takes:
+   * a machine never asked, a binary since changed, a version it does not print. */
   const catalogs = new Map<string, { at: number; catalog: Promise<HarnessCatalog> }>();
   /** Every ask of an agent's own CLI the host set going on its own, a probe or a title question, which a close waits
    * for: one let go on past the close runs that CLI after the host let the machine go. */
@@ -72,14 +74,22 @@ export function agentsArea(ctx: RuntimeContext): AgentsArea {
     // the deadline would leave it running. The table answers, and the next ask looks again.
     let skipped = false;
     const probe = adapter.probeCatalog;
-    const catalog = holdAsk(firstRunHere(entry, table.harness)
+    // Read once for the probe and the version check below, neither of which runs a command that would install.
+    const installing = firstRunHere(entry, table.harness);
+    const catalog = holdAsk(installing
       .then(installs => {
         skipped = installs;
         return installs ? null : probe(harnessExec(machine, CATALOG_PROBE_TIMEOUT_MS));
       })
       // A binary that named why it described nothing keeps the table's lists and lends the footer its words.
       .then(
-        answer => (answer === null ? known : catalogRefused(answer) ? { ...known, refusal: answer.refused } : catalogFromProbe(known, answer)),
+        answer => {
+          if (answer === null) return known;
+          if (catalogRefused(answer)) return { ...known, refusal: answer.refused };
+          // The answer is kept, not the catalog: what wsp itself says of the agent is this build's.
+          void ctx.store.put(AGENT_LISTS, key, answer).catch((e: unknown) => console.warn(`${table.harness} on ${machine.id}: its lists were not kept for the next host (${e instanceof Error ? e.message : String(e)}); its first send there waits on the probe`));
+          return catalogFromProbe(known, answer);
+        },
         (e: unknown) => {
           // The lists a start is checked against are then wsp's own, which refuse a model the binary there takes.
           console.warn(`${table.harness} on ${machine.id}: the probe of the agent failed (${e instanceof Error ? e.message : String(e)}); wsp's built-in list answers until the next probe`);
@@ -89,16 +99,32 @@ export function agentsArea(ctx: RuntimeContext): AgentsArea {
     void catalog.then(() => {
       if (skipped) catalogs.delete(key);
     });
-    if (hit === undefined) {
-      catalogs.set(key, { at: now, catalog });
-      return catalog;
-    }
-    const asking = { at: now, catalog: hit.catalog };
+    // Lists another build kept in a shape this one cannot read are no answer: the probe is.
+    const kept = (answer: unknown): HarnessCatalog | undefined => {
+      try {
+        return answer === undefined ? undefined : catalogFromProbe(known, answer as HarnessCatalogProbe);
+      } catch {
+        return undefined;
+      }
+    };
+    // Lists the binary answered are its lists while it answers the same version: an update or another binary first on
+    // the PATH takes other flags and opens on another model. wsp's own table answers as it did, since no binary's word
+    // is in it.
+    const sameBinary = async (lists: HarnessCatalog): Promise<HarnessCatalog> => {
+      const read = adapter.probeVersion;
+      if (lists.source !== "harness") return lists;
+      if (read === undefined || lists.version === null) return catalog;
+      const answered = await holdAsk(installing.then(installs => (installs ? null : read(harnessExec(machine, AGENT_VERSION_READ_MS))))).catch(() => null);
+      return answered !== null && answered === lists.version ? lists : catalog;
+    };
+    const before = hit?.catalog ?? ctx.store.get(AGENT_LISTS, key).then(kept, () => undefined);
+    const held = before.then(lists => (lists === undefined ? catalog : sameBinary(lists)));
+    const asking = { at: now, catalog: held };
     catalogs.set(key, asking);
     void catalog.then(() => {
       if (catalogs.get(key) === asking) asking.catalog = catalog;
     });
-    return hit.catalog;
+    return held;
   };
 
   /** One title read per harness session per machine per TTL, a failed one included and one in flight shared: a row

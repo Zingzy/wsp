@@ -33,7 +33,7 @@ import type { HostHandle } from "../src/server.js";
 import { AFTER_WORKTREE_BLANK_FIX, afterWorktreeBlankLine, CLI_VERBS, hasTool, noHostServingLine, type DialOpts, type HostClient } from "../src/verbs.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
-import { ASKS, EXPORT_SOURCE, PAGE, SCRIPTED_ASK, bornDeadAgent, captured, execGuest, exportGuest, scriptedAgent, type Captured } from "./verbs-fixture.js";
+import { ASKS, STARTS_THEN_DIES, EXPORT_SOURCE, PAGE, SCRIPTED_ASK, bornDeadAgent, captured, execGuest, exportGuest, scriptedAgent, type Captured } from "./verbs-fixture.js";
 import { runsFromItsOwnFolder } from "./own-folder.js";
 import { agentHome, type AgentHome } from "../../collect/test/agent-home.js";
 import { agentsReader } from "../src/agents-reader.js";
@@ -776,6 +776,12 @@ describe("the agent contract on the command line and the tool door", () => {
     const died = await run("run", "alpha", "die");
     expect(died.code).toBe(1);
     expect(died.io.errors).toEqual(["wsp run: the harness died"]);
+    // The line that says the agent is starting is a wait's, held back under --json as the reply's stream is.
+    const slow = await run("run", "alpha", STARTS_THEN_DIES);
+    expect(slow.io.errors).toEqual(["Starting Claude Code", "wsp run: the harness died"]);
+    const slowJson = await run("run", "alpha", STARTS_THEN_DIES, "--json");
+    expect(slowJson.code).toBe(1);
+    expect(failure(slowJson.io)).toEqual({ error: "the harness died", class: "provider", exit: 1 });
 
     await handle!.close();
     handle = undefined;

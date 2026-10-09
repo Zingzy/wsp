@@ -71,6 +71,8 @@ export const CUT_LINE = "stopped after 15m 00s with no output for 10m";
 /** The task that makes a scripted agent stop on a permission question instead of replying, for a case about a thread
  * that needs the person: the turn raises this one prompt and ends when somebody answers it. */
 export const ASKS = "ask before running";
+/** The prompt whose agent takes half a second to start and then dies, long enough for the host to say it is starting. */
+export const STARTS_THEN_DIES = "start slowly, then die";
 export const SCRIPTED_ASK: PermissionAsk = {
   askId: "ask_scripted",
   toolName: "Bash",
@@ -126,9 +128,10 @@ export function scriptedAgent(reply: (prompt: string) => string, names?: (title:
         };
       }
       const cut = o.prompt === "cut";
-      const text = cut ? "" : reply(o.prompt);
+      const slow = o.prompt === STARTS_THEN_DIES;
+      const text = cut || slow ? "" : reply(o.prompt);
       const result: TurnResult = cut ? { status: "failed", error: CUT_LINE } : text === "" ? { status: "failed", error: "the harness died" } : { status: "completed", text };
-      const finished = Promise.resolve().then(() => {
+      const finished = (slow ? new Promise(r => setTimeout(r, 500)) : Promise.resolve()).then(() => {
         o.onEvent({ type: "session.start", sessionId, model: o.model ?? "claude-sonnet-4-5" });
         if (text !== "") {
           o.onEvent({ type: "turn.delta", sessionId, kind: "text", text: text.slice(0, 4) });

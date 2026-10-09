@@ -2,7 +2,7 @@
 import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { buildEnv, catalogProbeCommand, parseCatalogProbe } from "@wsp/adapter-claude";
+import { buildEnv, catalogProbeCommand, parseCatalogProbe, parseVersion, versionProbeCommand } from "@wsp/adapter-claude";
 import { diskFullLine } from "@wsp/protocol";
 import { foldThreads, type AdapterEvent, type EventUnion, type SessionEvent, type TurnResult, type WorkspaceStatus } from "@wsp/protocol";
 import { DISK_USE_CMD } from "@wsp/engine";
@@ -72,6 +72,7 @@ describe("runtime session history", () => {
     const adapter: HarnessAdapterFactory = ctx => ({
       steers: false,
       probeCatalog: exec => exec(catalogProbeCommand(), buildEnv({ base: ctx.env })).then(parseCatalogProbe),
+      probeVersion: exec => exec(versionProbeCommand(), buildEnv({ base: ctx.env })).then(parseVersion),
       start: o => {
         onEvent = o.onEvent;
         lastStart = o;
@@ -608,10 +609,11 @@ describe("runtime session history", () => {
       await rt.close();
     });
 
-    it("past the TTL a session start answers off the lists it holds while the binary is asked again, and the next start reads the new answer", async () => {
+    it("past the TTL a session start answers off the lists it holds, while the binary answers the version they were read off, as it is asked again, and the next start reads the new answer", async () => {
       const backend = stubBackend();
       let asked: ((r: { exitCode: number; stdout: string; stderr: string }) => void) | undefined;
       backend.execImpl = (_m, cmd) => {
+        if (cmd.includes("claude --version") && !cmd.includes("claude --help")) return { exitCode: 0, stdout: PROBE_OUTPUT.split("__WSP_CATALOG_SEP__")[0]!, stderr: "" };
         if (!cmd.includes("claude --help")) return { exitCode: 0, stdout: "", stderr: "" };
         if (probes(backend).length === 1) return { exitCode: 0, stdout: PROBE_OUTPUT, stderr: "" };
         return new Promise(resolve => (asked = resolve));

@@ -1,3 +1,47 @@
 # Side question
 
-Written from the Side question pane: a question the thread never keeps.
+{/* Written from apps/web/src/components/chat/AsideSurface.tsx, asideStore.ts and composerWords.ts, the side question lines in packages/protocol/src/words/thread.ts, packages/runtime/src/threads/sessions.ts, packages/adapter-claude/src/aside.ts, packages/adapter-codex/src/adapter.ts and rpc.ts. */}
+
+A side question is a question you ask about a thread that the thread never keeps. The agent answers it from the thread's conversation, in a pane beside the thread. The question and its answer do not go into the thread, and the agent does not remember them on its next turn.
+
+Use a side question when you want to know something about the work without changing it. For example, "which file did you change for the login bug?" or "why did you pick a queue here?"
+
+<Image src="/shots/docs-side-question.webp" alt="A side question asked and answered in the pane beside the thread." />
+
+## Ask a side question
+
+1. In the composer, type `/btw` and then your question. For example: `/btw what does the retry loop in fetch.ts do?`
+2. Send it.
+
+The Side question pane opens with your question. It says **Asking** until the first words arrive, then **Answering**, with a timer. The pane's note reads "Answered from this thread's conversation. Nothing here is kept."
+
+You can ask while the thread works. A side question never starts a turn and never stops one.
+
+## Who answers
+
+The thread's own agent answers, on a copy of the conversation. The copy goes away after the answer. Claude Code and Codex answer in different ways.
+
+- Claude Code answers with the thread's model, effort and context window. It can run no tools. wsp refuses every tool call, so it answers from what the conversation already holds. If the answer needs a tool, the side question fails and says so. Send it as a normal message instead, and the thread works on it.
+- Codex answers on a temporary fork of the thread, with the thread's model but not its effort. The fork runs in a read-only sandbox that asks you nothing, so Codex can still run commands that only read. Codex does not send its answer as it writes it. The pane says **Asking** until the whole answer arrives.
+
+Claude Code and Codex take side questions. OpenCode and Cursor do not. In a thread on one of those, the composer says so and asks you to drop the `/btw`.
+
+A side question stops after 3 minutes with no answer.
+
+## Ask again, or close
+
+A new `/btw` replaces the question in the pane. Each side question starts from a new copy of the conversation, so the agent does not see your earlier side questions.
+
+To close the pane, press `Esc`, close its tab, or go to another thread. The right panel goes back to how it was. The pane is not kept: after a reload, it is gone.
+
+The Side question pane has no letter of its own, and the right panel's menu does not list it. Only `/btw` opens it.
+
+## When a side question is refused
+
+| The message | What to do |
+|---|---|
+| this thread's agent has not started a conversation yet, so there is nothing to ask about | Wait for the agent's first reply. |
+| *Agent* takes no side question | Drop the `/btw` and send the message to the thread. |
+| This thread's early turns are no longer listed, so a side question has nothing to copy | Drop the `/btw` and send the message to the thread. |
+| the answer reached for a tool, and a side question runs none | Ask again, or send it as a message for the thread to work on. |
+| the side question came back with no words in its answer | Ask again. |

@@ -488,8 +488,9 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
       };
       hold();
       let outcome: Exclude<SessionStartOutcome, "held"> = "started";
-      // A start still waiting on its agent past AGENT_STARTING_MS says so once, with whether the agent's command is a
-      // wrapper whose first run installs it; nothing goes out once the turn's session started or the start left.
+      // A start says its agent is starting once, at the launch of a new process or past AGENT_STARTING_MS without one,
+      // with whether the agent's command is a wrapper whose first run installs it; nothing goes out once the turn's
+      // session started or the start left.
       let quiet = false;
       const sayStarting = async (): Promise<void> => {
         if (quiet || outcome === "queued") return hush();
@@ -798,6 +799,7 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
             }),
         });
         handedOver = true;
+        if (kept === undefined) void sayStarting();
         void ctx.keepSentImages(workspaceId, threadId, o.requestId, o.attachments ?? []);
         // The thread's record, written at its first turn from what that turn runs at, once the turn is under way so a
         // launch that never opened leaves none; a thread from before the record existed gets one here too, off what
