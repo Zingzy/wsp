@@ -11,7 +11,7 @@ import { CHILD_WORDS } from "../actions/format.js";
 import { openContextMenu } from "../actions/contextMenu.js";
 import type { ChildVerbs } from "../actions/threadActions.js";
 import type { SidebarThreadSnapshot } from "../adapt/index.js";
-import { childParts, childTarget, finishedTake, kindOf, leadActs, leadNodes, noteOf, partOf, type LeadNode, type Tree } from "../components/threads/leadTree.js";
+import { childParts, childTarget, finishedTake, kindOf, leadActs, leadNodes, noteOf, type LeadNode, type Tree } from "../components/threads/leadTree.js";
 import { SidebarMenuButton } from "../components/ui/sidebar.js";
 import { isThreadWorking } from "./Sidebar.logic.js";
 import { cn } from "../lib/utils.js";
@@ -34,11 +34,14 @@ export function settlesOnHover(node: TileNode, tree: Tree<TileNode>): boolean {
   return quiet({ node, thread: node.thread.thread });
 }
 
-/** How many rows a tile would draw under it at any depth: its live threads and subagents and theirs, a Finished fold
- * counting none of what it holds. What a folded tile says. */
-export function liveRows(lead: SidebarThreadSnapshot, kids: ReadonlyArray<TileNode>, tree: Tree<TileNode>): number {
-  const count = (nodes: ReadonlyArray<LeadNode<TileNode>>): number =>
-    nodes.filter(node => partOf(node, tree) === "live").reduce((sum, node) => sum + 1 + ("subagent" in node ? 0 : count(leadNodes(node.thread, node.node.children, tree))), 0);
+/** How many rows a tile would draw under it at any depth: its live threads and subagents and theirs, and each shut
+ * Finished fold as its one row. What a folded tile says. */
+export function rowsUnder(lead: SidebarThreadSnapshot, kids: ReadonlyArray<TileNode>, tree: Tree<TileNode>): number {
+  const count = (nodes: ReadonlyArray<LeadNode<TileNode>>): number => {
+    const parts = childParts(nodes, tree);
+    const fold = parts.finished.length > 0 ? 1 : 0;
+    return parts.live.reduce((sum, node) => sum + 1 + ("subagent" in node ? 0 : count(leadNodes(node.thread, node.node.children, tree))), fold);
+  };
   return count(leadNodes(lead, kids, tree));
 }
 

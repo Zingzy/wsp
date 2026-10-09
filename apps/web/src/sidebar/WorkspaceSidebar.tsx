@@ -56,7 +56,7 @@ import { CHILD_LIST_CLASS, ONE_LINE_ROW_CLASS, RAIL_ITEM_CLASS, ROW_META_CLASS, 
 import { SearchRow } from "./SearchRow.js";
 import { resolveAdjacentThreadId, threadSection, topSidebarThread } from "./Sidebar.logic.js";
 import { SIDEBAR_SECTIONS, drawnCount, drawsUnder, dropMarks, nodeOf, settleableRoots, sidebarTiles, tileTree, treeSettle, treeThreadIds, treeWorkspaceIds, type ProjectGroup, type SidebarSection, type TileNode } from "./threadTree.js";
-import { LeadTree, liveRows, settlesOnHover } from "./LeadTree.js";
+import { LeadTree, rowsUnder, settlesOnHover } from "./LeadTree.js";
 import { SnoozeDialog } from "./SnoozeDialog.js";
 import { SidebarCorner } from "./SidebarCorner.js";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./SidebarChrome.js";
@@ -427,7 +427,7 @@ export function WorkspaceSidebar() {
           {...(inbox === undefined ? {} : { inboxOf: inbox })}
           {...(inbox === undefined && !settled && depth > 2 ? { openers: path } : {})}
           {...(part === "finished" ? { finished: kindOf(lead, "finished") } : {})}
-          {...(folds ? { fold: folded ? liveRows(thread, children, tree) : ("open" as const) } : {})}
+          {...(folds ? { fold: folded ? rowsUnder(thread, children, tree) : ("open" as const) } : {})}
           {...(group.length > 0 && thread.model !== null ? { label: catalog === null ? thread.model : modelOf(catalog, modelPicks(thread.model).model)?.label } : {})}
           {...tileHandlers(rowId, {
             onSelect: () => select(thread.workspaceId, thread.threadId),

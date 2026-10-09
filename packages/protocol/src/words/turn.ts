@@ -46,9 +46,12 @@ export const SUBAGENT_ASKED_CHARS = 280;
  * one-word last lines of 50 KB replies held 100 MB). */
 const ownCopy = (line: string): string => line.split("").join("");
 
-/** The last line of a reply as a listing carries it; nothing where the reply has no words. */
+/** A markdown list marker at a line's start: a row that draws the line alone draws no list for it to mark. */
+const LIST_MARKER = /^(?:[-*+]|\d{1,9}[.)])\s+(?=\S)/;
+
+/** The last line of a reply as a listing carries it, its list marker taken off; nothing where the reply has no words. */
 export function listedLastLine(text: string | undefined): string | undefined {
-  const last = lastLine(text ?? "");
+  const last = lastLine(text ?? "")?.replace(LIST_MARKER, "");
   return last === undefined ? undefined : ownCopy(cutLine(last, LISTED_LINE_CHARS));
 }
 

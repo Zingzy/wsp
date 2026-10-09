@@ -1728,6 +1728,19 @@ describe("thread provenance", () => {
     expect(subagentAsked("Count to three.")).toBe("Count to three.");
   });
 
+  it("a listed last line drops the markdown list marker it was written under, and keeps a line that only looks like one", () => {
+    expect(listedLastLine("Found three gaps:\n- No test counts the case where the fold is empty.")).toBe("No test counts the case where the fold is empty.");
+    expect(listedLastLine("* Main is green.")).toBe("Main is green.");
+    expect(listedLastLine("+ Main is green.")).toBe("Main is green.");
+    expect(listedLastLine("12. Main is green.")).toBe("Main is green.");
+    expect(listedLastLine("3) Main is green.")).toBe("Main is green.");
+    expect(listedLastLine("  -   Main is green.")).toBe("Main is green.");
+    expect(listedLastLine("3")).toBe("3");
+    expect(listedLastLine("-1 below zero")).toBe("-1 below zero");
+    expect(listedLastLine("**Main** is green.")).toBe("**Main** is green.");
+    expect(listedLastLine("-")).toBe("-");
+  });
+
   it("a cut through a line with no space, CJK with an emoji at the edge, ends on a whole character and never half of a pair", () => {
     const line = `${"完成".repeat(99)}🎉${"了".repeat(60)}`;
     for (const cut of [listedLastLine(line)!, listedFailure(line), subagentAsked(`${"完成".repeat(139)}🎉${"了".repeat(60)}`), cutLine(line, 200)]) {

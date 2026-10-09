@@ -333,8 +333,9 @@ export const ThreadTile = memo(function ThreadTile(props: ThreadTileProps) {
     changed: checkout.changed,
     notes: [snoozed ? SNOOZE_WORDS.workingHover(snoozedWorking) : null, ...capNotes(thread.capped), thread.setupRefusal ?? null, ...checkout.counts, checkout.why ?? null],
   });
-  // The card leads with the status row, the reason whole under its word; a settled tile's card has none.
-  const reason = noteOf({ node: null, thread }, finished !== undefined ? "finished" : "live");
+  // The card leads with the status row, the reason whole under its word, an ended turn's last line among them; a
+  // settled tile's card has none.
+  const reason = noteOf({ node: null, thread }, thread.status === "running" ? "live" : "finished");
   const statusRow = settled || snoozed ? undefined : <StatusLine thread={thread} {...(finished !== undefined ? { kind: finished } : {})} age={time} {...(reason !== undefined ? { reason } : {})} />;
   // An agent the host refuses to start there says so in the slot, over a resting or failed thread's own status.
   const setupRefused = thread.setupRefusal !== undefined && (status === RESTING || status.id === FAILED.id) ? thread.setupRefusal : undefined;
