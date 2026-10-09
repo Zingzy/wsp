@@ -188,6 +188,22 @@ describe("a lead's children as rows", () => {
     expect(rows()[0]!.querySelector("[data-child-acts]")!.parentElement!.className).toContain("md:min-w-13");
   });
 
+  it("mounts a row's acts as focus lands on its title, after the title, and at once where the title is no link", () => {
+    useStore.setState({ api: { interruptSession: vi.fn() } } as never);
+    render(tree([nodeOf(working("Cart total rounding"))]));
+    const row = rows()[0]!;
+    expect(row.querySelectorAll("[data-child-acts] button")).toHaveLength(0);
+    const link = row.querySelector<HTMLAnchorElement>("a[href]")!;
+    act(() => link.focus());
+    const acts = [...row.querySelectorAll<HTMLElement>("[data-child-acts] button")];
+    expect(acts.map(b => b.getAttribute("aria-label"))).toEqual(["Send a message", "Stop thread", "More"]);
+    expect(link.compareDocumentPosition(acts[0]!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    cleanup();
+    render(tree([nodeOf(thread("Starting", { status: "running", startedAt: at(1), endedAt: null, threadId: null }))]));
+    expect(rows()[0]!.querySelector("a")).toBeNull();
+    expect(rows()[0]!.querySelectorAll("[data-child-acts] button").length).toBeGreaterThan(0);
+  });
+
   it("Send a message opens the field in the second line's place: Enter sends to that thread and closes it, Escape cancels", () => {
     const startSession = vi.fn(async () => ({}) as never);
     useStore.setState({ api: { startSession } } as never);
@@ -257,8 +273,8 @@ describe("a lead's children as rows", () => {
     const row = document.querySelector<HTMLElement>('[data-subagent-row="task_1"]')!;
     expect(row.querySelector("[data-subagent-mark]")!.getAttribute("class")).toContain("lucide-bot");
     expect(row.textContent).toContain("Read the open tickets");
-    // Focus reaching the row mounts its acts as the pointer does, so a keyboard reaches them next.
-    fireEvent.focus(row.querySelector<HTMLElement>("[data-subagent-open], span")!);
+    // Its title is no link, so its act is the row's one tab stop and stands mounted at rest.
+    expect(row.querySelector("a, [tabindex]")).toBeNull();
     expect([...row.querySelectorAll("[data-child-acts] button")].map(b => b.getAttribute("aria-label"))).toEqual(["Stop subagent"]);
     expect(row.querySelector("[data-child-acts]")!.parentElement!.className).toContain("md:min-w-6");
   });

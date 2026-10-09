@@ -76,7 +76,8 @@ function Act({ icon: Icon, label, run }: { icon: LucideIcon; label: string; run:
 }
 
 /** Whether the pointer or the focus has reached the row yet. Its acts mount then and stay: a lead's tree mounts every
- * row as its thread opens, and each act is a tooltip of its own that nobody has pointed at. */
+ * row as its thread opens, and each act is a tooltip of its own that nobody has pointed at. A row whose title is no
+ * link has nothing a Tab lands on before its acts, so its acts stand mounted. */
 function useWoken(): [boolean, { onPointerEnter: () => void; onFocus: () => void }] {
   const [woken, setWoken] = useState(false);
   const wake = (): void => setWoken(true);
@@ -205,7 +206,7 @@ export const ThreadRow = memo(function ThreadRow({ thread, place, at, note, targ
       {sending ? (
         status
       ) : (
-        <Slot status={status} acts={acts} menu={menu} more={target !== undefined && target.task === null} woken={woken || shown} />
+        <Slot status={status} acts={acts} menu={menu} more={target !== undefined && target.task === null} woken={woken || shown || threadId === null} />
       )}
     </div>
   );
@@ -311,7 +312,7 @@ export const SubagentRow = memo(function SubagentRow({ subagent, target, kind, n
         </Tooltip>
         <SecondLine place="" at={undefined} note={note} />
       </span>
-      <Slot status={status} acts={acts} menu={menu} more={false} woken={woken} />
+      <Slot status={status} acts={acts} menu={menu} more={false} woken={woken || opens === undefined} />
     </div>
   );
 }, (a, b) => a.lead?.workspaceId === b.lead?.workspaceId && a.lead?.threadId === b.lead?.threadId && sameSubagentRow(a, b));
