@@ -6,7 +6,7 @@
 // fixture shape as chat-composer.test.tsx; no live daemon and no host.
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { noImagesLine, sendRefusal, type EventUnion, type KeptAttachment, type SessionEvent, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, noImagesLine, sendRefusal, steerFilesBlocked, type Attachment, type EventUnion, type KeptAttachment, type SessionEvent, type SessionSteerOutcome, type SessionView, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { installFakeLayout } from "./fake-layout.js";
 import { TABLE_CATALOG, whenAgentsAnswered } from "./agents.js";
 import { composerEditor, press, typeInto } from "./composer-harness.js";
@@ -17,6 +17,7 @@ import { useComposerDraftStore } from "../src/components/chat/composerDraftStore
 import { useComposerFilesStore } from "../src/components/chat/composerFiles.js";
 import { usePromptStashStore } from "../src/components/chat/promptStashStore.js";
 import { COMPOSER_WORDS } from "../src/components/chat/composerWords.js";
+import { QUEUE_WORDS } from "../src/components/chat/bars/QueueBar.js";
 import { clearNotices, lastNotice } from "./notice-text.js";
 import { CHAT_WS } from "./fixtures/chat-stream.js";
 import { caps } from "./caps.js";
@@ -643,5 +644,82 @@ describe("the images on the send", () => {
     await waitFor(() => expect(started).toHaveLength(1));
     await waitFor(() => expect(thumbs()).toHaveLength(1));
     expect(thumbs()[0]!.dataset["chatImage"]).toBe("shot.png");
+  });
+});
+
+describe("an image sent with steer picked during a running turn", () => {
+  const turn = { workspaceId: WS, sessionId: "sess_0001", turnId: "turn_0001", threadId: "thr_1" };
+  const runningRow: SessionView = { id: "sess_local_1", workspaceId: WS, harness: "claude", status: "running", claudeSessionId: "sess_0001", threadId: "thr_1", prompt: "first", startedAt: 0 };
+  const SHOT: Attachment = { mediaType: "image/png", bytes: base64Of(2048, 3), name: "shot.png" };
+  beforeEach(() => useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, midTurn: "steer" } }));
+  afterEach(() => useStore.setState({ preferences: DEFAULT_PREFERENCES }));
+
+  /** A thread whose Claude Code turn is running, on a harness that steers, its steer taking images or not. */
+  async function running(steersImages: boolean, answer: () => Promise<SessionSteerOutcome> = async () => "accepted") {
+    const f = fixtureApi();
+    const steered: { prompt: string; requestId: string; attachments: readonly Attachment[] }[] = [];
+    f.api.listSessions = async () => [runningRow];
+    f.api.listHarnesses = async () => [{ ...TABLE_CATALOG, source: "harness", steers: true, images: true, ...(steersImages ? { steersImages: true } : {}) }];
+    f.api.steerSession = async (_sessionId, prompt, requestId, attachments = []) => {
+      steered.push({ prompt, requestId, attachments });
+      return answer();
+    };
+    const view = await setup(f.api);
+    f.emit({ type: "session.start", ...turn, prompt: "first" });
+    f.emit({ type: "session.delta", ...turn, kind: "text", text: "on it" });
+    await waitFor(() => expect(useStore.getState().sessions[WS]).toHaveLength(1));
+    await waitFor(() => expect(useStore.getState().harnessesByWorkspace[WS]?.[0]?.source).toBe("harness"));
+    await typeInto(composerEditor(), "what is in this picture?");
+    act(() => void paste([pngFile("shot.png", 2048, 3)]));
+    await waitFor(() => expect(thumbs()).toHaveLength(1));
+    await press(composerEditor(), "Enter");
+    return { ...f, steered, view };
+  }
+
+  it("goes into the turn with its bytes where the harness's steer takes images, and the thread's row draws it at once and again after a restart", async () => {
+    const { api, started, steered, emit, kept, view } = await running(true);
+    await waitFor(() => expect(steered).toHaveLength(1));
+    expect(steered[0]).toMatchObject({ prompt: "what is in this picture?", attachments: [SHOT] });
+    expect(started).toEqual([]);
+    expect(thumbs()).toHaveLength(0);
+    expect(document.querySelector("[data-drawer-row=queue]")).toBeNull();
+    const { requestId } = steered[0]!;
+    const steer: SessionEvent = { type: "session.steer", ...turn, prompt: "what is in this picture?", requestId, attachments: [{ mediaType: "image/png", bytes: 2048, name: "shot.png" }] };
+    emit(steer);
+    expect((await imageRow()).closest("[data-user-message-steered=true]")).not.toBeNull();
+
+    view.unmount();
+    useComposerFilesStore.setState({ pending: {}, refused: {}, queued: {}, sent: {} });
+    kept.set(`${WS}/thr_1/${requestId}/0`, { mediaType: "image/png", bytes: SHOT.bytes });
+    api.sessionHistory = async () => [{ type: "session.start", ...turn, prompt: "first", requestId: "req_first" }, steer];
+    render(<WorkspaceThread workspaceId={WS} />);
+    expect((await imageRow()).closest("[data-user-message-steered=true]")).not.toBeNull();
+  });
+
+  it("comes back to the box with its words where the person edited its card while the steer was out and the turn did not take it", async () => {
+    let answer!: (outcome: SessionSteerOutcome) => void;
+    const { steered } = await running(true, () => new Promise(resolve => (answer = resolve)));
+    await waitFor(() => expect(steered).toHaveLength(1));
+    fireEvent.click(document.querySelector("[data-drawer-row=queue]")!);
+    fireEvent.click(document.querySelector<HTMLElement>("[data-composer-bar=queue] [data-queued-id] button[aria-label='Edit queued message']")!);
+    await waitFor(() => expect(useComposerDraftStore.getState().drafts[WS]?.prompt).toBe("what is in this picture?"));
+    expect(thumbs()).toHaveLength(0);
+    await act(async () => answer("not-running"));
+    await waitFor(() => expect(thumbs().map(t => t.dataset["chatImage"])).toEqual(["shot.png"]));
+  });
+
+  it("waits for the turn's end where the harness's steer takes none, its card saying why, and its image rides the next start", async () => {
+    const { started, steered, emit } = await running(false);
+    await waitFor(() => expect(document.querySelector("[data-drawer-row=queue]")).not.toBeNull());
+    expect(steered).toEqual([]);
+    fireEvent.click(document.querySelector("[data-drawer-row=queue]")!);
+    const card = document.querySelector<HTMLElement>("[data-composer-bar=queue] [data-queued-id]")!;
+    const why = steerFilesBlocked([{ mediaType: "image/png", bytes: 2048 }], false, "Claude Code")!;
+    expect(why).toBe("Claude Code takes no image into a running turn");
+    expect(card.querySelector("[data-settings-description]")!.textContent).toContain(QUEUE_WORDS.waitsFor(why));
+    emit({ type: "session.done", ...turn, result: { status: "completed", durationMs: 900, costUsd: 0.001 } });
+    emit({ type: "session.end", ...turn, exitCode: 0, sawResult: true });
+    await waitFor(() => expect(started).toHaveLength(1));
+    expect(started[0]).toMatchObject({ prompt: "what is in this picture?", attachments: [SHOT] });
   });
 });

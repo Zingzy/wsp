@@ -63,9 +63,9 @@ export function transcriptsArea(ctx: RuntimeContext): TranscriptsArea {
       });
       return { threads: Object.fromEntries(threads) };
     });
-  /** The keys of the images a start's message carried, which the host keeps while the start is in the transcript. */
+  /** The keys of the images a message carried, started or steered, which the host keeps while it is in the transcript. */
   const imageKeysOf = (e: SessionEvent): string[] =>
-    e.type !== "session.start" || e.threadId === undefined
+    (e.type !== "session.start" && e.type !== "session.steer") || e.threadId === undefined
       ? []
       : (e.attachments ?? []).flatMap((a, index) => {
           const key = isImage(a.mediaType) ? attachmentKey(e.threadId!, e.requestId, index) : undefined;

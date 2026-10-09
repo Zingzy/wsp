@@ -1705,7 +1705,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               send({ id: msg.id, ok: true, ...(await rt.slates.resolve({ threadId: msg.threadId, paths: msg.paths })) });
               return;
             case "sessions.steer":
-              send({ id: msg.id, ok: true, ...(await rt.sessions.steer(msg.sessionId, { prompt: msg.prompt, ...(msg.requestId !== undefined ? { requestId: msg.requestId } : {}) }, origin)) });
+              send({ id: msg.id, ok: true, ...(await rt.sessions.steer(msg.sessionId, { prompt: msg.prompt, ...(msg.requestId !== undefined ? { requestId: msg.requestId } : {}), ...(msg.attachments !== undefined ? { attachments: msg.attachments } : {}) }, origin)) });
               return;
             case "golden.get":
               send({ id: msg.id, ok: true, manifest: await rt.golden.get(msg.name) });

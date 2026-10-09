@@ -66,7 +66,7 @@ import type { AgentsActs, AgentsReader, ServerIcons, ServersActs, SkillsActs } f
 import type { DaemonChannel, DaemonChannelOptions } from "../daemon-channel.js";
 import type { MachineExecOptions, TurnWaiting } from "../machine-exec.js";
 import type { Copier } from "@wsp/engine";
-import type { TaskStop } from "@wsp/protocol";
+import type { TaskStop, TurnImage } from "@wsp/protocol";
 import { realClock, type Clock } from "../clock.js";
 import type { StatusApi, StatusListOptions, StatusWatchOptions } from "../status.js";
 import type { PlaceWiring } from "../places.js";
@@ -430,7 +430,7 @@ export interface SessionHandle {
   readonly outcome: Exclude<SessionStartOutcome, "held">;
   view(): SessionView;
   interrupt(): Promise<void>;
-  steer?(prompt: string, id?: string): Promise<"accepted" | "not-running">;
+  steer?(prompt: string, id?: string, images?: readonly TurnImage[]): Promise<"accepted" | "not-running">;
   /** Whether the turn tells, as it ends, the steered messages its agent never read, as its agent said when it
    * announced itself; absent or false, nothing says whether a steer whose answer never came was read. */
   tellsUnread?(): boolean;

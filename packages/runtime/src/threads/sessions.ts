@@ -14,7 +14,7 @@ import {
   THREAD_WORKING_LINE, threadOnMachineLine, WORKTREE_BUSY_LINE, copiesFolder, runsInFolder, sendRefusal, startPicks, titleLine,
   TURN_TOKEN_ENV, turnImagesDir, workspaceState, REWIND_LATEST_LINE, REWIND_NO_CHECKPOINT_LINE, REWIND_NO_UNDO_LINE,
   REWIND_SHARED_LINE, REWIND_WORKING_LINE, rewindBesideLine, rewindChildrenLine, rewindKeptLine, rewindNoAnchorLine,
-  attachmentRecord, attachmentKey, filesBlocked, isImage, sendFilesDir, attachedFilesPrompt, threadMessages,
+  attachmentRecord, attachmentKey, filesBlocked, filesRefusal, steerFilesBlocked, type Attachment, isImage, sendFilesDir, attachedFilesPrompt, threadMessages,
   threadSeed, taskStopRefusedLine, taskStopUnsupportedLine, agentOffLine, HEAD_BYTES, HISTORY_PAGE_BYTES,
   HISTORY_PAGE_EVENTS, AGENT_STARTING_MS, ASIDE_EMPTY_LINE, capStoppedLine, deletedBeforeStartLine, type AsideQuestion,
   type McpServerSpec, type SessionAsker, refusal, sendFilesAcrossLine, SEND_FILES_ACROSS_FIX, waitAcrossLine, WAIT_ACROSS_FIX,
@@ -32,6 +32,9 @@ import {
   type LiveSession, type SessionEntry,
 } from "../types/internal.js";
 import type { RuntimeContext, SessionsArea } from "../context.js";
+
+/** A steered message's images as an adapter that declares steersImages reads them: the bytes, as a start's inline road. */
+const inlineImages = (attachments: readonly Attachment[] | undefined): TurnImage[] => (attachments ?? []).map(({ mediaType, bytes }) => ({ mediaType, bytes }));
 
 /** The wsp server a thread's launch is handed. A thread another thread started has no slate: its launch says nothing of
  * one, and on this computer, where the server is the host's own wsp and knows the word, its server is told too. A box's
@@ -678,14 +681,14 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
           // A turn that has already answered takes no message, however well its harness steers: the words would
           // land after the reply the caller read. The send waits for that process to exit and runs as the thread's
           // next turn; nothing here is ever refused for being in the way.
-          const steer = running.turnLive?.reply === undefined && adapter.steers ? running.handle.steer : undefined;
+          const steer = running.turnLive?.reply === undefined && adapter.steers && steerFilesBlocked(records, adapter.steersImages === true, harness) === null ? running.handle.steer : undefined;
           const steerId = randomUUID();
           if (steer !== undefined) {
             // The turn keeps the message before the write, so a write whose answer was lost, landed or not, leaves it
             // with the turn: its end sends back one its agent never took up, and nothing sends it a second time. A
             // turn that ends while the write is out leaves the message to this road, which queues it as the next turn.
             await ctx.keepSteer(running, o, origin, steerId);
-            const answer = await steer(o.prompt, steerId).catch((e: unknown) => (e instanceof Error ? e : new Error(String(e))));
+            const answer = await steer(o.prompt, steerId, inlineImages(o.attachments)).catch((e: unknown) => (e instanceof Error ? e : new Error(String(e))));
             // Where the turn's agent tells no unread messages, nothing will say whether a write that threw landed: the
             // caller hears it failed, in words no retry reads as a computer that did not answer, so a line falls to the
             // person rather than reach the thread twice.
@@ -947,8 +950,11 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
       if (refusal !== null) throw new Error(refusal);
       if (s.view.status !== "running" || s.handle === undefined) return { outcome: "not-running" };
       if (s.handle.steer === undefined) return { outcome: "unsupported" };
+      const records = (o.attachments ?? []).map(attachmentRecord);
+      const blocked = records.length === 0 ? null : (filesRefusal(records) ?? steerFilesBlocked(records, ctx.adapterFor(entry, s.view.harness).adapter.steersImages === true, s.view.harness));
+      if (blocked !== null) throw new Error(blocked);
       const steerId = randomUUID();
-      const outcome = await s.handle.steer(o.prompt, steerId);
+      const outcome = await s.handle.steer(o.prompt, steerId, inlineImages(o.attachments));
       if (outcome !== "accepted") return { outcome };
       ctx.recordSteer(s, sessionId, o, origin, steerId);
       return { outcome: "accepted" };

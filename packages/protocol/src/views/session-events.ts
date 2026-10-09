@@ -186,6 +186,8 @@ export const SessionSteerEvent = z.object({
   type: z.literal("session.steer"),
   ...sessionScope,
   prompt: z.string(),
+  /** The images the message carried, as records, as on session.start. */
+  attachments: z.array(AttachmentRecord).optional(),
   /** The id the client minted for the sessions.steer, as on session.start. */
   requestId: z.string().optional(),
   /** Set where the message came from a press in the thread's slate, as on session.start. */

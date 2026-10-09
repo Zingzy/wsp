@@ -28,6 +28,8 @@ describe("the agents wsp can open a thread on", () => {
       expect(screenCommandsOf(row), id).toEqual(adapter.screenCommands ?? []);
       // And whether a pick made while a turn runs reaches that turn, which the access picker says before the pick.
       expect(movesRunningAccess(row), id).toBe(adapter.movesAccess === true);
+      // And whether a message steered into a running turn takes its images, which decides whether the composer steers it.
+      expect(row?.steersImages === true, id).toBe(adapter.steersImages === true);
       // And whether it takes a side question: the list a window holds before its workspace's machine answers is
       // these rows, and one that read no answer as a no sent /btw into the thread as a turn.
       expect(row?.asides === true, id).toBe(adapter.aside !== undefined);

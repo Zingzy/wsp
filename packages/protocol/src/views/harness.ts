@@ -97,6 +97,10 @@ export const HarnessCatalog = z.object({
    * it, as with mcpServers, so the picker says what a pick does to the turn in front of the person before the pick
    * rather than under the box after it. Read it through movesRunningAccess: absent is a no. */
   movesAccess: z.boolean().optional(),
+  /** Whether a message steered into a running turn of this harness may carry an image. The adapter in this host
+   * declares it, as with mcpServers, so a table row is the answer; absent is a no, and such a message waits for the
+   * turn to end. */
+  steersImages: z.boolean().optional(),
   /** Whether a person may ask this harness a question beside a thread (sessions.aside), answered on a copy of the
    * thread's session that nothing keeps. The adapter in this host declares it, as with mcpServers; absent is a no. */
   asides: z.boolean().optional(),
