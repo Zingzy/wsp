@@ -5,6 +5,7 @@ import { Computers } from "@/sections/computers";
 import { Features } from "@/sections/features";
 import { Handoff } from "@/sections/handoff";
 import { Hero } from "@/sections/hero";
+import { Sits } from "@/sections/sits";
 import { Slate } from "@/sections/slate";
 
 export function Home() {
@@ -14,6 +15,7 @@ export function Home() {
       <Agents />
       <Handoff />
       <Computers />
+      <Sits />
       <Slate />
       <Features />
       <Questions />
