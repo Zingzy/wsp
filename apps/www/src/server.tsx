@@ -61,7 +61,7 @@ export function sitemap(): string {
 }
 
 export function robots(): string {
-  return `User-agent: *\nAllow: /\n\nSitemap: ${SITE}/sitemap.xml\n`;
+  return `User-agent: *\nAllow: /\n\nSitemap: ${SITE}/sitemap.xml\nSitemap: ${SITE}/docs/sitemap.xml\n`;
 }
 
 export function llms(): string {

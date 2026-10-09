@@ -35,6 +35,12 @@
           "sizes": "32x32",
           "href": "/favicon.png"
         }
+      ],
+      "styles": [
+        {
+          "path": "assets/custom.css",
+          "tagPosition": "head"
+        }
       ]
     },
     "routing": {

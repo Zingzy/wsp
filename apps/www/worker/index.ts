@@ -6,7 +6,7 @@ const CANONICAL = "usewsp.com";
 const DOCS_ORIGIN = "wsp.apidocumentation.com";
 const DOCS = "/docs";
 /** Scalar's own address in a page, a redirect or llms.txt, with or without the subpath it writes. */
-const SCALAR_URL = /https:\/\/[a-z0-9-]+\.apidocumentation\.com(?:\/docs(?=[/"'<)\s]|$))?/g;
+const SCALAR_URL = /https:\/\/(?:[A-Za-z0-9]+--)?(?:zingzy-)?wsp\.apidocumentation\.com(?:\/docs(?=[/?#"'<)\s]|$))?/g;
 /** A root-relative link Scalar left without the subpath, such as one written in a page's own text. */
 const BARE_LINK = /\b(href|src)="\/(?!\/|docs(?:[/"?#]))/g;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -36,8 +36,10 @@ export async function waitlist(request: Request, env: Env): Promise<Response> {
 
 /** The docs, served from Scalar under our own name: /docs comes off the way in and goes onto every link on the way out. */
 export async function docs(request: Request, url: URL): Promise<Response> {
-  const to = new URL((url.pathname.slice(DOCS.length) || "/") + url.search, `https://${DOCS_ORIGIN}`);
-  const proxied = new Request(to, { method: request.method, headers: request.headers, body: request.body, redirect: "manual" });
+  // Joined as a string: new URL("//host/x", origin) would read the path as another host.
+  const to = new URL(`https://${DOCS_ORIGIN}${url.pathname.slice(DOCS.length) || "/"}${url.search}`);
+  const bodied = request.method !== "GET" && request.method !== "HEAD";
+  const proxied = new Request(to, { method: request.method, headers: request.headers, body: bodied ? request.body : null, redirect: "manual" });
   proxied.headers.set("x-forwarded-host", CANONICAL);
   proxied.headers.set("x-forwarded-proto", "https");
   const res = await fetch(proxied);
@@ -55,7 +57,7 @@ export async function docs(request: Request, url: URL): Promise<Response> {
 /** Whether Scalar has a page at a path the site lacks. Its scripts redraw a page's own links and pictures without the
  * subpath once it loads, so a click on one lands here. */
 async function inDocs(url: URL): Promise<boolean> {
-  const res = await fetch(new URL(url.pathname, `https://${DOCS_ORIGIN}`), { redirect: "manual" });
+  const res = await fetch(`https://${DOCS_ORIGIN}${url.pathname}`, { method: "HEAD", redirect: "manual" });
   return res.status === 200 || (res.status >= 300 && res.status < 400);
 }
 
@@ -73,7 +75,7 @@ export default {
     if (url.pathname === "/api/waitlist") return waitlist(request, env);
     if (url.pathname === "/docs" || url.pathname.startsWith("/docs/")) return docs(request, url);
     const served = await env.ASSETS.fetch(request);
-    if (served.status === 404 && request.method === "GET" && (await inDocs(url))) return Response.redirect(`https://${CANONICAL}${DOCS}${url.pathname}${url.search}`, 308);
+    if (served.status === 404 && request.method === "GET" && (await inDocs(url))) return Response.redirect(`https://${CANONICAL}${DOCS}${url.pathname}${url.search}`, 307);
     if (url.pathname === "/install" && served.ok) {
       const text = new Response(served.body, served);
       text.headers.set("content-type", "text/plain; charset=utf-8");

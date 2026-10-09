@@ -41,6 +41,12 @@ describe("the Worker in front of usewsp.com", () => {
     expect(await (await worker.fetch(new Request("https://usewsp.com/docs"), env())).text()).toBe("https://wsp.apidocumentation.com/");
   });
 
+  it("keeps a path that starts with // on Scalar's host", async () => {
+    const sent = vi.fn(async (r: Request) => new Response(r.url, { headers: { "content-type": "application/octet-stream" } }));
+    vi.stubGlobal("fetch", sent);
+    expect(await (await worker.fetch(new Request("https://usewsp.com/docs//example.com/x"), env())).text()).toBe("https://wsp.apidocumentation.com//example.com/x");
+  });
+
   it("writes /docs onto Scalar's bare links, its redirects and its own address", async () => {
     const page = '<a href="/reference/slate">x</a><a href="/docs/features/slate">y</a><img src="/shots/a.webp"><a href="//cdn.x/y">z</a><a href="/">home</a>';
     vi.stubGlobal("fetch", async (r: Request) => {
@@ -58,10 +64,10 @@ describe("the Worker in front of usewsp.com", () => {
   });
 
   it("sends a path the site lacks to the docs when Scalar has it, since its scripts drop /docs from a page's links", async () => {
-    vi.stubGlobal("fetch", async (r: Request | URL) => new Response(null, { status: new URL(r instanceof Request ? r.url : r).pathname === "/reference/slate" ? 200 : 404 }));
+    vi.stubGlobal("fetch", async (r: Request | string) => new Response(null, { status: new URL(typeof r === "string" ? r : r.url).pathname === "/reference/slate" ? 200 : 404 }));
     const missing: Env["ASSETS"] = { fetch: async () => new Response("not found", { status: 404 }) };
     const moved = await worker.fetch(new Request("https://usewsp.com/reference/slate?x=1"), env({ ASSETS: missing }));
-    expect(moved.status).toBe(308);
+    expect(moved.status).toBe(307);
     expect(moved.headers.get("location")).toBe("https://usewsp.com/docs/reference/slate?x=1");
     expect((await worker.fetch(new Request("https://usewsp.com/nope"), env({ ASSETS: missing }))).status).toBe(404);
   });
