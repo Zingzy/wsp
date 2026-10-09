@@ -107,43 +107,18 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: node scripts/pr-body-check.mjs
-      # The host spawns the daemon for this computer's own workspace and the command line package carries it, so the
-      # build and the suite both want the one Linux binary this runner runs before anything of node's is built.
-      - name: Toolchain from rust-toolchain.toml
-        working-directory: daemon
+      # The packages build beside the daemon; the command line package carries the daemon, so it builds after both.
+      - name: Install and build every package but the command line's
+        id: packages
+        background: true
         run: |
-          rustup toolchain install
-          rustup show
-      # The daemon workflow's x86_64 musl build is this one, flags and all, and its cache on main holds that target
-      # alone: about 270 MB, where the daemon gate's holds every profile in 8 GB and took four minutes to restore.
-      # Read only, so the daemon workflow stays the one that writes it.
-      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-            daemon/target
-          key: daemon-artifacts-x86_64-unknown-linux-musl-${{ hashFiles('daemon/Cargo.lock', 'daemon/rust-toolchain.toml') }}
-          restore-keys: |
-            daemon-artifacts-x86_64-unknown-linux-musl-
-      # Cargo rebuilds what is older than its sources, so a cache saved after this checkout never passes for this build.
-      - name: The daemon's sources newer than anything restored
-        run: git ls-files -z daemon | xargs -0 touch
-      # ring carries C, which musl-tools compiles for the musl target; libcontainer links libseccomp statically, and
-      # the archive has to be one built against musl, so the script builds it from its pinned release first.
-      - name: C compiler for the musl target, and libseccomp built against musl
-        working-directory: daemon
-        run: |
-          sudo apt-get install -y --no-install-recommends musl-tools gperf
-          ./scripts/libseccomp-archive.sh musl
-      - name: The daemon this runner runs
-        working-directory: daemon
-        run: LIBSECCOMP_LIB_PATH=$PWD/target/libseccomp/musl cargo build --locked --release --target x86_64-unknown-linux-musl -p wsp-daemon-bin
+          pnpm install --frozen-lockfile
+          pnpm -r --filter '!./apps/www' --filter '!./apps/docs' --filter '!@wsp/desktop' --filter '!@wsp-labs/wsp' build
+      - uses: ./.github/actions/daemon-binary
       - run: node packages/wspx/scripts/daemon-binary.mjs --triple x86_64-unknown-linux-musl
-      - run: pnpm install --frozen-lockfile
-      - name: Build
-        run: pnpm -r --filter '!./apps/www' --filter '!./apps/docs' --filter '!@wsp/desktop' build
+      - wait: packages
+      - name: Build the command line package
+        run: pnpm --filter @wsp-labs/wsp build
       - name: The tests this change can reach
         if: startsWith(github.ref, 'refs/heads/land/')
         run: |
@@ -214,7 +189,7 @@ jobs:
         run: |
           affected=()
           if [ -f "$RUNNER_TEMP/affected.txt" ]; then mapfile -t affected < "$RUNNER_TEMP/affected.txt"; fi
-          pnpm exec vitest run --minWorkers=1 --maxWorkers=2 --shard=${{ matrix.shard }}/4 "${affected[@]}"
+          pnpm exec vitest run --minWorkers=1 --maxWorkers=4 --shard=${{ matrix.shard }}/4 "${affected[@]}"
 
   flake:
     name: The test files this change added or modified, five times over
