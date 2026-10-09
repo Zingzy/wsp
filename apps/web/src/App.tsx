@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { useEffect, useSyncExternalStore } from "react";
 import { makeApi, ProtocolClient } from "./protocol/client.js";
-import { useCreation, useFirstRun, useProjectsRead, useProjectsRefused, useReady, useSelectedId, useSelectedThreadId, useStore } from "./protocol/store.js";
+import { useCreation, useFirstRun, useProjectsRead, useProjectsRefused, useReady, useSelectedId, useSelectedSubagent, useSelectedThreadId, useStore } from "./protocol/store.js";
 import { ComputerTerminalDrawer, WorkspaceTerminalDrawer } from "./components/WorkspaceTerminalDrawer.js";
 import { useFontEffect, useThemeEffect, useTransparencyEffect } from "./settings/theme.js";
 import { AppShell } from "./shell/AppShell.js";
@@ -72,6 +72,7 @@ export function App({ wsUrl, token, onUnauthorized }: AppProps) {
 function WorkspaceCenter() {
   const workspaceId = useSelectedId();
   const threadId = useSelectedThreadId();
+  const subagent = useSelectedSubagent();
   const creation = useCreation(workspaceId);
   const firstRun = useFirstRun();
   const projectsRead = useProjectsRead();
@@ -122,9 +123,12 @@ function WorkspaceCenter() {
   return (
     <>
       <div className="flex min-h-0 flex-1 flex-col" data-terminal-beside>
-        <WorkspaceThread workspaceId={workspaceId} threadId={threadId} />
+        <WorkspaceThread workspaceId={workspaceId} threadId={threadId} subagent={subagent} />
       </div>
-      <WorkspaceTerminalDrawer workspaceId={workspaceId} />
+      {/* The lead's drawer, hidden on a subagent's page and kept, so its shells are where they were on the way back. */}
+      <div data-lead-drawer className={subagent === null ? "contents" : "hidden"}>
+        <WorkspaceTerminalDrawer workspaceId={workspaceId} />
+      </div>
     </>
   );
 }

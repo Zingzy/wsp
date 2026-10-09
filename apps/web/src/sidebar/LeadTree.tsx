@@ -3,7 +3,8 @@
 // with its own, then a Finished fold, shut each time it is drawn, that pages its rows twenty at a time and whose menu
 // holds Settle N finished. A subagent is a slim row of its own. Settled children are not drawn here; a tree settled
 // whole folds into the sidebar's Settled section. The list nests two levels and then stands flat, so the rows a
-// level draws come back as list items for the caller to place.
+// level draws come back as list items for the caller to place. While an ended subagent's page is open its one row
+// stands under the shut fold's head, and goes when the person leaves, the fold as it was.
 import { ChevronDownIcon, CircleCheckIcon } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { CHILD_WORDS } from "../actions/format.js";
@@ -14,7 +15,8 @@ import { childParts, childTarget, finishedTake, kindOf, leadActs, leadNodes, not
 import { SidebarMenuButton } from "../components/ui/sidebar.js";
 import { isThreadWorking } from "./Sidebar.logic.js";
 import { cn } from "../lib/utils.js";
-import { ONE_LINE_ROW_CLASS, RAIL_ITEM_CLASS, ROW_META_CLASS, threadRowId } from "./rowGrammar.js";
+import { useStore } from "../protocol/store.js";
+import { CHILD_LIST_CLASS, ONE_LINE_ROW_CLASS, RAIL_ITEM_CLASS, ROW_META_CLASS, threadRowId } from "./rowGrammar.js";
 import { SubagentRow } from "./SubagentRow.js";
 import type { TileNode } from "./threadTree.js";
 
@@ -59,19 +61,25 @@ export function LeadTree({
 }) {
   const [open, setOpen] = useState(false);
   const [shown, setShown] = useState(PAGE);
+  // The subagent of this lead whose page is open, by its launching call.
+  const opened = useStore(s => (s.selectedSubagent !== null && s.selectedId === lead.workspaceId && s.selectedThreadId === lead.threadId ? s.selectedSubagent : null));
   const nodes = leadNodes(lead, kids, tree);
   const parts = childParts(nodes, tree);
-  const row = (node: LeadNode<TileNode>, part: "live" | "finished"): ReactNode => {
+  const at = lead.threadId === null ? undefined : { workspaceId: lead.workspaceId, threadId: lead.threadId };
+  const row = (node: LeadNode<TileNode>, part: "live" | "finished", rowDepth = depth): ReactNode => {
     if (!("subagent" in node)) return tile(node.node, part);
     const rowId = `subagent:${node.of.id}:${node.subagent.id}`;
     return (
       <li key={rowId} data-thread-item data-slim className={RAIL_ITEM_CLASS}>
-        <SubagentRow subagent={node.subagent} target={childTarget(node, part, tree)} kind={kindOf(node, part)} note={noteOf(node, part)} depth={depth} rowId={rowId} />
+        <SubagentRow subagent={node.subagent} target={childTarget(node, part, tree)} kind={kindOf(node, part)} note={noteOf(node, part)} depth={rowDepth} rowId={rowId} lead={at} active={opened !== null && node.subagent.parentToolUseId === opened} />
       </li>
     );
   };
   const page = open ? parts.finished.slice(0, shown) : [];
   const rest = parts.finished.length - page.length;
+  const isOpened = (node: LeadNode<TileNode>): boolean => "subagent" in node && opened !== null && node.subagent.parentToolUseId === opened;
+  // An ended subagent's open page keeps its row in sight under the shut fold, or where a settled one has no fold.
+  const standing = open ? undefined : (parts.finished.find(isOpened) ?? parts.settled.find(isOpened));
   return (
     <>
       {parts.live.map(node => row(node, "live"))}
@@ -96,8 +104,10 @@ export function LeadTree({
             <span className={cn(ROW_META_CLASS, "shrink-0")}>{parts.finished.length}</span>
             <ChevronDownIcon aria-hidden className={cn("size-3.5 shrink-0 text-sidebar-muted-foreground transition-transform duration-150", !open && "-rotate-90")} />
           </SidebarMenuButton>
+          {standing === undefined ? null : <ul className={CHILD_LIST_CLASS}>{row(standing, "finished", depth + 1)}</ul>}
         </li>
       )}
+      {standing !== undefined && parts.finished.length === 0 ? row(standing, "finished") : null}
       {page.map(node => row(node, "finished"))}
       {open && rest > 0 ? (
         <li key="more" data-slim className={RAIL_ITEM_CLASS}>

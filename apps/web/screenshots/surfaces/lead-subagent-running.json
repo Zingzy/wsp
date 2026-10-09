@@ -1,0 +1,14 @@
+{
+  "at": "/#w/ws_wsp/t/d636d674-4a44-4b4e-a220-ec1cf5b304f0/a/tu_sa-steps",
+  "fixture": "lead-marathon",
+  "steps": [
+    "pointer-off"
+  ],
+  "wait": "subagent-bar",
+  "settleMs": 1200,
+  "widths": [
+    1440,
+    390
+  ],
+  "reason": "The bar is judged at the desktop and phone widths its frozen shots were taken at; 1280 is the 1440 column a little narrower."
+}

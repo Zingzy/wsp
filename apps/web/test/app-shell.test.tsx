@@ -28,6 +28,7 @@ import { AppShell } from "../src/shell/AppShell.js";
 import { runShellCommand } from "../src/shell/shellCommands.js";
 import { onNewThreadRequest } from "../src/shell/shellRequests.js";
 import { useSignInStore } from "../src/shell/signInStore.js";
+import { provideTerminals, WorkspaceTerminals, type TerminalWire } from "../src/terminal/link.js";
 import { WorkspaceCreation } from "../src/shell/WorkspaceCreation.js";
 import { caps } from "./caps.js";
 import { noDaemonApi } from "./fake-daemon-api.js";
@@ -588,6 +589,79 @@ describe("the breadcrumb of a thread an agent opened", () => {
     await waitFor(() => expect([useStore.getState().selectedId, useStore.getState().selectedThreadId]).toEqual(["ws_a", LEAD]));
     expect(crumb().textContent).toBe("the-project/queue migration across three services");
   });
+});
+
+describe("a subagent's page over its lead's panels", () => {
+  const LEAD = "thr_lead";
+  const lead = { id: "s1", workspaceId: "ws_a", harness: "claude", status: "running" as const, prompt: "run the marathon", threadId: LEAD, subagents: [{ id: "map", title: "Read the open tickets", state: "running" as const, parentToolUseId: "tu_map", startedAt: 1 }] };
+
+  /** The daemon side of a terminal link: it opens ptys and counts what it is asked. */
+  function terminalLink(): { ops: string[]; terms: WorkspaceTerminals } {
+    const ops: string[] = [];
+    let next = 1;
+    const wire: TerminalWire = {
+      request: async op => {
+        ops.push(op);
+        if (op === "pty.create") return { ok: true, ptyId: `p${next++}` };
+        if (op === "pty.list") return { ok: true, ptys: Array.from({ length: next - 1 }, (_, i) => ({ id: `p${i + 1}`, pid: 1, cols: 80, rows: 24, exited: false })) };
+        return { ok: true };
+      },
+    };
+    const terms = new WorkspaceTerminals(wire);
+    terms.feedStatus("live");
+    provideTerminals("ws_a", terms);
+    return { ops, terms };
+  }
+  afterEach(() => provideTerminals("ws_a", null));
+
+  it("hides the lead's panel and the header's buttons on the page and gives them back on the same nodes, the terminal's session kept", async () => {
+    const { ops, terms } = terminalLink();
+    // The lead's panel holds a shell of its own, opened on the workspace's link.
+    const tab = await terms.open();
+    useRightPanelStore.getState().openTerminal("ws_a", tab.ptyId);
+    useStore.getState().bind({ ...fakeApi([view("ws_a", "api")]), listSessions: async () => [lead] } as never);
+    render(
+      <AppShell>
+        <div>center content</div>
+      </AppShell>,
+    );
+    await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_a"));
+    act(() => useStore.getState().select("ws_a", LEAD));
+    const terminal = await waitFor(
+      () => {
+        const found = document.querySelector<HTMLElement>('[data-terminal-owner="right-panel"]');
+        expect(found).not.toBeNull();
+        return found!;
+      },
+      { timeout: 15_000 },
+    );
+    const root = document.querySelector<HTMLElement>("[data-right-panel-tabbar]")!;
+    root.dataset["tag"] = "panel";
+    terminal.dataset["tag"] = "terminal";
+    const created = ops.filter(op => op === "pty.create").length;
+    expect(created).toBe(1);
+    const wrapper = document.querySelector<HTMLElement>("[data-lead-panels]")!;
+    expect(wrapper.className).toBe("contents");
+
+    act(() => useStore.getState().select("ws_a", LEAD, "tu_map"));
+    // Hidden, not closed: the wrapper takes the panel out of the layout and every node under it stays.
+    expect(wrapper.className).toBe("hidden");
+    expect(document.querySelector("[data-tag=panel]")).toBe(root);
+    expect(document.querySelector("[data-tag=terminal]")).toBe(terminal);
+    expect(root.isConnected && terminal.isConnected).toBe(true);
+    // The header draws no context ring, git, open, panel or terminal buttons on the page.
+    expect(banner().querySelectorAll("[data-header-part]")).toHaveLength(0);
+    expect(banner().querySelector("button[aria-label='Toggle right panel'], button[aria-label='Toggle terminal']")).toBeNull();
+
+    act(() => useStore.getState().select("ws_a", LEAD));
+    expect(wrapper.className).toBe("contents");
+    expect(document.querySelector("[data-tag=panel]")).toBe(root);
+    expect(document.querySelector("[data-tag=terminal]")).toBe(terminal);
+    expect([...banner().querySelectorAll<HTMLElement>("[data-header-part]")].map(el => el.dataset["headerPart"])).toEqual(["context-ring", "git-split", "open-split"]);
+    // The pty the panel opened was never killed nor opened again.
+    expect(ops.filter(op => op === "pty.kill")).toHaveLength(0);
+    expect(ops.filter(op => op === "pty.create")).toHaveLength(created);
+  }, 20_000);
 });
 
 describe("the macOS desktop window", () => {

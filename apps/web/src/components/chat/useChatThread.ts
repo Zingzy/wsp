@@ -59,8 +59,9 @@ export interface ChatThreadHandle {
   /** What the thread runs on before its transcript says it: its head's facts, else its latest row. Null for a view
    * pinned to no thread and for a fresh one. */
   readonly facts: ThreadSeed | null;
-  /** Asks for the thread's events before the oldest held, where the transcripts hold it; nothing otherwise. */
-  readonly older: () => void;
+  /** Asks for the thread's events before the oldest held, where the transcripts hold it; nothing otherwise. Answers
+   * whether older events may be left once that read is in. */
+  readonly older: () => Promise<boolean>;
   /** Moves when the view takes another thread's rows, and not when a pin names the thread it already shows: the list
    * is drawn anew, at its end, for a thread it did not just show. */
   readonly drawKey: string;
@@ -900,8 +901,10 @@ export function useChatThread(workspaceId: string, threadId: string | null = nul
     if (facts === null) return cwd === shown.cwd ? shown : { ...shown, cwd };
     return { ...shown, cwd, agent: shown.agent ?? facts.harness, model: shown.model ?? facts.model ?? null, permissionMode: shown.permissionMode ?? facts.permissionMode ?? null };
   }, [state, fromRow, rowCwd, facts, held, threadId, listed, latestRow]);
-  const older = useCallback(() => {
-    if (heldRef.current && threadId !== null) void transcripts.older(threadId).catch(() => {});
+  const older = useCallback(async (): Promise<boolean> => {
+    if (!heldRef.current || threadId === null) return false;
+    await transcripts.older(threadId).catch(() => {});
+    return transcripts.get(threadId)?.complete !== true;
   }, [threadId]);
   const setSending = useCallback(
     (sending: boolean) =>

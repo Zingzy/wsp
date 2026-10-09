@@ -1,0 +1,16 @@
+{
+  "at": "/#w/ws_wsp/t/d636d674-4a44-4b4e-a220-ec1cf5b304f0/a/tu_sa-order",
+  "fixture": "lead-marathon",
+  "steps": [
+    "subagent-back",
+    "1440:scroll:620:sidebar-tree",
+    "pointer-off"
+  ],
+  "wait": "chat-composer",
+  "settleMs": 1200,
+  "widths": [
+    1440,
+    390
+  ],
+  "reason": "The sidebar after Back to lead is judged at the desktop width its frozen shots were taken at and on the phone; 1280 is the 1440 column a little narrower."
+}

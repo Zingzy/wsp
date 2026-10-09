@@ -1,0 +1,14 @@
+{
+  "at": "/#w/ws_wsp/t/e31037c6-030a-44e6-add1-ec116e638a56/a/tu_sa-hdr",
+  "fixture": "lead-marathon",
+  "steps": [
+    "pointer-off"
+  ],
+  "wait": "subagent-bar",
+  "settleMs": 1200,
+  "widths": [
+    1440,
+    390
+  ],
+  "reason": "The bar is judged at the desktop and phone widths its frozen shots were taken at; 1280 is the 1440 column a little narrower."
+}

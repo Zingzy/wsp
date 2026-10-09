@@ -37,6 +37,29 @@ describe("the thread a page opens on", () => {
   });
 });
 
+describe("the subagent a page opens on", () => {
+  it("round-trips a workspace, its lead thread and the call that launched the subagent", () => {
+    const address = { workspaceId: "ws_a1b2", threadId: "thr_9", subagent: "toolu_01Ab" };
+    expect(appHash(address)).toBe("#w/ws_a1b2/t/thr_9/a/toolu_01Ab");
+    expect(addressFromHash(appHash(address))).toEqual(address);
+  });
+
+  it("escapes what each id carries, and names no subagent where the hash ends at the thread or the call is empty", () => {
+    const odd = { workspaceId: "ws a", threadId: "t/a/1", subagent: "call/a/2" };
+    expect(addressFromHash(appHash(odd))).toEqual(odd);
+    expect(addressFromHash("#w/ws_a1b2/t/thr_9")).toEqual({ workspaceId: "ws_a1b2", threadId: "thr_9" });
+    expect(addressFromHash("#w/ws_a1b2/t/thr_9/a/")).toEqual({ workspaceId: "ws_a1b2", threadId: "thr_9" });
+  });
+
+  it("is written only under a thread: a subagent with no lead named is the workspace alone", () => {
+    expect(appHash({ workspaceId: "ws_a1b2", subagent: "toolu_01Ab" })).toBe("#w/ws_a1b2");
+  });
+
+  it("keeps the pairing code off what it names", () => {
+    expect(addressFromHash("#w/ws_a1b2/t/thr_9/a/toolu_01Ab/c/7K3MQP2X")).toEqual({ workspaceId: "ws_a1b2", threadId: "thr_9", subagent: "toolu_01Ab" });
+  });
+});
+
 describe("the screen a workspace's next thread is written on", () => {
   it("has an address of its own, which names no thread", () => {
     expect(appHash({ workspaceId: "ws_a1b2", fresh: true })).toBe("#w/ws_a1b2/new");

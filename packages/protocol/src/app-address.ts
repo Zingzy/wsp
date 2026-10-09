@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The one address rule the app and the host share: which workspace a page
-// opens on, which thread of it, and the screen a workspace's next thread is
-// written on. The address is the app's one record of what a person is
+// opens on, which thread of it or of its subagents, and the screen a
+// workspace's next thread is written on. The address is the app's one record of what a person is
 // reading, so it is written on every pick and read on every refresh; wsp init
 // writes the workspace form after its first fork, and a thread row's
 // copy-link action the thread form. A wsp:// link the desktop takes from the
@@ -10,6 +10,8 @@
 
 const PREFIX = "#w/";
 const THREAD = "/t/";
+/** A subagent of the thread, by the call that launched it, after the thread's own segment. */
+const SUBAGENT = "/a/";
 const NEW = "/new";
 /** The pairing code wsp init minted for the browser it opens, as the last segment of the hash: spent on the page's
  * first paint and written back out of the address, so what the person is reading never carries it. */
@@ -24,15 +26,21 @@ export interface AppAddress {
   readonly threadId?: string;
   /** Whether it names the screen the workspace's next thread is written on, which has no thread of its own yet. */
   readonly fresh?: boolean;
+  /** One of the thread's own subagents, by the id of the call that launched it (its lines' parentToolUseId); only
+   * ever beside a thread, whose transcript holds those lines. */
+  readonly subagent?: string;
 }
 
 /** The hash that opens the app on a workspace. */
 export const workspaceHash = (workspaceId: string): string => `${PREFIX}${encodeURIComponent(workspaceId)}`;
 
-/** The hash for an address: a workspace, one thread of it, or its next thread's screen. */
+/** The hash for an address: a workspace, one thread of it or a subagent of that thread, or its next thread's screen. */
 export function appHash(address: AppAddress): string {
   const base = workspaceHash(address.workspaceId);
-  if (address.threadId !== undefined) return `${base}${THREAD}${encodeURIComponent(address.threadId)}`;
+  if (address.threadId !== undefined) {
+    const thread = `${base}${THREAD}${encodeURIComponent(address.threadId)}`;
+    return address.subagent === undefined ? thread : `${thread}${SUBAGENT}${encodeURIComponent(address.subagent)}`;
+  }
   return address.fresh === true ? `${base}${NEW}` : base;
 }
 
@@ -60,8 +68,11 @@ export function addressFromHash(hash: string): AppAddress | undefined {
   const fresh = cut === -1 && rest.endsWith(NEW);
   const workspaceId = decodeURIComponent(fresh ? rest.slice(0, -NEW.length) : cut === -1 ? rest : rest.slice(0, cut));
   if (workspaceId === "") return undefined;
-  const threadId = cut === -1 ? "" : decodeURIComponent(rest.slice(cut + THREAD.length));
-  return { workspaceId, ...(threadId === "" ? {} : { threadId }), ...(fresh ? { fresh: true } : {}) };
+  const after = cut === -1 ? "" : rest.slice(cut + THREAD.length);
+  const split = after.indexOf(SUBAGENT);
+  const threadId = decodeURIComponent(split === -1 ? after : after.slice(0, split));
+  const subagent = split === -1 || threadId === "" ? "" : decodeURIComponent(after.slice(split + SUBAGENT.length));
+  return { workspaceId, ...(threadId === "" ? {} : { threadId }), ...(subagent === "" ? {} : { subagent }), ...(fresh ? { fresh: true } : {}) };
 }
 
 /** What a wsp:// link can name. A link opens something and never does anything to it: an act a link could start

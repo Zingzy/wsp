@@ -1,0 +1,13 @@
+{
+  "at": "/#w/ws_wsp/t/e31037c6-030a-44e6-add1-ec116e638a56/a/tu_sa-map",
+  "fixture": "lead-marathon",
+  "steps": [
+    "pointer-off"
+  ],
+  "wait": "subagent-bar",
+  "settleMs": 1200,
+  "widths": [
+    1440
+  ],
+  "reason": "The lead's panel stands beside the thread only on the desktop; its frozen shots are 1440 alone."
+}

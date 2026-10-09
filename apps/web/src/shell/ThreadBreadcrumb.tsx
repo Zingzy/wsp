@@ -10,9 +10,10 @@
 // the one the centre shows. The header carries no state word for a thread that
 // is simply working or settled, since the pane under it already shows that; it
 // carries the one state a person has to act on, so a prompt is never hidden by
-// the header the pane is scrolled under.
+// the header the pane is scrolled under. On a subagent's page the lead stands
+// where an opener would, as the way back to it, and the subagent's title last.
 import { threadState, threadWordOf, waitingLine } from "@wsp/protocol";
-import { useCreation, useFirstRun, useOpenThread, useSelectedId, useSelectedWorkspaceId, useSettingsOpen, useSidebarProjects, useStore, useWorkspace } from "../protocol/store.js";
+import { useCreation, useFirstRun, useOpenThread, useSelectedId, useSelectedSubagent, useSelectedWorkspaceId, useSettingsOpen, useSidebarProjects, useStore, useWorkspace } from "../protocol/store.js";
 import { ThreadLink } from "../components/ThreadLink.js";
 import { cn } from "../lib/utils.js";
 import { useState } from "react";
@@ -28,8 +29,11 @@ import { ProjectGlyph } from "../projects/look.js";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.js";
 import { useMediaQuery } from "../hooks/useMediaQuery.js";
 import { openedBy } from "../sidebar/threadTree.js";
+import { useOpenSubagentRun } from "../components/chat/openSubagent.js";
 
 const NEW_THREAD = "New thread";
+/** The crumb on screen beside a project or an opener: its whole measure, capped so a long one cannot push the rest off. */
+const OWN_CRUMB = "max-w-[70%] shrink-0";
 
 /** The open thread's title in the top bar, which sits in the window's drag region: a double-click there would zoom the
  * window, so the title takes itself out of the region and a double-click, or Rename on its menu, makes it the same
@@ -106,7 +110,13 @@ export function ThreadBreadcrumb() {
   // The first run is the whole centre, and it is titled: the bar says nothing over it.
   const firstRun = useFirstRun();
   // An opener may run on any workspace, so the whole fleet is read rather than this one's threads.
-  const opener = openedBy(useSidebarProjects(), { parentThreadId: thread?.parentThreadId ?? null });
+  const opened = openedBy(useSidebarProjects(), { parentThreadId: thread?.parentThreadId ?? null });
+  const subagentId = useSelectedSubagent();
+  const folded = useOpenSubagentRun(s => (s.run !== null && s.run.parentToolUseId === subagentId ? s.run : null));
+  // The lead's listing names it, else its own fold in the lead's transcript does.
+  const subagent = subagentId === null ? undefined : (thread?.subagents?.find(sub => sub.parentToolUseId === subagentId) ?? folded ?? undefined);
+  // On a subagent's page its lead is the crumb before it, the way back, as an opener is before a thread it opened.
+  const opener = subagent === undefined || thread === null || workspaceId === null ? opened : { thread: { threadId: thread.threadId ?? null, workspaceId, title: thread.title } };
   const name = workspace?.name ?? creation?.name;
   const home = useStore(s => (s.projectHome === null ? undefined : s.projects.find(p => p.id === s.projectHome)));
   const project = workspace?.project ?? home;
@@ -142,8 +152,14 @@ export function ThreadBreadcrumb() {
             <>
               {/* The thread on screen is the last thing to give way: beside its project or an opener it keeps its whole
                   measure and they are what the room is taken from, capped so a long one cannot push the rest off. */}
-              <ThreadTitle workspaceId={workspaceId} thread={thread} className={cn((project !== undefined || opener !== undefined) && "max-w-[70%] shrink-0")} />
-              {threadState(thread) === "waiting" ? (
+              {subagent !== undefined ? (
+                <span data-breadcrumb-subagent className={cn(OWN_CRUMB, "truncate font-medium text-foreground")}>
+                  {subagent.title}
+                </span>
+              ) : (
+                <ThreadTitle workspaceId={workspaceId} thread={thread} className={cn((project !== undefined || opener !== undefined) && OWN_CRUMB)} />
+              )}
+              {subagent === undefined && threadState(thread) === "waiting" ? (
                 <Tooltip>
                   <TooltipTrigger render={<span data-breadcrumb-waiting role="img" aria-label={threadWordOf(thread)} className="inline-flex shrink-0 items-center text-status-input" />}>
                     <MessageCircleQuestionIcon aria-hidden className="size-3.5" />

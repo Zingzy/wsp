@@ -42,7 +42,7 @@ import { useLocalStorage, type Codec } from "../hooks/useLocalStorage.js";
 import { useNowMinute } from "../hooks/useNowMinute.js";
 import { cn } from "../lib/utils.js";
 import { addNotice } from "../notices/store.js";
-import { catalogIn, useLaunches, useProjectsRead, useProjectsRefused, useReady, useSelectedId, useSelectedThreadId, useSelectedWorkspaceId, useSidebarProjects, useStore, useWorkspace, type Creation } from "../protocol/store.js";
+import { catalogIn, useLaunches, useProjectsRead, useProjectsRefused, useReady, useSelectedId, useSelectedSubagent, useSelectedThreadId, useSelectedWorkspaceId, useSidebarProjects, useStore, useWorkspace, type Creation } from "../protocol/store.js";
 import { hostAsleep } from "../boot.js";
 import { onAddProjectRequest, onForgetWorkspaceRequest, onProjectTripRequest, onRenameWorkspaceRequest, requestAddProject, type ProjectTripRequest } from "../shell/shellRequests.js";
 import { useShortcutLabel } from "../shell/useKeybindings.js";
@@ -159,6 +159,8 @@ export function WorkspaceSidebar() {
   const loadLanding = useStore(s => s.loadLanding);
   const selectedId = useSelectedId();
   const selectedThreadId = useSelectedThreadId();
+  // A subagent's page marks the subagent's row, not its lead's tile, unless the lead is folded over it.
+  const selectedSubagent = useSelectedSubagent();
   const selectedWorkspace = useWorkspace(useSelectedWorkspaceId());
   const nowMinute = useNowMinute();
   // One clock sample per minute tick so every tile reads the same now and the fold moves on the minute.
@@ -410,7 +412,7 @@ export function WorkspaceSidebar() {
           model={thread.model === null ? null : catalog === null ? thread.model : (modelOf(catalog, modelPicks(thread.model).model)?.label ?? thread.model)}
           time={restingAge(thread)}
           depth={depth}
-          active={(selectedId === thread.workspaceId && (selectedThreadId === null ? thread.threadId === null : selectedThreadId === thread.id)) || (selectedThreadId !== null && (item.holds?.includes(selectedThreadId) === true || (folded && holds(real, selectedThreadId))))}
+          active={(selectedId === thread.workspaceId && (selectedThreadId === null ? thread.threadId === null : selectedThreadId === thread.id) && (selectedSubagent === null || folded)) || (selectedThreadId !== null && (item.holds?.includes(selectedThreadId) === true || (folded && holds(real, selectedThreadId))))}
           settled={settled}
           snoozedWorking={item.snoozedWorking}
           renaming={renaming?.rowId === rowId}
