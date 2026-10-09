@@ -28,10 +28,12 @@ export function threadUnread(thread: Pick<ThreadView, "status" | "endedAt" | "re
   return (thread.status === "completed" || thread.status === "interrupted") && threadUnseenAt(thread) !== undefined;
 }
 
-/** Whether the thread waits on the person: it asks, or is stopped behind a thread that asks, or a finish or a failure
- * sits there that no window has shown. What the dock's count, the jump to the next thread and the menu bar read. */
+/** Whether the thread waits on the person: it asks, or is stopped behind a thread that asks, or a finish, a failure or
+ * a snooze's end sits there that no window has shown. A turn the person stopped asks nothing of them, so its end does
+ * not count. What the dock's count, the jump to the next thread and the menu bar read. */
 export function threadNeedsYou(thread: Pick<ThreadView, "status" | "asking" | "waitingOn" | "endedAt" | "readAt" | "wokeAt">): boolean {
-  return thread.asking !== undefined || thread.waitingOn !== undefined || threadUnseenAt(thread) !== undefined;
+  if (thread.asking !== undefined || thread.waitingOn !== undefined) return true;
+  return threadUnseenAt(thread.status === "interrupted" ? { ...thread, endedAt: undefined } : thread) !== undefined;
 }
 
 /** What a thread reads as, from its folded row alone. */

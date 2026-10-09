@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // What every fixture in fixtures/ is built from: the home and cloud a build hangs off, the ids, the stores, the
 // threads and their transcripts, the computers, and the base states more than one fixture serves.
-import { HERE_PLACE_ID as HERE } from "@wsp/protocol";
+import { HERE_PLACE_ID as HERE, subagentAsked } from "@wsp/protocol";
 import { createHash } from "node:crypto";
 import { homedir, hostname } from "node:os";
 import { join, resolve } from "node:path";
@@ -445,6 +445,58 @@ export const sealed = () => ({
 
 /** A thread an agent inside another thread opened: the same shape as a person's, with the tree it hangs in. */
 export const spawned = (id, of, parent, root) => ({ ...of, id, parent, root, startedBy: "agent" });
+
+/** One of an agent's own subagents as its turn's transcript holds it, each line without the turn's scope: the Agent
+ * call that launched it with its prompt, its running row with the start of what it was asked, the row naming its
+ * model, its own lines stamped with that call, and where it ended, its end row and the call's answer. `started` and
+ * `ended` are minutes ago, and its lines fall evenly between them. */
+export const subagentLines = sub => {
+  const call = `tu_${sub.id}`;
+  const end = sub.ended ?? 0;
+  const at = i => ago(sub.started - ((sub.started - end) * (i + 1)) / (sub.work.length + 1));
+  const own = { parentToolUseId: call };
+  const work = sub.work.flatMap((step, i) =>
+    step.say !== undefined
+      ? [{ type: "session.delta", at: at(i), kind: "text", text: step.say, ...own }]
+      : [
+          { type: "session.delta", at: at(i), kind: "tool_use", toolName: step.tool, toolUseId: `${call}_${i}`, text: JSON.stringify(step.input), ...own },
+          ...(step.result === undefined ? [] : [{ type: "session.delta", at: at(i), kind: "tool_result", toolUseId: `${call}_${i}`, text: step.result, ...own }]),
+        ],
+  );
+  // What Claude answers the launching call with: the summary, why it failed, or the stop it was cut by.
+  const answer = sub.summary ?? sub.failure ?? "[Request interrupted by user for tool use]";
+  const said = sub.state === "done" ? sub.summary : sub.state === "failed" ? sub.failure : undefined;
+  return [
+    { type: "session.delta", at: ago(sub.started), kind: "tool_use", toolName: "Agent", toolUseId: call, text: JSON.stringify({ description: sub.title, prompt: sub.prompt, subagent_type: "Explore" }) },
+    { type: "session.subagent", at: ago(sub.started), task: sub.id, state: "running", ...own, title: sub.title, asked: subagentAsked(sub.prompt) },
+    { type: "session.subagent", at: ago(sub.started), task: sub.id, state: "running", ...own, model: sub.model },
+    ...work,
+    ...(sub.state === "running"
+      ? []
+      : [
+          { type: "session.subagent", at: ago(end), task: sub.id, state: sub.state, ...own, ...(said === undefined ? {} : { summary: said }) },
+          { type: "session.delta", at: ago(end), kind: "tool_result", toolUseId: call, text: answer },
+        ]),
+  ];
+};
+
+/** A thread's agent starting another thread with wsp's run tool, detached and told to report back, and the tool's
+ * answer naming the thread it started: what places that thread's tile where its lead started it. A start the
+ * computer's threads at once held back answers held, with the cap it waits on. */
+export const runCall = (child, { project, workspaceId, at, capped }) => {
+  const call = `tu_run_${child.id}`;
+  const agent = child.agent ?? "claude";
+  return [
+    { type: "session.delta", at, kind: "tool_use", toolName: "mcp__wsp__run", toolUseId: call, text: JSON.stringify({ project, title: child.title, message: child.title, ...(agent === "claude" ? {} : { agent }), notify: "me", detach: true }) },
+    {
+      type: "session.delta",
+      at,
+      kind: "tool_result",
+      toolUseId: call,
+      text: JSON.stringify({ threadId: threadId(child.id), workspaceId, harness: agent, outcome: capped === undefined ? "started" : "held", ...(capped === undefined ? {} : { capped }) }),
+    },
+  ];
+};
 
 export const MIGRATE = {
   id: "migrate",

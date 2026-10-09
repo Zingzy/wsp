@@ -1,22 +1,21 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // A thread in the sidebar as one tile of two rows: the project and the
-// computer it runs on with the thread's status at the right, then the agent's
-// mark and the title, with an open pull request's icon and the crab at the
-// row's end. Everything else, the branch, the model, the pull request's number
-// and what holds the thread, is on the card that opens to the tile's right when
-// the pointer rests on it, as T3 Code's sidebar. Every tile the sidebar draws
+// computer it runs on with the thread's status at the right, the crab there
+// while it works, then the agent's mark and the title, with an open pull
+// request's icon at the row's end. Everything else, the branch, the model, the
+// pull request's number and what holds the thread, is on the card that opens to
+// the tile's right when the pointer rests on it, as T3 Code's sidebar. Every tile the sidebar draws
 // takes this shape: a thread, a workspace that holds no thread yet, a send in
 // flight and a workspace being made. A resting title takes the muted ink, so the
 // tiles a person is waiting on stand out. Renaming turns the title into the
 // sidebar's one name box in the same row, so the tile keeps its height.
-import type { ComponentProps, DragEvent, MouseEvent, ReactNode } from "react";
+import { memo, useLayoutEffect, useRef, type ComponentProps, type DragEvent, type MouseEvent, type ReactNode } from "react";
 import { AlarmClockIcon, FileDiffIcon, FolderIcon, GitBranchIcon, GitPullRequestIcon } from "lucide-react";
 import { agentName } from "@wsp/catalog";
 import { capRunningLine, type PlaceView, type ThreadCapWait } from "@wsp/protocol";
 import { THREAD_WORDS, WORKSPACE_WORDS } from "../actions/format.js";
 import type { Launch, SidebarThreadSnapshot } from "../adapt/index.js";
 import { HarnessMark } from "../components/chat/HarnessMark.js";
-import { Crab } from "../components/status/Crab.js";
 import type { ThreadStatusInput } from "../components/status/kinds/index.js";
 import { ThreadStatus } from "../components/status/ThreadStatus.js";
 import { threadStatusOf } from "../components/status/threadStatusOf.js";
@@ -96,9 +95,8 @@ function TileFrame({ card, place, harness, renaming, children, ...button }: Comp
   );
 }
 
-/** The two rows every tile draws. Row two is the agent's mark and the title, then an open pull request's icon and
- * the crab while the thread works. */
-function TileRows({ place, status, title, harness, pr, crab }: { place: TilePlace; status: ReactNode; title: ReactNode; harness: string | null; pr?: TileCheckout["pr"]; crab: boolean }) {
+/** The two rows every tile draws. Row two is the agent's mark and the title, then an open pull request's icon. */
+function TileRows({ place, status, title, harness, pr }: { place: TilePlace; status: ReactNode; title: ReactNode; harness: string | null; pr?: TileCheckout["pr"] }) {
   return (
     <>
       <span className={TILE_ROW_ONE_CLASS}>
@@ -112,7 +110,6 @@ function TileRows({ place, status, title, harness, pr, crab }: { place: TilePlac
         {harness === null ? null : <HarnessMark harness={harness} label={agentName(harness)} className="size-3" />}
         {title}
         {tilePrIcon(pr) ? <GitPullRequestIcon aria-hidden data-tile-pr className="size-3 shrink-0 text-[var(--top-row-meta)]" /> : null}
-        {crab ? <Crab className="shrink-0 text-status-working" /> : null}
       </span>
     </>
   );
@@ -155,27 +152,8 @@ const NO_CHECKOUT: TileCheckout = { branch: "", counts: [] };
 /** A held thread's reason and the setting that ends its wait, the card's lines while its computer holds it back. */
 const capNotes = (capped: ThreadCapWait | undefined): string[] => (capped === undefined ? [] : [capRunningLine(capped), CAP_WAIT_WORDS.raise(capped.place)]);
 
-export function ThreadTile({
-  thread,
-  place,
-  checkout = NO_CHECKOUT,
-  model = null,
-  time,
-  depth,
-  active,
-  settled = false,
-  snoozedWorking,
-  renaming,
-  saving,
-  onSelect,
-  onContextMenu,
-  onRename,
-  onRenameCancel,
-  onRenameOpen,
-  onDragStart,
-  onDragEnd,
-  label,
-}: {
+/** What a tile is drawn from. */
+type ThreadTileProps = {
   thread: SidebarThreadSnapshot;
   place: TilePlace;
   /** What the host read of the thread's workspace: the card's branch, pull request and changes, and the icon. */
@@ -208,12 +186,66 @@ export function ThreadTile({
   /** What row two says in place of the title, where the title is already said over the tile: the model, in a group
    * of threads one send opened. */
   label?: string | undefined;
-}) {
+};
+
+/** What a tile does when it is pressed, opened, renamed or dragged. */
+export type TileHandlers = Pick<ThreadTileProps, "onSelect" | "onContextMenu" | "onRename" | "onRenameCancel" | "onRenameOpen" | "onDragStart" | "onDragEnd">;
+
+/** Handlers for the tiles a draw makes: each is the same function from draw to draw and calls what the latest
+ * committed draw passed for its row, so a tile's memo compares them by identity and a tile it skips still acts on the
+ * sidebar's latest state, where a menu built before a child finished would offer a stale Settle. An optional handler
+ * is passed only while the draw has one, so a rename refused or allowed draws the tile again. */
+export function useTileHandlers(): (rowId: string, handlers: TileHandlers) => TileHandlers {
+  const committed = useRef(new Map<string, TileHandlers>());
+  const fixed = useRef(new Map<string, Required<TileHandlers>>());
+  const drawn = new Map<string, TileHandlers>();
+  useLayoutEffect(() => {
+    committed.current = drawn;
+  });
+  return (rowId, handlers) => {
+    drawn.set(rowId, handlers);
+    let row = fixed.current.get(rowId);
+    if (row === undefined) {
+      const at = (): TileHandlers => committed.current.get(rowId)!;
+      row = {
+        onSelect: () => at().onSelect(),
+        onContextMenu: event => at().onContextMenu(event),
+        onRename: title => at().onRename(title),
+        onRenameCancel: () => at().onRenameCancel(),
+        onRenameOpen: () => at().onRenameOpen?.(),
+        onDragStart: event => at().onDragStart?.(event),
+        onDragEnd: () => at().onDragEnd?.(),
+      };
+      fixed.current.set(rowId, row);
+    }
+    return {
+      onSelect: row.onSelect,
+      onContextMenu: row.onContextMenu,
+      onRename: row.onRename,
+      onRenameCancel: row.onRenameCancel,
+      ...(handlers.onRenameOpen === undefined ? {} : { onRenameOpen: row.onRenameOpen }),
+      ...(handlers.onDragStart === undefined ? {} : { onDragStart: row.onDragStart }),
+      ...(handlers.onDragEnd === undefined ? {} : { onDragEnd: row.onDragEnd }),
+    };
+  };
+}
+
+/** Whether two values are the same data: plain objects and arrays by their entries, anything else by identity. */
+function sameData(a: unknown, b: unknown): boolean {
+  if (Object.is(a, b)) return true;
+  if (typeof a !== "object" || typeof b !== "object" || a === null || b === null || Array.isArray(a) !== Array.isArray(b)) return false;
+  const keys = Object.keys(a);
+  return keys.length === Object.keys(b).length && keys.every(key => Object.hasOwn(b, key) && sameData((a as Record<string, unknown>)[key], (b as Record<string, unknown>)[key]));
+}
+
+/** A tile, drawn again only when what it is given changes; the sidebar passes its handlers through `useTileHandlers`. */
+export const ThreadTile = memo(function ThreadTile(props: ThreadTileProps) {
+  const { thread, place, checkout = NO_CHECKOUT, model = null, time, depth, active, settled = false, snoozedWorking, renaming, saving, onSelect, onContextMenu, onRename, onRenameCancel, onRenameOpen, onDragStart, onDragEnd, label } = props;
   const snoozed = snoozedWorking !== undefined;
   const status = settled || snoozed ? RESTING : threadStatusOf(thread);
   // A working or read row recedes unless it is the one open, as T3 Code's shouldRecede; a row that calls for the
   // person keeps the foreground ink, and the label keeps its hue either way.
-  const recede = !active && (status === RESTING || status.id === "working" || status.id === "resuming");
+  const recede = !active && (status === RESTING || status.id === "working" || status.id === "resuming" || status.id === "stopped");
   const card = tileCardLines({
     title: thread.title,
     place,
@@ -272,11 +304,10 @@ export function ThreadTile({
         title={titleOrBox ?? <Title text={label ?? thread.title} idle={recede} active={active} onDoubleClick={onRenameOpen} />}
         harness={thread.harness}
         pr={checkout.pr}
-        crab={status.crab === true}
       />
     </TileFrame>
   );
-}
+}, sameData);
 
 /** A workspace that holds no thread yet, as a tile: its name for the title, no status and no agent, and its menu the
  * workspace's own verbs. Renaming it turns the name into the one name box, as a thread's title does. */
@@ -328,7 +359,6 @@ export function WorkspaceTile({
         title={renaming ? <NameBox name={name} label={WORKSPACE_WORDS.rename} saving={saving} onRename={onRename} onCancel={onRenameCancel} /> : <Title text={name} idle active={active} />}
         harness={null}
         pr={checkout.pr}
-        crab={false}
       />
     </TileFrame>
   );
@@ -344,7 +374,7 @@ export function ThreadLaunchTile({ launch, place, checkout }: { launch: Launch; 
   const card = tileCardLines({ title: launch.title, place, folder: checkout.folder, branch: checkout.branch, harness: launch.harness, model: null, pr: checkout.pr, changed: checkout.changed, notes: [] });
   return (
     <TileFrame card={card} place={place} harness={launch.harness} renaming={false} render={<div />} data-thread-launch data-depth={0} className={TILE_CLASS}>
-      <TileRows place={place} status={<ThreadStatus thread={LAUNCHED} />} title={<Title text={launch.title} idle={false} active={false} />} harness={launch.harness} pr={checkout.pr} crab />
+      <TileRows place={place} status={<ThreadStatus thread={LAUNCHED} />} title={<Title text={launch.title} idle={false} active={false} />} harness={launch.harness} pr={checkout.pr} />
     </TileFrame>
   );
 }
@@ -352,8 +382,8 @@ export function ThreadLaunchTile({ launch, place, checkout }: { launch: Launch; 
 const CREATE_FAILED: ThreadStatusInput = { status: "failed", asking: null, startedAt: null, unread: false };
 const CREATE_RUNNING: ThreadStatusInput = { status: "running", asking: null, startedAt: null, unread: false };
 
-/** A workspace still being made, in the tile's grammar: where it will run with Starting in the slot, its name with the
- * crab at its end, and the step the create is waiting on on its card. A refused create says Failed instead. */
+/** A workspace still being made, in the tile's grammar: where it will run with Starting's crab in the slot, its name,
+ * and the step the create is waiting on on its card. A refused create says Failed instead. */
 export function CreationTile({ rowId, name, place, line, failed, active, onSelect, onContextMenu }: { rowId: string; name: string; place: TilePlace; line: string; failed: boolean; active: boolean; onSelect: () => void; onContextMenu?: (event: MouseEvent<HTMLElement>) => void }) {
   const card = tileCardLines({ title: name, place, branch: "", harness: null, model: null, notes: [line] });
   return (
@@ -377,7 +407,6 @@ export function CreationTile({ rowId, name, place, line, failed, active, onSelec
         status={failed ? <ThreadStatus thread={CREATE_FAILED} /> : <ThreadStatus thread={CREATE_RUNNING} kind={STARTING} />}
         title={<Title text={name} idle={false} active={active} />}
         harness={null}
-        crab={!failed}
       />
     </TileFrame>
   );

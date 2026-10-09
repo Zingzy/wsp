@@ -71,6 +71,13 @@ export const fixturePulls = name => {
  * readings. None for a fixture that names none. */
 export const fixtureFiles = name => (name === undefined ? [] : (fixtureRow(name).files?.() ?? []));
 
+/** The moment a fixture's page reads as now, a ms epoch, for a fixture whose shots line up with frozen ones by their
+ * times: none for every other, whose page reads the real clock. */
+export const fixtureClock = name => (name === undefined ? undefined : fixtureRow(name).clock?.());
+
+/** What a fixture's page finds in its local storage before it loads, by key: none for a fixture that names none. */
+export const fixtureStorage = name => (name === undefined ? {} : (fixtureRow(name).storage?.() ?? {}));
+
 /** This computer's agents as a fixture's host reads them: every fixture's, unless it names its own. */
 export const fixtureAgents = name => (name === undefined ? HERE_AGENTS : (fixtureRow(name).agents?.() ?? HERE_AGENTS));
 

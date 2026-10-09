@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { fixtureCloud, fixtureState, threadId } from "./fixture-state.mjs";
-import { indexMarkdown, readSurfaces, selectorFor, shippedSurfaces, shotName, shotPlan, stepFor } from "./plan.mjs";
+import { indexMarkdown, readSurfaces, selectorFor, shippedSurfaces, shotName, shotPlan, stepFor, surfacesIn } from "./plan.mjs";
 
 const list = (surfaces, rest = {}) => readSurfaces({ surfaces, ...rest });
 
@@ -43,6 +43,10 @@ describe("a click or wait word", () => {
   it("reads a key: word as a press, kept for a width like any other step", () => {
     expect(stepFor("key:Escape", [1440, 390])).toEqual({ key: "Escape" });
     expect(stepFor("390:key:Escape", [1440, 390])).toEqual({ width: 390, key: "Escape" });
+  });
+
+  it("reads pointer-off as the pointer leaving every control, not a click on a data-pointer-off", () => {
+    expect(stepFor("390:pointer-off", [1440, 390])).toEqual({ width: 390, pointerOff: true });
   });
 
   it("reads a focus: word as focus on a data attribute, with no click", () => {
@@ -266,6 +270,19 @@ describe("the surfaces folder", () => {
       writeFileSync(join(root, "surfaces", "zeta.json"), JSON.stringify({ at: "/" }));
       writeFileSync(join(root, "surfaces", "alpha.json"), JSON.stringify({ at: "/x" }));
       expect(shippedSurfaces(join(root, "surfaces"))).toEqual({ widths: [1440], surfaces: [{ name: "alpha", at: "/x" }, { name: "zeta", at: "/" }] });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("takes one of its files as a list of that surface alone, at the folder's widths, and a list file as it is", () => {
+    const root = folder();
+    try {
+      writeFileSync(join(root, "surfaces", "alpha.json"), JSON.stringify({ at: "/x" }));
+      expect(surfacesIn(join(root, "surfaces", "alpha.json"))).toEqual({ widths: [1440], surfaces: [{ name: "alpha", at: "/x" }] });
+      const listed = { widths: [390], surfaces: [{ name: "beta", at: "/" }] };
+      writeFileSync(join(root, "list.json"), JSON.stringify(listed));
+      expect(surfacesIn(join(root, "list.json"))).toEqual(listed);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
