@@ -1,3 +1,18 @@
 # wsp agents signin
 
-Generated from `wsp agents signin --help` and its line in `COMMAND_LINES` (`packages/host/src/cli/commands.ts`).
+{/* Written by apps/docs-next/scripts/cli.ts: change the script or its source and run pnpm --filter @wsp/docs-next generate. */}
+
+```text
+usage: wsp agents signin <agent> [<workspace>]
+  signs an agent in on this computer or in a workspace, its own sign-in run
+  there and shown in this terminal; a box you added takes wsp add <computer>
+  --sign-in <agent>
+
+  --json     print the raw protocol values, one JSON object per line, with
+             everything else on stderr
+  --state    the state file the host serves
+  --host     run the line against a host on your account, by the name wsp hosts
+             lists it under; WSP_HOST names one for a whole shell
+```
+
+No MCP tool: runs the agent's own sign-in in a terminal a person types into, which is where the ones that ask them to pick a provider are answered.

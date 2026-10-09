@@ -1,3 +1,24 @@
 # wsp usage reset
 
-Generated from `wsp usage reset --help` and its line in `COMMAND_LINES` (`packages/host/src/cli/commands.ts`).
+{/* Written by apps/docs-next/scripts/cli.ts: change the script or its source and run pnpm --filter @wsp/docs-next generate. */}
+
+```text
+usage: wsp usage reset <account> [--credit <id>] [--on <computer>] [--yes]
+  spends one of the resets a Codex account has banked, on a computer of yours
+  that holds its login, after reading the account there: its five-hour and
+  weekly windows start again now; asks first unless --yes
+
+  --credit    the reset to spend, by the id Codex lists it under; whichever
+              Codex picks without it
+  --on        the computer to spend it on, by the name wsp computers shows, one
+              of the account's own that holds its login; the first of those that
+              is connected without it
+  --yes       go ahead without being asked
+  --json      print the raw protocol values, one JSON object per line, with
+              everything else on stderr
+  --state     the state file the host serves
+  --host      run the line against a host on your account, by the name wsp hosts
+              lists it under; WSP_HOST names one for a whole shell
+```
+
+No MCP tool: spends a reset the person owns; the skill already says an agent does not read the person's accounts, and a thread's socket is refused every usage op.

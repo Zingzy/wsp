@@ -1,3 +1,23 @@
 # wsp status
 
-Generated from `wsp status --help` and its line in `COMMAND_LINES` (`packages/host/src/cli/commands.ts`).
+{/* Written by apps/docs-next/scripts/cli.ts: change the script or its source and run pnpm --filter @wsp/docs-next generate. */}
+
+```text
+usage: wsp status [--watch]
+  whether a host serves this state file, on which ports, what keeps it there and
+  the newest release the host last read, with a non-zero exit code when none
+  does; on a computer joined to somebody's wsp it reads the agent there instead,
+  what that computer is doing and what is running on it, and --watch draws the
+  same rows again every second. --host reads a host on another computer
+
+  --state    the state file: this word first, else WSP_HOME's state.json, else
+             ./.wsp/state.json when the current directory is a checkout of wsp,
+             else state.json in the home the running host serves
+  --watch    draw the same rows again every second where they stand, until
+             Ctrl-C; it needs a terminal to redraw on, and reads nothing but
+             this computer's own agent
+  --host     run the line against a host on your account, by the name wsp hosts
+             lists it under; WSP_HOST names one for a whole shell
+```
+
+No MCP tool: reads this computer's lock and service manager, the agent on a computer that joined somebody's wsp, or dials the host named beside it; a tool that answers at all is proof a host is up.

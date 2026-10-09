@@ -17,6 +17,7 @@ import { chmod, mkdir, mkdtemp, open, rm } from "node:fs/promises";
 import { basename, dirname, join, posix } from "node:path";
 import { promisify } from "node:util";
 import { inflateRawSync } from "node:zlib";
+import { HOME_ENV } from "@wsp/protocol";
 
 export const UPDATE_WORDS = {
   translocated: "macOS runs the app from a temporary copy, so it cannot replace itself. Move wsp to Applications and open it again.",
@@ -382,7 +383,7 @@ export const swapArgs = (s: Swap): string[] => [
 /** What the script and the app it launches run with: the system's own PATH, and of this launch's environment only
  * what says whose login and which wsp home it is. */
 export function swapEnv(env: Readonly<Record<string, string | undefined>>): Record<string, string> {
-  const kept = ["HOME", "USER", "LOGNAME", "TMPDIR", "LANG", "WSP_HOME"].flatMap(name => (env[name] === undefined ? [] : [[name, env[name]!]]));
+  const kept = ["HOME", "USER", "LOGNAME", "TMPDIR", "LANG", HOME_ENV].flatMap(name => (env[name] === undefined ? [] : [[name, env[name]!]]));
   return { PATH: "/usr/bin:/bin:/usr/sbin:/sbin", ...Object.fromEntries(kept) };
 }
 

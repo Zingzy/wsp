@@ -1,3 +1,138 @@
 # Settings
 
-Generated from `SETTINGS_GROUPS` in `apps/web/src/settings/groups.ts` and each group's `cards()`, defaults from `Preferences` and themes from `apps/web/src/themes`.
+{/* Written by apps/docs-next/scripts/settings.ts: change the script or its source and run pnpm --filter @wsp/docs-next generate. */}
+
+Settings has one page per group, in the order its sidebar lists them: General, Appearance, Agents, Computers, Recipes, Projects, Usage, Keybindings, Privacy, Devices, Account. A row off its default shows an arrow by its title that puts it back. Appearance, Keybindings, and Privacy also have Restore defaults, which puts back the whole page.
+
+A default below is what the app shows before you change anything, read on the desktop app on a Mac.
+
+## General
+
+### Composer
+
+| Setting | What it does | Default |
+|---|---|---|
+| Send with | The other key makes a new line. ⌘ on a Mac, Ctrl elsewhere. | Enter |
+| A message while a thread works | Queue waits for the turn to end; steer hands it to the agent now. | Queue |
+
+### Notifications
+
+| Setting | What it does | Default |
+|---|---|---|
+| When a thread needs you | A question, a permission prompt, a sign-in. | Notify and sound |
+| When a thread finishes | A thread you or the command line started; one an agent started reports to that agent. | Notify |
+| When a plan window runs low | At 70% and 90% of a window, once each, and when an account is blocked. | On |
+
+### Threads
+
+| Setting | What it does | Default |
+|---|---|---|
+| New thread starts in | Ask every time lists your projects before a new thread opens. | Ask every time |
+| Settle a thread after | A read thread moves to Settled once it has been quiet this long. | 2 hours |
+| Ask before deleting | A workspace with unpushed work always asks. | On |
+
+### Open in
+
+| Setting | What it does | Default |
+|---|---|---|
+| Open files in | Where Open in editor goes, for a file in a thread or a whole workspace. |  |
+| Editors over ssh | One line at the top of ~/.ssh/config lets your editor open a workspace on another computer. | Off |
+
+### Startup and quit
+
+| Setting | What it does | Default |
+|---|---|---|
+| When you quit | Quitting the window leaves threads running on your computer; quit and stop ends them too. | Ask each time |
+| Start wsp at login | wsp keeps running on your computer with no window open, so threads carry on. | On |
+| Keep your computer awake | The wsp app stops it sleeping on its own while a thread works there. | On |
+
+### Version
+
+The version this wsp runs, whether a newer release is out, and the button that gets it. What's new opens the release notes.
+
+## Appearance
+
+### Mode
+
+Light, dark, or whichever side your computer is on.
+
+Default: System.
+
+### Themes
+
+Point at a theme to see this window in it.
+
+Default: Paper on the light side, Graphite on the dark.
+
+| Theme | Side | What it looks like |
+|---|---|---|
+| Paper | Light | Zinc on near white, with the wsp blue. |
+| Linen | Light | Unbleached light with warm greys and an ink-black key. |
+| Frost | Light | Cool blue-grey light with a steel blue. |
+| Graphite | Dark | Neutral black with a black sidebar and the wsp blue. |
+| Denim | Dark | Indigo-black with a periwinkle blue. |
+| Tungsten | Dark | Warm soot with ivory ink and an ivory key. |
+| Moss | Dark | Forest grey with sage ink and a sage key. |
+| Pitch | Dark | True black for an OLED screen, one grey edge and a white key. |
+
+### Glass
+
+How wsp's window shows what is behind it.
+
+| Setting | What it does | Default |
+|---|---|---|
+| Transparency | Glass shows what is behind the window. Off, every surface is solid. | On |
+
+### Type
+
+The faces and sizes the conversation and its code are read in.
+
+| Setting | What it does | Default |
+|---|---|---|
+| App font | The sidebar, replies and every page. | Default |
+| Reading size | Replies, your own messages and the box you write in. | Default |
+| Code font | Code in replies, the changes and files. | Default |
+| Code size | Code in replies, tool output, the changes and files. | Default |
+
+## Agents
+
+Pick the computer to read and a tab: Agents, Tool servers or Skills. Agents starts with the default agent a new thread runs on, which a project can override, then one row per agent there with its version, its sign-in and what a new thread runs it with. Each row opens its own page.
+
+## Computers
+
+One row per computer this wsp runs on. Each row opens that computer's page: its state, its agents and tool servers, its image, the threads running there, and Remove.
+
+## Recipes
+
+One row per recipe: its icon, what it holds and the computers that follow it. An open recipe has the same rows Add a computer ticks, and a change there reaches every computer following it.
+
+## Projects
+
+One row per project, with its source and the computer it lives on. Each opens the project's page: its facts, what a new task starts from, its icon and color, and Remove, which waits until no workspace uses it.
+
+## Usage
+
+Two tabs. Usage: what turns used over a range, split by a value you pick, with the threads that used the most. Limits: each signed-in account with what its agent last said about its plan's windows.
+
+## Keybindings
+
+One line per command, in cards headed *Window and panels*, *Tasks and threads*, *Terminal, while it has focus*, *Fixed*. A command's keys are a button that sets a chord of your own. Every command and its keys on Mac and Linux are on [Keyboard shortcuts](/features/shortcuts).
+
+## Privacy
+
+| Setting | What it does | Default |
+|---|---|---|
+| Server icons from Google | wsp asks Google for each public server's icon by host name; turning this off deletes the saved icons. | On |
+| Newest agent versions | wsp asks npm, GitHub and each agent's maker for every agent's newest version, once a day. | On |
+| Agent logs | Usage counts what Claude Code, Codex and OpenCode logged on your computer and on every computer you added, wsp's own threads there included. Each computer reads its own logs, and wsp shows what they count on the Usage page alone, never to an agent. | On |
+| Anonymous usage counts | wsp sends PostHog counts of threads, turns, setups and failures; never a path, a prompt, a name or a key. | On |
+
+## Devices
+
+Every computer and browser paired with this wsp, with when it paired and when it was last seen, and Revoke.
+
+## Account
+
+| Setting | What it does |
+|---|---|
+| GitHub | Sign in to use this wsp from outside your network. Not from the app yet. |

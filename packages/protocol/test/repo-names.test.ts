@@ -10,7 +10,9 @@ import { ROOT } from "./source-files.js";
 const OLD = ["Zingzy/wsp($|[^-]|-map)", "@zingzy/wsp"];
 
 function oldNames(): string[] {
-  const args = ["grep", "-n", "-E", OLD.join("|"), "--", ":!packages/protocol/test/repo-names.test.ts"];
+  // The changelog quotes the release notes, and the releases before the move were published under the old name.
+  const history = [":!apps/docs-next/content/project/changelog.mdx", ":!apps/docs-next/scripts/releases.json"];
+  const args = ["grep", "-n", "-E", OLD.join("|"), "--", ":!packages/protocol/test/repo-names.test.ts", ...history];
   try {
     return execFileSync("git", args, { cwd: ROOT, encoding: "utf8" }).trim().split("\n");
   } catch (err) {

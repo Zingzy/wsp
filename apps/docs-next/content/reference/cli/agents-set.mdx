@@ -1,3 +1,37 @@
 # wsp agents set
 
-Generated from `wsp agents set --help` and its line in `COMMAND_LINES` (`packages/host/src/cli/commands.ts`).
+{/* Written by apps/docs-next/scripts/cli.ts: change the script or its source and run pnpm --filter @wsp/docs-next generate. */}
+
+```text
+usage: wsp agents set <agent> [--model <slug>] [--effort <word>]
+       [--access <word>] [--hide <model>]... [--show <model>]...
+       [--order <model,model>] [--add-model <id>]... [--drop-model <id>]...
+       [--reset <field>]...
+  an agent's defaults on every computer: the model, effort and access a new
+  thread on it starts on, and which models its picker lists
+
+  --model         the model a new thread on it starts on, by the agent's own
+                  slug
+  --effort        the effort a new thread on it starts at, by the agent's own
+                  word
+  --access        how far a new thread on it may go without asking: ask,
+                  auto-edit, full or plan, refused where the agent has no such
+                  mode
+  --hide          a model to take off its picker; a start still takes it by
+                  name; repeats
+  --show          a hidden model to put back on its picker; repeats
+  --order         the models its picker lists first, comma separated; the rest
+                  follow in the agent's own order
+  --add-model     a model id the binary does not list, which a start may then
+                  name; repeats
+  --drop-model    a model id added before, taken back off; repeats
+  --reset         put a field back on the agent's own: model, effort, access or
+                  models; repeats
+  --json          print the raw protocol values, one JSON object per line, with
+                  everything else on stderr
+  --state         the state file the host serves
+  --host          run the line against a host on your account, by the name wsp
+                  hosts lists it under; WSP_HOST names one for a whole shell
+```
+
+MCP tool: [`agents_set`](/reference/mcp-tools#agentsset).

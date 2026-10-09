@@ -1,3 +1,20 @@
 # wsp servers
 
-Generated from `wsp servers --help` and its line in `COMMAND_LINES` (`packages/host/src/cli/commands.ts`).
+{/* Written by apps/docs-next/scripts/cli.ts: change the script or its source and run pnpm --filter @wsp/docs-next generate. */}
+
+```text
+usage: wsp servers [<workspace>] [--on <computer>]
+  the MCP servers the agents on this computer, a box you added or a workspace
+  are set up with: how each is reached, the file it is defined in and its
+  sign-in as its config says it
+
+  --on       the computer to read, by the name wsp computers shows; this
+             computer without it, and a workspace names its own
+  --json     print the raw protocol values, one JSON object per line, with
+             everything else on stderr
+  --state    the state file the host serves
+  --host     run the line against a host on your account, by the name wsp hosts
+             lists it under; WSP_HOST names one for a whole shell
+```
+
+MCP tool: [`servers`](/reference/mcp-tools#servers).

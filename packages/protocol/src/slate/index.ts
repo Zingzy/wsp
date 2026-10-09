@@ -21,5 +21,5 @@ export { runSlateBatch, type SlateBatchResult, type SlateBatchContext, type Slat
 export { sketchSlate, type SlateSketchContext } from "./sketch.js";
 export { slateAxisWord, slateChartAxis, slateShares, slateSpanState, slateTime, SLATE_DONUT_PARTS, SLATE_SPAN_STATES, type SlateSpanState } from "./chart.js";
 export { slateResultShape, sketchSlateResult, slateFieldWords, SLATE_RESULT_ROWS, type SlateResultShape } from "./shape.js";
-export { slateCatalog, slateTokens, SLATE_RULES } from "./catalog.js";
+export { slateCatalog, slateTokens, SLATE_CHAPTERS, SLATE_RULES } from "./catalog.js";
 export { SLATE_EXAMPLES } from "./examples.js";

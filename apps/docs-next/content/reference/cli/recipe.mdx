@@ -1,3 +1,55 @@
 # wsp recipe
 
-Generated from `wsp recipe --help` and its line in `COMMAND_LINES` (`packages/host/src/cli/commands.ts`).
+{/* Written by apps/docs-next/scripts/cli.ts: change the script or its source and run pnpm --filter @wsp/docs-next generate. */}
+
+```text
+usage: wsp recipe [--tick used|installed|default] [--set <id>=on|off]
+       [--signin <id>=copy|machine|later|key|skip|token] [--add <id>=<command>]
+       [--add-check <id>=<command>] [--why <words>] [--engine]
+       [--project <folder>] [--out <path>]
+  write the recipe and print it as a table: every catalog agent and tool with
+  its tick, why it has it and what it costs on the machine, then the commands
+  your agents ran that no catalog row carries. --tick used|installed|default
+  names the rule that decides every tick (used, the default, ticks what your
+  agents actually ran here); --set <id>=on|off flips a row by its catalog id, or
+  a package this computer's own package managers have by the id wsp recipe scan
+  gives it, which the build installs by that package's own road; --signin
+  <id>=copy|machine|later|key|skip|token answers a sign-in by catalog id, later
+  leaving it to the first time the tool is needed on the machine and key
+  bringing the key files beside a login and nothing else of it; --add
+  <id>=<command> carries a tool neither the catalog nor this computer has,
+  installed by that command on the machine, with --add-check <id>=<command>
+  saying it is there and --why <words> what the rows it adds are for; --engine
+  marks the recipe so every machine from its image gets the place's Docker or
+  podman through a socket of its own (a project whose compose file needs one),
+  and stays in the file until you edit it out; --project reads a folder's own
+  manifests for what it takes to build and weighs the histories by it, --out
+  says where the file goes and --json prints the table as one object. Naming
+  --tick or --project decides every tick again; without either, what the file
+  says stands and the flags flip rows on top of it. A sign-in answer stands
+  either way: no rule decides one. All of them repeat. Review it, then wsp init
+  --recipe
+
+  --out          where the recipe file is written
+  --tick         the rule that decides every tick: used, installed, default
+  --set          <id>=on|off flipping one row of the recipe by its id; repeats
+  --signin       <id>=copy|machine|later|key|skip|token answering one sign-in by
+                 catalog id; repeats
+  --add          <id>=<command> carrying a tool neither the catalog nor this
+                 computer has, installed by that command on the machine; repeats
+  --add-check    <id>=<command> proving that added tool is on the machine;
+                 repeats
+  --why          what the rows this line adds are for, in your own words; the
+                 rows say an agent added them without it
+  --engine       mark the recipe so every machine from its image gets the
+                 place's Docker or podman; it stays in the file until you edit
+                 it out
+  --project      a folder on this computer to weigh the histories by; repeats
+  --json         print the raw protocol values, one JSON object per line, with
+                 everything else on stderr
+  --state        the state file the host serves
+  --host         run the line against a host on your account, by the name wsp
+                 hosts lists it under; WSP_HOST names one for a whole shell
+```
+
+MCP tool: [`recipe`](/reference/mcp-tools#recipe).

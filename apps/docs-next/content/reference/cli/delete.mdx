@@ -1,3 +1,20 @@
 # wsp delete
 
-Generated from `wsp delete --help` and its line in `COMMAND_LINES` (`packages/host/src/cli/commands.ts`).
+{/* Written by apps/docs-next/scripts/cli.ts: change the script or its source and run pnpm --filter @wsp/docs-next generate. */}
+
+```text
+usage: wsp delete <thread>|<workspace> [--yes]
+  takes a thread on this computer away, its turns and checkpoints with it, and
+  the worktree wsp made for it with every thread in it, never the project
+  folder; a workspace on a box goes as before, its machine deleted at the
+  provider and its record and threads dropped from this computer
+
+  --yes      go ahead without being asked
+  --json     print the raw protocol values, one JSON object per line, with
+             everything else on stderr
+  --state    the state file the host serves
+  --host     run the line against a host on your account, by the name wsp hosts
+             lists it under; WSP_HOST names one for a whole shell
+```
+
+MCP tool: [`delete`](/reference/mcp-tools#delete).

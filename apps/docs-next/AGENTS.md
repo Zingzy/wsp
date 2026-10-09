@@ -40,3 +40,5 @@ again as a last pass.
    `/` key overwrites the first, and `//` makes that group's own route answer `/`, sending the home page to its first
    child. That is why The project's pages live under `/project/`.
 2. `apps/docs` is the site still published until the swap; nothing here reads it but the redirects test.
+3. Scalar keeps a JSX attribute only in its React spelling, so a `<video>` plays only with `autoPlay`, and
+   `test/prose.test.ts` fails one without it.

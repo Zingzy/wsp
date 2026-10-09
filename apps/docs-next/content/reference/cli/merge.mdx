@@ -1,3 +1,21 @@
 # wsp merge
 
-Generated from `wsp merge --help` and its line in `COMMAND_LINES` (`packages/host/src/cli/commands.ts`).
+{/* Written by apps/docs-next/scripts/cli.ts: change the script or its source and run pnpm --filter @wsp/docs-next generate. */}
+
+```text
+usage: wsp merge <workspace> [--method merge|squash|rebase] [--when-checks-pass]
+  merges the workspace's pull request, or merges it once its checks pass
+
+  --method              merge, squash or rebase; the repository's own default
+                        without one
+  --when-checks-pass    merge once the checks pass rather than now, where the
+                        repository allows it
+  --json                print the raw protocol values, one JSON object per line,
+                        with everything else on stderr
+  --state               the state file the host serves
+  --host                run the line against a host on your account, by the name
+                        wsp hosts lists it under; WSP_HOST names one for a whole
+                        shell
+```
+
+MCP tool: [`merge`](/reference/mcp-tools#merge).

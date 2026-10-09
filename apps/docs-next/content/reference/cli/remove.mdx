@@ -1,3 +1,24 @@
 # wsp remove
 
-Generated from `wsp remove --help` and its line in `COMMAND_LINES` (`packages/host/src/cli/commands.ts`).
+{/* Written by apps/docs-next/scripts/cli.ts: change the script or its source and run pnpm --filter @wsp/docs-next generate. */}
+
+```text
+usage: wsp remove <computer> [--yes] [--force] [--json]
+  take a computer out, asked once: its forks are deleted and its projects leave
+  this wsp with their threads, then the agent and its files go and the computer
+  is left as wsp found it. Stopped by a fork or a project folder there holding
+  work no remote has, naming each
+
+  --state    the state file: this word first, else WSP_HOME's state.json, else
+             ./.wsp/state.json when the current directory is a checkout of wsp,
+             else state.json in the home the running host serves
+  --yes      go ahead without being asked
+  --force    remove it even where a fork or a project folder there holds work no
+             remote has, which goes with it
+  --json     print the raw protocol values, one JSON object per line, with
+             everything else on stderr
+  --host     read to say this line runs at its own host's terminal; it dials no
+             other
+```
+
+No MCP tool: takes a computer out of this wsp and sweeps wsp off it, which belongs with the terminal that joined it.

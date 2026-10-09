@@ -254,7 +254,8 @@ describe("the pages wsp prints", () => {
     // "--in <" alone let three rows of the skill keep the flag in backticks with no value after it.
     // wsp hosts is a line wsp answers to, so it is no banned word; the ones below are gone for good.
     const banned = ["thread new", "thread_new", "--in <", "`--in`", "--to <", "new --local", "new --ssh", "wsp connect", "wsp relay", "wsp pair", "wsp devices", "wsp disconnect", "wsp host list", "wsp host linked", "wsp host clients", "run wsp up first", "wsp image move"];
-    const docs = [...filesUnder(join(REPO, "apps/docs/content")), ...filesUnder(join(REPO, "apps/docs-next/content"))].filter(p => p.endsWith(".mdx") || p.endsWith(".md"));
+    // The changelog is the published release notes, which name the words each release retired.
+    const docs = [...filesUnder(join(REPO, "apps/docs/content")), ...filesUnder(join(REPO, "apps/docs-next/content"))].filter(p => (p.endsWith(".mdx") || p.endsWith(".md")) && !p.endsWith("project/changelog.mdx"));
     const texts: [string, string][] = [
       ["the front page", HELP],
       ["the agent page", agentPage()],

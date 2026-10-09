@@ -1,3 +1,34 @@
 # wsp projects set
 
-Generated from `wsp projects set --help` and its line in `COMMAND_LINES` (`packages/host/src/cli/commands.ts`).
+{/* Written by apps/docs-next/scripts/cli.ts: change the script or its source and run pnpm --filter @wsp/docs-next generate. */}
+
+```text
+usage: wsp projects set <project> [--agent <id>] [--model <slug>]
+       [--effort <word>] [--access <word>] [--after-worktree <command>]
+       [--reset <field>]...
+  what a new thread on one project starts on, over the agent's own defaults: its
+  agent, model, effort and access; and the shell line a new worktree of it runs
+  once, after each ecosystem's own install, for what none of them knows
+
+  --agent             the agent a new thread on it runs (claude, codex,
+                      opencode, cursor)
+  --model             the model a new thread on it starts on, by the agent's own
+                      slug
+  --effort            the effort a new thread on it starts at, by the agent's
+                      own word
+  --access            how far a new thread on it may go without asking: ask,
+                      auto-edit, full or plan
+  --after-worktree    a shell line a new worktree of the project runs once at
+                      its top, after each ecosystem's own install
+  --reset             put a field back on the layer below: agent, model, effort
+                      or access, or take the after-worktree command away with
+                      after-worktree; repeats
+  --json              print the raw protocol values, one JSON object per line,
+                      with everything else on stderr
+  --state             the state file the host serves
+  --host              run the line against a host on your account, by the name
+                      wsp hosts lists it under; WSP_HOST names one for a whole
+                      shell
+```
+
+MCP tool: [`projects_set`](/reference/mcp-tools#projectsset).

@@ -1,3 +1,47 @@
 # wsp computers set
 
-Generated from `wsp computers set --help` and its line in `COMMAND_LINES` (`packages/host/src/cli/commands.ts`).
+{/* Written by apps/docs-next/scripts/cli.ts: change the script or its source and run pnpm --filter @wsp/docs-next generate. */}
+
+```text
+usage: wsp computers set <computer> [--name <new>] [--ssh <login>]
+       [--threads <n>] [--nap <minutes>|off] [--turn-limit <hours>|off]
+       [--spawn on|off] [--max-machines <n>] [--max-depth <n>]
+       [--recipe <name>|none] [--reset <setting>]...
+  what you set on one of your computers: its name, the ssh login it is reached
+  by, how many threads run there at once, how long a quiet machine there runs
+  before it naps, how long one turn there may run, whether agents there may
+  start agents, the recipe it follows; --reset takes a setting back to its
+  default
+
+  --name            what to call a computer you added from now, which every
+                    listing then shows; its id, its projects and its machines
+                    stay as they are
+  --ssh             the login user@host the host reaches a computer you added by
+                    over ssh from now, saved only once the computer it reaches
+                    reads as that same one
+  --threads         how many threads may run on that computer at once; a new one
+                    waits past it
+  --nap             the minutes a quiet machine there runs before it naps, or
+                    off
+  --turn-limit      the hours one turn there may run before it is stopped, or
+                    off; off on a computer you own until it is set
+  --spawn           on lets agents there whose folder or machine holds no switch
+                    of its own open threads and fork machines, capped; off
+                    refuses them
+  --max-machines    how many machines may stand at once under one root thread
+                    while spawning is on; defaults to 3
+  --max-depth       how many levels of threads may stand under the root thread
+                    while spawning is on; defaults to 2
+  --recipe          the saved recipe it follows from now, by the name wsp
+                    recipes shows, or none to keep what it has and follow
+                    nothing
+  --reset           a setting to take back to its default, by its flag's word;
+                    repeats
+  --json            print the raw protocol values, one JSON object per line,
+                    with everything else on stderr
+  --state           the state file the host serves
+  --host            run the line against a host on your account, by the name wsp
+                    hosts lists it under; WSP_HOST names one for a whole shell
+```
+
+MCP tool: [`computers_set`](/reference/mcp-tools#computersset).

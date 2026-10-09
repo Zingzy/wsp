@@ -1,3 +1,17 @@
 # wsp agents key
 
-Generated from `wsp agents key --help` and its line in `COMMAND_LINES` (`packages/host/src/cli/commands.ts`).
+{/* Written by apps/docs-next/scripts/cli.ts: change the script or its source and run pnpm --filter @wsp/docs-next generate. */}
+
+```text
+usage: wsp agents key <agent>
+  puts an agent's token or API key into this host's vault, typed where nothing
+  echoes it; Claude Code's token is the one claude setup-token prints
+
+  --json     print the raw protocol values, one JSON object per line, with
+             everything else on stderr
+  --state    the state file the host serves
+  --host     read to say this line runs at its own host's terminal; it dials no
+             other
+```
+
+No MCP tool: takes a token typed at the host's own terminal into its vault, which is the person's to hand over.

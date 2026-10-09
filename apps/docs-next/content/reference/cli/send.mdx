@@ -1,3 +1,31 @@
 # wsp send
 
-Generated from `wsp send --help` and its line in `COMMAND_LINES` (`packages/host/src/cli/commands.ts`).
+{/* Written by apps/docs-next/scripts/cli.ts: change the script or its source and run pnpm --filter @wsp/docs-next generate. */}
+
+```text
+usage: wsp send <thread> [--model, --effort <value>] [--fast] [--file <path>]
+       [--detach] "<message>"
+  a message to the thread, on a named model or effort, fast or not, with files;
+  the thread keeps its own access and a running turn its own picks; --detach
+  prints the id and returns
+
+  --model     the model the turn runs on, by the agent's own slug
+              (claude-sonnet-5); the thread's own without it
+  --effort    how hard the agent thinks, by its own word (low, medium, high,
+              xhigh, max); absent on a new thread means the agent's default; on
+              send, the thread's own
+  --fast      run the turn in the agent's fast mode, on a model that offers one;
+              refused naming the model otherwise
+  --file      a file on this computer to send with the message: an image goes as
+              an image, any other file lands in the thread's folder and the
+              message names its path; repeats
+  --detach    print the thread's id and return, leaving the reply to the
+              thread's finished line
+  --json      print the raw protocol values, one JSON object per line, with
+              everything else on stderr
+  --state     the state file the host serves
+  --host      run the line against a host on your account, by the name wsp hosts
+              lists it under; WSP_HOST names one for a whole shell
+```
+
+MCP tool: [`send`](/reference/mcp-tools#send).
