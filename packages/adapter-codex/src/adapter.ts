@@ -529,6 +529,9 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
 
     let threadId = localId;
     let announced = false;
+    /** The run hands its turn's prompt over after the thread answers: it announces itself unprompted, and again once
+     * the turn under that prompt has started. */
+    const promptsLater = o.turnLine !== undefined || o.owedTurn !== undefined;
     /** The server keeps this thread's history in a form thread/revert cannot cut, as its thread answer said. */
     let legacy = false;
     let turnId: string | undefined;
@@ -617,7 +620,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
       modelUsed = runs;
       const where = o.cwd ?? cwd;
       cwdUsed = where;
-      emit({ type: "session.start", sessionId: threadId, ...(runs !== undefined ? { model: runs } : {}), ...(where !== undefined ? { cwd: where } : {}) });
+      emit({ type: "session.start", sessionId: threadId, ...(runs !== undefined ? { model: runs } : {}), ...(where !== undefined ? { cwd: where } : {}), ...(promptsLater && turnId === undefined ? { prompted: false as const } : {}) });
       for (const text of early.splice(0)) emit({ type: "turn.delta", sessionId: threadId, kind: "note", text });
     };
 
@@ -923,7 +926,10 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
         case "turn/started": {
           const first = turnId === undefined;
           turnId = str(rec(params.turn)?.id) ?? turnId;
-          if (first && turnId !== undefined) emit({ type: "turn.anchor", sessionId: threadId, anchor: turnId, ...(legacy ? { kept: CODEX_LEGACY_HISTORY } : {}) });
+          if (first && turnId !== undefined) {
+            if (promptsLater && announced) emit({ type: "session.start", sessionId: threadId, ...(modelUsed !== undefined ? { model: modelUsed } : {}), ...(cwdUsed !== undefined ? { cwd: cwdUsed } : {}) });
+            emit({ type: "turn.anchor", sessionId: threadId, anchor: turnId, ...(legacy ? { kept: CODEX_LEGACY_HISTORY } : {}) });
+          }
           break;
         }
         case "item/started":
@@ -1026,6 +1032,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
 
     const finished = (async (): Promise<TurnResult> => {
       let streamError: string | undefined;
+      let streamFailure: unknown;
       try {
         for await (const raw of stream.lines) {
           const message = readMessage(raw);
@@ -1052,6 +1059,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
       } catch (cause) {
         // The transport ended the turn itself and its message says why; that message is the turn's error.
         streamError = cause instanceof Error ? cause.message : String(cause);
+        streamFailure = cause;
       }
       const exitCode = await stream.exited;
       if (asideWall !== undefined) clearTimeout(asideWall);
@@ -1074,7 +1082,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
           : withLimit(words !== undefined ? { status: "failed", error: words.line, ...(words.cause !== undefined ? { refusal: words.cause } : {}) } : { status: "failed", error: streamError ?? died });
         emit({ type: "turn.done", sessionId: threadId, result: turnResult });
       }
-      emit({ type: "session.end", sessionId: threadId, exitCode, sawResult });
+      emit({ type: "session.end", sessionId: threadId, exitCode, sawResult, ...(streamFailure !== undefined ? { failure: streamFailure } : {}) });
       return turnResult;
     })();
 
@@ -1104,8 +1112,10 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
         if (!running() || turnId === undefined) return "not-running";
         const id = `wsp-steer-${++requestSeq}`;
         const answered = new Promise<{ error?: string } | "gone">(resolve => awaiting.set(id, resolve));
-        const wrote = await stream.write(turnSteerLine(id, { threadId, turnId, text: prompt })).catch(() => "gone" as const);
-        if (wrote !== "written") {
+        // A write whose answer was lost may still have landed: the server's own answer to the request says which, and
+        // the turn's end settles it as gone where none comes, so the message never lands twice.
+        const wrote = await stream.write(turnSteerLine(id, { threadId, turnId, text: prompt })).catch(() => (running() ? ("unanswered" as const) : ("gone" as const)));
+        if (wrote === "gone") {
           awaiting.delete(id);
           return "not-running";
         }

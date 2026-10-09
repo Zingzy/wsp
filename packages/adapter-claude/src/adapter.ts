@@ -89,6 +89,8 @@ export interface ClaudeSession {
   /** Writes a user message into the running turn under `id`, which unread messages are told by; not-running before
    * system/init and once result was seen or the process is gone. */
   steer(prompt: string, id?: string): Promise<SteerOutcome>;
+  /** The CLI announced msg_lifecycle_v1, so the turn tells the messages it never took up as it ends. */
+  readonly tellsUnread: boolean;
   /** Answers a permission prompt this turn raised, by the ask's own id and one of the options it carried; the tool
    * call it blocks runs or is refused as the option says. The caller names the outcome, since only it knows whether
    * this is the person's pick or its own answer for a prompt nobody came to, and denyMessage is what the agent
@@ -681,6 +683,8 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
     from?: number;
     /** The CLI's running totals as the process's last turn left them: on a kept process they run on across turns. */
     saved?: SavedUse;
+    /** The messages a host kept as steered into this turn before it wrote them, on an attach. */
+    steered?: readonly string[];
     onEvent: (event: AdapterEvent) => void;
   }): ClaudeSession => {
     const { stream, localId, onEvent } = o;
@@ -712,7 +716,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
      * carry it, and the line a finished task gets is written from it. */
     const taskNames = new Map<string, string>();
     /** The messages steered into this turn, which the reply waits on until the CLI has answered each. */
-    const steers = steersOf(stream.taken ?? []);
+    const steers = steersOf(stream.taken ?? [], o.steered);
     const plans = newPlanBook();
     /** What the model held after its last call, the agent's own and never a subagent's: the last reply's usage, or a
      * compaction's figure where one came after it. The result's usage sums the turn, so it cannot say this. */
@@ -884,6 +888,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
 
     const finished = (async (): Promise<TurnResult> => {
       let streamError: string | undefined;
+      let streamFailure: unknown;
       try {
         for await (const raw of stream.lines) {
           // A held reply waiting on nothing but silence: this line is the CLI saying something, so the window it has
@@ -1097,6 +1102,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
       } catch (cause) {
         // The transport ended the turn itself and its message says why; that message is the turn's error.
         streamError = cause instanceof Error ? cause.message : String(cause);
+        streamFailure = cause;
       }
       if (settleTimer !== undefined) clearTimeout(settleTimer);
       settleTimer = undefined;
@@ -1136,7 +1142,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
         steers.tellUnread(claudeSessionId, onEvent);
         onEvent({ type: "turn.done", sessionId: claudeSessionId, result: turnResult });
       }
-      onEvent({ type: "session.end", sessionId: claudeSessionId, exitCode, sawResult });
+      onEvent({ type: "session.end", sessionId: claudeSessionId, exitCode, sawResult, ...(streamFailure !== undefined ? { failure: streamFailure } : {}) });
       return turnResult;
     })();
 
@@ -1163,6 +1169,9 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
       ...(stream.run !== undefined ? { run: stream.run } : {}),
       ...(stream.pid !== undefined ? { pid: stream.pid } : {}),
       finished,
+      get tellsUnread() {
+        return steers.reports;
+      },
       steer: async (prompt, uuid = randomUUID()) => {
         if (!running()) return "not-running";
         steers.add(uuid);
@@ -1347,6 +1356,9 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
       get pid() {
         return current.pid;
       },
+      get tellsUnread() {
+        return current.tellsUnread;
+      },
       finished,
       kept: () => current.kept?.(),
       interrupt: () => current.interrupt(),
@@ -1445,7 +1457,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
       ? {
           attach: async (options: AdapterAttachOptions) => {
             const stream = await attach(options.run, { input: true, startedAt: options.startedAt, ...(options.from !== undefined ? { from: options.from } : {}) });
-            return stream === "gone" ? "gone" : follow({ stream, localId: options.sessionId, announced: true, fresh: false, ...(options.from !== undefined ? { from: options.from } : {}), onEvent: options.onEvent });
+            return stream === "gone" ? "gone" : follow({ stream, localId: options.sessionId, announced: true, fresh: false, ...(options.from !== undefined ? { from: options.from } : {}), ...(options.steered !== undefined ? { steered: options.steered } : {}), onEvent: options.onEvent });
           },
         }
       : {}),

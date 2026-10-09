@@ -10,6 +10,7 @@ import { join as joinPath } from "node:path";
 import { HERE_PLACE_ID, type Caller, type ThreadScope, type TurnResult } from "@wsp/protocol";
 import type { HarnessAdapterFactory, HarnessStartOptions } from "../src/runtime.js";
 import type { Store } from "../src/store.js";
+import type { Clock } from "../src/clock.js";
 import type { ServersActs } from "../src/agents-read.js";
 import { MCP_READ_END } from "@wsp/engine";
 import { ctx, sockets, serving, code, join, KEEPS_NO_IMAGE } from "./places-fixture.js";
@@ -151,9 +152,9 @@ export function answering(starts: Started[]): HarnessAdapterFactory {
 export const HETZNER: BoxLogin = { home: "/root", owner: "root" };
 
 /** A host holding one joined computer, hetzner, its login root unless named, and a project added there by url. */
-export async function joined(o: { login?: BoxLogin; adapters?: Record<string, HarnessAdapterFactory>; taken?: string[]; store?: Store; vault?: Record<string, string>; failClone?: boolean; serversActs?: ServersActs; logins?: string } = {}) {
+export async function joined(o: { login?: BoxLogin; adapters?: Record<string, HarnessAdapterFactory>; taken?: string[]; store?: Store; vault?: Record<string, string>; failClone?: boolean; serversActs?: ServersActs; logins?: string; clock?: Clock } = {}) {
   const login = o.login ?? HETZNER;
-  const { hostKey } = await serving({ adapters: o.adapters ?? {}, ...(o.store !== undefined ? { store: o.store } : {}), ...(o.vault !== undefined ? { vault: o.vault } : {}), ...(o.serversActs !== undefined ? { serversActs: o.serversActs } : {}) });
+  const { hostKey } = await serving({ adapters: o.adapters ?? {}, ...(o.store !== undefined ? { store: o.store } : {}), ...(o.vault !== undefined ? { vault: o.vault } : {}), ...(o.serversActs !== undefined ? { serversActs: o.serversActs } : {}), ...(o.clock !== undefined ? { clock: o.clock } : {}) });
   let seen!: Box;
   const { client, placeId, pair } = await join(hostKey, {
     code: await code(),

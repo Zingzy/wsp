@@ -247,7 +247,7 @@ describe("CodexAdapter over codex app-server", () => {
     expect(launch.wires[0]!.written.find(m => m.method === "turn/start")!.params).toMatchObject({ threadId: RECORDED_THREAD, input: [{ type: "text", text: "list the repo" }] });
   });
 
-  it("reads a recorded turn: session.start, the CLI's warning as a note, each item as deltas, the approval, turn.done and session.end", async () => {
+  it("reads a recorded turn: session.start unprompted as the thread opens and again once its turn started, the CLI's warning as a note, each item as deltas, the approval, turn.done and session.end", async () => {
     const launch = launcher(server(fixtureLines("app-server-turn")));
     const { events, onEvent } = collect();
     let session: CodexSession | undefined;
@@ -262,6 +262,7 @@ describe("CodexAdapter over codex app-server", () => {
     expect(events.map(e => (e.type === "turn.delta" ? `delta:${e.kind}` : e.type))).toEqual([
       "session.start",
       "delta:note",
+      "session.start",
       "turn.anchor",
       "delta:text",
       "delta:tool_use",
@@ -276,7 +277,8 @@ describe("CodexAdapter over codex app-server", () => {
       "turn.done",
       "session.end",
     ]);
-    expect(events[0]).toEqual({ type: "session.start", sessionId: RECORDED_THREAD, model: "gpt-5.6-sol", cwd: "/private/tmp/b7-real" });
+    expect(events[0]).toEqual({ type: "session.start", sessionId: RECORDED_THREAD, model: "gpt-5.6-sol", cwd: "/private/tmp/b7-real", prompted: false });
+    expect(events[2]).toEqual({ type: "session.start", sessionId: RECORDED_THREAD, model: "gpt-5.6-sol", cwd: "/private/tmp/b7-real" });
     const deltas = deltasOf(events);
     expect(deltas[0]!.text).toMatch(/^loading hooks from both /);
     expect(deltas[1]).toMatchObject({ text: "I\u2019ll create `hi.txt` in the current folder.", messageId: "msg_0567d7bf2c7ea0de016ab930865e9087d09774946388412886" });
@@ -447,6 +449,42 @@ describe("a message sent while a Codex turn runs", () => {
     await session.finished;
     expect(await session.steer!("after the end")).toBe("not-running");
   });
+  it("a steer whose write lost its answer reads the server's own answer: accepted where it landed, not-running where it never did", async () => {
+    let losing: "landed" | "lost" | undefined;
+    const live = launcher(seed => {
+      const w = wire({
+        onWrite: (message, self) => {
+          if (message.method === "thread/start") self.push(...opened());
+          if (message.method === "turn/start") self.push(turnStarted);
+          if (message.method === "turn/steer") self.push(`{"id":${JSON.stringify(message.id)},"result":{"turnId":"${TURN_ID}"}}`);
+        },
+      });
+      const write = w.stream.write;
+      w.stream = {
+        ...w.stream,
+        write: async line => {
+          const loses = parse(line).method === "turn/steer" ? losing : undefined;
+          if (loses === "lost") throw new Error("remote write failed on m1: nothing came back saying WSP_OK");
+          const wrote = await write(line);
+          if (loses === "landed") throw new Error("remote write failed on m1: nothing came back saying WSP_OK");
+          return wrote;
+        },
+      };
+      for (const line of seed) void w.stream.write(line);
+      return w;
+    });
+    const session = adapterOver(live).start({ prompt: "count to 40", onEvent: () => {} });
+    await until(() => live.wires[0]!.written.some(m => m.method === "turn/start"));
+    await new Promise(r => setTimeout(r, 5));
+    losing = "landed";
+    expect(await session.steer!("stop at 12")).toBe("accepted");
+    losing = "lost";
+    const unanswered = session.steer!("stop at 20");
+    live.wires[0]!.push(agentMessage("msg_1", "stopped at 12"), completed("completed"));
+    expect(await unanswered).toBe("not-running");
+    expect(live.wires[0]!.written.filter(m => m.method === "turn/steer")).toHaveLength(1);
+    await session.finished;
+  });
 });
 
 describe("an approval Codex asks for", () => {
@@ -561,7 +599,7 @@ describe("a Codex turn that does not complete", () => {
     const result = await adapterOver(launch).start({ prompt: "hi", onEvent }).finished;
     expect(NOT_SIGNED_IN).toBe("Codex is not signed in where this workspace runs; run codex login --device-auth there");
     expect(result).toMatchObject({ status: "failed", error: NOT_SIGNED_IN, refusal: "sign-in" });
-    expect(events.map(e => e.type)).toEqual(["session.start", "turn.anchor", "turn.delta", "turn.done", "session.end"]);
+    expect(events.map(e => e.type)).toEqual(["session.start", "session.start", "turn.anchor", "turn.delta", "turn.done", "session.end"]);
     expect(events.at(-1)).toEqual({ type: "session.end", sessionId: NO_LOGIN_THREAD, exitCode: 0, sawResult: true });
     expect(launch.wires[0]!.closed).toBe(true);
   });
@@ -625,7 +663,7 @@ describe("a Codex turn that does not complete", () => {
     const { events, onEvent } = collect();
     const result = await adapterOver(launch).start({ prompt: "x", onEvent }).finished;
     expect(result).toEqual({ status: "failed", error: "codex exited with code 2 before its turn ended: 2026-09-27T00:51:50Z ERROR codex_core: sandbox unavailable" });
-    expect(events.map(e => [e.type, e.sessionId])).toEqual([["session.start", THREAD_ID], ["turn.anchor", THREAD_ID], ["turn.done", THREAD_ID], ["session.end", THREAD_ID]]);
+    expect(events.map(e => [e.type, e.sessionId])).toEqual([["session.start", THREAD_ID], ["session.start", THREAD_ID], ["turn.anchor", THREAD_ID], ["turn.done", THREAD_ID], ["session.end", THREAD_ID]]);
   });
 
   it("a transport that ends the turn itself makes its message the turn's error", async () => {

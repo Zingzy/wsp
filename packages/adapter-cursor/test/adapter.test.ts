@@ -26,7 +26,7 @@ interface ScriptedExec {
   order: string[];
 }
 
-function scriptedExec(lines: string[], opts: { exitCode?: number; hang?: boolean } = {}): ScriptedExec {
+function scriptedExec(lines: string[], opts: { exitCode?: number; hang?: boolean; fails?: Error } = {}): ScriptedExec {
   const calls: ScriptedExec["calls"] = [];
   const order: string[] = [];
   const factory: ExecStreamFactory = (command, { env, input }) => {
@@ -39,6 +39,10 @@ function scriptedExec(lines: string[], opts: { exitCode?: number; hang?: boolean
       run: RUN_HANDLE,
       lines: (async function* () {
         yield* lines;
+        if (opts.fails !== undefined) {
+          resolveExit(null);
+          throw opts.fails;
+        }
         if (opts.hang) await exited;
         else resolveExit(opts.exitCode ?? 0);
       })(),
@@ -118,6 +122,15 @@ describe("CursorAdapter over an agent -p stream-json turn", () => {
     const result = await adapterOver(scriptedExec(fixture("no-login.jsonl"), { exitCode: 1 })).start({ prompt: "say hi", onEvent }).finished;
     expect(result).toEqual({ status: "failed", error: `Error: Authentication required. Please run 'agent login' first, or set CURSOR_API_KEY environment variable.; ${SIGN_IN_ROAD}`, refusal: "sign-in" });
     expect(events.at(-1)).toMatchObject({ type: "session.end", exitCode: 1, sawResult: false });
+  });
+
+  it("a stream its transport failed hands that very error to the runtime on session.end, which reads its class", async () => {
+    const lost = Object.assign(new Error("remote launch failed on m1: daemon on m1 did not answer within 30000 ms"), { code: "ETIMEDOUT" });
+    const { events, onEvent } = collect();
+    const result = await adapterOver(scriptedExec([], { fails: lost })).start({ prompt: "go", onEvent }).finished;
+    expect(result).toMatchObject({ status: "failed", error: expect.stringContaining(lost.message) });
+    const end = events.at(-1);
+    expect(end?.type === "session.end" ? end.failure : undefined).toBe(lost);
   });
 
   it("a process that dies before its result fails the turn with what it printed last", async () => {

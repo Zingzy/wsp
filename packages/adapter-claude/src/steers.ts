@@ -34,9 +34,9 @@ export interface Steers {
 }
 
 /** The steers of one turn, starting from the messages its run's channel already took on a turn re-opened after a host
- * restart. */
-export function steersOf(taken: readonly string[]): Steers {
-  const steers = new Map<string, { started: boolean }>(steeredIds(taken).map(uuid => [uuid, { started: false }]));
+ * restart, and those the host kept as steered before writing them, whose write may never have landed. */
+export function steersOf(taken: readonly string[], kept: readonly string[] = []): Steers {
+  const steers = new Map<string, { started: boolean }>([...new Set([...steeredIds(taken), ...kept])].map(uuid => [uuid, { started: false }]));
   const dropped: string[] = [];
   let reports = false;
   let cancelsQueued = false;

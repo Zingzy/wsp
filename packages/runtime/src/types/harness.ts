@@ -157,6 +157,10 @@ export interface HarnessSession {
    * started or had ended when the message was offered. `id` is what a harness that tells unread messages tells this
    * one by. */
   steer?(prompt: string, id?: string): Promise<"accepted" | "not-running">;
+  /** Whether this turn tells, as it ends, the steered messages its agent never read (`turn.unread`), a turn re-opened
+   * after a host restart included: read off what the agent's CLI said it does when it announced itself, so it is
+   * false until then. Absent, nothing says whether a steer whose answer never came was read. */
+  readonly tellsUnread?: boolean;
   /** Answers a permission prompt this turn raised; absent on a harness that raises none this host can answer. The
    * caller names the outcome, since only it knows whether the answer is the person's or its own for a prompt nobody
    * came to, and the adapter emits the permission.close that carries it. `gone` when no such prompt is open. */

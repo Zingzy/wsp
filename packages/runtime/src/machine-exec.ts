@@ -34,7 +34,7 @@
 // every claim on the machine that the caller did not name.
 
 import { randomBytes } from "node:crypto";
-import { ENV_FROM_INPUT, HANDSHAKE, INLINE_EXEC_MS, envInput, MachineUnreachableError, MachineUnreached, RUN_DIR, execFits, isPlaceAbsent, machineAnswer, putFiles, realRetryClock, untilReached, type ExecResult, type GuestWrite, type Machine } from "@wsp/engine";
+import { ENV_FROM_INPUT, HANDSHAKE, INLINE_EXEC_MS, envInput, farEndAnswered, MachineUnreachableError, MachineUnreached, RUN_DIR, execFits, isPlaceAbsent, machineAnswer, neverSent, putFiles, realRetryClock, untilReached, type ExecResult, type GuestWrite, type Machine } from "@wsp/engine";
 import { EXEC_CHUNK_BYTES, LINK_RETRY_WINDOW_MS, RUN_STOP_MS, TURN_IDLE_MS, TURN_WALL_MS, TURN_WORK_TICKS_PER_S, shellQuote, turnCutLine, workScoreLine } from "@wsp/protocol";
 import type { ExecStream, ExecStreamFactory, TurnCutRule } from "@wsp/protocol";
 
@@ -64,6 +64,22 @@ export interface MachineExecOptions {
   launchOn?: Machine;
   /** The thread a turn's run is for, which a kind that groups a thread's processes reads to pick `launchOn`. */
   thread?: string;
+  /** A launch whose posts got no answer asks after its run until the turn is stopped, not for one link window: a
+   * line's try, which the line's own hour stops, and which a second launch beside a run that is there would deliver
+   * twice. */
+  asksUntilStopped?: true;
+}
+
+/** A launch whose posts went out with no answer, and whose run the machine then said it does not hold: nothing ran
+ * there and the computer never answered the launch, so the launch may go again. */
+export class LaunchUnanswered extends Error {}
+
+/** A launch's posts, as the reader that follows them asks after them: when the first went, how many went, and whether
+ * one went out and got no answer, which may have started the run. */
+interface Posting {
+  since: number;
+  posts: () => number;
+  mayHaveRun: () => boolean;
 }
 
 /** The two limits a turn runs under on every kind of machine, and what ends one: the wall since it started, else the
@@ -238,7 +254,7 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
    * host process left behind. `opened` settles once the run is known to be on the machine and rejects with the words
    * the turn fails on when it is not. The log is read from its first byte either way, so a run that printed while no
    * host was listening is replayed to whoever attaches. */
-  const open = (base: string, hasInput: boolean, opened: Promise<void>, turnStartedAt?: number, taken?: readonly string[]): ExecStream => {
+  const open = (base: string, hasInput: boolean, launched: Promise<void>, turnStartedAt?: number, taken?: readonly string[], posting?: Posting): ExecStream => {
     const sentinel = `__WSP_EOF_${randomBytes(6).toString("hex")}__`;
     const reapMark = `__WSP_REAPED_${randomBytes(6).toString("hex")}__`;
 
@@ -270,6 +286,36 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
         resolveExit(code);
       }
     };
+
+    /** Whether the machine holds the run, asked for one link window, the wait the launch's own posts were given, or
+     * until a stop on a line's try: a launch whose posts went out and whose answer never came may have started it.
+     * Only the guest's own answer says it does not; a refusal of the question (a box not connected, a sandbox the
+     * provider cannot reach) says nothing about the run, and is asked again, as a machine silent for the whole window
+     * or a stop says nothing. Nothing is known while the process lets go of the run. */
+    const holdsRun = async (): Promise<{ held: "yes" | "no" | "silent" | "stopped"; asked: number }> => {
+      const from = now();
+      for (let asked = 0; ; asked++) {
+        if (dropped) await never();
+        if (killed) return { held: "stopped", asked };
+        if (opts.asksUntilStopped !== true && now() - from >= LINK_RETRY_WINDOW_MS) return { held: "silent", asked };
+        const res = await machine.exec(`if [ -d ${q(claim(base))} ]; then echo ${HANDSHAKE.run}; else echo ${HANDSHAKE.gone}; fi`, { timeoutMs: execTimeoutMs }).catch(() => undefined);
+        if (res?.stdout.includes(HANDSHAKE.run) === true) return { held: "yes", asked: asked + 1 };
+        if (res?.stdout.includes(HANDSHAKE.gone) === true) return { held: "no", asked: asked + 1 };
+        await nap(pollMs);
+      }
+    };
+    // A run the machine holds after such a launch is read as one that launched, so its agent's lines reach the turn
+    // and nothing launches it a second time. One it does not hold never ran, and one it stayed silent about through
+    // the window is a computer that did not answer: either may go again, and a line's own clock decides whether it
+    // does. A stop keeps the launch's own words.
+    const opened = launched.catch(async (e: unknown) => {
+      if (posting === undefined || !posting.mayHaveRun()) throw e;
+      const { held, asked } = await holdsRun();
+      if (held === "yes") return;
+      if (held === "silent") throw new MachineUnreached(posting.posts() + asked, now() - posting.since, e);
+      if (held === "no" && !(e instanceof MachineUnreached)) throw new LaunchUnanswered(e instanceof Error ? e.message : String(e), { cause: e });
+      throw e;
+    });
 
     const signal = (sig: "TERM" | "KILL"): void => {
       void opened
@@ -504,11 +550,17 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
     const files: GuestWrite[] = [{ path: `${base}.sh`, text: `${workScoreLine()}\n${run}` }];
     if (input !== undefined && !held.some(h => h.variable === undefined)) files.push({ path: `${base}.in`, text: input.map(line => `${line}\n`).join("") });
 
+    // Whether a post of the launch went out and got no answer: one that failed before it left this computer started
+    // nothing there, and one the far end answered, a refusal included, said what came of it.
+    let mayHaveRun = false;
+    let posts = 0;
+    const since = now();
     // Spawn eagerly, like a local child process would, unless the seed is held: a write here is one more exec trip, so
     // the launch waits and carries the seed with it.
     const posted: Promise<ExecResult> = Promise.resolve(inputAfter).then(() => untilReached(
-      () =>
-        putFiles(opts.launchOn ?? machine, files, {
+      () => {
+        posts++;
+        return putFiles(opts.launchOn ?? machine, files, {
           // exec honours no idempotency key and a launch whose answer was lost is retried; the claim makes the second
           // a no-op. A mkdir that fails for any other reason (a run folder another login on the machine owns) fails
           // the launch: read as a replay it would answer launched and leave the reader polling a log nobody writes.
@@ -519,7 +571,11 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
           after: [...(input === undefined ? [] : [`mkfifo ${q(base)}.fifo`]), ...envLines, ...heldLines, `setsid bash ${q(base)}.sh > ${q(base)}.log 2>&1 & echo $! > ${q(base)}.pid; echo ${HANDSHAKE.launched}`],
           timeoutMs: execTimeoutMs,
           ...(machine.takesStdin === true ? { stdin: envInput({ ...named, ...Object.fromEntries(held.map(h => [h.name, h.text])) }) } : {}),
-        }),
+        }).catch((e: unknown) => {
+          if (!neverSent(e) && !farEndAnswered(e)) mayHaveRun = true;
+          throw e;
+        });
+      },
       { now, sleep },
     ));
     const opened = posted.then(
@@ -532,7 +588,7 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
         throw new Error(`remote launch failed on ${machine.id}: ${e instanceof Error ? e.message : String(e)}`);
       },
     );
-    return open(base, input !== undefined, opened);
+    return open(base, input !== undefined, opened, undefined, undefined, { since, posts: () => posts, mayHaveRun: () => mayHaveRun });
   };
 
   factory.attach = async (run, { input, startedAt }) => {
