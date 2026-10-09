@@ -82,6 +82,10 @@ struct Session {
     #[serde(default)]
     resume_at: Option<Box<RawValue>>,
     #[serde(default)]
+    last_line: Option<String>,
+    #[serde(default)]
+    failure: Option<String>,
+    #[serde(default)]
     pid: Option<Box<RawValue>>,
     #[serde(default)]
     read_at: Option<Box<RawValue>>,
@@ -89,6 +93,8 @@ struct Session {
     settled_at: Option<Box<RawValue>>,
     #[serde(default)]
     pinned_at: Option<Box<RawValue>>,
+    #[serde(default)]
+    folded_at: Option<Box<RawValue>>,
     #[serde(default)]
     snoozed_until: Option<Box<RawValue>>,
     #[serde(default)]
@@ -157,6 +163,10 @@ pub struct Thread {
     #[cfg_attr(test, schemars(with = "Option<f64>"))]
     pub resume_at: Option<Box<RawValue>>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_line: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failure: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     #[cfg_attr(test, schemars(with = "Option<i64>"))]
     pub pid: Option<Box<RawValue>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -168,6 +178,9 @@ pub struct Thread {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[cfg_attr(test, schemars(with = "Option<f64>"))]
     pub pinned_at: Option<Box<RawValue>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, schemars(with = "Option<f64>"))]
+    pub folded_at: Option<Box<RawValue>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[cfg_attr(test, schemars(with = "Option<f64>"))]
     pub snoozed_until: Option<Box<RawValue>>,
@@ -337,10 +350,13 @@ fn fold(sessions: Vec<Session>) -> Vec<Thread> {
                 capped: latest.capped,
                 limit: latest.limit,
                 resume_at: latest.resume_at,
+                last_line: latest.last_line,
+                failure: latest.failure,
                 pid: latest.pid,
                 read_at: latest.read_at,
                 settled_at: latest.settled_at,
                 pinned_at: latest.pinned_at,
+                folded_at: latest.folded_at,
                 snoozed_until: latest.snoozed_until,
                 woke_at: latest.woke_at,
                 section: latest.section,

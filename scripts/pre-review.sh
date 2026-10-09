@@ -50,6 +50,7 @@ LAWS=(
   apps/web/test/design-literals.test.ts
   apps/web/test/design-pieces.test.ts
   apps/web/test/has-selectors.test.ts
+  packages/protocol/test/ts-parse.test.ts
   packages/protocol/test/law-list.test.ts
 )
 

@@ -624,6 +624,23 @@ describe("a held start that never launches tells whoever it was to report to", (
     }
   });
 
+  it("a send answered held whose agent then fails to start leaves its reason on the thread, which keeps its last turn's end", async () => {
+    const root = mkdtempSync(joinPath(tmpdir(), "wsp-cap-held-failure-"));
+    const t = await withLead(root);
+    try {
+      const mac = (await ctx.runtime!.workspaces.list()).find(w => w.name === "mac")!;
+      const asked = (await t.host.request("sessions.start", { workspaceId: mac.id, thread: t.leadThread, prompt: "boom again", answerHeld: true })) as { outcome: string };
+      expect(asked.outcome).toBe("held");
+      t.ends.get("busy")!();
+      await until(async () => (await rowsOf(mac.id)).some(r => r.failure !== undefined));
+      expect((await rowsOf(mac.id)).find(r => r.threadId === t.leadThread)).toMatchObject({ status: "completed", lastLine: "ok", failure: "the agent would not start" });
+      t.host.close();
+    } finally {
+      for (const end of [...t.ends.values()]) end();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("a held start a host restart drops ends on the next host with the restart named, and wakes the lead it was to tell", async () => {
     const root = mkdtempSync(joinPath(tmpdir(), "wsp-cap-tell-restart-"));
     const store = memoryStore();
@@ -656,6 +673,11 @@ describe("a held start that never launches tells whoever it was to report to", (
       expect(await store.list("held-starts")).toEqual([]);
     } finally {
       for (const end of [...first.ends.values(), ...(second?.ends.values() ?? [])]) end();
+      // The second host's boot writes the daemon's roots file into root without waiting; its close waits for that.
+      await ctx.srv?.close();
+      ctx.srv = undefined;
+      await ctx.runtime?.close();
+      ctx.runtime = undefined;
       rmSync(root, { recursive: true, force: true });
     }
   });

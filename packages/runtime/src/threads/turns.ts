@@ -3,14 +3,14 @@ import {
   type AdapterEvent, type PermissionAsk, type PermissionOption, type PermissionOutcome, type SessionEvent,
   type SessionAnswerResult, type SessionStartOutcome, type SessionView, type AttachmentRecord, type TurnResult,
   type TurnStatus, ThreadScope, WorkspaceOrigin, threadWord, leadAsk, askingLine, permissionModeOptionLabel,
-  pickedOptions, deniedLine, toolCallFacts, notifyBody,
+  pickedOptions, deniedLine, toolCallFacts, notifyBody, turnLines,
 } from "@wsp/protocol";
 import { harnessCatalog } from "../harness-catalog.js";
 import type { HarnessSession, HarnessAdapter } from "../types/harness.js";
 import type { LiveWorkspace, SessionHandle } from "../types/wiring.js";
 import {
   sweptRunsLogLine, noMadeTitleLogLine, type TurnWritten, turnWritten, type TurnLive, type TurnAsked, type KeptLaunch,
-  type Reopened,
+  type Reopened, writeLines,
 } from "../types/internal.js";
 import type { RuntimeContext, TurnsArea } from "../context.js";
 
@@ -382,6 +382,8 @@ export function turnsArea(ctx: RuntimeContext): TurnsArea {
           // same worktree. The result is held and applied at the exit below.
           turnLive.reply = event.result.status;
           const result = withWaited(event.result);
+          // What the turn said last and why it failed ride the row too, so a lead's tree says what a child did.
+          writeLines(view, turnLines(result));
           // The cause rides the row too, since a refused turn did none of the work: what a thread is read as having
           // run is decided off the rows, and the result itself lives only in the transcript.
           if (result.refusal !== undefined) view.refusal = result.refusal;
@@ -448,6 +450,8 @@ export function turnsArea(ctx: RuntimeContext): TurnsArea {
             ...(event.title !== undefined ? { title: event.title } : {}),
             ...(event.summary !== undefined ? { summary: event.summary } : {}),
             ...(event.depth !== undefined ? { depth: event.depth } : {}),
+            ...(event.model !== undefined ? { model: event.model } : {}),
+            ...(event.asked !== undefined ? { asked: event.asked } : {}),
           });
           return;
         case "limit": {
@@ -655,6 +659,8 @@ export function turnsArea(ctx: RuntimeContext): TurnsArea {
         void deviceDoor.revoke(scopeDeviceId).catch((e: unknown) => console.warn(`the token of thread ${threadWord(threadId)} was not taken away: ${e instanceof Error ? e.message : String(e)}`));
       }
       if (!ended) view.status = status;
+      // A process that exited with no result leaves the words a read of the turn ends on.
+      if (!ended && turnLive.reply === undefined) writeLines(view, turnLines({ status }));
       ctx.portRootsMoved(workspaceId);
       view.endedAt ??= Date.now();
       if (view.status === "failed") ctx.endSnoozeFor(view);

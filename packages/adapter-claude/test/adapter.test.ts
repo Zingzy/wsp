@@ -2,13 +2,13 @@ import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
-import { backgroundTasksLine, LOST_SESSION_NOTE, notifyTail, signInRefusalLine } from "@wsp/protocol";
+import { backgroundTasksLine, LOST_SESSION_NOTE, notifyTail, signInRefusalLine, SUBAGENT_ASKED_CHARS, subagentAsked } from "@wsp/protocol";
 import type { AdapterEvent, ExecStream, ExecStreamFactory, TurnResult } from "@wsp/protocol";
 import { createClaudeAdapter, type ClaudeSession } from "../src/adapter.js";
 import { CLAUDE_SCREEN_COMMANDS } from "../src/catalog.js";
 import { userMessageLine } from "../src/landmines.js";
 import { asideCommand } from "../src/aside.js";
-import { AGENT_A_CALL, AGENT_A_ID, AGENT_B_CALL, AGENT_B_ID, subagentFixtureLines } from "./subagent-fixture.js";
+import { AGENT_A_CALL, AGENT_A_ID, AGENT_A_PROMPT, AGENT_B_CALL, AGENT_B_ID, AGENT_B_PROMPT, subagentFixtureLines } from "./subagent-fixture.js";
 
 const FIXTURE_SESSION_ID = "e16ed170-8257-4668-879e-fe836341633c";
 
@@ -418,16 +418,23 @@ describe("ClaudeAdapter over the recorded fixture", () => {
     expect(deltas.some(d => d.text.includes("task_started"))).toBe(false);
   });
 
-  it("says each subagent's start and its end, once each, and nothing for its progress", async () => {
+  it("says each subagent's start with what its call asked, its model once on its first line, and its end, once each, and nothing for its progress", async () => {
     const exec = scriptedExec(subagentFixtureLines());
     const adapter = createClaudeAdapter({ exec: exec.factory, configDir: "/root/.claude-cfg" });
     const { events, onEvent } = collect();
     await adapter.start({ prompt: "fan out", onEvent }).finished;
 
+    const askedB = subagentAsked(AGENT_B_PROMPT);
+    expect(AGENT_B_PROMPT.length).toBeGreaterThan(SUBAGENT_ASKED_CHARS);
+    expect(askedB.length).toBeLessThanOrEqual(SUBAGENT_ASKED_CHARS);
+    expect(AGENT_B_PROMPT.startsWith(askedB.slice(0, -1))).toBe(true);
     const changes = events.filter(e => e.type === "subagent");
     expect(changes).toEqual([
-      { type: "subagent", sessionId: FIXTURE_SESSION_ID, task: AGENT_A_ID, parentToolUseId: AGENT_A_CALL, state: "running", title: "count alpha files", depth: 1 },
-      { type: "subagent", sessionId: FIXTURE_SESSION_ID, task: AGENT_B_ID, parentToolUseId: AGENT_B_CALL, state: "running", title: "read beta hostname", depth: 1 },
+      { type: "subagent", sessionId: FIXTURE_SESSION_ID, task: AGENT_A_ID, parentToolUseId: AGENT_A_CALL, state: "running", title: "count alpha files", depth: 1, asked: AGENT_A_PROMPT },
+      { type: "subagent", sessionId: FIXTURE_SESSION_ID, task: AGENT_B_ID, parentToolUseId: AGENT_B_CALL, state: "running", title: "read beta hostname", depth: 1, asked: askedB },
+      // Each child's first line names the model it runs on; the lines after it say nothing more.
+      { type: "subagent", sessionId: FIXTURE_SESSION_ID, task: AGENT_A_ID, parentToolUseId: AGENT_A_CALL, state: "running", model: "claude-haiku-4-5" },
+      { type: "subagent", sessionId: FIXTURE_SESSION_ID, task: AGENT_B_ID, parentToolUseId: AGENT_B_CALL, state: "running", model: "claude-sonnet-4-5" },
       { type: "subagent", sessionId: FIXTURE_SESSION_ID, task: AGENT_A_ID, parentToolUseId: AGENT_A_CALL, state: "done", summary: "acpi, adduser.conf, alsa" },
       // The kill's task_updated is the end; the notification after it says the same thing again and adds nothing.
       { type: "subagent", sessionId: FIXTURE_SESSION_ID, task: AGENT_B_ID, parentToolUseId: AGENT_B_CALL, state: "stopped" },
@@ -443,14 +450,34 @@ describe("ClaudeAdapter over the recorded fixture", () => {
       await adapter.start({ prompt: "fan out", ...(version !== undefined ? { version } : {}), onEvent }).finished;
       return { command: exec.calls[0]!.command, children: events.filter(e => e.type === "subagent").length };
     };
-    expect(await launched("2.1.288")).toEqual({ command: expect.stringContaining("--forward-subagent-text"), children: 4 });
-    expect(await launched("2.1.270")).toEqual({ command: expect.stringContaining("--forward-subagent-text"), children: 4 });
+    expect(await launched("2.1.288")).toEqual({ command: expect.stringContaining("--forward-subagent-text"), children: 6 });
+    expect(await launched("2.1.270")).toEqual({ command: expect.stringContaining("--forward-subagent-text"), children: 6 });
     // An older CLI exits on a flag it does not know, and a version nobody read could be one.
     for (const older of ["2.1.269", undefined]) {
       const { command, children } = await launched(older);
       expect(command).not.toContain("--forward-subagent-text");
-      expect(children).toBe(4);
+      expect(children).toBe(6);
     }
+  });
+
+  it("a subagent's model comes off its first line from the model, never an API error the CLI wrote in its place", async () => {
+    const lines = [
+      `{"type":"system","subtype":"init","session_id":"${FIXTURE_SESSION_ID}"}`,
+      `{"type":"assistant","session_id":"${FIXTURE_SESSION_ID}","parent_tool_use_id":null,"message":{"id":"m1","model":"claude-sonnet-4-5","content":[{"type":"tool_use","id":"toolu_t","name":"Task","input":{"description":"count","prompt":"Count to three."}}]}}`,
+      `{"type":"system","subtype":"task_started","task_id":"a1","tool_use_id":"toolu_t","description":"count","task_type":"local_agent","session_id":"${FIXTURE_SESSION_ID}"}`,
+      `{"type":"assistant","session_id":"${FIXTURE_SESSION_ID}","parent_tool_use_id":"toolu_t","is_api_error_message":true,"message":{"id":"m2","model":"<synthetic>","content":[{"type":"text","text":"API Error: 529"}]}}`,
+      `{"type":"assistant","session_id":"${FIXTURE_SESSION_ID}","parent_tool_use_id":"toolu_t","message":{"id":"m3","model":"claude-haiku-4-5","content":[{"type":"text","text":"1, 2, 3"}]}}`,
+      `{"type":"assistant","session_id":"${FIXTURE_SESSION_ID}","parent_tool_use_id":"toolu_t","message":{"id":"m4","model":"claude-opus-4-1","content":[{"type":"text","text":"done"}]}}`,
+      `{"type":"result","subtype":"success","session_id":"${FIXTURE_SESSION_ID}","result":"ok","usage":{"output_tokens":1}}`,
+    ];
+    const exec = scriptedExec(lines);
+    const adapter = createClaudeAdapter({ exec: exec.factory, configDir: "/root/.claude-cfg" });
+    const { events, onEvent } = collect();
+    await adapter.start({ prompt: "count", onEvent }).finished;
+    expect(events.filter(e => e.type === "subagent")).toEqual([
+      { type: "subagent", sessionId: FIXTURE_SESSION_ID, task: "a1", parentToolUseId: "toolu_t", state: "running", title: "count", asked: "Count to three." },
+      { type: "subagent", sessionId: FIXTURE_SESSION_ID, task: "a1", parentToolUseId: "toolu_t", state: "running", model: "claude-haiku-4-5" },
+    ]);
   });
 
   it("a background command the CLI tracks as a task is no subagent", async () => {

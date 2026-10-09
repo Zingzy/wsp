@@ -164,6 +164,10 @@ export type AdapterEvent =
       summary?: string;
       /** How deep under the thread's own agent it was spawned, 1 for one the agent itself started. */
       depth?: number;
+      /** The model it runs on and the start of what it was asked, as subagentAsked cuts it, on a running event where
+       * the agent said them; a model learned after the start comes on one more running event. */
+      model?: string;
+      asked?: string;
     }
   | { type: "permission.ask"; sessionId: string; ask: PermissionAsk }
   | {

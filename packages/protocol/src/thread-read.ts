@@ -9,7 +9,7 @@
 // to megabytes.
 import { z } from "zod";
 import { threadMovedLine } from "./projects.js";
-import { NEWER_TURN_LINE, compactedLine, fmtClock, notifyBody, notifyReply, planStepsLine, toolActivityLine, toolDoneLine, turnChangesLine, turnEndLine } from "./format.js";
+import { NEWER_TURN_LINE, NO_RESULT_LINE, compactedLine, fmtClock, notifyBody, notifyReply, planStepsLine, toolActivityLine, toolDoneLine, turnChangesLine, turnEndLine } from "./format.js";
 import type { SessionEvent, SessionPermissionEvent, TurnResult } from "./index.js";
 
 /** Who a row of a read is: the message that opened or steered a turn, the agent's own words, one tool call, or the
@@ -28,9 +28,6 @@ export type ThreadMessage = z.infer<typeof ThreadMessage>;
 /** Whether the event is this thread's. The runtime stamps every event with the thread it belongs to; a row from
  * before the stamp carries none and is read by no thread id, which is what a wait on such a thread already does. */
 const inThread = (event: { threadId?: string }, threadId: string): boolean => event.threadId === threadId;
-
-/** A turn that ended with no result and no reason from the runtime. */
-const NO_RESULT_LINE = "turn ended without a result";
 
 /** The most of a thread a new session is handed where the one it resumed is gone, in characters, its newest rows kept:
  * a long thread's tool rows alone run past what one message should carry. */

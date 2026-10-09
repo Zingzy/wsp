@@ -378,8 +378,17 @@ describe("the tree rule over a lead's children on a computer the person joined",
     expect(named.home).toBeUndefined();
     expect(named.claudeSessionId).toBeUndefined();
     expect(named.folder).toBeUndefined();
-    starts[0]!.answer("waiting on the children");
+    starts[0]!.o.onEvent({ type: "subagent", sessionId: "s", task: "a1", state: "running", parentToolUseId: "call-a1", title: "read the notes", asked: "Read the deploy notes and say where the key is." });
+    starts[0]!.o.onEvent({ type: "subagent", sessionId: "s", task: "a1", state: "done", parentToolUseId: "call-a1", summary: "The key is in the notes." });
+    starts[0]!.answer("The deploy key for prod is in the notes file.");
     await turn.finished;
+    // The listing names the lead and its subagents, and carries nothing they said or were asked: the person's does.
+    const mine = (await rt.sessions.list()).find(r => r.threadId === threadId)!;
+    expect(mine).toMatchObject({ lastLine: "The deploy key for prod is in the notes file.", subagents: [{ id: "a1", asked: expect.any(String), lastLine: "The key is in the notes." }] });
+    const theirs = (await rt.sessions.list(undefined, child.caller)).find(r => r.threadId === threadId)!;
+    expect(theirs).not.toHaveProperty("lastLine");
+    expect(theirs).not.toHaveProperty("failure");
+    expect(theirs.subagents).toEqual([{ id: "a1", title: "read the notes", state: "done", parentToolUseId: "call-a1", startedAt: expect.any(Number), endedAt: expect.any(Number) }]);
     const turns = starts.length;
     // A send carries its words alone: no file lands in the person's folder, and the reply is the lead's message to send.
     const here = (await placesOf()).find(p => p.id === HERE_PLACE_ID)!.name;

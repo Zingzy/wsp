@@ -74,9 +74,10 @@ export const ThreadPlacement = z.object({ name: ThreadSection, whileState: z.str
 export type ThreadPlacement = z.infer<typeof ThreadPlacement>;
 
 /** What sessions.mark moves on a thread: a pin set or taken off, a snooze set until a moment or taken off, a
- * placement set or taken off, Resume at reset armed or cancelled. A field left out is left as it is. */
+ * placement set or taken off, Resume at reset armed or cancelled, its tree folded or opened in the sidebar. A field
+ * left out is left as it is. */
 export const ThreadMarks = z
-  .object({ pinned: z.boolean().optional(), snoozedUntil: z.number().nullable().optional(), section: ThreadPlacement.nullable().optional(), resumeAtReset: z.boolean().optional() })
+  .object({ pinned: z.boolean().optional(), snoozedUntil: z.number().nullable().optional(), section: ThreadPlacement.nullable().optional(), resumeAtReset: z.boolean().optional(), folded: z.boolean().optional() })
   .strict();
 export type ThreadMarks = z.infer<typeof ThreadMarks>;
 
@@ -95,8 +96,16 @@ export const SubagentView = z.object({
   state: SubagentState,
   parentToolUseId: z.string().optional(),
   depth: z.number().int().positive().optional(),
+  /** The model it runs on, once its first line names one, and what it was asked, the start of its launching call's
+   * prompt; absent where the agent said neither. */
+  model: z.string().optional(),
+  asked: z.string().optional(),
   startedAt: z.number(),
   endedAt: z.number().optional(),
+  /** The last line of what it said at its end, where it ended done, and the first line of why it failed, where it
+   * failed; each absent where the agent gave no words. */
+  lastLine: z.string().optional(),
+  failure: z.string().optional(),
 });
 export type SubagentView = z.infer<typeof SubagentView>;
 
@@ -148,6 +157,13 @@ export const SessionView = z.object({
    * has ended and on a harness that reports no figure, which is not the same as nothing spent. It rides the row so
    * a listing can say what a thread spent without anyone reading its transcript. */
   costUsd: z.number().optional(),
+  /** The last line of the latest turn's reply, as listedLastLine cuts it, written as each turn ends and absent where it
+   * replied nothing; and why that turn failed, absent on every turn that did not. A send answered as held that then
+   * never ran leaves its reason here too, on the row of the turn before it, which keeps its status. Both ride the row
+   * so a lead's tree says what a child did without anyone reading its transcript, and neither reaches a caller that
+   * reaches the row only to list it. */
+  lastLine: z.string().optional(),
+  failure: z.string().optional(),
   /** What the session runs with, as the harness's own slugs: the start request's model until the harness announces
    * its own; effort as requested, since the CLI never echoes it, and the permission mode the thread is at, which is
    * the start's until an access pick moves it, on the running turn or for the next one. */
@@ -198,6 +214,8 @@ export const SessionView = z.object({
   settledAt: z.number().optional(),
   /** When the person pinned this row's thread to the top of the sidebar, kept and stamped as readAt is. */
   pinnedAt: z.number().optional(),
+  /** When the person folded this row's thread's tree in the sidebar, kept and stamped as readAt is. */
+  foldedAt: z.number().optional(),
   /** When a snooze on this row's thread ends, while it has not: the sidebar leaves the thread out until then. Once
    * the host's clock passes it the listing carries wokeAt instead, and every window is told at that moment. */
   snoozedUntil: z.number().optional(),
@@ -253,12 +271,16 @@ export const ThreadView = z.object({
   resumeAt: z.number().optional(),
   /** What this thread has cost: its rows' figures added up. Absent where no row of it carries one. */
   costUsd: z.number().optional(),
+  /** The latest turn's last line and why it failed, as SessionView carries them. */
+  lastLine: z.string().optional(),
+  failure: z.string().optional(),
   /** The latest turn's process on the computer the host runs on, as SessionView.pid carries it. */
   pid: z.number().int().optional(),
   /** The thread's stamps and marks, as SessionView carries them; threadUnread reads readAt and wokeAt. */
   readAt: z.number().optional(),
   settledAt: z.number().optional(),
   pinnedAt: z.number().optional(),
+  foldedAt: z.number().optional(),
   snoozedUntil: z.number().optional(),
   wokeAt: z.number().optional(),
   section: ThreadPlacement.optional(),
@@ -320,10 +342,13 @@ export function foldThreads(sessions: ReadonlyArray<SessionView>): ThreadView[] 
       ...(latest.capped !== undefined ? { capped: latest.capped } : {}),
       ...(latest.limit !== undefined ? { limit: latest.limit } : {}),
       ...(latest.resumeAt !== undefined ? { resumeAt: latest.resumeAt } : {}),
+      ...(latest.lastLine !== undefined ? { lastLine: latest.lastLine } : {}),
+      ...(latest.failure !== undefined ? { failure: latest.failure } : {}),
       ...(latest.pid !== undefined ? { pid: latest.pid } : {}),
       ...(latest.readAt !== undefined ? { readAt: latest.readAt } : {}),
       ...(latest.settledAt !== undefined ? { settledAt: latest.settledAt } : {}),
       ...(latest.pinnedAt !== undefined ? { pinnedAt: latest.pinnedAt } : {}),
+      ...(latest.foldedAt !== undefined ? { foldedAt: latest.foldedAt } : {}),
       ...(latest.snoozedUntil !== undefined ? { snoozedUntil: latest.snoozedUntil } : {}),
       ...(latest.wokeAt !== undefined ? { wokeAt: latest.wokeAt } : {}),
       ...(latest.section !== undefined ? { section: latest.section } : {}),

@@ -222,6 +222,19 @@ describe("rewinding a thread to one of its replies", () => {
     expect(foldThreads(await rt!.sessions.list(ws.id)).find(t => t.threadId === threadId)?.rewoundAt).toBeUndefined();
   });
 
+  it("lists the last line and the failure of the turn that is now the thread's last", async () => {
+    const { ws } = await workspace(harness({ cuts: "next", ends: { 1: { status: "failed", error: "API Error: 529 overloaded\nretry" } } }));
+    const { threadId, turns } = await threeTurns(ws.id);
+    const listed = async () => foldThreads(await rt!.sessions.list(ws.id)).find(t => t.threadId === threadId)!;
+    expect(await listed()).toMatchObject({ lastLine: "reply 3" });
+    await rt!.sessions.rewind(threadId, { turnId: turns[1]!, files: false });
+    expect(await listed()).toMatchObject({ lastLine: "reply 2" });
+    expect(await listed()).not.toHaveProperty("failure");
+    await rt!.sessions.rewind(threadId, { turnId: turns[0]!, files: false });
+    expect(await listed()).toMatchObject({ failure: "API Error: 529 overloaded" });
+    expect(await listed()).not.toHaveProperty("lastLine");
+  });
+
   it("cuts a harness that reverts at once before the first turn it drops, after the files", async () => {
     const reverted: Parameters<SessionReverter>[0][] = [];
     const { ws, daemon } = await workspace(harness({ cuts: "revert", reverted }));

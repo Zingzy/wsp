@@ -4,7 +4,7 @@ import {
   AGENT_KEEP_MS, AGENTS_KEPT, type PermissionAsk, type SessionRenameWrite, type SessionView, type TurnResult,
   type Caller, SessionOrigin, ThreadScope, WorkspaceOrigin, GitDiffReply, GitWorktreesReply, repoPathOf, worktreeOf, foldThreads, threadWord, threadsFollowed, scopeOf,
   type ThreadWaitingOn, isLocalWorkspace, NO_SUCH_TURN, NOTIFY_ME, notifyLine, runsInFolder, DEVICE_OPS, sendRefusal,
-  workspaceState, HERE_PLACE_ID, runningOn as runningOnPlace, type ThreadCapWait, roadOf, unreadLine,
+  workspaceState, HERE_PLACE_ID, runningOn as runningOnPlace, type ThreadCapWait, roadOf, unreadLine, turnLines,
 } from "@wsp/protocol";
 import { harnessCatalog } from "../harness-catalog.js";
 import { PLAN_RESETS, secretsOf } from "../adapters.js";
@@ -12,7 +12,7 @@ import { accountOf, accountOnComputer, resetDetailsDue, type Vaulted } from "../
 import type { WorkspaceRecord, LiveWorkspace, SessionHandle } from "../types/wiring.js";
 import {
   RESTARTED_REASON, NOTIFY_OWED, readRoad, readScope, noCheckpointLogLine, type Taken, type TurnLive, type KeptProcess, type KeptLaunch, launchesAs,
-  stampSessionFile, sameSessionFile, DaemonRefusal, type LiveSession, HELD_STARTS, type HeldStartRecord,
+  stampSessionFile, sameSessionFile, DaemonRefusal, type LiveSession, HELD_STARTS, type HeldStartRecord, writeLines,
 } from "../types/internal.js";
 import type { CapHeld, RuntimeContext, ThreadsArea } from "../context.js";
 
@@ -564,6 +564,7 @@ export function threadsArea(ctx: RuntimeContext): ThreadsArea {
     delete s.snapshot;
     const endedAt = Date.now();
     s.view.status = reply ?? (stopped ? "interrupted" : "failed");
+    if (reply === undefined) writeLines(s.view, turnLines({ status: s.view.status }, reason));
     ctx.portRootsMoved(s.view.workspaceId);
     s.view.endedAt = endedAt;
     if (s.view.status === "failed") ctx.endSnoozeFor(s.view);
