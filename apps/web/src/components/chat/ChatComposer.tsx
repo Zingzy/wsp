@@ -30,13 +30,13 @@
 // are held too. Held rows go only after the person's next send here, never on
 // their own, and a row typed during a turn goes ahead of the held ones it
 // releases. With steer picked, a send during a turn whose harness's catalog says
-// it steers and whose draft carries no file goes now: to the head, then into
-// the running turn through sessions.steer, leaving the queue once the runtime
-// took it (the thread shows it from the session.steer event), while
-// not-running leaves it at the head for the turn's end. A harness that does
-// not steer, or a draft with files, which a steer cannot carry, queues the
-// message as queue does and its card says it waits: the pick never stops the
-// running turn. A card's edit puts
+// it steers goes now, with its images where the catalog says steersImages: to
+// the head, then into the running turn through sessions.steer, leaving the
+// queue once the runtime took it (the thread shows it from the session.steer
+// event), while not-running leaves it at the head for the turn's end. A harness
+// that does not steer, or a draft with files its steer cannot carry, queues the
+// message as queue does and its card says why it waits: the pick never stops
+// the running turn. A card's edit puts
 // its words and files back in the box. A new thread owes nothing to the
 // turn it left behind: the runtime runs a workspace's threads side by side
 // and holds each to one turn, so the fresh composer opens at once. The slash
@@ -76,7 +76,7 @@
 import { cn, isMacPlatform } from "../../lib/utils";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type ClipboardEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { PaperclipIcon } from "lucide-react";
-import { ASIDE_NO_SESSION_LINE, composerHeldLine, HERE_PLACE_ID, hereName, HOST_ASLEEP_SEND, isLocalWorkspace, signedOutLine, type AgentsTarget, FILES_MAX, FILE_MAX_WORDS, IMAGE_MAX_WORDS, IMAGE_TYPE_WORDS, TURN_IN_FLIGHT, movesRunningAccess, noImagesLine, readsImages, screenCommandLine, screenCommandTyped, screenCommandsOf, sendRefusal, type SendRefusalKind, type TurnLimit, type WorkspaceState } from "@wsp/protocol";
+import { ASIDE_NO_SESSION_LINE, composerHeldLine, HERE_PLACE_ID, hereName, HOST_ASLEEP_SEND, isLocalWorkspace, signedOutLine, type AgentsTarget, FILES_MAX, FILE_MAX_WORDS, IMAGE_MAX_WORDS, IMAGE_TYPE_WORDS, TURN_IN_FLIGHT, movesRunningAccess, noImagesLine, readsImages, screenCommandLine, screenCommandTyped, screenCommandsOf, sendRefusal, steerFilesBlocked, type SendRefusalKind, type TurnLimit, type WorkspaceState } from "@wsp/protocol";
 import type { ConnStatus } from "../../protocol/client";
 import { hostAsleep } from "../../boot";
 import { projectHomeKey, useAbsentComputer, useHarnessCatalogs, useStore, useThreadSessions, useWorkspace, useWorkspaceState } from "../../protocol/store";
@@ -101,7 +101,7 @@ import { useComposerList } from "./useComposerList";
 import { useComposerTriggerState } from "./useComposerTriggerState";
 import { ComposerCommandMenuLayer } from "./ComposerCommandMenuLayer";
 import { ChatFileTile, ChatImageThumb, ChatRefusedFile } from "./ChatFiles";
-import { attachmentOf, fileFromStash, recordOf, releaseFiles, stashedOf, useComposerFiles, useComposerFilesStore, useQueuedFiles, useRefusedFiles } from "./composerFiles";
+import { attachmentOf, fileFromStash, recordOf, releaseFiles, stashedOf, useComposerFiles, useComposerFilesStore, useQueuedFiles, useRefusedFiles, type ComposerFile } from "./composerFiles";
 import { COMPOSER_WORDS } from "./composerWords";
 import { partitionStashFiles, usePromptStashStore, type PromptStashEntry } from "./promptStashStore";
 import { ComposerStashMenu, stashedWord } from "./ComposerStashMenu";
@@ -424,6 +424,11 @@ export function ChatComposer({
   const canStop = runningTurn !== null && api?.interruptSession !== undefined;
   // The catalog answers before the click: a harness that steers takes the row into the turn, any other queues it.
   const canSteer = canStop && heldRow === null && harnessCatalog?.steers === true && api?.steerSession !== undefined;
+  /** What keeps these files out of a running turn of this harness, or null where its steer carries them. */
+  const steerWaits = useCallback(
+    (carried: ReadonlyArray<ComposerFile>): string | null => (!steers || harnessCatalog?.steers !== true ? null : steerFilesBlocked(carried.map(recordOf), harnessCatalog.steersImages === true, harnessCatalog.label)),
+    [harnessCatalog, steers],
+  );
   // The draft holds the collapsed caret, where a chip is one place; a trigger reads the text as sent. A caret beside a
   // chip opens nothing, so a chip's own text never reads as a token being typed.
   const candidate = useMemo(() => {
@@ -660,29 +665,37 @@ export function ChatComposer({
       const method = api?.steerSession;
       if (!canSteer || runningTurn === null || stopTarget === null || method === undefined) return;
       const words = row.prompt.trim();
+      const requestId = newId();
+      const carried = (useComposerFilesStore.getState().queued[row.id] ?? []).map(attachmentOf);
       setNext(row.id);
-      void method(stopTarget, words, newId()).then(
+      // As a start does: the files are kept under the request id the thread's row draws them by, and go back on the
+      // card where the turn did not take them, or into the box beside its words where an Edit took the card meanwhile.
+      sendFilesAs(workspaceId, requestId, row.id);
+      const giveBack = (): void => restoreFiles(workspaceId, requestId, Object.values(useComposerDraftStore.getState().queues).some(rows => rows.some(r => r.id === row.id)) ? row.id : undefined);
+      void method(stopTarget, words, requestId, carried).then(
         outcome => {
           setNext(null);
           if (outcome === "accepted") return removeQueued(threadKey, row.id);
+          giveBack();
           // not-running: the turn beat the message, so it stays at the head and the head effect starts it once the turn ends.
           if (outcome === "not-found") flyout(COMPOSER_WORDS.sendNowFailed(COMPOSER_WORDS.sendNowUnknown));
           if (outcome === "unsupported") flyout(COMPOSER_WORDS.sendNowFailed(COMPOSER_WORDS.sendNowUnsupported));
         },
         (err: unknown) => {
           setNext(null);
+          giveBack();
           flyout(COMPOSER_WORDS.sendNowFailed(err instanceof Error ? err.message : String(err)));
         },
       );
     },
-    [api, canSteer, release, removeQueued, runningTurn, stopTarget, threadKey],
+    [api, canSteer, release, removeQueued, restoreFiles, runningTurn, sendFilesAs, stopTarget, threadKey, workspaceId],
   );
 
   /** Sends the draft, or queues it behind a running turn; with steer picked it goes into that turn at once where the
-   * harness steers and the draft carries words alone, and is queued like any other where not: a pick never stops a turn. */
+   * harness steers and carries the draft's files, and is queued like any other where not: a pick never stops a turn. */
   const send = useCallback(
     () => {
-      const now = steers && canSteer && files.length === 0;
+      const now = steers && canSteer && steerWaits(files) === null;
       // The same reading the send button's hover is already wearing: an Enter that lands here leaves the draft where
       // it was typed and says why.
       if (sendHeld !== null) {
@@ -735,7 +748,7 @@ export function ChatComposer({
       if (now) sendNow({ id, prompt });
       else release(threadKey);
     },
-    [askAside, asides, busy, canSteer, dismissRefused, dismissTrigger, draft, enqueue, files, harnessCatalog, held, onStart, queueFiles, release, restoreDraft, runningTurn, sendHeld, sendNow, sending, setDraft, start, steers, threadKey, trigger, waits, workspace, workspaceId],
+    [askAside, asides, busy, canSteer, dismissRefused, dismissTrigger, draft, enqueue, files, harnessCatalog, held, onStart, queueFiles, release, restoreDraft, runningTurn, sendHeld, sendNow, sending, setDraft, start, steerWaits, steers, threadKey, trigger, waits, workspace, workspaceId],
   );
 
   // The head row goes as soon as nothing blocks a send; starting flips busy, so the rest wait for the next end. The
@@ -783,7 +796,7 @@ export function ChatComposer({
     openBar === "tasks" && tasks !== null ? (
       <TasksBar tasks={tasks} threadKey={threadKey} workspaceId={workspaceId} />
     ) : openBar === "queue" && head !== undefined ? (
-      <QueueBar rows={queue} files={queuedFiles} threadKey={threadKey} workspaceId={workspaceId} onEdit={editCard} onRemove={removeCard} />
+      <QueueBar rows={queue} files={queuedFiles} waits={steerWaits} threadKey={threadKey} workspaceId={workspaceId} onEdit={editCard} onRemove={removeCard} />
     ) : openBar === "usage" && limit !== null ? (
       <UsageBar agent={limit.agent} limit={limit.limit} resumeAt={limit.resumeAt} threadKey={threadKey} workspaceId={workspaceId} />
     ) : null;

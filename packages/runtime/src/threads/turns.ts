@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import {
   type AdapterEvent, type PermissionAsk, type PermissionOption, type PermissionOutcome, type SessionEvent,
-  type SessionAnswerResult, type SessionStartOutcome, type SessionView, type AttachmentRecord, type TurnResult,
+  type SessionAnswerResult, type SessionStartOutcome, type SessionView, type AttachmentRecord, type TurnImage, type TurnResult,
   type TurnStatus, ThreadScope, WorkspaceOrigin, threadWord, leadAsk, askingLine, permissionModeOptionLabel,
   pickedOptions, deniedLine, toolCallFacts, notifyBody, turnLines,
 } from "@wsp/protocol";
@@ -605,7 +605,7 @@ export function turnsArea(ctx: RuntimeContext): TurnsArea {
         stopped = true;
         return started.interrupt();
       },
-      ...(started.steer !== undefined ? { steer: (prompt: string, id?: string) => started.steer!(prompt, id) } : {}),
+      ...(started.steer !== undefined ? { steer: (prompt: string, id?: string, images?: readonly TurnImage[]) => started.steer!(prompt, id, images) } : {}),
       tellsUnread: () => started.tellsUnread === true,
       ...(started.answer !== undefined ? { answer } : {}),
       ...(started.setAccess !== undefined ? { setAccess } : {}),

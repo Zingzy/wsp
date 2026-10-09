@@ -750,6 +750,12 @@
                   "prompt": {
                     "type": "string"
                   },
+                  "attachments": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/properties/events/items/anyOf/0/properties/attachments/items"
+                    }
+                  },
                   "requestId": {
                     "type": "string"
                   },
@@ -2315,6 +2321,12 @@
                   },
                   "prompt": {
                     "type": "string"
+                  },
+                  "attachments": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/properties/events/items/anyOf/0/properties/attachments/items"
+                    }
                   },
                   "requestId": {
                     "type": "string"

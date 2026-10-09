@@ -471,6 +471,9 @@ export interface BootArea {
   readonly reachesRow: (row: { threadId?: string; workspaceId: string }, caller: Caller | undefined, talk?: TreeTalk) => boolean;
   readonly entryOfRow: (row: { threadId?: string; workspaceId: string }, origin: Caller | undefined, talk?: TreeTalk) => Promise<LiveWorkspace | undefined>;
   readonly listedRows: (held: readonly (Map<string, SessionEntry> extends Map<string, infer V> ? V : never)[]) => SessionView[];
+  readonly placedRows: (listed: SessionView[]) => Promise<SessionView[]>;
+  readonly rowGone: (id: string, at: { workspaceId: string; threadId?: string }) => void;
+  readonly setupRefusalMoved: (place: string, harness: string) => void;
   readonly threadFacts: (threadId: string) => ThreadFacts | undefined;
   readonly settledNow: (threadId: string, settleMs: number | null) => boolean;
   readonly pushHead: (threadId: string) => void;
@@ -632,13 +635,13 @@ export interface ThreadsArea {
   readonly checkpointsLanding: Map<string, Promise<void>>;
   readonly keepCheckpoint: (entry: LiveWorkspace, turn: { sessionId: string; threadId: string; turnId: string; anchor?: string; kept?: string }) => Promise<void>;
   readonly takenTurn: (workspaceId: string, taken: Taken) => Promise<SessionHandle | undefined>;
-  readonly keepSteer: (s: { view: SessionView; turnLive?: TurnLive }, o: { prompt: string; requestId?: string; startedBy?: SessionOrigin }, caller: Caller | undefined, steerId: string) => Promise<void>;
+  readonly keepSteer: (s: { view: SessionView; turnLive?: TurnLive }, o: { prompt: string; requestId?: string; startedBy?: SessionOrigin; attachments?: readonly Attachment[] }, caller: Caller | undefined, steerId: string) => Promise<void>;
   readonly steerLost: (s: { view: SessionView; turnLive?: TurnLive }, steerId: string) => void;
   readonly lineTry: (s: { view: SessionView; turnId: string; asked?: TurnAsked }) => boolean;
   readonly promptHeld: (requestId: string) => void;
   readonly tryStopped: (turnId: string) => void;
-  readonly steerAnswered: (s: { view: SessionView; turnId: string; turnLive?: TurnLive }, handleId: string, o: { prompt: string; requestId?: string; via?: "slate"; startedBy?: SessionOrigin }, caller: Caller | undefined, steerId: string, landed: boolean) => boolean;
-  readonly recordSteer: (s: { view: SessionView; turnId: string; turnLive?: TurnLive }, handleId: string, o: { prompt: string; requestId?: string; via?: "slate"; startedBy?: SessionOrigin }, caller: Caller | undefined, steerId: string) => void;
+  readonly steerAnswered: (s: { view: SessionView; turnId: string; turnLive?: TurnLive }, handleId: string, o: { prompt: string; requestId?: string; via?: "slate"; startedBy?: SessionOrigin; attachments?: readonly Attachment[] }, caller: Caller | undefined, steerId: string, landed: boolean) => boolean;
+  readonly recordSteer: (s: { view: SessionView; turnId: string; turnLive?: TurnLive }, handleId: string, o: { prompt: string; requestId?: string; via?: "slate"; startedBy?: SessionOrigin; attachments?: readonly Attachment[] }, caller: Caller | undefined, steerId: string) => void;
   readonly snapshotOf: (entry: LiveWorkspace, cwd: string) => Promise<string | undefined>;
   readonly readTurnChanges: (entry: LiveWorkspace, turn: { sessionId: string; turnId: string; threadId: string; cwd: string; from: string; startedAt: number; wrote?: ReadonlySet<string> }) => Promise<boolean>;
   readonly usageComputerOf: (r: WorkspaceRecord) => string;

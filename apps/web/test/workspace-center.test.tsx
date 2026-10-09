@@ -206,6 +206,7 @@ describe("workspace creation view", () => {
 
     held = true;
     bus({ type: "session.held", workspaceId: "ws_beta", threadId: "th_1", requestId: requestId! });
+    bus({ type: "session.row", workspaceId: "ws_beta", threadId: "th_1", id: "s1", row });
     bus({ type: "session.starting", workspaceId: "ws_beta", threadId: "th_1", harness: "claude", requestId: requestId! });
     const activeTiles = () => [...document.querySelectorAll<HTMLElement>("[data-slot=sidebar] [data-sidebar-row][data-active=true]")].map(tile => tile.dataset["rowId"]);
     await waitFor(() => expect(document.querySelector("[data-row-id='thread:th_1']")).not.toBeNull());

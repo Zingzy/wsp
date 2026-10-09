@@ -950,6 +950,25 @@ describe("steer over the stdin channel", () => {
     expect((await session.finished).status).toBe("completed");
   });
 
+  it("carries a steered message's images as base64 image blocks ahead of its words, as on the first message", async () => {
+    const exec = manualExec();
+    const adapter = createClaudeAdapter({ exec: exec.factory, configDir: "/root/.claude-cfg" });
+    expect(adapter.steersImages).toBe(true);
+    const { events, onEvent } = collect();
+    const session = adapter.start({ prompt: "go", onEvent });
+    exec.push(init);
+    await until(() => events.some((e) => e.type === "session.start"));
+    expect(await session.steer("what is this?", "steer-1", [{ mediaType: "image/png", bytes: "iVBORw0KGgo=" }])).toBe("accepted");
+    expect(JSON.parse(exec.writes[0]!)).toMatchObject({
+      type: "user",
+      uuid: "steer-1",
+      message: { role: "user", content: [{ type: "image", source: { type: "base64", media_type: "image/png", data: "iVBORw0KGgo=" } }, { type: "text", text: "what is this?" }] },
+    });
+    exec.push(result);
+    exec.end(0);
+    expect((await session.finished).status).toBe("completed");
+  });
+
   it("after result answers not-running, and result closed the channel once", async () => {
     const exec = manualExec();
     const adapter = createClaudeAdapter({ exec: exec.factory, configDir: "/root/.claude-cfg" });

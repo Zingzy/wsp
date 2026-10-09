@@ -33,12 +33,17 @@ describe("wsp verbs over the host: threads, projects and agent defaults", () => 
     const dead = await h.run("run", "alpha", "hello");
     expect(dead.code).toBe(1);
     expect(dead.io.errors).toEqual([`wsp run: ${UNREACHED_LINE}`]);
-    const junk = (await h.rt.sessions.list())[0]!.threadId!;
+    const [junkRow] = await h.rt.sessions.list();
+    const junk = junkRow!.threadId!;
     expect((await h.run("threads")).io.lines[0]).toContain(junk);
+    // Every window drops the row, since no listing comes to draw the thread gone.
+    const dropped: unknown[] = [];
+    h.rt.events.on("*", e => void (e.type === "session.row" && e.row === undefined && dropped.push({ id: e.id, threadId: e.threadId })));
 
     const forgot = await h.run("thread", "forget", junk.slice(0, 8), "--yes");
     expect(forgot.code).toBe(0);
     expect(forgot.io.lines).toEqual([`forgot thread ${junk}: no turn ever ran on it, so nothing of its work is gone`]);
+    await vi.waitFor(() => expect(dropped).toEqual([{ id: junkRow!.id, threadId: junk }]));
     expect((await h.run("threads")).io.lines[0]).not.toContain(junk);
     expect(await h.rt.sessions.list()).toEqual([]);
 
@@ -232,11 +237,15 @@ describe("wsp verbs over the host: threads, projects and agent defaults", () => 
     expect((await h.run("run", "spoo", "first")).code).toBe(0);
     expect((await h.run("run", "spoo", "second")).code).toBe(0);
     const listed = await h.rt.sessions.list();
-    const first = listed.find(t => t.prompt === "first")!.threadId!;
+    const firstRow = listed.find(t => t.prompt === "first")!;
+    const first = firstRow.threadId!;
     const second = listed.find(t => t.prompt === "second")!.threadId!;
+    const dropped: unknown[] = [];
+    h.rt.events.on("*", e => void (e.type === "session.row" && e.row === undefined && dropped.push({ id: e.id, threadId: e.threadId })));
     const gone = await h.run("delete", first.slice(0, 8), "--yes");
     expect(gone.code, gone.io.errors.join("\n")).toBe(0);
     expect(gone.io.lines).toEqual([`deleted thread ${first}`]);
+    await vi.waitFor(() => expect(dropped).toEqual([{ id: firstRow.id, threadId: first }]));
     expect((await h.rt.sessions.list()).map(t => t.threadId)).toEqual([second]);
     expect(existsSync(join(folder, ".git"))).toBe(true);
     expect((await h.run("run", "spoo", "--branch", "feat/y", "on a branch")).code).toBe(0);

@@ -38,6 +38,9 @@ export function Nav() {
           <a href={DOCS} className="rounded-md px-3 py-2 text-[14px] text-muted-foreground transition-colors duration-150 hover:text-foreground">
             Docs
           </a>
+          <a href="/compare" className="hidden rounded-md px-3 py-2 text-[14px] text-muted-foreground transition-colors duration-150 hover:text-foreground sm:block">
+            Compare
+          </a>
           <a href={REPO} aria-label="GitHub" className="flex items-center gap-2 rounded-md px-3 py-2 text-[14px] text-muted-foreground transition-colors duration-150 hover:text-foreground">
             <GithubGlyph className="size-4" />
             <span className="hidden sm:inline">GitHub</span>

@@ -7,14 +7,14 @@ import { harnessExec } from "@wsp/engine";
 import {
   type SessionEvent, type SessionInterruptOutcome, type SessionInterruptResult, type SessionStartOutcome,
   type SessionSearchResult, type SessionView, type StartPicks, type TurnImage, type TurnResult, foldThreads,
-  MCP_SERVER_NAME, threadForgetRefusal, threadKeyOf, threadRan, threadWord, SCOPED_MCP_ARG, roadOf, scopeOf, tableName,
+  MCP_SERVER_NAME, threadForgetRefusal, threadKeyOf, threadRan, threadWord, SCOPED_MCP_ARG, roadOf, scopeOf,
   RUN_PERSONS_LINE, runOutputTail, type SessionRunEvent, NO_SLATE_MCP_ARG, ASIDE_NO_SESSION_LINE, BLANK_ASIDE_LINE,
   asideUnsupportedLine, isLocalWorkspace, mcpServersBlocked, actionRefusal, homeShortened, EMPTY_TITLE_LINE,
   threadRunsOnLine, keptPicks, listedPick, notFoundRefusal, NOTIFY_ME, noCwdLine,
   THREAD_WORKING_LINE, threadOnMachineLine, WORKTREE_BUSY_LINE, copiesFolder, runsInFolder, sendRefusal, startPicks, titleLine,
   TURN_TOKEN_ENV, turnImagesDir, workspaceState, REWIND_LATEST_LINE, REWIND_NO_CHECKPOINT_LINE, REWIND_NO_UNDO_LINE,
   REWIND_SHARED_LINE, REWIND_WORKING_LINE, rewindBesideLine, rewindChildrenLine, rewindKeptLine, rewindNoAnchorLine,
-  attachmentRecord, attachmentKey, filesBlocked, isImage, sendFilesDir, attachedFilesPrompt, threadMessages,
+  attachmentRecord, attachmentKey, filesBlocked, filesRefusal, steerFilesBlocked, type Attachment, isImage, sendFilesDir, attachedFilesPrompt, threadMessages,
   threadSeed, taskStopRefusedLine, taskStopUnsupportedLine, agentOffLine, HEAD_BYTES, HISTORY_PAGE_BYTES,
   HISTORY_PAGE_EVENTS, AGENT_STARTING_MS, ASIDE_EMPTY_LINE, capStoppedLine, deletedBeforeStartLine, type AsideQuestion,
   type McpServerSpec, type SessionAsker, refusal, sendFilesAcrossLine, SEND_FILES_ACROSS_FIX, waitAcrossLine, WAIT_ACROSS_FIX,
@@ -32,6 +32,9 @@ import {
   type LiveSession, type SessionEntry,
 } from "../types/internal.js";
 import type { RuntimeContext, SessionsArea } from "../context.js";
+
+/** A steered message's images as an adapter that declares steersImages reads them: the bytes, as a start's inline road. */
+const inlineImages = (attachments: readonly Attachment[] | undefined): TurnImage[] => (attachments ?? []).map(({ mediaType, bytes }) => ({ mediaType, bytes }));
 
 /** The wsp server a thread's launch is handed. A thread another thread started has no slate: its launch says nothing of
  * one, and on this computer, where the server is the host's own wsp and knows the word, its server is told too. A box's
@@ -678,14 +681,14 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
           // A turn that has already answered takes no message, however well its harness steers: the words would
           // land after the reply the caller read. The send waits for that process to exit and runs as the thread's
           // next turn; nothing here is ever refused for being in the way.
-          const steer = running.turnLive?.reply === undefined && adapter.steers ? running.handle.steer : undefined;
+          const steer = running.turnLive?.reply === undefined && adapter.steers && steerFilesBlocked(records, adapter.steersImages === true, harness) === null ? running.handle.steer : undefined;
           const steerId = randomUUID();
           if (steer !== undefined) {
             // The turn keeps the message before the write, so a write whose answer was lost, landed or not, leaves it
             // with the turn: its end sends back one its agent never took up, and nothing sends it a second time. A
             // turn that ends while the write is out leaves the message to this road, which queues it as the next turn.
             await ctx.keepSteer(running, o, origin, steerId);
-            const answer = await steer(o.prompt, steerId).catch((e: unknown) => (e instanceof Error ? e : new Error(String(e))));
+            const answer = await steer(o.prompt, steerId, inlineImages(o.attachments)).catch((e: unknown) => (e instanceof Error ? e : new Error(String(e))));
             // Where the turn's agent tells no unread messages, nothing will say whether a write that threw landed: the
             // caller hears it failed, in words no retry reads as a computer that did not answer, so a line falls to the
             // person rather than reach the thread twice.
@@ -810,7 +813,11 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
         if (filesFolder !== undefined && !(thread.filesIn ?? []).includes(filesFolder)) threadRecords.set(threadId, { ...thread, filesIn: [...(thread.filesIn ?? []), filesFolder] });
         launched();
         // The restart is under way, so the thread it replaces folds into Settled, as a settle by the person would.
-        if (replaces !== undefined) await sessionsApi.settle([replaces]).catch((e: unknown) => console.warn(`thread ${threadWord(replaces)} was not settled after its restart: ${e instanceof Error ? e.message : String(e)}`));
+        // Its row names this one as what replaced it, which a thread already settled moves no mark to say.
+        if (replaces !== undefined) {
+          await sessionsApi.settle([replaces]).catch((e: unknown) => console.warn(`thread ${threadWord(replaces)} was not settled after its restart: ${e instanceof Error ? e.message : String(e)}`));
+          ctx.pushHead(replaces);
+        }
         // The turn is running; what the record failed to remember must not read as a start that failed.
         if (resume === undefined) await ctx.rememberTarget(entry.record).catch((e: unknown) => console.warn(`last target for ${workspaceId} not remembered: ${e instanceof Error ? e.message : String(e)}`));
         return handle;
@@ -880,13 +887,7 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
       const trimmed = ctx.treeRecords(origin, "list", workspaceId).filter(([threadId]) => !rowed.has(threadId));
       const ends = await Promise.all(trimmed.map(async ([threadId, r]) => r.ended ?? threadResult(await ctx.openTranscript(r.workspaceId), threadId)?.status));
       const listed = [...ctx.listedRows(held).map(view => (ctx.reachesRow(view, origin) ? view : namedOnly(view))), ...trimmed.map(([threadId, r], i) => trimmedRow(threadId, r, ends[i]))];
-      const computers = listed.length === 0 ? [] : await ctx.computerRows();
-      return listed.map(view => {
-        const id = ctx.live.get(view.workspaceId)?.record.project;
-        const project = id === undefined ? undefined : ctx.projectsHeld.get(id);
-        const computer = computers.find(r => r.id === project?.computer);
-        return project === undefined ? view : { ...view, project: { id: project.id, name: project.name }, computerName: computer === undefined ? project.computer : tableName(computer) };
-      });
+      return ctx.placedRows(listed);
     },
 
     async history(workspaceId, origin) {
@@ -947,8 +948,11 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
       if (refusal !== null) throw new Error(refusal);
       if (s.view.status !== "running" || s.handle === undefined) return { outcome: "not-running" };
       if (s.handle.steer === undefined) return { outcome: "unsupported" };
+      const records = (o.attachments ?? []).map(attachmentRecord);
+      const blocked = records.length === 0 ? null : (filesRefusal(records) ?? steerFilesBlocked(records, ctx.adapterFor(entry, s.view.harness).adapter.steersImages === true, s.view.harness));
+      if (blocked !== null) throw new Error(blocked);
       const steerId = randomUUID();
-      const outcome = await s.handle.steer(o.prompt, steerId);
+      const outcome = await s.handle.steer(o.prompt, steerId, inlineImages(o.attachments));
       if (outcome !== "accepted") return { outcome };
       ctx.recordSteer(s, sessionId, o, origin, steerId);
       return { outcome: "accepted" };
@@ -1354,7 +1358,11 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
       await ctx.dropCheckpoints(entry, threadId);
       await ctx.dropThreadFiles(entry, [threadId]);
       await ctx.dropSentImages(workspaceId, [threadId]);
-      for (const [id, s] of [...sessions]) if (s.view.threadId === threadId) sessions.delete(id);
+      for (const [id, s] of [...sessions]) {
+        if (s.view.threadId !== threadId) continue;
+        sessions.delete(id);
+        ctx.rowGone(id, { workspaceId, threadId });
+      }
       threadRecords.delete(threadId);
       await ctx.dropFromTranscript(workspaceId, e => e.threadId === threadId);
       await ctx.persistSessions(workspaceId);
@@ -1381,7 +1389,10 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
       // A launch that never got going can still have landed the files its send carried.
       await ctx.dropThreadFiles(entry, [threadId]);
       await ctx.dropSentImages(workspaceId, [threadId]);
-      for (const [id] of held) sessions.delete(id);
+      for (const [id] of held) {
+        sessions.delete(id);
+        ctx.rowGone(id, { workspaceId, threadId });
+      }
       threadRecords.delete(threadId);
       await ctx.slates.forget(threadId);
       await ctx.dropFromTranscript(workspaceId, e => e.threadId === threadId);

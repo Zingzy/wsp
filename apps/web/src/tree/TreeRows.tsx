@@ -6,10 +6,8 @@
 // says the tree's counts, to the most pressing live thread at any depth fading out under it, a peek that takes no act
 // and opens the section on a press. Shut is the lead's entry in the host's preferences, apart from the sidebar's fold
 // of the same tree, so a reload and every window agree.
-// A child workspace's row keeps its branch and how far that branch is ahead of the lead's as the git host holds
-// them, the push its computer could not make as the note, and the act there is to take once the thread is quiet:
-// Merge into lead while it has commits the lead lacks, Ask the lead to merge it after a merge stopped on conflicts.
-import { SETTLE_MS, TREE_WORDS, cannotPushFromLine, type PlaceView, type TreeChild, type TreeFact } from "@wsp/protocol";
+// A row says nothing of a branch, a push or a merge: what a child keeps is its agent's to commit and push.
+import { SETTLE_MS, type PlaceView } from "@wsp/protocol";
 import { ArchiveIcon, ChevronDownIcon, ListTreeIcon } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { GROUP_LABEL } from "../lib/microLabel.js";
@@ -21,18 +19,12 @@ import { useChildVerbs } from "../actions/verbs.js";
 import type { SidebarProjectSnapshot, SidebarThreadSnapshot } from "../adapt/index.js";
 import { FoldRow } from "../components/threads/FoldRow.js";
 import { childParts, childTarget, countTree, finishedTake, kindOf, leadActs, leadNodes, mostPressing, noteOf, type ChildPart, type LeadNode, type Tree, type TreeCounts as Counts } from "../components/threads/leadTree.js";
-import { SubagentRow, ThreadRow, type ThreadRowItem } from "../components/threads/ThreadRows.js";
+import { SubagentRow, ThreadRow } from "../components/threads/ThreadRows.js";
 import { TreeCounts } from "../components/threads/TreeCounts.js";
 import { Button } from "../components/ui/button.js";
 import { useStore } from "../protocol/store.js";
 import { TRANSCRIPT_ITEM_CLASS, TRANSCRIPT_LIST_CLASS } from "../sidebar/rowGrammar.js";
 import { computerName, computerOf } from "../sidebar/workspaceRows.js";
-import { askLeadToMerge, mergeIntoLead } from "./acts.js";
-
-interface Lead {
-  readonly id: string;
-  readonly name: string;
-}
 
 /** A child as the transcript holds it: the thread, the computer it runs on and the threads it opened. */
 export interface ChildNode {
@@ -45,40 +37,6 @@ export interface ChildNode {
 /** How many rows an open fold mounts at a time. */
 const PAGE = 20;
 
-/** A thread with nothing running and nobody asked is one whose branch a merge can take. */
-const quiet = (thread: SidebarThreadSnapshot): boolean => thread.status !== "running" && thread.asking === null;
-
-/** The one fact beside a child's branch: its landing where it has one, else how far it stands from the lead's. */
-function factOf(child: TreeChild, leadBranch: string): string {
-  if (child.conflicts !== undefined && child.conflicts.length > 0) return TREE_WORDS.conflictsIn(child.conflicts.length);
-  if (child.merged !== undefined && (child.aheadOfLead ?? 0) === 0) return TREE_WORDS.mergedIntoLead;
-  if (child.pushed === false) return TREE_WORDS.notPushed;
-  if (child.aheadOfLead === undefined) return TREE_WORDS.notCounted;
-  return TREE_WORDS.aheadOf(child.aheadOfLead, leadBranch);
-}
-
-/** A thread's row with what its workspace's branch says, where the lead's tree holds that workspace. */
-export function treeRowOf(lead: Lead, tree: TreeFact | undefined, row: ThreadRowItem): ThreadRowItem {
-  const child = tree?.children.find(c => c.workspaceId === row.thread.workspaceId);
-  if (tree === undefined || child === undefined) return row;
-  const stuck = child.conflicts !== undefined && child.conflicts.length > 0;
-  // Nothing counted means nothing says there is nothing to take: the merge says so itself where there was not.
-  const hasMore = child.pushed !== false && (child.aheadOfLead === undefined || child.aheadOfLead > 0);
-  const act = !quiet(row.thread)
-    ? undefined
-    : stuck
-      ? { label: TREE_WORDS.askTheLead, run: () => void askLeadToMerge(lead, child.workspaceId) }
-      : hasMore
-        ? { label: TREE_WORDS.mergeIntoLead, run: () => void mergeIntoLead(lead, child.workspaceId) }
-        : undefined;
-  return {
-    ...row,
-    branch: { name: child.branch, fact: factOf(child, tree.leadBranch) },
-    ...(child.pushRefused !== undefined ? { note: cannotPushFromLine(row.place, child.pushRefused) } : {}),
-    ...(act !== undefined ? { act } : {}),
-  };
-}
-
 /** Every thread under a lead at any depth off the listing the sidebar reads, each with the computer it runs on. */
 export function childNodesOf(projects: ReadonlyArray<SidebarProjectSnapshot>, places: readonly PlaceView[], leadKey: string): ChildNode[] {
   const all = projects.flatMap(runs => runs.threads.map(thread => ({ thread, runs })));
@@ -90,8 +48,6 @@ export function childNodesOf(projects: ReadonlyArray<SidebarProjectSnapshot>, pl
 }
 
 interface Drawing {
-  readonly lead: Lead;
-  readonly facts: TreeFact | undefined;
   readonly leadPlace: string;
   readonly tree: Tree<ChildNode>;
 }
@@ -153,9 +109,8 @@ function Item({ node, part, depth, at, alone = false }: { node: LeadNode<ChildNo
   } else {
     const { thread } = node.node;
     const place = node.node.place === at.leadPlace ? "" : node.node.place;
-    const item = treeRowOf(at.lead, at.facts, { thread, place, at: node.node.at, ...(note !== undefined ? { note } : {}) });
-    two = sending || item.note !== undefined || place !== "";
-    row = <ThreadRow {...item} target={target} kind={kind} sending={sending} onSending={setSending} />;
+    two = sending || note !== undefined || place !== "";
+    row = <ThreadRow thread={thread} place={place} at={node.node.at} {...(note !== undefined ? { note } : {})} target={target} kind={kind} sending={sending} onSending={setSending} />;
     if (part !== "settled" && !alone) kids = leadNodes(thread, node.node.children, at.tree);
   }
   const level = kids.length === 0 ? null : <Level nodes={kids} depth={depth + 1} at={at} top={false} />;
@@ -225,15 +180,11 @@ function Head({ counts, open, settle, onToggle }: { counts: Counts | undefined; 
 }
 
 export function TreeRows({
-  lead,
-  tree,
   leadThread,
   leadPlace,
   nodes,
   className,
 }: {
-  lead: Lead;
-  tree: TreeFact | undefined;
   /** The lead's own thread, whose subagents stand among its children and whose id keys the section's shut entry;
    * null while the listing holds none. */
   leadThread: SidebarThreadSnapshot | null;
@@ -251,7 +202,7 @@ export function TreeRows({
     if (leadId !== null) void setPreferences({ threadsShut: { [leadId]: shut ? null : true } });
   };
   const read: Tree<ChildNode> = { threadOf: n => n.thread, kidsOf: n => n.children, nowMs: Date.now(), settleMs };
-  const at = { lead, facts: tree, leadPlace, tree: read };
+  const at = { leadPlace, tree: read };
   const top = leadNodes(leadThread, nodes, read);
   const pressing = shut ? mostPressing(top, read) : undefined;
   const verbs = useChildVerbs();
