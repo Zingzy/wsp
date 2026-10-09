@@ -226,8 +226,13 @@ export async function downCommand(io: CliIO, opts: { statePath: string }, deps: 
   // The manager is asked even with no unit file: a file somebody removed, or an install that took the file back,
   // still leaves the manager holding the service, and that is the one thing wsp down is for.
   const installed = existsSync(unit.path);
+  const serving = servingHost(opts.statePath);
+  // A host a line started holds the lock whatever unit the manager has, and only its pid stops it.
+  const lineStarted = serving?.startedBy !== undefined && serving.startedBy !== "service";
   const { held, unsure, failure } = await stopService(manager, at, deps.run);
-  if (unsure !== undefined) {
+  // A manager that cannot answer, as systemctl --user with no bus under env -i over ssh, cannot have started a host
+  // whose lock a line wrote, so that host is still this line's to stop.
+  if (unsure !== undefined && !lineStarted) {
     const stands = installed ? `Its unit file is still ${unit.path}; nothing was changed.` : "Nothing was changed.";
     io.error(`wsp down: ${runFailureLine(unsure)}, so wsp cannot tell whether the ${manager.words} ${unit.name} is still loaded. ${stands}`);
     return 1;
@@ -236,9 +241,6 @@ export async function downCommand(io: CliIO, opts: { statePath: string }, deps: 
     io.error(`wsp down: ${runFailureLine(failure)}`);
     return 1;
   }
-  const serving = servingHost(opts.statePath);
-  // A host a line started holds the lock whatever unit the manager has, and only its pid stops it.
-  const lineStarted = serving?.startedBy !== undefined && serving.startedBy !== "service";
   if ((!held && !installed) || lineStarted) {
     // A host the command line brought up is wsp down's to stop, whether a verb started it for itself or a person
     // typed wsp up: up and down are a pair. The pid comes off the lock that host wrote, never off a search for a

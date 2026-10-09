@@ -73,7 +73,7 @@ Taking a joined computer out takes two commands, one on each computer:
 1. On the host, run `wsp remove <computer>`, or click **Remove** on the computer's page. The host forgets the computer and asks it to delete wsp's own files. A joined computer has no ssh login, so the host cannot take the service off. The wsp service keeps running there, as root.
 2. On the computer itself, as root, run `wsp leave`. It asks once, then takes the service and wsp's files off. Your work folder stays.
 
-If the computer is offline when you remove it, the host says that the agent is still installed, and forgets the computer. When the computer comes back, the host refuses its dial. Run `wsp leave` on it then.
+If the computer is offline when you remove it, the host says that the daemon is still installed, and forgets the computer. When the computer comes back, the host refuses its dial. Run `wsp leave` on it then.
 
 If the host is gone, run `wsp leave` on the computer alone. The host still lists the computer until someone runs `wsp remove` there.
 

@@ -7,12 +7,12 @@ import { REWIND_LATEST_LINE, REWIND_NO_CHECKPOINT_LINE, REWIND_NO_UNDO_LINE, REW
 describe("the words a rewind says", () => {
   it("names what goes before the click, and that undo brings the files back and never the conversation", () => {
     expect(rewindNote({ turns: 3, files: true, cutsConversation: true, agent: "Claude Code" })).toBe(
-      "The 3 turns after this reply leave the conversation, and the files go back to how they stood at this reply. The whole copy's files go back, other threads' work included. Undo rewind puts them back until the next turn in this copy ends; the conversation does not come back.",
+      "The 3 turns after this reply leave the conversation, and the files go back to how they stood at this reply. If another thread has worked in this folder since this reply, the files stay as they are. Undo rewind puts them back until the next turn in this folder ends; the conversation does not come back.",
     );
     expect(rewindNote({ turns: 1, files: false, cutsConversation: true, agent: "Codex" })).toBe("The turn after this reply leaves the conversation; the files stay as they are.");
     // An agent that keeps its own history: only the files move, and the note says why the turns stay.
     expect(rewindNote({ turns: 2, files: true, cutsConversation: false, agent: "Cursor" })).toBe(
-      "Cursor keeps its own history, so the conversation stays and the files go back to how they stood at this reply. The whole copy's files go back, other threads' work included. Undo rewind puts them back until the next turn in this copy ends.",
+      "Cursor keeps its own history, so the conversation stays and the files go back to how they stood at this reply. If another thread has worked in this folder since this reply, the files stay as they are. Undo rewind puts them back until the next turn in this folder ends.",
     );
   });
 

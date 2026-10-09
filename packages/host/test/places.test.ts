@@ -130,6 +130,13 @@ describe("what wsp add prints with no argument", () => {
     for (const id of addableProviders()) expect(lines).toContain(`wsp add ${id}`);
   });
 
+  it("sends the person to wsp computers, the verb that lists a joined computer, and says the daemon is what goes on", () => {
+    const lines = addLines(joinToken("X", `SHA256:${"b".repeat(43)}`), 600_000, 0, ["http://10.0.0.2:4400"], undefined).join("\n");
+    expect(lines).toContain("The computer shows in wsp computers within a minute of joining.");
+    expect(lines).toContain("installs the daemon there");
+    expect(lines).not.toContain("wsp places");
+  });
+
   it("leaves the relay line out when the host is on no relay", () => {
     expect(addLines(joinToken("X", `SHA256:${"b".repeat(43)}`), 1, 0, ["http://10.0.0.2:4400"], undefined).join("\n")).not.toContain("relay");
   });

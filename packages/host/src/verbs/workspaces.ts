@@ -397,7 +397,7 @@ export const WORKSPACE_VERBS: readonly Verb[] = [
     },
     tool: tool({
       description:
-        "Starts a reviewer thread on a pull request, off its link or off a workspace's own pull request, and returns as soon as the thread is started. The reviewer works in a fresh copy at the pull request's head, at its agent's read-only access (Codex unless another is named; an agent with no read-only access is refused naming the ones that have one), with the description, the diff against the base and the repository's own review rules in its task. Its reply ends in a review the host keeps as the workspace's draft; nothing reaches the git host until review_post. A thread's own token is refused.",
+        "Starts a reviewer thread on a pull request, off its link or off a workspace's own pull request, and returns as soon as the thread is started. On the computer the app runs on the reviewer works in a worktree on the pull request's head<!-- cloud -->, and on a cloud in a fresh copy at that head<!-- /cloud -->, at its agent's read-only access (Codex unless another is named; an agent with no read-only access is refused naming the ones that have one), with the description, the diff against the base and the repository's own review rules in its task. Its reply ends in a review the host keeps as the workspace's draft; nothing reaches the git host until review_post. A thread's own token is refused.",
       input: {
         target: z.string().describe("a GitHub pull request link, or the workspace whose pull request to review"),
         agent: z.string().optional().describe("the reviewing agent, codex or claude; absent is codex"),

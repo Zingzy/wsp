@@ -51,7 +51,10 @@ usage: wsp add
                   itself; this is the same road for a computer already in
   --on            the computer a project lives on, by the name wsp computers
                   lists: a repo a computer clones needs one, and a folder here
-                  or a repo cloned --into a folder here takes none
+                  takes one to have that computer clone the folder's own remote,
+                  with the folder seeding what git ignores; without it a folder
+                  here, or a repo cloned --into a folder here, is worked where
+                  it sits
   --into          the empty folder on this computer to clone a repo into, one
                   that does not exist yet or holds nothing; the project is then
                   that folder, worked where it sits

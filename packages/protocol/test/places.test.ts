@@ -9,6 +9,9 @@ import {
   GUEST_WSP_BIN,
   KNOWN_HOSTS,
   PLACE_ADD_WORDS,
+  PLACE_INSTALL,
+  placeNoLinkLine,
+  placeStillInstalledLine,
   PLACE_LINK_NONCE_BYTES,
   PlaceApplied,
   absentComputer,
@@ -187,12 +190,22 @@ describe("the steps of an install on a computer over ssh", () => {
     expect(placeAddSheetWord("connect", "running")).toBe(PLACE_ADD_WORDS.connect);
     expect(placeAddSheetWord("connect", "done")).toBe(PLACE_ADD_WORDS.connect);
     expect(placeAddSheetWord("wsp", "running")).toBe("installing wsp under ~/.wsp");
-    expect(placeAddSheetWord("service", "running")).toBe("starting the agent as a user service");
+    expect(placeAddSheetWord("service", "running")).toBe("starting the daemon as a system service");
     expect(placeAddSheetWord("join", "running")).toBe("waiting for it to connect to this computer");
     // A line under a check reading as the wait it was in is the wrong word for a step that is over.
     expect(placeAddSheetWord("join", "done")).toBe("connected to this computer");
     // What one line of the sheet's list holds at 12 px mono beside a check: a longer word is cut from the right.
     for (const step of PlaceAddStep.options) for (const state of ["running", "done"] as const) expect(placeAddSheetWord(step, state).length).toBeLessThanOrEqual(51);
+  });
+
+  it("names the daemon as what goes on and the system unit wsp join installs for it, and what a remove leaves on a computer it could not reach", () => {
+    // A place's unit sits under /etc/systemd/system (systemdScoped in packages/host/src/service.ts).
+    expect(PLACE_INSTALL.service).toBe("a system service");
+    expect(PLACE_ADD_WORDS.service).toBe("starting the daemon");
+    expect(PLACE_INSTALL.taken.service).toBe("the daemon's service");
+    expect(placeStillInstalledLine("vps")).toBe("vps is off this host, but the daemon on it is still installed; run wsp leave on that computer when it is back");
+    expect(placeNoLinkLine("vps")).toContain("vps took the daemon and has not dialled this host yet");
+    expect(placeNoLinkLine("vps")).toContain("wsp computers shows it the moment it does");
   });
 
   it("names the one thing the add does to the computer the person is sitting at, before Add is pressed, and names the file by the path they would type", () => {
