@@ -6,7 +6,7 @@ import { Section } from "@/components/section";
 import { DOCS, REPO } from "@/links";
 
 export const QUESTIONS = [
-  { q: "Do I need API keys?", a: "No. Your agents use the subscriptions they're already signed in to, on every computer." },
+  { q: "Do I need API keys?", a: "No. Your agents use the subscriptions they're already signed in to." },
   { q: "Which agents does it run?", a: "Claude Code, Codex, OpenCode and Cursor today. A thread can use any of them, and one thread can start another on a different one." },
   { q: "Which computers?", a: "Your Mac, and any Linux computer you can reach over ssh or that can dial out to you: a server you rent, an old laptop, a desktop under the desk." },
   { q: "Does my code go through your servers?", a: "Only if you turn on the relay. Threads run on your computers, and the app reaches them over your own network or SSH. If you link the relay to reach a computer from anywhere, that connection runs through Cloudflare, which can read it on the way. You can skip it or run your own." },
