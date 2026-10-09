@@ -7,6 +7,7 @@ import {
   type Caller, SessionOrigin, ThreadScope, WorkspaceOrigin, GitDiffReply, GitWorktreesReply, repoPathOf, worktreeOf, foldThreads, threadWord, threadsFollowed, scopeOf,
   type ThreadWaitingOn, isLocalWorkspace, NO_SUCH_TURN, NOTIFY_ME, notifyLine, runsInFolder, DEVICE_OPS, sendRefusal,
   workspaceState, HERE_PLACE_ID, runningOn as runningOnPlace, type ThreadCapWait, roadOf, unreadLine, turnLines,
+  type Attachment, AttachmentRecord, attachmentKey, attachmentRecord,
 } from "@wsp/protocol";
 import { harnessCatalog } from "../harness-catalog.js";
 import { PLAN_RESETS, secretsOf } from "../adapters.js";
@@ -16,7 +17,7 @@ import { isDaemonUnanswered } from "../daemon-channel.js";
 import { LaunchUnanswered } from "../machine-exec.js";
 import {
   RESTARTED_REASON, NOTIFY_OWED, OWED_RETRY_MS, OWED_RETRY_MAX_MS, OWED_FOR_MS, readRoad, readScope, noCheckpointLogLine, type Taken, type TurnAsked, type TurnLive, type KeptProcess, type KeptLaunch, launchesAs,
-  stampSessionFile, sameSessionFile, DaemonRefusal, type LiveSession, type SessionEntry, HELD_STARTS, type HeldStartRecord, writeLines,
+  stampSessionFile, sameSessionFile, DaemonRefusal, type LiveSession, type SessionEntry, HELD_STARTS, type HeldStartRecord, writeLines, ATTACHMENTS,
 } from "../types/internal.js";
 import type { CapHeld, RuntimeContext, ThreadsArea } from "../context.js";
 
@@ -26,7 +27,14 @@ type PersonRow = { workspaceId: string; sessionId: string; turnId: string; text:
  * steered into the thread's turn that its agent never read, which goes as whoever opened it. `since` is the wall time
  * it became owed and `requestId` the one request every try of it goes under, on any host; `tries` is how many of those
  * failed on a computer that did not answer and `next` when the next may go, so a restart keeps the spacing. */
-type Owed = { id: string; from: string; notify: string; text: string; by?: ThreadScope; road?: WorkspaceOrigin; startedBy?: SessionOrigin; toPerson?: PersonRow; since?: number; requestId?: string; tries?: number; next?: number };
+type Owed = { id: string; from: string; notify: string; text: string; by?: ThreadScope; road?: WorkspaceOrigin; startedBy?: SessionOrigin; toPerson?: PersonRow; since?: number; requestId?: string; tries?: number; next?: number; images?: OwedImages };
+/** The images a steered message carried, which its send-back reads from the host's keep under the steer's request. */
+type OwedImages = { under: string; records: AttachmentRecord[] };
+const readOwedImages = (raw: unknown): OwedImages | undefined => {
+  const r = raw as Partial<Record<keyof OwedImages, unknown>> | undefined;
+  const records = AttachmentRecord.array().safeParse(r?.records);
+  return typeof r?.under === "string" && records.success && records.data.length > 0 ? { under: r.under, records: records.data } : undefined;
+};
 const readPersonRow = (raw: unknown): PersonRow | undefined => {
   const r = raw as Partial<Record<keyof PersonRow, unknown>> | undefined;
   return typeof r?.workspaceId === "string" && typeof r.sessionId === "string" && typeof r.turnId === "string" && typeof r.text === "string"
@@ -40,12 +48,14 @@ const readOwed = (raw: unknown): Owed | undefined => {
   const road = readRoad(r.road);
   const startedBy = SessionOrigin.safeParse(r.startedBy);
   const toPerson = readPersonRow(r.toPerson);
+  const images = readOwedImages(r.images);
   return {
     id: r.id, from: r.from, notify: r.notify, text: r.text,
     ...(by !== undefined ? { by } : {}), ...(road !== undefined ? { road } : {}),
     ...(startedBy.success ? { startedBy: startedBy.data } : {}), ...(toPerson !== undefined ? { toPerson } : {}),
     ...(typeof r.since === "number" ? { since: r.since } : {}), ...(typeof r.requestId === "string" ? { requestId: r.requestId } : {}),
     ...(typeof r.tries === "number" ? { tries: r.tries } : {}), ...(typeof r.next === "number" ? { next: r.next } : {}),
+    ...(images !== undefined ? { images } : {}),
   };
 };
 
@@ -686,7 +696,8 @@ export function threadsArea(ctx: RuntimeContext): ThreadsArea {
         }
       }
       try {
-        const handle = await ctx.sessionsApi.start(parent.workspaceId, { prompt: text, harness: parent.harness, thread: notify, startedBy: line.startedBy ?? "agent", requestId, owed: true, ...(deadline > clock.now() ? { asksUntilStopped: true as const } : {}), ...(line.startedBy === undefined ? { wakesLead: true as const } : {}) }, asWho);
+        const attachments = line.images === undefined ? [] : await keptImages(parent.workspaceId, notify, line.images);
+        const handle = await ctx.sessionsApi.start(parent.workspaceId, { prompt: text, ...(attachments.length > 0 ? { attachments } : {}), harness: parent.harness, thread: notify, startedBy: line.startedBy ?? "agent", requestId, owed: true, ...(deadline > clock.now() ? { asksUntilStopped: true as const } : {}), ...(line.startedBy === undefined ? { wakesLead: true as const } : {}) }, asWho);
         if (handle.outcome === "steered") return taken();
         await settleTry(handle);
       } catch (e: unknown) {
@@ -702,6 +713,16 @@ export function threadsArea(ctx: RuntimeContext): ThreadsArea {
       sending.delete(line.id);
       console.warn(`the line of thread ${from.slice(0, 8)} into thread ${notify.slice(0, 8)} was not sent: ${e instanceof Error ? e.message : String(e)}`);
     });
+  };
+  /** A sent-back message's images, read from what the host kept of its steer; one gone with its row goes without. */
+  const keptImages = async (workspaceId: string, threadId: string, images: OwedImages): Promise<Attachment[]> => {
+    await ctx.keptWrites.get(workspaceId);
+    const read = await Promise.all(images.records.map(async (record, index) => {
+      const key = attachmentKey(threadId, images.under, index);
+      const bytes = key === undefined ? undefined : await ctx.store.getBlob(ATTACHMENTS, key);
+      return bytes === undefined ? [] : [{ mediaType: record.mediaType, bytes: bytes.toString("base64"), ...(record.name !== undefined ? { name: record.name } : {}) }];
+    }));
+    return read.flat();
   };
   /** The steers whose write has not answered yet, by the id the harness is handed each under: the start road owns the
    * message until it answers. A turn that ends meanwhile with it unread leaves it here, with whether a stop ended
@@ -723,13 +744,14 @@ export function threadsArea(ctx: RuntimeContext): ThreadsArea {
       }
       const steered = s.turnLive?.steered?.[id];
       if (steered === undefined) continue;
-      const { prompt, requestId: _steeredUnder, ...as } = steered;
+      const { prompt, requestId: steeredUnder, attachments, ...as } = steered;
       const toPerson: PersonRow = { workspaceId: s.view.workspaceId, sessionId: s.view.claudeSessionId ?? s.view.id, turnId: s.turnId, text: unreadLine(prompt) };
       if (stopped) {
         ctx.record({ type: "session.notify", ...toPerson, threadId, notify: NOTIFY_ME });
         continue;
       }
-      deliver({ id: `${s.turnId}:unread:${id}`, from: threadId, notify: threadId, text: prompt, ...as, toPerson });
+      const images = steeredUnder !== undefined && attachments !== undefined ? { images: { under: steeredUnder, records: attachments } } : {};
+      deliver({ id: `${s.turnId}:unread:${id}`, from: threadId, notify: threadId, text: prompt, ...as, toPerson, ...images });
     }
   };
   // A wake or a rebuild (of a gone or zombie machine) puts the workspace back to running: the held lines go now.
@@ -831,15 +853,16 @@ export function threadsArea(ctx: RuntimeContext): ThreadsArea {
 
   /** The message on the turn's row under the id the harness is handed it by, written to the store: what its end sends
    * back if the agent never took it up, past a host restart too. */
-  const keepOnTurn = (s: { view: SessionView; turnLive?: TurnLive }, o: { prompt: string; requestId?: string; startedBy?: SessionOrigin }, caller: Caller | undefined, steerId: string): Promise<void> => {
+  const keepOnTurn = (s: { view: SessionView; turnLive?: TurnLive }, o: { prompt: string; requestId?: string; startedBy?: SessionOrigin; attachments?: readonly Attachment[] }, caller: Caller | undefined, steerId: string): Promise<void> => {
     if (s.turnLive === undefined) return Promise.resolve();
     const by = scopeOf(caller);
     const road = roadOf(caller);
-    s.turnLive.steered = { ...s.turnLive.steered, [steerId]: { prompt: o.prompt, startedBy: o.startedBy ?? "person", ...(by !== undefined ? { by } : {}), ...(road !== undefined ? { road } : {}), ...(o.requestId !== undefined ? { requestId: o.requestId } : {}) } };
+    const attachments = (o.attachments ?? []).map(attachmentRecord);
+    s.turnLive.steered = { ...s.turnLive.steered, [steerId]: { prompt: o.prompt, startedBy: o.startedBy ?? "person", ...(by !== undefined ? { by } : {}), ...(road !== undefined ? { road } : {}), ...(o.requestId !== undefined ? { requestId: o.requestId } : {}), ...(attachments.length > 0 ? { attachments } : {}) } };
     return ctx.persistSessions(s.view.workspaceId);
   };
   /** The message kept on the turn before its write goes, the start road owning it until the write answers. */
-  const keepSteer = (s: { view: SessionView; turnLive?: TurnLive }, o: { prompt: string; requestId?: string; startedBy?: SessionOrigin }, caller: Caller | undefined, steerId: string): Promise<void> => {
+  const keepSteer = (s: { view: SessionView; turnLive?: TurnLive }, o: { prompt: string; requestId?: string; startedBy?: SessionOrigin; attachments?: readonly Attachment[] }, caller: Caller | undefined, steerId: string): Promise<void> => {
     steersOut.set(steerId, {});
     return keepOnTurn(s, o, caller, steerId);
   };
@@ -860,7 +883,7 @@ export function threadsArea(ctx: RuntimeContext): ThreadsArea {
    * message is the turn's now, false where the start road queues it as the thread's next turn. One the turn's end
    * found unread while the write was out goes as that next turn, or to the person where a stop ended the turn, and
    * never by both roads. */
-  const steerAnswered = (s: { view: SessionView; turnId: string; turnLive?: TurnLive }, handleId: string, o: { prompt: string; requestId?: string; via?: "slate"; startedBy?: SessionOrigin }, caller: Caller | undefined, steerId: string, landed: boolean): boolean => {
+  const steerAnswered = (s: { view: SessionView; turnId: string; turnLive?: TurnLive }, handleId: string, o: { prompt: string; requestId?: string; via?: "slate"; startedBy?: SessionOrigin; attachments?: readonly Attachment[] }, caller: Caller | undefined, steerId: string, landed: boolean): boolean => {
     const ended = steersOut.get(steerId)?.ended;
     steersOut.delete(steerId);
     if (ended === undefined && landed) {
@@ -874,8 +897,11 @@ export function threadsArea(ctx: RuntimeContext): ThreadsArea {
     dropSteer(s, steerId);
     return false;
   };
-  const recordSteer = (s: { view: SessionView; turnId: string; turnLive?: TurnLive }, handleId: string, o: { prompt: string; requestId?: string; via?: "slate"; startedBy?: SessionOrigin }, caller: Caller | undefined, steerId: string): void => {
+  const recordSteer = (s: { view: SessionView; turnId: string; turnLive?: TurnLive }, handleId: string, o: { prompt: string; requestId?: string; via?: "slate"; startedBy?: SessionOrigin; attachments?: readonly Attachment[] }, caller: Caller | undefined, steerId: string): void => {
     if (s.turnLive?.steered?.[steerId] === undefined) void keepOnTurn(s, o, caller, steerId);
+    const records = (o.attachments ?? []).map(attachmentRecord);
+    // Kept before the row is written, so a client drawing the row asks for bytes the host already holds.
+    if (s.view.threadId !== undefined && records.length > 0) void ctx.keepSentImages(s.view.workspaceId, s.view.threadId, o.requestId, o.attachments!);
     ctx.record({
       type: "session.steer",
       workspaceId: s.view.workspaceId,
@@ -883,6 +909,7 @@ export function threadsArea(ctx: RuntimeContext): ThreadsArea {
       turnId: s.turnId,
       ...(s.view.threadId !== undefined ? { threadId: s.view.threadId } : {}),
       prompt: o.prompt,
+      ...(records.length > 0 ? { attachments: records } : {}),
       ...(o.requestId !== undefined ? { requestId: o.requestId } : {}),
       ...(o.via !== undefined ? { via: o.via } : {}),
       // Read off the row the turn writes its open prompt on: a message that joined a turn stopped on one waits for

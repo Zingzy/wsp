@@ -440,7 +440,7 @@ export interface Runtime {
     /** Sends a message into the session's running turn through its harness and records it as session.steer once the
      * harness took it; a turn already over, a harness without steer or an unknown id answers. Refuses like start
      * while the workspace is pausing or paused. */
-    steer(sessionId: string, opts: { prompt: string; requestId?: string }, origin?: Caller): Promise<SessionSteerResult>;
+    steer(sessionId: string, opts: { prompt: string; requestId?: string; attachments?: readonly Attachment[] }, origin?: Caller): Promise<SessionSteerResult>;
     /** Answers a permission prompt the session's running turn relayed into the chat, by the prompt's own id and one
      * of the options it carried; the tool call it blocks then runs or is refused, and a session.permission.closed
      * event records which option did it. The session is the one the prompt's row names, by the agent's own id or the

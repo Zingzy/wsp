@@ -80,6 +80,8 @@ export const HARNESS_CATALOGS: readonly HarnessCatalog[] = [
     // Its control channel takes a mode change while a turn runs, and the prompt that turn is stopped on is answered
     // with it, so an access picked mid-turn lands on the turn in front of the person.
     movesAccess: true,
+    // A user message written to stream-json mid-turn takes image blocks as the opening one does.
+    steersImages: true,
     screenCommands: [...CLAUDE_SCREEN_COMMANDS],
     // The cheapest of the four at $1/$5 per Mtok, as the CLI's own handshake prices them (read 2026-09-23).
     smallModel: "claude-haiku-4-5-20251001",

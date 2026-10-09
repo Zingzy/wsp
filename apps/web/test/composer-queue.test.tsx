@@ -4,7 +4,8 @@
 // the queue's bar with the files it goes with, going one per
 // turn end in order; a card's edit puts it back in the box and its remove drops
 // it; with steer picked in Settings a send goes now, into the turn where the
-// harness steers and queued like any other where it does not, never by
+// harness steers and its steer carries the draft's files, and queued like any
+// other where not, its card saying why, never by
 // stopping the turn, and no chord stands in for that pick; and the queue lives in local storage so a reload
 // still holds it: restored rows wait for the person's next send. Same fixture
 // api shape as chat.test.tsx; no live daemon.
@@ -364,7 +365,7 @@ describe("composer queue", () => {
     await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["one"]));
   });
 
-  it("with steer picked, a send with a file queues even where the harness steers, since a steer carries words alone, and the turn is never stopped", async () => {
+  it("with steer picked, a send with a file that is not an image queues even where the harness steers, its card says why, and the turn is never stopped", async () => {
     const { api, started, interrupted, steered, emit } = fixtureApi({}, [runningRow], [catalog(true)]);
     await setup(api);
     emit({ type: "session.start", ...scope, prompt: "go" });
@@ -376,6 +377,8 @@ describe("composer queue", () => {
     await waitFor(() => expect(document.querySelector('[data-composer-files] [data-chat-file="notes.md"]')).not.toBeNull());
     await steer("read the notes now");
     await waitFor(() => expect(queued()).toEqual(["read the notes now"]));
+    expect(rowFor("read the notes now").querySelector("[data-settings-description]")?.textContent).toContain(QUEUE_WORDS.waitsFor("a file that is not an image goes only with a message that starts a turn"));
+    foldQueue();
     expect(steered).toEqual([]);
     expect(interrupted).toEqual([]);
     expect(queueWord()).toBe(QUEUE_WORDS.waiting(1));

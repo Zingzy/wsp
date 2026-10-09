@@ -4,6 +4,7 @@
 import type { ComponentType } from "react";
 import { DOWNLOADS } from "./downloads";
 import { EMAIL, ORG, SITE, X } from "./links";
+import { Compare } from "./pages/compare";
 import { Home } from "./pages/home";
 import { Privacy, Security, Terms } from "./pages/legal";
 import { NotFound } from "./pages/not-found";
@@ -61,6 +62,14 @@ export const ROUTES: readonly Route[] = [
   { path: "/privacy", title: "Privacy: wsp", description: "What wsp collects and sends, where it goes, and how to turn each part off.", image: MAIN_IMAGE, index: true, Page: Privacy },
   { path: "/terms", title: "Terms: wsp", description: "The terms for usewsp.com, the docs, the relay and the waitlist.", image: MAIN_IMAGE, index: true, Page: Terms },
   { path: "/security", title: "Security: wsp", description: "How the parts of wsp trust each other, what it does with your keys, and how to report a problem.", image: MAIN_IMAGE, index: true, Page: Security },
+  {
+    path: "/compare",
+    title: "Compare: wsp",
+    description: "wsp beside Conductor, herdr, Orca, Claude Code on the web and six more: where each runs agents, and what a second computer has on it.",
+    image: { path: "/og-compare.png", line: "How wsp compares.", alt: "wsp: how wsp compares." },
+    index: true,
+    Page: Compare,
+  },
   {
     path: "/404",
     title: "Not found: wsp",
