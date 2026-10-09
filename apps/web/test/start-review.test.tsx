@@ -108,6 +108,8 @@ describe("the Pull request pane's head", () => {
     fireEvent.click(screen.getByRole("button", { name: START_WORDS.reviewWithAgent }));
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByRole("radio", { name: "Codex" }).getAttribute("aria-checked")).toBe("true");
+    // A review on this computer runs in a worktree on the pull request's head (folderFrom in the runtime).
+    expect(dialog.textContent).toContain("Reads the pull request in a worktree on its branch and changes nothing. Its review waits here until you post it.");
     fireEvent.click(within(dialog).getByRole("button", { name: "Start" }));
     await waitFor(() => expect(api.review).toHaveBeenCalledWith({ workspaceId: WS, agent: "codex" }));
     await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_review"));

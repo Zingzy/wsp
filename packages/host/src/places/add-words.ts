@@ -28,8 +28,8 @@ export function addLines(token: string, expiresAt: number, now: number, urls: re
   return [
     "wsp add: a computer you own joins by dialing this host. On that computer, with wsp installed:",
     ...joinRoads(token, urls, publicAt === undefined ? undefined : relayUrlOf(publicAt)).map(road => `  ${road.line}${road.note === undefined ? "" : `      (${road.note})`}`),
-    `The code is spent by the first join and stops working in ${fmtDuration(Math.max(0, expiresAt - now))}. The computer shows in wsp places within a minute of joining.`,
-    "Over ssh instead: wsp add user@host --name <name> installs the agent there and joins it for you, and an alias from your ssh config works in place of user@host.",
+    `The code is spent by the first join and stops working in ${fmtDuration(Math.max(0, expiresAt - now))}. The computer shows in wsp computers within a minute of joining.`,
+    "Over ssh instead: wsp add user@host --name <name> installs the daemon there and joins it for you, and an alias from your ssh config works in place of user@host.",
     ...(addableProviders().length === 0 ? [] : [`A provider instead: ${addableProviders().map(id => `wsp add ${id}`).join(", ")}.`]),
   ];
 }

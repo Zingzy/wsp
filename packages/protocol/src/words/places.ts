@@ -345,14 +345,14 @@ export const PLACE_INSTALL = {
   /** Where wsp's own files land under that login's home, and what they weigh there. */
   folder: "~/.wsp",
   weight: "about 40 MB",
-  /** Whose service manager holds the agent up: that login's own, never the system's, so nothing here needs root. */
-  service: "a user service",
+  /** What holds the daemon up: a unit under /etc/systemd/system, which needs root and starts again at every boot. */
+  service: "a system service",
   /** The three things a sweep takes off again, in the order placeOwnedPaths walks them and in the grammar Remove
    * says them: the unit that holds the agent up, the files under wsp's own folder, and the command beside them.
    * The Add lines name the same three in their own grammar, so a fourth thing landing on a box cannot show on one
    * screen and not the other. */
   taken: {
-    service: "the agent's service",
+    service: "the daemon's service",
     files: "wsp's own files under that login's home",
     opener: "the command beside them that opens sign-in pages in your browser",
   },

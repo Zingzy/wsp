@@ -22,6 +22,7 @@ import {
   serviceTag,
   statusLines,
   stopService,
+  systemRunner,
   untilLock,
   type ServiceAddress,
   type ServiceManager,
@@ -33,6 +34,7 @@ import { BOX_KEY_ENV, PROVIDER_ENV } from "../src/providers.js";
 import type { HostClient } from "../src/verbs.js";
 import { runningWsp } from "../src/mcp-install.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
+import { writeStub } from "../../protocol/test/stub-script.js";
 import { runsFromItsOwnFolder } from "./own-folder.js";
 import { CLOUD_ON } from "../src/cloud.js";
 
@@ -846,6 +848,23 @@ describe("wsp up --service, wsp down and wsp status", () => {
     expect(errors).toEqual([]);
     expect(lines).toEqual([hostStoppedLine("verb", process.pid, statePath)]);
     expect(existsSync(join(home, ".wsp", "host.lock"))).toBe(false);
+  });
+
+  it("wsp down stops a host a verb started where systemctl --user has no bus to ask, since no unit was ever installed", async () => {
+    // What env -i as root over ssh gives: no XDG_RUNTIME_DIR, so systemctl --user cannot reach a user manager.
+    const bin = join(home, "bin");
+    mkdirSync(bin);
+    writeStub(join(bin, "systemctl"), "#!/bin/sh\necho 'Failed to connect to bus: No medium found' >&2\nexit 1\n");
+    vi.stubEnv("PATH", `${bin}:${process.env["PATH"] ?? ""}`);
+    writeFileSync(join(home, ".wsp", "host.lock"), JSON.stringify({ pid: process.pid, port: 4400, startedAt: new Date().toISOString(), startedBy: "verb" }));
+    const stopped: number[] = [];
+    const fake = svc({ stop: pid => void (stopped.push(pid), rmSync(join(home, ".wsp", "host.lock"), { force: true })) });
+    const lines: string[] = [];
+    const errors: string[] = [];
+    expect(await downCommand(quietIO(lines, errors), opts, { ...fake.deps, platform: "linux", manager: SERVICE_MANAGERS.systemd, run: systemRunner, waitMs: 500 })).toBe(0);
+    expect(errors).toEqual([]);
+    expect(stopped).toEqual([process.pid]);
+    expect(lines).toEqual([hostStoppedLine("verb", process.pid, statePath)]);
   });
 
   it("wsp down stops the host wsp up started, whatever port it took, and says which line brought it up", async () => {

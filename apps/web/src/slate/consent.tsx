@@ -85,7 +85,7 @@ export const CONSENT_WORDS = {
   always: "Always in this thread",
   run: "Run",
   wrote: "Written by the agent in this thread",
-  reach: "If a script it names changes, it asks again. The command can read anything you can.",
+  reach: "On this computer, if a script it names changes, it asks again. The command can read anything you can.",
   agent: "With Always in this thread, the agent can start it too.",
   more: (n: number) => (n === 1 ? "1 more command waits after this one" : `${n} more commands wait after this one`),
 } as const;

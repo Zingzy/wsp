@@ -598,7 +598,7 @@ describe("a computer's own page", () => {
     expect(document.querySelector("[data-k='remove-note']")?.textContent).toBe(WHERE_WORDS.removeDescription("old-macbook", MAC));
     fireEvent.click(document.querySelector("[data-settings-page] [data-k='remove']")!);
     expect(screen.getByText("Remove old-macbook?")).toBeTruthy();
-    expect(document.querySelector("[data-k='remove-sentence']")?.textContent).toBe("wsp and its task come off old-macbook, which keeps the copy of your image and is otherwise left as it is. The task's record and 2 threads leave zingzy's MacBook Pro. It is offline; what is on it is swept the next time it connects.");
+    expect(document.querySelector("[data-k='remove-sentence']")?.textContent).toBe("old-macbook is offline, so nothing comes off it: run wsp leave on that computer once it is back. The task's record and 2 threads leave zingzy's MacBook Pro.");
     expect(document.querySelector("[data-k='leave-line']")?.textContent).toBe(PLACES_WORDS.remove.leaveLine);
     expect(document.querySelector("[data-remove-place-dialog]")?.textContent).toContain(imageCopyLine());
     fireEvent.click(document.querySelector("[data-k='remove-confirm']")!);
