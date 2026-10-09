@@ -5,8 +5,14 @@
 // holds a pane to its own folder and its own ptys, reads the computer's ports,
 // load and processes for it through watches it shares with every pane there
 // (box-panels.test.ts), and refuses a command before the link.
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { forkOpRefusedLine } from "@wsp/protocol";
+import { forkOpRefusedLine, rootsPathIn, type DaemonFrame } from "@wsp/protocol";
+import { fakeProcTree } from "../../daemon/test/fake-proc.js";
+import { daemonUnderTest } from "../../daemon/test/harness.js";
+import { openDaemonChannel } from "../src/daemon-channel.js";
 import { until } from "./until.js";
 import { handedLine, joined } from "./box-fixture.js";
 
@@ -103,6 +109,38 @@ describe("a pane of a thread in a folder on a computer you joined", () => {
     expect(await asking).toMatchObject({ ok: true, branch: { head: "main" } });
     channel.close();
   });
+});
+
+describe("a terminal of a thread in a folder on a computer you joined", () => {
+  it("starts in the project folder there when the pane names none, as a real shell prints it", async () => {
+    const home = mkdtempSync(join(tmpdir(), "wsp-box-home-"));
+    const inbox = mkdtempSync(join(tmpdir(), "wsp-box-inbox-"));
+    const procRoot = fakeProcTree([]);
+    const daemon = await daemonUnderTest({ host: "127.0.0.1", port: 0, token: "box-token", inbox, rootsPath: rootsPathIn(inbox), procRoot });
+    try {
+      let push = (_event: Record<string, unknown>): void => {};
+      const real = await openDaemonChannel({ url: `ws://127.0.0.1:${daemon.port}`, token: "box-token", onEvent: event => push(event) });
+      const { rt, project, seen } = await joined({ login: { home, owner: "root" }, ptys: async frame => (await real.send(frame as DaemonFrame)) as Record<string, unknown> });
+      push = event => void (String(event["type"]).startsWith("pty.") && seen.push(event));
+      mkdirSync(project.path);
+      const at = await rt.workspaces.folderFor({ project: project.id });
+      const heard: Record<string, unknown>[] = [];
+      const channel = await rt.workspaces.daemonChannel(at.workspace.id, e => heard.push(e));
+      const created = (await channel.send({ op: "pty.create", cols: 200, rows: 24, shell: "/bin/sh" })) as Record<string, unknown>;
+      expect(created).toMatchObject({ ok: true });
+      const ptyId = String(created["ptyId"]);
+      await channel.send({ op: "pty.attach", ptyId });
+      await channel.send({ op: "pty.write", ptyId, data: "echo at-$(pwd)-mark\r" });
+      const printed = (): string => heard.filter(e => e["type"] === "pty.data" && e["ptyId"] === ptyId).map(e => String(e["data"])).join("");
+      await until(() => /at-\/\S*-mark/.test(printed()), 10_000);
+      expect(/at-(\/\S*)-mark/.exec(printed())![1]).toBe(project.path);
+      channel.close();
+      real.close();
+    } finally {
+      await daemon.close();
+      for (const dir of [home, inbox, procRoot]) rmSync(dir, { recursive: true, force: true });
+    }
+  }, 30_000);
 });
 
 describe("an add on a computer you joined that fails", () => {
