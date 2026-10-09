@@ -51,7 +51,6 @@ const BOX_VERBS: ReadonlySet<string> = new Set([
   "wake",
   "rebuild",
   "image",
-  "image move",
   "image remove",
   "forget",
   "delete",

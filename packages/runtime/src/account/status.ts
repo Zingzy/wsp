@@ -86,7 +86,7 @@ export function statusArea(ctx: RuntimeContext): StatusArea {
     for (const row of listing) {
       // The engine kills only a running row, so a paused one stays reported rather than silently left.
       if (known.has(row.id) || (dropped.has(row.id) && row.state === "running") || !lostWorkspace(row, ctx.state.owner, now)) continue;
-      // A stamped id another machine now holds is a body a rebuild or an image move replaced and failed to stop: the engine kills it.
+      // A stamped id another machine now holds is a body a rebuild replaced and failed to stop: the engine kills it.
       const stamped = row.labels[WORKSPACE_LABEL];
       if (stamped !== undefined && live.has(stamped)) continue;
       const kept = stamped === undefined ? undefined : ((await store.get(WORKSPACE_NAMES, stamped)) as NamedWorkspace | undefined);

@@ -47,17 +47,7 @@ describe("the provider a workspace's view names", () => {
 });
 
 describe("each verb that moves a machine reads its own capability", () => {
-  it("a provider that stands a fresh machine in for another moves a workspace onto a newer image, though its forks boot cold", async () => {
-    const { rt, backend, store } = await setup();
-    forksBootCold(backend);
-    const ws = await createOn(rt, { golden: "snap_golden-v1", name: "api" });
-    const moved = await rt.workspaces.updateImage(ws.id);
-    expect(moved).toMatchObject({ moved: true, workspace: { golden: "snap_golden-v2", machineId: "m2" } });
-    expect(await store.get("workspaces", ws.id)).toMatchObject({ golden: "snap_golden-v2" });
-    await rt.close();
-  });
-
-  it("that same provider rebuilds a workspace's machine, though its forks boot cold", async () => {
+  it("a provider that stands a fresh machine in for another rebuilds a workspace's machine, though its forks boot cold", async () => {
     const { rt, backend } = await setup();
     forksBootCold(backend);
     const ws = await createOn(rt, { golden: "snap_golden-v1", name: "api" });
@@ -87,7 +77,6 @@ describe("what a refusal calls a machine wsp forks", () => {
     delete backend.capabilities.pauseMode;
     const gates = [
       ["have its machine replaced", () => rt.workspaces.upgrade(ws.id)],
-      ["move to a newer image", () => rt.workspaces.updateImage(ws.id)],
       ["be rebuilt", () => rt.workspaces.rebuild(ws.id)],
       ["be snapshotted", () => rt.workspaces.snapshot(ws.id)],
       ["be paused", () => rt.workspaces.nap(ws.id)],
@@ -109,12 +98,11 @@ describe("what a refusal calls a machine wsp forks", () => {
     backend.capabilities.replacesMachine = false;
     await expect(rt.workspaces.rebuild(ws.id)).rejects.toThrow(NO_PROVIDER_LINE);
     await expect(rt.workspaces.upgrade(ws.id)).rejects.toThrow(NO_PROVIDER_LINE);
-    await expect(rt.workspaces.updateImage(ws.id)).rejects.toThrow(NO_PROVIDER_LINE);
     await rt.close();
     // And the row itself, over the same records: a host restarted without its provider env holds cloud workspaces
-    // it can say nothing else about, and none of the three tells a person their fork is their own computer.
+    // it can say nothing else about, and neither of the two tells a person their fork is their own computer.
     const restarted = createRuntime({ backend: new NoProviderBackend(), store, adapters: {} });
-    for (const run of [() => restarted.workspaces.rebuild(ws.id), () => restarted.workspaces.upgrade(ws.id), () => restarted.workspaces.updateImage(ws.id)]) {
+    for (const run of [() => restarted.workspaces.rebuild(ws.id), () => restarted.workspaces.upgrade(ws.id)]) {
       const said = await run().then(() => "", (e: unknown) => (e as Error).message);
       expect([said, said.includes("which wsp does not run")]).toEqual([NO_PROVIDER_LINE, false]);
     }

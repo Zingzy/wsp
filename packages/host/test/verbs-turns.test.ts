@@ -221,7 +221,6 @@ describe("wsp verbs over the host: prompts, answers and what a turn prints", () 
       ["run", ["run", "nope", "build it"]],
       ["fork", ["fork", "nope", "--name", "child"]],
       ["export", ["export", "nope", folder, "--from", "/root/work/proj"]],
-      ["image move", ["image", "move", "nope"]],
     ];
     const walked = async (lines: [string, string[]][]): Promise<[string, number, string[]][]> => {
       const refused: [string, number, string[]][] = [];

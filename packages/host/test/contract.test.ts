@@ -436,8 +436,6 @@ describe("the agent contract on the command line and the tool door", () => {
     const snapped = CLOUD_ON ? ((await last("snapshot", "snapshot", "alpha")) as { projectGolden: { snapshotId: string } }) : undefined;
     await last("pause", "pause", "alpha");
     await last("wake", "wake", "alpha");
-    // Already on the golden's head, so the move is the answer alone: the workspace untouched and nothing kept.
-    if (CLOUD_ON) expect(await last("image move", "image", "move", "alpha")).toEqual({ workspace: expect.objectContaining({ name: "alpha" }), moved: false, kept: [] });
     // The seeded golden was sealed before records existed, so the record reads off its head and holds no sign-ins.
     expect(await last("image", "image")).toMatchObject({ image: expect.objectContaining({ version: 1 }), copies: [expect.objectContaining({ place: "default" })], projects: expect.any(Array) });
     if (snapped !== undefined) {

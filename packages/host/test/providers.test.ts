@@ -87,9 +87,9 @@ describe("provider modules", () => {
     // Which life a copy may be taken from is each provider's own row: Solari refuses a machine that was resumed,
     // and a box's named snapshot reads the disk as it stands.
     expect(Object.fromEntries(all.map(([id, b]) => [id, b.capabilities.snapshotsAnyLife]))).toEqual({ box: true, solari: false, fake: true, none: false, local: false });
-    // Which providers stand a fresh machine in for one a workspace is on, the fact the rebuild and the image move
-    // read. Each verb has its own row here, so a provider added tomorrow answers for every road rather than being
-    // read off a neighbour's flag.
+    // Which providers stand a fresh machine in for one a workspace is on, the fact the rebuild reads. Each verb has
+    // its own row here, so a provider added tomorrow answers for every road rather than being read off a neighbour's
+    // flag.
     expect(Object.fromEntries(all.map(([id, b]) => [id, b.capabilities.replacesMachine]))).toEqual({ box: true, solari: true, fake: true, none: false, local: false });
     for (const [, b] of all) if (b.lifecycle !== undefined) {
       expect(b.lifecycle.budgets.wakeAttempts).toBeGreaterThanOrEqual(1);

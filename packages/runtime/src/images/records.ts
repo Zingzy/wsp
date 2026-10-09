@@ -247,7 +247,7 @@ export function recordsArea(ctx: RuntimeContext): RecordsArea {
   };
   return {
     view, putLook, persist, shapeOf, sizeBuilt, readMemory, forkedFrom, copyOf, putCopy, copyRecipeOf, putCopyRecipe,
-    dropCopyRecipe, migrateCopies, recordOf, recordedImages, goldenManifestOf, recipeAsksEngine, imageOf,
+    dropCopyRecipe, migrateCopies, recordOf, recordedImages, recipeAsksEngine, imageOf,
     projectGoldenOf,
   };
 }

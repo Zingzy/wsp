@@ -17,7 +17,6 @@ export const WORKSPACE_CALLED: Called[] = [
   { tool: "pause", argv: ["pause", "alpha"], arguments: { workspace: "alpha" }, given: alpha },
   { tool: "rename", argv: ["rename", "alpha", "alpha"], arguments: { workspace: "alpha", name: "alpha" }, given: alpha, heldHere: true },
   { tool: "workspaces_agents", argv: ["workspaces", "agents", "alpha", "--spawn", "on", "--max-machines", "2"], arguments: { workspace: "alpha", spawn: "on", max_machines: 2 }, given: alpha, heldHere: true },
-  { tool: "image_move", argv: ["image", "move", "alpha"], arguments: { workspace: "alpha" }, given: alpha, heldHere: true, cloud: true },
   { tool: "delete", argv: ["delete", "alpha", "--yes"], arguments: { workspace: "alpha" }, given: alpha, first: true, error: true, heldHere: true },
   { tool: "rebuild", argv: ["rebuild", "alpha"], arguments: { workspace: "alpha" }, given: alpha, refused: true, cloud: true },
   { tool: "forget", argv: ["forget", "alpha", "--yes"], arguments: { workspace: "alpha" }, given: alpha, refused: true },
