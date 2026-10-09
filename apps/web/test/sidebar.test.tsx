@@ -152,7 +152,11 @@ async function mount(api: FakeApi, firstName: string) {
   return api;
 }
 
-const rowOf = (text: string): HTMLElement => screen.getByText(text).closest<HTMLElement>("[data-sidebar-row]")!;
+/** The row a text stands in: its tile in the tree where an inbox tile also names it. */
+const rowOf = (text: string): HTMLElement => {
+  const rows = screen.getAllByText(text).map(element => element.closest<HTMLElement>("[data-sidebar-row]")!);
+  return rows.find(row => !row.dataset["rowId"]?.startsWith("inbox:")) ?? rows[0]!;
+};
 /** The tiles and the Settled row in their order, leaving out the live sections' heads the arrow keys also walk. */
 const rowIds = () => Array.from(document.querySelectorAll<HTMLElement>("[data-sidebar-row]")).map(r => r.dataset["rowId"]).filter(id => !id?.startsWith("section:"));
 const statusSlot = (row: HTMLElement): HTMLElement | null => row.querySelector<HTMLElement>("[data-thread-status]");
@@ -223,7 +227,7 @@ describe("tiles from the fixture wire", () => {
       "fix the port list",
     );
     // The failure waits on the person, so it heads the list over the working thread, and the read one rests last.
-    expect(rowIds()).toEqual(["thread:s3", "thread:s1", "thread:s2"]);
+    expect(rowIds()).toEqual(["inbox:thread:s3", "thread:s1", "thread:s2"]);
     expect(rowOf("fix the port list").querySelector("[data-tile-where]")!.textContent).toBe(`the-project @ ${BOX_NAME}`);
     // The one slot at row one's right edge: the state's icon while a thread is one a person acts on, the age once it rests.
     expect(threadState(rowOf("fix the port list"))).toBe("Working");
@@ -798,19 +802,21 @@ describe("the tree", () => {
       ),
       "move the pricing table",
     );
-    // The reviewer asks, so the lead's whole tree stands under Needs you, over the orphan that only works.
-    expect(rowIds()).toEqual(["thread:th_lead", "thread:th_build", "thread:th_move", "thread:th_review", "thread:th_orphan"]);
+    // The reviewer asks, so it stands alone in Needs you; the lead's tree stays in the list by its own state, newest
+    // first, and the asking reviewer leads its level.
+    expect(rowIds()).toEqual(["inbox:thread:th_review", "thread:th_orphan", "thread:th_lead", "thread:th_build", "thread:th_review", "thread:th_move"]);
     const depths = rowIds().map(id => Number(document.querySelector<HTMLElement>(`[data-row-id='${id}']`)!.dataset["depth"]));
-    expect(depths).toEqual([0, 1, 2, 2, 0]);
+    expect(depths).toEqual([0, 0, 0, 1, 2, 2]);
     // Real nesting, item inside item: the builder's item holds the reviewer and the fork's thread.
     const build = rowOf("build the rows").closest("li[data-thread-item]")!;
-    expect(build.contains(rowOf("review the rows"))).toBe(true);
+    const review = document.querySelector<HTMLElement>("[data-row-id='thread:th_review']")!;
+    expect(build.contains(review)).toBe(true);
     expect(build.contains(rowOf("move the pricing table"))).toBe(true);
     expect(rowOf("retry the webhook queue").closest("li[data-thread-item]")!.contains(build)).toBe(true);
     // Every child list stands its line under the centre of the parent's mark, and every item in one draws its elbow
     // and its line as borders, never a background; the top list has none.
     for (const title of ["build the rows", "review the rows", "move the pricing table"]) {
-      const item = rowOf(title).closest("li")!;
+      const item = (title === "review the rows" ? review : rowOf(title)).closest("li")!;
       expect(item.className, title).toBe(cn("min-w-0", RAIL_ITEM_CLASS));
       expect(item.parentElement!.className, title).toBe(CHILD_LIST_CLASS);
       expect(item.hasAttribute("data-slim"), title).toBe(false);

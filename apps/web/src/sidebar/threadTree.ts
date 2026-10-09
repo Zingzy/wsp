@@ -9,9 +9,9 @@
 // while the workspace its session is filed under stays what its meta names and
 // what selecting it opens: the two are the same thread's two facts and a
 // surface needs both.
-import { bareFolder, ThreadSection, type ProjectView, type ThreadMarks, type ThreadPlacement } from "@wsp/protocol";
+import { bareFolder, DEFAULT_PREFERENCES, SETTLE_MS, ThreadSection, type ProjectView, type ThreadMarks, type ThreadPlacement } from "@wsp/protocol";
 import type { SidebarProjectSnapshot, SidebarThreadSnapshot } from "../adapt/index.js";
-import { settleTake } from "../components/threads/leadTree.js";
+import { leadNodes, partOf, settleTake, type Tree } from "../components/threads/leadTree.js";
 import { workspaceRowId } from "./rowGrammar.js";
 import { isThreadSettleable, isThreadSettled, isThreadWorking, nestSpawnedThreads, sortSettledThreadsForSidebar, sortThreadsForSidebar, threadForest, threadSection, type ThreadNode } from "./Sidebar.logic.js";
 
@@ -165,6 +165,15 @@ export interface TileItem {
   /** Set with it: the fold keys of every thread the folded tree holds, the root first, so the root reads as selected
    * while one of them is open in the centre. */
   readonly holds?: readonly string[];
+  /** Set on a tile of the Needs you inbox: where its thread hangs, which its first row and its card name. */
+  readonly inboxOf?: InboxMark;
+}
+
+/** Where a thread in the Needs you inbox hangs: the thread that started it, null for a tree's top, and the titles
+ * from the top of its tree down to that thread. */
+export interface InboxMark {
+  readonly parent: string | null;
+  readonly path: ReadonlyArray<string>;
 }
 
 export type TileNode = ThreadNode<TileItem>;
@@ -185,7 +194,9 @@ export interface TileSection {
 
 /** The sidebar's list: root tiles across every workspace newest first, each with the tiles its agents opened under
  * it, parted into the live list and the Settled fold, which holds every root whose whole tree is settled threads.
- * The live list is drawn in sections, and `live` is every root of them in the order they are drawn. A snoozed tree
+ * The live list is drawn in sections: the pinned trees, Needs you as an inbox of every thread at any depth that needs
+ * the person, each a tile with nothing under it, then every other live tree, whatever under it asks. `live` is every
+ * live root once in the order they are drawn, a root that stands in the inbox alone with it. A snoozed tree
  * is in neither until its snooze ends or a thread of it needs the person, but while a thread of it runs its root
  * stands alone at the foot of the list carrying how many work. Under a picked project only that project's
  * roots are listed, children kept wherever they run. */
@@ -199,7 +210,8 @@ export function sidebarTiles(
     return runs.threads.map(thread => ({ id: thread.id, parentThreadId: thread.parentThreadId ?? forkedBy, startedAt: thread.startedAt, runs, thread }));
   });
   const roots = attemptGroups(threadForest(sortThreadsForSidebar(items)).filter(node => picked === null || node.thread.runs.workspace.project.id === picked));
-  const filed = new Map<SidebarSection, TileNode[]>(SIDEBAR_SECTIONS.map(id => [id, []]));
+  const pinned: TileNode[] = [];
+  const listed: TileNode[] = [];
   const settled: TileNode[] = [];
   const snoozedWorking: TileNode[] = [];
   for (const node of roots) {
@@ -208,15 +220,55 @@ export function sidebarTiles(
       if (working > 0) snoozedWorking.push({ thread: { ...node.thread, snoozedWorking: working, holds: treeThreadIds(node) }, children: [] });
       continue;
     }
-    const pinned = node.thread.thread?.pinnedAt != null;
-    if (everyTile(node, thread => isThreadSettled(thread, nowMs, pinned || thread.id === open, settleMs))) settled.push(node);
-    else filed.get(pinned ? "pinned" : listOf(sectionOf(node)))!.push(node);
+    const pins = node.thread.thread?.pinnedAt != null;
+    if (everyTile(node, thread => isThreadSettled(thread, nowMs, pins || thread.id === open, settleMs))) settled.push(node);
+    else (pins ? pinned : listed).push(node);
   }
-  filed.get("threads")!.push(...snoozedWorking);
-  filed.get("pinned")!.sort((a, b) => b.thread.thread!.pinnedAt!.localeCompare(a.thread.thread!.pinnedAt!));
-  const sections = SIDEBAR_SECTIONS.map(id => ({ id, roots: filed.get(id)! })).filter(section => section.roots.length > 0);
+  pinned.sort((a, b) => b.thread.thread!.pinnedAt!.localeCompare(a.thread.thread!.pinnedAt!));
+  const tree = tileTree({ nowMs, settleMs: settleMs === undefined ? SETTLE_MS[DEFAULT_PREFERENCES.settleAfter] : settleMs });
+  const inbox = [...pinned, ...listed].flatMap(node => inboxTiles(node, [], { tree, open }));
+  const tops = new Set(inbox.filter(node => node.thread.inboxOf?.parent === null).map(node => node.thread.id));
+  const inboxOnly = listed.filter(node => tops.has(node.thread.id) && !drawsUnder(node, tree));
+  const trees = [...listed.filter(node => !inboxOnly.includes(node)), ...snoozedWorking];
+  const sections = [
+    { id: "pinned" as const, roots: pinned },
+    { id: "needs-you" as const, roots: inbox },
+    { id: "threads" as const, roots: trees },
+  ].filter(section => section.roots.length > 0);
   const bySettle = new Map(settled.map(node => [node.thread.thread!, node]));
-  return { live: sections.flatMap(section => section.roots), settled: sortSettledThreadsForSidebar([...bySettle.keys()]).map(thread => bySettle.get(thread)!), sections };
+  return { live: [...pinned, ...inboxOnly, ...trees], settled: sortSettledThreadsForSidebar([...bySettle.keys()]).map(thread => bySettle.get(thread)!), sections };
+}
+
+/** How the sidebar reads a lead's tree off its tiles. */
+export function tileTree({ nowMs, settleMs }: { nowMs: number; settleMs: number | null }): Tree<TileNode> {
+  return { threadOf: node => node.thread.thread, kidsOf: node => node.children, nowMs, settleMs };
+}
+
+/** Whether a tile draws anything under it: a child or a subagent that is not settled. */
+export function drawsUnder(node: TileNode, tree: Tree<TileNode>): boolean {
+  return leadNodes(node.thread.thread, node.children, tree).some(child => partOf(child, tree) !== "settled");
+}
+
+/** The inbox's tiles out of one tree, top first and then down each branch: every thread that asks or failed and is
+ * not armed to resume, not settled, each alone with where it hangs. A tree's top goes by where the person dragged it
+ * while that holds; a subagent is no thread here, its failure being its lead agent's to handle. */
+function inboxTiles(node: TileNode, path: ReadonlyArray<string>, { tree, open }: { tree: Tree<TileNode>; open: string | null }): TileNode[] {
+  const thread = node.thread.thread;
+  const top = path.length === 0;
+  const needs = thread !== null && (top ? sectionOf(node, threadSection(thread)) : threadSection(thread)) === "needs-you" && !isThreadSettled(thread, tree.nowMs, thread.id === open, tree.settleMs);
+  const own = needs ? [{ thread: { ...node.thread, inboxOf: { parent: path.at(-1) ?? null, path } }, children: [] }] : [];
+  const below = thread === null ? path : [...path, thread.title];
+  return [...own, ...node.children.flatMap(child => inboxTiles(child, below, { tree, open }))];
+}
+
+/** How many tiles a tree draws, its top among them: its live threads at any depth, none under a folded tile; a
+ * Finished fold's rows are behind its shut fold. A group's head is no tile. What a section's head counts. */
+export function drawnCount(node: TileNode, read: { nowMs: number; settleMs: number | null }): number {
+  const { thread, groupTitle } = node.thread;
+  if (groupTitle !== undefined) return node.children.reduce((sum, child) => sum + drawnCount(child, read), 0);
+  if (thread === null || thread.foldedAt !== null) return 1;
+  const tree = tileTree(read);
+  return 1 + node.children.filter(child => partOf({ node: child, thread: child.thread.thread }, tree) === "live").reduce((sum, child) => sum + drawnCount(child, read), 0);
 }
 
 /** The roots one send to several models opened, as one node where the first of them stands in the list: a head named
@@ -267,15 +319,15 @@ export function dropMarks(node: TileNode, section: SidebarSection): ThreadMarks 
   if (thread === null) return null;
   const pinned = thread.pinnedAt != null;
   if (section === "pinned") return pinned ? null : { pinned: true };
-  const own = listOf(treeSection(node)) === section;
+  const own = listOf(threadSection(thread)) === section;
   if (own && !pinned && thread.section == null) return null;
   return { ...(pinned ? { pinned: false } : {}), section: own ? null : placementFor(node, section === "needs-you" ? "needs-you" : "idle") };
 }
 
-/** The section a root tree is drawn in: where the person dragged it while that still holds, else its state's. */
-function sectionOf(node: TileNode): ThreadSection {
+/** The section a root tree is drawn in: where the person dragged it while that still holds, else its own. */
+function sectionOf(node: TileNode, own: ThreadSection): ThreadSection {
   const placed = node.thread.thread?.section;
-  return placed != null && placed.whileState === placementKey(node) ? placed.name : treeSection(node);
+  return placed != null && placed.whileState === placementKey(node) ? placed.name : own;
 }
 
 /** How many threads of a tree are working, the root's own included. */
@@ -326,6 +378,15 @@ export function treeSettle(node: TileNode): { threadIds: string[]; working: bool
 /** The live roots "Settle all read" takes: every tree whose threads have all been read and are quiet. */
 export function settleableRoots(live: ReadonlyArray<TileNode>): TileNode[] {
   return live.filter(node => everyTile(node, isThreadSettleable));
+}
+
+/** A tile's node at any depth of the roots given, by its id; undefined for one none of them holds. */
+export function nodeOf(roots: ReadonlyArray<TileNode>, id: string): TileNode | undefined {
+  for (const node of roots) {
+    const found = node.thread.id === id ? node : nodeOf(node.children, id);
+    if (found !== undefined) return found;
+  }
+  return undefined;
 }
 
 /** The root tree a thread hangs in, among the roots given; undefined for a thread none of them holds. */

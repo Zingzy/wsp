@@ -139,7 +139,7 @@ const ago = (ms: number): string => new Date(Date.now() - ms).toISOString();
 /** Sessions for the store, one per thread, keyed by workspace, every time read off one clock reading so two rows
  * given the same age share it exactly. A turn that ended was shown as it ended unless `readAgo` says the last
  * showing was earlier. */
-const sessions = (rows: Array<{ ws: string; id: string; prompt: string; parent?: string; status?: string; startedAgo?: number; endedAgo?: number; readAgo?: number; settledAgo?: number; asking?: string; pinnedAgo?: number; snoozed?: boolean; section?: { name: string; whileState: string } }>) => {
+const sessions = (rows: Array<{ ws: string; id: string; prompt: string; parent?: string; status?: string; startedAgo?: number; endedAgo?: number; readAgo?: number; settledAgo?: number; asking?: string; pinnedAgo?: number; snoozed?: boolean; section?: { name: string; whileState: string }; foldedAgo?: number; subagents?: unknown[] }>) => {
   const now = Date.now();
   const before = (ms: number): string => new Date(now - ms).toISOString();
   const by: Record<string, unknown[]> = {};
@@ -160,6 +160,8 @@ const sessions = (rows: Array<{ ws: string; id: string; prompt: string; parent?:
       ...(r.pinnedAgo === undefined ? {} : { pinnedAt: now - r.pinnedAgo }),
       ...(r.snoozed === true ? { snoozedUntil: now + HOUR } : {}),
       ...(r.section === undefined ? {} : { section: r.section }),
+      ...(r.foldedAgo === undefined ? {} : { foldedAt: now - r.foldedAgo }),
+      ...(r.subagents === undefined ? {} : { subagents: r.subagents }),
     });
   }
   return by;
@@ -594,10 +596,13 @@ describe("the sidebar's list of thread tiles", () => {
       fireEvent.contextMenu(rowOf("the lead"));
       await waitFor(() => expect(settleThreads).toHaveBeenCalledWith(["th_lead", "th_builder"]));
       expect(picked[0]).toContain("settle");
-      // A thread under a root settles with it, so its own menu offers none.
-      fireEvent.contextMenu(rowOf("its builder"));
-      await waitFor(() => expect(picked).toHaveLength(2));
-      expect(picked[1]).not.toContain("settle");
+      // A finished thread under a root stands behind the lead's Finished fold, and settles alone from its own menu.
+      expect(picked[0]).toContain("settle-finished");
+      fireEvent.click(document.querySelector<HTMLElement>("[data-child-fold=finished]")!);
+      settleThreads.mockClear();
+      fireEvent.contextMenu(await waitFor(() => rowOf("its builder")));
+      await waitFor(() => expect(settleThreads).toHaveBeenCalledWith(["th_builder"]));
+      expect(picked[1]).toContain("settle");
       settleThreads.mockClear();
       choose("settle-read");
       fireEvent.contextMenu(fold);
@@ -716,7 +721,7 @@ describe("the sidebar's list of thread tiles", () => {
     mount({ projects: [project("pr_1", "spoo")], workspaces: [workspace("ws_a", "pricing page", "pr_1")] });
     const failed = { ws: "ws_a", id: "th_broke", prompt: "it broke", status: "failed", startedAgo: 30 * HOUR, endedAgo: 29 * HOUR, readAgo: 28 * HOUR };
     await act(async () => useStore.setState({ sessions: sessions([failed]) } as never));
-    await waitFor(() => expect(rowIds()).toEqual(["thread:th_broke"]));
+    await waitFor(() => expect(rowIds()).toEqual(["inbox:thread:th_broke"]));
     expect(rowOf("it broke").querySelector("[data-thread-status]")!.getAttribute("aria-label")).toBe("Failed");
     await act(async () => useStore.setState({ sessions: sessions([{ ...failed, settledAgo: HOUR }]) } as never));
     await waitFor(() => expect(rowIds()).toEqual(["settled"]));
@@ -797,8 +802,8 @@ describe("the sidebar's list of thread tiles", () => {
       // Every head names its section in words, Needs you as Pinned and Settled do; the state glyph is the tiles' alone.
       expect([...document.querySelectorAll("[data-section-head]")].map(head => head.textContent)).toEqual(["Pinned (1)", "Needs you (1)"]);
       expect(document.querySelector("[data-section-head=needs-you] svg.lucide-message-circle-question")).toBeNull();
-      expect(rowIds()).toEqual(["thread:th_pinned", "thread:th_asks", "thread:th_works", "thread:th_done", "thread:th_idle"]);
-      expect(walkIds()).toEqual(["section:pinned", "thread:th_pinned", "section:needs-you", "thread:th_asks", "thread:th_works", "thread:th_done", "thread:th_idle"]);
+      expect(rowIds()).toEqual(["thread:th_pinned", "inbox:thread:th_asks", "thread:th_works", "thread:th_done", "thread:th_idle"]);
+      expect(walkIds()).toEqual(["section:pinned", "thread:th_pinned", "section:needs-you", "inbox:thread:th_asks", "thread:th_works", "thread:th_done", "thread:th_idle"]);
       expect(screen.queryByText("snoozed away")).toBeNull();
       const slot = (title: string): HTMLElement => rowOf(title).querySelector<HTMLElement>("[data-thread-status]")!;
       // Every state is its icon alone, its word on the label: the crab while it works.
@@ -946,5 +951,288 @@ describe("the sidebar's list of thread tiles", () => {
     fireEvent.dragOver(option("pr_3"), { dataTransfer });
     fireEvent.drop(option("pr_3"), { dataTransfer });
     await waitFor(() => expect(setPreferences).toHaveBeenCalledWith({ projectOrder: ["pr_2", "pr_3", "pr_1"] }));
+  });
+});
+
+describe("a lead's tree in the sidebar", () => {
+  const MIN = 60_000;
+  /** The marathon's shape: a lead working, two children that need the person, a reviewer whose probe failed, and a
+   * thread of its own asking. */
+  const marathon = [
+    { ws: "ws_a", id: "relay", prompt: "probe the relay", startedAgo: 9 * MIN, asking: "Fetch the metrics" },
+    { ws: "ws_a", id: "lead", prompt: "coordinator", startedAgo: 2 * MIN },
+    { ws: "ws_a", id: "c-ask", prompt: "build the box thread", parent: "lead", startedAgo: 23 * MIN, asking: "Run pnpm install" },
+    { ws: "ws_a", id: "c-fail", prompt: "fix the smoke", parent: "lead", status: "failed", startedAgo: 31 * MIN, endedAgo: 4 * MIN },
+    { ws: "ws_a", id: "c-rev", prompt: "review the carry", parent: "lead", startedAgo: 9 * MIN },
+    { ws: "ws_a", id: "g-probe", prompt: "probe the carry", parent: "c-rev", status: "failed", startedAgo: 8 * MIN, endedAgo: 5 * MIN },
+  ];
+  const menuOf = async (row: HTMLElement): Promise<string[]> => {
+    let ids: string[] = [];
+    window.wsp = { contextMenu: async (items: Array<{ id: string }>) => ((ids = items.map(item => item.id)), null) } as never;
+    try {
+      fireEvent.contextMenu(row);
+      await waitFor(() => expect(ids.length).toBeGreaterThan(0));
+      return ids;
+    } finally {
+      delete (window as { wsp?: unknown }).wsp;
+    }
+  };
+
+  it("Needs you is an inbox: each thread that needs the person stands alone, one under a tree marked with its starter, the head counting them, and the trees stay in the list; picking one marks it in both", async () => {
+    mount({ projects: [project("pr_1", "spoo")], workspaces: [workspace("ws_a", "pricing page", "pr_1")] });
+    await act(async () => useStore.setState({ sessions: sessions(marathon) } as never));
+    await waitFor(() => expect(screen.getAllByText("build the box thread")).toHaveLength(2));
+    const head = document.querySelector<HTMLElement>("[data-section-head=needs-you]")!;
+    expect(head.textContent).toBe("Needs you (4)");
+    const inbox = [...document.querySelectorAll<HTMLElement>("[data-section=needs-you] li [data-sidebar-row]")];
+    expect(inbox.map(row => row.dataset["rowId"])).toEqual(["inbox:thread:g-probe", "inbox:thread:c-ask", "inbox:thread:c-fail", "inbox:thread:relay"]);
+    const probe = inbox[0]!;
+    // Row one keeps the project's glyph, the starter's mark on its corner, and names the thread that started it.
+    expect(probe.querySelector("[data-tile-where]")!.textContent).toBe("review the carry");
+    expect(probe.querySelector("[data-tile-started-by]")).not.toBeNull();
+    expect(probe.querySelector("[data-tile-started-by] svg.lucide-corner-down-right")).not.toBeNull();
+    expect(inbox[3]!.querySelector("[data-tile-started-by]")).toBeNull();
+    expect(inbox[3]!.querySelector("[data-tile-where]")!.textContent).toBe(document.querySelector("[data-row-id='thread:lead'] [data-tile-where]")!.textContent);
+    // Nothing hangs under an inbox tile.
+    expect(probe.closest("li")!.querySelector("ul")).toBeNull();
+    // Its card says the whole path down to it.
+    fireEvent.mouseEnter(probe);
+    expect(document.querySelector("[data-tile-card-line=started-by]")!.textContent).toBe("Started by coordinator / review the carry");
+    // The tree stays in the list, whatever under it asks; the relay, alone, stands in the inbox only.
+    expect(document.querySelector("[data-section=threads] [data-row-id='thread:lead']")).not.toBeNull();
+    expect(document.querySelector("[data-section=threads] [data-row-id='thread:c-ask']")).not.toBeNull();
+    expect(document.querySelector("[data-row-id='thread:relay']")).toBeNull();
+    fireEvent.click(inbox[1]!);
+    expect(useStore.getState().selectedThreadId).toBe("c-ask");
+    await waitFor(() => expect(document.querySelector("[data-row-id='inbox:thread:c-ask']")!.getAttribute("data-active")).toBe("true"));
+    expect(document.querySelector("[data-row-id='thread:c-ask']")!.getAttribute("data-active")).toBe("true");
+  });
+
+  it("a tile folds its tree by the host's folded mark, from its control and the arrow keys; folded it reads how many rows it would draw, keeps its own glyphs and mounts nothing under it", async () => {
+    const { markThreads } = mount({ projects: [project("pr_1", "spoo")], workspaces: [workspace("ws_a", "pricing page", "pr_1")] });
+    const tree = [
+      { ws: "ws_a", id: "lead", prompt: "coordinator", startedAgo: 2 * MIN },
+      { ws: "ws_a", id: "c-one", prompt: "child one", parent: "lead", startedAgo: 3 * MIN },
+      { ws: "ws_a", id: "c-two", prompt: "child two", parent: "lead", startedAgo: 4 * MIN },
+      { ws: "ws_a", id: "g-one", prompt: "grandchild", parent: "c-two", startedAgo: 1 * MIN },
+      { ws: "ws_a", id: "c-done", prompt: "child done", parent: "lead", status: "completed", startedAgo: 9 * MIN, endedAgo: 8 * MIN },
+    ];
+    await act(async () => useStore.setState({ sessions: sessions(tree) } as never));
+    await waitFor(() => expect(screen.getByText("grandchild")).toBeDefined());
+    const lead = (): HTMLElement => rowOf("coordinator");
+    // Open: the chevron alone, nothing at rest, its room kept; no count.
+    const control = lead().querySelector<HTMLElement>("[data-tile-fold]")!;
+    expect(lead().getAttribute("aria-expanded")).toBe("true");
+    expect(control.textContent).toBe("");
+    expect(control.className).toContain("opacity-0");
+    expect(control.querySelector("svg.lucide-chevron-down")).not.toBeNull();
+    fireEvent.click(control);
+    await waitFor(() => expect(markThreads).toHaveBeenCalledWith(["lead"], { folded: true }));
+    expect(useStore.getState().selectedThreadId).toBeNull();
+    lead().focus();
+    fireEvent.keyDown(lead(), { key: "ArrowLeft" });
+    await waitFor(() => expect(markThreads).toHaveBeenCalledTimes(2));
+    expect(markThreads).toHaveBeenLastCalledWith(["lead"], { folded: true });
+    // The host's mark lands: the tile reads how many rows it would draw at any depth, and mounts none of them.
+    await act(async () => useStore.setState({ sessions: sessions(tree.map(row => (row.id === "lead" ? { ...row, foldedAgo: MIN } : row))) } as never));
+    await waitFor(() => expect(screen.queryByText("grandchild")).toBeNull());
+    expect(lead().getAttribute("aria-expanded")).toBe("false");
+    const shut = lead().querySelector<HTMLElement>("[data-tile-fold]")!;
+    expect(shut.textContent).toBe("3");
+    expect(shut.className).not.toContain("opacity-0");
+    expect(shut.querySelector("svg.lucide-chevron-right")).not.toBeNull();
+    expect(lead().closest("li")!.querySelector("ul, [data-child-fold]")).toBeNull();
+    expect(screen.queryByText("child one")).toBeNull();
+    expect(lead().querySelector("[data-thread-status=working]")).not.toBeNull();
+    lead().focus();
+    fireEvent.keyDown(lead(), { key: "ArrowRight" });
+    await waitFor(() => expect(markThreads).toHaveBeenLastCalledWith(["lead"], { folded: false }));
+    // A child with a tree under it folds as the lead does; one with nothing under it has no fold.
+    await act(async () => useStore.setState({ sessions: sessions(tree) } as never));
+    await waitFor(() => expect(screen.getByText("grandchild")).toBeDefined());
+    expect(rowOf("child one").getAttribute("aria-expanded")).toBeNull();
+    expect(rowOf("child one").querySelector("[data-tile-fold]")).toBeNull();
+    fireEvent.click(rowOf("child two").querySelector<HTMLElement>("[data-tile-fold]")!);
+    await waitFor(() => expect(markThreads).toHaveBeenLastCalledWith(["c-two"], { folded: true }));
+  });
+
+  it("draws live children first and the finished behind a shut Finished fold that mounts none of them; open, it pages twenty at a time; its menu and the lead's hold Settle N finished", async () => {
+    const { settleThreads } = mount({ projects: [project("pr_1", "spoo")], workspaces: [workspace("ws_a", "pricing page", "pr_1")] });
+    const finished = Array.from({ length: 25 }, (_, i) => ({ ws: "ws_a", id: `f${i}`, prompt: `finished ${i}`, parent: "lead", status: "completed", startedAgo: (30 + i) * MIN, endedAgo: (10 + i) * MIN, ...(i === 0 ? { readAgo: 2 * HOUR } : {}) }));
+    await act(async () =>
+      useStore.setState({ sessions: sessions([{ ws: "ws_a", id: "lead", prompt: "coordinator", startedAgo: 2 * MIN, pinnedAgo: MIN }, { ws: "ws_a", id: "c-live", prompt: "still building", parent: "lead", startedAgo: 3 * MIN }, ...finished]) } as never),
+    );
+    await waitFor(() => expect(screen.getByText("still building")).toBeDefined());
+    // The head counts the tiles it draws: the lead and its one live child.
+    expect(document.querySelector("[data-section-head=pinned]")!.textContent).toBe("Pinned (2)");
+    const fold = document.querySelector<HTMLElement>("[data-child-fold=finished]")!;
+    expect(fold.getAttribute("aria-expanded")).toBe("false");
+    expect(fold.textContent).toBe("Finished25");
+    expect(fold.querySelector("svg.lucide-circle-check")).not.toBeNull();
+    expect(screen.queryByText("finished 3")).toBeNull();
+    expect(await menuOf(fold)).toEqual(["settle-finished"]);
+    expect(await menuOf(rowOf("coordinator"))).toContain("settle-finished");
+    fireEvent.click(fold);
+    await waitFor(() => expect(screen.getByText("finished 3")).toBeDefined());
+    // The rows stand at the fold row's own x, under it in the same list.
+    const rows = (): HTMLElement[] => [...fold.closest("ul")!.querySelectorAll<HTMLElement>(":scope > li > div > [data-sidebar-row][data-slim]")];
+    expect(rows()).toHaveLength(20);
+    // The fold's rows end in the check: green while nobody has read one, muted after.
+    expect(rows()[0]!.querySelector("[data-thread-status]")!.getAttribute("data-tone")).toBe("done");
+    expect(rows()[1]!.querySelector("[data-thread-status=finished]")).not.toBeNull();
+    const more = document.querySelector<HTMLElement>("[data-child-fold=more]")!;
+    expect(more.textContent).toBe("5 more");
+    fireEvent.click(more);
+    await waitFor(() => expect(rows()).toHaveLength(25));
+    expect(document.querySelector("[data-child-fold=more]")).toBeNull();
+    // A finished row offers Settle on hover, as a quiet tile does.
+    const settle = rows()[1]!.parentElement!.querySelector<HTMLElement>("[data-tile-settle]")!;
+    fireEvent.click(settle);
+    await waitFor(() => expect(settleThreads).toHaveBeenCalledWith(["f1"]));
+  });
+
+  it("a quiet tile offers Settle beside its button, a working one and one over a working child nothing", async () => {
+    const { settleThreads } = mount({ projects: [project("pr_1", "spoo")], workspaces: [workspace("ws_a", "pricing page", "pr_1")] });
+    await act(async () =>
+      useStore.setState({
+        sessions: sessions([
+          { ws: "ws_a", id: "quiet", prompt: "all quiet", status: "completed", startedAgo: 30 * MIN, endedAgo: 20 * MIN },
+          { ws: "ws_a", id: "works", prompt: "still going", startedAgo: 10 * MIN },
+          { ws: "ws_a", id: "over", prompt: "over a builder", status: "completed", startedAgo: 40 * MIN, endedAgo: 35 * MIN },
+          { ws: "ws_a", id: "builder", prompt: "the builder", parent: "over", startedAgo: 34 * MIN },
+        ]),
+      } as never),
+    );
+    await waitFor(() => expect(screen.getByText("the builder")).toBeDefined());
+    const settleOf = (title: string): HTMLElement | null => rowOf(title).parentElement!.querySelector<HTMLElement>(":scope > [data-tile-settle]");
+    expect(rowOf("all quiet").parentElement!.hasAttribute("data-has-action")).toBe(true);
+    expect(settleOf("still going")).toBeNull();
+    expect(settleOf("over a builder")).toBeNull();
+    fireEvent.click(settleOf("all quiet")!);
+    await waitFor(() => expect(settleThreads).toHaveBeenCalledWith(["quiet"]));
+    expect(useStore.getState().selectedThreadId).toBeNull();
+  });
+
+  it("a thread's subagents hang under it as slim rows, a running one live with Stop on hover and in its menu, an ended one in the Finished fold", async () => {
+    const at = Date.now();
+    mount({ projects: [project("pr_1", "spoo")], workspaces: [workspace("ws_a", "pricing page", "pr_1")] }, { interruptSession: vi.fn(async () => ({})) });
+    const subagents = [
+      { id: "sa-map", title: "Read the open tickets", state: "running", startedAt: at - MIN, model: "claude-opus-5-5", asked: "Read every open ticket" },
+      { id: "sa-done", title: "Check the gate", state: "done", startedAt: at - 5 * MIN, endedAt: at - 4 * MIN, lastLine: "Main is green." },
+    ];
+    await act(async () => useStore.setState({ sessions: sessions([{ ws: "ws_a", id: "lead", prompt: "coordinator", startedAgo: 10 * MIN, subagents }]) } as never));
+    await waitFor(() => expect(screen.getByText("Read the open tickets")).toBeDefined());
+    const row = screen.getByText("Read the open tickets").closest<HTMLElement>("[data-subagent-row]")!;
+    expect(row.className).toContain("h-9");
+    expect(row.querySelector("svg.lucide-bot")).not.toBeNull();
+    expect(row.querySelector("[data-thread-status=working]")).not.toBeNull();
+    expect(row.parentElement!.querySelector(":scope > [data-subagent-stop]")).not.toBeNull();
+    expect(await menuOf(row)).toEqual(["stop-subagent"]);
+    expect(screen.queryByText("Check the gate")).toBeNull();
+    expect(document.querySelector("[data-child-fold=finished]")!.textContent).toBe("Finished1");
+  });
+
+  it("a snoozed root that runs a subagent stands alone at the foot of the list: no subagent row under it and no fold", async () => {
+    const at = Date.now();
+    mount({ projects: [project("pr_1", "spoo")], workspaces: [workspace("ws_a", "pricing page", "pr_1")] });
+    const subagents = [{ id: "sa1", title: "Read the open tickets", state: "running", startedAt: at - MIN }];
+    await act(async () =>
+      useStore.setState({ sessions: sessions([{ ws: "ws_a", id: "here", prompt: "still here", status: "completed", startedAgo: 9 * MIN, endedAgo: 8 * MIN }, { ws: "ws_a", id: "away", prompt: "snoozed away", startedAgo: 5 * MIN, snoozed: true, subagents }]) } as never),
+    );
+    await waitFor(() => expect(screen.getByText("snoozed away")).toBeDefined());
+    expect(rowIds()).toEqual(["thread:here", "thread:away"]);
+    expect(rowOf("snoozed away").querySelector("[data-tile-fold]")).toBeNull();
+    expect(rowOf("snoozed away").getAttribute("aria-expanded")).toBeNull();
+    expect(rowOf("snoozed away").closest("li")!.querySelector("ul")).toBeNull();
+  });
+
+  it("a done lead over a failed child offers Settle on hover, as its menu's Settle does; over an asking child it offers none", async () => {
+    mount({ projects: [project("pr_1", "spoo")], workspaces: [workspace("ws_a", "pricing page", "pr_1")] });
+    const tree = [
+      { ws: "ws_a", id: "lead", prompt: "coordinator", status: "completed", startedAgo: 20 * MIN, endedAgo: 10 * MIN },
+      { ws: "ws_a", id: "c-fail", prompt: "fix the smoke", parent: "lead", status: "failed", startedAgo: 31 * MIN, endedAgo: 4 * MIN },
+    ];
+    await act(async () => useStore.setState({ sessions: sessions(tree) } as never));
+    await waitFor(() => expect(document.querySelector("[data-row-id='thread:c-fail']")).not.toBeNull());
+    const settleOf = (rowId: string): HTMLElement | null => document.querySelector(`[data-row-id='${rowId}']`)!.parentElement!.querySelector<HTMLElement>(":scope > [data-tile-settle]");
+    expect(settleOf("thread:lead")).not.toBeNull();
+    expect(settleOf("thread:c-fail")).not.toBeNull();
+    expect(await menuOf(document.querySelector<HTMLElement>("[data-row-id='thread:lead']")!)).toContain("settle");
+    await act(async () => useStore.setState({ sessions: sessions([...tree, { ws: "ws_a", id: "c-ask", prompt: "build the box thread", parent: "lead", status: "completed", startedAgo: 23 * MIN, endedAgo: 3 * MIN, asking: "Run pnpm install" }]) } as never));
+    await waitFor(() => expect(document.querySelector("[data-row-id='thread:c-ask']")).not.toBeNull());
+    expect(settleOf("thread:lead")).toBeNull();
+  });
+
+  it("nests two levels and then stands flat, and a tile past the second level names its opener on its card", async () => {
+    mount({ projects: [project("pr_1", "spoo")], workspaces: [workspace("ws_a", "pricing page", "pr_1")] });
+    const chain = ["coordinator", "level one", "level two", "level three", "level four"];
+    const ids = ["lead", "l1", "l2", "l3", "l4"];
+    await act(async () => useStore.setState({ sessions: sessions(ids.map((id, i) => ({ ws: "ws_a", id, prompt: chain[i]!, startedAgo: (10 - i) * MIN, ...(i === 0 ? {} : { parent: ids[i - 1] }) }))) } as never));
+    await waitFor(() => expect(screen.getByText("level four")).toBeDefined());
+    const listOf = (title: string): Element => rowOf(title).closest("li")!.parentElement!;
+    expect(listOf("level one")).toBe(rowOf("coordinator").closest("li")!.querySelector(":scope > ul"));
+    expect(listOf("level two")).toBe(rowOf("level one").closest("li")!.querySelector(":scope > ul"));
+    expect(listOf("level three")).toBe(listOf("level two"));
+    expect(listOf("level four")).toBe(listOf("level two"));
+    const startedBy = async (title: string): Promise<string | null> => {
+      fireEvent.mouseEnter(document.querySelector<HTMLElement>(`[data-row-id='thread:${ids[chain.indexOf(title)]}']`)!);
+      const card = await waitFor(() => [...document.querySelectorAll("[data-tile-card]")].find(at => at.querySelector("[data-tile-card-title]")!.textContent === title)!);
+      return card.querySelector("[data-tile-card-line=started-by]")?.textContent ?? null;
+    };
+    expect(await startedBy("level two")).toBeNull();
+    expect(await startedBy("level three")).toBe("Started by coordinator / level one / level two");
+    expect(await startedBy("level four")).toBe("Started by coordinator / level one / level two / level three");
+    // Settled whole, the tree nests in the Settled fold at every depth, and no card names an opener.
+    await act(async () => useStore.setState({ sessions: sessions(ids.map((id, i) => ({ ws: "ws_a", id, prompt: chain[i]!, status: "completed", startedAgo: (10 - i) * HOUR, endedAgo: (9 - i) * HOUR, settledAgo: HOUR, ...(i === 0 ? {} : { parent: ids[i - 1] }) }))) } as never));
+    fireEvent.click(await waitFor(() => document.querySelector<HTMLElement>("[data-row-id=settled]")!));
+    await waitFor(() => expect(document.querySelector("[data-row-id='thread:l4']")).not.toBeNull());
+    expect(await startedBy("level four")).toBeNull();
+  });
+
+  it("a folded tile reads as selected while a thread under it is open", async () => {
+    mount({ projects: [project("pr_1", "spoo")], workspaces: [workspace("ws_a", "pricing page", "pr_1")] });
+    const tree = [
+      { ws: "ws_a", id: "lead", prompt: "coordinator", startedAgo: 2 * MIN },
+      { ws: "ws_a", id: "c-one", prompt: "child one", parent: "lead", startedAgo: 3 * MIN },
+    ];
+    await act(async () => useStore.setState({ sessions: sessions(tree) } as never));
+    await waitFor(() => expect(screen.getByText("child one")).toBeDefined());
+    fireEvent.click(rowOf("child one"));
+    expect(useStore.getState().selectedThreadId).toBe("c-one");
+    expect(rowOf("coordinator").getAttribute("data-active")).not.toBe("true");
+    await act(async () => useStore.setState({ sessions: sessions(tree.map(row => (row.id === "lead" ? { ...row, foldedAgo: MIN } : row))) } as never));
+    await waitFor(() => expect(screen.queryByText("child one")).toBeNull());
+    expect(rowOf("coordinator").getAttribute("data-active")).toBe("true");
+  });
+
+  it("draws no fold control and folds on no key where the host cannot mark threads", async () => {
+    mount({ projects: [project("pr_1", "spoo")], workspaces: [workspace("ws_a", "pricing page", "pr_1")] }, { markThreads: undefined });
+    await act(async () =>
+      useStore.setState({ sessions: sessions([{ ws: "ws_a", id: "lead", prompt: "coordinator", startedAgo: 2 * MIN }, { ws: "ws_a", id: "c-one", prompt: "child one", parent: "lead", startedAgo: 3 * MIN }]) } as never),
+    );
+    await waitFor(() => expect(screen.getByText("child one")).toBeDefined());
+    expect(rowOf("coordinator").querySelector("[data-tile-fold]")).toBeNull();
+    expect(rowOf("coordinator").getAttribute("aria-expanded")).toBeNull();
+  });
+
+  it("the n more row is a row the arrow keys reach, and a shut fold opens again on its first page", async () => {
+    mount({ projects: [project("pr_1", "spoo")], workspaces: [workspace("ws_a", "pricing page", "pr_1")] });
+    const finished = Array.from({ length: 45 }, (_, i) => ({ ws: "ws_a", id: `f${i}`, prompt: `finished ${i}`, parent: "lead", status: "completed", startedAgo: (30 + i) * MIN, endedAgo: (10 + i) * MIN }));
+    await act(async () => useStore.setState({ sessions: sessions([{ ws: "ws_a", id: "lead", prompt: "coordinator", startedAgo: 2 * MIN }, ...finished]) } as never));
+    await waitFor(() => expect(document.querySelector("[data-child-fold=finished]")).not.toBeNull());
+    const fold = (): HTMLElement => document.querySelector<HTMLElement>("[data-child-fold=finished]")!;
+    const more = (): HTMLElement => document.querySelector<HTMLElement>("[data-child-fold=more]")!;
+    fireEvent.click(fold());
+    await waitFor(() => expect(more().textContent).toBe("25 more"));
+    expect(more().hasAttribute("data-sidebar-row")).toBe(true);
+    rowOf("finished 19").focus();
+    fireEvent.keyDown(rowOf("finished 19"), { key: "ArrowDown" });
+    expect(document.activeElement).toBe(more());
+    fireEvent.click(more());
+    await waitFor(() => expect(more().textContent).toBe("5 more"));
+    fireEvent.click(fold());
+    await waitFor(() => expect(document.querySelector("[data-child-fold=more]")).toBeNull());
+    fireEvent.click(fold());
+    await waitFor(() => expect(more().textContent).toBe("25 more"));
   });
 });

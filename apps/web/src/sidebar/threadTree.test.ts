@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import type { ProjectView } from "@wsp/protocol";
 import type { SidebarProjectSnapshot, SidebarThreadSnapshot } from "../adapt/index.js";
-import { dropMarks, nextNeedsYou, placementFor, projectGroups, rootHolding, settleableRoots, sidebarTiles, threadTree, treeSettle, type TileNode } from "./threadTree";
+import { drawnCount, dropMarks, nextNeedsYou, placementFor, projectGroups, rootHolding, settleableRoots, sidebarTiles, threadTree, treeSettle, type TileNode } from "./threadTree";
 
 const project = (id: string, name: string, computer = "here"): ProjectView => ({
   id,
@@ -21,7 +21,7 @@ const NOW = Date.parse("2026-09-26T12:00:00.000Z");
 const ago = (hours: number): string => new Date(NOW - hours * 3_600_000).toISOString();
 
 const thread = (id: string, workspaceId: string, parentThreadId: string | null = null, over: Partial<SidebarThreadSnapshot> = {}): SidebarThreadSnapshot =>
-  ({ id, threadId: id, sessionId: `s_${id}`, workspaceId, title: id, status: "running", startedAt: ago(1), endedAt: null, parentThreadId, asking: null, unread: false, needsYou: false, readAt: null, settledAt: null, pinnedAt: null, snoozedUntil: null, section: null, ...over }) as unknown as SidebarProjectSnapshot["threads"][number];
+  ({ id, threadId: id, sessionId: `s_${id}`, workspaceId, title: id, status: "running", startedAt: ago(1), endedAt: null, parentThreadId, asking: null, unread: false, needsYou: false, readAt: null, settledAt: null, pinnedAt: null, snoozedUntil: null, section: null, subagents: [], foldedAt: null, ...over }) as unknown as SidebarProjectSnapshot["threads"][number];
 /** A thread that finished `hours` ago and that a window showed as it finished. */
 const done = (id: string, workspaceId: string, hours: number, parentThreadId: string | null = null, over: Partial<SidebarThreadSnapshot> = {}): SidebarThreadSnapshot =>
   thread(id, workspaceId, parentThreadId, { status: "completed", startedAt: ago(hours + 0.1), endedAt: ago(hours), readAt: ago(hours), ...over });
@@ -305,7 +305,10 @@ describe("the sections the live list is drawn in", () => {
     const tiles = sidebarTiles(quiet, { picked: null, nowMs: NOW });
     expect([shape(tiles.live), shape(tiles.settled)]).toEqual([["here"], []]);
     const asked = [row("ws_a", "pr_1", [done("away", "ws_a", 30, null, { snoozedUntil }), thread("child", "ws_a", "away", { asking: "Permission for Bash", needsYou: true })])];
-    expect(sections(asked)).toEqual([["needs-you", [["away", ["child"]]]]]);
+    expect(sections(asked)).toEqual([
+      ["needs-you", ["child"]],
+      ["threads", [["away", ["child"]]]],
+    ]);
   });
 
   it("keeps a snoozed tree reachable while a thread in it runs: its root alone at the foot of the list, folded, carrying how many work", () => {
@@ -341,5 +344,64 @@ describe("the sections the live list is drawn in", () => {
     expect(next("unseen")).toBe("asks");
     expect(next("read")).toBe("asks");
     expect(nextNeedsYou(sidebarTiles([row("ws_a", "pr_1", [done("read", "ws_a", 0.4)])], { picked: null, nowMs: NOW }).live, null)).toBeUndefined();
+  });
+});
+
+describe("Needs you as an inbox", () => {
+  /** The marathon's shape: a lead working, two of its children asking or failed, a grandchild failed under a
+   * reviewer, a root of its own asking, and threads that no longer need the person. */
+  const marathon = () => [
+    row("ws_a", "pr_1", [
+      thread("relay", "ws_a", null, { title: "Probe: relay", asking: "Fetch the metrics", needsYou: true, startedAt: ago(0.09) }),
+      thread("lead", "ws_a", null, { title: "Coordinator", startedAt: ago(0.03) }),
+      thread("c-ask", "ws_a", "lead", { title: "Build: box thread", asking: "Run pnpm install", needsYou: true, startedAt: ago(0.4) }),
+      done("c-fail", "ws_a", 0.07, "lead", { title: "Fix: the smoke", status: "failed", startedAt: ago(0.5), needsYou: true }),
+      thread("c-rev", "ws_a", "lead", { title: "Review 1822", startedAt: ago(0.15) }),
+      done("g-probe", "ws_a", 0.08, "c-rev", { title: "Probe: the carry", status: "failed", startedAt: ago(0.13), needsYou: true }),
+      thread("c-answered", "ws_a", "lead", { title: "Answered", startedAt: ago(0.2) }),
+      done("c-put-away", "ws_a", 0.3, "lead", { title: "Put away", status: "failed", settledAt: ago(0.2) }),
+      done("c-resumes", "ws_a", 0.3, "lead", { title: "Resumes at reset", status: "failed", resumeAt: NOW + 3_600_000 }),
+    ]),
+  ];
+
+  it("stands every thread that asks or failed, at any depth, as its own tile with nothing under it, in the order the trees draw them, and the trees stay in the list", () => {
+    expect(sections(marathon())).toEqual([
+      ["needs-you", ["g-probe", "c-ask", "c-fail", "relay"]],
+      ["threads", [["lead", [["c-rev", ["g-probe"]], "c-answered", "c-ask", "c-put-away", "c-resumes", "c-fail"]]]],
+    ]);
+    const inbox = sidebarTiles(marathon(), { picked: null, nowMs: NOW }).sections[0]!.roots;
+    // One under a tree names the thread that started it and the whole path down to it; a root of its own names none.
+    expect(inbox.map(node => node.thread.inboxOf)).toEqual([
+      { parent: "Review 1822", path: ["Coordinator", "Review 1822"] },
+      { parent: "Coordinator", path: ["Coordinator"] },
+      { parent: "Coordinator", path: ["Coordinator"] },
+      { parent: null, path: [] },
+    ]);
+  });
+
+  it("keeps every live root once in live, a root alone in the inbox included, so the walks and the drop find each tree", () => {
+    expect(shape(sidebarTiles(marathon(), { picked: null, nowMs: NOW }).live).map(node => (Array.isArray(node) ? node[0] : node))).toEqual(["relay", "lead"]);
+  });
+
+  it("lets a thread leave once it is answered or settled: nothing left to ask, the inbox holds none", () => {
+    const answered = marathon().map(r => ({ ...r, threads: r.threads.map(t => ({ ...t, asking: null, status: t.status === "failed" ? ("completed" as const) : t.status, needsYou: false })) }));
+    expect(sections(answered).map(([id]) => id)).toEqual(["threads"]);
+  });
+
+  it("a root that asks with a tree under it stands in the inbox and in the list both", () => {
+    const rows = [row("ws_a", "pr_1", [thread("lead", "ws_a", null, { asking: "Which ticket next?", needsYou: true }), thread("child", "ws_a", "lead")])];
+    expect(sections(rows)).toEqual([
+      ["needs-you", ["lead"]],
+      ["threads", [["lead", ["child"]]]],
+    ]);
+  });
+
+  it("a head counts the tiles a tree draws: its live threads at any depth, none under a folded tile and none in a Finished fold", () => {
+    const lead = sidebarTiles(marathon(), { picked: null, nowMs: NOW }).live.find(node => node.thread.id === "lead")!;
+    const read = { nowMs: NOW, settleMs: null };
+    // Every thread but the one settled by hand, which the sidebar does not draw.
+    expect(drawnCount(lead, read)).toBe(7);
+    const folded = { ...lead, thread: { ...lead.thread, thread: { ...lead.thread.thread!, foldedAt: ago(0.01) } } };
+    expect(drawnCount(folded, read)).toBe(1);
   });
 });

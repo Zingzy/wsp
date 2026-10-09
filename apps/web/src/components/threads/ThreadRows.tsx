@@ -305,6 +305,6 @@ export const SubagentRow = memo(function SubagentRow({ subagent, target, kind, n
 
 const SUBAGENT_DRAWN = ["id", "title", "state", "startedAt", "endedAt", "asked", "model", "lastLine", "failure"] as const;
 
-function sameSubagentRow(a: { subagent: SubagentView; target: ChildTarget; kind: StatusKind; note: string | undefined }, b: typeof a): boolean {
+export function sameSubagentRow(a: { subagent: SubagentView; target: ChildTarget; kind: StatusKind; note: string | undefined }, b: typeof a): boolean {
   return SUBAGENT_DRAWN.every(field => a.subagent[field] === b.subagent[field]) && a.kind === b.kind && a.note === b.note && a.target.harness === b.target.harness && sameTarget(a.target, b.target);
 }

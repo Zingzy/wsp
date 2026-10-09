@@ -1,0 +1,13 @@
+{
+  "at": "/",
+  "fixture": "lead-marathon",
+  "steps": [
+    "390:key:Escape",
+    "390:sidebar=trigger",
+    "row-id=inbox:thread:c-fail",
+    "focus:section-head=needs-you",
+    "pointer-off"
+  ],
+  "wait": "section-head=needs-you",
+  "settleMs": 1200
+}
