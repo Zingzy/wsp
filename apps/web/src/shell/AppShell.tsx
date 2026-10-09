@@ -58,6 +58,21 @@ const sidebarWidthStore: SidebarWidthStore = {
  * and its tiles as they are. */
 const WORKSPACE_SIDEBAR = <WorkspaceSidebar />;
 
+/** The shell's hosts that take no props, one element for the module's life: a thread switch renders the shell again
+ * for its new workspace, and none of these has anything to draw for it. */
+const HOSTS = (
+  <>
+    <KeybindingDispatcher />
+    <SlateWatcher />
+    <CommandPalette />
+    <FileFinder />
+    <ContextMenuHost />
+    <RewindDialogHost />
+    <AddComputerDialog />
+    <WorkspaceSwitcher />
+  </>
+);
+
 export function AppShell({ children }: { children: ReactNode }) {
   const workspaceId = useSelectedWorkspaceId();
   // With no workspace on screen the terminal and the panel are this computer's own.
@@ -100,14 +115,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <SidebarProvider className="h-dvh! min-h-0!" defaultOpen>
-      <KeybindingDispatcher />
-      <SlateWatcher />
-      <CommandPalette />
-      <FileFinder />
-      <ContextMenuHost />
-      <RewindDialogHost />
-      <AddComputerDialog />
-      <WorkspaceSwitcher />
+      {HOSTS}
       <Sidebar
         side="left"
         collapsible="offcanvas"

@@ -92,6 +92,20 @@ describe("hostSwitcher", () => {
     expect(switcher.token()).toBeUndefined();
   });
 
+  it("after this computer's host is replaced at another port, the window on it and the way back here both name the new one", async () => {
+    const d = deps();
+    writeHost(d.home, "box", accountRecord("http://127.0.0.1:14400"));
+    const switcher = hostSwitcher(d);
+    const next: HostSession = { ...d.local, url: "http://127.0.0.1:4555", port: 4555 };
+    switcher.replaced(next);
+    expect(switcher.current()).toBe(next);
+    expect(await switcher.to("box")).toEqual({ ok: true });
+    switcher.replaced({ ...next, url: "http://127.0.0.1:4556", port: 4556 });
+    expect(switcher.current().alias).toBe("box");
+    expect(await switcher.to(null)).toEqual({ ok: true });
+    expect(d.opened.at(-1)).toBe("http://127.0.0.1:4556");
+  });
+
   it("the page of the host here is answered that host's own token, read beside the state it serves", () => {
     const dir = home();
     writeFileSync(join(dir, "host-token"), "host-tok\n");

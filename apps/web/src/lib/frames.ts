@@ -7,9 +7,17 @@ const drawn = new Map<Element, { draw: (now: number) => void; seen: boolean }>()
 let frame = 0;
 let sight: IntersectionObserver | undefined;
 
+/** How long the canvases hold still after the last scroll anywhere on the page. A window composited in software spent
+ * frames of over 50 ms redrawing every crab under a scroll that was already repainting what moved. */
+export const SCROLL_HOLD_MS = 150;
+let scrolledAt = -Infinity;
+const scrolled = (): void => {
+  scrolledAt = performance.now();
+};
+
 function tick(now: number): void {
   frame = 0;
-  for (const d of drawn.values()) if (d.seen) d.draw(now);
+  if (now - scrolledAt >= SCROLL_HOLD_MS) for (const d of drawn.values()) if (d.seen) d.draw(now);
   wake();
 }
 
@@ -34,6 +42,7 @@ export function onFrame(el: Element, draw: (now: number) => void): () => void {
           }
           wake();
         });
+  if (drawn.size === 0) document.addEventListener("scroll", scrolled, { capture: true, passive: true });
   drawn.set(el, { draw, seen: sight === undefined });
   sight?.observe(el);
   wake();
@@ -45,5 +54,6 @@ export function onFrame(el: Element, draw: (now: number) => void): () => void {
     frame = 0;
     sight?.disconnect();
     sight = undefined;
+    document.removeEventListener("scroll", scrolled, { capture: true });
   };
 }

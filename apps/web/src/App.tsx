@@ -63,7 +63,7 @@ export function App({ wsUrl, token, onUnauthorized }: AppProps) {
   useHostNotices();
   useWorkspaceLineNotices();
   useShellVersionEffect();
-  return <Shell />;
+  return SHELL;
 }
 
 /** The center slot, which the shell hides under Settings: the first run while this wsp holds no project, else the
@@ -147,3 +147,7 @@ export function Shell() {
     </AppShell>
   );
 }
+
+/** One element for the life of the module: the hooks above re-render App on every prompt that opens or closes, and
+ * the shell under it, the slate's pieces included, has nothing to draw again for that. */
+const SHELL = <Shell />;

@@ -6,7 +6,8 @@
 #
 # On a Mac it puts wsp.app in /Applications, or ~/Applications where that is not writable, and opens it once. On
 # Linux (x64) it puts the AppImage in ~/Applications and the files the command runs under ~/.wsp/app. On both it
-# writes the wsp command at ~/.wsp/bin/wsp and puts that folder on PATH for new shells.
+# writes the wsp command at ~/.wsp/bin/wsp and puts that folder on PATH for new shells, and npm's link of an older
+# wsp on PATH becomes a link to it.
 #
 # Every download is an asset of a release of github.com/wsp-labs/wsp, checked against the sha256 GitHub publishes
 # for it before anything is unpacked. The release is read off api.github.com and nothing else is asked of anything,
@@ -122,6 +123,71 @@ answers() {
     why="says ${got:-nothing}, not wsp $version"
     return 1
   }
+}
+
+# Whether release $1 comes before release $2, in the order compareVersions keeps: the dotted core by number, then a
+# prerelease before its release, and two prereleases of one core part by part, digits as numbers and below words, a
+# shorter one first where every part before it matches.
+earlier() {
+  left=${1%%-*}
+  right=${2%%-*}
+  for _ in 1 2 3; do
+    l=${left%%.*}
+    r=${right%%.*}
+    if [ "$l" -lt "$r" ]; then return 0; fi
+    if [ "$l" -gt "$r" ]; then return 1; fi
+    left=${left#*.}
+    right=${right#*.}
+  done
+  case "$1" in *-*) ;; *) return 1 ;; esac
+  case "$2" in *-*) ;; *) return 0 ;; esac
+  left=${1#*-}
+  right=${2#*-}
+  while [ -n "$left" ] && [ -n "$right" ]; do
+    l=${left%%.*}
+    r=${right%%.*}
+    if [ "$l" != "$r" ]; then
+      case "$l" in *[!0-9]*) ;; *) case "$r" in *[!0-9]*) return 0 ;; *) [ "$l" -lt "$r" ]; return ;; esac ;; esac
+      case "$r" in *[!0-9]*) ;; *) return 1 ;; esac
+      [ "$(printf '%s\n%s\n' "$l" "$r" | LC_ALL=C sort | head -n 1)" = "$l" ]
+      return
+    fi
+    case "$left" in *.*) left=${left#*.} ;; *) left="" ;; esac
+    case "$right" in *.*) right=${right#*.} ;; *) right="" ;; esac
+  done
+  [ -z "$left" ] && [ -n "$right" ]
+}
+
+# npm's link of a global install of wsp on PATH of an earlier release becomes a link to the command above, so a shell
+# finds this release whatever order its PATH comes in: the owner's ~/.local/bin/wsp was one, and it started an old
+# host beside the app. A wsp is ours by where its link points, never by what it prints, the rule the app keeps at
+# each launch (apps/desktop/src/shim.ts): a file of its own (a person's wrapper, the wsp a host writes on a machine),
+# a link anywhere else, a later release and a folder PATH names relative to here all stay.
+replace_older() {
+  printf '%s\n' "${PATH:-}" | tr ':' '\n' | while IFS= read -r dir; do
+    case "$dir" in /*) ;; *) continue ;; esac
+    other="$dir/wsp"
+    { [ -L "$other" ] && [ ! "$other" -ef "$shim" ]; } || continue
+    target=$(readlink "$other") || continue
+    case "$target" in /*) ;; *) target="$dir/$target" ;; esac
+    pkg=$(cd "$dir/../lib/node_modules/@wsp-labs/wsp" 2>/dev/null && pwd -P) || continue
+    from=$(cd "$(dirname "$target")" 2>/dev/null && pwd -P) || continue
+    case "$from/" in "$pkg/"*) ;; *) continue ;; esac
+    grep -q '"name"[[:space:]]*:[[:space:]]*"@wsp-labs/wsp"' "$pkg/package.json" 2>/dev/null || continue
+    theirs=$(sed -n 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$pkg/package.json" | head -n 1)
+    valid_version "$theirs" || continue
+    if earlier "$version" "$theirs"; then
+      say "$other is wsp $theirs, later than $version, so it stays"
+      continue
+    fi
+    earlier "$theirs" "$version" || continue
+    if ln -s "$shim" "$dir/.wsp.$$.part" 2>/dev/null && mv -f "$dir/.wsp.$$.part" "$other" 2>/dev/null; then
+      say "$other was npm's wsp $theirs; it now runs $shim"
+    else
+      rm -f "$dir/.wsp.$$.part" 2>/dev/null || true
+      say "$other is npm's wsp $theirs and could not be replaced; remove it so a shell finds wsp $version"
+    fi
+  done
 }
 
 # The host service the app installed runs the command above, so a restart puts it on the files just installed. Only
@@ -255,6 +321,7 @@ install_mac() {
   say "installed $app"
 
   put_on_path
+  replace_older
   restart_service
 
   # A file curl wrote carries no quarantine flag, so this opens with no Open Anyway step.
@@ -334,6 +401,7 @@ $parts"
   say "installed $image"
 
   put_on_path
+  replace_older
   restart_service
 
   # What earlier runs of this left; the service now runs the files above.

@@ -134,6 +134,7 @@ const NEVER_RUN: Record<string, Record<string, string>> = {
     'join(shims, "cursor-agent")': "ASCII's lazy-run shim, which the installed test finds on PATH and never runs",
     'join(other, "cursor-agent")': "a command the installed test finds on PATH past the shim and never runs",
   },
+  "apps/desktop/test/shim.test.ts": { file: "a person's wrapper and a machine's wsp the PATH check must leave without running" },
   "packages/runtime/test/store.test.ts": { wide: "the state folders an older build left wider, for the store to repair" },
   "packages/host/test/connector.test.ts": { 'join(made, "cloudflared")': "packed into a release archive the unpack is tested on, and read back for its bytes and mode" },
   "packages/host/test/doctor.test.ts": { "daemonBinaryIn(daemon, triple)": "a stand-in daemon staged into a bundle as bytes" },
@@ -153,7 +154,10 @@ const NEVER_RUN: Record<string, Record<string, string>> = {
     'join(home, ".codex", "notify.py")': "a hook the import copies, its mode what is read",
   },
   "apps/desktop/test/self-update.test.ts": { 'join(s.staged.stage, "new")': "the folder a checked copy was unpacked into, made read only so the rename out of it fails" },
-  "apps/desktop/test/install-script.test.ts": { 'join(contents, "MacOS", "wsp")': "packed into the archive a release serves; the copy its unpack writes is the one that runs" },
+  "apps/desktop/test/install-script.test.ts": {
+    'join(contents, "MacOS", "wsp")': "packed into the archive a release serves; the copy its unpack writes is the one that runs",
+    wrapper: "a person's wrapper that would hang if run, which the install line must leave without running",
+  },
 };
 
 /** Executables a test signs into an app bundle as its main executable, where a link to the runner cannot stand:
