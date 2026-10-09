@@ -11,7 +11,7 @@
 // absolute. Not persisted: a reload follows the thread again.
 import { useMemo } from "react";
 import { create } from "zustand";
-import type { ProjectRef, WorkspaceView } from "@wsp/protocol";
+import type { WorkspaceView } from "@wsp/protocol";
 import { useStore } from "../protocol/store.js";
 import { parentPath, pathSegments, type PathSegment } from "./entries.js";
 import { getDaemonRoot, useDaemonRoot } from "./wire.js";
@@ -110,12 +110,6 @@ export function selectRoot(byWorkspaceId: Record<string, WorkspaceRoot>, workspa
  * finder searches and what Open in editor opens for the thread. */
 export function projectFolderOf(workspace: Pick<WorkspaceView, "folder" | "project">): string {
   return workspace.folder ?? workspace.project.path;
-}
-
-/** The workspace's one project off the store: a workspace is one project's copy, so this is the whole of what it
- * holds. Null while the store has no record for it yet. */
-export function useProject(workspaceId: string): ProjectRef | null {
-  return useStore(s => s.workspaces.find(w => w.id === workspaceId)?.project ?? null);
 }
 
 export function useRoots(workspaceId: string): string[] {

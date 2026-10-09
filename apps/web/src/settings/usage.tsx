@@ -28,7 +28,6 @@ import { CHART_HEIGHT, UsageChart, type ChartLine } from "./usageChart.js";
 import { Skeleton } from "../components/ui/skeleton.js";
 import { DigitRoll } from "../components/ui/digit-roll.js";
 
-const NUMBER = "font-mono text-xs tabular-nums";
 const ROW_NUMBER = "font-mono text-sm tabular-nums";
 /** A table on this page: a hairline under its head and between its rows, no box, its text on the page's edge. */
 const BARE_TABLE = "flex flex-col border-b border-border/50 [&>*]:border-t [&>*]:border-border/50";

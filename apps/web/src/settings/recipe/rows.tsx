@@ -68,12 +68,8 @@ export const ROW = "flex h-12 items-center gap-3 pl-4 pr-[10px]";
 export const ROW_LINE = "border-t border-border first:border-t-0";
 export const NAME = "min-w-0 flex-1 truncate text-[15px] text-foreground";
 export const META = "font-mono text-xs tabular-nums text-muted-foreground";
-/** A field inside a row: 32 px high under a 13 px label with 8 px between, the row 72 px. */
-export const FIELD_ROW = "flex h-[72px] flex-col justify-center gap-2 pl-4 pr-[10px]";
 export const FIELD_LABEL = "text-[13px] leading-none text-foreground";
 export const FIELD = "h-8 w-full rounded-md border border-input bg-background font-mono text-xs [&_input]:h-8 [&_input]:leading-8";
-/** A field standing on its own, outside any card: 48 px high, 13 px mono. */
-export const LONE_FIELD = "h-12 w-full rounded-md border border-input bg-background font-mono text-[13px] [&_input]:h-12 [&_input]:px-[14px] [&_input]:text-[13px] [&_input]:leading-[48px]";
 
 /** One heading over a group of rows, in the group heading's sentence case sans. */
 export function GroupLabel({ children }: { children: ReactNode }) {

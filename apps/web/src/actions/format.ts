@@ -4,7 +4,7 @@
 // sentence for why it cannot run right now. Every surface reads these, so a
 // menu, a palette row and a button never say two things about one action.
 import { agentName } from "@wsp/catalog";
-import { actionRefusal, type BringBackResult, goneRefusal, isBilling, keepsRename, onDeleteOf, threadForgetRefusal, threadStateWord, type HarnessCatalog, type SessionRenameOutcome, type WorkspaceKind, type WorkspaceState } from "@wsp/protocol";
+import { actionRefusal, type BringBackResult, goneRefusal, isBilling, keepsRename, onDeleteOf, threadForgetRefusal, type HarnessCatalog, type SessionRenameOutcome, type WorkspaceKind, type WorkspaceState } from "@wsp/protocol";
 import { MAX_TERMINALS_PER_GROUP } from "../terminal/groups.js";
 
 export const WORKSPACE_WORDS = {
@@ -24,10 +24,6 @@ export const WORKSPACE_WORDS = {
   forget: "Forget task",
   startDaemon: "Reconnect",
 } as const;
-
-/** The word a creation row's slot carries once the create was refused: the state table's own, so a thread that
- * failed and a create that failed read as one word. */
-export const CREATION_FAILED = threadStateWord("failed");
 
 export const THREAD_WORDS = {
   stop: "Stop thread",
@@ -130,7 +126,6 @@ export const NEW_THREAD_WAITS = "New threads wait for the rebuild";
 export const PROJECTS_WAIT = "Projects wait for the rebuild";
 export const CLIENT_CANNOT_EXPORT = "This client cannot export projects";
 export const CLIENT_CANNOT_RENAME_WORKSPACE = "This client cannot rename tasks";
-export const CLIENT_CANNOT_LOOK = "This client cannot set a task's theme or icon";
 /** What Bring back does, on the button's hover text: the agent's branch is what leaves, and it leaves through git. */
 export const BRING_BACK_HINT = "Pushes the agent's branch and opens a pull request";
 

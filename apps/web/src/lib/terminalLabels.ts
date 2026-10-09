@@ -9,15 +9,3 @@ export function getTerminalLabel(terminalId: string): string {
 
   return terminalId;
 }
-
-/** Prefer server summary label when present; otherwise fall back to `getTerminalLabel`. */
-export function resolveTerminalSessionLabel(
-  terminalId: string,
-  summary: { label?: string | null } | null | undefined,
-): string {
-  const trimmed = summary?.label?.trim();
-  if (trimmed && trimmed.length > 0) {
-    return trimmed;
-  }
-  return getTerminalLabel(terminalId);
-}

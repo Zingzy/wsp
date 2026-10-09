@@ -88,7 +88,3 @@ export interface ResolvedKeybindingRule {
 }
 
 export type ResolvedKeybindingsConfig = ReadonlyArray<ResolvedKeybindingRule>;
-
-export function isKeybindingCommand(value: string): value is KeybindingCommand {
-  return (KEYBINDING_COMMANDS as readonly string[]).includes(value);
-}

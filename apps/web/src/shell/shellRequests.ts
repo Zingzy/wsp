@@ -7,7 +7,6 @@
 // Composer focus is held rather than broadcast: the workspace switch selects
 // and asks in one handler, and the composer it names remounts after that
 // handler returns.
-import type { LookPart } from "@wsp/protocol";
 
 const NEW_THREAD_EVENT = "wsp:new-thread";
 const ADD_PROJECT_EVENT = "wsp:add-project";
@@ -111,24 +110,6 @@ export function onRenameWorkspaceRequest(listener: (detail: RenameWorkspaceReque
   const handler = (event: Event) => listener((event as CustomEvent<RenameWorkspaceRequest>).detail);
   window.addEventListener(RENAME_WORKSPACE_EVENT, handler);
   return () => window.removeEventListener(RENAME_WORKSPACE_EVENT, handler);
-}
-
-const WORKSPACE_LOOK_EVENT = "wsp:workspace-look";
-
-export interface WorkspaceLookRequest {
-  readonly workspaceId: string;
-  readonly part: LookPart;
-}
-
-/** Asks for the picker of one fact of a workspace's look; the sidebar answers, since it draws the rows the pick shows on. */
-export function requestWorkspaceLook(workspaceId: string, part: LookPart): void {
-  window.dispatchEvent(new CustomEvent(WORKSPACE_LOOK_EVENT, { detail: { workspaceId, part } }));
-}
-
-export function onWorkspaceLookRequest(listener: (detail: WorkspaceLookRequest) => void): () => void {
-  const handler = (event: Event) => listener((event as CustomEvent<WorkspaceLookRequest>).detail);
-  window.addEventListener(WORKSPACE_LOOK_EVENT, handler);
-  return () => window.removeEventListener(WORKSPACE_LOOK_EVENT, handler);
 }
 
 const PROJECT_TRIP_EVENT = "wsp:project-trip";
