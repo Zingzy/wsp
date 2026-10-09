@@ -63,7 +63,7 @@ import type {
   LimitWindow,
   ResetCredit,
 } from "@wsp/protocol";
-import { catalogProbeCommand, parseCatalogProbe } from "./catalog.js";
+import { catalogProbeCommand, parseCatalogProbe, versionProbeCommand, parseVersion } from "./catalog.js";
 import { accessParams, buildCommand, buildEnv, imagePath } from "./command.js";
 import {
   INITIALIZED_LINE,
@@ -190,6 +190,8 @@ export interface CodexAdapter {
   readonly waitsForPrompt: true;
   /** Makes the binary describe itself under the same home as a session, without running a turn. */
   probeCatalog(exec: HarnessExec): Promise<HarnessCatalogAnswer>;
+  /** Asks the binary only its version, under the same environment as the probe; null where it printed none. */
+  probeVersion(exec: HarnessExec): Promise<string | null>;
   /** What the CLI's thread index calls a thread: the name the person gave it, or the title it derived. */
   sessionTitle: SessionTitleReader;
   /** Names the thread through the app server's own rename, which writes the column that read takes. */
@@ -1338,6 +1340,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
     aside,
     revert,
     probeCatalog,
+    probeVersion: (exec: HarnessExec) => exec(versionProbeCommand(launch), questionEnv()).then(parseVersion),
     sessionTitle: (threadId, exec) => exec(sessionTitleCommand({ home: deps.home, threadId })).then(parseSessionTitle),
     renameSession: (threadId, title, exec) =>
       exec(renameCommand({ threadId, title, ...launch }), questionEnv()).then(parseRename),

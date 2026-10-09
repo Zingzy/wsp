@@ -131,6 +131,9 @@ export const PREFERENCES_ID = "default";
  * before it reads as seen, so the stamps arriving do not mark every old thread unread at once. */
 export const READS = "reads";
 export const READS_ID = "since";
+/** An agent's lists as its binary last answered the probe, one record per machine and agent: a host just started
+ * answers its first send from them, while that binary answers the same version, and asks the binary again. */
+export const AGENT_LISTS = "agent-lists";
 
 /** What the timeline shows as the last row of a turn the runtime ended, not the harness. */
 export const PAUSED_REASON = "machine paused while the agent was working";
