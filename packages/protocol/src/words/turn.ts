@@ -30,6 +30,9 @@ export function notifyBody(result: TurnResult, length: NotifyLength = "tail"): s
 /** A turn that ended with no result and no reason from the runtime. */
 export const NO_RESULT_LINE = "turn ended without a result";
 
+/** A subagent that ended with its report withheld: the CLI's own line for it is written to the model. */
+export const NO_REPORT_LINE = "Finished without handing back a report.";
+
 /** How long a line a listing carries for a turn or a subagent runs, in characters: what a lead's tree draws under a
  * child. */
 export const LISTED_LINE_CHARS = 200;
