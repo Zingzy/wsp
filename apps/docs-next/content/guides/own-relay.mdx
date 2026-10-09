@@ -1,3 +1,152 @@
 # Run your own relay
 
-Written from `infra/relay`: `wrangler.jsonc` and its migrations.
+The relay gives a host that no one can reach from outside an HTTPS address. wsp uses `relay.usewsp.com` unless you name another one. The relay is in the wsp repo under `infra/relay`: a Cloudflare Worker with one D1 database. Run your own when you do not want a third party to hold your relay account and the Cloudflare account that your tunnels live on.
+
+## Before you start
+
+You need:
+
+- A Cloudflare account.
+- A domain on that account for the relay's own address, for example `relay.example.com`.
+- A GitHub account, for the OAuth app that people sign in with.
+- Node, pnpm and git on the computer that you deploy from.
+
+Decide how hosts get their names:
+
+- With a zone, each host gets a name of its own, `<host id>.<zone>`, through a tunnel that the relay makes on your account. The relay needs a Cloudflare API token that can edit DNS in that zone.
+- Without a zone, the relay makes no tunnel and calls no Cloudflare API. Each host runs a quick tunnel and gets a new `trycloudflare.com` name each time its connector starts `cloudflared`. That happens at each start of the host, and again when `cloudflared` stops and the connector starts it again. A box keeps the address that it joined at. So a box that joined through a quick tunnel's name loses your host at the next new name. Use a zone if boxes join through the relay.
+
+Give the relay a zone that nothing else depends on. The relay writes and deletes only `<host id>.<zone>`, but its API token can write any record in that zone. Anyone who takes over the Worker or the token takes over the whole zone. A zone that also holds your mail or your main site is the wrong one.
+
+## Step 1: Get the code
+
+```sh
+git clone https://github.com/wsp-labs/wsp.git
+cd wsp
+pnpm install
+cd infra/relay
+pnpm exec wrangler login
+```
+
+## Step 2: Make the database
+
+```sh
+pnpm exec wrangler d1 create wsp-relay
+```
+
+Copy the `database_id` that it prints.
+
+## Step 3: Edit `wrangler.jsonc`
+
+The file in the repo holds the values of `relay.usewsp.com`. Replace each one with yours:
+
+| Key | Value |
+|---|---|
+| `routes[0].pattern` | Your relay's address, for example `relay.example.com` |
+| `d1_databases[0].database_id` | The id from step 2 |
+| `vars.CLOUDFLARE_ACCOUNT_ID` | The id of the Cloudflare account that the tunnels are made on |
+| `vars.RELAY_ZONE` | The zone for host names, for example `example.com`. Empty for quick tunnels. |
+| `vars.RELAY_ZONE_ID` | The id of that zone. Empty for quick tunnels. |
+
+The relay uses a zone only when both `RELAY_ZONE` and `RELAY_ZONE_ID` are set.
+
+`observability.enabled` is `true` in the file, so Cloudflare keeps the Worker's logs. The URL of the GitHub callback carries the OAuth code and state, so those are in the logs. To keep no Worker logs, set it to `false`.
+
+## Step 4: Apply the migrations
+
+```sh
+pnpm exec wrangler d1 migrations apply wsp-relay --remote
+```
+
+This makes the tables from `infra/relay/migrations`: the accounts, the hosts, the computers that signed in, their admissions and the link codes.
+
+## Step 5: Make a GitHub OAuth app
+
+In GitHub, open Settings > Developer settings > OAuth Apps and make a new app:
+
+- Homepage URL: `https://relay.example.com`
+- Authorization callback URL: `https://relay.example.com/link/callback`
+
+Keep its client id, and make a client secret. The relay asks GitHub for no scope. It keeps the GitHub user id and login, and not the token.
+
+The relay has no list of allowed users. Any GitHub user who opens your relay can sign in, get an account of their own, and put hosts on it. With a zone, each of those hosts makes a tunnel on your Cloudflare account and a DNS name in your zone.
+
+## Step 6: Make a Cloudflare API token
+
+Skip this step for quick tunnels. With a zone, make a token in Cloudflare with these permissions:
+
+- Account, Cloudflare Tunnel, Edit, on the account from step 3.
+- Zone, DNS, Edit, on the zone from step 3 only.
+
+## Step 7: Set the secrets
+
+```sh
+pnpm exec wrangler secret put CLOUDFLARE_API_TOKEN
+pnpm exec wrangler secret put GITHUB_CLIENT_ID
+pnpm exec wrangler secret put GITHUB_CLIENT_SECRET
+pnpm exec wrangler secret put RELAY_SIGNING_KEY
+```
+
+Each command asks for the value. For quick tunnels, skip `CLOUDFLARE_API_TOKEN`. For `RELAY_SIGNING_KEY`, use 32 random bytes:
+
+```sh
+openssl rand -base64 32
+```
+
+The relay signs its own tokens with this key. Anyone who has it can make tokens for any account on your relay, so keep it only in the Worker.
+
+## Step 8: Deploy
+
+```sh
+pnpm exec wrangler deploy
+```
+
+To make sure that the Worker answers, open `https://relay.example.com/link/verify` in a browser.
+
+## Step 9: Point wsp at your relay
+
+wsp has no setting for the relay. You name it in the command.
+
+A host that is linked to another relay, such as `relay.usewsp.com`, refuses a second link. Run `wsp host unlink` on its computer first. A computer that is signed in to another relay refuses to sign in again. Run `wsp logout` on it first.
+
+On the computer that runs your host, sign in to your relay:
+
+```sh
+wsp login https://relay.example.com
+```
+
+It prints a word, a code and a page. This is the first computer on your account, so open the page, sign in with GitHub and type the code there. Then link the host and restart it:
+
+```sh
+wsp host link
+wsp restart
+```
+
+On a computer that is signed in, `wsp host link` takes no address. It links the host to the relay that the computer is signed in to.
+
+On each other computer that opens your host from outside, sign in too:
+
+```sh
+wsp login https://relay.example.com
+```
+
+It prints a line that starts with `word`. On the computer that runs your host, admit that computer with its word:
+
+```sh
+wsp login <word>
+```
+
+Then, on the other computer, list the hosts that it can reach:
+
+```sh
+wsp hosts
+```
+
+`wsp hosts` writes a record for each host. The Hosts menu in the app and `--host` read those records, so the other computer reaches your host only after this step.
+
+A computer that signed in on the page alone can read the account but reaches no host. Your host takes an admission only from the computer that linked it, or from a computer that it already admitted. On one of those computers, `wsp login` on its own lists the ids, and `wsp login <id>` admits that computer. On a computer that is signed in to nothing, `wsp login` on its own starts a sign-in to `relay.usewsp.com` instead.
+
+## Next
+
+- [A box behind a firewall](/guides/behind-a-firewall) joins a box through the relay.
+- [What leaves your computer](/how/network) lists what a relay stores.

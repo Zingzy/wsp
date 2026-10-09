@@ -1,3 +1,147 @@
 # The host
 
-Written from `wsp up --service`, `down`, `status` and `restart`, and the launchd and systemd units.
+The host is the wsp process on your computer. It holds the state file, with your projects, threads, transcripts and computers, and it holds your keys. Everything else is a client of the host: the app's window, a browser tab, the `wsp` command line and the wsp tools in an agent.
+
+There is one host for each state file. The state file is `~/.wsp/state.json` unless you name another one with `--state` or `WSP_HOME`.
+
+## The app starts it as a service
+
+When the desktop app opens and nothing serves the state file, the app installs the host as a service and connects to it. The service runs the command that the app installs:
+
+```sh
+~/.wsp/bin/wsp up --state ~/.wsp/state.json
+```
+
+By default, the service starts again at every login, and the host keeps running when you close the window or quit the app. Quit asks you first:
+
+```
+Quit wsp?
+wsp keeps running in the background after the app quits, so your threads carry on and the wsp command still answers. Quit and stop wsp stops it too.
+```
+
+Quit and stop wsp stops the threads that work on this computer, and then stops the host.
+
+To change these defaults, open Settings > General. Start wsp at login turns the start at login off. When you quit has three choices: Ask each time, Keep threads running and Stop wsp too.
+
+## A command starts one when there is no app
+
+When a `wsp` command needs a host and nothing serves its state file, the command starts a host for itself and tells you on stderr:
+
+```
+starting the host for /Users/you/.wsp/state.json; its log is /Users/you/.wsp/host.log, and wsp down stops it
+```
+
+That host runs detached, on a free port that the operating system picks. Every client reads the port from the lock file beside the state file, so the port number does not matter. The command waits up to 20 seconds for the host to answer.
+
+If a service unit is installed for the state file but is not running, the command does not start a second host. It tells you how to start the service:
+
+```
+/Users/you/.wsp/state.json is served by the launchd agent com.wsp.host.1a2b3c4d, which is not running; wsp up --service --state /Users/you/.wsp/state.json starts it again
+```
+
+## Run it in a terminal with `wsp up`
+
+Use `wsp up` when you want to watch the host in a terminal. The host serves until you stop it, so the terminal must stay open.
+
+```sh
+wsp up
+wsp up --port 4401
+wsp up --state ~/work/.wsp/state.json
+```
+
+It prints where it serves:
+
+```
+app         http://127.0.0.1:4400
+runtime ws  ws://127.0.0.1:4400/ws (token: /Users/you/.wsp/host-token)
+state       /Users/you/.wsp/state.json
+```
+
+- The app and the WebSocket share one port. The default is `4400`, on `127.0.0.1` only.
+- If you name no port and `4400` is in use, the host takes the next free port, up to 19 higher, and says which.
+- If you name a port and it is in use, the host does not start. It names the next free port.
+- `--port 0` takes any free port.
+- `--listen <addr>` binds another address. Then anyone who can reach that address can load the page, and pairing is the gate. `wsp host pair` prints a code, and `wsp host devices` shows who took one.
+
+When a computer has joined, the host also opens a second port on every address. A joined computer's daemon dials that port.
+
+- The app's host, and a host that you start with `wsp up` or `wsp up --service`, ask for a fixed port. The second port is 20 above that port. That is `4420` for the default `4400`, and `4421` for `wsp up --port 4401`.
+- A host that a `wsp` command starts by itself runs on port 0. Its second port is then any free port, and it changes at each start.
+
+A box keeps the address that it joined with. So a box that joined a host on port 0 loses that host when the host starts again. If you do not use the app, start the host with `wsp up --service` before a box joins.
+
+A second host on the same state file does not start. It names the one that is serving:
+
+```
+another wsp host (pid 4123) is already serving /Users/you/.wsp/state.json on port 4400. wsp down stops it, or point --state at a different file.
+```
+
+A lock whose process is gone is left over from a crash, and a new host takes it.
+
+## Run it as a service with `wsp up --service`
+
+`wsp up --service` gives the same host to your computer's service manager. The app takes this path itself, so you do not need it when you use the app.
+
+| Computer | Unit file |
+|---|---|
+| macOS | a launchd agent at `~/Library/LaunchAgents/com.wsp.host.<tag>.plist` |
+| Linux | a systemd user unit at `~/.config/systemd/user/wsp-host-<tag>.service` |
+
+The `<tag>` is the first 8 characters of the SHA-256 of the state file's path, so each state file has its own unit. The unit file has mode 600. The service writes its output to `host.log` beside the state file. On Linux, the service starts again 5 seconds after it stops, and a restart of the service does not stop running turns. The service starts at every login. On Linux, `loginctl enable-linger` keeps it running between logins.
+
+The unit holds no key. It carries `WSP_HOME`, `WSP_LABS`, `WSP_UPDATE_CHECK`, `WSP_ANALYTICS`, `WSP_STATE_STORE` and `SHELL`, each only when the shell that installs it sets it. The host reads its keys from the `.env` file beside the state file. A service starts without your shell, so the service does not get a key that is only in your shell's environment. For `ANTHROPIC_API_KEY`, the install prints a note and goes on. Every other key that is only in your shell, such as `CLAUDE_CODE_OAUTH_TOKEN` or `GH_TOKEN`, is left out without a word. Before you install the service, put each key that the host needs in that `.env`.
+
+After it loads the unit, `wsp up --service` waits up to 20 seconds for the lock file and for an answer on the port. On success, it prints the address lines and `Stop it with wsp down.` On failure, it prints the last 20 lines of the log.
+
+## Stop it with `wsp down`
+
+`wsp down` stops the host that serves the state file:
+
+- If a service unit serves it, `wsp down` stops the service and removes the unit. Running turns keep going until the next host takes them over.
+- If a command or a terminal `wsp up` started it, `wsp down` stops that process.
+- If you started the host by hand in another way, `wsp down` tells you to stop it with Ctrl-C in its terminal, or with `kill`.
+
+## Check it with `wsp status`
+
+`wsp status` prints one row for each fact:
+
+```
+host        running (pid 4123, up 130m)
+app         http://127.0.0.1:4400
+runtime ws  ws://127.0.0.1:4400/ws (token: /Users/you/.wsp/host-token)
+state       /Users/you/.wsp/state.json
+service     launchd agent com.wsp.host.1a2b3c4d, loaded (...)
+latest      0.3.1
+```
+
+The `latest` row comes from `release.json`, the last answer of the release check. `wsp status` exits with 0 only when a host answers.
+
+## Restart it after an update
+
+When you install a newer wsp, the files change but the running host does not. Restart the host to run the new files:
+
+- `wsp restart` restarts the host and answers when the new host serves. It names the threads that are still running.
+- In the app, Settings > General has Restart host in the Version card when the files carry another version than the host.
+
+A service host exits, and its service manager starts it again. A host that a command started starts the new host on the same port. A host that you run with `wsp up` in a terminal does not restart itself. Press Ctrl-C in that terminal and run `wsp up` again.
+
+A restart closes every open terminal pane, every forward of a localhost port and every sign-in in progress. Running turns continue.
+
+## A command and a host of different versions
+
+A command line refuses to talk to a host of another wsp version. It says which versions they are and how to fix it, for example:
+
+```
+this line runs wsp 0.3.1 and the host serving /Users/you/.wsp/state.json runs wsp 0.3.0: restart that host with wsp restart.
+```
+
+The fix depends on how the host started. For a host that the app holds, it tells you to quit the app and open it again. For a host in a terminal, it tells you to press Ctrl-C and run `wsp up` again.
+
+## When its program file is gone
+
+On Linux, the host checks every 5 seconds that its own program file is still there. The file is the program that runs the host: node for a wsp from npm, or a program inside the app for the desktop app's host. An AppImage's mount that goes away and a copy of the app that you remove are two examples. When the file is gone, the host stops, so the next start runs what the `wsp` command names now. An update that puts a new file at the same path does not stop the host. On a Mac, the host keeps serving.
+
+## Next
+
+- [What is stored where](/how/storage) lists every file beside the state file.
+- [The host, the daemon and the relay](/how/overview) shows how the host reaches your other computers.
