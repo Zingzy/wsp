@@ -5,13 +5,13 @@ import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { LINK_PROMPT_MS, LinkMachine, roadFailed, type ExecResult } from "@wsp/engine";
 import { createRuntime, type Runtime } from "../src/runtime.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
-import { POLL_INTERVAL_MS, createStatusTracker, probeReach, type StatusListOptions, type StatusRecord, type StatusWatchOptions } from "../src/status.js";
+import { POLL_INTERVAL_MS, costMoved, createStatusTracker, probeReach, type StatusListOptions, type StatusRecord, type StatusWatchOptions } from "../src/status.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { droppingPort } from "./held-port.js";
 import { fakeClock } from "./fake-clock.js";
 import { stubBackend, type StubBackend, createOn, projectOn } from "./stub-backend.js";
 import { until } from "./until.js";
-import { WsClient } from "./ws-client.js";
+import { WsClient, type WireMsg } from "./ws-client.js";
 
 /** Every road to the provider's view of a machine: backend.get/list and machine.state(). */
 function countProvider(backend: StubBackend): () => { get: number; list: number; state: number } {
@@ -542,6 +542,7 @@ describe("the status poll and a machine's uptime", () => {
         if (e.type === "workspace.status") sent.push(e.status);
         for (const l of listeners) l(e);
       },
+      pass: () => {},
       on: (_type, listener) => {
         listeners.push(listener);
         return () => {};
@@ -585,6 +586,7 @@ describe("the status poll and a machine's uptime", () => {
         if (e.type === "workspace.status") sent.push(e.status);
         for (const l of listeners) l(e);
       },
+      pass: () => {},
       on: (_type, listener) => {
         listeners.push(listener);
         return () => {};
@@ -657,6 +659,7 @@ describe("the status ticks", () => {
       records: async () => [dark],
       store: memoryStore(),
       emit: () => {},
+      pass: () => {},
       on: (_type, listener) => {
         heard.push(listener);
         return () => {};
@@ -689,6 +692,7 @@ describe("the status ticks", () => {
       },
       store: memoryStore(),
       emit: () => {},
+      pass: () => {},
       on: () => () => {},
       defaults: { costIntervalMs: 5, pollIntervalMs: 5 },
     });
@@ -1410,6 +1414,102 @@ describe("serveRuntime status.subscribe", () => {
     await until(() => c.events.some(e => e.type === "workspace.cost"));
     c.close();
   });
+
+  /** A runtime with `count` workspaces whose cost timer the test moves `everyMs` at a time, served to one subscribed socket. */
+  async function served(count = 1, everyMs = 10): Promise<{ rt: Runtime; ws: { id: string }; all: { id: string }[]; c: WsClient; stream: string; ticks: (n: number) => Promise<void>; sent: () => WireMsg[] }> {
+    const fc = fakeClock();
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {}, goneConfirmMs: 0, clock: fc.clock, status: { costIntervalMs: everyMs, pollIntervalMs: 24 * 3_600_000 }, idle });
+    const all: { id: string }[] = [];
+    for (let i = 0; i < count; i++) all.push(await createOn(rt, { golden: "snap_g", name: `w${i}` }));
+    const ws = all[0]!;
+    srv = await serveRuntime(rt, { port: 0, authToken: "secret" });
+    const c = await WsClient.connect(srv.port, { token: "secret" });
+    const stream = (await c.request("events.subscribe"))["stream"] as string;
+    await c.request("status.subscribe");
+    const ticks = async (n: number): Promise<void> => {
+      for (let i = 0; i < n; i++) {
+        fc.advance(everyMs);
+        await new Promise(r => setImmediate(r));
+      }
+      await new Promise(r => setTimeout(r, 50));
+    };
+    return { rt, ws, all, c, stream, ticks, sent: () => c.events.filter(e => e.type === "workspace.cost" && e["workspaceId"] === ws.id) };
+  }
+
+  /** Every workspace has spent and is napping, and the nap's own tick has gone out. */
+  async function nappedWithSpend(rt: Runtime, all: { id: string }[], ticks: (n: number) => Promise<void>): Promise<void> {
+    await ticks(5);
+    for (const w of all) await rt.workspaces.nap(w.id);
+    await ticks(2);
+    for (const w of all) expect((await rt.status.history(w.id)).at(-1)).toMatchObject({ phase: "napping", accruedUsd: expect.any(Number) });
+  }
+
+  it("sends a napping workspace's spend once: 100 cost ticks in a second send it at most twice", async () => {
+    const { rt, ws, c, ticks, sent } = await served();
+    await ticks(5);
+    await rt.workspaces.nap(ws.id);
+    await until(() => sent().at(-1)?.["phase"] === "napping");
+    expect(sent().at(-1)!["accruedUsd"]).toBeGreaterThan(0);
+    const before = sent().length;
+    await ticks(100);
+    expect(sent().length - before).toBeLessThanOrEqual(2);
+    c.close();
+  });
+
+  it("keeps the last figures of a burst: a second after it ends, the socket holds what the meter holds", async () => {
+    const { rt, ws, c, ticks, sent } = await served();
+    await ticks(50);
+    await rt.workspaces.nap(ws.id);
+    await ticks(50);
+    await ticks(100);
+    const last = (await rt.status.history(ws.id)).at(-1)!;
+    expect(sent().at(-1)).toMatchObject({ phase: "napping", rateUsdPerHour: 0, awakeMs: last.awakeMs, accruedUsd: last.accruedUsd });
+    c.close();
+  });
+
+  it("keeps repeated figures out of the replay list: a socket that sat idle reconnects after its cursor with no gap", async () => {
+    const { rt, all, c, stream, ticks } = await served(40);
+    await nappedWithSpend(rt, all, ticks);
+    await ticks(140);
+    const cursor = Math.max(...c.events.map(e => (typeof e["seq"] === "number" ? e["seq"] : 0)));
+    const again = await WsClient.connect(srv!.port, { token: "secret" });
+    const res = await again.request("events.subscribe", { after: cursor, stream });
+    expect(res["gap"]).toBeUndefined();
+    again.close();
+    c.close();
+  });
+
+  it("adds at most one cost event per napping workspace to the replay list in an hour of ticks", async () => {
+    const { rt, all, c, ticks } = await served(70, 5_000);
+    await nappedWithSpend(rt, all, ticks);
+    const { stream, head } = rt.events.since(undefined, undefined);
+    await ticks(720);
+    const { events, gap } = rt.events.since(head, stream);
+    expect(gap).toBe(false);
+    const per = new Map<string, number>();
+    for (const e of events) if (e.type === "workspace.cost") per.set(e.workspaceId, (per.get(e.workspaceId) ?? 0) + 1);
+    expect([...per.values()].every(n => n <= 1)).toBe(true);
+    c.close();
+  }, 30_000);
+
+  it("forgets a deleted workspace's figures, so a socket open for days holds none of them", () => {
+    const moved = costMoved();
+    const tick = { type: "workspace.cost", workspaceId: "ws_a", phase: "napping", rateUsdPerHour: 0, awakeMs: 1, accruedUsd: 0.5, at: new Date(0).toISOString() };
+    expect([moved(tick), moved(tick), moved({ type: "workspace.deleted", workspaceId: "ws_a" }), moved(tick)]).toEqual([true, false, true, true]);
+  });
+
+  it("sends a socket that subscribes later every workspace's spend on the next tick", async () => {
+    const { rt, ws, c, ticks, sent } = await served();
+    await ticks(5);
+    await rt.workspaces.nap(ws.id);
+    await ticks(10);
+    const late = await WsClient.connect(srv!.port, { token: "secret" });
+    await late.request("events.subscribe");
+    await ticks(1);
+    expect(late.events.filter(e => e.type === "workspace.cost" && e["workspaceId"] === ws.id)).toMatchObject([{ phase: "napping", accruedUsd: sent().at(-1)!["accruedUsd"] }]);
+    late.close();
+    c.close();
+  });
 });
 
 describe("status zombie at rest", () => {
@@ -1582,7 +1682,7 @@ describe("a machine the provider answered it cannot reach", () => {
       unreached: LINE,
       ...over,
     };
-    const tracker = createStatusTracker({ records: async () => [record], store: memoryStore(), emit: () => {}, on: () => () => {}, clock: fc.clock, defaults: { zombieProbeTimeoutMs: 2_000 } });
+    const tracker = createStatusTracker({ records: async () => [record], store: memoryStore(), emit: () => {}, pass: () => {}, on: () => () => {}, clock: fc.clock, defaults: { zombieProbeTimeoutMs: 2_000 } });
     const poll = async (opts?: StatusListOptions): Promise<WorkspaceStatus> => {
       fc.advance(POLL_INTERVAL_MS);
       return (await tracker.list(opts))[0]!;

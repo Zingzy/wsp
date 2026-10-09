@@ -123,6 +123,7 @@ import { answeredStart } from "./threads/answered-start.js";
 import type { HostEditor, HostFolders, HostSsh, HostTerminalConfig, InitDoor, ProjectBundler, ProjectLander, RecipeShelf, Runtime } from "./runtime.js";
 
 import { forwardsOf, type ForwardsSource } from "./forwards.js";
+import { costMoved } from "./status.js";
 export type { ForwardsSource };
 
 /** The address a host binds when nobody names another and the path the runtime answers upgrades on, both the
@@ -1165,8 +1166,9 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               // An event about a workspace this caller may not drive never reaches it, replayed or live: a socket
               // that may not read a workspace's rows may not read its turns going by either. Read through the
               // runtime's one rule, so what a listing hides and what the stream hides cannot come apart.
+              const moved = costMoved();
               const pass = (e: unknown): void => {
-                if (rt.workspaces.seenBy(e, origin)) send(e as Record<string, unknown>);
+                if (rt.workspaces.seenBy(e, origin) && moved(e)) send(e as Record<string, unknown>);
               };
               detaches.push(rt.events.on("*", pass));
               detaches.push(forwards.on(pass));
