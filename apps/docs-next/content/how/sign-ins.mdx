@@ -4,7 +4,7 @@ Many tools sign in through a web page. The tool opens the page in a browser, and
 
 wsp opens the page in your browser and carries the callback back to the box. The host never logs the URL. The callback request itself travels through the host's link to the box, with the code that the provider put in it. A device code travels to you in the line that says a sign-in waits.
 
-This works only for a sign-in that wsp starts on a box. Those are the sign-ins in the app's Add a computer, the app's Sign in for an agent, `wsp agents signin` and `wsp add <computer> --sign-in <agent>`. While one of them runs, the host acts on a sign-in page or a callback port from that box. At any other time, the host ignores them and logs `ignored a sign-in page from the computer; no sign-in runs there`. So `gh auth login` that you type in a box's terminal gets no forward. The host also never forwards a local URL that a box prints.
+This works only for a sign-in that wsp starts on a box. Those are the sign-ins in the app's Add a computer, the app's Sign in for an agent, and `wsp add <computer> --sign-in <agent>`. `wsp agents signin` signs an agent in on the computer that the app runs on, not on a box. While one of them runs, the host acts on a sign-in page or a callback port from that box. At any other time, the host ignores them and logs `ignored a sign-in page from the computer; no sign-in runs there`. So `gh auth login` that you type in a box's terminal gets no forward. The host also never forwards a local URL that a box prints.
 
 ## The steps
 
@@ -28,7 +28,7 @@ Some tools print the URL and do not ask for a browser. The daemon also reads the
 
 ## In a terminal
 
-When `wsp add` or `wsp agents signin` runs a sign-in in your terminal, the tool runs on the box and its output shows in your terminal, as over ssh. A URL that the tool prints shows again as a link with one line:
+When `wsp add` runs a sign-in in your terminal, the tool runs on the box and its output shows in your terminal, as over ssh. A URL that the tool prints shows again as a link with one line:
 
 ```
   link  https://github.com/login/device  o opens it on this computer

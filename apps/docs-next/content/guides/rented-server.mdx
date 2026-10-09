@@ -14,7 +14,7 @@ The server must have:
 - Root's login shell set to bash or sh.
 - Free space on `/opt/wsp` for the base tools, plus 1 GiB.
 
-On your computer, you need wsp and a running host. The app starts the host. Without the app, the first `wsp` command starts it.
+On your computer, you need wsp and a running host. The app starts the host. If you do not use the app, run `wsp up --service` before you add the server. A host that a `wsp` command starts by itself takes a new port for boxes at each start, and the server then loses it.
 
 ## Step 1: Read the server's host key on the server itself
 
@@ -119,7 +119,7 @@ wsp recipes save mine --from vps
 wsp add root@198.51.100.4 --name vps2 --recipe mine
 ```
 
-`wsp recipes` lists the recipes that you saved. A recipe cannot be saved from the computer that the app runs on.
+After the save, vps follows `mine`. When `mine` changes later, wsp applies the change to vps, and to each other computer that follows `mine`, with no step from you. `wsp recipes` lists the recipes that you saved. A recipe cannot be saved from the computer that the app runs on.
 
 The setup puts on the base tools first. Then it runs the other steps, several at once where one does not wait on another:
 

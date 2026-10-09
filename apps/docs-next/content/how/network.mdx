@@ -6,7 +6,7 @@ wsp runs on computers that you own. Your code, prompts, transcripts and keys sta
 
 ## Five requests the host makes on its own
 
-The host makes these five requests without an action from you. The first four carry no key, path, prompt or file of yours. The fifth goes through your own `gh` sign-in.
+The host makes these five requests without an action from you. The first four carry no key, path, prompt or file of yours. The fifth goes through a `gh` that you signed in.
 
 ### wsp's newest release
 
@@ -45,8 +45,8 @@ A release build of wsp sends counts to PostHog's EU cloud (`eu.i.posthog.com`). 
 | `computer.added` | The system (linux, darwin or other) and how many agents |
 | `computer.setup.ended` | How the setup ended, the steps that failed and its time |
 | `project.added` | Whether it came from a folder or a repo, and whether it is on this computer |
-| `init.ended` | How a `wsp init` ended, where it stopped, and its time |
-| `op.failed` | The name of the operation and its class, at most once a minute |
+| `init.ended` | Which way a `wsp init` ran (`manual`, `agent` or `terminal`), how it ended, where it stopped, and its time |
+| `op.failed` | The name of the operation, its class and, when the error has one, its kind (`usage`, `invalid`, `auth` or `not-found`), at most once a minute |
 | `host.started` | How many projects, computers and workspaces the host holds, and whether this is its first run |
 
 Every event also carries the wsp version, the system, the chip, how the host started and `surface: "app"`. Nothing else goes with it: no path, prompt, reply, error text, name, host name, account or key. Each event carries a random install id from `analytics-id` (see [What is stored where](/how/storage)). PostHog sees the address of the request.
@@ -57,9 +57,9 @@ To turn this off, switch off Anonymous usage counts in Settings > Privacy. `WSP_
 
 ### Pull requests, through your `gh`
 
-The host reads a thread's pull request with your own `gh` sign-in, through the daemon of the computer where the thread runs. It reads it after every turn that ends by itself, because a turn can push. It also reads an open pull request again every 3 minutes while a window is open, and every 15 minutes while none is. It never reads a merged or closed one again.
+The host reads a thread's pull request with the `gh` on the computer where the host runs. If that `gh` is not signed in and the thread runs on a box, the host uses the `gh` on the box, through the box's daemon. It reads it after every turn that ends by itself, because a turn can push. It also reads an open pull request again every 3 minutes while a window is open, and every 15 minutes while none is. It never reads a merged or closed one again.
 
-To stop it, sign out of `gh` on the computer where the thread runs.
+To stop it, sign out of `gh` on the computer where the host runs. For a thread on a box, also sign out of `gh` on the box. Settings has no switch for these reads.
 
 ## Requests when you use a feature
 
@@ -78,10 +78,10 @@ Each agent's traffic, with your prompts, your code and its replies, goes from `c
 
 ## Between your computers
 
-- When you add a box, the setup copies what you pick to it over ssh. That is the agents' configuration, including `~/.claude.json` as it is, your MCP servers' configuration, your skills, and your git and shell configuration after their cuts. The shell's variables are cut by name only, so a `DATABASE_URL` with a password in it travels. [What is stored where](/how/storage) lists the cuts.
+- When you add a box, the setup copies what you pick to it over the daemon's sealed link, not over ssh. A box that joined with `wsp join` gets the same copies. They are the agents' configuration, including `~/.claude.json` as it is, your MCP servers' configuration, your skills, and your git and shell configuration after their cuts. The shell's variables are cut by name only, so a `DATABASE_URL` with a password in it travels. [What is stored where](/how/storage) lists the cuts.
 - `wsp add user@host` reaches a box over ssh. The box's host key goes into your `~/.ssh/known_hosts`. A sudo password goes only to sudo on the box, and wsp keeps it nowhere.
 - The daemon on a box dials your host. The two sides check each other's keys, then seal every frame with X25519, HKDF and AES-256-GCM.
-- When a computer has joined, the host listens on a second port on every address of your computer. The port is 20 above the app port, `4420` for the default `4400`. So a box on your network can dial it.
+- When a computer has joined, the host listens on a second port on every address of your computer. For the app's host and a host that `wsp up` starts, the port is 20 above the app port, `4420` for the default `4400`. A host that a `wsp` command starts by itself takes any free port for it. So a box on your network can dial it.
 - At each dial, a box reports its name, system, CPU, memory, disk, `HOME`, `USER`, `PATH`, its agents' versions and the names of their sign-in files.
 - The daemon has no telemetry and no update server. A new daemon comes only from your host.
 
@@ -110,7 +110,7 @@ A Cloudflare tunnel ends TLS at Cloudflare. Frames between a box and the host st
 | Each agent's newest version | Settings > Privacy > Newest agent versions, or `WSP_UPDATE_CHECK=0` |
 | Icons of MCP servers | Settings > Privacy > Server icons from Google |
 | Usage counts | Settings > Privacy > Anonymous usage counts, or `WSP_ANALYTICS=0` |
-| Pull request reads | Sign out of `gh` on the computer where the thread runs |
+| Pull request reads | Sign out of `gh` on the computer where the host runs, and on the box for a thread there |
 | The relay | Do not run `wsp host link`. `wsp host unlink` takes a linked host off. |
 
 Settings > Privacy also has Agent logs. That switch decides whether the Usage page counts what the agents logged on your computers. Those counts stay on your computers.

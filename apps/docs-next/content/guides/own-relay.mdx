@@ -14,7 +14,7 @@ You need:
 Decide how hosts get their names:
 
 - With a zone, each host gets a name of its own, `<host id>.<zone>`, through a tunnel that the relay makes on your account. The relay needs a Cloudflare API token that can edit DNS in that zone.
-- Without a zone, the relay makes no tunnel and calls no Cloudflare API. Each host runs a quick tunnel and gets a new `trycloudflare.com` name each time its connector starts. A box keeps the address that it joined at. So a box that joined through a quick tunnel's name loses your host at the next restart of the host. Use a zone if boxes join through the relay.
+- Without a zone, the relay makes no tunnel and calls no Cloudflare API. Each host runs a quick tunnel and gets a new `trycloudflare.com` name each time its connector starts `cloudflared`. That happens at each start of the host, and again when `cloudflared` stops and the connector starts it again. A box keeps the address that it joined at. So a box that joined through a quick tunnel's name loses your host at the next new name. Use a zone if boxes join through the relay.
 
 Give the relay a zone that nothing else depends on. The relay writes and deletes only `<host id>.<zone>`, but its API token can write any record in that zone. Anyone who takes over the Worker or the token takes over the whole zone. A zone that also holds your mail or your main site is the wrong one.
 
@@ -69,7 +69,7 @@ In GitHub, open Settings > Developer settings > OAuth Apps and make a new app:
 
 Keep its client id, and make a client secret. The relay asks GitHub for no scope. It keeps the GitHub user id and login, and not the token.
 
-The relay has no list of allowed users. Any GitHub user who opens your relay can sign in, get an account of their own, and put hosts on it. Each of those hosts makes a tunnel on your Cloudflare account and, with a zone, a DNS name in your zone.
+The relay has no list of allowed users. Any GitHub user who opens your relay can sign in, get an account of their own, and put hosts on it. With a zone, each of those hosts makes a tunnel on your Cloudflare account and a DNS name in your zone.
 
 ## Step 6: Make a Cloudflare API token
 
@@ -136,7 +136,15 @@ It prints a line that starts with `word`. On the computer that runs your host, a
 wsp login <word>
 ```
 
-A computer that signed in on the page alone can read the account but reaches no host. A computer that is signed in admits such a computer with `wsp login <id>`. `wsp login` on its own lists the ids.
+Then, on the other computer, list the hosts that it can reach:
+
+```sh
+wsp hosts
+```
+
+`wsp hosts` writes a record for each host. The Hosts menu in the app and `--host` read those records, so the other computer reaches your host only after this step.
+
+A computer that signed in on the page alone can read the account but reaches no host. Your host takes an admission only from the computer that linked it, or from a computer that it already admitted. On one of those computers, `wsp login` on its own lists the ids, and `wsp login <id>` admits that computer. On a computer that is signed in to nothing, `wsp login` on its own starts a sign-in to `relay.usewsp.com` instead.
 
 ## Next
 

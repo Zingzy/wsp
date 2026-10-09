@@ -42,17 +42,19 @@ Transcripts have a limit for each workspace. When a transcript is over it, the o
 - The service unit that starts the host at login: `~/Library/LaunchAgents/com.wsp.host.<tag>.plist` on a Mac, `~/.config/systemd/user/wsp-host-<tag>.service` on Linux.
 - The wsp server and the wsp skill in each agent's own configuration, after you give the agent the tools. [Give your agent the wsp tools](/agents/tools) lists the files.
 - One line in `~/.ssh/known_hosts` for each box that you add.
-- Each agent's own session files, in the agent's own folder, for example `~/.claude/projects` or `~/.codex/sessions`. The agent writes them. wsp writes one thing there. When you name or rename a Claude Code thread in wsp, it appends a title line to that session's file, as `/rename` in Claude Code does.
+- Each agent's own session files, in the agent's own folder, for example `~/.claude/projects` or `~/.codex/sessions`. The agent writes them. wsp writes two things in Claude Code's folder:
+  - A title line, appended to a session's file when you name or rename the thread, or when wsp names a thread itself. `/rename` in Claude Code writes the same line.
+  - A copy of the session beside it while a side question runs. wsp deletes the copy after the side question.
 
 ## On a box
 
-When you add a box, the setup copies what you pick from your computer to the box over ssh:
+When you add a box, the setup copies what you pick from your computer to the box. The copies go over the daemon's sealed link, not over ssh, so a box that joined with `wsp join` gets the same copies:
 
 - The agents' own configuration, including `~/.claude.json` as it is. wsp removes no account field from it.
 - The configuration of your MCP servers, with their values moved into environment variables.
 - Your skills.
 - Your git configuration, with secret-named keys, token-shaped values and URLs with a login cut out.
-- Your shell configuration, with exported variables cut by name only. A variable whose name says key, token, secret or password is cut. A `DATABASE_URL` with a password in it is not, so it travels.
+- Your shell configuration, with exported variables cut by name only. wsp cuts a variable when one word of its name, between underscores, is `KEY`, `APIKEY`, `TOKEN`, `SECRET` or `PASSWORD`. So `GITHUB_TOKEN` and `APIKEY` are cut. `DB_PASS`, `PASSWD` and a `DATABASE_URL` with a password in it are not, so they travel.
 
 wsp never copies a sign-in file. You sign in on the box.
 
