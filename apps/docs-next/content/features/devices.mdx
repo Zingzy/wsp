@@ -1,3 +1,74 @@
 # Other devices
 
-Written from Settings > Devices and Account, `wsp login`, `wsp hosts` and `--host`.
+{/* Written from apps/web/src/settings/devices.tsx and account.tsx, apps/web/src/PairScreen.tsx, the host and login lines in packages/host/src/cli/commands.ts, packages/host/src/pairing.ts and hosts.ts. */}
+
+You can use your wsp from more than one device. A browser on another computer, or a phone, can pair with your host and open the app. Another computer with the `wsp` command line can sign in to your account and run every command against your host.
+
+The host is the wsp process that holds your threads and serves the app. It runs on one computer, usually your Mac. Every device talks to that one host.
+
+## Reach the host from another device
+
+A device must first be able to reach the host. There are two ways:
+
+- On your own network, start the host so that it listens beyond the computer it runs on: `wsp up --listen <address>`.
+- From anywhere, put the host on your account at the relay with `wsp host link`. The relay gives the host an https address, so no port has to be open to the world. See [Computers behind a firewall](/features/behind-a-firewall).
+
+## Pair a browser or a phone
+
+1. On the computer that runs the host, run `wsp host pair` in a terminal.
+
+   ```sh
+   wsp host pair
+   ```
+
+   It prints a code, when the code expires, and the addresses to open.
+
+2. On the other device, open one of those addresses in a browser. The page says **Pair this browser**.
+3. Type the code in **Pairing code** and click **Pair**.
+
+The code is 8 letters and digits, such as `ABCD-EFGH`. It works once and lasts 10 minutes. Only a terminal on the host's own computer can make a code, since a code lets a device in.
+
+If the host listens only on its own computer, `wsp host pair` says that the code lets in a browser on that computer and nothing beyond it.
+
+<Image src="/shots/docs-devices.webp" alt="Settings > Devices with two paired devices." />
+
+## See and revoke devices
+
+Settings > Devices lists every device paired with your wsp, with when it paired and when wsp last heard from it. The browser you read the list in says **this browser**.
+
+To take a device out, click **Revoke** beside it. It can no longer reach your wsp until it pairs again.
+
+From the command line, `wsp host devices` lists the same devices, and `wsp host devices revoke <id>` takes one out. The list says how each device came in: by a code, or by your account.
+
+## Sign in to your account
+
+Your account is at the relay, and you sign in to it with GitHub. A computer that is signed in reaches every host on the account with no code to type.
+
+Settings > Account shows whether this wsp is signed in. The app cannot sign in yet. Use the command line:
+
+1. On the computer you want to sign in, run:
+
+   ```sh
+   wsp login
+   ```
+
+2. If no computer of yours is signed in yet, `wsp login` prints a page and a code. Open the page, sign in with GitHub, and type the code there.
+3. If another computer of yours is signed in already, `wsp login` prints a word. On that other computer, run `wsp login <word>`.
+
+On a signed-in computer, `wsp login` with nothing after it lists the account's computers and who let each one in. `wsp logout` signs this computer out. `wsp logout <id>` signs another of your computers out.
+
+## Run commands against a host on another computer
+
+`wsp hosts` lists every host on your account that this computer can reach. It shows each host's address and state, and marks the one that every command uses by default.
+
+To run one command against another host, add `--host` with the name that `wsp hosts` shows:
+
+```sh
+wsp threads --host studio
+```
+
+To use one host for a whole shell, set `WSP_HOST` to its name.
+
+With no host named, a command goes to the host on this computer. If none runs here, it goes to the one host on your account. If the account has several hosts, wsp asks you to name one with `--host`.
+
+The command line reference has every flag: [host pair](/reference/cli/host-pair), [host devices](/reference/cli/host-devices), [host link](/reference/cli/host-link), [login](/reference/cli/login), [logout](/reference/cli/logout) and [hosts](/reference/cli/hosts).

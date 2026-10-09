@@ -1,3 +1,45 @@
 # Files
 
-Written from the Files pane (`F`): find a file and search in files.
+{/* Written from apps/web/src/files/ (FilesSurface.tsx, FilePreviewSurface.tsx, FileFinder.tsx), apps/web/src/components/files/, daemon/crates/wsp-daemon/src/fs.rs, daemon/crates/wsp-frames/src/numbers.rs. */}
+
+The Files pane shows the files in the thread's folder, read on the computer the thread runs on. You can browse the tree, read a file, find a file by name and search the files for a word. The pane only reads. To change a file, use your editor or the [Changes pane](/features/changes).
+
+To open it, press `F` in the right panel. The thread must be running.
+
+<Image src="/shots/docs-files.webp" alt="The Files pane with Find a file open and a query typed." />
+
+## Browse the tree
+
+The tree starts at the folder the thread works in, and it follows the agent when it moves to another folder. To keep the tree on one folder, click the pin, **Stay in this folder**.
+
+- Type in **Search files** at the top of the tree to filter it by name.
+- Click **Refresh files** to read the folder again.
+- Click **New thread in this folder** to start a thread there.
+
+Right-click a file for **Open file**, **Show in Changes** and **Copy path**.
+
+## Read a file
+
+Click a file to open it as a tab of its own. Code shows with syntax colors. A Markdown file shows rendered. Click **Show markdown source** to see the text, and **Show rendered markdown** to go back. Click **Reload file** to read it again.
+
+wsp reads at most 2 MB of a file. A bigger file shows its first 2 MB and says so. A binary file, an image too, shows its size and no preview.
+
+To open the file in your own editor, click **Open in editor**. See [Open in your editor](/features/editor).
+
+A file path in the terminal opens here too. `Cmd`-click it on a Mac, or `Ctrl`-click it elsewhere, and the file opens at its line.
+
+## Find a file
+
+Press `mod+p` and type part of the name. The letters you type must come in order in the name, but they do not have to be next to each other. Pick a file to open it.
+
+## Search in files
+
+Press `mod+shift+f` and type a word. The search finds every line that holds the word, in any case. Pick a line to open the file at that line.
+
+The search runs on the thread's computer. It works as follows:
+
+- It skips the files that `.gitignore` and `.ignore` name, hidden files, and files over 2 MB.
+- It reads at most 5,000 files and shows at most 500 lines. If more match, it asks you to type more.
+- It stops after 5 seconds.
+
+Both searches need a running thread. In both, `mod` is `Cmd` on a Mac and `Ctrl` elsewhere. On a computer that is not a Mac, `Ctrl+p` goes to the terminal while the terminal has focus, so click outside the terminal first.

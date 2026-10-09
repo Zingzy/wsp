@@ -1,3 +1,57 @@
 # The computer and its processes
 
-Written from the Computer (`M`) and Processes (`P`) panes.
+{/* Written from PANES in apps/web/src/panes.ts, apps/web/src/components/machine/MachineSurface.tsx, apps/web/src/components/procs/, apps/web/src/machine/live.ts, daemon/crates/wsp-frames/src/numbers.rs. */}
+
+Two panes show the computer a thread runs on. The Computer pane shows its load, memory and disk. The Processes pane lists what runs on it, and you can stop a process from there.
+
+With no thread open, both panes show the computer you sit at.
+
+## The Computer pane
+
+To open it, press `M` in the right panel.
+
+<Image src="/shots/docs-computer-pane.webp" alt="The Computer pane with its load, memory and disk lines." />
+
+The pane draws three lines over the last two minutes:
+
+- **Load**, the load average over one minute.
+- **Memory**, how much is in use, out of the total.
+- **Disk**, how much is in use, out of the total.
+
+The daemon on that computer sends a reading every 2 seconds. The memory and disk lines turn to a warning color at 70% and to a danger color at 90%.
+
+Above the lines, the pane names the computer and what it has: its cores and its memory. For a thread, it also names the thread's state, where it runs and the project folder.
+
+If the computer does not answer, the lines say **unreachable**, **paused**, **unavailable** or **pending** in place of a value.
+
+## The Processes pane
+
+To open it, press `P` in the right panel.
+
+<Image src="/shots/docs-processes.webp" alt="The Processes pane: the process table with one row open." />
+
+The pane is one table with four columns: `pid`, `cpu`, `mem` and `command`. Child processes sit under their parent. The heaviest process comes first.
+
+- Click the `cpu` or `mem` header to sort by it. The pane sorts by `cpu` first.
+- Type in **filter** to keep only the rows that match.
+- The count at the top says how many rows show, for example `12 of 230`.
+
+wsp names its own rows. A row marked `agent` is a thread's agent, `terminal` is a shell in a terminal pane, and `wsp` is wsp itself. On your own computers, the thread's processes come first under the thread's title, and the rest sit under **Everything else**.
+
+The pane reads the full list once and then the changes every 5 seconds. It shows up to 1,000 processes.
+
+### Read one process
+
+Click a row, or select it and press `Enter`, to open it. The pane shows the process's user, state, start time, threads, working folder, the TCP ports it listens on, its children and its full command.
+
+### Stop a process
+
+1. Open the row and click **kill**.
+2. Within 2 seconds, click **confirm TERM**. wsp sends the process `SIGTERM`, and the row says **TERM sent**.
+3. If the process is still there after 5 seconds, click **kill -9**, then **confirm KILL**. wsp sends `SIGKILL`.
+
+There is no dialog. The second click within 2 seconds is the confirmation.
+
+### When the daemon stops
+
+The daemon is the wsp program on each computer that runs terminals and reads files for the app. If it stops, the pane says that the computer's terminals and files stopped. Where wsp can start it again, the pane shows **Start again**.
