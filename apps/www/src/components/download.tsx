@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { track } from "@/lib/analytics";
 import { useState, type FormEvent } from "react";
 import { ArrowRight, Check } from "lucide-react";
 import { CopyCommand } from "@/components/copy-command";
@@ -36,6 +37,7 @@ export function Waitlist({ className }: { className?: string }) {
     try {
       const sent = await fetch("/api/waitlist", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email }) });
       setState(sent.ok ? "done" : "failed");
+      if (sent.ok) track("waitlist_joined");
     } catch {
       setState("failed");
     }
