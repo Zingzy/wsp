@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// A list of threads as one-line rows under a quiet sans head: the agent's
-// mark, the title as the way to the thread, and the one status slot at a fixed
-// width so times and words line up down the list. A lead's rows add the line
-// under the title (what it asks, why it failed, what holds it, its last line),
-// led by the computer where that is not the lead's; the child's branch with one
-// fact beside it and the one merge act there is to take; and the acts the
-// status slot yields to on hover, from md up. A subagent's row is the same box,
-// led by the glyph the timeline gives the call that launched it.
+// A thread as a one-line row: the agent's mark, the title as the way to the
+// thread, and the one status slot at a fixed width so times and words line up
+// down the list. A lead's rows add the line under the title (what it asks, why
+// it failed, what holds it, its last line), led by the computer where that is
+// not the lead's; the child's branch with one fact beside it and the one merge
+// act there is to take; and the acts the status slot yields to on hover, from
+// md up. A subagent's row is the same box, led by the glyph the timeline gives
+// the call that launched it.
 import { agentName } from "@wsp/catalog";
 import type { PlaceView, SubagentView } from "@wsp/protocol";
 import { BotIcon, EllipsisIcon, GitBranchIcon, type LucideIcon } from "lucide-react";
@@ -17,7 +17,6 @@ import { resolveActions, type ResolvedAction } from "../../actions/registry.js";
 import { childActions, type ChildTarget } from "../../actions/threadActions.js";
 import { sendToThread, useChildVerbs } from "../../actions/verbs.js";
 import type { SidebarThreadSnapshot } from "../../adapt/index.js";
-import { GROUP_LABEL } from "../../lib/microLabel.js";
 import { cn } from "../../lib/utils.js";
 import { useStore } from "../../protocol/store.js";
 import { ComputerGlyph } from "../../settings/ComputerGlyph.js";
@@ -46,20 +45,6 @@ export interface ThreadRowItem {
   readonly note?: string;
   /** The one merge act the row offers, drawn in the status slot in place of the status while there is one to take. */
   readonly act?: { readonly label: string; readonly run: () => void };
-}
-
-export function ThreadRows({ label, rows, children, className }: { label: string; rows?: ReadonlyArray<ThreadRowItem>; children?: ReactNode; className?: string }) {
-  return (
-    <div data-thread-rows className={cn("flex flex-col", className)}>
-      <span data-thread-rows-head className={cn(GROUP_LABEL, "flex h-8 items-center px-2 text-muted-foreground")}>
-        {label}
-      </span>
-      {rows?.map(row => (
-        <ThreadRow key={row.thread.id} {...row} />
-      ))}
-      {children}
-    </div>
-  );
 }
 
 /** How long the pointer rests on a subagent's row before its card opens, the tile card's own delay. */

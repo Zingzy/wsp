@@ -9,7 +9,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import type { SidebarThreadSnapshot } from "../src/adapt/index.js";
-import { childActs, childParts, countTree, finishedTake, kindOf, leadActs, leadNodes, noteOf, partOf, settleTake, type LeadNode, type Tree } from "../src/components/threads/leadTree.js";
+import { childActs, childParts, countTree, finishedTake, kindOf, leadActs, leadNodes, mostPressing, noteOf, partOf, settleTake, type LeadNode, type Tree } from "../src/components/threads/leadTree.js";
 
 const NOW = Date.parse("2026-10-09T12:00:00Z");
 const ago = (m: number): number => NOW - m * 60_000;
@@ -292,8 +292,24 @@ describe("a lead's tree, read once", () => {
     }
   });
 
-  it("counts every live thread and subagent at any depth by what it does, and the finished at the top", () => {
+  it("counts every live thread and subagent at any depth by what it does, and the finished threads Settle takes", () => {
     expect(countTree(top(), tree())).toEqual({ needsYou: 1, failed: 2, working: 8, workingSubagents: 2, waiting: 2, finished: 61 });
+    const rollout = node({ key: "rollout", status: "completed", started: 30, ended: 20, read: true }, [
+      node({ key: "canary", status: "completed", started: 29, ended: 21, read: true }),
+      node({ key: "drain", status: "completed", started: 28, ended: 22, read: true }),
+    ]);
+    const quiet = leadNodes(null, [rollout, node({ key: "docs", status: "completed", started: 27, ended: 23, read: true })], tree());
+    expect(countTree(quiet, tree()).finished).toBe(finishedTake(quiet, tree()).threads);
+    expect(countTree(quiet, tree()).finished).toBe(4);
+  });
+
+  it("gives a shut section the most pressing thread at any depth, newest first within its rank, as the counts lead", () => {
+    expect(keyOf(mostPressing(top(), tree())!)).toBe("c_ask");
+    const alpha = node({ key: "alpha", status: "running", started: 1 });
+    const beta = node({ key: "beta", status: "running", started: 5 }, [node({ key: "probe", status: "failed", started: 4, ended: 3 })]);
+    expect(keyOf(mostPressing(leadNodes(null, [alpha, beta], tree()), tree())!)).toBe("probe");
+    expect(keyOf(mostPressing(leadNodes(null, [node({ key: "older", status: "running", started: 9 }), alpha], tree()), tree())!)).toBe("alpha");
+    expect(mostPressing(leadNodes(null, [node({ key: "done", status: "completed", started: 9, ended: 8, read: true })], tree()), tree())).toBeUndefined();
   });
 
   it("gives the lead Settle N finished over every finished thread anywhere in its tree, each once, no subagent, N counting the threads they hold", () => {

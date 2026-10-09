@@ -12,8 +12,9 @@
 // against what those threads spent.
 import { HeroField, HeroMark } from "./EmptyHero.js";
 import { SetupCard, SetupRoom } from "./SetupCard.js";
+import { holdEndOnFooterShrink } from "./footerHold.js";
 import { answerPrompt } from "./answerPrompt.js";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ArrowDownIcon } from "lucide-react";
 import type { LegendListRef } from "@legendapp/list/react";
 import { CAP_RAISE_ACT, threadKeyOf, USAGE_WORDS, WAKE_ACT, capWaitLine, folderOnJoined, workspaceKind, workspaceWord } from "@wsp/protocol";
@@ -224,6 +225,13 @@ export function ChatView({
     observer.observe(composer);
     return () => observer.disconnect();
   }, []);
+  const footerRef = useCallback((node: HTMLDivElement | null) => {
+    if (node === null) return;
+    let scroller = node.parentElement;
+    while (scroller !== null && !/auto|scroll/.test(getComputedStyle(scroller).overflowY)) scroller = scroller.parentElement;
+    const content = scroller?.firstElementChild;
+    return scroller == null || content == null ? undefined : holdEndOnFooterShrink(node, scroller, content);
+  }, []);
   const showTranscript = thread.hydrated && !empty;
   // Rewind to here stands on each earlier reply that kept something to go back to, and opens the one dialog.
   const cutsConversation = catalog?.rewindsConversation === true;
@@ -257,7 +265,7 @@ export function ChatView({
   // What the machine needs from the person, said here on the thread they are reading and nowhere else.
   const machine = useMachineLine(workspaceId);
   const footer = thread.hydrated ? (
-    <div className="mx-auto w-full min-w-0 max-w-3xl">
+    <div ref={footerRef} className="mx-auto w-full min-w-0 max-w-3xl">
       {opened.length > 0 ? <OpenedThreads workspaceId={workspaceId} leadKey={thread.threadKey} /> : null}
       {view.settled !== null && !settledOnReply ? <SettledFooter turn={view.settled} /> : null}
       {paused !== null ? (
@@ -436,8 +444,9 @@ export function EmptyThread({ name, projectId, picker }: { name: string; project
 
 /** The threads this thread's agent opened, wherever each runs, one line each under the reply, so a person reading the
  * opener can reach every thread it started without hunting the sidebar for it; each with its workspace's branch against
- * this workspace's where the host read this workspace's children. */
-function OpenedThreads({ workspaceId, leadKey }: { workspaceId: string; leadKey: string }) {
+ * this workspace's where the host read this workspace's children. Drawn again only when what it reads moves, never
+ * on the opener's own streamed events. */
+const OpenedThreads = memo(function OpenedThreads({ workspaceId, leadKey }: { workspaceId: string; leadKey: string }) {
   const places = usePlaces();
   const projects = useSidebarProjects();
   const tree = useStatus(workspaceId)?.tree;
@@ -445,7 +454,7 @@ function OpenedThreads({ workspaceId, leadKey }: { workspaceId: string; leadKey:
   const lead = projects.flatMap(runs => runs.threads.map(thread => ({ thread, runs }))).find(({ thread }) => thread.id === leadKey);
   const nodes = useMemo(() => childNodesOf(projects, places, leadKey), [projects, places, leadKey]);
   return <TreeRows lead={{ id: workspaceId, name }} tree={tree} leadThread={lead?.thread ?? null} leadPlace={lead === undefined ? "" : computerName(places, lead.runs)} nodes={nodes} className="mt-2" />;
-}
+});
 
 const TURN_STATUS: Record<TurnSummary["state"], string> = {
   running: "running",

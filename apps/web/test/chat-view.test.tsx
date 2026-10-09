@@ -4,15 +4,32 @@
 // stream-session.jsonl). No live daemon; the fixture api replays history and
 // pushes live events through the store's subscription.
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+
+const sectionDraws = vi.hoisted(() => ({ n: 0 }));
+// The Threads section counted each time ChatView draws it, behind whatever memo stands over it.
+vi.mock("../src/tree/TreeRows.js", async importOriginal => {
+  const { createElement } = await import("react");
+  const real = await importOriginal<typeof import("../src/tree/TreeRows.js")>();
+  return {
+    ...real,
+    TreeRows: (props: Parameters<typeof real.TreeRows>[0]) => {
+      sectionDraws.n++;
+      return createElement(real.TreeRows, props);
+    },
+  };
+});
 import { installFakeLayout } from "./fake-layout.js";
-import type { EventUnion, HarnessCatalog, SessionEvent, SessionView, WorkspaceView } from "@wsp/protocol";
-import { QUESTION_TOOL, USAGE_WORDS, spawnCapRefusal, pickedOptionId, questionOptions } from "@wsp/protocol";
+import type { EventUnion, HarnessCatalog, PreferencesPatch, SessionEvent, SessionView, WorkspaceView } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, applyPreferencesPatch, QUESTION_TOOL, USAGE_WORDS, spawnCapRefusal, pickedOptionId, questionOptions } from "@wsp/protocol";
 import { useStore } from "../src/protocol/store.js";
 import { useRightPanelStore } from "../src/rightPanelStore.js";
 import { useSettingsStore } from "../src/settings/settingsStore.js";
 import type { Api, ProtocolEvent } from "../src/protocol/client.js";
 import { ChatView } from "../src/components/chat/ChatView.js";
+import { SidebarProvider } from "../src/components/ui/sidebar.js";
+import { GROUP_LABEL } from "../src/lib/microLabel.js";
+import { WorkspaceSidebar } from "../src/sidebar/WorkspaceSidebar.js";
 import type { ChatThreadHandle } from "../src/components/chat/useChatThread.js";
 import { CHAT_STREAM, CHAT_T0, CHAT_TURN, CHAT_WS } from "./fixtures/chat-stream.js";
 import { requestNewThread } from "../src/shell/shellRequests.js";
@@ -992,7 +1009,11 @@ describe("the threads a thread opened", () => {
       expect(found).toHaveLength(2);
       return found;
     });
-    expect(document.querySelector("[data-thread-rows-head]")!.textContent).toBe("Threads");
+    const head = document.querySelector<HTMLElement>("[data-thread-rows] [data-threads-head]")!;
+    expect(within(head).getByText("Threads")).toBeDefined();
+    // The group label on a 32 px row, as every list's head.
+    expect(head.className).toContain("h-8");
+    expect(head.className).toContain(GROUP_LABEL);
     // Failed ranks before working; the computer leads a row's second line only where it is not the lead's own.
     expect(opened.map(row => [row.querySelector("a")!.textContent, row.querySelector("[data-thread-place]")?.textContent ?? null, row.querySelector<HTMLElement>("[data-thread-status]")!.dataset.threadStatus])).toEqual([
       ["rewrite the web client", null, "failed"],
@@ -1016,6 +1037,116 @@ describe("the threads a thread opened", () => {
     const row = await waitFor(() => document.querySelector<HTMLElement>('[data-thread-row="thr_mac"]')!);
     await waitFor(() => expect(row.querySelector("[data-thread-place]")!.textContent).toBe("zingzy's MacBook Pro"));
     expect(document.querySelector("[data-thread-rows]")!.textContent).not.toContain("zingzys-MacBook-Pro.local");
+  });
+
+  it("shuts from its head to the counts and the most pressing thread at any depth, kept on the host's preferences apart from the sidebar's fold, so a reload and every window read the same", async () => {
+    // Alpha works and is the newest child; beta works with a failed thread under it, which is what the counts lead with.
+    const listed: SessionView[] = [
+      rows[0]!,
+      { id: "sess_alpha", workspaceId: WS, harness: "claude", status: "running", startedBy: "agent", threadId: "thr_alpha", parentThreadId: PARENT, prompt: "port the queue", startedAt: T0 + 2_000 },
+      { id: "sess_beta", workspaceId: WS, harness: "claude", status: "running", startedBy: "agent", threadId: "thr_beta", parentThreadId: PARENT, prompt: "rewrite the web client", startedAt: T0 + 1_000 },
+      { id: "sess_beta_kid", workspaceId: WS, harness: "claude", status: "failed", startedBy: "agent", threadId: "thr_beta_kid", parentThreadId: "thr_beta", prompt: "split the web client's bundle", startedAt: T0 + 1_500 },
+    ];
+    const { api, emit } = fixtureApi([workspace], { [WS]: lead }, listed);
+    api.listSessions = async id => listed.filter(row => id === undefined || row.workspaceId === id);
+    /** The host's record: preferences.set lands the patch on it and tells every window, as the runtime does. */
+    let held = DEFAULT_PREFERENCES;
+    const patches: PreferencesPatch[] = [];
+    api.preferences = async () => held;
+    api.setPreferences = async patch => {
+      patches.push(patch);
+      held = applyPreferencesPatch(held, patch);
+      emit({ type: "preferences.changed", preferences: held });
+      return held;
+    };
+    const marks: unknown[] = [];
+    api.markThreads = async (ids, m) => {
+      marks.push([ids, m]);
+      for (const [i, row] of listed.entries()) if (ids.includes(row.threadId!)) listed[i] = m.folded === true ? { ...row, foldedAt: Date.now() } : (({ foldedAt: _, ...open }) => open)(row);
+      emit({ type: "thread.marked", workspaceId: WS, threadIds: [...ids] });
+    };
+    const openWindow = async () => {
+      useStore.getState().bind(api);
+      await waitFor(() => expect(useStore.getState().workspaces.length).toBeGreaterThan(0));
+      const view = render(
+        <SidebarProvider defaultOpen>
+          <WorkspaceSidebar />
+          <ChatView workspaceId={WS} />
+        </SidebarProvider>,
+      );
+      await waitFor(() => expect(screen.queryByText("loading transcript")).toBeNull());
+      return view;
+    };
+    const section = () => document.querySelector<HTMLElement>("[data-thread-rows]")!;
+    const drawn = () => [...section().querySelectorAll<HTMLElement>("[data-thread-row]")].map(row => row.dataset.threadRow);
+    const head = () => section().querySelector<HTMLElement>("[data-threads-head]")!;
+    const toggle = () => section().querySelector<HTMLElement>("[data-threads-toggle]")!;
+    const sidebarFold = () => document.querySelector<HTMLElement>(`[data-row-id="thread:${PARENT}"] [data-tile-fold]`)?.dataset.tileFold;
+    const sidebarTiles = () => [...document.querySelectorAll<HTMLElement>("[data-row-id^='thread:']")].map(tile => tile.dataset.rowId);
+    const first = await openWindow();
+    await waitFor(() => expect(drawn()).toEqual(["thr_beta", "thr_beta_kid", "thr_alpha"]));
+    await waitFor(() => expect(sidebarFold()).toBe("open"));
+    const tiles = sidebarTiles();
+    expect(tiles).toEqual(expect.arrayContaining([`thread:${PARENT}`, "thread:thr_alpha", "thread:thr_beta", "thread:thr_beta_kid"]));
+    expect(toggle().getAttribute("aria-label")).toBe("Hide the threads");
+    // Open, the head says no counts; nothing here is finished, so it offers no Settle either.
+    expect(head().querySelectorAll("[data-tree-count], [data-settle-finished]")).toHaveLength(0);
+
+    fireEvent.click(toggle());
+    expect(patches).toEqual([{ threadsShut: { [PARENT]: true } }]);
+    await waitFor(() => expect(toggle().getAttribute("aria-expanded")).toBe("false"));
+    expect(toggle().getAttribute("aria-label")).toBe("Show the threads");
+    // The failed grandchild is the one row, drawn as its own, agreeing with the counts above it.
+    expect(drawn()).toEqual(["thr_beta_kid"]);
+    expect([...head().querySelectorAll<HTMLElement>("[data-tree-count]")].map(count => [count.dataset.treeCount, count.textContent, count.title])).toEqual([
+      ["failed", "1", "1 failed"],
+      ["working", "2", "2 threads working"],
+    ]);
+    // The sidebar's tree stands as it was: no fold mark sent, the lead's tile open, every tile still drawn.
+    expect(marks).toEqual([]);
+    expect(sidebarFold()).toBe("open");
+    expect(sidebarTiles()).toEqual(tiles);
+
+    // The peek takes no act and no focus, and a press on it opens the section.
+    const peek = section().querySelector<HTMLElement>("[data-shut-peek]")!;
+    expect(peek.getAttribute("aria-hidden")).toBe("true");
+    expect(peek.querySelector("[data-shut-row]")!.hasAttribute("inert")).toBe(true);
+    fireEvent.click(peek.querySelector("[data-thread-row]")!);
+    expect(patches.at(-1)).toEqual({ threadsShut: { [PARENT]: null } });
+    await waitFor(() => expect(drawn()).toEqual(["thr_beta", "thr_beta_kid", "thr_alpha"]));
+    fireEvent.click(toggle());
+    await waitFor(() => expect(drawn()).toEqual(["thr_beta_kid"]));
+
+    // A reload reads the entry back off the host's record.
+    first.unmount();
+    await openWindow();
+    await waitFor(() => expect(drawn()).toEqual(["thr_beta_kid"]));
+    expect(sidebarFold()).toBe("open");
+
+    // Another window opening it reaches this one as the host's word, and the sidebar still does not move.
+    held = applyPreferencesPatch(held, { threadsShut: { [PARENT]: null } });
+    emit({ type: "preferences.changed", preferences: held });
+    await waitFor(() => expect(drawn()).toEqual(["thr_beta", "thr_beta_kid", "thr_alpha"]));
+    expect(sidebarTiles()).toEqual(tiles);
+
+    // Folding the lead's tree in the sidebar leaves the section open.
+    fireEvent.click(document.querySelector<HTMLElement>(`[data-row-id="thread:${PARENT}"] [data-tile-fold]`)!);
+    await waitFor(() => expect(sidebarFold()).toBe("shut"));
+    expect(section().hasAttribute("data-shut")).toBe(false);
+    expect(drawn()).toEqual(["thr_beta", "thr_beta_kid", "thr_alpha"]);
+  });
+
+  it("draws the section no more while the opener streams its reply", async () => {
+    const { api, emit } = fixtureApi([workspace, BENCH], { [WS]: lead }, rows);
+    await setup(api);
+    await waitFor(() => expect(document.querySelectorAll("[data-thread-rows] [data-thread-row]")).toHaveLength(2));
+    const turn = { ...scoped, sessionId: "sess_lead_2", turnId: "turn_lead_2" };
+    emit({ type: "session.start", ...turn, at: T0 + 10_000, model: "claude-sonnet-5", prompt: "go on" });
+    await screen.findByText("go on");
+    const before = sectionDraws.n;
+    for (let n = 1; n <= 10; n++) emit({ type: "session.delta", ...turn, at: T0 + 10_000 + n * 100, kind: "text", text: `Line ${n}. ` });
+    await screen.findByText(/Line 10\./);
+    expect(sectionDraws.n - before).toBe(0);
   });
 
   it("leaves the transcript alone on a thread that opened none", async () => {
