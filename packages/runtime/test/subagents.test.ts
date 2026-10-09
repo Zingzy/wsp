@@ -180,6 +180,32 @@ describe("an agent's own subagents as children of its thread", () => {
     await rt2.close();
   });
 
+  it("a child lists the model its first line named and what it was asked, the model row replayed once after a restart, then its last line or its failure", async () => {
+    const h = machineRuns();
+    const store = memoryStore();
+    const backend = stubBackend();
+    const { rt, ws, run } = await begin(h, store, backend);
+    h.emit(run, { ...started("a1", "sess-1"), asked: "Count the files under /etc and say how many." } as AdapterEvent);
+    h.emit(run, { type: "subagent", sessionId: "sess-1", task: "a1", state: "running", parentToolUseId: "toolu_a1", model: "claude-haiku-4-5" });
+    h.emit(run, started("b2", "sess-1"));
+    await until(async () => subagentRows(await rt.sessions.history(ws.id)).length === 3);
+    expect((await rt.sessions.list(ws.id))[0]!.subagents?.[0]).toMatchObject({ id: "a1", title: "count a1", state: "running", model: "claude-haiku-4-5", asked: "Count the files under /etc and say how many." });
+    await rt.close();
+
+    const rt2 = createRuntime({ backend, store, adapters: { claude: h.adapter } });
+    h.emit(run, ended("a1", "sess-1", "done", "Counted them.\nThere are 212."));
+    h.emit(run, ended("b2", "sess-1", "failed", "API Error: 529 overloaded\nretry"));
+    await until(async () => subagentRows(await rt2.sessions.history(ws.id)).length === 5);
+    const rows = subagentRows(await rt2.sessions.history(ws.id));
+    expect(rows.filter(e => e.model !== undefined)).toHaveLength(1);
+    const children = (await rt2.sessions.list(ws.id))[0]!.subagents!;
+    expect(children[0]).toMatchObject({ id: "a1", state: "done", model: "claude-haiku-4-5", asked: "Count the files under /etc and say how many.", lastLine: "There are 212." });
+    expect(children[0]).not.toHaveProperty("failure");
+    expect(children[1]).toMatchObject({ id: "b2", state: "failed", failure: "API Error: 529 overloaded" });
+    expect(children[1]).not.toHaveProperty("lastLine");
+    await rt2.close();
+  });
+
   it("a run a host from before subagents were recorded wrote is re-read with its children and no delta twice", async () => {
     const h = machineRuns();
     const store = memoryStore();

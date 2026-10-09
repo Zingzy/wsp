@@ -4,6 +4,7 @@
 // per tool, each case's arguments and the frame the host answers every op
 // with. The frames carry what a byte compare has to survive, and fields out
 // of the order a parsed reply is answered in, with a field no schema names.
+import { listedFailure, listedLastLine } from "@wsp/protocol";
 
 /** One recorded call: its name, the tool's arguments, and the frame the host answers each op with. */
 interface Case {
@@ -119,6 +120,20 @@ const WITH_CLOUD = reply({ workspaces: [{ id: "ws-cloud", name: "cloudwork", kin
 const PLACED = [
   { ...SESSIONS[0]!, pinnedAt: 1727431000000, section: { name: "working", whileState: "running" }, attempt: "att-1", permissionMode: "acceptEdits", fast: false },
   { ...SESSIONS[2]!, pinnedAt: 1727431280000.5, snoozedUntil: 1727434800000, wokeAt: 1727431290000, section: { name: "needs-you", whileState: "asking \"é\"" }, attempt: "att-2", permissionMode: "bypass \u0085", fast: true },
+];
+
+const CJK_LINE = `${"完成".repeat(99)}🎉${"了".repeat(60)}`;
+
+/** A lead's tree as the sidebar reads it: a child that failed before it finished, a lead folded with a reply's last
+ * line, and the lead's own subagents with what each ran on, was asked and said or failed on. */
+const LINED = [
+  { ...SESSIONS[0]!, status: "failed", failure: "API Error: 529 \u0085overloaded", lastLine: "half way" },
+  { ...SESSIONS[4]!, lastLine: "Pushed feat/é and opened the pull request.", foldedAt: 1727431300000.5, subagents: [
+    { id: "a1", title: "count", state: "done", parentToolUseId: "call-a1", depth: 1, model: "claude-haiku-4-5", asked: "Count the files under /etc.\nSay how many.", startedAt: 1727431200000, endedAt: 1727431210000, lastLine: "There are 212." },
+    { id: "b2", title: "read", state: "failed", parentToolUseId: "call-b2", depth: 1, asked: "Read the hosts file.", startedAt: 1727431200000, endedAt: 1727431220000, failure: "API Error: 529 overloaded" },
+  ] },
+  // A line with no space to break on, cut where an emoji stands at the edge, as the host cuts it.
+  { ...SESSIONS[5]!, status: "failed", lastLine: listedLastLine(CJK_LINE), failure: listedFailure(CJK_LINE) },
 ];
 
 const WORKSPACES = reply({
@@ -299,6 +314,7 @@ export const READS: Record<string, Case[]> = {
     { case: "within a box folder's project", arguments: { project: "lab-box" }, replies: { "workspaces.list": WORKSPACES, "sessions.list": reply({ sessions: BOX_CHILD }) } },
     { case: "empty", arguments: {}, replies: { "workspaces.list": WORKSPACES, "sessions.list": reply({ sessions: [] }) } },
     { case: "pinned, snoozed and in a section", arguments: {}, replies: { "workspaces.list": WORKSPACES, "sessions.list": reply({ sessions: PLACED }) } },
+    { case: "a last line, a failure, a fold and subagents", arguments: {}, replies: { "workspaces.list": WORKSPACES, "sessions.list": reply({ sessions: LINED }) } },
     { case: "no such project", arguments: { project: "nope" }, replies: { "workspaces.list": WORKSPACES, "sessions.list": reply({ sessions: SESSIONS }) } },
   ],
   thread_read: [

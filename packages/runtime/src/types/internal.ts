@@ -33,7 +33,7 @@ import type {
 import { type ThreadPlacement, SessionOrigin, ThreadScope, WorkspaceOrigin } from "@wsp/protocol";
 import { EXEC_OUTPUT_MAX, fmtBytes, fmtDuration, type WorktreeFolder, type DefaultBranchRoad, defaultBranchFix, defaultBranchRefusal, refusal } from "@wsp/protocol";
 import type { MachineExecOptions, TurnWaiting } from "../machine-exec.js";
-import type { SubagentView } from "@wsp/protocol";
+import { listedFailure, listedLastLine, type SubagentView } from "@wsp/protocol";
 import type { ScopedRoad } from "../devices.js";
 import type { BlobMark } from "../store.js";
 import type { HarnessSession } from "./harness.js";
@@ -228,8 +228,9 @@ export type SessionFacts = Partial<Record<(typeof SESSION_FACTS)[number], string
 
 export const emptyIndex = (): TranscriptIndex => ({ words: new Map(), starts: new Map(), cut: new Map(), facts: new Map(), taken: new Map(), children: new Map(), pos: 0 });
 
-/** One session.subagent row into a thread's children: a start makes the child, or runs a resumed one again, and an end
- * moves one the index holds. An end whose start has left the ring finds none, so the child stays gone with it. */
+/** One session.subagent row into a thread's children: a start makes the child, or runs a resumed one again, a later
+ * running row adds the model it named, and an end moves one the index holds, with the last line of what it said or
+ * the first of why it failed. An end whose start has left the ring finds none, so the child stays gone with it. */
 export function foldChild(index: TranscriptIndex, e: Extract<SessionEvent, { type: "session.subagent" }>): void {
   if (e.threadId === undefined) return;
   const held = index.children.get(e.threadId) ?? new Map<string, Child>();
@@ -241,6 +242,8 @@ export function foldChild(index: TranscriptIndex, e: Extract<SessionEvent, { typ
       state: "running",
       ...((e.parentToolUseId ?? child?.parentToolUseId) !== undefined ? { parentToolUseId: e.parentToolUseId ?? child?.parentToolUseId } : {}),
       ...((e.depth ?? child?.depth) !== undefined ? { depth: e.depth ?? child?.depth } : {}),
+      ...((e.model ?? child?.model) !== undefined ? { model: e.model ?? child?.model } : {}),
+      ...((e.asked ?? child?.asked) !== undefined ? { asked: e.asked ?? child?.asked } : {}),
       startedAt: child?.startedAt ?? e.at ?? 0,
       ...(e.turnId !== undefined ? { turnId: e.turnId } : {}),
       ...(e.at !== undefined ? { startRow: e.at } : {}),
@@ -249,6 +252,25 @@ export function foldChild(index: TranscriptIndex, e: Extract<SessionEvent, { typ
   } else if (child !== undefined) {
     child.state = e.state;
     child.endedAt = e.at ?? child.startedAt;
+    const last = e.state === "done" ? listedLastLine(e.summary) : undefined;
+    if (last !== undefined) child.lastLine = last;
+    if (e.state === "failed" && e.summary !== undefined) child.failure = listedFailure(e.summary);
+  }
+}
+
+/** A row as a caller sees it that reaches it only to list it, a thread on a computer the person joined looking at its
+ * tree elsewhere: the thread and its subagents named, and nothing their turns said or were asked. */
+export function namedOnly(view: SessionView): SessionView {
+  const { lastLine: _line, failure: _failure, subagents, ...rest } = view;
+  return { ...rest, ...(subagents !== undefined ? { subagents: subagents.map(({ asked: _asked, lastLine: _said, failure: _failed, ...child }) => child) } : {}) };
+}
+
+/** What a turn's end left, onto its row: each line set where the end gave one and cleared where it gave none. */
+export function writeLines(view: SessionView, lines: { lastLine?: string; failure?: string }): void {
+  for (const key of ["lastLine", "failure"] as const) {
+    const line = lines[key];
+    if (line === undefined) delete view[key];
+    else view[key] = line;
   }
 }
 
@@ -568,6 +590,8 @@ export interface ThreadRecord {
   /** The person's marks on the thread, kept here for the same reason; snoozedUntil is kept after it passes, since
    * the thread reads Done off it until a window shows it. */
   pinnedAt?: number;
+  /** When the person folded the thread's tree in the sidebar; the mark is the host's so every window draws it alike. */
+  foldedAt?: number;
   snoozedUntil?: number;
   section?: ThreadPlacement;
   /** The anchor a rewind kept, held until the next turn of a harness that cuts on its next resume has taken it. */

@@ -4,7 +4,7 @@
 // recorded in solari-poc/RESULTS.md.
 
 import { randomUUID } from "node:crypto";
-import { ASIDE_WALL_MS, baseModel, INTERRUPT_GRACE_MS, LOST_SESSION_NOTE, PERMISSION_ALLOW, PERMISSION_DENY, QUESTION_TOOL, RUN_EXIT_MS, asideWallLine, backgroundTasksLine, claudeMemoryDir, endAfterResult, endRun, fmtDuration, keepRun, harnessExitLine, lostSessionPrompt, refusedTurn, taskFinishedLine, titlePrompt } from "@wsp/protocol";
+import { ASIDE_WALL_MS, baseModel, INTERRUPT_GRACE_MS, LOST_SESSION_NOTE, PERMISSION_ALLOW, PERMISSION_DENY, QUESTION_TOOL, RUN_EXIT_MS, asideWallLine, backgroundTasksLine, claudeMemoryDir, endAfterResult, endRun, fmtDuration, keepRun, harnessExitLine, lostSessionPrompt, refusedTurn, subagentAsked, taskFinishedLine, titlePrompt } from "@wsp/protocol";
 import type { AdapterAttachOptions, AdapterEvent, AgentLaunch, KeptAgent, KeptRun, KeptTurn, SubagentState, TaskStop, AsideAnswer, AsideQuestion, ExecStream, ExecStreamFactory, HarnessCatalogProbe, HarnessExec, McpServerSpec, PermissionAsk, PermissionOutcome, ScreenCommand, SessionAsker, SessionHarness, SessionRenamer, SessionTitleMaker, SessionTitleReader, TurnImage, TurnRefusal, TurnResult, TurnStatus, CommitDrafter, TurnTokens } from "@wsp/protocol";
 import { SKIP_PROMPTS_MODE, controlAllowLine, controlAnswerLine, controlErrorLine, controlLine, interruptLine, modeOptionOn, setModeLine, stopTaskLine } from "./permissions.js";
 import { CLAUDE_SCREEN_COMMANDS, catalogProbeCommand, parseCatalogProbe } from "./catalog.js";
@@ -452,6 +452,22 @@ function subagentLaunch(event: Record<string, unknown>): { agentId: string; tool
   return agentId === undefined || toolUseId === undefined ? undefined : { agentId, toolUseId };
 }
 
+/** The tools the agent launches a subagent with; the call's input holds what the subagent was asked. */
+const SUBAGENT_TOOLS: ReadonlySet<string> = new Set(["Agent", "Task"]);
+
+/** What each subagent call on a line of the agent's own asks, by the call's id. */
+function subagentPrompts(event: Record<string, unknown>): [string, string][] {
+  if (str(event.type) !== "assistant" || str(event.parent_tool_use_id) !== undefined) return [];
+  const blocks = rec(event.message)?.content;
+  if (!Array.isArray(blocks)) return [];
+  return blocks.flatMap(raw => {
+    const block = rec(raw);
+    const id = str(block?.id);
+    const prompt = str(rec(block?.input)?.prompt);
+    return str(block?.type) === "tool_use" && SUBAGENT_TOOLS.has(str(block?.name) ?? "") && id !== undefined && prompt !== undefined ? [[id, prompt]] : [];
+  });
+}
+
 /** The CLI's own word for how a subagent ended, as wsp's; a word it has not used before reads as failed. */
 const SUBAGENT_ENDS: Readonly<Record<string, SubagentState>> = { completed: "done", failed: "failed", stopped: "stopped", killed: "stopped" };
 
@@ -765,6 +781,10 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
     /** Where each of the agent's own subagents stands, by the CLI's handle for it: what says its end once, and what a
      * stop of one already over is answered from. */
     const subagents = new Map<string, SubagentState>();
+    /** What each subagent call asked, by the call's id, until its subagent starts. */
+    const askedBy = new Map<string, string>();
+    /** The subagents whose model has been said: the first line of each that names one says it, and no later line. */
+    const modelSaid = new Set<string>();
     /** Set once the turn is in the mode that asks nobody, launched there or moved there: every prompt the CLI raises
      * from then is allowed by this host, and only a question reaches the person. */
     let skipsPrompts = false;
@@ -897,6 +917,16 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
             callsCounted = calls.size;
           }
           if (event.type === "assistant" && typeof event.uuid === "string" && (event.parent_tool_use_id === undefined || event.parent_tool_use_id === null)) anchor = event.uuid;
+          for (const [call, prompt] of subagentPrompts(event)) askedBy.set(call, prompt);
+          const childLine = str(event.type) === "assistant" && event.is_api_error_message !== true ? str(event.parent_tool_use_id) : undefined;
+          const childModel = childLine === undefined ? undefined : str(rec(event.message)?.model);
+          if (childLine !== undefined && childModel !== undefined) {
+            const task = [...launchedBy].find(([id, call]) => call === childLine && subagents.get(id) === "running" && !modelSaid.has(id))?.[0];
+            if (task !== undefined) {
+              modelSaid.add(task);
+              onEvent({ type: "subagent", sessionId: claudeSessionId, task, state: "running", parentToolUseId: childLine, model: childModel });
+            }
+          }
           const control = controlLine(event);
           if (control !== undefined) {
             switch (control.kind) {
@@ -937,7 +967,9 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
             if (started !== undefined) {
               subagents.set(started.task, "running");
               const { task, parent, ...said } = started;
-              onEvent({ type: "subagent", sessionId: claudeSessionId, task, state: "running", ...(parent !== undefined ? { parentToolUseId: parent } : {}), ...said });
+              const prompt = parent === undefined ? undefined : askedBy.get(parent);
+              if (parent !== undefined) askedBy.delete(parent);
+              onEvent({ type: "subagent", sessionId: claudeSessionId, task, state: "running", ...(parent !== undefined ? { parentToolUseId: parent } : {}), ...said, ...(prompt !== undefined ? { asked: subagentAsked(prompt) } : {}) });
             }
             continue;
           }
