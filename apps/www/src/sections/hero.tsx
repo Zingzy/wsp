@@ -2,7 +2,9 @@
 import { Install } from "@/components/download";
 import { Field } from "@/components/field";
 import hero from "@/assets/shots/w-hero.webp";
-import wall from "@/assets/wall/wall.webp";
+import hero800 from "@/assets/shots/w-hero-800.webp";
+import hero1440 from "@/assets/shots/w-hero-1440.webp";
+import { WALL } from "@/wall";
 
 export function Hero() {
   return (
@@ -22,9 +24,20 @@ export function Hero() {
 
       <div className="rise mx-auto mt-16 max-w-[1320px] px-3 [animation-delay:260ms] sm:mt-20 sm:px-6">
         <div className="relative isolate overflow-hidden rounded-[20px] border border-white/[0.08] px-[4%] pt-[4%] pb-[4%] sm:rounded-[24px]">
-          <img src={wall} alt="" aria-hidden decoding="async" draggable={false} className="absolute inset-0 -z-10 size-full object-cover select-none" />
+          <img
+            {...WALL}
+            sizes="(min-width: 1320px) 1272px, 100vw"
+            alt=""
+            aria-hidden
+            fetchPriority="high"
+            decoding="async"
+            draggable={false}
+            className="absolute inset-0 -z-10 size-full object-cover select-none"
+          />
           <img
             src={hero}
+            srcSet={`${hero800} 800w, ${hero1440} 1440w, ${hero} 2880w`}
+            sizes="(min-width: 1320px) 1170px, 92vw"
             width={1440}
             height={900}
             alt="The wsp app: a coordinator thread on a MacBook Pro has handed its tickets to Claude Code and Codex threads on five computers, with its board of the night's landings in the slate beside it."

@@ -33,3 +33,14 @@ if (typeof window.matchMedia !== "function") {
       dispatchEvent: () => false,
     }) as MediaQueryList;
 }
+
+// A browser starts a parsed video's `muted` from its attribute and hydration checks the two agree; jsdom keeps them apart.
+Object.defineProperty(HTMLMediaElement.prototype, "muted", {
+  configurable: true,
+  get(this: HTMLMediaElement) {
+    return this.hasAttribute("muted");
+  },
+  set(this: HTMLMediaElement, on: boolean) {
+    this.toggleAttribute("muted", on);
+  },
+});

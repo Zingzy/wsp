@@ -4,7 +4,7 @@
 // window sits: a corner leaves that corner's two edges in view and runs the rest off the panel, `top` centres it with
 // the wallpaper above it and runs it off the bottom. `scale` is the window's width over the panel's.
 import { cn } from "@/lib/utils";
-import dunes from "@/assets/wall/wall.webp";
+import { WALL } from "@/wall";
 
 export type At = "tl" | "tr" | "bl" | "br" | "top";
 
@@ -20,6 +20,7 @@ const PLACE: Record<At, string> = {
  * looks, so panels side by side are not the same picture. */
 export function Peek({
   src,
+  narrow,
   alt,
   at,
   scale = 1.3,
@@ -28,6 +29,8 @@ export function Peek({
   className,
 }: {
   src: string;
+  /** The shot at half its width, for a phone. */
+  narrow?: string;
   alt: string;
   at: At;
   scale?: number;
@@ -38,12 +41,23 @@ export function Peek({
   const [w, h] = size;
   return (
     <div className={cn("relative isolate overflow-hidden bg-[#1a0d06]", className)}>
-      <img src={dunes} alt="" aria-hidden loading="lazy" decoding="async" draggable={false} className="absolute inset-0 -z-10 size-full scale-110 object-cover select-none" style={{ objectPosition: wall }} />
+      <img {...WALL} sizes="(min-width: 1024px) 600px, 100vw" alt="" aria-hidden loading="lazy" decoding="async" draggable={false} className="absolute inset-0 -z-10 size-full scale-110 object-cover select-none" style={{ objectPosition: wall }} />
       <div
         className={cn("absolute shadow-[0_30px_80px_-10px_rgb(0_0_0/0.6)]", PLACE[at])}
         style={{ width: `${scale * 100}%`, aspectRatio: `${w} / ${h}`, borderRadius: `${(17 / w) * 100}% / ${(17 / h) * 100}%` }}
       >
-        <img src={src} alt={alt} width={w} height={h} loading="lazy" decoding="async" draggable={false} className="block size-full select-none" />
+        <img
+          src={src}
+          srcSet={narrow === undefined ? undefined : `${narrow} ${w}w, ${src} ${w * 2}w`}
+          sizes={narrow === undefined ? undefined : `(min-width: 1200px) ${Math.round(scale * 1152)}px, ${Math.round(scale * 100)}vw`}
+          alt={alt}
+          width={w}
+          height={h}
+          loading="lazy"
+          decoding="async"
+          draggable={false}
+          className="block size-full select-none"
+        />
       </div>
     </div>
   );

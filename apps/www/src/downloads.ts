@@ -2,6 +2,7 @@
 // The two desktop downloads and which one a visitor is shown first. The names
 // and the URLs come from the release job's own formatter, so a rename there
 // moves these links with it and nothing on this page can go stale.
+import { useSyncExternalStore } from "react";
 import { downloadUrl, STABLE_NAMES } from "../../../packages/protocol/src/bundles.mjs";
 
 export type Platform = "mac" | "linux" | "windows";
@@ -18,4 +19,12 @@ export function platformOf(userAgent: string): Platform {
   if (/Android/i.test(userAgent)) return "mac";
   if (/Windows/i.test(userAgent)) return "windows";
   return /Linux|X11|CrOS/i.test(userAgent) ? "linux" : "mac";
+}
+
+const fixed = () => () => {};
+
+/** The visitor's platform once the page runs in their browser. The prerendered page is the Mac's, so hydration matches
+ * it first and a Linux or Windows visitor's buttons switch right after. */
+export function useVisitor(): Platform {
+  return useSyncExternalStore(fixed, () => platformOf(navigator.userAgent), (): Platform => "mac");
 }

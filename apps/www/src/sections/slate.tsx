@@ -5,19 +5,24 @@ import { Peek } from "@/components/peek";
 import { Head, Section } from "@/components/section";
 import { cn } from "@/lib/utils";
 import pr from "@/assets/shots/w-slate-pr.webp";
+import pr1280 from "@/assets/shots/w-slate-pr-1280.webp";
 import deploy from "@/assets/shots/w-slate-deploy.webp";
+import deploy1280 from "@/assets/shots/w-slate-deploy-1280.webp";
 import cart from "@/assets/shots/w-slate-cart.webp";
+import cart1280 from "@/assets/shots/w-slate-cart-1280.webp";
 import traffic from "@/assets/shots/w-slate-traffic.webp";
+import traffic1280 from "@/assets/shots/w-slate-traffic-1280.webp";
 import explain from "@/assets/shots/w-slate-explain.webp";
+import explain1280 from "@/assets/shots/w-slate-explain-1280.webp";
 
-const shot = (src: string, alt: string) => ({ src, alt });
+const shot = (src: string, narrow: string, alt: string) => ({ src, narrow, alt });
 
 const EXAMPLES = [
-  { name: "Pull request", line: "Checks as they finish. A failed one goes back to the agent in one press.", shot: shot(pr, "A slate for pull request #212: its checks, a failed e2e run with Send to agent beside it, and Auto-merge.") },
-  { name: "Deploy setup", line: "A field for a token the agent never sees. It goes straight into .env.", shot: shot(deploy, "A slate walking through a Vercel deploy setup, with a password field for a token the agent never sees.") },
-  { name: "A long fix", line: "The plan as a checklist you can edit, with the files it changed.", shot: shot(cart, "A slate for a cart rounding fix: progress, an editable checklist, the files changed and a button to go on.") },
-  { name: "Live numbers", line: "Traffic that refreshes every minute, without spending a turn.", shot: shot(traffic, "A slate of live redirect traffic: six numbers and a line chart of requests a minute.") },
-  { name: "Explain it", line: "A diagram drawn to answer a question about the code.", shot: shot(explain, "A slate with a diagram of how a short link becomes a redirect.") },
+  { name: "Pull request", line: "Checks as they finish. A failed one goes back to the agent in one press.", shot: shot(pr, pr1280, "A slate for pull request #212: its checks, a failed e2e run with Send to agent beside it, and Auto-merge.") },
+  { name: "Deploy setup", line: "A field for a token the agent never sees. It goes straight into .env.", shot: shot(deploy, deploy1280, "A slate walking through a Vercel deploy setup, with a password field for a token the agent never sees.") },
+  { name: "A long fix", line: "The plan as a checklist you can edit, with the files it changed.", shot: shot(cart, cart1280, "A slate for a cart rounding fix: progress, an editable checklist, the files changed and a button to go on.") },
+  { name: "Live numbers", line: "Traffic that refreshes every minute, without spending a turn.", shot: shot(traffic, traffic1280, "A slate of live redirect traffic: six numbers and a line chart of requests a minute.") },
+  { name: "Explain it", line: "A diagram drawn to answer a question about the code.", shot: shot(explain, explain1280, "A slate with a diagram of how a short link becomes a redirect.") },
 ];
 
 /** How long each example shows before the next, while nobody has picked one. */
@@ -89,7 +94,7 @@ export function Slate() {
 
           <div className="mt-6 grid">
             {EXAMPLES.map((e, i) => (
-              <Peek key={e.name} src={e.shot.src} alt={e.shot.alt} at="top" scale={0.86} wall="30% 55%" className={cn("col-start-1 row-start-1 aspect-[1.75] rounded-[16px] border border-white/[0.08] transition-opacity duration-300", i === at ? "opacity-100" : "pointer-events-none opacity-0")} />
+              <Peek key={e.name} src={e.shot.src} narrow={e.shot.narrow} alt={e.shot.alt} at="top" scale={0.86} wall="30% 55%" className={cn("col-start-1 row-start-1 aspect-[1.75] rounded-[16px] border border-white/[0.08] transition-opacity duration-300", i === at ? "opacity-100" : "pointer-events-none opacity-0")} />
             ))}
           </div>
         </div>
