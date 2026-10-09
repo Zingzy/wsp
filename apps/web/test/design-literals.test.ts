@@ -122,7 +122,7 @@ const ALLOWED: readonly Allowed[] = [
   { text: "text-[12.5px]", count: 8, why: BEFORE("a size on the type scale") },
   { text: "text-[12px]", count: 7, why: BEFORE("text-xs") },
   { text: "text-[13.5px]", count: 5, why: BEFORE("text-head") },
-  { text: "text-[13px]", count: 145, why: BEFORE("text-note") },
+  { text: "text-[13px]", count: 143, why: BEFORE("text-note") },
   { text: "text-[14px]", count: 1, why: BEFORE("text-sm") },
   { text: "text-[15px]", count: 16, why: BEFORE("text-title") },
   { text: "text-[20px]", count: 1, why: BEFORE("a size on the type scale") },
@@ -135,7 +135,7 @@ const ALLOWED: readonly Allowed[] = [
 
 /** How many of each counted kind the sources hold now. A new one fails; one taken away fails until the figure here
  * falls with it. */
-const CEILINGS: Readonly<Record<string, number>> = { spacing: 102, size: 135 };
+const CEILINGS: Readonly<Record<string, number>> = { spacing: 102, size: 133 };
 
 describe("sizes, radii, shadows and colours come from the named scale", () => {
   const held = holdTo(hits.map(hit => ({ text: hit.text, where: hit.file })), ALLOWED);

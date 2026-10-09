@@ -189,7 +189,7 @@ function inlineJson(value: unknown): string {
 
 function loadPage(webDir: string, boot: BootPayload): string {
   const path = join(webDir, "index.html");
-  if (!existsSync(path)) throw new Error(`web app not built: ${path} is missing (pnpm --filter @wsp/web build)`);
+  if (!existsSync(path)) throw new Error(`web app not built: ${path} is missing (pnpm --filter @wsp/web... build)`);
   const html = readFileSync(path, "utf8");
   // The dev default apps/web/index.html ships is swapped for the real boot object, so the page carries exactly one
   // inline script. Written through a function, since a token or a path may hold what a replacement string reads.

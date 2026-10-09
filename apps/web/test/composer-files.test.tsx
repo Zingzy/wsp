@@ -602,7 +602,7 @@ describe("the images on the send", () => {
     expect(started[0]!.attachments).toBeUndefined();
   });
 
-  it("a message with an image sent during a running turn queues with its image on its card, and the image rides its start", async () => {
+  it("a message with an image sent during a running turn queues with its image named on its row, and the image rides its start", async () => {
     const { api, started, emit } = fixtureApi();
     await setup(api);
     const editor = composerEditor();
@@ -615,13 +615,14 @@ describe("the images on the send", () => {
     act(() => void paste([pngFile("shot.png")]));
     await waitFor(() => expect(thumbs()).toHaveLength(1));
     await press(editor, "Enter");
-    const card = await waitFor(() => {
-      const found = document.querySelector<HTMLElement>("[data-queued-id]");
-      expect(found).not.toBeNull();
-      return found!;
-    });
-    expect(card.querySelector('[data-queued-file="shot.png"]')).not.toBeNull();
+    await waitFor(() => expect(document.querySelector("[data-drawer-row=queue]")).not.toBeNull());
     expect(thumbs()).toHaveLength(0);
+    // The queue's bar names the message and the file it goes with.
+    fireEvent.click(document.querySelector("[data-drawer-row=queue]")!);
+    const card = document.querySelector<HTMLElement>("[data-composer-bar=queue] [data-queued-id]")!;
+    expect(card.querySelector("[data-settings-description]")!.textContent).toBe("shot.png");
+    fireEvent.click(document.querySelector("[data-dock-back]")!);
+    await waitFor(() => expect(document.querySelector("[data-chat-composer-form]")).not.toBeNull());
     expect(started).toHaveLength(1);
     noLineAbove();
     emit({ type: "session.done", workspaceId: WS, sessionId: "sess_0001", turnId: "turn_0001", result: { status: "completed", durationMs: 900, costUsd: 0.001 } });

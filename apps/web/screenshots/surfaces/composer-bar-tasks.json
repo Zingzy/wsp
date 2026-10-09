@@ -1,11 +1,13 @@
 {
   "at": "/",
-  "fixture": "replies",
+  "fixture": "composer-drawer",
   "steps": [
     "390:key:Escape",
     "390:sidebar=trigger",
-    "row-id=thread:tasks",
+    "row-id=thread:lead",
     "390:key:Escape",
+    "1440:prompt-write",
+    "1280:prompt-write",
     "drawer-row=tasks"
   ],
   "wait": "composer-bar=tasks",

@@ -929,10 +929,10 @@ describe("Add a computer while the setup runs", () => {
       act(() => openSetup(studio.id));
       await settle();
       const time = (id: string): string | null | undefined => dialog()!.querySelector(`[data-step-row='${id}'] [data-step-time]`)?.textContent;
-      expect(["agents", "mcp", "clis"].map(time)).toEqual(["0 s", "0 s", "5:00"]);
+      expect(["agents", "mcp", "clis"].map(time)).toEqual(["0s", "0s", "5m"]);
       await rest(1100);
-      expect(["agents", "mcp", "clis"].map(time)).toEqual(["1 s", "1 s", "5:01"]);
-      expect(time("floor")).toBe("1:12");
+      expect(["agents", "mcp", "clis"].map(time)).toEqual(["1s", "1s", "5m 1s"]);
+      expect(time("floor")).toBe("1m 12s");
       expect(ticks).toHaveLength(1);
     } finally {
       window.setInterval = was;

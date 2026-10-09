@@ -1357,12 +1357,12 @@ describe("composer while the workspace is not live", () => {
     await typeInto(composerEditor(), "follow up");
     await press(composerEditor(), "Enter");
     expect(draft()).toBe("");
-    expect(document.querySelector("[data-queued-id] [data-queued-text]")?.textContent).toBe("follow up");
+    expect(document.querySelector("[data-drawer-row=queue] [data-drawer-line]")?.textContent).toBe("follow up");
     expect(started).toHaveLength(0);
     emit({ type: "session.done", ...scope, result: { status: "completed", durationMs: 900, costUsd: 0.001 } });
     emit({ type: "session.end", ...scope, exitCode: 0, sawResult: true });
     await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["follow up"]));
-    expect(document.querySelector("[data-queued-id]")).toBeNull();
+    expect(document.querySelector("[data-drawer-row=queue]")).toBeNull();
   });
 });
 
@@ -1415,7 +1415,7 @@ describe("a new thread while another thread of the workspace works", () => {
     expect(screen.getByRole("button", { name: "Stop generation" })).toBeDefined();
   });
 
-  it("a thread whose turn replied and runs on says nothing above the box: a message sent now is a queued card", async () => {
+  it("a thread whose turn replied and runs on says nothing above the box: a message sent now waits in the drawer", async () => {
     const { api, emit, started } = fixtureApi([workspace], { [WS]: WORKING });
     await setup(api);
     await screen.findByText("On it.");
@@ -1424,8 +1424,8 @@ describe("a new thread while another thread of the workspace works", () => {
     expect(screen.queryByRole("button", { name: "Send message" })).toBeNull();
     await typeInto(composerEditor(), "then run the tests");
     await press(composerEditor(), "Enter");
-    await waitFor(() => expect(document.querySelectorAll("[data-queued-id]")).toHaveLength(1));
-    expect(document.querySelector("[data-queued-id]")!.textContent).toContain("then run the tests");
+    await waitFor(() => expect(document.querySelectorAll("[data-drawer-row=queue]")).toHaveLength(1));
+    expect(document.querySelector("[data-drawer-row=queue]")!.textContent).toContain("then run the tests");
     expect(started).toHaveLength(0);
     noLineAbove();
     // A new thread asked for now owes that turn nothing.

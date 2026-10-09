@@ -1,0 +1,14 @@
+{
+  "at": "/",
+  "fixture": "composer-drawer",
+  "steps": [
+    "390:key:Escape",
+    "390:sidebar=trigger",
+    "row-id=thread:lead",
+    "390:key:Escape",
+    "1440:prompt-write",
+    "1280:prompt-write"
+  ],
+  "wait": "drawer-row=question",
+  "settleMs": 800
+}

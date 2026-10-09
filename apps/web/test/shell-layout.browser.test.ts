@@ -739,11 +739,11 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
   }, 60_000);
 
   it("a pick closes the option menu, so the click after it lands on the prompt the menu was covering", async () => {
-    // A turn running on this computer with a prompt open, folded over the composer, which is the page the menu covered.
+    // A turn running on this computer with a prompt open, folded to the composer's drawer, which is the page the menu covered.
     await page!.goto(`${base}?theme=dark&local=1&ws=ws_m&perm=1`);
     await page!.waitForSelector("text=Loading transcript", { state: "detached" });
     await page!.locator("[data-prompt-dock='ask_open'] [data-prompt-write]").click();
-    await page!.waitForSelector("[data-prompt-strip]");
+    await page!.waitForSelector("[data-drawer-row=question]");
     await page!.waitForSelector("[data-composer-picker='access']");
     await page!.locator("[data-composer-picker='access']").click();
     await page!.waitForSelector("[data-composer-option='default']");
@@ -757,7 +757,7 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
 
     // Default answers nothing the prompt offers, so the prompt stands and their click on it lands
     // rather than being eaten by a menu that stayed up.
-    await page!.locator("[data-prompt-strip] [data-prompt-open]").click({ timeout: 5_000 });
+    await page!.locator("[data-drawer-row=question]").click({ timeout: 5_000 });
     await page!.locator("[data-prompt-dock='ask_open'] [data-prompt-answer]").click({ timeout: 5_000 });
     await page!.waitForSelector("[data-permission-prompt='ask_open'] [data-permission-outcome='allowed']");
   }, 60_000);
@@ -773,7 +773,7 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
 
     // The prompt the turn was stopped on is answered by the pick itself: the person clicks nothing.
     await page!.waitForSelector("[data-permission-prompt='ask_open'] [data-permission-outcome='allowed']");
-    expect(await page!.locator("[data-prompt-strip]").count()).toBe(0);
+    expect(await page!.locator("[data-drawer-row=question]").count()).toBe(0);
     await page!.waitForSelector(`[data-composer-picker='access'][data-access='bypassPermissions']`);
     expect(await page!.locator("[data-composer-picker='access']").getAttribute("data-access-refused")).toBeNull();
     expect(await page!.locator("[data-composer-refusal]").count()).toBe(0);

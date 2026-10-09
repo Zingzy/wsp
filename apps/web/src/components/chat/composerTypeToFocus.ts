@@ -19,9 +19,9 @@ export function typesIntoComposer(event: Pick<KeyboardEvent, "key" | "metaKey" |
   return !keyBelongsElsewhere(target, event.key);
 }
 
-/** Whether a composer stands on screen, whose thread's keys are its own; the prompt dock stands in its place, and a
- * letter typed there is the start of a message too. */
-export const composerOnScreen = (): boolean => document.querySelector("[data-chat-composer], [data-prompt-dock]") !== null;
+/** Whether a composer stands on screen, whose thread's keys are its own; the prompt dock or a bar stands in its place,
+ * and a letter typed there is the start of a message too. */
+export const composerOnScreen = (): boolean => document.querySelector("[data-chat-composer], [data-prompt-dock], [data-composer-bar]") !== null;
 
 /** While `enabled`, a key typed in the thread outside any field focuses the editor `focus` reaches. */
 export function useTypeToFocus(focus: RefObject<{ focus: () => void } | null>, enabled: boolean): void {
@@ -35,7 +35,7 @@ export function useTypeToFocus(focus: RefObject<{ focus: () => void } | null>, e
   }, [enabled, focus]);
 }
 
-/** While `enabled`, the prompt dock stands where the composer would, and a key typed outside any field lands there as
+/** While `enabled`, the prompt dock or a bar stands where the composer would, and a key typed outside any field lands there as
  * a letter lands in the composer: one the dock takes (a digit) is handed to the dock, and any other calls `fold` to
  * put it away and ends the draft with the key. No editor is mounted to hand that key to, so it goes into the draft,
  * and the composer that comes back takes the focus with its caret after it. */

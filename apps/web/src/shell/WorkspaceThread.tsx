@@ -6,16 +6,17 @@
 // as the menu it is answered from, and the composer comes back once the
 // prompt closes; a prompt another thread is stopped on, or one of a
 // subagent's, keeps its buttons in the timeline. Write a message instead, Esc,
-// or a letter typed outside the dock's own keys folds the prompt to one line
-// over the composer until the person opens it again. A turn the agent's usage
-// limit stopped puts its one row over the composer until the turn goes on or
-// the thread moves on without it.
-import { useMemo, useState } from "react";
+// or a letter typed outside the dock's own keys folds the prompt to the first
+// row of the composer's drawer until the person opens it again. A turn the
+// agent's usage limit stopped is a row of that drawer too, until the turn goes
+// on or the thread moves on without it.
+import { useEffect, useMemo } from "react";
+import { permissionPromptWords } from "@wsp/protocol";
 import { ChatComposer } from "../components/chat/ChatComposer.js";
 import { ChatView } from "../components/chat/ChatView.js";
-import { LimitStrip } from "../components/chat/LimitStrip.js";
 import { answerPrompt, type AnswerPrompt } from "../components/chat/answerPrompt.js";
-import { PromptDock, PromptStrip } from "../components/chat/PromptDock.js";
+import { useComposerBarStore } from "../components/chat/composerBar.js";
+import { PromptDock } from "../components/chat/PromptDock.js";
 import { useTypeToWrite } from "../components/chat/composerTypeToFocus.js";
 import type { ChatThreadHandle } from "../components/chat/useChatThread.js";
 import { isPromptOpen, type PermissionPrompt } from "../adapt/index.js";
@@ -29,47 +30,43 @@ function openPrompt(thread: ChatThreadHandle): PermissionPrompt | null {
   return null;
 }
 
-/** The prompt the dock is drawing for this thread, by id: its own open prompt, unless the person folded it away. */
-const dockedPrompt = (thread: ChatThreadHandle, writing: string | null): PermissionPrompt | null => {
-  const prompt = openPrompt(thread);
-  return prompt !== null && writing !== prompt.askId ? prompt : null;
+/** What the drawer's first row says of a folded prompt: its question, or what the call is. */
+const askedLine = (prompt: PermissionPrompt): string => {
+  const words = permissionPromptWords(prompt.toolName, prompt.input, prompt.detail);
+  return words.questions !== undefined ? words.questions[0]!.question : words.lead;
 };
 
 export function WorkspaceThread({ workspaceId, threadId = null }: { workspaceId: string; threadId?: string | null }) {
   const api = useStore(s => s.api);
-  const [writing, setWriting] = useState<string | null>(null);
   const answer = useMemo(() => answerPrompt(api), [api]);
-  // The thread's own prompt is the dock's whether the dock is up or folded to its strip: its row keeps the record
+  // The thread's own prompt is the dock's whether the dock is up or folded to the drawer: its row keeps the record
   // alone either way.
   return (
     <ChatView workspaceId={workspaceId} threadId={threadId} docked={thread => openPrompt(thread)?.askId ?? null}>
-      {thread => <Slot workspaceId={workspaceId} thread={thread} writing={writing} setWriting={setWriting} answer={answer} />}
+      {thread => <Slot workspaceId={workspaceId} thread={thread} answer={answer} />}
     </ChatView>
   );
 }
 
 /** What stands in the composer's slot: the dock while this thread's own prompt is open and not folded, else the
- * composer under the folded prompt's line. */
-function Slot({
-  workspaceId,
-  thread,
-  writing,
-  setWriting,
-  answer,
-}: {
-  workspaceId: string;
-  thread: ChatThreadHandle;
-  writing: string | null;
-  setWriting: (askId: string | null) => void;
-  answer: AnswerPrompt;
-}) {
+ * composer with the folded prompt and the usage limit among its drawer's rows. */
+function Slot({ workspaceId, thread, answer }: { workspaceId: string; thread: ChatThreadHandle; answer: AnswerPrompt }) {
   const prompt = openPrompt(thread);
+  const key = thread.threadKey;
+  const folded = useComposerBarStore(s => s.folded[key] ?? null);
   const catalog = useHarnessCatalog(thread.view.agent, workspaceId);
-  const docked = prompt !== null && dockedPrompt(thread, writing) !== null;
-  useTypeToWrite(workspaceId, docked, () => setWriting(prompt?.askId ?? null));
-  const api = useStore(s => s.api);
-  const latest = useThreadSessions(workspaceId, thread.threadKey).at(-1);
-  const limit = latest !== undefined && latest.status === "failed" ? latest.limit : undefined;
+  const docked = prompt !== null && folded !== prompt.askId;
+  // The panel takes the place of any bar, and once it is answered the composer comes back, not that bar.
+  useEffect(() => {
+    if (docked) useComposerBarStore.getState().closeBar(key);
+  }, [docked, key]);
+  useTypeToWrite(workspaceId, docked, () => {
+    if (prompt !== null) useComposerBarStore.getState().fold(key, prompt.askId);
+  });
+  const latest = useThreadSessions(workspaceId, key).at(-1);
+  const limit = latest !== undefined && latest.status === "failed" && latest.limit !== undefined ? latest.limit : null;
+  const question = useMemo(() => (prompt === null ? null : askedLine(prompt)), [prompt]);
+  const threadLimit = useMemo(() => (latest === undefined || limit === null ? null : { agent: latest.harness, limit, resumeAt: latest.resumeAt ?? null }), [latest, limit]);
   if (prompt !== null && docked)
     return (
       <PromptDock
@@ -80,24 +77,10 @@ function Slot({
         modes={catalog?.permissionModes ?? []}
         onAnswer={answer}
         onWriteInstead={() => {
-          setWriting(prompt.askId);
+          useComposerBarStore.getState().fold(key, prompt.askId);
           requestComposerFocus(workspaceId);
         }}
       />
     );
-  return (
-    <>
-      {prompt === null ? null : <PromptStrip permission={prompt} onOpen={() => setWriting(null)} />}
-      {latest === undefined || limit === undefined ? null : (
-        <LimitStrip
-          agent={latest.harness}
-          limit={limit}
-          resumeAt={latest.resumeAt ?? null}
-          onResume={() => void api?.markThreads?.([thread.threadKey], { resumeAtReset: true })}
-          onCancel={() => void api?.markThreads?.([thread.threadKey], { resumeAtReset: false })}
-        />
-      )}
-      <ChatComposer key={workspaceId} workspaceId={workspaceId} thread={thread} />
-    </>
-  );
+  return <ChatComposer key={workspaceId} workspaceId={workspaceId} thread={thread} question={question} limit={threadLimit} />;
 }

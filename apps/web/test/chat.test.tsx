@@ -192,32 +192,37 @@ describe("chat tab rendering", () => {
     expect(card.textContent).not.toMatch(/Checked out|Other threads/);
   });
 
-  it("carries the agent's step list on the composer's edge while its turn runs, never in the transcript", async () => {
+  it("carries the agent's step list in the composer's drawer while its turn runs, never in the transcript", async () => {
     const { api, emit } = fixtureApi([workspace]);
     await setup(api);
     emit({ type: "session.start", ...scope, prompt: "make a list and work through it" });
     emit({ type: "session.plan", ...scope, steps: [{ text: "one", state: "working" }, { text: "two", state: "pending" }] });
-    const row = await waitFor(() => document.querySelector<HTMLElement>("[data-composer-tasks-row]")!);
-    expect(row.querySelector("[data-composer-task-current]")!.textContent).toBe("one");
-    expect(row.querySelector("[data-composer-task-progress]")!.textContent).toBe("0/2");
+    const row = await waitFor(() => document.querySelector<HTMLElement>("[data-drawer-row=tasks]")!);
+    expect(row.querySelector("[data-drawer-line]")!.textContent).toBe("one");
+    expect(row.querySelector("[data-drawer-count]")!.textContent).toBe("0/2");
     emit({ type: "session.plan", ...scope, steps: [{ text: "one", state: "done" }, { text: "two", state: "working" }] });
-    await waitFor(() => expect(document.querySelector("[data-composer-task-progress]")?.textContent).toBe("1/2"));
-    expect(document.querySelector("[data-chat-composer] [data-composer-tasks]")).not.toBeNull();
-    expect(document.querySelector("[data-timeline-root] [data-composer-tasks], [data-todo-card]")).toBeNull();
-    // A click opens the whole list, each step with its mark.
-    fireEvent.click(document.querySelector("[data-composer-tasks-row]")!);
-    expect([...document.querySelectorAll("[data-composer-task]")].map(e => e.getAttribute("data-composer-task"))).toEqual(["done", "working"]);
+    await waitFor(() => expect(document.querySelector("[data-drawer-row=tasks] [data-drawer-count]")?.textContent).toBe("1/2"));
+    expect(document.querySelector("[data-chat-composer] [data-composer-drawer]")).not.toBeNull();
+    expect(document.querySelector("[data-timeline-root] [data-composer-drawer], [data-todo-card]")).toBeNull();
+    // A press opens the whole list in the composer's place, each step with its mark, and its foot folds it back.
+    fireEvent.click(document.querySelector("[data-drawer-row=tasks]")!);
+    expect([...document.querySelectorAll("[data-composer-bar=tasks] [data-step-row]")].map(e => e.getAttribute("data-state"))).toEqual(["done", "working"]);
+    fireEvent.click(document.querySelector("[data-dock-back]")!);
+    await waitFor(() => expect(document.querySelector("[data-drawer-row=tasks]")).not.toBeNull());
 
-    // While the agent asks the person something, the question is the one thing to read.
+    // While the agent asks the person something the question takes the composer's place; folded, it is the
+    // drawer's first row, above the tasks.
     emit({ type: "session.permission", ...scope, askId: "ask-1", toolName: "Bash", input: "{}", options: [{ id: "allow", label: "Allow", effect: "allow" }] });
-    await waitFor(() => expect(document.querySelector("[data-composer-tasks]")).toBeNull());
+    await waitFor(() => expect(document.querySelector("[data-prompt-root]")).not.toBeNull());
+    fireEvent.keyDown(document.querySelector("[data-prompt-root]")!, { key: "Escape" });
+    await waitFor(() => expect([...document.querySelectorAll("[data-drawer-row]")].map(e => e.getAttribute("data-drawer-row"))).toEqual(["question", "tasks"]));
     emit({ type: "session.permission.closed", ...scope, askId: "ask-1", outcome: "allowed", optionId: "allow" });
-    await waitFor(() => expect(document.querySelector("[data-composer-tasks]")).not.toBeNull());
+    await waitFor(() => expect([...document.querySelectorAll("[data-drawer-row]")].map(e => e.getAttribute("data-drawer-row"))).toEqual(["tasks"]));
 
     // The turn ends and the row goes with it.
     emit({ type: "session.done", ...scope, result: { status: "completed", durationMs: 900 } });
     emit({ type: "session.end", ...scope, exitCode: 0, sawResult: true });
-    await waitFor(() => expect(document.querySelector("[data-composer-tasks]")).toBeNull());
+    await waitFor(() => expect(document.querySelector("[data-composer-drawer]")).toBeNull());
     const next = { ...scope, turnId: "turn_0002" };
     emit({ type: "session.start", ...next, prompt: "plan it" });
     emit({ type: "session.plan", ...next, text: "# Add a quiet flag\n\n1. Parse it" });
@@ -382,7 +387,7 @@ describe("chat tab composer", () => {
     await press(editor, "Enter");
     expect(started.length).toBe(1);
     expect(editor.textContent).toBe("");
-    expect(document.querySelector("[data-queued-id] [data-queued-text]")?.textContent).toBe("again");
+    expect(document.querySelector("[data-drawer-row=queue] [data-drawer-line]")?.textContent).toBe("again");
 
     emit({ type: "session.start", ...turn, prompt: "fix the flaky test" });
     expect(stopButton()).toBeDefined();
@@ -390,7 +395,7 @@ describe("chat tab composer", () => {
     emit({ type: "session.end", ...turn, exitCode: 0, sawResult: true });
     await waitFor(() => expect(started.length).toBe(2));
     expect(started[1]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "again", thread: "thr_a" });
-    expect(document.querySelector("[data-queued-id]")).toBeNull();
+    expect(document.querySelector("[data-drawer-row=queue]")).toBeNull();
     expect(sendButton().getAttribute("aria-label")).toBe("Turn in flight");
   });
 
@@ -501,7 +506,7 @@ describe("chat tab send after a harness died before its init", () => {
     const { api, started, emit } = fixtureApi([workspace], history, [deadRow]);
     // The runtime records an event before it pushes it, so a reload finds the retry in the reply.
     const record = (e: SessionEvent) => { history[WS] = [...history[WS]!, e]; emit(e); };
-    const queued = () => document.querySelector("[data-queued-id] [data-queued-text]")?.textContent;
+    const queued = () => document.querySelector("[data-drawer-row=queue] [data-drawer-line]")?.textContent;
     await setup(api, "thr_dead");
     await screen.findByText(/exited before init/);
     expect(screen.queryByText(/Server is live at :3000\./)).toBeNull();
