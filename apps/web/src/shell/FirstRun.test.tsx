@@ -20,7 +20,7 @@ describe("the first run", () => {
     useStore.setState({ places: [{ id: "here", kind: "computer", name: "studio.local", label: "zingzy's MacBook Pro", default: true }] });
     render(<FirstRun />);
     expect(k("title").textContent).toBe(FIRST_RUN_WORDS.title);
-    expect(k("sentence").textContent).toBe("A project is a git repo on zingzy's MacBook Pro. Every piece of work on it gets its own copy.");
+    expect(k("sentence").textContent).toBe("A project is a folder on zingzy's MacBook Pro. Its threads work in that folder.");
     expect(document.querySelectorAll("input")).toHaveLength(0);
     expect([...document.querySelectorAll("button")].map(b => b.dataset["k"])).toEqual(["add-project", "privacy"]);
     expect(k("add-project").textContent).toBe(FIRST_RUN_WORDS.add);

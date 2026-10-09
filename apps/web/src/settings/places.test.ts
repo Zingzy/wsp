@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { DAEMON_VERSION, JOINED_COMPUTER, PLACE_BLOCKED_WORD, absentComputer, placeDaemonBehind, type PlaceSetup, type PlaceView, type SealedImageCopy, type WorkspaceView } from "@wsp/protocol";
+import { DAEMON_VERSION, JOINED_COMPUTER, PLACE_BLOCKED_WORD, absentComputer, placeDaemonBehind, placeWord, type PlaceSetup, type PlaceSync, type PlaceView, type SealedImageCopy, type WorkspaceView } from "@wsp/protocol";
 import { copyOn } from "./image.js";
 import { NOTHING_HELD, PLACE_KIND_WORDS, hereName, outcomeWord, placeName, placeOf, placeStateCell, removeSentence, removeTitle } from "./places.js";
 
@@ -91,9 +91,18 @@ describe("the remove sentence", () => {
     );
   });
 
-  it("adds when an offline computer is swept", () => {
-    expect(removeSentence(laptop, NOTHING_HELD, MAC)).toBe(
-      "wsp comes off old-macbook, which keeps the copy of your image and is otherwise left as it is. It is offline; what is on it is swept the next time it connects.",
+  it("says nothing comes off an offline computer joined with a code, and hands over the line to run there", () => {
+    // The remove sweeps over the link or over the ssh login (places/manage.ts); with neither, nothing sweeps it later.
+    expect(removeSentence({ ...laptop, road: {} }, NOTHING_HELD, MAC)).toBe("old-macbook is offline, so nothing comes off it: run wsp leave on that computer once it is back.");
+  });
+
+  it("says nothing of an ssh login or a leave for a cloud that is not answering", () => {
+    expect(removeSentence({ ...ascii, present: false }, NOTHING_HELD, MAC)).toBe("The key for Boat is forgotten on zingzy's MacBook Pro.");
+  });
+
+  it("says an offline computer added over ssh is swept over that login", () => {
+    expect(removeSentence({ ...laptop, road: { ssh: "root@203.0.113.7" } }, NOTHING_HELD, MAC)).toBe(
+      "wsp comes off old-macbook, which keeps the copy of your image and is otherwise left as it is. It is offline, so wsp logs in as root@203.0.113.7 to take itself off; if that fails too, run wsp leave on that computer.",
     );
   });
 });
@@ -143,6 +152,14 @@ describe("the state cell of a list row", () => {
     const behind = { ...hetzner, daemonVersion: DAEMON_VERSION - 5 };
     expect(placeStateCell(behind, null, { canUpdate: true })).toEqual({ kind: "update", why: placeDaemonBehind(behind) });
     expect(placeStateCell(behind, null, { canUpdate: false })).toEqual({ kind: "word", word: "Behind", why: `daemon ${DAEMON_VERSION - 5}, host ${DAEMON_VERSION}` });
+  });
+
+  it("says Behind for a change to the computer's recipe on its way, with placeWord's sentence on the hover, before a daemon behind", () => {
+    const sync: PlaceSync = { state: "behind", changes: ["ripgrep", "uv"], since: "x" };
+    expect(placeWord({ ...hetzner, sync }, null)).toEqual({ word: "Behind", sentence: "waiting to put on the recipe's 2 changes: ripgrep, uv" });
+    expect(placeStateCell({ ...hetzner, sync }, null, { canUpdate: true })).toEqual({ kind: "word", word: "Behind", why: "waiting to put on the recipe's 2 changes: ripgrep, uv" });
+    expect(placeStateCell({ ...hetzner, sync, daemonVersion: DAEMON_VERSION - 5 }, null, { canUpdate: true })).toEqual({ kind: "word", word: "Behind", why: "waiting to put on the recipe's 2 changes: ripgrep, uv" });
+    expect(placeStateCell({ ...hetzner, sync: { ...sync, state: "running" } }, null, { canUpdate: true })).toEqual({ kind: "word", word: "Behind", why: "putting on the recipe's 2 changes: ripgrep, uv", mark: "working" });
   });
 
   it("says a computer that is not answering first, since nothing can be put on a computer that is off", () => {

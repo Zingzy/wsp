@@ -154,6 +154,14 @@ describe("the pages wsp prints", () => {
     }
   });
 
+  it("add's --on says a folder here takes it, since wsp add <folder> --on <computer> seeds a project there", async () => {
+    const add = captured();
+    expect(await cli(["add", "--help"], add, undefined, {}, false)).toBe(0);
+    const page = add.lines.join("\n").replace(/\s+/g, " ");
+    expect(page).toContain("a folder here takes one to have that computer clone the folder's own remote");
+    expect(page).not.toContain("a folder here or a repo cloned --into a folder here takes none");
+  });
+
   it("a page is reached by its own word, a command by its own flag, and a word no page answers to is refused", async () => {
     const agent = captured();
     expect(await cli(["--help", "agent"], agent, undefined, {}, false)).toBe(0);

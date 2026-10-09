@@ -98,7 +98,8 @@ After it loads the unit, `wsp up --service` waits up to 20 seconds for the lock 
 `wsp down` stops the host that serves the state file:
 
 - If a service unit serves it, `wsp down` stops the service and removes the unit. Running turns keep going until the next host takes them over.
-- If a command or a terminal `wsp up` started it, `wsp down` stops that process.
+- If a command or a terminal `wsp up` started it, `wsp down` stops that process. This works when the service manager cannot answer, for example `systemctl --user` with no bus under `env -i` over ssh.
+- If the service manager cannot answer and no command started the host, `wsp down` changes nothing and names the command that failed.
 - If you started the host by hand in another way, `wsp down` tells you to stop it with Ctrl-C in its terminal, or with `kill`.
 
 ## Check it with `wsp status`

@@ -17,7 +17,7 @@ export const NEW_WORKSPACE = "New thread";
  * Start, since the screen has one act and its title says what that act starts. */
 export const FIRST_RUN_WORDS = {
   title: "Add a project to get started",
-  sentence: (here: string) => onceNamed(here, h => `A project is a git repo on ${h}. Every piece of work on it gets its own copy.`),
+  sentence: (here: string) => onceNamed(here, h => `A project is a folder on ${h}. Its threads work in that folder.`),
   add: "Add a project",
   productUsage: "wsp sends anonymous usage counts to PostHog.",
   privacy: "Privacy settings",

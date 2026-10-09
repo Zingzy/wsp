@@ -17,6 +17,8 @@ export const PR_WORDS = {
   sendToAgent: (agent: string): string => `Send to ${agent}`,
   sendAll: "Send to agent",
   refresh: "Refresh",
+  /** A review on this computer runs in a worktree on the pull request's branch, at its agent's read-only word. */
+  reviewNote: "Reads the pull request in a worktree on its branch and changes nothing. Its review waits here until you post it.",
   heads: { draft: "Draft review", status: "Status", activity: "Activity" },
   tabs: { conversation: "Conversation", commits: "Commits", files: "Files" },
   showMore: "Show more",

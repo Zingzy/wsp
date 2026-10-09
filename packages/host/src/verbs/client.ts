@@ -961,7 +961,7 @@ export const SEND_OPTIONS = optionsFor(SEND_FLAGS);
 export const flag = (flags: Flags, name: string): string | undefined => (typeof flags[name] === "string" ? (flags[name] as string) : undefined);
 export const flagList = (flags: Flags, name: string): string[] => (Array.isArray(flags[name]) ? (flags[name] as string[]) : []);
 
-export const PLACES_FIX = "Run wsp places.";
+export const PLACES_FIX = "Run wsp computers.";
 
 /** The place a word names, by the name or the id the list carries; a word nothing holds is refused with the names
  * there are. One reading, so the verb and the tool answer an unknown place alike. */

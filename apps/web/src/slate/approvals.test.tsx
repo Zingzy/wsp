@@ -72,7 +72,7 @@ describe("several commands waiting", () => {
     const [link, disk, inbox] = rows as [HTMLElement, HTMLElement, HTMLElement];
     expect(link.querySelector("[data-slate-consent-cmd]")!.textContent).toBe('vercel link --yes --project "$PROJECT"');
     // What an Always cannot cover is said on the sheet: a script it names is bound, anything else it reads is not.
-    expect(document.querySelector("[data-slate-consent-reach]")?.textContent).toBe("If a script it names changes, it asks again. The command can read anything you can.");
+    expect(document.querySelector("[data-slate-consent-reach]")?.textContent).toBe("On this computer, if a script it names changes, it asks again. The command can read anything you can.");
     // A press is not the only start once Always is given: the agent may start it too, and the sheet says so.
     expect(document.querySelector("[data-slate-consent-agent]")?.textContent).toBe("With Always in this thread, the agent can start it too.");
     expect(link.querySelector("[data-slate-consent-cadence]")!.textContent).toBe("Runs when you press it");

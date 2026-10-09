@@ -144,7 +144,7 @@
         "workspaces.resolve": "{\"id\":1,\"ok\":true,\"workspace\":{\"id\":\"ws_1\",\"name\":\"landing\",\"machineId\":\"m1\",\"phase\":\"running\",\"golden\":\"snap_gold\",\"createdAt\":\"2026-09-25T00:00:00.000Z\",\"project\":{\"id\":\"pr_1\",\"name\":\"api\",\"path\":\"/root/api\",\"computer\":\"place-9\"}}}",
         "places.list": "{\"id\":1,\"ok\":true,\"places\":[{\"id\":\"place-9\",\"kind\":\"computer\",\"name\":\"attic\",\"label\":\"zingzy's \u0085box\u007f \\\"one\\\" \\\\ two\\nthree 🧪\",\"default\":false,\"os\":\"linux\",\"shape\":{\"cpu\":8,\"memMb\":16384},\"diskFreeBytes\":123456789012,\"present\":true,\"agentVersions\":{\"2\":\"an index key\",\"claude\":\"2.1.0\"},\"forks\":{\"running\":1,\"room\":2}},{\"id\":\"place-solari\",\"kind\":\"provider\",\"name\":\"solari\",\"default\":true,\"rateUsdPerHour\":0.30000000000000004}]}"
       },
-      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"no place named nowhere; you have attic, solari. Run wsp places.\"}],\"structuredContent\":{\"error\":\"no place named nowhere; you have attic, solari. Run wsp places.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"no place named nowhere; you have attic, solari. Run wsp computers.\"}],\"structuredContent\":{\"error\":\"no place named nowhere; you have attic, solari. Run wsp computers.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
         {
           "op": "places.list"

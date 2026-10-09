@@ -247,9 +247,9 @@ export const PLACE_UNKNOWN_REFUSAL = "this host holds no place by that id; join 
  * learned at join, so nothing of this computer's went to it. */
 export const hostKeyRefusal = (url: string): string => `the host at ${url} did not prove the key this computer learned at join; nothing was sent to it`;
 
-/** What a remove says about a place that was not linked when it ran: the records here are gone and the agent on
+/** What a remove says about a place that was not linked when it ran: the records here are gone and the daemon on
  * that computer is not, since nothing could reach it to sweep. */
-export const placeStillInstalledLine = (name: string): string => `${name} is off this host, but the agent on it is still installed; run ${PLACE_LEAVE_LINE} on that computer when it is back`;
+export const placeStillInstalledLine = (name: string): string => `${name} is off this host, but the daemon on it is still installed; run ${PLACE_LEAVE_LINE} on that computer when it is back`;
 
 /** What a remove took off that computer by its agent's own command: a plugin the setup put on there. */
 export const pluginOffLine = (name: string): string => `plugin ${name}`;
@@ -262,9 +262,9 @@ export const pluginsKeptLine = (name: string, plugins: readonly string[]): strin
  * that port to carry to, and only that computer knows it. */
 export const placeNoDaemonPortLine = (name: string): string => `${name} is connected but has not said which port its daemon is on, so nothing can carry a pane to it yet; it says so on its next link`;
 
-/** What an install is refused with when the computer took the agent and never dialled back: the join landed, so
+/** What an install is refused with when the computer took the daemon and never dialled back: the join landed, so
  * the computer belongs to this wsp, and what is missing is a road from it to here. */
-export const placeNoLinkLine = (name: string): string => `${name} took the agent and has not dialled this host yet; check that it can reach this computer on the address it was given, and wsp places shows it the moment it does`;
+export const placeNoLinkLine = (name: string): string => `${name} took the daemon and has not dialled this host yet; check that it can reach this computer on the address it was given, and wsp computers shows it the moment it does`;
 
 /** What a stage reads while the computer it is running on has no link: the requests behind it are held until that
  * computer opens a socket again, and a stage with no line of its own reads as one that stopped. */
@@ -292,7 +292,7 @@ export const NO_PLACE_INSTALLER = "this host cannot install the agent on a compu
 /** The refusal a socket that was let in on a single-use ticket gets for reaching the place ops: which computers a
  * person's wsp runs on, and taking one back out, is handed out and taken away at the terminal of the computer the
  * host runs on and nowhere else. */
-export const PLACES_TICKET_REFUSAL = "a socket let in on a ticket cannot see or change the places this host holds; run wsp places on the computer the host runs on";
+export const PLACES_TICKET_REFUSAL = "a socket let in on a ticket cannot see or change the places this host holds; run wsp computers on the computer the host runs on";
 
 /** The refusal for a daemon channel that named both a workspace and a computer, or neither: a channel is one
  * daemon's, and which one is the caller's to say. */

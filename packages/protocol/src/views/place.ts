@@ -33,7 +33,7 @@ export const PLACE_ADD_WORDS: Record<PlaceAddStep, string> = {
   disk: "checking it has room for the base tools",
   reach: "checking it can reach this computer",
   wsp: "installing wsp",
-  service: "starting the agent",
+  service: "starting the daemon",
   join: "waiting for it to connect to this computer",
 };
 
@@ -44,7 +44,7 @@ export const PLACE_ADD_SHEET_WORDS: Partial<Record<PlaceAddStep, { word?: string
   "host-key": { word: `keeps the box's host key in ${KNOWN_HOSTS} here` },
   reach: { done: "reaches this computer" },
   wsp: { word: `installing wsp under ${PLACE_INSTALL.folder}` },
-  service: { word: `starting the agent as ${PLACE_INSTALL.service}` },
+  service: { word: `starting the daemon as ${PLACE_INSTALL.service}` },
   join: { done: "connected to this computer" },
 };
 

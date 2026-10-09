@@ -453,19 +453,20 @@ export const REWIND_NO_UNDO_LINE = "this thread has no rewind to undo; undo last
 /** What Undo rewind puts back, said beside it: the files, and never the turns the rewind cut. */
 export const UNDO_REWIND_LINE = "Files come back; the cut conversation does not.";
 
-/** Said beside every rewind that moves files: they are the whole copy's, so another thread's work goes back too. */
-const WHOLE_COPY = "The whole copy's files go back, other threads' work included.";
+/** Said beside every rewind that moves files: they go back only where no other thread has worked in the folder since
+ * that reply, and otherwise the files stay where they are. */
+const SHARED_FOLDER = "If another thread has worked in this folder since this reply, the files stay as they are.";
 
 const turnsAfter = (turns: number): string => (turns === 1 ? "The turn after this reply leaves" : `The ${turns} turns after this reply leave`);
 
 /** What a rewind to a reply takes, said before the click: how many turns go, whether the files go back, and what
  * Undo rewind brings back after. An agent that cuts no history of its own keeps every turn, and the note says so. */
 export function rewindNote(o: { turns: number; files: boolean; cutsConversation: boolean; agent: string; kept?: string }): string {
-  const undo = "Undo rewind puts them back until the next turn in this copy ends";
-  if (o.kept !== undefined) return `${o.kept.charAt(0).toUpperCase()}${o.kept.slice(1)}, so the conversation stays and the files go back to how they stood at this reply. ${WHOLE_COPY} ${undo}.`;
-  if (!o.cutsConversation) return `${o.agent} keeps its own history, so the conversation stays and the files go back to how they stood at this reply. ${WHOLE_COPY} ${undo}.`;
+  const undo = "Undo rewind puts them back until the next turn in this folder ends";
+  if (o.kept !== undefined) return `${o.kept.charAt(0).toUpperCase()}${o.kept.slice(1)}, so the conversation stays and the files go back to how they stood at this reply. ${SHARED_FOLDER} ${undo}.`;
+  if (!o.cutsConversation) return `${o.agent} keeps its own history, so the conversation stays and the files go back to how they stood at this reply. ${SHARED_FOLDER} ${undo}.`;
   if (!o.files) return `${turnsAfter(o.turns)} the conversation; the files stay as they are.`;
-  return `${turnsAfter(o.turns)} the conversation, and the files go back to how they stood at this reply. ${WHOLE_COPY} ${undo}; the conversation does not come back.`;
+  return `${turnsAfter(o.turns)} the conversation, and the files go back to how they stood at this reply. ${SHARED_FOLDER} ${undo}; the conversation does not come back.`;
 }
 
 /** The refusal of a send into a thread that names another agent. A thread's rows carry the agent its turns ran on

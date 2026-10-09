@@ -268,8 +268,9 @@ export interface Runtime {
      * repository, the text read on this computer, the copy made and, for a pull request, put on its head branch, and
      * a thread opened with the composed task. A person's act: a thread's own token is refused. */
     start(o: { url: string; project?: string; agent?: string; model?: string; effort?: string; access?: AccessChoice }, origin?: Caller): Promise<StartResult>;
-    /** A reviewer thread on a pull request, off its link or a workspace's own pull request: a fresh copy at its head,
-     * the agent at its harness's read-only word, Codex where none is named, the diff in its task. A person's act. */
+    /** A reviewer thread on a pull request, off its link or a workspace's own pull request: a worktree on its head
+     * here, a fresh copy on a cloud, the agent at its harness's read-only word, Codex where none is named, the diff
+     * in its task. A person's act. */
     review(o: { url?: string; workspaceId?: string; agent?: string; model?: string; effort?: string }, origin?: Caller): Promise<StartResult>;
     /** A review workspace's draft, edited first where asked: its summary, its verdict and which comments stay ticked. */
     reviewDraft(o: { workspaceId: string; summary?: string; verdict?: ReviewVerdict; on?: readonly { id: string; on: boolean }[] }, origin?: Caller): Promise<{ review?: ReviewDraft }>;

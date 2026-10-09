@@ -375,7 +375,7 @@ export const forkOpRefusedLine = (op: string, workspace: string, computer: strin
 /** What a person asking for a second workspace on the computer the app itself runs on is told. Its local mode is
  * one workspace, the one it already has; every other workspace is forked at a place. */
 export const localRunsOneLine = (workspace: string): string => `${THIS_COMPUTER} is already a workspace, ${workspace}, the only one it can be`;
-export const localRunsOneFix = (workspace: string): string => `Use ${workspace}, or name a place that forks: wsp places.`;
+export const localRunsOneFix = (workspace: string): string => `Use ${workspace}, or name a computer that forks: wsp computers.`;
 
 /** What a computer's kernel must have before wsp runs workspaces on it, asked in this order so the reason a person
  * reads is the first thing missing rather than the last. `read` answers a file's text or nothing when it is not
