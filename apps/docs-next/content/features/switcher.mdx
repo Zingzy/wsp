@@ -1,6 +1,6 @@
 # The switcher and the palette
 
-{/* Written from apps/web/src/keybindingDefaults.ts, apps/web/src/shell/ (shellCommands.ts, threadHistory.ts, workspaceSwitcher.ts), apps/web/src/components/palette/, apps/web/src/keybindings.ts. */}
+{/* Written from apps/web/src/keybindingDefaults.ts, apps/web/src/shell/ (shellCommands.ts, threadHistory.ts, workspaceSwitcher.ts), apps/web/src/components/palette/, apps/web/src/keybindings.ts, apps/web/src/adapt/workspaces.ts, packages/protocol/src/thread-state.ts and projects.ts. */}
 
 Three ways move you between threads with the keyboard. The switcher steps through the threads you opened last. The palette searches threads and actions. The jump keys open a row of the palette's Tasks group by its number.
 
@@ -35,7 +35,7 @@ Press `mod+k` or `mod+shift+p`, or click **Search** at the top of the sidebar, t
 Before you type, the palette shows three groups:
 
 - **Actions**: things to do, such as **New thread**, **Add a project**, **Settings** and **Report a bug**, and the actions of the open project.
-- **Tasks**: one row for each project folder that has a thread, and one for each worktree. Each row shows its jump key.
+- **Tasks**: one row for each project folder and each worktree that has a thread. Each row shows its jump key.
 - **Recent threads**: the 12 threads started last.
 
 When you type, it searches the actions, the Tasks rows, the titles of your threads, and the words in their messages. A match in a message shows under **In messages**, with the words around it.
@@ -48,7 +48,7 @@ The palette does not search files. To find a file, press `mod+p`. See [Files](/f
 
 ## Jump to a row
 
-`mod+1` to `mod+9` open the rows of the palette's **Tasks** group by their number. `mod+1` is the first row. The rows are in the order in which wsp made them, oldest first, and the order does not change while you work. A project folder with no thread has no row, and each worktree has a row of its own. If there is no row at that number, nothing happens.
+`mod+1` to `mod+9` open the rows of the palette's **Tasks** group by their number. `mod+1` is the first row. The rows are in the order in which wsp made them, oldest first, and the order does not change while you work. A project folder or a worktree with no thread has no row, and each worktree that has a thread has a row of its own. If there is no row at that number, nothing happens.
 
 The sidebar shows threads, not these rows, so the numbers do not match the sidebar. Open the palette to see which row has which number.
 

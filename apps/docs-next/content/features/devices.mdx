@@ -1,6 +1,6 @@
 # Other devices
 
-{/* Written from apps/web/src/settings/devices.tsx and account.tsx, apps/web/src/PairScreen.tsx, the host and login lines in packages/host/src/cli/commands.ts, packages/host/src/pairing.ts and hosts.ts. */}
+{/* Written from apps/web/src/settings/devices.tsx and account.tsx, apps/web/src/PairScreen.tsx, the host and login lines in packages/host/src/cli/commands.ts, packages/host/src/pairing.ts and hosts.ts, packages/host/src/relay-link.ts and host-lock.ts. */}
 
 You can use your wsp from more than one device. A browser on another computer, or a phone, can pair with your host and open the app. Another computer with the `wsp` command line can sign in to your account and run every command against your host.
 
@@ -8,9 +8,9 @@ The host is the wsp process that holds your threads and serves the app. It runs 
 
 ## Sign in to your account
 
-Your account is at the relay, a service that gives your host an https address. You sign in to it with GitHub. Sign in before you put a host on the relay, because `wsp host link` needs a computer that is signed in.
+Your account is at the relay, a service that gives your host an https address. You sign in to it with GitHub. Sign in before you put a host on the relay, because a bare `wsp host link` needs a computer that is signed in.
 
-Settings > Account shows whether this wsp is signed in. The app cannot sign in yet, so use the command line.
+Settings > Account shows whether this wsp is signed in. The app cannot sign in, so use the command line.
 
 On the computer that you want to sign in, run:
 
@@ -54,7 +54,7 @@ On the computer that runs the host, put the host on your account at the relay:
 wsp host link
 ```
 
-On a computer that is signed in, `wsp host link` asks nothing. On a computer that is not signed in, give the relay's address, `wsp host link <url>`, and approve the code it prints on the page it names. The relay gives the host an https address, so no port has to be open to the world. See [Computers behind a firewall](/features/behind-a-firewall).
+On a computer that is signed in, `wsp host link` asks nothing. On a computer that is not signed in, run `wsp host link <url>` with the relay's address. Then approve the code it prints on the page it names. The relay gives the host an https address, so no port has to be open to the world. See [Computers behind a firewall](/features/behind-a-firewall).
 
 ## Pair a browser or a phone
 

@@ -1,10 +1,10 @@
 # Changes and commits
 
-{/* Written from apps/web/src/diffs/, apps/web/src/components/chat/ChangedFilesTree.tsx, apps/web/src/pull-request/gitAction.logic.ts, wsp commit, discard and update in packages/host/src/verbs/workspaces.ts, daemon/crates/wsp-daemon/src/git.rs. */}
+{/* Written from apps/web/src/diffs/, apps/web/src/components/chat/ChangedFilesTree.tsx, apps/web/src/pull-request/gitAction.logic.ts, wsp commit, discard and update in packages/host/src/verbs/workspaces.ts, daemon/crates/wsp-daemon/src/git.rs, apps/web/src/pull-request/GitSplit.tsx, packages/runtime/src/threads/threads.ts. */}
 
 The Changes pane shows the git changes in the thread's folder, read on the computer the thread runs on. You can read the diff, comment on lines, edit a file, discard a file and commit, without leaving the app.
 
-To open it, click **Add a panel**, the **+** at the top of the right panel, and pick **Changes**. In that menu, and in the list an empty right panel shows, `D` picks it too. You can also click **Open diff** on a turn's list of changed files.
+To open it, click **Add a panel**, the **+** at the top of the right panel, and pick **Changes**. If the right panel is empty, it has no **+**. Click the pane in the list the empty panel shows instead. In that menu or that list, `D` picks it too. You can also click **Open diff** on a turn's list of changed files.
 
 <Image src="/shots/docs-changes.webp" alt="The Changes pane: the changed files as a tree and a split diff." />
 
@@ -25,7 +25,7 @@ The pane keeps your pick of scope for each thread's folder.
 
 ## Read the diff
 
-At the top is a tree of the changed files, with a count such as `3 of 7 viewed`. It folds, and it takes a fixed height. The diff is under it.
+At the top is a tree of the changed files, with a count such as `3 of 7 viewed`. It folds, and past a set height it scrolls. The diff is under it.
 
 - **Stacked view** shows each file as one column. **Split view** shows the old and the new side by side.
 - Tick a file as viewed to fold it. The tick stays until the file changes again.

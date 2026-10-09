@@ -1,6 +1,6 @@
 # Slate
 
-{/* Written from apps/www/src/sections/slate.tsx, apps/web/src/slate/ (SlateSurface.tsx, consent.tsx, standing.tsx, store.ts), packages/protocol/src/slate/catalog.ts and limits.ts, packages/runtime/src/slates.ts. */}
+{/* Written from apps/www/src/sections/slate.tsx, apps/web/src/slate/ (SlateSurface.tsx, consent.tsx, standing.tsx, store.ts), packages/protocol/src/slate/catalog.ts, limits.ts and types.ts, packages/runtime/src/slates.ts. */}
 
 A slate is a panel beside a thread that the agent builds and keeps current. It holds checklists, live numbers, charts, forms and buttons. You press a button or fill in a field, and the agent reads what you did.
 
@@ -8,7 +8,7 @@ Status updates fill up a chat, and a separate file means another window. A slate
 
 ## Open the slate
 
-The Slate tab is in the right panel. To open it, click **Add a panel**, the **+** at the top of the right panel, and pick **Slate**. In that menu, and in the list an empty right panel shows, `S` picks it too.
+The Slate tab is in the right panel. To open it, click **Add a panel**, the **+** at the top of the right panel, and pick **Slate**. If the right panel is empty, it has no **+**. Click the pane in the list the empty panel shows instead. In that menu or that list, `S` picks it too.
 
 The tab opens by itself the first time the agent writes a slate for the thread. After that, it stays where you put it. When a turn changes the slate, the line **Updated the slate** shows under the agent's reply. Click it to open the tab.
 
@@ -44,7 +44,7 @@ Traffic that refreshes every minute. A refresh runs a command, not a turn, so it
 
 <Image src="/shots/slate-traffic.webp" alt="A slate of live redirect traffic: six numbers and a line chart of requests a minute." />
 
-<video src="/shots/docs-slate-live.mp4" muted loop playsinline autoplay />
+<video src="/shots/docs-slate-live.mp4" autoPlay muted loop playsInline aria-label="The traffic slate refreshing on its timer." />
 
 ### Explain it
 
@@ -54,7 +54,7 @@ A diagram that the agent drew to answer a question about the code.
 
 ## Commands a slate runs
 
-A slate gets its live values from commands. A command runs with `bash` in the thread's folder, on the computer the thread runs on. It reaches what the agent reaches: your files, your command line tools and your MCP servers.
+A slate gets its live values from commands. A command runs with `bash` in the thread's folder, on the computer the thread runs on. The agent can also mark a command to run on the computer that runs wsp instead. It reaches what the agent reaches: your files, your command line tools and your MCP servers.
 
 A command can run again on a timer, every 10 seconds at the least. A timer ticks only while the slate is on screen, unless the agent marks the command to tick when the tab is hidden too. A command stops after 60 seconds by default, and after 600 seconds at most.
 
@@ -66,7 +66,7 @@ A command waits for your yes the first time it wants to run. The slate shows **R
 - **Run once** runs it this time and asks again next time.
 - **Always in this thread** runs it from now on. The agent can then start it too.
 
-The command can read anything you can read, so read it before you allow it. For a thread on the computer that runs wsp, the slate also asks again if a script that the command names changes. For a thread on a computer you added, it does not. wsp cannot read that computer's files to see the change.
+The command can read anything you can read, so read it before you allow it. If the command runs on the computer that runs wsp, the slate also asks again when a script that the command names changes. If the command runs on a computer you added, it does not. wsp cannot read that computer's files to see the change.
 
 To take back a yes, open the slate's menu, click **Approvals**, and click **Revoke** beside the command.
 
