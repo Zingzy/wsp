@@ -82,7 +82,7 @@ wsp leave takes this computer back out.
 
 <video src="/shots/docs-join.mp4" autoPlay muted loop playsInline aria-label="wsp join on the box: it dials the host, checks its key and loads the service" />
 
-The box keeps the addresses on its join line for good. The join writes them into the box's record once, and the daemon dials only those. So a box that joined through the relay's address alone loses your host when you unlink the host from the relay. To keep a second way in, give the join line every address that the box can reach, for example `wsp join http://192.168.1.12:4420 https://h1a2b3c4d5e6f7a8b.usewsp.com --code <code>`. If the box loses your host, join it again in this order:
+The box keeps the addresses on its join line for good. The join writes them into the box's record once, and the daemon dials only those. A new link gives your host a new name on the relay. So while a box last reached your host through the relay's address, `wsp host unlink` refuses and names that box. To keep a second way in, give the join line every address that the box can reach, for example `wsp join http://192.168.1.12:4420 https://h1a2b3c4d5e6f7a8b.usewsp.com --code <code>`. If the box loses your host, join it again in this order:
 
 1. On your computer, run `wsp remove office`. A new join makes a new record, and your host keeps the old one until you remove it. Two records with one name make every command that names `office` refuse.
 2. On the box, run `wsp leave`.
@@ -126,7 +126,7 @@ wsp leave
 
 It asks first. It stops if work on the box is on no remote, unless you add `--force`. Then run `wsp remove office` on your computer, because your host lists the box until you remove it there.
 
-To take your host off the relay, run `wsp host unlink` on your computer. It stops the tunnel and deletes the host's name. Every box that joined through the relay's address alone then loses your host.
+To take your host off the relay, run `wsp host unlink` on your computer. It stops the tunnel and deletes the host's name. While a box last reached your host through the relay's address, it refuses and names the box, since a box dials only the addresses it joined at. Remove that box with `wsp remove` and join it again at an address it reaches without the relay, then unlink.
 
 ## Next
 

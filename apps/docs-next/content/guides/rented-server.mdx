@@ -14,7 +14,7 @@ The server must have:
 - Root's login shell set to bash or sh.
 - Free space on `/opt/wsp` for the base tools, plus 1 GiB.
 
-On your computer, you need wsp and a running host. The app starts the host. If you do not use the app, run `wsp up --service` before you add the server. A host that a `wsp` command starts by itself takes a new port for boxes at each start, and the server then loses it.
+On your computer, you need wsp and a running host. The app starts the host. Without the app, a `wsp` command starts one by itself. That host takes a free port for boxes at its first start and asks for the same port at every start after, so the server keeps reaching it.
 
 ## Step 1: Read the server's host key on the server itself
 

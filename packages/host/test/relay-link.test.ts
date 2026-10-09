@@ -28,6 +28,7 @@ import {
   relayCommand,
   relayRecordPath,
   startRelay,
+  unlinkCutsOffLine,
   writeRelayRecord,
   type RelayDeps,
   type RelayDeviceDoor,
@@ -35,7 +36,8 @@ import {
 import { CLOUDFLARED } from "../src/connector.js";
 import type { DialOpts, HostClient } from "../src/verbs.js";
 import { keyFingerprint, verifyPlaceBytes } from "@wsp/keys";
-import { makeDevices, memoryStore } from "@wsp/runtime";
+import { makeDevices, memoryStore, PLACES } from "@wsp/runtime";
+import { stateStore } from "../src/cli/state.js";
 import { ADDRESS_NEXT_START, DEFAULT_RELAY, LOGIN_NO_KEY_REFUSAL, NOT_UP_YET, NO_HOSTS_LINE, deviceAdmissionTranscript, exitClassOf, type DeviceView } from "@wsp/protocol";
 import { writeStub } from "../../protocol/test/stub-script.js";
 
@@ -534,6 +536,27 @@ describe("wsp host unlink", () => {
     expect(await relayCommand(io([], err), { statePath, home }, ["unlink"], {}, deps(dir))).toBe(0);
     expect(readRelayRecord(statePath)).toBeUndefined();
     expect(err.join("\n")).toContain("that token does not name this host");
+  });
+
+  it("refuses while a box's last link came in at the relay's name, which the unlink deletes, and names the box", async () => {
+    const relay = await fakeRelay();
+    const { statePath, home, dir } = box();
+    await relayCommand(io(), { statePath, home }, ["link", relay.url], {}, deps(dir));
+    writeRelayRecord(statePath, { ...readRelayRecord(statePath)!, hostname: "hbox1.relay.example" });
+    const store = stateStore(statePath);
+    const placed = (id: string, name: string, dialed: string) => store.put(PLACES, id, { id, name, publicKey: `key-${id}`, joinedAt: "2026-10-09T00:00:00.000Z", report: { dialed } });
+    await placed("p_office", "office", "https://hbox1.relay.example");
+    await placed("p_lan", "lan", "http://192.168.1.12:4420");
+    const refused = await relayCommand(io(), { statePath, home }, ["unlink"], {}, deps(dir)).catch((e: unknown) => e);
+    expect(refused).toBeInstanceOf(Error);
+    expect(exitClassOf(refused)).toBe("usage");
+    expect(String(refused)).toContain(unlinkCutsOffLine(["office"], "https://hbox1.relay.example"));
+    expect(readRelayRecord(statePath)).toBeDefined();
+    expect(relay.calls.some(c => c.line.startsWith("DELETE"))).toBe(false);
+    // Once that box is off this host, the unlink goes ahead.
+    await store.delete(PLACES, "p_office");
+    expect(await relayCommand(io(), { statePath, home }, ["unlink"], {}, deps(dir))).toBe(0);
+    expect(readRelayRecord(statePath)).toBeUndefined();
   });
 
   it("says there is nothing to unlink on a box that never linked", async () => {

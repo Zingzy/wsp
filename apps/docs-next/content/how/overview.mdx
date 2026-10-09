@@ -15,7 +15,7 @@ flowchart LR
 
 The host is the process that holds a state file and serves the app, the command line and the MCP tools. There is one host for each state file. It holds your keys and the records of your projects, threads, transcripts and computers. The app, the `wsp` command and the wsp tools in an agent are all clients of the same host. So a thread that an agent starts shows in your sidebar at once.
 
-The host listens on `127.0.0.1:4400` by default. When a computer has joined, it also listens on a second port on every address, for the daemons of your other computers. For the app's host and a host that `wsp up` starts, that port is 20 above the app port, `4420` for the default `4400`. A host that a `wsp` command starts by itself takes any free port for it, at each start. [The host](/how/host) says how it starts, stops and restarts.
+The host listens on `127.0.0.1:4400` by default. When a computer has joined, it also listens on a second port on every address, for the daemons of your other computers. For the app's host and a host that `wsp up` starts, that port is 20 above the app port, `4420` for the default `4400`. A host that a `wsp` command starts by itself takes any free port for it at its first start, and the same port after. [The host](/how/host) says how it starts, stops and restarts.
 
 ## The daemon
 

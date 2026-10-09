@@ -150,9 +150,10 @@ export function keysFound(sources: KeySources, layers: Array<Record<string, stri
  * shell would reach the turns one road launched and none of the others. Not a folder's .env either: the folder a
  * host happened to start in is nobody's vault. The one file is what wsp init writes and what the person can read,
  * and a token saved there while the host runs is in the next turn, since nothing of this is cached. The servers'
- * values beside it come too, under the names their definitions on other computers read. */
+ * values beside it come too, under the names their definitions on other computers read, and a server's own value
+ * outranks the GitHub token a box's setup saved under the same name. */
 export function vaultNow(statePath: string): Record<string, string> {
-  return { ...serverValuesOf(parseEnvFile(serverEnvFileFor(statePath))), ...vaultOf(savedEnv(statePath)) };
+  return { ...vaultOf(savedEnv(statePath)), ...serverValuesOf(parseEnvFile(serverEnvFileFor(statePath))) };
 }
 
 /** Names the file only when the state file this run serves is not the default home's. */

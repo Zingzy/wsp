@@ -9,6 +9,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { writeOwn } from "@wsp/own-file";
 import { VAULT_VARIABLES, crossesLines, serverValuesOf } from "@wsp/catalog";
+import { GITHUB_TOKEN_ENV } from "@wsp/engine";
 
 export const ANTHROPIC_KEY = "ANTHROPIC_API_KEY";
 
@@ -125,10 +126,11 @@ export function keysOf(env: Readonly<Record<string, string | undefined>>): Keys 
   return anthropic !== undefined ? { anthropic } : {};
 }
 
-/** What the vault hands a turn: a record cut to the variables the catalog declares, empty values dropped. Nothing
- * of it is written to a machine; the runtime reads it at each launch and sets it in that turn's environment. */
+/** What the vault hands a turn: a record cut to the variables the catalog declares and gh's token, which a box's
+ * setup saves here, empty values dropped. Nothing of it is written to a machine; the runtime reads it at each launch
+ * and sets it in that turn's environment. */
 export function vaultOf(env: Readonly<Record<string, string | undefined>>): Record<string, string> {
-  return Object.fromEntries([...VAULT_VARIABLES].flatMap(name => (keyIn(env, name) !== undefined ? [[name, env[name]!]] : [])));
+  return Object.fromEntries([...VAULT_VARIABLES, GITHUB_TOKEN_ENV].flatMap(name => (keyIn(env, name) !== undefined ? [[name, env[name]!]] : [])));
 }
 
 /** The one writer of the wsp home's .env: a key line it knows is rewritten in place, or taken out for a name set to

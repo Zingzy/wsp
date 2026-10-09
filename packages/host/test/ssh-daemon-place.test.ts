@@ -154,6 +154,7 @@ describe("the place a machine reached over ssh keeps its daemon", () => {
     expect(s).toContain(`journalctl --user -u ${DAEMON_UNIT}`);
     expect(daemonUnit(sshDaemonPlace(LOGIN), GUEST_TARGET)).toContain("WantedBy=default.target");
     expect(daemonUnit(sshDaemonPlace(LOGIN), GUEST_TARGET)).toContain('Environment="HOME=/home/maya"');
+    expect(daemonUnit(sshDaemonPlace(LOGIN), GUEST_TARGET)).toContain('Environment="BROWSER=/home/maya/.local/bin/wsp-open"');
     // A login that arrives with no session bus cannot reach its own systemd at all, so the address is settled
     // before the first systemctl rather than every line failing at the bus.
     const lines = s.split("\n");
