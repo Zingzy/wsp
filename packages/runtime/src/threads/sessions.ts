@@ -29,7 +29,7 @@ import { SESSION_TITLE_TIMEOUT_MS } from "../types/events.js";
 import type { Runtime } from "../types/api.js";
 import {
   ATTACHMENTS, ATTACHMENT_KEYS, snippetAround, namedOnly, writeLines, type KeptProcess, type KeptLaunch, type ThreadRecord, type KeptImages,
-  type LiveSession, type SessionEntry,
+  type LiveSession, type SessionEntry, stopLogLine,
 } from "../types/internal.js";
 import type { RuntimeContext, SessionsArea } from "../context.js";
 
@@ -205,7 +205,7 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
       // state file. The thread's next turn waits for that end, so it never launches into the group being emptied.
       if (place !== undefined && (await stopUnheard(place, stopping))) {
         const left = await ends!(entry!, thread!, { away: true });
-        row.end?.(left ?? TURN_STOPPED_LINE, true);
+        row.end?.(left ?? TURN_STOPPED_LINE, true, true);
         const owed = await kind!.endOwed?.(entry!, thread!);
         if (owed !== undefined) holdNext(thread!, owed.paid, ctx.placeDoorOf().nameOf(place));
         return answered("accepted", left);
@@ -933,8 +933,14 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
 
     async interrupt(sessionId, origin, task) {
       const asking = task === undefined ? ctx.capStopping(sessionId) : () => {};
+      const thread = (sessions.get(sessionId) ?? [...sessions.values()].find(r => r.turnId === sessionId))?.view.threadId ?? sessionId;
       try {
-        return await stopTurn(asking, sessionId, origin, task);
+        const answer = await stopTurn(asking, sessionId, origin, task);
+        console.warn(stopLogLine(thread, task, answer.outcome, answer.left));
+        return answer;
+      } catch (e: unknown) {
+        console.warn(stopLogLine(thread, task, `failed: ${e instanceof Error ? e.message : String(e)}`));
+        throw e;
       } finally {
         asking();
       }

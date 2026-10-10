@@ -289,6 +289,7 @@ export function createSessionFold(): SessionFold {
       tokens: result.tokens ?? null,
       model: result.model ?? t.summary.model,
       error: result.error ?? null,
+      ...(result.unreached === true ? { unreached: true } : {}),
       limit: result.limit ?? null,
       completedAt: at || null,
     };

@@ -211,6 +211,8 @@ export interface TurnSummary {
   /** What the turn changed in its folder, between the snapshots at its launch and its end; null on one that changed nothing. */
   readonly changes: TurnChanges | null;
   readonly error: string | null;
+  /** The turn was stopped here because its computer could not be reached: error says so, and the thread shows it. */
+  readonly unreached?: boolean;
   readonly startedAt: string | null;
   readonly completedAt: string | null;
   /** What the turn kept to rewind to once it was over: the checkpoint of the files (null where none was taken) and

@@ -171,6 +171,9 @@ export const noCheckpointLogLine = (threadId: string, workspaceId: string, words
  * whatever its harness did with it, so only the harness's own UI is out of step. */
 export const noNameWriteLogLine = (sessionId: string, workspaceId: string, words: string): string =>
   `the harness did not take the name for session ${sessionId.slice(0, 8)} on ${workspaceId}: ${words}`;
+/** The host log's one line for each stop sent to a turn or one of its subagents: the thread it named and its answer. */
+export const stopLogLine = (thread: string, task: string | undefined, outcome: string, left?: string): string =>
+  `stop on thread ${thread.slice(0, 8)}${task !== undefined ? ` subagent ${task.slice(0, 8)}` : ""}: ${outcome}${left !== undefined ? ` (${left})` : ""}`;
 /** What a cut turn's parent hears: the row's own span, since no harness result reports one. */
 export const restartCutLine = (elapsedMs: number): string => `cut by a host restart after ${fmtDuration(elapsedMs, "clock")}`;
 /** A guest with no daemon is asked again after this long (one may be deployed later). */
@@ -1070,4 +1073,4 @@ export type LiveSession = { view: SessionView; turnId: string; handle: SessionHa
  * run this host has no road to at all, and the row reads as a turn the restart cut. */
 export type Reopened = "attached" | "gone" | "unreached" | "cannot";
 
-export type SessionEntry = { view: SessionView; turnId: string; replaces?: string; notify?: readonly string[]; notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin; turnToken?: string; scopeDeviceId?: string; handle?: SessionHandle; end?: (reason: string, stopped?: boolean) => void; turnLive?: TurnLive; run?: string; from?: number; asked?: TurnAsked; snapshot?: string; pid?: number; launch?: Promise<void>; calls?: Map<string, { toolName: string; input: string }> };
+export type SessionEntry = { view: SessionView; turnId: string; replaces?: string; notify?: readonly string[]; notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin; turnToken?: string; scopeDeviceId?: string; handle?: SessionHandle; end?: (reason: string, stopped?: boolean, unreached?: boolean) => void; turnLive?: TurnLive; run?: string; from?: number; asked?: TurnAsked; snapshot?: string; pid?: number; launch?: Promise<void>; calls?: Map<string, { toolName: string; input: string }> };

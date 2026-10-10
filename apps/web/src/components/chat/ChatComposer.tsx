@@ -398,10 +398,12 @@ export function ChatComposer({
   const runningTurn: Pick<TurnSummary, "turnId" | "sessionId"> | null = thread.view.running ? thread.view.latestTurn : heldRow === null ? null : { turnId: heldRow.id, sessionId: heldRow.id };
   // The runtime keys sessions.interrupt by its own session id; the events carry the harness id, which differs after a
   // resume, so the row from sessions.list maps one to the other. Without a row the events' id goes, and the runtime answers.
+  // An agent that names its own session (Codex, Cursor, OpenCode) keys a thread's first row by its launch and the
+  // later turns' row by that name, and both carry it: the running row is the turn, the first answers not-running.
   const stopTarget = useMemo(() => {
     if (runningTurn === null) return null;
-    const row = sessions?.find(r => r.claudeSessionId === runningTurn.sessionId || r.id === runningTurn.sessionId);
-    return row?.id ?? runningTurn.sessionId;
+    const rows = sessions?.filter(r => r.claudeSessionId === runningTurn.sessionId || r.id === runningTurn.sessionId) ?? [];
+    return (rows.find(r => r.status === "running") ?? rows.at(-1))?.id ?? runningTurn.sessionId;
   }, [runningTurn, sessions]);
   // The same row sessions.interrupt is keyed by: a pick made while this turn runs goes to the runtime by that id.
   // Between turns, a thread that has run is named by its latest row, the one the pickers stand on, so the pick still
@@ -424,9 +426,14 @@ export function ChatComposer({
   const canStop = runningTurn !== null && api?.interruptSession !== undefined;
   // The catalog answers before the click: a harness that steers takes the row into the turn, any other queues it.
   const canSteer = canStop && heldRow === null && harnessCatalog?.steers === true && api?.steerSession !== undefined;
-  /** What keeps these files out of a running turn of this harness, or null where its steer carries them. */
+  /** With steer picked, what keeps a message with these files out of a running turn of this harness: a harness that
+   * takes none mid-turn, or files its steer does not carry; null where it goes. */
   const steerWaits = useCallback(
-    (carried: ReadonlyArray<ComposerFile>): string | null => (!steers || harnessCatalog?.steers !== true ? null : steerFilesBlocked(carried.map(recordOf), harnessCatalog.steersImages === true, harnessCatalog.label)),
+    (carried: ReadonlyArray<ComposerFile>): string | null => {
+      if (!steers || harnessCatalog === null) return null;
+      if (harnessCatalog.steers !== true) return QUEUE_WORDS.noSteer(harnessCatalog.label);
+      return steerFilesBlocked(carried.map(recordOf), harnessCatalog.steersImages === true, harnessCatalog.label);
+    },
     [harnessCatalog, steers],
   );
   // The draft holds the collapsed caret, where a chip is one place; a trigger reads the text as sent. A caret beside a
