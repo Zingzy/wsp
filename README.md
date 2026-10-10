@@ -29,7 +29,7 @@ wsp runs coding agents (Claude Code, Codex, OpenCode, Cursor) as threads on your
 ## Install
 
 ```sh
-curl --proto '=https' --tlsv1.2 -fsSL https://usewsp.com/install | sh
+curl -fsSL https://usewsp.com/install | sh
 ```
 
 On a Mac this puts wsp.app in Applications and opens it; on Linux it puts the AppImage in `~/Applications`. Either way the `wsp` command lands in `~/.wsp/bin`, on PATH in a new terminal. Each download comes from this repo's releases and is checked against the sha256 GitHub publishes for it. `WSP_VERSION=1.2.3` installs that release; running it again upgrades in place.

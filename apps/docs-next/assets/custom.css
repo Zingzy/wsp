@@ -53,3 +53,36 @@
 .t-header__item--button .t-header__item--active {
   color: var(--scalar-button-1-color);
 }
+
+/* Room around the blocks a page is built from, so pictures, tables and code do not touch the prose beside them. */
+.t-editor__heading[data-level="2"] {
+  margin-top: 56px;
+}
+.t-editor__heading[data-level="3"] {
+  margin-top: 36px;
+}
+p.t-editor__paragraph + p.t-editor__paragraph {
+  margin-top: 16px;
+}
+ul.t-editor__list,
+ol.t-editor__list {
+  margin-top: 16px;
+}
+.t-editor__list li + li {
+  margin-top: 6px;
+}
+figure.t-editor__image,
+figure.t-editor__table-wrapper,
+.t-editor__code-container {
+  margin-top: 28px;
+  margin-bottom: 28px;
+}
+figure.t-editor__image img {
+  border-radius: 12px;
+  filter: drop-shadow(0 20px 40px rgb(0 0 0 / 50%)) drop-shadow(0 2px 6px rgb(0 0 0 / 35%));
+}
+figure.t-editor__image figcaption {
+  margin-top: 16px;
+  font-size: 13px;
+  color: var(--scalar-color-2);
+}

@@ -10,7 +10,7 @@ wsp is one app for every Mac, with Apple silicon or an Intel chip. The app also 
 2. Run the install line. Do not put `sudo` in front of it.
 
    ```sh
-   curl --proto '=https' --tlsv1.2 -fsSL https://usewsp.com/install | sh
+   curl -fsSL https://usewsp.com/install | sh
    ```
 
 3. Open a new terminal window, and run `wsp --version`. It prints `wsp` and the version that you installed.
@@ -43,5 +43,5 @@ The first window also says that wsp sends anonymous usage counts to PostHog. To 
 
 ## Install a given version or update
 
-- To install one release instead of the latest, set `WSP_VERSION` for the `sh` that runs the line. For example: `curl --proto '=https' --tlsv1.2 -fsSL https://usewsp.com/install | WSP_VERSION=1.2.3 sh`.
+- To install one release instead of the latest, set `WSP_VERSION` for the `sh` that runs the line. For example: `curl -fsSL https://usewsp.com/install | WSP_VERSION=1.2.3 sh`.
 - To move to the latest release, run the install line again. It replaces the app where it is and restarts the host on the new version.
