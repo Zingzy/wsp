@@ -369,7 +369,7 @@ const CHECK_FAILED = "wsp-check";
 /** The installs that carry a check of their own, read on the tools PATH after the stage, a page of reads to an
  * exec: a row whose install exited 0 without leaving its tool on the machine is a failure, not an install, and so
  * is every row of a page that could not be run at all, which is said in the stage detail rather than passing
- * quietly. Paged because a check can be a `brew list` of about a second and a recipe can carry a dozen: one read
+ * quietly. A row's note is what its check printed; the check itself goes to the stage detail, which is the log. Paged because a check can be a `brew list` of about a second and a recipe can carry a dozen: one read
  * of all of them reaches the inline bound and would fail every row on the machine, agents included. */
 async function verifyChecks(machine: Machine, tools: readonly ToolInstall[], results: readonly ToolResult[], stage: (detail: string) => void, path: string, prefix?: string): Promise<void> {
   const checked = results.flatMap(r => {
@@ -389,7 +389,8 @@ async function verifyChecks(machine: Machine, tools: readonly ToolInstall[], res
       stage(`the checks could not be run (${why}): ${nameList(rows.map(c => c.result.label))} count as failed`);
       for (const c of rows) {
         c.result.outcome = "failed";
-        c.result.note = `the check could not be run (${c.check}): ${why}`;
+        c.result.note = `the check could not be run: ${why}`;
+        stage(`${c.result.label}: its check was ${c.check}`);
       }
       continue;
     }
@@ -398,7 +399,8 @@ async function verifyChecks(machine: Machine, tools: readonly ToolInstall[], res
       const why = failed.get(String(at));
       if (why === undefined) continue;
       c.result.outcome = "failed";
-      c.result.note = `the check did not pass (${c.check})${why === "" ? "" : `: ${why}`}`;
+      c.result.note = why === "" ? `${c.result.label} is not there after the install` : why;
+      stage(`${c.result.label}: the check did not pass: ${c.check}`);
     }
   }
 }

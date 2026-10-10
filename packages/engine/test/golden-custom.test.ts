@@ -236,9 +236,17 @@ describe("the tools stage on rows outside the catalog", () => {
 
   it("checks each one after its install, and a row whose install exited 0 without leaving the tool is a failure", async () => {
     const machine = builder({ checkFails: "ruff --version" });
-    const out = await installTools(machine, customInstallsFor([just, ruff]), () => {});
+    const lines: string[] = [];
+    const out = await installTools(machine, customInstallsFor([just, ruff]), (_stage, detail) => lines.push(detail ?? ""));
     expect(out.tools.map(t => t.outcome)).toEqual(["installed", "failed"]);
-    expect(out.tools[1]!.note).toBe("the check did not pass (ruff --version): command not found");
+    // The row says what the check found; the command it ran is the log's.
+    expect(out.tools[1]!.note).toBe("command not found");
+    expect(lines).toContain("ruff: the check did not pass: ruff --version");
+    // A check that printed nothing says the row's tool is not there, still without its command.
+    const silent = builder();
+    silent.exec = async cmd => (cmd.includes("wsp-check") ? shellOut(cmd) : { exitCode: 0, stdout: "", stderr: "" });
+    const quiet = await installTools(silent, customInstallsFor([{ ...ruff, check: "false" }]), () => {});
+    expect(quiet.tools[0]!.note).toBe("ruff is not there after the install");
     // One run answers for every row, and each check is named in it.
     const runs = machine.inline.filter(c => c.includes("wsp-check"));
     expect(runs).toHaveLength(1);
@@ -280,7 +288,8 @@ describe("the tools stage on rows outside the catalog", () => {
     const lines: string[] = [];
     const out = await installTools(machine, customInstallsFor([just, ruff]), (_stage, detail) => lines.push(detail ?? ""));
     expect(out.tools.map(t => t.outcome)).toEqual(["failed", "failed"]);
-    expect(out.tools[0]!.note).toContain("the check could not be run (command -v just)");
+    expect(out.tools[0]!.note).toBe("the check could not be run: bash: no such shell");
+    expect(lines).toContain("just: its check was command -v just");
     expect(lines.find(l => l.startsWith("the checks could not be run"))).toContain("just, ruff count as failed");
   });
 

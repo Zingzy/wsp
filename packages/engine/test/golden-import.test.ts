@@ -843,12 +843,13 @@ describe("toolInstallsFor", () => {
     expect(cmd("tools/brew/gh")).toMatch(/su -s \/bin\/bash linuxbrew -c 'cd \.[\s\S]*HOMEBREW_NO_AUTO_UPDATE=1[\s\S]*brew install gh'$/);
     const shared = cmd("tools/brew-shared");
     expect(shared).toMatch(/su -s \/bin\/bash linuxbrew -c 'cd \. 2>\/dev\/null \|\| cd \/home\/linuxbrew\nexport HOMEBREW_NO_AUTO_UPDATE=1 .*NONINTERACTIVE=1 HOMEBREW_CURL_RETRIES=1\n/);
-    expect(shared).toContain(`brew deps --for-each '\\''gh'\\'' '\\''pipx'\\'' '\\''go'\\'' | sed`);
+    expect(shared).toContain(`brew deps --for-each '\\''gh'\\'' '\\''pipx'\\'' '\\''go'\\'')`);
     // Homebrew's own toolchain is never in the shared set: it installed before, on request, and stays that way.
     expect(shared).toContain(`grep -vx -e '\\'''\\'' -e glibc -e gcc | sort | uniq -d`);
-    expect(shared).toContain("brew install $shared; rc=$?");
+    expect(shared).toContain(`brew install $shared 2>"$err"; rc=$?`);
     // Installed as dependencies, so autoremove takes them with the formula that fails or leaves.
-    expect(shared).toContain("brew tab --no-installed-on-request $shared || true\nexit $rc");
+    expect(shared).toContain("brew tab --no-installed-on-request $shared || true\n");
+    expect(shared).toMatch(/exit \$rc'$/);
     // Homebrew cleans after each install; one recipe with it off left 2.6 GB of bottles on a 20 GB disk.
     for (const i of t.installs) expect(i.cmd).not.toContain("HOMEBREW_NO_INSTALL_CLEANUP");
     expect(cmd("tools/npm/bun")).toMatch(/npm install -g bun@1\.4\.0$/);
@@ -950,7 +951,7 @@ describe("toolInstallsFor", () => {
     const two = toolInstallsFor([row({ rung: "tools", id: "tools/brew/gh", linux: "yes" }), row({ rung: "tools", id: "tools/brew/yq", linux: "yes" }), row({ rung: "tools", id: "tools/brew-tap/zingzy/tap", linux: "yes" })]);
     expect(two.installs.map(i => i.id)).toEqual(["tools/homebrew", "tools/brew-toolchain/glibc", "tools/brew-toolchain/gcc", "tools/brew-tap/zingzy/tap", "tools/brew-shared", "tools/brew/gh", "tools/brew/yq"]);
     expect(two.installs.find(i => i.id === "tools/brew-shared")).toMatchObject({ label: "shared Homebrew dependencies", after: "tools/brew-toolchain/gcc" });
-    expect(two.installs.find(i => i.id === "tools/brew-shared")!.cmd).toContain(`brew deps --for-each '\\''gh'\\'' '\\''yq'\\'' |`);
+    expect(two.installs.find(i => i.id === "tools/brew-shared")!.cmd).toContain(`brew deps --for-each '\\''gh'\\'' '\\''yq'\\'')`);
   });
 
   it("the housekeeping after the loop is autoremove then a full cleanup, each as linuxbrew with the tools PATH", () => {
@@ -1185,7 +1186,7 @@ describe("catalog rows", () => {
       ["tools/brew/yq", "tools/brew-toolchain/gcc"],
       ["tools/catalog/go", "tools/brew-toolchain/gcc"],
     ]);
-    expect(t.installs.find(i => i.id === "tools/brew-shared")!.cmd).toContain(`brew deps --for-each '\\''yq'\\'' '\\''go'\\'' |`);
+    expect(t.installs.find(i => i.id === "tools/brew-shared")!.cmd).toContain(`brew deps --for-each '\\''yq'\\'' '\\''go'\\'')`);
     expect(t.installs.at(-1)).toMatchObject({ id: "tools/catalog/go", label: "Go", manager: "brew", bin: "go" });
     expect(t.installs.at(-1)!.cmd).toMatch(/brew install go'$/);
     expect(t.installs.at(-1)).not.toHaveProperty("note");
