@@ -39,6 +39,6 @@ again as a last pass.
 1. Scalar joins route keys, so two groups whose pages share no path prefix cannot both sit at the root: a second
    `/` key overwrites the first, and `//` makes that group's own route answer `/`, sending the home page to its first
    child. That is why The project's pages live under `/project/`.
-2. `apps/docs` is the site still published until the swap; nothing here reads it but the redirects test.
+2. Scalar serves these pages at its own root and writes its sidebar and asset links with the `/docs` subpath, but its scripts redraw a page's own links without it once the page loads. The usewsp.com Worker (`apps/www/worker/index.ts`) strips `/docs`, writes it back onto bare links, and sends a path the site lacks to `/docs` when Scalar has it. Publish with `scalar project publish -s wsp -c scalar.config.json` from this folder; Scalar's GitHub sync names the repo's old home.
 3. Scalar keeps a JSX attribute only in its React spelling, so a `<video>` plays only with `autoPlay`, and
    `test/prose.test.ts` fails one without it.

@@ -325,7 +325,7 @@ jobs:
           WSP_REQUIRE_DAEMON: "1"
           PUBLIC_BUILD: "1"
           POSTHOG_KEY: ${{ vars.POSTHOG_KEY }}
-        run: pnpm -r --filter '!./apps/www' --filter '!./apps/docs' --filter '!@wsp/desktop' build
+        run: pnpm -r --filter '!./apps/www' --filter '!@wsp/desktop' build
       - name: Every target the host names is in the package
         run: node packages/wspx/scripts/daemon-binary.mjs --check
       - name: The package carries no cloud provider

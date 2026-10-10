@@ -556,7 +556,7 @@ const CONTROL_WORDS: Record<Exclude<ScreenControl, "sign-in">, string> = {
   model: "pick the model in the row under the box",
   access: "pick the access mode in the row under the box",
   settings: "wsp's settings open from the command palette",
-  docs: "wsp's docs are at wsp.apidocumentation.com",
+  docs: "wsp's docs are at usewsp.com/docs",
 };
 
 /** How the person signs this workspace's agent in, in one place: the sign-in is the workspace's, so the Workspace

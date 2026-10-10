@@ -38,4 +38,4 @@ wsp mcp install --agent claude   # or codex, gemini, opencode
 
 ## More
 
-The docs are at [wsp.apidocumentation.com](https://wsp.apidocumentation.com) and the source at [github.com/wsp-labs/wsp](https://github.com/wsp-labs/wsp). wsp is licensed AGPL-3.0-only.
+The docs are at [usewsp.com/docs](https://usewsp.com/docs) and the source at [github.com/wsp-labs/wsp](https://github.com/wsp-labs/wsp). wsp is licensed AGPL-3.0-only.

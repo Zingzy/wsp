@@ -1,0 +1,4 @@
+/* Scalar's copy button carries the block's language word and sits over the first line. */
+.t-editor__code {
+  padding-top: 2.25rem;
+}

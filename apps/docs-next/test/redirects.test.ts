@@ -7,9 +7,8 @@ import { describe, expect, it } from "vitest";
 import { pagePaths } from "./tree.js";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
-const OLD_CONFIG = join(ROOT, "../docs/scalar.config.json");
 
-/** The 28 pages the old docs published (wsp-map#1920 part 2, section 2). */
+/** The 28 pages the old docs published (wsp-map#1920 part 2, section 2), kept here since their folder is gone. */
 const OLD = [
   "/", "/start/install", "/start/first-workspace", "/start/the-model",
   "/setup/init", "/setup/recipes", "/setup/sign-ins", "/setup/keys", "/setup/the-host", "/setup/reach-your-box",
@@ -24,11 +23,6 @@ const config = JSON.parse(readFileSync(join(ROOT, "scalar.config.json"), "utf8")
 const redirects: { from: string; to: string }[] = config.siteConfig.routing.redirects;
 
 describe("redirects from the old docs", () => {
-  it("cover the old navigation's 28 pages", () => {
-    expect(OLD).toHaveLength(28);
-    expect([...pagePaths(OLD_CONFIG).keys()].sort()).toEqual([...OLD].sort());
-  });
-
   it("land each old path on a page of the new tree", () => {
     const landing = (path: string): string | undefined => (pages.has(path) ? path : redirects.find(r => r.from === path)?.to);
     expect(OLD.filter(path => landing(path) === undefined || !pages.has(landing(path)!))).toEqual([]);

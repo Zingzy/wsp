@@ -33,7 +33,7 @@ function readWords(): { path: string; text: string }[] {
       if (statSync(join(ROOT, group, name)).isDirectory() && readdirSync(join(ROOT, group, name)).includes("src")) walk(src);
       for (const page of ["README.md", "index.html"]) if (readdirSync(join(ROOT, group, name)).includes(page)) files.push(join(ROOT, group, name, page));
     }
-  for (const dir of ["skills", "docs", "apps/docs/content", "apps/docs-next/content", "daemon/crates/wsp-mcp/record"]) walk(join(ROOT, dir));
+  for (const dir of ["skills", "docs", "apps/docs-next/content", "daemon/crates/wsp-mcp/record"]) walk(join(ROOT, dir));
   files.push(join(ROOT, "README.md"));
   return files.map(path => ({ path: path.slice(ROOT.length), text: readFileSync(path, "utf8") }));
 }
