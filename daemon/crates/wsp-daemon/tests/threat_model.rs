@@ -55,6 +55,7 @@ const COPY_MADE: &str = "a copy being made, in a folder of the runtime's own tha
 const PTY: &str = "the pid file in the runtime's own folder, and in the wsp home the folder itself, which the runtime made and no workspace can swap, and an unlink of the size file there; the size file is written through write_file_in";
 const BROKER: &str = "runs inside the workspace as its own pty broker, with the workspace's rights and in its view";
 const ASIDE: &str = "the copy road's set-aside folders beside a project on the computer the person sits at";
+const EMPTIED: &str = "removes the runtime's folder only once it is empty, which follows no link and takes nothing one points at";
 
 /// Every function in the root paths allowed a write by path, and why a link a workspace planted cannot steer it.
 const EXEMPT: &[(&str, &str, &str)] = &[
@@ -69,6 +70,7 @@ const EXEMPT: &[(&str, &str, &str)] = &[
     ("wsp-daemon/src/place.rs", "sweep_workspace_profile", INSTALL),
     ("wsp-daemon/src/place.rs", "take_unfound", INSTALL),
     ("wsp-daemon/src/place.rs", "take_update_part", INSTALL),
+    ("wsp-daemon/src/place/outside.rs", "sweep_runtime_root", EMPTIED),
     ("wsp-daemon/src/readings_history.rs", "append", OWN),
     ("wsp-daemon/src/relay.rs", "listen_open_socket", UNLINK),
     ("wsp-daemon/src/ssh.rs", "contain", KERNEL),
@@ -86,6 +88,7 @@ const EXEMPT: &[(&str, &str, &str)] = &[
     ("wsp-runtime/src/bundle.rs", "view_of", BUNDLE),
     ("wsp-runtime/src/bundle.rs", "write_etc", BUNDLE),
     ("wsp-runtime/src/cgroup.rs", "forbid_swap", KERNEL),
+    ("wsp-runtime/src/cgroup.rs", "remove_tree", KERNEL),
     ("wsp-runtime/src/cgroup.rs", "throttle_at", KERNEL),
     ("wsp-runtime/src/copy.rs", "clones_under", OWN),
     ("wsp-runtime/src/copy.rs", "copier_for", OWN),

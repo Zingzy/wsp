@@ -17,7 +17,7 @@ use std::path::{Component, Path, PathBuf};
 
 use nix::errno::Errno;
 use nix::fcntl::{open, openat, openat2, readlinkat, OFlag, OpenHow, ResolveFlag};
-use nix::mount::{mount, umount2, MntFlags, MsFlags};
+use nix::mount::{mount, MsFlags};
 use nix::sys::stat::{fstat, mkdirat, stat, Mode};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -26,7 +26,9 @@ use wsp_frames::{Bind, CopyWord, Share};
 
 use crate::doctor::OVERLAID;
 use crate::hardening;
-use crate::mount_table::{mount_points, MOUNTINFO};
+use crate::mount_table::unmount_under;
+#[cfg(test)]
+use crate::mount_table::{mount_points, unmount, MOUNTINFO};
 use crate::profile;
 
 mod ssh;
@@ -207,11 +209,11 @@ impl Layout {
     /// Where the project checkouts a box holds live; the copies directory sits beside it under the same root,
     /// which is what lets a copy share blocks with the checkout it was made from.
     pub fn projects(&self) -> PathBuf {
-        self.root.join("projects")
+        self.root.join(wsp_frames::numbers::RUNTIME_PROJECTS)
     }
     /// The workspace's cgroup as the spec names it, under the cgroup root.
     pub fn cgroup_name(&self, id: &str) -> String {
-        format!("/wsp/{id}")
+        format!("{}/{id}", wsp_frames::numbers::WORKSPACE_CGROUPS)
     }
     /// Where the plain cgroup manager puts it.
     pub fn cgroup_dir(&self, id: &str) -> PathBuf {
@@ -518,6 +520,8 @@ pub fn mount_computer(layout: &Layout, id: &str, tool_roots: &[&str]) -> Result<
         return Err(Error { path: PathBuf::from("/"), source: io::Error::new(io::ErrorKind::Unsupported, reason) });
     }
     fs::create_dir_all(&rootfs).map_err(at(&rootfs))?;
+    // A stop that failed before its unmount left the last boot's set standing, and this boot's would go over it.
+    unmount_under(&rootfs)?;
     // A wake finds what the last boot wrote at /run and /tmp, which every distribution expects empty: the pid
     // files and sockets in them name processes the stop took away.
     for name in EMPTIED_AT_BOOT {
@@ -1121,14 +1125,6 @@ fn top_level_links() -> Result<Vec<(String, PathBuf)>, Error> {
     Ok(links)
 }
 
-/// Detaches the mount; a target that is not mounted is already what was asked for.
-pub fn unmount(target: &Path) -> Result<(), Error> {
-    match umount2(target, MntFlags::MNT_DETACH) {
-        Ok(()) | Err(nix::Error::EINVAL) | Err(nix::Error::ENOENT) => Ok(()),
-        Err(e) => Err(nix_at(target)(e)),
-    }
-}
-
 /// One bind under a workspace's rootfs, made from this daemon's own mount namespace and before youki's create:
 /// youki rebinds the rootfs recursively as it pivots, so what is bound here travels into the workspace with it,
 /// and the daemon keeps seeing it at the same path outside, which is the path the engine fence already rewrites
@@ -1308,31 +1304,6 @@ pub fn computer_tree_refusal(at: &str, tree: &str) -> String {
     )
 }
 
-/// Every mount under this path taken down, deepest first, and then the path itself: a rootfs carries the
-/// overlay, the copy bound into it and whatever youki mounted under that, and a stop that detached only the
-/// rootfs would leave the rest of them on the box. Read off this process's own mount table, so nothing outside
-/// the path is ever named, let alone unmounted.
-pub fn unmount_under(target: &Path) -> Result<(), Error> {
-    unmount_inside(target)?;
-    unmount(target)
-}
-
-/// The same, for a directory of this daemon's own that is no mount itself and whose entries are: the fence's
-/// staging directory. Asking the kernel to detach a path that was never mounted is its own refusal to read, so
-/// nothing but what the table names is named here.
-pub fn unmount_inside(target: &Path) -> Result<(), Error> {
-    let mut under: Vec<PathBuf> = mount_points(&fs::read_to_string(MOUNTINFO).map_err(at(Path::new(MOUNTINFO)))?)
-        .into_iter()
-        .filter(|point| point.starts_with(target) && point != target)
-        .collect();
-    // Deepest first: a mount cannot be detached while another sits under it.
-    under.sort_by_key(|point| std::cmp::Reverse(point.components().count()));
-    for point in under {
-        unmount(&point)?;
-    }
-    Ok(())
-}
-
 /// The sibling a death leaves sits in the workspace's own directory, which the remove and the open's sweep take
 /// away with everything else under it.
 pub fn write_json(path: &Path, value: &impl Serialize) -> Result<(), Error> {
@@ -1383,6 +1354,20 @@ mod tests {
         fs::write(&record, "{ \"id\": \"wsp-torn\"").unwrap();
         let refused = read_record(&record).unwrap_err().to_string();
         assert!(refused.contains("workspace.json"), "{refused}");
+    }
+
+    #[test]
+    fn every_folder_the_layout_makes_under_the_root_is_one_a_leave_takes_as_wsps() {
+        // A folder named here and missing from the list would outlive every leave of a runtime folder that stood.
+        let named: Vec<&str> =
+            include_str!("bundle.rs").split("self.root.join(\"").skip(1).filter_map(|rest| rest.split('"').next()).collect();
+        assert!(named.len() >= 6, "{named:?}");
+        for name in named {
+            assert!(
+                wsp_frames::numbers::RUNTIME_FOLDERS.contains(&name),
+                "{name} is made under the runtime's root and is not in RUNTIME_FOLDERS"
+            );
+        }
     }
 
     #[test]

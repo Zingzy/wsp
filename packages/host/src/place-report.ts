@@ -13,7 +13,7 @@ import { spawnRun } from "@wsp/collect";
 import { PLACE_FILE_MODE, engineWord, parsePlaceFile, placeFileText, workspacesBlockedBy, type PlaceEngine, type PlaceFile, type PlaceReport } from "@wsp/protocol";
 import { CATALOG_AGENTS, configSum } from "@wsp/catalog";
 import { LOGIN_READ, SSH_STORE_VARS, landedFilesScript, writeConfigHere, localShape, outsideMarks, outsideSweepScript, ownMarks, plainPath, readValues, serversOutLines, unmergeServers, type ServerPort } from "@wsp/engine";
-import { DAEMON_VERSION, threadCgroupsEndScript, isPlainPath, placeDaemonPaths, placeKeptForLinkLine, placeKeptMountedLine, placeKeptMountsUnreadLine, placeOutsideLeftLine, placeRuntimeStandsLine, placeOwnedPaths, placeOwnersUnknownLine, placeStoodBeforeLine, PLACE_FOUND_END, PLACE_FOUND_MAX_BYTES, TOOL_LINKS_DIR, TOOL_PREFIX, workFolderIn, WSP_WORKSPACE_APPARMOR_PATH } from "@wsp/protocol";
+import { DAEMON_VERSION, RUNTIME_FOLDERS, RUNTIME_PROJECTS, placeCgroupStandsLine, threadCgroupsEndScript, isPlainPath, placeDaemonPaths, placeKeptForLinkLine, placeKeptMountedLine, placeKeptMountsUnreadLine, placeOutsideLeftLine, placeRuntimeStandsLine, placeOwnedPaths, placeOwnersUnknownLine, placeStoodBeforeLine, PLACE_FOUND_END, PLACE_FOUND_MAX_BYTES, TOOL_LINKS_DIR, TOOL_PREFIX, workFolderIn, WSP_WORKSPACE_APPARMOR_PATH } from "@wsp/protocol";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { apparmorOffStep, sshDaemonPlace, type DaemonPlace } from "./doctor.js";
 import { onPath, runningWsp, wspCommand, type RunningWsp } from "./mcp-install.js";
@@ -261,6 +261,11 @@ export interface PlaceSweepOptions {
   /** The folder the daemon here keeps its workspaces in, taken only where a caller names it: the leave on this
    * computer names the protocol's, under the system root. */
   runtimeRoot?: string;
+  /** The project folders under the runtime's projects folder the host's records name, which a leave over a runtime
+   * folder that stood before the add takes with wsp's own folders there. */
+  runtimeProjects?: readonly string[];
+  /** The cgroups wsp made here, taken only where a caller names them, as the runtime's folder is. */
+  cgroupRoots?: readonly string[];
   /** This process's mount table, read off /proc unless a caller hands another; throws where it cannot be read. */
   mountTable?: () => string;
 }
@@ -400,8 +405,9 @@ export async function sweepPlace(opts: PlaceSweepOptions = {}): Promise<PlaceSwe
         if (!there(profile)) removed.push(profile);
       }
       removed.push(...outsideMarks(sh(outsideSweepScript(opts.systemRoot))), ...sweepTools(tools, found));
-      if (runtime !== undefined) removed.push(...sweepRuntime(runtime, found, opts.mountTable ?? readMountTable));
+      if (runtime !== undefined) removed.push(...sweepRuntime(runtime, found, opts.mountTable ?? readMountTable, opts.runtimeProjects ?? []));
     }
+    removed.push(...sweepCgroups(opts.cgroupRoots ?? []));
   }
   const said = unsourced(sshDaemonPlace({ home, path: "" }), home);
   if (said !== undefined && "removed" in said) removed.push(said.removed);
@@ -427,13 +433,15 @@ export function placeFound(home: string): ReadonlySet<string> | undefined {
   return new Set(text.slice(0, -end.length).split("\0").filter(entry => entry !== ""));
 }
 
-/** Takes the daemon's runtime folder off this computer whole, unless the add found it standing or something is still
- * mounted under it: a workspace running there reads through those mounts, and a removal would reach through them into
- * whatever they show. A mount table that cannot be read keeps it for the same reason, and a folder still standing
- * after the try is said rather than answered as gone or as nothing. The daemon's leave takes it by the same rule. */
-export function sweepRuntime(root: string, found: ReadonlySet<string>, table: () => string): string[] {
+/** Takes the daemon's runtime folder off this computer, unless something is still mounted under it: a workspace running
+ * there reads through those mounts, and a removal would reach through them into whatever they show. A mount table that
+ * cannot be read keeps it for the same reason. Whole where wsp made it. Where the add found it standing, which is also
+ * what a folder an earlier wsp's remove left reads as, only what wsp made there goes: its `RUNTIME_FOLDERS` and the
+ * project folders the host's records name, each a single name under `RUNTIME_PROJECTS`; anything else there may be the
+ * person's and stays, and the folder goes only once nothing else is in it. A folder still standing after the try is
+ * said rather than answered as gone or as nothing. The daemon's leave takes it by the same rule. */
+export function sweepRuntime(root: string, found: ReadonlySet<string>, table: () => string, projects: readonly string[] = []): string[] {
   if (!there(root)) return [];
-  if (found.has(root)) return [placeStoodBeforeLine(root)];
   let read: string;
   try {
     read = table();
@@ -442,12 +450,48 @@ export function sweepRuntime(root: string, found: ReadonlySet<string>, table: ()
   }
   const mount = mountsUnder(root, read)[0];
   if (mount !== undefined) return [placeKeptMountedLine(root, mount)];
+  if (!found.has(root)) return takeWhole(root);
+  const held = join(root, RUNTIME_PROJECTS);
+  const oneName = (name: string): boolean => name !== "" && name !== "." && name !== ".." && !name.includes("/");
+  const went = [...RUNTIME_FOLDERS.map(name => join(root, name)), ...projects.filter(oneName).map(name => join(held, name))].filter(there).flatMap(takeWhole);
   try {
-    rmSync(root, { recursive: true, force: true });
+    rmdirSync(held);
+    went.push(held);
   } catch {
-    // What could not go stays, and the line below says the folder stands; the rest of the leave still runs.
+    // Something no record names is in it, or it was never there.
   }
-  return there(root) ? [placeRuntimeStandsLine(root)] : [root];
+  try {
+    rmdirSync(root);
+    return [...went, root];
+  } catch {
+    return [...went, placeStoodBeforeLine(root)];
+  }
+}
+
+function takeWhole(path: string): string[] {
+  try {
+    rmSync(path, { recursive: true, force: true });
+  } catch {
+    // What could not go stays, and the line below says it stands; the rest of the leave still runs.
+  }
+  return there(path) ? [placeRuntimeStandsLine(path)] : [path];
+}
+
+/** Takes the cgroups wsp made, deepest first, each only once nothing stands in it: a leave ends no process, and the
+ * kernel refuses the removal of a cgroup still holding one, which is then said. One that is not there is nothing. */
+export function sweepCgroups(roots: readonly string[]): string[] {
+  const empty = (at: string): void => {
+    for (const entry of readdirSync(at, { withFileTypes: true })) if (entry.isDirectory()) empty(join(at, entry.name));
+    rmdirSync(at);
+  };
+  return roots.filter(there).map(root => {
+    try {
+      empty(root);
+    } catch {
+      // The kernel's refusal: the line below says the cgroup stands.
+    }
+    return there(root) ? placeCgroupStandsLine(root) : root;
+  });
 }
 
 /** This process's mount table, every byte kept: a mount point anywhere on the computer may name bytes that are not

@@ -6,8 +6,8 @@
 // nothing outside this file decides by what a computer is. Adding a road is a
 // module and its row.
 import { CLAUDE_CONFIG_DIR, GUEST_HOME } from "@wsp/catalog";
-import { envInput, INSTALL_MS, installScript, projectInstalls, withEnvFromInput, type Machine } from "@wsp/engine";
-import { claudeMemoryDir, claudeProjectKey, NO_IMAGE_FOR_SEED, placeDaemonPaths, placeInstallLog, projectLeftOnComputerLine, projectPathOn, projectRemovedAtProviderLine, projectRemovedHereLine, seedBytes, seedCommitsLandedLine, seedCommitsLostLine, SEED_DIR, SEED_MEMORY_DIR, SEED_PATCH, seedingLine, seedMemoryKeptLine, SEEDED_REFS, projectFolderNamed, shellLine, shellQuote, unpushedLine, type ExecResult, type MachineBind, type ProjectAddStage, type ProjectSource, type ProjectView, type SeedChoice, type SeedPlan } from "@wsp/protocol";
+import { envInput, INSTALL_MS, INSTALL_STORES, installScript, projectInstalls, withEnvFromInput, type Machine } from "@wsp/engine";
+import { claudeMemoryDir, claudeProjectKey, NO_IMAGE_FOR_SEED, placeDaemonPaths, placeInstallLog, projectLeftOnComputerLine, projectPathOn, projectRemovedAtProviderLine, projectRemovedHereLine, unpushedUnreadLine, seedBytes, seedCommitsLandedLine, seedCommitsLostLine, SEED_DIR, SEED_MEMORY_DIR, SEED_PATCH, seedingLine, seedMemoryKeptLine, SEEDED_REFS, projectFolderNamed, shellLine, shellQuote, unpushedLine, type ExecResult, type MachineBind, type ProjectAddStage, type ProjectSource, type ProjectView, type SeedChoice, type SeedPlan } from "@wsp/protocol";
 import type { ProjectSourceModule } from "./project-sources.js";
 
 /** How far the add has got, as the door turns each one into an event. */
@@ -204,7 +204,7 @@ const NO_CHECKOUT_MARK = "wsp-no-checkout";
 /** One line counting what a checkout holds that no remote does, read the same way for a project folder on its
  * computer and for a fork's checkout inside the fork: the commits on any branch or at any worktree's HEAD that no
  * remote branch carries and the seed did not bring from the person's own folder, the uncommitted files of every
- * worktree, and the stashes. A tag is not counted, since a clone fetches the remote's tags with no mark saying the
+ * worktree but the store wsp's own install put at its root, and the stashes. A tag is not counted, since a clone fetches the remote's tags with no mark saying the
  * remote holds them. A computer with no git, a `.git` git cannot open (a dangling link included), and any step of
  * the read that fails answer nothing, which reads as a checkout that could not be read rather than a clean one. */
 export function unsavedScript(checkout: string): string {
@@ -228,7 +228,7 @@ export function unsavedScript(checkout: string): string {
     "    bare) tree= ;;",
     '    "")',
     '      if [ -n "$tree" ] && [ -d "$tree" ]; then',
-    `        said=$(${git} "$tree" status --porcelain) || exit 1`,
+    `        said=$(${git} "$tree" status --porcelain -- ${INSTALL_STORES.map(dir => shellQuote(`:(top,exclude)${dir}`)).join(" ")}) || exit 1`,
     "        [ -z \"$said\" ] || changed=$((changed + $(printf '%s\\n' \"$said\" | wc -l)))",
     "      fi",
     "      tree= ;;",
@@ -245,12 +245,14 @@ export function unsavedScript(checkout: string): string {
 }
 
 /** The line a remove names a checkout by, off what `unsavedScript` printed there: nothing for a clean checkout or a
- * folder git does not track, and "could not read" for a read that failed or printed anything else. */
-export function unsavedOf(name: string, ran: ExecResult | undefined): string | undefined {
-  const said = ran?.exitCode === 0 ? lastLine(ran.stdout) : undefined;
+ * folder git does not track, and "could not read" for a read that failed or printed anything else, with what it said. */
+export function unsavedOf(name: string, ran: ExecResult): string | undefined {
+  const said = ran.exitCode === 0 ? lastLine(ran.stdout) : undefined;
   if (said === NO_CHECKOUT_MARK) return undefined;
   const counts = (said ?? "").split(/\s+/).map(Number);
-  if (counts.length !== 3 || !counts.every(n => Number.isInteger(n) && n >= 0)) return unpushedLine(name, undefined);
+  if (counts.length !== 3 || !counts.every(n => Number.isInteger(n) && n >= 0)) {
+    return unpushedUnreadLine(name, ran.exitCode !== 0 ? (lastLine(ran.stderr) ?? `the read exited ${ran.exitCode}`) : `the read printed ${JSON.stringify(said ?? "")}`);
+  }
   const [ahead, changed, stashes] = counts as [number, number, number];
   return unpushedLine(name, { branch: "", ahead, behind: 0, changed, ...(stashes > 0 ? { stashes } : {}), readAt: 0 });
 }
@@ -258,7 +260,13 @@ export function unsavedOf(name: string, ran: ExecResult | undefined): string | u
 /** The unsaved read of one checkout, run where `run` runs a command: on the computer for a project folder, inside
  * the fork for a fork's checkout. */
 export async function readUnsaved(name: string, checkout: string, run: (cmd: string, o: { timeoutMs: number }) => Promise<ExecResult>): Promise<string | undefined> {
-  return unsavedOf(name, await run(unsavedScript(checkout), { timeoutMs: STEP_MS }).catch(() => undefined));
+  let ran: ExecResult;
+  try {
+    ran = await run(unsavedScript(checkout), { timeoutMs: STEP_MS });
+  } catch (e) {
+    return unpushedUnreadLine(name, e instanceof Error ? e.message : String(e));
+  }
+  return unsavedOf(name, ran);
 }
 
 /** The last of the seed: the memory folder moved out of the checkout onto the computer, where every workspace of

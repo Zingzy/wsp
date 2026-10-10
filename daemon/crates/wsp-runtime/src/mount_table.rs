@@ -66,6 +66,87 @@ fn unescaped(word: &str) -> String {
     out
 }
 
+/// What the runtime takes off the table, every detach of a workspace's mounts read off it first.
+#[cfg(target_os = "linux")]
+mod detach {
+    use std::fs;
+    use std::io;
+    use std::path::{Path, PathBuf};
+
+    use nix::mount::{umount2, MntFlags};
+
+    use super::{mount_points, MOUNTINFO};
+    use crate::bundle::Error;
+
+    /// Detaches the mount; a target that is not mounted is already what was asked for.
+    pub fn unmount(target: &Path) -> Result<(), Error> {
+        match umount2(target, MntFlags::MNT_DETACH) {
+            Ok(()) | Err(nix::Error::EINVAL) | Err(nix::Error::ENOENT) => Ok(()),
+            Err(e) => Err(Error { path: target.to_owned(), source: e.into() }),
+        }
+    }
+
+    /// Every mount under this path taken down, deepest first, and then the path itself: a rootfs carries the
+    /// overlay, the copy bound into it and whatever youki mounted under that, and a stop that detached only the
+    /// rootfs would leave the rest of them on the box. Read off this process's own mount table, so nothing outside
+    /// the path is ever named, let alone unmounted.
+    ///
+    /// A boot over a set a stop left binds a second set at the same paths, and one detach of the path takes the top set
+    /// alone, so the passes go on until the table names nothing at or under it: a box held 27 sets under one fork. A pass
+    /// that takes nothing off is refused naming what stands, never looped on.
+    pub fn unmount_under(target: &Path) -> Result<(), Error> {
+        let mut standing = mounted_at_or_under(target)?;
+        while !standing.is_empty() {
+            unmount_inside(target)?;
+            unmount(target)?;
+            let left = mounted_at_or_under(target)?;
+            if left.len() >= standing.len() {
+                return Err(Error { path: left[0].clone(), source: io::Error::other("still mounted after it was detached") });
+            }
+            standing = left;
+        }
+        Ok(())
+    }
+
+    /// Refused naming the first mount at or under any of these paths: what a remove reads before it deletes a byte, since a
+    /// removal through a mount reaches whatever the mount shows and one stopped by a busy folder has already emptied the
+    /// rest.
+    pub fn nothing_mounted_under(targets: &[PathBuf]) -> Result<(), Error> {
+        for target in targets {
+            if let Some(point) = mounted_at_or_under(target)?.into_iter().next() {
+                return Err(Error { path: point, source: io::Error::other("still mounted, so nothing of the workspace was deleted") });
+            }
+        }
+        Ok(())
+    }
+
+    fn mounted_at_or_under(target: &Path) -> Result<Vec<PathBuf>, Error> {
+        Ok(mount_points(&fs::read_to_string(MOUNTINFO).map_err(|source| Error { path: PathBuf::from(MOUNTINFO), source })?)
+            .into_iter()
+            .filter(|point| point.starts_with(target))
+            .collect())
+    }
+
+    /// The same, for a directory of this daemon's own that is no mount itself and whose entries are: the fence's
+    /// staging directory. Asking the kernel to detach a path that was never mounted is its own refusal to read, so
+    /// nothing but what the table names is named here.
+    pub fn unmount_inside(target: &Path) -> Result<(), Error> {
+        let mut under: Vec<PathBuf> =
+            mount_points(&fs::read_to_string(MOUNTINFO).map_err(|source| Error { path: PathBuf::from(MOUNTINFO), source })?)
+                .into_iter()
+                .filter(|point| point.starts_with(target) && point != target)
+                .collect();
+        // Deepest first: a mount cannot be detached while another sits under it.
+        under.sort_by_key(|point| std::cmp::Reverse(point.components().count()));
+        for point in under {
+            unmount(&point)?;
+        }
+        Ok(())
+    }
+}
+#[cfg(target_os = "linux")]
+pub use detach::{nothing_mounted_under, unmount, unmount_inside, unmount_under};
+
 #[cfg(test)]
 mod tests {
     use super::*;

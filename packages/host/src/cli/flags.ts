@@ -122,6 +122,7 @@ export interface SharedFlags {
   base?: string;
   keep?: string[];
   cut?: string[];
+  takes?: string[];
   "no-memory"?: boolean;
   "no-commits"?: boolean;
   remember?: boolean;
@@ -166,6 +167,7 @@ export const SHARED_OPTIONS: Options = {
   base: { type: "string" },
   keep: { type: "string", multiple: true },
   cut: { type: "string", multiple: true },
+  takes: { type: "string", multiple: true },
   "no-memory": { type: "boolean" },
   "no-commits": { type: "boolean" },
   remember: { type: "boolean" },

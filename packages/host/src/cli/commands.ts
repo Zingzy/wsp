@@ -306,12 +306,13 @@ const COMMANDS: Readonly<Record<string, Command>> = {
   },
   [PLACE_LEAVE_VERB]: {
     page: "agent",
-    usage: `${PLACE_LEAVE_LINE} [--yes] [--force]`,
+    usage: `${PLACE_LEAVE_LINE} [--yes] [--force] [--takes <project folder>]...`,
     about: "on that computer: take wsp off it, for a computer whose host is gone and cannot run wsp remove; asked once, and stopped by a fork or a project checkout there holding work no remote has, naming each",
     json: false,
     host: "refused",
     cliOnly: "sweeps wsp off the computer it is typed on, which belongs with the terminal that joined it",
-    run: (io, _opts, values, args) => leaveCommand(io, args, undefined, { ...(values.yes === true ? { yes: true } : {}), ...(values.force === true ? { force: true } : {}) }),
+    run: (io, _opts, values, args) =>
+      leaveCommand(io, args, undefined, { ...(values.yes === true ? { yes: true } : {}), ...(values.force === true ? { force: true } : {}), ...(values.takes !== undefined ? { takes: values.takes } : {}) }),
   },
   doctor: {
     page: "dev",
@@ -569,6 +570,7 @@ export const SHARED_FLAGS: readonly SharedFlag[] = [
   { name: "yes", on: ["remove", PLACE_LEAVE_VERB], says: FLAG_WORDS["yes"]! },
   { name: "force", on: ["remove"], says: "remove it even where a fork or a project folder there holds work no remote has, which goes with it" },
   { name: "force", on: [PLACE_LEAVE_VERB], says: "leave even where a project checkout on this computer holds work no remote has, which goes with it" },
+  { name: "takes", on: [PLACE_LEAVE_VERB], says: "one project folder under /wsp/projects that wsp made, taken where /wsp stood before the add, which otherwise keeps every folder wsp did not make; given once per folder, as a remove names them" },
   { name: "yes", on: ["doctor"], says: "also delete the snapshots and templates this host left behind, which is not reversible" },
   { name: "recipe", on: ["init"], says: "tick the agents and tools from this recipe (wsp recipe writes it) and go straight to the sign-ins" },
   { name: "project", on: ["init"], says: "the project folder you are bringing first; its own files say what it needs, and those rows are ticked first" },

@@ -14,8 +14,15 @@ use crate::under_home::{remove_under_home, Removed};
 /// setup put outside the home. Before anything goes, a leave that would take the runtime's folder reads the checkouts
 /// in it, and refuses naming each that holds work no remote has, or the folder where it could not read them, unless
 /// forced. The add's record of what stood before it sits in wsp's folder, which the home's sweep takes, so it is read
-/// first.
-pub(crate) fn leave_here(home: &Path, profile: &Path, install: &str, runtime: &Path, force: bool) -> Result<Vec<String>, String> {
+/// first. `projects` are the folders under the runtime's projects folder the host's records name.
+pub(crate) fn leave_here(
+    home: &Path,
+    profile: &Path,
+    install: &str,
+    runtime: &Path,
+    force: bool,
+    projects: &[String],
+) -> Result<Vec<String>, String> {
     let found = super::place_found(home);
     if leave_takes_runtime(found.as_ref(), runtime) && !force {
         let unsaved = unsaved_under(runtime).unwrap_or_else(|_| vec![words::place_unread(runtime.display())]);
@@ -28,14 +35,19 @@ pub(crate) fn leave_here(home: &Path, profile: &Path, install: &str, runtime: &P
     // either off.
     if nix::unistd::geteuid().is_root() {
         let mounted = wsp_runtime::mount_table::mounts_at_or_under(runtime);
-        swept.extend(sweep_outside_owned(found.as_ref(), profile, install, runtime, &mounted, &super::sh_stdout));
+        swept.extend(sweep_outside_owned(found.as_ref(), profile, install, runtime, &mounted, projects, &super::sh_stdout));
+        #[cfg(target_os = "linux")]
+        swept.extend(sweep_cgroup_roots(
+            &[numbers::WORKSPACE_CGROUPS, numbers::THREAD_CGROUPS]
+                .map(|cgroup| PathBuf::from(format!("{install}{}{cgroup}", numbers::CGROUP_MOUNT))),
+        ));
     }
     Ok(swept)
 }
 
-/// Whether a leave here takes the runtime's folder whole: only root's can, and only with the add's whole record
-/// naming it as not there before, since with no record nothing tells wsp's folder from one that stood. Something
-/// mounted under it keeps it too, which the sweep reads at the time it runs.
+/// Whether a leave here takes the runtime's folder whole: only root's can, and only with the add's whole record naming
+/// it as not there before, since with no record nothing tells wsp's folder from one that stood. Something mounted under
+/// it keeps it too, which the sweep reads at the time it runs.
 pub(crate) fn leave_takes_runtime(found: Option<&HashSet<PathBuf>>, runtime: &Path) -> bool {
     nix::unistd::geteuid().is_root() && found.is_some_and(|found| !found.contains(runtime))
 }
@@ -51,6 +63,7 @@ pub(crate) fn sweep_outside_owned(
     install: &str,
     runtime: &Path,
     mounted: &Result<Vec<PathBuf>, String>,
+    projects: &[String],
     read: &dyn Fn(&str) -> String,
 ) -> Vec<String> {
     let prefix = PathBuf::from(format!("{install}{}", numbers::TOOL_PREFIX));
@@ -72,22 +85,27 @@ pub(crate) fn sweep_outside_owned(
     // The list naming what the setup wrote outside the home sits in the prefix, so it is read first.
     swept.extend(sweep_outside_home(install));
     swept.extend(sweep_tool_prefix(&prefix, &links, found));
-    swept.extend(sweep_runtime_root(runtime, found, mounted));
+    swept.extend(sweep_runtime_root(runtime, found, mounted, projects));
     swept
 }
 
-/// Takes the runtime's folder off this computer whole, unless the add found it standing or something is mounted under
-/// it: a workspace still running there reads through those mounts, and a removal would reach through them into
-/// whatever they show. A mount table that cannot be read keeps it for the same reason. Emptied by descriptor under its
-/// parent, as the home's paths are, so a tree a workspace made deeper than wsp's own keeps what lies below rather than
-/// overflowing the leave's small stack. A folder still standing after the try is said, never answered as gone or as
-/// nothing. The host's own leave takes it by the same rule.
-pub(crate) fn sweep_runtime_root(root: &Path, found: &HashSet<PathBuf>, mounted: &Result<Vec<PathBuf>, String>) -> Vec<String> {
+/// Takes the runtime's folder off this computer, unless something is mounted under it: a workspace still running there
+/// reads through those mounts, and a removal would reach through them into whatever they show. A mount table that
+/// cannot be read keeps it for the same reason. Whole where wsp made it. Where the add found it standing, which is also
+/// what a folder an earlier wsp's remove left reads as, only what wsp made there goes: its `RUNTIME_FOLDERS` and the
+/// project folders the host's records name, each a single name under `RUNTIME_PROJECTS`; anything else there may be the
+/// person's and stays, and the folder goes only once nothing else is in it. Emptied by descriptor under its parent, as
+/// the home's paths are, so a tree a workspace made deeper than wsp's own keeps what lies below rather than overflowing
+/// the leave's small stack. A folder still standing after the try is said, never answered as gone or as nothing. The
+/// host's own leave takes it by the same rule.
+pub(crate) fn sweep_runtime_root(
+    root: &Path,
+    found: &HashSet<PathBuf>,
+    mounted: &Result<Vec<PathBuf>, String>,
+    projects: &[String],
+) -> Vec<String> {
     if std::fs::symlink_metadata(root).is_err() {
         return Vec::new();
-    }
-    if found.contains(root) {
-        return vec![words::place_stood_before(root.to_string_lossy())];
     }
     let mounted = match mounted {
         Ok(mounted) => mounted,
@@ -96,14 +114,52 @@ pub(crate) fn sweep_runtime_root(root: &Path, found: &HashSet<PathBuf>, mounted:
     if let Some(mount) = mounted.iter().find(|point| point.starts_with(root)) {
         return vec![words::place_kept_mounted(root.to_string_lossy(), mount.to_string_lossy())];
     }
-    let (Some(parent), Some(name)) = (root.parent(), root.file_name()) else { return Vec::new() };
+    if !found.contains(root) {
+        return take_whole(root);
+    }
+    let held = root.join(numbers::RUNTIME_PROJECTS);
+    let one_name =
+        |name: &&String| matches!(Path::new(name.as_str()).components().collect::<Vec<_>>()[..], [std::path::Component::Normal(_)]);
+    let mut swept: Vec<String> = numbers::RUNTIME_FOLDERS
+        .iter()
+        .map(|name| root.join(name))
+        .chain(projects.iter().filter(one_name).map(|name| held.join(name)))
+        .filter(|folder| std::fs::symlink_metadata(folder).is_ok())
+        .flat_map(|folder| take_whole(&folder))
+        .collect();
+    if std::fs::remove_dir(&held).is_ok() {
+        swept.push(held.to_string_lossy().into_owned());
+    }
+    swept.push(match std::fs::remove_dir(root) {
+        Ok(()) => root.to_string_lossy().into_owned(),
+        Err(_) => words::place_stood_before(root.to_string_lossy()),
+    });
+    swept
+}
+
+fn take_whole(path: &Path) -> Vec<String> {
+    let (Some(parent), Some(name)) = (path.parent(), path.file_name()) else { return Vec::new() };
     match remove_under_home(parent, Path::new(name)) {
-        Removed::Gone => vec![root.to_string_lossy().into_owned()],
-        Removed::Linked => vec![words::place_kept_for_link(root.to_string_lossy())],
-        Removed::TooDeep => vec![words::place_kept_too_deep(root.to_string_lossy())],
-        Removed::Absent if std::fs::symlink_metadata(root).is_ok() => vec![words::place_runtime_stands(root.to_string_lossy())],
+        Removed::Gone => vec![path.to_string_lossy().into_owned()],
+        Removed::Linked => vec![words::place_kept_for_link(path.to_string_lossy())],
+        Removed::TooDeep => vec![words::place_kept_too_deep(path.to_string_lossy())],
+        Removed::Absent if std::fs::symlink_metadata(path).is_ok() => vec![words::place_runtime_stands(path.to_string_lossy())],
         Removed::Absent => Vec::new(),
     }
+}
+
+/// Takes the cgroups wsp made, deepest first, each only once nothing stands in it: a leave ends no process, and the
+/// kernel refuses the removal of a cgroup still holding one, which is then said. One that is not there is nothing.
+#[cfg(target_os = "linux")]
+pub(crate) fn sweep_cgroup_roots(roots: &[PathBuf]) -> Vec<String> {
+    roots
+        .iter()
+        .filter(|root| std::fs::symlink_metadata(root).is_ok())
+        .map(|root| match wsp_runtime::cgroup::remove_tree(root) {
+            Ok(()) => root.to_string_lossy().into_owned(),
+            Err(_) => words::place_cgroup_stands(root.to_string_lossy()),
+        })
+        .collect()
 }
 
 /// Every checkout and workspace under the runtime's folder a leave would take with it, each named by its path with
@@ -233,7 +289,7 @@ pub(super) mod tests {
         std::fs::create_dir_all(runtime.join("run/wsp-a/rootfs")).unwrap();
         let unread = Err("/proc/self/mountinfo: stream did not contain valid UTF-8".to_owned());
         assert_eq!(
-            sweep_runtime_root(&runtime, &HashSet::new(), &unread),
+            sweep_runtime_root(&runtime, &HashSet::new(), &unread, &[]),
             [words::place_kept_mounts_unread(runtime.to_string_lossy(), "/proc/self/mountinfo: stream did not contain valid UTF-8")]
         );
         assert!(runtime.join("run/wsp-a/rootfs").exists());
@@ -252,7 +308,7 @@ pub(super) mod tests {
         if !set("+i") {
             return;
         }
-        let swept = sweep_runtime_root(&runtime, &HashSet::new(), &Ok(Vec::new()));
+        let swept = sweep_runtime_root(&runtime, &HashSet::new(), &Ok(Vec::new()), &[]);
         set("-i");
         assert_eq!(swept, [words::place_runtime_stands(runtime.to_string_lossy())]);
         assert!(held.exists());
@@ -346,16 +402,133 @@ pub(super) mod tests {
         std::fs::write(runtime.join("logins/codex/login.log"), "signed in\n").unwrap();
         let mounted = [runtime.join("run/wsp-a/rootfs")];
         assert_eq!(
-            sweep_runtime_root(&runtime, &HashSet::new(), &Ok(mounted.to_vec())),
+            sweep_runtime_root(&runtime, &HashSet::new(), &Ok(mounted.to_vec()), &[]),
             [words::place_kept_mounted(runtime.to_string_lossy(), mounted[0].to_string_lossy())]
         );
         assert!(runtime.join("logins/codex/login.log").exists());
-        let stood = HashSet::from([runtime.clone()]);
-        assert_eq!(sweep_runtime_root(&runtime, &stood, &Ok(Vec::new())), [words::place_stood_before(runtime.to_string_lossy())]);
-        assert!(runtime.join("logins/codex/login.log").exists());
-        assert_eq!(sweep_runtime_root(&runtime, &HashSet::new(), &Ok(Vec::new())), [runtime.to_string_lossy().into_owned()]);
+        assert_eq!(sweep_runtime_root(&runtime, &HashSet::new(), &Ok(Vec::new()), &[]), [runtime.to_string_lossy().into_owned()]);
         assert!(!runtime.exists());
-        assert_eq!(sweep_runtime_root(&runtime, &HashSet::new(), &Ok(Vec::new())), Vec::<String>::new());
+        assert_eq!(sweep_runtime_root(&runtime, &HashSet::new(), &Ok(Vec::new()), &[]), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_runtime_folder_that_stood_before_loses_only_what_wsp_made_there_and_goes_once_nothing_else_is_in_it() {
+        let at = box_of_its_own();
+        let runtime = runtime_of(&at);
+        // What an earlier wsp's remove left, which the next add found standing: its own folders and the checkouts of two
+        // projects the host still records, beside a repository and notes of the person's own.
+        for folder in [
+            "run/wsp-a",
+            "state",
+            "copies",
+            "put",
+            "logins",
+            "projects/pr_1/checkout",
+            "projects/pr_2/checkout",
+            "projects/myrepo",
+            "notes",
+        ] {
+            std::fs::create_dir_all(runtime.join(folder)).unwrap();
+        }
+        std::fs::write(runtime.join("projects/myrepo/notes.md"), "mine\n").unwrap();
+        let stood = HashSet::from([runtime.clone()]);
+        let named = ["pr_1".to_owned(), "pr_2".to_owned(), "../notes".to_owned(), "pr_gone".to_owned()];
+        let swept = sweep_runtime_root(&runtime, &stood, &Ok(Vec::new()), &named);
+        let taken: Vec<String> = ["copies", "logins", "put", "run", "state", "projects/pr_1", "projects/pr_2"]
+            .iter()
+            .map(|f| runtime.join(f).to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(swept, [taken, vec![words::place_stood_before(runtime.to_string_lossy())]].concat());
+        assert!(
+            runtime.join("projects/myrepo/notes.md").exists() && runtime.join("notes").is_dir(),
+            "the leave took a folder no record names"
+        );
+        // Once only wsp's are there, the folder goes with them.
+        std::fs::remove_dir_all(runtime.join("projects/myrepo")).unwrap();
+        std::fs::remove_dir_all(runtime.join("notes")).unwrap();
+        std::fs::create_dir_all(runtime.join("projects/pr_1/checkout")).unwrap();
+        let swept = sweep_runtime_root(&runtime, &stood, &Ok(Vec::new()), &named);
+        assert_eq!(
+            swept,
+            [runtime.join("projects/pr_1"), runtime.join("projects"), runtime.clone()].map(|p| p.to_string_lossy().into_owned())
+        );
+        assert!(!runtime.exists());
+        // And with something mounted under it, nothing of it goes.
+        std::fs::create_dir_all(runtime.join("run/wsp-a/rootfs")).unwrap();
+        let mounted = [runtime.join("run/wsp-a/rootfs")];
+        assert_eq!(
+            sweep_runtime_root(&runtime, &stood, &Ok(mounted.to_vec()), &named),
+            [words::place_kept_mounted(runtime.to_string_lossy(), mounted[0].to_string_lossy())]
+        );
+        assert!(runtime.join("run/wsp-a/rootfs").exists());
+    }
+
+    /// A git repository with one commit, cloned from a bare origin and pushed there where `pushed`.
+    #[cfg(target_os = "linux")]
+    fn repo(at: &Path, pushed: bool) {
+        let git = |dir: &Path, args: &[&str]| {
+            let ran = std::process::Command::new("git")
+                .args(["-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "init.defaultBranch=main"])
+                .args(args)
+                .current_dir(dir)
+                .env("GIT_CONFIG_NOSYSTEM", "1")
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .output()
+                .unwrap();
+            assert!(ran.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&ran.stderr));
+        };
+        std::fs::create_dir_all(at).unwrap();
+        git(at, &["init", "-q"]);
+        std::fs::write(at.join("notes.md"), "one\n").unwrap();
+        git(at, &["add", "notes.md"]);
+        git(at, &["commit", "-q", "-m", "one"]);
+        if pushed {
+            let origin = at.with_extension("origin.git");
+            git(at.parent().unwrap(), &["clone", "-q", "--bare", at.to_str().unwrap(), origin.to_str().unwrap()]);
+            git(at, &["remote", "add", "origin", origin.to_str().unwrap()]);
+            git(at, &["fetch", "-q", "origin"]);
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_plain_leave_over_a_runtime_folder_that_stood_keeps_the_persons_repository_and_takes_the_clean_checkouts_it_is_named() {
+        if !nix::unistd::geteuid().is_root() {
+            return;
+        }
+        let home = tempfile::tempdir().unwrap();
+        let at = wsp_frames::place_daemon_paths(home.path());
+        let runtime = home.path().join("runtime");
+        std::fs::create_dir_all(&at.wsp).unwrap();
+        std::fs::write(&at.place_file, "{}").unwrap();
+        std::fs::write(&at.place_found, format!("{}\0{}\0", runtime.display(), numbers::PLACE_FOUND_END)).unwrap();
+        // The person's own repository with a commit on no remote, and two clean, pushed checkouts an older wsp made.
+        repo(&runtime.join("projects/myrepo"), false);
+        repo(&runtime.join("projects/pr_1/checkout"), true);
+        repo(&runtime.join("projects/pr_2/checkout"), true);
+        let profile = home.path().join("apparmor.d").join("wsp-workspace");
+        let named = ["pr_1".to_owned(), "pr_2".to_owned()];
+        let swept = leave_here(home.path(), &profile, &home.path().to_string_lossy(), &runtime, false, &named).unwrap();
+        assert!(runtime.join("projects/myrepo/notes.md").exists(), "{swept:?}");
+        assert!(!runtime.join("projects/pr_1").exists() && !runtime.join("projects/pr_2").exists(), "{swept:?}");
+        assert!(swept.contains(&words::place_stood_before(runtime.to_string_lossy())), "{swept:?}");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn the_cgroups_wsp_made_go_once_empty_and_one_still_holding_something_is_said() {
+        let at = box_of_its_own();
+        let workspaces = at.root.path().join("cgroup/wsp");
+        let threads = at.root.path().join("cgroup/wsp-threads");
+        std::fs::create_dir_all(workspaces.join("wsp-a/wsp-ssh")).unwrap();
+        std::fs::create_dir_all(threads.join("t_1")).unwrap();
+        // A file stands for the process a cgroup still holds: either way the folder will not go.
+        std::fs::write(threads.join("t_1/held"), "").unwrap();
+        let gone = at.root.path().join("cgroup/never-made");
+        let swept = sweep_cgroup_roots(&[workspaces.clone(), threads.clone(), gone]);
+        assert!(!workspaces.exists(), "{swept:?}");
+        assert!(threads.join("t_1/held").exists());
+        assert_eq!(swept, [workspaces.to_string_lossy().into_owned(), words::place_cgroup_stands(threads.to_string_lossy())]);
     }
 
     #[test]
@@ -371,6 +544,7 @@ pub(super) mod tests {
             &install_root(&at),
             &runtime_of(&at),
             &Ok(Vec::new()),
+            &[],
             &never,
         );
         assert_eq!(swept, [words::place_owners_unknown(&[at.profile.to_string_lossy(), at.prefix.to_string_lossy()])]);
@@ -394,6 +568,7 @@ pub(super) mod tests {
                 &install_root(&at),
                 &runtime_of(&at),
                 &Ok(Vec::new()),
+                &[],
                 &|_| String::new(),
             );
             assert_eq!(swept.len(), 1, "{swept:?}");
@@ -423,6 +598,7 @@ pub(super) mod tests {
             &install_root(&at),
             &runtime_of(&at),
             &Ok(Vec::new()),
+            &[],
             &never,
         );
         assert_eq!(tree(&at.prefix), before);
@@ -460,6 +636,7 @@ pub(super) mod tests {
             &install_root(&at),
             &runtime_of(&at),
             &Ok(Vec::new()),
+            &[],
             &|_| String::new(),
         );
         assert!(!at.profile.exists() && !at.prefix.exists());

@@ -201,6 +201,10 @@ export function unpushedLine(name: string, checkout: Checkout | undefined): stri
   return `${name} holds ${listed}`;
 }
 
+/** The line for a checkout whose read of what is not pushed did not finish, with why: what the read said last, or what
+ * stopped it from running. */
+export const unpushedUnreadLine = (name: string, why: string): string => `${unpushedLine(name, undefined)}: ${why}`;
+
 /** What a delete does to a create that failed before any machine was made, which is the one record with no machine id. */
 const NO_MACHINE_MADE: MachineOnDelete = { asked: "create failed before any computer was made, so there is none to delete", done: () => "its create had made no computer" };
 

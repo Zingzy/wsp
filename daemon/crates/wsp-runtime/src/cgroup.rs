@@ -11,7 +11,7 @@ use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 /// Where cgroup v2 is mounted.
-pub const CGROUP_ROOT: &str = "/sys/fs/cgroup";
+pub const CGROUP_ROOT: &str = wsp_frames::numbers::CGROUP_MOUNT;
 
 /// Waits until cgroup.events says no process is left, or the cgroup is gone; killed processes take a moment to
 /// leave, and the cgroup cannot be removed before they have.
@@ -28,6 +28,35 @@ pub fn wait_unpopulated(cgroup: &Path, patience: Duration) -> io::Result<()> {
             return Err(io::Error::other(format!("{} still holds processes after {} s", cgroup.display(), patience.as_secs())));
         }
         sleep(Duration::from_millis(2));
+    }
+}
+
+/// Every cgroup under this one, deepest first, and not the cgroup itself: the ssh server an editor dials stands in a
+/// cgroup of its own under the workspace's, which outlives its sessions empty, and the kernel refuses to remove a
+/// cgroup that still has a child. Only an empty cgroup can go; one still holding a process is the kernel's refusal,
+/// said with its path.
+pub fn remove_children(cgroup: &Path) -> io::Result<()> {
+    let listed = match fs::read_dir(cgroup) {
+        Ok(listed) => listed,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(io::Error::new(e.kind(), format!("{}: {e}", cgroup.display()))),
+    };
+    for entry in listed {
+        let entry = entry?;
+        if entry.file_type()?.is_dir() {
+            remove_tree(&entry.path())?;
+        }
+    }
+    Ok(())
+}
+
+/// The cgroup and every cgroup under it, deepest first.
+pub fn remove_tree(cgroup: &Path) -> io::Result<()> {
+    remove_children(cgroup)?;
+    match fs::remove_dir(cgroup) {
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(io::Error::new(e.kind(), format!("{}: {e}", cgroup.display()))),
+        Ok(()) => Ok(()),
     }
 }
 

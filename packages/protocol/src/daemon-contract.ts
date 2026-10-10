@@ -38,9 +38,20 @@ export const WSP_WORKSPACE_APPARMOR_PATH = "/etc/apparmor.d/wsp-workspace";
  * entry it held then, with the links into those. */
 export const TOOL_PREFIX = "/opt/wsp";
 /** Where the daemon of a computer somebody owns keeps everything its workspaces run on: their copies, their state,
- * the project checkouts and the shared logins. A leave run as root takes it whole unless the add found it standing,
- * and keeps it while anything is mounted under it, since a workspace still running there reads through those mounts. */
+ * the project checkouts and the shared logins. A leave run as root takes it whole, and keeps it while anything is
+ * mounted under it, since a workspace still running there reads through those mounts. Where the add found it standing,
+ * the leave takes only what wsp made there: its `RUNTIME_FOLDERS` and the project folders the host's records name. */
 export const RUNTIME_ROOT = "/wsp";
+/** The folders of its own state the daemon makes under `RUNTIME_ROOT`, every one wsp's by its name. */
+export const RUNTIME_FOLDERS = ["check", "copies", "logins", "put", "run", "state"] as const;
+/** The folder under `RUNTIME_ROOT` the project checkouts of an older wsp sit in, one folder per project id: a folder
+ * there no record names may be the person's own. */
+export const RUNTIME_PROJECTS = "projects";
+/** Where cgroup v2 is mounted, and the two cgroups wsp makes under it: the workspaces' and the threads'. A leave run as
+ * root takes each once nothing stands in it. */
+export const CGROUP_MOUNT = "/sys/fs/cgroup";
+export const WORKSPACE_CGROUPS = "/wsp";
+export const THREAD_CGROUPS = "/wsp-threads";
 /** The refs an add's seed leaves on a checkout at the tip of the commits it carried over from the person's own folder:
  * those commits are on that person's computer, so an unsaved read counts none of them as work a remove would lose. */
 export const SEEDED_REFS = "refs/wsp/seeded";
@@ -288,6 +299,9 @@ export const placeKeptMountsUnreadLine = (path: string, why: string): string => 
 /** Why the runtime's folder is still there after a leave that tried to take it: something in it would not go. Said on
  * both roads a leave runs on, and pinned to one text by the contract fixture. */
 export const placeRuntimeStandsLine = (path: string): string => `${path} still stands: the leave could not remove all of it; remove what is left there by hand`;
+/** Why a cgroup wsp made is still there after a leave: a process still stands in it or under it, and the leave ends
+ * none. Said on both roads a leave runs on, and pinned to one text by the contract fixture. */
+export const placeCgroupStandsLine = (path: string): string => `${path} still stands: a process is still in it; end it and remove the cgroup by hand`;
 /** Why a leave stopped before it removed anything: checkouts under the runtime's folder hold work no remote has, one
  * line each as the daemon's read names them. Said on both roads a leave runs on, and pinned to one text by the
  * contract fixture. */

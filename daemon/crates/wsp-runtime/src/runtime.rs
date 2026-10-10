@@ -453,7 +453,7 @@ impl Runtime {
                 let _ = fs::remove_dir_all(&dir);
                 if cgroup.exists() {
                     crate::cgroup::wait_unpopulated(&cgroup, KILL_PATIENCE).map_err(io_at(&cgroup))?;
-                    fs::remove_dir(&cgroup).map_err(io_at(&cgroup))?;
+                    crate::cgroup::remove_tree(&cgroup).map_err(io_at(&cgroup))?;
                 }
                 return Ok(());
             }
@@ -469,9 +469,7 @@ impl Runtime {
                     wait_reaped(init.pid, KILL_PATIENCE)?;
                 }
                 fs::remove_dir_all(&dir).map_err(io_at(&dir))?;
-                if cgroup.exists() {
-                    fs::remove_dir(&cgroup).map_err(io_at(&cgroup))?;
-                }
+                crate::cgroup::remove_tree(&cgroup).map_err(io_at(&cgroup))?;
                 return Ok(());
             };
             let pid = state.pid;
@@ -495,6 +493,8 @@ impl Runtime {
             if let (true, Some(pid)) = (ours, pid) {
                 wait_reaped(pid, KILL_PATIENCE)?;
             }
+            // youki's delete removes the cgroup itself and nothing under it, so a child left there fails it.
+            crate::cgroup::remove_children(&cgroup).map_err(io_at(&cgroup))?;
             let deleted = Container::load(dir.clone()).map_err(container).and_then(|mut c| c.delete(true).map_err(container));
             if let Err(e) = deleted {
                 if cgroup.exists() {

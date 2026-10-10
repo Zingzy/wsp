@@ -15,10 +15,10 @@ import { OWN_MARK, outsideAfterScript, outsideBeforeScript, keyFingerprint } fro
 import { daemonBinaryHere } from "../src/assets.js";
 import { GUEST_DAEMON_TARGETS } from "../src/daemon-binary.js";
 import { apparmorStep, apparmorStoodLine, joinedPlace, placeFoundSkippedLine, placeFoundStep, sshDaemonPlace } from "../src/doctor.js";
-import { PLACE_FOUND_END, threadCgroupsEndScript, placeOutsideLeftLine, placeOwnersUnknownLine, TOOL_PREFIX } from "@wsp/protocol";
+import { PLACE_FOUND_END, placeCgroupStandsLine, threadCgroupsEndScript, placeOutsideLeftLine, placeOwnersUnknownLine, TOOL_PREFIX } from "@wsp/protocol";
 import { pinnedDroppingPort } from "../../runtime/test/held-port.js";
 import { NOTHING_TO_LEAVE_LINE, brokenJoinLine, brokenPlaceLeftLine, joinCutByLeaveLine, joinCommand } from "../src/places.js";
-import { mountsUnder, placeFilePath, placeKeyPath, placeLogPath, readPlaceFile, sweepRuntime, sweptLine, sweptSaid, writePlaceFile } from "../src/place-report.js";
+import { mountsUnder, placeFilePath, placeKeyPath, placeLogPath, readPlaceFile, sweepCgroups, sweepRuntime, sweptLine, sweptSaid, writePlaceFile } from "../src/place-report.js";
 import { captured } from "./verbs-fixture.js";
 import { SERVICE_MANAGERS, type ServiceAddress, type ServiceRunner } from "../src/service.js";
 import { writeStub } from "../../protocol/test/stub-script.js";
@@ -608,7 +608,7 @@ describe("taking wsp off the computer it is typed on", () => {
   });
 
   // A box's leave: only Linux reads a mount table off /proc and keeps workspaces under the runtime's folder.
-  it.runIf(process.platform === "linux")("takes the runtime folder whole where the leave runs as root, keeps one the add found standing, and keeps one with a mount under it", async () => {
+  it.runIf(process.platform === "linux")("takes the runtime folder whole where the leave runs as root, takes wsp's own folders from one the add found standing, and keeps one with a mount under it", async () => {
     const home = tmp("leave-runtime");
     writePlaceFile(placeFilePath(home), { placeId: "p_1", name: "box", hostName: "zingzy-mbp", hostUrls: ["http://x"], hostPublicKey: "k", keyPath: placeKeyPath(home), joinedAt: new Date(0).toISOString() });
     addFoundNothing(home);
@@ -627,10 +627,58 @@ describe("taking wsp off the computer it is typed on", () => {
     mkdirSync(join(stood, "theirs"), { recursive: true });
     expect(sweepRuntime(stood, new Set([stood]), () => "")).toEqual([placeStoodBeforeLine(stood)]);
     expect(existsSync(join(stood, "theirs"))).toBe(true);
+    // What an earlier wsp's remove left, which the next add found standing: its own folders and the checkouts of the
+    // projects the host's records name go; a repository of the person's under projects stays, and the folder with it.
+    for (const folder of ["projects/pr_1/checkout/node_modules", "projects/pr_2/checkout", "projects/myrepo", "copies", "run", "state", "put", "logins"]) mkdirSync(join(stood, folder), { recursive: true });
+    writeFileSync(join(stood, "projects/myrepo/notes.md"), "mine\n");
+    expect(sweepRuntime(stood, new Set([stood]), () => "", ["pr_1", "pr_2", "../theirs", "pr_gone"])).toEqual([
+      ...["copies", "logins", "put", "run", "state", "projects/pr_1", "projects/pr_2"].map(name => join(stood, name)),
+      placeStoodBeforeLine(stood),
+    ]);
+    expect(readdirSync(stood).sort()).toEqual(["projects", "theirs"]);
+    expect(readdirSync(join(stood, "projects"))).toEqual(["myrepo"]);
+    rmSync(join(stood, "theirs"), { recursive: true });
+    rmSync(join(stood, "projects/myrepo"), { recursive: true });
+    mkdirSync(join(stood, "projects/pr_1/checkout"), { recursive: true });
+    expect(sweepRuntime(stood, new Set([stood]), () => "", ["pr_1"])).toEqual([join(stood, "projects/pr_1"), join(stood, "projects"), stood]);
+    expect(existsSync(stood)).toBe(false);
+    mkdirSync(join(stood, "theirs"), { recursive: true });
     // A workspace still running there reads through its mounts, so nothing under them is reached for.
     const table = `36 25 0:32 / ${stood}/run/wsp-a/rootfs rw - overlay overlay rw\n`;
     expect(sweepRuntime(stood, new Set(), () => table)).toEqual([placeKeptMountedLine(stood, `${stood}/run/wsp-a/rootfs`)]);
     expect(existsSync(join(stood, "theirs"))).toBe(true);
+  });
+
+  it("takes the cgroups wsp made once they are empty, and says one that still holds something", () => {
+    const at = tmp("leave-cgroups");
+    const workspaces = join(at, "wsp");
+    const threads = join(at, "wsp-threads");
+    mkdirSync(join(workspaces, "wsp-a", "wsp-ssh"), { recursive: true });
+    mkdirSync(join(threads, "t_1"), { recursive: true });
+    // A file stands for the process a cgroup still holds: either way the folder will not go.
+    writeFileSync(join(threads, "t_1", "held"), "");
+    expect(sweepCgroups([workspaces, threads, join(at, "never-made")])).toEqual([workspaces, placeCgroupStandsLine(threads)]);
+    expect(existsSync(workspaces)).toBe(false);
+    expect(existsSync(join(threads, "t_1", "held"))).toBe(true);
+  });
+
+  it.runIf(process.platform === "linux")("takes from a runtime folder the add found standing only the project folders it is named, reading nothing there, and keeps the person's own", async () => {
+    const home = tmp("leave-stood-named");
+    writePlaceFile(placeFilePath(home), { placeId: "p_1", name: "box", hostName: "zingzy-mbp", hostUrls: ["http://x"], hostPublicKey: "k", keyPath: placeKeyPath(home), joinedAt: new Date(0).toISOString() });
+    const runtime = join(home, "system", "wsp");
+    for (const folder of ["projects/pr_1/checkout", "projects/pr_2/checkout", "projects/myrepo"]) mkdirSync(join(runtime, folder), { recursive: true });
+    writeFileSync(join(runtime, "projects/myrepo/notes.md"), "mine, on no remote\n");
+    const at = placeDaemonPaths(home);
+    mkdirSync(dirname(at.placeFound), { recursive: true });
+    writeFileSync(at.placeFound, `${runtime}\0${PLACE_FOUND_END}\0`);
+    const io = captured();
+    const unsaved = (): string[] => {
+      throw new Error("a leave over a runtime folder that stood reads nothing there");
+    };
+    expect(await leaveCommand(io, [], { home, systemRoot: join(home, "system"), run: fakeRunner().run, platform: "linux", uid: 0, unsaved }, { yes: true, takes: ["pr_1", "pr_2"] })).toBe(0);
+    expect(existsSync(join(runtime, "projects/pr_1")) || existsSync(join(runtime, "projects/pr_2"))).toBe(false);
+    expect(readFileSync(join(runtime, "projects/myrepo/notes.md"), "utf8")).toBe("mine, on no remote\n");
+    expect(io.lines).toContain(sweptLine(placeStoodBeforeLine(runtime)));
   });
 
   it.runIf(process.platform === "linux")("stops a leave as root over a checkout holding work no remote has before anything goes, naming it, and takes it only when forced", async () => {

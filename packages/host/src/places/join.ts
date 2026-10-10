@@ -4,7 +4,7 @@ import { spawnSync } from "node:child_process";
 import { lstatSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { platform } from "node:os";
 import { resolve } from "node:path";
-import { ALREADY_JOINED_LINE, RUNTIME_ROOT, JOIN_ADDRESS_LINE, PLACE_CODE_REFUSAL, JOIN_NO_KEY_REFUSAL, joinKeyRefusal, readJoinToken, PLACE_LINK_NONCE_BYTES, PlaceJoinDevice, PlaceJoinReply, type PlaceFile, type PlaceReport, placeDaemonPaths, workFolderIn, hostKeyRefusal, joinAddressOf, placeLinkTranscript, usageRefusal, wsUrlOf, PLACE_NEEDS_ROOT_LINE, placeLeaveUnsavedLine, placeUnreadLine } from "@wsp/protocol";
+import { ALREADY_JOINED_LINE, CGROUP_MOUNT, RUNTIME_ROOT, THREAD_CGROUPS, WORKSPACE_CGROUPS, JOIN_ADDRESS_LINE, PLACE_CODE_REFUSAL, JOIN_NO_KEY_REFUSAL, joinKeyRefusal, readJoinToken, PLACE_LINK_NONCE_BYTES, PlaceJoinDevice, PlaceJoinReply, type PlaceFile, type PlaceReport, placeDaemonPaths, workFolderIn, hostKeyRefusal, joinAddressOf, placeLinkTranscript, usageRefusal, wsUrlOf, PLACE_NEEDS_ROOT_LINE, placeLeaveUnsavedLine, placeUnreadLine } from "@wsp/protocol";
 import { keyFingerprint } from "@wsp/engine";
 import { freshEphemeral, makeSeal, newPlaceKeyPair, openFrame, sealKeys, sharedSecret, signPlaceBytes, verifyPlaceBytes, type Seal } from "@wsp/runtime";
 import { CATALOG_AGENTS } from "@wsp/catalog";
@@ -433,7 +433,7 @@ export async function leaveCommand(
    * `unsaved` reads what the runtime's folder holds that no remote has, one line each, the daemon's own read by
    * default; nothing where it could not read it. */
   deps: LeaveDeps = { home: process.env["HOME"] ?? "", run: systemRunner, platform: platform() },
-  flags: { yes?: boolean; force?: boolean } = {},
+  flags: { yes?: boolean; force?: boolean; takes?: readonly string[] } = {},
 ): Promise<number> {
   if (args.length !== 0) throw usageRefusal("wsp leave takes no positional arguments.", "Run wsp leave on its own; it takes wsp off the computer you are sitting at.");
   const home = deps.home;
@@ -449,15 +449,17 @@ export async function leaveCommand(
   // workspaces and the projects here, which the sweep takes whole where it runs as root and the add left a record.
   const found = placeFound(home);
   const takesRuntime = (deps.uid ?? process.getuid?.()) === 0 && found !== undefined && !found.has(runtime) && lstatSync(runtime, { throwIfNoEntry: false }) !== undefined;
+  // A runtime folder that stood before the add keeps everything wsp did not make there.
+  const takesOwn = (deps.uid ?? process.getuid?.()) === 0 && found?.has(runtime) === true && lstatSync(runtime, { throwIfNoEntry: false }) !== undefined;
   const lost = takesRuntime ? ((deps.unsaved ?? unsavedHere)(runtime) ?? [placeUnreadLine(runtime)]) : [];
   if (lost.length > 0 && flags.force !== true) throw usageRefusal(placeLeaveUnsavedLine(lost), LEAVE_UNSAVED_FIX);
   const name = held?.name ?? "this computer";
   const losing = lost.length > 0 ? `, and with it work no remote has: ${lost.join("; ")}` : "";
-  if (!(await confirmedAt(io, flags.yes === true, `Take ${name} out of its wsp?\nwsp comes off this computer: its service, its files${takesRuntime ? ` and ${runtime}` : ""}${losing}.`, name))) return 1;
+  if (!(await confirmedAt(io, flags.yes === true, `Take ${name} out of its wsp?\nwsp comes off this computer: its service, its files${takesRuntime ? ` and ${runtime}` : takesOwn ? ` and wsp's own folders in ${runtime}` : ""}${losing}.`, name))) return 1;
   const manager = serviceManagerFor(deps.platform);
   // The agent is another process from this one, so the sweep stops it before taking its unit file, and the lines
   // below say so.
-  const swept = await sweepPlace({ home, ...(manager !== undefined ? { manager } : {}), run: deps.run, ...(deps.apparmorProfile === undefined ? {} : { apparmorProfile: deps.apparmorProfile }), ...(deps.tools === undefined ? {} : { tools: deps.tools }), ...(deps.systemRoot === undefined ? {} : { systemRoot: deps.systemRoot }), runtimeRoot: runtime, ...(deps.uid === undefined ? {} : { uid: deps.uid }) });
+  const swept = await sweepPlace({ home, ...(manager !== undefined ? { manager } : {}), run: deps.run, ...(deps.apparmorProfile === undefined ? {} : { apparmorProfile: deps.apparmorProfile }), ...(deps.tools === undefined ? {} : { tools: deps.tools }), ...(deps.systemRoot === undefined ? {} : { systemRoot: deps.systemRoot }), runtimeRoot: runtime, runtimeProjects: flags.takes ?? [], cgroupRoots: [WORKSPACE_CGROUPS, THREAD_CGROUPS].map(cgroup => `${deps.systemRoot ?? ""}${CGROUP_MOUNT}${cgroup}`), ...(deps.uid === undefined ? {} : { uid: deps.uid }) });
   io.log("broken" in standing ? brokenPlaceLeftLine(standing.broken) : `${standing.joined.name} left the wsp at ${standing.joined.hostUrls.join(", ")}; removed:`);
   for (const line of swept.removed) io.log(sweptLine(line));
   for (const line of swept.kept) io.log(line);

@@ -154,6 +154,7 @@ const DAEMON_CONTENTS = [
   "97757fce8a1af0f854aeebb94852334e4be7a749abd8b59d26482e51cb6f5f93",
   "f11092ebbda4c528bd4264ebe7e541e50941f573227f29a641a6c977b1281385",
   "30e5f5cfa31e466e2c1ef6c48698cfd4bca296363eb0a625c98d07edc7cdf017",
+  "ec71770f7aa868a95bf5fa8e4c665b9b54d5f60b519763c39b7078db5a44dd0e",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -570,7 +571,11 @@ const DAEMON_CONTENTS = [
  * names with no link followed there, opened without blocking and judged on the handle, and answers its size, modified
  * time, inode and change time with its bytes only where it is a regular file under the image cap whose own bytes name
  * an image type the protocol allows, and says svg where an SVG document stands there; a folder, device, pipe or socket
- * is refused not-a-file and a missing path not-found. */
+ * is refused not-a-file and a missing path not-found.
+ * Version 145: A workspace's stop and remove take its child cgroups and every stacked set of mounts, a boot clears a
+ * set a failed stop left, a remove deletes nothing while anything is mounted under it, place.leave takes the project
+ * folders the host names, a leave over a /wsp that stood before the add takes only wsp's own folders there, and wsp's
+ * empty cgroups go. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
@@ -636,6 +641,13 @@ export const LEAVE_ASKS_DAEMON_VERSION = 141;
 /** Whether the `wsp leave` a computer runs is that build or later, read off the version its own wsp says it was built
  * with and never its daemon's: an update moves the daemon alone. A wsp that said none runs an older leave. */
 export const leaveAsks = (report: { wspDaemonVersion?: number }): boolean => (report.wspDaemonVersion ?? 0) >= LEAVE_ASKS_DAEMON_VERSION;
+
+/** The first build whose `wsp leave` takes `--takes`, the project folders under the runtime's folder the host's records
+ * name, read off the version that computer's own wsp says it was built with, as `leaveAsks` reads it. */
+export const LEAVE_TAKES_DAEMON_VERSION = 145;
+
+/** Whether the `wsp leave` a computer runs takes `--takes`. */
+export const leaveTakes = (report: { wspDaemonVersion?: number }): boolean => (report.wspDaemonVersion ?? 0) >= LEAVE_TAKES_DAEMON_VERSION;
 
 /** The line that moves a place onto this wsp's daemon, which is the fix half of every sentence about a place that
  * is behind. */
