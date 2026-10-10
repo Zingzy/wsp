@@ -132,7 +132,7 @@ export function BrowserSurface({ workspaceId, surface }: { workspaceId: string; 
   const frameAddress = (next: Place): void => {
     setHint(null);
     if (tabId === null) {
-      if (!roomForBrowserTab()) return;
+      if (!roomForBrowserTab(workspaceId)) return;
       openBrowser(workspaceId, tabs.createTab(workspaceId, next));
     } else tabs.navigate(workspaceId, tabId, next);
     setRecents(prev => recordVisit(prev, placeUrl(next), Date.now()));

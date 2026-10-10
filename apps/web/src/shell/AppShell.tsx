@@ -27,7 +27,7 @@ import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY, sidebarMaxWidthBeside } from "..
 import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH } from "./sidebarWidth.js";
 import { trackThreadHistory } from "./threadHistory.js";
 import { useShortcutLabel } from "./useKeybindings.js";
-import { selectWorkspaceRightPanelState, useRightPanelStore } from "../rightPanelStore.js";
+import { keepListedPanels, selectWorkspaceRightPanelState, useRightPanelStore } from "../rightPanelStore.js";
 import { SettingsHeaderActions } from "../settings/SettingsHeaderActions.js";
 import { SettingsPage } from "../settings/SettingsPage.js";
 import { SettingsSidebar } from "../settings/SettingsSidebar.js";
@@ -100,6 +100,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const panelInline = rightPanelOpen && !useSheet;
   // The switch chord walks the threads last opened, so every selection is remembered from here on.
   useEffect(() => trackThreadHistory(), []);
+  useEffect(() => keepListedPanels(), []);
   const terminalShortcutLabel = useShortcutLabel("terminal.toggle");
   const rightPanelShortcutLabel = useShortcutLabel("rightPanel.toggle");
 

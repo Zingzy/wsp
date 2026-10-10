@@ -10,6 +10,10 @@ import { desktopBridge } from "../lib/desktopShell.js";
 
 export const GUEST_IDLE_MS = 5 * 60_000;
 
+/** Guests held at once across every workspace: each is a renderer process of its own, a few hundred MB on a real
+ * site, so a tab past this many is refused and a guest made past it unloads the one hidden longest. */
+export const GUEST_CAP = 10;
+
 export interface GuestRect {
   readonly x: number;
   readonly y: number;
@@ -93,6 +97,11 @@ export function showGuest(key: string, made: Guest, rect: GuestRect): void {
   const held = useGuests.getState();
   const slot = held.slots[key];
   if (held.guests[key] !== undefined && slot !== undefined && sameRect(slot, rect)) return;
+  // A saved tab shown again makes a guest the cap never asked about, so the one hidden longest makes room.
+  if (held.guests[key] === undefined && Object.keys(held.guests).length >= GUEST_CAP) {
+    const longest = Object.entries(held.hiddenAt).sort(([, a], [, b]) => a - b)[0]?.[0];
+    if (longest !== undefined) dropGuests([longest]);
+  }
   useGuests.setState(s => ({
     guests: s.guests[key] === undefined ? { ...s.guests, [key]: made } : s.guests,
     slots: { ...s.slots, [key]: rect },
@@ -128,7 +137,10 @@ export function dropGuests(keys: ReadonlyArray<string>): void {
 
 /** Unloads every guest not shown for the idle span. */
 export function sweepGuests(now = Date.now()): void {
-  dropGuests(Object.entries(useGuests.getState().hiddenAt).flatMap(([key, at]) => (now - at >= GUEST_IDLE_MS ? [key] : [])));
+  const due = Object.entries(useGuests.getState().hiddenAt).flatMap(([key, at]) => (now - at >= GUEST_IDLE_MS ? [key] : []));
+  // A timer that fires a hair early, or a clock set back, finds none due: the next one is set from the clock again.
+  if (due.length === 0) scheduleSweep();
+  else dropGuests(due);
 }
 
 let sweep: ReturnType<typeof setTimeout> | undefined;

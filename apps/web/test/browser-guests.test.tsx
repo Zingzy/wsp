@@ -6,14 +6,19 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BROWSER_PARTITION, type DesktopBridge, type GuestOpen } from "@wsp/protocol";
-import { GUEST_IDLE_MS, resetGuests, useGuests } from "../src/browser/guests.js";
+import { GUEST_IDLE_MS, hideGuest, resetGuests, showGuest, useGuests } from "../src/browser/guests.js";
 import { currentPlace, resetBrowserTabs, useBrowserTabs } from "../src/browser/tabs.js";
 import { SEARCH_URL } from "../src/browser/url.js";
 import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { BrowserGuests } from "../src/components/preview/BrowserGuests.js";
 import { BrowserSurface, UNFRAMEABLE } from "../src/components/preview/BrowserSurface.js";
-import { useRightPanelStore } from "../src/rightPanelStore.js";
+import { selectWorkspaceRightPanelState, useRightPanelStore } from "../src/rightPanelStore.js";
+import { openCommandPalette } from "../src/commandPaletteBus.js";
+import { CommandPalette } from "../src/components/palette/CommandPalette.js";
+import { SidebarProvider } from "../src/components/ui/sidebar.js";
+import { RightPanel } from "../src/shell/RightPanel.js";
+import { HERE_KEY } from "../src/terminal/computer.js";
 
 const WS = "ws_guests01";
 const HOST = "m1-3000.preview.example";
@@ -240,6 +245,49 @@ describe("the browser tab on the desktop app", () => {
     rerender(<Pane tabId={tabId} shown={false} />);
     act(() => vi.advanceTimersByTime(GUEST_IDLE_MS - 1_000));
     expect(document.querySelector("webview")).toBe(element);
+  });
+
+  it("a timer that finds no guest due, the clock set back, is set again and still unloads the guest", () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    vi.setSystemTime(10 * GUEST_IDLE_MS);
+    const key = `${WS}/t1`;
+    showGuest(key, { workspaceId: WS, tabId: "t1", src: "https://github.com/", route: null, loaded: 0 }, { x: 0, y: 0, width: 400, height: 300, raised: false });
+    hideGuest(key);
+    vi.setSystemTime(10 * GUEST_IDLE_MS - 60_000);
+    act(() => vi.advanceTimersByTime(GUEST_IDLE_MS));
+    expect(useGuests.getState().guests[key]).toBeDefined();
+    act(() => vi.advanceTimersByTime(60_000));
+    expect(useGuests.getState().guests[key]).toBeUndefined();
+  });
+
+  it("over a panel drawn as a sheet, the page stands aside while the palette is open and comes back when it shuts", async () => {
+    window.innerWidth = 900;
+    const tabId = useBrowserTabs.getState().createTab(HERE_KEY, { url: "https://github.com/" });
+    act(() => useRightPanelStore.getState().openBrowser(HERE_KEY, tabId));
+    function Sheet() {
+      const state = useRightPanelStore(st => selectWorkspaceRightPanelState(st.byWorkspaceId, HERE_KEY));
+      return <RightPanel workspaceId={HERE_KEY} state={state} mode="sheet" />;
+    }
+    render(
+      <SidebarProvider defaultOpen>
+        <CommandPalette />
+        <BrowserGuests />
+        <Sheet />
+      </SidebarProvider>,
+    );
+    await settle();
+    const wrapper = () => guest().parentElement!;
+    expect(wrapper().style.left).toBe("600px");
+    expect(wrapper().style.zIndex).toBe("60");
+
+    act(() => openCommandPalette());
+    await settle();
+    expect(document.querySelector('[data-slot="command-dialog-popup"], [role="dialog"] input')).not.toBeNull();
+    expect(wrapper().style.left).toBe("-100000px");
+
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+    await settle();
+    expect(wrapper().style.left).toBe("600px");
   });
 
   it("a closed tab takes its guest with it at once", () => {

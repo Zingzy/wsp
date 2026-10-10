@@ -21,9 +21,10 @@ import {
 import { useBrowserTabs } from "../../browser/tabs.js";
 import { placeOfUrl } from "../../browser/url.js";
 import { desktopBridge } from "../../lib/desktopShell.js";
-import { roomForBrowserTab, useRightPanelStore } from "../../rightPanelStore.js";
+import { openBrowserAt } from "../../rightPanelStore.js";
 
-/** Over the inline panel and under the dialogs (z-50); over a panel drawn as a sheet (z-50) and under menus (130). */
+/** Over the inline panel and under the dialogs (z-50); over a panel drawn as a sheet (z-50) and so over a dialog
+ * opened on it, which is why a slot in a sheet hides its guest while anything modal stands over the sheet. */
 const OVER_PANEL = 10;
 const OVER_SHEET = 60;
 const OFF_SCREEN = -100_000;
@@ -37,9 +38,7 @@ function openFromGuest(open: GuestOpen): void {
   const { guests } = useGuests.getState();
   const key = Object.keys(guests).find(k => guestElement(k)?.getWebContentsId() === open.guest);
   const from = key === undefined ? undefined : guests[key];
-  if (from === undefined || !roomForBrowserTab()) return;
-  const tabId = useBrowserTabs.getState().createTab(from.workspaceId, placeOfUrl(open.url, from.route));
-  useRightPanelStore.getState().openBrowser(from.workspaceId, tabId);
+  if (from !== undefined) openBrowserAt(from.workspaceId, placeOfUrl(open.url, from.route));
 }
 
 export function BrowserGuests() {
@@ -126,8 +125,12 @@ function GuestView({ id, guest, rect }: { id: string; guest: Guest; rect: GuestR
   );
 }
 
+/** Base UI marks everything outside an open dialog, palette or menu with this, an ancestor of the slot included. */
+const UNDER_MODAL = "[data-base-ui-inert]";
+
 /** Where the shown tab's guest stands: measured on every change of its size, the panel's and the window's, and after
- * a transition, which moves a sheet without resizing it. A slot drawn at no size, inside a hidden panel, shows none. */
+ * a transition, which moves a sheet without resizing it. A slot drawn at no size, inside a hidden panel, shows none,
+ * and a slot in a sheet shows none while a dialog, the palette or a menu is open over it. */
 export function GuestSlot({ id, made }: { id: string; made: Guest }) {
   const ref = useRef<HTMLDivElement | null>(null);
   const madeNow = useRef(made);
@@ -138,8 +141,9 @@ export function GuestSlot({ id, made }: { id: string; made: Guest }) {
     if (slot === null) return;
     const place = (): void => {
       const box = slot.getBoundingClientRect();
-      if (box.width === 0 || box.height === 0) return hideGuest(id);
-      showGuest(id, madeNow.current, { x: box.x, y: box.y, width: box.width, height: box.height, raised: slot.closest('[data-preview-panel-mode="sheet"]') !== null });
+      const raised = slot.closest('[data-preview-panel-mode="sheet"]') !== null;
+      if (box.width === 0 || box.height === 0 || (raised && slot.closest(UNDER_MODAL) !== null)) return hideGuest(id);
+      showGuest(id, madeNow.current, { x: box.x, y: box.y, width: box.width, height: box.height, raised });
     };
     place();
     const observer = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(place);
@@ -148,8 +152,11 @@ export function GuestSlot({ id, made }: { id: string; made: Guest }) {
     if (panel !== null) observer?.observe(panel);
     window.addEventListener("resize", place);
     document.addEventListener("transitionend", place, true);
+    const modal = new MutationObserver(place);
+    modal.observe(document.body, { subtree: true, attributeFilter: ["data-base-ui-inert"] });
     return () => {
       observer?.disconnect();
+      modal.disconnect();
       window.removeEventListener("resize", place);
       document.removeEventListener("transitionend", place, true);
       hideGuest(id);

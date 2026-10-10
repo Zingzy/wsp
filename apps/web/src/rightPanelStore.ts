@@ -13,7 +13,10 @@
  * here belongs to the machine, not to one conversation on it.
  */
 import { useBrowserTabs } from "./browser/tabs.js";
+import { GUEST_CAP, useGuests } from "./browser/guests.js";
+import type { Place } from "./browser/url.js";
 import { addNotice } from "./notices/store.js";
+import { useStore } from "./protocol/store.js";
 import { HERE_KEY } from "./terminal/computer.js";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
@@ -266,7 +269,7 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
           }),
         })),
       openNewBrowser: (workspaceId) => {
-        if (roomForBrowserTab()) get().openBrowser(workspaceId, useBrowserTabs.getState().createTab(workspaceId, null));
+        if (roomForBrowserTab(workspaceId)) get().openBrowser(workspaceId, useBrowserTabs.getState().createTab(workspaceId, null));
       },
       openFile: (workspaceId, path, line) =>
         set((state) => ({
@@ -570,19 +573,40 @@ export function selectPanelTerminalIds(
   return state.surfaces.flatMap((surface) => (surface.kind === "terminal" ? surface.terminalIds : []));
 }
 
-/** Browser tabs open across every workspace: on the desktop app each may hold a page's own renderer process, so a
- * tab past this many is refused. */
-export const BROWSER_TAB_CAP = 10;
+/** The cap's line: how many guests hold a page, and how many of those are in other threads than the one asking. */
+export function guestCapLine(open: number, elsewhere: number): string {
+  const where = elsewhere === 0 ? "" : elsewhere === 1 ? "; 1 of them is in another thread" : `; ${elsewhere} of them are in other threads`;
+  return `${open} browser tabs have a page open, the most wsp keeps. Close one to open another${where}.`;
+}
 
-export const BROWSER_TAB_CAP_LINE = `${BROWSER_TAB_CAP} browser tabs are open, the most wsp keeps. Close one to open another.`;
-
-/** Whether one more browser tab may open, saying the cap's line when it may not. */
-export function roomForBrowserTab(): boolean {
-  const open = Object.values(useRightPanelStore.getState().byWorkspaceId).reduce(
-    (n, state) => n + state.surfaces.filter((surface) => surface.kind === "preview" && surface.resourceId !== null).length,
-    0,
-  );
-  if (open < BROWSER_TAB_CAP) return true;
-  addNotice({ kind: "note", text: BROWSER_TAB_CAP_LINE });
+/** Whether one more browser tab may open in this workspace, saying the cap's line when it may not. What counts is
+ * the guests holding a page, since the cap is for their memory; a saved tab with none loaded counts for nothing. */
+export function roomForBrowserTab(workspaceId: string): boolean {
+  const guests = Object.values(useGuests.getState().guests);
+  if (guests.length < GUEST_CAP) return true;
+  addNotice({ kind: "note", text: guestCapLine(guests.length, guests.filter((guest) => guest.workspaceId !== workspaceId).length) });
   return false;
+}
+
+/** A new browser tab on a place, opened and shown, unless the cap refuses it: a link in a reply, a guest's new window. */
+export function openBrowserAt(workspaceId: string, place: Place): void {
+  if (roomForBrowserTab(workspaceId)) useRightPanelStore.getState().openBrowser(workspaceId, useBrowserTabs.getState().createTab(workspaceId, place));
+}
+
+/** Drops the panel and the browser tabs of every workspace the host no longer lists, which local storage would keep
+ * for good; this computer's own panel and a workspace still being made stay. The shell runs it once. */
+export function keepListedPanels(): () => void {
+  const prune = (s: ReturnType<typeof useStore.getState>): void => {
+    if (!s.ready) return;
+    const kept = new Set<string>([HERE_KEY, ...s.workspaces.map((w) => w.id), ...s.creations.flatMap((c) => (c.workspaceId === null ? [c.key] : [c.key, c.workspaceId]))]);
+    for (const workspaceId of Object.keys(useRightPanelStore.getState().byWorkspaceId)) {
+      if (kept.has(workspaceId)) continue;
+      useRightPanelStore.getState().removeWorkspace(workspaceId);
+      useBrowserTabs.getState().prune(workspaceId, []);
+    }
+  };
+  prune(useStore.getState());
+  return useStore.subscribe((s, prev) => {
+    if (s.ready !== prev.ready || s.workspaces !== prev.workspaces || s.creations !== prev.creations) prune(s);
+  });
 }
