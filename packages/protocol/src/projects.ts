@@ -110,8 +110,10 @@ export const cloneIntoNeeded = (word: string): string => `${word} is a repo; nam
  * not its. `free` is the next folder of the repo's name with a number that does not stand yet. */
 export const cloneIntoTakenLine = (folder: string, free: string): string => `${folder} already holds files; clone into ${free}, or pick another folder`;
 
-/** Why a file is no place to clone into. */
-export const cloneIntoFileLine = (path: string): string => `${path} is a file; pick a folder to clone the repo in`;
+/** Why a file is no place to clone into, with the next free folder of the repo's name where it stands at the
+ * repo's own path. */
+export const cloneIntoFileLine = (path: string, free?: string): string =>
+  `${path} is a file; ${free === undefined ? "pick a folder to clone the repo in" : `clone into ${free}, or pick another folder`}`;
 
 /** Why --into beside a computer that is not this one is refused: the folder is on the computer named, and the other
  * computer clones where it keeps its own checkouts. */

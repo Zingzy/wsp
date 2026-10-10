@@ -132,7 +132,8 @@ describe("recording a project", () => {
       // Every url the rig is handed is the one repo above, however it was spelled; an url naming "missing" fails
       // the way a clone of a repo that is not there does, and one naming "private" the way a signed-out one does.
       const script = (name: string, clone: string) => `#!/bin/sh\n${record(name)}\n${clone}\n`;
-      const pick = `case "$URL" in *missing*) echo "fatal: repository '$URL' does not exist" >&2; exit 128;; *private*) echo "remote: Repository not found." >&2; echo "fatal: repository '$URL' not found" >&2; exit 128;; esac`;
+      // A clone that fails leaves behind the folders above its own that it made, as git 2.43 does.
+      const pick = `case "$URL" in *missing*|*private*) mkdir -p "$(dirname "$4")";; esac; case "$URL" in *missing*) echo "fatal: repository '$URL' does not exist" >&2; exit 128;; *private*) echo "remote: Repository not found." >&2; echo "fatal: repository '$URL' not found" >&2; exit 128;; esac`;
       writeStub(join(bin, "git"), script("git", `if [ "$1" = clone ]; then URL="$3"; ${pick}; exec ${JSON.stringify(realGit)} clone -q ${JSON.stringify(origin)} "$4"; fi\nexec ${JSON.stringify(realGit)} "$@"`));
       writeStub(join(bin, "gh"), script("gh", `URL="$3"; ${pick}; exec ${JSON.stringify(realGit)} clone -q ${JSON.stringify(origin)} "$4"`));
       vi.stubEnv("PATH", `${bin}:${process.env["PATH"] ?? ""}`);
@@ -175,11 +176,21 @@ describe("recording a project", () => {
       const dest = join(downloads, "lab");
       expect(project).toMatchObject({ computer: HERE_PLACE_ID, name: "lab", path: dest, source: { kind: "folder", path: dest } });
       expect(readFileSync(join(dest, "README.md"), "utf8")).toBe("spoo\n");
-      // An empty folder of another name is a folder picked too, so the clone lands inside it.
+      // An empty folder of another name is a folder picked too, so the clone lands inside it, and so does one of
+      // another name that does not stand yet, which the clone makes.
       const empty = rig.into("code");
       mkdirSync(empty);
       await rt.projects.add({ source: "acme/site", into: empty });
-      expect(rig.calls().filter(c => c.argv[1] === "clone" || c.argv[0] === "gh").map(c => c.argv.at(-1))).toEqual([dest, join(empty, "site")]);
+      const fresh = rig.into("fresh", "work");
+      const kit = await rt.projects.add({ source: "https://github.com/acme/kit", into: fresh });
+      expect(kit).toMatchObject({ name: "kit", path: join(fresh, "kit") });
+      expect(readdirSync(fresh)).toEqual(["kit"]);
+      // A folder named for the repo, or for it with a number, is the clone's own folder; a longer name is a parent.
+      const shelf = rig.into("lab-4-shelf");
+      await rt.projects.add({ source: "https://github.com/acme/lab-4.git", into: shelf });
+      const seventh = rig.into("kit-7");
+      expect(await rt.projects.add({ source: "https://github.com/acme/kit.git", into: seventh })).toMatchObject({ path: seventh });
+      expect(rig.calls().filter(c => c.argv[1] === "clone" || c.argv[0] === "gh").map(c => c.argv.at(-1))).toEqual([dest, join(empty, "site"), join(fresh, "kit"), join(shelf, "lab-4"), seventh]);
     });
 
     it("refuses a folder of the repo's name that holds something, offering the next name nothing stands at", async () => {
@@ -191,10 +202,17 @@ describe("recording a project", () => {
       await expect(rt.projects.add({ source: "https://github.com/acme/lab", into: downloads })).rejects.toThrow(cloneIntoTakenLine(join(downloads, "lab"), join(downloads, "lab-2")));
       mkdirSync(join(downloads, "lab-2"));
       await expect(rt.projects.add({ source: "https://github.com/acme/lab", into: downloads })).rejects.toThrow(cloneIntoTakenLine(join(downloads, "lab"), join(downloads, "lab-3")));
+      // The folder of the repo's name picked itself, full, is refused the same way and never cloned into.
+      await expect(rt.projects.add({ source: "https://github.com/acme/lab", into: join(downloads, "lab") })).rejects.toThrow(cloneIntoTakenLine(join(downloads, "lab"), join(downloads, "lab-3")));
+      // A file of the repo's name is named as a file.
+      writeFileSync(join(downloads, "kit"), "a file");
+      await expect(rt.projects.add({ source: "https://github.com/acme/kit", into: downloads })).rejects.toThrow(cloneIntoFileLine(join(downloads, "kit"), join(downloads, "kit-2")));
+      await expect(rt.projects.add({ source: "https://github.com/acme/kit", into: join(downloads, "kit") })).rejects.toThrow(cloneIntoFileLine(join(downloads, "kit"), join(downloads, "kit-2")));
       // The name offered is a folder that does not stand yet, which is itself the clone's folder.
       const project = await rt.projects.add({ source: "https://github.com/acme/lab", into: join(downloads, "lab-3") });
       expect(project).toMatchObject({ path: join(downloads, "lab-3") });
       expect(readdirSync(join(downloads, "lab"))).toEqual(["notes.txt"]);
+      expect(rig.calls().filter(c => c.argv[1] === "clone").map(c => c.argv.at(-1))).toEqual([join(downloads, "lab-3")]);
     });
 
     it("refuses a folder that holds something, a url with no folder, and a url no clone should run, cloning nothing", async () => {
@@ -219,10 +237,12 @@ describe("recording a project", () => {
     it("says git's own last line when the clone fails, with how to sign in where the failure is a sign-in, and records nothing", async () => {
       cloneRig();
       const { rt } = withLocal();
-      const dest = join(here(), "gone");
+      // A folder picked that does not stand yet is made by the clone, and a clone that fails leaves none of it.
+      const top = join(here(), "gone");
+      const dest = join(top, "code");
       await expect(rt.projects.add({ source: "https://github.com/me/missing.git", into: dest })).rejects.toThrow("fatal: repository 'https://github.com/me/missing.git' does not exist");
       await expect(rt.projects.add({ source: "https://github.com/me/private.git", into: dest })).rejects.toThrow("fatal: repository 'https://github.com/me/private.git' not found; sign in with gh auth login, or use the repo's ssh url");
-      expect(existsSync(dest)).toBe(false);
+      expect(existsSync(top)).toBe(false);
       expect(await rt.projects.list()).toEqual([]);
     });
   });

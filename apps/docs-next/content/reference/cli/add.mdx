@@ -57,10 +57,11 @@ usage: wsp add
                   it sits
   --into          the folder on this computer to clone a repo in, as git clone
                   does: the repo lands in a folder of its own name inside it,
-                  refused when that one holds files, or in the folder named
-                  itself where it does not exist yet or is empty and carries the
-                  repo's name; the project is then the clone's folder, worked
-                  where it sits
+                  made where it does not exist yet, unless the folder named
+                  carries the repo's name or that name with a number (lab,
+                  lab-2), when it is the clone's folder itself; a clone's folder
+                  that holds files is refused with the next free name; the
+                  project is then the clone's folder, worked where it sits
   --base          the branch a thread of the project starts on; the remote's own
                   default branch at the clone without it
   --yes           send the ticked rows of the seed menu; without it a folder

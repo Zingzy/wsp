@@ -1,7 +1,7 @@
 {
   "cloudOff": {
     "name": "projects_add",
-    "description": "Records a project: one source on one computer. A folder on the computer the app runs on is the project as it stands, a git repo or not, a folder inside a repo being a project of that repo; its threads run in it. A repo is cloned into a folder of its own name inside the folder named with into on the computer the app runs on, or into that folder itself where it does not exist yet or is empty and carries the repo's name, and the clone's folder is then a folder project there, or by the computer named with on, whose machines then hold a checkout of it. A repo with neither into nor on, a clone's folder that holds files, and a source already recorded on that computer are each refused in one line, and a clone that fails says git's own last line. The answer is the project, whose name is what run takes.",
+    "description": "Records a project: one source on one computer. A folder on the computer the app runs on is the project as it stands, a git repo or not, a folder inside a repo being a project of that repo; its threads run in it. A repo is cloned into a folder of its own name inside the folder named with into on the computer the app runs on, made where it does not exist yet, or into that folder itself where its name is the repo's or the repo's with a number, and the clone's folder is then a folder project there, or by the computer named with on, whose machines then hold a checkout of it. A repo with neither into nor on, a clone's folder that holds files, and a source already recorded on that computer are each refused in one line, and a clone that fails says git's own last line. The answer is the project, whose name is what run takes.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -15,7 +15,7 @@
         },
         "into": {
           "type": "string",
-          "description": "an absolute path on the computer the app runs on to clone the repo in: into a folder of the repo's name inside it, or into the path itself where it does not exist yet or is empty and carries the repo's name; the project is then the clone's folder"
+          "description": "an absolute path on the computer the app runs on to clone the repo in: into a folder of the repo's name inside it, made where it does not exist yet, or into the path itself where its name is the repo's or the repo's with a number; the project is then the clone's folder"
         },
         "name": {
           "type": "string",
@@ -268,7 +268,7 @@
   },
   "cloudOn": {
     "name": "projects_add",
-    "description": "Records a project: one source on one computer. A folder on the computer the app runs on is the project as it stands, a git repo or not, a folder inside a repo being a project of that repo; its threads run in it. A repo is cloned into a folder of its own name inside the folder named with into on the computer the app runs on, or into that folder itself where it does not exist yet or is empty and carries the repo's name, and the clone's folder is then a folder project there, or by the computer named with on, whose machines then hold a checkout of it. A repo with neither into nor on, a clone's folder that holds files, and a source already recorded on that computer are each refused in one line, and a clone that fails says git's own last line. The answer is the project, whose name is what run takes.",
+    "description": "Records a project: one source on one computer. A folder on the computer the app runs on is the project as it stands, a git repo or not, a folder inside a repo being a project of that repo; its threads run in it. A repo is cloned into a folder of its own name inside the folder named with into on the computer the app runs on, made where it does not exist yet, or into that folder itself where its name is the repo's or the repo's with a number, and the clone's folder is then a folder project there, or by the computer named with on, whose machines then hold a checkout of it. A repo with neither into nor on, a clone's folder that holds files, and a source already recorded on that computer are each refused in one line, and a clone that fails says git's own last line. The answer is the project, whose name is what run takes.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -282,7 +282,7 @@
         },
         "into": {
           "type": "string",
-          "description": "an absolute path on the computer the app runs on to clone the repo in: into a folder of the repo's name inside it, or into the path itself where it does not exist yet or is empty and carries the repo's name; the project is then the clone's folder"
+          "description": "an absolute path on the computer the app runs on to clone the repo in: into a folder of the repo's name inside it, made where it does not exist yet, or into the path itself where its name is the repo's or the repo's with a number; the project is then the clone's folder"
         },
         "name": {
           "type": "string",

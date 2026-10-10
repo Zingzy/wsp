@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, rmdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve as resolvePathOn } from "node:path";
 import { CATALOG_AGENTS, GUEST_HOME, guestEnv, loginHomeIn, sharedLoginOf, sharedOn } from "@wsp/catalog";
@@ -98,11 +98,13 @@ export function kindsArea(ctx: RuntimeContext): KindsArea {
     if (opts.statePath === undefined) throw Object.assign(new Error("this runtime was given no state file, so it keeps no worktrees or copies"), { kind: "invalid" });
     return dirname(resolvePathOn(opts.statePath));
   };
-  /** A repo cloned on this computer into the folder the person picked, as git clone does: into a folder of the
-   * repo's name inside it, unless the folder picked does not stand yet, or stands empty with the repo's name, when
-   * it is the clone's folder itself. The source's own clone line, argv quoted so neither the url nor the folder is
-   * read by the shell, `--` before the url so git reads no option out of it, and no prompt, since nobody is at a
-   * terminal to answer one. Git's own last line is the refusal. Answers the folder as it resolved, which is the
+  /** A repo cloned on this computer into the folder the person picked, as git clone does: the folder picked is the
+   * clone's own folder when its name is the repo's or the repo's with a number (`lab`, `lab-2`), and otherwise the
+   * folder the clone goes in, as `<picked>/<repo>`, made when it does not stand yet. The clone's folder must hold
+   * nothing, and a refusal offers the next free name beside it. The source's own clone line, argv quoted so neither
+   * the url nor the folder is read by the shell, `--` before the url so git reads no option out of it, and no
+   * prompt, since nobody is at a terminal to answer one. Git's own last line is the refusal, and the folders above
+   * the clone's that the failed clone made are taken away. Answers the folder as it resolved, which is the
    * project's path from here on. */
   const cloneHere = async (word: string, source: ProjectSource, into: string): Promise<string> => {
     const refused = cloneUrlRefusal(word);
@@ -119,18 +121,33 @@ export function kindsArea(ctx: RuntimeContext): KindsArea {
       }
     };
     const name = projectNameOf(source);
-    const atPicked = standing(picked);
-    if (atPicked === "file") throw Object.assign(new Error(cloneIntoFileLine(homeShortened(picked, homedir()))), { kind: "invalid" });
-    const dest = atPicked === "missing" || (atPicked === "empty" && basename(picked) === name) ? picked : join(picked, name);
-    if (dest !== picked && !["missing", "empty"].includes(standing(dest))) {
+    const own = basename(picked) === name || (basename(picked).startsWith(`${name}-`) && /^[0-9]+$/.test(basename(picked).slice(name.length + 1)));
+    const dest = own ? picked : join(picked, name);
+    if (!own && standing(picked) === "file") throw Object.assign(new Error(cloneIntoFileLine(homeShortened(picked, homedir()))), { kind: "invalid" });
+    const atDest = standing(dest);
+    if (atDest === "full" || atDest === "file") {
+      const beside = dirname(dest);
       let n = 2;
-      while (existsSync(join(picked, `${name}-${n}`))) n += 1;
-      throw Object.assign(new Error(cloneIntoTakenLine(homeShortened(dest, homedir()), homeShortened(join(picked, `${name}-${n}`), homedir()))), { kind: "invalid" });
+      while (existsSync(join(beside, `${name}-${n}`))) n += 1;
+      const shown = homeShortened(dest, homedir());
+      const free = homeShortened(join(beside, `${name}-${n}`), homedir());
+      throw Object.assign(new Error(atDest === "file" ? cloneIntoFileLine(shown, free) : cloneIntoTakenLine(shown, free)), { kind: "invalid" });
     }
+    const made: string[] = [];
+    for (let up = dirname(dest); !existsSync(up) && up !== dirname(up); up = dirname(up)) made.push(up);
     const machine = await moduleOf("local").backend({ kind: "local" } as WorkspaceRecord).get(LOCAL_MACHINE_ID);
     const line = `${shellLine(["env", "GIT_TERMINAL_PROMPT=0"])} ${projectSource(source.kind).cloneCommand({ remote: projectRemote(source), dest })}`;
     const cloned = await machine.exec(line, { timeoutMs: CLONE_MS });
-    if (cloned.exitCode !== 0) throw Object.assign(new Error(cloneFailedLine(cloned.stderr || cloned.stdout)), { kind: "invalid" });
+    if (cloned.exitCode !== 0) {
+      for (const folder of made) {
+        try {
+          rmdirSync(folder);
+        } catch {
+          break;
+        }
+      }
+      throw Object.assign(new Error(cloneFailedLine(cloned.stderr || cloned.stdout)), { kind: "invalid" });
+    }
     return folderNamed(dest);
   };
   /** The import road on this computer: the folder is here already, so its path is recorded at once and nothing is
