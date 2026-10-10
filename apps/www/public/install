@@ -6,9 +6,9 @@
 #
 # On a Mac it puts wsp.app in /Applications, or ~/Applications where that is not writable, and opens it once. On
 # Linux (x64) it puts the AppImage in ~/Applications and the files the command runs under ~/.wsp/app, and on a desktop
-# adds the app to its menu and opens it once. On both it
-# writes the wsp command at ~/.wsp/bin/wsp and puts that folder on PATH for new shells, and npm's link of an older
-# wsp on PATH becomes a link to it.
+# adds the app to its menu and opens it once. On both it quits a wsp that is open before replacing its files, writes
+# the wsp command at ~/.wsp/bin/wsp and puts that folder on PATH for new shells, and npm's link of an older wsp on
+# PATH becomes a link to it.
 #
 # Every download is an asset of a release of github.com/wsp-labs/wsp, checked against the sha256 GitHub publishes
 # for it before anything is unpacked. The release is read off api.github.com and nothing else is asked of anything,
@@ -70,14 +70,22 @@ valid_version() {
   printf '%s\n' "$1" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'
 }
 
-# -q first, so no ~/.curlrc can turn the checks below off. With bar given and a terminal on stderr curl draws its
-# progress bar there, which -s would hide, and its error comes back through --write-out instead.
+# Whether this curl can draw its bar and still name its error: --write-out learned %{errormsg} in curl 7.75, and an
+# older one prints a warning in its place.
+curl_draws() {
+  v=$(curl -q --version 2>/dev/null </dev/null | sed -n '1s/^curl \([0-9][0-9]*\)\.\([0-9][0-9]*\)\..*/\1 \2/p')
+  [ -n "$v" ] || return 1
+  [ "${v% *}" -gt 7 ] || { [ "${v% *}" -eq 7 ] && [ "${v#* }" -ge 75 ]; }
+}
+
+# -q first, so no ~/.curlrc can turn the checks below off. With bar given, a terminal on stderr and a curl that
+# draws, curl draws its progress bar there, which -s would hide, and its error comes back through --write-out instead.
 fetch() {
   url=$1
   out=$2
   bar=${3:-}
   if [ -n "${WSP_RELEASE_API:-}" ]; then set --; else set -- --proto '=https' --proto-redir '=https' --tlsv1.2; fi
-  if [ -n "$bar" ] && [ -t 2 ]; then
+  if [ -n "$bar" ] && [ -t 2 ] && curl_draws; then
     code=0
     curl -q -fL --progress-bar -w '%{errormsg}' "$@" -o "$out" "$url" >"$tmp/curl.err" </dev/null || code=$?
     [ "$code" = 0 ] || die "curl: ($code) $(cat "$tmp/curl.err")"
@@ -262,6 +270,16 @@ put_on_path() {
   esac
 }
 
+# Waits while "$@" says the wsp asked to quit still runs, up to 30 s.
+quit_wait() {
+  n=0
+  while "$@"; do
+    n=$((n + 1))
+    [ "$n" -le 300 ] || die "wsp did not quit within 30 s; nothing was changed"
+    sleep 0.1
+  done
+}
+
 app_running() { [ "$(osascript -e "application id \"$BUNDLE_ID\" is running" 2>/dev/null </dev/null)" = true ]; }
 
 # Between moving the installed copy aside and knowing the new one stands, a signal would leave neither: the exit trap
@@ -313,12 +331,7 @@ install_mac() {
     step="quitting wsp"
     say "quitting wsp to replace it"
     osascript -e "tell application id \"$BUNDLE_ID\" to quit" >/dev/null 2>&1 </dev/null || die "wsp did not take the quit; nothing was changed"
-    n=0
-    while app_running; do
-      n=$((n + 1))
-      [ "$n" -le 300 ] || die "wsp did not quit within 30 s; nothing was changed"
-      sleep 0.1
-    done
+    quit_wait app_running
   fi
 
   step="putting the app in place"
@@ -391,18 +404,56 @@ ensure_libraries() {
 # backslash, a value doubles every backslash once more, and a % is doubled.
 exec_word() { printf '"%s"' "$(printf '%s' "$1" | sed -e 's/\\/\\\\\\\\/g' -e 's/["`$]/\\\\&/g' -e 's/%/%%/g')"; }
 
-# The entry the AppImage carries, with its wsp:// handler, in the folder a desktop's app menu reads, running the files
-# unpacked above: they need no FUSE, which the AppImage's runtime does to mount itself, and nothing is unpacked again at
-# each launch. The app opens once from there, as it does on a Mac.
+# The wsp window open on this home: Chromium's lock in the app's folder names it host-pid, and it counts only while
+# that pid still runs a program named wsp. Sets pid.
+window_pid() {
+  lock=$(readlink "$HOME/.wsp/desktop/SingletonLock" 2>/dev/null) || return 1
+  pid=${lock##*-}
+  case "$pid" in '' | *[!0-9]*) return 1 ;; esac
+  window_runs
+}
+
+# Whether pid still runs a program named wsp. A quit is waited on by this and not the lock, which Chromium takes away
+# up to 0.1 s before its process ends.
+window_runs() { case "$(readlink "/proc/$pid/exe" 2>/dev/null)" in */wsp | */wsp" (deleted)") ;; *) return 1 ;; esac; }
+
+# What the menu entry runs: the app from the newest folder under ~/.wsp/app, which the app's own copy of a later
+# release it opens joins, and whose older folders that copy cleans away.
+write_launcher() {
+  cat <<'LAUNCHER'
+#!/bin/sh
+# The wsp install line writes this for the app menu: it opens wsp from the newest folder under ~/.wsp/app.
+newest=""
+for dir in "$HOME"/.wsp/app/*/; do
+  case "$dir" in *.part/) continue ;; esac
+  [ -x "${dir}AppRun" ] || continue
+  if [ -z "$newest" ] || ! [ "$newest" -nt "$dir" ]; then newest=$dir; fi
+done
+[ -n "$newest" ] || { echo "wsp: no app under ~/.wsp/app; run the install line again" >&2; exit 1; }
+exec "${newest}AppRun" "$@"
+LAUNCHER
+}
+
+# The entry the AppImage carries, with its wsp:// handler, in the folder a desktop's app menu reads, with its icon
+# copied beside it. It runs the unpacked files through the launcher above: they need no FUSE, which the AppImage's
+# runtime does to mount itself, and nothing is unpacked again at each launch. The app opens once from there, as it
+# does on a Mac.
 add_to_menu() {
   step="adding wsp to the app menu"
-  entry="${XDG_DATA_HOME:-$HOME/.local/share}/applications/wsp.desktop"
+  data=${XDG_DATA_HOME:-$HOME/.local/share}
+  entry="$data/applications/wsp.desktop"
+  icon="$data/icons/hicolor/512x512/apps/wsp.png"
+  launcher="$HOME/.wsp/bin/wsp-desktop"
   parts="$entry.part
+$icon.part
+$launcher.part
 $parts"
-  run=$(exec_word "$files/AppRun")
-  icon=$(printf '%s' "$files/wsp.png" | sed 's/\\/\\\\/g')
-  if { make_dir "$(dirname "$entry")" &&
-    run=$run icon=$icon awk '/^Exec=AppRun/ { print "Exec=" ENVIRON["run"] substr($0, 12); next } /^Icon=/ { print "Icon=" ENVIRON["icon"]; next } { print }' "$files/wsp.desktop" >"$entry.part" &&
+  run=$(exec_word "$launcher")
+  named=$(printf '%s' "$icon" | sed 's/\\/\\\\/g')
+  if { write_launcher >"$launcher.part" && chmod 755 "$launcher.part" && mv -f "$launcher.part" "$launcher" &&
+    make_dir "$(dirname "$icon")" && cp "$files/wsp.png" "$icon.part" && mv -f "$icon.part" "$icon" &&
+    make_dir "$(dirname "$entry")" &&
+    run=$run icon=$named awk '/^Exec=AppRun/ { print "Exec=" ENVIRON["run"] substr($0, 12); next } /^Icon=/ { print "Icon=" ENVIRON["icon"]; next } { print }' "$files/wsp.desktop" >"$entry.part" &&
     mv -f "$entry.part" "$entry"; } 2>/dev/null; then
     opens="open wsp from your app menu, or run ~/Applications/wsp.AppImage"
   else
@@ -410,7 +461,7 @@ $parts"
     opens="run ~/Applications/wsp.AppImage to open wsp"
   fi
   step="opening wsp"
-  if command -v setsid >/dev/null 2>&1; then setsid "$files/AppRun" </dev/null >/dev/null 2>&1 & fi
+  if command -v setsid >/dev/null 2>&1; then setsid "$launcher" </dev/null >/dev/null 2>&1 & fi
 }
 
 install_linux() {
@@ -427,6 +478,15 @@ install_linux() {
 
   step="checking the app"
   answers env ELECTRON_RUN_AS_NODE=1 "$tree/wsp" "$tree/resources/app/main/cli.mjs" || die "its wsp command $why; nothing was changed"
+
+  # A window run from the files below would go on running from deleted ones, and the launch at the end would only
+  # bring it forward.
+  if window_pid; then
+    step="quitting wsp"
+    say "quitting wsp to replace it"
+    kill -TERM "$pid" 2>/dev/null || die "wsp did not take the quit; nothing was changed"
+    quit_wait window_runs
+  fi
 
   step="putting the app in place"
   files="$HOME/.wsp/app/$version-install"
