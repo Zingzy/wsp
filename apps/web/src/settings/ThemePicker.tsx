@@ -3,7 +3,7 @@
 // a small wsp window drawn in the theme that side shows; under them one card per
 // registered theme of the side shown, each drawn in its own tokens by carrying
 // the theme's mark, so no hex is written twice. A pointer over a card shows that
-// theme in the real window and leaving the cards puts the pick back. System shows
+// theme in the real window and leaving the card puts the pick back. System shows
 // the side this computer is on now.
 import { Radio as RadioPrimitive } from "@base-ui/react/radio";
 import { RadioGroup as RadioGroupPrimitive } from "@base-ui/react/radio-group";
@@ -73,12 +73,13 @@ function ModeTile({ mode, picks }: { mode: ThemePreference; picks: ThemePicks })
 }
 
 /** One theme as a card: its window in its own tokens over its name and what it is like. */
-function ThemeCard({ theme, chosen, onPreview }: { theme: Theme; chosen: boolean; onPreview: (theme: Theme) => void }) {
+function ThemeCard({ theme, chosen, onPreview, onRestore }: { theme: Theme; chosen: boolean; onPreview: (theme: Theme) => void; onRestore: () => void }) {
   return (
     <RadioPrimitive.Root
       value={theme.id}
       data-theme-option={theme.id}
       onPointerEnter={() => onPreview(theme)}
+      onPointerLeave={onRestore}
       className={cn(CARD_SURFACE, "group flex min-w-0 cursor-pointer flex-col text-left outline-none", RING, chosen ? PICKED : HOVER, "focus-visible:ring-2 focus-visible:ring-ring")}
     >
       <span className="block aspect-[16/10] w-full border-b border-border">
@@ -115,7 +116,7 @@ export function ThemePicker({ picks, onChange }: { picks: ThemePicks; onChange: 
   const systemDark = useMediaQuery(SYSTEM_DARK_QUERY);
   const shown = shownSide(picks, systemDark);
   const field = PICK_FIELD[shown];
-  // The window back on the picks while a preview stands: the pointer leaving the cards, the window losing focus or the
+  // The window back on the picks while a preview stands: the pointer leaving its card, the window losing focus or the
   // pointer under a card, and the page going.
   const previewing = useRef(false);
   const restore = useRef(() => {});
@@ -147,11 +148,10 @@ export function ThemePicker({ picks, onChange }: { picks: ThemePicks; onChange: 
         aria-label={SETTINGS_WORDS.themesOf(THEME_WORDS[shown])}
         value={picks[field]}
         onValueChange={id => onChange({ [field]: id })}
-        onPointerLeave={() => restore.current()}
         className="grid grid-cols-[repeat(auto-fill,minmax(13rem,1fr))] gap-3 max-sm:grid-cols-2 max-sm:gap-2"
       >
         {THEMES.filter(t => t.side === shown).map(theme => (
-          <ThemeCard key={theme.id} theme={theme} chosen={theme.id === picks[field]} onPreview={preview} />
+          <ThemeCard key={theme.id} theme={theme} chosen={theme.id === picks[field]} onPreview={preview} onRestore={() => restore.current()} />
         ))}
       </RadioGroupPrimitive>
     </div>
