@@ -233,6 +233,7 @@ describe("Undo rewind", () => {
     state: "running",
     root: null,
     others: [],
+    terminalLine: null,
     ...(rewound !== undefined ? { rewound } : {}),
   });
 

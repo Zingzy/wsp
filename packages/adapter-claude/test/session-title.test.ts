@@ -100,7 +100,7 @@ describe("the title Claude Code makes for a thread", () => {
     const { stdout } = await ask(command, { env: { PATH: `${bin}:${process.env["PATH"] ?? ""}` } });
     expect(parseTitleFor(stdout)).toBe("Seed thread titles here");
     const [argv, ...rest] = readFileSync(seen, "utf8").split("\n");
-    expect(argv).toBe("-p --safe-mode --output-format json --tools  --model claude-sonnet-5");
+    expect(argv).toBe("-p --safe-mode --output-format json --tools  --no-session-persistence --model claude-sonnet-5");
     expect(rest.join("\n")).toBe(prompt);
   });
 
@@ -142,6 +142,23 @@ describe("the title Claude Code makes for a thread", () => {
       await ask(command, { env: { PATH: `${bin}:${process.env["PATH"] ?? ""}` } });
     }
     expect(existsSync(ran)).toBe(false);
+  });
+
+  it("keeps no session of its own, so a title or a commit message leaves no file in the folder's projects store", async () => {
+    // The stand-in acts as 2.1.296 did: a print-mode run writes <config>/projects/<folder key>/<id>.jsonl unless
+    // --no-session-persistence is on its line, and that file is one more sdk-cli session in the person's store.
+    const dir = mkdtempSync(join(tmpdir(), "wsp-claude-kept-"));
+    roots.push(dir);
+    const bin = fakeClaude(
+      `keep=yes; for word in "$@"; do [ "$word" = --no-session-persistence ] && keep=no; done; cat > /dev/null\n` +
+        `[ "$keep" = yes ] && mkdir -p "$CLAUDE_CONFIG_DIR/projects/-root" && touch "$CLAUDE_CONFIG_DIR/projects/-root/$$.jsonl"\n` +
+        `printf '{"type":"result","is_error":false,"result":"Name it"}\\n'`,
+    );
+    writeFileSync(join(dir, "asked"), "Write a commit message.\n");
+    for (const command of [titleForCommand({ prompt: "name it" }), draftForCommand({ promptFile: join(dir, "asked") })]) {
+      await ask(command, { env: { PATH: `${bin}:${process.env["PATH"] ?? ""}`, CLAUDE_CONFIG_DIR: dir } });
+    }
+    expect(existsSync(join(dir, "projects"))).toBe(false);
   });
 
   it("leaves the model to the CLI when the catalog named none", () => {
@@ -226,7 +243,7 @@ describe("the commit message Claude Code drafts", () => {
     const { stdout } = await ask(command, { env: { PATH: `${bin}:${process.env["PATH"] ?? ""}` } });
     expect(parseDraftFor(stdout)).toBe("Round the total once\n\nIt rounded per line.");
     const [argv, ...rest] = readFileSync(seen, "utf8").split("\n");
-    expect(argv).toBe("-p --safe-mode --output-format json --tools  --model claude-haiku-4-5");
+    expect(argv).toBe("-p --safe-mode --output-format json --tools  --no-session-persistence --model claude-haiku-4-5");
     expect(rest.join("\n")).toBe("Write a commit message.\n\nThe diff:\n+one\n");
     expect(command).not.toContain("--bare");
   });

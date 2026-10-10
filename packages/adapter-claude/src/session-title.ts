@@ -77,9 +77,10 @@ export function titleForCommand(options: { prompt: string; model?: string; launc
 /** Inherited Claude Code marks dropped, then the question's own environment read off its input. */
 const CLEAN = `unset \${!CLAUDE_CODE_@} CLAUDECODE FORCE_CODE_TERMINAL; ${ENV_FROM_INPUT}`;
 
-/** The print-mode question as the title asks it: the person's customizations off, no tool, and their sign-in read. */
+/** The print-mode question as the title asks it: the person's customizations off, no tool, their sign-in read, and
+ * no session kept, since 2.1.296 writes every print-mode run into the projects store as an sdk-cli session. */
 const questionLine = (model: string | undefined, launch: AgentLaunch | undefined): string =>
-  [`${programWord("claude", launch)} -p`, "--safe-mode", "--output-format json", "--tools ''", ...(model === undefined ? [] : [`--model ${shellQuote(model)}`])].join(" ");
+  [`${programWord("claude", launch)} -p`, "--safe-mode", "--output-format json", "--tools ''", "--no-session-persistence", ...(model === undefined ? [] : [`--model ${shellQuote(model)}`])].join(" ");
 
 /**
  * One shell line for the guest that asks the CLI for a commit message: the same print-mode question the title asks,
