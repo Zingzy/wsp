@@ -118,6 +118,20 @@ describe("ChatMarkdown", () => {
     expect(anchor?.textContent).toBe("link");
   });
 
+  it("leads a web link with the app's own glyph and draws no image that would ask a third party for the host", () => {
+    const { container } = render(
+      <ChatMarkdown
+        text={"See [the readme](https://raw.githubusercontent.com/acme/lab/main/README.md), https://build.internal:8080/logs and <http://example.com>."}
+        cwd="/tmp/project"
+        resolvedTheme="dark"
+      />,
+    );
+    const anchors = [...container.querySelectorAll("a")];
+    expect(anchors.map(a => a.getAttribute("href"))).toEqual(["https://raw.githubusercontent.com/acme/lab/main/README.md", "https://build.internal:8080/logs", "http://example.com"]);
+    expect([...container.querySelectorAll("img")].map(i => i.getAttribute("src"))).toEqual([]);
+    for (const a of anchors) expect(a.querySelector("svg.lucide-globe"), a.textContent ?? "").not.toBeNull();
+  });
+
   it("scrolls to a heading a reply links to and leaves the page's address alone", () => {
     const scrolled = vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(() => {});
     window.history.replaceState(null, "", "/#w/ws_a/t/thr_1");

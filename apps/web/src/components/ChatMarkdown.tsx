@@ -366,8 +366,6 @@ function ChatMarkdown({
             : null;
         if (!fileLinkMeta) {
           const webHost = resolveExternalWebLinkHost(href);
-          // A restricted file's page draws no favicon: that is an image fetched from Google naming the host.
-          const faviconHost = restricted ? null : webHost;
           const isSameDocumentLink = href?.startsWith("#") ?? false;
           const onClick = props.onClick;
           const linkChildren = <MarkdownLinkContext value>{children}</MarkdownLinkContext>;
@@ -386,8 +384,8 @@ function ChatMarkdown({
                 }
               }}
             >
-              {faviconHost && hastHasText(node) ? (
-                <MarkdownExternalLinkContent host={faviconHost} plainText={plainHastText(node)}>
+              {webHost && hastHasText(node) ? (
+                <MarkdownExternalLinkContent plainText={plainHastText(node)}>
                   {linkChildren}
                 </MarkdownExternalLinkContent>
               ) : (
