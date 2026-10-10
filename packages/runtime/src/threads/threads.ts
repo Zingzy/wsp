@@ -796,7 +796,7 @@ export function threadsArea(ctx: RuntimeContext): ThreadsArea {
    * where a stop settled it. A reply held over background work whose line went said another line follows, so its cut
    * sends one too. The session.end carries `reason` either way. The one rule for both roads, the runtime's end() and
    * the restart load. */
-  const settleCut = (s: { view: SessionView; turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin; turnLive?: TurnLive; snapshot?: string; asked?: TurnAsked }, reason: string, cutLine: (endedAt: number) => string, stopped = false): void => {
+  const settleCut = (s: { view: SessionView; turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin; turnLive?: TurnLive; snapshot?: string; asked?: TurnAsked }, reason: string, cutLine: (endedAt: number) => string, stopped = false, unreached = false): void => {
     const reply = s.turnLive?.reply;
     delete s.snapshot;
     const endedAt = Date.now();
@@ -809,7 +809,7 @@ export function threadsArea(ctx: RuntimeContext): ThreadsArea {
     // one whose process is gone, and a settled row still carrying it would read as waiting on a person forever.
     delete s.view.asking;
     if (s.view.threadId !== undefined) leadAsks.delete(s.view.threadId);
-    const cut: TurnResult = { status: stopped ? "interrupted" : "failed", error: cutLine(endedAt) };
+    const cut: TurnResult = { status: stopped ? "interrupted" : "failed", error: cutLine(endedAt), ...(stopped && unreached ? { unreached: true as const } : {}) };
     if (reply === undefined && s.notify !== undefined && !lineTry(s)) notifyEnd(s, s.notify, tellAs(s), cut);
     const sessionId = s.view.claudeSessionId ?? s.view.id;
     // A stop the process never heard is still the turn's reply, so every client reads the turn stopped, not failed.

@@ -640,6 +640,10 @@
                       "error": {
                         "type": "string"
                       },
+                      "unreached": {
+                        "type": "boolean",
+                        "const": true
+                      },
                       "refusal": {
                         "type": "string",
                         "enum": [
@@ -2211,6 +2215,10 @@
                       },
                       "error": {
                         "type": "string"
+                      },
+                      "unreached": {
+                        "type": "boolean",
+                        "const": true
                       },
                       "refusal": {
                         "type": "string",

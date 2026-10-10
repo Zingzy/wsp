@@ -614,7 +614,7 @@ export function turnsArea(ctx: RuntimeContext): TurnsArea {
       ...(started.setAccess !== undefined ? { setAccess } : {}),
       ...(started.stopTask !== undefined ? { stopTask: (task: string) => started.stopTask!(task) } : {}),
     };
-    const end = (reason: string, byStop = false): void => {
+    const end = (reason: string, byStop = false, unreached = false): void => {
       if (ended || view.status !== "running") return;
       if (byStop) stopped = true;
       // Before `ended` shuts the forward road: the interrupt below reaches the harness, whose own close would then
@@ -623,7 +623,7 @@ export function turnsArea(ctx: RuntimeContext): TurnsArea {
       ended = true;
       const row = sessions.get(rowId);
       if (row?.turnId === turnId) delete row.snapshot;
-      ctx.settleCut({ view, turnId, ...(notify !== undefined ? { notify } : {}), ...(notifyBy !== undefined ? { notifyBy } : {}), ...(notifyRoad !== undefined ? { notifyRoad } : {}), turnLive, ...(t.asked !== undefined ? { asked: t.asked } : {}) }, reason, () => reason, byStop);
+      ctx.settleCut({ view, turnId, ...(notify !== undefined ? { notify } : {}), ...(notifyBy !== undefined ? { notifyBy } : {}), ...(notifyRoad !== undefined ? { notifyRoad } : {}), turnLive, ...(t.asked !== undefined ? { asked: t.asked } : {}) }, reason, () => reason, byStop, unreached);
       void ctx.persistSessions(workspaceId);
       void started.interrupt().catch(() => {});
       turnOver();

@@ -166,6 +166,10 @@ const ENV_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const RUN_ID = /^[0-9a-f]{12}$/;
 /** How often the reap looks at the group it asked to go, while it waits out the one stop grace both roads give. */
 const GRACE_POLL_MS = 200;
+/** The poll after a write to a run's input, and for how long: at 1500 ms polls a stop on a box took 2.6 s to end its
+ * turn, nearly all of it waiting for the poll after the agent's reply had landed (240 ms at these figures). */
+const HURRIED_POLL_MS = 200;
+const HURRIED_FOR_MS = 3_000;
 /** That grace as the shell's own counter, since a guest has no seq to lean on. */
 const GRACE_CHECKS = Array.from({ length: Math.round(RUN_STOP_MS / GRACE_POLL_MS) }, (_, i) => String(i + 1)).join(" ");
 
@@ -184,7 +188,7 @@ const never = (): Promise<never> => new Promise<never>(() => {});
 /** The poll's own wait, and the one call that cuts it short. The timer belongs to the reader, so a reader that
  * lets go of a run frees it where it stands rather than at the end of the poll it was in; a caller that handed in
  * a clock of its own waits on that instead, and the wake ends that wait the same way. */
-function pollNap(sleep?: (ms: number) => Promise<void>): { nap: (ms: number) => Promise<void>; wake: () => void } {
+function pollNap(sleep?: (ms: number) => Promise<void>): { nap: (ms: number) => Promise<void>; wake: () => void; hurry: () => void } {
   let woken: (() => void) | undefined;
   /** Set once the reader has let go. Every nap after that returns where it stands rather than starting a timer:
    * the wake often lands while the poll is inside its exec, and the nap it comes back to would otherwise hold
@@ -214,6 +218,7 @@ function pollNap(sleep?: (ms: number) => Promise<void>): { nap: (ms: number) => 
       awake = true;
       woken?.();
     },
+    hurry: () => woken?.(),
   };
 }
 
@@ -263,7 +268,11 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
     /** Set when this process lets go of the run: the poll ends where it stands, nothing is reaped and no exit is
      * written, since ending the run here would take a turn its own owner is still waiting on. */
     let dropped = false;
-    const { nap, wake } = pollNap(opts.sleep);
+    const { nap, wake, hurry } = pollNap(opts.sleep);
+    // The agent's reply to a write (a stop, a steer, an answer, or an adapter's own line) would otherwise wait out a
+    // whole poll: the polls run at HURRIED_POLL_MS for a while after any write.
+    let hurriedUntil = 0;
+    const gap = (): number => (now() < hurriedUntil ? Math.min(pollMs, HURRIED_POLL_MS) : pollMs);
     const drop = (): void => {
       dropped = true;
       opts.reading?.delete(drop);
@@ -479,7 +488,7 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
           finish(null);
           return;
         }
-        await nap(pollMs);
+        await nap(gap());
       }
     }
 
@@ -506,6 +515,8 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
         if (res.exitCode !== 0 || !res.stdout.includes(HANDSHAKE.written)) throw new Error(`remote write failed on ${machine.id}: nothing came back saying ${HANDSHAKE.written}, the word the guest prints once the message landed; ${machineAnswer(res)}`);
         // The person just acted, so the turn gets its idle time over.
         activity.touch(now());
+        hurriedUntil = now() + HURRIED_FOR_MS;
+        hurry();
         return "written";
       },
       closeInput: () => {

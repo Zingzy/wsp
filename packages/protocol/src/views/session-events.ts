@@ -49,6 +49,9 @@ export const TurnResult = z.object({
   models: z.array(z.object({ model: z.string(), tokens: UsageTokens, costUsd: z.number().optional() })).optional(),
   text: z.string().optional(),
   error: z.string().optional(),
+  /** Set only on a turn a stop ended here because its computer could not be reached, with error saying so; the
+   * agent there never heard the stop. A stop the agent heard carries the agent's own words, if any, and no mark. */
+  unreached: z.literal(true).optional(),
   /** Set only on a turn the agent refused outright for a cause wsp knows; the status is failed with it. */
   refusal: TurnRefusal.optional(),
   /** Set only on a turn the agent's usage limit stopped; the status is failed with it, and the thread offers to go
