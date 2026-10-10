@@ -4,6 +4,7 @@
 // with, the review the host reads off the reviewer's reply, and the words every road says them in.
 import { z } from "zod";
 import { fenceFor, oneLine } from "./quote.js";
+import { HUNK_HEAD } from "./tool-result.js";
 
 const count = z.number().int().nonnegative();
 
@@ -164,7 +165,7 @@ export function lineInDiff(diff: string, path: string, line: number, side: "LEFT
       continue;
     }
     if (!mine || !row.startsWith("@@ ")) continue;
-    const m = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(row);
+    const m = HUNK_HEAD.exec(row);
     if (m === null) continue;
     const [start, len] = side === "LEFT" ? [Number(m[1]), m[2] === undefined ? 1 : Number(m[2])] : [Number(m[3]), m[4] === undefined ? 1 : Number(m[4])];
     if (len > 0 && line >= start && line < start + len) return true;

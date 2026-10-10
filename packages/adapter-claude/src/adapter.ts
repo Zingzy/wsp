@@ -15,6 +15,7 @@ import { draftForCommand, parseDraftFor, parseRename, parseSessionTitle, parseTi
 import { buildCommand, buildEnv, forwardsSubagentText, newSessionId, savedSpendCommand, serverValuesFile, userMessageLine } from "./landmines.js";
 import { steersOf } from "./steers.js";
 import { newPlanBook, readPlanCall, type PlanBook } from "./plans.js";
+import { resultFacts } from "./tool-results.js";
 import { endAnswer, heldCall, interimEnd, laterEnd, newHandbackBook, noteLine, readAnswer, taskEnded, type HandbackBook, type TurnDelta } from "./handback.js";
 import { shellCwdAfter } from "./shell-cwd.js";
 
@@ -608,14 +609,16 @@ function normalizeEvent(event: Record<string, unknown>, fallbackSessionId: strin
           plans.unnamed.delete(answered);
           continue;
         }
+        const text = flattenContent(block.content);
         deltas.push(...readAnswer(book, {
           type: "turn.delta",
           sessionId,
           kind: "tool_result",
-          text: flattenContent(block.content),
+          text,
           toolUseId: str(block.tool_use_id),
           isError: block.is_error === true,
           ...from,
+          ...resultFacts(blocks, text, block.is_error === true, event.tool_use_result),
         }));
       }
       return deltas;

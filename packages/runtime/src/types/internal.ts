@@ -184,8 +184,9 @@ export const TRANSCRIPT_CAP = 5000;
  * is held in memory whole, and a turn's tool calls carry whole files, so the count alone let one workspace hold a
  * hundred megabytes. */
 export const TRANSCRIPT_BYTES = 4 * 1024 * 1024;
-/** The characters of one tool result a transcript keeps. Every reader of a kept result reads its first line (the
- * app's row, the terminal's line, a subagent's answer), and the live stream still carries it whole. */
+/** The characters of one tool result a transcript keeps, its text's and its patch's lines' each; a cut text carries
+ * the bytes of the whole. Every reader of a kept result reads its first line (the app's row, the terminal's line, a
+ * subagent's answer), and the live stream still carries it whole. */
 export const TOOL_RESULT_KEPT = 16 * 1024;
 /** The transcripts held whole after they were opened, the newest kept: reopening one of them reads no file. Every
  * other transcript is its index and the events written since its last flush. */

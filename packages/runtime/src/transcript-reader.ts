@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { HEAD_RESULT_CHARS, type SessionEvent } from "@wsp/protocol";
+import { HEAD_RESULT_CHARS, keptPatch, type SessionEvent } from "@wsp/protocol";
 
 /** What a read of one thread asks for: the events under `before` (every one when absent), newest first, at most
  * `limit` of them and no more than `bytes` of UTF-8 JSON as `shape` leaves each, the comma after each counted.
@@ -70,6 +70,10 @@ export function numbered(events: SessionEvent[]): SessionEvent[] {
   return events;
 }
 
-/** An event as a head carries it: a tool result past HEAD_RESULT_CHARS cut there and marked with its whole length. */
-export const headShape = (e: SessionEvent): SessionEvent =>
-  e.type === "session.delta" && e.kind === "tool_result" && e.text.length > HEAD_RESULT_CHARS ? { ...e, text: e.text.slice(0, HEAD_RESULT_CHARS), cut: e.text.length } : { ...e };
+/** An event as a head carries it: a tool result past HEAD_RESULT_CHARS cut there and marked with its whole length, and
+ * its patch cut to the hunks that fit in as many characters. */
+export function headShape(e: SessionEvent): SessionEvent {
+  if (e.type !== "session.delta" || e.kind !== "tool_result") return { ...e };
+  const text = e.text.length > HEAD_RESULT_CHARS ? { text: e.text.slice(0, HEAD_RESULT_CHARS), cut: e.text.length } : {};
+  return { ...e, ...text, ...(e.patch !== undefined ? keptPatch(e.patch, HEAD_RESULT_CHARS) : {}) };
+}

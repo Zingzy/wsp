@@ -373,6 +373,10 @@ export function turnsArea(ctx: RuntimeContext): TurnsArea {
             ...(event.isError !== undefined ? { isError: event.isError } : {}),
             ...(event.parentToolUseId !== undefined ? { parentToolUseId: event.parentToolUseId } : {}),
             ...(event.cwd !== undefined ? { cwd: event.cwd } : {}),
+            ...(event.exitCode !== undefined ? { exitCode: event.exitCode } : {}),
+            ...(event.durationMs !== undefined ? { durationMs: event.durationMs } : {}),
+            ...(event.bytes !== undefined ? { bytes: event.bytes } : {}),
+            ...(event.patch !== undefined ? { patch: event.patch } : {}),
           });
           return;
         case "turn.done": {

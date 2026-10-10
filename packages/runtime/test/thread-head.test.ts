@@ -8,13 +8,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { DAEMON_VERSION, HEAD_BYTES, HEAD_RESULT_CHARS, HISTORY_PAGE_BYTES, isSessionEvent, type AdapterEvent, type EventUnion, type SessionEvent, type ThreadHeadEvent, type TurnResult } from "@wsp/protocol";
-import { createRuntime, type HarnessAdapterFactory } from "../src/runtime.js";
+import { createRuntime, TOOL_RESULT_KEPT, type HarnessAdapterFactory } from "../src/runtime.js";
 import { sqliteStore } from "../src/sqlite-store.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { createOn, stubBackend } from "./stub-backend.js";
 
-/** One delta of a scripted turn: its kind and its text. */
-type Line = { kind: "text" | "tool_use" | "tool_result"; text: string };
+/** One delta of a scripted turn: its kind and its text, and on a result what else its adapter read. */
+type Line = { kind: "text" | "tool_use" | "tool_result"; text: string; facts?: Pick<Extract<AdapterEvent, { type: "turn.delta" }>, "bytes" | "exitCode" | "durationMs" | "patch"> };
 
 /** A harness whose turn writes the lines the test gives it for the prompt, then replies and exits. `hold` keeps the
  * turn open until the test lets it end. It keeps a name of a person's, so a rename lands. */
@@ -29,7 +29,7 @@ function scripted(lines: (prompt: string) => Line[], hold?: () => Promise<void>)
         await Promise.resolve();
         o.onEvent({ type: "session.start", sessionId, cwd: o.cwd ?? "/root/app", model: "claude-sonnet-4-5" });
         lines(o.prompt).forEach((l, n) =>
-          o.onEvent({ type: "turn.delta", sessionId, kind: l.kind, text: l.text, ...(l.kind === "text" ? { messageId: `m${n}` } : { toolUseId: `t${n}`, toolName: "Bash" }) } as AdapterEvent),
+          o.onEvent({ type: "turn.delta", sessionId, kind: l.kind, text: l.text, ...(l.kind === "text" ? { messageId: `m${n}` } : { toolUseId: `t${n}`, toolName: "Bash" }), ...l.facts } as AdapterEvent),
         );
         await hold?.();
         o.onEvent({ type: "turn.done", sessionId, result });
@@ -231,6 +231,73 @@ describe.each(STORES)("a thread's head, kept as %s", (_, fresh) => {
     expect(await rt.sessions.access(handle.id, "acceptEdits")).toEqual({ outcome: "set" });
     expect(heads.at(-1)).toMatchObject({ threadId, facts: { permissionMode: "acceptEdits" } });
     expect(heads).toHaveLength(4);
+    await rt.close();
+  });
+});
+
+describe.each(STORES)("a tool result, kept as %s", (_, fresh) => {
+  /** A build's 2,000 lines of output, past the transcript's cap. */
+  const BUILD = Array.from({ length: 2000 }, (_, i) => `compiling module ${i} of the workspace, step ${i * 7}`).join("\n");
+  /** A rewrite of a 2,000-line file, as twenty hunks of a hundred lines. */
+  const HUNKS = Array.from({ length: 20 }, (_, h) => ({ oldStart: h * 100 + 1, oldLines: 50, newStart: h * 100 + 1, newLines: 50, lines: Array.from({ length: 100 }, (_, i) => `${i % 2 === 0 ? "-" : "+"}const value${h}_${i} = compute(${h}, ${i}); // a line long enough to count`) }));
+  const EDIT = [{ path: "/root/app/big.ts", hunks: HUNKS }];
+  const SMALL = [{ path: "/root/app/f.txt", hunks: [{ oldStart: 1, oldLines: 3, newStart: 1, newLines: 3, lines: [" alpha", "-beta", "+BETA", " gamma"] }] }];
+  const lines = (): Line[] => [
+    { kind: "tool_use", text: '{"command":"npm run build"}' },
+    { kind: "tool_result", text: BUILD, facts: { exitCode: 2, durationMs: 4100 } },
+    { kind: "tool_use", text: '{"command":"seq 1 40000"}' },
+    { kind: "tool_result", text: "1\n2\n3", facts: { bytes: 228894 } },
+    { kind: "tool_use", text: '{"file_path":"/root/app/big.ts"}' },
+    { kind: "tool_result", text: "updated", facts: { patch: EDIT } },
+    { kind: "tool_use", text: '{"file_path":"/root/app/f.txt"}' },
+    { kind: "tool_result", text: "updated", facts: { patch: SMALL } },
+    ...texts(3, "after"),
+  ];
+  const results = (events: SessionEvent[]) => events.filter((e): e is Extract<SessionEvent, { type: "session.delta" }> => e.type === "session.delta" && e.kind === "tool_result");
+
+  it("keeps a command's output to the cap with the bytes of the whole, its exit code and how long it ran", async () => {
+    expect(BUILD.length).toBeGreaterThan(TOOL_RESULT_KEPT);
+    const { rt, ws } = await seeded(fresh(), lines);
+    await (await rt.sessions.start(ws.id, { prompt: "build" })).finished;
+    const [build, big] = results(await rt.sessions.history(ws.id));
+    expect(build).toMatchObject({ text: BUILD.slice(0, TOOL_RESULT_KEPT), bytes: Buffer.byteLength(BUILD), exitCode: 2, durationMs: 4100 });
+    // An output the agent cut first keeps the agent's count of the whole.
+    expect(big).toMatchObject({ text: "1\n2\n3", bytes: 228894 });
+    await rt.close();
+  });
+
+  it("keeps an edit's hunks under the same cap, its first lines in order, and says when some were left out", async () => {
+    const { rt, ws } = await seeded(fresh(), lines);
+    await (await rt.sessions.start(ws.id, { prompt: "edit" })).finished;
+    const [, , edit, small] = results(await rt.sessions.history(ws.id));
+    const kept = edit!.patch![0]!.hunks;
+    expect(kept.length).toBeGreaterThan(0);
+    expect(kept.length).toBeLessThan(HUNKS.length);
+    const shown = kept.flatMap(h => h.lines);
+    expect(shown).toEqual(HUNKS.flatMap(h => h.lines).slice(0, shown.length));
+    expect(shown.join("").length).toBeLessThanOrEqual(TOOL_RESULT_KEPT);
+    expect(edit!.patchCut).toBe(true);
+    expect(small).toMatchObject({ patch: SMALL });
+    expect(small!.patchCut).toBeUndefined();
+    await rt.close();
+  });
+
+  it("a head with a 2,000-line output and a 2,000-line edit stays under its bytes, the edit cut to what fits and the small one whole", async () => {
+    const { rt, ws } = await seeded(fresh(), lines);
+    const turn = await rt.sessions.start(ws.id, { prompt: "both" });
+    await turn.finished;
+    const head = await rt.sessions.head(turn.view().threadId!);
+    expect(Buffer.byteLength(JSON.stringify(head))).toBeLessThan(HEAD_BYTES);
+    const [build, , edit, small] = results(head.events);
+    expect(build).toMatchObject({ exitCode: 2, durationMs: 4100, bytes: Buffer.byteLength(BUILD), cut: TOOL_RESULT_KEPT });
+    expect(build!.text.length).toBe(HEAD_RESULT_CHARS);
+    expect(edit!.patchCut).toBe(true);
+    const shown = edit!.patch!.flatMap(f => f.hunks).flatMap(h => h.lines).join("").length;
+    expect(shown).toBeGreaterThan(0);
+    expect(shown).toBeLessThanOrEqual(HEAD_RESULT_CHARS);
+    expect(small).toMatchObject({ patch: SMALL });
+    expect(small!.patchCut).toBeUndefined();
+    expect(head.events.at(-1)!.type).toBe("session.end");
     await rt.close();
   });
 });
