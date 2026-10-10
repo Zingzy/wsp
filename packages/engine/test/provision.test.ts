@@ -143,7 +143,7 @@ const marksFor = (cmd: string, wanted: readonly string[]): string =>
 
 describe("what a computer already satisfies", () => {
   it("is the step whose check passes, the step whose command answers with no version asked, and the step reading the version it asks for", async () => {
-    const dir = scratch({ ace: "exit 0", bee: "exit 0", cee: "echo 1.2.3", dee: "echo 9.9.9" });
+    const dir = scratch({ ace: "exit 0", bee: "exit 0", cee: "echo 1.2.3", dee: "echo 1.0.9" });
     const steps = [
       step({ id: "tools/custom/ace", label: "Ace", check: "ace --version" }),
       step({ id: "tools/apt/bee", label: "Bee", manager: "apt", bin: "bee" }),
@@ -153,7 +153,7 @@ describe("what a computer already satisfies", () => {
       step({ id: "agents/node", label: "Node 22.23.2" }),
     ];
     const present = await presentSteps(shellMachine(dir), steps);
-    // Dee answers, but at another version than the recipe asks for, which is the drift the recipe is there to fix;
+    // Dee answers, but at an older version than the recipe asks for, which is the drift the recipe is there to fix;
     // Eff is not on the computer at all; the node step names nothing that can be read and is never present.
     expect([...present.keys()].sort()).toEqual(["agents/cee", "tools/apt/bee", "tools/custom/ace"]);
     // The path the command answered from rides the same read, so nothing asks the computer a second time for it.
@@ -188,19 +188,20 @@ describe("what a computer already satisfies", () => {
   });
 
   it("is a step whose only read is its version: the version it asks for, or any version at all where it asks for none", async () => {
-    const dir = scratch({ bun: "echo 1.4.0", wrangler: "echo 4.105.0", quiet: "exit 0", cloudflared: "echo 2026.9.1" });
+    const dir = scratch({ bun: "echo 1.4.0", wrangler: "echo 4.105.0", vite: "echo 7.1.0", quiet: "exit 0", cloudflared: "echo 2026.9.1" });
     // The three npm rows of spoo's recipe carry no command of their own and no check: what a person asked for is a
     // package at a version, and the road's own version read is the whole of what the computer can be asked.
     const steps = [
       step({ id: "tools/npm/bun", label: "bun@1.4.0", manager: "npm", asks: "1.4.0", pin: { read: "bun", fixed: true, words: "as an npm global" } }),
       step({ id: "tools/npm/wrangler", label: "wrangler@4.106.0", manager: "npm", asks: "4.106.0", pin: { read: "wrangler", fixed: true, words: "as an npm global" } }),
+      step({ id: "tools/npm/vite", label: "vite@7.0.0", manager: "npm", asks: "7.0.0", pin: { read: "vite", fixed: true, words: "as an npm global" } }),
       step({ id: "tools/npm/agent-browser", label: "agent-browser@0.31.1", manager: "npm", asks: "0.31.1", pin: { read: "agent-browser", fixed: true, words: "as an npm global" } }),
       step({ id: "tools/npm/quiet", label: "quiet", manager: "npm", pin: { read: "quiet", fixed: false, words: "as an npm global" } }),
       step({ id: "tools/brew/cloudflared", label: "cloudflared", manager: "brew", pin: { read: "cloudflared", fixed: false, words: "with Homebrew" } }),
     ];
     const present = await presentSteps(shellMachine(dir), steps);
-    // bun answers at the version the recipe pins; wrangler answers at another, which is the drift the recipe is
-    // there to fix; agent-browser is not on the computer; quiet prints nothing, so nothing says it is there;
+    // bun answers at the version the recipe pins; wrangler answers at an older one and vite at a newer one, which is
+    // the drift the recipe is there to fix, since only an agent ahead of its pin is kept; agent-browser is not on the computer; quiet prints nothing, so nothing says it is there;
     // cloudflared's road installs whatever it serves that day, so any version it prints is that row on the box.
     expect([...present.keys()].sort()).toEqual(["tools/brew/cloudflared", "tools/npm/bun"]);
   });
