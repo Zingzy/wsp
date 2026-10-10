@@ -3,7 +3,7 @@ import type { AgentEntry } from "../catalog.js";
 import { CODEX_CONFIG_FILE, CODEX_HOOKS } from "../codex-hooks.js";
 import { CODEX_CONTEXT } from "../context.js";
 import { CODEX_MCP_CHECK } from "../mcp-check.js";
-import { codexTrusts } from "../mcp-launch.js";
+import { codexTrusts } from "../mcp-codex.js";
 import { CODEX_MCP_LOGIN } from "../mcp-login.js";
 import { CODEX_TOML } from "../mcp.js";
 import { PROJECT_SHARED_SKILLS, SHARED_SKILLS } from "../skills.js";

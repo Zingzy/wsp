@@ -20,6 +20,7 @@ import {
   provisionPlanOf,
   toolSize,
   pathLine,
+  projectServersStep,
   provisionStep,
   serverNeeds,
   tarOf,
@@ -44,6 +45,7 @@ import { loadRecipe, smallRecipePath } from "./recipe-file.js";
 import { estimatePicks } from "./pick-sizes.js";
 import { agentOwnPaths } from "./recipes.js";
 import { withoutWspHere } from "./wsp-own.js";
+import { projectServersPlan } from "./project-servers.js";
 
 /** What the planner reads beside the picks: this computer's rungs and its Homebrew table, the same two readers wsp
  * init and a copy's build take. */
@@ -422,6 +424,11 @@ export function placeProvisioner(o: ProvisionReaders): PlaceProvisioner {
     },
     floor: (machine, on, stage) => provisionStep(machine, { ...placePaths(on.home), recipeAt: "floor", steps: [], agents: 0, compiler: false, skipped: [] }, "floor", newSetupRun(), stage, on),
     step: (machine, plan, step, run, stage, on) => provisionStep(machine, plan, step, run, stage, on),
+    projectServers: async (machine, picks, key, path, stage, on) => {
+      const folder = picks.folders[key];
+      const plan = folder === undefined ? undefined : await projectServersPlan({ here: here(), picks, folder, path, on, vault: serverVault(o.statePath) });
+      return plan === undefined ? [] : projectServersStep(machine, plan, placePaths(on.home).path, stage, on);
+    },
     estimate: async picks => estimatePicks(await withoutWspHere(here(), picks), o.home),
     undo: async (before, removed, on) => undoPlan(before, removed, on, async () => brewTableFor(await o.collect(), o.brew)),
   };

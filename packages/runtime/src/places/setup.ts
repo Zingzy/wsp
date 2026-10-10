@@ -33,6 +33,7 @@ import {
   waitsForInstallLine,
   GITHUB_SKIPPED_LINE,
   NEEDS_GITHUB_LINE,
+  FOLDER_SERVERS_WAIT_LINE,
   WAITS_ON_GITHUB_LINE,
   SKIPPED_FOR_NOW,
   wasThereLine,
@@ -232,6 +233,8 @@ export function placeSetup(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea) 
     // writes each step's over its own.
     const rows: HeldRow[] = sync !== undefined ? [...before] : [...before.filter(r => r.step !== undefined && done.has(r.step)), ...carried];
     const ours = (got: PlaceProvisionRow[]): PlaceProvisionRow[] => got.map(r => (r.outcome === "present" && put.some(p => p.id === r.id) ? { ...r, outcome: "installed", earlier: true } : r));
+    /** Whether the computer follows a saved recipe, where a server's yes to copying its keys is given. */
+    const follows = record.recipe !== undefined && record.recipe !== NO_RECIPE;
     let held = started;
     let ended = false;
     let writing: Promise<void> = Promise.resolve();
@@ -566,6 +569,47 @@ export function placeSetup(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea) 
       return foldersOf.run(placeId, () => add(placeId, key, folder, move, line => said(`${label}: ${line}`))).catch((e: unknown): PlaceProvisionRow => ({ id: `folders/${key}`, label, outcome: "failed", note: firstLineOf(e) }));
     };
 
+    /** The folders this run landed as projects, by key, whose own servers the folderServers step carries, and those
+     * it has carried. */
+    const landedFolders = new Map<string, HeldRow>();
+    const carriedFolders = new Set<string>();
+    const landed = (key: string, row: HeldRow): HeldRow => {
+      if (row.outcome === "installed" && row.project !== undefined) landedFolders.set(key, row);
+      return row;
+    };
+    // A resume whose folders step ended before carries the folders that step landed.
+    if (done.has("folders")) for (const r of rows) if (r.step === "folders" && r.id.startsWith("folders/")) landed(r.id.slice("folders/".length), r);
+    /** Whether the agents' own files are there, so a project's servers merge into them rather than make them: the
+     * servers step lands those files once, and a file that stands before it would keep them from landing at all. A
+     * resume whose servers step ended before has them there. */
+    let agentFilesThere = done.has("mcp");
+    let stepsEnded: () => void = () => {};
+    /** Settles once every step of this run has ended, after which no step holds the files lane. */
+    const stepsDone = new Promise<void>(resolve => (stepsEnded = resolve));
+
+    /** One landed folder's own servers: those a turn in it gets here that its checkout does not bring, carried into its
+     * project there. */
+    const carryServers = async (key: string, row: HeldRow): Promise<PlaceProvisionRow[]> => {
+      carriedFolders.add(key);
+      const project = row.project?.id;
+      if (project === undefined || provisioner.projectServers === undefined) return [];
+      if (!agentFilesThere) return [{ id: `folders/${key}/servers`, label: `${row.label} servers`, outcome: "skipped", note: FOLDER_SERVERS_WAIT_LINE }];
+      const path = (await recording.projectsOn(placeId)).find(p => p.id === project)?.path;
+      if (path === undefined) return [];
+      const stores = await storesHere();
+      const on = { home, held: new Set(Object.keys(serverValuesOf(vault()))), ...(stores !== undefined ? { stores } : {}), ...(follows ? { recipe: picks.name } : {}) };
+      const got = await provisioner.projectServers(machine, picks, key, path, stageOf("folderServers"), on).catch((e: unknown): PlaceProvisionRow[] => [
+        { id: `folders/${key}/servers`, label: `${row.label} servers`, outcome: "failed", note: firstLineOf(e) },
+      ]);
+      return ours(got);
+    };
+    /** The folderServers step: every folder landed so far and not carried yet. */
+    const folderServers = async (): Promise<PlaceProvisionRow[]> => {
+      const out: PlaceProvisionRow[] = [];
+      for (const [key, row] of landedFolders) if (!carriedFolders.has(key)) out.push(...(await carryServers(key, row)));
+      return out;
+    };
+
     /** The folders, each a project on that computer. One whose repository needs GitHub there waits on the GitHub
      * sign-in while the person has it open, and lands once they are through; with GitHub skipped or not signed in it
      * reads as needing GitHub to clone, and nothing is asked of the remote. */
@@ -582,8 +626,8 @@ export function placeSetup(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea) 
         const ours = claim !== undefined && standing.has(claim.id) ? claim : undefined;
         if (ours !== undefined && ours.pick.from === folder.from && ours.pick.name === folder.name && ours.pick.keep.join("\n") === folder.keep.join("\n")) {
           const row: HeldRow = { id: `folders/${key}`, label: was!.label, outcome: "installed", project: { id: ours.id }, pick: folder };
-          if (ours.pick.icon === folder.icon && ours.pick.hue === folder.hue) out.push({ ...row, earlier: true });
-          else out.push(await recording.folderLook(ours.id, ours.pick, folder).then(() => row, (e: unknown): HeldRow => ({ ...row, outcome: "failed", note: firstLineOf(e), pick: ours.pick })));
+          if (ours.pick.icon === folder.icon && ours.pick.hue === folder.hue) out.push(landed(key, { ...row, earlier: true }));
+          else out.push(landed(key, await recording.folderLook(ours.id, ours.pick, folder).then(() => row, (e: unknown): HeldRow => ({ ...row, outcome: "failed", note: firstLineOf(e), pick: ours.pick }))));
           continue;
         }
         // One whose kept files alone moved gets the new ones copied in; one whose source or name moved is added again
@@ -592,7 +636,7 @@ export function placeSetup(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea) 
         // remove takes it.
         const claimed = (r: HeldRow): HeldRow => (claim === undefined || r.project !== undefined ? r : { ...r, project: { id: claim.id }, pick: claim.pick, ...(claim.createdAt !== undefined ? { createdAt: claim.createdAt } : {}) });
         if (githubKnown === true || !(await needsGitHub(folder))) {
-          out.push(claimed(await addFolder(key, folder, claim)));
+          out.push(landed(key, claimed(await addFolder(key, folder, claim))));
           continue;
         }
         if (githubKnown === false) {
@@ -602,9 +646,16 @@ export function placeSetup(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea) 
         out.push(claimed({ id: `folders/${key}`, label, outcome: "skipped", note: WAITS_ON_GITHUB_LINE }));
         foldersWaiting++;
         void githubReady.then(async ok => {
-          const landed = ok ? await addFolder(key, folder, claim) : { id: `folders/${key}`, label, outcome: "failed" as const, note: NEEDS_GITHUB_LINE };
+          const got = ok ? await addFolder(key, folder, claim) : { id: `folders/${key}`, label, outcome: "failed" as const, note: NEEDS_GITHUB_LINE };
+          const row = landed(key, claimed(got));
+          landRow({ ...row, step: "folders" });
+          // A folder that lands once the steps are under way waits for them all, so its servers go in after the
+          // agents' files and with nothing else in the files lane.
+          await stepsDone;
+          if (row.outcome === "installed" && !carriedFolders.has(key)) for (const r of await carryServers(key, row)) landRow({ ...r, step: "folderServers" });
+          // The last of a folder's rows is the one that says the setup's end, once.
           foldersWaiting--;
-          landRow(claimed({ ...landed, step: "folders" }));
+          landRow({ ...row, step: "folders" });
         });
       }
       return out;
@@ -612,6 +663,7 @@ export function placeSetup(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea) 
 
     const end = async (failed?: string): Promise<void> => {
       ended = true;
+      stepsEnded();
       if (sync !== undefined) {
         // A sync leaves the computer in step whatever its rows came to: a row that failed stands with Retry, and the
         // computer holds the recipe it applied.
@@ -676,7 +728,6 @@ export function placeSetup(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea) 
       if (picks.configs.github !== undefined && githubWord === "vault" && vault()[GITHUB_TOKEN_ENV] === undefined) await wiring.githubToken?.().catch(() => undefined);
       await undo();
       const stores = await storesHere();
-      const follows = record.recipe !== undefined && record.recipe !== NO_RECIPE;
       const planned = await provisioner.setup(picks, { home, ...(stores !== undefined ? { stores } : {}), ...(follows ? { recipe: picks.name } : {}) }, sync?.steps);
       // A sync puts on only the plugins it added; the rest are there, and their install would run again.
       const kept = sync === undefined || planned.plugins === undefined ? planned : { ...planned, plugins: planned.plugins.filter(p => sync.moved.has(p.id)) };
@@ -741,11 +792,24 @@ export function placeSetup(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea) 
         // The servers wait on the CLIs they run, since a server whose command is not there is dropped, and the plugins
         // on the servers step, where the agents' own files land: a plugin's install writes the agent's settings,
         // which a landing then never writes over.
-        { name: "mcp", after: ["agents", "servers"], lanes: [FILES], run: () => go(step("mcp", engine("mcp"))) },
+        {
+          name: "mcp",
+          after: ["agents", "servers"],
+          lanes: [FILES],
+          run: async () => {
+            const done = await step("mcp", engine("mcp"));
+            // Skipped, its files landed on an earlier run; run, they landed unless its files round failed.
+            agentFilesThere = done === undefined || !done.rows.some(r => r.outcome === "failed" && (r.id.startsWith("files/") || r.id === "mcp/stopped"));
+            return "go";
+          },
+        },
         { name: "configs", after: [], lanes: (plan.configTools ?? []).length > 0 ? [INSTALLS, FILES] : [FILES], run: () => go(step("configs", engine("configs"))) },
         { name: "plugins", after: ["mcp"], lanes: [], run: () => go(step("plugins", engine("plugins"))) },
         // The folders wait on every picked CLI's hook as well as GitHub: git-lfs's is what makes a clone check out its files.
         { name: "folders", after: ["github", "hooks"], lanes: [], run: () => go(step("folders", folders)) },
+        // A project's own servers merge into the agents' files, so they go once those files have landed and the plugins
+        // that write them are in, holding the files lane, whose close also sweeps the job's folder.
+        { name: "folderServers", after: ["mcp", "plugins", "folders"], lanes: [FILES], run: () => go(step("folderServers", folderServers)) },
       ];
       await runGraph(
         graph.filter(g => !done.has(g.name)),
@@ -768,6 +832,7 @@ export function placeSetup(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea) 
       }
       await end(firstLineOf(e));
     } finally {
+      stepsEnded();
       // A run cut off by a computer that went away writes nothing more; one still waiting on the person keeps its rows.
       if (!ended) letGo();
       void log.close(held);

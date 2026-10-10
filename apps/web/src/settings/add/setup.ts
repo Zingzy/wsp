@@ -100,7 +100,8 @@ function signInOffer(row: PlaceProvisionRow | undefined): Pick<StepLine, "signIn
 }
 
 /** The steps as the person chose them and as they read in every list: the job's steps by the name each goes by. The
- * sign-ins sit under Agents and the job's own context step is not drawn. */
+ * sign-ins sit under Agents, a project's own servers under MCP servers, and the job's own context step and the step
+ * those servers land in are not drawn. */
 export const SETUP_ROWS: readonly SetupRowSpec[] = [
   { step: "floor", name: "Base packages" },
   { step: "agents", name: "Agents", doing: { verb: "Installing", picked: picks => Object.keys(picks.agents).map(id => [id, agentName(id)] as const) } },
@@ -146,7 +147,7 @@ export function setupRows(place: Pick<PlaceView, "setup" | "applied" | "picks" |
   const out: StepLine[] = [{ id: "wsp", name: INSTALL, state: "done", note: ADD_COMPUTER_WORDS.installed }];
   for (const { step, name, doing, ended } of SETUP_ROWS) {
     const line = setup?.steps.find(s => s.step === step);
-    const mine = rows.filter(r => r.step === step);
+    const mine = rows.filter(r => r.step === step || (step === "mcp" && r.step === "folderServers"));
     const landed = mine.filter(r => r.outcome === "installed" || r.outcome === "present");
     // The step a setup stopped at says why on its own row; any other step that missed says it per item, under it.
     const stopped = setup?.state === "failed" && line?.state === "failed";

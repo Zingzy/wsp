@@ -6,11 +6,12 @@
 // it needs on Linux and which secret it carries. Token files are only stat'ed,
 // never read.
 import { createHash } from "node:crypto";
-import { MAC_BIN_DIRS, MAC_ONLY, MCP_AGENTS, type McpAgent, type McpConfig, type McpServer, type McpTransport } from "@wsp/catalog";
+import { MAC_BIN_DIRS, MAC_ONLY, MCP_AGENTS, type McpAgent, type McpServer, type McpTransport } from "@wsp/catalog";
 import { MCP_ID_PREFIX, fmtBytes, type ServerSignIn } from "@wsp/protocol";
 import { type Host, expand, tilde } from "../host.js";
 import type { ManifestEntry } from "../manifest.js";
 import { isSecretName } from "./shell-rc.js";
+import { readTurnServers } from "./turn-servers.js";
 
 /** The row that carries mcp-remote's saved browser sign-ins for every agent. */
 export const MCP_REMOTE_ID = `${MCP_ID_PREFIX}mcp-remote`;
@@ -409,15 +410,14 @@ function remoteRow(store: RemoteStore, matched: readonly string[]): ManifestEntr
   };
 }
 
-/** The text of the first of an agent's config files that is here. */
-async function configText(host: Host, config: McpConfig): Promise<string | undefined> {
-  for (const file of config.files) {
-    if ((await host.fs.stat(expand(host, file)))?.kind !== "file") continue;
-    const text = await host.fs.readText(expand(host, file));
-    if (text !== undefined) return text;
-  }
-  return undefined;
+/** One server's row as the scan reads it: how it fits Linux, what it carries and the home paths it runs against. */
+export async function mcpServerRow(host: Host, agent: McpAgent, server: McpServer, tokens: ReadonlyMap<string, number>): Promise<ManifestEntry> {
+  const c = await carried(host, server, agent, tokens);
+  return serverRow(agent, server, linuxFit(server, host.home), await homeDeps(host, server, c.paths), c, host.home);
 }
+
+/** The token sizes mcp-remote keeps by server hash, for the rows of servers read apart from the scan. */
+export const mcpRemoteTokens = async (host: Host): Promise<ReadonlyMap<string, number>> => (await remoteStore(host))?.tokens ?? new Map();
 
 /** One row per MCP server under its agent, then the mcp-remote sign-in store when there is one. Each agent's
  * config is read by its entry's format module, so an agent the catalog gains needs nothing here. */
@@ -427,15 +427,13 @@ export async function detectMcp(host: Host, agents: readonly McpAgent[] = MCP_AG
   const rows: ManifestEntry[] = [];
   const matched: string[] = [];
   for (const agent of agents) {
-    const text = await configText(host, agent.mcp);
-    if (text === undefined) continue;
-    for (const server of agent.mcp.format.read(text, host.home)) {
-      const fit = linuxFit(server, host.home);
-      const c = await carried(host, server, agent, tokens);
-      const deps = await homeDeps(host, server, c.paths);
+    // What a turn at home gets from the agent's own file: its user scope, then the home folder's own entry.
+    const turns = await readTurnServers(host, agent, host.home, { own: true });
+    for (const turn of [...turns.filter(t => t.scope === "user"), ...turns.filter(t => t.scope === "local")]) {
+      const server: McpServer = { ...turn.server, scope: turn.scope === "local" ? "home" : "user" };
       const hash = server.transport.kind === "stdio" ? mcpRemoteHash(server.transport.args) : undefined;
       if (hash !== undefined && tokens.has(hash)) matched.push(server.name);
-      rows.push(serverRow(agent, server, fit, deps, c, host.home));
+      rows.push(await mcpServerRow(host, agent, server, tokens));
     }
   }
   if (store !== undefined) rows.push(remoteRow(store, matched));

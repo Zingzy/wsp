@@ -627,6 +627,7 @@ const SKILLS_AND_SERVERS: Answered = {
     { case: "scoped", arguments: { name: "linear", agent: "claude", scope: "home" }, replies: { "servers.remove": reply({ file: "~/.claude.json" }) } },
     { case: "a project on a computer", arguments: { name: "linear", agent: "claude", on: "attic", project: "api" }, replies: { ...AIMED, "servers.remove": reply({ file: "/root/api/.mcp.json" }) } },
     { case: "project and another scope", arguments: { name: "linear", agent: "claude", project: true, scope: "user" }, replies: {} },
+    { case: "local beside a named project", arguments: { name: "kept", agent: "claude", on: "attic", project: "api", scope: "local" }, replies: { ...AIMED, "servers.remove": reply({ file: "~/.claude-cfg/.claude.json" }) } },
     { case: "refused", arguments: { name: "linear", agent: "claude" }, replies: { "servers.remove": refused("claude has no MCP server named linear", "not-found") } },
   ],
   servers_disable: [

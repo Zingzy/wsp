@@ -256,6 +256,20 @@ describe("one MCP server for a slate's tool runs", () => {
     await expect(reader.server!(on, { agent: "claude", name: "zoho-mail" })).rejects.toThrow(noSuchServerRefusal("zoho-mail", "Claude Code"));
     reader.close();
   });
+
+  it("finds a project's server where a turn there finds it: kept for its folder in the agent's own file, or in a .mcp.json above it", async () => {
+    const f = fixture();
+    const project = join(f.root, "project");
+    mkdirSync(project);
+    writeFileSync(join(f.home, ".claude.json"), JSON.stringify({ mcpServers: {}, projects: { [project]: { mcpServers: { kept: { command: "kept-server", args: [] } } } } }));
+    writeFileSync(join(f.root, ".mcp.json"), JSON.stringify({ mcpServers: { above: { command: "above-server", args: [] } } }));
+    const reader = agentsReader({ vault: () => ({}), here: () => here(f), loginEnv: async () => ({ PATH: "/usr/bin:/bin", HOME: f.home }) });
+    const on = { kind: "here" as const, projects: [{ id: "p", name: "project", path: project }] };
+    expect(await reader.server!(on, { agent: "claude", name: "kept" })).toMatchObject({ transport: { kind: "stdio", command: "kept-server" }, cwd: project });
+    expect(await reader.server!(on, { agent: "claude", name: "above" })).toMatchObject({ transport: { kind: "stdio", command: "above-server" }, cwd: project });
+    await expect(reader.server!({ kind: "here" }, { agent: "claude", name: "kept" })).rejects.toThrow(noSuchServerRefusal("kept", "Claude Code"));
+    reader.close();
+  });
 });
 
 describe("one MCP server's tools, on the person's ask", () => {

@@ -35,14 +35,15 @@ interface Pair {
 const serverAgents = (report: AgentsReport | null): string[] => MCP_AGENTS.filter(a => report?.agents.some(r => r.id === a.id && r.installed) === true).map(a => a.id);
 
 /** The file an add for this agent lands in: the one the report already read servers from, else the first the agent
- * reads; a project's own file under that project's folder. */
+ * reads; a project's own file in that project's folder, never one above it. */
 function fileOf(agent: string, project: AgentsProject | undefined, report: AgentsReport | null): string | undefined {
   const entry = MCP_AGENTS.find(a => a.id === agent);
   if (entry === undefined) return undefined;
   if (project !== undefined) {
-    const own = report?.servers.find(r => r.agent === agent && inProject(r, project))?.file;
-    const first = entry.mcp.projectFiles?.[0];
-    return own ?? (first === undefined ? undefined : `${project.path}/${first}`);
+    // A project's rows also name the files above its folder that its turns read; an add writes the folder's own.
+    const files = (entry.mcp.projectFiles ?? []).map(f => `${project.path}/${f}`);
+    const own = report?.servers.find(r => r.agent === agent && inProject(r, project) && r.file !== undefined && files.includes(r.file))?.file;
+    return own ?? files[0];
   }
   return report?.servers.find(r => r.agent === agent && r.scope === "user" && r.file !== undefined)?.file ?? entry.mcp.files[0];
 }

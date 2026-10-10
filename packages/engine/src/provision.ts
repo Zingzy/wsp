@@ -357,6 +357,26 @@ async function filesRound(machine: Machine, files: NonNullable<ProvisionPlan["fi
   return landed.rows;
 }
 
+/** One project's own servers on a computer somebody owns, once its folder is there: merged into the agents' files as the
+ * servers step merges the recipe's, from the copy the plan hands in, and written down beside the job so a leave takes
+ * them out again. It runs apart from the servers step, which owns the job's folder while it runs. */
+export async function projectServersStep(machine: Machine, mcp: McpPlan, path: string, stage: ProvisionStage, on: ProvisionOn): Promise<PlaceProvisionRow[]> {
+  const servers = await provisionMcp(machine, mcp, {
+    home: on.home,
+    landed: new Map(),
+    tools: [],
+    path,
+    ...(on.held !== undefined ? { held: on.held } : {}),
+    ...(on.stores !== undefined ? { stores: on.stores } : {}),
+    stage: (_which, detail) => {
+      if (detail !== undefined) stage(detail);
+    },
+  });
+  for (const row of servers) stage(rowLine(row), undefined, row);
+  await closeAgentFiles(machine, on.home, [], on.stores);
+  return servers;
+}
+
 /** Runs one step of a setup on the computer and answers its rows, each marked with the step. Throws only when the
  * computer stopped answering, which is the one thing a step cannot report a row for. */
 export async function provisionStep(machine: Machine, plan: ProvisionPlan, step: EngineStep, run: SetupRun, stage: ProvisionStage, on: ProvisionOn): Promise<PlaceProvisionRow[]> {

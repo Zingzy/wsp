@@ -199,6 +199,9 @@ export const folderMoveHeldLine = (why: string): string => `${why}, then retry t
  * lives in still stands on that computer, which holds the person's work and is never taken. */
 export const folderMoveStandsLine = (folder: string, computer: string): string =>
   `${folder} still stands on ${computer}; remove or rename it there, then sync again to move the project to the recipe's folder`;
+/** What a project's servers row says where the agents' own files did not land before it, which the servers merge into. */
+export const FOLDER_SERVERS_WAIT_LINE = "its servers wait for the agents' own files, which did not land this run; retry once they have";
+
 /** What a folder's row says where the recipe names a folder this computer does not have. */
 export const recipeFolderGoneLine = (folder: string): string => `there is no folder at ${folder} on this computer; point the recipe at one that exists`;
 
@@ -215,6 +218,7 @@ export function setupRowFix(row: Pick<PlaceProvisionRow, "step" | "note">, box: 
     clis: `Retry, or install it on ${box} yourself and skip it here.`,
     skills: "Check the skill's folder here, then retry.",
     mcp: "Check the server's entry in the agent's settings here, then retry.",
+    folderServers: "Check the server's entry in the project's settings here, then retry.",
     plugins: `Retry, or add it on ${box} yourself and skip it here.`,
     configs: "Check the file here, then retry.",
     github: "Retry for a fresh sign-in, or sign in later in Settings.",

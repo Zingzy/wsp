@@ -605,7 +605,7 @@ function runtimeCore(ctx: RuntimeContext, opts: RuntimeOptions): RuntimeCore {
         },
         projectsOn: async placeId => {
           await ctx.ready();
-          return [...projectsHeld.values()].filter(p => p.computer === placeId).map(p => ({ id: p.id, name: p.name, ...(p.checkout === undefined ? {} : { checkout: p.checkout }) }));
+          return [...projectsHeld.values()].filter(p => p.computer === placeId).map(p => ({ id: p.id, name: p.name, path: p.path, ...(p.checkout === undefined ? {} : { checkout: p.checkout }) }));
         },
         dropOn: async placeId => {
           const { forks, folders, projects, rows } = await standingOn(placeId);

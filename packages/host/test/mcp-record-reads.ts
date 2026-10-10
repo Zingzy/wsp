@@ -49,6 +49,7 @@ const REPORT = {
   servers: [
     { name: "linear", agent: "claude", scope: "user", file: "~/.claude.json", transport: { kind: "http", host: "mcp.linear.app" }, envNames: [], auth: "unknown", enabled: true, inRecipe: false },
     { agent: "codex", name: "wsp", scope: "project", file: "~/p/.codex/config.toml", transport: { line: "wsp mcp --scoped", kind: "stdio" }, envNames: ["WSP_HOST_URL", "WSP_HOST_TOKEN"], auth: "open", enabled: false, project: { id: "proj-1", name: "wsp", path: "~/p" } },
+    { agent: "claude", name: "kept", scope: "local", file: "~/.claude-cfg/.claude.json", transport: { kind: "stdio", line: "node k.js" }, envNames: [], auth: "open", enabled: true, project: { id: "proj-1", name: "wsp", path: "~/p" } },
     { agent: "not-in-catalog", name: "odd", scope: "home", file: "~/.x", transport: { kind: "stdio", line: "odd é" }, envNames: [], auth: "open", enabled: true, tools: [{ name: "t" }] },
   ],
   refused: ["codex: config.toml did not \u0085parse\nat line 3"],
