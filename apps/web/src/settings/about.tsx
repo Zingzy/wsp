@@ -4,10 +4,12 @@
 // downloads and opens it, or stages it and restarts into it where the app
 // replaces itself, anywhere else Get is a link. Once newer files are
 // installed under a running host, Restart host stands in Get's place. The app's
-// half and the host's get a line each only once they run apart.
+// half and the host's get a line each only once they run apart. Level with the
+// release, Check for updates asks the host at once.
 import type { ReleaseLatest, ReleaseView } from "@wsp/protocol";
 import { Mark } from "../brand/Brand.js";
 import { Button } from "../components/ui/button.js";
+import { useStore } from "../protocol/store.js";
 import { RELEASES } from "../../../../packages/protocol/src/bundles.mjs";
 import { releaseAhead } from "../shell/shellVersion.js";
 import { restartShown, runUpdate, useUpdateStage, type UpdateAct } from "../shell/update.js";
@@ -59,12 +61,14 @@ function UpdateStep() {
   );
 }
 
-/** The line under the version: whether a newer release waits, as the host last read it. */
-function stateLine(release: ReleaseView | null, behind: ReleaseLatest | undefined): string {
+/** The line under the version: whether a newer release waits, as the host last read it, and when it last asked. */
+function stateLine(release: ReleaseView | null, behind: ReleaseLatest | undefined, now: number): string {
   if (behind !== undefined) return ABOUT_WORDS.available(behind.version);
   if (release === null || release.state === "checking") return ABOUT_WORDS.checking;
   if (release.state === "off") return ABOUT_WORDS.checksOff;
-  return release.latest === undefined ? ABOUT_WORDS.notChecked : ABOUT_WORDS.upToDate;
+  const ago = (at: string | undefined): string => ABOUT_WORDS.readWhen(at === undefined ? 0 : now - Date.parse(at));
+  const checked = release.checkedAt === undefined ? undefined : ago(release.checkedAt);
+  return release.state === "read" && checked !== undefined ? ABOUT_WORDS.upToDate(checked) : ABOUT_WORDS.unreached(checked, ago(release.triedAt));
 }
 
 /** General's Version card: the one number while the two halves agree, the step to the next release where there is
@@ -76,7 +80,14 @@ export function versionCards(ctx: SettingsContext): SettingsCardData[] {
   const apart = inShell && app !== undefined && host !== undefined && app !== host;
   const hover = release === null ? undefined : latestHover(release, ctx.now);
   const notes = release?.latest?.url ?? RELEASES;
-  const step = restartShown(release) || behind !== undefined ? <UpdateStep /> : null;
+  const releaseCheck = ctx.api?.releaseCheck;
+  const check =
+    release === null || release.state === "off" || releaseCheck === undefined ? null : (
+      <Button size="xs" variant="outline" data-k="check-updates" disabled={release.state === "checking"} onClick={() => void releaseCheck(true).then(release => useStore.setState({ release }), ctx.failed)}>
+        {ABOUT_WORDS.checkNow}
+      </Button>
+    );
+  const step = restartShown(release) || behind !== undefined ? <UpdateStep /> : check;
   const row: SettingsItem[] = [
     {
       kind: "row",
@@ -88,7 +99,7 @@ export function versionCards(ctx: SettingsContext): SettingsCardData[] {
         </GlyphFrame>
       ),
       mark: host ?? app ?? ABOUT_WORDS.unknown,
-      description: stateLine(release, behind),
+      description: stateLine(release, behind, ctx.now),
       ...(step === null ? {} : { control: step }),
       attrs: { "data-k": "version" },
     },

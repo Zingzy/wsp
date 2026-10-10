@@ -817,9 +817,9 @@ const RuntimeOp = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("preferences.set"), patch: PreferencesPatch }),
   /** Replies with { release: ReleaseView }: the newest release as this host last read it, asking nobody. */
   z.object({ id: reqId, op: z.literal("release.get") }),
-  /** Asks GitHub again unless the last ask was under ten minutes ago and replies with { release: ReleaseView }; a
-   * changed view is pushed to every socket as release.changed. */
-  z.object({ id: reqId, op: z.literal("release.check") }),
+  /** Asks GitHub again unless the last ask was under ten minutes ago, or at once with `force`, and replies with
+   * { release: ReleaseView }; a changed view is pushed to every socket as release.changed. */
+  z.object({ id: reqId, op: z.literal("release.check"), force: z.boolean().optional() }),
   /** Replies { ok } and then restarts this host on the files it was installed from, by the road it came up on;
    * refused where that road would not bring it back. The socket closes on the host's stopping code. */
   z.object({ id: reqId, op: z.literal("host.restart") }),

@@ -285,7 +285,7 @@ export interface PlaceDoctor {
  * `on` is a host source like the init door's, so its events carry no sequence and are not replayed. */
 export interface ReleaseDoor {
   get(): ReleaseView;
-  check(): Promise<ReleaseView>;
+  check(force?: boolean): Promise<ReleaseView>;
   on(fn: (e: ReleaseChangedEvent) => void): () => void;
 }
 
@@ -1981,7 +1981,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               send({ id: msg.id, ok: true, release: release().get() });
               return;
             case "release.check":
-              send({ id: msg.id, ok: true, release: await release().check() });
+              send({ id: msg.id, ok: true, release: await release().check(msg.force === true) });
               return;
             case "host.restart": {
               if (!ownRoad()) {
