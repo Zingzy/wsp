@@ -1,6 +1,6 @@
 # Your first thread
 
-{/* Written from apps/web/src/shell/ProjectHome.tsx, NewThreadPicks.tsx, FirstRun.tsx, sidebar/AddProjectDialog.tsx, sidebar/words.ts, keybindingDefaults.ts, packages/protocol/src/general-prefs.ts, packages/protocol/src/projects.ts (sourceKind), wsp add --help, wsp run --help and the run section of skills/wsp/SKILL.md. */}
+{/* Written from apps/web/src/shell/ProjectHome.tsx, NewThreadPicks.tsx, FirstRun.tsx, sidebar/AddProjectDialog.tsx, keybindingDefaults.ts, packages/protocol/src/general-prefs.ts, wsp add --help, wsp run --help and the run section of skills/wsp/SKILL.md. */}
 
 A thread is one conversation with a coding agent. The agent works in a project, which is a repo or a folder on one computer. On this page, you add a project on your computer and start a thread in it. You do it first in the app, then from the command line.
 
@@ -12,11 +12,11 @@ Before you start, install wsp ([on a Mac](/install/mac) or [on Linux](/install/l
 
 1. Open wsp. If wsp has no project, the window says "Add a project to get started".
 2. Select **Add a project**.
-3. Pick a repo from the list. The list shows the git repos on this computer, the most recently used first.
+3. Pick a repo from the list of git repos on this computer.
 4. If the folder is not in the list, type a path that starts with `/` or `~`, or select **Choose**.
 5. Select **Add**.
 
-A thread on this computer runs in the project's folder itself. wsp does not make a copy of the folder.
+A thread on this computer runs in the project's folder itself, not in a copy.
 
 ### Start the thread
 
@@ -26,7 +26,7 @@ A thread on this computer runs in the project's folder itself. wsp does not make
 4. Optional: with the pickers at the bottom of the box, pick the model, the reasoning effort and the access. The model list also picks the agent. Access sets how far the agent goes before it asks you.
 5. Type your message in the box, and press Enter.
 
-The thread opens and the reply streams in. The agent names the thread from your message, and the thread shows in the sidebar. To type a new line without sending, press Shift+Enter.
+The thread opens, the reply streams in, and the thread shows in the sidebar. To type a new line without sending, press Shift+Enter.
 
 To send on Cmd+Enter instead of Enter, go to **Settings**, then **General**, then **Send with**.
 
@@ -46,9 +46,9 @@ To send on Cmd+Enter instead of Enter, go to **Settings**, then **General**, the
    wsp run acme "Read the README and list the three biggest gaps in it."
    ```
 
-The first line that `wsp run` prints is `thread <id> on <project> in <folder>`. The reply streams in your terminal, and the same thread shows in the app's sidebar. You can read it and answer it there.
+The first line that `wsp run` prints is `thread <id> on <project> in <folder>`. The reply streams in your terminal, and the same thread shows in the app's sidebar, where you can read it and answer it.
 
-If no host runs yet, the first command starts one and tells you on stderr. That is normal.
+If no host runs yet, the first command starts one and says so. That is normal.
 
 ## Choose the agent and the model
 
@@ -61,7 +61,7 @@ wsp run acme --model claude-sonnet-5 --effort low "Fix the typo in the README."
 
 - `--agent` takes `claude`, `codex`, `opencode` or `cursor`.
 - `--effort` takes the effort words of the agent and the model. They are not the same for every model. For Claude, the words are `low`, `medium`, `high`, `xhigh` and `max`.
-- `--access` takes `ask`, `auto-edit`, `full` or `plan`. Without it, the thread runs with the project's access, then the agent's default, then `full`.
+- `--access` takes `ask`, `auto-edit`, `full` or `plan`. Without it, the thread uses the project's access, or the agent's default, or `full`.
 - `--branch <branch>` runs the thread in a worktree of the project's repo on that branch. The project's own folder does not change.
 
 ## Send the next message

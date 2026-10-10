@@ -1,6 +1,6 @@
 # Run your own relay
 
-The relay gives a host that no one can reach from outside an HTTPS address. wsp uses `relay.usewsp.com` unless you name another one. The relay is in the wsp repo under `infra/relay`: a Cloudflare Worker with one D1 database. Run your own when you do not want a third party to hold your relay account and the Cloudflare account that your tunnels live on.
+The relay gives a host that no one can reach from outside an HTTPS address. wsp uses `relay.usewsp.com` unless you name another one. The relay is a Cloudflare Worker with one D1 database, in the wsp repo under `infra/relay`. Run your own when you do not want a third party to hold your relay account and the Cloudflare account that your tunnels live on.
 
 ## Before you start
 
@@ -14,9 +14,9 @@ You need:
 Decide how hosts get their names:
 
 - With a zone, each host gets a name of its own, `<host id>.<zone>`, through a tunnel that the relay makes on your account. The relay needs a Cloudflare API token that can edit DNS in that zone.
-- Without a zone, the relay makes no tunnel and calls no Cloudflare API. Each host runs a quick tunnel and gets a new `trycloudflare.com` name each time its connector starts `cloudflared`. That happens at each start of the host, and again when `cloudflared` stops and the connector starts it again. A box keeps the address that it joined at. So a box that joined through a quick tunnel's name loses your host at the next new name. Use a zone if boxes join through the relay.
+- Without a zone, the relay makes no tunnel and calls no Cloudflare API. Each host runs a quick tunnel and gets a new `trycloudflare.com` name each time it starts. A box keeps the address that it joined at, so it loses your host at the next new name. Use a zone if boxes join through the relay.
 
-Give the relay a zone that nothing else depends on. The relay writes and deletes only `<host id>.<zone>`, but its API token can write any record in that zone. Anyone who takes over the Worker or the token takes over the whole zone. A zone that also holds your mail or your main site is the wrong one.
+Give the relay a zone that nothing else depends on. The relay writes only `<host id>.<zone>`, but its API token can write any record in that zone. Anyone who takes over the Worker or the token takes over the whole zone, so do not use a zone that holds your mail or your main site.
 
 ## Step 1: Get the code
 
@@ -50,15 +50,13 @@ The file in the repo holds the values of `relay.usewsp.com`. Replace each one wi
 
 The relay uses a zone only when both `RELAY_ZONE` and `RELAY_ZONE_ID` are set.
 
-`observability.enabled` is `true` in the file, so Cloudflare keeps the Worker's logs. The URL of the GitHub callback carries the OAuth code and state, so those are in the logs. To keep no Worker logs, set it to `false`.
+`observability.enabled` is `true` in the file, so Cloudflare keeps the Worker's logs, and those logs hold the GitHub OAuth code and state from the callback URL. To keep no Worker logs, set it to `false`.
 
 ## Step 4: Apply the migrations
 
 ```sh
 pnpm exec wrangler d1 migrations apply wsp-relay --remote
 ```
-
-This makes the tables from `infra/relay/migrations`: the accounts, the hosts, the computers that signed in, their admissions and the link codes.
 
 ## Step 5: Make a GitHub OAuth app
 
@@ -67,7 +65,7 @@ In GitHub, open Settings > Developer settings > OAuth Apps and make a new app:
 - Homepage URL: `https://relay.example.com`
 - Authorization callback URL: `https://relay.example.com/link/callback`
 
-Keep its client id, and make a client secret. The relay asks GitHub for no scope. It keeps the GitHub user id and login, and not the token.
+Keep its client id, and make a client secret. The relay asks GitHub for no scope. It keeps the GitHub user id and login, not the token.
 
 The relay has no list of allowed users. Any GitHub user who opens your relay can sign in, get an account of their own, and put hosts on it. With a zone, each of those hosts makes a tunnel on your Cloudflare account and a DNS name in your zone.
 
@@ -142,9 +140,9 @@ Then, on the other computer, list the hosts that it can reach:
 wsp hosts
 ```
 
-`wsp hosts` writes a record for each host. The Hosts menu in the app and `--host` read those records, so the other computer reaches your host only after this step.
+The other computer reaches your host, in the app's Hosts menu and with `--host`, only after this step.
 
-A computer that signed in on the page alone can read the account but reaches no host. Your host takes an admission only from the computer that linked it, or from a computer that it already admitted. On one of those computers, `wsp login` on its own lists the ids, and `wsp login <id>` admits that computer. On a computer that is signed in to nothing, `wsp login` on its own starts a sign-in to `relay.usewsp.com` instead.
+A computer that signed in on the page alone reaches no host until it is admitted. Admit it from the computer that linked the host, or from one that the host already admitted. There, `wsp login` on its own lists the ids, and `wsp login <id>` admits a computer. On a computer that is signed in to nothing, `wsp login` on its own starts a sign-in to `relay.usewsp.com` instead.
 
 ## Next
 

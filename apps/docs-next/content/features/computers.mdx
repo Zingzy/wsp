@@ -1,12 +1,12 @@
 # Computers
 
-A computer is one of your own computers that wsp runs threads on. That is the computer the app runs on, and each Linux computer you added or joined. **Settings > Computers** lists them all.
+A computer is one of your own computers that wsp runs threads on. It is the computer the app runs on, or a Linux computer you added or joined. **Settings > Computers** lists them all.
 
 <Image src="/shots/computers.webp" alt="Settings > Computers: the computer the app runs on and two added computers, each with its cores, memory, threads and state" caption="Settings > Computers." />
 
 ## The list
 
-Each row shows the computer's name, its cores, its memory, its threads and its state. The computer you added last carries the tag `default`. It is the computer a command means when it names none. A thread always starts on its project's computer, whatever the tag says. Below the list, **Pending** holds the adds you have not finished. Each says the step you reached.
+Each row shows the computer's name, its cores, its memory, its threads and its state. The computer you added last carries the tag `default`. A command that names no computer means that one. A thread always starts on its project's computer. Below the list, **Pending** holds the adds you have not finished.
 
 | State | Meaning |
 |---|---|
@@ -18,25 +18,17 @@ Each row shows the computer's name, its cores, its memory, its threads and its s
 | No answer, or Stopped | The computer does not answer, or wsp on it stopped. |
 | Blocked | It cannot run threads. The hover says why. |
 
-In place of a state, a computer with an older wsp shows an **Update** button. A computer where an agent has no sign-in shows a **Sign in** button.
-
-`wsp computers` reads its STATE column from the same rules, with a few differences:
-
-- `Pending` marks a computer that joined and waits for its picks.
-- A computer with an older wsp shows the two versions, such as `daemon 41, host 42`, in place of a state.
-- `Full` marks a computer that runs as many threads as it allows at once.
+A computer with an older wsp shows an **Update** button in place of a state. A computer where an agent has no sign-in shows **Sign in**.
 
 To add a computer, click **Add a computer**. See [Add a computer](/features/add-a-computer), or [Computers behind a firewall](/features/behind-a-firewall) for a computer that dials out to you.
 
 ## A computer's own page
 
-Click a row to open the computer's page. It shows the computer's version, its system, its cores and its memory, and then these parts.
-
-<Image src="/shots/docs-computer-page.webp" alt="The top of a computer's own page: its name and system, whether it answers, and its limits" caption="One computer's page." />
+Click a row to open the computer's page. It shows the computer's version, system, cores and memory, then these parts.
 
 ### Update
 
-If the computer runs an older wsp than the host, the page says "Runs an older wsp than" the host's computer. Click **Update wsp on** the computer to install the host's version there. Running threads carry on.
+If the computer runs an older wsp than the host, click **Update wsp on** the computer. Running threads carry on.
 
 ### Recipe
 
@@ -44,7 +36,7 @@ If the computer runs an older wsp than the host, the page says "Runs an older ws
 
 ### Setup and sign-ins
 
-**Setup** lists what the setup put on the computer, step by step. **Sign-ins** lists each agent's sign-in there, with **Sign in** for one that is missing.
+**Setup** lists what the setup put on the computer. **Sign-ins** lists each agent's sign-in there, with **Sign in** for one that is missing.
 
 ### Limits
 
@@ -54,36 +46,27 @@ If the computer runs an older wsp than the host, the page says "Runs an older ws
 | Nap a quiet workspace after | A workspace with no running turn stops, and wakes on the next message. | 20 minutes |
 | Turn limit | Stops a turn that runs this long. Send to the thread to continue where it stopped. Up to 24 hours. | Off |
 
-When a computer runs as many threads as it allows, the next thread waits for a slot and starts by itself when one frees. Its transcript says, for example, "waiting while studio is running 4 of 4 threads", with a **Raise threads at once** button that opens this page.
-
-When a turn reaches the turn limit, wsp stops it and says how long it ran. Send to the thread to continue.
+When a computer is full, the next thread waits and starts by itself when a slot frees. Its transcript says so, with a **Raise threads at once** button that opens this page.
 
 ### Threads here
 
-**Agents may start agents** lets a thread on this computer start threads of its own. **Levels deep** sets how far: 1 lets the thread you start open threads, and 2 lets those open their own. Both are on by default, at 2 levels. See [Leads and sub-threads](/features/leads).
+**Agents may start agents** lets a thread here start threads of its own. **Levels deep** sets how far, 2 by default. See [Leads and sub-threads](/features/leads).
 
 ### Name and ssh login
 
-Click **Change** beside **Name** to rename the computer. Its projects and threads stay on it. You cannot rename the computer the app runs on.
+Click **Change** beside **Name** to rename the computer. You cannot rename the computer the app runs on.
 
-Click **Change** beside **SSH login** to give wsp another login, as `user@host`. wsp saves it only after it checks that the login reaches the same computer. A computer that joined with a code has no ssh login.
+Click **Change** beside **SSH login** to give wsp another login, as `user@host`. wsp saves it only if it reaches the same computer.
 
 ### Remove
 
-Click **Remove** and confirm once. The computer's threads' records leave the host. Your files there stay. If a project on the computer holds work that no remote has, the dialog names it, and its button says **Remove anyway**.
+Click **Remove** and confirm. The computer's threads leave the host, and your files there stay. If a project there holds work that no remote has, the dialog names it, and the button says **Remove anyway**.
 
-For a computer you added over ssh, wsp logs in and takes off its service and its own files under the login's home. It also takes off the command that opens sign-in pages in your browser. Your work folder stays.
+For a computer you added over ssh, wsp logs in and takes its own service and files off.
 
-In two cases the wsp service stays on the computer and keeps running as root:
-
-- The computer joined with a code. It has no ssh login, so the host can only ask it to delete wsp's files.
-- The computer is offline, and for a computer you added over ssh, its login does not answer either. Before you confirm, the dialog says that nothing comes off a computer that joined with a code, and that wsp tries the login of one you added over ssh. The host says that the daemon is still installed, and forgets the computer. When the computer comes back, the host refuses its dial.
-
-In both cases, run `wsp leave` as root on that computer. It takes the service and wsp's files off. See [Computers behind a firewall](/features/behind-a-firewall#take-a-computer-out).
+The wsp service stays on the computer, running as root, if the computer joined with a code or was offline when you removed it. Then run `wsp leave` as root on that computer. See [Computers behind a firewall](/features/behind-a-firewall#take-a-computer-out).
 
 ## From the command line
-
-`wsp computers` lists your computers with their state, cores, memory and threads.
 
 `wsp computers set` changes one computer:
 
@@ -105,6 +88,6 @@ wsp computers set studio --recipe build-box
 | `--recipe <name>` or `none` | The recipe it follows. With `none`, the computer keeps what it has. |
 | `--reset <setting>` | Puts a setting back to its default. |
 
-`wsp remove <computer>` takes a computer out. It asks once. For a joined or offline computer, run `wsp leave` on that computer too. `--force` removes it even where work that no remote has is on it, and that work goes with it.
+`wsp remove <computer>` takes a computer out. It asks once. `--force` removes it even when it holds work that no remote has, and that work is lost.
 
 See [`wsp computers`](/reference/cli/computers), [`wsp computers set`](/reference/cli/computers-set) and [`wsp remove`](/reference/cli/remove) for every flag.

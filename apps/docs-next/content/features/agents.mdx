@@ -1,8 +1,6 @@
 # Agents and sign-ins
 
-An agent is the coding agent a thread runs, such as Claude Code or Codex. wsp runs the agent's own command line on the computer where the thread runs. The agent uses its own sign-in, its own config and its own sessions there.
-
-wsp knows the agents in the table below. Four of them run threads in wsp today. The others are in the catalog. The Agents pane lists them and wsp knows how they sign in, but wsp cannot run a thread on them yet.
+An agent is the coding agent a thread runs, such as Claude Code or Codex. wsp runs the agent's own command line on the thread's computer, with its own sign-in, config and sessions. Four of the agents below run threads today. The others show in the Agents pane, but cannot run a thread yet.
 
 {/* generated: agents */}
 
@@ -39,30 +37,22 @@ The **Agents** tab lists the agents on the thread's computer, each with its vers
 | Needs sign-in | The agent has no login and no key. |
 | Not checked | wsp has not asked the agent yet. |
 
-Under **Available to install** are the catalog's agents that the computer does not have. The pane does not install, update or remove agents yet. To put an agent on a computer you added, use [Add a computer](/features/add-a-computer). On your Mac, install the agent the way its maker says.
+The pane does not install agents. To put one on a computer you added, use [Add a computer](/features/add-a-computer). On your Mac, install it the way its maker says.
 
-The buttons on an installed agent depend on its state:
+Each installed agent shows **Sign in** until it is signed in, then **Open in terminal**. **Add the wsp tools** writes the wsp MCP server and skill into the agent's config, so the agent can drive wsp. It works for Claude Code, Codex, Gemini CLI and OpenCode, on the computer the app runs on. See [Give your agent the wsp tools](/agents/tools).
 
-- **Sign in** shows while the agent is not signed in.
-- **Open in terminal** shows once it is signed in.
-- **Add the wsp tools** shows while the agent does not have the wsp tools.
-
-**Add the wsp tools** writes the wsp MCP server and the wsp skill into that agent's config, so the agent can drive wsp. It works only on the computer the app runs on. It also works only for an agent whose MCP config wsp knows: Claude Code, Codex, Gemini CLI and OpenCode. For any other agent, the button is held, and hovering it says the agent "has no MCP config wsp knows". See [Give your agent the wsp tools](/agents/tools).
-
-**Settings > Agents** shows the same lists for any of your computers. Each agent there has its own page with its default model, effort and access, its program, its config folder, its launch arguments and its environment.
+**Settings > Agents** shows the same lists for any of your computers, and a page per agent for its defaults and how it runs.
 
 ## Sign in
 
-Each agent signs in its own way, as the table says. wsp starts the agent's own login and shows it to you. It never asks for your password.
+wsp starts the agent's own login and shows it to you. It never asks for your password. A sign-in belongs to a computer, so every thread on that computer uses it.
 
-- On the computer the app runs on, a thread uses the agent you installed, with the login you already have. If the agent works in your terminal, it works in wsp.
+- If the agent works in your terminal, it works in wsp on that computer.
 - In the Agents pane, click **Sign in** beside the agent. For a token or a key, wsp asks you to paste it.
 - In a terminal, run `wsp agents signin <agent>`.
-- On a computer you added, run `wsp add <computer> --sign-in <agent>`, or click **Sign in** on that computer's row in **Settings > Computers**.
+- On a computer you added, run `wsp add <computer> --sign-in <agent>`, or click **Sign in** on its row in **Settings > Computers**.
 
-The two commands run an agent's own login, so they work only for an agent that has one. Claude Code has no login for wsp to run, so wsp refuses both commands for it. Claude Code signs in with a token in wsp's vault instead, as the next section says. Crush, Qwen Code, Goose and Amp need no sign-in.
-
-A sign-in belongs to a computer, not to a thread. Every thread on that computer uses it.
+Claude Code has no login for wsp to run, so the two commands do not work for it. Give wsp a token instead, as the next section says.
 
 ## Keep a key in wsp's vault
 
@@ -72,7 +62,7 @@ To give wsp a token or a key instead of a login, run this at the host's own term
 wsp agents key claude
 ```
 
-wsp asks for the key where nothing echoes it. For Claude Code, it asks you to run `claude setup-token` in another terminal and paste the token it prints. Claude Code takes only that token. wsp refuses an Anthropic API key there as "not a Claude Code token". Codex, Gemini CLI and Cursor take their API key, the variable in the table above. OpenCode keeps no key in wsp's vault. The key goes into the `.env` file beside wsp's state, `~/.wsp/.env` by default, readable by you alone. Every turn reads it from there, as the variable in the table above.
+wsp asks for the key and does not echo it. For Claude Code, run `claude setup-token` in another terminal and paste the token it prints. An Anthropic API key does not work there. Codex, Gemini CLI and Cursor take their API key. The key stays in `~/.wsp/.env` on your host, readable by you alone, and each turn gets it as the variable in the table above.
 
 ## From the command line
 

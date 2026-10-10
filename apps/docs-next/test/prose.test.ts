@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The writing rules every page is held to: unslop's words, Simple English's modals in a page of steps, no em dash,
-// and every picture a scene the shooter makes.
+// every picture a scene the shooter makes, and a feature page short enough to read, with one picture at most.
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, extname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -35,13 +35,29 @@ const MODALS = ["should", "would", "may", "might", "could"];
 /** The folders whose pages are steps to follow, where Simple English allows no modal. */
 const PROCEDURAL = ["content/install/", "content/start/", "content/guides/"];
 
-type Scene = { name: string; pages: string[]; steps?: boolean; byHand?: boolean };
+/** A feature page says what a reader does in this many words of prose at most; its tables and code are not counted. */
+const FEATURE_WORDS = 500;
+
+type Scene = { name: string; pages: string[]; steps?: boolean };
 const SCENES: Scene[] = JSON.parse(readFileSync(join(ROOT, "shots.json"), "utf8")).scenes;
 
 const pages = (dir: string): string[] =>
   readdirSync(dir, { withFileTypes: true }).flatMap(e => (e.isDirectory() ? pages(join(dir, e.name)) : /\.mdx?$/.test(e.name) ? [join(dir, e.name)] : []));
 
 const prose = (text: string): string => text.replace(/```[\s\S]*?```/g, "").replace(/`[^`\n]*`/g, "");
+
+/** The words a reader reads as prose: no comment, code block, JSX tag or table row, and an inline code span is one word. */
+const proseWords = (text: string): number =>
+  text
+    .replace(/\{\/\*[\s\S]*?\*\/\}/g, "")
+    .replace(/```[\s\S]*?```/g, "")
+    .replace(/<[^>]*>/g, "")
+    .split("\n")
+    .filter(line => !line.trimStart().startsWith("|"))
+    .join("\n")
+    .replace(/`[^`\n]*`/g, "x")
+    .split(/\s+/)
+    .filter(word => /[A-Za-z0-9]/.test(word)).length;
 
 const isScene = (src: string): boolean => {
   const stem = basename(src, extname(src));
@@ -61,6 +77,12 @@ function problems(path: string, text: string): string[] {
     ...[...text.matchAll(/!\[[^\]]*\]\(([^)\s]+)/g)].map(m => m[1]!),
   ];
   for (const src of pictures) if (!isScene(src)) found.push(`${path}: ${src} names no scene in shots.json`);
+  if (path.startsWith("content/features/")) {
+    const count = proseWords(text);
+    if (count > FEATURE_WORDS) found.push(`${path}: ${count} words of prose, over ${FEATURE_WORDS}`);
+    const shown = (text.match(/<(?:Image|img|video)\b/g) ?? []).length + (text.match(/!\[[^\]]*\]\(/g) ?? []).length;
+    if (shown > 1) found.push(`${path}: ${shown} pictures, one at most`);
+  }
   // Scalar keeps a JSX attribute only in its React spelling, and a video plays only with autoPlay.
   for (const [video] of text.matchAll(/<video\b[^>]*>/g)) {
     for (const [lower, react] of [["autoplay", "autoPlay"], ["playsinline", "playsInline"]] as const)
@@ -78,12 +100,11 @@ describe("the prose checker", () => {
     expect(all.flatMap(p => problems(relative(ROOT, p), readFileSync(p, "utf8")))).toEqual([]);
   });
 
-  it("finds every picture a page shows in assets, but one the owner shoots by hand", () => {
-    const byHand = new Set(SCENES.filter(s => s.byHand === true).map(s => s.name));
+  it("finds every picture a page shows in assets", () => {
     const missing = pages(join(ROOT, "content")).flatMap(p =>
       [...readFileSync(p, "utf8").matchAll(/<(?:Image|img|video|source)\b[^>]*?\bsrc=\{?\s*["'](\/shots\/[^"']+)["']/g)]
         .map(m => m[1]!)
-        .filter(src => !byHand.has(basename(src, extname(src))) && !existsSync(join(ROOT, "assets", src)))
+        .filter(src => !existsSync(join(ROOT, "assets", src)))
         .map(src => `${relative(ROOT, p)}: ${src}`),
     );
     expect(missing).toEqual([]);
@@ -107,7 +128,7 @@ describe("the prose checker", () => {
   });
 
   it("fails a picture or a recording that names no scene", () => {
-    expect(problems("content/features/threads.mdx", '<Image src="/shots/docs-composer.png" />\n<video src="/shots/docs-queue.mp4" autoPlay muted loop playsInline aria-label="A message queued behind a running turn" />\n')).toEqual([]);
+    expect(problems("content/start/first-thread.mdx", '<Image src="/shots/docs-composer.png" />\n<video src="/shots/docs-mcp-install.mp4" autoPlay muted loop playsInline aria-label="A message queued behind a running turn" />\n')).toEqual([]);
     expect(problems("content/start/first-computer.mdx", '<Image src="/shots/wizard-00-where.png" />\n')).toEqual([]);
     expect(problems("content/features/threads.mdx", '<Image src="/shots/composer-old.png" />\n')).toEqual(["content/features/threads.mdx: /shots/composer-old.png names no scene in shots.json"]);
     expect(problems("content/features/threads.mdx", '<video muted src="/shots/queue.mp4" autoPlay aria-label="The queue" />\n')).toEqual(["content/features/threads.mdx: /shots/queue.mp4 names no scene in shots.json"]);
@@ -117,16 +138,36 @@ describe("the prose checker", () => {
   });
 });
 
+describe("a feature page", () => {
+  const filler = (n: number): string => Array.from({ length: n }, () => "word").join(" ");
+
+  it("fails over the word cap, counting prose and not its tables, code or comments", () => {
+    const path = "content/features/threads.mdx";
+    expect(problems(path, `# Threads\n\n${filler(497)}\n`)).toEqual([]);
+    expect(problems(path, `# Threads\n\n${filler(500)}\n`)).toEqual([`${path}: 501 words of prose, over 500`]);
+    const extras = `{/* Written from ${filler(50)} */}\n\n| a | b |\n|---|---|\n| ${filler(50)} | x |\n\n\`\`\`sh\n${filler(50)}\n\`\`\`\n`;
+    expect(problems(path, `# Threads\n\n${filler(497)}\n\n${extras}`)).toEqual([]);
+    expect(problems("content/guides/own-relay.mdx", `# Own relay\n\n${filler(900)}\n`)).toEqual([]);
+  });
+
+  it("fails a second picture", () => {
+    const path = "content/features/threads.mdx";
+    expect(problems(path, '<Image src="/shots/docs-composer.webp" />\n')).toEqual([]);
+    expect(problems(path, '<Image src="/shots/docs-composer.webp" />\n![The composer](/shots/docs-composer.webp)\n')).toEqual([`${path}: 2 pictures, one at most`]);
+    expect(problems("content/start/first-computer.mdx", '<Image src="/shots/wizard-00-where.webp" />\n<Image src="/shots/wizard-01-agents.webp" />\n')).toEqual([]);
+  });
+});
+
 describe("a video slot", () => {
   it("fails the lowercase attributes Scalar drops, and a video with no aria-label", () => {
     const path = "content/features/threads.mdx";
-    expect(problems(path, '<video src="/shots/docs-queue.mp4" autoplay muted loop playsinline aria-label="The queue" />\n')).toEqual([
+    expect(problems(path, '<video src="/shots/docs-mcp-install.mp4" autoplay muted loop playsinline aria-label="The queue" />\n')).toEqual([
       `${path}: <video> writes autoplay, which Scalar drops; write autoPlay`,
       `${path}: <video> writes playsinline, which Scalar drops; write playsInline`,
       `${path}: a <video> with no autoPlay`,
     ]);
-    expect(problems(path, '<video src="/shots/docs-queue.mp4" autoPlay muted loop playsInline />\n')).toEqual([`${path}: a <video> with no aria-label`]);
-    expect(problems(path, '<video src="/shots/docs-queue.mp4" autoPlay muted loop playsInline aria-label="The queue" />\n')).toEqual([]);
+    expect(problems(path, '<video src="/shots/docs-mcp-install.mp4" autoPlay muted loop playsInline />\n')).toEqual([`${path}: a <video> with no aria-label`]);
+    expect(problems(path, '<video src="/shots/docs-mcp-install.mp4" autoPlay muted loop playsInline aria-label="The queue" />\n')).toEqual([]);
   });
 
   it("fails a video with no autoPlay, which never plays", () => {
@@ -141,5 +182,10 @@ describe("the shot list", () => {
     const paths = pagePaths(join(ROOT, "scalar.config.json"));
     expect(new Set(SCENES.map(s => s.name)).size).toBe(SCENES.length);
     expect(SCENES.flatMap(s => s.pages).filter(p => !paths.has(p))).toEqual([]);
+  });
+
+  it("gives a feature page one scene at most", () => {
+    const feature = SCENES.flatMap(s => s.pages).filter(p => p.startsWith("/features/"));
+    expect(feature.filter((p, i) => feature.indexOf(p) !== i)).toEqual([]);
   });
 });

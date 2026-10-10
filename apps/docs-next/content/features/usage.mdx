@@ -1,65 +1,45 @@
 # Usage
 
-{/* Written from apps/web/src/settings/usage.tsx and format.ts, packages/protocol/src/usage.ts, wsp usage and usage reset in packages/host/src/verbs/computers.ts, apps/web/src/components/chat/bars/UsageBar.tsx, packages/runtime/src/account/usage.ts, packages/runtime/src/usage.ts, packages/host/src/verbs/client.ts. */}
+{/* Written from apps/web/src/settings/usage.tsx, packages/protocol/src/usage.ts, wsp usage and usage reset in packages/host/src/verbs/computers.ts, apps/web/src/components/chat/bars/UsageBar.tsx and packages/runtime/src/account/usage.ts. */}
 
-Settings > Usage shows the tokens your agents used and what they cost at list price. You can split them by agent, account, computer, project or model. It also shows how much of each plan's limits your accounts have left.
-
-The page has two tabs, **Usage** and **Limits**. They are two answers, and wsp never adds them together.
+Settings > Usage shows the tokens your agents used and what they cost at list price, split by agent, account, computer, project or model. Its **Limits** tab shows how much of each plan's limits your accounts have left.
 
 <Image src="/shots/usage.webp" alt="Settings > Usage: tokens a day by agent, and the table by agent and model." />
 
 ## What wsp counts
 
-wsp counts the tokens of every turn it ran. It also reads the logs that Claude Code, Codex and OpenCode keep on each of your computers. So the page also counts the work you did with those agents outside wsp. The line at the end of the page names the agents and the computers it read.
+wsp counts the tokens of every turn it ran. It also reads the logs Claude Code, Codex and OpenCode keep on each of your computers, so the page counts work you did with those agents outside wsp too. To stop that, turn off **Agent logs** in Settings > Privacy.
 
-To stop wsp from reading the agents' logs, turn off **Agent logs** in Settings > Privacy.
-
-The cost is an estimate. wsp prices every token at the list price in LiteLLM's public price table, which the host downloads once a day. If the host is offline, it uses the last copy. A model that is not in the table shows **not priced**. On a plan, you pay the plan's price, not the list price.
+The cost is an estimate at the list price in LiteLLM's public price table. A model missing from it shows **not priced**. On a plan, you pay the plan's price, not the list price.
 
 ## The Usage tab
 
-Pick a range: **Today**, **7 days** or **30 days**. Then pick how to split it: **Agent**, **Account**, **Computer**, **Project** or **Model**. The page opens on 7 days, split by agent.
-
-The top row has four figures:
+Pick a range, **Today**, **7 days** or **30 days**, and how to split it. The top row shows:
 
 | Figure | What it is |
 |---|---|
-| Tokens | The input and output tokens in the range, and the share of the input read from the cache. |
+| Tokens | The input and output tokens in the range. |
 | API estimate | The cost at list price. |
-| Turns | How many turns ran in the range, in threads wsp ran. |
+| Turns | How many turns ran in threads wsp ran. |
 | Cache hit | The share of input read from the cache, and what it saved. |
 
-Under them:
-
-- A chart of tokens an hour for Today, or tokens a day for 7 and 30 days. It has one line for each row of the split.
-- A table, **By agent** or the split you picked, with the tokens, cache hit, turns and API estimate of each row. Split by agent, each agent's models sit under it.
-- **Where the tokens went**: fresh input, cache writes, cached input and output.
+Under it are a chart of tokens over the range, a table with a row for each agent or whatever you split by, and **Where the tokens went**.
 
 ## The Limits tab
 
-The Limits tab has a card for each agent with the accounts that run on a plan. An account signed in on three computers counts once.
+Each agent has a card with its accounts that run on a plan. Each card shows how much is left in each plan window, such as **5-hour** and **Week**, how fast your threads use tokens now, and when the window resets or runs out.
 
-<Image src="/shots/docs-usage-limits.webp" alt="The Limits tab: each account's plan windows and what is left." />
-
-Each card shows:
-
-- The plan's windows: **5-hour**, **Week**, and for some plans **Week, Opus**, **Week, Sonnet** or **Month**. Each window shows how much is left, as a percentage.
-- How fast your threads use tokens now, over the last 15 minutes.
-- Whether you use the window faster or slower than an even pace, and when the window resets or runs out.
-
-wsp reads these figures from what the agent printed in the last turn wsp ran on that account. An account that no turn ran on yet says **not read yet**. An account signed in with an API key says **pays per token, no plan limit**.
+wsp reads these figures from the last turn it ran on that account. An account with no turn yet says **not read yet**. An account signed in with an API key says **pays per token, no plan limit**.
 
 ### Use a banked reset
 
-A Codex account can bank resets. If it has one, the card says how many and offers **Use reset**. A reset starts the 5-hour and weekly windows again now. There is no undo.
-
-From the command line, run `wsp usage reset <account>`. It asks first, unless you pass `--yes`. An agent in a thread cannot run it, since a reset is yours to spend.
+A Codex account can bank resets. If it has one, the card offers **Use reset**, which starts the 5-hour and weekly windows again now. There is no undo. From the command line, run `wsp usage reset <account>`. An agent in a thread cannot run it.
 
 ## When a plan runs out
 
-If an agent's plan limit stops a turn, a bar takes the composer's place and says **Usage limit reached**. If the agent said when its plan resets, click **Resume at reset**. The thread then goes on with the turn by itself at the reset.
+If a plan limit stops a turn, a bar in place of the composer says **Usage limit reached**. If the agent said when its plan resets, click **Resume at reset** and the thread goes on by itself at the reset.
 
-wsp also sends a notification at 70% and at 90% of a window, and when an account reaches its limit. To turn these off, use **When a plan window runs low** in Settings > General.
+wsp also sends a notification at 70% and 90% of a window and when an account reaches its limit. To turn these off, use **When a plan window runs low** in Settings > General.
 
 ## From the command line
 
@@ -67,8 +47,6 @@ wsp also sends a notification at 70% and at 90% of a window, and when an account
 wsp usage --range week --by model
 ```
 
-`--range` takes `day`, `week` or `month`, and `day` is the default. `--by` takes `agent`, `account`, `computer`, `project`, `model` or `source`, and `agent` is the default. `source` splits wsp's threads from the work the agents logged outside wsp.
+`--range` takes `day`, `week` or `month`. `--by` takes `agent`, `account`, `computer`, `project`, `model` or `source`, which splits wsp's threads from the work the agents logged outside wsp. Only `--by source` reads the agents' own logs, so `wsp usage` can show less than Settings > Usage for the same range.
 
-The command reads the agents' own logs only with `--by source`. With any other split, it counts only the turns that wsp ran. So `wsp usage --by agent` can show less than Settings > Usage for the same range, because the page always reads the logs too.
-
-The command prints two tables, the accounts and their limits, then what was used. See [`wsp usage`](/reference/cli/usage) and [`wsp usage reset`](/reference/cli/usage-reset).
+See [`wsp usage`](/reference/cli/usage) and [`wsp usage reset`](/reference/cli/usage-reset).

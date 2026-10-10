@@ -41,7 +41,6 @@
       "name": "wizard",
       "pages": [
         "/start/first-computer",
-        "/features/add-a-computer",
         "/guides/rented-server",
         "/guides/home-computer"
       ],
@@ -70,16 +69,6 @@
       "clip": "composer"
     },
     {
-      "name": "docs-queue",
-      "pages": [
-        "/features/threads"
-      ],
-      "fixture": "site",
-      "kind": "recording",
-      "seconds": 12,
-      "skip": "Needs a turn that streams while a second message waits; the fixture's stand-in agents send no reply."
-    },
-    {
       "name": "sidebar",
       "pages": [
         "/features/leads"
@@ -92,7 +81,6 @@
     {
       "name": "docs-lead-spawn",
       "pages": [
-        "/features/leads",
         "/agents/coordinating"
       ],
       "fixture": "site",
@@ -110,18 +98,14 @@
     },
     {
       "name": "docs-question",
-      "pages": [
-        "/features/needs-you"
-      ],
+      "pages": [],
       "fixture": "needs-you",
       "kind": "still",
       "clip": "question card"
     },
     {
       "name": "docs-inbox",
-      "pages": [
-        "/features/needs-you"
-      ],
+      "pages": [],
       "fixture": "needs-you",
       "kind": "still",
       "clip": "sidebar"
@@ -167,7 +151,6 @@
     {
       "name": "docs-join",
       "pages": [
-        "/features/behind-a-firewall",
         "/guides/behind-a-firewall"
       ],
       "fixture": "throwaway host",
@@ -185,9 +168,7 @@
     },
     {
       "name": "docs-computer-page",
-      "pages": [
-        "/features/computers"
-      ],
+      "pages": [],
       "fixture": "site",
       "kind": "still"
     },
@@ -201,18 +182,14 @@
     },
     {
       "name": "slate-pr",
-      "pages": [
-        "/features/slate"
-      ],
+      "pages": [],
       "fixture": "site-slates",
       "kind": "still",
       "exists": true
     },
     {
       "name": "slate-deploy",
-      "pages": [
-        "/features/slate"
-      ],
+      "pages": [],
       "fixture": "site-slates",
       "kind": "still",
       "exists": true
@@ -228,31 +205,17 @@
     },
     {
       "name": "slate-traffic",
-      "pages": [
-        "/features/slate"
-      ],
+      "pages": [],
       "fixture": "site-slates",
       "kind": "still",
       "exists": true
     },
     {
       "name": "slate-explain",
-      "pages": [
-        "/features/slate"
-      ],
+      "pages": [],
       "fixture": "site-slates",
       "kind": "still",
       "exists": true
-    },
-    {
-      "name": "docs-slate-live",
-      "pages": [
-        "/features/slate"
-      ],
-      "fixture": "site-slates",
-      "kind": "recording",
-      "seconds": 10,
-      "skip": "The site-slates fixture writes every value in, so no slate refreshes on a timer."
     },
     {
       "name": "terminal",
@@ -304,16 +267,6 @@
       "clip": "pane"
     },
     {
-      "name": "docs-pr-fix",
-      "pages": [
-        "/features/pull-requests"
-      ],
-      "fixture": "site, one failed check",
-      "kind": "recording",
-      "seconds": 10,
-      "skip": "Send to agent starts a turn the stand-in agent cannot answer."
-    },
-    {
       "name": "docs-files",
       "pages": [
         "/features/files"
@@ -331,16 +284,6 @@
       "kind": "still",
       "clip": "pane",
       "skip": "The Computer pane reads the Mac it runs on: its load and memory are the owner's, and disagree with the fixture's own figures."
-    },
-    {
-      "name": "docs-processes",
-      "pages": [
-        "/features/computer-pane"
-      ],
-      "fixture": "site",
-      "kind": "still",
-      "clip": "pane",
-      "skip": "The Processes pane reads the Mac it runs on, and its rows showed the owner's own processes."
     },
     {
       "name": "docs-side-question",
@@ -371,9 +314,7 @@
     },
     {
       "name": "docs-usage-limits",
-      "pages": [
-        "/features/usage"
-      ],
+      "pages": [],
       "fixture": "usage",
       "kind": "still"
     },
@@ -398,20 +339,9 @@
     },
     {
       "name": "docs-palette",
-      "pages": [
-        "/features/switcher"
-      ],
+      "pages": [],
       "fixture": "site",
       "kind": "still"
-    },
-    {
-      "name": "docs-menu-bar",
-      "pages": [
-        "/features/desktop-app"
-      ],
-      "fixture": "site",
-      "kind": "still",
-      "byHand": true
     },
     {
       "name": "docs-devices",
@@ -423,14 +353,6 @@
     },
     {
       "name": "docs-settings-general",
-      "pages": [
-        "/features/settings"
-      ],
-      "fixture": "site",
-      "kind": "still"
-    },
-    {
-      "name": "docs-settings-appearance",
       "pages": [
         "/features/settings"
       ],

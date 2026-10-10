@@ -1,6 +1,6 @@
 # Install on a Mac
 
-{/* Written from apps/www/public/install (install_mac, put_on_path, restart_service), apps/www/src/downloads.ts, packages/protocol/src/bundles.mjs, apps/desktop/electron-builder.yml, apps/desktop/src/shim.ts, apps/desktop/src/host-lifecycle.ts (the service install on launch), packages/host/src/service.ts, apps/web/src/shell/FirstRun.tsx. */}
+{/* Written from apps/www/public/install (install_mac, put_on_path, restart_service), apps/www/src/downloads.ts, apps/desktop/src/host-lifecycle.ts, apps/web/src/shell/FirstRun.tsx. */}
 
 wsp is one app for every Mac, with Apple silicon or an Intel chip. The app also gives you the `wsp` command line.
 
@@ -15,9 +15,7 @@ wsp is one app for every Mac, with Apple silicon or an Intel chip. The app also 
 
 3. Open a new terminal window, and run `wsp --version`. It prints `wsp` and the version that you installed.
 
-The line downloads the latest release from [GitHub](https://github.com/wsp-labs/wsp/releases), checks its sha256 and signature, puts `wsp.app` in `/Applications`, and opens it. It also adds the `wsp` command to your `PATH`, which is why the new window can find it.
-
-If wsp is open when you run the line, the line quits wsp first.
+The line downloads the latest release from [GitHub](https://github.com/wsp-labs/wsp/releases), checks its sha256 and signature, puts `wsp.app` in `/Applications`, and opens it. It adds the `wsp` command to your `PATH`. If wsp is open, the line quits it first.
 
 ## Install from the download
 
@@ -25,15 +23,13 @@ If wsp is open when you run the line, the line quits wsp first.
 2. Open the file, and drag wsp to the Applications folder.
 3. Open wsp from the Applications folder.
 
-The app writes the `wsp` command at `~/.wsp/bin/wsp` each time it opens. The download does not change your `PATH`. To run `wsp` by name, add `~/.wsp/bin` to your `PATH` yourself, or run the install line once.
+The download does not change your `PATH`. To run `wsp` by name, add `~/.wsp/bin` to your `PATH`, or run the install line once.
 
 ## What happens when wsp opens
 
-When the app opens for the first time, it installs the host. The host is the process that keeps your projects and threads and serves the app and the command line.
+When the app opens for the first time, it sets up the host. The host is the process that keeps your projects and threads and serves the app and the command line. It starts at every login, and again if it stops.
 
-The host runs as a launchd agent at `~/Library/LaunchAgents/com.wsp.host.<tag>.plist`. launchd starts it now and again at every login. If the host stops, launchd starts it again. When you quit the app, it asks if your threads keep running or if wsp stops too. To change that answer, go to **Settings**, then **General**, then **When you quit**.
-
-wsp keeps its state in `~/.wsp/state.json`. The host writes its log to `~/.wsp/host.log`.
+When you quit the app, it asks if your threads keep running or if wsp stops too. To change that answer, go to **Settings**, then **General**, then **When you quit**. The host's log is `~/.wsp/host.log`.
 
 <Image src="/shots/docs-first-launch.webp" alt="The first wsp window on a new Mac, with one Get started button." />
 

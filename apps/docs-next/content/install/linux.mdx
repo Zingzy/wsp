@@ -1,8 +1,8 @@
 # Install on Linux
 
-{/* Written from apps/www/public/install (install_linux, missing_libraries, apt_packages, put_on_path, restart_service), apps/www/src/downloads.ts, packages/protocol/src/bundles.mjs, packages/host/src/service.ts and wsp up --help. */}
+{/* Written from apps/www/public/install (install_linux, missing_libraries, apt_packages, put_on_path, restart_service), apps/www/src/downloads.ts and wsp up --help. */}
 
-wsp for Linux is an AppImage for x86_64 computers. The AppImage also gives you the `wsp` command line. The install line below installs both.
+wsp for Linux is an AppImage for x86_64 computers. It also gives you the `wsp` command line. The install line installs both.
 
 ## Install with one line
 
@@ -16,22 +16,13 @@ wsp for Linux is an AppImage for x86_64 computers. The AppImage also gives you t
 3. If the line says that the computer lacks libraries, type your password when `sudo` asks for it.
 4. Open a new terminal, and run `wsp --version`. It prints `wsp` and the version that you installed.
 
-The line downloads the latest release from [GitHub](https://github.com/wsp-labs/wsp/releases), checks its sha256, and puts the app at `~/Applications/wsp.AppImage`. It also adds the `wsp` command to your `PATH`, which is why the new window can find it. First it checks for the libraries the app needs, as the next section says.
-
-The install line does not open the app.
+The line downloads the latest release from [GitHub](https://github.com/wsp-labs/wsp/releases), checks its sha256, and puts the app at `~/Applications/wsp.AppImage`. It adds the `wsp` command to your `PATH`. It does not open the app.
 
 ## The libraries that the app needs
 
-The app links GTK and some libraries beside it. A desktop computer usually has them. A server usually does not.
+The app needs GTK and a few libraries beside it. A desktop computer usually has them. A server usually does not.
 
-If libraries are missing and the computer has `apt-get`, the install line says how many are missing. Then it installs these packages with `apt-get`:
-
-- `libgtk-3-0t64`, or `libgtk-3-0` where the computer knows no package by the first name
-- `libnss3`
-- `libasound2t64`, or `libasound2` where the computer knows no package by the first name
-- `libgbm1`
-
-This is the one step that asks for `sudo`. If you run the line as root, it does not use `sudo`.
+If libraries are missing and the computer has `apt-get`, the line installs them with `sudo apt-get`: `libgtk-3-0`, `libnss3`, `libasound2` and `libgbm1`, or their `t64` names on newer releases. This is the one step that uses `sudo`.
 
 If the computer has no `apt-get`, the line stops and names the missing libraries. Install them with your package manager, and run the line again.
 
@@ -41,22 +32,20 @@ If the computer has no `apt-get`, the line stops and names the missing libraries
 2. Make the file executable with `chmod +x wsp-linux.AppImage`.
 3. Open the AppImage.
 
-The app writes the `wsp` command at `~/.wsp/bin/wsp` each time it opens. The download does not install missing libraries and does not change your `PATH`. To run `wsp` by name, add `~/.wsp/bin` to your `PATH` yourself, or run the install line once.
+The download does not install missing libraries or change your `PATH`. To run `wsp` by name, add `~/.wsp/bin` to your `PATH`, or run the install line once.
 
 ## How the host runs
 
-The host is the process that keeps your projects and threads and serves the app and the command line. On Linux, the host runs as a systemd user unit at `~/.config/systemd/user/wsp-host-<tag>.service`.
+The host is the process that keeps your projects and threads and serves the app and the command line. It starts at every login.
 
-- If you open the app, the app installs the unit the first time.
-- If the computer has no screen, run `wsp up --service`. It installs the same unit.
+- If you open the app, the app sets the host up the first time.
+- If the computer has no screen, run `wsp up --service`.
 
-systemd starts the unit now and again at every login. To keep the host running when you are not logged in, run `loginctl enable-linger`.
-
-wsp keeps its state in `~/.wsp/state.json`. The host writes its log to `~/.wsp/host.log`.
+To keep the host running when you are not logged in, run `loginctl enable-linger`. The host's log is `~/.wsp/host.log`.
 
 ## Install a given version or update
 
 - To install one release instead of the latest, set `WSP_VERSION` for the `sh` that runs the line. For example: `curl -fsSL https://usewsp.com/install | WSP_VERSION=1.2.3 sh`.
-- To move to the latest release, run the install line again. It replaces the files and restarts the host unit on the new version.
+- To move to the latest release, run the install line again. It replaces the files and restarts the host on the new version.
 
 Next, start [your first thread](/start/first-thread).
