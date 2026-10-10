@@ -5,7 +5,7 @@
 // does not already satisfy, then the machine context. Nothing here knows how
 // the computer is reached: it drives a Machine, which for a box is that
 // computer over the link its daemon holds.
-import { COMPILER_ROW, ROAD_MODULES, aptNeedRows, catalogEntry, catalogIdOfRow, nodeAtLeast } from "@wsp/catalog";
+import { COMPILER_ROW, ROAD_MODULES, aptNeedRows, catalogEntry, catalogIdOfRow, nodeAtLeast, setupNeedRows } from "@wsp/catalog";
 import { TOOL_PREFIX, agentOfRow, plural, presentElsewhereLine, provisionServersLine, shellQuote, type PlaceProvisionRow } from "@wsp/protocol";
 import { markersOf, pagedReads } from "./exec-detached.js";
 import { baseInstalls, installBase } from "./golden-base.js";
@@ -88,14 +88,18 @@ export function provisionPlanOf(imp: GoldenImport, recipeAt: string, path: strin
   };
 }
 
-/** Each agent's Debian packages as apt rows of the agents step, each run only once its agent is on. */
+/** Each agent's Debian packages as apt rows of the agents step, each run only once its agent is on, then the rows
+ * that settle what a package alone does not, each once its package is on. */
 function aptNeedSteps(agents: readonly ToolInstall[], path: string, prefix?: string): ToolInstall[] {
-  return agents.flatMap(a =>
-    aptNeedRows(agentOfRow(a) ?? "").flatMap(need => {
+  return agents.flatMap(a => {
+    const agent = agentOfRow(a) ?? "";
+    const packages = aptNeedRows(agent).flatMap((need): ToolInstall[] => {
       const step = viaRoad({ road: "apt", packages: [need.package] }, need.command, path, prefix);
-      return "cmd" in step ? [{ id: need.id, label: need.package, manager: "apt" as const, ...step, bin: need.command, after: a.id }] : [];
-    }),
-  );
+      return "cmd" in step ? [{ id: need.id, label: need.package, manager: "apt", ...step, bin: need.command, after: a.id }] : [];
+    });
+    const settles = setupNeedRows(agent).map((need): ToolInstall => ({ id: need.id, label: need.label, manager: "apt", cmd: `${pathLine(path, prefix)}\n${need.cmd}`, shown: need.label, check: need.check, after: need.after }));
+    return [...packages, ...settles];
+  });
 }
 
 /** Which of the recipe's destinations land once rather than on every run: the file an agent keeps its own MCP

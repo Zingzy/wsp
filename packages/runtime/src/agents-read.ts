@@ -355,6 +355,7 @@ export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): {
       if (row === undefined) throw usage(noSuchPlaceRefusal(target.placeId, rows.map(p => p.name)));
       if (!isJoinedComputer(row)) throw usage(providerAgentsRefusal(row.name));
       const report = await door.reportOf(row.id);
+      if (read) await door.loginsAgain(row.id);
       const signIns = door.signInsAt(row.id);
       const machine = { exec: (cmd: string, opts?: { timeoutMs?: number; stdin?: Uint8Array }) => door.exec(row.id, cmd, opts ?? {}) };
       const login = { ...(report?.login["HOME"] !== undefined ? { HOME: report.login["HOME"] } : {}), ...(report?.login["PATH"] !== undefined ? { PATH: report.login["PATH"] } : {}) };

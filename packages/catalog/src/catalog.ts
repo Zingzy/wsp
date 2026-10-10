@@ -163,6 +163,8 @@ export interface AgentEntry extends EntryBase {
   /** Debian packages the agent runs with on Linux that its own install does not bring, each with the command that
    * says it is there: a computer's setup puts each on right after the agent, as a row of its own. */
   aptNeeds?: readonly { package: string; command: string }[];
+  /** Rows a computer's setup runs once one of `aptNeeds` is on, for what that package alone does not settle there. */
+  setupNeeds?: readonly SetupNeed[];
   /** The agent's own way of running a command in the background that it tracks and wakes the agent from when the
    * command ends, in the words the agent is told; absent where none was measured, and the machine context names none. */
   backgroundRoad?: string;
@@ -511,6 +513,22 @@ export function loginSignIn(row: string): SignIn | undefined {
 export function sharedOn(agent: string): SharedLogin | undefined {
   const row = loginSignIn(agent);
   return row === undefined ? undefined : sharedLoginOf(row);
+}
+
+/** One row a computer's setup runs after one of the agent's Debian packages (`after`, by package name): `check` exits
+ * 0 where nothing is left to do, and is read both before the row runs and after; `off` takes it off again. */
+export interface SetupNeed {
+  id: string;
+  label: string;
+  after: string;
+  cmd: string;
+  check: string;
+  off: string;
+}
+
+/** The setup rows an agent needs after its Debian packages, each under the agent's own row id, waiting on its package's row. */
+export function setupNeedRows(agent: string): SetupNeed[] {
+  return (CATALOG_AGENTS.find(a => a.id === agent)?.setupNeeds ?? []).map(n => ({ ...n, id: `agents/${agent}/${n.id}`, after: `agents/${agent}/${n.after}` }));
 }
 
 /** The rows a computer's setup puts an agent's Debian packages on as, each under the agent's own row id. */
