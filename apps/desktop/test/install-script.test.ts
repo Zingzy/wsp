@@ -6,16 +6,17 @@
 // run, is a stub on PATH.
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chownSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chownSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { tmpdir } from "node:os";
+import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
+import { fmtBytes } from "@wsp/protocol";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { REPO, bundleNames } from "../../../packages/protocol/src/bundles.mjs";
 import { compareVersions } from "../../../packages/protocol/src/semver.mjs";
 import { writeStub } from "../../../packages/protocol/test/stub-script.js";
-import { shimText } from "../src/shim.js";
+import { keepAppImage, shimText } from "../src/shim.js";
 
 const SCRIPT = join(__dirname, "..", "..", "www", "public", "install");
 const REPO_PATH = new URL(REPO).pathname;
@@ -39,8 +40,12 @@ function answer(version: string, assets: Record<string, Buffer>): string {
   return JSON.stringify({ tag_name: `v${version}`, name: `wsp ${version}`, draft: false, prerelease: false, assets: rows, body }, null, 2);
 }
 
+/** The desktop entry a release's AppImage carries, as electron-builder writes it. */
+const carriedEntry = (version: string): string =>
+  `[Desktop Entry]\nName=wsp\nExec=AppRun %U\nTerminal=false\nType=Application\nIcon=wsp\nStartupWMClass=wsp\nX-AppImage-Version=${version}\nMimeType=x-scheme-handler/wsp;\nCategories=Development;\n`;
+
 /** An AppImage whose runtime unpacks a tree with the app's binary and its command, the binary answering --version as
- * the app run as node does. */
+ * the app run as node does, and the AppRun, entry and icon a release carries beside them. */
 function appImage(version: string, opts: { command?: boolean } = {}): Buffer {
   const binary = `#!/bin/sh\ncase "$1" in */resources/app/main/cli.mjs) ;; *) exit 3 ;; esac\n[ "$ELECTRON_RUN_AS_NODE" = 1 ] || exit 4\n[ "$2" = --version ] && echo "wsp ${version}"\n`;
   return Buffer.from(
@@ -51,6 +56,10 @@ function appImage(version: string, opts: { command?: boolean } = {}): Buffer {
       ": > squashfs-root/resources/app/main/cli.mjs",
       `cat > squashfs-root/wsp <<'BIN'\n${binary}BIN`,
       "chmod 755 squashfs-root/wsp",
+      `cat > squashfs-root/wsp.desktop <<'ENTRY'\n${carriedEntry(version)}ENTRY`,
+      `printf '#!/bin/sh\\necho "wsp ${version} opened $*"\\n' > squashfs-root/AppRun`,
+      "chmod 755 squashfs-root/AppRun",
+      ": > squashfs-root/wsp.png",
       opts.command === false ? "rm squashfs-root/resources/app/main/cli.mjs" : ": > squashfs-root/resources/app/main/cli.mjs",
       "",
     ].join("\n"),
@@ -74,6 +83,16 @@ describe("the install line's release order", () => {
   });
 });
 
+describe("the install line's sizes", () => {
+  it("are fmtBytes' words, so the downloading line says a size as the app does", () => {
+    const sizes = [0, 1023, 1024, 1535, 1536, 1048575, 1048576, 125 * 1048576 + 524287, 125 * 1048576 + 524288, 226_492_416, 1073741823, 1073741824, 1610612736, 2147483647, 5 * 1073741824];
+    const script = `eval "$(sed -n '/^size_words() {/,/^}/p' "$1")"\nshift\nfor n in "$@"; do size_words "$n"; echo; done\n`;
+    const ran = spawnSync("/bin/sh", ["-c", script, "sh", SCRIPT, ...sizes.map(String)], { encoding: "utf8" });
+    expect(ran.status, ran.stderr).toBe(0);
+    expect(ran.stdout.trim().split("\n")).toEqual(sizes.map(fmtBytes));
+  });
+});
+
 describe("the install line", () => {
   let root: string;
   let home: string;
@@ -82,6 +101,8 @@ describe("the install line", () => {
   let api: string;
   /** What the server answers, by path. */
   let routes: Map<string, Buffer>;
+  /** Paths the server sends in twenty slices a tenth of a second apart, by how many it sends before it closes. */
+  let drips: Map<string, number>;
 
   /** Publishes a release: its answer under its tag (and as the latest where asked) and each asset's bytes, which
    * `served` replaces on the wire while the answer keeps the sha256 of the real ones. */
@@ -92,9 +113,9 @@ describe("the install line", () => {
     for (const [name, bytes] of Object.entries(assets)) routes.set(`${REPO_PATH}/releases/download/v${version}/${name}`, opts.served?.[name] ?? bytes);
   }
 
-  function run(env: Record<string, string> = {}): Promise<Ran> {
+  function run(env: Record<string, string> = {}, [command, ...args]: [string, ...string[]] = ["/bin/sh", SCRIPT]): Promise<Ran> {
     return new Promise((resolve, reject) => {
-      const child = spawn("/bin/sh", [SCRIPT], {
+      const child = spawn(command, args, {
         env: { HOME: home, PATH: `${bin}:/usr/bin:/bin`, SHELL: "/bin/bash", WSP_RELEASE_API: api, ...env },
         stdio: ["ignore", "pipe", "pipe"],
       });
@@ -105,6 +126,28 @@ describe("the install line", () => {
       child.on("error", reject);
       child.on("close", code => resolve({ code, stdout, stderr }));
     });
+  }
+
+  /** The script with its stdout in a terminal, as `curl ... | sh` runs it from one, and its stderr there too unless
+   * `stderr` names a file; the terminal's bytes come back as stdout. Not pty.spawn: in the Python 3.9 a Mac carries it
+   * never returns, since macOS ends a terminal with an empty read where Linux raises. That Python also writes a cache
+   * under ~/Library, so it runs on a home of its own and hands the script the test's. */
+  function runInTerminal(env: Record<string, string> = {}, stderr?: string): Promise<Ran> {
+    const line = stderr === undefined ? ["/bin/sh", SCRIPT] : ["/bin/sh", "-c", 'exec /bin/sh "$0" 2>"$1"', SCRIPT, stderr];
+    const terminal = [
+      "import os, sys",
+      "pid, fd = os.forkpty()",
+      "if pid == 0:",
+      '    os.environ["HOME"] = os.environ.pop("SCRIPT_HOME")',
+      "    os.execv(sys.argv[1], sys.argv[1:])",
+      "while True:",
+      "    try: data = os.read(fd, 65536)",
+      "    except OSError: break",
+      "    if not data: break",
+      "    sys.stdout.buffer.write(data); sys.stdout.buffer.flush()",
+      "sys.exit(os.waitstatus_to_exitcode(os.waitpid(pid, 0)[1]))",
+    ].join("\n");
+    return run({ ...env, HOME: join(root, "python-home"), SCRIPT_HOME: env["HOME"] ?? home }, ["python3", "-c", terminal, ...line]);
   }
 
   function uname(os: "Linux" | "Darwin"): void {
@@ -118,9 +161,26 @@ describe("the install line", () => {
     mkdirSync(home);
     mkdirSync(bin);
     routes = new Map();
+    drips = new Map();
     server = createServer((req, res) => {
       const bytes = routes.get(req.url ?? "");
-      res.writeHead(bytes === undefined ? 404 : 200).end(bytes ?? "Not Found");
+      const sent = drips.get(req.url ?? "");
+      if (bytes === undefined || sent === undefined) {
+        res.writeHead(bytes === undefined ? 404 : 200).end(bytes ?? "Not Found");
+        return;
+      }
+      res.writeHead(200, { "Content-Length": bytes.length });
+      const slice = Math.ceil(bytes.length / 20);
+      const drip = (n: number): void => {
+        if (n === sent) {
+          if (n < 20) res.socket?.end();
+          else res.end();
+          return;
+        }
+        res.write(bytes.subarray(n * slice, (n + 1) * slice));
+        setTimeout(() => drip(n + 1), 100);
+      };
+      drip(0);
     });
     await new Promise<void>(done => server.listen(0, "127.0.0.1", done));
     api = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -224,6 +284,184 @@ describe("the install line", () => {
       expect(ran.code, ran.stderr).toBe(0);
       expect(ran.stdout).toMatch(/^wsp install: this computer lacks 2 libraries the app links, GTK among them; installing them with apt-get(, which asks for sudo)?$/m);
       expect(readFileSync(join(root, "apt.log"), "utf8")).toBe("apt-get update -qq\napt-get install -y -qq --no-install-recommends libgtk-3-0t64 libnss3 libasound2t64 libgbm1\n");
+    });
+
+    /** An AppImage four megabytes long, so its download takes a while dripped. */
+    const heavyAppImage = (version: string): Buffer => Buffer.concat([appImage(version), Buffer.from("exit 0\n"), Buffer.alloc(4 * 1048576, "x")]);
+
+    it("draws curl's bar with the size on the downloading line in a terminal, and no bar where stderr is a file", async () => {
+      const asset = bundleNames("0.4.0").appImage;
+      const bytes = heavyAppImage("0.4.0");
+      publish("0.4.0", { [asset]: bytes }, { latest: true });
+      drips.set(`${REPO_PATH}/releases/download/v0.4.0/${asset}`, 20);
+
+      const shown = await runInTerminal();
+      expect(shown.code, shown.stdout).toBe(0);
+      expect(shown.stdout).toContain("wsp install: downloading wsp 0.4.0 (4 MB)\r\n");
+      expect(fmtBytes(bytes.length)).toBe("4 MB");
+      // The bar redraws its line as the bytes come, so it says more than one share before the whole.
+      const shares = [...new Set(shown.stdout.match(/\r#+ +\d+\.\d%/g)?.map(drawn => drawn.split(" ").at(-1)))];
+      expect(shares.length, shown.stdout).toBeGreaterThanOrEqual(3);
+      expect(shares.at(-1)).toBe("100.0%");
+      expect(shown.stdout).toContain("wsp install: sha256 matches the release");
+
+      const log = join(root, "log");
+      const quiet = await runInTerminal({}, log);
+      expect(quiet.code, quiet.stdout).toBe(0);
+      expect(quiet.stdout).toContain("wsp install: downloading wsp 0.4.0 (4 MB)\r\nwsp install: sha256 matches the release\r\n");
+      expect(quiet.stdout).not.toContain("%");
+      expect(readFileSync(log, "utf8")).toBe("");
+    });
+
+    it("ends a download cut off partway on curl's error with nothing unpacked, in a terminal and out of one", async () => {
+      const asset = bundleNames("0.4.0").appImage;
+      const bytes = heavyAppImage("0.4.0");
+      publish("0.4.0", { [asset]: bytes }, { latest: true });
+      drips.set(`${REPO_PATH}/releases/download/v0.4.0/${asset}`, 10);
+      const failed = `wsp install: downloading ${asset} failed: curl: (18) transfer closed with ${bytes.length - 10 * Math.ceil(bytes.length / 20)} bytes remaining to read`;
+
+      const shown = await runInTerminal();
+      expect(shown.code, shown.stdout).toBe(1);
+      expect(shown.stdout).toMatch(/\r#+ +\d+\.\d%/);
+      expect(shown.stdout.endsWith(`\r\n${failed}\r\n`), shown.stdout).toBe(true);
+      expect(readdirSync(home)).toEqual([]);
+
+      const quiet = await run();
+      expect(quiet).toMatchObject({ code: 1, stderr: `${failed}\n` });
+      expect(readdirSync(home)).toEqual([]);
+    });
+
+    /** The words of a desktop entry's Exec line as a launcher runs them, the field codes dropped. */
+    function execWords(entry: string): string[] {
+      const value = (/^Exec=(.*)$/m.exec(entry)?.[1] ?? "").replace(/\\(.)/g, "$1");
+      const words = value.match(/"(?:\\.|[^"\\])*"|\S+/g) ?? [];
+      return words.filter(word => !/^%[a-zA-Z]$/.test(word)).map(word => (word.startsWith('"') ? word.slice(1, -1).replace(/\\(.)/g, "$1") : word).replaceAll("%%", "%"));
+    }
+
+    it("on a desktop puts the AppImage's own entry in the app menu running the unpacked app through a launcher that stays, needing no FUSE, and opens it once", async () => {
+      const launches = join(root, "setsid.log");
+      writeStub(join(bin, "setsid"), `#!/bin/sh\necho "setsid $*" >> ${JSON.stringify(launches)}\n`);
+      publish("0.4.0", { [bundleNames("0.4.0").appImage]: appImage("0.4.0") }, { latest: true });
+      // A home whose path the Exec line has to quote and escape.
+      const spaced = join(root, "home of 100% $wsp");
+      mkdirSync(spaced);
+
+      for (const [display, at] of [[{ DISPLAY: ":0" }, home], [{ WAYLAND_DISPLAY: "wayland-0" }, spaced]] as const) {
+        rmSync(launches, { force: true });
+        const ran = await run({ ...display, HOME: at });
+        expect(ran.code, ran.stderr).toBe(0);
+        const launcher = join(at, ".wsp", "bin", "wsp-desktop");
+        const icon = join(at, ".local", "share", "icons", "hicolor", "512x512", "apps", "wsp.png");
+        const entry = readFileSync(join(at, ".local", "share", "applications", "wsp.desktop"), "utf8");
+        expect(entry).toBe(carriedEntry("0.4.0").replace("Exec=AppRun", `Exec=${JSON.stringify(launcher).replace(/[$%\\]/g, c => (c === "%" ? "%%" : `\\\\${c}`))}`).replace("Icon=wsp", `Icon=${icon}`));
+        expect(existsSync(icon)).toBe(true);
+        expect(execWords(entry)).toEqual([launcher]);
+        // What the menu runs is the unpacked app itself, with no AppImage runtime to mount.
+        expect(menuOpens(entry, at)).toBe("wsp 0.4.0 opened \n");
+        for (let n = 0; n < 40 && !existsSync(launches); n++) await new Promise(done => setTimeout(done, 50));
+        expect(readFileSync(launches, "utf8")).toBe(`setsid ${launcher}\n`);
+        expect(ran.stdout.trimEnd().split("\n").at(-1)).toBe("wsp install: open wsp from your app menu, or run ~/Applications/wsp.AppImage");
+      }
+    });
+
+    /** What the entry's Exec line prints when a launcher runs it on `at`'s session. */
+    const menuOpens = (entry: string, at: string): string => {
+      const [command = "", ...args] = execWords(entry);
+      const ran = spawnSync(command, args, { encoding: "utf8", env: { HOME: at, PATH: "/usr/bin:/bin" } });
+      return `${ran.stdout ?? ""}${ran.stderr ?? ""}${ran.error?.message ?? ""}`;
+    };
+
+    it("keeps the menu entry opening wsp after the app's own copies of two later releases clean away the folder the line installed", async () => {
+      writeStub(join(bin, "setsid"), "#!/bin/sh\n");
+      publish("0.4.0", { [bundleNames("0.4.0").appImage]: appImage("0.4.0") }, { latest: true });
+      expect((await run({ DISPLAY: ":0" })).code).toBe(0);
+      const apps = join(home, ".wsp", "app");
+      const now = Date.now() / 1000;
+      utimesSync(join(apps, "0.4.0-install"), now - 20, now - 20);
+      // Each later release opened from its AppImage, as the app's Get button leaves one in Downloads.
+      for (const [version, age] of [["0.4.1", 10], ["0.4.2", 0]] as const) {
+        const mount = mkdtempSync(join(root, "mount-"));
+        mkdirSync(join(mount, "resources", "app", "main"), { recursive: true });
+        writeStub(join(mount, "AppRun"), `#!/bin/sh\necho "wsp ${version} opened $*"\n`);
+        const image = join(root, `wsp-${version}.AppImage`);
+        writeFileSync(image, version);
+        const kept = keepAppImage({ execPath: join(mount, "wsp"), script: join(mount, "resources", "app", "main", "cli.mjs") }, { appdir: mount, image, version }, join(home, ".wsp"));
+        const folder = join(kept.execPath, "..");
+        utimesSync(folder, now - age, now - age);
+      }
+      expect(readdirSync(apps).some(name => name === "0.4.0-install")).toBe(false);
+      expect(menuOpens(readFileSync(join(home, ".local", "share", "applications", "wsp.desktop"), "utf8"), home)).toBe("wsp 0.4.2 opened \n");
+    });
+
+    // The window is found through /proc, which a Mac has not.
+    it.skipIf(!existsSync("/proc/self/exe"))("quits a wsp window open on this home before replacing the files it runs from, and opens the new one", async () => {
+      const launches = join(root, "setsid.log");
+      writeStub(join(bin, "setsid"), `#!/bin/sh\necho "setsid $*" >> ${JSON.stringify(launches)}\n`);
+      publish("0.4.0", { [bundleNames("0.4.0").appImage]: appImage("0.4.0") }, { latest: true });
+      expect((await run({ DISPLAY: ":0" })).code).toBe(0);
+      rmSync(launches);
+      // A window as Chromium leaves one: a program named wsp, and the lock in the app's folder naming its pid. It holds
+      // the folder it runs from as its working folder, which a path put back by the same name does not stand in for.
+      // Told to quit, it takes the lock away at once and runs on a while, as the real app did for up to 0.1 s, then
+      // notes whether its files were there as it ended, and any moment they went while it ran.
+      const said = join(root, "window.log");
+      mkdirSync(join(root, "window"));
+      copyFileSync("/bin/sh", join(root, "window", "wsp"));
+      const watch = `trap 'rm -f "$1"; sleep 0.5; if [ -f AppRun ]; then echo "quit with its files"; else echo "quit without its files"; fi >> "$0"; exit 0' TERM
+while :; do [ -f AppRun ] || echo "its files went while it ran" >> "$0"; sleep 0.05; done`;
+      const window = spawn(join(root, "window", "wsp"), ["-c", watch, said, join(home, ".wsp", "desktop", "SingletonLock")], { cwd: join(home, ".wsp", "app", "0.4.0-install"), stdio: "ignore" });
+      const exited = new Promise(done => window.once("exit", done));
+      try {
+        mkdirSync(join(home, ".wsp", "desktop"), { recursive: true });
+        symlinkSync(`${hostname()}-${window.pid}`, join(home, ".wsp", "desktop", "SingletonLock"));
+        await new Promise(done => setTimeout(done, 200));
+
+        const ran = await run({ DISPLAY: ":0" });
+        expect(ran.code, ran.stderr).toBe(0);
+        expect(ran.stdout).toContain("wsp install: quitting wsp to replace it\n");
+        expect(await exited).toBe(0);
+        expect(readFileSync(said, "utf8")).toBe("quit with its files\n");
+        for (let n = 0; n < 40 && !existsSync(launches); n++) await new Promise(done => setTimeout(done, 50));
+        expect(readFileSync(launches, "utf8")).toBe(`setsid ${join(home, ".wsp", "bin", "wsp-desktop")}\n`);
+      } finally {
+        window.kill("SIGKILL");
+      }
+    });
+
+    it("draws no bar with a curl older than 7.75, which has no %{errormsg}, and still ends a cut download on curl's error", async () => {
+      const curl = spawnSync("/bin/sh", ["-c", "command -v curl"], { encoding: "utf8" }).stdout.trim();
+      writeStub(join(bin, "curl"), `#!/bin/sh\nif [ "$1 $2" = "-q --version" ]; then echo 'curl 7.68.0 (x86_64-pc-linux-gnu) libcurl/7.68.0'; exit 0; fi\nexec ${JSON.stringify(curl)} "$@"\n`);
+      const asset = bundleNames("0.4.0").appImage;
+      const bytes = heavyAppImage("0.4.0");
+      publish("0.4.0", { [asset]: bytes }, { latest: true });
+      const path = `${REPO_PATH}/releases/download/v0.4.0/${asset}`;
+
+      drips.set(path, 10);
+      const cut = await runInTerminal();
+      expect(cut.code, cut.stdout).toBe(1);
+      expect(cut.stdout).not.toContain("%");
+      expect(cut.stdout.endsWith(`wsp install: downloading wsp 0.4.0 (4 MB)\r\nwsp install: downloading ${asset} failed: curl: (18) transfer closed with ${bytes.length - 10 * Math.ceil(bytes.length / 20)} bytes remaining to read\r\n`), cut.stdout).toBe(true);
+      expect(readdirSync(home)).toEqual([]);
+
+      drips.set(path, 20);
+      const whole = await runInTerminal();
+      expect(whole.code, whole.stdout).toBe(0);
+      expect(whole.stdout).toContain("wsp install: downloading wsp 0.4.0 (4 MB)\r\nwsp install: sha256 matches the release\r\n");
+    });
+
+    it("with no display writes no entry, opens nothing, and says the app needs a desktop and the command works here", async () => {
+      const launches = join(root, "setsid.log");
+      writeStub(join(bin, "setsid"), `#!/bin/sh\necho "setsid $*" >> ${JSON.stringify(launches)}\n`);
+      publish("0.4.0", { [bundleNames("0.4.0").appImage]: appImage("0.4.0") }, { latest: true });
+      const ran = await run();
+      expect(ran.code, ran.stderr).toBe(0);
+      expect(existsSync(join(home, ".local"))).toBe(false);
+      await new Promise(done => setTimeout(done, 300));
+      expect(existsSync(launches)).toBe(false);
+      expect(ran.stdout.trimEnd().split("\n").slice(-2)).toEqual([
+        "wsp install: wsp 0.4.0 is installed; open a new terminal and run wsp --version",
+        "wsp install: the app needs a desktop, and the wsp command works here; at a desktop, run ~/Applications/wsp.AppImage to open wsp",
+      ]);
     });
 
     it("stops on a download whose sha256 is not the release's before anything is unpacked", async () => {

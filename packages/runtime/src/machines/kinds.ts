@@ -205,6 +205,11 @@ export function kindsArea(ctx: RuntimeContext): KindsArea {
     const logins = place === undefined ? undefined : placeDoor?.backendOf(place)?.logins;
     return shared !== undefined && logins !== undefined ? loginHomeIn(logins, shared) : underLoginHome(home, cloudHome(id));
   };
+  /** The vault as the computer a workspace stands on hands it to its turns, by that computer's picks. */
+  const vaultOn = (entry: LiveWorkspace): Readonly<Record<string, string>> => {
+    const vault = opts.vault?.() ?? {};
+    return entry.record.place === undefined ? vault : (placeDoor?.vaultAt(entry.record.place, vault) ?? vault);
+  };
   /** Whether the computer a workspace stands on listed a login of this agent's own, by the word its row carries. */
   const placeLoginStands = (entry: LiveWorkspace, id: string): boolean => entry.record.place !== undefined && placeDoor?.signInsAt(entry.record.place)?.[id] === "signed-in";
   /** The environment every process of a thread in a folder on that computer runs under, its agent's turns and its
@@ -217,7 +222,7 @@ export function kindsArea(ctx: RuntimeContext): KindsArea {
     const { home } = placeOf(entry.record);
     // The PATH is the login's own, which the run's command exports as the login before this environment is read.
     const { USER: _root, PATH: _path, ...login } = PLACE_LOGIN_ENV;
-    const vault = opts.vault?.() ?? {};
+    const vault = vaultOn(entry);
     const agents = CATALOG_AGENTS.map(agent => {
       const variable = agent.stateHomeEnv ?? sharedLoginOf(agent.signIn)?.homeEnv;
       return { ...(variable !== undefined ? { [variable]: homeOf(agent.id) } : {}), ...secretEnvOf(vault, agent.id, placeLoginStands(entry, agent.id)) };
@@ -471,6 +476,6 @@ export function kindsArea(ctx: RuntimeContext): KindsArea {
   return {
     projectOf, remoteHere, gitHere, gitTopOf, branchAt, stateFolder, cloneHere, localRoad, placeDoorOf, machineReading,
     moduleOf, backendFor, openChannel, backendOfKind, keepsImages, pauseKeepsDisk, namesWorkspace, lifecycleOf,
-    execFactoryFor, threadFolder, kindOf, placeAgentHome,
+    execFactoryFor, threadFolder, kindOf, placeAgentHome, vaultOn,
   };
 }

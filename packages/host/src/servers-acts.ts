@@ -85,7 +85,7 @@ const checkName = (name: string): void => {
 
 /** The agent's MCP config the act is for, by the scope: the files it reads in the home (the first that is there is the
  * config), or the project's, and the folder the file must stay inside. `folder` names Claude Code's servers kept for
- * the home folder itself inside its user file. `store` is a store outside the home, which the write makes where it is
+ * the home folder itself, or for a project's folder, inside its user file. `store` is a store outside the home, which the write makes where it is
  * not there yet. */
 interface Config {
   agent: McpAgent;
@@ -110,15 +110,20 @@ function checkNameKept(agent: McpAgent, name: string, transport: McpTransport): 
 function configOf(road: Road, on: AgentsOn, agentId: string, scope: McpScope): Config {
   const agent = mcpAgent(agentId);
   const home = road.host.home;
+  const project = projectOf(on);
+  const projectNamed = (): string => {
+    if (project === undefined) throw usage("A project's server is changed from a thread of that project, or from its computer's page.");
+    return project;
+  };
   if (scope !== "project") {
     const own = ownServerConfig(agent, home, road.host.stores?.[agentId]);
-    return { agent, ...own, ...(own.base !== home ? { store: own.base } : {}), ...(scope === "home" ? { folder: home } : {}) };
+    const folder = scope === "home" ? home : scope === "local" ? projectNamed() : undefined;
+    return { agent, ...own, ...(own.base !== home ? { store: own.base } : {}), ...(folder !== undefined ? { folder } : {}) };
   }
-  const project = projectOf(on);
-  if (project === undefined) throw usage("A project's server is changed from a thread of that project, or from its computer's page.");
-  const files = (agent.mcp.projectFiles ?? []).map(f => posix.join(project, f));
+  const at = projectNamed();
+  const files = (agent.mcp.projectFiles ?? []).map(f => posix.join(at, f));
   if (files.length === 0) throw usage(noServersConfigRefusal(agentName(agentId)));
-  return { agent, files, base: project };
+  return { agent, files, base: at };
 }
 
 /** The config as it stands: the file it is, its text and the checksum a write compares, or no file yet. */
@@ -179,8 +184,8 @@ function formatted<T>(file: string, run: () => T): T {
 
 /** Whether the text defines the server in that scope: a project's file holds its servers at its root. */
 const defines = (config: Config, text: string, home: string, ask: ServerAsk): { disabled: boolean } | undefined => {
-  const want = ask.scope === "home" ? "home" : "user";
-  const found = config.agent.mcp.format.read(text, home).find(s => s.name === ask.name && s.scope === want);
+  const want = config.folder !== undefined ? "home" : "user";
+  const found = config.agent.mcp.format.read(text, config.folder ?? home).find(s => s.name === ask.name && s.scope === want);
   return found === undefined ? undefined : { disabled: found.disabled === true };
 };
 

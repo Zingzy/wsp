@@ -2,9 +2,9 @@
 
 import { readFileSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
-import { ALREADY_JOINED_LINE, GITHUB_CLI, signInOfRow, waitsForInstallLine, type PlaceProvisionRow, isHttpUrl, PLACE_LEAVE_LINE, fmtPrice, joinRoads, PlaceView, type PlaceFile, fmtBytes, fmtDuration, shellQuote, BACK_OVER_SSH, backUrl, dialsBackWord, PLACE_SUDO_KIND, refusal, twoPlacesRefusal, relayUrlOf, TOOL_PREFIX, placeHoldsLine, pluginOffLine, type PlaceHolds, type PlaceRemoved } from "@wsp/protocol";
+import { ALREADY_JOINED_LINE, CODE_FROM_ROW, GITHUB_CLI, signInOfRow, waitsForInstallLine, type PlaceProvisionRow, isHttpUrl, PLACE_LEAVE_LINE, fmtPrice, joinRoads, PlaceView, type PlaceFile, fmtBytes, fmtDuration, shellQuote, BACK_OVER_SSH, backUrl, dialsBackWord, PLACE_SUDO_KIND, refusal, twoPlacesRefusal, relayUrlOf, TOOL_PREFIX, placeHoldsLine, pluginOffLine, type PlaceHolds, type PlaceRemoved } from "@wsp/protocol";
 import { prefixVolume, SSH_LINE_CAP, boxWord, keyFingerprint, type SshReach, type SshSudo } from "@wsp/engine";
-import { CATALOG_AGENTS, agentName, hasLogin, keyEnvOf, mintsToken, sharedOn } from "@wsp/catalog";
+import { CATALOG_AGENTS, agentName, keyEnvOf, loginThere, mintsToken, sharedOn } from "@wsp/catalog";
 import { cappedLine } from "../doctor.js";
 import { guestDaemonTarget, guestSystem, noGuestDaemonLine, noPlaceSystemLine, type DaemonTarget } from "../daemon-binary.js";
 import { joinStanding, sweptLine } from "../place-report.js";
@@ -208,8 +208,8 @@ export function keyIs(key: string, pem: string): boolean {
 export const SIGN_IN_FLAGS_REFUSAL =
   "wsp add --sign-in names a computer already in this wsp, so it takes none of the flags a join takes. Drop them, or drop --sign-in to join a computer.";
 
-/** The agents with a sign-in to run on a computer, off the catalog's rows: a token or key this host keeps is none. */
-const loginAgents = (): string[] => CATALOG_AGENTS.filter(a => hasLogin(a.signIn)).map(a => a.id);
+/** The agents with a sign-in to run on a computer, off the catalog's rows: their own login, or the one a token row names. */
+const loginAgents = (): string[] => CATALOG_AGENTS.filter(a => loginThere(a.signIn) !== undefined).map(a => a.id);
 
 /** What wsp add --sign-in signs in on a computer: those agents, and gh, which a setup's GitHub row signs in there. */
 export const signsInOnComputer = (): string[] => [...loginAgents(), GITHUB_CLI];
@@ -220,9 +220,13 @@ export function signInRowCommand(computer: string, row: Pick<PlaceProvisionRow, 
   const id = signInOfRow(row.id);
   // A sign-in waiting on its agent's install has nothing to run there until a Retry puts the agent on.
   if (id === undefined || row.note === waitsForInstallLine(row.label)) return undefined;
-  if (signsInOnComputer().includes(id)) return `wsp add ${computer} --sign-in ${id}`;
   const signIn = CATALOG_AGENTS.find(a => a.id === id)?.signIn;
-  return signIn !== undefined && (mintsToken(signIn) || keyEnvOf(signIn) !== undefined) ? `wsp agents key ${id}` : undefined;
+  // A row set aside for its own sign-in there was picked to sign in on that computer, not to take the vault's.
+  if (row.note === CODE_FROM_ROW && signsInOnComputer().includes(id)) return `wsp add ${computer} --sign-in ${id}`;
+  // A token this host makes, or a key, is the first way for an agent that mints one; its row's fix names the others.
+  if (signIn !== undefined && mintsToken(signIn)) return `wsp agents key ${id}`;
+  if (signsInOnComputer().includes(id)) return `wsp add ${computer} --sign-in ${id}`;
+  return signIn !== undefined && keyEnvOf(signIn) !== undefined ? `wsp agents key ${id}` : undefined;
 }
 
 /** The refusal for a name with no sign-in to run on a computer. The agents are the catalog's own. */

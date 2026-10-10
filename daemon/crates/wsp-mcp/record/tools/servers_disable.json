@@ -26,9 +26,10 @@
           "enum": [
             "user",
             "home",
+            "local",
             "project"
           ],
-          "description": "the scope servers lists it under: user, home or project; user without it"
+          "description": "the scope servers lists it under: user, home, local or project; user without it"
         },
         "project": {
           "type": [
@@ -92,9 +93,10 @@
           "enum": [
             "user",
             "home",
+            "local",
             "project"
           ],
-          "description": "the scope servers lists it under: user, home or project; user without it"
+          "description": "the scope servers lists it under: user, home, local or project; user without it"
         },
         "project": {
           "type": [

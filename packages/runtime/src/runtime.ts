@@ -541,6 +541,21 @@ function runtimeCore(ctx: RuntimeContext, opts: RuntimeOptions): RuntimeCore {
       ...(reach.wsp !== undefined ? { wsp: reach.wsp } : {}),
     };
   };
+  /** The app's own sign-in road, followed as a setup's row waiting on the person, with the stop that ends it. */
+  const followSignIn = async (target: AgentsTarget, ask: SignInAsk, emit: (e: AgentsSignInEvent) => void): Promise<{ leave(): void; stop(): void }> => {
+    const handle = await ctx.agentsRead.signIn(target, ask, emit);
+    return {
+      leave: () => handle.leave(),
+      stop: () => {
+        // A sign-in that already ended has nothing left to stop.
+        try {
+          ctx.agentsRead.signInStop(handle.signInId);
+        } catch {
+          return;
+        }
+      },
+    };
+  };
   /** Puts the icon and the hue a recipe moved from `was` to `now` on a project, the rest of its look left as the
    * person set it. */
   const folderLook = async (projectId: string, was: RecipeFile["folders"][string], now: RecipeFile["folders"][string]): Promise<void> => {
@@ -605,7 +620,7 @@ function runtimeCore(ctx: RuntimeContext, opts: RuntimeOptions): RuntimeCore {
         },
         projectsOn: async placeId => {
           await ctx.ready();
-          return [...projectsHeld.values()].filter(p => p.computer === placeId).map(p => ({ id: p.id, name: p.name, ...(p.checkout === undefined ? {} : { checkout: p.checkout }) }));
+          return [...projectsHeld.values()].filter(p => p.computer === placeId).map(p => ({ id: p.id, name: p.name, path: p.path, ...(p.checkout === undefined ? {} : { checkout: p.checkout }) }));
         },
         dropOn: async placeId => {
           const { forks, folders, projects, rows } = await standingOn(placeId);
@@ -635,20 +650,9 @@ function runtimeCore(ctx: RuntimeContext, opts: RuntimeOptions): RuntimeCore {
         storesOn: (placeId, home) => ctx.placeStores(placeId, home),
         loginHere: agent => loginHere(ctx.homesHere, agent),
         // The app's own sign-in road on that computer, read as a setup's row waiting on the person.
-        signIn: async (placeId, agent, emit) => {
-          const handle = await ctx.agentsRead.signIn({ placeId }, { agent, toolThere: true }, emit);
-          return {
-            leave: () => handle.leave(),
-            stop: () => {
-              // A sign-in that already ended has nothing left to stop.
-              try {
-                ctx.agentsRead.signInStop(handle.signInId);
-              } catch {
-                return;
-              }
-            },
-          };
-        },
+        signIn: (placeId, agent, emit) => followSignIn({ placeId }, { agent, toolThere: true }, emit),
+        // A token is made on the computer the host runs on, by the same road the app's own sign-in there takes.
+        mintHere: (agent, emit) => followSignIn({ placeId: HERE_PLACE_ID }, { agent }, emit),
         // The add's own road for a folder seeding a project on that computer, with what the pick keeps. A pick that
         // moved its kept files alone puts the newly kept ones into the folder that stands and moves nothing. One that
         // moved its source or name keeps the project's id and age, so what the person set under it carries and its

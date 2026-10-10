@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { PLACES_TICKET_REFUSAL, DAEMON_VERSION, agentsCell, THREAD_OPS, readJoinToken, type PlaceReport } from "@wsp/protocol";
+import { PLACES_TICKET_REFUSAL, DAEMON_VERSION, agentsCell, THREAD_OPS, readJoinToken, SIGNED_IN_THERE, CODE_FROM_ROW, type PlaceReport, type PlaceProvisionRow } from "@wsp/protocol";
 import { createRuntime } from "../src/runtime.js";
 import { newPlaceKeyPair, signInsOf } from "../src/places.js";
 import { serveRuntime } from "../src/serve.js";
@@ -141,6 +141,14 @@ describe("what stands for each agent on a computer you own", () => {
     expect(signInsOf(withAgents({ logins: ["codex/auth.json"] }), { OPENAI_API_KEY: "sk-x" })?.codex).toBe("signed-in");
     // A folder with no file under it is no login: the name the row shares is what has to be there.
     expect(signInsOf(withAgents({ logins: ["gemini/oauth_creds.json"] }), {})?.codex).toBe("none");
+  });
+
+  it("reads Claude Code signed in on a box where its setup signed it in there, its login being in the threads' store", () => {
+    const row = (note: string, outcome: "installed" | "present" | "skipped" = "installed"): PlaceProvisionRow => ({ id: "signins/claude", label: "Claude Code", outcome, note });
+    expect(signInsOf(withAgents({ logins: [] }), { ANTHROPIC_API_KEY: "sk-ant-x" }, [row(SIGNED_IN_THERE)])?.claude).toBe("signed-in");
+    expect(signInsOf(withAgents({ logins: [] }), {}, [row(CODE_FROM_ROW, "skipped")])?.claude).toBe("none");
+    // A shared login still answers to its file alone: a row says nothing over what that computer listed.
+    expect(signInsOf(withAgents({ logins: [] }), {}, [{ id: "signins/codex", label: "Codex", outcome: "installed", note: SIGNED_IN_THERE }])?.codex).toBe("none");
   });
 
   it("says nothing at all about a computer whose daemon lists no logins, which is unknown and not none", () => {

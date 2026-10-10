@@ -10,9 +10,11 @@ import { ProjectHue, ProjectIcon } from "./project-look.js";
 import { listWords } from "./usage.js";
 import { MCP_SERVER_NAME } from "./wsp-tools.js";
 
-/** How an agent or the GitHub row signs in on the computer: the token this computer's vault holds, set in the
- * environment of every run there, or the tool's own login run on that computer through the sign-in relay. */
-export const RecipeSignIn = z.enum(["vault", "machine"]);
+/** How an agent or the GitHub row signs in on the computer: the token or key this computer's vault holds, set in the
+ * environment of every run there, or the tool's own login run on that computer through the sign-in relay. An agent
+ * that mints a token here names which of the two it takes: `token`, minted here by its own command, or `key`, an API
+ * key the person put in the wsp home's .env, which bill differently. */
+export const RecipeSignIn = z.enum(["vault", "machine", "token", "key"]);
 export type RecipeSignIn = z.infer<typeof RecipeSignIn>;
 
 /** How the GitHub row signs gh in on the computer: either sign-in word, or skip, which leaves gh signed out there and

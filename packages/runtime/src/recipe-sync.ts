@@ -50,9 +50,9 @@ export function recipeChanges(before: RecipeFile | undefined, beforeItems: Reado
   return out;
 }
 
-/** The steps that carry a set of changes. An agent added brings its files, servers and skills folder with it; a
- * server taken out leaves by the servers step, which takes out what wsp wrote and is no longer picked; the rest of a
- * removal is the undo's, not a step's. */
+/** The steps that carry a set of changes. An agent added brings its files, servers and skills folder with it, and a
+ * folder its own servers; a server taken out leaves by the servers step, which takes out what wsp wrote and is no
+ * longer picked; the rest of a removal is the undo's, not a step's. */
 export function stepsFor(changes: readonly RecipeChange[], after: RecipeFile): Set<PlaceSetupStep> {
   const steps = new Set<PlaceSetupStep>();
   for (const c of changes) {
@@ -82,5 +82,7 @@ export function stepsFor(changes: readonly RecipeChange[], after: RecipeFile): S
         steps.add(c.kind);
     }
   }
+  // A folder that lands brings the servers its turns read here with it.
+  if (steps.has("folders")) steps.add("folderServers");
   return steps;
 }

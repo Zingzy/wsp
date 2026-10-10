@@ -357,7 +357,7 @@ describe("adding an MCP server", () => {
       const { at, vault, acts, envFile } = setup();
       const other = box(at, road(at).machine);
       const add = (agent: string, token: string) => acts.add(other, { agent, name: "tracker", url: "https://mcp.linear.app/mcp", headers: { Authorization: `Bearer ${token}` } });
-      const codexSends = async () => (await codexLaunchConfig({ user: readFileSync(join(at.home, ".codex/config.toml"), "utf8"), folder: at.home }, vault.held()))["mcp_servers.tracker.http_headers.Authorization"];
+      const codexSends = async () => (await codexLaunchConfig({ user: { path: join(at.home, ".codex/config.toml"), text: readFileSync(join(at.home, ".codex/config.toml"), "utf8") }, folder: at.home }, vault.held()))["mcp_servers.tracker.http_headers.Authorization"];
       return { add, remove: (agent: string) => acts.remove(other, { agent, name: "tracker" }), codexSends, envFile };
     };
 
@@ -655,6 +655,20 @@ describe("removing an MCP server", () => {
     expect(readFileSync(join(at.home, ".codex/config.toml"), "utf8")).toBe(`model = "gpt-5"\n\n[mcp_servers.old]\ncommand = "uvx"\nargs = ["old-server"]\nenabled = false\n`);
     await acts.remove({ kind: "here", projects: [{ id: "pr_app", name: "app", path: at.project }] }, { agent: "claude", name: "project-db", scope: "project" });
     expect(json(join(at.project, ".mcp.json"))).toEqual({ mcpServers: {} });
+  });
+
+  it("takes out a server Claude Code keeps for a project's folder in its own file, and refuses one with no project named", async () => {
+    const at = fixture();
+    const file = join(at.home, ".claude.json");
+    const own = json(file) as { projects: Record<string, unknown> };
+    own.projects[at.project] = { mcpServers: { kept: { command: "kept-mcp", args: [] } } };
+    writeFileSync(file, JSON.stringify(own));
+    const acts = serversActs({ here: () => here(at) });
+    const app = { kind: "here" as const, projects: [{ id: "pr_app", name: "app", path: at.project }] };
+    await expect(acts.remove(HERE, { agent: "claude", name: "kept", scope: "local" })).rejects.toThrow(/from a thread of that project/);
+    await acts.remove(app, { agent: "claude", name: "kept", scope: "local" });
+    expect((json(file) as { projects: Record<string, unknown> }).projects[at.project]).toEqual({ mcpServers: {} });
+    expect((json(file) as { projects: Record<string, unknown> }).projects[at.home]).toEqual(own.projects[at.home]);
   });
 
   it("refuses a server the file does not define in that scope, and writes nothing", async () => {

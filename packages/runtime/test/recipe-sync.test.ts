@@ -54,5 +54,7 @@ describe("what moved in a followed recipe", () => {
     expect(steps({ ...BEFORE, mcp: {} }, ITEMS)).toEqual(["mcp"]);
     expect(steps({ ...BEFORE, skills: {} }, ITEMS)).toEqual([]);
     expect(steps({ ...BEFORE, configs: { git: {}, github: { signin: "vault" } } }, ITEMS)).toEqual(["github"]);
+    // A folder that lands brings its own servers, which go once it is there.
+    expect(steps({ ...BEFORE, folders: { app: { from: "~/code/app", keep: [] } } }, ITEMS)).toEqual(["folderServers", "folders"]);
   });
 });

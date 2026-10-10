@@ -132,8 +132,9 @@ export function agentRowLines(r: AgentsReport): string[] {
   return [...table([["AGENT", "VERSION", "LATEST", "SIGN-IN", "WSP TOOLS", "UPDATE", "PATH"], ...r.agents.map(a => [a.name, a.version ?? (a.installsOnFirstRun === true ? FIRST_RUN_WORD : a.versionUnread === true ? VERSION_UNREAD_WORD : "-"), a.latest ?? "-", word(a), a.wspTools ? "yes" : "no", update(a), a.path ?? "-"])]), ...reportTail(r)];
 }
 
-/** Where a skill or a server stands, as both tables print it: its scope, or the project it is a project's of by name. */
-const scopeWord = (row: { scope: string; project?: { name: string } }): string => (row.project !== undefined ? `project ${cell(row.project.name)}` : row.scope);
+/** Where a skill or a server stands, as both tables print it: its scope, and the project by name for a project's own or
+ * a server its agent keeps for that project's folder (`local`). */
+const scopeWord = (row: { scope: string; project?: { name: string } }): string => (row.project !== undefined ? `${row.scope === "local" ? "local" : "project"} ${cell(row.project.name)}` : row.scope);
 
 export function skillRowLines(r: AgentsReport): string[] {
   const where = (s: SkillRow): string => s.paths.map(p => (p.linkTo === undefined ? cell(p.path) : `${cell(p.path)} -> ${cell(p.linkTo)}`)).join(", ");
@@ -198,21 +199,21 @@ export function serverCommand(line: string | undefined, usage: string): { comman
   return { command, args };
 }
 
-export const projectScopeLine = (word: string): string => `--project is the project scope, not ${word}; give one of the two.`;
+export const projectScopeLine = (word: string): string => `--project names a project, which only the project and local scopes take, not ${word}; give one of the two.`;
 
-/** The scope a line names, which the wire checks too, and --project, which is the project scope; nothing without
- * either. */
+/** The scope a line names, which the wire checks too, and --project, which is the project scope alone and names the
+ * project a local scope's server is kept for; nothing without either. */
 export function serverScope(word: string | undefined, usage: string, project: ProjectAsked = { project: false }): { scope?: McpScope } {
   if (word === undefined) return project.project ? { scope: "project" } : {};
   const scope = McpScope.safeParse(word);
-  if (!scope.success) throw usageRefusal(`--scope is user, home or project, not ${word}.`, usage);
-  if (project.project && scope.data !== "project") throw usageRefusal(projectScopeLine(word), usage);
+  if (!scope.success) throw usageRefusal(`--scope is user, home, local or project, not ${word}.`, usage);
+  if (project.project && scope.data !== "project" && scope.data !== "local") throw usageRefusal(projectScopeLine(word), usage);
   return { scope: scope.data };
 }
 
 export const ServerNameIn = z.string().describe("the server's name, as servers lists it");
 export const ServerAgentIn = z.string().describe("the catalog id of the agent whose config names it, as servers lists it");
-export const ServerScopeIn = McpScope.optional().describe("the scope servers lists it under: user, home or project; user without it");
+export const ServerScopeIn = McpScope.optional().describe("the scope servers lists it under: user, home, local or project; user without it");
 export const ServerProjectIn = z
   .union([z.boolean(), z.string()])
   .optional()

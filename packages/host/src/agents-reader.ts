@@ -7,12 +7,11 @@
 // state is what its tools connect answers, asked apart from the read.
 import { userInfo } from "node:os";
 import { posix } from "node:path";
-import { CATALOG_AGENTS, MCP_AGENTS, TOOL_PREFIX, installsOnFirstRun, serverValuesOf, harnessLine, signInRoadOf, versionOf, type AgentEntry, type McpAgent, type McpServer } from "@wsp/catalog";
-import { detectSkills, nodeHost, skillRoots, stdioLine, tilde, type Host } from "@wsp/collect";
+import { CATALOG_AGENTS, MCP_AGENTS, TOOL_PREFIX, installsOnFirstRun, serverValuesOf, harnessLine, signInRoadOf, versionOf, type AgentEntry, type McpAgent, type McpServer, type TurnServer } from "@wsp/catalog";
+import { detectSkills, nodeHost, readCheckout, readTurnServers, skillRoots, stdioLine, tilde, type Host } from "@wsp/collect";
 import { landedServersScript, mcpRowId, NO_DIGEST, parseLandedServers, targetLogin } from "@wsp/engine";
 import { MCP_SERVER_NAME, agentVersionWord, compareVersions, controlNameRefusal, hasControlChar, shellQuote, strictVersion, takesMcpServers, type AgentRow, type AgentSignInState, type AgentsProject, type McpRow, type PlaceProvisionRow } from "@wsp/protocol";
 import { GUEST_WSP_MCP, harnessCatalog, projectOf, vaultSignIn, type AgentsOn, type AgentsRead, type AgentsReader } from "@wsp/runtime";
-import { ownServerFiles } from "./agents-here.js";
 import { machineHost, type MachineHost } from "./machine-host.js";
 import { resolveServer, serverTools } from "./server-tools.js";
 
@@ -105,19 +104,14 @@ interface Servers {
   refused: string[];
 }
 
-/** Every server each agent's own file defines, and each project's the read covers; the first of an agent's files that
- * is there is its config, as the agent itself reads it. */
+/** Every server a turn of each agent gets at home, and in each project the read covers, by the catalog's one
+ * resolver: the user scope and the home folder's own once, and each project's local and project servers under it. */
 async function serversOf(host: Host, projects: readonly AgentsProject[], held: ReadonlySet<string>): Promise<Servers> {
   const rows: McpRow[] = [];
   const wsp = new Set<string>();
   const refused: string[] = [];
-  const firstOf = async (files: readonly string[]): Promise<{ file: string; text: string } | undefined> => {
-    const texts = await Promise.all(files.map(f => host.fs.readText(f)));
-    const at = texts.findIndex(t => t !== undefined);
-    return at < 0 ? undefined : { file: files[at]!, text: texts[at]! };
-  };
-  const push = (agent: McpAgent, file: string, servers: readonly McpServer[], project?: AgentsProject): void => {
-    for (const s of servers) {
+  const push = (agent: McpAgent, servers: readonly TurnServer[], project?: AgentsProject): void => {
+    for (const { server: s, scope, file } of servers) {
       if (hasControlChar(s.name)) {
         const line = controlNameRefusal(tilde(host.home, file));
         if (!refused.includes(line)) refused.push(line);
@@ -129,7 +123,7 @@ async function serversOf(host: Host, projects: readonly AgentsProject[], held: R
       const row: McpRow = {
         agent: agent.id,
         name: s.name,
-        scope: project !== undefined ? "project" : s.scope,
+        scope: project === undefined ? (scope === "local" ? "home" : "user") : scope === "local" ? "local" : "project",
         file: tilde(host.home, file),
         transport: transportOf(s, host.home),
         envNames: envNamesOf(s, held),
@@ -141,12 +135,13 @@ async function serversOf(host: Host, projects: readonly AgentsProject[], held: R
       rows.push(row);
     }
   };
+  // One read of each project's checkout, which every agent's servers there are keyed by.
+  const checkouts = projects.map(p => readCheckout(host, p.path));
   await Promise.all(
     MCP_AGENTS.map(async agent => {
-      const [mine, theirs] = await Promise.all([firstOf(ownServerFiles(host, agent)), Promise.all(projects.map(p => firstOf((agent.mcp.projectFiles ?? []).map(f => posix.join(p.path, f)))))]);
-      const read = (f: { text: string } | undefined, userOnly: boolean): McpServer[] => (f === undefined ? [] : agent.mcp.format.read(f.text, host.home).filter(s => !userOnly || s.scope === "user"));
-      if (mine !== undefined) push(agent, mine.file, read(mine, false));
-      theirs.forEach((f, i) => f !== undefined && push(agent, f.file, read(f, true), projects[i]));
+      const [mine, theirs] = await Promise.all([readTurnServers(host, agent, host.home, { own: true }), Promise.all(projects.map((p, i) => checkouts[i]!.then(checkout => readTurnServers(host, agent, p.path, { checkout }))))]);
+      push(agent, mine);
+      theirs.forEach((servers, i) => push(agent, servers.filter(s => s.scope !== "user"), projects[i]));
     }),
   );
   return { rows: rows.sort((a, b) => byAgent(a, b) || a.scope.localeCompare(b.scope) || (a.project?.name ?? "").localeCompare(b.project?.name ?? "") || a.name.localeCompare(b.name)), wsp, refused };
@@ -257,7 +252,13 @@ export async function readAgents(host: Host, o: { user: string; vault: Readonly<
     };
   });
   const all = [...launch, ...servers.rows].sort(byAgent);
-  const serverRows = recipe === undefined ? all : all.map(r => (r.scope === "project" || r.launch === true ? r : { ...r, inRecipe: recipe.has(mcpRowId(r.agent, r.scope === "home", r.name)) }));
+  // A server carried with a project is written down under the project's folder there, as the box holds it.
+  const folderOf = new Map(projects.map(p => [p.id, p.path]));
+  const rowId = (r: McpRow): string | undefined => (r.scope === "local" ? (r.project === undefined ? undefined : mcpRowId(r.agent, folderOf.get(r.project.id) ?? r.project.path, r.name)) : mcpRowId(r.agent, r.scope === "home", r.name));
+  const serverRows = recipe === undefined ? all : all.map(r => {
+    const id = r.scope === "project" || r.launch === true ? undefined : rowId(r);
+    return id === undefined ? r : { ...r, inRecipe: recipe.has(id) };
+  });
   return {
     home: host.home,
     user: o.user,

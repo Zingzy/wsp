@@ -26,21 +26,21 @@ const machineLogin = (id: ThreadAgent): string => {
  * and the token the person minted would never be used. One reader for every agent, so a new one is a row and not
  * a branch here.
  *
- * `loginStands` is whether a login of that agent's own stands where the turn runs. A harness reads a key in its
- * environment ahead of the login on its disk, so a key handed there would bill the key and leave the sign-in the
- * person made unused: the key goes only where no login stands. The variable it would travel under comes back
- * beside it, since the sentence for a key the provider turns down has to name it. */
+ * `loginStands` is whether a login of that agent's own stands where the turn runs. A harness reads a key or a token
+ * in its environment ahead of the login on its disk, so either handed there would bill it and leave the sign-in the
+ * person made unused: neither goes where a login stands. The variable a key would travel under comes back beside
+ * it, since the sentence for a key the provider turns down has to name it. */
 export function secretsOf(
   vault: Readonly<Record<string, string>>,
   id: string,
   loginStands = false,
 ): { oauthToken?: string; apiKey?: string; keyEnv?: string } {
   const signIn = CATALOG_AGENTS.find(a => a.id === id)?.signIn;
-  if (signIn === undefined) return {};
+  if (signIn === undefined || loginStands) return {};
   const token = mintsToken(signIn) ? vault[signIn.tokenEnv] : undefined;
   if (token !== undefined) return { oauthToken: token };
   const keyEnv = keyEnvOf(signIn);
-  if (keyEnv === undefined || loginStands) return {};
+  if (keyEnv === undefined) return {};
   const key = vault[keyEnv];
   return key === undefined ? {} : { apiKey: key, keyEnv };
 }
@@ -63,8 +63,6 @@ export const HARNESS_ADAPTERS: Readonly<Record<ThreadAgent, HarnessAdapterFactor
       signInRefusal: ctx.signInRefusal,
       ...(ctx.projectKey !== undefined ? { projectDirName: ctx.projectKey } : {}),
       ...(ctx.launch !== undefined ? { launch: ctx.launch } : {}),
-      // Claude Code keeps no login where a workspace runs: its sign-in is the token this computer minted, so
-      // nothing stands there for the vault to give way to.
       ...secretsOf(ctx.vault, "claude", ctx.loginStands("claude")),
     }),
   codex: ctx =>

@@ -28,11 +28,22 @@ export interface McpAgentSource {
 export interface McpScope {
   files: string[];
   format: McpFormat;
-  /** Claude Code's servers local to the laptop's home folder move under the machine's home. */
+  /** Claude Code's servers local to a folder on the laptop move under a folder on the machine: the home under its home,
+   * a project's folder under that project's folder there. */
   project?: { from: string; to: string };
   keep: string[];
   /** `keys` on a server set aside for want of a yes to copying its keys: what they go by. */
   drop: { name: string; reason: string; keys?: string[] }[];
+  /** The copy the definitions come from, handed in, where none travelled in the job's own folder. */
+  travelled?: string;
+  /** The file the servers merge into and the folder a write stays inside, where it is not the agent's own file. */
+  own?: { files: string[]; base: string };
+  /** The project folder on the machine these servers are for, which their rows and the list beside the job name. */
+  folder?: string;
+  /** A folder the file is to mark trusted, by its format's own edit, which is when the agent reads that folder's servers. */
+  trust?: string;
+  /** One more edit of the file once its servers are merged: a project's switches written under its folder there. */
+  edit?: (text: string | undefined) => string;
 }
 
 export interface McpAgentPlan {
@@ -82,17 +93,23 @@ export interface McpResult {
 /** Rows whose last id segment is the binary they put on PATH; taps, casks and the toolchain install none. */
 const BINARY_ROW = /^tools\/(brew|go|cargo|npm|pnpm|bun|pipx|uv|hand)\//;
 
-/** One server's row id: the agent it belongs to, whether its scope is the person's home folder, and its name. The
- * one spelling, read by the plan that edits the configs and by every caller that sets a server aside without one. */
-export const mcpRowId = (agent: string, home: boolean, name: string): string => `${MCP_ID_PREFIX}${agent}/${home ? "home/" : ""}${name}`;
+/** One server's row id: the agent it belongs to, where it sits (the user scope, the person's home folder with `true`,
+ * or a project folder on the machine by its path), and its name. The one spelling, read by the plan that edits the
+ * configs and by every caller that sets a server aside without one. */
+export const mcpRowId = (agent: string, at: boolean | string, name: string): string =>
+  `${MCP_ID_PREFIX}${agent}/${typeof at === "string" ? `@${encodeURIComponent(at)}/` : at ? "home/" : ""}${name}`;
 
-/** A row's agent, scope and server name from its id: `agents/mcp/<agent>/<name>`, or `agents/mcp/<agent>/home/<name>`;
- * nothing for a row that is not a server, the mcp-remote row included. */
-export function parseMcpId(id: string): { agent: string; home: boolean; name: string } | undefined {
+/** One scope's row id for a server of it. */
+export const scopeRowId = (agent: string, scope: Pick<McpScope, "project" | "folder">, name: string): string => mcpRowId(agent, scope.folder ?? scope.project !== undefined, name);
+
+/** A row's agent, scope and server name from its id: `agents/mcp/<agent>/<name>`, `agents/mcp/<agent>/home/<name>`, or
+ * `agents/mcp/<agent>/@<folder>/<name>`; nothing for a row that is not a server, the mcp-remote row included. */
+export function parseMcpId(id: string): { agent: string; home: boolean; folder?: string; name: string } | undefined {
   if (!id.startsWith(MCP_ID_PREFIX) || id === MCP_REMOTE_ID) return undefined;
   const rest = id.slice(MCP_ID_PREFIX.length).split("/");
   const agent = rest[0];
   if (agent === undefined || rest.length < 2) return undefined;
+  if (rest.length >= 3 && rest[1]!.startsWith("@")) return { agent, home: false, folder: decodeURIComponent(rest[1]!.slice(1)), name: rest.slice(2).join("/") };
   const home = rest.length === 3 && rest[1] === "home";
   return { agent, home, name: home ? rest[2]! : rest.slice(1).join("/") };
 }
@@ -425,7 +442,7 @@ export async function mcpRows(
   for (const agent of agents) {
     for (const scope of agent.scopes) {
       const outcome = report?.[at++];
-      const id = (name: string): string => mcpRowId(agent.id, scope.project !== undefined, name);
+      const id = (name: string): string => scopeRowId(agent.id, scope, name);
       const skippedKeep =
         failure ?? (outcome === undefined || outcome.file === null ? `${agent.label}'s config is not on the machine` : outcome.error !== undefined ? `${agent.label}'s config on the machine did not parse (${outcome.error})` : undefined);
       for (const name of scope.keep) {

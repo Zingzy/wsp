@@ -20,7 +20,7 @@ const REPORT = {
   readAt: "2026-09-25T12:00:00.000Z",
   agents: [],
   skills: [{ name: "deploy", scope: "project", paths: [{ path: "~/www/.claude/skills/deploy" }], project: WWW }],
-  servers: [db(), db(WWW)],
+  servers: [db(), db(WWW), { ...db(WWW), name: "kept", scope: "local", file: "~/.claude-cfg/.claude.json" }],
   refused: [],
   projects: [WWW],
 };
@@ -117,6 +117,18 @@ describe("--project on the skills and servers lines", () => {
     expect(scoped.code).toBe(EXIT_CODES.usage);
     expect(scoped.acts).toEqual([]);
   });
+
+  it("takes --scope local beside a named project on a computer, the server kept for that project's folder", async () => {
+    for (const [words, op, ask] of [
+      [["servers", "remove", "kept", "--agent", "claude", "--yes"], "servers.remove", { name: "kept", scope: "local" }],
+      [["servers", "disable", "kept", "--agent", "claude"], "servers.toggle", { name: "kept", scope: "local", on: false }],
+      [["servers", "enable", "kept", "--agent", "claude"], "servers.toggle", { name: "kept", scope: "local", on: true }],
+    ] as const) {
+      const { code, acts, errors } = await run([...words, "--on", "spoo", "--project", "www", "--scope", "local"]);
+      expect(code, `${words.join(" ")}: ${errors.join(" ")}`).toBe(0);
+      expect(acts, words.join(" ")).toEqual([{ op, params: expect.objectContaining({ target: { placeId: "p_1", project: "www" }, ...ask }) }]);
+    }
+  });
 });
 
 describe("project on the skills and servers tools", () => {
@@ -142,6 +154,9 @@ describe("project on the skills and servers tools", () => {
     expect((await call("servers disable", { name: "db", agent: "opencode", on: "spoo", project: "www" })).acts).toEqual([
       { op: "servers.toggle", params: expect.objectContaining({ target: { placeId: "p_1", project: "www" }, scope: "project", on: false }) },
     ]);
+    expect((await call("servers remove", { name: "kept", agent: "claude", on: "spoo", project: "www", scope: "local" })).acts).toEqual([
+      { op: "servers.remove", params: expect.objectContaining({ target: { placeId: "p_1", project: "www" }, scope: "local" }) },
+    ]);
   });
 });
 
@@ -163,6 +178,8 @@ describe("the skills and servers tables", () => {
     expect(servers.code, servers.errors.join(" ")).toBe(0);
     const rows = servers.lines.join("\n").split("\n").filter(l => l.startsWith("db"));
     expect(rows.map(l => l.split(/\s{2,}/)[2])).toEqual(["user", "project www"]);
+    // A server its agent keeps for the project's folder prints as the scope --scope takes for it.
+    expect(servers.lines.join("\n").split("\n").find(l => l.startsWith("kept"))?.split(/\s{2,}/)[2]).toBe("local www");
     const skills = await run(["skills", "--on", "spoo", "--plain"]);
     expect(skills.lines.join("\n")).toMatch(/deploy\s+project www\s/);
   });

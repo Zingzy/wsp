@@ -71,8 +71,9 @@ describe("mcp servers", () => {
       bytes: 1800, default: "bring", consent: true,
       detail: "browser sign-ins saved by mcp-remote for remote servers: 1 token (1 KB), for zomato; older bridge versions' folders stay here",
     });
-    // The config itself is never listed here; it travels with the agent's row. No token file is read.
-    expect(host.calls.filter(c => c.startsWith("read "))).toEqual([`read ${HOME}/.claude.json`]);
+    // The config itself is never listed here; it travels with the agent's row. Each agent's own file is read, the
+    // first of its candidates that is there, and no token file.
+    expect(host.calls.filter(c => c.startsWith("read "))).toEqual([".claude.json", ".codex/config.toml", ".gemini/settings.json", ".config/opencode/opencode.json", ".config/opencode/opencode.jsonc"].map(f => `read ${HOME}/${f}`));
   });
 
   it("a server local to another project stays behind: its repo is not on the machine", async () => {
@@ -258,6 +259,7 @@ describe("mcp servers", () => {
       // The collector asks a format to read and nothing else: what writes a file is the install helper's and the
       // machine's, and this row's module is here to be read through.
       entryOf: () => undefined,
+      only: text => text,
       merge: (_lib, _scope, own) => ({ text: own ?? "", results: [], commentsDropped: false }),
       remove: text => ({ text }),
       refer: async text => ({ text, servers: [], entries: [] }),

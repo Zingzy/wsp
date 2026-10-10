@@ -11,6 +11,7 @@ import { readJsonc, type Jsonc } from "./jsonc.js";
 import type { McpCheck } from "./mcp-check.js";
 import type { McpLogin } from "./mcp-login.js";
 import { bearerOf, mcpBearerVariable } from "./mcp-bearer.js";
+import { resolveCodex, trustCodex } from "./mcp-codex.js";
 
 export type McpTransport =
   | { kind: "stdio"; command: string; args: string[]; env: Record<string, string>; cwd?: string; toolTimeoutSec?: number }
@@ -108,6 +109,13 @@ export interface McpFormat {
    * server as it was; absent on a format whose agent keeps no such switch per server. Throws when the text is not the
    * format or names no such server. */
   enable?(text: string, name: string, on: boolean, project?: string): Placed;
+  /** The file's text with the folder marked trusted, every other key as it was. Throws where the folder's entry is
+   * written in a shape this edit does not read. */
+  trust?(text: string | undefined, folder: string): Promise<Placed>;
+  /** A copy of the file holding the named servers alone, as one scope keeps them: read from under the folder `from`
+   * where the format keeps servers per folder, else from the file's own table, and written under the folder `to` the
+   * same way. A name the text does not define is left out. Throws when the text is not the format. */
+  only(text: string, names: readonly string[], from?: string, to?: string): string;
   /** The edit the import runs over the text it read off the machine. */
   edit: McpEditor;
   /** The definition one server has in a file of this format, in the one shape it keeps when the agent rewrites the
@@ -1153,6 +1161,13 @@ function jsonFormat(shape: JsonShape): McpFormat {
       return { text: editJsonc(text, root, [isObject(root[shape.key]) ? [[shape.key, name], entry] : [[shape.key], { [name]: entry }]]) };
     },
     edit: jsonEditor(shape.key),
+    only: (text, names, from, to) => {
+      const root = tree(readJsonc(text).value);
+      if (root === undefined) throw new Error("the file is not a JSON object");
+      const table = tree((from === undefined ? root : tree(tree(root.projects)?.[from]))?.[shape.key]) ?? {};
+      const kept = Object.fromEntries(names.filter(n => Object.hasOwn(table, n)).map(n => [n, table[n]]));
+      return `${JSON.stringify(to === undefined || !shape.projects ? { [shape.key]: kept } : { projects: { [to]: { [shape.key]: kept } } }, null, 2)}\n`;
+    },
     entryOf: (text, name, project) => {
       let held: unknown;
       try {
@@ -1745,41 +1760,15 @@ async function referCodex(text: string, only?: string, known: readonly KnownValu
   return { text: out, servers, entries };
 }
 
-/** Codex reads nothing inside its strings: a command's env_vars pass through where they have a value, and a header
- * named by env_http_headers or bearer_token_env_var is sent with its variable's value, which it must have. */
-function resolveCodex(server: McpServer, value: (name: string) => string | undefined): McpResolved {
-  const t = server.transport;
-  const r = server.reads;
-  if (r === undefined) return { transport: t, values: [] };
-  const values: string[] = [];
-  const read = (name: string): string | undefined => {
-    const got = value(name);
-    if (got !== undefined) values.push(got);
-    return got;
-  };
-  if (t.kind === "stdio") {
-    const env = { ...t.env };
-    for (const name of r.env) {
-      const got = read(name);
-      if (got !== undefined) env[name] = got;
-    }
-    return { transport: { ...t, env }, values };
-  }
-  const headers = { ...t.headers };
-  const sent = Object.entries(r.headers).map(([header, name]) => ({ header, name, bearer: false }));
-  if (r.bearer !== undefined) sent.push({ header: "Authorization", name: r.bearer, bearer: true });
-  for (const { header, name, bearer } of sent) {
-    const got = read(name);
-    if (got === undefined) return { missing: name };
-    headers[header] = bearer ? `Bearer ${got}` : got;
-  }
-  return { transport: { ...t, headers }, values };
-}
-
 export const CODEX_TOML: McpFormat = {
   read: readCodex,
   place: (text, name, server) => ({ text: placeCodex(text, name, server) }),
   edit: codexEditor,
+  only: (text, names) => {
+    const lines = text.split("\n");
+    const blocks = names.map(name => codexBlock(lines, name, true).map(i => lines[i]!).join("\n")).filter(b => b !== "");
+    return blocks.map(b => `${b}\n`).join("\n");
+  },
   entryOf: (text, name) => {
     const lines = text.split("\n");
     const at = codexBlock(lines, name, true);
@@ -1788,6 +1777,7 @@ export const CODEX_TOML: McpFormat = {
   merge: codexMerge,
   remove: removeCodex,
   enable: enableCodex,
+  trust: trustCodex,
   refer: referCodex,
   resolve: resolveCodex,
 };

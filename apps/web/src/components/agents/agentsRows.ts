@@ -4,7 +4,7 @@
 // sign-in roads, and the lines under the list. Each kind's own rows, detail
 // and acts are its module under kinds/.
 import { LogInIcon, PencilIcon, XIcon, type LucideIcon } from "lucide-react";
-import { agentName, catalogEntry, hasLogin, loginIdOf, mintsToken, serverSignInRoad, signInRoadOf } from "@wsp/catalog";
+import { agentName, catalogEntry, hasLogin, loginIdOf, loginThere, mintsToken, serverSignInRoad, signInRoadOf } from "@wsp/catalog";
 import { outcomeWord } from "../../settings/places.js";
 import { agentOfRow, type AgentRow, type AgentsProject, type AgentsReport, type AgentsTarget, type McpRow, type McpScope, type PageReach, type PlaceProvisionRow, type SealedImage, type ServerAdd, type ServerToolsAnswer, type SignInRoad, type SkillHit, type SkillPreview, type SkillRow } from "@wsp/protocol";
 
@@ -400,6 +400,15 @@ export function agentSignInStart(row: Pick<AgentRow, "id" | "signInRoad">, ctx: 
     return { kind: "copy", line: `wsp agents signin ${row.id}` };
   }
   return row.signInRoad === "none" ? undefined : { kind: "run", agent: row.id, ...(row.signInRoad === "code" ? { pastes: true } : {}) };
+}
+
+/** How a way of an agent that mints its token here starts from a setup's row: the token made on the computer the host
+ * runs on, or the agent's own login on the box, its code pasted under the row where its page hands one back. */
+export function wayStart(agent: string, way: "token" | "machine"): SignInStart {
+  if (way === "token") return { kind: "run", agent };
+  const signIn = catalogEntry(agent)?.signIn;
+  const login = signIn === undefined ? undefined : loginThere(signIn);
+  return { kind: "run", agent, ...(login !== undefined && signInRoadOf(login) === "code" ? { pastes: true } : {}) };
 }
 
 /** How one server's Sign in goes: its harness's own command in a watched pty, or the line the person runs where

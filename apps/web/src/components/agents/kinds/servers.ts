@@ -32,7 +32,7 @@ export interface ServerEntry {
   readonly rows: readonly McpRow[];
 }
 
-const scopeOf = (row: McpRow): Scope => (row.scope === "project" ? "project" : "global");
+const scopeOf = (row: McpRow): Scope => (row.scope === "project" || row.scope === "local" ? "project" : "global");
 const reachOf = (row: McpRow): string => (row.transport.kind === "stdio" ? row.transport.line : row.transport.host);
 /** The box a server's row and detail lead with: its company's registered mark, else its own icon where it is reached
  * over an address. */

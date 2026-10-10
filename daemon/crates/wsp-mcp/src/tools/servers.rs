@@ -321,11 +321,14 @@ async fn changed(host: Arc<Host>, arguments: Value, tool: &'static str, turn: Op
     Ok(Answer::text(line, &out))
 }
 
-/// The scope a call names, which its schema has already held to the three, and a project, which is the project scope.
+/// The scope a call names, which its schema has already held to the four, and a project, which is the project scope
+/// alone and names the project a local scope's server is kept for.
 fn server_scope(words: &Words, scope: Option<String>, asked: &Asked, usage: &str) -> Result<Option<String>, Failure> {
     match scope {
         None => Ok(asked.project.then(|| "project".to_owned())),
-        Some(scope) if asked.project && scope != "project" => Err(refused(&words.project_scope, &[("scope", &scope)], usage)),
+        Some(scope) if asked.project && scope != "project" && scope != "local" => {
+            Err(refused(&words.project_scope, &[("scope", &scope)], usage))
+        }
         Some(scope) => Ok(Some(scope)),
     }
 }

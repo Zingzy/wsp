@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { execFile, execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir, userInfo } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
@@ -307,6 +307,74 @@ describe("the agents report off this computer and off a workspace", () => {
     ]);
     expect(read.servers.filter(s => s.scope !== "project").every(s => s.project === undefined)).toBe(true);
     nothingLeaked(at, read, lines);
+  });
+
+  it("lists what a turn in a project gets: its local entry, each .mcp.json from the folder up, and Codex's project file only where Codex trusts it", async () => {
+    const at = fixture();
+    const own = JSON.parse(readFileSync(join(at.home, ".claude.json"), "utf8")) as { projects: Record<string, unknown> };
+    own.projects[at.project] = { mcpServers: { "local-one": { command: "node", args: ["local.js"] } }, disabledMcpServers: ["parent-off"], disabledMcpjsonServers: ["parent-gone"] };
+    writeFileSync(join(at.home, ".claude.json"), JSON.stringify(own));
+    writeFileSync(join(at.home, "code", ".mcp.json"), JSON.stringify({ mcpServers: { "parent-one": { command: "npx", args: ["one"] }, "parent-off": { command: "npx", args: ["off"] }, "parent-gone": { command: "npx", args: ["gone"] } } }));
+    mkdirSync(join(at.project, ".codex"), { recursive: true });
+    writeFileSync(join(at.project, ".codex/config.toml"), '[mcp_servers.codex-proj]\ncommand = "npx"\nargs = ["p"]\n');
+    const { machine } = road(at);
+    const app = { id: "pr_app", name: "app", path: at.project };
+    const rows = async () => (await agentsReader({ vault: () => ({}) }).read({ kind: "box", machine, login: { HOME: at.home, PATH: `${at.bin}:/usr/bin:/bin` }, projects: [app] })).servers.filter(s => s.project !== undefined).map(s => [s.agent, s.name, s.scope, s.file, s.enabled]);
+    expect(await rows()).toEqual([
+      ["claude", "local-one", "local", "~/.claude.json", true],
+      ["claude", "parent-off", "project", "~/code/.mcp.json", false],
+      ["claude", "parent-one", "project", "~/code/.mcp.json", true],
+      ["claude", "project-db", "project", "~/code/app/.mcp.json", true],
+    ]);
+    writeFileSync(join(at.home, ".codex/config.toml"), `${readFileSync(join(at.home, ".codex/config.toml"), "utf8")}\n[projects."${at.project}"]\ntrust_level = "trusted"\n`);
+    expect((await rows()).filter(r => r[0] === "codex")).toEqual([["codex", "codex-proj", "project", "~/code/app/.codex/config.toml", true]]);
+  });
+
+  it("lists an OpenCode project's servers from opencode.jsonc where that is the file the project keeps", async () => {
+    const at = fixture();
+    writeFileSync(join(at.project, "opencode.jsonc"), '{\n  // the project\'s own\n  "mcp": { "theirs": { "type": "local", "command": ["t"] } }\n}\n');
+    const { machine } = road(at);
+    const read = await agentsReader({ vault: () => ({}) }).read({ kind: "box", machine, login: { HOME: at.home, PATH: `${at.bin}:/usr/bin:/bin` }, projects: [{ id: "pr_app", name: "app", path: at.project }] });
+    expect(read.servers.filter(s => s.agent === "opencode" && s.project !== undefined).map(s => [s.name, s.scope, s.file])).toEqual([["theirs", "project", "~/code/app/opencode.jsonc"]]);
+  });
+
+  it("reads a project recorded at a subfolder of its repository from the repository's top, for both agents", async () => {
+    const at = fixture();
+    // Both agents key a folder by its real path, which git answers; a temporary folder on a Mac sits behind a link.
+    const top = realpathSync(at.project);
+    const sub = join(top, "web");
+    mkdirSync(join(sub, ".codex"), { recursive: true });
+    mkdirSync(join(top, ".codex"), { recursive: true });
+    execFileSync("git", ["init", "-q", top]);
+    const own = JSON.parse(readFileSync(join(at.home, ".claude.json"), "utf8")) as { projects: Record<string, unknown> };
+    own.projects[top] = { mcpServers: { "repo-local": { command: "node", args: ["r.js"] } } };
+    own.projects[sub] = { mcpServers: { "sub-local": { command: "node", args: ["s.js"] } } };
+    writeFileSync(join(at.home, ".claude.json"), JSON.stringify(own));
+    writeFileSync(join(top, ".codex/config.toml"), '[mcp_servers.codex-top]\ncommand = "npx"\n');
+    writeFileSync(join(sub, ".codex/config.toml"), '[mcp_servers.codex-sub]\ncommand = "npx"\n');
+    writeFileSync(join(at.home, ".codex/config.toml"), `${readFileSync(join(at.home, ".codex/config.toml"), "utf8")}\n[projects."${top}"]\ntrust_level = "trusted"\n`);
+    const { machine } = road(at);
+    const read = await agentsReader({ vault: () => ({}) }).read({ kind: "box", machine, login: { HOME: at.home, PATH: `${at.bin}:/usr/bin:/bin` }, projects: [{ id: "pr_web", name: "web", path: sub }] });
+    // Claude Code's local entry and Codex's project files; the .mcp.json files above are the other test's.
+    const rows = read.servers.filter(s => s.project !== undefined && (s.agent === "codex" || s.scope === "local")).map(s => [s.agent, s.name, s.scope]);
+    expect(rows).toEqual([
+      ["claude", "repo-local", "local"],
+      ["codex", "codex-sub", "project"],
+      ["codex", "codex-top", "project"],
+    ]);
+  });
+
+  it("says a server carried with a project is wsp's on a box, off the key the list beside the job keeps under the project's folder", async () => {
+    const at = fixture();
+    const own = JSON.parse(readFileSync(join(at.home, ".claude.json"), "utf8")) as { projects: Record<string, unknown> };
+    own.projects[at.project] = { mcpServers: { carried: { command: "node", args: ["c.js"] }, theirs: { command: "node", args: ["t.js"] } } };
+    writeFileSync(join(at.home, ".claude.json"), JSON.stringify(own));
+    const landed = placeProvisionPaths(at.home).landed;
+    mkdirSync(dirname(landed), { recursive: true });
+    writeFileSync(landed, `agents/mcp/claude/@${encodeURIComponent(at.project)}/carried\tabc\tabc\n`);
+    const { machine } = road(at);
+    const read = await agentsReader({ vault: () => ({}) }).read({ kind: "box", machine, login: { HOME: at.home, PATH: `${at.bin}:/usr/bin:/bin` }, projects: [{ id: "pr_app", name: "app", path: at.project }] });
+    expect(read.servers.filter(s => s.scope === "local").map(s => [s.name, s.inRecipe])).toEqual([["carried", true], ["theirs", false]]);
   });
 
   it("a project skills folder that links out of the repo is left out and said in one refusal line, which the agents panel lists under its rows", async () => {

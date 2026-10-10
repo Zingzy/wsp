@@ -10,7 +10,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { act, cleanup, fireEvent, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { AT_ITS_TERMINAL, PLACE_HOST_KEY_KIND, closedBeforeSignInLine, PLACE_SUDO_KIND, RecipeFile, SKIPPED_FOR_NOW, copiedFromLine, noCopyLine, signInThereFix, signInWithFix, type AgentsSignInEvent, type AgentsTarget, type AgentRow, type AgentsReport, type PlaceAddJob, type PlaceAddStep, type EventUnion, type PendingComputer, type PlaceSetup, type PlaceView, type ProjectView, type RecipeOptions, type RecipeView } from "@wsp/protocol";
+import { AT_ITS_TERMINAL, PLACE_HOST_KEY_KIND, closedBeforeSignInLine, PLACE_SUDO_KIND, RecipeFile, SKIPPED_FOR_NOW, copiedFromLine, noCopyLine, noKeyLine, signInThereFix, signInWaysFix, type AgentsSignInEvent, type AgentsTarget, type AgentRow, type AgentsReport, type PlaceAddJob, type PlaceAddStep, type EventUnion, type PendingComputer, type PlaceSetup, type PlaceView, type ProjectView, type RecipeOptions, type RecipeView } from "@wsp/protocol";
 import { RequestError, type Api, type SshLogin } from "../src/protocol/client.js";
 import { useNotices } from "../src/notices/store.js";
 import { useStore } from "../src/protocol/store.js";
@@ -464,6 +464,22 @@ describe("Add a computer's picks read the host's facts", () => {
     expect(size("codex")).toEqual(["40 MB", "muted"]);
     expect(dialog()!.querySelector("[data-pick-row='claude'] [data-slot=select-trigger]")?.textContent).toBe("Copy the key");
     expect(dialog()!.querySelector("[data-pick-row='codex'] [data-slot=select-trigger]")?.textContent).toBe("Sign in on studio with a code");
+  });
+
+  it("starts Claude Code's sign-in at the way the host read first, offers all three, and says where a key goes", async () => {
+    const billed = { ...FACTS, agents: [{ id: "claude", name: "Claude Code", signins: ["key", "token", "machine"], kind: "token" }] } as RecipeOptions;
+    await open("agents", undefined, { recipesOptions: async () => billed } as Partial<Api>);
+    await waitFor(() => expect(ticked("claude")).toBe(true));
+    const row = (): HTMLElement => dialog()!.querySelector<HTMLElement>("[data-pick-row='claude']")!;
+    expect(row().querySelector("[data-slot=select-trigger]")?.textContent).toBe("Use an API key");
+    expect(row().querySelector("[data-pick-note]")?.textContent).toBe("Put ANTHROPIC_API_KEY in ~/.wsp/.env on zingzy's MacBook Pro first, and wsp reads it from there without showing it.");
+    await press(row().querySelector("[data-slot=select-trigger]"));
+    await waitFor(() => expect([...document.querySelectorAll("[role=option]")].map(o => o.textContent)).toEqual(["Use an API key", "Make a token", "Sign in on studio"]));
+    const token = [...document.querySelectorAll("[role=option]")].find(o => o.textContent === "Make a token")!;
+    fireEvent.pointerDown(token, { pointerType: "mouse" });
+    fireEvent.mouseUp(token);
+    await press(token);
+    await waitFor(() => expect(row().querySelector("[data-pick-note]")?.textContent).toBe("claude setup-token runs on zingzy's MacBook Pro and asks your browser once."));
   });
 
   it("says how each MCP server signs in on the computer, as the agents step says it for an agent", async () => {
@@ -1188,25 +1204,28 @@ describe("Add a computer, the running sheet as the host has it", () => {
     refused: [],
   });
 
-  it("signs Claude Code in with a token pasted on its row where this computer had none to copy, as the computer's Sign-ins do", async () => {
-    const keyed: { agent: string; key: string }[] = [];
-    const fake = host({ agentsRead: async () => boxReport(), agentsKey: async (agent: string, key: string) => void keyed.push({ agent, key }) } as Partial<Api>);
-    const run: PlaceView["applied"] = { hash: "h", at: "x", rows: [{ id: "signins/claude", label: "Claude Code", outcome: "failed", step: "signins", note: noCopyLine("Claude Code", "zingzy's MacBook Pro"), fix: signInWithFix("Claude Code", "token") }] };
-    useStore.setState({ places: [here, placed(DONE, run)] });
+  it("offers Claude Code's three ways on its failed row, each button named by the row's line, the detected one first", async () => {
+    const setups: { ref: string; o: { choices?: RecipeFile } }[] = [];
+    const fake = signInHost({ agentsRead: async () => boxReport(), placesSetup: async (ref: string, o: { choices?: RecipeFile }) => (setups.push({ ref, o }), { addId: "a_key", place: studio }) } as Partial<Api>);
+    const fix = signInWaysFix(["key", "token", "machine"], { name: "Claude Code", here: "zingzy's MacBook Pro", box: "studio", mint: "claude setup-token", keyEnv: "ANTHROPIC_API_KEY" });
+    const run: PlaceView["applied"] = { hash: "h", at: "x", rows: [{ id: "signins/claude", label: "Claude Code", outcome: "failed", step: "signins", note: noKeyLine("ANTHROPIC_API_KEY", "zingzy's MacBook Pro"), fix }] };
+    const picks = RecipeFile.parse({ name: "studio", agents: { claude: { signin: "key" } } });
+    useStore.setState({ places: [here, { ...placed(DONE, run), picks }] });
     mountSettings({ api: fake.api, at: { kind: "group", group: "computers" } });
     act(() => openSetup(studio.id));
     await settle();
     const claude = (): HTMLElement => dialog()!.querySelector<HTMLElement>("[data-step-row='signins/claude']")!;
-    expect(claude().textContent).toContain("Sign in with a Claude Code token instead.");
-    expect([...claude().querySelectorAll("button")].map(b => b.textContent)).toEqual(["Sign in on studio", "Skip"]);
+    const buttons = [...claude().querySelectorAll("button")].map(b => b.textContent ?? "");
+    expect(buttons).toEqual(["Use an API key", "Make a token", "Sign in on studio", "Skip"]);
+    for (const label of buttons.slice(0, 3)) expect(claude().textContent).toContain(`${label}:`);
+    // A token is made on the computer the host runs on, a sign-in on the box itself.
+    await press(claude().querySelector("[data-k=sign-in-token]"));
+    expect(fake.signIns).toEqual([{ target: { placeId: "here" }, agent: "claude" }]);
     await press(claude().querySelector("[data-k=sign-in]"));
-    expect(claude().querySelector("[data-k=sign-in-mint]")?.textContent).toBe("claude setup-token");
-    // The paste stands under the row with Cancel to close it, and no empty refusal room above that.
-    expect([...claude().querySelectorAll("[data-k=sign-in], [data-k=skip]")].map(b => b.textContent)).toEqual(["Cancel", "Skip"]);
-    expect(claude().querySelector("[data-k=sign-in-refused]")).toBeNull();
-    fireEvent.change(claude().querySelector("[data-k=sign-in-key]")!, { target: { value: "sk-ant-oat01-x" } });
-    await press(claude().querySelector("[data-k=sign-in-save]"));
-    expect(keyed).toEqual([{ agent: "claude", key: "sk-ant-oat01-x" }]);
+    expect(fake.signIns.at(-1)).toEqual({ target: { placeId: studio.id }, agent: "claude" });
+    // The key is put in the wsp home's .env by the person; the button runs the setup again with that way picked.
+    await press(claude().querySelector("[data-k=sign-in-key]"));
+    expect(setups.map(s => [s.ref, s.o.choices?.agents["claude"]?.signin])).toEqual([[studio.id, "key"]]);
   });
 
   it("opens OpenCode's sign-in in place as its own terminal on the computer, since it asks which provider: no line to copy", async () => {
@@ -1420,7 +1439,7 @@ describe("Add a computer, the running sheet as the host has it", () => {
     act(() => closeAdd());
     // Claude Code's row here had nothing to copy, over the owner's run where it copied.
     const rows = [
-      { id: "signins/claude", label: "Claude Code", outcome: "failed" as const, step: "signins" as const, note: noCopyLine("Claude Code", "zingzy's MacBook Pro"), fix: signInWithFix("Claude Code", "token") },
+      { id: "signins/claude", label: "Claude Code", outcome: "failed" as const, step: "signins" as const, note: noCopyLine("Claude Code", "zingzy's MacBook Pro"), fix: signInWaysFix(["token", "key", "machine"], { name: "Claude Code", here: "zingzy's MacBook Pro", box: "studio", mint: "claude setup-token", keyEnv: "ANTHROPIC_API_KEY" }) },
       { id: "signins/opencode", label: "OpenCode", outcome: "skipped" as const, step: "signins" as const, note: AT_ITS_TERMINAL },
       { id: "folders/app", label: "app", outcome: "failed" as const, step: "folders" as const, note: "private; needs GitHub to clone", fix: "Sign GitHub in on studio, then retry." },
       ...OWNERS_RUN!.rows,

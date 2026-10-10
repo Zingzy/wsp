@@ -8,7 +8,7 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { AT_ITS_TERMINAL, DAEMON_VERSION, waitsForInstallLine, placeCurrentLine, placeProvisioningLine, type PlaceProvisionRow, type PlaceSetup, PlaceReport, placeDaemonPaths, placeNoChipLine, placeOwnedPaths, placeUpdateLine, shellQuote, type PlaceView, type SignInLine } from "@wsp/protocol";
+import { AT_ITS_TERMINAL, CODE_FROM_ROW, DAEMON_VERSION, waitsForInstallLine, placeCurrentLine, placeProvisioningLine, type PlaceProvisionRow, type PlaceSetup, PlaceReport, placeDaemonPaths, placeNoChipLine, placeOwnedPaths, placeUpdateLine, shellQuote, type PlaceView, type SignInLine } from "@wsp/protocol";
 import { type PlaceUpdateRequest } from "@wsp/runtime";
 import { type SshRiding } from "@wsp/engine";
 import { daemonBinaryIn, GUEST_DAEMON_TARGETS, noPlaceSystemLine } from "../src/daemon-binary.js";
@@ -115,6 +115,8 @@ describe("wsp add <place> --sign-in <agent>", () => {
     expect(signInRowCommand("spoo", { id: "signins/opencode", label: "OpenCode", note: AT_ITS_TERMINAL })).toBe("wsp add spoo --sign-in opencode");
     // Claude Code has no login to run there: its token goes in this host's vault, which every turn there reads.
     expect(signInRowCommand("spoo", { id: "signins/claude", label: "Claude Code" })).toBe("wsp agents key claude");
+    // Picked to sign in on that computer, its row was set aside for that sign-in, which the vault's token would bill over.
+    expect(signInRowCommand("spoo", { id: "signins/claude", label: "Claude Code", note: CODE_FROM_ROW })).toBe("wsp add spoo --sign-in claude");
     expect(signInRowCommand("spoo", { id: "tools/brew/jq", label: "jq" })).toBeUndefined();
     // Codex did not install there, so no login runs until a Retry puts it on.
     expect(signInRowCommand("spoo", { id: "signins/codex", label: "Codex", note: waitsForInstallLine("Codex") })).toBeUndefined();
@@ -132,13 +134,15 @@ describe("wsp add <place> --sign-in <agent>", () => {
     expect(io.lines.join("\n")).toContain("wsp add spoo --sign-in codex");
   });
 
-  it("refuses an agent whose login sits in the image, a computer no place answers to, and the flags of a join", async () => {
+  it("refuses a name with no sign-in to run on a computer, a computer no place answers to, and the flags of a join", async () => {
     const io = captured();
     const run = signingIn({ signedIn: true });
-    // Claude Code's login is a token on this computer, so there is nothing to sign in on a box.
-    expect(await addCommand(io, opts(tmp("signin-claude")), ["spoo"], { signIn: "claude" }, run.deps)).toBe(1);
-    expect(io.errors.join("\n")).toContain("codex");
+    expect(await addCommand(io, opts(tmp("signin-jq")), ["spoo"], { signIn: "jq" }, run.deps)).toBe(1);
+    expect(io.errors.join("\n")).toContain("claude, codex");
     expect(run.asked).toEqual([]);
+    // Claude Code's token is made on this computer, and its own login runs on a box as the third way.
+    expect(await addCommand(captured(), opts(tmp("signin-claude")), ["spoo"], { signIn: "claude" }, run.deps)).toBe(0);
+    expect(run.asked.map(a => a.agent)).toEqual(["claude"]);
     const gone = captured();
     expect(await addCommand(gone, opts(tmp("signin-none")), ["laptop"], { signIn: "codex" }, run.deps)).toBe(1);
     expect(gone.errors[0]).toContain("It holds spoo.");

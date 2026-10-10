@@ -117,6 +117,7 @@
                 "enum": [
                   "user",
                   "home",
+                  "local",
                   "project"
                 ]
               },
@@ -388,6 +389,7 @@
                 "enum": [
                   "user",
                   "home",
+                  "local",
                   "project"
                 ]
               },
