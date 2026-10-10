@@ -3,6 +3,7 @@
 // real shell over a real directory standing in for that computer's home: what
 // it is for is deciding whether a file there is theirs or wsp's own copy, and
 // only a shell reading the bytes decides that.
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -207,6 +208,26 @@ describe("the landing on the computer itself", { timeout: 60_000 }, () => {
       [`${root}/.claude-cfg/skills/why/SKILL.md`, "installed"],
     ]);
     expect(landed.skipped).toEqual([{ id: "agents/codex", path: `${root}/.codex/AGENTS.md`, note: "already there with other content; wsp did not write over it" }]);
+  });
+
+  it("writes over an empty file, which a workspace on that computer leaves as the mount point of its own copy, so the git identity lands", async () => {
+    const { root, machine } = box();
+    for (const rel of [".gitconfig", ".zshrc", ".zshenv"]) write(root, rel, "");
+    const lands: ProvisionLanding[] = [
+      { id: "configs/git", label: "git config", dest: ".gitconfig" },
+      { id: "configs/shell", label: "shell config", dest: ".zshrc" },
+      { id: "configs/shell", label: "shell config", dest: ".zshenv" },
+    ];
+    const tar = tarOf([file(".gitconfig", "[user]\n\tname = Dev\n\temail = dev@acme.test\n"), file(".zshrc", "setopt autocd\n"), file(".zshenv", "export EDITOR=vi\n")]);
+    const landed = await landAgentFiles(machine, { home: root, tar, lands, say: QUIET });
+    expect(landed.rows.map(r => [r.id, r.outcome, r.note])).toEqual([
+      ["files/.gitconfig", "installed", undefined],
+      ["files/.zshrc", "installed", undefined],
+      ["files/.zshenv", "installed", undefined],
+    ]);
+    expect(landed.skipped).toEqual([]);
+    const ident = execFileSync("git", ["var", "GIT_AUTHOR_IDENT"], { cwd: root, env: { PATH: process.env["PATH"] ?? "/usr/bin:/bin", HOME: root, GIT_CONFIG_NOSYSTEM: "1" }, encoding: "utf8" });
+    expect(ident).toMatch(/^Dev <dev@acme\.test> \d+ [+-]\d{4}\n$/);
   });
 
   it("lands its own copy again when this computer's file changed, and leaves that file alone once the person has written it themselves", async () => {

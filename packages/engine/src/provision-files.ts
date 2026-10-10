@@ -262,7 +262,9 @@ export function landFilesScript(home: string, once: readonly string[] = [], root
     '  rel=${p#./}',
     '  src="$stage/$rel"; wsp_dest "$rel"',
     '  s=$(sha256sum "$src" | cut -d" " -f1)',
-    '  if [ ! -e "$dest" ]; then act=installed',
+    // An empty file is nobody's content: a workspace on that computer makes one at each path it covers as the mount
+    // point of its own copy, and leaves it behind.
+    '  if [ ! -e "$dest" ] || { [ -f "$dest" ] && [ ! -s "$dest" ]; }; then act=installed',
     // A file its agent writes for itself stands as it is from its first landing on: the agent rewrites it at every
     // launch, so its bytes are never wsp's to replace, and what the recipe has to say about it is its server keys.
     '  elif wsp_once "$rel"; then act=present',

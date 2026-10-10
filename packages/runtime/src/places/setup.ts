@@ -17,6 +17,7 @@ import {
   SETUP_STEP_WORDS,
   SIGN_IN_WAIT_MS,
   copiedFromLine,
+  copiedNotSignedInLine,
   SIGNED_IN_THERE,
   NO_SIGN_IN_ROAD,
   NO_FOLDER_ROAD,
@@ -54,7 +55,7 @@ import {
   toolRowId,
 } from "@wsp/protocol";
 import { GITHUB_TOKEN_ENV, unlandFiles, PlaceAbsentError, PlaceMachine, envInput, hookOf, newSetupRun, pathLine, putFiles, storesReached, withEnvFromInput, type EngineStep, type ExecResult, type Machine, type MachineLink, type ProvisionPlan, type ProvisionStage } from "@wsp/engine";
-import { CATALOG_AGENTS, asksThePerson, hasLogin, loginSignIn, mintsToken, serverValuesOf } from "@wsp/catalog";
+import { CATALOG_AGENTS, asksThePerson, hasLogin, loginSignIn, mintsToken, serverValuesOf, sharedOn } from "@wsp/catalog";
 import { runGraph, type GraphStep } from "../setup-graph.js";
 import { recipeChanges, stepsFor, type RecipeChange } from "../recipe-sync.js";
 import { appliedView, type FolderMove, type HeldApplied, type HeldRow, type PlaceRecord, type RecipeResolver } from "./types.js";
@@ -425,6 +426,10 @@ export function placeSetup(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea) 
       signInThere(agent, id, label, "signins");
     };
 
+    /** A login runs where its agent is, and only its agent's status reads one standing there: an agent that did not
+     * install has neither until a Retry puts it on. */
+    const notInstalled = (agent: string): boolean => rows.some(r => agentOfRow(r) === agent && r.outcome === "failed");
+
     /** The sign-ins step: an agent that signs in from the vault reads its token there now, and every turn there is
      * handed it; an agent that signs in on that computer and is not signed in there yet is started and left waiting
      * on the person. */
@@ -434,8 +439,7 @@ export function placeSetup(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea) 
         if (sync !== undefined && !sync.changes.some(c => c.key === `agents/${agent}` && (c.how === "added" || c.how === "changed"))) continue;
         const label = CATALOG_AGENTS.find(a => a.id === agent)?.name ?? agent;
         if ((row.signin ?? "vault") === "machine") {
-          // A login runs where its agent is: one that did not install has nothing to run until a Retry puts it on.
-          if (rows.some(r => agentOfRow(r) === agent && r.outcome === "failed")) {
+          if (notInstalled(agent)) {
             out.push({ id: signInRowId(agent), label, outcome: "skipped", note: waitsForInstallLine(label) });
             continue;
           }
@@ -443,11 +447,38 @@ export function placeSetup(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea) 
           continue;
         }
         const signIn = CATALOG_AGENTS.find(a => a.id === agent)?.signIn;
+        if (vaultSignIn(agent, vault()) === "vault-key") {
+          out.push({ id: signInRowId(agent), label, outcome: "present", note: copiedFromLine(here()) });
+          continue;
+        }
+        const copied = await loginCopied(agent, label, plan);
+        if (copied !== undefined) {
+          out.push(copied);
+          continue;
+        }
         // An agent with no login to run there signs in with the token or key this host keeps for every turn there.
         const fix = signIn === undefined || hasLogin(signIn) ? signInThereFix(record.name) : signInWithFix(label, mintsToken(signIn) ? "token" : "key");
-        out.push(vaultSignIn(agent, vault()) === "vault-key" ? { id: signInRowId(agent), label, outcome: "present", note: copiedFromLine(here()) } : { id: signInRowId(agent), label, outcome: "failed", note: noCopyLine(label, here()), fix });
+        out.push({ id: signInRowId(agent), label, outcome: "failed", note: noCopyLine(label, here()), fix });
       }
       return out;
+    };
+
+    /** An agent's login as this computer holds it, put where every thread there reads it, on the run's input alone:
+     * a login standing there already stays, since only the person's own Sign in may replace one. Nothing where this
+     * computer holds no login of that agent's or its threads' folder for it is out of the login's reach. */
+    const loginCopied = async (agent: string, label: string, plan: ProvisionPlan): Promise<PlaceProvisionRow | undefined> => {
+      const shared = sharedOn(agent);
+      const held = shared === undefined ? undefined : await recording.loginHere?.(agent).catch(() => undefined);
+      const store = held === undefined ? undefined : (await storesHere())?.[agent];
+      if (shared === undefined || held === undefined || store === undefined) return undefined;
+      const id = signInRowId(agent);
+      // A copy over a login no status could read would replace it.
+      if (notInstalled(agent)) return { id, label, outcome: "skipped", note: waitsForInstallLine(label) };
+      if (await agentSignedIn(agent, plan)) return { id, label, outcome: "present", note: SIGNED_IN_THERE };
+      const at = shellQuote(`${store}/${shared.file}`);
+      const put = await machine.exec(`umask 077 && mkdir -p ${shellQuote(store)} && cat > ${at}.wsp && mv -f ${at}.wsp ${at}`, { timeoutMs: SIGNIN_STATUS_MS, stdin: held }).catch((e: unknown) => ({ exitCode: -1, stdout: "", stderr: firstLineOf(e) }));
+      if (put.exitCode !== 0) return { id, label, outcome: "failed", note: lastLine(put.stderr) ?? `the copy exited ${put.exitCode}`, fix: signInThereFix(record.name) };
+      return (await agentSignedIn(agent, plan)) ? { id, label, outcome: "installed", note: copiedFromLine(here()) } : { id, label, outcome: "failed", note: copiedNotSignedInLine(label, here()), fix: signInThereFix(record.name) };
     };
 
     /** Whether gh can clone a private repository there, which the GitHub step settles: at once from the vault or a
