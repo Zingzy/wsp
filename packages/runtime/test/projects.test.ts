@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpath
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cloneIntoNeeded, cloneIntoTakenLine, cloneUrlRefusal, INTO_TAKES_A_REPO_LINE, noComputerForSourceLine, HERE_PLACE_ID, NO_IMAGE_FOR_SEED, noRemoteLine, copyTakesNone, idPrefixRefusal, noWorkspaceRefusal, projectInUseRefusal, sameSourceRefusal, seedChoiceNeeded, type AdapterEvent, type Caller, type EventUnion, type SeedPlan, type TurnResult } from "@wsp/protocol";
+import { cloneIntoFileLine, cloneIntoNeeded, cloneIntoTakenLine, cloneUrlRefusal, INTO_TAKES_A_REPO_LINE, noComputerForSourceLine, HERE_PLACE_ID, NO_IMAGE_FOR_SEED, noRemoteLine, copyTakesNone, idPrefixRefusal, noWorkspaceRefusal, projectInUseRefusal, sameSourceRefusal, seedChoiceNeeded, type AdapterEvent, type Caller, type EventUnion, type SeedPlan, type TurnResult } from "@wsp/protocol";
 import { createRuntime, NO_SEED_WIRING, type HarnessAdapterFactory, type HarnessStartOptions, type Runtime, type SeedWiring } from "../src/runtime.js";
 import { memoryStore } from "../src/store.js";
 import { writeStub } from "../../protocol/test/stub-script.js";
@@ -155,14 +155,46 @@ describe("recording a project", () => {
       expect((await rt.projects.list()).map(p => p.source)).toEqual([{ kind: "folder", path: dest }]);
     });
 
-    it("clones owner/repo through gh into an empty folder that already exists", async () => {
+    it("clones owner/repo through gh into an empty folder that already exists and carries the repo's name", async () => {
       const rig = cloneRig();
       const { rt } = withLocal();
-      const dest = rig.into("empty");
+      const dest = rig.into("spoo.me");
       mkdirSync(dest);
       const project = await rt.projects.add({ source: "spoo-me/spoo.me", into: dest, name: "spoo" });
       expect(project).toMatchObject({ name: "spoo", source: { kind: "folder", path: dest } });
       expect(rig.calls().filter(c => c.argv[0] === "gh")).toEqual([{ prompt: "0", argv: ["gh", "repo", "clone", "spoo-me/spoo.me", dest] }]);
+    });
+
+    it("clones into a folder of the repo's name inside a folder picked that stands, as git clone does, and that folder is the project", async () => {
+      const rig = cloneRig();
+      const { rt } = withLocal();
+      const downloads = rig.into("Downloads");
+      mkdirSync(downloads);
+      writeFileSync(join(downloads, "invoice.pdf"), "mine");
+      const project = await rt.projects.add({ source: "https://github.com/acme/lab.git", into: downloads });
+      const dest = join(downloads, "lab");
+      expect(project).toMatchObject({ computer: HERE_PLACE_ID, name: "lab", path: dest, source: { kind: "folder", path: dest } });
+      expect(readFileSync(join(dest, "README.md"), "utf8")).toBe("spoo\n");
+      // An empty folder of another name is a folder picked too, so the clone lands inside it.
+      const empty = rig.into("code");
+      mkdirSync(empty);
+      await rt.projects.add({ source: "acme/site", into: empty });
+      expect(rig.calls().filter(c => c.argv[1] === "clone" || c.argv[0] === "gh").map(c => c.argv.at(-1))).toEqual([dest, join(empty, "site")]);
+    });
+
+    it("refuses a folder of the repo's name that holds something, offering the next name nothing stands at", async () => {
+      const rig = cloneRig();
+      const { rt } = withLocal();
+      const downloads = rig.into("Downloads");
+      mkdirSync(join(downloads, "lab"), { recursive: true });
+      writeFileSync(join(downloads, "lab", "notes.txt"), "mine");
+      await expect(rt.projects.add({ source: "https://github.com/acme/lab", into: downloads })).rejects.toThrow(cloneIntoTakenLine(join(downloads, "lab"), join(downloads, "lab-2")));
+      mkdirSync(join(downloads, "lab-2"));
+      await expect(rt.projects.add({ source: "https://github.com/acme/lab", into: downloads })).rejects.toThrow(cloneIntoTakenLine(join(downloads, "lab"), join(downloads, "lab-3")));
+      // The name offered is a folder that does not stand yet, which is itself the clone's folder.
+      const project = await rt.projects.add({ source: "https://github.com/acme/lab", into: join(downloads, "lab-3") });
+      expect(project).toMatchObject({ path: join(downloads, "lab-3") });
+      expect(readdirSync(join(downloads, "lab"))).toEqual(["notes.txt"]);
     });
 
     it("refuses a folder that holds something, a url with no folder, and a url no clone should run, cloning nothing", async () => {
@@ -171,8 +203,7 @@ describe("recording a project", () => {
       const full = rig.into("full");
       mkdirSync(full);
       writeFileSync(join(full, "notes.txt"), "mine");
-      await expect(rt.projects.add({ source: REPO, into: full })).rejects.toThrow(cloneIntoTakenLine(full));
-      await expect(rt.projects.add({ source: REPO, into: join(full, "notes.txt") })).rejects.toThrow(cloneIntoTakenLine(join(full, "notes.txt")));
+      await expect(rt.projects.add({ source: REPO, into: join(full, "notes.txt") })).rejects.toThrow(cloneIntoFileLine(join(full, "notes.txt")));
       await expect(rt.projects.add({ source: REPO, on: HERE_PLACE_ID })).rejects.toThrow(cloneIntoNeeded(REPO));
       await expect(rt.projects.add({ source: REPO })).rejects.toThrow(noComputerForSourceLine(REPO, ["default"]));
       await expect(rt.projects.add({ source: "file:///etc", into: rig.into("etc") })).rejects.toThrow(cloneUrlRefusal("file:///etc")!);

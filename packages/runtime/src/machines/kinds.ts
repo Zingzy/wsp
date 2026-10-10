@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { existsSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, resolve as resolvePathOn } from "node:path";
+import { basename, dirname, join, resolve as resolvePathOn } from "node:path";
 import { CATALOG_AGENTS, GUEST_HOME, guestEnv, loginHomeIn, sharedLoginOf, sharedOn } from "@wsp/catalog";
 import { INLINE_EXEC_MS, installScript, INSTALL_MS, guestAgentHomes, PlaceFolderMachine, placeFolderBackend, projectInstalls, type Lifecycle, type MachineBackend, GUEST_TMP, GITHUB_TOKEN_ENV, LOCAL_MACHINE_ID, projectStateKey } from "@wsp/engine";
-import { type DaemonReachView, type ExecStreamFactory, type ProjectSource, type ProjectView, type WorkspaceKind, type WorkspaceProject, SCOPED_MCP_ARG, imageCarriesCheckout, placeLoginNotRootLine, DAEMON_TOKEN_PATH, homeShortened, folderName, kindForComputer, noKindLine, registeredLine, REGISTERING_LINE, cloneFailedLine, cloneIntoTakenLine, cloneUrlRefusal, placeDaemonPaths, rootsPathIn, shellLine, shellQuote, placeForksNowhereLine, placeServesDaemonLine, threadCgroup } from "@wsp/protocol";
+import { type DaemonReachView, type ExecStreamFactory, type ProjectSource, type ProjectView, type WorkspaceKind, type WorkspaceProject, SCOPED_MCP_ARG, imageCarriesCheckout, placeLoginNotRootLine, DAEMON_TOKEN_PATH, homeShortened, folderName, kindForComputer, noKindLine, registeredLine, REGISTERING_LINE, cloneFailedLine, cloneIntoFileLine, cloneIntoTakenLine, projectNameOf, cloneUrlRefusal, placeDaemonPaths, rootsPathIn, shellLine, shellQuote, placeForksNowhereLine, placeServesDaemonLine, threadCgroup } from "@wsp/protocol";
 import { cloneLines, underLoginHome } from "../project-landing.js";
 import { threadEnds } from "./thread-ends.js";
 import { PANE_HOLD_MS } from "../places/pane-ports.js";
@@ -98,23 +98,35 @@ export function kindsArea(ctx: RuntimeContext): KindsArea {
     if (opts.statePath === undefined) throw Object.assign(new Error("this runtime was given no state file, so it keeps no worktrees or copies"), { kind: "invalid" });
     return dirname(resolvePathOn(opts.statePath));
   };
-  /** A repo cloned on this computer into the folder the person named, which must hold nothing yet: the source's own
-   * clone line, argv quoted so neither the url nor the folder is read by the shell, `--` before the url so git
-   * reads no option out of it, and no prompt, since nobody is at a terminal to answer one. Git's own last line is
-   * the refusal. Answers the folder as it resolved, which is the project's path from here on. */
+  /** A repo cloned on this computer into the folder the person picked, as git clone does: into a folder of the
+   * repo's name inside it, unless the folder picked does not stand yet, or stands empty with the repo's name, when
+   * it is the clone's folder itself. The source's own clone line, argv quoted so neither the url nor the folder is
+   * read by the shell, `--` before the url so git reads no option out of it, and no prompt, since nobody is at a
+   * terminal to answer one. Git's own last line is the refusal. Answers the folder as it resolved, which is the
+   * project's path from here on. */
   const cloneHere = async (word: string, source: ProjectSource, into: string): Promise<string> => {
     const refused = cloneUrlRefusal(word);
     if (refused !== undefined) throw Object.assign(new Error(refused), { kind: "invalid" });
-    const dest = folderNamed(into);
-    let held: string[] = [];
-    try {
-      held = readdirSync(dest);
-    } catch (e) {
-      const code = (e as NodeJS.ErrnoException).code;
-      if (code === "ENOTDIR") held = [dest];
-      else if (code !== "ENOENT") throw e;
+    const picked = folderNamed(into);
+    const standing = (path: string): "missing" | "empty" | "full" | "file" => {
+      try {
+        return readdirSync(path).length === 0 ? "empty" : "full";
+      } catch (e) {
+        const code = (e as NodeJS.ErrnoException).code;
+        if (code === "ENOENT") return "missing";
+        if (code === "ENOTDIR") return "file";
+        throw e;
+      }
+    };
+    const name = projectNameOf(source);
+    const atPicked = standing(picked);
+    if (atPicked === "file") throw Object.assign(new Error(cloneIntoFileLine(homeShortened(picked, homedir()))), { kind: "invalid" });
+    const dest = atPicked === "missing" || (atPicked === "empty" && basename(picked) === name) ? picked : join(picked, name);
+    if (dest !== picked && !["missing", "empty"].includes(standing(dest))) {
+      let n = 2;
+      while (existsSync(join(picked, `${name}-${n}`))) n += 1;
+      throw Object.assign(new Error(cloneIntoTakenLine(homeShortened(dest, homedir()), homeShortened(join(picked, `${name}-${n}`), homedir()))), { kind: "invalid" });
     }
-    if (held.length > 0) throw Object.assign(new Error(cloneIntoTakenLine(homeShortened(dest, homedir()))), { kind: "invalid" });
     const machine = await moduleOf("local").backend({ kind: "local" } as WorkspaceRecord).get(LOCAL_MACHINE_ID);
     const line = `${shellLine(["env", "GIT_TERMINAL_PROMPT=0"])} ${projectSource(source.kind).cloneCommand({ remote: projectRemote(source), dest })}`;
     const cloned = await machine.exec(line, { timeoutMs: CLONE_MS });

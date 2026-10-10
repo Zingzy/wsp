@@ -4,8 +4,8 @@
 // searches all of them by name and path. A path typed from / or ~ walks the disk
 // instead. A repository address is cloned by the computer picked: a box or a
 // provider clones where it keeps its checkouts, and the host's own computer into
-// an empty folder the person names, which is then a folder project like any
-// other. owner/repo reads as a search here until no repo matches it. The list
+// a folder of the repo's name inside the one the person picks, which is then a
+// folder project like any other. owner/repo reads as a search here until no repo matches it. The list
 // keeps one height across every state, so nothing around it moves.
 import { CloudIcon, FolderGitIcon, FolderIcon, FolderOpenIcon, GitBranchIcon, LaptopIcon, PlusIcon, ServerIcon } from "lucide-react";
 import { useEffect, useMemo, useState, type KeyboardEvent } from "react";

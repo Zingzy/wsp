@@ -258,7 +258,7 @@ export interface AddFlags {
   on?: string;
   /** The branch a workspace of the project starts on; absent takes the remote's own default at the clone. */
   base?: string;
-  /** The empty folder on this computer a repo is cloned into, which is then the project. */
+  /** The folder on this computer a repo is cloned in, as git clone does; the clone's folder is then the project. */
   into?: string;
   /** The agent to sign in on a computer already in this wsp, once, outside every workspace on it. The join offers
    * this itself while the person is at the terminal; this is the same road for a computer that is already in. */

@@ -76,7 +76,7 @@ export const ADD_PROJECT_WORDS = {
   added: "Added",
   cloneLine: (url: string, on: string) => `Clone ${url} on ${on}`,
   cloneInto: (url: string) => `Clone ${url} into`,
-  cloneIntoPlaceholder: (name: string) => `An empty folder, like ~/code/${name}`,
+  cloneIntoPlaceholder: (name: string) => `The folder to put ${name} in, like ~/code`,
   boxSays: (name: string) => `Repos on ${name} show here soon. Paste a repository address above to clone it there.`,
   providerSays: (name: string) => `${name} clones a project from its repository address. Paste one above.`,
 } as const;
