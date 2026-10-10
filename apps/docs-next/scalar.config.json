@@ -135,7 +135,8 @@
         }
       ]
     },
-    "subpath": "/docs"
+    "subpath": "/docs",
+    "subdomain": "wsp"
   },
   "navigation": {
     "header": [
