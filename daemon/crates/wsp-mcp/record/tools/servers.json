@@ -234,6 +234,9 @@
               },
               "project": {
                 "$ref": "#/properties/projects/items"
+              },
+              "signInLine": {
+                "type": "string"
               }
             },
             "required": [
@@ -502,6 +505,9 @@
               },
               "project": {
                 "$ref": "#/properties/projects/items"
+              },
+              "signInLine": {
+                "type": "string"
               }
             },
             "required": [

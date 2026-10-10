@@ -11,7 +11,7 @@
 // that page's callback port, types what a page hands back, and asks the
 // tool's own status until it says signed in. The vault and the wsp tools are
 // the two writes that sit beside it.
-import { CATALOG, CATALOG_AGENTS, MCP_AGENTS, type CatalogEntry, asksThePerson, hasLogin, keyEnvOf, loginHomeIn, mintsToken, questionsOf, serverSignInRoad, sharedLoginOf, signInRoadOf, tokenIn, type Question, type StatusCheck } from "@wsp/catalog";
+import { CATALOG, CATALOG_AGENTS, MCP_AGENTS, type CatalogEntry, asksThePerson, hasLogin, keyEnvOf, loginHomeIn, mintsToken, questionsOf, harnessLine, serverSignInRoad, sharedLoginOf, signInRoadOf, tokenIn, type Question, type StatusCheck } from "@wsp/catalog";
 import { asLogin, targetLogin, type TargetLogin } from "@wsp/engine";
 import {
   addToolsHereRefusal,
@@ -26,6 +26,7 @@ import {
   notTokenRefusal,
   placeDaemonPaths,
   redirectsToMachine,
+  serverNotSetUpLine,
   serverSignInCopyRefusal,
   shellQuote,
   signInTerminalRefusal,
@@ -53,6 +54,8 @@ export interface SignInPlan {
   code?: RegExp;
   paste(url: string): boolean;
   status?: StatusCheck;
+  /** The one line a failure says in place of the tool's own words, where those words have one. */
+  refusal?(said: string): string | undefined;
 }
 
 const STATUS_MS = 60_000;
@@ -102,21 +105,34 @@ export async function planSignIn(on: AgentsOn, ask: SignInAsk, o: { terminal?: b
     const reach = pageReachOf(on, login?.runAs);
     const road = serverSignInRoad(entry.id, ask.server, reach);
     if (road === undefined) throw new Error(`${entry.name} has no sign-in for an MCP server that wsp knows`);
-    if (road.kind === "copy") throw new Error(serverSignInCopyRefusal(entry.name, road.line, road.why));
+    const stores = on.kind === "here" ? undefined : on.stores;
+    const folder = ask.scope === "project" ? on.projects?.find(p => p.id === ask.project)?.path : undefined;
+    if (road.kind === "copy") throw new Error(serverSignInCopyRefusal(entry.name, road.why === "callback" ? harnessLine(entry.id, road.line, { stores, folder }) : road.line, road.why));
     const wrap = login === undefined ? (line: string) => line : (line: string) => asLogin(login, line);
+    const server = ask.server;
+    const mcpLogin = MCP_AGENTS.find(a => a.id === entry.id)?.mcp.login;
+    const notSetUp = mcpLogin !== undefined && "command" in mcpLogin ? mcpLogin.notSetUp : undefined;
     // The daemon's pty names wsp's own shim as BROWSER, which this computer has none of; a workspace keeps it behind
     // the sign-in's own opener, and its browser.open is what the relay carries here. A joined computer keeps its
     // shim under the login's home.
     const shim: Record<string, string> = login === undefined ? {} : { BROWSER: placeDaemonPaths(login.home).openShim };
     const env: Record<string, string> | undefined = reach === "here" ? { BROWSER: process.env["BROWSER"] || openerCommand() } : road.finish === "callback" ? { ...signInEnv("callback"), ...shim } : undefined;
-    const command = reach === "relay" ? pagesOnPty(road.command) : road.command;
-    return { name: entry.name, line: { command: wrap(command), ...(env !== undefined ? { env } : {}) }, questions: [], paste: () => road.finish === "code" };
+    const own = harnessLine(entry.id, road.command, { stores, folder });
+    const command = reach === "relay" ? pagesOnPty(own) : own;
+    return {
+      name: entry.name,
+      line: { command: wrap(command), ...(env !== undefined ? { env } : {}) },
+      questions: [],
+      paste: () => road.finish === "code",
+      ...(notSetUp === undefined ? {} : { refusal: (said: string) => (notSetUp.test(withoutEscapes(said)) ? serverNotSetUpLine(entry.name, server) : undefined) }),
+    };
   }
   const row = entry.signIn;
   if (!hasLogin(row)) throw new Error(signInVaultRefusal(entry.name));
   if (asksThePerson(row) && o.terminal !== true) throw new Error(signInTerminalRefusal(entry.name, `wsp agents signin ${entry.id}`));
-  const command = row.fallback ?? row.login;
-  const status = row.status?.typed ?? row.status?.command;
+  const stores = on.kind === "here" ? undefined : on.stores;
+  const command = harnessLine(entry.id, row.fallback ?? row.login, { stores });
+  const status = row.status === undefined ? undefined : harnessLine(entry.id, row.status.typed ?? row.status.command, { stores });
   const shared = sharedLoginOf(row);
   const byCode = signInRoadOf(row) === "code";
   const plan = { name: entry.name, questions: questionsOf(row), ...(row.code !== undefined ? { code: row.code } : {}), ...(row.status !== undefined ? { status: row.status } : {}), paste: (url: string) => byCode && !(on.kind === "here" && redirectsToMachine(url)) };
@@ -129,11 +145,12 @@ export async function planSignIn(on: AgentsOn, ask: SignInAsk, o: { terminal?: b
   return { ...plan, line: { command: wrap(command), ...(status !== undefined ? { status: wrap(status) } : {}) } };
 }
 
+const withoutEscapes = (text: string): string => text.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "");
+
 /** The last thing the tool said, with the terminal's escapes taken out and the tool's echo of a code a page handed
  * back left out, since that is not the tool's words either. */
 function lastSaid(text: string, codes: readonly string[]): string | undefined {
-  const lines = text
-    .replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "")
+  const lines = withoutEscapes(text)
     .split(/\r?\n|\r/)
     .filter(l => !codes.some(t => l.includes(t)));
   return lastLine(lines.join("\n"));
@@ -236,7 +253,7 @@ export async function watchSignIn(plan: SignInPlan, run: SignInRun, o: { pollMs?
   if (outcome.dropped) return void run.emit({ state: "failed", said: "the computer's terminal link dropped" });
   const through = plan.status === undefined ? outcome.exitCode === 0 : await asked();
   if (through) return void run.emit({ state: "signed-in" });
-  run.emit({ state: "failed", said: lastSaid(said, codes) ?? `it ended with exit ${outcome.exitCode}` });
+  run.emit({ state: "failed", said: plan.refusal?.(said) ?? lastSaid(said, codes) ?? `it ended with exit ${outcome.exitCode}` });
 }
 
 /** How a pty the person's own terminal attaches to opens: about a terminal's size, which the page resizes it from. */

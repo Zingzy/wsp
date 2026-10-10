@@ -216,7 +216,7 @@ describe("a sign-in across a dropped socket", () => {
     await settle();
     expect(current().frames("servers.signIn")).toMatchObject([{ agent: "claude", name: "linear", scope: "user" }]);
     await dropAndReturn(() => step({ state: "waiting", url: "https://mcp.linear.app/authorize?client_id=x", paste: false }));
-    expect(flow()?.querySelector("[data-k=sign-in-refused]")?.textContent, "the drop is not shown as the sign-in failing").toBe("");
+    expect(flow()?.querySelector("[data-k=sign-in-refused]")?.textContent ?? "", "the drop is not shown as the sign-in failing").toBe("");
     expect(flow()?.querySelector("[data-k=sign-in-open]")).not.toBeNull();
     openRow(LINEAR);
     fireEvent.click(headAct("cancel")!);

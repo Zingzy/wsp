@@ -16,7 +16,7 @@ import type { GoldenImport, ImportResult, PackFiles } from "./golden.js";
 import { applyMachineContext } from "./machine-context.js";
 import type { Machine } from "./machine.js";
 import { closeAgentFiles, oncePathsOf, outsideAfterScript, outsideBeforeScript, provisionFiles, type OwnedPaths, type ProvisionLanding } from "./provision-files.js";
-import { provisionMcp } from "./provision-mcp.js";
+import { headlessKeys, provisionMcp } from "./provision-mcp.js";
 
 /** What the recipe comes to on a computer you own, in run order: the node step, the agents after it, the tools by
  * their roads, the rows outside the catalog last, each with the `after` chain the tools plan gave it. The floor is
@@ -442,6 +442,10 @@ async function stepRows(machine: Machine, plan: ProvisionPlan, step: EngineStep,
         stage(provisionServersLine(servers.filter(r => r.outcome === "installed").length, servers.length));
         for (const row of servers) stage(rowLine(row), undefined, row);
         rows.push(...servers);
+      }
+      if (on.stores !== undefined) {
+        const setUp = new Set(plan.steps.slice(0, plan.agents).flatMap(s => agentOfRow(s) ?? []));
+        for (const line of await headlessKeys(machine, on.home, on.stores, setUp)) stage(line);
       }
       // What wsp owns in the agents' homes there, written down once the servers are in their configs, so the next
       // run knows its own copy from a file the person has written since. Every run closes, files or none: the close

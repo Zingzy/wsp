@@ -97,6 +97,8 @@
 //                    480 and at its 360 floor: Claude Code with an update
 //                    out, Codex waiting on a sign-in, OpenCode not checked
 //                    and Pi to install, every server state a connect answers
+//                    (&signin=unset: a server's sign-in fails at once, its harness
+//                    having no server of that name)
 //   panel-agents     the task on the box selected, its panel open on Agents
 //                    (&fork=solari: the same task a fork at Solari, whose one
 //                    act is Edit image)
@@ -107,7 +109,7 @@
 import { createRoot } from "react-dom/client";
 import { CATALOG_AGENTS, agentName } from "@wsp/catalog";
 import { manyAgents } from "./agents";
-import { DAEMON_VERSION, DEFAULT_PREFERENCES, copyFirstLine, hostnameSetLine, type HarnessCatalog, GOLDEN_STAGE_WORDS, MACHINE_ROW_LABEL, STOP_LEFT_MACHINE_LINE, hereWord, startingLine, type AgentsSignInEvent, type Capabilities, type DeviceView, type InitAgent, type InitJob, type InitRow, type InitScreen, type PlaceAddJob, type PlaceAddStep, type PlaceApplied, type PlaceView, type ProjectView, type SealedImage, type SessionView, type ThreadDefaults, type WorkspaceLanding, type WorkspaceView } from "@wsp/protocol";
+import { DAEMON_VERSION, DEFAULT_PREFERENCES, copyFirstLine, hostnameSetLine, type HarnessCatalog, GOLDEN_STAGE_WORDS, MACHINE_ROW_LABEL, STOP_LEFT_MACHINE_LINE, hereWord, serverNotSetUpLine, startingLine, type AgentsSignInEvent, type Capabilities, type DeviceView, type InitAgent, type InitJob, type InitRow, type InitScreen, type PlaceAddJob, type PlaceAddStep, type PlaceApplied, type PlaceView, type ProjectView, type SealedImage, type SessionView, type ThreadDefaults, type WorkspaceLanding, type WorkspaceView } from "@wsp/protocol";
 import { AppShell } from "../../src/shell/AppShell";
 import { FirstRun } from "../../src/shell/FirstRun";
 import { AgentsSurface } from "../../src/components/agents/AgentsSurface";
@@ -655,6 +657,10 @@ const api = {
   // On this Mac a server's harness opens the browser itself and nothing is pasted back.
   agentsSignIn: async (target: { placeId?: string }, agent: string, server: string | undefined, onStep: (step: AgentsSignInEvent) => void) => {
     const here = target.placeId === "here";
+    if (server !== undefined && params.get("signin") === "unset") {
+      setTimeout(() => onStep({ type: "agents.signIn", signInId: `si_${agent}`, state: "failed", said: serverNotSetUpLine(agentName(agent), server) }), 30);
+      return { signInId: `si_${agent}`, stop: () => {} };
+    }
     const url = server === undefined ? "https://auth.openai.com/codex/device" : here ? "https://mcp.notion.com/authorize?client_id=wsp" : "https://claude.ai/oauth/authorize?code=true";
     setTimeout(() => onStep({ type: "agents.signIn", signInId: `si_${agent}`, state: "waiting", url, ...(server === undefined ? { code: "ABCD-12345", paste: false } : { paste: !here }) }), 30);
     return { signInId: `si_${agent}`, stop: () => {} };

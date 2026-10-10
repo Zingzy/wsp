@@ -268,6 +268,9 @@ export const McpRow = z.object({
   tools: z.array(McpTool).optional(),
   /** The project a project server is set up in. */
   project: AgentsProject.optional(),
+  /** The line the person runs there to sign it in where its page cannot come back here, as that computer runs its
+   * agent's command: absent where the agent has no such command. */
+  signInLine: z.string().optional(),
 });
 export type McpRow = z.infer<typeof McpRow>;
 
@@ -389,6 +392,13 @@ export const signInVaultRefusal = (agent: string): string => `${agent} has no si
 /** Why a server's sign-in is not run for the app, with the line the person runs instead. */
 export const serverSignInCopyRefusal = (agent: string, line: string, why: "inside" | "callback"): string =>
   why === "inside" ? `${agent} signs a server in inside its own session: ${line}` : `${agent} finishes a server's sign-in on a page at localhost, which reaches only the computer your browser is on; run ${line} in a terminal there.`;
+
+/** A project's server the agent leaves out, since it reads that project's file only in a folder it trusts. */
+export const serverUntrustedLine = (agent: string, name: string, file: string, folder: string): string =>
+  `${agent} reads ${file} only in a folder it trusts, and ${folder} is not one, so ${name} is not set up for ${agent} there. Trust that folder in ${agent} to use it.`;
+
+/** A server the agent's own command, run with the config its threads read, says it does not have. */
+export const serverNotSetUpLine = (agent: string, name: string): string => `${name} is not set up for ${agent} where its threads read their config. Add it again with Add a tool server.`;
 
 /** Why the wsp tools go only into an agent's config on this computer: a thread elsewhere is handed them on every turn. */
 export const addToolsHereRefusal = "The wsp tools go into an agent's config on this computer; a thread on any other computer is handed them with every turn.";

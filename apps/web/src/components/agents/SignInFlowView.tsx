@@ -90,8 +90,9 @@ export function SignInFlowView({ view, label, reserve = true }: { view: FlowView
       </Button>
     );
   const browser = flow.finish === "callback" && flow.state !== "failed";
-  // Where no room is kept, a failed flow with no page draws no line: an empty one would stand over the failure.
+  // Where no room is kept, a failed flow draws no line it would leave empty: one would stand over the failure.
   const line = reserve || flow.state !== "failed" || flow.url !== undefined;
+  const pasteLine = (flow.pastes === true || flow.paste === true) && (reserve || flow.state !== "failed");
   return (
     <div data-k="sign-in-flow" className="flex flex-col gap-2">
       {line ? (
@@ -123,7 +124,7 @@ export function SignInFlowView({ view, label, reserve = true }: { view: FlowView
           )}
         </div>
       ) : null}
-      {flow.pastes === true || flow.paste === true ? (
+      {pasteLine ? (
         <div data-sign-in-line className="flex h-10 items-center">
           {flow.paste === true && flow.state === "waiting" ? <SignInCode label={label} onCode={view.code} {...(flow.finish !== undefined ? { ask: AGENTS_LIST_WORDS.landedAddress } : {})} /> : null}
         </div>

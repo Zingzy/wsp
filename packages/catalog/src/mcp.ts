@@ -463,6 +463,11 @@ export interface McpConfig {
   check?: McpCheck;
   /** How the harness signs one server in. */
   login?: McpLogin;
+  /** Top-level keys its own config needs on a Linux computer with no keyring, each written as `key = value` where the
+   * config sets no value of that key. */
+  headless?: readonly { key: string; value: string }[];
+  /** Whether it reads a project's own file in `folder`, off the text of its own config; absent where it always does. */
+  trusts?(user: string | undefined, folder: string): Promise<boolean>;
 }
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
