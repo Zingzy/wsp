@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { act, fireEvent, render, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { LegendListRef } from "@legendapp/list/react";
-import type { AttachmentRecord, SessionEvent } from "@wsp/protocol";
+import { runBlockKey, type AttachmentRecord, type SessionEvent } from "@wsp/protocol";
 import { MessagesTimeline, WORK_TONES } from "./MessagesTimeline";
 import { deriveSession, type TimelineEntry, type TurnSummary, type WorkLogEntry, type WorkLogTone } from "./adapt";
 import { fileFactsOf, fileOf, useComposerFilesStore } from "./composerFiles";
@@ -629,6 +629,33 @@ describe("MessagesTimeline", () => {
     expect(markup).not.toContain("onerror=");
     expect(markup).not.toContain("javascript:");
     expect(markup).not.toContain("globalThis.__xss");
+  });
+
+  it("draws an insight block as a note labelled Insight, with no star and no dashes", () => {
+    const text = ["Reading first.", "", "`★ Insight " + "─".repeat(37) + "`", "- The list remounts rows.", "- So no row takes focus.", "`" + "─".repeat(49) + "`", "", "Now the edit."].join("\n");
+    const { container } = render(<MessagesTimeline {...buildProps()} timelineEntries={[buildAssistantTimelineEntry(text)]} />);
+    const note = container.querySelector('[role="note"][data-insight]');
+    expect(note?.querySelector("p")?.textContent).toBe("Insight");
+    expect([...(note?.querySelectorAll("li") ?? [])].map(li => li.textContent)).toEqual(["The list remounts rows.", "So no row takes focus."]);
+    expect(container.textContent).toContain("Reading first.");
+    expect(container.textContent).toContain("Now the edit.");
+    expect(container.textContent).not.toMatch(/[★─]/u);
+    expect(container.querySelectorAll("code")).toHaveLength(0);
+  });
+
+  it("names a shell block after an insight by its place in the whole reply, so its recorded run still draws", () => {
+    const text = ["Before.", "`★ Insight " + "─".repeat(37) + "`", "A point.", "`" + "─".repeat(49) + "`", "", "```sh", "kill 60082", "```"].join("\n");
+    const block = runBlockKey("message-1", text.indexOf("```sh"));
+    const ended = { type: "session.run", workspaceId: "ws_a", sessionId: "s", threadId: "th_1", turnId: "turn-1", runId: "run-1", block, command: "kill 60082", state: "exited", exitCode: 1, output: "No such process" } as const;
+    const entry = buildAssistantTimelineEntry(text);
+    const { container } = render(
+      <MessagesTimeline
+        {...buildProps()}
+        replyRuns={{ workspaceId: "ws_a", threadId: "th_1", cwd: "/work/copy", runs: new Map([[block, ended]]) }}
+        timelineEntries={[{ ...entry, message: { ...entry.message, turnId: "turn-1" } }]}
+      />,
+    );
+    expect(container.querySelector("[data-reply-run-output]")?.textContent).toBe("No such process");
   });
 
   it("keeps the copy button for collapsed long user messages", () => {

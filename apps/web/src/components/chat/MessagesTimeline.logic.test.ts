@@ -15,7 +15,6 @@ import {
   resolveAssistantMessageCopyState,
   resolveWorkGroupScrollIndex,
   shouldFollowWorkGroupAppend,
-  shouldPreserveAssistantLineBreaks,
   workEntryDisplayLabel,
 } from "./MessagesTimeline.logic";
 
@@ -153,17 +152,6 @@ describe("work entry labels", () => {
     const label = { verb: null, text: "The failing test imports the old module.", mono: false };
     expect(workEntryDisplayLabel(reasoningEntry, undefined)).toEqual(label);
     expect(liveWorkEntryLabel(reasoningEntry, undefined, false)).toEqual(label);
-  });
-});
-
-describe("shouldPreserveAssistantLineBreaks", () => {
-  it("preserves insight block formatting without changing regular markdown", () => {
-    expect(
-      shouldPreserveAssistantLineBreaks(
-        "★ Insight ─────────────────\\nFirst observation\\nSecond observation\\n─────────────────",
-      ),
-    ).toBe(true);
-    expect(shouldPreserveAssistantLineBreaks("A normal\\nmarkdown paragraph")).toBe(false);
   });
 });
 

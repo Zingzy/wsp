@@ -145,7 +145,7 @@ export function MarkdownCodeBlock({
   language: string;
   fenceTitle: string | null;
   wordWrap: boolean;
-  /** Where the block's fence starts in the message's text, which names it on the thread's record of its runs. */
+  /** Where the block's fence starts in the markdown drawn; the run scope's offset adds where that starts in the reply. */
   offset: number;
   isStreaming: boolean;
   children: ReactNode;
@@ -153,7 +153,7 @@ export function MarkdownCodeBlock({
   // A shell block in an agent's reply runs where it stands; a block still streaming is not the command yet.
   const scope = use(ReplyRunContext);
   const command = scope !== null && !isStreaming ? runnableCommand(language, code) : null;
-  const block = scope !== null ? runBlockKey(scope.messageId, offset) : "";
+  const block = scope !== null ? runBlockKey(scope.messageId, scope.offset + offset) : "";
   const run = command !== null ? scope?.runs.get(block) : undefined;
   const api = useStore(s => s.api);
   const [runRefusal, setRunRefusal] = useState<string | null>(null);
