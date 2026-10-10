@@ -16,6 +16,9 @@ interface ComposerBarState {
   readonly open: Readonly<Record<string, ComposerBar>>;
   /** The question each thread's person folded, by thread key: its ask id. */
   readonly folded: Readonly<Record<string, string>>;
+  /** The threads whose open question stands in the composer's place now, by thread key. */
+  readonly docked: Readonly<Record<string, true>>;
+  dock: (key: string, docked: boolean) => void;
   openBar: (key: string, bar: ComposerBar) => void;
   closeBar: (key: string) => void;
   /** Folds the question to the drawer's first row, and the composer stands. */
@@ -33,6 +36,8 @@ const without = <T>(map: Readonly<Record<string, T>>, key: string): Record<strin
 export const useComposerBarStore = create<ComposerBarState>(set => ({
   open: {},
   folded: {},
+  docked: {},
+  dock: (key, docked) => set(s => (docked === (s.docked[key] === true) ? s : { docked: docked ? { ...s.docked, [key]: true } : without(s.docked, key) })),
   openBar: (key, bar) => set(s => ({ open: { ...s.open, [key]: bar } })),
   closeBar: key => set(s => (s.open[key] === undefined ? s : { open: without(s.open, key) })),
   fold: (key, askId) => set(s => ({ folded: { ...s.folded, [key]: askId }, open: without(s.open, key) })),
