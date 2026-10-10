@@ -4,11 +4,12 @@ import { homedir } from "node:os";
 import { parseArgs } from "node:util";
 import { MCP_AGENT_IDS } from "@wsp/catalog";
 import { authRefusal, type McpServerSpec, hostFromEnv, jsonLine, SCOPED_MCP_ARG, scopedNoPairLine, EXIT_CODES, runForTheList, unknownWordLine, usageRefusal } from "@wsp/protocol";
+import { gitRootOf } from "../repo-root.js";
 import { alsoHere } from "../scan.js";
 import { wrap } from "../init-layout.js";
 import type { HostStarter } from "../host-start.js";
 import { emptyHostRefusal } from "../hosts.js";
-import { agentsOnPath, installEach, installLines, mcpServerSpec, nextLine, registeredLine, removeEach, removeLines, toolServerLine, type RunningWsp } from "../mcp-install.js";
+import { agentsOnPath, installEach, installLines, mcpServerSpec, nextLine, notAProjectLine, registeredLine, removeEach, removeLines, sameFile, toolServerLine, type RunningWsp } from "../mcp-install.js";
 import { COMMON_FLAG_WORDS, failed, HELP_WIDTH, helpPage, jsonAsked } from "../verbs.js";
 import type { CliIO } from "./io.js";
 import { MCP_COMMAND, MCP_OPTIONS, mcpInstallUsage, mcpUsage, COMMAND_LINES } from "./commands.js";
@@ -58,9 +59,9 @@ export async function mcp(io: CliIO, argv: string[], statePathOf: (flag?: string
         : "wsp mcp install writes the config of the agents it is given, and was given none.";
     return failed(io, json, usageRefusal(none, `Name one with --agent.\n\nusage: ${mcpInstallUsage()}`));
   }
-  const project = process.cwd();
+  const here = process.cwd();
   if (values.remove === true) {
-    const gone = removeEach(agents, project);
+    const gone = removeEach(agents, here);
     if (json) io.log(jsonLine(gone));
     else {
       for (const agent of gone.removed) for (const line of removeLines(agent)) io.log(line);
@@ -68,10 +69,14 @@ export async function mcp(io: CliIO, argv: string[], statePathOf: (flag?: string
     }
     return gone.failures.length > 0 ? 1 : 0;
   }
+  // A home folder kept in git is no project: a CLAUDE.md there is read by every session under it.
+  const root = gitRootOf(here);
+  const project = root === undefined || sameFile(root, homedir()) ? undefined : here;
   const report = installEach(agents, mcpServerSpec(statePath, run, values.host !== undefined ? { host: values.host } : {}), homedir(), project);
   if (json) io.log(jsonLine(report));
   else {
     for (const placed of report.installed) for (const line of installLines(placed)) io.log(line);
+    if (project === undefined && report.installed.length > 0) io.log(notAProjectLine(here));
     const registered = registeredLine(report);
     if (registered !== undefined) io.log(registered);
     for (const failed of report.failures) io.error(`wsp mcp install: ${failed.error}`);

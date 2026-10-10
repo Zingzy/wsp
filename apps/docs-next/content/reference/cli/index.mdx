@@ -79,7 +79,7 @@ wsp --version
 | [`wsp login`](/reference/cli/login) | sign this computer in to your account, so every host on it is a line away with no code typed. With a word another computer's wsp login printed, or the id of one already signed in, it signs that computer's key for the hosts this one is trusted at; with nothing on a computer already signed in it lists the account's computers |
 | [`wsp logout`](/reference/cli/logout) | sign this computer out of your account, which drops the hosts it reached through it; with an id it signs another of your computers out, and every host drops what it admitted for that one |
 | [`wsp mcp`](/reference/cli/mcp) | serve the verbs as tools over stdio to an agent on this computer |
-| [`wsp mcp install`](/reference/cli/mcp-install) | put the wsp tools, this skill and wsp's own section of this folder's AGENTS.md into that agent (claude, codex, gemini, opencode); --agent repeats, --remove takes it back out, and --json prints what each agent took |
+| [`wsp mcp install`](/reference/cli/mcp-install) | put the wsp tools, this skill and wsp's own section of this project's AGENTS.md into that agent (claude, codex, gemini, opencode); --agent repeats, --remove takes it back out, and --json prints what each agent took |
 | [`wsp merge`](/reference/cli/merge) | merges the pull request of the thread's branch, or merges it once its checks pass |
 | [`wsp merge in`](/reference/cli/merge-in) | merges a child thread's branch into its lead's folder with a merge commit, or names the files that conflict |
 | [`wsp projects`](/reference/cli/projects) | your projects, each on its computer: where its code comes from, where its folder sits, the branch a machine of it starts on and how many threads it has |
@@ -459,7 +459,7 @@ up and down for the host, recipe and image for what a machine starts from.
       the thread's own folder
   wsp mcp install --agent <id> [--agent <id>] [--host <alias>] [--json]
     [--remove]   (claude, codex, gemini, opencode)
-      put the wsp tools, this skill and wsp's own section of this folder's
+      put the wsp tools, this skill and wsp's own section of this project's
       AGENTS.md into that agent (claude, codex, gemini, opencode); --agent
       repeats, --remove takes it back out, and --json prints what each agent
       took

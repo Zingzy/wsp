@@ -26,7 +26,6 @@ export const BUNDLE_WORDS = {
   mismatch: (asset: string): string => `${asset} did not match the release's sha256 and was deleted`,
   tooBig: (asset: string): string => `${asset} ran past the size the release publishes and was deleted`,
   unsaved: (asset: string): string => `${asset} could not be saved`,
-  unreached: (asset: string, why: string): string => `${asset} was not downloaded: ${why}`,
   changed: (asset: string): string => `${asset} changed after it was checked and was not opened`,
   gone: "the checked update is gone; get it again",
   nothingKept: "no verified download to open",
@@ -147,7 +146,7 @@ async function download(url: string, file: string, want: Published, asset: strin
     // Armed once answered: the fetch bounds its own connect tries and the wait for an answer.
     const res = await deps.fetch(url, { headers: { "user-agent": deps.userAgent }, signal: stalled.signal });
     arm();
-    if (!res.ok || res.body === null) return { ok: false, error: BUNDLE_WORDS.unreached(asset, `GitHub answered ${res.status}`) };
+    if (!res.ok || res.body === null) return { ok: false, error: `GitHub answered ${res.status}` };
     await rm(part, { force: true });
     // Exclusive create refuses a link planted at the name between the removal and the open.
     await pipeline(Readable.fromWeb(res.body as ReadableStream), tee, createWriteStream(part, { flags: "wx" }), { signal: stalled.signal });
@@ -156,9 +155,9 @@ async function download(url: string, file: string, want: Published, asset: strin
   } catch (e) {
     failed =
       e instanceof PastSize ? BUNDLE_WORDS.tooBig(asset)
-      : stalled.signal.aborted ? BUNDLE_WORDS.unreached(asset, `no bytes for ${stallMs / 1000} s`)
+      : stalled.signal.aborted ? `no bytes for ${stallMs / 1000} s`
       : e instanceof Error && "path" in e ? BUNDLE_WORDS.unsaved(asset)
-      : BUNDLE_WORDS.unreached(asset, e instanceof Error ? e.message : String(e));
+      : e instanceof Error ? e.message : String(e);
   } finally {
     clearTimeout(timer);
   }
@@ -181,7 +180,7 @@ export async function getBundle(version: string, deps: BundleDeps, pick?: (versi
   try {
     want = await published(tag, asset, deps);
   } catch (e) {
-    return { ok: false, error: BUNDLE_WORDS.unreached(asset, e instanceof Error ? e.message : String(e)) };
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
   if (want === undefined) return { ok: false, error: BUNDLE_WORDS.noDigest(asset) };
   const file = join(deps.dir, asset);

@@ -12,7 +12,7 @@ import { configHardLinkRefusal, mcpServerCommandLine, nextInsideAgentLine, WSP_T
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HELP, JSON_COMMANDS, PROSE_COMMANDS, agentPage, cli, type CliIO } from "../src/cli.js";
 import { SECTION_BEGIN, sectionText } from "../src/agents-md.js";
-import { agentsOnPath, installEach, installLines, installMcp, mcpServerSpec, refreshSkills, removeLines, runningWsp, thisComputersPath, toolServerHere, type RunningWsp } from "../src/mcp-install.js";
+import { agentsOnPath, installEach, installLines, installMcp, mcpServerSpec, notAProjectLine, refreshSkills, removeLines, runningWsp, thisComputersPath, toolServerHere, type RunningWsp } from "../src/mcp-install.js";
 import { shimPath } from "../src/shim.js";
 import { noHostServingLine } from "../src/verbs.js";
 import { SKILL_NAME, wspSkill } from "../src/skill.js";
@@ -49,6 +49,7 @@ describe("installing the MCP server for a local agent", () => {
     home = mkdtempSync(join(tmpdir(), "wsp-mcp-home-"));
     statePath = join(home, ".wsp", "state.json");
     project = mkdtempSync(join(tmpdir(), "wsp-mcp-project-"));
+    mkdirSync(join(project, ".git"));
     vi.stubEnv("HOME", home);
     vi.spyOn(process, "cwd").mockReturnValue(project);
   });
@@ -432,6 +433,39 @@ describe("installing the MCP server for a local agent", () => {
       removed: [{ id: "claude", agent: "Claude Code", docs: [] }],
       failures: [{ id: "emacs", error: "no agent emacs in the catalog; agents with an MCP config: claude, codex, gemini, opencode" }],
     });
+  });
+
+  it("run from the home folder or a folder in no repository, the install writes the server and the skill and no AGENTS.md or CLAUDE.md there", async () => {
+    const loose = mkdtempSync(join(tmpdir(), "wsp-mcp-loose-"));
+    const notes = join(home, "notes");
+    mkdirSync(notes);
+    try {
+      // A home folder kept in git as dotfiles is still no project, and neither is any folder under it outside a repository.
+      mkdirSync(join(home, ".git"));
+      for (const folder of [home, loose, notes]) {
+        vi.spyOn(process, "cwd").mockReturnValue(folder);
+        rmSync(join(home, ".claude.json"), { force: true });
+        const out = io();
+        expect(await cli(["mcp", "install", "--agent", "claude", "--agent", "codex", "--state", statePath], out)).toBe(0);
+        expect(existsSync(join(folder, "AGENTS.md"))).toBe(false);
+        expect(existsSync(join(folder, "CLAUDE.md"))).toBe(false);
+        expect(JSON.parse(readFileSync(join(home, ".claude.json"), "utf8")).mcpServers.wsp).toEqual({ command: mcpServerSpec(statePath).command, args: mcpServerSpec(statePath).args });
+        expect(out.lines).toContain(notAProjectLine(folder));
+        expect(out.lines.some(l => l.startsWith("The wsp section is in"))).toBe(false);
+      }
+      vi.spyOn(process, "cwd").mockReturnValue(loose);
+      const json = io();
+      expect(await cli(["mcp", "install", "--agent", "claude", "--json", "--state", statePath], json)).toBe(0);
+      expect(JSON.parse(json.lines[0]!).installed[0]).not.toHaveProperty("docs");
+      // The working folder is the physical path, so a HOME spelled through a link still names this home.
+      symlinkSync(home, join(loose, "home"));
+      vi.stubEnv("HOME", join(loose, "home"));
+      vi.spyOn(process, "cwd").mockReturnValue(home);
+      expect(await cli(["mcp", "install", "--agent", "claude", "--state", statePath], io())).toBe(0);
+      expect(existsSync(join(home, "CLAUDE.md"))).toBe(false);
+    } finally {
+      rmSync(loose, { recursive: true, force: true });
+    }
   });
 
   it("two agents installed into the same AGENTS.md leave one section, true for both, naming neither one's skill path", async () => {

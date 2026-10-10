@@ -71,7 +71,7 @@ export function agentsOnPath(PATH: string | undefined): string[] {
   return CATALOG_AGENTS.filter(a => onPath(a.bin, PATH) !== undefined).map(a => a.id);
 }
 
-function sameFile(a: string, b: string): boolean {
+export function sameFile(a: string, b: string): boolean {
   try {
     return realpathSync(a) === realpathSync(b);
   } catch {
@@ -394,3 +394,6 @@ export function nextLine(report: InstallReport): string | undefined {
   const entry = agentEntry(first.id);
   return nextInsideAgentLine(entry.bin, entry.firstMove);
 }
+
+/** What an install says in place of the section's line when the folder it ran in is not a project. */
+export const notAProjectLine = (folder: string): string => `${folder} is not in a project, so no AGENTS.md or CLAUDE.md was written there.`;

@@ -503,7 +503,7 @@ export const COMMAND_LINES: readonly CommandLine[] = [
     options: MCP_OPTIONS,
     page: "agent" as const,
     usage: mcpInstallUsage(),
-    about: `put the wsp tools, this skill and wsp's own section of this folder's AGENTS.md into that agent (${MCP_AGENT_IDS}); --agent repeats, --remove takes it back out, and --json prints what each agent took`,
+    about: `put the wsp tools, this skill and wsp's own section of this project's AGENTS.md into that agent (${MCP_AGENT_IDS}); --agent repeats, --remove takes it back out, and --json prints what each agent took`,
     cliOnly: "writes an agent's own config and skills folder, which is done once from a shell",
   },
   // The flags are read when asked for, since the table of who reads which is written below this one.
