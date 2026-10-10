@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The writing rules every page is held to: unslop's words, Simple English's modals in a page of steps, no em dash,
 // and every picture a scene the shooter makes.
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, extname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -35,7 +35,7 @@ const MODALS = ["should", "would", "may", "might", "could"];
 /** The folders whose pages are steps to follow, where Simple English allows no modal. */
 const PROCEDURAL = ["content/install/", "content/start/", "content/guides/"];
 
-type Scene = { name: string; pages: string[]; steps?: boolean };
+type Scene = { name: string; pages: string[]; steps?: boolean; byHand?: boolean };
 const SCENES: Scene[] = JSON.parse(readFileSync(join(ROOT, "shots.json"), "utf8")).scenes;
 
 const pages = (dir: string): string[] =>
@@ -76,6 +76,17 @@ describe("the prose checker", () => {
     const all = pages(join(ROOT, "content"));
     expect(all.length).toBeGreaterThan(140);
     expect(all.flatMap(p => problems(relative(ROOT, p), readFileSync(p, "utf8")))).toEqual([]);
+  });
+
+  it("finds every picture a page shows in assets, but one the owner shoots by hand", () => {
+    const byHand = new Set(SCENES.filter(s => s.byHand === true).map(s => s.name));
+    const missing = pages(join(ROOT, "content")).flatMap(p =>
+      [...readFileSync(p, "utf8").matchAll(/<(?:Image|img|video|source)\b[^>]*?\bsrc=\{?\s*["'](\/shots\/[^"']+)["']/g)]
+        .map(m => m[1]!)
+        .filter(src => !byHand.has(basename(src, extname(src))) && !existsSync(join(ROOT, "assets", src)))
+        .map(src => `${relative(ROOT, p)}: ${src}`),
+    );
+    expect(missing).toEqual([]);
   });
 
   it("fails a page holding an em dash", () => {

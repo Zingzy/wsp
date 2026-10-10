@@ -79,8 +79,6 @@ root@192.168.1.40 answers with the key ssh-ed25519 SHA256:...; trust it and cont
 
 Compare the fingerprint with the one from step 2. Answer `yes` only if they are the same. Without a terminal, give the key with `--host-key 'SHA256:...'`. If the computer answers with another key, run the `ssh-keygen -R` line that the refusal prints before you add it again.
 
-<video src="/shots/docs-ssh-add.mp4" autoPlay muted loop playsInline aria-label="wsp add in a terminal: the host key question, then each step of the install" />
-
 The add installs the daemon. Then you choose what goes on the computer in the app's Add a computer, or you give a saved [recipe](/features/recipes) with `--recipe <name>`. The add asks you to finish the sign-ins in your browser. [A rented server](/guides/rented-server) shows each step, its output and how to save a recipe.
 
 ## How the computer reaches yours
