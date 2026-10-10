@@ -2,7 +2,7 @@
 // NOTICE; logic only) and measured behavior in solari-poc/RESULTS.md.
 
 import { randomUUID } from "node:crypto";
-import { inFolder, launchHasSlate, MCP_SERVER_NAME, programWord, shellQuote, SLATE_BRIEF } from "@wsp/protocol";
+import { inFolder, launchHasSlate, MCP_SERVER_NAME, programWord, shellLine, shellQuote, SLATE_BRIEF } from "@wsp/protocol";
 import type { AgentLaunch, McpServerSpec, TurnImage } from "@wsp/protocol";
 import { PERMISSION_PROMPT_TOOL, SKIP_PROMPTS_MODE } from "./permissions.js";
 
@@ -32,6 +32,15 @@ const HEADLESS_OVERRIDES = {
  * auto memory in. Set after the strip, never through `base`: the strip drops every inherited CLAUDE_CODE_* as a
  * nesting mark, and this one is ours. */
 export const PROJECT_DIR_ENV = "CLAUDE_CODE_PROJECT_DIR_NAME";
+
+/** The command that opens one of this CLI's sessions in the person's own terminal, the session id going after it: the
+ * program a turn runs, under the config folder a turn's environment names, since a session is found only in the store
+ * it was written to. Measured on 2.1.296: `claude --resume <id>` opens a print-mode session from any folder of that
+ * store, where the picker, `-c` and a resume by title never list it. */
+export function terminalResumeCommand(o: { base?: Readonly<Record<string, string | undefined>>; launch?: AgentLaunch }): string {
+  const dir = o.base?.["CLAUDE_CONFIG_DIR"];
+  return `${dir === undefined ? "" : `CLAUDE_CONFIG_DIR=${shellLine([dir])} `}${programWord("claude", o.launch)} --resume`;
+}
 
 export interface ClaudeEnvOptions {
   /** The machine's login environment: a guest's carries its config dir and IS_SANDBOX, a person's own carries theirs. */

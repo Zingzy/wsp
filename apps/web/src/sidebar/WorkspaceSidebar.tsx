@@ -23,7 +23,7 @@
 import { openProjectSettings } from "../settings/openAt.js";
 import { ChevronDownIcon, CopyIcon, PlusIcon, SquarePenIcon, Trash2Icon } from "lucide-react";
 import { Fragment, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type ReactNode } from "react";
-import { HOST_ASLEEP_LINE, SETTLE_MS, copiesFolder, kindForComputer, modelOf, runsInFolder, modelPicks, workspaceKind, workspaceState, type WorkspaceState, type WorkspaceView } from "@wsp/protocol";
+import { HOST_ASLEEP_LINE, SETTLE_MS, copiesFolder, isHere, kindForComputer, modelOf, runsInFolder, modelPicks, workspaceKind, workspaceState, type WorkspaceState, type WorkspaceView } from "@wsp/protocol";
 import { openContextMenu, runAction } from "../actions/contextMenu.js";
 import { THREAD_TREE_WORKING, rebuildRefusedLine } from "../actions/format.js";
 import { CREATE_ASKED, CREATE_STEP_WORDS, currentStep, stepWords, stoppedStep } from "../shell/creationLog.js";
@@ -396,7 +396,7 @@ export function WorkspaceSidebar() {
       // A settle, a restore, a pin and a snooze take a root and its whole tree; a tile under one settles its own.
       const root = isRoot ? { ...treeSettle(real), workspaceIds: treeWorkspaceIds(real), pinned: thread.pinnedAt !== null, settled } : null;
       const catalog = catalogIn({ harnesses, harnessesByWorkspace }, thread.workspaceId, thread.harness);
-      const target = threadTarget(thread, { catalog, ...machineOf(runs) }, root, group);
+      const target = threadTarget(thread, { catalog, ...machineOf(runs), ...(place.at !== undefined && !isHere(place.at) ? { elsewhere: place.computer } : {}) }, root, group);
       const actionsOf = resolveActions(threadActions, target, inbox === undefined || !canRename ? threadVerbs : { ...threadVerbs, rename: () => setRenaming({ rowId, saving: false }) });
       const lead = { node: real, thread };
       const asChild = childActs(lead, part, tree, childVerbs);

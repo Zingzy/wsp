@@ -354,6 +354,17 @@ describe("wsp verbs over the host: threads, projects and agent defaults", () => 
     expect(h.claude.starts.at(-1)).toMatchObject({ model: "claude-sonnet-5", permissionMode: "bypassPermissions", effort: level });
   });
 
+  it("threads --json carries each thread's folder and its agent's own session id, the two a terminal resumes it by", async () => {
+    const { folder } = await h.macProject("mac");
+    expect((await h.run("run", "mac", "write the notes")).code).toBe(0);
+    const [row] = await h.rt.sessions.list();
+    expect(row!.claudeSessionId).toEqual(expect.any(String));
+    const listed = await h.run("threads", "--json");
+    expect(listed.code).toBe(0);
+    const [{ threads }] = h.json(listed.io) as [{ threads: { id: string; folder: string; claudeSessionId?: string }[] }];
+    expect(threads).toEqual([expect.objectContaining({ id: row!.threadId, folder, claudeSessionId: row!.claudeSessionId })]);
+  });
+
   it("a thread on this computer runs every action without asking when the line names no access, and at wsp's word when it names one", async () => {
     await h.macProject("mac");
     const bare = await h.run("run", "mac", "write the notes");

@@ -24,11 +24,12 @@ const ANSWER = "You are in /root/b and last asked for the second thing.";
 
 /** A harness whose every turn announces the same session, each at a folder and model of its own, and replies at once.
  * `announce: false` dies before it announces any; `aside: false` has no side question. */
-function answering(asked: AsideQuestion[], o: { announce?: boolean; aside?: boolean; compacts?: string } = {}): HarnessAdapterFactory {
+function answering(asked: AsideQuestion[], o: { announce?: boolean; aside?: boolean; compacts?: string; terminalResume?: string } = {}): HarnessAdapterFactory {
   let turns = 0;
   return () => ({
     steers: false,
     ...(o.compacts !== undefined ? { compacts: o.compacts } : {}),
+    ...(o.terminalResume !== undefined ? { terminalResume: o.terminalResume } : {}),
     start: ({ onEvent }) => {
       turns += 1;
       const at = turns === 1 ? { cwd: "/root/a", model: "claude-opus-5" } : { cwd: "/root/b", model: "claude-sonnet-5" };
@@ -221,6 +222,15 @@ describe("a side question beside a thread", () => {
     const bare = runtime(answering(asked));
     const other = await createOn(bare, { on: HERE_PLACE_ID, name: "mac-2" });
     expect((await bare.harnesses.list(other.id)).find(c => c.harness === "claude")?.compacts).toBeUndefined();
+  });
+
+  it("tells the app the command that opens the harness's session in the person's terminal, the adapter's own, and nothing where it has none", async () => {
+    rt = runtime(answering(asked, { terminalResume: "claude --resume" }));
+    const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
+    expect((await rt.harnesses.list(ws.id)).find(c => c.harness === "claude")?.terminalResume).toBe("claude --resume");
+    const bare = runtime(answering(asked));
+    const other = await createOn(bare, { on: HERE_PLACE_ID, name: "mac-2" });
+    expect((await bare.harnesses.list(other.id)).find(c => c.harness === "claude")?.terminalResume).toBeUndefined();
   });
 
   it("refuses a thread whose harness never announced a session, a harness with no side question, and no words", async () => {
