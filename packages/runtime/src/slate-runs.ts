@@ -10,7 +10,7 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { basename, dirname, posix, resolve } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { writeOwn } from "@wsp/own-file";
-import { EXEC_DEADLINE_EXIT, EXEC_OUTPUT_MAX, EXEC_TIMEOUT_MAX_MS, runOutputTail } from "@wsp/protocol";
+import { EXEC_DEADLINE_EXIT, EXEC_OUTPUT_MAX, EXEC_TIMEOUT_MAX_MS, runOutputTail, SLATE_HELD_APPROVAL } from "@wsp/protocol";
 import { SLATE_LIMITS, SLATE_SECRET_IN_ARGS } from "@wsp/protocol/slate";
 import type { SlateJson } from "@wsp/protocol/slate";
 
@@ -397,7 +397,7 @@ const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 /** What a set secret reads as wherever a command or a tool call is shown. */
 export const SECRET_DOTS = "••••";
 
-export const HELD_APPROVAL = "needs your approval";
+export const HELD_APPROVAL = SLATE_HELD_APPROVAL;
 const HELD_BUSY = `${RUNNING_MAX} runs are already running`;
 export const HELD_BUDGET = `started ${STARTS_PER_MINUTE} times in a minute; press to run it again`;
 export const HELD_PRESSED = `pressed ${STARTS_PER_MINUTE} times in a minute; it can start again in a minute`;

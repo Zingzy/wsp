@@ -33,6 +33,9 @@ export type SlateBy = z.infer<typeof SlateBy>;
 export const SlateEmpty = z.enum(["none", "cleared", "rewound-before"]);
 export type SlateEmpty = z.infer<typeof SlateEmpty>;
 
+/** Why a run waits when nothing but the person's word holds it, which the sheet leaves unsaid. */
+export const SLATE_HELD_APPROVAL = "needs your approval";
+
 /** What the consent sheet shows for a held command (07, "Consent"): everything the person reads before approving. */
 export const SlateCmdAsk = z.object({
   /** The approval key: the hash of the declaration without its values. */
@@ -53,6 +56,9 @@ export const SlateCmdAsk = z.object({
   then: z.string().optional(),
   /** The text of each of the slate's files the run reads, by name. */
   files: z.record(z.string(), z.string()).optional(),
+  /** The command names files on the thread's machine, whose content an Always cannot pin from here, so the sheet
+   * offers Run once alone. */
+  noAlways: z.literal(true).optional(),
   /** Why it is held: "needs your approval", "started 12 times in a minute; press to run it again". */
   why: z.string(),
 });

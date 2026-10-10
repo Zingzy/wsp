@@ -2,8 +2,10 @@
 // The person's approval before a slate's command first runs: the row under
 // the header while a run is held, and the 440 px sheet that shows the host's ask: the whole command text, each
 // environment name with the value it carries now (a secret as dots), the computer and the folder, the timeout and who
-// wrote it, with Don't, Run once and Always in this thread. A run that names `confirm` asks in the destructive tier.
+// wrote it, with Don't, Run once and Always in this thread, the last only where the host can pin what it names. A run
+// that names `confirm` asks in the destructive tier.
 import { useState } from "react";
+import { SLATE_HELD_APPROVAL } from "@wsp/protocol";
 import { AlertDialog, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogPopup, AlertDialogTitle } from "../components/ui/alert-dialog.js";
 import { Button, NEUTRAL_RING } from "../components/ui/button.js";
 import { Dialog, DialogFooter, DialogHeader, DialogPanel, DialogPopup, DialogTitle } from "../components/ui/dialog.js";
@@ -85,8 +87,6 @@ export const CONSENT_WORDS = {
   always: "Always in this thread",
   run: "Run",
   wrote: "Written by the agent in this thread",
-  reach: "On this computer, if a script it names changes, it asks again. The command can read anything you can.",
-  agent: "With Always in this thread, the agent can start it too.",
   more: (n: number) => (n === 1 ? "1 more command waits after this one" : `${n} more commands wait after this one`),
 } as const;
 
@@ -198,7 +198,7 @@ export function CommandBody({ ask, cadence, lines }: { ask: Extract<SlateAsk, { 
       <p data-slate-consent-where className="text-foreground">
         on {ask.computer}, in {ask.folder}, {ask.timeoutS} s at most
       </p>
-      <AskWhy why={ask.why} />
+      {ask.why === SLATE_HELD_APPROVAL ? null : <AskWhy why={ask.why} />}
     </>
   );
 }
@@ -209,8 +209,6 @@ export function ConsentSheet({ ask, cadence, more = 0, answer, onClose }: { ask:
     <div data-slate-consent={ask.run} className="flex min-w-0 flex-col gap-3 text-[13px] leading-5">
       <CommandBody ask={ask} cadence={cadence} lines={12} />
       <p className="text-muted-foreground">{CONSENT_WORDS.wrote}.</p>
-      <p data-slate-consent-reach className="text-muted-foreground">{CONSENT_WORDS.reach}</p>
-      {ask.confirm === undefined ? <p data-slate-consent-agent className="text-muted-foreground">{CONSENT_WORDS.agent}</p> : null}
       {more > 0 ? <p data-slate-consent-more className="text-muted-foreground">{CONSENT_WORDS.more(more)}</p> : null}
       {refused === undefined ? null : <p className="text-error-foreground">{refused}</p>}
     </div>
@@ -247,9 +245,11 @@ export function ConsentSheet({ ask, cadence, more = 0, answer, onClose }: { ask:
           <Button variant="outline" disabled={busy} onClick={() => decide("refuse")}>
             {CONSENT_WORDS.dont}
           </Button>
-          <Button variant="outline" disabled={busy} onClick={() => decide("thread")}>
-            {CONSENT_WORDS.always}
-          </Button>
+          {ask.noAlways === true ? null : (
+            <Button variant="outline" disabled={busy} onClick={() => decide("thread")}>
+              {CONSENT_WORDS.always}
+            </Button>
+          )}
           <Button disabled={busy} onClick={() => decide("once")}>
             {CONSENT_WORDS.once}
           </Button>

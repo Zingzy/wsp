@@ -71,10 +71,6 @@ describe("several commands waiting", () => {
     expect(rows.map(r => r.dataset["slateApproval"])).toEqual(["k-link", "k-disk", "mcp:zoho-mail"]);
     const [link, disk, inbox] = rows as [HTMLElement, HTMLElement, HTMLElement];
     expect(link.querySelector("[data-slate-consent-cmd]")!.textContent).toBe('vercel link --yes --project "$PROJECT"');
-    // What an Always cannot cover is said on the sheet: a script it names is bound, anything else it reads is not.
-    expect(document.querySelector("[data-slate-consent-reach]")?.textContent).toBe("On this computer, if a script it names changes, it asks again. The command can read anything you can.");
-    // A press is not the only start once Always is given: the agent may start it too, and the sheet says so.
-    expect(document.querySelector("[data-slate-consent-agent]")?.textContent).toBe("With Always in this thread, the agent can start it too.");
     expect(link.querySelector("[data-slate-consent-cadence]")!.textContent).toBe("Runs when you press it");
     expect(link.querySelector('[data-slate-consent-env="PROJECT"] dd')!.textContent).toBe("spoo-web");
     expect(link.querySelector('[data-slate-consent-env="VERCEL_TOKEN"] dd')!.textContent).toBe("•••••••••••• (24)");
@@ -195,5 +191,12 @@ describe("several commands waiting", () => {
     const sheet = await screen.findByRole("dialog", { name: "Run this command?" });
     expect(sheet.querySelector("[data-slate-approvals]")).toBeNull();
     expect(sheet.querySelector("[data-slate-consent-cmd]")!.textContent).toBe('vercel link --yes --project "$PROJECT"');
+  });
+
+  it("leaves a command with no Always to the one-command sheet, since Allow all would be one", async () => {
+    open(record(DOC, held("link", "disk"), [LINK, { ...DISK, computer: "acme-box", noAlways: true }]));
+    const sheet = await screen.findByRole("dialog", { name: "Run this command?" });
+    expect(sheet.querySelector("[data-slate-approvals]")).toBeNull();
+    expect(within(sheet).queryByRole("button", { name: "Allow all" })).toBeNull();
   });
 });

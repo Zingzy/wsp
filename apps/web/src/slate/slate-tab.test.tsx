@@ -142,6 +142,8 @@ describe("the Slate tab", () => {
     expect(secret).toMatch(/^VERCEL_TOKEN•+ \(24 characters\)$/);
     expect(sheet.textContent).not.toContain(TOKEN);
     expect(within(sheet).getByText(/on zingzy's MacBook Pro, in \/Users\/zingzy\/wsp-landing, 30 s at most/)).toBeTruthy();
+    // The command, how often, where and who wrote it, and nothing more: a plain wait for approval goes unsaid.
+    expect([...sheet.querySelectorAll("[data-slate-consent] > p")].map(p => p.textContent)).toEqual(["Runs each time $project changes", `on ${CHECK_ASK.computer}, in ${CHECK_ASK.folder}, 30 s at most`, "Written by the agent in this thread."]);
     expect(within(sheet).getByRole("button", { name: "Run once" })).toBeTruthy();
     expect(within(sheet).getByRole("button", { name: "Don't" })).toBeTruthy();
     await act(async () => fireEvent.click(within(sheet).getByRole("button", { name: "Always in this thread" })));
@@ -159,6 +161,18 @@ describe("the Slate tab", () => {
     expect(sheet.querySelector("[data-slate-consent-cmd]")?.textContent).toBe(ask.cmd);
     await act(async () => fireEvent.click(within(sheet).getByRole("button", { name: "Run once" })));
     expect(slates.approve).toHaveBeenCalledWith(tid(), "k-env", "once");
+  });
+
+  it("offers no Always for a command that names a file on its box, and says nothing about it", async () => {
+    const ask: SlateAsk = { ...CHECK_ASK, cmd: "python3 /root/acme/.wsp-system-resources.py", env: {}, computer: "acme-box", folder: "/root/acme", noAlways: true };
+    const slates = host(record(DEPLOY_SLATE, { step: 2, project: "wsp-landing", vercelToken: HANDLE, check: { state: "held", why: "needs your approval", runs: 0 } }, { asks: [ask] }));
+    openThread(slates);
+    const sheet = await screen.findByRole("dialog");
+    expect(within(sheet).getAllByRole("button").map(b => b.textContent)).toEqual(expect.arrayContaining(["Don't", "Run once"]));
+    expect(within(sheet).queryByRole("button", { name: "Always in this thread" })).toBeNull();
+    expect([...sheet.querySelectorAll("[data-slate-consent] > p")].map(p => p.textContent)).toEqual(["Runs each time $project changes", "on acme-box, in /root/acme, 30 s at most", "Written by the agent in this thread."]);
+    await act(async () => fireEvent.click(within(sheet).getByRole("button", { name: "Run once" })));
+    expect(slates.approve).toHaveBeenCalledWith(tid(), "k-check", "once");
   });
 
   it("streams a run's lines into its output piece and cancels it through slates.cancel", async () => {
