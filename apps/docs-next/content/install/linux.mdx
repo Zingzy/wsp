@@ -10,7 +10,7 @@ wsp for Linux is an AppImage for x86_64 computers. The AppImage also gives you t
 2. Run the install line. Do not put `sudo` in front of it.
 
    ```sh
-   curl --proto '=https' --tlsv1.2 -fsSL https://usewsp.com/install | sh
+   curl -fsSL https://usewsp.com/install | sh
    ```
 
 3. If the line says that the computer lacks libraries, type your password when `sudo` asks for it.
@@ -56,7 +56,7 @@ wsp keeps its state in `~/.wsp/state.json`. The host writes its log to `~/.wsp/h
 
 ## Install a given version or update
 
-- To install one release instead of the latest, set `WSP_VERSION` for the `sh` that runs the line. For example: `curl --proto '=https' --tlsv1.2 -fsSL https://usewsp.com/install | WSP_VERSION=1.2.3 sh`.
+- To install one release instead of the latest, set `WSP_VERSION` for the `sh` that runs the line. For example: `curl -fsSL https://usewsp.com/install | WSP_VERSION=1.2.3 sh`.
 - To move to the latest release, run the install line again. It replaces the files and restarts the host unit on the new version.
 
 Next, start [your first thread](/start/first-thread).
