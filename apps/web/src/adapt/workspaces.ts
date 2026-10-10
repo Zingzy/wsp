@@ -162,6 +162,7 @@ function deriveThread(thread: ThreadView, workspace: Pick<WorkspaceView, "projec
     status: thread.status,
     ran: thread.ran,
     ...(thread.rewoundAt !== undefined ? { rewound: true } : {}),
+    ...(thread.claudeSessionId !== undefined && thread.cwd !== undefined ? { harnessSession: { id: thread.claudeSessionId, folder: thread.cwd } } : {}),
     startedAt: thread.startedAt !== undefined ? new Date(thread.startedAt).toISOString() : null,
     endedAt: thread.endedAt !== undefined ? new Date(thread.endedAt).toISOString() : null,
     indicator: threadIndicator(thread),

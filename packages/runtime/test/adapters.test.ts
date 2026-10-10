@@ -54,6 +54,16 @@ describe("the agents wsp can open a thread on", () => {
     expect(takesMcpServers(HARNESS_CATALOGS.find(c => c.harness === "codex"))).toBe(true);
   });
 
+  it("Claude Code's adapter names the command that opens one of its sessions in the person's terminal, under the config folder and program its turns run with, and no other adapter names one", () => {
+    const machine = {} as Machine;
+    const ctx = { machine, workspaceId: "ws_1", execStream: machineExecStream(machine), home: () => "/root/.state", env: {}, signInRefusal: signInRefusalLine({ kind: "local" }), vault: {}, loginStands: () => false };
+    expect(HARNESS_ADAPTERS.claude(ctx).terminalResume).toBe("claude --resume");
+    // A session is found only in the store it was written to, so the folder a setup named for the turns rides the line.
+    const set = HARNESS_ADAPTERS.claude({ ...ctx, env: { CLAUDE_CONFIG_DIR: "/Users/dev/claude work" }, launch: { program: "/opt/claude/bin/claude" } });
+    expect(set.terminalResume).toBe("CLAUDE_CONFIG_DIR='/Users/dev/claude work' '/opt/claude/bin/claude' --resume");
+    for (const id of ["codex", "opencode", "cursor"] as const) expect(HARNESS_ADAPTERS[id](ctx).terminalResume, id).toBeUndefined();
+  });
+
   it("OpenCode's row offers Auto alone and says why, Cursor's the two modes its CLI has, and neither takes a message mid-turn", () => {
     const machine = {} as Machine;
     const ctx = { machine, workspaceId: "ws_1", execStream: machineExecStream(machine), home: () => "/root/.state", env: {}, signInRefusal: signInRefusalLine({ kind: "cloud" }), loginStands: () => false };
