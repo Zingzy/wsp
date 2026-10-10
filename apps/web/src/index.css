@@ -1437,10 +1437,13 @@ code {
   background: transparent;
 }
 
-.desktop-mac.dark {
+.desktop-mac.dark:not(.solid) {
   /* Over a white desktop the glass reads as mid grey and the page's muted ink falls under AA on every share of it;
      this step clears it under a hover fill and stays a step behind the body. */
   --muted-foreground: color-mix(in oklab, var(--glass-ink) 85%, var(--material-ground));
+}
+
+.desktop-mac.dark {
   --material-centre: 67%;
   --material-panel: 74%;
   --material-sidebar: 40%;
@@ -1595,8 +1598,9 @@ html.desktop-mac.dark [data-preview-panel-mode="inline"][data-terminal-ground] [
 /* Over the glass the sidebar's quiet text and glyphs have no solid card
    behind them: one step up, the rows' words and the prose whole, the
    counts nearly opaque and the state words a tint lighter, keep them at AA
-   over a white desktop, where the glass reads as mid grey. */
-.desktop-mac [data-app-sidebar] {
+   over a white desktop, where the glass reads as mid grey. With transparency off there is no glass, and the
+   theme's own inks stand. */
+.desktop-mac:not(.solid) [data-app-sidebar] {
   @variant dark {
     --muted-foreground: var(--glass-ink);
     --sidebar-muted-foreground: var(--glass-ink);
@@ -1613,7 +1617,7 @@ html.desktop-mac.dark [data-preview-panel-mode="inline"][data-terminal-ground] [
 
 /* The search row's word paints at the kit's 80 percent; over the glass it
    takes the muted token whole, the step that keeps it AA over a white desktop. */
-.desktop-mac [data-app-sidebar] [data-search-row] {
+.desktop-mac:not(.solid) [data-app-sidebar] [data-search-row] {
   color: var(--sidebar-muted-foreground);
 }
 

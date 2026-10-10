@@ -12,14 +12,14 @@
 // on or the thread moves on without it. On a subagent's page the slot holds
 // that subagent's bar: nobody writes to a subagent but through its lead.
 import { useEffect, useMemo } from "react";
-import { agentName } from "@wsp/catalog";
-import { modelOf, modelPicks, permissionPromptWords } from "@wsp/protocol";
+import { permissionPromptWords } from "@wsp/protocol";
 import { ChatComposer } from "../components/chat/ChatComposer.js";
 import { ChatView } from "../components/chat/ChatView.js";
 import { answerPrompt, type AnswerPrompt } from "../components/chat/answerPrompt.js";
 import { useComposerBarStore } from "../components/chat/composerBar.js";
 import { PromptDock } from "../components/chat/PromptDock.js";
 import { SubagentBar } from "../components/chat/SubagentBar.js";
+import { useSubagentModel } from "../components/threads/SubagentCard.js";
 import { useTypeToWrite } from "../components/chat/composerTypeToFocus.js";
 import type { ChatThreadHandle } from "../components/chat/useChatThread.js";
 import { isPromptOpen, subagentOfRun, subagentRunOf, type PermissionPrompt } from "../adapt/index.js";
@@ -60,9 +60,8 @@ function SubagentSlot({ workspaceId, threadId, subagent, thread }: { workspaceId
   const run = subagentRunOf(thread.view.entries, subagent);
   const shown = row?.subagents?.find(sub => sub.parentToolUseId === subagent) ?? (run === null ? undefined : subagentOfRun(run));
   const harness = row?.harness ?? rows.at(-1)?.harness ?? null;
-  const catalog = useHarnessCatalog(harness, workspaceId);
-  if (shown === undefined || harness === null) return null;
-  const model = shown.model === undefined ? agentName(harness) : catalog === null ? shown.model : (modelOf(catalog, modelPicks(shown.model).model)?.label ?? shown.model);
+  const model = useSubagentModel(shown?.model, harness, workspaceId);
+  if (shown === undefined || harness === null || model === null) return null;
   const back = (): void => {
     useStore.getState().select(workspaceId, threadId);
     requestComposerFocus(workspaceId);

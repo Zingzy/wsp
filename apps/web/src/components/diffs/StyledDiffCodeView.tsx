@@ -168,27 +168,19 @@ const DIFF_VIEW_UNSAFE_CSS = `${DIFF_SURFACE_THEME_UNSAFE_CSS}
   white-space: nowrap !important;
 }
 
-:is([data-separator="line-info"], [data-separator="line-info-basic"]):has(
-    [data-expand-button]
-  )
+:is([data-separator="line-info"], [data-separator="line-info-basic"])[data-expand-index]
   [data-separator-content] {
   cursor: pointer;
 }
 
-:is([data-separator="line-info"], [data-separator="line-info-basic"]):has(
-    [data-expand-button]
-  ):is(:hover, :focus-within)
+:is([data-separator="line-info"], [data-separator="line-info-basic"])[data-expand-index]:is(:hover, :focus-within)
   [data-separator-content] {
   color: color-mix(in srgb, var(--code-foreground) 76%, var(--code-background)) !important;
 }
 
-:is([data-separator="line-info"], [data-separator="line-info-basic"]):has(
-    [data-expand-button]
-  ):is(:hover, :focus-within)
+:is([data-separator="line-info"], [data-separator="line-info-basic"])[data-expand-index]:is(:hover, :focus-within)
   [data-unmodified-lines]::before,
-:is([data-separator="line-info"], [data-separator="line-info-basic"]):has(
-    [data-expand-button]
-  ):is(:hover, :focus-within)
+:is([data-separator="line-info"], [data-separator="line-info-basic"])[data-expand-index]:is(:hover, :focus-within)
   [data-unmodified-lines]::after {
   background-color: color-mix(in srgb, var(--code-background) 84%, var(--code-foreground));
 }

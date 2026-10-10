@@ -308,7 +308,7 @@ export const SubagentRow = memo(function SubagentRow({ subagent, target, kind, n
               </a>
             )}
           </TooltipTrigger>
-          <SubagentCard subagent={subagent} harness={target.harness} kind={kind} reason={note} />
+          <SubagentCard subagent={subagent} harness={target.harness} workspaceId={lead?.workspaceId ?? null} kind={kind} reason={note} />
         </Tooltip>
         <SecondLine place="" at={undefined} note={note} />
       </span>

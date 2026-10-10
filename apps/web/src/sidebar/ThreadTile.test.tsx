@@ -228,6 +228,25 @@ describe("a thread tile", () => {
     }
   });
 
+  it("a done tile's card says the last line of what the thread said under Done; a working one's says nothing from the turn before", async () => {
+    vi.useFakeTimers();
+    try {
+      const reasonOf = async (over: Partial<SidebarThreadSnapshot>): Promise<string | null> => {
+        mount({ over: { lastLine: "Opened acme/lab#42 and the gate is green.", ...over } });
+        pointAt(tile());
+        await act(async () => void vi.advanceTimersByTime(600));
+        const reason = document.querySelector("[data-tile-card] [data-status-line] [data-status-reason]")?.textContent ?? null;
+        cleanup();
+        return reason;
+      };
+      expect(await reasonOf({ status: "completed", endedAt: "2026-09-17T00:05:00.000Z", unread: true })).toBe("Opened acme/lab#42 and the gate is green.");
+      expect(await reasonOf({ status: "completed", endedAt: "2026-09-17T00:05:00.000Z", unread: false })).toBe("Opened acme/lab#42 and the gate is green.");
+      expect(await reasonOf({ status: "running" })).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("keeps the sidebar button's slot under the card's trigger, the slot the sidebar's styles and measures find a row by", () => {
     mount({ over: { status: "completed" }, checkout: { branch: "fix/cart-rounding", counts: [] } });
     expect(tile().dataset["slot"]).toBe("sidebar-menu-button");
@@ -519,6 +538,35 @@ describe("a tile's acts on hover", () => {
       expect(status.dataset["statusLine"]).toBe("failed");
       expect(status.querySelector("[data-status-reason]")!.textContent).toBe("WebFetch could not reach https://acme.dev: connect ETIMEDOUT");
     } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a subagent's card names its model in the words its page's bar says, off the agent's catalog, and the id where the catalog has none", async () => {
+    vi.useFakeTimers();
+    const catalog = { harness: "claude", label: "Claude Code", source: "table" as const, version: null, models: [{ value: "claude-opus-5-5", label: "Opus 5.5" }], efforts: [], contextWindows: [], permissionModes: [], steers: false, renames: false, images: false };
+    const modelOn = async (model: string): Promise<string> => {
+      const subagent: SubagentView = { id: "sa", title: "Read the open tickets", state: "running", startedAt: Date.now() - 60_000, model };
+      const leaf = { subagent, of: thread() };
+      const tree = tileTree({ nowMs: Date.now(), settleMs: null });
+      render(
+        <SidebarProvider defaultOpen>
+          <SubagentRow subagent={subagent} target={childTarget(leaf, "live", tree)} kind={kindOf(leaf, "live")} note={noteOf(leaf, "live")} depth={1} lead={{ workspaceId: "ws_a", threadId: "th_1" }} />
+        </SidebarProvider>,
+      );
+      pointAt(document.querySelector<HTMLElement>("[data-subagent-row]")!);
+      await act(async () => void vi.advanceTimersByTime(600));
+      const words = document.querySelector('[data-subagent-card] [data-tile-card-line="agent"]')!.textContent!;
+      cleanup();
+      return words;
+    };
+    try {
+      useStore.setState({ harnesses: [catalog] } as never);
+      expect(await modelOn("claude-opus-5-5")).toBe("Opus 5.5");
+      expect(await modelOn("claude-opus-5-5[1m]")).toBe("Opus 5.5");
+      expect(await modelOn("claude-haiku-9")).toBe("claude-haiku-9");
+    } finally {
+      useStore.setState({ harnesses: [] } as never);
       vi.useRealTimers();
     }
   });

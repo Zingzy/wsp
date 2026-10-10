@@ -89,9 +89,9 @@ function colours(id: string): (token: string) => Rgba {
   return token => resolveColor(token.startsWith("--") ? (lookup(token) ?? `var(${token})`) : token, lookup);
 }
 
-/** The Mac's dark window: its own declarations and the sidebar's inside it. */
-const macWindow = new Map(declarations(blockBody(indexCss, /\.desktop-mac\.dark \{/)!));
-const macSidebar = new Map(declarations(blockBody(blockBody(indexCss, /\.desktop-mac \[data-app-sidebar\] \{/)!, /@variant dark \{/)!));
+/** The Mac's dark window over its glass: its own declarations and the sidebar's inside it. */
+const macWindow = new Map([...declarations(blockBody(indexCss, /\.desktop-mac\.dark \{/)!), ...declarations(blockBody(indexCss, /\.desktop-mac\.dark:not\(\.solid\) \{/)!)]);
+const macSidebar = new Map(declarations(blockBody(blockBody(indexCss, /\.desktop-mac:not\(\.solid\) \[data-app-sidebar\] \{/)!, /@variant dark \{/)!));
 /** The sidebar's own tiers, which the Mac's light sidebar lays over its veil on the glass. */
 const sidebarTiers = new Map(declarations(blockBody(indexCss, /:root,\n\[data-app-sidebar\] \{/)!));
 /** The glass read as mid grey: the dark glass over a white desktop, the lightest it shows, and the light glass over a
