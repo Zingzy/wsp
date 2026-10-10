@@ -14,6 +14,7 @@ mod fs;
 mod git;
 mod guest;
 mod hosts;
+mod image;
 mod inbox;
 mod link;
 mod mac_model;
@@ -40,6 +41,7 @@ mod tunnel;
 mod under_home;
 mod urls;
 mod usage_logs;
+mod workspace;
 
 pub use link::place_backoff_ms;
 

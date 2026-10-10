@@ -92,6 +92,10 @@ machineId?: string, } | { "op": "fs.read", path: string, encoding?: FsReadEncodi
 /**
  * The workspace this frame is for, as on fs.list above.
  */
+machineId?: string, } | { "op": "fs.image", path: string, 
+/**
+ * The workspace this frame is for, as on fs.list above.
+ */
 machineId?: string, } | { "op": "fs.write", path: string, contents: string, 
 /**
  * The workspace this frame is for, as on fs.list above.

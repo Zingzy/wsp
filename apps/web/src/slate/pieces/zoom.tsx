@@ -8,6 +8,9 @@ import { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, u
 import { SCROLL_FADE } from "../../components/ui/scroll-area.js";
 import { cn } from "../../lib/utils.js";
 
+/** The dialog a drawing or a picture opens whole in: most of the window, wider than any dialog's own width. */
+export const EXPANDED_POPUP = "h-[85vh] w-[90vw] max-w-[min(90vw,1400px)] sm:max-w-[min(90vw,1400px)]";
+
 export interface ZoomControls {
   fit(): void;
   zoom(by: number): void;

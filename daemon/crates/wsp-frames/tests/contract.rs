@@ -467,6 +467,7 @@ fn rendered_numbers() -> BTreeMap<&'static str, Value> {
     m.insert("authDeadlineMs", Value::from(numbers::AUTH_DEADLINE_MS));
     m.insert("tunnelCap", Value::from(numbers::TUNNEL_CAP));
     m.insert("fsReadCapBytes", Value::from(numbers::FS_READ_CAP_BYTES));
+    m.insert("fsImageCapBytes", Value::from(numbers::FS_IMAGE_CAP_BYTES));
     m.insert("sshKeyMax", Value::from(numbers::SSH_KEY_MAX));
     m.insert("sshIdleMs", Value::from(numbers::SSH_IDLE_MS));
     m.insert("fsWriteCapBytes", Value::from(numbers::FS_WRITE_CAP_BYTES));

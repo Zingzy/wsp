@@ -23,3 +23,4 @@ export { slateAxisWord, slateChartAxis, slateShares, slateSpanState, slateTime, 
 export { slateResultShape, sketchSlateResult, slateFieldWords, SLATE_RESULT_ROWS, type SlateResultShape } from "./shape.js";
 export { slateCatalog, slateTokens, SLATE_CHAPTERS, SLATE_RULES } from "./catalog.js";
 export { SLATE_EXAMPLES } from "./examples.js";
+export { slateAddressRefused, slateImageMissing, slateImageNotAFile, slateImageSource, slateImageTooBig, slateLooksSvg, slateListTooLong, slateNotAnImage, SLATE_IMAGE_LAYOUTS, SLATE_IMAGE_MAX_BYTES, type SlateImageSource } from "./image.js";

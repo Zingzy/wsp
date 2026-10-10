@@ -18,7 +18,7 @@ use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 use wsp_daemon::{Daemon, Options};
-use wsp_frames::numbers::{FS_READ_CAP_BYTES, FS_SEARCH_CAP_FILES, FS_SEARCH_CAP_HITS, GIT_DIFF_CAP_BYTES};
+use wsp_frames::numbers::{FS_IMAGE_CAP_BYTES, FS_READ_CAP_BYTES, FS_SEARCH_CAP_FILES, FS_SEARCH_CAP_HITS, GIT_DIFF_CAP_BYTES};
 
 const TOKEN: &str = "fs-token";
 
@@ -967,4 +967,53 @@ async fn git_range_refuses_a_ref_that_is_not_forty_hex_before_any_git_runs_and_b
         refused(&c.request(op, frame(json!(".."))).await, "outside-root");
         refused(&c.request(op, frame(json!("repo/escape"))).await, "outside-root");
     }
+}
+
+const PNG: &[u8] = &[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, b'I', b'H', b'D', b'R'];
+
+#[tokio::test]
+async fn fs_image_reads_an_image_from_any_whole_path_and_hands_back_no_other_file() {
+    let (t, _d, mut c) = bench().await;
+    let at = |name: &str| t.outside().join(name).to_string_lossy().into_owned();
+    fs::write(at("home.png"), PNG).unwrap();
+    fs::write(at("notes.png"), "a text file named like a picture\n").unwrap();
+    fs::write(at("logo.svg"), "<svg xmlns=\"http://www.w3.org/2000/svg\"/>").unwrap();
+    fs::write(at("logo-as.png"), "<?xml version=\"1.0\"?>\n<svg xmlns=\"http://www.w3.org/2000/svg\"/>").unwrap();
+    let mut huge = PNG.to_vec();
+    huge.resize(FS_IMAGE_CAP_BYTES as usize + 1, 0);
+    fs::write(at("huge.png"), &huge).unwrap();
+    fs::create_dir(at("shots")).unwrap();
+    assert!(Command::new("mkfifo").arg(at("pipe.png")).status().unwrap().success());
+
+    let shown = c.request("fs.image", json!({ "path": at("home.png") })).await;
+    assert_eq!(
+        (shown["ok"].as_bool(), shown["mediaType"].as_str(), shown["size"].as_u64()),
+        (Some(true), Some("image/png"), Some(PNG.len() as u64)),
+        "{shown}"
+    );
+    assert_eq!(b64(shown["content"].as_str().unwrap()), PNG);
+    let written =
+        fs::metadata(at("home.png")).unwrap().modified().unwrap().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64;
+    assert_eq!(shown["modified"].as_u64(), Some(written), "{shown}");
+    let meta = fs::metadata(at("home.png")).unwrap();
+    assert_eq!(shown["inode"].as_u64(), Some(std::os::unix::fs::MetadataExt::ino(&meta)), "{shown}");
+    let changed =
+        std::os::unix::fs::MetadataExt::ctime(&meta) as u64 * 1_000_000_000 + std::os::unix::fs::MetadataExt::ctime_nsec(&meta) as u64;
+    assert_eq!(shown["changed"].as_u64(), Some(changed), "{shown}");
+    for (name, svg) in [("notes.png", None), ("logo.svg", Some(true)), ("logo-as.png", Some(true))] {
+        let not = c.request("fs.image", json!({ "path": at(name) })).await;
+        assert_eq!(
+            (not["ok"].as_bool(), not.get("mediaType"), not.get("content"), not["svg"].as_bool()),
+            (Some(true), None, None, svg),
+            "{name}: {not}"
+        );
+    }
+    let big = c.request("fs.image", json!({ "path": at("huge.png") })).await;
+    assert_eq!((big["size"].as_u64(), big.get("content")), (Some(FS_IMAGE_CAP_BYTES + 1), None), "{big}");
+    refused(&c.request("fs.image", json!({ "path": at("shots") })).await, "not-a-file");
+    refused(&c.request("fs.image", json!({ "path": "/dev/null" })).await, "not-a-file");
+    // A read that waited on the pipe would never answer, and the request would hang this test.
+    refused(&c.request("fs.image", json!({ "path": at("pipe.png") })).await, "not-a-file");
+    refused(&c.request("fs.image", json!({ "path": at("gone.png") })).await, "not-found");
+    refused(&c.request("fs.image", json!({ "path": "repo/home.png" })).await, "bad-request");
 }

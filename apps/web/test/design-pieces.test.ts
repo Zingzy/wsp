@@ -85,7 +85,6 @@ const BEFORE = (piece: string): string => `before 2026-10-06, move to ${piece}`;
 const ALLOWED: readonly Allowed[] = [
   { text: "-end-1.5 -top-1.5 absolute size-5 rounded-full border border-border/60 bg-card", count: 1, why: BEFORE("Button") },
   { text: "<DialogPopup className=\"w-auto max-w-[90vw] p-2\">", count: 1, why: BEFORE("a named DialogPopup width") },
-  { text: "<DialogPopup ref={popup} initialFocus={popup} data-slate-diagram-expanded", count: 1, why: BEFORE("a named DialogPopup width") },
   { text: "<Kbd className=\"h-6 min-w-0 rounded-md px-1.5 font-mono text-xs\">", count: 1, why: BEFORE("a tooltip") },
   { text: "<Kbd className=\"mr-auto h-auto rounded border border-border bg-transparent", count: 1, why: BEFORE("a tooltip") },
   { text: "<Kbd className=\"ms-auto font-sans\">", count: 1, why: BEFORE("MenuShortcut") },

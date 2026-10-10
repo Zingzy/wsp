@@ -377,6 +377,44 @@ describe("a box thread's slate", () => {
   }, 30_000);
 });
 
+describe("a box thread's image", () => {
+  it("is read through that computer's daemon by its whole path there, a relative one under the thread's folder there, never off this computer's disk", async () => {
+    const png = Buffer.from("89504e470d0a1a0a0000000d494844520000000100000001", "hex");
+    const here = temp();
+    writeFileSync(join(here, "home.png"), png);
+    const thread = `t-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const asked: string[] = [];
+    const slates = createSlates({
+      store: memoryStore(),
+      now: () => Date.now(),
+      record: () => {},
+      emit: () => {},
+      thread: () => ({ workspaceId: "w1", rootThreadId: thread, sessionId: "s1", folder: "/root/acme", hostFolder: here, computer: "spoo" }),
+      machineOf: () => bashMachine(),
+      imageOn: () => ({
+        name: "spoo",
+        read: async path => {
+          asked.push(path);
+          if (path === "/root/acme/shots/home.png") return { size: png.length, mediaType: "image/png", content: png.toString("base64") };
+          throw Object.assign(new Error(`${path} does not exist`), { code: "not-found" });
+        },
+      }),
+      under: lead => [lead],
+      threadOfToken: () => thread,
+      sources: (threadId, workspaceId) => ({ threadId, workspaceId, now: Date.now(), rows: () => [] }) as never,
+      deliver: async () => ({ outcome: "started" }),
+      runEnv: () => ({ PATH: process.env["PATH"] ?? "/usr/bin:/bin" }),
+    });
+    const asThread: Caller = { origin: "here", by: { kind: "thread", threadId: thread, workspaceId: "w1", rootThreadId: thread } };
+    await slates.write({ text: `<slate><column><image src="shots/home.png" /></column></slate>` }, asThread);
+    expect(await slates.image({ threadId: thread, src: "shots/home.png" })).toMatchObject({ mediaType: "image/png", bytes: png.toString("base64") });
+    const gone = await slates.image({ threadId: thread, src: join(here, "home.png") });
+    expect("problem" in gone && `${gone.problem.code} ${gone.problem.message}`).toBe(`R900 no file at ${join(here, "home.png")}`);
+    expect(asked).toEqual(["/root/acme/shots/home.png", join(here, "home.png")]);
+    slates.close();
+  });
+});
+
 describe("an Always for a box thread's command", () => {
   it("covers the script an on=host command names in this computer's folder, and is refused for one that names a file on the box", async () => {
     const machine = bashMachine();

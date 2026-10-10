@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Slates the render tests open by name with ?doc=, each the smallest that shows one layout fault the matrix found.
 import type { SlateJson } from "@wsp/protocol/slate";
+import { IMAGE_CASES } from "./images";
 import { VIZ_CASES } from "./viz";
 
 /** Longer than any slot in a 400 px panel holds on one line. */
@@ -8,6 +9,7 @@ export const LONG = "Requests from the Bengaluru edge to the origin over the las
 
 export const RENDER_CASES: Readonly<Record<string, { text: string; values?: Record<string, SlateJson> }>> = {
   ...VIZ_CASES,
+  ...IMAGE_CASES,
   "long-head": {
     text: `<slate><column>
   <section id="retail" title="Bengaluru retail" note="Indicative local jewellery-market rates; making charges and GST can vary by retailer"><status tone="good">Open</status></section>

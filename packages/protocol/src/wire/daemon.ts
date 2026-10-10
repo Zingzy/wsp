@@ -10,6 +10,7 @@ import type { FsSearchReply as WireFsSearchReply } from "../generated/FsSearchRe
 import type { GitCommitReply as WireGitCommitReply } from "../generated/GitCommitReply.js";
 import type { GitDiscardReply as WireGitDiscardReply } from "../generated/GitDiscardReply.js";
 import type { GitDiffFile as WireGitDiffFile } from "../generated/GitDiffFile.js";
+import type { FsImageReply as WireFsImageReply } from "../generated/FsImageReply.js";
 import type { FsWriteReply as WireFsWriteReply } from "../generated/FsWriteReply.js";
 import type { PullRequest as WirePullRequest } from "../generated/PullRequest.js";
 import type { GitPrReadReply as WireGitPrReadReply } from "../generated/GitPrReadReply.js";
@@ -140,6 +141,10 @@ type FsWriteReplyHeld = Held<Same<z.infer<typeof FsWriteReply>, FsWriteReply>>;
 /** size is the whole file's byte length; content holds at most the first 2 MiB. */
 export const FsReadReply = z.object({ content: z.string(), size: z.number(), truncated: z.boolean() });
 export type FsReadReply = z.infer<typeof FsReadReply>;
+/** An fs.image's size, with its type and bytes only where they are an image under the cap. */
+export const FsImageReply = z.object({ size: z.number(), modified: z.number().optional(), inode: z.number().optional(), changed: z.number().optional(), mediaType: z.string().optional(), content: z.string().optional(), svg: z.boolean().optional() });
+export type FsImageReply = WireFsImageReply;
+type FsImageReplyHeld = Held<Same<z.infer<typeof FsImageReply>, FsImageReply>>;
 
 export const FsSearchMode = z.enum(["files", "text"]);
 export type FsSearchMode = z.infer<typeof FsSearchMode>;
@@ -447,6 +452,8 @@ export const DaemonRequest = z.discriminatedUnion("op", [
    * to cwd, answered from `git ls-files` and kept until a folder holding one of them changes. */
   z.object({ id: reqId, op: z.literal("fs.files"), cwd: z.string(), machineId: z.string().optional() }),
   z.object({ id: reqId, op: z.literal("fs.read"), path: z.string(), encoding: FsReadEncoding.optional(), machineId: z.string().optional() }),
+  /** A slate's image by its whole path, answered with its bytes only where they are an image under FS_IMAGE_CAP_BYTES. */
+  z.object({ id: reqId, op: z.literal("fs.image"), path: z.string(), machineId: z.string().optional() }),
   /** Replaces an existing regular file's contents whole and answers an FsWriteReply: written beside it and renamed
    * over, its mode and owner kept, never through a link standing where the file should be, and refused over
    * FS_WRITE_CAP_BYTES. The folder resolves inside a root as fs.read's path does. */

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The window's slate ops, each answer parsed against the wire type.
-import { SlateEventAnswer, SlateReadAnswer, SlatesGetAnswer, SlatesResolveAnswer, SlateStateAnswer, SlateWriteAnswer, type SlateOpName, type SlateOpParams, type SlateView } from "@wsp/protocol";
+import { SlateEventAnswer, SlateReadAnswer, SlatesGetAnswer, SlatesImageAnswer, SlatesResolveAnswer, SlateStateAnswer, SlateWriteAnswer, type SlateOpName, type SlateOpParams, type SlateView } from "@wsp/protocol";
 import { SLATE_SCHEMA, type SlateDoc, type SlateJson } from "@wsp/protocol/slate";
 import type { SlateEventAsk } from "./actions.js";
 import type { SlateApproval } from "./model.js";
@@ -45,6 +45,7 @@ export interface SlateApi {
   subscribe(threadId: string, sources: readonly string[]): Promise<void>;
   unsubscribe(threadId: string, sources: readonly string[]): Promise<void>;
   resolve(threadId: string, paths: readonly string[]): Promise<Record<string, unknown>>;
+  image?(threadId: string, src: string, have?: string): Promise<SlatesImageAnswer>;
 }
 
 export function slateApi(c: Requester): SlateApi {
@@ -65,5 +66,6 @@ export function slateApi(c: Requester): SlateApi {
     subscribe: async (threadId, sources) => void (await ask("slates.subscribe", { threadId, sources: [...sources] })),
     unsubscribe: async (threadId, sources) => void (await ask("slates.unsubscribe", { threadId, sources: [...sources] })),
     resolve: async (threadId, paths) => SlatesResolveAnswer.parse(await ask("slates.resolve", { threadId, paths: [...paths] })).values,
+    image: async (threadId, src, have) => SlatesImageAnswer.parse(await ask("slates.image", { threadId, src, ...(have !== undefined ? { have } : {}) })),
   };
 }

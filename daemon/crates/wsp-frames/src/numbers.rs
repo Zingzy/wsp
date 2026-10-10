@@ -2,7 +2,7 @@
 //! The numbers and paths the protocol and the node daemon own, as the contract fixture pins them.
 
 /// The daemon's protocol version, carried in its hello: the length of the protocol's DAEMON_CONTENTS record.
-pub const DAEMON_VERSION: u32 = 143;
+pub const DAEMON_VERSION: u32 = 144;
 
 pub const DEFAULT_HOST: &str = "0.0.0.0";
 pub const DEFAULT_PORT: u16 = 7070;
@@ -120,6 +120,8 @@ pub const EXEC_TIMEOUT_MAX_MS: u32 = 600_000;
 pub const EXEC_DEADLINE_EXIT: i32 = 124;
 
 pub const FS_READ_CAP_BYTES: u64 = 2 * 1024 * 1024;
+/// The most one fs.image carries, the cap on an image a person attaches.
+pub const FS_IMAGE_CAP_BYTES: u64 = 10 * 1024 * 1024;
 /// The longest public key line an ssh.start carries; an ed25519 line is under a hundred bytes.
 pub const SSH_KEY_MAX: usize = 1024;
 /// How long an editor's ssh server stands once its last session closed, before it and every server the editor

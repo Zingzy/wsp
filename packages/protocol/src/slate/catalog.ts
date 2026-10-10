@@ -87,7 +87,7 @@ function index(): string {
     ...core.map(pieceLine),
     `Every piece: id, when={cond}; items take when too. tone: default muted good warning bad info accent. emphasis: normal strong quiet. format, where a line lists none: ${SLATE_FIGURES.join(" ")}.`,
     "section, column, grid: pad none tight normal loose; surface=\"inset\" sets the card ground; align start center end, else children fill the width.",
-    "bars compare categories; time is a chart, x in ms or ISO; shares a donut, sizes a treemap, spans on a clock a timeline; a flow is a diagram.",
+    "bars compare categories; time is a chart, x in ms or ISO; shares a donut, sizes a treemap, spans on a clock a timeline; a flow is a diagram; a screenshot or plot is an image from its path on the thread's computer, or an https address the person allows.",
     "Sources, read only:",
     ...Object.values(SLATE_SOURCES).filter(s => s.level === "core").map(s => sourceLine(s.name)),
     "Declarations: <value name start> <secret name> <derived name value> <run name cmd env args stdin on timeout every always once confirm then tool resource> <file name> <when change={$path} or done={$run} do={steps}>",
