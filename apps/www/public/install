@@ -5,7 +5,8 @@
 #   curl --proto '=https' --tlsv1.2 -fsSL https://usewsp.com/install | sh
 #
 # On a Mac it puts wsp.app in /Applications, or ~/Applications where that is not writable, and opens it once. On
-# Linux (x64) it puts the AppImage in ~/Applications and the files the command runs under ~/.wsp/app. On both it
+# Linux (x64) it puts the AppImage in ~/Applications and the files the command runs under ~/.wsp/app, and on a desktop
+# adds the app to its menu and opens it once. On both it
 # writes the wsp command at ~/.wsp/bin/wsp and puts that folder on PATH for new shells, and npm's link of an older
 # wsp on PATH becomes a link to it.
 #
@@ -30,6 +31,8 @@ stage=""
 # takes both away again, and a folder that holds something by then stays.
 made=""
 parts=""
+# The last line on Linux: how to open the app there.
+opens=""
 
 say() { printf 'wsp install: %s\n' "$*"; }
 
@@ -67,12 +70,19 @@ valid_version() {
   printf '%s\n' "$1" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'
 }
 
-# -q first, so no ~/.curlrc can turn the checks below off.
+# -q first, so no ~/.curlrc can turn the checks below off. With bar given and a terminal on stderr curl draws its
+# progress bar there, which -s would hide, and its error comes back through --write-out instead.
 fetch() {
-  if [ -n "${WSP_RELEASE_API:-}" ]; then
-    curl -q -fsSL -o "$2" "$1" 2>"$tmp/curl.err" </dev/null || die "$(last_line "$tmp/curl.err")"
+  url=$1
+  out=$2
+  bar=${3:-}
+  if [ -n "${WSP_RELEASE_API:-}" ]; then set --; else set -- --proto '=https' --proto-redir '=https' --tlsv1.2; fi
+  if [ -n "$bar" ] && [ -t 2 ]; then
+    code=0
+    curl -q -fL --progress-bar -w '%{errormsg}' "$@" -o "$out" "$url" >"$tmp/curl.err" </dev/null || code=$?
+    [ "$code" = 0 ] || die "curl: ($code) $(cat "$tmp/curl.err")"
   else
-    curl -q -fsSL --proto '=https' --proto-redir '=https' --tlsv1.2 -o "$2" "$1" 2>"$tmp/curl.err" </dev/null || die "$(last_line "$tmp/curl.err")"
+    curl -q -fsSL "$@" -o "$out" "$url" 2>"$tmp/curl.err" </dev/null || die "$(last_line "$tmp/curl.err")"
   fi
 }
 
@@ -80,10 +90,21 @@ fetch() {
 # escaped in JSON, so no line cut out of one starts with a quote and none is read as a key.
 flatten() { tr -d '\r\n' <"$1" | sed 's/" *: */":/g' | tr ',{}[]' '\n\n\n\n\n' | sed 's/^[[:space:]]*//'; }
 
-# The hex sha256 GitHub publishes for one asset: the digest between its name and the next asset's.
-published_sum() {
+# One value GitHub publishes for one asset, as its answer writes it: the first between its name and the next asset's.
+asset_value() {
   name=$(printf '%s' "$1" | sed 's/\./\\./g')
-  sed -n "/^\"name\":\"$name\"\$/,/^\"name\":/s/^\"digest\":\"sha256:\\([0-9a-f]*\\)\"\$/\\1/p" "$2" | head -n 1
+  sed -n "/^\"name\":\"$name\"\$/,/^\"name\":/s/^\"$2\":\\(.*\\)\$/\\1/p" "$3" | head -n 1
+}
+
+# Bytes as the app writes them (fmtBytes): binary units, whole under a gigabyte, GB with one decimal unless whole.
+size_words() {
+  if [ "$1" -lt 1024 ]; then printf '%s B' "$1"
+  elif [ "$1" -lt 1048576 ]; then printf '%s KB' $((($1 + 512) / 1024))
+  elif [ "$1" -lt 1073741824 ]; then printf '%s MB' $((($1 + 524288) / 1048576))
+  else
+    tenths=$((($1 * 10 + 536870912) / 1073741824))
+    if [ $((tenths % 10)) = 0 ]; then printf '%s GB' $((tenths / 10)); else printf '%s.%s GB' $((tenths / 10)) $((tenths % 10)); fi
+  fi
 }
 
 # A Mac always has shasum and not always sha256sum; a Linux box has sha256sum from coreutils.
@@ -366,6 +387,32 @@ ensure_libraries() {
   [ -z "$missing" ] || die "this computer still lacks $missing after apt-get installed $packages"
 }
 
+# One argument of a desktop entry's Exec line, quoted the way the spec reads one: inside the quotes ", `, $ and \ take a
+# backslash, a value doubles every backslash once more, and a % is doubled.
+exec_word() { printf '"%s"' "$(printf '%s' "$1" | sed -e 's/\\/\\\\\\\\/g' -e 's/["`$]/\\\\&/g' -e 's/%/%%/g')"; }
+
+# The entry the AppImage carries, with its wsp:// handler, in the folder a desktop's app menu reads, running the files
+# unpacked above: they need no FUSE, which the AppImage's runtime does to mount itself, and nothing is unpacked again at
+# each launch. The app opens once from there, as it does on a Mac.
+add_to_menu() {
+  step="adding wsp to the app menu"
+  entry="${XDG_DATA_HOME:-$HOME/.local/share}/applications/wsp.desktop"
+  parts="$entry.part
+$parts"
+  run=$(exec_word "$files/AppRun")
+  icon=$(printf '%s' "$files/wsp.png" | sed 's/\\/\\\\/g')
+  if { make_dir "$(dirname "$entry")" &&
+    run=$run icon=$icon awk '/^Exec=AppRun/ { print "Exec=" ENVIRON["run"] substr($0, 12); next } /^Icon=/ { print "Icon=" ENVIRON["icon"]; next } { print }' "$files/wsp.desktop" >"$entry.part" &&
+    mv -f "$entry.part" "$entry"; } 2>/dev/null; then
+    opens="open wsp from your app menu, or run ~/Applications/wsp.AppImage"
+  else
+    say "$entry could not be written, so wsp is not in the app menu"
+    opens="run ~/Applications/wsp.AppImage to open wsp"
+  fi
+  step="opening wsp"
+  if command -v setsid >/dev/null 2>&1; then setsid "$files/AppRun" </dev/null >/dev/null 2>&1 & fi
+}
+
 install_linux() {
   step="unpacking $asset"
   make_dir "$HOME/.wsp/app" || die "$HOME/.wsp/app could not be made"
@@ -408,6 +455,10 @@ $parts"
   for earlier in "$HOME"/.wsp/app/*-install; do
     if [ -d "$earlier" ] && [ "$earlier" != "$files" ]; then rm -rf "$earlier"; fi
   done
+
+  if [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; then add_to_menu; else
+    opens="the app needs a desktop, and the wsp command works here; at a desktop, run ~/Applications/wsp.AppImage to open wsp"
+  fi
 }
 
 main() {
@@ -461,12 +512,14 @@ main() {
   if [ -n "${asked:-}" ] && [ "$version" != "$asked" ]; then die "GitHub answered with $tag, not v$asked"; fi
   if [ "$os" = Darwin ]; then asset="wsp-$version-mac.zip"; else asset="wsp-$version.AppImage"; fi
   grep -qxF "\"name\":\"$asset\"" "$tmp/release.txt" || die "release $tag has no $asset"
-  sum=$(published_sum "$asset" "$tmp/release.txt")
+  sum=$(asset_value "$asset" digest "$tmp/release.txt" | sed -n 's/^"sha256:\([0-9a-f]*\)"$/\1/p')
   [ "${#sum}" -eq 64 ] || die "release $tag publishes no sha256 for $asset"
+  size=$(asset_value "$asset" size "$tmp/release.txt")
+  case "$size" in '' | *[!0-9]* | ?????????????*) size="" ;; *) size=" ($(size_words "$size"))" ;; esac
 
   step="downloading $asset"
-  say "downloading wsp $version"
-  fetch "$site/releases/download/$tag/$asset" "$tmp/$asset"
+  say "downloading wsp $version$size"
+  fetch "$site/releases/download/$tag/$asset" "$tmp/$asset" bar
 
   step="checking $asset"
   got=$(sha256_of "$tmp/$asset")
@@ -479,6 +532,7 @@ main() {
     *":$HOME/.wsp/bin:"*) say "wsp $version is installed; run wsp --version" ;;
     *) say "wsp $version is installed; open a new terminal and run wsp --version" ;;
   esac
+  if [ -n "$opens" ]; then say "$opens"; fi
 }
 
 main "$@"

@@ -1,6 +1,6 @@
 # Install on Linux
 
-{/* Written from apps/www/public/install (install_linux, missing_libraries, apt_packages, put_on_path, restart_service), apps/www/src/downloads.ts, packages/protocol/src/bundles.mjs, packages/host/src/service.ts and wsp up --help. */}
+{/* Written from apps/www/public/install (install_linux, add_to_menu, missing_libraries, apt_packages, put_on_path, restart_service), apps/www/src/downloads.ts, packages/protocol/src/bundles.mjs, packages/host/src/service.ts and wsp up --help. */}
 
 wsp for Linux is an AppImage for x86_64 computers. The AppImage also gives you the `wsp` command line. The install line below installs both.
 
@@ -18,7 +18,9 @@ wsp for Linux is an AppImage for x86_64 computers. The AppImage also gives you t
 
 The line downloads the latest release from [GitHub](https://github.com/wsp-labs/wsp/releases), checks its sha256, and puts the app at `~/Applications/wsp.AppImage`. It also adds the `wsp` command to your `PATH`, which is why the new window can find it. First it checks for the libraries the app needs, as the next section says.
 
-The install line does not open the app.
+On a computer with a desktop, the line adds wsp to your app menu and opens the app once. After that, open wsp from the app menu, or run `~/Applications/wsp.AppImage`. The menu entry runs the app from the files under `~/.wsp/app`, so it opens on a computer without FUSE too.
+
+On a computer with no desktop, such as a server over ssh, the line adds nothing to the menu and opens nothing. The `wsp` command works there.
 
 ## The libraries that the app needs
 
