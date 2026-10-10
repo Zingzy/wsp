@@ -1,0 +1,16 @@
+{
+  "at": "/",
+  "fixture": "lead-small",
+  "fresh": true,
+  "steps": [
+    "1440:row-id=thread:lead",
+    "390:key:Escape",
+    "390:sidebar=trigger",
+    "row-id=finished:thread:lead",
+    "menu:row-id=thread:m-done",
+    "menu-item=settle",
+    "pointer-off"
+  ],
+  "wait": "row-id=thread:m-done",
+  "settleMs": 1500
+}
