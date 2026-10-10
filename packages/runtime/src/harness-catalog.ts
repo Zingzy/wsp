@@ -72,7 +72,7 @@ export const HARNESS_CATALOGS: readonly HarnessCatalog[] = [
     harness: "claude",
     label: "Claude Code",
     // The models below are the pinned binary's handshake; harness-catalog.test.ts holds them to its recording.
-    pin: { read: "--help", version: CLAUDE_CODE.version, date: "2026-09-23" },
+    pin: { read: "--help", version: CLAUDE_CODE.version, date: "2026-10-10" },
     // --mcp-config takes the servers as JSON on the launch (read off `claude --help` at 2.1.257, 2026-09-10).
     mcpServers: true,
     // A side question runs on a fork of the session, which the adapter makes; no binary decides it.
@@ -83,13 +83,13 @@ export const HARNESS_CATALOGS: readonly HarnessCatalog[] = [
     // A user message written to stream-json mid-turn takes image blocks as the opening one does.
     steersImages: true,
     screenCommands: [...CLAUDE_SCREEN_COMMANDS],
-    // The cheapest of the four at $1/$5 per Mtok, as the CLI's own handshake prices them (read 2026-09-23).
-    smallModel: "claude-haiku-4-5-20251001",
+    // The cheapest of the four at $0.10/$0.50 per Mtok, as the CLI's own handshake prices them (read 2026-10-10).
+    smallModel: "claude-haiku-5-5",
     models: [
-      { ...option("claude-opus-5-5", "Opus 5.5"), isDefault: true, fast: true, efforts: ["low", "medium", "high", "xhigh", "max"], contextWindows: ["200k", "1m"] },
-      { ...option("claude-fable-5-1", "Fable 5.1"), efforts: ["low", "medium", "high", "xhigh", "max"], contextWindows: ["200k", "1m"] },
-      { ...option("claude-sonnet-5", "Sonnet 5"), efforts: ["low", "medium", "high", "xhigh", "max"], contextWindows: [] },
-      { ...option("claude-haiku-4-5-20251001", "Haiku 4.5"), efforts: [], contextWindows: [] },
+      { ...option("claude-opus-5-5", "Opus 5.5"), isDefault: true, fast: true, efforts: ["low", "medium", "high", "xhigh", "max"], contextWindows: [] },
+      { ...option("claude-fable-5-1", "Fable 5.1"), efforts: ["low", "medium", "high", "xhigh", "max"], contextWindows: [] },
+      { ...option("claude-sonnet-5-5", "Sonnet 5.5"), efforts: ["low", "medium", "high", "xhigh", "max"], defaultEffort: "medium", contextWindows: [] },
+      { ...option("claude-haiku-5-5", "Haiku 5.5"), efforts: ["low", "medium", "high", "xhigh", "max"], defaultEffort: "medium", contextWindows: [] },
     ],
     // The pinned binary's own model catalog, which harness-catalog.test.ts holds these to: each is run as named, with
     // the levels, default and 1M suffix it lists. Opus 4.0 and 4.1 are run as the latest Opus and Sonnet 4.0 is retired.
@@ -100,8 +100,10 @@ export const HARNESS_CATALOGS: readonly HarnessCatalog[] = [
       { ...option("claude-opus-4-6", "Opus 4.6"), fast: true, efforts: ["low", "medium", "high", "max"], contextWindows: ["200k", "1m"] },
       { ...option("claude-opus-4-5", "Opus 4.5"), fast: true, efforts: [], contextWindows: ["200k", "1m"] },
       { ...option("claude-fable-5", "Fable 5"), efforts: ["low", "medium", "high", "xhigh", "max"], defaultEffort: "high", contextWindows: [] },
+      { ...option("claude-sonnet-5", "Sonnet 5"), efforts: ["low", "medium", "high", "xhigh", "max"], defaultEffort: "high", contextWindows: [] },
       { ...option("claude-sonnet-4-6", "Sonnet 4.6"), efforts: ["low", "medium", "high", "max"], contextWindows: ["200k", "1m"] },
       { ...option("claude-sonnet-4-5", "Sonnet 4.5"), efforts: [], contextWindows: ["200k", "1m"] },
+      { ...option("claude-haiku-4-5-20251001", "Haiku 4.5"), efforts: [], contextWindows: [] },
     ],
     efforts: CLAUDE_EFFORTS,
     contextWindows: CLAUDE_CONTEXT_WINDOWS,
@@ -221,7 +223,7 @@ export function harnessCatalog(harness: string): HarnessCatalog | undefined {
 }
 
 /** Models an agent newer than its pin runs and the usage ledger meets in its logs: named, never offered at a start. */
-export const NAMED_ONLY: readonly HarnessOption[] = [option("claude-sonnet-5-5", "Sonnet 5.5"), option("gpt-6-astra", "GPT-6-Astra")];
+export const NAMED_ONLY: readonly HarnessOption[] = [option("gpt-6-astra", "GPT-6-Astra")];
 
 /** A model as a person reads it: its label in any agent's table, found as an agent names it, with a provider in front
  * or a date after it; else a name built from its words, a version's numbers joined by dots; an empty id is no model. */

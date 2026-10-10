@@ -139,7 +139,9 @@ export function presenceTests(step: ToolInstall, versions: "asked" | "any" = "as
   const version = step.pin?.read;
   if (version !== undefined && (step.asks !== undefined || tests.length === 0)) {
     const read = `"$( ( ${version} ) 2>/dev/null | head -n 1 | tr -d '[:space:]' )"`;
-    const is = (asks: string | undefined): string => (asks === undefined || versions === "any" ? `[ -n ${read} ]` : `[ ${read} = ${shellQuote(asks)} ]`);
+    // An agent newer than the one asked is kept: putting the pin over it takes away models the newer one offers.
+    const asked = (asks: string): string => (agentOfRow(step) === undefined ? `[ ${read} = ${shellQuote(asks)} ]` : `printf '%s\\n' ${shellQuote(asks)} ${read} | sort -V -C`);
+    const is = (asks: string | undefined): string => (asks === undefined || versions === "any" ? `[ -n ${read} ]` : asked(asks));
     tests.push(step.below === undefined || versions === "any" ? is(step.asks) : `if ${nodeAtLeast(step.below.node)}; then ${is(step.asks)}; else ${is(step.below.asks)}; fi`);
   }
   return tests;

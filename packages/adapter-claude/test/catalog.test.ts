@@ -15,9 +15,9 @@ import { writeStub } from "../../protocol/test/stub-script.js";
 // stream-json session that was sent no prompt, joined by the probe's separator; the commands and agents lists are cut
 // to two entries each.
 const REAL = readFileSync(new URL("./fixtures/catalog-probe.txt", import.meta.url), "utf8");
-// Claude Code 2.1.280 on 2026-09-23, the version the catalog pins, recorded the same way with the account's fields cut
-// too; the built-in table's claude row is held to it.
-const PINNED = readFileSync(new URL("./fixtures/catalog-probe-2.1.280.txt", import.meta.url), "utf8");
+// Claude Code 2.1.296 on 2026-10-10, the version the catalog pins, recorded the same way under a fresh config signed in
+// by key, with the account's fields cut too; the built-in table's claude row is held to it.
+const PINNED = readFileSync(new URL("./fixtures/catalog-probe-2.1.296.txt", import.meta.url), "utf8");
 
 describe("catalogProbeCommand", () => {
   const dirs: string[] = [];
@@ -90,11 +90,12 @@ describe("parseCatalogProbe", () => {
 
   it("reads the pinned version's recording: its four models in the handshake's order, the default it resolves and its effort list", () => {
     const probe = parseCatalogProbe(PINNED);
-    expect(probe!.version).toBe("2.1.280");
-    expect(probe!.models.map(m => m.slug)).toEqual(["claude-opus-5-5", "claude-fable-5-1", "claude-sonnet-5", "claude-haiku-4-5-20251001"]);
-    // "default" resolves to claude-opus-5-5[1m].
+    expect(probe!.version).toBe("2.1.296");
+    expect(probe!.models.map(m => m.slug)).toEqual(["claude-opus-5-5", "claude-fable-5-1", "claude-sonnet-5-5", "claude-haiku-5-5"]);
+    // "default" resolves to claude-opus-5-5, and no model is offered with a [1m] suffix.
     expect(probe!.models.filter(m => m.isDefault).map(m => m.slug)).toEqual(["claude-opus-5-5"]);
-    expect(probe!.models.map(m => m.efforts)).toEqual([["low", "medium", "high", "xhigh", "max"], ["low", "medium", "high", "xhigh", "max"], ["low", "medium", "high", "xhigh", "max"], []]);
+    expect(probe!.models.map(m => m.contextWindows)).toEqual([[], [], [], []]);
+    expect(probe!.models.map(m => m.efforts)).toEqual(Array(4).fill(["low", "medium", "high", "xhigh", "max"]));
     expect(probe!.efforts).toEqual(["low", "medium", "high", "xhigh", "max"]);
   });
 

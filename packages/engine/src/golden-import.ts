@@ -1546,8 +1546,8 @@ export const nodeFloorCheck = (floor: number): string =>
 /** An agents plan as steps of the one tools loop: the node step first, then each agent, waiting on that step
  * where its road runs on node. The install line runs on the tools PATH with the Node the step installed ahead of
  * it, the agent's own version check is the step's check, the catalog's command is its bin and the version the
- * catalog's road pins is what the step asks for, so a computer that already answers at that version installs
- * nothing. The road is the step's manager, which is what bounds the run.
+ * catalog's road pins is what the step asks for, so a computer that already answers at that version or a newer
+ * one installs nothing. The road is the step's manager, which is what bounds the run.
  *
  * The plan's own skipped rows are not here: they never became steps, and whoever runs the plan reports them. */
 export function agentSteps(plan: AgentsPlan, agents: readonly AgentEntry[] = CATALOG_AGENTS, path: string = TOOLS_PATH, prefix?: string): ToolInstall[] {

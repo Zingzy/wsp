@@ -705,7 +705,7 @@ describe("the slate v2 host, round 4", () => {
   it("a press starts the agent's turn on the thread's own model, effort and access, at the 1M window only where the thread ran at it", async () => {
     const opened = [
       { model: "claude-fable-5-1", effort: "low", permissionMode: "acceptEdits" },
-      { model: "claude-opus-5-5", effort: "max", permissionMode: "default", contextWindow: "1m" },
+      { model: "claude-opus-5", effort: "max", permissionMode: "default", contextWindow: "1m" },
     ];
     for (const picks of opened) {
       const { rt, threadId, asThread, starts } = await threadOn("wsp-slates-picks-", { picks });
@@ -1061,7 +1061,7 @@ describe("a slate over the host's socket", () => {
 
 describe("the slate v2 host, round 5", () => {
   it("a send and a notify that name no picks run on the thread's own model, effort and window", async () => {
-    const picks = { model: "claude-opus-5-5", effort: "max", contextWindow: "1m" };
+    const picks = { model: "claude-opus-5", effort: "max", contextWindow: "1m" };
     const { rt, threadId, workspaceId, starts } = await threadOn("wsp-slates-sendpicks-", { picks });
     const pickedOf = (o: HarnessStartOptions) => ({ model: o.model, effort: o.effort, contextWindow: o.contextWindow });
 

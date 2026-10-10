@@ -739,7 +739,7 @@ describe("the MCP server over the host", () => {
     const before = claude.starts.length;
     const refused = await call("run", { workspace: "alpha", task: "review it", model: "claude-haiku-4-5" });
     expect(refused.isError).toBe(true);
-    expect(refused.text).toMatch(/^model "claude-haiku-4-5" is not one claude takes; one of: Opus 5\.5 \(claude-opus-5-5\), Fable 5\.1 \(claude-fable-5-1\), Sonnet 5 \(claude-sonnet-5\), Haiku 4\.5 \(claude-haiku-4-5-20251001\); legacy: Opus 5 \(claude-opus-5\), /);
+    expect(refused.text).toMatch(/^model "claude-haiku-4-5" is not one claude takes; one of: Opus 5\.5 \(claude-opus-5-5\), Fable 5\.1 \(claude-fable-5-1\), Sonnet 5\.5 \(claude-sonnet-5-5\), Haiku 5\.5 \(claude-haiku-5-5\); legacy: Opus 5 \(claude-opus-5\), /);
     expect(refused.text.endsWith(`${BUILT_IN_LIST_CLAUSE}. Drop the flag, or give it a value the agent offers.`)).toBe(true);
     const mode = await call("run", { workspace: "alpha", task: "go", access: "yolo" });
     expect(mode.isError).toBe(true);

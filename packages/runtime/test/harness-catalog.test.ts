@@ -44,7 +44,7 @@ describe("harness catalogs", () => {
   });
 
   it("the pin is what was run on the row's own binary, and a row written from a CLI's docs claims none", () => {
-    expect(harnessCatalog("claude")!.version).toBe("--help 2.1.280, 2026-09-23");
+    expect(harnessCatalog("claude")!.version).toBe("--help 2.1.296, 2026-10-10");
     expect(harnessCatalog("codex")!.version).toBe("app-server 0.153.0, 2026-09-07");
     expect(catalogSourceLine(harnessCatalog("codex")!, THIS_COMPUTER)).toBe("codex table, app-server 0.153.0, 2026-09-07");
     expect(catalogSourceLine(harnessCatalog("opencode")!, THIS_COMPUTER)).toBe("opencode table, run --help 1.18.18, 2026-09-27");
@@ -97,12 +97,13 @@ describe("harness catalogs", () => {
     it("Haiku 4.5 takes no window though the table takes its 1M suffix: its window there is 200k with no 1M beta, and the handshake offers no 1M Haiku", () => {
       const haiku = entryOf("claude-haiku-4-5-20251001")!;
       expect(haiku.context).toEqual({ window: 200_000, supports_1m_suffix: true });
-      expect(harnessCatalog("claude")!.models.find(m => m.value === "claude-haiku-4-5-20251001")?.contextWindows).toEqual([]);
+      expect(modelOf(harnessCatalog("claude")!, "claude-haiku-4-5-20251001")?.contextWindows).toEqual([]);
     });
 
     it("the legacy rows are the table's, so a bump of the pin fails here until a recording and the rows move with it", () => {
       const current = new Set(harnessCatalog("claude")!.models.map(m => entryOf(m.value)?.id));
-      expect(harnessCatalog("claude")!.legacyModels).toEqual(
+      // A row names the dated id the binary sends, as Haiku 4.5's is, where the table keys its family id.
+      expect(harnessCatalog("claude")!.legacyModels?.map(m => ({ ...m, value: m.value.replace(/-\d{8}$/, "") }))).toEqual(
         entries()
           .filter(e => !current.has(e.id))
           .map(e => ({
@@ -110,7 +111,8 @@ describe("harness catalogs", () => {
             label: e.display_name,
             efforts: levels(e.capabilities),
             ...(e.default_effort !== undefined ? { defaultEffort: e.default_effort } : {}),
-            contextWindows: e.context.supports_1m_suffix === true ? ["200k", "1m"] : [],
+            // Haiku 4.5 is the one whose suffix the binary takes and never offered, as the test above holds.
+            contextWindows: e.context.supports_1m_suffix === true && e.id !== "claude-haiku-4-5" ? ["200k", "1m"] : [],
             // Fast is the table's own mark, on every Opus from 4.5, which the recording does not carry.
             ...(e.id.startsWith("claude-opus-") ? { fast: true } : {}),
           })),
@@ -143,13 +145,13 @@ describe("harness catalogs", () => {
 
   it("Claude Code offers the models, effort levels, context windows and permission modes its CLI takes", () => {
     const claude = harnessCatalog("claude")!;
-    expect(claude.models.map(o => o.value)).toEqual(["claude-opus-5-5", "claude-fable-5-1", "claude-sonnet-5", "claude-haiku-4-5-20251001"]);
+    expect(claude.models.map(o => o.value)).toEqual(["claude-opus-5-5", "claude-fable-5-1", "claude-sonnet-5-5", "claude-haiku-5-5"]);
     expect(claude.models.find(o => o.isDefault)?.value).toBe("claude-opus-5-5");
-    expect(claude.models.map(o => o.contextWindows)).toEqual([["200k", "1m"], ["200k", "1m"], [], []]);
-    // Haiku answers no effort list, so it takes no --effort.
-    expect(claude.models.map(o => o.efforts?.length)).toEqual([5, 5, 5, 0]);
+    // 2.1.296 offers no current model with a [1m] suffix.
+    expect(claude.models.map(o => o.contextWindows)).toEqual([[], [], [], []]);
+    expect(claude.models.map(o => o.efforts?.length)).toEqual([5, 5, 5, 5]);
     // The older models the binary still runs as named; Opus 4.0 and 4.1 it runs as the latest Opus, Sonnet 4.0 is retired.
-    expect(claude.legacyModels?.map(o => o.value)).toEqual(["claude-opus-5", "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6", "claude-opus-4-5", "claude-fable-5", "claude-sonnet-4-6", "claude-sonnet-4-5"]);
+    expect(claude.legacyModels?.map(o => o.value)).toEqual(["claude-opus-5", "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6", "claude-opus-4-5", "claude-fable-5", "claude-sonnet-5", "claude-sonnet-4-6", "claude-sonnet-4-5", "claude-haiku-4-5-20251001"]);
     expect(claude.efforts.map(o => o.value)).toEqual(["low", "medium", "high", "xhigh", "max"]);
     // The handshake names no default effort; the CLI documents high on every model that takes one.
     expect(claude.efforts.find(o => o.isDefault)?.value).toBe("high");
@@ -191,9 +193,10 @@ describe("the default effort of a pick", () => {
     const claude = harnessCatalog("claude")!;
     expect(markedDefault(effortsFor(claude, markedDefault(claude.models) ?? null))?.value).toBe("high");
     expect(markedDefault(effortsFor(claude, null))?.value).toBe("high");
-    // Every model this list carries that takes an effort runs at high, and Haiku, which takes none, is given none.
-    expect(claude.models.map(m => markedDefault(effortsFor(claude, m))?.value)).toEqual(["high", "high", "high", undefined]);
-    expect(modelOf(claude, "claude-fable-5-1")).toMatchObject({ label: "Fable 5.1", contextWindows: ["200k", "1m"] });
+    // Each model runs at the default its own row carries, and at the catalog's high where it carries none.
+    expect(claude.models.map(m => markedDefault(effortsFor(claude, m))?.value)).toEqual(["high", "high", "medium", "medium"]);
+    expect(markedDefault(effortsFor(claude, modelOf(claude, "claude-haiku-4-5-20251001")))?.value).toBeUndefined();
+    expect(modelOf(claude, "claude-sonnet-4-6")).toMatchObject({ label: "Sonnet 4.6", contextWindows: ["200k", "1m"] });
     // A model the binary routes to another provider names no efforts and no default of its own.
     expect(markedDefault(effortsFor(codex, { value: "anthropic/claude-sonnet-4.5", label: "anthropic/claude-sonnet-4.5" }))?.value).toBe("low");
     expect(shown(null)).toBe("low");
@@ -269,7 +272,7 @@ describe("the access a thread starts at, and wsp's words for it", () => {
 describe("startPicks", () => {
   /** The lists as the table holds them, with the mode that asks nothing marked. */
   const claude = harnessCatalog("claude")!;
-  const MODELS = "Opus 5.5 (claude-opus-5-5), Fable 5.1 (claude-fable-5-1), Sonnet 5 (claude-sonnet-5), Haiku 4.5 (claude-haiku-4-5-20251001)";
+  const MODELS = "Opus 5.5 (claude-opus-5-5), Fable 5.1 (claude-fable-5-1), Sonnet 5.5 (claude-sonnet-5-5), Haiku 5.5 (claude-haiku-5-5)";
   /** A catalog whose default model takes two of the five efforts and whose other model takes none. */
   const narrowed = { ...claude, models: [{ value: "claude-opus-5", label: "Opus 5", isDefault: true, efforts: ["high", "max"] }, { value: "claude-haiku-4-5", label: "Haiku", efforts: [] }] };
 
@@ -364,6 +367,7 @@ describe("startPicks", () => {
 
   it("a start on a legacy model runs that model at the levels the binary lists for it, and a refusal names the legacy ones apart", () => {
     const claude = harnessCatalog("claude")!;
+    expect(startPicks(claude, { model: "claude-sonnet-5-5" }, true)).toEqual({ model: "claude-sonnet-5-5", effort: "medium", permissionMode: "bypassPermissions" });
     expect(startPicks(claude, { model: "claude-opus-5", effort: "high" }, true)).toEqual({ model: "claude-opus-5", effort: "high", permissionMode: "bypassPermissions" });
     // Its own default, where the binary lists one; the catalog's high where it lists none.
     expect(startPicks(claude, { model: "claude-opus-4-7" }, true)).toMatchObject({ effort: "xhigh" });
@@ -372,7 +376,7 @@ describe("startPicks", () => {
     expect(startPicks(claude, { model: "claude-sonnet-4-5" }, true)).toEqual({ model: "claude-sonnet-4-5", permissionMode: "bypassPermissions" });
     expect(() => startPicks(claude, { model: "claude-sonnet-4-5", effort: "high" }, true)).toThrow("Sonnet 4.5 takes no effort");
     expect(() => startPicks(claude, { model: "claude-opus-4-1" }, true)).toThrow(
-      'model "claude-opus-4-1" is not one claude takes; one of: Opus 5.5 (claude-opus-5-5), Fable 5.1 (claude-fable-5-1), Sonnet 5 (claude-sonnet-5), Haiku 4.5 (claude-haiku-4-5-20251001); legacy: Opus 5 (claude-opus-5), Opus 4.8 (claude-opus-4-8),',
+      `model "claude-opus-4-1" is not one claude takes; one of: ${MODELS}; legacy: Opus 5 (claude-opus-5), Opus 4.8 (claude-opus-4-8),`,
     );
   });
 
@@ -432,11 +436,12 @@ describe("catalogFromProbe", () => {
 
   it("keeps the table's legacy models on a binary that lists none of them, since it still runs each by name", () => {
     const catalog = catalogFromProbe(harnessCatalog("claude")!, probe);
-    expect(catalog.legacyModels).toEqual(harnessCatalog("claude")!.legacyModels);
+    // The probe lists Haiku 4.5 among its current models, so it alone leaves the fold.
+    expect(catalog.legacyModels).toEqual(harnessCatalog("claude")!.legacyModels?.filter(m => m.value !== "claude-haiku-4-5-20251001"));
     // One it names is among its current models, and leaves the fold.
     const current = catalogFromProbe(harnessCatalog("claude")!, { ...probe, models: [...probe.models, { slug: "claude-opus-4-8", label: "Opus", efforts: ["low"], contextWindows: [], isDefault: false }] });
     expect(current.models.map(m => m.value)).toContain("claude-opus-4-8");
-    expect(current.legacyModels?.map(m => m.value)).toEqual(["claude-opus-5", "claude-opus-4-7", "claude-opus-4-6", "claude-opus-4-5", "claude-fable-5", "claude-sonnet-4-6", "claude-sonnet-4-5"]);
+    expect(current.legacyModels?.map(m => m.value)).toEqual(["claude-opus-5", "claude-opus-4-7", "claude-opus-4-6", "claude-opus-4-5", "claude-fable-5", "claude-sonnet-5", "claude-sonnet-4-6", "claude-sonnet-4-5"]);
     expect(startPicks(catalog, { model: "claude-fable-5" }, false)).toEqual({ model: "claude-fable-5" });
   });
 

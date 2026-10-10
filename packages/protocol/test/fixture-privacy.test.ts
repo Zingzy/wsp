@@ -47,7 +47,6 @@ const placeholder = (value: string) => PLACEHOLDER_HOMES.some(group => group.nam
 const CLAUDE_STREAM = "a recorded Claude Code stream whose session and message ids the adapter tests match on";
 const SUBAGENTS = "the same recorded session with subagents; the tool ids are synthetic and pair each call with its result";
 const TITLES = "session ids the title reader keys its titles by";
-const CLAUDE_PROBE = "message ids in a captured catalog probe";
 const CODEX_RUN = "a recorded Codex app server run whose thread and turn ids the adapter tests match on";
 const CODEX_TURN = "a recorded Codex app server turn whose thread and turn ids the adapter tests match on";
 const NO_SIGN_IN = "a recorded Codex app server run with no sign-in";
@@ -126,8 +125,6 @@ const ALLOWED: readonly Allowed[] = [
   { text: "toolu_01WspFixAsideBash2", count: 2, why: ASIDE },
   { text: "5b3d3ddb-86d6-47ba-b216-0a510284d8b6", count: 5, why: TITLES },
   { text: "11111111-1111-4111-8111-111111111111", count: 2, why: TITLES },
-  { text: "7c6f56dc-c585-42a0-b6e8-783665c45546", count: 1, why: CLAUDE_PROBE },
-  { text: "8ba9226e-a816-4937-8929-ee0272a7c498", count: 1, why: CLAUDE_PROBE },
   { text: "01a100dc-e1f0-7183-94f1-048611cff500", count: 28, why: CODEX_RUN },
   { text: "01a100dc-e29f-7942-9ad4-1f2da918b6e2", count: 18, why: CODEX_RUN },
   { text: "01a100dc-ecc5-7b02-9cee-319037d6a218", count: 2, why: CODEX_RUN },

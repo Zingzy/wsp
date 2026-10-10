@@ -76,19 +76,19 @@ describe("the model, effort and window a start into a thread runs on", () => {
   };
 
   it("a send naming none runs on the thread's model, effort and window, the window read back off the announced model", async () => {
-    const { workspaceId, thread } = await openThread({ harness: "claude", model: "claude-fable-5-1", effort: "low", contextWindow: "1m" });
-    expect((await rt.sessions.list(workspaceId)).at(-1)?.model).toBe("claude-fable-5-1[1m]");
+    const { workspaceId, thread } = await openThread({ harness: "claude", model: "claude-opus-5", effort: "low", contextWindow: "1m" });
+    expect((await rt.sessions.list(workspaceId)).at(-1)?.model).toBe("claude-opus-5[1m]");
     await (await rt.sessions.start(workspaceId, { prompt: "two", thread })).finished;
-    expect(picksOf(claude.starts.at(-1))).toEqual({ model: "claude-fable-5-1", effort: "low", contextWindow: "1m" });
+    expect(picksOf(claude.starts.at(-1))).toEqual({ model: "claude-opus-5", effort: "low", contextWindow: "1m" });
     // The third start reads the second's row, which is where the thread's latest picks now are.
     await (await rt.sessions.start(workspaceId, { prompt: "three", thread })).finished;
-    expect(picksOf(claude.starts.at(-1))).toEqual({ model: "claude-fable-5-1", effort: "low", contextWindow: "1m" });
+    expect(picksOf(claude.starts.at(-1))).toEqual({ model: "claude-opus-5", effort: "low", contextWindow: "1m" });
   });
 
   it("what a send names wins, and the effort it leaves out stays where the new model takes it", async () => {
-    const { workspaceId, thread } = await openThread({ harness: "claude", model: "claude-fable-5-1", effort: "low", contextWindow: "1m" });
+    const { workspaceId, thread } = await openThread({ harness: "claude", model: "claude-opus-5", effort: "low", contextWindow: "1m" });
     await (await rt.sessions.start(workspaceId, { prompt: "two", thread, effort: "max" })).finished;
-    expect(picksOf(claude.starts.at(-1))).toEqual({ model: "claude-fable-5-1", effort: "max", contextWindow: "1m" });
+    expect(picksOf(claude.starts.at(-1))).toEqual({ model: "claude-opus-5", effort: "max", contextWindow: "1m" });
     // Sonnet 5 takes the effort but offers no window, so the window does not ride with it.
     await (await rt.sessions.start(workspaceId, { prompt: "three", thread, model: "claude-sonnet-5" })).finished;
     expect(picksOf(claude.starts.at(-1))).toEqual({ model: "claude-sonnet-5", effort: "max", contextWindow: undefined });
@@ -112,13 +112,13 @@ describe("the model, effort and window a start into a thread runs on", () => {
   });
 
   it("a thread whose rows fell off the index still sends on its model, effort and window, read off its transcript", async () => {
-    const { workspaceId, thread } = await openThread({ harness: "claude", model: "claude-fable-5-1", effort: "low", contextWindow: "1m" });
+    const { workspaceId, thread } = await openThread({ harness: "claude", model: "claude-opus-5", effort: "low", contextWindow: "1m" });
     // Two hundred other threads in the same folder push the thread's one row off the workspace's 200-row index, on
     // other picks, so a value read off the wrong turn shows.
     for (let i = 0; i < 200; i++) await (await rt.sessions.start(workspaceId, { prompt: `other ${i}`, harness: "claude", model: "claude-sonnet-5", effort: "max" })).finished;
     expect((await rt.sessions.list(workspaceId)).some(s => s.threadId === thread)).toBe(false);
     await (await rt.sessions.start(workspaceId, { prompt: "two", thread })).finished;
-    expect(picksOf(claude.starts.at(-1))).toEqual({ model: "claude-fable-5-1", effort: "low", contextWindow: "1m" });
+    expect(picksOf(claude.starts.at(-1))).toEqual({ model: "claude-opus-5", effort: "low", contextWindow: "1m" });
   }, 60_000);
 
   it("a model the catalog dropped since the thread's last turn is left out rather than refused, and the thread's effort still rides", async () => {
