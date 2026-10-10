@@ -285,7 +285,7 @@ describe("the host's reading of the newest release", () => {
     expect(lines).toEqual([expect.stringMatching(/^release: the check failed \(EISDIR/)]);
   });
 
-  it("gives up on an ask after five seconds and keeps what it had", async () => {
+  it("gives up on an ask once every connect it tries and the answer have had their time, and keeps what it had", async () => {
     vi.useFakeTimers();
     const hang = (init: RequestInit): Promise<Response> =>
       new Promise((_, reject) => init.signal?.addEventListener("abort", () => reject(new Error("aborted"))));

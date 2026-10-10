@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { adoptLoginPath, agentsHere, aimedHost, computerNameHere, daemonBinaryHere, dialHost, installEach, mcpServerSpec, runningWsp, serviceAddressHere, shimPath, systemService, wspHome, VERSION, type CliIO } from "@wsp/host";
+import { adoptLoginPath, agentsHere, aimedHost, computerNameHere, daemonBinaryHere, dialHost, installEach, mcpServerSpec, releaseFetch, runningWsp, serviceAddressHere, shimPath, systemService, wspHome, VERSION, type CliIO } from "@wsp/host";
 import { DEFAULT_PREFERENCES, HOME_ENV, HOST_WORDS, OutsideLine, ThemePreference, hostMenuAction, hostsMenuItems } from "@wsp/protocol";
 import { BrowserWindow, Menu, Notification, Tray, app, dialog, ipcMain, nativeImage, nativeTheme, powerSaveBlocker, shell, type IpcMainEvent, type IpcMainInvokeEvent } from "electron";
 import { awakeWanted } from "./awake.js";
@@ -233,7 +233,7 @@ const bundles = (): BundleShell =>
     dir: app.getPath("downloads"),
     env: process.env,
     userAgent: `wsp/${app.getVersion()}`,
-    fetch,
+    fetch: releaseFetch(),
     open: file => shell.openPath(file),
     reveal: file => shell.showItemInFolder(file),
     quit: () => app.quit(),
