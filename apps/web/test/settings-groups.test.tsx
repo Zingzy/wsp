@@ -22,6 +22,7 @@ import { useSettingsStore } from "../src/settings/settingsStore.js";
 import { crumb, descriptionOf, lineLabels, lineOf, mountSettings, pageAt, resetSettings, rowOf, rowTitles, settingsApi, settle, wordOf } from "./settings-harness.js";
 import { lastNotice } from "./notice-text.js";
 import { useNotices } from "../src/notices/store.js";
+import { UPDATE_WORDS } from "../src/shell/update.js";
 import { pickOption } from "./select.js";
 
 const AT = "2026-09-12T09:14:00.000Z";
@@ -930,7 +931,7 @@ describe("General's Version card", () => {
     await mount({}, "general");
     await waitFor(() => expect(screen.getByRole("button", { name: ABOUT_WORDS.get("0.3.0") }).title).toBe(HOVER));
     fireEvent.click(screen.getByRole("button", { name: ABOUT_WORDS.get("0.3.0") }));
-    await waitFor(() => expect(useNotices.getState().notices.slice(0, 1).map(n => [n.kind, n.text])).toEqual([["error", "wsp-0.3.0-mac.dmg did not match the release's sha256 and was deleted"]]));
+    await waitFor(() => expect(useNotices.getState().notices.slice(0, 1).map(n => [n.kind, n.text])).toEqual([["error", UPDATE_WORDS.notReady("0.3.0", "wsp-0.3.0-mac.dmg did not match the release's sha256 and was deleted")]]));
     expect(buttons()).toEqual([ABOUT_WORDS.get("0.3.0"), ABOUT_WORDS.whatsNew]);
   });
 
@@ -1006,7 +1007,7 @@ describe("General's Version card", () => {
     useStore.setState({ release: read("0.3.0", { installed: "0.3.0" }) });
     await mount({ hostRestart } as Partial<Api>, "general");
     fireEvent.click(screen.getByRole("button", { name: ABOUT_WORDS.restartHost }));
-    await waitFor(() => expect(useNotices.getState().notices.slice(0, 1).map(n => n.text)).toEqual(["a socket let in on a ticket cannot restart this host"]));
+    await waitFor(() => expect(useNotices.getState().notices.slice(0, 1).map(n => n.text)).toEqual([UPDATE_WORDS.notRestarted("a socket let in on a ticket cannot restart this host")]));
   });
 
   it("draws no Restart where a restart would not bring the host back, and the Host hover says the terminal's line instead", async () => {

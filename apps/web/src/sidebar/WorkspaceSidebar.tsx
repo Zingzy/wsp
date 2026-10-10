@@ -59,6 +59,7 @@ import { SIDEBAR_SECTIONS, drawnCount, drawsUnder, dropMarks, nodeOf, settleable
 import { LeadTree, rowsUnder, settlesOnHover } from "./LeadTree.js";
 import { SnoozeDialog } from "./SnoozeDialog.js";
 import { SidebarCorner } from "./SidebarCorner.js";
+import { UpdateCard } from "./UpdateCard.js";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./SidebarChrome.js";
 import { CreationTile, ThreadLaunchTile, ThreadTile, WorkspaceTile, useTileHandlers, type TilePlace } from "./ThreadTile.js";
 import { newThreadTitle, computerName, computerOf, copyName, placeNames } from "./workspaceRows.js";
@@ -715,6 +716,7 @@ export function WorkspaceSidebar() {
         </SidebarContent>
         <SidebarChromeFooter>
           <SettingUpSection collapsed={folded.includes("setting-up")} onToggle={() => toggleFold("setting-up")} />
+          <UpdateCard />
           <SidebarCorner />
         </SidebarChromeFooter>
       </div>

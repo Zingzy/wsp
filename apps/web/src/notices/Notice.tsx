@@ -26,7 +26,7 @@ const dismiss = (id: string): void => useNotices.getState().dismiss(id);
 
 function Notice({ notice }: { notice: NoticeRecord }) {
   const { word, Icon, tone } = NOTICE_KINDS[notice.kind];
-  const { action, later } = notice;
+  const { action } = notice;
   const act =
     action === undefined ? null : (
       <Button
@@ -59,36 +59,17 @@ function Notice({ notice }: { notice: NoticeRecord }) {
             {notice.detail}
           </p>
         )}
-        {/* Two keycaps stand under the words, the one that waits first, so neither squeezes the sentence. */}
-        {later === undefined ? null : (
-          <div className="mt-2.5 flex justify-end gap-2 pr-1">
-            <Button
-              data-notice-later=""
-              size="xs"
-              variant="outline"
-              onClick={() => {
-                later.run();
-                dismiss(notice.id);
-              }}
-            >
-              {later.word}
-            </Button>
-            {act}
-          </div>
-        )}
       </div>
-      {later !== undefined ? null : act}
-      {later !== undefined ? null : (
-        <Button
-          size="icon-xs"
-          variant="ghost"
-          className="shrink-0 opacity-0 transition-opacity duration-150 group-hover/toast:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-100"
-          aria-label={CLOSE_NOTICE_LABEL}
-          onClick={() => dismiss(notice.id)}
-        >
-          <XIcon />
-        </Button>
-      )}
+      {act}
+      <Button
+        size="icon-xs"
+        variant="ghost"
+        className="shrink-0 opacity-0 transition-opacity duration-150 group-hover/toast:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-100"
+        aria-label={CLOSE_NOTICE_LABEL}
+        onClick={() => dismiss(notice.id)}
+      >
+        <XIcon />
+      </Button>
     </div>
   );
 }

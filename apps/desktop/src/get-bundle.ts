@@ -201,7 +201,7 @@ export async function openBundle(kept: { file: string; platform: NodeJS.Platform
 export interface BundleShell {
   get(raw: unknown): Promise<BundleOutcome>;
   open(): Promise<BundleOutcome>;
-  /** Deletes the checked copy an app that replaces itself holds, which Later asks for. */
+  /** Deletes the checked copy an app that replaces itself holds, which dismissing the update card asks for. */
   discard(): Promise<BundleOutcome>;
 }
 

@@ -12,6 +12,7 @@ import { closeAdd } from "../src/settings/add/addFlow.js";
 import { useRecipes } from "../src/settings/recipesStore.js";
 import { useAdds } from "../src/settings/adds.js";
 import { useNotices } from "../src/notices/store.js";
+import { useUpdateDownload } from "../src/shell/update.js";
 import { useStore } from "../src/protocol/store.js";
 import { useRightPanelStore } from "../src/rightPanelStore.js";
 import { FIRST_PAGE, NO_READS, useSettingsStore, type SettingsAt } from "../src/settings/settingsStore.js";
@@ -62,6 +63,7 @@ export function resetSettings(): void {
   useSettingsStore.setState({ at: FIRST_PAGE, search: "", reads: NO_READS, addProjectAt: null, devicesAsked: 0, buildShown: null, recipeAsked: null, addAsked: null, usageTab: "used", agentsTab: "agents", agentsPlace: null, agentsLevel: null });
   useRightPanelStore.setState({ byWorkspaceId: {} });
   useNotices.getState().clear();
+  useUpdateDownload.setState({ download: null });
   useAdds.setState({ jobs: {} });
   closeAdd();
   useRecipes.setState({ recipes: null, refused: null });

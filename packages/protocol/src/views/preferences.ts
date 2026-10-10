@@ -131,6 +131,8 @@ export const Preferences = z.object({
   productUsage: z.boolean().default(true),
   /** The editor Open in editor opens a file in; absent opens the first one installed on the computer running the host. */
   editor: EditorId.optional(),
+  /** The release whose card in the sidebar the person dismissed, so no window shows it again; a newer one shows. */
+  updateDismissed: z.string().optional(),
   /** Whether the desktop app keeps this computer from sleeping on its own while a thread works on it. On unless the
    * person turns it off; defaulted so a record from a host older than the switch reads as on. */
   keepAwake: z.boolean().default(true),
@@ -216,6 +218,7 @@ export function applyPreferencesPatch(current: Preferences, patch: PreferencesPa
   };
   const target = patch.target === undefined ? current.target : patch.target;
   const editor = patch.editor ?? current.editor;
+  const updateDismissed = patch.updateDismissed ?? current.updateDismissed;
   const textSize = patch.textSize === undefined ? current.textSize : patch.textSize;
   const codeSize = patch.codeSize === undefined ? current.codeSize : patch.codeSize;
   const defaultAgent = patch.defaultAgent === undefined ? current.defaultAgent : patch.defaultAgent;
@@ -257,6 +260,7 @@ export function applyPreferencesPatch(current: Preferences, patch: PreferencesPa
     ...(sidebarWidth === null || sidebarWidth === undefined ? {} : { sidebarWidth }),
     ...(target === null || target === undefined ? {} : { target }),
     ...(editor === undefined ? {} : { editor }),
+    ...(updateDismissed === undefined ? {} : { updateDismissed }),
     ...(textSize === null || textSize === undefined ? {} : { textSize }),
     ...(codeSize === null || codeSize === undefined ? {} : { codeSize }),
     ...(defaultAgent === null || defaultAgent === undefined ? {} : { defaultAgent }),

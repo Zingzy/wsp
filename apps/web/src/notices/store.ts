@@ -22,8 +22,6 @@ export interface Notice {
   /** Wall-clock ms. */
   readonly at: number;
   readonly action?: NoticeAction;
-  /** A second keycap that puts the toast away after its own act, for a notice whose action can wait. */
-  readonly later?: NoticeAction;
   /** A notice that stands for a wait: its toast stays until end(key), and a second add under the key replaces it. */
   readonly key?: string;
 }
