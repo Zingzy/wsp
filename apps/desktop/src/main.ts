@@ -11,7 +11,7 @@ import { awakeWanted } from "./awake.js";
 import { chooseFrom, contextMenuTemplate, parseContextMenuItems } from "./context-menu.js";
 import { deepLinks, linkInArgv } from "./deep-link.js";
 import { fontDirs, fontFamilies, indexFonts, localFontFaces, type FontFile } from "./fonts.js";
-import { bundleShell, type BundleShell } from "./get-bundle.js";
+import { bundleShell, updateLogLine, type BundleShell } from "./get-bundle.js";
 import { KeptOtherRelease, earlierHostCheck, homeOf, loginStart, oneAtATime, openHost, openHostReady, servesAgainNotice, setLoginStart, statePathIn, stopWsp, userDataIn, workingHere, type HostSession, type Launch, type OpenHostOptions } from "./host-lifecycle.js";
 import { hostSwitcher, type HostSwitcher } from "./host-switch.js";
 import { offerMove, type MoveGate } from "./move.js";
@@ -299,7 +299,7 @@ async function updateStep(step: string, run: () => Promise<BundleOutcome>): Prom
   appLog.write("info", `update: ${step}`);
   try {
     const outcome = await run();
-    appLog.write(outcome.ok ? "info" : "error", `update: ${step} ${outcome.ok ? "done" : `failed: ${outcome.error}`}`);
+    appLog.write(outcome.ok ? "info" : "error", updateLogLine(step, outcome));
     return outcome;
   } catch (e) {
     appLog.write("error", `update: ${step} threw: ${stackOf(e)}`);
