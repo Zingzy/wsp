@@ -16,7 +16,7 @@ wsp runs your coding agents as threads in your projects: in a folder on this com
 npm i -g @wsp-labs/wsp
 ```
 
-The desktop app carries the same command. It installs with `curl --proto '=https' --tlsv1.2 -fsSL https://usewsp.com/install | sh`, or from the [releases page](https://github.com/wsp-labs/wsp/releases).
+The desktop app carries the same command. It installs with `curl -fsSL https://usewsp.com/install | sh`, or from the [releases page](https://github.com/wsp-labs/wsp/releases).
 
 ## First steps
 
