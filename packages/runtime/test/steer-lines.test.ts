@@ -6,6 +6,7 @@
 // message alone goes at the turn's end, and a slash command's answer is never the reply.
 import { afterEach, describe, expect, it } from "vitest";
 import { createClaudeAdapter } from "@wsp/adapter-claude";
+import { stillRunningLine } from "@wsp/protocol";
 import { createRuntime, type Runtime } from "../src/runtime.js";
 import { memoryStore } from "../src/store.js";
 import { fedRuns, init, lifecycle, result, said, taskDone, tasks } from "./fed-runs.js";
@@ -16,6 +17,10 @@ const REPORT = "Built the parser; 40 tests pass.";
 const ANSWER = "BANANA";
 const LINE = "thread 1234abcd finished (completed): reply with the single word BANANA";
 const COST = "Total cost:            $0.0128\nTotal duration (API):  5s";
+/** A reply given over running background work, as its line carries it. */
+const held = (reply: string): string => `${reply}\n\n${stillRunningLine(1)}`;
+/** The end of a turn whose line promised another and had nothing to add under the reply: its outcome alone. */
+const OUTCOME = expect.stringMatching(/^thread \w+ finished \(completed[^)]*\)$/);
 
 describe("a child's finished lines into its lead, with a message steered into the child's last words", () => {
   const runtimes: Runtime[] = [];
@@ -104,7 +109,7 @@ describe("a child's finished lines into its lead, with a message steered into th
     run.end(0);
     await kid.finished;
     await new Promise(r => setTimeout(r, 50));
-    expect(await toLead()).toEqual([REPORT, ANSWER]);
+    expect(await toLead()).toEqual([held(REPORT), held(ANSWER), OUTCOME]);
   });
 
   it("the same, with the background work over before the answer: the answer's line goes at the end, once", async () => {
@@ -114,7 +119,7 @@ describe("a child's finished lines into its lead, with a message steered into th
     const uuid = await steer(LINE);
     run.push(tasks([]), lifecycle(uuid, "queued"), lifecycle(uuid, "started"), init, said("msg_2", ANSWER), result(ANSWER), lifecycle(uuid, "completed"));
     await over();
-    expect(await toLead()).toEqual([REPORT, ANSWER]);
+    expect(await toLead()).toEqual([held(REPORT), ANSWER]);
   });
 
   it("a steer the woken agent takes at a tool's end, completed before its result as 2.1.295 prints it, sends the answer's line at the end, once", async () => {
@@ -126,7 +131,7 @@ describe("a child's finished lines into its lead, with a message steered into th
     run.push(lifecycle(uuid, "queued"), lifecycle(uuid, "started"), said("msg_2", ANSWER), lifecycle(uuid, "completed"), result(ANSWER, 2, { kind: "task-notification" }));
     await over();
     expect((await kid.finished).text).toBe(ANSWER);
-    expect(await toLead()).toEqual([REPORT, ANSWER]);
+    expect(await toLead()).toEqual([held(REPORT), ANSWER]);
   });
 
   it("/cost steered into the child's last words leaves the agent's report as the line, and the cost as a row of its own", async () => {
@@ -140,7 +145,7 @@ describe("a child's finished lines into its lead, with a message steered into th
     expect(rows).toContain(COST);
   });
 
-  it("/cost steered over a reply already told for its background work sends no second line", async () => {
+  it("/cost steered over a reply already told for its background work sends the reply no second time, only the outcome the line promised", async () => {
     const { kid, run, steer, toLead, over } = await setup();
     run.push(tasks(["bk1"]), said("msg_1", REPORT), result(REPORT, 3));
     await until(async () => (await toLead()).length === 1);
@@ -148,10 +153,10 @@ describe("a child's finished lines into its lead, with a message steered into th
     run.push(tasks([]), lifecycle(uuid, "queued"), lifecycle(uuid, "started"), init, said("ac793b79", COST, "<synthetic>"), result(COST, 0), lifecycle(uuid, "completed"));
     await over();
     expect((await kid.finished).text).toBe(REPORT);
-    expect(await toLead()).toEqual([REPORT]);
+    expect(await toLead()).toEqual([held(REPORT), OUTCOME]);
   });
 
-  it("a reply told over background work is told once across a host restart that reads its run again from the start", async () => {
+  it("a reply told over background work is told once across a host restart that reads its run again from the start, and its end sends the outcome", async () => {
     const { kid, run, toLead, restart, endedOn } = await setup();
     run.push(tasks(["bk1"]), said("msg_1", REPORT), result(REPORT, 3));
     await until(async () => (await toLead()).length === 1);
@@ -161,7 +166,7 @@ describe("a child's finished lines into its lead, with a message steered into th
     await new Promise(r => setTimeout(r, 50));
     run.end(0);
     await endedOn(second);
-    expect(await toLead(second)).toEqual([REPORT]);
+    expect(await toLead(second)).toEqual([held(REPORT), OUTCOME]);
     // The second host read the run to its end: a row the restart had settled would carry no done.
     expect((await second.sessions.history(kid.view().workspaceId)).filter(e => e.type === "session.done").map(e => (e.type === "session.done" ? e.result.text : ""))).toEqual([REPORT]);
   });
