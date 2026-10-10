@@ -16,22 +16,7 @@ wsp for Linux is an AppImage for x86_64 computers. The AppImage also gives you t
 3. If the line says that the computer lacks libraries, type your password when `sudo` asks for it.
 4. Open a new terminal, and run `wsp --version`. It prints `wsp` and the version that you installed.
 
-The install line does these steps:
-
-1. It reads the latest release of [wsp-labs/wsp](https://github.com/wsp-labs/wsp/releases) from GitHub.
-2. It downloads the AppImage and compares its sha256 with the sha256 that GitHub publishes for the release. If they do not match, it stops before it unpacks anything.
-3. It unpacks the files that the command runs into `~/.wsp/app/<version>-install`.
-4. It makes sure that the computer has the libraries that the app needs. The next section tells you more.
-5. It writes the `wsp` command at `~/.wsp/bin/wsp`.
-6. It puts the AppImage at `~/Applications/wsp.AppImage`.
-7. It adds `~/.wsp/bin` to your `PATH` in the files that your shell reads. The table below names the files.
-
-| Shell | Files |
-|---|---|
-| bash | `~/.bashrc` and `~/.profile` |
-| zsh | `~/.zshrc` |
-| fish | `~/.config/fish/conf.d/wsp.fish` |
-| Any other shell | `~/.profile` |
+The line downloads the latest release from [GitHub](https://github.com/wsp-labs/wsp/releases), checks its sha256, and puts the app at `~/Applications/wsp.AppImage`. It also adds the `wsp` command to your `PATH`, which is why the new window can find it. First it checks for the libraries the app needs, as the next section says.
 
 The install line does not open the app.
 
