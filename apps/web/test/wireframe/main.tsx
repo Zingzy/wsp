@@ -70,7 +70,8 @@
 //                         with an update out, Codex, and OpenCode not installed
 //   settings-agent        Claude Code's own page on this Mac, with launch words and two variables
 //   settings-agents-servers  the Tool servers tab on this Mac: every server state, the person's own and a project's
-//   settings-agents-skills   the Skills tab on this Mac: a shared skill, wsp's own, a plugin's and a project's
+//   settings-agents-skills   the Skills tab on this Mac: a shared skill, wsp's own and a project's
+//   settings-agents-plugins  the Plugins tab: each agent's plugins, on, off, missing and a project's
 //   settings-project-overrides  wsp's page with Codex set as its agent, its model and access
 //                         left to Codex's own
 //   settings-image-nothing, -copy, -copying, -stopped, -stale, -ready  the box's
@@ -414,6 +415,7 @@ const SETTINGS_SCREENS: Record<string, SettingsAt> = {
   "settings-agent": { kind: "agent", id: "claude" },
   "settings-agents-servers": { kind: "group", group: "agents" },
   "settings-agents-skills": { kind: "group", group: "agents" },
+  "settings-agents-plugins": { kind: "group", group: "agents" },
   "settings-project-overrides": { kind: "project", id: "pr_wsp" },
   ...Object.fromEntries(IMAGE_SCREENS.map(name => [name, { kind: "computer", id: imageAt.id } as SettingsAt])),
 };
@@ -524,7 +526,7 @@ const creatingScreen = screen === "creating" || screen === "creating-refused";
  * set as its agent, which read the host's own lists and this Mac's agents. */
 const agentScreen = ["settings-agents", "settings-agent", "settings-project-overrides"].includes(screen);
 /** The Agents page's Tool servers and Skills tabs, which read every server and skill on this Mac. */
-const toolsScreen = screen === "settings-agents-servers" || screen === "settings-agents-skills";
+const toolsScreen = screen === "settings-agents-servers" || screen === "settings-agents-skills" || screen === "settings-agents-plugins";
 /** The record the host shaped the lists off, Claude Code's picker hiding the models held apart; and wsp's own overrides
  * on the screen about them: its agent set to Codex, its model and access left to Codex's own. */
 const OVERRIDES = { ...(agentScreen ? { agentDefaults: HARNESS_DEFAULTS } : {}), ...(screen === "settings-project-overrides" ? { projectDefaults: { pr_wsp: { agent: "codex" } } } : {}) };
@@ -738,7 +740,7 @@ const pick = params.get("pick");
 if (pick !== null) window.localStorage.setItem("wsp:sidebar-project", JSON.stringify(pick));
 const sidebarWidth = params.get("sidebar");
 // The page Settings opens on, as this window would remember it, and the one screen with text in the field.
-if (settingsAt !== undefined) useSettingsStore.setState({ at: settingsAt, search: screen === "settings-search" ? "icons" : "", ...(toolsScreen ? { agentsTab: screen === "settings-agents-servers" ? ("servers" as const) : ("skills" as const) } : {}) });
+if (settingsAt !== undefined) useSettingsStore.setState({ at: settingsAt, search: screen === "settings-search" ? "icons" : "", ...(toolsScreen ? { agentsTab: screen === "settings-agents-servers" ? ("servers" as const) : screen === "settings-agents-plugins" ? ("plugins" as const) : ("skills" as const) } : {}) });
 useStore.setState({
   conn: "live",
   ready: true,
@@ -800,8 +802,8 @@ useRightPanelStore.setState({
   byWorkspaceId: Object.fromEntries([...HELD.map(w => w.id), CREATED_ID].map(id => [id, screen === "settings-over-panel" && id === "ws_copy" ? openPanel : screen === "panel-agents" && id === "ws_box" ? agentsPanel : shutPanel])),
 });
 
-/** The panel's widths: the one it opens at and its floor. */
-const PANEL_WIDTHS = [480, 360] as const;
+/** The panel's widths: the one it opens at, the 400 the design draws it at, and its floor. */
+const PANEL_WIDTHS = [480, 400, 360] as const;
 /** The task on this Mac's own read: Claude Code with an update out beside the agents of the shared report. */
 const PANEL_REPORT = { ...AGENTS_REPORT, target: { workspaceId: "ws_copy" }, reach: "here" as const, agents: AGENTS_REPORT.agents.map(a => (a.id === "claude" ? { ...a, update: { to: "2.1.290", command: "claude update" } } : a)) };
 function AgentsWidths() {

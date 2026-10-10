@@ -335,7 +335,7 @@ export const AGENTS_PAGE_WORDS = {
   title: "Agents",
   computer: "Computer",
   tab: "Show",
-  tabs: { agents: "Agents", servers: "Tool servers", skills: "Skills" },
+  tabs: { agents: "Agents", servers: "Tool servers", skills: "Skills", plugins: "Plugins" },
   onComputer: (name: string): string => `Agents, tool servers and skills on ${name}`,
   onComputerDescription: "Installed agents, their sign-ins, and the tools and skills they get.",
   newThreads: "New threads",

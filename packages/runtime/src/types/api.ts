@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { GoldenDelta, ExecResult, GoldenManifest, GoldenVersion, MachineBackend, MachineKind, RetentionPlan, SnapshotRow, TemplateRow } from "@wsp/engine";
-import type { ThreadCapWait, ThreadScope, AgentsReport, AgentsSignInEvent, AgentsSignInRun, AgentsTarget, ServerAdd, ServerAsk, ServerToolsAnswer, SignInLine, SkillAdded, SkillHit, SkillPreview } from "@wsp/protocol";
+import type { ThreadCapWait, ThreadScope, AgentsReport, AgentsSignInEvent, AgentsSignInRun, AgentsTarget, PluginAsk, PluginRow, ServerAdd, ServerAsk, ServerToolsAnswer, SignInLine, SkillAdded, SkillHit, SkillPreview } from "@wsp/protocol";
 import type {
   Capabilities,
   DaemonReachView,
@@ -118,6 +118,8 @@ export interface Runtime {
     serversToggle(target: AgentsTarget, ask: ServerAsk & { on: boolean }, origin?: Caller): Promise<{ file: string }>;
     /** A remote server's icon as a data url, asked of Google by this host only while the person's switch is on. */
     serversIcon(host: string, refresh?: boolean): Promise<string | null>;
+    /** One plugin of one agent turned on or off there for the login, by the agent's own road, and its row after. */
+    pluginsToggle(target: AgentsTarget, ask: PluginAsk & { on: boolean }, origin?: Caller): Promise<{ plugin: PluginRow }>;
     /** Changes how one agent runs on one computer, checked first, and answers its row there, names only. */
     setup(placeId: string, agent: string, change: AgentSetupSet, origin?: Caller): Promise<AgentRow>;
     /** Every catalog agent's config folder on this computer by id, where a launch here finds it: the one the person

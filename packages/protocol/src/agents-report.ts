@@ -93,7 +93,7 @@ export type AgentRow = z.infer<typeof AgentRow>;
 
 /** One folder a skill lives in: `~`-relative, the agent whose own folder it is (none for a folder several agents
  * read), where a link points when the folder is one, and whether it is turned off: its SKILL.md renamed
- * SKILL.md.off, which no agent loads. */
+ * SKILL.md.off, or the plugin it comes with off, so no agent loads it. */
 export const SkillPath = z.object({ path: z.string(), agent: z.string().optional(), linkTo: z.string().optional(), off: z.literal(true).optional() });
 export type SkillPath = z.infer<typeof SkillPath>;
 
@@ -101,8 +101,9 @@ export const SkillScope = z.enum(["user", "project", "plugin"]);
 export type SkillScope = z.infer<typeof SkillScope>;
 
 /** One skill by its name, with every folder it lives in. `description` is off its SKILL.md's frontmatter; `project`
- * is the project a project skill lives in. */
-export const SkillRow = z.object({ name: z.string(), description: z.string().optional(), paths: z.array(SkillPath).min(1), scope: SkillScope, project: AgentsProject.optional() });
+ * is the project a project skill lives in; `plugin` is the id of the plugin a plugin's skill comes with, whose name
+ * leads the skill's as the agent announces it (`brag:brag`). */
+export const SkillRow = z.object({ name: z.string(), description: z.string().optional(), paths: z.array(SkillPath).min(1), scope: SkillScope, project: AgentsProject.optional(), plugin: z.string().optional() });
 export type SkillRow = z.infer<typeof SkillRow>;
 
 /** One skill skills.sh lists for a search: `id` is `<owner>/<repo>/<skill>`, what an install names. */
@@ -126,8 +127,8 @@ export const skillsSearchEmptyRefusal = "Type something to search skills.sh for.
 /** Why the skill wsp writes is never turned off or removed: the next start writes it again. */
 export const systemSkillRefusal = (name: string): string => `${name} is written by wsp and kept current on every start, so it is always on.`;
 
-/** Why a plugin's skill is not turned off or removed on its own. */
-export const pluginSkillRefusal = (name: string): string => `${name} comes with a plugin; turn the plugin off instead.`;
+/** Why a plugin's skill is not turned off or removed on its own, with the line that turns its plugin off. */
+export const pluginSkillRefusal = (name: string, plugin: string, agent: string): string => `${name} comes with the plugin ${plugin}, so it goes with it; turn the plugin off with wsp plugins disable ${plugin} --agent ${agent}.`;
 
 /** Why a project's skill is not turned off: it lives in the repo, and the rename would be a change to it. */
 export const projectSkillOffRefusal = (name: string, path: string): string => `${name} lives in the repo at ${path}, so it is not turned off here.`;
@@ -199,6 +200,76 @@ export const noServersConfigRefusal = (agent: string): string => `${agent} keeps
 
 /** Why a napping workspace's servers were not changed: nothing here wakes a machine. */
 export const nappingServersRefusal = (name: string): string => `${name} is napping, and its servers are changed only while it runs; wake it first`;
+
+/** Where a plugin is installed for: every folder of the login, one project for everyone in its repo, or one project
+ * for this login alone. */
+export const PluginScope = z.enum(["user", "project", "local"]);
+export type PluginScope = z.infer<typeof PluginScope>;
+
+/** What a plugin brings, each by the name a turn gives it: its skills, slash commands and subagents, the events its
+ * hooks run on, its tool servers, language servers and apps. */
+export const PluginBrings = z.object({
+  skills: z.array(z.string()),
+  commands: z.array(z.string()),
+  subagents: z.array(z.string()),
+  hooks: z.array(z.string()),
+  servers: z.array(z.string()),
+  lsp: z.array(z.string()),
+  apps: z.array(z.string()),
+});
+export type PluginBrings = z.infer<typeof PluginBrings>;
+
+/** Why the agent loads nothing of a plugin it names: its install folder is not there (`folder`); or the agent lists no
+ * such plugin, its marketplace a folder that is not there (`marketplace`), or for no reason it gives (`unlisted`). */
+export const PluginMissing = z.enum(["folder", "marketplace", "unlisted"]);
+export type PluginMissing = z.infer<typeof PluginMissing>;
+
+/** One plugin of one agent, as `name@marketplace`, in the scope it is installed for. `on` is what the agent's own
+ * settings make of it there; `path` its folder, `~`-relative; `setIn` the settings file a project or local row is
+ * switched in; `source` where its marketplace comes from, a GitHub repo as owner/name, an address or a folder. */
+export const PluginRow = z.object({
+  agent: z.string(),
+  id: z.string(),
+  name: z.string(),
+  marketplace: z.string(),
+  version: z.string().optional(),
+  scope: PluginScope,
+  project: AgentsProject.optional(),
+  on: z.boolean(),
+  missing: PluginMissing.optional(),
+  path: z.string().optional(),
+  setIn: z.string().optional(),
+  description: z.string().optional(),
+  source: z.string().optional(),
+  brings: PluginBrings,
+});
+export type PluginRow = z.infer<typeof PluginRow>;
+
+/** One plugin of one agent on a target, by its id (`name@marketplace`). */
+export const PluginAsk = z.object({ agent: z.string(), plugin: z.string() });
+export type PluginAsk = z.infer<typeof PluginAsk>;
+
+/** Why a missing plugin loads in no turn there, in the agent's terms. */
+export function pluginMissingLine(row: Pick<PluginRow, "id" | "marketplace" | "missing" | "on">, agent: string, computer: string): string {
+  if (row.missing === "folder") return `${agent} has ${row.id} ${row.on ? "on" : "installed"}, but its folder is not on ${computer}, so no turn loads it.`;
+  const unlisted = `The config.toml on ${computer} names ${row.id}, but ${agent} lists no such plugin there.`;
+  return row.missing === "marketplace" ? `${unlisted} Its marketplace, ${row.marketplace}, is a folder that is not on ${computer}.` : unlisted;
+}
+
+/** Why an act named a plugin the report does not list for that agent. */
+export const noSuchPluginRefusal = (id: string, agent: string): string => `There is no plugin ${id} for ${agent} there, so nothing was switched.`;
+
+/** Why a missing plugin is not switched. */
+export const missingPluginRefusal = (line: string): string => `${line} Nothing was switched.`;
+
+/** Why a project's or a project's local plugin is not switched here: its settings file lives in the project. */
+export const projectPluginRefusal = (id: string, file: string): string => `${id} is set in the repo at ${file}, so it is not switched here.`;
+
+/** Why an agent's plugins are not switched by wsp. */
+export const noPluginSwitchRefusal = (agent: string): string => `${agent} keeps no plugin switch wsp turns, so nothing was switched.`;
+
+/** Why a napping workspace's plugins were not switched: nothing here wakes a machine. */
+export const nappingPluginsRefusal = (name: string): string => `${name} is napping, and its plugins are switched only while it runs; wake it first`;
 
 /** One property of a tool's input, off its input schema: its name, the type its schema gives it where it gives one,
  * and whether a call has to carry it. */
@@ -301,6 +372,9 @@ export const AgentsReport = z.object({
   agents: z.array(AgentRow),
   skills: z.array(SkillRow),
   servers: z.array(McpRow),
+  /** Each agent's plugins, one row per agent and plugin in each scope; absent reads as none, as a report an older host
+   * kept carries none. */
+  plugins: z.array(PluginRow).optional(),
   /** One line per reader that could not answer, naming it. */
   refused: z.array(z.string()),
   /** Every project whose folders the read covered, rows or none: each one a computer holds, or a workspace's own. */

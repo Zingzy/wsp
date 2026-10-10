@@ -1,0 +1,61 @@
+{
+  "tool": "plugins_disable",
+  "cases": [
+    {
+      "case": "off",
+      "arguments": {
+        "plugin": "brag@brag",
+        "agent": "claude",
+        "thread": "t-landing"
+      },
+      "replies": {
+        "sessions.list": "{\"id\":1,\"ok\":true,\"sessions\":[{\"id\":\"s-1\",\"workspaceId\":\"ws_1\",\"harness\":\"claude\",\"status\":\"completed\",\"threadId\":\"t-landing \u0085\"}]}",
+        "workspaces.get": "{\"id\":1,\"ok\":true,\"workspace\":{\"id\":\"ws_1\",\"name\":\"landing\",\"machineId\":\"m1\",\"phase\":\"running\",\"golden\":\"snap_gold\",\"createdAt\":\"2026-09-25T00:00:00.000Z\",\"project\":{\"id\":\"pr_1\",\"name\":\"api\",\"path\":\"/root/api\",\"computer\":\"place-9\"}}}",
+        "places.list": "{\"id\":1,\"ok\":true,\"places\":[{\"id\":\"place-9\",\"kind\":\"computer\",\"name\":\"attic\",\"label\":\"zingzy's \u0085box\u007f \\\"one\\\" \\\\ two\\nthree 🧪\",\"default\":false,\"os\":\"linux\",\"shape\":{\"cpu\":8,\"memMb\":16384},\"diskFreeBytes\":123456789012,\"present\":true,\"agentVersions\":{\"2\":\"an index key\",\"claude\":\"2.1.0\"},\"forks\":{\"running\":1,\"room\":2}},{\"id\":\"place-solari\",\"kind\":\"provider\",\"name\":\"solari\",\"default\":true,\"rateUsdPerHour\":0.30000000000000004}]}",
+        "plugins.toggle": "{\"id\":1,\"ok\":true,\"plugin\":{\"on\":false,\"id\":\"brag@brag\",\"agent\":\"claude\",\"name\":\"brag\",\"marketplace\":\"brag\",\"scope\":\"user\",\"version\":\"0.4.0\",\"path\":\"~/.claude/plugins/cache/brag/brag/0.4.0\",\"description\":\"Turn a project into a launch video \u0085 🧪\",\"source\":\"latent-spaces/brag\",\"brings\":{\"skills\":[\"brag:brag\",\"brag:brag-slim\"],\"commands\":[],\"subagents\":[],\"hooks\":[],\"servers\":[],\"lsp\":[],\"apps\":[]},\"later\":\"kept\"}}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"brag@brag is off for Claude Code; its next turn leaves out what it brings.\"}],\"structuredContent\":{\"plugin\":{\"agent\":\"claude\",\"id\":\"brag@brag\",\"name\":\"brag\",\"marketplace\":\"brag\",\"version\":\"0.4.0\",\"scope\":\"user\",\"on\":false,\"path\":\"~/.claude/plugins/cache/brag/brag/0.4.0\",\"description\":\"Turn a project into a launch video \\u0085 🧪\",\"source\":\"latent-spaces/brag\",\"brings\":{\"skills\":[\"brag:brag\",\"brag:brag-slim\"],\"commands\":[],\"subagents\":[],\"hooks\":[],\"servers\":[],\"lsp\":[],\"apps\":[]}}}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "sessions.list"
+        },
+        {
+          "op": "workspaces.get",
+          "workspaceId": "ws_1",
+          "threadId": "t-landing \u0085"
+        },
+        {
+          "op": "plugins.toggle",
+          "target": {
+            "workspaceId": "ws_1"
+          },
+          "agent": "claude",
+          "plugin": "brag@brag",
+          "on": false
+        }
+      ]
+    },
+    {
+      "case": "refused",
+      "arguments": {
+        "plugin": "nope@brag",
+        "agent": "claude"
+      },
+      "replies": {
+        "plugins.toggle": "{\"id\":1,\"ok\":false,\"error\":\"There is no plugin nope@brag for Claude Code there, so nothing was switched.\",\"kind\":\"usage\"}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"There is no plugin nope@brag for Claude Code there, so nothing was switched.\"}],\"structuredContent\":{\"error\":\"There is no plugin nope@brag for Claude Code there, so nothing was switched.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "plugins.toggle",
+          "target": {
+            "placeId": "here"
+          },
+          "agent": "claude",
+          "plugin": "nope@brag",
+          "on": false
+        }
+      ]
+    }
+  ]
+}

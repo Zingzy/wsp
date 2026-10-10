@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-//! `agents`, `skills` and `servers`: one read of what stands on a computer or where a thread runs, each tool answering its own
+//! `agents`, `skills`, `servers` and `plugins`: one read of what stands on a computer or where a thread runs, each tool answering its own
 //! rows beside the report's facts, its text the table the command line prints. The report is parsed as the TypeScript
 //! tool parses it, so its fields come out in the schema's order and without any the schema does not name.
 
@@ -20,10 +20,12 @@ use crate::zod::{self, Ordered, Schema};
 const AGENTS_LISTED: &str = include_str!(concat!(env!("OUT_DIR"), "/record/tools/agents.json"));
 const SKILLS_LISTED: &str = include_str!(concat!(env!("OUT_DIR"), "/record/tools/skills.json"));
 const SERVERS_LISTED: &str = include_str!(concat!(env!("OUT_DIR"), "/record/tools/servers.json"));
+const PLUGINS_LISTED: &str = include_str!(concat!(env!("OUT_DIR"), "/record/tools/plugins.json"));
 
 pub const AGENTS: Tool = Tool { name: "agents", listed: AGENTS_LISTED, call: |host, args| Box::pin(call(host, args, Rows::Agents)) };
 pub const SKILLS: Tool = Tool { name: "skills", listed: SKILLS_LISTED, call: |host, args| Box::pin(call(host, args, Rows::Skills)) };
 pub const SERVERS: Tool = Tool { name: "servers", listed: SERVERS_LISTED, call: |host, args| Box::pin(call(host, args, Rows::Servers)) };
+pub const PLUGINS: Tool = Tool { name: "plugins", listed: PLUGINS_LISTED, call: |host, args| Box::pin(call(host, args, Rows::Plugins)) };
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
@@ -34,7 +36,7 @@ pub struct In {
     pub on: Option<String>,
 }
 
-/// What every one of the three answers beside its rows: `reportFacts` in packages/host/src/verbs.ts, in its order.
+/// What every one of the four answers beside its rows: `reportFacts` in packages/host/src/verbs.ts, in its order.
 #[derive(Debug, Serialize, Deserialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
@@ -82,15 +84,25 @@ pub struct ServersOut {
     pub servers: Box<RawValue>,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+pub struct PluginsOut {
+    #[serde(flatten)]
+    pub facts: Facts,
+    #[cfg_attr(test, schemars(with = "Vec<serde_json::Value>"))]
+    pub plugins: Box<RawValue>,
+}
+
 #[derive(Clone, Copy, PartialEq)]
 enum Rows {
     Agents,
     Skills,
     Servers,
+    Plugins,
 }
 
 impl Rows {
-    const ALL: [Rows; 3] = [Rows::Agents, Rows::Skills, Rows::Servers];
+    const ALL: [Rows; 4] = [Rows::Agents, Rows::Skills, Rows::Servers, Rows::Plugins];
 
     /// The tool's name, which is also the report's field its rows are under.
     fn name(self) -> &'static str {
@@ -98,6 +110,7 @@ impl Rows {
             Rows::Agents => "agents",
             Rows::Skills => "skills",
             Rows::Servers => "servers",
+            Rows::Plugins => "plugins",
         }
     }
 
@@ -106,6 +119,7 @@ impl Rows {
             Rows::Agents => AGENTS_LISTED,
             Rows::Skills => SKILLS_LISTED,
             Rows::Servers => SERVERS_LISTED,
+            Rows::Plugins => PLUGINS_LISTED,
         }
     }
 }
@@ -169,6 +183,19 @@ struct Transport {
     kind: String,
     line: Option<String>,
     host: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PluginRow {
+    id: String,
+    agent: String,
+    scope: String,
+    project: Option<Named>,
+    on: bool,
+    missing: Option<String>,
+    version: Option<String>,
+    brings: std::collections::HashMap<String, Vec<String>>,
 }
 
 #[derive(Deserialize)]
@@ -243,6 +270,7 @@ async fn call(host: Arc<Host>, arguments: Value, rows: Rows) -> Result<Answer, R
         Rows::Agents => Answer::text(text, &AgentsOut { facts, agents: own }),
         Rows::Skills => Answer::text(text, &SkillsOut { facts, skills: own }),
         Rows::Servers => Answer::text(text, &ServersOut { facts, servers: own }),
+        Rows::Plugins => Answer::text(text, &PluginsOut { facts, plugins: own }),
     })
 }
 
@@ -262,7 +290,14 @@ fn read(report: &RawValue, rows: Rows, cloud: bool) -> Option<(Facts, Box<RawVal
     let required = |name: &str, root: &Schema| field(name, root)?;
     let mut mine = None;
     for (list, root) in &schemas {
-        let parsed = required(list.name(), root)?;
+        // A report an older host kept carries no plugins, which reads as none.
+        let parsed = match list {
+            Rows::Plugins => match field(list.name(), root)? {
+                Some(given) => given,
+                None => RawValue::from_string("[]".to_owned()).ok()?,
+            },
+            _ => required(list.name(), root)?,
+        };
         if *list == rows {
             mine = Some(parsed);
         }
@@ -303,7 +338,7 @@ fn row(cells: &[&str]) -> Vec<String> {
     cells.iter().map(|c| (*c).to_owned()).collect()
 }
 
-/// `agentRowLines`, `skillRowLines` and `serverRowLines`.
+/// `agentRowLines`, `skillRowLines`, `serverRowLines` and `pluginRowLines`.
 fn lines(facts: &Facts, own: &RawValue, rows: Rows) -> Option<Vec<String>> {
     let mut out = match rows {
         Rows::Agents => {
@@ -373,6 +408,49 @@ fn lines(facts: &Facts, own: &RawValue, rows: Rows) -> Option<Vec<String>> {
                 table(&all)
             }
         }
+        Rows::Plugins => {
+            let plugins: Vec<PluginRow> = serde_json::from_str(own.get()).ok()?;
+            if plugins.is_empty() {
+                vec!["no plugins".to_owned()]
+            } else {
+                let words = record::words();
+                let state = |p: &PluginRow| {
+                    let on = if p.on { "on" } else { "off" };
+                    if p.missing.is_some() {
+                        format!("missing, {on}")
+                    } else {
+                        on.to_owned()
+                    }
+                };
+                let brought = |p: &PluginRow| {
+                    let said: Vec<String> = words
+                        .plugin_kinds
+                        .iter()
+                        .filter_map(|(kind, one, many)| {
+                            let count = p.brings.get(kind).map_or(0, Vec::len);
+                            (count > 0).then(|| format!("{count} {}", if count == 1 { one } else { many }))
+                        })
+                        .collect();
+                    if said.is_empty() {
+                        "-".to_owned()
+                    } else {
+                        said.join(", ")
+                    }
+                };
+                let mut all = vec![row(&["PLUGIN", "AGENT", "SCOPE", "STATE", "VERSION", "BRINGS"])];
+                all.extend(plugins.iter().map(|p| {
+                    vec![
+                        cell(&p.id),
+                        super::target::agent_name(&words, &p.agent),
+                        scope_word(&p.scope, p.project.as_ref()),
+                        state(p),
+                        p.version.clone().unwrap_or_else(|| "-".to_owned()),
+                        brought(p),
+                    ]
+                }));
+                table(&all)
+            }
+        }
     };
     out.extend(tail(facts));
     Some(out)
@@ -388,5 +466,6 @@ mod tests {
         to_the_record::<In, AgentsOut>(AGENTS.listed);
         to_the_record::<In, SkillsOut>(SKILLS.listed);
         to_the_record::<In, ServersOut>(SERVERS.listed);
+        to_the_record::<In, PluginsOut>(PLUGINS.listed);
     }
 }

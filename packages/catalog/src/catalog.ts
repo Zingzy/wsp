@@ -13,6 +13,7 @@ import type { McpConfig } from "./mcp.js";
 import { loginRoad, type ServerSignInRoad } from "./mcp-login.js";
 import { pinnedRelease } from "./release-pins.js";
 import type { BundledSkills, PluginRoad, PluginSkills, SkillRoots } from "./skills.js";
+import type { PluginShelf } from "./plugins.js";
 import { APT_BIN, APT_INDEX, CARGO_BIN, roadModule, type InstallHomes } from "./road-modules.js";
 import type { RoadName } from "./roads.js";
 import { DOCKER_INSTALL, FD_INSTALL, LOCAL_BIN, NODE_RELEASES, OP_INSTALL, PLAYWRIGHT, PLAYWRIGHT_INSTALL, PYTHON_INSTALL, RUSTUP_INSTALL, SWIFT, SWIFT_INSTALL, UV_INSTALL, YARN_INSTALL, nodeInstallScript, type InstallRoad } from "./roads.js";
@@ -154,6 +155,8 @@ export interface AgentEntry extends EntryBase {
   bundledSkills?: BundledSkills;
   /** How its plugins go on another computer, by its own commands there; absent where the agent has no plugins. */
   plugins?: PluginRoad;
+  /** How its plugins are read where it reads them and turned on or off there; absent where wsp reads none of its plugins. */
+  pluginShelf?: PluginShelf;
   /** The files in a project this agent reads standing instructions from, project-relative; the MCP install keeps its
    * own marked section in each of them. */
   projectDocs: readonly string[];

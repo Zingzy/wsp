@@ -4,7 +4,7 @@
 // reading the agents, skills and servers off it is the host's, since the
 // catalog's readers live there. A read never wakes a machine.
 import { randomBytes } from "node:crypto";
-import { AgentsReport, GITHUB_CLI, HERE_PLACE_ID, installingFirstLine, refusal, toolNotInstalledFix, toolNotInstalledLine, lastLine, type McpServerSpec as LaunchServer, type PlaceProvisionRow, ptyBareOn, type AgentRow, type AgentSetupSet, type AgentSetupView, THIS_COMPUTER, noSuchAgentsProjectRefusal, sharedAgentsProjectRefusal, ServerToolsAnswer, SignInLine, SkillAdded, SkillHit, SkillPreview, isJoinedComputer, nappingAgentsRefusal, nappingServersRefusal, nappingSignInRefusal, nappingSkillsRefusal, nappingToolsRefusal, noSignInRefusal, noSuchPlaceRefusal, providerAgentsRefusal, type AgentSignInState, type AgentsProject, type AgentsSignInEvent, type AgentsTarget, type DaemonFrame, type PageReach, type ServerAdd, type ServerAsk, type WorkspacePhase, withoutControlChars, SIGN_IN_ENDED_KEPT_MS, type AgentsSignInRun, type McpScope } from "@wsp/protocol";
+import { AgentsReport, GITHUB_CLI, HERE_PLACE_ID, installingFirstLine, refusal, toolNotInstalledFix, toolNotInstalledLine, lastLine, type McpServerSpec as LaunchServer, type PlaceProvisionRow, ptyBareOn, type AgentRow, type AgentSetupSet, type AgentSetupView, THIS_COMPUTER, noSuchAgentsProjectRefusal, sharedAgentsProjectRefusal, ServerToolsAnswer, SignInLine, SkillAdded, SkillHit, SkillPreview, isJoinedComputer, nappingAgentsRefusal, nappingPluginsRefusal, nappingServersRefusal, nappingSignInRefusal, nappingSkillsRefusal, nappingToolsRefusal, noSignInRefusal, noSuchPlaceRefusal, providerAgentsRefusal, type AgentSignInState, type AgentsProject, type AgentsSignInEvent, type AgentsTarget, type DaemonFrame, type PageReach, type PluginAsk, PluginRow, type ServerAdd, type ServerAsk, type WorkspacePhase, withoutControlChars, SIGN_IN_ENDED_KEPT_MS, type AgentsSignInRun, type McpScope } from "@wsp/protocol";
 import type { Machine } from "@wsp/engine";
 import { catalogEntry, mintsToken } from "@wsp/catalog";
 import type { DaemonChannel } from "./daemon-channel.js";
@@ -151,6 +151,12 @@ export interface ServersActs {
   toggle(on: AgentsOn, ask: ServerAsk & { on: boolean }): Promise<{ file: string }>;
 }
 
+/** What the host does with an agent's plugins on a target: one turned on or off for the login by the agent's own
+ * road, answering its row as it now stands. */
+export interface PluginsActs {
+  toggle(on: AgentsOn, ask: PluginAsk & { on: boolean }): Promise<{ plugin: PluginRow }>;
+}
+
 /** A remote MCP server's icon by its host, asked by this host alone: a data url, or nothing where there is none or
  * the host may not be asked for. */
 export interface ServerIcons {
@@ -187,6 +193,7 @@ export interface AgentsReadOptions<Caller> {
   acts?: AgentsActs;
   skills?: SkillsActs;
   servers?: ServersActs;
+  plugins?: PluginsActs;
   /** Absent, or with the person's switch off, every server draws its glyph and nothing is asked. */
   icons?: ServerIcons;
   /** Whether the person lets this host ask vendors for each agent's newest version; absent, it may. */
@@ -240,6 +247,7 @@ export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): {
   serversRemove(target: AgentsTarget, ask: ServerAsk, origin?: Caller): Promise<{ file: string }>;
   serversToggle(target: AgentsTarget, ask: ServerAsk & { on: boolean }, origin?: Caller): Promise<{ file: string }>;
   serversIcon(host: string, refresh?: boolean): Promise<string | null>;
+  pluginsToggle(target: AgentsTarget, ask: PluginAsk & { on: boolean }, origin?: Caller): Promise<{ plugin: PluginRow }>;
   setup(placeId: string, agent: string, change: AgentSetupSet, origin?: Caller): Promise<AgentRow>;
 } {
   /** A write in one project of a computer changes the computer's report, which is the one a page reads. */
@@ -573,6 +581,11 @@ export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): {
     serversRemove: (target, ask, origin) => serverWrite(target, origin, (acts, on) => acts.remove(on, ask)),
     serversIcon: async (host, refresh) => (o.icons === undefined ? null : o.icons.icon(host, refresh)),
     serversToggle: (target, ask, origin) => serverWrite(target, origin, (acts, on) => acts.toggle(on, ask)),
+    async pluginsToggle(target, ask, origin) {
+      if (o.plugins === undefined) throw new Error(NO_AGENTS_READER);
+      const [acts, on] = [o.plugins, await awakeOn(target, nappingPluginsRefusal, origin)];
+      return written(target, async () => ({ plugin: PluginRow.parse((await acts.toggle(on, ask)).plugin) }));
+    },
     async addTools(target, agent, origin) {
       const acts = actsOf();
       const on = await onOf(target, origin);

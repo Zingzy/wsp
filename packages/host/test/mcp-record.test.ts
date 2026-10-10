@@ -47,6 +47,7 @@ const RELEASE_ROAD_SAMPLES = [
   "/Users/dev/wsp/packages/wspx/daemon/aarch64-apple-darwin/wsp-daemon",
 ];
 import { ADD_TOOL_FIX, ADD_TOOL_MS, addToolRefusal } from "../src/setup-follow.js";
+import { PLUGIN_KIND_WORDS, pluginTurnedWords } from "../src/verbs/agents-help.js";
 import { WORKSPACE_ANSWERED, workspaceWords } from "./mcp-record-workspaces.js";
 import { SLATE_ANSWERED } from "./mcp-record-slates.js";
 import { READS } from "./mcp-record-reads.js";
@@ -254,6 +255,9 @@ async function words(): Promise<Record<string, unknown>> {
     turnedOff: turnedLine("{name}", false),
     turnedOnIn: turnedInLine("{name}", true, "{file}"),
     turnedOffIn: turnedInLine("{name}", false, "{file}"),
+    pluginTurnedOn: pluginTurnedWords("{id}", true, "{agent}"),
+    pluginTurnedOff: pluginTurnedWords("{id}", false, "{agent}"),
+    pluginKinds: PLUGIN_KIND_WORDS.map(([kind, one, many]) => [kind, one, many]),
     toolsAdded: toolsAddedLine("{agent}", "{file}"),
     serverToolsHead: tools({})[0],
     serverToolsHeld: tools({ holder: "{holder}" })[0],
@@ -262,7 +266,7 @@ async function words(): Promise<Record<string, unknown>> {
     serverToolColumns: SERVER_TOOL_COLUMNS,
     commandWords: Object.fromEntries(COMMAND_LINES.map(line => [line, commandWords(line) ?? null])),
     hostWouldNotRead: refusalLine(validatorRefusal(JSON.stringify([{ code: "custom", path: [] }]))!, "usage: {usage}"),
-    bothTargets: Object.fromEntries(await Promise.all(["agents", "skills", "servers"].map(async tool => [tool, await toolText(tool, { thread: "w", on: "c" }, {})]))),
+    bothTargets: Object.fromEntries(await Promise.all(["agents", "skills", "servers", "plugins"].map(async tool => [tool, await toolText(tool, { thread: "w", on: "c" }, {})]))),
     folderHere: await toolText("folders", { folder: "{path}" }, {}),
     folderOn: await toolText("folders", { folder: "{path}", on: "{name}" }, { "places.list": reply({ places: [{ id: "p", kind: "computer", name: "{name}" }] }) }),
     noThread: await thrown(() => threadOf(answering({ "sessions.list": reply({ sessions: [] }) }), "{ref}")),
@@ -481,6 +485,9 @@ const WORKSPACE = { id: "ws_1", name: "landing", machineId: "m1", phase: "runnin
 /** The thread the aimed cases name, on WORKSPACE. */
 const AIMED_THREAD = reply({ sessions: [{ id: "s-1", workspaceId: WORKSPACE.id, harness: "claude", status: "completed", threadId: "t-landing \u0085" }] });
 const AIMED = { "sessions.list": AIMED_THREAD, "workspaces.get": reply({ workspace: WORKSPACE }), "places.list": reply({ places: [PLACE, CLOUD] }) };
+const PLACES_LIST = reply({ places: [PLACE, CLOUD] });
+/** One plugin's row as the host answers it: its fields out of a parse's order, with words a person reads. */
+const PLUGIN_ROW = { on: true, id: "brag@brag", agent: "claude", name: "brag", marketplace: "brag", scope: "user", version: "0.4.0", path: "~/.claude/plugins/cache/brag/brag/0.4.0", description: "Turn a project into a launch video \u0085 🧪", source: "latent-spaces/brag", brings: { skills: ["brag:brag", "brag:brag-slim"], commands: [], subagents: [], hooks: [], servers: [], lsp: [], apps: [] } };
 
 const RECIPE = { name: "laptop \u0085 \"one\" 🧪", slug: "laptop-one", summary: "2 agents, 1 CLI", machines: ["attic"], file: RecipeFile.parse({ name: "laptop \u0085 \"one\" 🧪", agents: { claude: { signin: "vault" }, codex: { signin: "machine" } }, clis: { "cargo-nextest": { via: "cargo", needs: ["build-essential"] } } }) };
 
@@ -635,6 +642,11 @@ const SKILLS_AND_SERVERS: Answered = {
     { case: "refused", arguments: { name: "linear", agent: "claude" }, replies: { "servers.toggle": refused("Claude Code keeps no switch per server that wsp turns, so nothing was changed.", "usage") } },
   ],
   servers_enable: [{ case: "on", arguments: { name: "linear", agent: "gemini" }, replies: { "servers.toggle": reply({ file: "~/.gemini/settings.json" }) } }],
+  plugins_disable: [
+    { case: "off", arguments: { plugin: "brag@brag", agent: "claude", thread: "t-landing" }, replies: { ...AIMED, "plugins.toggle": reply({ plugin: { ...PLUGIN_ROW, on: false, later: "kept" } }) } },
+    { case: "refused", arguments: { plugin: "nope@brag", agent: "claude" }, replies: { "plugins.toggle": refused("There is no plugin nope@brag for Claude Code there, so nothing was switched.", "usage") } },
+  ],
+  plugins_enable: [{ case: "on", arguments: { plugin: "brag@brag", agent: "codex", on: "attic" }, replies: { "places.list": PLACES_LIST, "plugins.toggle": reply({ plugin: { ...PLUGIN_ROW, agent: "codex" } }) } }],
   agents_addtools: [
     { case: "added", arguments: { agent: "claude" }, replies: { "agents.addTools": reply({ file: "~/.claude.json" }) } },
     { case: "an agent the catalog does not know", arguments: { agent: "zed-x" }, replies: { "agents.addTools": reply({ file: "~/.zed/settings.json", more: true }) } },

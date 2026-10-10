@@ -158,3 +158,33 @@ describe("the agents report on the wire", () => {
     expect(ServerToolsAnswer.parse({ auth: "open", tools: [tool], readAt: "2026-09-25T12:00:00.000Z" }).tools).toEqual([tool]);
   });
 });
+
+describe("each agent's plugins in the report", () => {
+  const BASE = { target: { placeId: "here" }, home: "/home/ada", user: "ada", readAt: "2026-10-11T00:00:00.000Z", agents: [], skills: [], servers: [], refused: [] };
+  const VERCEL = {
+    agent: "claude",
+    id: "vercel@claude-plugins-official",
+    name: "vercel",
+    marketplace: "claude-plugins-official",
+    version: "0.50.0",
+    scope: "user",
+    on: true,
+    path: "~/.claude/plugins/cache/claude-plugins-official/vercel/0.50.0",
+    description: "Build and deploy web apps and agents",
+    source: "anthropics/claude-plugins-official",
+    brings: { skills: ["vercel:nextjs"], commands: ["vercel:deploy"], subagents: ["vercel:ai-architect"], hooks: ["SessionStart"], servers: ["plugin:vercel:vercel"], lsp: [], apps: [] },
+  };
+
+  it("carries one row per agent and plugin with what it brings, and a report with no plugins field still parses as none", () => {
+    expect(AgentsReport.parse({ ...BASE, plugins: [VERCEL] }).plugins).toEqual([VERCEL]);
+    const older = AgentsReport.parse(BASE);
+    expect(older.plugins ?? []).toEqual([]);
+    const local = { ...VERCEL, scope: "local", project: { id: "pr_1", name: "lab", path: "~/lab" }, setIn: "~/lab/.claude/settings.local.json", missing: "folder" };
+    expect(AgentsReport.parse({ ...BASE, plugins: [local] }).plugins![0]).toMatchObject({ scope: "local", missing: "folder", setIn: "~/lab/.claude/settings.local.json" });
+    expect(() => AgentsReport.parse({ ...BASE, plugins: [{ ...VERCEL, scope: "team" }] })).toThrow();
+  });
+
+  it("takes plugins.toggle with the agent, the plugin and the switch", () => {
+    expect(RuntimeRequest.parse({ id: "1", op: "plugins.toggle", target: { placeId: "here" }, agent: "claude", plugin: "vercel@claude-plugins-official", on: false })).toMatchObject({ op: "plugins.toggle", plugin: "vercel@claude-plugins-official", on: false });
+  });
+});

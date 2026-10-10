@@ -108,6 +108,7 @@ export function preferencesArea(ctx: RuntimeContext): PreferencesArea {
     ...(opts.agentsActs !== undefined ? { acts: opts.agentsActs } : {}),
     ...(opts.skillsActs !== undefined ? { skills: opts.skillsActs } : {}),
     ...(opts.serversActs !== undefined ? { servers: opts.serversActs } : {}),
+    ...(opts.pluginsActs !== undefined ? { plugins: opts.pluginsActs } : {}),
     latestOn: async () => (await preferences.get()).agentVersions,
     // The person's switch is read at every ask, so turning it off stops the next one.
     ...(opts.serverIcons !== undefined ? { icons: { folder: opts.serverIcons.folder, icon: async (host, refresh) => ((await iconsOn()) ? opts.serverIcons!.icon(host, refresh, iconsOn) : null), forget: () => opts.serverIcons!.forget() } satisfies ServerIcons } : {}),

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { z } from "zod";
-import { AgentsTarget, McpScope, ServerAdd, ServerAsk } from "../agents-report.js";
+import { AgentsTarget, McpScope, PluginAsk, ServerAdd, ServerAsk } from "../agents-report.js";
 import { Attachment } from "../attachments.js";
 import { threadAt } from "../format.js";
 import { InitRoad, InitScreenId, SIGN_IN_CODE_MAX } from "../init-job.js";
@@ -769,6 +769,10 @@ const RuntimeOp = z.discriminatedUnion("op", [
   /** Replies with { file }: that one server turned off or on in that agent's config there, by the switch the agent
    * itself reads; refused for an agent that keeps no such switch per server. */
   z.object({ id: reqId, op: z.literal("servers.toggle"), target: AgentsTarget, ...ServerAsk.shape, on: z.boolean() }),
+  /** Replies with { plugin: PluginRow }: that agent's plugin turned on or off there for the login, where the agent's own
+   * command or config writer puts it, and the row as a read after it gives it. Refused for a plugin the report does
+   * not list, a missing one, and one a project's settings switch. */
+  z.object({ id: reqId, op: z.literal("plugins.toggle"), target: AgentsTarget, ...PluginAsk.shape, on: z.boolean() }),
   /** Replies with { setup: InitSetup }: the cloud setup as the modal opens on it, the init job included when one runs.
    * `on` prices the build at that place instead of the default one, by the name or id wsp places lists; once the
    * image stands, every build is priced at the image's own place whatever `on` says. */

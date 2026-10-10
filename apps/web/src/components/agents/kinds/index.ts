@@ -4,6 +4,7 @@
 import { AGENTS } from "./agents.js";
 import type { AnyKind } from "./kind.js";
 import { SERVERS } from "./servers.js";
+import { PLUGINS } from "./plugins.js";
 import { SKILLS } from "./skills.js";
 
-export const AGENTS_KINDS = { agents: AGENTS, servers: SERVERS, skills: SKILLS } satisfies Record<string, AnyKind>;
+export const AGENTS_KINDS = { agents: AGENTS, servers: SERVERS, skills: SKILLS, plugins: PLUGINS } satisfies Record<string, AnyKind>;

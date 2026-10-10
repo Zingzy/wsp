@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// One kind of thing the agents lists draw (agents, tool servers, skills): its
+// One kind of thing the agents lists draw (agents, tool servers, skills, plugins): its
 // rows, its groups, its detail and its acts, pure over one report. Settings
 // and a task's panel draw every kind through this one shape, so a kind is its
 // module and one line in the registry.
@@ -68,11 +68,13 @@ export interface Fact {
   readonly prose?: boolean;
 }
 
-/** One row of what a detail lists under it: a server's tool by its name, what it does under that. */
+/** One row of what a detail lists under it: a server's tool by its name, what it does under that; or a kind of thing
+ * a plugin brings, their names under it and their count at the right. */
 export interface UnderRow {
   readonly key: string;
   readonly title: string;
   readonly subtext?: string;
+  readonly count?: string;
 }
 
 /** What a detail lists under it where a kind has such a list (a server's tools), with when it was read. */

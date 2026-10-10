@@ -30,6 +30,7 @@ import { agentLatest } from "../agent-latest.js";
 import { keptTools, recipeShelf } from "../recipes.js";
 import { recipeWatch, type WatchFn } from "../recipe-watch.js";
 import { serversActs } from "../servers-acts.js";
+import { pluginsActs } from "../plugins-acts.js";
 import { hostActs } from "../agents-signin.js";
 import { threadShellEnv, writeThreadWsp } from "../shim.js";
 import { mcpServerSpec, runningWsp, wspCommand, type RunningWsp } from "../mcp-install.js";
@@ -323,6 +324,8 @@ export function makeRuntime(
     // A server lands in the agent's own config as the login of the computer it is for: its values in that file on
     // this computer, and on any other the file names a variable for each and the value goes to the vault.
     serversActs: serversActs({ vault: serverVault(statePath) }),
+    // A plugin is switched by its agent's own road, as the login of the computer it is on.
+    pluginsActs: pluginsActs(),
     // A remote server's icon is asked of Google from this host, never from the page or a machine, and kept beside the
     // state file.
     serverIcons: serverIcons({ dir: join(dirname(statePath), "icons") }),

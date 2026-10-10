@@ -5,9 +5,10 @@
 // One command reads every folder, so a computer reached over a link answers
 // in one round trip however many skills it keeps.
 import { posix } from "node:path";
-import { CATALOG_AGENTS, type AgentEntry } from "@wsp/catalog";
+import { CATALOG_AGENTS, inStore, type AgentEntry } from "@wsp/catalog";
 import type { AgentsProject, SkillPath, SkillRow, SkillScope } from "@wsp/protocol";
-import { type Host, expand, tilde } from "../host.js";
+import { type Host, tilde } from "../host.js";
+import type { AgentPlugins } from "./plugins.js";
 
 /** One folder to read skills from, absolute: whose own folder it is, where it is one agent's, and what kind. */
 export interface SkillRootAt {
@@ -19,6 +20,8 @@ export interface SkillRootAt {
   /** Why nothing under this folder is read, as the list's refusal line says it: a project's folder that links out of
    * the repo, or one the read could not tell. */
   skipped?: string;
+  /** The plugin a plugin's folder comes with: its id, the name its skills are announced under, and whether it is on. */
+  plugin?: { id: string; prefix: string; on: boolean };
 }
 
 export interface SkillsRead {
@@ -202,10 +205,10 @@ function skippedLine(host: Host, dir: string, at: { link: string; to: string } |
   return `skills: ${folder} links out of the repo${at.link === dir ? "" : ` through ${tilde(host.home, at.link)}`}, to ${at.to}, so its skills are not read`;
 }
 
-/** The folders every catalog agent loads skills from on that computer, absolute, each once: an agent's own folder
- * carries that agent, a folder several read carries none. Each project adds the folders the agents read inside it,
- * and the plugin indexes name the folders their plugins' skills sit in. */
-export async function skillRoots(host: Host, o: { agents?: readonly AgentEntry[]; projects?: readonly AgentsProject[] } = {}): Promise<SkillRootAt[]> {
+/** The folders every catalog agent loads skills from on that computer, absolute, each once, an agent's own under the
+ * folder its store variable names there: an agent's own folder carries that agent, a folder several read carries none.
+ * Each project adds the folders the agents read inside it, and each plugin read the folders its skills sit in. */
+export async function skillRoots(host: Host, o: { agents?: readonly AgentEntry[]; projects?: readonly AgentsProject[]; plugins?: readonly AgentPlugins[] } = {}): Promise<SkillRootAt[]> {
   const agents = o.agents ?? CATALOG_AGENTS;
   const out = new Map<string, SkillRootAt>();
   const add = (dirs: { dir: string; own: boolean }[], scope: SkillScope, agent: string, project?: AgentsProject): void => {
@@ -215,7 +218,7 @@ export async function skillRoots(host: Host, o: { agents?: readonly AgentEntry[]
       else if (own && at.agent === undefined) out.set(dir, { ...at, agent });
     }
   };
-  for (const a of agents) add(a.skillRoots.user.map((r, i) => ({ dir: expand(host, r.dir), own: i === 0 })), "user", a.id);
+  for (const a of agents) add(a.skillRoots.user.map((r, i) => ({ dir: inStore(a, r.dir, { home: host.home, store: host.stores?.[a.id] }), own: i === 0 })), "user", a.id);
   await Promise.all(
     (o.projects ?? []).map(async project => {
       const at = (r: { dir: string }): string => posix.join(project.path, r.dir);
@@ -225,13 +228,15 @@ export async function skillRoots(host: Host, o: { agents?: readonly AgentEntry[]
       for (const dir of dirs) if (linked === undefined || linked.has(dir)) out.set(dir, { ...out.get(dir)!, skipped: skippedLine(host, dir, linked?.get(dir)) });
     }),
   );
-  const plugins = agents.filter(a => a.pluginSkills !== undefined);
-  const indexes = await Promise.all(plugins.map(a => host.fs.readText(expand(host, a.pluginSkills!.index))));
-  plugins.forEach((a, i) => {
-    const text = indexes[i];
-    if (text !== undefined) add(a.pluginSkills!.roots(text).map(dir => ({ dir, own: true })), "plugin", a.id);
-  });
+  for (const root of pluginSkillRoots(o.plugins ?? [])) if (!out.has(root.dir)) out.set(root.dir, root);
   return [...out.values()];
+}
+
+/** The folders each plugin read says its skills sit in, each with its plugin: none of a plugin whose folder is gone. */
+function pluginSkillRoots(plugins: readonly AgentPlugins[]): SkillRootAt[] {
+  return plugins.flatMap(({ agent, found }) =>
+    found.plugins.flatMap(p => (p.skills === undefined || p.missing !== undefined ? [] : p.skills.dirs.map(dir => ({ dir, scope: "plugin" as const, agent, plugin: { id: p.id, prefix: p.skills!.prefix, on: p.on } })))),
+  );
 }
 
 /** Every skill under the roots, one row per folder name and kind with every folder it lives in. A folder whose name starts
@@ -261,18 +266,20 @@ export async function detectSkills(host: Host, all: readonly SkillRootAt[]): Pro
     const parts = f.dir.slice(f.root.dir.length + 1).split("/");
     if (parts.slice(1).some((_, i) => dirs.has(`${f.root.dir}\0${f.root.dir}/${parts.slice(0, i + 1).join("/")}`))) continue;
     const meta = skillFrontmatter(f.head);
-    // Keyed by folder, which is what an agent loads a skill by; the frontmatter's name is the file's own claim.
-    const name = posix.basename(f.dir);
-    const key = `${f.root.scope}\0${f.root.project?.id ?? ""}\0${name}`;
+    // Keyed by folder, which is what an agent loads a skill by; the frontmatter's name is the file's own claim. A
+    // plugin's skill goes by the name the agent announces it under, its plugin's first.
+    const plugin = f.root.plugin;
+    const name = plugin === undefined ? posix.basename(f.dir) : `${plugin.prefix}:${posix.basename(f.dir)}`;
+    const key = `${f.root.scope}\0${f.root.project?.id ?? plugin?.id ?? ""}\0${name}`;
     const path: SkillPath = {
       path: tilde(host.home, f.dir),
       ...(f.root.agent !== undefined ? { agent: f.root.agent } : {}),
       ...(f.link !== "" ? { linkTo: tilde(host.home, posix.resolve(posix.dirname(f.dir), f.link)) } : {}),
-      ...(f.off ? { off: true as const } : {}),
+      ...(f.off || plugin?.on === false ? { off: true as const } : {}),
     };
     const row = rows.get(key);
     const project = f.root.project === undefined ? {} : { project: { ...f.root.project, path: tilde(host.home, f.root.project.path) } };
-    if (row === undefined) rows.set(key, { name, ...(meta.description !== undefined ? { description: meta.description } : {}), paths: [path], scope: f.root.scope, ...project });
+    if (row === undefined) rows.set(key, { name, ...(meta.description !== undefined ? { description: meta.description } : {}), paths: [path], scope: f.root.scope, ...project, ...(plugin !== undefined ? { plugin: plugin.id } : {}) });
     else if (!row.paths.some(p => p.path === path.path)) row.paths.push(path);
   }
   return { skills: [...rows.values()].sort((a, b) => a.name.localeCompare(b.name) || a.scope.localeCompare(b.scope) || (a.project?.name ?? "").localeCompare(b.project?.name ?? "")), refused };

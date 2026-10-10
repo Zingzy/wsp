@@ -19,6 +19,7 @@ import {
   commandWords,
   unclosedQuoteRefusal,
   McpTool,
+  PluginRow,
   ServerToolsAnswer,
   SkillAdded,
   SkillHit,
@@ -112,8 +113,8 @@ export async function agentsReport(client: HostClient, thread: string | undefine
   return AgentsReport.parse((await client.request<{ report: unknown }>("agents.read", { target })).report);
 }
 
-/** What every one of the three lists answers beside its own rows. */
-export const AGENTS_FRAME = AgentsReport.omit({ agents: true, skills: true, servers: true }).shape;
+/** What every one of the four lists answers beside its own rows. */
+export const AGENTS_FRAME = AgentsReport.omit({ agents: true, skills: true, servers: true, plugins: true }).shape;
 
 /** The report's own facts, beside the rows one list prints. */
 export function reportFacts(r: AgentsReport): Pick<AgentsReport, "target" | "home" | "user" | "readAt" | "stale" | "refused" | "projects"> {
@@ -146,6 +147,43 @@ export function serverRowLines(r: AgentsReport): string[] {
   const state = (s: McpRow): string => (s.launch === true ? "on every thread" : [s.enabled ? s.auth : "disabled", ...(s.inRecipe === false ? ["not in recipe"] : [])].join(", "));
   return [...(r.servers.length === 0 ? ["no MCP servers"] : table([["SERVER", "AGENT", "SCOPE", "REACHED BY", "FILE", "STATE"], ...r.servers.map(s => [s.name, agentName(s.agent), scopeWord(s), reach(s), s.file ?? "every launch", state(s)])])), ...reportTail(r)];
 }
+
+/** Each kind a plugin brings by its field, with its word for one and for many. */
+export const PLUGIN_KIND_WORDS: readonly (readonly [keyof PluginRow["brings"], string, string])[] = [
+  ["skills", "skill", "skills"],
+  ["commands", "command", "commands"],
+  ["subagents", "subagent", "subagents"],
+  ["hooks", "hook", "hooks"],
+  ["servers", "tool server", "tool servers"],
+  ["lsp", "language server", "language servers"],
+  ["apps", "app", "apps"],
+];
+
+/** What a plugin brings, counted by kind, in the words a person reads. */
+export function broughtWords(b: PluginRow["brings"]): string {
+  const said = PLUGIN_KIND_WORDS.filter(([kind]) => b[kind].length > 0).map(([kind, one, many]) => `${b[kind].length} ${b[kind].length === 1 ? one : many}`);
+  return said.length === 0 ? "-" : said.join(", ");
+}
+
+export function pluginRowLines(r: AgentsReport): string[] {
+  const plugins = r.plugins ?? [];
+  const state = (p: PluginRow): string => (p.missing !== undefined ? `missing, ${p.on ? "on" : "off"}` : p.on ? "on" : "off");
+  return [...(plugins.length === 0 ? ["no plugins"] : table([["PLUGIN", "AGENT", "SCOPE", "STATE", "VERSION", "BRINGS"], ...plugins.map(p => [cell(p.id), agentName(p.agent), scopeWord(p), state(p), p.version ?? "-", broughtWords(p.brings)])])), ...reportTail(r)];
+}
+
+/** One plugin there turned on or off; the answer is its row after. */
+export async function pluginChanged(client: HostClient, ask: { agent: string; plugin: string; on: boolean }, thread: string | undefined, on: string | undefined, usage: string, line: string): Promise<PluginRow> {
+  const target = await agentsTarget(client, thread, on, usage, line);
+  return PluginRow.parse((await client.request<{ plugin: unknown }>("plugins.toggle", { target, ...ask })).plugin);
+}
+
+export const pluginTurnedWords = (id: string, on: boolean, agent: string): string => `${id} is ${on ? "on" : "off"} for ${agent}; its next turn ${on ? "loads" : "leaves out"} what it brings.`;
+export const pluginTurnedLine = (row: PluginRow): string => pluginTurnedWords(row.id, row.on, agentName(row.agent));
+
+export const PluginIdIn = z.string().describe("the plugin's id, name@marketplace, as plugins lists it");
+export const PluginAgentIn = z.string().describe("the catalog id of the agent whose plugin it is, as plugins lists it; one id can name a plugin of two agents");
+export const PLUGIN_CHANGE_WORDS =
+  "Written for the login the computer was added with, where that agent's own command reads it: Claude Code's user settings through claude plugin enable or disable, Codex's config.toml through its app server's config write, which refuses a file changed since wsp read it. A plugin plugins does not list, a missing one, and one a project's settings switch are refused. A turn running now keeps what it loaded; the next one follows. A napping machine is not woken. The report there reads again at once.";
 
 export const SERVER_TOOL_COLUMNS = ["TOOL", "DESCRIPTION"];
 

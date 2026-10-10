@@ -59,7 +59,7 @@ export function appServerScript(codex: string, stages: readonly ServerStage[]): 
   ].join("\n");
 }
 
-export type ServerAnswer = { result: Record<string, unknown> } | { error: { code?: number; message: string } };
+export type ServerAnswer = { result: Record<string, unknown> } | { error: { code?: number; message: string; data?: Record<string, unknown> } };
 
 function rec(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
@@ -82,7 +82,10 @@ export function answersOf(text: string): Map<number, ServerAnswer> {
     const result = rec(message.result);
     const error = rec(message.error);
     if (result !== undefined) byId.set(message.id, { result });
-    else if (error !== undefined) byId.set(message.id, { error: { ...(typeof error.code === "number" ? { code: error.code } : {}), message: typeof error.message === "string" ? error.message : "codex refused the request without saying why" } });
+    else if (error !== undefined) {
+      const data = rec(error.data);
+      byId.set(message.id, { error: { ...(typeof error.code === "number" ? { code: error.code } : {}), message: typeof error.message === "string" ? error.message : "codex refused the request without saying why", ...(data !== undefined ? { data } : {}) } });
+    }
   }
   return byId;
 }

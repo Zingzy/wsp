@@ -548,6 +548,21 @@
                     "title": "wsp merge in",
                     "filepath": "content/reference/cli/merge-in.mdx"
                   },
+                  "/plugins": {
+                    "type": "page",
+                    "title": "wsp plugins",
+                    "filepath": "content/reference/cli/plugins.mdx"
+                  },
+                  "/plugins-disable": {
+                    "type": "page",
+                    "title": "wsp plugins disable",
+                    "filepath": "content/reference/cli/plugins-disable.mdx"
+                  },
+                  "/plugins-enable": {
+                    "type": "page",
+                    "title": "wsp plugins enable",
+                    "filepath": "content/reference/cli/plugins-enable.mdx"
+                  },
                   "/projects": {
                     "type": "page",
                     "title": "wsp projects",

@@ -52,6 +52,12 @@ const REPORT = {
     { agent: "claude", name: "kept", scope: "local", file: "~/.claude-cfg/.claude.json", transport: { kind: "stdio", line: "node k.js" }, envNames: [], auth: "open", enabled: true, project: { id: "proj-1", name: "wsp", path: "~/p" } },
     { agent: "not-in-catalog", name: "odd", scope: "home", file: "~/.x", transport: { kind: "stdio", line: "odd é" }, envNames: [], auth: "open", enabled: true, tools: [{ name: "t" }] },
   ],
+  plugins: [
+    { brings: { skills: ["vercel:nextjs"], commands: ["vercel:deploy", "vercel:env"], subagents: ["vercel:ai-architect"], hooks: ["SessionStart"], servers: ["plugin:vercel:vercel"], lsp: [], apps: [] }, id: "vercel@claude-plugins-official", agent: "claude", name: "vercel", marketplace: "claude-plugins-official", version: "0.50.0", scope: "user", on: true, path: "~/.claude/plugins/cache/claude-plugins-official/vercel/0.50.0", source: "anthropics/claude-plugins-official", later: 1 },
+    { id: "posthog\tlab@lab-local", agent: "claude", name: "posthog\tlab", marketplace: "lab-local", scope: "local", project: { id: "proj-1", name: "wsp", path: "~/p" }, on: false, missing: "folder", setIn: "~/p/.claude/settings.local.json", brings: { skills: [], commands: [], subagents: [], hooks: [], servers: [], lsp: ["rust-analyzer"], apps: [] } },
+    { id: "chrome@openai-bundled", agent: "codex", name: "chrome", marketplace: "openai-bundled", scope: "user", on: true, missing: "marketplace", source: "/x/.codex/.tmp/bundled-marketplaces/openai-bundled", brings: { skills: [], commands: [], subagents: [], hooks: [], servers: [], lsp: [], apps: [] } },
+    { id: "odd@m", agent: "not-in-catalog", name: "odd", marketplace: "m", scope: "user", on: false, brings: { skills: [], commands: [], subagents: [], hooks: ["preToolUse"], servers: [], lsp: [], apps: ["Gmail \u0085"] } },
+  ],
   refused: ["codex: config.toml did not \u0085parse\nat line 3"],
   projects: [{ name: "wsp", id: "proj-1", path: "~/p", extra: true }],
   reach: "here",
@@ -295,6 +301,7 @@ export const READS: Record<string, Case[]> = {
   agents: reportCases("agents"),
   skills: [...reportCases("skills"), { case: "no skills", arguments: {}, replies: { "agents.read": reply({ report: EMPTY_REPORT }) } }],
   servers: [...reportCases("servers"), { case: "no servers", arguments: {}, replies: { "agents.read": reply({ report: EMPTY_REPORT }) } }],
+  plugins: [...reportCases("plugins"), { case: "a report with no plugins", arguments: {}, replies: { "agents.read": reply({ report: EMPTY_REPORT }) } }],
   projects: [
     {
       case: "rows",

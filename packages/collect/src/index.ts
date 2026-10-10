@@ -25,6 +25,7 @@ export type { ProjectFile, ProjectFinding, ProjectReader } from "./project/reade
 export { MCP_BIN_DIRS, MCP_REMOTE_ID, MCP_REMOTE_LABEL, detectMcp, homePaths, linuxFit, mcpRemoteHash, secretNamed, stdioLine, type LinuxFit } from "./detect/mcp.js";
 export { SWITCHED_OFF_HERE, detectProjectMcp, outsideProjectLine, type ProjectServer } from "./detect/mcp-project.js";
 export { readCheckout, readTurnServers } from "./detect/turn-servers.js";
+export { detectPlugins, pluginIo, pluginRow, type AgentPlugins, type PluginsRead } from "./detect/plugins.js";
 export { SKILL_HEAD_BYTES, SKILL_LINK_ABOVE, detectSkills, skillFrontmatter, skillMdFrontmatter, skillRoots, type SkillRootAt, type SkillsRead } from "./detect/skills.js";
 export { CLAUDE_KEY_ENV, apiKeyHelperOf, billedHere, claudeBills, detectLogins } from "./detect/logins.js";
 export { FISH_CONF_D, RC_NAMES, RC_PATHS, isRcPath, isSecretName, rcFiles, simpleCommands, sourcedPaths, stripExports } from "./detect/shell-rc.js";

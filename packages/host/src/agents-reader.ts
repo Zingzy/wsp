@@ -8,7 +8,7 @@
 import { userInfo } from "node:os";
 import { posix } from "node:path";
 import { CATALOG_AGENTS, MCP_AGENTS, TOOL_PREFIX, installsOnFirstRun, serverValuesOf, harnessLine, signInRoadOf, versionOf, type AgentEntry, type McpAgent, type McpServer, type TurnServer } from "@wsp/catalog";
-import { detectSkills, nodeHost, readCheckout, readTurnServers, skillRoots, stdioLine, tilde, type Host } from "@wsp/collect";
+import { detectPlugins, detectSkills, nodeHost, readCheckout, readTurnServers, skillRoots, stdioLine, tilde, type Host } from "@wsp/collect";
 import { landedServersScript, mcpRowId, NO_DIGEST, parseLandedServers, targetLogin } from "@wsp/engine";
 import { MCP_SERVER_NAME, agentVersionWord, compareVersions, controlNameRefusal, hasControlChar, shellQuote, strictVersion, takesMcpServers, type AgentRow, type AgentSignInState, type AgentsProject, type McpRow, type PlaceProvisionRow } from "@wsp/protocol";
 import { GUEST_WSP_MCP, harnessCatalog, projectOf, vaultSignIn, type AgentsOn, type AgentsRead, type AgentsReader } from "@wsp/runtime";
@@ -195,10 +195,14 @@ export async function readAgents(host: Host, o: { user: string; vault: Readonly<
   const projects = o.projects ?? [];
   const refused: string[] = [];
   const agents: readonly AgentEntry[] = CATALOG_AGENTS;
-  const [where, servers, skills, recipe] = await Promise.all([
+  // A plugin's skills are listed under the plugin's name and follow its switch, so the one find of every skill waits
+  // for the plugins, which read in two round trips.
+  const plugins = detectPlugins(host, { projects });
+  const [where, servers, found, skills, recipe] = await Promise.all([
     host.exec.run("sh", ["-c", WHERE, "sh", ...agents.map(a => a.bin)], { timeoutMs: READ_MS }),
     serversOf(host, projects, new Set(Object.keys(o.vault))),
-    skillRoots(host, { projects }).then(roots => detectSkills(host, roots)),
+    plugins,
+    plugins.then(p => skillRoots(host, { projects, plugins: p.agents })).then(roots => detectSkills(host, roots)),
     o.box !== undefined ? recipeServers(host) : Promise.resolve(undefined),
   ]);
   if (where === undefined) refused.push("agents: the login PATH could not be read");
@@ -265,7 +269,8 @@ export async function readAgents(host: Host, o: { user: string; vault: Readonly<
     agents: rows,
     skills: skills.skills,
     servers: serverRows,
-    refused: [...refused, ...servers.refused, ...skills.refused],
+    plugins: found.plugins,
+    refused: [...refused, ...servers.refused, ...skills.refused, ...found.refused],
     ...(o.projects !== undefined ? { projects: projects.map(p => ({ ...p, path: tilde(host.home, p.path) })) } : {}),
   };
 }

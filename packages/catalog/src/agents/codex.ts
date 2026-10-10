@@ -8,6 +8,7 @@ import { CODEX_MCP_LOGIN } from "../mcp-login.js";
 import { CODEX_TOML } from "../mcp.js";
 import { PROJECT_SHARED_SKILLS, SHARED_SKILLS } from "../skills.js";
 import { SIGN_IN_ROWS } from "../signin.js";
+import { CODEX_PLUGIN_SHELF } from "../plugins-codex.js";
 import { agent, dfSize } from "./entry.js";
 
 export const CODEX: AgentEntry = {
@@ -41,6 +42,8 @@ export const CODEX: AgentEntry = {
     trusts: (user, folder) => (user === undefined ? Promise.resolve(false) : codexTrusts(user, folder)),
   },
   hooks: CODEX_HOOKS,
+  // 0.162.1: read and switched through its app server.
+  pluginShelf: CODEX_PLUGIN_SHELF,
   configPaths: [CODEX_CONFIG_FILE, "~/.codex/AGENTS.md", "~/.codex/prompts", "~/.codex/skills"],
   projectState: [
     { state: "rollout transcript", location: "sessions/YYYY/MM/DD/rollout-TIMESTAMP-THREADID.jsonl", key: "by date and thread id, not by path", pathFields: ["cwd in the session_meta payload and on per-turn lines"], move: "rewrite cwd", status: "measured" },

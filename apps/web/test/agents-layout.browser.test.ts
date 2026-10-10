@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The agents panel in a real Chromium, since jsdom lays nothing out. At the
-// panel's 480 and its 360 floor, on every tab and on an item's page, nothing
+// panel's 480, its 400 and its 360 floor, on every tab and on an item's page, nothing
 // stands wider than the panel and no name breaks inside a word; in the real
 // right panel the tabs stay at the top while the list scrolls under them; an
 // agent's device sign-in stands under its row as the code's one line, and a
 // server's browser sign-in as its two.
-// Photographs of every tab and an item's page of each kind at 480 and 360 in
+// Photographs of every tab and an item's page of each kind at 480, 400 and 360 in
 // both themes, the sign-in, and the real right panel. Vite serves test/wireframe, so like
 // the other render tests it runs only when asked for (WSP_RENDER=1) and skips
 // without Playwright's Chromium.
@@ -21,12 +21,14 @@ import { startVite, type ViteChild } from "./vite-child";
 
 const WEB_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SHOTS_DIR = join(tmpdir(), "wsp-render");
-const WIDTHS = [480, 360] as const;
-const TABS = ["Agents", "Tool servers", "Skills"] as const;
+const WIDTHS = [480, 400, 360] as const;
+const TABS = ["Agents", "Tool servers", "Skills", "Plugins"] as const;
 const PAGES = [
   { tab: "Agents", row: "claude", name: "agent" },
   { tab: "Tool servers", row: "server-global-github-stdio-npx -y @modelcontextprotocol/server-github", name: "server" },
   { tab: "Skills", row: "skill-user-frontend-design", name: "skill" },
+  { tab: "Plugins", row: "claude:user:vercel@claude-plugins-official", name: "plugin" },
+  { tab: "Plugins", row: "claude:user:skill-creator@claude-plugins-official", name: "plugin-missing" },
 ] as const;
 
 if (renderSkipped !== undefined) console.info(`agents layout render test skipped: ${renderSkipped}`);
@@ -45,7 +47,7 @@ describe.skipIf(renderSkipped !== undefined)("the agents panel laid out in Chrom
   }, 60_000);
   afterAll(() => stopRender(browser, vite?.child));
 
-  const open = async (query: string, viewport = { width: 1000, height: 1400 }): Promise<Page> => {
+  const open = async (query: string, viewport = { width: 1400, height: 1400 }): Promise<Page> => {
     await page?.close();
     // The system's side matches the one the query names, since a settings screen follows the system's.
     page = await browser!.newPage({ viewport, colorScheme: query.includes("theme=light") ? "light" : "dark" });
@@ -78,7 +80,7 @@ describe.skipIf(renderSkipped !== undefined)("the agents panel laid out in Chrom
       return { wide: [...new Set(wide)], broken };
     });
 
-  it("keeps every tab and every item's page inside the panel at 480 and 360, no name broken inside a word", async () => {
+  it("keeps every tab and every item's page inside the panel at 480, 400 and 360, no name broken inside a word", async () => {
     await open("screen=agents-widths&theme=dark");
     await page!.waitForSelector("[data-agent-row]");
     for (const width of WIDTHS) {
@@ -132,7 +134,7 @@ describe.skipIf(renderSkipped !== undefined)("the agents panel laid out in Chrom
     expect(panel.inside).toBe(false);
   });
 
-  it("draws a device sign-in under the agent's row, the code on its one 40 px line inside the panel, at 480 and 360 in both themes, photographed", async () => {
+  it("draws a device sign-in under the agent's row, the code on its one 40 px line inside the panel, at 480, 400 and 360 in both themes, photographed", async () => {
     for (const theme of ["dark", "light"] as const) {
       for (const width of WIDTHS) {
         await open(`screen=agents-widths&theme=${theme}`);
@@ -153,7 +155,7 @@ describe.skipIf(renderSkipped !== undefined)("the agents panel laid out in Chrom
     }
   }, 120_000);
 
-  it("draws a server's browser sign-in under its row: Finish in your browser with its Open on one 40 px line and the address field on another, inside the panel at 480 and 360 in both themes, photographed", async () => {
+  it("draws a server's browser sign-in under its row: Finish in your browser with its Open on one 40 px line and the address field on another, inside the panel at 480, 400 and 360 in both themes, photographed", async () => {
     const row = "server-global-linear-http-mcp.linear.app";
     for (const theme of ["dark", "light"] as const) {
       for (const width of WIDTHS) {
@@ -174,7 +176,7 @@ describe.skipIf(renderSkipped !== undefined)("the agents panel laid out in Chrom
     }
   }, 120_000);
 
-  it("draws a server's failed sign-in under its row as its one line with no empty room above it, at 480 and 360 in both themes, photographed", async () => {
+  it("draws a server's failed sign-in under its row as its one line with no empty room above it, at 480, 400 and 360 in both themes, photographed", async () => {
     const row = "server-global-linear-http-mcp.linear.app";
     for (const theme of ["dark", "light"] as const) {
       for (const width of WIDTHS) {
@@ -195,7 +197,7 @@ describe.skipIf(renderSkipped !== undefined)("the agents panel laid out in Chrom
     }
   }, 120_000);
 
-  it("photographs every tab and an item's page of each kind at 480 and 360 in both themes", async () => {
+  it("photographs every tab and an item's page of each kind at 480, 400 and 360 in both themes", async () => {
     for (const theme of ["dark", "light"] as const) {
       await open(`screen=agents-widths&theme=${theme}`);
       await page!.waitForSelector("[data-agent-row]");

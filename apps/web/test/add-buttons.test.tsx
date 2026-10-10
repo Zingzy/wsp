@@ -131,7 +131,7 @@ describe("the shared Add button in the agents panel", () => {
       await settle();
     };
     const names = tabs().map(t => t.textContent ?? "");
-    expect(names.length).toBe(3);
+    expect(names.length).toBe(4);
     const seen = new Set<string>();
     for (const [at, name] of names.entries()) {
       fireEvent.click(tabs()[at]!);
