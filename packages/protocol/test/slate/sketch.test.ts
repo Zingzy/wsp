@@ -133,8 +133,8 @@ describe("the catalog", () => {
     // A line for each run attribute, after small models guessed what always and once did, took it from 590 to 660;
     // once, stream and when the person is asked, as ruled (6, 7), to 720; a secret in a file, to 730; the line back to
     // the pieces every named entry ends with, after agents that read runs alone guessed <h1> and <p>, to 740; a timed
-    // run on the tab's return and a tool's text in out, to 750.
-    expect(slateTokens(slateCatalog("runs"))).toBeLessThan(750);
+    // run on the tab's return and a tool's text in out, to 750; a slate's file never in the project, to 760.
+    expect(slateTokens(slateCatalog("runs"))).toBeLessThan(760);
     for (const n of ["runs", "chart", "thread", "functions", "steps", "handlers", "patch", "examples"]) expect(slateCatalog(n).endsWith("\nThe pieces and rules: slate_catalog with no name."), n).toBe(true);
     expect(slateCatalog()).not.toContain("slate_catalog with no name");
     expect(slateCatalog("nope")).not.toContain("slate_catalog with no name");

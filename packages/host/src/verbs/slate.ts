@@ -2,7 +2,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { z } from "zod";
-import { turnTokenOf, usageRefusal, SLATE_TOOLS } from "@wsp/protocol";
+import { turnTokenOf, usageRefusal, SLATE_SCRIPT_WORDS, SLATE_TOOLS } from "@wsp/protocol";
 import { type HostClient, type VerbDeps, type VerbContext, usageIs, tool, type Verb, flagList, pick } from "./client.js";
 import { threadOf } from "./workspaces-help.js";
 import { asText } from "./io.js";
@@ -135,7 +135,7 @@ export const SLATE_VERBS: readonly Verb[] = [
       return 0;
     },
     tool: tool({
-      description: "Writes this thread's slate, the live panel shown here beside the chat. Use it to show the person anything they want to see, watch, monitor or keep an eye on while you work (live data, traffic, metrics, a price, logs, a PR, progress, status), or a dashboard, a form to fill in or a checklist. A run with every= refreshes itself on a timer with no turns, so nothing polls.",
+      description: `Writes this thread's slate, the live panel here beside the chat. Use it to show the person what they want to see, watch, monitor or keep an eye on while you work (live data, traffic, metrics, a price, logs, a PR, progress, status), a dashboard, a form to fill in or a checklist. A run with every= refreshes on a timer with no turns, so nothing polls. ${SLATE_SCRIPT_WORDS}`,
       input: {
         thread: SlateThreadIn,
         text: z.string().optional().describe("JSX-like text: a <slate>, or a patch"),

@@ -701,7 +701,7 @@ $run reads state why exit out err json lines startedAt endedAt ms runs cut stale
 json is out parsed as JSON. Before a first result or after a failure, out and json are empty and len of them 0: show a figure with when={$run.exit == 0}. stale: the command changed since this result. Output is scrubbed of secrets.
 <value> state and each run's last result outlive an app or host restart.
 Chain: <when done={$check} do={set($ok, $check.exit == 0)} />; done fires on any outcome.
-Code only the slate uses goes in <file name="x.py"> and runs as $SLATE_DIR/x.py; project code runs where it is.
+Code only the slate uses goes in <file name="x.py">, never in the project, and runs as $SLATE_DIR/x.py; project code runs where it is.
 A tool's json is its structured result, else its text parsed; out is its text; one marked text only keeps json empty unless its text is JSON. The person allows a server once per thread, a destructive tool every start. A secret in args returns as [secret:name].
 ```
 

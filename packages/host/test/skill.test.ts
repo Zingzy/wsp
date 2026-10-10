@@ -136,7 +136,7 @@ describe("the wsp skill", () => {
     const section = text.slice(text.indexOf("### slate\n"), text.indexOf("\n## ", text.indexOf("### slate\n")));
     for (const words of [
       "a request to see something lands there", "gets its result there unless they ask in the chat",
-      "Code only the slate uses goes in a `<file name=\"x.py\">`, run as `\"$SLATE_DIR/x.py\"`; code the project already has is called where it is.",
+      "Code only the slate uses goes in a `<file name=\"x.py\">`, never in the project, and runs as `\"$SLATE_DIR/x.py\"`; project code runs where it is.",
       "give a `<secret name=\"token\" />` input; never ask them to paste it into a file or the chat",
       "Build and read it with the slate tools (`slate_catalog`, `slate_write`, `slate_state`, `slate_read`), never `wsp` from a shell",
       "one heading per section", "status and last-checked lines small and muted", "actions at the end of their row with one primary per section",
@@ -158,6 +158,21 @@ describe("the wsp skill", () => {
         expect(said(kept, word), `${word} in a thread's instructions`).toBe(true);
         expect(described.some(d => said(d, word)), `${word} in a slate tool's description`).toBe(true);
       }
+    }
+  });
+
+  // A Codex thread asked for a live panel wrote its sampler into the project, where Changes listed it.
+  it("says in the slate_write description, the brief, the catalog and the skill that a run's script is a <file> in the thread's slate folder, never in the project", () => {
+    const write = VERBS.find(v => v.name === "slate write");
+    const section = wspSkill().slice(wspSkill().indexOf("### slate\n"), wspSkill().indexOf("\n## ", wspSkill().indexOf("### slate\n")));
+    const texts: Record<string, string> = {
+      "Claude slate brief": SLATE_BRIEF,
+      "slate_write description": write !== undefined && hasTool(write) ? write.tool.description : "",
+      "catalog runs": slateCatalog("runs"),
+      "skill": section,
+    };
+    for (const [where, text] of Object.entries(texts)) {
+      for (const words of ['<file name="x.py">', "$SLATE_DIR/x.py", "never in the project"]) expect(text, `${words} in the ${where}`).toContain(words);
     }
   });
 
