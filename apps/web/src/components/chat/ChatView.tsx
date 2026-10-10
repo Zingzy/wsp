@@ -506,11 +506,21 @@ const TURN_STATUS: Record<TurnSummary["state"], string> = {
  * line's to say. */
 function SettledFooter({ turn }: { turn: TurnSummary }) {
   const limited = (turn.limit ?? null) !== null;
-  return (
+  // A stop that could not reach the computer says why under the word. Any other stop is the person's own, and its word
+  // says it all, whatever the agent or the host wrote as its reason.
+  const why = turn.state === "interrupted" && turn.unreached === true && turn.error !== null ? turn.error : null;
+  const word = (
     <Facts
-      data-testid="settled-footer"
+      {...(why === null ? { "data-testid": "settled-footer" } : {})}
       parts={[limited ? USAGE_WORDS.reached : TURN_STATUS[turn.state]]}
-      className={cn("w-full px-1 pb-2 font-mono text-[11px] tabular-nums", turn.state !== "completed" && !limited ? "text-destructive" : "text-muted-foreground")}
+      className={cn("w-full font-mono text-[11px] tabular-nums", why === null && "px-1 pb-2", turn.state !== "completed" && !limited ? "text-destructive" : "text-muted-foreground")}
     />
+  );
+  if (why === null) return word;
+  return (
+    <div data-testid="settled-footer" className="w-full px-1 pb-2">
+      {word}
+      <p className="mt-0.5 text-xs leading-4 text-muted-foreground">{why}</p>
+    </div>
   );
 }

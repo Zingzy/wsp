@@ -7,7 +7,7 @@
 // what maps one to the other.
 import { act, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { threadLeftLine, type EventUnion, type SessionView, type WorkspaceView } from "@wsp/protocol";
+import { capStoppedLine, threadEndAwayLine, threadLeftLine, TURN_STOPPED_LINE, type EventUnion, type SessionView, type WorkspaceView } from "@wsp/protocol";
 import { installFakeLayout } from "./fake-layout.js";
 import { TABLE_CATALOG } from "./agents.js";
 import { composerEditor, isEditable } from "./composer-harness.js";
@@ -128,6 +128,23 @@ describe("composer stop", () => {
     expect(sock.frames("sessions.interrupt")).toHaveLength(1);
   });
 
+  it("stops a Codex thread's later turn by its running row, not the thread's first row, which carries the same harness id", async () => {
+    // Codex keys a thread's first row by the launch's id and every later one by its own thread id, which both carry.
+    const first: SessionView = { ...runningRow, id: "launch_1", harness: "codex", status: "interrupted" };
+    const later: SessionView = { ...runningRow, id: CLAUDE_SESSION, harness: "codex" };
+    rows = [first, later];
+    const { sock, deliver, push } = await setup();
+    await streamTurn(push);
+    onInterrupt = f => {
+      deliver(done("interrupted"));
+      deliver(end);
+      return { id: f["id"], ok: true, outcome: "accepted" };
+    };
+    fireEvent.click(stopButton());
+    expect(sock.frames("sessions.interrupt")).toEqual([{ id: expect.any(Number), op: "sessions.interrupt", sessionId: later.id }]);
+    await waitFor(() => expect(footer()).toContain("interrupted"));
+  });
+
   it("stop after the turn ended is a no-op: not-running shows no error", async () => {
     rows = [runningRow];
     const { sock, deliver, push } = await setup();
@@ -159,6 +176,39 @@ describe("composer stop", () => {
     };
     fireEvent.click(stopButton());
     await waitFor(() => expect(lastNotice()).toBe(left));
+  });
+
+  it("a stop that cannot reach the computer says so on the thread, under the turn it ended", async () => {
+    rows = [runningRow];
+    const { deliver, push } = await setup();
+    await streamTurn(push);
+    const away = threadEndAwayLine("hetzner");
+    onInterrupt = f => {
+      deliver({ type: "session.done", ...scope, result: { status: "interrupted", error: away, unreached: true, durationMs: 1200 } });
+      deliver(end);
+      return { id: f["id"], ok: true, outcome: "accepted", left: away };
+    };
+    fireEvent.click(stopButton());
+    await waitFor(() => expect(footer()).toContain("interrupted"));
+    expect(footer()).toContain(away);
+  });
+
+  // A stop the agent or the host settled for the person keeps whatever reason it wrote off the thread.
+  it.each([
+    { stop: "a plain stop", error: TURN_STOPPED_LINE },
+    { stop: "a stop the agent ended with its own words", error: "request was aborted" },
+    { stop: "a first turn stopped while it starts", error: capStoppedLine(undefined) },
+  ])("$stop reads interrupted alone", async ({ error }) => {
+    rows = [runningRow];
+    const { deliver, push } = await setup();
+    await streamTurn(push);
+    onInterrupt = f => {
+      deliver({ type: "session.done", ...scope, result: { status: "interrupted", error, durationMs: 1200 } });
+      deliver(end);
+      return { id: f["id"], ok: true, outcome: "accepted" };
+    };
+    fireEvent.click(stopButton());
+    await waitFor(() => expect(footer()).toBe("interrupted"));
   });
 
   it("a double click sends one request; the button stays disabled as Stopping until the reply", async () => {

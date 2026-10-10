@@ -5,7 +5,7 @@
 // file and run there when the computer dials back, across a host restart too.
 // A send behind that end waits for it, says so, and a Stop or a delete gives it
 // up. The agent is the real Claude adapter over a fake computer on the link.
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { cgroupEndScript, sendGivenUpLine, threadCgroup, threadEndAwayLine, threadEndLateLine, threadLeftLine, type EventUnion, type SessionInterruptResult } from "@wsp/protocol";
 import { createRuntime } from "../src/runtime.js";
 import { serveRuntime } from "../src/serve.js";
@@ -86,6 +86,29 @@ function endedThenLaunched(again: Box, threadId: string): void {
   expect(again.order.indexOf("end answers")).toBeGreaterThanOrEqual(0);
   expect(again.order.indexOf("end answers")).toBeLessThan(again.order.indexOf("launch"));
 }
+
+describe("the host log of a stop on a box turn", () => {
+  it("writes one line per stop naming the thread and its answer, the away sentence the transcript carries too", async () => {
+    const lines: string[] = [];
+    const warn = vi.spyOn(console, "warn").mockImplementation((line: unknown) => void lines.push(String(line)));
+    try {
+      const { rt, placeId, workspaceId, turn, threadId } = await running();
+      await away(placeId);
+      expect(await rt.sessions.interrupt(turn.id)).toEqual({ outcome: "accepted", left: threadEndAwayLine("hetzner") });
+      expect(await rt.sessions.interrupt(turn.id)).toMatchObject({ outcome: "not-running" });
+      expect(await rt.sessions.interrupt("sess_nobody")).toEqual({ outcome: "not-found" });
+      expect(lines.filter(line => line.startsWith("stop on thread"))).toEqual([
+        `stop on thread ${threadId.slice(0, 8)}: accepted (${threadEndAwayLine("hetzner")})`,
+        `stop on thread ${threadId.slice(0, 8)}: not-running`,
+        "stop on thread sess_nob: not-found",
+      ]);
+      const done = (await rt.sessions.history(workspaceId)).filter(e => e.type === "session.done" && e.turnId === turn.turnId);
+      expect(done.map(e => (e.type === "session.done" ? e.result : undefined))).toEqual([{ status: "interrupted", error: threadEndAwayLine("hetzner"), unreached: true }]);
+    } finally {
+      warn.mockRestore();
+    }
+  }, 15_000);
+});
 
 describe("a stop on a running box turn while the box is away", () => {
   it("answers at once when the host reads the box away, settles the row and ends the thread there at its next link", async () => {
@@ -194,6 +217,8 @@ describe("a stop on a running box turn while the box is away", () => {
   it("leaves a stop on a box that answers as it was: the agent's own stop, then the thread's end there, nothing owed", async () => {
     const { rt, seen, store, placeId, workspaceId, turn, threadId } = await running();
     expect(await rt.sessions.interrupt(turn.id)).toEqual({ outcome: "accepted" });
+    const done = (await rt.sessions.history(workspaceId)).filter(e => e.type === "session.done" && e.turnId === turn.turnId);
+    expect(done.map(e => (e.type === "session.done" ? e.result.unreached : "none"))).toEqual([undefined]);
     expect(seen.kills.some(cmd => cmd.includes("kill -TERM"))).toBe(true);
     expect(seen.execs.some(e => e.cmd === cgroupEndScript(threadCgroup(threadId)))).toBe(true);
     expect((await rowOf(workspaceId, turn.id)).status).toBe("interrupted");

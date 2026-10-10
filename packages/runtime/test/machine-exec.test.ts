@@ -329,6 +329,30 @@ describe("machineExecStream", () => {
     expect(await stream.exited).toBeNull();
   });
 
+  it("reads the agent's reply to a write at hurried polls, not at the next 1500 ms one, and goes back to 1500 ms after", async () => {
+    const { backend, machine } = await makeMachine();
+    const guest = scriptGuest(backend, []);
+    let clock = 0;
+    const naps: number[] = [];
+    const reading = new Set<() => void>();
+    // A full poll's wait never ends here, so only a write's hurry lets the reply through.
+    const sleep = (ms: number): Promise<void> => (naps.push(ms), ms >= 1500 ? new Promise<void>(() => {}) : new Promise<void>(r => setTimeout(r, 1)));
+    const stream = machineExecStream(machine, { pollMs: 1500, now: () => clock, sleep, reading })("codex app-server", { env: {}, input: ["first"] });
+    const lines = stream.lines[Symbol.asyncIterator]();
+    guest.append("started\n");
+    expect((await lines.next()).value).toBe("started");
+    const reply = lines.next();
+    await vi.waitFor(() => expect(naps.at(-1)).toBe(1500));
+    expect(await stream.write("interrupt")).toBe("written");
+    guest.append("interrupted\n");
+    expect((await reply).value).toBe("interrupted");
+    expect(naps.at(-1)).toBe(200);
+    clock = 3_001;
+    void lines.next();
+    await vi.waitFor(() => expect(naps.at(-1)).toBe(1500));
+    for (const drop of reading) drop();
+  });
+
   it("closeInput kills the recorded tail pid and nothing else, once", async () => {
     const { backend, machine } = await makeMachine();
     const guest = scriptGuest(backend, [{}, {}, { exit: 0 }, {}]);

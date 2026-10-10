@@ -27,6 +27,8 @@ export const QUEUE_WORDS = {
   cancelLabel: "Cancel queued message",
   /** A message steer would have sent now, held back by what its files are. */
   waitsFor: (why: string): string => `Waits for the turn to end, since ${why}`,
+  /** Why a message waits with steer picked, where the thread's agent takes none mid-turn. */
+  noSteer: (agent: string): string => `${agent} takes no message while its turn runs`,
 } as const;
 
 /** A message as one line: its first line with words on it. */

@@ -299,6 +299,9 @@ describe("composer queue", () => {
     expect(started).toHaveLength(0);
     expect(queueWord()).toBe(QUEUE_WORDS.waiting(2));
     noLineAbove();
+    // With steer picked, each card says in one line why it waits instead of joining the turn.
+    expect(rowFor("two").textContent).toContain(QUEUE_WORDS.waitsFor(QUEUE_WORDS.noSteer("Claude Code")));
+    foldQueue();
     emit(done("completed"));
     emit(end());
     await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["one"]));
@@ -326,6 +329,29 @@ describe("composer queue", () => {
     emit(done("completed"));
     emit(end());
     await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["one"]));
+  });
+
+  it("on a box, steers a Codex thread's later turn on the box's own catalog, by its running row rather than the thread's first", async () => {
+    const box: WorkspaceView = { ...workspace, kind: "place", place: "p_2", machineId: "p_2", project: { id: "pr_1", name: "lab", path: "~/lab", computer: "p_2" } };
+    // The host-wide table says no Codex steers; the adapter on the box says it does, and only the box's list says so.
+    const table: HarnessCatalog = { ...catalog(false), harness: "codex", label: "Codex", source: "table" };
+    const onBox: HarnessCatalog = { ...catalog(true), harness: "codex", label: "Codex" };
+    const first: SessionView = { ...runningRow, id: "launch_1", harness: "codex", status: "interrupted" };
+    const later: SessionView = { ...runningRow, id: "sess_0001", harness: "codex" };
+    const { api, interrupted, steered, emit } = fixtureApi({}, [first, later], [table]);
+    api.listWorkspaces = async () => [box];
+    api.getWorkspace = async () => box;
+    api.listHarnesses = async workspaceId => (workspaceId === WS ? [onBox] : [table]);
+    useStore.setState({ places: [{ id: "p_2", kind: "computer", name: "hetzner", default: false, present: true, takesForks: true, engine: "docker", buildsImages: true }] });
+    await setup(api);
+    emit({ type: "session.start", ...scope, prompt: "go" });
+    emit({ type: "session.delta", ...scope, kind: "text", text: "on it" });
+    await waitFor(() => expect(useStore.getState().sessions[WS]).toHaveLength(2));
+    await waitFor(() => expect(useStore.getState().harnessesByWorkspace[WS]?.[0]?.steers).toBe(true));
+    await steer("two");
+    await waitFor(() => expect(steered).toHaveLength(1));
+    expect(steered[0]).toMatchObject({ sessionId: later.id, prompt: "two" });
+    expect(interrupted).toEqual([]);
   });
 
   it("with a harness that steers, a steer the turn beat (not-running) leaves the message first, and the turn's end sends it as a start", async () => {
