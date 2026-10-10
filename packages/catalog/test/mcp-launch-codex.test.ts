@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { AGENT_STAND_INS } from "../../../vitest.env.js";
+import { own } from "./turn-files.js";
 import { codexLaunchConfig, launchMisses } from "../src/mcp-launch.js";
 import { CODEX_TOML } from "../src/mcp.js";
 import { serverValuesOf } from "../src/signin.js";
@@ -37,7 +38,7 @@ describe("a Codex server added with a bearer token, on a computer whose launch h
     expect(stored).toEqual({ WSP_MCP_ACME_AUTHORIZATION: TOKEN });
     const server = CODEX_TOML.read(text, "/root")[0]!;
     expect(launchMisses("codex", CODEX_TOML, server, new Set(Object.keys(values)))).toEqual([]);
-    expect(await codexLaunchConfig({ user: text, folder: "/root" }, values)).toEqual({ "mcp_servers.acme.http_headers.Authorization": `Bearer ${TOKEN}` });
+    expect(await codexLaunchConfig({ user: own(text), folder: "/root" }, values)).toEqual({ "mcp_servers.acme.http_headers.Authorization": `Bearer ${TOKEN}` });
   });
 
   it("is read back from the vault under the name Codex reads, beside the token every other agent reads, a name the vault holds itself standing", () => {
@@ -75,7 +76,7 @@ describe("a Codex server added with a bearer token, on a computer whose launch h
     mkdirSync(join(dir, ".codex"));
     mkdirSync(folder);
     writeFileSync(join(dir, ".codex", "config.toml"), text);
-    const config = await codexLaunchConfig({ user: text, folder }, values);
+    const config = await codexLaunchConfig({ user: own(text), folder }, values);
 
     codex = spawn(CODEX!, ["app-server"], { cwd: folder, env: { PATH, HOME: dir, CODEX_HOME: join(dir, ".codex") }, stdio: ["pipe", "pipe", "ignore"] });
     const send = (o: object): boolean => codex!.stdin!.write(`${JSON.stringify({ jsonrpc: "2.0", ...o })}\n`);

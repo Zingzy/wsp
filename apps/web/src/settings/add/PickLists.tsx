@@ -7,7 +7,8 @@
 // where the picks hold it.
 import { GitCommitHorizontalIcon, GithubIcon, KeyRoundIcon, PlugIcon, PuzzleIcon, ScrollTextIcon, SquareTerminalIcon, TerminalIcon } from "lucide-react";
 import type { ReactNode } from "react";
-import { HERE_PLACE_ID, fmtBytes, fmtCalls, hereName, sizeTone, type GitHubSignIn, type ProjectHue, type ProjectIcon, type RecipeFile, type RecipeOptions, type RecipeSignIn } from "@wsp/protocol";
+import { HERE_PLACE_ID, fmtBytes, fmtCalls, hereName, signInWayDoes, signInWayLabel, sizeTone, type GitHubSignIn, type ProjectHue, type ProjectIcon, type RecipeFile, type RecipeOptions, type RecipeSignIn } from "@wsp/protocol";
+import { catalogEntry, keyEnvOf, mintsToken } from "@wsp/catalog";
 import { AgentMarks } from "../../components/agents/agentsParts.js";
 import { catalogSignInRow } from "../../components/agents/agentsRows.js";
 import { useAgentsReport } from "../../components/agents/useAgentsReport.js";
@@ -62,7 +63,18 @@ const MACHINE_TAIL: Readonly<Record<string, string>> = { device: " with a code" 
 const signInWords = (box: string, kind: string | undefined): Record<RecipeSignIn, string> => ({
   vault: "Copy the key",
   machine: `${box === "" ? "Sign in there" : `Sign in on ${box}`}${(kind === undefined ? undefined : MACHINE_TAIL[kind]) ?? ""}`,
+  token: signInWayLabel("token", box),
+  key: signInWayLabel("key", box),
 });
+
+/** What a row picked to take a token or a key says it does, the same words its failed row's fix opens each way with. */
+const wayNote = (agent: string, name: string, way: "token" | "key", here: string, box: string): string => {
+  const s = catalogEntry(agent)?.signIn;
+  const keyEnv = s === undefined ? undefined : keyEnvOf(s);
+  const does = signInWayDoes(way, { name, here, box, ...(s !== undefined && mintsToken(s) ? { mint: s.mint } : {}), ...(keyEnv !== undefined ? { keyEnv } : {}) });
+  // The token's sentence opens with the command that makes it, which keeps its own case.
+  return way === "token" ? `${does}.` : `${does.charAt(0).toUpperCase()}${does.slice(1)}.`;
+};
 
 /** The agents; on a recipe's page each ticked one says how it signs in as its note rather than a picker. */
 export function AgentsPicks({ picks, options, onChange, box, versions, onlyTicked = false, wayAsNote = false }: PickProps & { versions?: Record<string, string>; wayAsNote?: boolean }) {
@@ -87,7 +99,9 @@ export function AgentsPicks({ picks, options, onChange, box, versions, onlyTicke
         // its row, or its terminal on the computer, which no setup sits at.
         const road = on && !wayAsNote && agent.signins.every(w => w === "machine") ? catalogSignInRow(agent.id)?.signInRoad : undefined;
         const note =
-          road === "token" || road === "key"
+          on && !wayAsNote && (way === "token" || way === "key")
+            ? wayNote(agent.id, agent.name, way, here, box)
+            : road === "token" || road === "key"
             ? ADD_COMPUTER_WORDS.pasteOnceSetUp(road)
             : road === "terminal"
               ? ADD_COMPUTER_WORDS.atItsTerminalOnceSetUp(box === "" ? "that computer" : box)

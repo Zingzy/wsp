@@ -23,7 +23,7 @@ import {
   TOOL_PREFIX,
   type PlaceProvisionRow,
 } from "@wsp/protocol";
-import { CATALOG_AGENTS, MCP_AGENTS, ownServerConfig, rewrittenRel, skillsDirOf } from "@wsp/catalog";
+import { CATALOG_AGENTS, LAUNCH_SERVER_ROADS, MCP_AGENTS, ownServerConfig, rewrittenRel, skillsDirOf } from "@wsp/catalog";
 import { INLINE_EXEC_MS, OLD_APPEND_MARKS } from "./exec-detached.js";
 import type { SkippedPath } from "./golden-import.js";
 import type { PackFiles } from "./golden.js";
@@ -585,26 +585,39 @@ export async function unmergeServers(port: ServerPort, home: string, stores: Rea
       return key?.agent === agent.id ? [{ ...key, digest }] : [];
     });
     if (mine.length === 0) continue;
-    try {
-      const config = ownServerConfig(agent, home, stores[agent.id]);
-      const file = await port.read(config.files);
-      if (file === undefined) continue;
-      let text = file.text;
-      const took: string[] = [];
-      // The user scope and, for a format that keeps servers per folder, the machine's own home folder: the same
-      // two scopes the merge wrote them under.
-      for (const scoped of [false, true]) {
-        const project = scoped ? home : undefined;
-        const names = mine.filter(k => k.home === scoped && serverDigest(agent.mcp.format.entryOf(text, k.name, project)) === k.digest).map(k => k.name);
-        if (names.length === 0) continue;
-        text = agent.mcp.format.remove(text, names, project).text;
-        took.push(...names);
+    const config = ownServerConfig(agent, home, stores[agent.id]);
+    // Each file the merge wrote this agent's keys into, with the folder each key sits under in it: the user scope and,
+    // for a format that keeps servers per folder, the machine's own home folder in its own file, and each project's
+    // where its agent keeps a project's servers there.
+    const files = new Map<string, { files: string[]; base: string; under: { project?: string; keys: typeof mine }[] }>();
+    const into = (c: { files: string[]; base: string }) => {
+      const at = c.files.join("\0");
+      if (!files.has(at)) files.set(at, { ...c, under: [] });
+      return files.get(at)!.under;
+    };
+    into(config).push({ keys: mine.filter(k => !k.home && k.folder === undefined) }, { project: home, keys: mine.filter(k => k.home) });
+    for (const folder of new Set(mine.flatMap(k => k.folder ?? []))) {
+      const carried = LAUNCH_SERVER_ROADS[agent.id]?.carry(folder, config);
+      if (carried !== undefined) into(carried).push({ ...(carried.folder !== undefined ? { project: carried.folder } : {}), keys: mine.filter(k => k.folder === folder) });
+    }
+    for (const at of files.values()) {
+      try {
+        const file = await port.read(at.files);
+        if (file === undefined) continue;
+        let text = file.text;
+        const took: string[] = [];
+        for (const { project, keys } of at.under) {
+          const names = keys.filter(k => serverDigest(agent.mcp.format.entryOf(text, k.name, project)) === k.digest).map(k => k.name);
+          if (names.length === 0) continue;
+          text = agent.mcp.format.remove(text, names, project).text;
+          took.push(...names);
+        }
+        if (took.length === 0 || text === file.text) continue;
+        await port.write(file, text, at.base);
+        out.push({ path: file.path, names: took });
+      } catch {
+        continue;
       }
-      if (took.length === 0 || text === file.text) continue;
-      await port.write(file, text, config.base);
-      out.push({ path: file.path, names: took });
-    } catch {
-      continue;
     }
   }
   return out;

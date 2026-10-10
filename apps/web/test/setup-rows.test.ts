@@ -82,6 +82,25 @@ describe("a setup's frames in the store", () => {
 });
 
 describe("a setup as rows", () => {
+  it("reads a project's own servers under MCP servers, a missed one under it, and draws no row of their own step", () => {
+    const rows = setupRows({
+      setup: { ...RUNNING, state: "done", steps: [{ step: "mcp", state: "done" }, { step: "folderServers", state: "done" }], waiting: [] },
+      applied: {
+        hash: "h",
+        at: "x",
+        rows: [
+          { id: "agents/mcp/claude/@%2Froot%2Facme/stub-one", label: "Claude Code stub-one", outcome: "installed", step: "folderServers" },
+          { id: "agents/mcp/claude/@%2Froot%2Facme/keyed", label: "Claude Code keyed", outcome: "failed", step: "folderServers", note: "the config edit did not run" },
+        ],
+      },
+    });
+    expect(rows.filter(r => r.name === "MCP servers" || r.name === "Claude Code keyed").map(r => [r.name, r.state, r.sub === true])).toEqual([
+      ["MCP servers", "done", false],
+      ["Claude Code keyed", "failed", true],
+    ]);
+    expect(rows.some(r => r.id === "folderServers")).toBe(false);
+  });
+
   it("draws every chosen step in order, a step not started waiting, the sign-ins under Agents and a missed item under its step", () => {
     const rows = setupRows({
       setup: { ...RUNNING, state: "done", steps: [{ step: "floor", state: "done", ms: 72_000 }, { step: "agents", state: "done" }, { step: "skills", state: "failed", note: "1 of 2 failed" }], waiting: [{ row: "signins/codex", label: "Codex", code: "4F2K", expiresAt: "x", state: "waiting" }] },

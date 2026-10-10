@@ -296,7 +296,7 @@ fn tail(facts: &Facts) -> Vec<String> {
 }
 
 fn scope_word(scope: &str, project: Option<&Named>) -> String {
-    project.map_or_else(|| scope.to_owned(), |p| format!("project {}", cell(&p.name)))
+    project.map_or_else(|| scope.to_owned(), |p| format!("{} {}", if scope == "local" { "local" } else { "project" }, cell(&p.name)))
 }
 
 fn row(cells: &[&str]) -> Vec<String> {

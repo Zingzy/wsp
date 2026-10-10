@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { homedir } from "node:os";
 import { dirname, join, posix, resolve as resolvePathOn } from "node:path";
-import { CATALOG_AGENTS, DEFAULT_AGENT, LAUNCH_SERVER_ROADS, MCP_AGENTS, installsOnFirstRun, ownServerConfig, serverValuesOf } from "@wsp/catalog";
+import { CATALOG_AGENTS, DEFAULT_AGENT, LAUNCH_SERVER_ROADS, MCP_AGENTS, checkoutArgs, checkoutOf, installsOnFirstRun, serverValuesOf, turnServerFiles } from "@wsp/catalog";
 import { INLINE_EXEC_MS, harnessExec, landBytes, agentHomes, parseConfigs, readConfigsCmd, readReason, readWhole } from "@wsp/engine";
 import {
   type AttachmentRoad, type HarnessCatalog, type HarnessCatalogProbe, type Preferences, type SessionView, type TitleSource, type Attachment,
@@ -502,13 +502,17 @@ export function agentsArea(ctx: RuntimeContext): AgentsArea {
     const env = threadEnv(entry, harness);
     const home = env["HOME"] ?? "~";
     const store = CATALOG_AGENTS.find(a => a.id === harness)?.stateHomeEnv;
-    const scopes = [{ files: ownServerConfig(mcp, home, store === undefined ? undefined : env[store]).files }, { files: [posix.join(folder, road.project)] }];
+    const said = await entry.machine.exec(`git ${checkoutArgs(folder).map(shellQuote).join(" ")} 2>/dev/null`, { timeoutMs: INLINE_EXEC_MS }).catch(() => undefined);
+    const checkout = checkoutOf(said?.exitCode === 0 ? said.stdout : undefined, folder);
+    const files = turnServerFiles(mcp, folder, home, store === undefined ? undefined : env[store], checkout.top);
+    const scopes = [{ files: files.user }, ...files.projects.map(f => ({ files: [f] }))];
     const res = await entry.machine.exec(readConfigsCmd(scopes), { timeoutMs: INLINE_EXEC_MS });
     const agent = CATALOG_AGENTS.find(a => a.id === harness)?.name ?? harness;
     if (res.exitCode === 0 && !readWhole(res.stdout)) throw new Error(serverValuesCutLine(agent, scopes.flatMap(scope => scope.files)));
     const read = res.exitCode === 0 ? parseConfigs(res.stdout, scopes) : undefined;
     if (read === undefined) throw new Error(serverValuesUnreadLine(agent, readReason(res, INLINE_EXEC_MS / 1000)));
-    const filled = await road.fill({ ...(read[0] !== undefined ? { user: read[0].text } : {}), ...(read[1] !== undefined ? { project: read[1].text } : {}), folder }, values);
+    const [user, ...projects] = read;
+    const filled = await road.fill({ ...(user !== undefined ? { user } : {}), projects: projects.filter(f => f !== undefined), folder, key: checkout.key }, values);
     return Object.values(filled).every(v => Object.keys(v ?? {}).length === 0) ? undefined : filled;
   };
 
@@ -528,7 +532,7 @@ export function agentsArea(ctx: RuntimeContext): AgentsArea {
     const factory = adapters[harness];
     if (!factory) throw new Error(noAdapterLine(harness, Object.keys(adapters)));
     const kind = ctx.moduleOf(entry.record.kind);
-    const vault = opts.vault?.() ?? {};
+    const vault = ctx.vaultOn(entry);
     const place = setupPlace(entry);
     const setup = place === undefined ? undefined : setups.launchOf(place, harness);
     const carried = kind.serverValues === "environment" ? servers : {};

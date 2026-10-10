@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { Machine } from "@wsp/engine";
-import { HERE_PLACE_ID, addToolsHereRefusal, closedBeforeSignInLine, controlSignInRefusal, signInUncheckedLine, noVaultKeyRefusal, notTokenRefusal, serverNotSetUpLine, serverSignInCopyRefusal, shellQuote, signInTerminalRefusal, signInVaultRefusal, type AgentsSignInEvent } from "@wsp/protocol";
+import { HERE_PLACE_ID, addToolsHereRefusal, closedBeforeSignInLine, controlSignInRefusal, mintFailedLine, signInUncheckedLine, noVaultKeyRefusal, notTokenRefusal, serverNotSetUpLine, serverSignInCopyRefusal, shellQuote, signInTerminalRefusal, signInVaultRefusal, type AgentsSignInEvent } from "@wsp/protocol";
 import type { AgentsOn, SignInForward } from "@wsp/runtime";
 import { hostActs, pagesOnPty, planSignIn, terminalSignIn, watchSignIn } from "../src/agents-signin.js";
 import { signInPrepareLine } from "../src/place-signin.js";
@@ -71,8 +71,18 @@ describe("the line a sign-in runs where it stands", () => {
     await expect(planSignIn(relayedBox(), { agent: "jq" })).rejects.toThrow(/no agent jq/);
   });
 
+  it("signs Claude Code in on a box by its own login, pointed at the store that box's threads read, its code pasted back", async () => {
+    const plan = await planSignIn({ ...relayedBox(), stores: { claude: "/root/.local/share/wsp/claude" } } as AgentsOn, { agent: "claude" });
+    expect(plan.line.command).toMatch(/export CLAUDE_CONFIG_DIR='\/root\/\.local\/share\/wsp\/claude'; claude auth login --claudeai$/);
+    expect(plan.line.status).toMatch(/export CLAUDE_CONFIG_DIR='\/root\/\.local\/share\/wsp\/claude'; claude auth status$/);
+    expect(plan.paste("https://claude.ai/oauth/authorize?code=true")).toBe(true);
+    // Its login is a box's alone: a workspace and this computer take the token or the key.
+    await expect(planSignIn(fork(), { agent: "claude" })).rejects.toThrow(signInVaultRefusal("Claude Code"));
+  });
+
   it("refuses a token row and, for the app, a row that asks the person to pick; the person's terminal takes that one", async () => {
     await expect(planSignIn({ kind: "here" }, { agent: "claude" })).rejects.toThrow(signInVaultRefusal("Claude Code"));
+    await expect(planSignIn({ kind: "here" }, { agent: "claude" }, { terminal: true, keep: () => {} })).rejects.toThrow(signInVaultRefusal("Claude Code"));
     await expect(planSignIn({ kind: "here" }, { agent: "opencode" })).rejects.toThrow(signInTerminalRefusal("OpenCode", "wsp agents signin opencode"));
     expect((await planSignIn({ kind: "here" }, { agent: "opencode" }, { terminal: true })).line.command).toBe("opencode auth login");
     await expect(planSignIn({ kind: "here" }, { agent: "nobody" })).rejects.toThrow(/no agent nobody/);
@@ -293,6 +303,39 @@ describe("a watched sign-in", () => {
     // Every status ran with the same store as the flow.
     expect(t.link.ptys.slice(1).every(p => (p.created["env"] as Record<string, string>)["CODEX_HOME"] === "/wsp/logins/codex")).toBe(true);
     expect(flow!.killed).toBe(true);
+  });
+
+  it("makes Claude Code's token on this computer, keeps it in the vault off what the command printed, and never says it", async () => {
+    const token = `sk-ant-oat01-${"Fake_token-".repeat(8)}`;
+    for (const [exit, kept] of [[0, [["CLAUDE_CODE_OAUTH_TOKEN", token]]], [1, []]] as const) {
+      const keeps: [string, string][] = [];
+      const plan = await planSignIn({ kind: "here" }, { agent: "claude" }, { keep: (name, value) => void keeps.push([name, value]) });
+      const t = await run((l, pty, line) => {
+        if (!line.includes("setup-token")) return;
+        l.data(pty, `Browser didn't open? Use the url below to sign in:\r\nhttps://claude.ai/oauth/authorize?code=true\r\n\x1b[32m✓\x1b[0m Long-lived authentication token created:\r\n${token}\r\n`);
+        l.exit(pty, exit);
+      }, plan);
+      await t.done;
+      expect(t.link.ptys[0]!.ran).toBe("claude setup-token");
+      expect(keeps).toEqual(kept);
+      expect(t.steps.at(-1)).toEqual(exit === 0 ? { state: "signed-in" } : { state: "failed", said: mintFailedLine("claude setup-token") });
+      expect(JSON.stringify(t.steps)).not.toContain(token);
+    }
+  });
+
+  it("says a fixed line when setup-token ends well with no token it reads, never what it printed last", async () => {
+    const moved = `sk-ant-oat02-${"Fake_token-".repeat(8)}`;
+    const keeps: [string, string][] = [];
+    const plan = await planSignIn({ kind: "here" }, { agent: "claude" }, { keep: (name, value) => void keeps.push([name, value]) });
+    const t = await run((l, pty, line) => {
+      if (!line.includes("setup-token")) return;
+      l.data(pty, `Long-lived authentication token created:\r\n${moved}\r\n`);
+      l.exit(pty, 0);
+    }, plan);
+    await t.done;
+    expect(keeps).toEqual([]);
+    expect(t.steps.at(-1)).toEqual({ state: "failed", said: mintFailedLine("claude setup-token") });
+    expect(JSON.stringify(t.steps)).not.toContain(moved);
   });
 
   it("reads the page and the code from the tool alone, never from what the shell printed before it started", async () => {

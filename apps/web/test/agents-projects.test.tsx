@@ -185,6 +185,16 @@ describe("a read over a computer's projects", () => {
     expect([tool.querySelector("[data-settings-title]")?.textContent, tool.querySelector("[data-settings-description]")?.textContent]).toEqual(["query", "Runs one query"]);
   });
 
+  it("names the project's own file for an add, not a .mcp.json above the project that its turns also read", async () => {
+    host();
+    const above: McpRow = { ...server("aaa", WWW), file: "~/code/.mcp.json" };
+    render(<Page report={{ ...REPORT, servers: [above, ...REPORT.servers] }} />);
+    tab("Tool servers");
+    add();
+    await pickWhere("www");
+    expect(panel().querySelector("[data-k=add-server-file]")?.textContent).toBe("~/code/www/.mcp.json");
+  });
+
   it("adds a tool server to the home or to the project picked, the file following it, and names that project to the host", async () => {
     const h = host();
     render(<Page />);

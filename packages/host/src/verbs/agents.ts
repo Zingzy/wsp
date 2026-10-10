@@ -515,7 +515,7 @@ export const AGENT_VERBS: readonly Verb[] = [
   },
   {
     name: "servers remove",
-    usage: "wsp servers remove <name> [<thread>] [--on <computer>] --agent <id> [--scope <user|home|project>] [--project [<name>]] [--yes]",
+    usage: "wsp servers remove <name> [<thread>] [--on <computer>] --agent <id> [--scope <user|home|local|project>] [--project [<name>]] [--yes]",
     about: "takes one MCP server's entry out of an agent's own config, every other line of the file as it was, and, once no agent's config on this computer lists that server, frees the vault's values kept for it that no other server holds",
     page: "agent",
     options: { agent: { type: "string" }, on: { type: "string" }, scope: { type: "string" }, project: { type: "string", valueWith: "on" }, yes: { type: "boolean" } },
@@ -546,7 +546,7 @@ export const AGENT_VERBS: readonly Verb[] = [
   ...(["disable", "enable"] as const).map(
     (word): Verb => ({
       name: `servers ${word}`,
-      usage: `wsp servers ${word} <name> [<thread>] [--on <computer>] --agent <id> [--scope <user|home|project>] [--project [<name>]]`,
+      usage: `wsp servers ${word} <name> [<thread>] [--on <computer>] --agent <id> [--scope <user|home|local|project>] [--project [<name>]]`,
       about: word === "disable" ? "turns one MCP server off by the switch its agent reads, so the agent leaves it out until it is turned on" : "turns an MCP server that was turned off on again",
       page: "agent",
       options: { agent: { type: "string" }, on: { type: "string" }, scope: { type: "string" }, project: { type: "string", valueWith: "on" } },

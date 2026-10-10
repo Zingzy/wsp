@@ -3,6 +3,7 @@
 // owns, as Claude Code's --mcp-config file and Codex's thread start take them:
 // filled in place for that launch, every key the person set kept.
 import { describe, expect, it } from "vitest";
+import { own, proj } from "./turn-files.js";
 import { claudeLaunchServers, codexLaunchConfig, launchMisses } from "../src/mcp-launch.js";
 import { CODEX_TOML, MCP_SERVERS_JSON, OPENCODE_JSON } from "../src/mcp.js";
 
@@ -23,7 +24,7 @@ describe("a Claude Code launch's servers", () => {
   });
 
   it("is each server that reads a held value, whole, the value in place and every other key and reference as written", () => {
-    const got = claudeLaunchServers({ user, folder: "/root/spoo-ts" }, values);
+    const got = claudeLaunchServers({ user: own(user), folder: "/root/spoo-ts" }, values);
     expect(Object.keys(got).sort()).toEqual(["gh", "local", "tracker"]);
     expect(got["tracker"]).toEqual({ type: "http", url: "https://mcp.linear.app/mcp", headers: { Authorization: "Bearer lin_TESTONLY" }, oauth: { clientId: "abc", callbackPort: 8080 } });
     // A reference with a default is filled like a plain one; one the vault does not hold is left for the agent.
@@ -31,17 +32,25 @@ describe("a Claude Code launch's servers", () => {
   });
 
   it("fills the home folder's own servers for a turn there, and the project's .mcp.json beneath the folder's own", () => {
-    expect(Object.keys(claudeLaunchServers({ user, folder: "/root" }, values)).sort()).toEqual(["gh", "homeonly", "off", "tracker"]);
+    expect(Object.keys(claudeLaunchServers({ user: own(user), folder: "/root" }, values)).sort()).toEqual(["gh", "homeonly", "off", "tracker"]);
     const project = JSON.stringify({ mcpServers: { shared: { command: "s", env: { T: "${LINEAR_TOKEN}" } }, local: { command: "from-project", env: { N: "${NOTION_TOKEN}" } } } });
-    const got = claudeLaunchServers({ user, project, folder: "/root/spoo-ts" }, values);
+    const got = claudeLaunchServers({ user: own(user), projects: [proj(project)], folder: "/root/spoo-ts" }, values);
     expect(got["shared"]).toEqual({ command: "s", env: { T: "lin_TESTONLY" } });
     expect(got["local"]).toEqual({ command: "l", env: { N: "ntn_TESTONLY" } });
   });
 
+  it("fills a server of a .mcp.json above the folder, under the nearer one of the same name", () => {
+    const repo = proj(JSON.stringify({ mcpServers: { shared: { command: "near", env: { T: "${LINEAR_TOKEN}" } } } }));
+    const parent = proj(JSON.stringify({ mcpServers: { shared: { command: "far", env: { T: "${LINEAR_TOKEN}" } }, above: { command: "a", env: { G: "${GH_TOKEN}" } } } }), "/root/.mcp.json");
+    const got = claudeLaunchServers({ user: own(user), projects: [repo, parent], folder: "/root/spoo-ts" }, values);
+    expect(got["shared"]).toEqual({ command: "near", env: { T: "lin_TESTONLY" } });
+    expect(got["above"]).toEqual({ command: "a", env: { G: "ghp_TESTONLY" } });
+  });
+
   it("is nothing with no value held or no file", () => {
-    expect(claudeLaunchServers({ user, folder: "/root" }, {})).toEqual({});
+    expect(claudeLaunchServers({ user: own(user), folder: "/root" }, {})).toEqual({});
     expect(claudeLaunchServers({ folder: "/root" }, values)).toEqual({});
-    expect(claudeLaunchServers({ user: "not json", folder: "/root" }, values)).toEqual({});
+    expect(claudeLaunchServers({ user: own("not json"), folder: "/root" }, values)).toEqual({});
   });
 });
 
@@ -68,7 +77,7 @@ describe("a Codex thread start's config", () => {
   ].join("\n");
 
   it("sets only the held names on each server that passes them through, so Codex lays them over the entry", async () => {
-    expect(await codexLaunchConfig({ user, folder: "/root/spoo-ts" }, values)).toEqual({
+    expect(await codexLaunchConfig({ user: own(user), folder: "/root/spoo-ts" }, values)).toEqual({
       "mcp_servers.notion.env.NOTION_TOKEN": "ntn_TESTONLY",
       "mcp_servers.tracker.http_headers.Authorization": "lin_TESTONLY",
     });
@@ -76,18 +85,18 @@ describe("a Codex thread start's config", () => {
 
   it("reads the project's file only where Codex's own marks the folder trusted", async () => {
     const project = ['[mcp_servers.proj]', 'command = "p"', 'env_vars = ["GH_TOKEN"]', ""].join("\n");
-    expect(Object.keys(await codexLaunchConfig({ user, project, folder: "/root/spoo-ts" }, values))).not.toContain("mcp_servers.proj.env.GH_TOKEN");
+    expect(Object.keys(await codexLaunchConfig({ user: own(user), projects: [proj(project)], folder: "/root/spoo-ts" }, values))).not.toContain("mcp_servers.proj.env.GH_TOKEN");
     const trusted = `${user}[projects."/root/spoo-ts"]\ntrust_level = "trusted"\n`;
-    expect(await codexLaunchConfig({ user: trusted, project, folder: "/root/spoo-ts" }, values)).toMatchObject({ "mcp_servers.proj.env.GH_TOKEN": "ghp_TESTONLY" });
+    expect(await codexLaunchConfig({ user: own(trusted), projects: [proj(project)], folder: "/root/spoo-ts" }, values)).toMatchObject({ "mcp_servers.proj.env.GH_TOKEN": "ghp_TESTONLY" });
   });
 
   it("reads a folder's trust however the TOML spells it, a dotted key and an inline table among them", async () => {
     const project = ['[mcp_servers.proj]', 'command = "p"', 'env_vars = ["GH_TOKEN"]', ""].join("\n");
     for (const trust of ['projects."/root/spoo-ts".trust_level = "trusted"', 'projects = { "/root/spoo-ts" = { trust_level = "trusted" } }']) {
-      expect(await codexLaunchConfig({ user: `${trust}\n${user}`, project, folder: "/root/spoo-ts" }, values)).toMatchObject({ "mcp_servers.proj.env.GH_TOKEN": "ghp_TESTONLY" });
+      expect(await codexLaunchConfig({ user: own(`${trust}\n${user}`), projects: [proj(project)], folder: "/root/spoo-ts" }, values)).toMatchObject({ "mcp_servers.proj.env.GH_TOKEN": "ghp_TESTONLY" });
     }
     const untrusted = `projects."/root/spoo-ts".trust_level = "untrusted"\n${user}`;
-    expect(Object.keys(await codexLaunchConfig({ user: untrusted, project, folder: "/root/spoo-ts" }, values))).not.toContain("mcp_servers.proj.env.GH_TOKEN");
+    expect(Object.keys(await codexLaunchConfig({ user: own(untrusted), projects: [proj(project)], folder: "/root/spoo-ts" }, values))).not.toContain("mcp_servers.proj.env.GH_TOKEN");
   });
 });
 

@@ -290,6 +290,7 @@ export const SETUP_STEP_CLASS = {
   plugins: "fixable",
   configs: "fixable",
   folders: "important",
+  folderServers: "fixable",
   github: "important",
   context: "fixable",
 } as const satisfies Record<string, SetupClass>;
@@ -307,6 +308,7 @@ export const SETUP_STEP_WORDS: Record<PlaceSetupStep, string> = {
   plugins: "the plugins",
   configs: "git and the shell",
   folders: "the folders, as projects",
+  folderServers: "the projects' own MCP servers",
   github: "the GitHub sign-in",
   context: "what the agents read about this computer",
 };

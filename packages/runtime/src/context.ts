@@ -246,6 +246,7 @@ export interface KindsArea {
   readonly machineReading: Set<() => void>;
   readonly moduleOf: (kind: WorkspaceKind) => KindModule;
   readonly placeAgentHome: (place: string | undefined, home: string, id: string) => string;
+  readonly vaultOn: (entry: LiveWorkspace) => Readonly<Record<string, string>>;
   readonly backendFor: (record: WorkspaceRecord) => MachineBackend;
   readonly openChannel: (o: DaemonChannelOptions) => Promise<DaemonChannel>;
   readonly backendOfKind: (kind: WorkspaceKind, place?: string) => MachineBackend;
@@ -645,7 +646,7 @@ export interface ThreadsArea {
   readonly snapshotOf: (entry: LiveWorkspace, cwd: string) => Promise<string | undefined>;
   readonly readTurnChanges: (entry: LiveWorkspace, turn: { sessionId: string; turnId: string; threadId: string; cwd: string; from: string; startedAt: number; wrote?: ReadonlySet<string> }) => Promise<boolean>;
   readonly usageComputerOf: (r: WorkspaceRecord) => string;
-  readonly vaultedFor: (agent: string, loginStands?: boolean) => Vaulted;
+  readonly vaultedFor: (agent: string, loginStands?: boolean, vault?: Readonly<Record<string, string>>) => Vaulted;
   readonly usageAccountOf: (entry: LiveWorkspace, harness: string, named?: { id: string; label?: string; }) => { key: string; label: string; road: AccountRoad; };
   readonly limitDetailsDue: (entry: LiveWorkspace, harness: string) => Promise<boolean>;
 }

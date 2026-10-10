@@ -4,14 +4,15 @@
 
 ```text
 usage: wsp servers enable <name> [<thread>] [--on <computer>] --agent <id>
-       [--scope <user|home|project>] [--project [<name>]]
+       [--scope <user|home|local|project>] [--project [<name>]]
   turns an MCP server that was turned off on again
 
   --agent      the agent whose config names the server, by its catalog id as wsp
                servers shows it
   --on         the computer to read, by the name wsp computers shows; this
                computer without it, and a thread names its own
-  --scope      user, home or project, as wsp servers shows it; user without it
+  --scope      user, home, local or project, as wsp servers shows it; user
+               without it
   --project    the project scope: alone with a thread, the thread's own project,
                or the project's name with --on
   --json       print the raw protocol values, one JSON object per line, with

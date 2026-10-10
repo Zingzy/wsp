@@ -22,8 +22,8 @@
 // handed to a server is hidden in what it says back.
 import { createHash } from "node:crypto";
 import { posix } from "node:path";
-import { MCP_AGENTS, MCP_AGENT_IDS, harnessLine, valueForms, type McpAgent, type McpCheckWord, type McpServer, type McpTransport } from "@wsp/catalog";
-import { secretNamed, type Host } from "@wsp/collect";
+import { MCP_AGENTS, MCP_AGENT_IDS, harnessLine, valueForms, type McpAgent, type McpCheckWord, type McpTransport, type TurnServer } from "@wsp/catalog";
+import { readTurnServers, secretNamed, type Host } from "@wsp/collect";
 import type { ServerToolsAsk } from "@wsp/runtime";
 import { lastLine, serverNotSetUpLine, serverToolsLateRefusal, serverUntrustedLine, shellQuote, withoutControlChars, type McpTool, type McpToolParam, type ServerToolsAnswer } from "@wsp/protocol";
 import { ownServerFiles } from "./agents-here.js";
@@ -275,31 +275,21 @@ async function askHarness(host: Host, agent: McpAgent, name: string, cwd: string
   return out === undefined ? undefined : check.auth(out, name);
 }
 
-/** One server as its agent's file defines it there: the agent's own file first, then the project's. */
-interface Found {
-  server: McpServer;
-  file: string;
-  entry: string;
-  project: boolean;
+/** One server by that name as a turn there reads it, in the project's folder where one is named, else in the home:
+ * the agent's user scope first, as the report's own rows name it, else the first the agent reads. */
+async function findServer(host: Host, agent: McpAgent, name: string, project: string | undefined): Promise<TurnServer | undefined> {
+  const named = (await readTurnServers(host, agent, project ?? host.home)).filter(s => s.server.name === name);
+  return named.find(s => s.scope === "user") ?? named[0] ?? (project === undefined ? undefined : await untrustedServer(host, agent, name, project));
 }
 
-async function findServer(host: Host, agent: McpAgent, name: string, project: string | undefined): Promise<Found | undefined> {
-  const files: { path: string; project: boolean }[] = [
-    ...ownServerFiles(host, agent).map(path => ({ path, project: false })),
-    ...(project === undefined ? [] : (agent.mcp.projectFiles ?? []).map(f => ({ path: posix.join(project, f), project: true }))),
-  ];
-  const texts = await Promise.all(files.map(f => host.fs.readText(f.path)));
-  // The first file of each kind that is there is the one the agent reads, as the report reads it.
-  const own = files.findIndex((f, i) => !f.project && texts[i] !== undefined);
-  const theirs = files.findIndex((f, i) => f.project && texts[i] !== undefined);
-  for (const at of [own, theirs]) {
-    if (at < 0) continue;
-    const text = texts[at]!;
-    const servers = agent.mcp.format.read(text, host.home).filter(s => !files[at]!.project || s.scope === "user");
-    const server = servers.find(s => s.name === name && s.scope === "user") ?? servers.find(s => s.name === name);
-    if (server === undefined) continue;
-    const entry = agent.mcp.format.entryOf(text, name, server.scope === "home" ? host.home : undefined) ?? JSON.stringify(server.transport);
-    return { server, file: files[at]!.path, entry, project: files[at]!.project };
+/** A server in the project's own file of an agent that reads that file only in a folder it trusts, which a turn there
+ * does not get, found by name so the check can say why rather than that it is not set up. */
+async function untrustedServer(host: Host, agent: McpAgent, name: string, project: string): Promise<TurnServer | undefined> {
+  if (agent.mcp.trusts === undefined) return undefined;
+  for (const file of (agent.mcp.projectFiles ?? []).map(f => posix.join(project, f))) {
+    const text = await host.fs.readText(file);
+    const server = text === undefined ? undefined : agent.mcp.format.read(text, project).find(s => s.name === name && s.scope === "user");
+    if (server !== undefined) return { server, scope: "project", file };
   }
   return undefined;
 }
@@ -310,12 +300,12 @@ export const noMcpAgentRefusal = (agent: string): string => `${agent} is no agen
 
 /** One server of an agent's config there, its references read: the folder it is asked from, and either the
  * reference with no value or its transport with the values handed to it, which are secrets to hide from what it says. */
-async function readServer(host: Host, agentId: string, name: string, o: { project?: string; values?: Readonly<Record<string, string>> }): Promise<{ agent: McpAgent; found: Found; cwd: string } & ({ missing: string } | { transport: McpTransport; secrets: string[] })> {
+async function readServer(host: Host, agentId: string, name: string, o: { project?: string; values?: Readonly<Record<string, string>> }): Promise<{ agent: McpAgent; found: TurnServer; cwd: string } & ({ missing: string } | { transport: McpTransport; secrets: string[] })> {
   const agent = MCP_AGENTS.find(a => a.id === agentId);
   if (agent === undefined) throw new Error(noMcpAgentRefusal(agentId));
   const found = await findServer(host, agent, name, o.project);
   if (found === undefined) throw new Error(noSuchServerRefusal(name, agent.name));
-  const cwd = found.project && o.project !== undefined ? o.project : host.home;
+  const cwd = found.scope !== "user" && o.project !== undefined ? o.project : host.home;
   const resolved = agent.mcp.format.resolve(found.server, n => o.values?.[n]);
   if ("missing" in resolved) return { agent, found, cwd, missing: resolved.missing };
   const t = resolved.transport;
@@ -337,14 +327,7 @@ export async function resolveServer(host: Host, agentId: string, name: string, o
 /** Whether the harness asked from `cwd` finds the name in two scopes, where it picks one itself and may start a
  * command server of that name. */
 async function twiceAt(host: Host, agent: McpAgent, name: string, cwd: string): Promise<boolean> {
-  const own = ownServerFiles(host, agent);
-  const first = async (files: readonly string[]): Promise<string | undefined> => (await Promise.all(files.map(f => host.fs.readText(f)))).find(t => t !== undefined);
-  const [mine, theirs] = await Promise.all([first(own), first((agent.mcp.projectFiles ?? []).map(f => posix.join(cwd, f)).filter(f => !own.includes(f)))]);
-  const scopes = new Set<string>([
-    ...(mine === undefined ? [] : agent.mcp.format.read(mine, cwd)).filter(s => s.name === name).map(s => s.scope),
-    ...(theirs === undefined ? [] : agent.mcp.format.read(theirs, host.home)).filter(s => s.name === name && s.scope === "user").map(() => "project"),
-  ]);
-  return scopes.size > 1;
+  return (await readTurnServers(host, agent, cwd)).filter(s => s.server.name === name).length > 1;
 }
 
 /** Whether the agent reads a project's own file in `folder`, off its own config there. */
@@ -424,7 +407,7 @@ export function serverTools(o: { now: () => number; deadlineMs?: number; log: (l
         held = mine;
       }
       const asked = await held.asked;
-      const answer = "unauthorized" in asked ? await harnessWord(host, ask.key, agent, ask.name, cwd, now, found.project ? found.file : undefined) : asked;
+      const answer = "unauthorized" in asked ? await harnessWord(host, ask.key, agent, ask.name, cwd, now, found.scope === "project" ? found.file : undefined) : asked;
       return { ...answer, readAt: new Date(held.at).toISOString() };
     },
     forget(key) {

@@ -306,6 +306,7 @@
                             "plugins",
                             "configs",
                             "folders",
+                            "folderServers",
                             "github",
                             "context"
                           ]
@@ -502,7 +503,9 @@
                           "type": "string",
                           "enum": [
                             "vault",
-                            "machine"
+                            "machine",
+                            "token",
+                            "key"
                           ]
                         }
                       },
@@ -1308,6 +1311,7 @@
                             "plugins",
                             "configs",
                             "folders",
+                            "folderServers",
                             "github",
                             "context"
                           ]
@@ -1504,7 +1508,9 @@
                           "type": "string",
                           "enum": [
                             "vault",
-                            "machine"
+                            "machine",
+                            "token",
+                            "key"
                           ]
                         }
                       },

@@ -135,14 +135,14 @@ export function box(client: WsClient, login: BoxLogin, o: { failClone?: boolean;
   return seen;
 }
 
-export type Started = { o: HarnessStartOptions; env: Readonly<Record<string, string>> };
+export type Started = { o: HarnessStartOptions; env: Readonly<Record<string, string>>; vault?: Readonly<Record<string, string>> };
 
 /** A harness that records what each turn was started with and answers at once. */
 export function answering(starts: Started[]): HarnessAdapterFactory {
   return hctx => ({
     steers: false,
     start: o => {
-      starts.push({ o, env: hctx.env });
+      starts.push({ o, env: hctx.env, vault: hctx.vault });
       const sessionId = randomUUID();
       const result: TurnResult = { status: "completed", text: "ok" };
       o.onEvent({ type: "session.start", sessionId });
@@ -164,6 +164,13 @@ export async function pickGitHub(store: Store, placeId: string, signin: "vault" 
   const record = (await store.get("places", placeId)) as Record<string, unknown>;
   const outcome = signin === "skip" ? "skipped" : "present";
   await store.put("places", placeId, { ...record, picks: { configs: { github: { signin } } }, applied: { at: new Date().toISOString(), rows: [{ id: "github", label: "GitHub", outcome }] } });
+  await ctx.runtime!.places!.load();
+}
+
+/** An agent's sign-in on that computer as the setup records the way it was picked. */
+export async function pickSignIn(store: Store, placeId: string, agent: string, signin: "vault" | "machine" | "token" | "key"): Promise<void> {
+  const record = (await store.get("places", placeId)) as Record<string, unknown>;
+  await store.put("places", placeId, { ...record, picks: { agents: { [agent]: { signin } }, configs: {} } });
   await ctx.runtime!.places!.load();
 }
 

@@ -88,7 +88,7 @@ Adds a computer of the person's over ssh and sets it up from a saved recipe, as 
 | `computer.spawnDefault` | object |  |  |
 | `computer.running` | integer |  |  |
 | `setup` | object[] | yes |  |
-| `setup[].step` | `connect`, `host-key`, `check`, `chip`, `root`, `system`, `disk`, `reach`, `wsp`, `service`, `join`, `floor`, `agents`, `signins`, `clis`, `skills`, `mcp`, `plugins`, `configs`, `folders`, `github`, `context` | yes |  |
+| `setup[].step` | `connect`, `host-key`, `check`, `chip`, `root`, `system`, `disk`, `reach`, `wsp`, `service`, `join`, `floor`, `agents`, `signins`, `clis`, `skills`, `mcp`, `plugins`, `configs`, `folders`, `folderServers`, `github`, `context` | yes |  |
 | `setup[].state` | `running`, `done`, `failed`, `skipped` | yes |  |
 | `setup[].note` | string |  |  |
 | `setup[].ms` | integer |  |  |
@@ -978,7 +978,7 @@ Saves the picks one of the person's computers was set up with as a recipe under 
 
 ## recipes_show
 
-One recipe by its name: file is the recipe as saved, every row by kind (agents with signin vault or machine, mcp with the agents each server goes to, clis with via, the manager it came from, and needs where it builds with the C toolchain, skills with from, the folder it is read from here, plugins, folders with from, name, icon, hue and keep, configs git, shell and github, github with signin vault, machine or skip), machines the computers that follow it, and hash what it resolves to on the computer the app runs on now: the versions, the skill folders and the configs read there, which a computer that applied it is held against.
+One recipe by its name: file is the recipe as saved, every row by kind (agents with signin vault, machine, token or key, mcp with the agents each server goes to, clis with via, the manager it came from, and needs where it builds with the C toolchain, skills with from, the folder it is read from here, plugins, folders with from, name, icon, hue and keep, configs git, shell and github, github with signin vault, machine or skip), machines the computers that follow it, and hash what it resolves to on the computer the app runs on now: the versions, the skill folders and the configs read there, which a computer that applied it is held against.
 
 **Takes**
 
@@ -1184,7 +1184,7 @@ Every MCP server each agent's own config file defines on one computer or where a
 | `servers` | object[] | yes |  |
 | `servers[].agent` | string | yes |  |
 | `servers[].name` | string | yes |  |
-| `servers[].scope` | `user`, `home`, `project` | yes |  |
+| `servers[].scope` | `user`, `home`, `local`, `project` | yes |  |
 | `servers[].file` | string |  |  |
 | `servers[].launch` | `true` |  |  |
 | `servers[].transport` | object or object | yes |  |
@@ -1232,7 +1232,7 @@ Turns one MCP server off in one agent's own config on one computer or where a th
 | `agent` | string | yes | the catalog id of the agent whose config names it, as servers lists it |
 | `thread` | string |  | a thread, by its id or a prefix of it, whose computer and project to read; absent reads a computer |
 | `on` | string |  | the computer to read, by the name computers lists; absent with no thread is the computer the app runs on |
-| `scope` | `user`, `home`, `project` |  | the scope servers lists it under: user, home or project; user without it |
+| `scope` | `user`, `home`, `local`, `project` |  | the scope servers lists it under: user, home, local or project; user without it |
 | `project` | boolean or string |  | the project's server of that name: true with a thread, the thread's own project, or the project's name, as projects lists it, with on |
 
 **Answers**
@@ -1253,7 +1253,7 @@ Turns one MCP server on again in one agent's own config on one computer or where
 | `agent` | string | yes | the catalog id of the agent whose config names it, as servers lists it |
 | `thread` | string |  | a thread, by its id or a prefix of it, whose computer and project to read; absent reads a computer |
 | `on` | string |  | the computer to read, by the name computers lists; absent with no thread is the computer the app runs on |
-| `scope` | `user`, `home`, `project` |  | the scope servers lists it under: user, home or project; user without it |
+| `scope` | `user`, `home`, `local`, `project` |  | the scope servers lists it under: user, home, local or project; user without it |
 | `project` | boolean or string |  | the project's server of that name: true with a thread, the thread's own project, or the project's name, as projects lists it, with on |
 
 **Answers**
@@ -1274,7 +1274,7 @@ Takes one MCP server's entry out of one agent's own config on one computer or wh
 | `agent` | string | yes | the catalog id of the agent whose config names it, as servers lists it |
 | `thread` | string |  | a thread, by its id or a prefix of it, whose computer and project to read; absent reads a computer |
 | `on` | string |  | the computer to read, by the name computers lists; absent with no thread is the computer the app runs on |
-| `scope` | `user`, `home`, `project` |  | the scope servers lists it under: user, home or project; user without it |
+| `scope` | `user`, `home`, `local`, `project` |  | the scope servers lists it under: user, home, local or project; user without it |
 | `project` | boolean or string |  | the project's server of that name: true with a thread, the thread's own project, or the project's name, as projects lists it, with on |
 
 **Answers**
