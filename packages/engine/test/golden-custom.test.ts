@@ -2,11 +2,11 @@
 // The rows a recipe carries that the catalog does not: where they land in the
 // plan, what they run with, and what the tools stage records for them.
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, onTestFinished } from "vitest";
-import { APT_INDEX, BREW_ENV, BREW_PREFIX, BREW_REAL, FROM_A_READABLE_DIR, LINUXBREW_SHIM, brewHasCheck } from "@wsp/catalog";
+import { APT_INDEX, BREW_ENV, BREW_PREFIX, BREW_REAL, FROM_A_READABLE_DIR, LINUXBREW_HOME, LINUXBREW_SHIM, brewHasCheck } from "@wsp/catalog";
 import type { RecipeCustomRow } from "@wsp/protocol";
 import { CUSTOM_PREFIX, TOOLS_PATH, customInstallsFor, customPrelude, recipeDigest, recipeHash, toolInstallsFor, type RecipeEntry } from "../src/golden-import.js";
 import { diffRecipes } from "../src/golden-diff.js";
@@ -97,6 +97,31 @@ describe("the plan's rows outside the catalog", () => {
     writeStub(join(dir, "brew"), `${LINUXBREW_SHIM.replaceAll(BREW_REAL, join(dir, "brew-stub"))}\n`);
     const out = execFileSync("bash", ["-c", 'brew install "some formula" --flag'], { encoding: "utf8", env: { ...process.env, PATH: `${dir}:${process.env["PATH"] ?? ""}` } });
     expect(out.trim().split("\n")).toEqual(["[as linuxbrew]", "[install]", "[some formula]", "[--flag]"]);
+  });
+
+  // Root passes any permission, so only a normal user (CI's) can be shut out of a folder it owns.
+  it.skipIf(process.getuid?.() === 0)("run brew from a folder the brew user cannot reach, and hand it the Brewfile that folder holds", () => {
+    // Every project on a box is under root's 0700 home: the brew user is left in the caller's folder but cannot stat
+    // its path, and Homebrew's first check is `[[ -d $PWD ]]`, which the stand-in repeats. A 0000 parent shuts the
+    // test's own user out the same way.
+    const dir = mkdtempSync(join(tmpdir(), "wsp-shim-"));
+    const locked = join(dir, "root");
+    onTestFinished(() => {
+      chmodSync(locked, 0o755);
+      rmSync(dir, { recursive: true, force: true });
+    });
+    mkdirSync(locked);
+    for (const d of ["bin", "home", "root/project", "open/project"]) mkdirSync(join(dir, d), { recursive: true });
+    for (const d of ["root/project", "open/project"]) writeFileSync(join(dir, d, "Brewfile"), 'brew "jq"\n');
+    writeStub(join(dir, "bin/su"), '#!/bin/sh\nshell=/bin/sh\nwhile [ $# -gt 0 ]; do case "$1" in -s) shell="$2"; shift 2 ;; -c) script="$2"; shift 2 ;; --) shift; break ;; *) shift ;; esac; done\nexec "$shell" -c "$script" "$@"\n');
+    writeStub(join(dir, "bin/brew-real"), '#!/bin/bash\n[[ -d $PWD ]] || { echo "Error: The current working directory must exist to run brew." >&2; exit 1; }\necho "$PWD"\ncat "${HOMEBREW_BUNDLE_FILE:-Brewfile}"\n');
+    writeStub(join(dir, "bin/brew"), `${LINUXBREW_SHIM.replaceAll(BREW_REAL, join(dir, "bin/brew-real")).replaceAll(LINUXBREW_HOME, join(dir, "home"))}\n`);
+    const env = { ...process.env, PATH: `${join(dir, "bin")}:${process.env["PATH"] ?? ""}` };
+    const shut = spawnSync("bash", ["-c", 'cd "$1/project" && chmod 000 "$1" && brew bundle', "bash", locked], { encoding: "utf8", env });
+    expect({ status: shut.status, out: shut.stdout.trim().split("\n") }, shut.stderr).toEqual({ status: 0, out: [join(dir, "home"), 'brew "jq"'] });
+    // A folder the brew user can reach stays the one brew works in, and Homebrew finds the Brewfile there itself.
+    const open = spawnSync("bash", ["-c", 'cd "$1" && brew bundle', "bash", join(dir, "open/project")], { encoding: "utf8", env });
+    expect({ status: open.status, out: open.stdout.trim().split("\n") }, open.stderr).toEqual({ status: 0, out: [join(dir, "open/project"), 'brew "jq"'] });
   });
 
   it("bring the manager the row's line calls: a brew row brings Homebrew and its toolchain, and waits on them", () => {
