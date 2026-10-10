@@ -91,7 +91,7 @@ describe("windowOptions", () => {
     expect(options).not.toHaveProperty("trafficLightPosition");
     expect(options).not.toHaveProperty("vibrancy");
     expect(options).not.toHaveProperty("visualEffectState");
-    expect(options.webPreferences).toEqual({ nodeIntegration: false, contextIsolation: true, sandbox: true, additionalArguments: ["--wsp-version=0.1.5"] });
+    expect(options.webPreferences).toEqual({ nodeIntegration: false, contextIsolation: true, sandbox: true, webviewTag: true, additionalArguments: ["--wsp-version=0.1.5"] });
   });
 
   it("tells every platform's renderer which release this shell is, so the page can say when its host is another", () => {

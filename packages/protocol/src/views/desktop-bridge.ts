@@ -126,6 +126,17 @@ export interface ShellChord {
 }
 
 
+/** The one session every browser tab's guest page runs in on the desktop app, kept apart from the window's own: the
+ * page names it on each guest and the shell refuses a guest on any other. */
+export const BROWSER_PARTITION = "persist:wsp-browser";
+
+/** A page a browser tab's guest asked to open in a new window (a target=_blank link, window.open), handed to the page
+ * that holds the guest so it opens a new tab; `guest` is the guest's own contents id. */
+export interface GuestOpen {
+  readonly guest: number;
+  readonly url: string;
+}
+
 /** What the desktop shell's preload puts on window.wsp; a browser tab has none of it. */
 export interface DesktopBridge {
   /** The release this shell is, so a page served by a host of another one can say which half is behind. Absent on
@@ -156,6 +167,11 @@ export interface DesktopBridge {
   capturePreview(workspaceId: string, bounded?: boolean): Promise<void>;
   /** The last photograph taken of this workspace, as a data url, or nothing when none was taken. */
   workspacePreview(workspaceId: string): Promise<string | undefined>;
+  /** Whether this page may hold browser tab guests: the app's own host's page on a shell that has them. Absent on a
+   * shell from before them, which frames ports alone. */
+  browserGuests?(): boolean;
+  /** A guest asked for a new window; returns the unsubscribe. */
+  onGuestOpen?(handler: (open: GuestOpen) => void): () => void;
   /** Whether a terminal holds focus, so the chords the shell's menu would zoom the window on stand aside for it. */
   setTerminalFocus(focused: boolean): void;
   /** A chord the shell stood aside from, for the page's keybindings to answer; returns the unsubscribe. */

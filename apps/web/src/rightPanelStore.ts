@@ -13,6 +13,7 @@
  * here belongs to the machine, not to one conversation on it.
  */
 import { useBrowserTabs } from "./browser/tabs.js";
+import { addNotice } from "./notices/store.js";
 import { HERE_KEY } from "./terminal/computer.js";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
@@ -264,7 +265,9 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
             return upsertSurface({ ...current, surfaces: withoutPlaceholder }, surface);
           }),
         })),
-      openNewBrowser: (workspaceId) => get().openBrowser(workspaceId, useBrowserTabs.getState().createTab(workspaceId, null)),
+      openNewBrowser: (workspaceId) => {
+        if (roomForBrowserTab()) get().openBrowser(workspaceId, useBrowserTabs.getState().createTab(workspaceId, null));
+      },
       openFile: (workspaceId, path, line) =>
         set((state) => ({
           byWorkspaceId: updateWorkspace(state.byWorkspaceId, workspaceId, (current) => {
@@ -565,4 +568,21 @@ export function selectPanelTerminalIds(
 ): string[] {
   const state = selectWorkspaceRightPanelState(byWorkspaceId, workspaceId);
   return state.surfaces.flatMap((surface) => (surface.kind === "terminal" ? surface.terminalIds : []));
+}
+
+/** Browser tabs open across every workspace: on the desktop app each may hold a page's own renderer process, so a
+ * tab past this many is refused. */
+export const BROWSER_TAB_CAP = 10;
+
+export const BROWSER_TAB_CAP_LINE = `${BROWSER_TAB_CAP} browser tabs are open, the most wsp keeps. Close one to open another.`;
+
+/** Whether one more browser tab may open, saying the cap's line when it may not. */
+export function roomForBrowserTab(): boolean {
+  const open = Object.values(useRightPanelStore.getState().byWorkspaceId).reduce(
+    (n, state) => n + state.surfaces.filter((surface) => surface.kind === "preview" && surface.resourceId !== null).length,
+    0,
+  );
+  if (open < BROWSER_TAB_CAP) return true;
+  addNotice({ kind: "note", text: BROWSER_TAB_CAP_LINE });
+  return false;
 }

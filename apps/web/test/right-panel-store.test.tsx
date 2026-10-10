@@ -7,10 +7,10 @@ import { cleanup, render, screen } from "@testing-library/react";
 import type { WorkspaceView } from "@wsp/protocol";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { useStore } from "../src/protocol/store.js";
-import { selectActiveRightPanel, selectPanelTerminalIds, selectWorkspaceRightPanelState, useRightPanelStore } from "../src/rightPanelStore.js";
+import { BROWSER_TAB_CAP, BROWSER_TAB_CAP_LINE, roomForBrowserTab, selectActiveRightPanel, selectPanelTerminalIds, selectWorkspaceRightPanelState, useRightPanelStore } from "../src/rightPanelStore.js";
 import { RightPanel } from "../src/shell/RightPanel.js";
 import { useBrowserTabs } from "../src/browser/tabs.js";
-import { clearNotices } from "./notice-text.js";
+import { clearNotices, lastNotice, noticeTexts } from "./notice-text.js";
 
 const KEY = "wsp:right-panel-state:v1";
 const WS = "ws_panel_store";
@@ -151,5 +151,25 @@ describe("rightPanelStore hydrate", () => {
     window.localStorage.setItem(KEY, JSON.stringify({ state: { byWorkspaceId: 7 }, version: 1 }));
     await useRightPanelStore.persist.rehydrate();
     expect(useRightPanelStore.getState().byWorkspaceId).toEqual({});
+  });
+});
+
+describe("the browser tab cap", () => {
+  const browserTabs = () =>
+    Object.values(useRightPanelStore.getState().byWorkspaceId).flatMap(state => state.surfaces.filter(s => s.kind === "preview" && s.resourceId !== null));
+
+  it("opens ten browser tabs across the workspaces and refuses the eleventh in one plain line", () => {
+    clearNotices();
+    const store = useRightPanelStore.getState();
+    for (let i = 0; i < BROWSER_TAB_CAP; i++) store.openNewBrowser(i % 2 === 0 ? WS : "ws_panel_other");
+    expect(browserTabs()).toHaveLength(BROWSER_TAB_CAP);
+    expect(noticeTexts()).toEqual([]);
+    store.openNewBrowser(WS);
+    expect(browserTabs()).toHaveLength(BROWSER_TAB_CAP);
+    expect(lastNotice()).toBe(BROWSER_TAB_CAP_LINE);
+    expect(BROWSER_TAB_CAP_LINE).toBe("10 browser tabs are open, the most wsp keeps. Close one to open another.");
+    expect(roomForBrowserTab()).toBe(false);
+    store.closeSurface(WS, browserTabs()[0]!.id);
+    expect(roomForBrowserTab()).toBe(true);
   });
 });
