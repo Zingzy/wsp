@@ -252,6 +252,18 @@ describe("recording a project", () => {
   });
 });
 
+describe("the branch a new thread of a project on a computer that copies it starts on", () => {
+  it("is the branch the project names for a new copy, else the remote's default, off the record and asking no machine", async () => {
+    const { rt, backend } = withLocal();
+    const plain = await projectOn(rt, "default", REPO, { name: "plain" });
+    const based = await projectOn(rt, "default", "https://github.com/acme/lab", { name: "based", base: "release" });
+    const forks = backend.machines.length;
+    expect(await rt.projects.branch(plain.id)).toEqual({ branch: plain.defaultBranch, folder: false });
+    expect(await rt.projects.branch("based")).toEqual({ branch: "release", folder: false });
+    expect(backend.machines.length).toBe(forks);
+  });
+});
+
 describe("a workspace of a project", () => {
   it("on a computer that clones, it forks that computer's image and clones the repo into it before it is ready", async () => {
     const { rt, backend } = withLocal();
