@@ -32,6 +32,10 @@ export function launchHasSlate(servers: Readonly<Record<string, Pick<McpServerSp
   return wsp !== undefined && wsp.noSlate !== true;
 }
 
+/** Where a slate's own script goes, said wherever an agent first learns the slate: told nothing, a Codex thread wrote
+ * its sampler into the project, where Changes listed it. The file is written 0600, so it runs through python3. */
+export const SLATE_SCRIPT_WORDS = 'A run\'s script goes in a <file name="x.py">, run as python3 "$SLATE_DIR/x.py", never in the project.';
+
 /** The slate's rules where a small model weighs them, at the end of the system prompt, for a thread whose launch
  * has a slate: in the server's instructions alone, behind the person's own CLAUDE.md and skills,
  * Haiku read a token file first and drew in chat. Free of the 2,048 characters an MCP server's instructions keep. */
@@ -43,6 +47,7 @@ export const SLATE_BRIEF = [
   "- asks for a button or control the project has no UI for: the slate is that UI.",
   "Then your first tool call is mcp__wsp__slate_catalog, then mcp__wsp__slate_write. Do not draw it with another tool or skill, write an HTML page, or answer in chat instead.",
   "On the slate, a value that changes comes from a <run>: a cmd, or tool=\"server.tool\" for an MCP tool. Never call that tool yourself and type its numbers in.",
+  SLATE_SCRIPT_WORDS,
   "A token or key the person keeps in a file stays there: the run's command reads it from the file. Never read that file or put its value in a tool call.",
   "A one-off answer, a comparison or an explanation stays in chat.",
 ].join("\n");

@@ -101,7 +101,7 @@ describe("a slate's files", () => {
 
   it("is in the catalog: the declaration in the index, the rule in the runs entry", () => {
     expect(slateCatalog()).toContain("<file name>");
-    expect(slateCatalog("runs")).toContain('Code only the slate uses goes in <file name="x.py"> and runs as $SLATE_DIR/x.py; project code runs where it is.');
+    expect(slateCatalog("runs")).toContain("Code only the slate uses goes in <file name=\"x.py\">, never in the project, and runs as $SLATE_DIR/x.py; project code runs where it is.");
     expect(slateCatalog("runs")).toContain("run by bash -c in the thread's folder");
   });
 
