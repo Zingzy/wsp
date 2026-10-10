@@ -329,12 +329,20 @@ export const MCP_AGENT_IDS: string = MCP_AGENTS.map(a => a.id).join(", ");
 /** Whether an agent keeps a switch per server that wsp turns: its format module has one. */
 export const mcpSwitch = (id: string): boolean => MCP_AGENTS.find(a => a.id === id)?.mcp.format.enable !== undefined;
 
-/** The line that points an agent's own command at the store its turns there read, from `stores` by agent id: a line
- * that runs the agent there to read its logins starts with it. Empty where none is named. */
-export function storeLine(agentId: string, stores: Readonly<Record<string, string>> | undefined): string {
+/** The line that points an agent's own command at the store its turns there read, from `stores` by agent id. Empty
+ * where none is named. */
+function storeLine(agentId: string, stores: Readonly<Record<string, string>> | undefined): string {
   const variable = CATALOG_AGENTS.find(a => a.id === agentId)?.stateHomeEnv;
   const store = variable === undefined ? undefined : stores?.[agentId];
   return store === undefined ? "" : `export ${variable}=${shellQuote(store)}; `;
+}
+
+/** A line of an agent's own command as wsp runs it or hands it to the person on a computer: in `folder` where one is
+ * named, since a project's servers are read from the folder it runs in, and pointed at the store `stores` names for
+ * that agent, since its logins and servers are kept there and not in the default home. The one way such a line is
+ * built. */
+export function harnessLine(agentId: string, line: string, at: { stores?: Readonly<Record<string, string>> | undefined; folder?: string | undefined } = {}): string {
+  return `${at.folder === undefined ? "" : `cd ${shellQuote(at.folder)} 2>/dev/null; `}${storeLine(agentId, at.stores)}${line}`;
 }
 
 /** How one server in that agent's config is signed in where it stands, off the agent's own module; nothing for an

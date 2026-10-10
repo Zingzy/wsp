@@ -22,10 +22,10 @@
 // handed to a server is hidden in what it says back.
 import { createHash } from "node:crypto";
 import { posix } from "node:path";
-import { MCP_AGENTS, MCP_AGENT_IDS, valueForms, type McpAgent, type McpServer, type McpTransport } from "@wsp/catalog";
+import { MCP_AGENTS, MCP_AGENT_IDS, harnessLine, valueForms, type McpAgent, type McpCheckWord, type McpServer, type McpTransport } from "@wsp/catalog";
 import { secretNamed, type Host } from "@wsp/collect";
 import type { ServerToolsAsk } from "@wsp/runtime";
-import { lastLine, serverToolsLateRefusal, shellQuote, withoutControlChars, type McpAuth, type McpTool, type McpToolParam, type ServerToolsAnswer } from "@wsp/protocol";
+import { lastLine, serverNotSetUpLine, serverToolsLateRefusal, serverUntrustedLine, shellQuote, withoutControlChars, type McpTool, type McpToolParam, type ServerToolsAnswer } from "@wsp/protocol";
 import { ownServerFiles } from "./agents-here.js";
 
 export const TOOLS_DEADLINE_MS = 20_000;
@@ -266,12 +266,13 @@ async function askHttp(host: Host, t: Extract<McpTransport, { kind: "http" }>, d
   return read(rest.join("\n"), log, hide);
 }
 
-/** The harness's own word on a server whose address wants a sign-in wsp does not hold. */
-async function askHarness(host: Host, agent: McpAgent, name: string, cwd: string, deadlineMs: number): Promise<Asked> {
+/** The harness's own word on a server whose address wants a sign-in wsp does not hold, asked with the store its
+ * threads there read. */
+async function askHarness(host: Host, agent: McpAgent, name: string, cwd: string, deadlineMs: number): Promise<McpCheckWord | undefined> {
   const check = agent.mcp.check;
-  if (check === undefined) return { auth: "unknown", holder: agent.id };
-  const out = await host.exec.run("bash", ["-c", `cd ${shellQuote(cwd)} 2>/dev/null; ${check.line(name)} 2>&1; true`], { timeoutMs: deadlineMs });
-  return { auth: (out === undefined ? undefined : check.auth(out)) ?? "unknown", holder: agent.id };
+  if (check === undefined) return undefined;
+  const out = await host.exec.run("bash", ["-c", `${harnessLine(agent.id, check.line(name), { stores: host.stores, folder: cwd })} 2>&1; true`], { timeoutMs: deadlineMs });
+  return out === undefined ? undefined : check.auth(out, name);
 }
 
 /** One server as its agent's file defines it there: the agent's own file first, then the project's. */
@@ -346,6 +347,13 @@ async function twiceAt(host: Host, agent: McpAgent, name: string, cwd: string): 
   return scopes.size > 1;
 }
 
+/** Whether the agent reads a project's own file in `folder`, off its own config there. */
+async function trusted(host: Host, agent: McpAgent, folder: string): Promise<boolean> {
+  if (agent.mcp.trusts === undefined) return true;
+  const texts = await Promise.all(ownServerFiles(host, agent).map(f => host.fs.readText(f)));
+  return agent.mcp.trusts(texts.find(t => t !== undefined), folder);
+}
+
 /** Runs at most `n` of what it is handed at once, the rest in the order they came. */
 function atMost(n: number): <T>(f: () => Promise<T>) => Promise<T> {
   let running = 0;
@@ -373,22 +381,23 @@ export interface ServerTools {
 
 export function serverTools(o: { now: () => number; deadlineMs?: number; log: (line: string) => void }): ServerTools {
   const connects = new Map<string, { at: number; asked: Promise<HttpAsked> }>();
-  const words = new Map<string, { at: number; auth: Promise<McpAuth | undefined> }>();
+  const words = new Map<string, { at: number; auth: Promise<McpCheckWord | undefined> }>();
   const asking = atMost(ASKS_AT_ONCE);
   const harnessing = atMost(HARNESS_AT_ONCE);
   const deadlineMs = o.deadlineMs ?? TOOLS_DEADLINE_MS;
 
   /** The word of the agent whose harness keeps the server's sign-in: the address's own needs-sign-in unless it says
-   * signed in or failed. */
-  const harnessWord = async (host: Host, key: string, agent: McpAgent, name: string, cwd: string, now: number): Promise<Asked> => {
+   * signed in or failed, or that the config its threads read has no such server. */
+  const harnessWord = async (host: Host, key: string, agent: McpAgent, name: string, cwd: string, now: number, project: string | undefined): Promise<Asked> => {
     if (agent.mcp.check === undefined || (await twiceAt(host, agent, name, cwd))) return { auth: "unknown", holder: agent.id };
     const at = `${key}\0${agent.id}\0${name}`;
     let held = words.get(at);
     if (held === undefined || now - held.at >= HARNESS_KEPT_MS) {
-      held = { at: now, auth: harnessing(() => askHarness(host, agent, name, cwd, HARNESS_MS)).then(a => a.auth, () => undefined) };
+      held = { at: now, auth: harnessing(() => askHarness(host, agent, name, cwd, HARNESS_MS)).catch(() => undefined) };
       words.set(at, held);
     }
     const said = await held.auth;
+    if (said === "not-set-up") return { auth: "failed", refused: project !== undefined && !(await trusted(host, agent, cwd)) ? serverUntrustedLine(agent.name, name, project, cwd) : serverNotSetUpLine(agent.name, name) };
     return { auth: said === "signed-in" || said === "failed" ? said : "needs-sign-in", holder: agent.id };
   };
 
@@ -415,7 +424,7 @@ export function serverTools(o: { now: () => number; deadlineMs?: number; log: (l
         held = mine;
       }
       const asked = await held.asked;
-      const answer = "unauthorized" in asked ? await harnessWord(host, ask.key, agent, ask.name, cwd, now) : asked;
+      const answer = "unauthorized" in asked ? await harnessWord(host, ask.key, agent, ask.name, cwd, now, found.project ? found.file : undefined) : asked;
       return { ...answer, readAt: new Date(held.at).toISOString() };
     },
     forget(key) {

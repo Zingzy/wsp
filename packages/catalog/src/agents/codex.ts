@@ -2,6 +2,8 @@
 import type { AgentEntry } from "../catalog.js";
 import { CODEX_CONFIG_FILE, CODEX_HOOKS } from "../codex-hooks.js";
 import { CODEX_CONTEXT } from "../context.js";
+import { CODEX_MCP_CHECK } from "../mcp-check.js";
+import { codexTrusts } from "../mcp-launch.js";
 import { CODEX_MCP_LOGIN } from "../mcp-login.js";
 import { CODEX_TOML } from "../mcp.js";
 import { PROJECT_SHARED_SKILLS, SHARED_SKILLS } from "../skills.js";
@@ -26,7 +28,18 @@ export const CODEX: AgentEntry = {
   aptNeeds: [{ package: "bubblewrap", command: "bwrap" }],
   signIn: SIGN_IN_ROWS.codex,
   // https://developers.openai.com/codex/config-basic (project scope is a trusted repo's .codex/config.toml)
-  mcp: { format: CODEX_TOML, files: [CODEX_CONFIG_FILE], projectFiles: [".codex/config.toml"], scope: "user scope", login: CODEX_MCP_LOGIN },
+  mcp: {
+    format: CODEX_TOML,
+    files: [CODEX_CONFIG_FILE],
+    projectFiles: [".codex/config.toml"],
+    scope: "user scope",
+    check: CODEX_MCP_CHECK,
+    login: CODEX_MCP_LOGIN,
+    // A box has no keyring: Codex logged keyring ServiceUnknown there, then refused the file fallback, so a server's
+    // sign-in never stayed until this key asked for the file.
+    headless: [{ key: "mcp_oauth_credentials_store", value: '"file"' }],
+    trusts: (user, folder) => (user === undefined ? Promise.resolve(false) : codexTrusts(user, folder)),
+  },
   hooks: CODEX_HOOKS,
   configPaths: [CODEX_CONFIG_FILE, "~/.codex/AGENTS.md", "~/.codex/prompts", "~/.codex/skills"],
   projectState: [

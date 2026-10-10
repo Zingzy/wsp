@@ -79,7 +79,7 @@ const PLAIN_KEY = /^[A-Za-z0-9_-]+$/;
 
 /** Whether Codex's own file marks the folder trusted, which is when it loads the project's file at all, read by a TOML
  * parser so every spelling of the key reads the same. The parser is loaded only when a project file is there. */
-async function codexTrusts(user: string, folder: string): Promise<boolean> {
+export async function codexTrusts(user: string, folder: string): Promise<boolean> {
   const { parse } = await import("smol-toml");
   try {
     const projects = (parse(user) as Json)["projects"];
@@ -88,6 +88,20 @@ async function codexTrusts(user: string, folder: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/** The ones of `keys` a TOML config sets no top-level value of, read by a TOML parser, so a quoted spelling is the same
+ * key and one under a table is not. None where the text does not parse: Codex refuses that file whole, and a line
+ * written above it would not mend it. */
+export async function unsetTomlKeys<K extends { key: string }>(text: string, keys: readonly K[]): Promise<K[]> {
+  const { parse } = await import("smol-toml");
+  let top: Json;
+  try {
+    top = parse(text) as Json;
+  } catch {
+    return [];
+  }
+  return keys.filter(k => !Object.hasOwn(top, k.key));
 }
 
 /** Codex: the config keys a thread's start sets so each server that passes a name `values` holds through its

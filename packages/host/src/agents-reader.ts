@@ -7,7 +7,7 @@
 // state is what its tools connect answers, asked apart from the read.
 import { userInfo } from "node:os";
 import { posix } from "node:path";
-import { CATALOG_AGENTS, MCP_AGENTS, TOOL_PREFIX, installsOnFirstRun, serverValuesOf, signInRoadOf, storeLine, versionOf, type AgentEntry, type McpAgent, type McpServer } from "@wsp/catalog";
+import { CATALOG_AGENTS, MCP_AGENTS, TOOL_PREFIX, installsOnFirstRun, serverValuesOf, harnessLine, signInRoadOf, versionOf, type AgentEntry, type McpAgent, type McpServer } from "@wsp/catalog";
 import { detectSkills, nodeHost, skillRoots, stdioLine, tilde, type Host } from "@wsp/collect";
 import { landedServersScript, mcpRowId, NO_DIGEST, parseLandedServers, targetLogin } from "@wsp/engine";
 import { MCP_SERVER_NAME, agentVersionWord, compareVersions, controlNameRefusal, hasControlChar, shellQuote, strictVersion, takesMcpServers, type AgentRow, type AgentSignInState, type AgentsProject, type McpRow, type PlaceProvisionRow } from "@wsp/protocol";
@@ -124,6 +124,8 @@ async function serversOf(host: Host, projects: readonly AgentsProject[], held: R
         continue;
       }
       if (project === undefined && s.name === MCP_SERVER_NAME) wsp.add(agent.id);
+      const login = agent.mcp.login;
+      const signInLine = login !== undefined && "command" in login ? harnessLine(agent.id, login.command(s.name), { stores: host.stores, folder: project?.path }) : undefined;
       const row: McpRow = {
         agent: agent.id,
         name: s.name,
@@ -134,6 +136,7 @@ async function serversOf(host: Host, projects: readonly AgentsProject[], held: R
         auth: authOf(s),
         enabled: s.disabled !== true,
         ...(project !== undefined ? { project: { ...project, path: tilde(host.home, project.path) } } : {}),
+        ...(signInLine !== undefined ? { signInLine } : {}),
       };
       rows.push(row);
     }
@@ -218,7 +221,7 @@ export async function readAgents(host: Host, o: { user: string; vault: Readonly<
   const launch = o.launched === true ? launchRows(onPath, servers.wsp) : [];
   const [versions, statuses] = await Promise.all([
     box?.versions !== undefined ? Promise.resolve(installed.map(a => box.versions?.[a.id])) : each(host, installed.map(a => `${shellQuote(a.bin)} --version`)).then(r => r.map(s => (s === undefined ? undefined : s.code !== 0 ? UNREAD : s.output.split("\n")[0]))),
-    box !== undefined ? Promise.resolve([]) : each(host, installed.map(a => `${storeLine(a.id, host.stores)}${a.signIn.status?.typed ?? a.signIn.status?.command ?? "false"}`)),
+    box !== undefined ? Promise.resolve([]) : each(host, installed.map(a => harnessLine(a.id, a.signIn.status?.typed ?? a.signIn.status?.command ?? "false", { stores: host.stores }))),
   ]);
   const rows: AgentRow[] = agents.map(a => {
     const { found, path, via } = at.get(a.id)!;

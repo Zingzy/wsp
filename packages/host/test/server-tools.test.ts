@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { nodeHost, type Host } from "@wsp/collect";
 import type { ExecResult, Machine } from "@wsp/engine";
-import { serverToolsLateRefusal } from "@wsp/protocol";
+import { serverNotSetUpLine, serverToolsLateRefusal, serverUntrustedLine } from "@wsp/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { agentsReader } from "../src/agents-reader.js";
 import { noSuchServerRefusal } from "../src/server-tools.js";
@@ -447,9 +447,9 @@ describe("one MCP server's tools, on the person's ask", () => {
     expect(readFileSync(join(f.home, "claude-asks"), "utf8").trim().split("\n"), "the harness is asked once per ten minutes, a refresh too").toHaveLength(1);
     mkdirSync(join(f.home, ".codex"));
     writeFileSync(join(f.home, ".codex", "config.toml"), `[mcp_servers.linear]\nurl = "${url}/oauth"\n`);
-    writeStub(join(f.bin, "codex"), `#!/bin/bash\necho asked >> "$HOME/codex-asks"\n`);
-    expect(await reader.tools({ kind: "here" }, { key: "here", agent: "codex", name: "linear" })).toEqual({ auth: "unknown", holder: "codex", readAt: expect.any(String) });
-    expect(existsSync(join(f.home, "codex-asks")), "Codex was asked for its servers").toBe(false);
+    writeStub(join(f.bin, "codex"), `#!/bin/bash\necho "$*" >> "$HOME/codex-asks"\necho '[{"name":"linear","enabled":true,"auth_status":"not_logged_in"}]'\n`);
+    expect(await reader.tools({ kind: "here" }, { key: "here", agent: "codex", name: "linear" })).toEqual({ auth: "needs-sign-in", holder: "codex", readAt: expect.any(String) });
+    expect(readFileSync(join(f.home, "codex-asks"), "utf8")).toBe("mcp list --json\n");
   });
 
   it("says curl's last words for an address that did not answer, with any query string in a URL cut off", async () => {
@@ -867,5 +867,73 @@ describe("a server's state, off its tools connect alone", () => {
     for (const name of ["twice", "once"]) expect(await reader.tools({ kind: "here" }, { key: "k", agent: "claude", name }), name).toMatchObject({ auth: "unknown", holder: "claude" });
     expect(harnessAsks(f)).toBe(0);
     expect(existsSync(join(f.home, "started")) || existsSync(join(f.home, "started-too"))).toBe(false);
+  });
+});
+
+describe("a server on a computer you joined, asked of its harness with the config its turns read", () => {
+  /** Claude Code as 2.1.296 answers `mcp get`: the server's state where CLAUDE_CONFIG_DIR's file names it, else its
+   * missing words. */
+  const CLAUDE_STORE = `#!/bin/bash\n[ "$1 $2" = "mcp get" ] || exit 9\nif grep -qF "\\"$3\\"" "\${CLAUDE_CONFIG_DIR:-$HOME}/.claude.json" 2>/dev/null; then printf '%s:\\n  Status: ✓ Connected\\n' "$3"; else printf 'No MCP server named "%s". Configured servers: plugin:context7:context7\\n' "$3"; exit 1; fi\n`;
+  /** Codex as 0.162.1 answers \`mcp list --json\`, warning on stderr first: each server its CODEX_HOME's config names. */
+  const CODEX_STORE = `#!/bin/bash\n[ "$1 $2 $3" = "mcp list --json" ] || exit 9\necho "WARNING: proceeding, even though we could not create PATH aliases" >&2\nif grep -qF "[mcp_servers.axiom]" "\${CODEX_HOME:-$HOME/.codex}/config.toml" 2>/dev/null; then printf '[\\n  {\\n    "name": "axiom",\\n    "enabled": true,\\n    "auth_status": "o_auth"\\n  }\\n]\\n'; else echo '[]'; fi\n`;
+
+  it("reads a server set up in each agent's store as signed in, and one its harness does not have as not set up in one plain line", async () => {
+    const f = fixture();
+    const { url } = await remote();
+    const claudeStore = join(f.home, ".claude");
+    const codexStore = join(f.root, "logins", "codex");
+    mkdirSync(claudeStore, { recursive: true });
+    mkdirSync(codexStore, { recursive: true });
+    writeFileSync(join(claudeStore, ".claude.json"), JSON.stringify({ mcpServers: { cloudflare: { type: "http", url: `${url}/oauth` } } }));
+    writeFileSync(join(codexStore, "config.toml"), `[mcp_servers.axiom]\nurl = "${url}/oauth"\n\n[mcp_servers.gone]\nurl = "${url}/oauth"\n`);
+    writeStub(join(f.bin, "claude"), CLAUDE_STORE);
+    writeStub(join(f.bin, "codex"), CODEX_STORE);
+    const { machine } = box(f);
+    const reader = agentsReader({ vault: () => ({}) });
+    const on = { kind: "box" as const, machine, login: { HOME: f.home, PATH: `${f.bin}:/usr/bin:/bin` }, stores: { claude: claudeStore, codex: codexStore } };
+    expect(await reader.tools(on, { key: "p_hz", agent: "claude", name: "cloudflare" })).toEqual({ auth: "signed-in", holder: "claude", readAt: expect.any(String) });
+    expect(await reader.tools(on, { key: "p_hz", agent: "codex", name: "axiom" })).toEqual({ auth: "signed-in", holder: "codex", readAt: expect.any(String) });
+    const gone = await reader.tools(on, { key: "p_hz", agent: "codex", name: "gone" });
+    expect(gone).toEqual({ auth: "failed", refused: serverNotSetUpLine("Codex", "gone"), readAt: expect.any(String) });
+    expect(gone.refused).not.toMatch(/No MCP server|\n/);
+  }, 20_000);
+});
+
+describe("what the report and the check say of a server, as its agent's threads there read it", () => {
+  it("names on each row of a box the sign-in line that runs with the agent's store, and in a project's folder for its own server", async () => {
+    const f = fixture();
+    const claudeStore = join(f.home, ".claude");
+    const codexStore = join(f.root, "logins", "codex");
+    const lab = join(f.home, "lab");
+    mkdirSync(claudeStore, { recursive: true });
+    mkdirSync(codexStore, { recursive: true });
+    mkdirSync(lab);
+    writeFileSync(join(claudeStore, ".claude.json"), JSON.stringify({ mcpServers: { cloudflare: { type: "http", url: "https://mcp.example.test/mcp" } } }));
+    writeFileSync(join(codexStore, "config.toml"), '[mcp_servers.axiom]\nurl = "https://mcp.example.test/mcp"\n');
+    writeFileSync(join(lab, ".mcp.json"), JSON.stringify({ mcpServers: { docs: { type: "http", url: "https://docs.example.test/mcp" } } }));
+    const { machine } = box(f);
+    const on = { kind: "box" as const, machine, login: { HOME: f.home, PATH: `${f.bin}:/usr/bin:/bin` }, stores: { claude: claudeStore, codex: codexStore }, projects: [{ id: "pr_lab", name: "lab", path: lab }] };
+    const read = await agentsReader({ vault: () => ({}) }).read(on, { latest: false });
+    const lineOf = (agent: string, name: string): string | undefined => read.servers.find(s => s.agent === agent && s.name === name)?.signInLine;
+    expect(lineOf("codex", "axiom")).toBe(`export CODEX_HOME='${codexStore}'; codex mcp login 'axiom'`);
+    expect(lineOf("claude", "cloudflare")).toBe(`export CLAUDE_CONFIG_DIR='${claudeStore}'; claude mcp login 'cloudflare'`);
+    expect(lineOf("claude", "docs")).toBe(`cd '${lab}' 2>/dev/null; export CLAUDE_CONFIG_DIR='${claudeStore}'; claude mcp login 'docs'`);
+  }, 20_000);
+
+  it("says a Codex server in a project's file is left out because Codex does not trust that folder, rather than to add it again", async () => {
+    const f = fixture();
+    const { url } = await remote();
+    const lab = join(f.home, "lab");
+    mkdirSync(join(lab, ".codex"), { recursive: true });
+    mkdirSync(join(f.home, ".codex"));
+    writeFileSync(join(lab, ".codex", "config.toml"), `[mcp_servers.docs]\nurl = "${url}/oauth"\n`);
+    // Codex 0.162.1 leaves an untrusted folder's servers out of its list.
+    writeStub(join(f.bin, "codex"), `#!/bin/bash\n[ "$1 $2 $3" = "mcp list --json" ] || exit 9\necho '[]'\n`);
+    const on = { kind: "here" as const, projects: [{ id: "pr_lab", name: "lab", path: lab }] };
+    const ask = { key: "k", agent: "codex", name: "docs" };
+    writeFileSync(join(f.home, ".codex", "config.toml"), 'model = "gpt-5"\n');
+    expect(await agentsReader({ vault: () => ({}), here: () => here(f) }).tools(on, ask)).toEqual({ auth: "failed", refused: serverUntrustedLine("Codex", "docs", join(lab, ".codex", "config.toml"), lab), readAt: expect.any(String) });
+    writeFileSync(join(f.home, ".codex", "config.toml"), `[projects."${lab}"]\ntrust_level = "trusted"\n`);
+    expect(await agentsReader({ vault: () => ({}), here: () => here(f) }).tools(on, ask)).toMatchObject({ auth: "failed", refused: serverNotSetUpLine("Codex", "docs") });
   });
 });

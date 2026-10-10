@@ -255,7 +255,7 @@ function KindRow({ kind, item, rows, computer, open }: { kind: AnyKind; item: un
       />
       {detail.flow === undefined ? null : (
         <div className={UNDER_ROW}>
-          <SignInFlowView view={detail.flow} label={row.title} />
+          <SignInFlowView view={detail.flow} label={row.title} reserve={false} />
         </div>
       )}
       {/* Only a refusal of something the person did stands under the row; a state's reason is its status's hover. */}

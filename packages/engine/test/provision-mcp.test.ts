@@ -12,7 +12,7 @@ import { CODEX_TOML, MCP_SERVERS_JSON, OPENCODE_JSON, parseJsonc } from "@wsp/ca
 import { MCP_ID_PREFIX, TOOLS_PATH, placeProvisionPaths } from "@wsp/protocol";
 import type { McpPlan } from "../src/golden-mcp.js";
 import { closeAgentFiles, machineServerPort, oncePathsOf, provisionFiles, unlandFiles, unmergeServers, type ProvisionLanding } from "../src/provision-files.js";
-import { keyUnreachedLine, provisionMcp, theirServerLine } from "../src/provision-mcp.js";
+import { headlessKeys, keyUnreachedLine, provisionMcp, theirServerLine } from "../src/provision-mcp.js";
 import { newSetupRun, provisionStep, type ProvisionPlan } from "../src/provision.js";
 import { tarOf } from "../src/vault.js";
 import type { PackedFiles } from "../src/golden.js";
@@ -386,6 +386,46 @@ describe("the recipe's servers on a computer somebody owns", { timeout: 60_000 }
     const out = await unmergeServers(machineServerPort(g.machine), g.root, { codex: logins });
     expect(out.find(x => x.path === join(logins, "config.toml"))?.names).toEqual(["context7"]);
     expect(readFileSync(join(logins, "config.toml"), "utf8")).toBe('model = "o4"\n');
+  });
+
+  it("writes the key Codex keeps a server's sign-in by on a box into its store's config, once, and never over the person's own", async () => {
+    const g = box();
+    const logins = mkdtempSync(join(tmpdir(), "wsp-box-logins-"));
+    g.dirs.push(logins);
+    const on = { home: g.root, stores: { codex: logins } };
+    const linux = process.platform === "linux";
+    const KEY = 'mcp_oauth_credentials_store = "file"\n';
+    await provisionStep(g.machine, codexStepPlan(g.root), "mcp", newSetupRun(), () => {}, on);
+    const own = readFileSync(join(logins, "config.toml"), "utf8");
+    expect(own.startsWith(KEY), "the key stands first, before any table").toBe(linux);
+    expect(own).toContain('model = "gpt-5"');
+    expect(CODEX_TOML.read(own, g.root).map(s => s.name)).toEqual(["context7"]);
+    const again = await provisionStep(g.machine, codexStepPlan(g.root), "mcp", newSetupRun(), () => {}, on);
+    expect(readFileSync(join(logins, "config.toml"), "utf8")).toBe(own);
+    expect(again.filter(r => r.kind === "file").map(r => r.outcome)).toEqual(["present", "present", "present"]);
+
+    // The person's own value stands, whatever it is.
+    const theirs = mkdtempSync(join(tmpdir(), "wsp-box-logins-"));
+    g.dirs.push(theirs);
+    writeFileSync(join(theirs, "config.toml"), 'model = "o4"\n  mcp_oauth_credentials_store = "keyring"\n');
+    expect(await headlessKeys(g.machine, g.root, { codex: theirs }, new Set())).toEqual([]);
+    expect(readFileSync(join(theirs, "config.toml"), "utf8")).toBe('model = "o4"\n  mcp_oauth_credentials_store = "keyring"\n');
+
+    // A quoted spelling of the key is the same key: a second one above it makes Codex refuse its whole config.
+    writeFileSync(join(theirs, "config.toml"), '"mcp_oauth_credentials_store" = "keyring"\n[mcp_servers.docs]\nurl = "https://docs.example.test/mcp"\n');
+    expect(await headlessKeys(g.machine, g.root, { codex: theirs }, new Set())).toEqual([]);
+    expect(readFileSync(join(theirs, "config.toml"), "utf8")).toBe('"mcp_oauth_credentials_store" = "keyring"\n[mcp_servers.docs]\nurl = "https://docs.example.test/mcp"\n');
+    // A key of that name under a table is not the top-level one Codex reads.
+    writeFileSync(join(theirs, "config.toml"), '[profiles.work]\nmcp_oauth_credentials_store = "keyring"\n');
+    await headlessKeys(g.machine, g.root, { codex: theirs }, new Set());
+    expect(readFileSync(join(theirs, "config.toml"), "utf8")).toBe(linux ? `${KEY}[profiles.work]\nmcp_oauth_credentials_store = "keyring"\n` : '[profiles.work]\nmcp_oauth_credentials_store = "keyring"\n');
+
+    // A store that is not there is made only where the setup puts Codex on.
+    const none = join(theirs, "not-yet");
+    await headlessKeys(g.machine, g.root, { codex: none }, new Set());
+    expect(existsSync(none)).toBe(false);
+    await headlessKeys(g.machine, g.root, { codex: none }, new Set(["codex"]));
+    expect(existsSync(join(none, "config.toml")) ? readFileSync(join(none, "config.toml"), "utf8") : undefined).toBe(linux ? KEY : undefined);
   });
 
   it("lands the rest of an agent's own files under the store its threads there read, and leaves none of them under the home", async () => {
