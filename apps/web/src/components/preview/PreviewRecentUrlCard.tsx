@@ -4,7 +4,7 @@ import { X } from "lucide-react";
 
 import type { BrowserHistoryEntry } from "../../browser/recents";
 
-import { PreviewFaviconIcon } from "./PreviewFaviconIcon";
+import { BrowserMockup } from "./BrowserMockup";
 import { Button } from "../ui/button";
 import { Spaced } from "../ui/spaced";
 
@@ -26,7 +26,7 @@ export function PreviewRecentUrlCard({ entry, visitedLabel, onOpen, onRemove }: 
         onClick={onOpen}
         className="flex w-full items-center gap-3 rounded-md px-2 py-2 pr-10 text-left transition-colors duration-150 hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
       >
-        <PreviewFaviconIcon />
+        <BrowserMockup className="size-7 shrink-0" />
         <div className="flex min-w-0 flex-1 flex-col">
           <span className={entry.title ? "truncate text-sm text-foreground" : "truncate font-mono text-[13px] text-foreground"}>
             {entry.title ?? label}

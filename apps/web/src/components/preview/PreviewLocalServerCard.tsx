@@ -4,7 +4,7 @@
 // is the same word said as many times as there are rows.
 import type { PreviewableServer } from "../../adapt/view-model";
 
-import { PreviewFaviconIcon } from "./PreviewFaviconIcon";
+import { BrowserMockup } from "./BrowserMockup";
 
 interface Props {
   server: PreviewableServer;
@@ -20,7 +20,7 @@ export function PreviewLocalServerCard({ server, onOpen }: Props) {
       onClick={onOpen}
       className="group flex w-full items-center gap-3 rounded-md px-2 py-2 text-left transition-colors duration-150 hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
     >
-      <PreviewFaviconIcon />
+      <BrowserMockup className="size-7 shrink-0" />
       <div className="flex min-w-0 flex-1 flex-col">
         <span className="truncate text-sm text-foreground">{subtitle}</span>
         <span className="truncate font-mono text-xs tabular-nums text-muted-foreground">

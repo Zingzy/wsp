@@ -451,6 +451,8 @@ const CHAT_MARKDOWN = [
   "| sidebar.test.tsx | 55 | green |",
   "",
   "Full notes in [the tracker](https://example.invalid/439).",
+  // ?links=1 adds links to a public, a private and an internal host, none of which the window may ask anyone about.
+  ...(params.get("links") === "1" ? ["", "The raw file is https://raw.githubusercontent.com/acme/lab/main/README.md, the build log [on the runner](https://build.internal:8080/logs), and the spec <http://example.com/spec>."] : []),
 ].join("\n");
 // The init's slash_commands as the CLI lists them: the built-ins that run headless, its own screens, and a skill.
 const CHAT_SLASH_COMMANDS = ["compact", "context", "cost", "init", "review", "login", "logout", "model", "permissions", "config", "help", "unslop"];
