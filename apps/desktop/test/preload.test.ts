@@ -11,8 +11,9 @@ const sendSync = vi.fn(() => false);
 const on = vi.fn();
 const off = vi.fn();
 const exposeInMainWorld = vi.fn();
+const executeInMainWorld = vi.fn();
 const DROPPED = "/Users/me/Projects/spoo";
-vi.mock("electron", () => ({ contextBridge: { exposeInMainWorld }, ipcRenderer: { invoke, send, sendSync, on, off }, webUtils: { getPathForFile: () => DROPPED } }));
+vi.mock("electron", () => ({ contextBridge: { exposeInMainWorld, executeInMainWorld }, ipcRenderer: { invoke, send, sendSync, on, off }, webUtils: { getPathForFile: () => DROPPED } }));
 
 // The preload reads the renderer's argv as its module body runs, which is the first import below.
 process.argv.push("--wsp-version=0.1.7", "--wsp-bundle-hover=Downloads the AppImage.", "--wsp-update-in-place=1");
@@ -73,6 +74,32 @@ describe("the preload's bridge", () => {
     expect(invoke).toHaveBeenLastCalledWith("bundle:open");
     await wsp.discardUpdate();
     expect(invoke).toHaveBeenLastCalledWith("bundle:discard");
+  });
+
+  it("opens the logs folder on its own channel", async () => {
+    const wsp = await bridge();
+    await wsp.openLogs?.();
+    expect(invoke).toHaveBeenLastCalledWith("logs:open");
+  });
+
+  it("listens in the page's own world, where the page's throws are heard, and sends each uncaught error and rejection to the log with the route", async () => {
+    await bridge();
+    expect(executeInMainWorld).toHaveBeenCalledOnce();
+    const { func, args } = executeInMainWorld.mock.calls[0]![0] as { func: (...a: unknown[]) => void; args: unknown[] };
+    const heard = new Map<string, (e: unknown) => void>();
+    vi.stubGlobal("addEventListener", (type: string, listener: (e: unknown) => void) => heard.set(type, listener));
+    vi.stubGlobal("location", { pathname: "/", hash: "#/settings/general" });
+    try {
+      // The function crosses into the page's world as its source alone, so it is run from that source here.
+      new Function(`return (${func.toString()})`)()(...args);
+      const thrown = new Error("forced renderer error");
+      heard.get("error")!({ message: "Uncaught Error: forced renderer error", error: thrown });
+      expect(send).toHaveBeenLastCalledWith("log:renderer", { kind: "error", message: "Uncaught Error: forced renderer error", stack: thrown.stack, route: "/#/settings/general" });
+      heard.get("unhandledrejection")!({ reason: "a string, not an Error" });
+      expect(send).toHaveBeenLastCalledWith("log:renderer", { kind: "rejection", message: "a string, not an Error", stack: "", route: "/#/settings/general" });
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("asks the shell before it hands over the path of a dropped file, and answers nothing when that is refused", async () => {

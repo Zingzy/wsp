@@ -175,6 +175,9 @@ export interface DesktopBridge {
   onNeedsYouOpen(handler: (id?: string) => void): () => void;
   /** How many threads wait on the person, for the dock's badge; zero clears it. */
   setBadge(count: number): void;
+  /** Opens the folder holding the app's log and crash dumps in the system's file manager. Absent on a shell from
+   * before it kept them. */
+  openLogs?(): Promise<void>;
   /** Whether this computer's service starts wsp at every login; null where no service is registered for this state.
    * Only the app's own host's page is answered. */
   loginStart(): Promise<boolean | null>;

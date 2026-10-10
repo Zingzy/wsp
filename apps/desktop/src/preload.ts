@@ -2,6 +2,7 @@
 import type { AgentHere, InstallReport } from "@wsp/host";
 import type { BundleOutcome, ContextMenuItem, DesktopBridge, HostOutcome, HostsView, LinkTarget, LocalFontFace, OutsideLine, ShellChord, ThemePreference } from "@wsp/protocol";
 import { contextBridge, ipcRenderer, webUtils } from "electron";
+import type { RendererError } from "./app-log.js";
 import { shellArgFrom } from "./shell-args.js";
 
 /** What the first launch's page can ask the shell, answered only while that page is up. */
@@ -74,6 +75,7 @@ const bridge: DesktopBridge & OnboardingBridge = {
   },
   sayOutside: (line: OutsideLine): void => ipcRenderer.send("outside:say", line),
   setBadge: (count: number): void => ipcRenderer.send("badge:set", count),
+  openLogs: (): Promise<void> => ipcRenderer.invoke("logs:open"),
   loginStart: (): Promise<boolean | null> => ipcRenderer.invoke("service:login"),
   setLoginStart: (on: boolean): Promise<boolean | null> => ipcRenderer.invoke("service:login-set", on),
   onOpen: (handler: (target: LinkTarget) => void): (() => void) => {
@@ -90,6 +92,19 @@ const bridge: DesktopBridge & OnboardingBridge = {
 };
 
 contextBridge.exposeInMainWorld("wsp", bridge);
+
+// The preload's own world never hears what the page's world throws, so the listeners are set in the page's world and
+// hand each report back across the bridge.
+const reportError = (report: RendererError): void => ipcRenderer.send("log:renderer", report);
+contextBridge.executeInMainWorld({
+  func: (report: (r: RendererError) => void): void => {
+    const route = (): string => `${location.pathname}${location.hash}`;
+    const stackOf = (e: unknown): string | undefined => (e instanceof Error ? e.stack : undefined);
+    addEventListener("error", e => report({ kind: "error", message: e.message, stack: stackOf(e.error) ?? "", route: route() }));
+    addEventListener("unhandledrejection", e => report({ kind: "rejection", message: e.reason instanceof Error ? e.reason.message : String(e.reason), stack: stackOf(e.reason) ?? "", route: route() }));
+  },
+  args: [reportError],
+});
 
 const htmlClass = shellArgFrom(process.argv, "html-class");
 if (htmlClass !== undefined) {
