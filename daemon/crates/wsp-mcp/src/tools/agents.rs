@@ -156,7 +156,8 @@ struct McpRow {
     agent: String,
     name: String,
     scope: String,
-    file: String,
+    file: Option<String>,
+    launch: Option<bool>,
     transport: Transport,
     auth: String,
     enabled: bool,
@@ -357,7 +358,11 @@ fn lines(facts: &Facts, own: &RawValue, rows: Rows) -> Option<Vec<String>> {
                         format!("http {}", s.transport.host.as_deref().unwrap_or("undefined"))
                     }
                 };
+                let file = |s: &McpRow| s.file.clone().unwrap_or_else(|| "every launch".to_owned());
                 let state = |s: &McpRow| {
+                    if s.launch == Some(true) {
+                        return "on every thread".to_owned();
+                    }
                     let first = if s.enabled { s.auth.clone() } else { "disabled".to_owned() };
                     if s.in_recipe == Some(false) {
                         format!("{first}, not in recipe")
@@ -368,7 +373,7 @@ fn lines(facts: &Facts, own: &RawValue, rows: Rows) -> Option<Vec<String>> {
                 let mut all = vec![row(&["SERVER", "AGENT", "SCOPE", "REACHED BY", "FILE", "STATE"])];
                 all.extend(servers.iter().map(|s| {
                     let agent = names.get(&s.agent).cloned().unwrap_or_else(|| s.agent.clone());
-                    vec![s.name.clone(), agent, scope_word(&s.scope, s.project.as_ref()), reach(s), s.file.clone(), state(s)]
+                    vec![s.name.clone(), agent, scope_word(&s.scope, s.project.as_ref()), reach(s), file(s), state(s)]
                 }));
                 table(&all)
             }
@@ -382,11 +387,27 @@ fn lines(facts: &Facts, own: &RawValue, rows: Rows) -> Option<Vec<String>> {
 mod tests {
     use super::super::held::to_the_record;
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn its_structs_are_the_recorded_schemas() {
         to_the_record::<In, AgentsOut>(AGENTS.listed);
         to_the_record::<In, SkillsOut>(SKILLS.listed);
         to_the_record::<In, ServersOut>(SERVERS.listed);
+    }
+
+    #[test]
+    fn a_launch_row_names_no_file_and_every_other_field_a_row_held_stays_required() {
+        let facts: Facts =
+            serde_json::from_str(r#"{"target":{"placeId":"p"},"home":"/root","user":"root","readAt":"t","refused":[]}"#).unwrap();
+        let launch = json!({ "agent": "claude", "name": "wsp", "scope": "user", "launch": true, "transport": { "kind": "stdio", "line": "wsp mcp" }, "auth": "open", "enabled": true });
+        let servers = |rows: Value| lines(&facts, &RawValue::from_string(rows.to_string()).unwrap(), Rows::Servers);
+        let printed = servers(json!([launch])).unwrap();
+        assert!(printed[1].ends_with("every launch  on every thread"), "{printed:?}");
+        for field in ["agent", "name", "scope", "transport", "auth", "enabled"] {
+            let mut row = launch.clone();
+            row.as_object_mut().unwrap().remove(field);
+            assert!(servers(json!([row])).is_none(), "{field}");
+        }
     }
 }
