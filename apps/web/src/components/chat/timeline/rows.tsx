@@ -26,6 +26,7 @@ import { QUOTE_SOURCE_ATTRIBUTE } from "../AssistantSelectionToolbar";
 import { TimelineRowCtx, TimelineRowActivityCtx, type TimelineRow } from "./context";
 import { WorkingTimelineRow, ThinkingTimelineRow } from "./working";
 import { WorkGroupSection, LiveWorkEntryTimelineRow, WorkGroupToggleTimelineRow } from "./workGroup";
+import { useIsFindTarget } from "./find";
 
 // ---------------------------------------------------------------------------
 // TimelineRowContent: the actual row component
@@ -105,6 +106,7 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
       >
         <ChatFileRow records={row.message.attachments ?? []} files={files} />
         <CollapsibleUserMessageBody
+          findKey={row.id}
           text={row.message.text}
           skills={ctx.skills}
           markdownCwd={ctx.markdownCwd}
@@ -181,18 +183,20 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
   return (
     <>
       <div className="relative min-w-0 px-1 py-0.5" {...{ [QUOTE_SOURCE_ATTRIBUTE]: row.message.id }}>
-        <ReplyRunContext value={runScope}>
-          <ChatMarkdown
-            text={messageText}
-            cwd={ctx.markdownCwd}
-            isStreaming={Boolean(row.message.streaming)}
-            lineBreaks={shouldPreserveAssistantLineBreaks(messageText)}
-            skills={ctx.skills}
-            onImageExpand={ctx.onImageExpand}
-            onOpenFile={ctx.onOpenFile}
-            resolvedTheme={ctx.resolvedTheme}
-          />
-        </ReplyRunContext>
+        <div data-find-text data-find-unit={row.id}>
+          <ReplyRunContext value={runScope}>
+            <ChatMarkdown
+              text={messageText}
+              cwd={ctx.markdownCwd}
+              isStreaming={Boolean(row.message.streaming)}
+              lineBreaks={shouldPreserveAssistantLineBreaks(messageText)}
+              skills={ctx.skills}
+              onImageExpand={ctx.onImageExpand}
+              onOpenFile={ctx.onOpenFile}
+              resolvedTheme={ctx.resolvedTheme}
+            />
+          </ReplyRunContext>
+        </div>
         <AssistantChangedFilesSection
           turnSummary={ctx.turnDiffSummaryByAssistantMessageId.get(row.message.id)}
           resolvedTheme={ctx.resolvedTheme}
@@ -237,10 +241,12 @@ function ProposedPlanTimelineRow({
   row: Extract<TimelineRow, { kind: "proposed-plan" }>;
 }) {
   const ctx = use(TimelineRowCtx);
+  const found = useIsFindTarget(row.id);
 
   return (
-    <div className="min-w-0 px-1 py-0.5">
+    <div className="min-w-0 px-1 py-0.5" data-find-unit={row.id}>
       <ProposedPlanCard
+        found={found}
         planMarkdown={row.proposedPlan.planMarkdown}
         cwd={ctx.markdownCwd}
         workspaceRoot={ctx.workspaceRoot}
@@ -330,6 +336,7 @@ const COLLAPSED_USER_MESSAGE_FADE_MASK = CLAMP_FADE_MASK;
 const shouldCollapseUserMessage = shouldClampText;
 
 const CollapsibleUserMessageBody = memo(function CollapsibleUserMessageBody(props: {
+  findKey: string;
   text: string;
   skills: ReadonlyArray<ProviderSkill>;
   markdownCwd: string | undefined;
@@ -337,6 +344,8 @@ const CollapsibleUserMessageBody = memo(function CollapsibleUserMessageBody(prop
   const [expanded, setExpanded] = useState(false);
   const hasVisibleBody = props.text.trim().length > 0;
   const canCollapse = hasVisibleBody && shouldCollapseUserMessage(props.text);
+  const found = useIsFindTarget(props.findKey);
+  if (found && canCollapse && !expanded) setExpanded(true);
   const isCollapsed = canCollapse && !expanded;
   const toggle = canCollapse ? (
     <Button
@@ -358,6 +367,8 @@ const CollapsibleUserMessageBody = memo(function CollapsibleUserMessageBody(prop
         <div
           className={cn("relative", isCollapsed && "max-h-44 overflow-hidden")}
           data-user-message-body="true"
+          data-find-text
+          data-find-unit={props.findKey}
           data-user-message-collapsed={isCollapsed ? "true" : "false"}
           data-user-message-collapsible={canCollapse ? "true" : "false"}
           data-user-message-fade={isCollapsed ? "true" : "false"}

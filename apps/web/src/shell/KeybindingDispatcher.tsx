@@ -15,13 +15,14 @@ import { desktopBridge } from "../lib/desktopShell.js";
 import { isPanelTabsFocused } from "../lib/panelFocus.js";
 import { isPreviewFocused } from "../lib/previewFocus.js";
 import { isTerminalFocused } from "../lib/terminalFocus.js";
+import { isTranscriptShown } from "../components/chat/threadFind.js";
 import { useSelectedWorkspaceId, useStore } from "../protocol/store.js";
 import { cancelWorkspaceSwitch, commitWorkspaceSwitch, runShellCommand, type ShellCommandTarget } from "./shellCommands.js";
 import { useKeybindings } from "./useKeybindings.js";
 import { releasesSwitchHold, useWorkspaceSwitcher } from "./workspaceSwitcher.js";
 
-/** Where focus is, read on every chord: the rules' when clauses name these. */
-const focusContext = () => ({ terminalFocus: isTerminalFocused(), previewFocus: isPreviewFocused(), panelTabsFocus: isPanelTabsFocused() });
+/** Where focus is and what is on screen, read on every chord: the rules' when clauses name these. */
+const focusContext = () => ({ terminalFocus: isTerminalFocused(), previewFocus: isPreviewFocused(), panelTabsFocus: isPanelTabsFocused(), transcriptShown: isTranscriptShown() });
 
 export function KeybindingDispatcher({ keybindings: given }: { keybindings?: ResolvedKeybindingsConfig }) {
   const live = useKeybindings();

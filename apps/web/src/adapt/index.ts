@@ -7,6 +7,7 @@ export { deriveSession, isPromptOpen, launchIn, subagentEntries, subagentOfRun, 
 export {
   deriveMessagesTimelineRows,
   entryTurnId,
+  openedGroupOf,
   summarizeToolGroup,
   toolGroupAction,
   toolGroupSummaryKind,

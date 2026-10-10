@@ -65,6 +65,7 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+alt+arrowup", command: "thread.previous", when: "!terminalFocus" },
   { key: "mod+alt+arrowdown", command: "thread.next", when: "!terminalFocus" },
   { key: "mod+shift+e", command: "thread.settle", when: "!terminalFocus" },
+  { key: "mod+f", command: "thread.find", when: "transcriptShown && !terminalFocus" },
   { key: "mod+alt+u", command: "thread.nextNeedsYou", when: "!terminalFocus" },
   { key: "mod+o", command: "editor.open", when: "!terminalOwnsMod" },
   { key: "ctrl+tab", command: "workspace.next", when: "!terminalFocus && !panelTabsFocus" },

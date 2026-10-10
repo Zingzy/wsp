@@ -3,12 +3,13 @@
 // Differs from upstream: store hooks are props (threadKey replaces the route and thread refs, expansion state is local, checkpoint data and callbacks arrive as optional props); rows come from the adapter; attachments, subagent rows, citations, user-message decorations, artifact templates, editor menus and the load-earlier header are removed.
 import { indicatesFailure, type MessagesTimelineRow } from "../adapt";
 import { resolveWorkGroupScrollAnchor } from "../../../work-log/scrollAnchor";
-import { memo, use, useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, use, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
 import { getVirtualizedScrollFadeClassName } from "../../ui/scroll-area";
 import { liveWorkEntryLabel, resolveWorkGroupScrollIndex, shouldFollowWorkGroupAppend, workEntryIsVisibleInGroup, workEntryLabelText } from "../MessagesTimeline.logic";
 import { cn } from "../../../lib/utils";
 import { TimelineRowCtx, WorkGroupViewCtx, type TimelineWorkEntry, type TimelineRow } from "./context";
+import { TimelineFindCtx } from "./find";
 import { LiveActivityRow, LiveActivityContent, TOOL_GROUP_GLYPHS, workEntryGlyph, SimpleWorkEntryRow } from "./workEntry";
 
 // ---------------------------------------------------------------------------
@@ -87,6 +88,20 @@ function ExpandedWorkGroupEntries({
         shouldFollowWorkGroupAppend(appendState.entries, entries, fades.bottom ? Infinity : 0),
     });
   }
+
+  // Find scrolls this list to the call its current match stands in, which the list's window may not draw yet.
+  const find = use(TimelineFindCtx);
+  useEffect(() => {
+    if (find === null) return;
+    find.groups.set(anchorKey, key => {
+      const index = entries.findIndex(entry => entry.id === key);
+      if (index >= 0) void listRef.current?.scrollToIndex({ index, animated: false, viewPosition: 0.5 });
+      return index >= 0;
+    });
+    return () => {
+      find.groups.delete(anchorKey);
+    };
+  }, [anchorKey, entries, find]);
 
   const groupView = useMemo(
     () => ({ state: viewState, onToggleEntry: () => onToggleWorkEntry(anchorKey) }),

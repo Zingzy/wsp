@@ -15,8 +15,8 @@ const LIVE_ACTIVITY_ROW_ID = "live-activity-row";
 export interface DeriveRowsInput {
   readonly timelineEntries: ReadonlyArray<TimelineEntry>;
   readonly turns: ReadonlyArray<TurnSummary>;
-  readonly expandedTurnIds?: ReadonlySet<string>;
-  readonly expandedWorkGroupIds?: ReadonlySet<string>;
+  readonly expandedTurnIds?: { has(id: string): boolean };
+  readonly expandedWorkGroupIds?: { has(id: string): boolean };
   readonly isWorking: boolean;
   readonly activeTurnStartedAt: string | null;
   /** The thread this one's running call is stopped behind, with that thread's open question; null when it is behind
@@ -387,8 +387,15 @@ function groupId(entryId: string, entry: WorkLogEntry): string {
   return `work-group:${groupIdentity(entryId, entry)}`;
 }
 
+const DETAILS = ":details";
+
 function expandedGroupRow(id: string, createdAt: string, grouped: ReadonlyArray<WorkLogEntry>): MessagesTimelineRow {
-  return { kind: "work", id: `${id}:details`, createdAt, groupedEntries: grouped, isExpandedToolGroup: true };
+  return { kind: "work", id: `${id}${DETAILS}`, createdAt, groupedEntries: grouped, isExpandedToolGroup: true };
+}
+
+/** The group an opened group's row of calls belongs to, the id its toggle opens it by; null for any other row. */
+export function openedGroupOf(row: MessagesTimelineRow): string | null {
+  return row.kind === "work" && row.isExpandedToolGroup ? row.id.slice(0, -DETAILS.length) : null;
 }
 
 /** A row no group folds and no settled turn hides: an error, and a compaction of the agent's context. */

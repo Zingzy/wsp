@@ -37,6 +37,7 @@ export const KEYBINDING_COMMANDS = [
   "thread.next",
   "thread.previous",
   "thread.settle",
+  "thread.find",
   "thread.nextNeedsYou",
   "editor.open",
   ...WORKSPACE_SELECT_SLOTS.map(workspaceSelectCommand),

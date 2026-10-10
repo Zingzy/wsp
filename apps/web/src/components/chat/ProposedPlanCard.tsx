@@ -36,7 +36,10 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
   workspaceRoot,
   resolvedTheme,
   onSavePlan,
+  found = false,
 }: {
+  /** The current find match stands in the plan, which opens to show it. */
+  found?: boolean;
   planMarkdown: string;
   cwd: string | undefined;
   workspaceRoot: string | undefined;
@@ -44,6 +47,7 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
   onSavePlan?: (input: { path: string; contents: string }) => Promise<void>;
 }) {
   const [expanded, setExpanded] = useState(false);
+  if (found && !expanded) setExpanded(true);
   const [isSaveDialogOpen, setIsSaveDialogOpen] = useState(false);
   const [savePath, setSavePath] = useState("");
   const [isSavingToWorkspace, setIsSavingToWorkspace] = useState(false);
@@ -109,7 +113,7 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
   return (
     <div className="rounded-xl border border-border/80 bg-card/70 p-4 sm:p-5" data-proposed-plan>
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="min-w-0 truncate text-sm font-medium text-foreground">{title}</p>
+        <p data-find-text className="min-w-0 truncate text-sm font-medium text-foreground">{title}</p>
         <Menu>
           <MenuTrigger
             render={<Button aria-label="Plan actions" size="icon-xs" variant="outline" />}
@@ -130,7 +134,7 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
         </Menu>
       </div>
       <div className="mt-4">
-        <div className={cn("relative", canCollapse && !expanded && "max-h-104 overflow-hidden")}>
+        <div data-find-text className={cn("relative", canCollapse && !expanded && "max-h-104 overflow-hidden")}>
           {canCollapse && !expanded ? (
             <ChatMarkdown
               text={collapsedPreview ?? ""}

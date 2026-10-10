@@ -49,6 +49,21 @@ export function workEntryDisplayLabel(entry: WorkLogEntry, workspaceRoot: string
   return prose(`${heading.charAt(0).toUpperCase()}${heading.slice(1)}`);
 }
 
+/** What a tool row opens onto: its command, its output or detail, and the files it changed; null where opening it
+ * would show nothing its label does not. */
+export function workEntryOpensOnto(entry: WorkLogEntry, workspaceRoot: string | undefined): string | null {
+  const previewText = workEntryLabelText(workEntryDisplayLabel(entry, workspaceRoot));
+  const command = entry.command?.trim();
+  const detail = entry.detail?.trim();
+  const changedFiles = entry.changedFiles ?? [];
+  if (!command && (!detail || detail === previewText) && changedFiles.length === 0) return null;
+  const blocks: string[] = [];
+  if (command) blocks.push(command);
+  if (detail) blocks.push(detail);
+  if (changedFiles.length > 0) blocks.push(changedFiles.map(path => formatWorkspaceRelativePath(path, workspaceRoot)).join("\n"));
+  return blocks.join("\n\n");
+}
+
 export function liveWorkEntryLabel(
   entry: WorkLogEntry,
   workspaceRoot: string | undefined,

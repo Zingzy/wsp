@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Adapted from pingdotgg/t3code apps/web/src/components/chat/MessagesTimeline.tsx at 57a66608 (MIT).
 // Differs from upstream: store hooks are props (threadKey replaces the route and thread refs, expansion state is local, checkpoint data and callbacks arrive as optional props); rows come from the adapter; attachments, subagent rows, citations, user-message decorations, artifact templates, editor menus and the load-earlier header are removed.
-import { deriveMessagesTimelineRows, type MessageId, type MessagesTimelineRow, type ProviderSkill, type TimelineEntry, type TimestampFormat, type TurnDiffSummary, type TurnId, type TurnSummary } from "../adapt";
+import { deriveMessagesTimelineRows, type DeriveRowsInput, type MessageId, type MessagesTimelineRow, type ProviderSkill, type TimelineEntry, type TimestampFormat, type TurnDiffSummary, type TurnId, type TurnSummary } from "../adapt";
 import { resolveChatListAnchoredEndSpace } from "../../../lib/chatList";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
@@ -16,6 +16,9 @@ import { deriveTimelineMinimapItems, resolveTimelineRowTop, resolveTimelineRowHe
 import { TimelineRowContent } from "./rows";
 import { useSpawnedChildren } from "../../threads/SpawnTiles";
 import type { AnswerPrompt } from "../answerPrompt";
+import { TimelineFindCtx } from "./find";
+import { FindBar } from "./findBar";
+import { useTranscriptFind } from "./useFind";
 
 const NOOP_OPEN_TURN_DIFF = (_turnId: TurnId, _filePath?: string) => {};
 const NOOP_REWIND = (_messageId: MessageId) => {};
@@ -99,8 +102,9 @@ export interface MessagesTimelineProps {
   replyRuns?: ReplyRuns | null;
   /** Where a selection quoted out of a reply goes; absent, a selection offers no Quote. */
   onQuote?: (quote: QuotedSelection) => void;
-  /** Asks for the thread's older events once the reader is within two screens of the oldest row held. */
-  onReachTop?: () => void;
+  /** Asks for the thread's older events once the reader is within two screens of the oldest row held; find reads
+   * every page with it, so it answers whether one is left after the page it read. */
+  onReachTop?: () => Promise<boolean> | void;
 }
 
 // ---------------------------------------------------------------------------
@@ -277,20 +281,21 @@ export const MessagesTimeline = memo(function MessagesTimeline({
 
   // A thread with no runtime id is nobody's lead: a child names its lead by that id.
   const spawned = useSpawnedChildren(threadKey.includes("/") ? threadKey.slice(threadKey.indexOf("/") + 1) : null);
+  const deriveInput = useMemo<DeriveRowsInput>(
+    () => ({
+      timelineEntries,
+      turns,
+      isWorking,
+      activeTurnStartedAt,
+      waitingOn,
+      openRun,
+      ...(spawned !== undefined ? { children: spawned } : {}),
+    }),
+    [timelineEntries, turns, isWorking, activeTurnStartedAt, waitingOn, openRun, spawned],
+  );
   const rawRows = useMemo(
-    () =>
-      deriveMessagesTimelineRows({
-        timelineEntries,
-        turns,
-        expandedTurnIds,
-        expandedWorkGroupIds,
-        isWorking,
-        activeTurnStartedAt,
-        waitingOn,
-        openRun,
-        ...(spawned !== undefined ? { children: spawned } : {}),
-      }),
-    [timelineEntries, turns, expandedTurnIds, expandedWorkGroupIds, isWorking, activeTurnStartedAt, waitingOn, openRun, spawned],
+    () => deriveMessagesTimelineRows({ ...deriveInput, expandedTurnIds, expandedWorkGroupIds }),
+    [deriveInput, expandedTurnIds, expandedWorkGroupIds],
   );
   const rows = useStableRows(rawRows);
   const minimapItems = useMemo(() => deriveTimelineMinimapItems(rows), [rows]);
@@ -308,6 +313,18 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   const [timelineViewportElement, setTimelineViewportElement] = useState<HTMLDivElement | null>(
     null,
   );
+  const openTurn = useCallback((turnId: TurnId) => setExpandedTurnIds(open => (open.has(turnId) ? open : new Set(open).add(turnId))), []);
+  const openGroup = useCallback((groupId: string) => setExpandedWorkGroupIds(open => (open.has(groupId) ? open : new Set(open).add(groupId))), []);
+  const find = useTranscriptFind({
+    input: deriveInput,
+    workspaceRoot,
+    rowsRef,
+    listRef: ownList,
+    viewport: timelineViewportElement,
+    openTurn,
+    openGroup,
+    readOlder: onReachTop,
+  });
   useLayoutEffect(() => {
     keepTimelineEndVisibleAfterOverlayGrowth({
       timeline: ownList.current,
@@ -531,57 +548,60 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   return (
     <TimelineRowCtx value={sharedState}>
       <TimelineRowActivityCtx value={activityState}>
-        <div
-          ref={setTimelineViewportElement}
-          className="relative h-full min-h-0"
-        >
-          <LegendList<MessagesTimelineRow>
-            ref={setList}
-            data={rows}
-            keyExtractor={keyExtractor}
-            getItemType={getItemType}
-            renderItem={renderItem}
-            estimatedItemSize={90}
-            initialScrollAtEnd
-            {...(anchoredEndSpace ? { anchoredEndSpace } : {})}
-            contentInsetEndAdjustment={contentInsetEndAdjustment}
-            maintainScrollAtEnd={
-              anchoredEndSpace || !liveFollowEnabled || disclosureToggleSettling
-                ? false
-                : TIMELINE_MAINTAIN_SCROLL_AT_END
-            }
-            maintainVisibleContentPosition={maintainVisibleContentPosition}
-            onScroll={handleScroll}
-            {...(onReachTop === undefined ? {} : { onStartReached: handleStartReached, onStartReachedThreshold: 2 })}
-            className={cn(
-              "scrollbar-gutter-both h-full min-h-0 overflow-x-hidden overscroll-y-contain px-3 [overflow-anchor:none] sm:px-5",
-              topFadeEnabled && "topbar-scroll-fade",
-            )}
-            ListHeaderComponent={topFadeEnabled ? TIMELINE_LIST_FADE_HEADER : TIMELINE_LIST_HEADER}
-            ListFooterComponent={
-              <>
-                {footer}
-                {TIMELINE_LIST_FOOTER}
-                <div aria-hidden className="h-(--chat-composer-inset,0px)" />
-              </>
-            }
-          />
-          {onQuote !== undefined ? <AssistantSelectionToolbar viewport={timelineViewportElement} replyToOf={replyToOf} onQuote={onQuote} /> : null}
-          <TimelineMinimap
-            items={minimapItems}
-            hasPersistentGutter={minimapHasPersistentGutter}
-            hitStripWidth={minimapHitStripWidth}
-            stripMap={minimapStripMap}
-            onSelect={(item) => {
-              onManualNavigation();
-              void ownList.current?.scrollToIndex({
-                index: item.rowIndex,
-                animated: true,
-                viewOffset: 24,
-              });
-            }}
-          />
-        </div>
+        <TimelineFindCtx value={find.target}>
+          <div
+            ref={setTimelineViewportElement}
+            className="relative h-full min-h-0"
+          >
+            <LegendList<MessagesTimelineRow>
+              ref={setList}
+              data={rows}
+              keyExtractor={keyExtractor}
+              getItemType={getItemType}
+              renderItem={renderItem}
+              estimatedItemSize={90}
+              initialScrollAtEnd
+              {...(anchoredEndSpace ? { anchoredEndSpace } : {})}
+              contentInsetEndAdjustment={contentInsetEndAdjustment}
+              maintainScrollAtEnd={
+                anchoredEndSpace || !liveFollowEnabled || disclosureToggleSettling
+                  ? false
+                  : TIMELINE_MAINTAIN_SCROLL_AT_END
+              }
+              maintainVisibleContentPosition={maintainVisibleContentPosition}
+              onScroll={handleScroll}
+              {...(onReachTop === undefined ? {} : { onStartReached: handleStartReached, onStartReachedThreshold: 2 })}
+              className={cn(
+                "scrollbar-gutter-both h-full min-h-0 overflow-x-hidden overscroll-y-contain px-3 [overflow-anchor:none] sm:px-5",
+                topFadeEnabled && "topbar-scroll-fade",
+              )}
+              ListHeaderComponent={topFadeEnabled ? TIMELINE_LIST_FADE_HEADER : TIMELINE_LIST_HEADER}
+              ListFooterComponent={
+                <>
+                  {footer}
+                  {TIMELINE_LIST_FOOTER}
+                  <div aria-hidden className="h-(--chat-composer-inset,0px)" />
+                </>
+              }
+            />
+            {onQuote !== undefined ? <AssistantSelectionToolbar viewport={timelineViewportElement} replyToOf={replyToOf} onQuote={onQuote} /> : null}
+            <FindBar find={find} />
+            <TimelineMinimap
+              items={minimapItems}
+              hasPersistentGutter={minimapHasPersistentGutter}
+              hitStripWidth={minimapHitStripWidth}
+              stripMap={minimapStripMap}
+              onSelect={(item) => {
+                onManualNavigation();
+                void ownList.current?.scrollToIndex({
+                  index: item.rowIndex,
+                  animated: true,
+                  viewOffset: 24,
+                });
+              }}
+            />
+          </div>
+        </TimelineFindCtx>
       </TimelineRowActivityCtx>
     </TimelineRowCtx>
   );

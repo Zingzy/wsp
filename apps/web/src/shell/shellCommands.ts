@@ -17,6 +17,7 @@ import { terminalRefusedLine } from "../actions/format.js";
 import { settleSaying } from "../actions/threadActions.js";
 import { deriveSidebarProjects, type SidebarProjectSnapshot, type SidebarThreadSnapshot } from "../adapt/index.js";
 import { toggleCommandPalette } from "../commandPaletteBus.js";
+import { requestThreadFind } from "../components/chat/threadFind.js";
 import { openFileFinder } from "../files/finderBus.js";
 import { openCopyInEditor } from "../files/openCopy.js";
 import { isWorkspaceSelectCommand, workspaceSelectSlot, type KeybindingCommand, type WorkspaceSelectSlot } from "../keybindingTypes.js";
@@ -365,6 +366,9 @@ export function runShellCommand(command: KeybindingCommand, target: ShellCommand
       return;
     case "thread.settle":
       settleOpenThread();
+      return;
+    case "thread.find":
+      if (!useStore.getState().settingsOpen) requestThreadFind();
       return;
     case "thread.nextNeedsYou":
       openNextNeedsYou();
