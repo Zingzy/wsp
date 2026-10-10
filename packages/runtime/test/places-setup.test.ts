@@ -833,6 +833,7 @@ describe("a computer added with its picks", () => {
     const row = await rowOf(place.id);
     expect(row.setup?.waiting).toEqual([]);
     expect(row.applied?.rows.find(r => r.id === "signins/codex")).toMatchObject({ outcome: "present", note: SIGNED_IN_THERE, step: "signins" });
+    expect(row.signIns).toEqual({ claude: "vault-key", codex: "signed-in" });
     expect(ended(frames).map(f => f.end)).toEqual(["ready"]);
     // A sign-in the person asks for by hand is the one road that may replace that login.
     await runtime!.agents.signIn({ placeId: place.id }, { agent: "codex" }, () => {});
@@ -1588,6 +1589,7 @@ describe("an agent's sign-in copied from this computer", () => {
     const row = await rowOf(place.id);
     expect(row.setup?.waiting).toEqual([]);
     expect(row.applied?.rows.find(r => r.id === "signins/codex")).toMatchObject({ outcome: "installed", note: expect.stringMatching(/^copied from /), step: "signins" });
+    expect(row.signIns).toEqual({ claude: "vault-key", codex: "signed-in" });
     expect(ended(frames).map(f => f.end)).toEqual(["ready"]);
   });
 

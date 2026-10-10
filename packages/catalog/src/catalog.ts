@@ -4,7 +4,7 @@
 // status check, the global config that carries over, how it keys project
 // state to a path, and whether it is on by default with the evidence behind
 // that. The wizard's tables read from here; nothing here runs a command.
-import { agentOfRow, compareVersions, packageOf, thisComputer, toolRowPrefix, type PageReach } from "@wsp/protocol";
+import { agentOfRow, compareVersions, packageOf, shellQuote, thisComputer, toolRowPrefix, type PageReach } from "@wsp/protocol";
 import { AGENT_MODULES } from "./agents/index.js";
 import type { AgentContext } from "./context.js";
 import type { HookCarry } from "./hooks.js";
@@ -160,6 +160,9 @@ export interface AgentEntry extends EntryBase {
   /** The first thing to type inside the agent once it has the wsp tools, in its own words: a slash form where the
    * agent has one for a skill, else the sentence that reaches the skill by its description. */
   firstMove: string;
+  /** Debian packages the agent runs with on Linux that its own install does not bring, each with the command that
+   * says it is there: a computer's setup puts each on right after the agent, as a row of its own. */
+  aptNeeds?: readonly { package: string; command: string }[];
   /** The agent's own way of running a command in the background that it tracks and wakes the agent from when the
    * command ends, in the words the agent is told; absent where none was measured, and the machine context names none. */
   backgroundRoad?: string;
@@ -325,6 +328,14 @@ export const MCP_AGENTS: readonly McpAgent[] = CATALOG_AGENTS.filter((a): a is M
 export const MCP_AGENT_IDS: string = MCP_AGENTS.map(a => a.id).join(", ");
 /** Whether an agent keeps a switch per server that wsp turns: its format module has one. */
 export const mcpSwitch = (id: string): boolean => MCP_AGENTS.find(a => a.id === id)?.mcp.format.enable !== undefined;
+
+/** The line that points an agent's own command at the store its turns there read, from `stores` by agent id: a line
+ * that runs the agent there to read its logins starts with it. Empty where none is named. */
+export function storeLine(agentId: string, stores: Readonly<Record<string, string>> | undefined): string {
+  const variable = CATALOG_AGENTS.find(a => a.id === agentId)?.stateHomeEnv;
+  const store = variable === undefined ? undefined : stores?.[agentId];
+  return store === undefined ? "" : `export ${variable}=${shellQuote(store)}; `;
+}
 
 /** How one server in that agent's config is signed in where it stands, off the agent's own module; nothing for an
  * agent with none. */
@@ -492,6 +503,11 @@ export function loginSignIn(row: string): SignIn | undefined {
 export function sharedOn(agent: string): SharedLogin | undefined {
   const row = loginSignIn(agent);
   return row === undefined ? undefined : sharedLoginOf(row);
+}
+
+/** The rows a computer's setup puts an agent's Debian packages on as, each under the agent's own row id. */
+export function aptNeedRows(agent: string): { id: string; package: string; command: string }[] {
+  return (CATALOG_AGENTS.find(a => a.id === agent)?.aptNeeds ?? []).map(n => ({ id: `agents/${agent}/${n.package}`, ...n }));
 }
 
 /** Which of the agents a computer reported sign in there once rather than in the image, in the order it named them. */

@@ -32,7 +32,7 @@ import { LinkBackend, PlaceAbsentError, PlaceFolderMachine, PlaceMachine, keyFin
 import { connectDaemon } from "../reach.js";
 import { verifyPlaceBytes } from "@wsp/keys";
 import { CAPS, DEFAULT_COLLECTION, DEFAULT_ID, type PlaceRecord, type PlaceDoor, PlaceForksNowhereError, PlaceProvisioningError } from "./types.js";
-import { vaultSignIn, landedOn, type LandedRow, bounded, readsAsEd25519, JOIN_PROVE_MS, PLACE_BAD_KEY_REFUSAL, takenReport, sharedLoginFile, REPLACED, BACKEND_FACTS_MS } from "./helpers.js";
+import { vaultSignIn, landedOn, type LandedRow, bounded, readsAsEd25519, JOIN_PROVE_MS, PLACE_BAD_KEY_REFUSAL, takenReport, REPLACED, BACKEND_FACTS_MS } from "./helpers.js";
 import { panePorts } from "./pane-ports.js";
 import type { PlaceDoorContext } from "./context.js";
 import type { PlaceRecordsArea } from "./records.js";
@@ -45,7 +45,7 @@ export function linkDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, se
   const panes = panePorts({ forwards, now: clockNow, schedule: ctx.schedule });
   const {
     records, wiredProvider, providerIds, providerBackend, recordOf, settingsOf, settingsHeld, awaiting, holdBack,
-    defaultId, inTurn, markDefault, markHeld, challenge, signedRefusal, writeSeen, change, withCap, rowIds,
+    defaultId, inTurn, markDefault, markHeld, challenge, signedRefusal, writeSeen, change, withCap, rowIds, loginListed,
   } = recordArea;
   const { channels, waiting, closedAt, woken, setting, settingNow, foldersOf, syncSoon, startedOrSaid, linkTo, landers, here } = setupArea;
   const folderMachines = new Map<string, { key: string; machine: PlaceFolderMachine }>();
@@ -309,11 +309,7 @@ export function linkDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, se
     },
 
     async loginLanded(placeId, agent) {
-      const file = sharedLoginFile(agent);
-      await change(placeId, now => {
-        const listed = now.report.logins;
-        return file === undefined || listed === undefined || listed.includes(file) ? undefined : { ...now, report: { ...now.report, logins: [...listed, file].sort() } };
-      });
+      await loginListed(placeId, agent);
       await landSignIn(placeId, { id: agent === GITHUB_CLI ? GITHUB_ROW : signInRowId(agent), outcome: "installed", note: SIGNED_IN_THERE });
     },
 
