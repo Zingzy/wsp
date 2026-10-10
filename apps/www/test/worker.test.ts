@@ -34,11 +34,42 @@ describe("the Worker in front of usewsp.com", () => {
     expect(JSON.parse(String(init.body))).toEqual({ email: "dev@example.com", unsubscribed: false, segments: [{ id: "seg" }] });
   });
 
-  it("serves the docs from Scalar with the path kept", async () => {
-    const sent = vi.fn(async (r: Request) => new Response(r.url));
+  it("serves the docs from Scalar's root, with /docs off the path", async () => {
+    const sent = vi.fn(async (r: Request) => new Response(r.url, { headers: { "content-type": "application/octet-stream" } }));
     vi.stubGlobal("fetch", sent);
-    const res = await worker.fetch(new Request("https://usewsp.com/docs/start/install?q=1"), env());
-    expect(await res.text()).toBe("https://wsp.apidocumentation.com/docs/start/install?q=1");
+    expect(await (await worker.fetch(new Request("https://usewsp.com/docs/start/install?q=1"), env())).text()).toBe("https://wsp.apidocumentation.com/start/install?q=1");
+    expect(await (await worker.fetch(new Request("https://usewsp.com/docs"), env())).text()).toBe("https://wsp.apidocumentation.com/");
+  });
+
+  it("keeps a path that starts with // on Scalar's host", async () => {
+    const sent = vi.fn(async (r: Request) => new Response(r.url, { headers: { "content-type": "application/octet-stream" } }));
+    vi.stubGlobal("fetch", sent);
+    expect(await (await worker.fetch(new Request("https://usewsp.com/docs//example.com/x"), env())).text()).toBe("https://wsp.apidocumentation.com//example.com/x");
+  });
+
+  it("writes /docs onto Scalar's bare links, its redirects and its own address", async () => {
+    const page = '<a href="/reference/slate">x</a><a href="/docs/features/slate">y</a><img src="/shots/a.webp"><a href="//cdn.x/y">z</a><a href="/">home</a>';
+    vi.stubGlobal("fetch", async (r: Request) => {
+      const path = new URL(r.url).pathname;
+      if (path === "/start/install") return new Response(null, { status: 301, headers: { location: "https://wsp.apidocumentation.com/install/mac" } });
+      if (path === "/llms.txt") return new Response("- [Mac](https://zingzy-wsp.apidocumentation.com/install/mac/index.md)", { headers: { "content-type": "text/plain" } });
+      if (path === "/sitemap.xml") return new Response("<loc>https://wsp.apidocumentation.com/docs/install/mac</loc><loc>https://wsp.apidocumentation.com/docs</loc>", { headers: { "content-type": "application/xml" } });
+      return new Response(page, { headers: { "content-type": "text/html" } });
+    });
+    const get = (path: string) => worker.fetch(new Request(`https://usewsp.com${path}`), env());
+    expect(await (await get("/docs/features/slate")).text()).toBe('<a href="/docs/reference/slate">x</a><a href="/docs/features/slate">y</a><img src="/docs/shots/a.webp"><a href="//cdn.x/y">z</a><a href="/docs/">home</a>');
+    expect((await get("/docs/start/install")).headers.get("location")).toBe("https://usewsp.com/docs/install/mac");
+    expect(await (await get("/docs/llms.txt")).text()).toBe("- [Mac](https://usewsp.com/docs/install/mac/index.md)");
+    expect(await (await get("/docs/sitemap.xml")).text()).toBe("<loc>https://usewsp.com/docs/install/mac</loc><loc>https://usewsp.com/docs</loc>");
+  });
+
+  it("sends a path the site lacks to the docs when Scalar has it, since its scripts drop /docs from a page's links", async () => {
+    vi.stubGlobal("fetch", async (r: Request | string) => new Response(null, { status: new URL(typeof r === "string" ? r : r.url).pathname === "/reference/slate" ? 200 : 404 }));
+    const missing: Env["ASSETS"] = { fetch: async () => new Response("not found", { status: 404 }) };
+    const moved = await worker.fetch(new Request("https://usewsp.com/reference/slate?x=1"), env({ ASSETS: missing }));
+    expect(moved.status).toBe(307);
+    expect(moved.headers.get("location")).toBe("https://usewsp.com/docs/reference/slate?x=1");
+    expect((await worker.fetch(new Request("https://usewsp.com/nope"), env({ ASSETS: missing }))).status).toBe(404);
   });
 
   it("serves the install script as text and every other file as the files say", async () => {

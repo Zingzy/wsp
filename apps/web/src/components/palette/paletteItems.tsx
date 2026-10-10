@@ -90,7 +90,7 @@ export interface PaletteItems {
 /** The pages about wsp itself, reached from here since Settings has no About page. */
 const LINKS = [
   { value: "action:github", title: "wsp on GitHub", terms: ["github", "source", "repo", "about", "licence", "license"], Icon: GithubIcon, url: REPO },
-  { value: "action:docs", title: "wsp docs", terms: ["docs", "documentation", "help", "manual"], Icon: BookOpenIcon, url: "https://wsp.apidocumentation.com" },
+  { value: "action:docs", title: "wsp docs", terms: ["docs", "documentation", "help", "manual"], Icon: BookOpenIcon, url: "https://usewsp.com/docs" },
   { value: "action:report-bug", title: "Report a bug", terms: ["bug", "issue", "report", "feedback", "help"], Icon: BugIcon, url: `${REPO}/issues/new` },
 ];
 

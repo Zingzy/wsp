@@ -352,7 +352,7 @@ describe("a slash command that works only in the CLI's own terminal", () => {
     expect(screenCommandLine(SCREEN[2]!, catalog, cloud)).toBe("/model works only in Claude Code's own terminal; pick the model in the row under the box");
     expect(screenCommandLine(SCREEN[3]!, catalog, local)).toBe("/permissions works only in Claude Code's own terminal; pick the access mode in the row under the box");
     expect(screenCommandLine(SCREEN[4]!, catalog, cloud)).toBe("/config works only in Claude Code's own terminal; wsp's settings open from the command palette");
-    expect(screenCommandLine(SCREEN[5]!, catalog, cloud)).toBe("/help works only in Claude Code's own terminal; wsp's docs are at wsp.apidocumentation.com");
+    expect(screenCommandLine(SCREEN[5]!, catalog, cloud)).toBe("/help works only in Claude Code's own terminal; wsp's docs are at usewsp.com/docs");
     // A record from before kinds existed is a provider fork, so it reads the machine's road.
     expect(screenCommandLine(SCREEN[0]!, catalog, {})).toContain("Workspace panel");
     // Every line is one sentence for the composer's slot: no line break, sentence case, nothing but words.

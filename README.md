@@ -2,7 +2,7 @@
 
 Your setup, on your computers, for coding agents.
 
-The site is [usewsp.com](https://usewsp.com). The docs are [wsp.apidocumentation.com](https://wsp.apidocumentation.com).
+The site is [usewsp.com](https://usewsp.com). The docs are at [usewsp.com/docs](https://usewsp.com/docs).
 
 wsp runs coding agents (Claude Code, Codex, OpenCode, Cursor) as threads on your own computers: the Mac you sit at, and any Linux box you add over ssh. A thread works in your project's folder, the way the agent would in a terminal there. You start threads, read them and answer them from the app, the command line, or from another agent over MCP, and every one of them shows in the same sidebar.
 
