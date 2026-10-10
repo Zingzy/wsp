@@ -16,7 +16,7 @@ import ChatMarkdown from "../../src/components/ChatMarkdown";
 import { ChangedFilesCard } from "../../src/components/chat/ChangedFilesTree";
 import { DiffStatLabel } from "../../src/components/chat/DiffStatLabel";
 import { DiffWorkerPoolProvider } from "../../src/components/DiffWorkerPoolProvider";
-import { commandFirstLine, summarizeToolGroup, toolGroupSummaryKind, type WorkLogEntry } from "../../src/components/chat/adapt";
+import { commandFirstLine, indicatesFailure, summarizeToolGroup, toolGroupSummaryKind, type WorkLogEntry } from "../../src/components/chat/adapt";
 import { TimelineRowCtx, type TimelineRowSharedState } from "../../src/components/chat/timeline/context";
 import { LiveActivityRow } from "../../src/components/chat/timeline/workEntry";
 import { WorkGroupToggleTimelineRow } from "../../src/components/chat/timeline/workGroup";
@@ -357,28 +357,39 @@ function EditRow({ call, initiallyOpen }: { call: EditCall; initiallyOpen?: bool
 }
 
 // ---------------------------------------------------------------------------
-// The group row the calls fold under, today's, fed the same calls.
+// The group the calls fold under.
 // ---------------------------------------------------------------------------
 
 const entry = (id: string, fields: Partial<WorkLogEntry>): WorkLogEntry => ({
   id, createdAt: "2026-10-10T09:00:00Z", turnId: "turn_a", label: "tool", tone: "tool", toolLifecycleStatus: "completed", sourceActivityKind: "tool.completed", ...fields,
 });
-const GROUP: WorkLogEntry[] = [
-  entry("w1", { command: LS_SRC.command, requestKind: "command" }),
-  entry("w2", { command: TSC_FAILED.command, requestKind: "command", toolLifecycleStatus: "failed" }),
-  entry("w3", { command: LS_PACKAGES.command, requestKind: "command" }),
-  entry("w4", { changedFiles: [EDIT_WORK_ENTRY.patch[0]!.path], requestKind: "file-change" }),
-  entry("w5", { changedFiles: [WRITE_TEST.patch[0]!.path], requestKind: "file-change" }),
-];
+const ran = (call: CommandCall): WorkLogEntry =>
+  entry(call.command, {
+    command: call.command,
+    requestKind: "command",
+    toolLifecycleStatus: call.state === "running" ? "inProgress" : call.exitCode !== undefined && call.exitCode !== 0 ? "failed" : "completed",
+  });
+const changed = (call: EditCall): WorkLogEntry => entry(call.patch.map(f => f.path).join(), { changedFiles: call.patch.map(f => f.path), requestKind: "file-change" });
 
-function GroupHead({ expanded }: { expanded: boolean }) {
+/** The group a turn's calls fold under, its head today's and fed the same calls. Open, its rows stand 12 px in under
+ * the head, the one child indent the app draws (the sidebar's tree), so they read as its children; no rail, since a
+ * line in the transcript would be a separator doing no work. */
+function Group({ calls, head, children }: { calls: readonly WorkLogEntry[]; head?: ReactNode; children: ReactNode }) {
   const ctx = { onToggleWorkGroup: () => {} } as unknown as TimelineRowSharedState;
+  const last = calls[calls.length - 1];
   return (
-    <TimelineRowCtx value={ctx}>
-      <WorkGroupToggleTimelineRow
-        row={{ kind: "work-toggle", id: "work-toggle:w5", createdAt: "2026-10-10T09:00:00Z", groupId: "g", hiddenCount: GROUP.length, expanded, summary: summarizeToolGroup(GROUP), summaryKind: toolGroupSummaryKind(GROUP), hasFailure: false }}
-      />
-    </TimelineRowCtx>
+    <div data-group className="flex flex-col gap-px">
+      {head ?? (
+        <TimelineRowCtx value={ctx}>
+          <WorkGroupToggleTimelineRow
+            row={{ kind: "work-toggle", id: `work-toggle:${last?.id ?? "g"}`, createdAt: "2026-10-10T09:00:00Z", groupId: "g", hiddenCount: calls.length, expanded: true, summary: summarizeToolGroup(calls), summaryKind: toolGroupSummaryKind(calls), hasFailure: last !== undefined && indicatesFailure(last) }}
+          />
+        </TimelineRowCtx>
+      )}
+      <div data-group-rows className="ms-3 flex flex-col gap-px">
+        {children}
+      </div>
+    </div>
   );
 }
 
@@ -405,8 +416,10 @@ const STATES: Record<string, { title: string; body: () => ReactNode }> = {
         <div className="px-1 py-0.5">
           <ChatMarkdown text={REPLY} cwd={ROOT} resolvedTheme={theme} />
         </div>
-        <CommandRow call={CODEX_TEST} initiallyOpen />
-        <div className="px-1">
+        <Group calls={[ran(CODEX_TEST)]}>
+          <CommandRow call={CODEX_TEST} initiallyOpen />
+        </Group>
+        <div className="px-1 pt-2">
           <ChangedFilesCard
             turnId="turn_a"
             files={[{ path: "apps/web/src/components/chat/timeline/workEntry.tsx", kind: "modified", additions: 4, deletions: 3 }, { path: "apps/web/test/command-duration.test.ts", kind: "added", additions: 22, deletions: 0 }]}
@@ -420,65 +433,84 @@ const STATES: Record<string, { title: string; body: () => ReactNode }> = {
     ),
   },
   group: {
-    title: "A turn's calls, the group open",
+    title: "A turn's calls, the group open: its rows 12 px in under the head",
     body: () => (
-      <>
-        <GroupHead expanded />
+      <Group calls={[ran(LS_SRC), ran(TSC_FAILED), ran(LS_PACKAGES), changed(EDIT_WORK_ENTRY), changed(WRITE_TEST)]}>
         <CommandRow call={LS_SRC} />
         <CommandRow call={TSC_FAILED} />
         <CommandRow call={LS_PACKAGES} />
         <EditRow call={EDIT_WORK_ENTRY} />
         <EditRow call={WRITE_TEST} />
-      </>
+      </Group>
     ),
   },
   running: {
-    title: "Command running: in the open group, and the live row under the turn",
+    title: "Command running: the live row heads the open group",
     body: () => (
-      <>
+      <Group
+        calls={[ran(LS_SRC), ran(RUNNING)]}
+        head={
+          <div className="flex items-center gap-3">
+            <LiveActivityRow label={{ verb: "Running", text: commandFirstLine(RUNNING.command), mono: true }} tone="tool" glyph={TerminalIcon} />
+            <span className="text-xs tabular-nums text-muted-foreground">
+              <WorkingTimer createdAt={new Date(Date.now() - 12_000).toISOString()} />
+            </span>
+          </div>
+        }
+      >
         <CommandRow call={LS_SRC} />
         <CommandRow call={RUNNING} />
-        <div className="mt-2 flex items-center gap-3">
-          <LiveActivityRow label={{ verb: "Running", text: commandFirstLine(RUNNING.command), mono: true }} tone="tool" glyph={TerminalIcon} />
-          <span className="text-xs tabular-nums text-muted-foreground">
-            <WorkingTimer createdAt={new Date(Date.now() - 12_000).toISOString()} />
-          </span>
-        </div>
-      </>
+      </Group>
     ),
   },
   done: {
     title: "Command done, open: its output whole",
-    body: () => <CommandRow call={LS_SRC} initiallyOpen />,
+    body: () => (
+      <Group calls={[ran(LS_SRC)]}>
+        <CommandRow call={LS_SRC} initiallyOpen />
+      </Group>
+    ),
   },
   failed: {
     title: "Command failed with exit code: the last lines first",
-    body: () => <CommandRow call={TSC_FAILED} initiallyOpen />,
+    body: () => (
+      <Group calls={[ran(TSC_FAILED)]}>
+        <CommandRow call={TSC_FAILED} initiallyOpen />
+      </Group>
+    ),
   },
   long: {
     title: "Long output, folded: the first lines, the count left, what the transcript kept",
-    body: () => <CommandRow call={LS_PACKAGES} initiallyOpen />,
+    body: () => (
+      <Group calls={[ran(LS_PACKAGES)]}>
+        <CommandRow call={LS_PACKAGES} initiallyOpen />
+      </Group>
+    ),
   },
   edit: {
-    title: "Edit, open: unified hunks with line numbers",
+    title: "Edit, open: unified hunks with line numbers, a write closed under it",
     body: () => (
-      <>
-        <EditRow call={EDIT_WORK_ENTRY} />
+      <Group calls={[changed(EDIT_WORK_ENTRY), changed(WRITE_TEST)]}>
         <EditRow call={EDIT_WORK_ENTRY} initiallyOpen />
-      </>
+        <EditRow call={WRITE_TEST} />
+      </Group>
     ),
   },
   write: {
     title: "Write of a new file, open and folded",
-    body: () => <EditRow call={WRITE_TEST} initiallyOpen />,
+    body: () => (
+      <Group calls={[changed(WRITE_TEST)]}>
+        <EditRow call={WRITE_TEST} initiallyOpen />
+      </Group>
+    ),
   },
   codex: {
     title: "Codex: the command without its shell, exit code and duration from Codex, one change across two files",
     body: () => (
-      <>
+      <Group calls={[ran(CODEX_TEST), changed(CODEX_CHANGE)]}>
         <CommandRow call={CODEX_TEST} initiallyOpen />
         <EditRow call={CODEX_CHANGE} initiallyOpen />
-      </>
+      </Group>
     ),
   },
 };
@@ -493,10 +525,10 @@ if (params.get("state") === "perf") {
   STATES.perf = {
     title: "50 edits and a 2,000-line output",
     body: () => (
-      <>
+      <Group calls={[ran(WHOLE_OUTPUT), ...MANY.map(changed)]}>
         <CommandRow call={WHOLE_OUTPUT} initiallyOpen={params.get("open") === "1" && params.get("what") !== "edits"} />
         {MANY.map((call, n) => <EditRow key={n} call={call} initiallyOpen={params.get("open") === "1" && params.get("what") !== "output"} />)}
-      </>
+      </Group>
     ),
   };
 }
