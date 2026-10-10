@@ -1,17 +1,19 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The tree under a tile in the sidebar, drawn over the one reading of a lead's tree: its live children first, each
 // with its own, then a Finished fold, shut each time it is drawn, that pages its rows twenty at a time and whose menu
-// holds Settle N finished. A subagent is a slim row of its own. Settled children are not drawn here; a tree settled
-// whole folds into the sidebar's Settled section. The list nests two levels and then stands flat, so the rows a
-// level draws come back as list items for the caller to place. While an ended subagent's page is open its one row
-// stands under the shut fold's head, and goes when the person leaves, the fold as it was.
+// holds Settle N finished. A subagent is a slim row of its own. The fold holds the settled child threads after the
+// finished, as settled rows, so a settle moves a child out of the way and never out of sight; a settled subagent
+// folds with its turn, and a tree settled whole folds into the sidebar's Settled section. The list nests two levels
+// and then stands flat, so the rows a level draws come back as list items for the caller to place. While an ended
+// subagent's page is open its one row stands under the shut fold's head, and goes when the person leaves, the fold
+// as it was.
 import { ChevronDownIcon, CircleCheckIcon } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useState, type MouseEvent, type ReactNode } from "react";
 import { CHILD_WORDS } from "../actions/format.js";
 import { openContextMenu } from "../actions/contextMenu.js";
 import type { ChildVerbs } from "../actions/threadActions.js";
 import type { SidebarThreadSnapshot } from "../adapt/index.js";
-import { childParts, childTarget, finishedTake, kindOf, leadActs, leadNodes, noteOf, type LeadNode, type Tree } from "../components/threads/leadTree.js";
+import { childParts, childTarget, finishedTake, kindOf, leadActs, leadNodes, noteOf, type ChildPart, type LeadNode, type Tree } from "../components/threads/leadTree.js";
 import { SidebarMenuButton } from "../components/ui/sidebar.js";
 import { isThreadWorking } from "./Sidebar.logic.js";
 import { cn } from "../lib/utils.js";
@@ -22,6 +24,9 @@ import type { TileNode } from "./threadTree.js";
 
 /** How many rows an open fold mounts at a time. */
 const PAGE = 20;
+
+/** The rows a lead's Finished fold holds: the finished, then the settled threads. */
+const foldRows = <N,>(parts: Record<ChildPart, LeadNode<N>[]>): LeadNode<N>[] => [...parts.finished, ...parts.settled.filter(node => !("subagent" in node))];
 
 /** Whether a tile offers Settle on hover: it is a thread, and nothing in it or under it works, waits or asks. A failed
  * thread holds nothing, as the menu's Settle reads it. */
@@ -39,7 +44,7 @@ export function settlesOnHover(node: TileNode, tree: Tree<TileNode>): boolean {
 export function rowsUnder(lead: SidebarThreadSnapshot, kids: ReadonlyArray<TileNode>, tree: Tree<TileNode>): number {
   const count = (nodes: ReadonlyArray<LeadNode<TileNode>>): number => {
     const parts = childParts(nodes, tree);
-    const fold = parts.finished.length > 0 ? 1 : 0;
+    const fold = foldRows(parts).length > 0 ? 1 : 0;
     return parts.live.reduce((sum, node) => sum + 1 + ("subagent" in node ? 0 : count(leadNodes(node.thread, node.node.children, tree))), fold);
   };
   return count(leadNodes(lead, kids, tree));
@@ -59,8 +64,8 @@ export function LeadTree({
   depth: number;
   tree: Tree<TileNode>;
   verbs: ChildVerbs;
-  /** One child thread's tile with everything under it, as the sidebar draws it; a finished one is a slim row. */
-  tile: (node: TileNode, part: "live" | "finished") => ReactNode;
+  /** One child thread's tile with everything under it, as the sidebar draws it; a finished or settled one is a slim row. */
+  tile: (node: TileNode, part: ChildPart) => ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   const [shown, setShown] = useState(PAGE);
@@ -68,8 +73,10 @@ export function LeadTree({
   const opened = useStore(s => (s.selectedSubagent !== null && s.selectedId === lead.workspaceId && s.selectedThreadId === lead.threadId ? s.selectedSubagent : null));
   const nodes = leadNodes(lead, kids, tree);
   const parts = childParts(nodes, tree);
+  const folded = foldRows(parts);
+  const foldActs = leadActs(lead, finishedTake(nodes, tree), verbs);
   const at = lead.threadId === null ? undefined : { workspaceId: lead.workspaceId, threadId: lead.threadId };
-  const row = (node: LeadNode<TileNode>, part: "live" | "finished", rowDepth = depth): ReactNode => {
+  const row = (node: LeadNode<TileNode>, part: ChildPart, rowDepth = depth): ReactNode => {
     if (!("subagent" in node)) return tile(node.node, part);
     const rowId = `subagent:${node.of.id}:${node.subagent.id}`;
     return (
@@ -78,15 +85,15 @@ export function LeadTree({
       </li>
     );
   };
-  const page = open ? parts.finished.slice(0, shown) : [];
-  const rest = parts.finished.length - page.length;
+  const page = open ? folded.slice(0, shown) : [];
+  const rest = folded.length - page.length;
   const isOpened = (node: LeadNode<TileNode>): boolean => "subagent" in node && opened !== null && node.subagent.parentToolUseId === opened;
   // An ended subagent's open page keeps its row in sight under the shut fold, or where a settled one has no fold.
   const standing = open ? undefined : (parts.finished.find(isOpened) ?? parts.settled.find(isOpened));
   return (
     <>
       {parts.live.map(node => row(node, "live"))}
-      {parts.finished.length === 0 ? null : (
+      {folded.length === 0 ? null : (
         <li key="fold-finished" data-slim className={RAIL_ITEM_CLASS}>
           <SidebarMenuButton
             size="sm"
@@ -100,18 +107,18 @@ export function LeadTree({
               setOpen(!open);
               setShown(PAGE);
             }}
-            onContextMenu={event => void openContextMenu(event, leadActs(lead, finishedTake(nodes, tree), verbs))}
+            {...(foldActs.length > 0 ? { onContextMenu: (event: MouseEvent<HTMLElement>) => void openContextMenu(event, foldActs) } : {})}
           >
             <CircleCheckIcon aria-hidden className="size-3 shrink-0 text-sidebar-muted-foreground" />
             <span className="min-w-0 flex-1 truncate text-sidebar-muted-foreground">{CHILD_WORDS.finished}</span>
-            <span className={cn(ROW_META_CLASS, "shrink-0")}>{parts.finished.length}</span>
+            <span className={cn(ROW_META_CLASS, "shrink-0")}>{folded.length}</span>
             <ChevronDownIcon aria-hidden className={cn("size-3.5 shrink-0 text-sidebar-muted-foreground transition-transform duration-150", !open && "-rotate-90")} />
           </SidebarMenuButton>
           {standing === undefined ? null : <ul className={CHILD_LIST_CLASS}>{row(standing, "finished", depth + 1)}</ul>}
         </li>
       )}
-      {standing !== undefined && parts.finished.length === 0 ? row(standing, "finished") : null}
-      {page.map(node => row(node, "finished"))}
+      {standing !== undefined && folded.length === 0 ? row(standing, "finished") : null}
+      {page.map(node => row(node, parts.finished.includes(node) ? "finished" : "settled"))}
       {open && rest > 0 ? (
         <li key="more" data-slim className={RAIL_ITEM_CLASS}>
           <SidebarMenuButton size="sm" data-child-fold="more" data-sidebar-row data-row-id={`more:${threadRowId(lead.id)}`} data-depth={depth} className={cn(ONE_LINE_ROW_CLASS, "gap-1.5")} onClick={() => setShown(n => n + PAGE)}>
