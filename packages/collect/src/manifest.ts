@@ -63,6 +63,9 @@ const Fields = z.object({
   sources: z.array(z.string().min(1)).optional(),
   /** Only on an MCP server row: how the server signs in, read off its definition. */
   signIn: ServerSignIn.optional(),
+  /** Only on a consent MCP server row: what each value its definition carries goes by (a variable, a header, a flag,
+   * an argument's place), so a question can name them. Names only, never values. */
+  keys: z.array(z.string().min(1)).optional(),
 });
 
 export const ManifestEntry = Fields.superRefine((e, ctx) => {

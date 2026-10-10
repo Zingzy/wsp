@@ -8,7 +8,7 @@ import { addFix } from "../adds.js";
 import { ADD_COMPUTER_WORDS } from "../format.js";
 import { githubPick } from "./choices.js";
 import { agentName } from "@wsp/catalog";
-import { AT_ITS_TERMINAL, GITHUB_ROW, MCP_ID_PREFIX, agentOfRow, waitsForInstallLine, SETUP_STEP_WORDS, SETUP_WORDS, SIGNED_IN_THERE, placeWord, signInOfRow, plural, type RecipeFile, type PlaceAddJob, type PlaceProvisionRow, type PlaceSetup, type PlaceSetupEvent, type PlaceSetupStep, type PlaceView, type PlaceWait } from "@wsp/protocol";
+import { AT_ITS_TERMINAL, GITHUB_ROW, MCP_ID_PREFIX, NO_RECIPE, agentOfRow, waitsForInstallLine, SETUP_STEP_WORDS, SETUP_WORDS, SIGNED_IN_THERE, placeWord, signInOfRow, plural, type RecipeFile, type PlaceAddJob, type PlaceProvisionRow, type PlaceSetup, type PlaceSetupEvent, type PlaceSetupStep, type PlaceView, type PlaceWait } from "@wsp/protocol";
 
 /** A row's state as the marks draw it: a sign-in the person set aside reads skipped. */
 export type StepState = "waiting" | "working" | "done" | "skipped" | "needs-you" | "failed";
@@ -30,6 +30,8 @@ export interface StepLine {
   /** The catalog id whose sign-in the row offers on the computer, on one that was skipped or failed; how it signs in
    * there is the agents list's own rule. */
   readonly signIn?: string;
+  /** A server set aside for want of a yes to copying its keys, which the row offers to copy. */
+  readonly copyKeys?: true;
 }
 
 /** A setup frame onto the setup the record held: a step's line where it stands, every step the frame names running
@@ -137,8 +139,9 @@ function countLine(step: PlaceSetupStep, rows: readonly PlaceProvisionRow[]): st
 /** The setup on a computer as rows: Install wsp, then each step with the items of it that did not land under it,
  * the sign-ins under Agents. A step not started reads waiting; a running one says what it is putting on; a sign-in
  * that waits on the person carries its wait. `box` is the computer's name, for the words that name it. */
-export function setupRows(place: Pick<PlaceView, "setup" | "applied" | "picks">, box = ""): StepLine[] {
+export function setupRows(place: Pick<PlaceView, "setup" | "applied" | "picks" | "recipe">, box = ""): StepLine[] {
   const setup = place.setup;
+  const recipe = place.recipe === undefined || place.recipe === NO_RECIPE ? undefined : place.picks?.name;
   const rows = place.applied?.rows ?? [];
   const out: StepLine[] = [{ id: "wsp", name: INSTALL, state: "done", note: ADD_COMPUTER_WORDS.installed }];
   for (const { step, name, doing, ended } of SETUP_ROWS) {
@@ -164,6 +167,7 @@ export function setupRows(place: Pick<PlaceView, "setup" | "applied" | "picks">,
     out.push({ id: step, name, state, ...(note === undefined ? {} : { note }), ...(line?.ms === undefined ? {} : { ms: line.ms }), ...(stopped && setup?.said !== undefined ? { said: setup.said } : {}), ...githubSaid, ...(step === "github" && ran !== "working" ? signInOffer(github) : {}) });
     if (step === "agents") out.push(...signInRows(setup, rows, box));
     if (!stopped) for (const r of mine) if (r.outcome === "failed" && r !== github) out.push({ id: r.id, name: r.label, state: "failed", sub: true, ...(r.note === undefined ? {} : { said: r.note }), ...(r.fix === undefined ? {} : { fix: r.fix }) });
+    if (!stopped) for (const r of mine) if (r.outcome === "skipped" && r.keys !== undefined) out.push({ id: r.id, name: r.label, state: "skipped", sub: true, note: ADD_COMPUTER_WORDS.keysNotCopied(r.keys, recipe), copyKeys: true });
   }
   return out;
 }

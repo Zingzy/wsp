@@ -10,7 +10,7 @@
 // and the one act.
 import { CheckIcon, ExternalLinkIcon, ListChecksIcon, ServerIcon, XIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { fmtBytes, fmtDuration, HERE_PLACE_ID, hereName, recipeCounts, recipeSummary, type AgentsTarget, type PlaceSetupStep, type PlaceView, type ProjectIcon, type RecipeFile, type RecipeOptions, type SshHostSuggestion } from "@wsp/protocol";
+import { fmtBytes, fmtDuration, HERE_PLACE_ID, hereName, NO_RECIPE, recipeCounts, recipeSummary, type AgentsTarget, type PlaceSetupStep, type PlaceView, type ProjectIcon, type RecipeFile, type RecipeOptions, type SshHostSuggestion } from "@wsp/protocol";
 import { agentName } from "@wsp/catalog";
 import { ActButton } from "../../components/agents/agentsParts.js";
 import { AGENTS_LIST_WORDS, agentSignInStart, catalogSignInRow, signInAct, type RowAct, type RowsContext } from "../../components/agents/agentsRows.js";
@@ -40,13 +40,13 @@ import { placeName } from "../places.js";
 import { readRecipes, useRecipes } from "../recipesStore.js";
 import { Card, Line } from "../rows.js";
 import { CopyRow, DeviceCode, RefusalSlot } from "../sheetParts.js";
-import { STEP_TITLES, askedHostKey, askedSudo, closeAdd, connect, firstCloseOf, firstPick, go, openSetup, readOptions, retrySetup, setPicks, skipRow, setSaveAs, setUp, stepLine, stepsFor, tooBig, useAddFlow, weigh, type AddStep } from "./addFlow.js";
+import { STEP_TITLES, askedHostKey, askedSudo, closeAdd, connect, copyKeysOn, firstCloseOf, firstPick, go, openSetup, readOptions, retrySetup, setPicks, skipRow, setSaveAs, setUp, stepLine, stepsFor, tooBig, useAddFlow, weigh, type AddStep } from "./addFlow.js";
 import { everything, folderKey, fromRecipe, githubPick, noPicks, servable, tickUsedClis } from "./choices.js";
 import { AgentsPicks, Choice, ClisPicks, GitHubPicks, OtherPicks, PluginsPicks, ProjectsPicks, ServersPicks, SkillsPicks, type FolderOption } from "./PickLists.js";
 import { PickLine, PickRow } from "./PickRow.js";
 import { checkRows, opensLog, runningSince, setupCount, setupRows, setupStanding, stepLogs, type StepLine } from "./setup.js";
 import { STEP_BODY, STEP_HEAD, STEP_WIDTH, StepFoot } from "./StepDialog.js";
-import { RetryActs, SkipAct, StepRow } from "./StepRow.js";
+import { CopyKeysAct, RetryActs, SkipAct, StepRow } from "./StepRow.js";
 import { keyTakenAt } from "../../keyOwners.js";
 
 const sshLogin = (host: SshHostSuggestion): string => [host.user, host.hostName ?? host.alias].filter(Boolean).join("@");
@@ -360,6 +360,9 @@ export function SetupList({ place, id = "setup", rows = setupRows(place, placeNa
     });
   };
   const retry = (): void => ask(() => retrySetup(api, place.id));
+  // The yes lives on the picks a computer follows: a recipe's page gives it for every computer that follows one.
+  const ownPicks = place.recipe === undefined || place.recipe === NO_RECIPE;
+  const copyKeys = (): void => ask(() => copyKeysOn(api, place));
   const skip = (row: string) => (): void => ask(() => skipRow(api, place.id, row));
   const ctx: RowsContext = { where: "box", computer: box, heldWhy: null, ...(signIns === undefined ? {} : { acts: signIns }) };
   // How it signs in there is the agents list's own rule, off that computer's report row where one is read.
@@ -378,6 +381,7 @@ export function SetupList({ place, id = "setup", rows = setupRows(place, placeNa
   const acts = (row: StepLine): ReactNode => {
     const signIn = signInOf(row);
     const signInButton = signIn === undefined ? null : <ActButton act={actOf(row, signIn)} k="sign-in" />;
+    if (row.state === "skipped" && row.copyKeys === true && ownPicks) return <CopyKeysAct onCopy={copyKeys} busy={busy} />;
     if (row.state === "skipped") return signInButton ?? undefined;
     if (row.state !== "failed" || row.wait !== undefined) return undefined;
     return (

@@ -43,7 +43,7 @@ describe("mcp servers", () => {
       "agents/mcp/claude/github", "agents/mcp/claude/notion", "agents/mcp/claude/gsc", "agents/mcp/claude/notes", "agents/mcp/claude/home/zomato", "agents/mcp/mcp-remote",
     ]);
     expect(rows[0]).toEqual({
-      rung: "agents", id: "agents/mcp/claude/github", label: "github", group: "Claude Code MCP servers", paths: [], bytes: 0, default: "bring", consent: true,
+      rung: "agents", id: "agents/mcp/claude/github", label: "github", group: "Claude Code MCP servers", paths: [], bytes: 0, default: "bring", consent: true, keys: ["GITHUB_TOKEN"],
       detail: "stdio: npx @modelcontextprotocol/server-github; runs via npx; carries a secret: env GITHUB_TOKEN (40 B)", signIn: "token",
     });
     expect(rows[1]).toEqual({
@@ -52,7 +52,7 @@ describe("mcp servers", () => {
     });
     // The file a secret-named env value points at travels on the row; the path itself is rewritten on the machine.
     expect(rows[2]).toEqual({
-      rung: "agents", id: "agents/mcp/claude/gsc", label: "gsc", group: "Claude Code MCP servers", paths: ["~/.config/gsc/creds.json"], bytes: 2100, default: "bring", consent: true,
+      rung: "agents", id: "agents/mcp/claude/gsc", label: "gsc", group: "Claude Code MCP servers", paths: ["~/.config/gsc/creds.json"], bytes: 2100, default: "bring", consent: true, keys: ["GSC_CREDENTIALS_PATH"],
       detail: "stdio: uvx mcp-search-console; needs uv, installed on the machine when missing; carries a secret: the file GSC_CREDENTIALS_PATH points at (2 KB)", signIn: "token",
     });
     expect(rows[3]).toEqual({
@@ -61,8 +61,8 @@ describe("mcp servers", () => {
       detail: "stdio: ~/Library/Application Support/Notes/mcp; carries no secret", signIn: "none",
     });
     expect(rows[4]).toEqual({
-      rung: "agents", id: "agents/mcp/claude/home/zomato", label: "zomato", group: "Claude Code MCP servers", paths: [], bytes: 0, default: "bring", consent: true,
-      detail: "local to ~; stdio: npx mcp-remote …; runs via npx; carries a secret: arg 2 (26 B); its saved sign-in (1 KB) travels on the mcp-remote sign-ins row", signIn: "oauth",
+      rung: "agents", id: "agents/mcp/claude/home/zomato", label: "zomato", group: "Claude Code MCP servers", paths: [], bytes: 0, default: "bring",
+      detail: "local to ~; stdio: npx mcp-remote (mcp.zomato.com/mcp); runs via npx; its saved sign-in (1 KB) travels on the mcp-remote sign-ins row", signIn: "oauth",
     });
     // The whole store is claimed; only what the current bridge reads travels.
     expect(rows[5]).toEqual({
@@ -88,7 +88,7 @@ describe("mcp servers", () => {
       default: "skip", reason: "no saved sign-in the current bridge reads; older versions' folders are left here",
     });
     const viaRemote = await detectMcp(fakeHost({ files: { "~/.claude.json": JSON.stringify({ mcpServers: { z: { command: "npx", args: ["-y", "mcp-remote", "https://z.example/mcp"] } } }) } }));
-    expect(viaRemote.map(r => r.detail)).toEqual(["stdio: npx mcp-remote …; runs via npx; carries a secret: arg 3 (21 B); no saved sign-in; the browser sign-in runs again on the machine"]);
+    expect(viaRemote.map(r => r.detail)).toEqual(["stdio: npx mcp-remote (z.example/mcp); runs via npx; no saved sign-in; the browser sign-in runs again on the machine"]);
   });
 
   it("Codex: mcp_servers tables in config.toml, env sub-tables included, with the bearer variable named as something to set", async () => {
@@ -122,7 +122,7 @@ describe("mcp servers", () => {
     expect(rows.map(r => [r.id, r.default, r.reason, r.detail])).toEqual([
       ["agents/mcp/codex/grafana", "bring", undefined, "stdio: /opt/homebrew/bin/uvx mcp-grafana; needs uv, installed on the machine when missing; carries a secret: env GRAFANA_SERVICE_ACCOUNT_TOKEN (15 B)"],
       ["agents/mcp/codex/sentry", "bring", undefined, "http: mcp.sentry.dev/mcp; nothing to install; reads SENTRY_TOKEN from the environment, set it on the machine; carries no secret"],
-      ["agents/mcp/codex/my server", "skip", "path /Applications/Tool.app/Contents/mcp.js is macOS-only, will not run", "stdio: node …; carries secrets: env A_KEY (4 B), arg 1 (38 B)"],
+      ["agents/mcp/codex/my server", "skip", "path /Applications/Tool.app/Contents/mcp.js is macOS-only, will not run", "stdio: node /Applications/Tool.app/Contents/mcp.js; carries a secret: env A_KEY (4 B)"],
     ]);
   });
 
@@ -175,6 +175,39 @@ describe("mcp servers", () => {
     expect(JSON.stringify(rows)).not.toMatch(/sk-test-bare-token|ghp-test-flag-secret|ghp-test-eq-secret|sk-test-flag-secret|sk-after-dashes/);
   });
 
+  it("a positional address, a path and a NAME=value whose name is no secret's are the definition's own words: aws-mcp needs no copy answer, gsc needs one for its key alone", async () => {
+    const config = JSON.stringify({
+      mcpServers: {
+        "aws-mcp": { command: "uvx", args: ["mcp-proxy-for-aws@latest", "https://aws-mcp.us-east-1.api.aws/mcp", "--metadata", "AWS_REGION=us-east-1", "--metadata", "INSTALL_SOURCE=claude-code"] },
+        gsc: { command: `${HOME}/mcp-gsc/.venv/bin/python`, args: [`${HOME}/mcp-gsc/gsc_server.py`], env: { GSC_CREDENTIALS_PATH: `${HOME}/.config/gsc/creds.json`, GSC_SKIP_OAUTH: "true" } },
+        login: { command: "npx", args: ["-y", "some-server", "https://acme:pw-test-login@x.example/mcp"] },
+        query: { command: "npx", args: ["-y", "some-server", "https://x.example/mcp?api_key=sk-test-query"] },
+        named: { command: "npx", args: ["-y", "some-server", "--api-key", "sk-test-flag", "-e", "SENTRY_ACCESS_TOKEN=sntrys-test"], env: { SENTRY_HOST: "sentry.io" } },
+        dburl: { command: "docker", args: ["run", "-e", "DATABASE_URL=postgres://app:pw-test-db@db.example/app", "ghcr.io/acme/lab"] },
+        dsn: { command: "npx", args: ["-y", "some-server", "--metadata", "DSN=https://pk-test-dsn@o1.ingest.example/1"] },
+        zapier: { command: "npx", args: ["-y", "mcp-remote", "https://mcp.zapier.com/api/mcp/s/ZmFrZS16YXBpZXItdGVzdC1wYXRoLXNlY3JldA==/mcp"] },
+        azure: { command: "npx", args: ["-y", "mcp-remote", "https://fn.example.net/runtime/webhooks/mcp/sse?code=az-test-code"] },
+        plaindb: { command: "npx", args: ["-y", "some-server", "--metadata", "DATABASE_URL=postgres://db.example/app"] },
+      },
+    });
+    const rows = await detectMcp(fakeHost({ files: { "~/.claude.json": config, "~/.config/gsc/creds.json": 2100, "~/mcp-gsc/gsc_server.py": 900 } }));
+    expect(rows.map(r => [r.label, r.consent, r.keys, r.detail])).toEqual([
+      ["aws-mcp", undefined, undefined, "stdio: uvx mcp-proxy-for-aws@latest (aws-mcp.us-east-1.api.aws/mcp) --metadata AWS_REGION=us-east-1 --metadata …; needs uv, installed on the machine when missing; carries no secret"],
+      ["gsc", true, ["GSC_CREDENTIALS_PATH"], "stdio: ~/mcp-gsc/.venv/bin/python ~/mcp-gsc/gsc_server.py; needs ~/mcp-gsc/.venv/bin/python on the machine; depends on ~/mcp-gsc/gsc_server.py, which comes along only if a row carries it; carries a secret: the file GSC_CREDENTIALS_PATH points at (2 KB)"],
+      ["login", true, ["argument 3"], "stdio: npx some-server …; runs via npx; carries a secret: arg 3 (40 B)"],
+      ["query", true, ["argument 3"], "stdio: npx some-server …; runs via npx; carries a secret: arg 3 (43 B)"],
+      ["named", true, ["--api-key", "SENTRY_ACCESS_TOKEN"], "stdio: npx some-server --api-key … -e SENTRY_ACCESS_TOKEN=…; runs via npx; carries secrets: flag --api-key (12 B), arg SENTRY_ACCESS_TOKEN (11 B)"],
+      // An address with a login is a value under any name and any scheme, the same rule a positional one keeps.
+      ["dburl", true, ["argument 1", "DATABASE_URL", "argument 4"], "stdio: docker … -e DATABASE_URL=… …; needs docker on the machine; carries secrets: arg 1 (3 B), arg DATABASE_URL (40 B), arg 4 (16 B)"],
+      ["dsn", true, ["DSN"], "stdio: npx some-server --metadata DSN=…; runs via npx; carries a secret: arg DSN (39 B)"],
+      // A key in an address's path or under a query name that says nothing asks too: asking costs one question.
+      ["zapier", true, ["argument 3"], "stdio: npx mcp-remote …; runs via npx; carries a secret: arg 3 (77 B); no saved sign-in; the browser sign-in runs again on the machine"],
+      ["azure", true, ["argument 3"], "stdio: npx mcp-remote …; runs via npx; carries a secret: arg 3 (65 B); no saved sign-in; the browser sign-in runs again on the machine"],
+      ["plaindb", undefined, undefined, "stdio: npx some-server --metadata DATABASE_URL=postgres://db.example/app; runs via npx; carries no secret"],
+    ]);
+    expect(JSON.stringify(rows)).not.toMatch(/pw-test-login|sk-test-query|sk-test-flag|sntrys-test|pw-test-db|pk-test-dsn|ZmFrZS16YXBp|az-test-code/);
+  });
+
   it("a secret-named env value pointing outside home is named without its value; a home path the server runs against is a dependency, or unticks the row without locking it when it is not here yet", async () => {
     const config = JSON.stringify({
       mcpServers: {
@@ -203,7 +236,7 @@ describe("mcp servers", () => {
     });
     const rows = await detectMcp(fakeHost({ files: { "~/.claude.json": config } }));
     expect(rows.map(r => r.detail)).toEqual([
-      "stdio: npx mcp-remote … --static-oauth-client-info …; runs via npx; carries secrets: arg 2 (26 B), flag --static-oauth-client-info (48 B); no saved sign-in; the browser sign-in runs again on the machine",
+      "stdio: npx mcp-remote (mcp.notion.com/mcp) --static-oauth-client-info …; runs via npx; carries a secret: flag --static-oauth-client-info (48 B); no saved sign-in; the browser sign-in runs again on the machine",
       "stdio: npx some-server --auth --transport http-only; runs via npx; carries no secret",
     ]);
     expect(JSON.stringify(rows)).not.toContain("shh-secret");

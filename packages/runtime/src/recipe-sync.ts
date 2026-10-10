@@ -31,16 +31,18 @@ function itemsOf(items: Readonly<Record<string, string>>, key: string): string {
 }
 
 /** Every row added, changed or taken out between what a computer applied and the recipe now. A computer that kept no
- * items (set up before the sync) reads every row that has one as changed, once. */
+ * items (set up before the sync) reads every row that has one as changed, once. The one answer about the servers'
+ * keys moving changes every server that stays. */
 export function recipeChanges(before: RecipeFile | undefined, beforeItems: Readonly<Record<string, string>> | undefined, after: RecipeFile, afterItems: Readonly<Record<string, string>>): RecipeChange[] {
   const out: RecipeChange[] = [];
+  const keysMoved = before !== undefined && (before.copyKeys === true) !== (after.copyKeys === true);
   for (const kind of RECIPE_KINDS) {
     const was = before === undefined ? new Map<string, unknown>() : rowsOf(before, kind);
     const now = rowsOf(after, kind);
     for (const [name, row] of now) {
       const key = `${kind}/${name}`;
       if (!was.has(name)) out.push({ key, kind, name, how: "added" });
-      else if (JSON.stringify(was.get(name)) !== JSON.stringify(row)) out.push({ key, kind, name, how: "changed" });
+      else if (JSON.stringify(was.get(name)) !== JSON.stringify(row) || (kind === "mcp" && keysMoved)) out.push({ key, kind, name, how: "changed" });
       else if (beforeItems === undefined ? itemsOf(afterItems, key) !== "[]" : itemsOf(beforeItems, key) !== itemsOf(afterItems, key)) out.push({ key, kind, name, how: "edited" });
     }
     for (const name of was.keys()) if (!now.has(name)) out.push({ key: `${kind}/${name}`, kind, name, how: "removed" });
