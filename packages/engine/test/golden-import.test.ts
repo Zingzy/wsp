@@ -836,13 +836,13 @@ describe("toolInstallsFor", () => {
     expect(cmd("tools/homebrew")).toContain("useradd");
     // The login-shell PATH file is written by the base stage on every golden, so the bootstrap no longer writes it.
     expect(cmd("tools/homebrew")).not.toContain("/etc/profile.d/wsp-golden.sh");
-    expect(cmd("tools/homebrew")).not.toContain("Brewfile");
+    expect(cmd("tools/homebrew")).not.toContain("brew bundle");
     expect(cmd("tools/brew-toolchain/glibc")).toMatch(/brew install glibc'$/);
     expect(cmd("tools/brew-toolchain/gcc")).toMatch(/brew install gcc'$/);
-    expect(cmd("tools/brew-tap/zingzy/tap")).toMatch(/su -s \/bin\/bash linuxbrew -c 'cd \.[\s\S]*brew tap zingzy\/tap'$/);
-    expect(cmd("tools/brew/gh")).toMatch(/su -s \/bin\/bash linuxbrew -c 'cd \.[\s\S]*HOMEBREW_NO_AUTO_UPDATE=1[\s\S]*brew install gh'$/);
+    expect(cmd("tools/brew-tap/zingzy/tap")).toMatch(/su -s \/bin\/bash linuxbrew -c '\[ -d "\$PWD" \][\s\S]*brew tap zingzy\/tap'$/);
+    expect(cmd("tools/brew/gh")).toMatch(/su -s \/bin\/bash linuxbrew -c '\[ -d "\$PWD" \][\s\S]*HOMEBREW_NO_AUTO_UPDATE=1[\s\S]*brew install gh'$/);
     const shared = cmd("tools/brew-shared");
-    expect(shared).toMatch(/su -s \/bin\/bash linuxbrew -c 'cd \. 2>\/dev\/null \|\| cd \/home\/linuxbrew\nexport HOMEBREW_NO_AUTO_UPDATE=1 .*NONINTERACTIVE=1 HOMEBREW_CURL_RETRIES=1\n/);
+    expect(shared).toMatch(/su -s \/bin\/bash linuxbrew -c '\[ -d "\$PWD" \] && \[ -r "\$PWD" \] \|\| cd \/home\/linuxbrew\nexport HOMEBREW_NO_AUTO_UPDATE=1 .*NONINTERACTIVE=1 HOMEBREW_CURL_RETRIES=1\n/);
     expect(shared).toContain(`brew deps --for-each '\\''gh'\\'' '\\''pipx'\\'' '\\''go'\\'')`);
     // Homebrew's own toolchain is never in the shared set: it installed before, on request, and stays that way.
     expect(shared).toContain(`grep -vx -e '\\'''\\'' -e glibc -e gcc | sort | uniq -d`);
@@ -957,8 +957,8 @@ describe("toolInstallsFor", () => {
   it("the housekeeping after the loop is autoremove then a full cleanup, each as linuxbrew with the tools PATH", () => {
     const BREW_HOUSEKEEPING = brewHousekeeping(TOOLS_PATH);
     expect(BREW_HOUSEKEEPING).toHaveLength(2);
-    expect(BREW_HOUSEKEEPING[0]).toMatch(/^export PATH=\/root\/\.local\/bin:.*\nsu -s \/bin\/bash linuxbrew -c 'cd \.[\s\S]*brew autoremove'$/);
-    expect(BREW_HOUSEKEEPING[1]).toMatch(/\nsu -s \/bin\/bash linuxbrew -c 'cd \.[\s\S]*brew cleanup -s --prune=all'$/);
+    expect(BREW_HOUSEKEEPING[0]).toMatch(/^export PATH=\/root\/\.local\/bin:.*\nsu -s \/bin\/bash linuxbrew -c '\[ -d "\$PWD" \][\s\S]*brew autoremove'$/);
+    expect(BREW_HOUSEKEEPING[1]).toMatch(/\nsu -s \/bin\/bash linuxbrew -c '\[ -d "\$PWD" \][\s\S]*brew cleanup -s --prune=all'$/);
   });
 
   it("puts the one brew a PATH reaches in the directory Homebrew's own line prepends, and Homebrew's brew where no PATH goes", () => {
@@ -976,10 +976,13 @@ describe("toolInstallsFor", () => {
     expect(cmd).toContain(`chmod 0755 ${BREW}`);
     // Written after the chown, so the file root runs with root's own rights is not the linuxbrew user's to rewrite.
     expect(cmd.indexOf(`> ${BREW}`)).toBeGreaterThan(cmd.indexOf("chown -R linuxbrew:linuxbrew"));
-    // A person's own brew reads the folder they are in; one linuxbrew cannot read (root's home on some images)
-    // would stop Homebrew before it starts, so the shim moves off it and only off it.
-    expect(LINUXBREW_SHIM).toContain(`su -s /bin/bash linuxbrew -c 'cd . 2>/dev/null || cd ${LINUXBREW_HOME}
-exec "$0" "$@"' -- ${BREW_REAL}`);
+    // Outside the first install, so a computer set up behind an older shim gets this one, and the step reads present
+    // only where the file is this one.
+    expect(cmd.indexOf(`> ${BREW}`)).toBeGreaterThan(cmd.indexOf("\nfi\n"));
+    expect(toolInstallsFor([row({ rung: "tools", id: "tools/brew/gh", linux: "yes" })]).installs.find(i => i.id === "tools/homebrew")!.present).toBe(`[ "$(cat ${BREW})" = ${shellQuote(LINUXBREW_SHIM)} ]`);
+    // A person's own brew reads the folder they are in; one linuxbrew cannot reach (root's home on a box) would stop
+    // Homebrew before it starts, so the shim moves off it and only off it, taking the Brewfile along on fd 9.
+    expect(LINUXBREW_SHIM).toContain(`su -s /bin/bash linuxbrew -c '[ -d "$PWD" ] && [ -r "$PWD" ] || { cd ${LINUXBREW_HOME}; `);
   });
 
   it("costs a line and not the step when the upstream branch will not fetch: the shim still lands", () => {

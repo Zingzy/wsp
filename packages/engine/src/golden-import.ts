@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { BREW_ID_PREFIX, MCP_ID_PREFIX, packageOf, shellLine, shellQuote, TOOLS_PATH, toolRowId, toolRowPrefix, type LoginChoice, type RecipeCustomRow, type RecipeDigest } from "@wsp/protocol";
 import { APT, PRELUDE } from "./dotfiles-presets.js";
 import { BREW_TOOLCHAIN, brewSharedCheck, brewSharedDeps } from "./brew-shared.js";
-import { APT_ENV, APT_INDEX, APT_UPDATE, asLinuxbrew, atCatalogPin, belowLine, pinnedNote, BASE_FLOOR, BASE_IMAGE_COMMANDS, baseEntryFor, BREW, BREW_ENV, BREW_PREFIX, BREW_REAL, BREW_REPO, brewHasCheck, LINUXBREW_HOME, MAC_BIN_DIRS, MAC_BREW, MAC_ONLY, CATALOG_AGENTS, CATALOG_TOOLS, catalogEntry, catalogToolFor, editJson, GUEST_HOME, installEnv, installHomes, loginSignIn, mintsToken, HOMEBREW, HOMEBREW_STEP, fixesVersion, installAfter, installLine, LINUXBREW_SHIM, NODE_BIN, NODE_PATH_LINE, NODE_RELEASES, nodeInstallScript, parseJsonc, ROAD_MODULES, roadModule, ROADS, rewrittenRel, rowRoadReader, smokeOf, standingPin, unpinned, UV_INSTALL, versionOf, type AgentEntry, type InstallRoad, type NodeMajor, type RoadName, type ToolEntry, type ToolPin } from "@wsp/catalog";
+import { APT_ENV, APT_INDEX, APT_UPDATE, asLinuxbrew, atCatalogPin, belowLine, pinnedNote, BASE_FLOOR, BASE_IMAGE_COMMANDS, baseEntryFor, BREW, BREW_ENV, BREW_PREFIX, BREW_REAL, BREW_REPO, BREW_SHIM_PRESENT, brewHasCheck, LINUXBREW_HOME, MAC_BIN_DIRS, MAC_BREW, MAC_ONLY, CATALOG_AGENTS, CATALOG_TOOLS, catalogEntry, catalogToolFor, editJson, GUEST_HOME, installEnv, installHomes, loginSignIn, mintsToken, HOMEBREW, HOMEBREW_STEP, fixesVersion, installAfter, installLine, LINUXBREW_SHIM, NODE_BIN, NODE_PATH_LINE, NODE_RELEASES, nodeInstallScript, parseJsonc, ROAD_MODULES, roadModule, ROADS, rewrittenRel, rowRoadReader, smokeOf, standingPin, unpinned, UV_INSTALL, versionOf, type AgentEntry, type InstallRoad, type NodeMajor, type RoadName, type ToolEntry, type ToolPin } from "@wsp/catalog";
 
 export { CLAUDE_KEY_FILE, HOMEBREW, NODE_PATH_LINE, NODE_RELEASES, UV, UV_INSTALL, nodeInstallScript, type NodeMajor, type NodeRelease, type ToolPin } from "@wsp/catalog";
 export { packageOf } from "@wsp/protocol";
@@ -843,12 +843,12 @@ function homebrewBootstrap(): string {
     `  mkdir -p ${BREW_PREFIX}/bin "$(dirname ${BREW_REAL})"`,
     `  ln -sfn ../Homebrew/bin/brew ${BREW_REAL}`,
     `  chown -R linuxbrew:linuxbrew ${LINUXBREW_HOME}`,
-    // After the chown, so the one file root executes stays root's; the rm is for the dangling link a half-built
-    // machine leaves, which the redirect would otherwise follow into the checkout.
-    `  rm -f ${BREW}`,
-    `  printf '%s\\n' ${shellQuote(LINUXBREW_SHIM)} > ${BREW}`,
-    `  chmod 0755 ${BREW}`,
     "fi",
+    // After the chown, so the one file root executes stays root's, and on every run, so an older shim is replaced; the
+    // rm is for the dangling link a half-built machine leaves, which the redirect would follow into the checkout.
+    `rm -f ${BREW}`,
+    `printf '%s\\n' ${shellQuote(LINUXBREW_SHIM)} > ${BREW}`,
+    `chmod 0755 ${BREW}`,
     `${asLinuxbrew("--version")} >/dev/null`,
   ].join("\n");
 }
@@ -1154,7 +1154,7 @@ export function toolInstallsFor(entries: readonly RecipeEntry[], table: BrewTabl
   const catalogFormulae = catalog.flatMap(c => (c.planned.road.road === "brew" ? roadModule(c.planned.road).names(c.planned.road) : []));
 
   if (brew.taps.length + brew.formulae.length > 0 || managerFormulae.length + catalogFormulae.length + customOf("brew").length > 0) {
-    installs.push({ id: "tools/homebrew", label: "Homebrew", manager: "brew", cmd: withPath(homebrewBootstrap(), path, prefix), shown: `git clone github.com/Homebrew/brew at ${HOMEBREW.tag}`, bin: "brew" });
+    installs.push({ id: "tools/homebrew", label: "Homebrew", manager: "brew", cmd: withPath(homebrewBootstrap(), path, prefix), shown: `git clone github.com/Homebrew/brew at ${HOMEBREW.tag}`, bin: "brew", present: BREW_SHIM_PRESENT });
     installs.push(...toolchain.steps);
     for (const t of brew.taps) installs.push({ id: `tools/brew-tap/${t}`, label: t, manager: "brew", cmd: withPath(asLinuxbrew(`tap ${t}`), path, prefix), shown: `brew tap ${t}`, after: toolchain.last, check: brewTapCheck(t) });
     const formulae = [...brew.formulae, ...managerFormulae, ...catalogFormulae];

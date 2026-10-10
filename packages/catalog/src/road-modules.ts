@@ -254,9 +254,12 @@ export const BREW = `${BREW_PREFIX}/bin/brew`;
 export const BREW_REAL = `${BREW_PREFIX}/libexec/brew`;
 
 /** su hands linuxbrew the directory the caller stood in, and Homebrew stops before it starts on one linuxbrew
- * cannot read: root's home is 0700 on the images a box boots, and every formula row failed behind it. Stay where
- * the call was made when linuxbrew can read it, so a person's own brew still reads the folder they are in. */
-export const FROM_A_READABLE_DIR = `cd . 2>/dev/null || cd ${LINUXBREW_HOME}`;
+ * cannot reach: root's home is 0700 on the images a box boots, and every project folder is under it. `cd .` is no
+ * test of that, since bash falls back to the relative chdir, which needs no way through /root; Homebrew's own is
+ * `[[ -d $PWD && -r $PWD ]]`, so this is the same one. Stay where the call was made when it passes, so a person's
+ * own brew still reads the folder they are in. */
+const CALLER_DIR_READABLE = `[ -d "$PWD" ] && [ -r "$PWD" ]`;
+export const FROM_A_READABLE_DIR = `${CALLER_DIR_READABLE} || cd ${LINUXBREW_HOME}`;
 
 // Homebrew refuses to run as root, so it lives under its own user at the
 // prefix its Linux bottles are built for; anything else compiles from source.
@@ -271,8 +274,16 @@ export function asLinuxbrew(cmd: string): string {
 /** The file that sits at BREW, so every brew on the machine runs as the user that owns the tree however it was
  * reached. Root running Homebrew's own brew writes root-owned files into that tree and git then refuses to read it,
  * which reads as "No remote origin, skipping update". It sets no Homebrew environment: a person's brew is meant to
- * update, and a caller that wants otherwise exports it, which su carries through. */
-export const LINUXBREW_SHIM = ["#!/bin/sh", `if [ "$(id -un)" = linuxbrew ]; then exec ${BREW_REAL} "$@"; fi`, `exec su -s /bin/bash linuxbrew -c ${shellQuote(`${FROM_A_READABLE_DIR}\nexec "$0" "$@"`)} -- ${BREW_REAL} "$@"`].join("\n");
+ * update, and a caller that wants otherwise exports it, which su carries through. Root opens the caller's Brewfile
+ * on fd 9, so `brew bundle` from a project linuxbrew cannot reach still reads it there. */
+export const LINUXBREW_SHIM = [
+  "#!/bin/sh",
+  `if [ "$(id -un)" = linuxbrew ]; then exec ${BREW_REAL} "$@"; fi`,
+  "if [ -f Brewfile ]; then exec 9<Brewfile; else exec 9<&-; fi",
+  `exec su -s /bin/bash linuxbrew -c ${shellQuote(`${CALLER_DIR_READABLE} || { cd ${LINUXBREW_HOME}; [ -e /dev/fd/9 ] && export HOMEBREW_BUNDLE_FILE="\${HOMEBREW_BUNDLE_FILE:-/dev/fd/9}"; }\nexec "$0" "$@"`)} -- ${BREW_REAL} "$@"`,
+].join("\n");
+/** Homebrew is there only behind today's shim: a computer whose brew answers through an older one runs setup's step again. */
+export const BREW_SHIM_PRESENT = `[ "$(cat ${BREW})" = ${shellQuote(LINUXBREW_SHIM)} ]`;
 
 /** A formula's own short name, the part after the tap: the name Homebrew links it under in the prefix, and the
  * name the road below installs the binary under where a tap formula has no Linux bottle. Not the command the
