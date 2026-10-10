@@ -120,6 +120,7 @@ describe("the sign-ins on a computer or a workspace", () => {
       reportOf: async () => undefined,
       signInsAt: () => undefined,
       loginLanded: async () => {},
+      loginsAgain: async () => {},
       exec: async () => ({ exitCode: 0, stdout: "", stderr: "" }),
     }) as unknown as PlaceDoor;
 
@@ -533,6 +534,7 @@ describe("the projects a computer's report covers", () => {
     reportOf: async () => undefined,
     signInsAt: () => undefined,
     loginLanded: async () => {},
+    loginsAgain: async () => {},
     exec: async () => ({ exitCode: 0, stdout: "", stderr: "" }),
   } as unknown as PlaceDoor;
   function computer(held: Record<string, readonly (typeof SPOO)[]> = { pl_1: [SPOO, WWW], here: [WWW] }) {

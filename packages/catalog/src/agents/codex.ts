@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { BWRAP_APPARMOR } from "../bwrap-apparmor.js";
 import type { AgentEntry } from "../catalog.js";
 import { CODEX_CONFIG_FILE, CODEX_HOOKS } from "../codex-hooks.js";
 import { CODEX_CONTEXT } from "../context.js";
@@ -26,6 +27,7 @@ export const CODEX: AgentEntry = {
   node: 16,
   // 0.155.1 runs its default sandbox under bubblewrap on Linux: with no bwrap on PATH a turn says so and runs read-only.
   aptNeeds: [{ package: "bubblewrap", command: "bwrap" }],
+  setupNeeds: [BWRAP_APPARMOR],
   signIn: SIGN_IN_ROWS.codex,
   // https://developers.openai.com/codex/config-basic (project scope is a trusted repo's .codex/config.toml)
   mcp: {

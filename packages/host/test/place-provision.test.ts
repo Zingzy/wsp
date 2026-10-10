@@ -344,6 +344,9 @@ describe("what taking rows out of a computer's picks runs there", () => {
     const undo = await undoPlan(before, [{ kind: "agents", name: "codex" }], { home: "/root" }, async () => new Map());
     const by = new Map(undo.map(u => [u.key, u]));
     expect(by.get("agents/codex/bubblewrap")).toMatchObject({ ids: ["agents/codex/bubblewrap"], owner: "agents/codex/bubblewrap", cmd: expect.stringContaining("apt-get purge -y -qq bubblewrap") });
+    // The profile comes off only where its row loaded it; a computer that already let bwrap through reads present.
+    expect(by.get("agents/codex/bwrap-apparmor")).toMatchObject({ ids: ["agents/codex/bwrap-apparmor"], owner: "agents/codex/bwrap-apparmor", cmd: expect.stringContaining('apparmor_parser -R "$f"') });
+    expect(by.get("agents/codex/bwrap-apparmor")?.cmd).toContain('rm -f "$f" /var/cache/apparmor/*/bwrap-userns-restrict');
   });
 
   it("takes gh off for the GitHub row only by the row that put gh on, and git-lfs's filters off before the tool", async () => {

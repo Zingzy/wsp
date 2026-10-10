@@ -28,9 +28,10 @@ import {
   type AgentSignInState,
   type PlaceReport,
   type RecipeOptions,
+  shellQuote,
 } from "@wsp/protocol";
 import { SSH_STORE_VARS, plainPath, type ProvisionPlan, type ToolInstall } from "@wsp/engine";
-import { CATALOG_AGENTS, keyEnvOf, mintsToken, sharedFileIn, sharedOn } from "@wsp/catalog";
+import { CATALOG_AGENTS, SHARED_LOGINS, keyEnvOf, mintsToken, sharedFileIn, sharedOn } from "@wsp/catalog";
 import type { WebSocket } from "ws";
 import type { PlaceForward } from "../place-forward.js";
 import type { DaemonReach } from "../reach.js";
@@ -149,6 +150,25 @@ export function signInsOf(
 export function sharedLoginFile(agentId: string): string | undefined {
   const shared = sharedOn(agentId);
   return shared === undefined ? undefined : sharedFileIn(shared);
+}
+
+/** How long the read of which shared logins stand on a computer gets: an agents read waits on it. */
+export const LOGINS_READ_MS = 10_000;
+
+/** The files every shared login writes under a computer's logins folder, named as its daemon lists them. */
+const SHARED_LOGIN_FILES: readonly string[] = SHARED_LOGINS.map(sharedFileIn);
+
+/** Prints which shared logins stand under that logins folder, one per line, the way its daemon counts them at a
+ * dial: anything there but a folder. A computer with no logins folder prints none. */
+export function sharedLoginsScript(logins: string): string {
+  return `cd ${shellQuote(logins)} 2>/dev/null || exit 0\nfor f in ${SHARED_LOGIN_FILES.map(shellQuote).join(" ")}; do if [ -e "$f" ] || [ -L "$f" ]; then [ -d "$f" ] || printf '%s\\n' "$f"; fi; done`;
+}
+
+/** A computer's logins list with each shared login's file as `found` says it stands now and every other name as
+ * listed; nothing where that is the list already. */
+export function relistedLogins(listed: readonly string[], found: readonly string[]): string[] | undefined {
+  const next = [...listed.filter(f => !SHARED_LOGIN_FILES.includes(f)), ...found.filter(f => SHARED_LOGIN_FILES.includes(f))].sort();
+  return next.length === listed.length && next.every((f, i) => f === listed[i]) ? undefined : next;
 }
 
 /** The word for an agent whose own login is not on the computer: this host's vault holds the token or the key it

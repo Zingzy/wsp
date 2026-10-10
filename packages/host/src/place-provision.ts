@@ -11,7 +11,7 @@ import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { join, posix } from "node:path";
 import type { Host, Manifest, ManifestEntry, Platform } from "@wsp/collect";
 import { expand, nodeHost } from "@wsp/collect";
-import { CATALOG_AGENTS, COMPILER_ROW, aptNeedRows, MCP_AGENTS, SHARED_SKILLS, TOOL_PREFIX, catalogEntry, catalogIdOfRow, harnessLine, installHomes, ownSkillFolder, rewrittenRel, roadModule } from "@wsp/catalog";
+import { CATALOG_AGENTS, COMPILER_ROW, aptNeedRows, setupNeedRows, MCP_AGENTS, SHARED_SKILLS, TOOL_PREFIX, catalogEntry, catalogIdOfRow, harnessLine, installHomes, ownSkillFolder, rewrittenRel, roadModule } from "@wsp/catalog";
 import {
   agentStateFile,
   mcpRowId,
@@ -329,6 +329,7 @@ export async function undoPlan(before: RecipeFile, removed: readonly { kind: Rec
           const r = roadModule(apt).uninstall(apt, need.command);
           out.push({ key: need.id, label: need.package, ids: [need.id], owner: need.id, ...("cmd" in r ? { cmd: `${pathLine(path, prefix)}\n${r.cmd}` } : { note: r.note }) });
         }
+        for (const need of setupNeedRows(name)) out.push({ key: need.id, label: need.label, ids: [need.id], owner: need.id, cmd: `${pathLine(path, prefix)}\n${need.off}` });
         break;
       }
       case "plugins": {

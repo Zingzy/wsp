@@ -166,10 +166,39 @@ describe("what a computer already satisfies", () => {
     const planOf = (...ids: string[]): ProvisionPlan => provisionPlanOf({ recipeHash: "h1", agents: agentInstallsFor(ids.map(id => row(id))).installs, node: agentInstallsFor(ids.map(id => row(id))).node!, tools: [] }, "2026-09-17T10:00:00.000Z", TOOLS_PATH);
     const plan = planOf("agents/claude", "agents/codex");
     const agents = plan.steps.slice(0, plan.agents);
-    expect(agents.map(s => s.id)).toEqual(["agents/node", "agents/claude", "agents/codex", "agents/codex/bubblewrap"]);
-    expect(agents.at(-1)).toMatchObject({ manager: "apt", bin: "bwrap", after: "agents/codex", label: "bubblewrap" });
-    expect(agents.at(-1)!.cmd).toContain("apt-get install -y -qq bubblewrap");
+    expect(agents.map(s => s.id)).toEqual(["agents/node", "agents/claude", "agents/codex", "agents/codex/bubblewrap", "agents/codex/bwrap-apparmor"]);
+    const bubblewrap = agents.find(s => s.id === "agents/codex/bubblewrap");
+    expect(bubblewrap).toMatchObject({ manager: "apt", bin: "bwrap", after: "agents/codex", label: "bubblewrap" });
+    expect(bubblewrap!.cmd).toContain("apt-get install -y -qq bubblewrap");
     expect(planOf("agents/claude").steps.map(s => s.id)).not.toContain("agents/codex/bubblewrap");
+  });
+
+  it("loads Ubuntu's bwrap profile once bubblewrap is on, so a turn as a user other than root gets Codex's sandbox", () => {
+    const install = agentInstallsFor([row("agents/codex")]);
+    const plan = provisionPlanOf({ recipeHash: "h1", agents: install.installs, node: install.node!, tools: [] }, "2026-09-17T10:00:00.000Z", TOOLS_PATH);
+    const agents = plan.steps.slice(0, plan.agents);
+    expect(agents.map(s => s.id)).toEqual(["agents/node", "agents/codex", "agents/codex/bubblewrap", "agents/codex/bwrap-apparmor"]);
+    const profile = agents.at(-1)!;
+    expect(profile).toMatchObject({ label: "bwrap AppArmor profile", after: "agents/codex/bubblewrap" });
+    // The one file out of apparmor-profiles, never the package, whose install loads twenty unrelated enforce profiles.
+    expect(profile.cmd).toContain("apt-get download -qq -o APT::Sandbox::User=root apparmor-profiles");
+    expect(profile.cmd).not.toContain("apt-get install");
+    expect(profile.cmd).toContain('apparmor_parser -r -W "$f"');
+    expect(profile.check).toContain("bwrap --ro-bind / / --unshare-net true");
+    // A failed row is never undone, so a load that leaves bwrap failing takes the profile off itself.
+    expect(profile.cmd.split("\n").at(-1)).toBe(`(${profile.check}) >&2 || { apparmor_parser -R "$f" 2>/dev/null; rm -f "$f"; exit 1; }`);
+  });
+
+  it("reads the bwrap profile row present where a user other than root can run bwrap, and says bwrap's own line where not", async () => {
+    const install = agentInstallsFor([row("agents/codex")]);
+    const step = provisionPlanOf({ recipeHash: "h1", agents: install.installs, node: install.node!, tools: [] }, "2026-09-17T10:00:00.000Z", TOOLS_PATH).steps.find(s => s.id === "agents/codex/bwrap-apparmor")!;
+    const works = scratch({ setpriv: "exit 0" });
+    expect([...(await presentSteps(shellMachine(works), [step])).keys()]).toEqual(["agents/codex/bwrap-apparmor"]);
+    const stopped = scratch({ setpriv: "echo 'bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted' >&2; exit 1" });
+    expect((await presentSteps(shellMachine(stopped), [step])).size).toBe(0);
+    const said = spawnSync("bash", ["-c", `PATH=${stopped}:$PATH\n${step.check}`], { encoding: "utf8" });
+    expect(said.status).toBe(1);
+    expect(said.stdout.trim()).toBe("bwrap fails for users other than root: bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted");
   });
 
   it("is every step of a plan the computer already answers, so a second run of that recipe installs nothing", async () => {

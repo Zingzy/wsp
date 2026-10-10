@@ -31,7 +31,7 @@ import { LinkBackend, PlaceAbsentError, PlaceFolderMachine, PlaceMachine, keyFin
 import { connectDaemon } from "../reach.js";
 import { verifyPlaceBytes } from "@wsp/keys";
 import { CAPS, DEFAULT_COLLECTION, DEFAULT_ID, type PlaceRecord, type PlaceDoor, PlaceForksNowhereError, PlaceProvisioningError } from "./types.js";
-import { vaultSignIn, vaultHeldLine, pickedVault, landedOn, type LandedRow, bounded, readsAsEd25519, JOIN_PROVE_MS, PLACE_BAD_KEY_REFUSAL, takenReport, REPLACED, BACKEND_FACTS_MS } from "./helpers.js";
+import { vaultSignIn, vaultHeldLine, pickedVault, landedOn, type LandedRow, bounded, readsAsEd25519, JOIN_PROVE_MS, PLACE_BAD_KEY_REFUSAL, takenReport, REPLACED, BACKEND_FACTS_MS, LOGINS_READ_MS, relistedLogins, sharedLoginsScript } from "./helpers.js";
 import { panePorts } from "./pane-ports.js";
 import type { PlaceDoorContext } from "./context.js";
 import type { PlaceRecordsArea } from "./records.js";
@@ -39,7 +39,7 @@ import type { PlaceSetupArea } from "./setup.js";
 import type { PlaceViewsArea } from "./views.js";
 
 /** The door's half that joins, proves and holds each computer's link, and answers what a link and a place say. */
-export function linkDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, setupArea: PlaceSetupArea, viewArea: PlaceViewsArea): Pick<PlaceDoor, "answerChallenge" | "join" | "auth" | "hostKey" | "prove" | "attach" | "link" | "channel" | "load" | "nameOf" | "settingsAt" | "turnLimitAt" | "threadsAt" | "signInsAt" | "vaultAt" | "githubFromVault" | "loginLanded" | "keyLanded" | "ghThere" | "offerOf" | "backendOf" | "forkingBackend" | "joined" | "folderComputer" | "forward" | "paneForwards" | "placeFor" | "defaultPlace" | "markUsed" | "markDefaultIfNone"> {
+export function linkDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, setupArea: PlaceSetupArea, viewArea: PlaceViewsArea): Pick<PlaceDoor, "answerChallenge" | "join" | "auth" | "hostKey" | "prove" | "attach" | "link" | "channel" | "load" | "nameOf" | "settingsAt" | "turnLimitAt" | "threadsAt" | "signInsAt" | "vaultAt" | "githubFromVault" | "loginLanded" | "loginsAgain" | "keyLanded" | "ghThere" | "offerOf" | "backendOf" | "forkingBackend" | "joined" | "folderComputer" | "forward" | "paneForwards" | "placeFor" | "defaultPlace" | "markUsed" | "markDefaultIfNone"> {
   const { opts, store, wiring, clockNow, seenEveryMs, live, kept, signInsHere, backends, forwards, asking, emit } = ctx;
   const panes = panePorts({ forwards, now: clockNow, schedule: ctx.schedule });
   const {
@@ -314,6 +314,18 @@ export function linkDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, se
     async loginLanded(placeId, agent) {
       await loginListed(placeId, agent);
       await landSignIn(placeId, { id: agent === GITHUB_CLI ? GITHUB_ROW : signInRowId(agent), outcome: "installed", note: SIGNED_IN_THERE });
+    },
+
+    async loginsAgain(placeId) {
+      const logins = kept.get(placeId)?.backendFacts?.logins;
+      if (logins === undefined || !live.has(placeId)) return;
+      const res = await ctx.door.exec(placeId, sharedLoginsScript(logins), { timeoutMs: LOGINS_READ_MS }).catch(() => undefined);
+      if (res?.exitCode !== 0) return;
+      const found = res.stdout.split("\n").filter(line => line !== "");
+      await change(placeId, now => {
+        const next = now.report.logins === undefined ? undefined : relistedLogins(now.report.logins, found);
+        return next === undefined ? undefined : { ...now, report: { ...now.report, logins: next } };
+      });
     },
 
     async keyLanded(agent) {
