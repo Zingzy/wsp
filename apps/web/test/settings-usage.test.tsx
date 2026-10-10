@@ -16,6 +16,7 @@ import { useStore } from "../src/protocol/store.js";
 import { ABOUT_WORDS, PRIVACY_WORDS, USAGE_PAGE_WORDS } from "../src/settings/format.js";
 import { useSettingsStore } from "../src/settings/settingsStore.js";
 import { mountSettings, resetSettings, rowOf, settingsApi, settle } from "./settings-harness.js";
+import { USED_BY_ACCOUNT, USED_BY_SOURCE } from "../../../packages/protocol/test/fixtures/usage-by-source.js";
 
 const here: PlaceView = { id: "here", kind: "computer", name: "zingzys-macbook-pro.local", label: "zingzy's MacBook Pro", default: true, present: true, takesForks: false, shape: { cpu: 10, memMb: 32_768 } };
 const boat: PlaceView = { id: "box", kind: "provider", name: "box", default: false, takesForks: true };
@@ -153,6 +154,48 @@ describe("Usage and Settings reads", () => {
     mountSettings({ api: useStore.getState().api!, at: { kind: "group", group: "usage" } });
     await settle();
     expect([asks.length, accountAsks, settingsAsks]).toEqual([4, 2, 2]);
+  });
+
+  it("reads both answers again at once from the head's refresh, asking the agents for their limits now, and says when they were read", async () => {
+    const accountAsks: unknown[] = [];
+    const { asks } = await mount({ usageAccounts: async (ask?: { fresh?: boolean }) => (accountAsks.push(ask), { accounts: accounts() }) } as Partial<Api>);
+    expect(text(document.querySelector("[data-k=usage-read-at]"))).toBe("checked just now");
+    const refresh = document.querySelector<HTMLElement>("[data-k=usage-refresh]")!;
+    expect(refresh.getAttribute("aria-label")).toBe(USAGE_PAGE_WORDS.readAgain);
+    expect([asks.length, accountAsks.length]).toEqual([2, 1]);
+    fireEvent.click(refresh);
+    await settle();
+    expect([asks.length, accountAsks.length]).toEqual([4, 2]);
+    expect(accountAsks).toEqual([{ fresh: true }, { fresh: true }]);
+    // The Limits tab stands under the same head.
+    fireEvent.click(document.querySelector("[data-k=usage-tabs] [data-segment=limits]")!);
+    await settle();
+    fireEvent.click(document.querySelector<HTMLElement>("[data-k=usage-refresh]")!);
+    await settle();
+    expect(accountAsks.length).toBe(3);
+  });
+
+  it("reads again by itself each minute the page stands open, and on the window's focus only once a minute has passed", async () => {
+    vi.useRealTimers();
+    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+    vi.setSystemTime(Date.parse("2026-10-01T09:30:20Z"));
+    let accountAsks = 0;
+    const { asks } = await mount({ usageAccounts: async () => (accountAsks++, { accounts: accounts() }) } as Partial<Api>);
+    expect([asks.length, accountAsks]).toEqual([2, 1]);
+    act(() => void window.dispatchEvent(new Event("focus")));
+    await settle();
+    expect(accountAsks).toBe(1);
+    act(() => vi.advanceTimersByTime(60_000));
+    await settle();
+    expect([asks.length, accountAsks]).toEqual([4, 2]);
+    act(() => vi.setSystemTime(Date.now() + 30_000));
+    act(() => void window.dispatchEvent(new Event("focus")));
+    await settle();
+    expect(accountAsks).toBe(2);
+    act(() => vi.setSystemTime(Date.now() + 31_000));
+    act(() => void window.dispatchEvent(new Event("focus")));
+    await settle();
+    expect(accountAsks).toBe(3);
   });
 
   it("keeps what an act wrote inside the hold, rather than drawing the older answer again on the next opening", async () => {
@@ -305,6 +348,24 @@ describe("Usage: limits", () => {
     expect(text(row.querySelector("[data-k=state]"))).toBe("Not read yet: shows after its next turn");
   });
 
+  it("reads a window past its reset, or older than the window runs, as of when it was read, muted, never as a live limit reached", async () => {
+    const readAt = Date.now() - 4 * 24 * HOUR;
+    await mountLimits({
+      usageAccounts: async () => ({
+        accounts: [{ ...codexPlus(), windows: [{ kind: "session", usedPercent: 40 }, { kind: "week", usedPercent: 100, resetsAt: Date.now() - HOUR }], status: "reached", readAt }],
+      }),
+    } as Partial<Api>);
+    for (const kind of ["session", "week"]) {
+      const window = $(`[data-usage-pool=codex] [data-window=${kind}]`)!;
+      const verdict = window.querySelector<HTMLElement>("[data-k=verdict]")!;
+      expect(text(verdict)).toMatch(/^As of /);
+      expect(verdict.className).toContain("text-muted-foreground");
+      expect(window.querySelector<HTMLElement>("[data-k=left]")!.className).toContain("text-muted-foreground");
+      expect(window.querySelector<HTMLElement>("[data-k=meter-fill]")!.className).not.toContain("bg-warning");
+    }
+    expect(document.body.textContent).not.toContain("Limit reached");
+  });
+
   it("carries the warning ink on a reached limit, with no pace mark where no reset is known", async () => {
     await mountLimits({ usageAccounts: async () => ({ accounts: [{ key: "claude:vault-token", agent: "claude", label: "Claude Code with your sign-in", computers: ["Boat"], windows: [{ kind: "session", usedPercent: 100 }], status: "reached", readAt: Date.now() }] }) } as Partial<Api>);
     const session = $("[data-usage-pool=claude] [data-window=session]")!;
@@ -343,9 +404,9 @@ describe("Usage: used", () => {
     expect(document.querySelector("[data-usage-section=used] [aria-busy=true]")).toBeNull();
   });
 
-  it("totals the range: the tokens with the cached share, the API estimate at list price and the cache hit, and no threads or turns it was not sent", async () => {
+  it("totals the range: the tokens and what they count, the API estimate at list price and the cache hit, and no threads or turns it was not sent", async () => {
     await mount();
-    expect(stat("stat-tokens")).toEqual([USAGE_PAGE_WORDS.tokens, "7.35B", USAGE_PAGE_WORDS.fromCache("93.9%")]);
+    expect(stat("stat-tokens")).toEqual([USAGE_PAGE_WORDS.tokens, "7.35B", USAGE_PAGE_WORDS.counts(true)]);
     expect(stat("stat-estimate")).toEqual([USAGE_PAGE_WORDS.estimate, "$4,301.74", USAGE_PAGE_WORDS.atListPrice]);
     expect(stat("stat-cache")).toEqual([USAGE_PAGE_WORDS.cacheHit, "93.9%"]);
     expect($("[data-k=stat-threads]")).toBeNull();
@@ -370,6 +431,64 @@ describe("Usage: used", () => {
     // Fresh is what was read neither from cache nor into it.
     expect(text($("[data-k=usage-mix] [data-k=mix-fresh]"))).toBe(`${USAGE_PAGE_WORDS.fresh}1.3M`);
     expect(text($("[data-k=usage-mix] [data-k=mix-cache-write]"))).toBe(`${USAGE_PAGE_WORDS.cacheWrite}100k`);
+  });
+
+  it("says the totals count wsp's threads alone where the range read no logs", async () => {
+    await mount({ usageUsed: async (range: UsageRange, split: UsageSplit) => ({ ...used(range, split), logs: undefined }) } as Partial<Api>);
+    expect(stat("stat-tokens")[2]).toBe(USAGE_PAGE_WORDS.counts(false));
+  });
+
+  it("splits by source with the figures wsp usage --by source prints for the same answer", async () => {
+    const asks: UsageSplit[] = [];
+    await mount({ usageUsed: async (range: UsageRange, split: UsageSplit) => (asks.push(split), split === "source" ? USED_BY_SOURCE : used(range, split)) } as Partial<Api>);
+    fireEvent.click($("[data-k=usage-split] [data-segment=source]")!);
+    await settle();
+    expect(asks.at(-1)).toBe("source");
+    expect(text($("[data-settings-card=usage-used] [data-settings-head]"))).toBe("By source");
+    const row = (key: string): string[] => [...$(`[data-used-row=${key}]`)!.querySelectorAll("[data-settings-title], [data-k=tokens], [data-k=turns], [data-k=price]")].map(text);
+    expect(row("log")).toEqual(["Outside wsp", "65.8B", "", "$44,925.05"]);
+    expect(row("wsp")).toEqual(["wsp threads", "13.8M", "21", "$8.63"]);
+    expect(stat("stat-tokens")).toEqual([USAGE_PAGE_WORDS.tokens, "65.8B", USAGE_PAGE_WORDS.counts(true)]);
+    expect(stat("stat-estimate")[1]).toBe("$44,933.68");
+    expect(stat("stat-turns")[1]).toBe("21");
+    expect([...$$("[data-k=usage-legend] > span")].map(text)).toEqual(["Outside wsp", "wsp threads"]);
+  });
+
+  it("splits by account with the use outside wsp counted in, the figures wsp usage --by account prints for the same answer", async () => {
+    await mount({ usageUsed: async (range: UsageRange, split: UsageSplit) => (split === "account" ? USED_BY_ACCOUNT : used(range, split)) } as Partial<Api>);
+    fireEvent.click($("[data-k=usage-split] [data-segment=account]")!);
+    await settle();
+    const row = (key: string): string[] => [...$(`[data-used-row="${key}"]`)!.querySelectorAll("[data-settings-title], [data-k=tokens], [data-k=price]")].map(text);
+    expect(row("claude@here")).toEqual(["Claude Code with an API key", "65.8B", "$44,928.61"]);
+    expect(row("codex:acct-1")).toEqual(["Codex with ChatGPT Plus", "8.2M", "$7.15"]);
+    expect(row("claude@pl_hetzner")).toEqual(["Claude Code signed in on hetzner", "0", "$0.00"]);
+    expect([...$$("[data-k=usage-legend] > span")].map(text)).toEqual(["Claude Code with an API key", "Codex with ChatGPT Plus"]);
+    expect(stat("stat-tokens")[2]).toBe(USAGE_PAGE_WORDS.counts(true));
+  });
+
+  it("draws two accounts of one agent in two shades of its ink, and a third agent's in its own", async () => {
+    const tokens = (n: number) => ({ input: n, output: 0, cached: 0 });
+    const points = (n: number) => [0, 0, 0, 0, 0, 0, n];
+    await mountUsed({
+      split: "account",
+      rows: [
+        { key: "codex:acct-1", label: "Codex with ChatGPT Plus", agent: "codex", tokens: tokens(8_300_000), priced: false },
+        { key: "claude@here", label: "Claude Code with an API key", agent: "claude", tokens: tokens(5_600_000), priced: false },
+        { key: "claude@pl_lab", label: "Claude Code signed in on lab", agent: "claude", tokens: tokens(900_000), priced: false },
+      ],
+      lines: [
+        { key: "codex:acct-1", label: "Codex with ChatGPT Plus", points: points(8_300_000) },
+        { key: "claude@here", label: "Claude Code with an API key", points: points(5_600_000) },
+        { key: "claude@pl_lab", label: "Claude Code signed in on lab", points: points(900_000) },
+      ],
+    });
+    const ink = (key: string): string => document.querySelector(`[data-usage-chart] [data-line="${key}"]`)!.getAttribute("class") ?? "";
+    const claudeInk = agentMark("claude")!.inks![0]!;
+    expect(new Set([ink("codex:acct-1"), ink("claude@here"), ink("claude@pl_lab")]).size).toBe(3);
+    for (const key of ["claude@here", "claude@pl_lab"]) expect((document.querySelector(`[data-usage-chart] [data-line="${key}"]`) as SVGGElement).style.getPropertyValue("--line-dark")).toBe(claudeInk.dark);
+    // The legend's swatch and the table's bar wear the line's own shade.
+    const swatches = [...$$("[data-k=usage-legend] > span > span:first-child")].map(el => el.getAttribute("class"));
+    expect(swatches.map(c => c?.split(" ").find(w => w.startsWith("text-")))).toEqual([ink("codex:acct-1"), ink("claude@here"), ink("claude@pl_lab")].map(c => c.split(" ").find(w => w.startsWith("text-"))));
   });
 
   it("reads a week by agent first, and the range and split ask again for theirs", async () => {

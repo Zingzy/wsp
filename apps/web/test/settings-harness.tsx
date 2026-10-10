@@ -60,7 +60,7 @@ export function resetSettings(): void {
   window.localStorage.clear();
   forgetHeld();
   forgetSignIns();
-  useSettingsStore.setState({ at: FIRST_PAGE, search: "", reads: NO_READS, addProjectAt: null, devicesAsked: 0, buildShown: null, recipeAsked: null, addAsked: null, usageTab: "used", agentsTab: "agents", agentsPlace: null, agentsLevel: null });
+  useSettingsStore.setState({ at: FIRST_PAGE, search: "", reads: NO_READS, addProjectAt: null, devicesAsked: 0, buildShown: null, recipeAsked: null, addAsked: null, usageTab: "used", usageAsked: 0, usageRead: { at: null, reading: false }, agentsTab: "agents", agentsPlace: null, agentsLevel: null });
   useRightPanelStore.setState({ byWorkspaceId: {} });
   useNotices.getState().clear();
   useUpdateDownload.setState({ download: null });

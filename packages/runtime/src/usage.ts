@@ -32,6 +32,7 @@ import {
   hereName,
   placeName,
   providerKeyName,
+  PROVIDER_KEY_WORDS,
   type PlaceView,
 } from "@wsp/protocol";
 import type { Clock } from "./clock.js";
@@ -128,12 +129,34 @@ export function accountOnComputer(o: { agent: string; agentName: string; compute
   return ran(r => r !== "vault") ?? (o.vaulted === "key" ? ran(r => r === "vault") : undefined) ?? accountOf({ agent: o.agent, agentName: o.agentName, vaulted: undefined, computer: o.computer });
 }
 
-/** A computer the usage records name by its id, as a person reads it: its row's own name, this computer's, or a
- * provider's by the word its table gives it, never a hostname or a provider's id. */
-export function usageComputerName(places: readonly PlaceView[], id: string): string {
+/** A computer the usage records name by its id, as a person reads it: its row's own name, this computer's, a
+ * provider's by the word its table gives it, else the name it had when the records last saw it, never a hostname or
+ * an id; one removed before any name was kept reads as removed. */
+export function usageComputerName(places: readonly PlaceView[], id: string, kept: ReadonlyMap<string, string> = new Map()): string {
   const place = places.find(p => p.id === id);
   if (place !== undefined) return placeName(place);
-  return id === HERE_PLACE_ID ? hereName(places) || THIS_COMPUTER : providerKeyName(id);
+  if (id === HERE_PLACE_ID) return hereName(places) || THIS_COMPUTER;
+  return PROVIDER_KEY_WORDS[id] !== undefined ? providerKeyName(id) : (kept.get(id) ?? USAGE_WORDS.removedComputer);
+}
+
+/** The names of the computers the usage records saw, kept so one removed later still reads as itself. */
+const COMPUTER_NAMES = "usage-computers";
+
+/** Keeps the name of every computer listed now, writing only a name that changed, and answers every name kept. */
+export async function keptComputerNames(store: Store, places: readonly PlaceView[]): Promise<Map<string, string>> {
+  const kept = new Map<string, string>();
+  for (const raw of await store.list(COMPUTER_NAMES)) {
+    const held = raw as { id?: unknown; name?: unknown };
+    if (typeof held.id === "string" && typeof held.name === "string") kept.set(held.id, held.name);
+  }
+  for (const place of places) {
+    if (place.id === HERE_PLACE_ID || PROVIDER_KEY_WORDS[place.id] !== undefined) continue;
+    const name = placeName(place);
+    if (kept.get(place.id) === name) continue;
+    kept.set(place.id, name);
+    await store.put(COMPUTER_NAMES, place.id, { id: place.id, name });
+  }
+  return kept;
 }
 
 /** The instant a zone's day began, for the day holding `at`. */
@@ -344,10 +367,9 @@ export function createUsageLedger(o: { store: Store; clock: Clock; timeZone?: st
           ...(ONE_AGENT.includes(q.split) ? { agent: row.agent } : {}),
           tokens: { input: 0, output: 0, cached: 0, cacheWrite: 0, reasoning: 0 },
           priced: true,
-          turns: 0,
         };
         for (const field of ["input", "output", "cached", "cacheWrite", "reasoning"] as const) line.tokens[field] = (line.tokens[field] ?? 0) + row.tokens[field];
-        // A log keeps sessions and no turns, so turns count the ones wsp ran.
+        // A log keeps sessions and no turns, so turns count the ones wsp ran, and a row of logs alone has none.
         if (row.source === "wsp") line.turns = (line.turns ?? 0) + row.turns;
         table ??= await o.prices();
         const listed = priceOf(row.model, row.tokens, table);
@@ -374,7 +396,7 @@ export function createUsageLedger(o: { store: Store; clock: Clock; timeZone?: st
     const ordered = [...rows.values()].sort((a, b) => b.tokens.input + b.tokens.output - (a.tokens.input + a.tokens.output) || a.key.localeCompare(b.key));
     // The range ends where today does, so two reads a moment apart answer the same range.
     const logs = logged.size === 0 ? {} : { logs: { agents: [...logged].map(agent => q.label("agent", agent)).sort(), computers: [...loggedOn].map(c => q.label("computer", c)).sort() } };
-    const lines = ordered.map(row => ({ key: row.key, label: row.label, points: points.get(row.key) ?? series.map(() => 0) }));
+    const lines = ordered.filter(row => row.tokens.input + row.tokens.output > 0).map(row => ({ key: row.key, label: row.label, points: points.get(row.key) ?? series.map(() => 0) }));
     return {
       range: q.range,
       split: q.split,
@@ -514,6 +536,28 @@ export function createPriceTable(o: { store: Store; clock: Clock; fetch: () => P
   };
 }
 
+/** What each account a turn read limits for is called wherever it shows, the limits, what was used and wsp usage
+ * alike: how it bills, by key or by its plan, else the address it signed in as, the vault's sign-in, or the computer
+ * whose own login it is. Two accounts of one agent that read the same, two logins on one plan or two keys, keep the
+ * address each signed in as, or the computer whose own login each is. */
+export function accountNames(o: { limits: readonly AccountLimit[]; nameOf: (placeId: string) => string; agentName: (agent: string) => string; planBrand?: (agent: string) => string | undefined }): Map<string, string> {
+  const names = new Map(
+    o.limits.map(l => [
+      l.key,
+      accountWords({ agentName: o.agentName(l.agent), keyed: l.keyed, plan: l.plan, planBrand: o.planBrand?.(l.agent), named: l.road === "named" ? l.label : undefined, vaulted: l.road === "vault", ownOn: l.road === "own" && l.computers[0] !== undefined ? o.nameOf(l.computers[0]) : undefined }),
+    ]),
+  );
+  const labels = [...names.values()];
+  const shared = new Set(labels.filter((label, at) => labels.indexOf(label) !== at));
+  for (const l of o.limits) {
+    const label = names.get(l.key)!;
+    if (!shared.has(label)) continue;
+    if (l.road === "named" && !label.endsWith(` as ${l.label}`)) names.set(l.key, `${label} as ${l.label}`);
+    else if (l.road === "own" && l.computers[0] !== undefined) names.set(l.key, `${label} on ${o.nameOf(l.computers[0])}`);
+  }
+  return names;
+}
+
 /** Every account row the Usage page lists: each account a turn has read limits for, and each sign-in any computer
  * reports, folded by the account it stands for. The vault's token or key is one account on every computer it was
  * handed to; a login a computer keeps of its own is that computer's, until a turn there names the account it is. */
@@ -536,6 +580,7 @@ export function accountRows(o: {
   burn?: (key: string) => AccountRow["burn"];
 }): AccountRow[] {
   const rows = new Map<string, AccountRow>();
+  const names = accountNames(o);
   const noteFor = (agent: string, keyed: boolean | undefined): AccountRow["note"] =>
     keyed === true ? USAGE_WORDS.keyed : o.printsLimits(agent) ? USAGE_WORDS.unread : USAGE_WORDS.noLimit;
   for (const l of o.limits) {
@@ -543,8 +588,8 @@ export function accountRows(o: {
     rows.set(l.key, {
       key: l.key,
       agent: l.agent,
-      label: accountWords({ agentName: o.agentName(l.agent), keyed: l.keyed, plan: l.plan, planBrand: o.planBrand?.(l.agent), named: l.road === "named" ? l.label : undefined, vaulted: l.road === "vault", ownOn: l.road === "own" && l.computers[0] !== undefined ? o.nameOf(l.computers[0]) : undefined }),
-      computers: l.computers.map(o.nameOf),
+      label: names.get(l.key)!,
+      computers: [...new Set(l.computers.map(o.nameOf))],
       ...(l.plan !== undefined ? { plan: l.plan } : {}),
       ...(read ? { windows: l.windows, readAt: l.readAt } : {}),
       ...(read && l.status !== undefined ? { status: l.status } : {}),
@@ -565,12 +610,7 @@ export function accountRows(o: {
       rows.set(key, row);
     }
   }
-  // Two accounts of one agent that read the same, two logins on one plan, keep the address each signed in as.
-  const addresses = new Map(o.limits.flatMap(l => (l.road === "named" ? [[l.key, l.label] as const] : [])));
-  const shared = new Set([...rows.values()].map(row => row.label).filter((label, at, all) => all.indexOf(label) !== at));
   for (const row of rows.values()) {
-    const address = addresses.get(row.key);
-    if (shared.has(row.label) && address !== undefined && !row.label.endsWith(` as ${address}`)) row.label = `${row.label} as ${address}`;
     const burn = o.burn?.(row.key);
     if (burn !== undefined) row.burn = burn;
   }

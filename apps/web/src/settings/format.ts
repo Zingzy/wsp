@@ -411,6 +411,7 @@ export const AGENTS_PAGE_WORDS = {
 export const USAGE_PAGE_WORDS = {
   title: "Usage",
   tabs: { used: "Usage", limits: "Limits" },
+  readAgain: "Read usage and limits again",
   tab: "Show",
   limits: "Limits",
   session: "Session",
@@ -448,7 +449,8 @@ export const USAGE_PAGE_WORDS = {
   cacheHit: "Cache hit",
   saved: (amount: string): string => `${amount} saved`,
   cacheWrite: "Cache write",
-  fromCache: (share: string): string => `${share} read from cache`,
+  /** What the totals count: wsp's threads, and the agents' own logs beside them where the range read any. */
+  counts: (outside: boolean): string => (outside ? "in wsp threads and outside wsp" : "in wsp threads only"),
   chartHead: { day: "Tokens an hour", week: "Tokens a day", month: "Tokens a day" },
   by: (split: string): string => `By ${split.toLowerCase()}`,
   mix: "Where the tokens went",

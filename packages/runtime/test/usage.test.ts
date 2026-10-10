@@ -137,6 +137,26 @@ describe("an account's limits", () => {
   });
 });
 
+describe("one name per account", () => {
+  const namesOf = async (rt: Runtime): Promise<{ listed: string[]; used: string[] }> => ({
+    listed: (await rt.usage.accounts()).accounts.map(a => a.label),
+    used: (await rt.usage.used({ range: "day", split: "account" })).rows.map(r => r.label),
+  });
+
+  it("names a computer's own login that bills a key as the key, in the limits and in what was used alike", async () => {
+    const { rt, ws } = await runtimeWith(turning({ status: "completed", text: "done", tokens: { input: 10, output: 1 } }, sessionId => [{ type: "limit", sessionId, limit: { windows: [], keyed: true } }]), {});
+    await (await rt.sessions.start(ws.id, { prompt: "go" })).finished;
+    expect(await namesOf(rt)).toEqual({ listed: ["Claude Code with an API key"], used: ["Claude Code with an API key"] });
+  });
+
+  it("names an account the harness named by its plan, in the limits and in what was used alike", async () => {
+    const limit: HarnessLimit = { ...window, plan: "max", account: { id: "acct-1", label: "dev@example.com" } };
+    const { rt, ws } = await runtimeWith(turning({ status: "completed", text: "done", tokens: { input: 10, output: 1 } }, sessionId => [{ type: "limit", sessionId, limit }]), {});
+    await (await rt.sessions.start(ws.id, { prompt: "go" })).finished;
+    expect(await namesOf(rt)).toEqual({ listed: ["Claude Code with Claude Max"], used: ["Claude Code with Claude Max"] });
+  });
+});
+
 describe("plan alerts off the readings turns print", () => {
   it("tells every client once a reading crosses 70% of a window, and not again for a reading no worse", async () => {
     let used = 40;
@@ -329,7 +349,7 @@ describe("the split by source", () => {
     const used = await rt.usage.used({ range: "day", split: "source" });
     expect(used.split).toBe("source");
     expect(used.rows.map(r => [r.key, r.label, r.tokens.input, r.costReported, r.turns, r.agent])).toEqual([
-      ["log", USAGE_WORDS.outsideWsp, 11, undefined, 0, undefined],
+      ["log", USAGE_WORDS.outsideWsp, 11, undefined, undefined, undefined],
       ["wsp", "wsp threads", 10, 0.5, 1, undefined],
     ]);
     // Every other split asked so holds wsp's threads alone.

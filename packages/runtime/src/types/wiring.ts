@@ -947,10 +947,14 @@ export const LOG_READ_MS = 30_000;
 /** How long one reset script may run on a computer: each of its reads waits ten seconds at most for a line. */
 export const RESET_EXEC_MS = 30_000;
 
+/** How often a refresh may ask one agent on one computer for its plan's limits. */
+export const PLAN_READ_EVERY_MS = 60_000;
+
 export interface UsageDoor {
   /** outside: count the rows read from the computers' agent logs, where the person has not turned that off. */
   used(q: { range: UsageRange; split: UsageSplit; outside?: boolean }): Promise<UsedAnswer>;
-  accounts(): Promise<AccountsAnswer>;
+  /** fresh: first ask each agent that can say for its plan's limits now, where a turn is otherwise the only reader. */
+  accounts(ask?: { fresh?: boolean }): Promise<AccountsAnswer>;
   /** A computer's readings over a range, off the daemon that kept them: this computer, a joined one, or a workspace's
    * own machine. A daemon that keeps none, or none yet, answers no points. */
   readings(target: { placeId: string } | { workspaceId: string }, range: UsageRange, origin?: Caller): Promise<ReadingsAnswer>;
