@@ -5,14 +5,12 @@
 // replaces itself, anywhere else Get is a link. Once newer files are
 // installed under a running host, Restart host stands in Get's place. The app's
 // half and the host's get a line each only once they run apart.
-import { releaseAbove, type BundleOutcome, type DesktopBridge, type ReleaseLatest, type ReleaseView } from "@wsp/protocol";
-import { useEffect, useState } from "react";
-import { onAnotherComputer } from "../boot.js";
+import type { ReleaseLatest, ReleaseView } from "@wsp/protocol";
 import { Mark } from "../brand/Brand.js";
 import { Button } from "../components/ui/button.js";
-import { desktopBridge } from "../lib/desktopShell.js";
 import { RELEASES } from "../../../../packages/protocol/src/bundles.mjs";
 import { releaseAhead } from "../shell/shellVersion.js";
+import { restartShown, runUpdate, useUpdateStage, type UpdateAct } from "../shell/update.js";
 import { ABOUT_WORDS } from "./format.js";
 import { GlyphFrame } from "./grid.js";
 import { builtWhen } from "./image.js";
@@ -29,10 +27,6 @@ function latestHover(release: ReleaseView, now: number): string | undefined {
   return missed === undefined ? ABOUT_WORDS.readHover(when) : ABOUT_WORDS.missedHover(when, missed);
 }
 
-/** Restart where the installed files are newer, a restart brings the host back, and the page is on the host's own
- * computer, since the host refuses a restart asked from anywhere else. */
-const restartShown = (release: ReleaseView | null): boolean => release?.installed !== undefined && release.restartRefusal === undefined && !onAnotherComputer();
-
 /** The Host line's hover: the files installed under the running host first, since the install already happened and
  * only its restart is left, then the line that installs the release while the host is behind it. */
 function hostHover(release: ReleaseView | null): string {
@@ -43,65 +37,24 @@ function hostHover(release: ReleaseView | null): string {
 
 const openPage = (url: string): void => void window.open(url, "_blank", "noopener,noreferrer");
 
-type Bundle = Pick<DesktopBridge, "getBundle" | "quitAndOpen" | "bundleHover" | "updatesInPlace">;
+const STEP_WORDS: Record<UpdateAct, (version: string) => string> = {
+  link: ABOUT_WORDS.get,
+  get: ABOUT_WORDS.get,
+  downloading: () => ABOUT_WORDS.downloading,
+  open: () => ABOUT_WORDS.quitAndOpen,
+  restart: () => ABOUT_WORDS.restartToUpdate,
+  "restart-host": () => ABOUT_WORDS.restartHost,
+};
 
-/** The shell's bundle road where this page is the app's own host's, else nothing: a page a host somewhere else
- * serves, a browser tab and a shell from before the road all take the link form. */
-function useBundleRoad(): Bundle | undefined {
-  const bridge = desktopBridge();
-  const [here, setHere] = useState<boolean | undefined>(bridge?.hosts === undefined ? true : undefined);
-  useEffect(() => {
-    let live = true;
-    bridge?.hosts?.().then(
-      view => live && setHere(view.current === null),
-      () => live && setHere(false),
-    );
-    return () => {
-      live = false;
-    };
-  }, [bridge]);
-  const { getBundle, quitAndOpen, bundleHover, updatesInPlace } = bridge ?? {};
-  return here === true && getBundle !== undefined && quitAndOpen !== undefined ? { getBundle, quitAndOpen, bundleHover, updatesInPlace } : undefined;
-}
-
-/** Get while this page is behind: the shell's download only where the app itself is behind, since a host that lags
- * alone is updated its own way and the app already installed is no update for it; the link to the release anywhere
- * else. */
-function GetRelease({ latest, appBehind, failed }: { latest: ReleaseLatest; appBehind: boolean; failed: (e: unknown) => void }) {
-  const shellRoad = useBundleRoad();
-  const road = appBehind ? shellRoad : undefined;
-  const [phase, setPhase] = useState<"get" | "downloading" | "kept">("get");
-  // A refused get or open puts Get back: a new get fetches nothing where the kept file still matches.
-  const answered = (asked: Promise<BundleOutcome>): void =>
-    void asked.then(
-      outcome => {
-        if (!outcome.ok) failed(outcome.error);
-        setPhase(outcome.ok ? "kept" : "get");
-      },
-      (e: unknown) => {
-        failed(e);
-        setPhase("get");
-      },
-    );
-  if (road === undefined)
-    return (
-      <Button size="xs" variant="outline" data-k="get-release" onClick={() => openPage(latest.url)}>
-        {ABOUT_WORDS.get(latest.version)}
-      </Button>
-    );
-  if (phase === "kept")
-    return (
-      <Button size="xs" variant="outline" data-k="get-release" onClick={() => answered(road.quitAndOpen())}>
-        {road.updatesInPlace === true ? ABOUT_WORDS.restartToUpdate : ABOUT_WORDS.quitAndOpen}
-      </Button>
-    );
-  const get = (): void => {
-    setPhase("downloading");
-    answered(road.getBundle({ version: latest.version }));
-  };
+/** The step to the release this page is behind, the same act the sidebar's update card offers. */
+function UpdateStep() {
+  const { stage, road } = useUpdateStage();
+  if (stage === undefined) return null;
+  const { act, version } = stage;
+  const title = act === "restart-host" ? ABOUT_WORDS.restartHover : act === "get" ? road?.bundleHover : undefined;
   return (
-    <Button size="xs" variant="outline" data-k="get-release" title={road.bundleHover} disabled={phase === "downloading"} onClick={get}>
-      {phase === "downloading" ? ABOUT_WORDS.downloading : ABOUT_WORDS.get(latest.version)}
+    <Button size="xs" variant="outline" data-k={act === "restart-host" ? "restart-host" : "get-release"} {...(title === undefined ? {} : { title })} disabled={act === "downloading"} onClick={() => runUpdate(stage, road)}>
+      {STEP_WORDS[act](version)}
     </Button>
   );
 }
@@ -123,13 +76,7 @@ export function versionCards(ctx: SettingsContext): SettingsCardData[] {
   const apart = inShell && app !== undefined && host !== undefined && app !== host;
   const hover = release === null ? undefined : latestHover(release, ctx.now);
   const notes = release?.latest?.url ?? RELEASES;
-  const step = restartShown(release) ? (
-    <Button size="xs" variant="outline" data-k="restart-host" title={ABOUT_WORDS.restartHover} onClick={() => void ctx.api?.hostRestart?.().catch(ctx.failed)}>
-      {ABOUT_WORDS.restartHost}
-    </Button>
-  ) : behind === undefined ? null : (
-    <GetRelease key={behind.version} latest={behind} appBehind={inShell && app !== undefined && release !== null && releaseAbove(release, app)} failed={ctx.failed} />
-  );
+  const step = restartShown(release) || behind !== undefined ? <UpdateStep /> : null;
   const row: SettingsItem[] = [
     {
       kind: "row",

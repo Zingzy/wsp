@@ -197,6 +197,6 @@ export interface DesktopBridge {
   /** Opens the bundle the last getBundle kept and quits the app, so the new one is never swapped in under a
    * running host; where the shell updates in place, quits and restarts into the new version instead. */
   quitAndOpen(): Promise<BundleOutcome>;
-  /** Deletes the checked update a shell that updates in place holds, which the ready notice's Later asks for. */
+  /** Deletes the checked update a shell that updates in place holds, which dismissing the update card asks for. */
   discardUpdate(): Promise<BundleOutcome>;
 }

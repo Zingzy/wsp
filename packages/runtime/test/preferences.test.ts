@@ -54,6 +54,20 @@ describe("preferences over the wire", () => {
     expect(await wsRequest(srv.port, "t", { op: "preferences.get" })).toMatchObject({ ok: true, preferences: { theme: "light", sidebarMode: "spaces", terminalZoom: { ws_a: 2 } } });
   });
 
+  it("a dismissed release lands on the record for every socket and the next runtime on the store", async () => {
+    const store = memoryStore();
+    srv = await serveRuntime(createRuntime({ backend: stubBackend(), store, adapters: {}, env: NO_LABS }), { port: 0, authToken: "t" });
+    const watcher = await WsClient.connect(srv.port, { token: "t" });
+    expect((await watcher.request("events.subscribe")).ok).toBe(true);
+    expect(await wsRequest(srv.port, "t", { op: "preferences.set", patch: { updateDismissed: "0.3.3" } })).toMatchObject({ ok: true, preferences: { updateDismissed: "0.3.3" } });
+    await until(() => watcher.events.some(e => e.type === "preferences.changed"));
+    expect(watcher.events.find(e => e.type === "preferences.changed")).toMatchObject({ preferences: { updateDismissed: "0.3.3" } });
+    watcher.close();
+    await srv.close();
+    srv = await serveRuntime(createRuntime({ backend: stubBackend(), store, adapters: {}, env: NO_LABS }), { port: 0, authToken: "t" });
+    expect(await wsRequest(srv.port, "t", { op: "preferences.get" })).toMatchObject({ ok: true, preferences: { updateDismissed: "0.3.3" } });
+  });
+
   it("usage counts read on until the person turns them off, and the record keeps the switch for the next runtime", async () => {
     const store = memoryStore();
     srv = await serveRuntime(createRuntime({ backend: stubBackend(), store, adapters: {}, env: NO_LABS }), { port: 0, authToken: "t" });
