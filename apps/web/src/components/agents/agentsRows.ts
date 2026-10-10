@@ -408,7 +408,9 @@ export function serverSignInStart(row: McpRow, ctx: RowsContext): SignInStart | 
   const road = serverSignInRoad(row.agent, row.name, ctx.reach ?? "none");
   if (road === undefined) return undefined;
   if (road.kind === "pty") return { kind: "run", agent: row.agent, server: row.name, scope: row.scope, ...(row.project !== undefined ? { project: row.project.id } : {}), finish: road.finish === "callback" ? "callback" : "address", pastes: true };
-  return { kind: "copy", line: road.line, ...(road.why === "callback" ? { why: AGENTS_LIST_WORDS.pageStaysHere(ctx.computer ?? "that computer") } : {}) };
+  // The host's own line runs the command as that computer's threads read their servers; the catalog's alone does not.
+  if (road.why === "callback") return { kind: "copy", line: row.signInLine ?? road.line, why: AGENTS_LIST_WORDS.pageStaysHere(ctx.computer ?? "that computer") };
+  return { kind: "copy", line: road.line };
 }
 
 /** Whether a watched sign-in is still going, so its act is Cancel. */

@@ -9,7 +9,7 @@
 // else; a report reads again when the host says the agents there changed.
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { AgentsReport, AgentsSignInEvent, AgentsTarget } from "@wsp/protocol";
+import { serverNotSetUpLine, type AgentsReport, type AgentsSignInEvent, type AgentsTarget } from "@wsp/protocol";
 import { AgentsPanel } from "../src/components/agents/AgentsPanel.js";
 import { AGENTS_LIST_WORDS, serverSignInStart, type AgentsWhere } from "../src/components/agents/agentsRows.js";
 import { forgetSignIns, useAgentActs } from "../src/components/agents/useAgentActs.js";
@@ -299,6 +299,20 @@ describe("signing an agent in from its row", () => {
     expect(flow()!.querySelector("[data-k=sign-in-refused]")?.textContent).toContain("Authentication failed: access denied");
   });
 
+  it("says a failed server sign-in under its row with nothing above it, where the lines a running one stands in would leave a gap", async () => {
+    const h = host();
+    render(<List report={{ ...AGENTS_REPORT, reach: "relay" }} />);
+    fireEvent.click(screen.getByRole("radio", { name: /^Tool servers/ }));
+    fireEvent.click(stepOf(LINEAR, "sign-in")!);
+    await settle();
+    act(() => h.started[0]!.step({ state: "failed", said: serverNotSetUpLine("Claude Code", "linear") }));
+    const drawn = flow()!;
+    expect(rowOf(LINEAR).nextElementSibling?.contains(drawn), "the flow stands under its row").toBe(true);
+    expect(drawn.querySelectorAll("[data-sign-in-line]")).toHaveLength(0);
+    expect(drawn.firstElementChild?.getAttribute("data-k")).toBe("sign-in-refused");
+    expect(drawn.textContent).toBe(serverNotSetUpLine("Claude Code", "linear"));
+  });
+
   it("hands a server whose page returns to localhost on another computer the harness's own line, from that agent's own line in a folded entry", async () => {
     host();
     render(<List />);
@@ -332,6 +346,13 @@ describe("signing an agent in from its row", () => {
 });
 
 describe("a server's sign-in road", () => {
+  it("hands the person the host's own line where the page cannot come back, which names the store the agent's threads read", () => {
+    const axiom = { agent: "codex", name: "axiom", scope: "user" as const, transport: { kind: "http" as const, host: "mcp.axiom.co" }, envNames: [], auth: "unknown" as const, enabled: true, signInLine: "export CODEX_HOME='/wsp/logins/codex'; codex mcp login 'axiom'" };
+    expect(serverSignInStart(axiom, { where: "box", computer: "hetzner", reach: "none" })).toEqual({ kind: "copy", line: "export CODEX_HOME='/wsp/logins/codex'; codex mcp login 'axiom'", why: AGENTS_LIST_WORDS.pageStaysHere("hetzner") });
+    const { signInLine: _line, ...bare } = axiom;
+    expect(serverSignInStart(bare, { where: "box", computer: "hetzner", reach: "none" })).toMatchObject({ kind: "copy", line: "codex mcp login 'axiom'" });
+  });
+
   it("is the one the host said the report's page reaches, never worked out again from where the list stands", () => {
     const linear = AGENTS_REPORT.servers.find(r => r.name === "linear")!;
     expect(serverSignInStart(linear, { where: "here", reach: "relay" })).toEqual({ kind: "run", agent: "claude", server: "linear", scope: "user", finish: "callback", pastes: true });

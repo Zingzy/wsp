@@ -72,14 +72,15 @@ export interface ProbedRoute {
 
 /** The route for the port and what one fetch of it answered, asked once per route and per reload; a probe that fails
  * leaves the frame as the only truth. The first 401 of a load asks for a fresh route instead of a sentence, since the host
- * reminted it on that answer; the probe of the fresh route decides. */
-export function useProbedRoute(workspaceId: string, port: number | null, reloadNonce: number): ProbedRoute {
+ * reminted it on that answer; the probe of the fresh route decides. A new `rechecks` asks for the route again, so a
+ * forward that ended opens again or says why not. */
+export function useProbedRoute(workspaceId: string, port: number | null, reloadNonce: number, rechecks = 0): ProbedRoute {
   const api = useStore(s => s.api);
   const [refusal, setRefusal] = useState<Refusal | null>(null);
   const [reminted, setReminted] = useState<{ load: string; count: number } | null>(null);
   const load = `${port}:${reloadNonce}`;
   const remints = reminted?.load === load ? reminted.count : 0;
-  const reach = usePortReach(workspaceId, port, remints);
+  const reach = usePortReach(workspaceId, port, `${remints}:${rechecks}`);
   const url = reach.state === "ready" ? reach.reach.url : null;
 
   useEffect(() => {

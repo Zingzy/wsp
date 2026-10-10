@@ -967,8 +967,9 @@ export interface KindModule {
    * nothing where none is owed. Present beside endThread. */
   endOwed?: (entry: LiveWorkspace, threadId: string) => Promise<{ paid: Promise<void> } | undefined>;
   /** Where a pane reaches one port of this kind's machine, where the kind answers it itself rather than through its
-   * machine's preview route: a computer the person joined forwards the port to this computer on demand. */
-  portReach?: (entry: LiveWorkspace, port: number) => Promise<{ url: string; expiresAt: number }>;
+   * machine's preview route: a computer the person joined forwards the port to this computer on demand. With
+   * standing, only a route that stands now, opened and held by nobody: what a probe of the port reaches. */
+  portReach?: (entry: LiveWorkspace, port: number, o?: { standing?: boolean }) => Promise<{ url: string; expiresAt: number }>;
   /** Whether a request relayed from a machine may drive this workspace; a local one answers only this computer,
    * and so does a machine of another kind whose dial names this computer. The machine id is absent on the one
    * road that asks before a machine exists, a fork's create, where only the kind can answer. */

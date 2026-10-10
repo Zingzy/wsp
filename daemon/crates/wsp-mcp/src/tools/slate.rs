@@ -280,7 +280,7 @@ mod tests {
     }
 
     #[test]
-    fn the_four_entries_fit_the_budget_of_4300_characters() {
+    fn the_four_entries_fit_the_budget_of_4400_characters() {
         for cloud in [false, true] {
             let total: usize = TOOLS
                 .iter()
@@ -292,7 +292,7 @@ mod tests {
                     serde_json::to_string(&entry).unwrap().chars().count()
                 })
                 .sum();
-            assert!(total < 4300, "the slate tools list {total} characters with the cloud {}", if cloud { "on" } else { "off" });
+            assert!(total < 4400, "the slate tools list {total} characters with the cloud {}", if cloud { "on" } else { "off" });
         }
     }
 

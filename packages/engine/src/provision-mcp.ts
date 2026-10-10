@@ -7,8 +7,8 @@
 // writes down at that grain, one line per key beside the job, so the next run
 // knows its own hand from the agent's and from the person's; a name it planned
 // and wrote nowhere is written down as one it no longer owns.
-import { placeProvisionPaths, type PlaceProvisionRow } from "@wsp/protocol";
-import { MCP_AGENTS, launchMisses, ownServerConfig, type McpEditLib, type McpMergeResult } from "@wsp/catalog";
+import { placeProvisionPaths, shellQuote, type PlaceProvisionRow } from "@wsp/protocol";
+import { MCP_AGENTS, launchMisses, ownServerConfig, unsetTomlKeys, type McpEditLib, type McpMergeResult } from "@wsp/catalog";
 import {
   READ_MS,
   absentCommands,
@@ -32,7 +32,8 @@ import {
 import type { ToolResult } from "./golden-tools.js";
 import type { StageListener } from "./golden.js";
 import type { Machine } from "./machine.js";
-import { NO_DIGEST, appendLanding, landedServers, serverDigest, type OwnedPaths } from "./provision-files.js";
+import { INLINE_EXEC_MS } from "./exec-detached.js";
+import { NO_DIGEST, appendLanding, landedServers, machineServerPort, serverDigest, type OwnedPaths } from "./provision-files.js";
 
 /** The plan as it reads on a computer whose login keeps its home somewhere else: every guest path the plan carries
  * hangs off the home it was planned for, so the whole of it moves with that home. The plan is made once for every
@@ -106,6 +107,32 @@ interface Merged {
   noCopy: Map<string, string>;
   /** Row id to the file that name's definition belongs in. */
   where: Map<string, string>;
+}
+
+/** Each agent's headless keys in its own config in the store its threads there read, on a Linux computer: `key =
+ * value` at the top for each key the config sets no value of, so one the person set stands. `agents` are the ones the
+ * setup puts there, whose store is made where it is not yet; another agent's is written only where its store stands.
+ * The words of a config that did not take the keys, one per agent. */
+export async function headlessKeys(machine: Machine, home: string, stores: Readonly<Record<string, string>>, agents: ReadonlySet<string>): Promise<string[]> {
+  const port = machineServerPort(machine);
+  const failed: string[] = [];
+  for (const agent of MCP_AGENTS) {
+    const keys = agent.mcp.headless;
+    const store = stores[agent.id];
+    if (keys === undefined || store === undefined) continue;
+    const make = agents.has(agent.id) ? `mkdir -p ${shellQuote(store)}` : `[ -d ${shellQuote(store)} ]`;
+    const there = await machine.exec(`[ "$(uname -s)" = Linux ] && ${make}`, { timeoutMs: INLINE_EXEC_MS }).catch(() => undefined);
+    if (there?.exitCode !== 0) continue;
+    const config = ownServerConfig(agent, home, store);
+    const file = await port.read(config.files);
+    const text = file?.text ?? "";
+    const missing = await unsetTomlKeys(text, keys);
+    if (missing.length === 0) continue;
+    const next = `${missing.map(k => `${k.key} = ${k.value}\n`).join("")}${text}`;
+    const refusedWrite = await landConfigs(machine, config.base, file === undefined ? [] : [file], new Map([[file?.path ?? config.files[0]!, next]]));
+    if (refusedWrite !== undefined) failed.push(`${agent.name}: ${refusedWrite}`);
+  }
+  return failed;
 }
 
 /** Writes the recipe's servers into the files the agents keep their own servers in on that computer, and answers

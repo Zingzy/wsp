@@ -7,7 +7,7 @@
 // stop is told so and drops the address. Held to the relay's own rules, the port floor and the cap
 // per workspace, and listed and stopped beside the relay's forwards.
 import type { Socket } from "node:net";
-import { FORWARD_MAX_PER_TARGET, RelayPort, paneForwardCapLine, paneForwardFloorLine, paneForwardQuietLine, paneForwardStoppedLine, type ForwardEvent, type PortForward } from "@wsp/protocol";
+import { FORWARD_MAX_PER_TARGET, RelayPort, paneForwardCapLine, paneForwardFloorLine, paneForwardGoneLine, paneForwardQuietLine, paneForwardStoppedLine, type ForwardEvent, type PortForward } from "@wsp/protocol";
 import { listenNear, type Forward } from "./helpers.js";
 
 /** How long a pane's forward stands after the pane last asked for it; the pane asks again every minute. */
@@ -36,6 +36,8 @@ interface Held {
 export interface PanePorts extends PaneForwards {
   /** The port on this computer a pane reaches that computer's port by, opened or held another hold. */
   reach(key: string, port: number, asker: { workspaceId: string; name: string }, onConn: (conn: Socket, used: () => void) => void): Promise<number>;
+  /** The port on this computer of the forward that stands for that computer's port, held no longer and opened by no one. */
+  standing(key: string, port: number): number;
 }
 
 export function panePorts(deps: { forwards: Map<string, Forward>; now: () => number; schedule: (fn: () => void, ms: number) => () => void }): PanePorts {
@@ -110,6 +112,11 @@ export function panePorts(deps: { forwards: Map<string, Forward>; now: () => num
       deps.forwards.set(key, forward);
       emit({ type: "forward.open", forward: h.view });
       return localPort;
+    },
+    standing(key, port) {
+      const h = held.get(key);
+      if (h === undefined) throw Object.assign(new Error(paneForwardGoneLine(port)), { kind: "usage" });
+      return h.forward.localPort;
     },
     list: () => [...held.values()].map(h => h.view),
     stop(workspaceId, port) {

@@ -431,7 +431,7 @@ export function linkDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, se
           },
         );
       };
-      if (o.pane !== undefined) return { localPort: await panes.reach(key, placePort, o.pane, tunnelled) };
+      if (o.pane !== undefined) return { localPort: o.standing === true ? panes.standing(key, placePort) : await panes.reach(key, placePort, o.pane, tunnelled) };
       const already = forwards.get(key);
       if (already !== undefined) return { localPort: already.localPort };
       const server = createServer(conn => tunnelled(conn));

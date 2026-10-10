@@ -99,23 +99,25 @@ export function applyStoppedEvent(stopped: ReadonlyMap<number, StoppedPort>, eve
   }
 }
 
-/** The line above a frame whose port stopped listening, or whose holder is no longer this workspace's; clock renders
- * the daemon's timestamp in the person's zone. */
-export function stoppedSentence(port: number, stopped: StoppedPort | undefined, clock: (iso: string) => string): string {
-  let out = stopped?.left === true ? `:${port} is no longer this workspace's` : `:${port} stopped listening`;
-  if (stopped === undefined) return out;
-  if (stopped.at !== null) out += ` at ${clock(stopped.at)}`;
+/** The line above a frame whose port does not answer on its computer, or whose holder is no longer this workspace's;
+ * clock renders the daemon's timestamp in the person's zone. With fetchedDown, a fetch of the port just failed, so a
+ * holder that left is not said to still listen. */
+export function stoppedSentence(port: number, computer: string, stopped: StoppedPort | undefined, clock: (iso: string) => string, fetchedDown = false): string {
+  const down = `:${port} on ${computer} is not answering; this tab reconnects when it does`;
+  if (stopped === undefined) return down;
+  let detail = stopped.at !== null ? ` at ${clock(stopped.at)}` : "";
   const holder = stopped.command ?? stopped.process;
   const pid = stopped.pid !== null ? `pid ${stopped.pid}` : null;
   const who = holder !== null ? (pid !== null ? `${holder} (${pid})` : holder) : pid;
   if (who !== null) {
-    out += `, held by ${who}`;
-    if (stopped.left) out += ", which still listens";
-    else if (stopped.exited === true) out += ", which exited";
-    else if (stopped.exited === false) out += ", which is still running";
+    detail += `, held by ${who}`;
+    if (stopped.left) detail += fetchedDown ? "" : ", which still listens";
+    else if (stopped.exited === true) detail += ", which exited";
+    else if (stopped.exited === false) detail += ", which is still running";
   }
-  if (stopped.movedTo !== null) out += `, now on :${stopped.movedTo}`;
-  return out;
+  if (stopped.movedTo !== null) detail += `, now on :${stopped.movedTo}`;
+  if (stopped.left) return `:${port} is no longer this workspace's${detail}`;
+  return detail === "" ? down : `${down}. It stopped listening${detail}`;
 }
 
 export interface PreviewableServersInput {

@@ -4,12 +4,13 @@
 // person types inside the harness's own session where it has no command.
 // One module per harness, registered on its catalog entry.
 import { shellQuote, type PageReach } from "@wsp/protocol";
+import { CLAUDE_NOT_SET_UP } from "./mcp-check.js";
 
 export type McpLogin =
   /** A command run in a pty on the computer the server is set up on, whose page returns to localhost on the computer the
    * browser is on. `pasted`: the same sign-in printing its page and taking back the address the browser landed on,
-   * which finishes from any computer. */
-  | { measured: string; command(name: string): string; pasted?(name: string): string }
+   * which finishes from any computer. `notSetUp`: the command's words for a name the config it read does not hold. */
+  | { measured: string; command(name: string): string; pasted?(name: string): string; notSetUp?: RegExp }
   /** The harness signs a server in only inside its own session: the line typed there. */
   | { measured: string; inside(name: string): string };
 
@@ -18,10 +19,12 @@ export const CLAUDE_MCP_LOGIN: McpLogin = {
   measured: "claude 2.1.282",
   command: name => `claude mcp login ${shellQuote(name)}`,
   pasted: name => `claude mcp login ${shellQuote(name)} --no-browser`,
+  notSetUp: CLAUDE_NOT_SET_UP,
 };
 
-/** No flag for a headless run: the page returns to a port the command listens on. */
-export const CODEX_MCP_LOGIN: McpLogin = { measured: "codex-cli 0.155.1", command: name => `codex mcp login ${shellQuote(name)}` };
+/** No flag for a headless run: the page returns to a port the command listens on. Its words for a name it does not
+ * have are 0.162.1's. */
+export const CODEX_MCP_LOGIN: McpLogin = { measured: "codex-cli 0.155.1", command: name => `codex mcp login ${shellQuote(name)}`, notSetUp: /^Error: No MCP server named '/m };
 
 export const OPENCODE_MCP_LOGIN: McpLogin = { measured: "opencode 1.18.18", command: name => `opencode mcp auth ${shellQuote(name)}` };
 

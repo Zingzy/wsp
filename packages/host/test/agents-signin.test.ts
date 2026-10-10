@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { Machine } from "@wsp/engine";
-import { HERE_PLACE_ID, addToolsHereRefusal, closedBeforeSignInLine, controlSignInRefusal, signInUncheckedLine, noVaultKeyRefusal, notTokenRefusal, serverSignInCopyRefusal, shellQuote, signInTerminalRefusal, signInVaultRefusal, type AgentsSignInEvent } from "@wsp/protocol";
+import { HERE_PLACE_ID, addToolsHereRefusal, closedBeforeSignInLine, controlSignInRefusal, signInUncheckedLine, noVaultKeyRefusal, notTokenRefusal, serverNotSetUpLine, serverSignInCopyRefusal, shellQuote, signInTerminalRefusal, signInVaultRefusal, type AgentsSignInEvent } from "@wsp/protocol";
 import type { AgentsOn, SignInForward } from "@wsp/runtime";
 import { hostActs, pagesOnPty, planSignIn, terminalSignIn, watchSignIn } from "../src/agents-signin.js";
 import { signInPrepareLine } from "../src/place-signin.js";
@@ -114,6 +114,33 @@ describe("the line a sign-in runs where it stands", () => {
     const handedOn = { ...rootBox(), relayed: true } as AgentsOn;
     expect((await planSignIn(handedOn, { agent: "claude", server: "notion" })).line.command).toContain("--no-browser");
     await expect(planSignIn(handedOn, { agent: "codex", server: "notion" })).rejects.toThrow(serverSignInCopyRefusal("Codex", "codex mcp login 'notion'", "callback"));
+  });
+
+  it("runs a server's sign-in on a joined computer with the store its threads there read, as their agent reads its servers", async () => {
+    const stores = { claude: "/root/.claude", codex: "/wsp/logins/codex" };
+    for (const [agent, line] of [["claude", "export CLAUDE_CONFIG_DIR='/root/.claude'; claude mcp login 'axiom'"], ["codex", "export CODEX_HOME='/wsp/logins/codex'; codex mcp login 'axiom'"]] as const) {
+      const plan = await planSignIn({ ...relayedBox(), stores } as AgentsOn, { agent, server: "axiom" });
+      expect(plan.line.command).toBe(`export HOME='/root' PATH='/usr/bin'; cd "$HOME" 2>/dev/null; ${pagesOnPty(line)}`);
+    }
+    const pasted = await planSignIn({ ...rootBox(), stores } as AgentsOn, { agent: "claude", server: "cloudflare" });
+    expect(pasted.line.command).toBe(`runuser -u 'ada' -- bash -c ${shellQuote(`export HOME='/home/ada' PATH='/usr/local/bin:/usr/bin'; cd "$HOME" 2>/dev/null; export CLAUDE_CONFIG_DIR='/root/.claude'; claude mcp login 'cloudflare' --no-browser`)}`);
+  });
+
+  it("hands the person a Codex server's sign-in line on a box with the store its threads read, where the page cannot come back", async () => {
+    const stores = { codex: "/wsp/logins/codex", claude: "/root/.claude" };
+    await expect(planSignIn({ ...rootBox(), relayed: true, stores } as AgentsOn, { agent: "codex", server: "axiom" })).rejects.toThrow(
+      serverSignInCopyRefusal("Codex", "export CODEX_HOME='/wsp/logins/codex'; codex mcp login 'axiom'", "callback"),
+    );
+    await expect(planSignIn({ ...rootBox(), stores } as AgentsOn, { agent: "codex", server: "axiom" })).rejects.toThrow("export CODEX_HOME='/wsp/logins/codex'; codex mcp login 'axiom'");
+  });
+
+  it("runs a project's server sign-in in that project's folder, and an agent's own login and status with its store", async () => {
+    const stores = { codex: "/wsp/logins/codex", claude: "/root/.claude" };
+    const projects = [{ id: "pr_lab", name: "lab", path: "/root/lab" }];
+    const plan = await planSignIn({ ...relayedBox(), stores, projects } as AgentsOn, { agent: "claude", server: "docs", scope: "project", project: "pr_lab" });
+    expect(plan.line.command).toBe(`export HOME='/root' PATH='/usr/bin'; cd "$HOME" 2>/dev/null; ${pagesOnPty("cd '/root/lab' 2>/dev/null; export CLAUDE_CONFIG_DIR='/root/.claude'; claude mcp login 'docs'")}`);
+    const own = await planSignIn({ ...rootBox(), stores } as AgentsOn, { agent: "codex" });
+    expect(own.line).toMatchObject({ command: "export CODEX_HOME='/wsp/logins/codex'; codex login --device-auth", status: "export CODEX_HOME='/wsp/logins/codex'; codex login status" });
   });
 
   it("refuses a server or agent named with a control character before anything is planned or dialled", async () => {
@@ -345,6 +372,23 @@ describe("a watched sign-in", () => {
     }, plan);
     await bad.done;
     expect(bad.steps.at(-1)).toEqual({ state: "failed", said: "Authentication failed: the server refused the redirect" });
+  });
+
+  it("says a server its harness does not have is not set up there, in one plain line and never the harness's own words", async () => {
+    for (const [agent, name, said] of [
+      ["codex", "axiom", "WARNING: proceeding, even though we could not create PATH aliases\r\nError: No MCP server named 'axiom' found.\r\n"],
+      ["claude", "cloudflare", 'No MCP server named "cloudflare". Configured servers: plugin:context7:context7, plugin:vercel:vercel\r\n'],
+      ["claude", "cloudflare", 'No MCP server named "cloudflare". Run `claude mcp add` to add one.\r\n'],
+    ] as const) {
+      const plan = await planSignIn(relayed(), { agent, server: name });
+      const t = await run((l, pty, line) => {
+        if (!line.includes(" mcp login ")) return;
+        l.data(pty, said);
+        l.exit(pty, 1);
+      }, plan);
+      await t.done;
+      expect(t.steps.at(-1)).toEqual({ state: "failed", said: serverNotSetUpLine(agent === "codex" ? "Codex" : "Claude Code", name) });
+    }
   });
 
   it("offers only the page the sign-in's own opener wrote on its terminal, never a browser.open from anything else on the workspace", async () => {

@@ -3,11 +3,12 @@
 // as protocol events, routes come from a fake portReach. No daemon, no cloud.
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { kindWords, noPreviewRouteLine, type EventUnion, type WorkspaceView } from "@wsp/protocol";
+import { kindWords, noPreviewRouteLine, workspaceComputerName, type EventUnion, type WorkspaceView } from "@wsp/protocol";
 import { useStore } from "../src/protocol/store.js";
 import type { Api, ProtocolEvent } from "../src/protocol/client.js";
 import { MOVED_WINDOW_MS } from "../src/adapt/ports.js";
 import { resetBrowsers } from "../src/browser/model.js";
+import { ANSWER_POLL_MS } from "../src/browser/answering.js";
 import { REACH_REASK_FLOOR_MS, REACH_REFRESH_WITH_MS_LEFT } from "../src/browser/reach.js";
 import { resetBrowserTabs, useBrowserTabs } from "../src/browser/tabs.js";
 import { RightPanel } from "../src/shell/RightPanel.js";
@@ -61,6 +62,8 @@ function fakeApi(workspaces: WorkspaceView[], portReach: Api["portReach"] = mint
 const open = (workspaceId: string, port: number, pid?: number, process?: string): EventUnion =>
   ({ type: "port.open", workspaceId, port, ...(pid !== undefined ? { pid } : {}), ...(process !== undefined ? { process } : {}) });
 const close = (workspaceId: string, port: number, detail: Partial<Extract<EventUnion, { type: "port.close" }>> = {}): EventUnion => ({ type: "port.close", workspaceId, port, ...detail });
+/** The line over a port that does not answer, naming the computer as the app names it. */
+const down = (port: number, w: WorkspaceView = workspace(WS)) => `:${port} on ${workspaceComputerName([], w)} is not answering; this tab reconnects when it does`;
 const clock = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
 function Harness({ workspaceId }: { workspaceId: string }) {
@@ -200,6 +203,155 @@ describe("framing a port", () => {
     expect(screen.getByText(/opens no address this pane can reach for port 8080/)).toBeDefined();
   });
 
+  it("the reload button asks for a forward that has ended again and frames the port once it stands", async () => {
+    let calls = 0;
+    const forwarded: Api["portReach"] = async (_id, port) => {
+      calls++;
+      if (calls === 2) throw new Error(`localhost:${port} was stopped in Ports; open the address again to forward it`);
+      return { url: `http://localhost:${port}/`, expiresAt: Date.now() + 120_000 };
+    };
+    await setup({ portReach: forwarded, workspaces: [{ ...workspace(WS), kind: "place" }] });
+    vi.useFakeTimers();
+    fireEvent.change(address(), { target: { value: "localhost:8080" } });
+    fireEvent.submit(address().closest("form")!);
+    await act(async () => {});
+    await act(() => vi.advanceTimersByTimeAsync(60_000));
+    expect(calls).toBe(2);
+    expect(screen.queryByTitle(":8080")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await act(async () => {});
+    expect(calls).toBe(3);
+    expect(frame(8080).getAttribute("src")).toBe("http://localhost:8080/");
+  });
+
+  it("a port no event names, as a Docker port held by docker-proxy is, says it is not answering on its computer once the frame loads onto it down and comes back by itself within five seconds, ten times", async () => {
+    let restarting = false;
+    const probed: number[] = [];
+    const forwarded: Api["portReach"] = async (_id, port) => ({ url: `http://localhost:${port}/`, expiresAt: Date.now() + 120_000 });
+    const { emit } = await setup({
+      portReach: forwarded,
+      workspaces: [{ ...workspace(WS), kind: "place" }],
+      portProbe: async (_id, port) => {
+        probed.push(port);
+        if (restarting) throw new Error("fetch failed");
+        return { status: 200, body: "<!doctype html>" };
+      },
+    });
+    // The daemon has spoken for the folder, and never of 8000.
+    emit(open(WS, 4000));
+    vi.useFakeTimers();
+    fireEvent.change(address(), { target: { value: "localhost:8000" } });
+    fireEvent.submit(address().closest("form")!);
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(screen.queryByText(/^:8000 /)).toBeNull();
+    const nonce = () => Object.values(useBrowserTabs.getState().byWorkspaceId[WS]!)[0]!.reloadNonce;
+    for (let restart = 1; restart <= 10; restart++) {
+      // The container goes down and the frame loads onto it, which is when the page turns white.
+      restarting = true;
+      fireEvent.load(frame(8000));
+      await act(() => vi.advanceTimersByTimeAsync(0));
+      expect(screen.getByText(/^:8000 /).textContent).toBe(down(8000, { ...workspace(WS), kind: "place" }));
+      const before = frame(8000);
+      restarting = false;
+      await act(() => vi.advanceTimersByTimeAsync(ANSWER_POLL_MS));
+      expect(screen.queryByText(/^:8000 /)).toBeNull();
+      expect(nonce()).toBe(restart);
+      expect(frame(8000)).not.toBe(before);
+    }
+    expect(ANSWER_POLL_MS).toBeLessThanOrEqual(5_000 / 2);
+  });
+
+  it("a port off the list is fetched again only while it does not answer: once it answers, only a close, a frame load or a Refresh asks again", async () => {
+    const probed: number[] = [];
+    const forwarded: Api["portReach"] = async (_id, port) => ({ url: `http://localhost:${port}/`, expiresAt: Date.now() + 120_000 });
+    const { emit } = await setup({
+      portReach: forwarded,
+      workspaces: [{ ...workspace(WS), kind: "place" }],
+      portProbe: async (_id, port) => {
+        probed.push(port);
+        return { status: 200, body: "<!doctype html>" };
+      },
+    });
+    emit(open(WS, 4000));
+    vi.useFakeTimers();
+    fireEvent.change(address(), { target: { value: "localhost:8000" } });
+    fireEvent.submit(address().closest("form")!);
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    const asked = probed.length;
+    await act(() => vi.advanceTimersByTimeAsync(ANSWER_POLL_MS * 10));
+    expect(probed).toHaveLength(asked);
+    fireEvent.load(frame(8000));
+    await act(() => vi.advanceTimersByTimeAsync(ANSWER_POLL_MS * 3));
+    expect(probed.length).toBeGreaterThan(asked);
+    const loaded = probed.length;
+    fireEvent.click(screen.getByRole("button", { name: /^(Refresh|Stop)$/ }));
+    await act(() => vi.advanceTimersByTimeAsync(ANSWER_POLL_MS * 3));
+    expect(probed.length).toBeGreaterThan(loaded);
+  });
+
+  it("one Refresh from a card whose forward ended frames the port once", async () => {
+    let calls = 0;
+    const forwarded: Api["portReach"] = async (_id, port) => {
+      calls++;
+      if (calls === 1) throw new Error(`localhost:${port} was stopped in Ports; open the address again to forward it`);
+      return { url: `http://localhost:${port}/`, expiresAt: Date.now() + 120_000 };
+    };
+    const { emit } = await setup({
+      portReach: forwarded,
+      workspaces: [{ ...workspace(WS), kind: "place" }],
+      portProbe: async () => ({ status: 200, body: "<!doctype html>" }),
+    });
+    emit(open(WS, 4000));
+    vi.useFakeTimers();
+    fireEvent.change(address(), { target: { value: "localhost:8000" } });
+    fireEvent.submit(address().closest("form")!);
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(screen.getByText(/opens no address this pane can reach for port 8000/)).toBeDefined();
+    const nonce = () => Object.values(useBrowserTabs.getState().byWorkspaceId[WS]!)[0]!.reloadNonce;
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    const shown = frame(8000);
+    await act(() => vi.advanceTimersByTimeAsync(ANSWER_POLL_MS * 2));
+    expect(frame(8000)).toBe(shown);
+    expect(nonce()).toBeLessThanOrEqual(1);
+  });
+
+  it("a port the folder's watch names is not fetched again, and a fetch that fails asks for the forward again, so one stopped in Ports shows the card", async () => {
+    let calls = 0;
+    const probed: number[] = [];
+    const forwarded: Api["portReach"] = async (_id, port) => {
+      calls++;
+      if (calls === 3) throw new Error(`localhost:${port} was stopped in Ports; open the address again to forward it`);
+      return { url: `http://localhost:${port}/`, expiresAt: Date.now() + 120_000 };
+    };
+    const { emit } = await setup({
+      portReach: forwarded,
+      workspaces: [{ ...workspace(WS), kind: "place" }],
+      portProbe: async (_id, port) => {
+        probed.push(port);
+        if (port === 8000) throw new Error(`localhost:${port} is not forwarded to this computer now`);
+        return { status: 200, body: "<!doctype html>" };
+      },
+    });
+    emit(open(WS, 5173));
+    vi.useFakeTimers();
+    fireEvent.click(serverCard(5173));
+    await act(() => vi.advanceTimersByTimeAsync(ANSWER_POLL_MS * 3));
+    expect(probed).toEqual([5173]);
+
+    act(() => useRightPanelStore.getState().openBrowser(WS, null));
+    fireEvent.change(address(), { target: { value: "localhost:8000" } });
+    fireEvent.submit(address().closest("form")!);
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(calls).toBe(3);
+    expect(screen.queryByTitle(":8000")).toBeNull();
+    expect(screen.getByText(/opens no address this pane can reach for port 8000/)).toBeDefined();
+    const fetched = probed.length;
+    await act(() => vi.advanceTimersByTimeAsync(ANSWER_POLL_MS * 3));
+    expect(probed).toHaveLength(fetched);
+    expect(calls).toBe(3);
+  });
+
   it("typing a loopback address or a bare port in the bar frames that port", async () => {
     await setup();
     act(() => address().focus());
@@ -300,7 +452,7 @@ describe("framing a port", () => {
     fireEvent.click(serverCard(5173));
     await screen.findByTitle(":5173");
     emit(close(WS, 5173));
-    expect(screen.getByText(":5173 stopped listening")).toBeDefined();
+    expect(screen.getByText(down(5173))).toBeDefined();
     expect(frame(5173).getAttribute("src")).toBe(PUBLIC(5173));
   });
 
@@ -311,21 +463,27 @@ describe("framing a port", () => {
     const first = await screen.findByTitle(":8412");
     const at = "2026-09-05T12:04:00.000Z";
     emit(close(WS, 8412, { pid: 53479, process: "python3", command: "python3 -m http.server 8412", exited: true, at }));
-    const slot = screen.getByText(/^:8412 stopped listening/);
-    expect(slot.textContent).toBe(`:8412 stopped listening at ${clock(at)}, held by python3 -m http.server 8412 (pid 53479), which exited`);
+    const slot = screen.getByText(new RegExp(`^${down(8412)}`));
+    expect(slot.textContent).toBe(`${down(8412)}. It stopped listening at ${clock(at)}, held by python3 -m http.server 8412 (pid 53479), which exited`);
     expect(slot.nextElementSibling).toBe(first);
     expect(frame(8412)).toBe(first);
   });
 
-  it("a port whose holder is no longer the workspace's says it left the workspace, not that it stopped", async () => {
-    const { emit } = await setup();
+  it("a port whose holder is no longer the workspace's shows no line while it answers, and says it left, not that it stopped, once it does not", async () => {
+    let answers = true;
+    const { emit } = await setup({ portProbe: async () => (answers ? { status: 200, body: "<!doctype html>" } : { status: 502, body: "" }) });
     emit(open(WS, 8000, 4202, "python3"));
     fireEvent.click(serverCard(8000));
     await screen.findByTitle(":8000");
     const at = "2026-09-05T12:04:00.000Z";
     emit(close(WS, 8000, { pid: 4202, process: "python3", command: "python3 -m http.server", exited: false, left: true, at } as never));
-    const slot = screen.getByText(/^:8000 /);
-    expect(slot.textContent).toBe(`:8000 is no longer this workspace's at ${clock(at)}, held by python3 -m http.server (pid 4202), which still listens`);
+    await act(async () => {});
+    expect(screen.queryByText(/^:8000 /)).toBeNull();
+
+    answers = false;
+    fireEvent.load(frame(8000));
+    const slot = await screen.findByText(/^:8000 /);
+    expect(slot.textContent).toBe(`:8000 is no longer this workspace's at ${clock(at)}, held by python3 -m http.server (pid 4202)`);
   });
 
   it("a long argv is cut to one line in the slot, the full sentence in its title, and the frame stays put", async () => {
@@ -335,7 +493,7 @@ describe("framing a port", () => {
     const first = await screen.findByTitle(":8412");
     const command = `node -e ${"x".repeat(4096)}`;
     emit(close(WS, 8412, { pid: 53479, process: "node", command, exited: true, at: "2026-09-05T12:04:00.000Z" }));
-    const slot = screen.getByText(/^:8412 stopped listening/);
+    const slot = screen.getByText(new RegExp(`^${down(8412)}`));
     expect(slot.classList.contains("truncate")).toBe(true);
     expect(slot.title).toBe(slot.textContent);
     expect(slot.title).toContain(command);
@@ -353,7 +511,7 @@ describe("framing a port", () => {
     emit(close(WS, 8412, { pid: 53479, process: "python3", command: "python3 -m http.server 8412", exited: true, at: "2026-09-05T12:04:00.000Z" }));
     vi.advanceTimersByTime(30_000);
     emit(open(WS, 8413, 60000, "python3"));
-    expect(screen.getByText(/^:8412 stopped listening/).textContent).toMatch(/, which exited, now on :8413$/);
+    expect(screen.getByText(new RegExp(`^${down(8412)}`)).textContent).toMatch(/, which exited, now on :8413$/);
     expect(frame(8412).getAttribute("src")).toBe(PUBLIC(8412));
 
     // The window is measured on the model's clock, which the fake timers drive.
@@ -364,10 +522,11 @@ describe("framing a port", () => {
     act(() => address().focus());
     fireEvent.change(address(), { target: { value: "9000" } });
     fireEvent.keyDown(address(), { key: "Enter" });
-    expect(screen.getByText(/^:9000 stopped listening/).textContent).toMatch(/, which exited$/);
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(screen.getByText(new RegExp(`^${down(9000)}`)).textContent).toMatch(/, which exited$/);
   });
 
-  it("when the port listens again after a close, the banner goes, the frame remounts and the route is probed anew", async () => {
+  it("when the port listens again after a close, the frame remounts and the route is probed anew, though the fetch answered through the close", async () => {
     const probed: number[] = [];
     const { emit } = await setup({
       portProbe: async (_id, port) => {
@@ -380,17 +539,17 @@ describe("framing a port", () => {
     const first = await screen.findByTitle(":8412");
     await waitFor(() => expect(probed).toEqual([8412]));
 
+    // The open arrives while the fetch the close started is still out.
     emit(close(WS, 8412));
-    expect(screen.getByText(":8412 stopped listening")).toBeDefined();
     expect(frame(8412)).toBe(first);
-
     emit(open(WS, 8412, 200, "node"));
-    expect(screen.queryByText(":8412 stopped listening")).toBeNull();
     await waitFor(() => expect(frame(8412)).not.toBe(first));
     expect(frame(8412).getAttribute("src")).toBe(PUBLIC(8412));
-    await waitFor(() => expect(probed).toEqual([8412, 8412]));
     await act(() => new Promise(r => setTimeout(r, 50)));
-    expect(probed).toEqual([8412, 8412]);
+    const asked = probed.length;
+    expect(asked).toBeGreaterThanOrEqual(2);
+    await act(() => new Promise(r => setTimeout(r, 50)));
+    expect(probed).toHaveLength(asked);
     expect(Object.values(useBrowserTabs.getState().byWorkspaceId[WS]!).map(t => t.reloadNonce)).toEqual([1]);
   });
 
@@ -411,10 +570,11 @@ describe("framing a port", () => {
     expect(screen.queryByTitle(":8412")).toBeNull();
     expect(probed).toEqual([8412]);
 
+    // The fetch the close started lands, answering, before the open.
     emit(close(WS, 8412));
+    await waitFor(() => expect(probed.length).toBeGreaterThan(1));
     blocked = false;
     emit(open(WS, 8412, 200, "node"));
-    await waitFor(() => expect(probed).toEqual([8412, 8412]));
     await screen.findByTitle(":8412");
     expect(screen.queryByText(":8412 refused the preview host")).toBeNull();
   });
@@ -425,9 +585,9 @@ describe("framing a port", () => {
     fireEvent.change(address(), { target: { value: "3000" } });
     fireEvent.keyDown(address(), { key: "Enter" });
     await screen.findByTitle(":3000");
-    expect(screen.queryByText(":3000 stopped listening")).toBeNull();
+    expect(screen.queryByText(down(3000))).toBeNull();
     emit(open(WS, 4000));
-    expect(screen.getByText(":3000 stopped listening")).toBeDefined();
+    expect(screen.getByText(down(3000))).toBeDefined();
   });
 
   it("a new tab typed onto a port that is listening frames it with no banner", async () => {
@@ -440,7 +600,7 @@ describe("framing a port", () => {
     fireEvent.change(address(), { target: { value: "8412" } });
     fireEvent.keyDown(address(), { key: "Enter" });
     await screen.findByTitle(":8412");
-    expect(screen.queryByText(":8412 stopped listening")).toBeNull();
+    expect(screen.queryByText(down(8412))).toBeNull();
   });
 
   it("a computer that mints no route says so in the person's words, and never in the engine's", async () => {

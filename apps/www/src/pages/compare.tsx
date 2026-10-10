@@ -118,7 +118,6 @@ export function Compare() {
             </ul>
           </section>
         ))}
-        <p className="font-mono text-[13px] text-faint">Read from each product's own site, docs and repo on {READ}.</p>
       </div>
       <TryIt />
     </main>
@@ -142,7 +141,6 @@ export function ToolPage({ tool }: { tool: Tool }) {
 
       <div className="mx-auto max-w-[1200px] px-4 sm:px-6">
         <Table tool={tool} />
-        <p className="mt-5 font-mono text-[13px] text-faint">Read on {READ}. Hover an answer for the sentence and pages behind it.</p>
       </div>
 
       <Section>

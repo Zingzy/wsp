@@ -14,6 +14,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Browser, Page } from "playwright";
+import { serverNotSetUpLine } from "@wsp/protocol";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { launchRender, renderSkipped, stopRender } from "./render-browser";
 import { startVite, type ViteChild } from "./vite-child";
@@ -169,6 +170,27 @@ describe.skipIf(renderSkipped !== undefined)("the agents panel laid out in Chrom
         }, row);
         expect(read, `${width} ${theme}`).toEqual({ words: "Finish in your browser", lines: [40, 40], under: true, fits: true, right: true });
         await at(width).screenshot({ path: join(SHOTS_DIR, `agents-signin-browser-${width}-${theme}.png`), animations: "disabled" });
+      }
+    }
+  }, 120_000);
+
+  it("draws a server's failed sign-in under its row as its one line with no empty room above it, at 480 and 360 in both themes, photographed", async () => {
+    const row = "server-global-linear-http-mcp.linear.app";
+    for (const theme of ["dark", "light"] as const) {
+      for (const width of WIDTHS) {
+        await open(`screen=agents-widths&theme=${theme}&signin=unset`);
+        await page!.waitForSelector("[data-agent-row]");
+        await pickTab(width, "Tool servers");
+        await at(width).locator(`[data-kind-row="${row}"] [data-k=act-sign-in]`).click();
+        const flow = at(width).locator("[data-k=sign-in-flow]");
+        await flow.locator("[data-k=sign-in-refused]").waitFor();
+        const read = await flow.evaluate((el, id) => {
+          const rowBox = el.closest("[data-agents-width]")!.querySelector(`[data-kind-row="${id}"]`)!.getBoundingClientRect();
+          const said = el.querySelector("[data-k=sign-in-refused]")!;
+          return { lines: el.querySelectorAll("[data-sign-in-line]").length, gap: Math.round(said.getBoundingClientRect().top - rowBox.bottom), said: said.textContent };
+        }, row);
+        expect(read, `${width} ${theme}`).toEqual({ lines: 0, gap: 0, said: serverNotSetUpLine("Claude Code", "linear") });
+        await at(width).screenshot({ path: join(SHOTS_DIR, `agents-signin-unset-${width}-${theme}.png`), animations: "disabled" });
       }
     }
   }, 120_000);

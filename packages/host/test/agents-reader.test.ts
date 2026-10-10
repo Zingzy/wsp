@@ -86,7 +86,7 @@ describe("the agents report off a computer you own whose daemon runs as root", (
     expect(agent("hermes")).toMatchObject({ installed: true, signIn: "unknown", signInRoad: "terminal" });
     expect(agent("gemini")).toMatchObject({ installed: false, road: "none", signIn: "none", signInRoad: "code" });
     const server = (agent: string, name: string) => read.servers.find(s => s.agent === agent && s.name === name)!;
-    expect(server("claude", "airtable")).toEqual({ agent: "claude", name: "airtable", scope: "user", file: "~/.claude.json", transport: { kind: "stdio", line: "npx airtable-mcp-server" }, envNames: ["AIRTABLE_API_KEY"], auth: "open", enabled: true, inRecipe: true });
+    expect(server("claude", "airtable")).toEqual({ agent: "claude", name: "airtable", scope: "user", file: "~/.claude.json", transport: { kind: "stdio", line: "npx airtable-mcp-server" }, envNames: ["AIRTABLE_API_KEY"], auth: "open", enabled: true, inRecipe: true, signInLine: "claude mcp login 'airtable'" });
     expect(server("claude", "notion")).toMatchObject({ transport: { kind: "http", host: "mcp.notion.com" }, auth: "unknown", inRecipe: false });
     expect(server("claude", "local")).toMatchObject({ scope: "home" });
     expect(server("codex", "linear")).toMatchObject({ file: "~/.codex/config.toml", transport: { kind: "http", host: "mcp.linear.app" }, auth: "open" });
@@ -266,7 +266,7 @@ describe("the agents report off this computer and off a workspace", () => {
     const read = await agentsReader({ vault: () => ({}) }).read({ kind: "machine", machine, projects: [{ id: "pr_app", name: "app", path: at.project }] });
     expect(lines.slice(1).some(l => l.startsWith("runuser"))).toBe(false);
     expect(read.servers.filter(s => s.scope === "project")).toEqual([
-      { agent: "claude", name: "project-db", scope: "project", file: "~/code/app/.mcp.json", transport: { kind: "stdio", line: "npx db-mcp" }, envNames: [], auth: "open", enabled: true, project: { id: "pr_app", name: "app", path: "~/code/app" } },
+      { agent: "claude", name: "project-db", scope: "project", file: "~/code/app/.mcp.json", transport: { kind: "stdio", line: "npx db-mcp" }, envNames: [], auth: "open", enabled: true, project: { id: "pr_app", name: "app", path: "~/code/app" }, signInLine: `cd '${at.project}' 2>/dev/null; claude mcp login 'project-db'` },
     ]);
     expect(read.skills.filter(s => s.scope === "project").map(s => s.name)).toEqual(["deploy", "lint"]);
     expect(read.agents.find(a => a.id === "claude")).toMatchObject({ signIn: "signed-in", version: "2.1.281" });
