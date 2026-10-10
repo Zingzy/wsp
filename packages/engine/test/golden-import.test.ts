@@ -8,7 +8,7 @@ import { describe, expect, it, onTestFinished } from "vitest";
 import { ROOT, sourceFiles } from "../../protocol/test/source-files.js";
 import { describeDiff, diffRecipes, isEmptyDiff } from "../src/golden-diff.js";
 import { withRecordedPins } from "../src/golden-tools.js";
-import { CATALOG_AGENTS, CLAUDE_INSTALL, LOCAL_BIN, ROAD_MODULES, ROAD_STEPS, baseNote, catalogEntry as catalogEntryOf, installLine, parseJsonc } from "@wsp/catalog";
+import { CATALOG_AGENTS, CLAUDE_CODE, CLAUDE_INSTALL, LOCAL_BIN, ROAD_MODULES, ROAD_STEPS, baseNote, catalogEntry as catalogEntryOf, installLine, parseJsonc } from "@wsp/catalog";
 import {
   rowRoad,
   UNMEASURED_ROAD,
@@ -1679,6 +1679,23 @@ describe("the agents as steps of the one tools loop", () => {
     expect(run(nodeFloorCheck(here + 1))).not.toBe(0);
     // A computer with no node at all reads as under every floor rather than as an error.
     expect(spawnSync("bash", ["-c", `( PATH=/nonexistent; ${nodeFloorCheck(18)} )`], { encoding: "utf8" }).status).not.toBe(0);
+  });
+
+  it("keeps an agent a computer has at the pin or newer, and installs over an older one, under a real shell", () => {
+    const dir = mkdtempSync(join(tmpdir(), "wsp-agent-newer-"));
+    onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
+    const step = agentSteps(agentInstallsFor(ticked("agents/claude"))).find(t => t.id === "agents/claude")!;
+    expect(step.asks).toBe(CLAUDE_CODE.version);
+    const [major, minor, patch] = CLAUDE_CODE.version.split(".").map(Number) as [number, number, number];
+    const present = (version: string): boolean => {
+      writeStub(join(dir, "claude"), `#!/bin/sh\necho '${version} (Claude Code)'\n`);
+      return spawnSync("bash", ["-c", `export PATH=${dir}:/usr/bin:/bin\n${presenceTests(step).join(" && ")}`], { encoding: "utf8" }).status === 0;
+    };
+    expect(present(`${major}.${minor}.${patch + 16}`)).toBe(true);
+    expect(present(`${major}.${minor + 1}.0`)).toBe(true);
+    expect(present(CLAUDE_CODE.version)).toBe(true);
+    expect(present(`${major}.${minor}.${patch - 10}`)).toBe(false);
+    expect(present(`${major}.${minor - 1}.${patch + 100}`)).toBe(false);
   });
 
   it("carries no node step when nothing ticked runs on node, and nothing at all for no agent", () => {

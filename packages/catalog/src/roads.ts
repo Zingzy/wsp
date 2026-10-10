@@ -131,13 +131,13 @@ export const CLAUDE_CONFIG_DIR = `${GUEST_HOME}/${CLAUDE_CONFIG_REL}`;
 export const CLAUDE_KEY_FILE = "anthropic-api-key";
 
 /** Claude Code by the vendor's own Linux binary at the version the owner's Mac runs, checksummed against the sums
- * that version's manifest publishes (https://downloads.claude.ai/claude-code-releases/2.1.280/manifest.json, the
+ * that version's manifest publishes (https://downloads.claude.ai/claude-code-releases/2.1.296/manifest.json, the
  * glibc platform keys linux-x64 and linux-arm64, which are the sums the vendor's own installer checks). */
 export const CLAUDE_CODE = {
-  version: "2.1.280",
+  version: "2.1.296",
   sha256: {
-    x86_64: "1e08503dbdf3c2cb0d706d32f3408277388d1c76ef108673e8fe42c1b322925b",
-    aarch64: "92f2b4fd05d0bdcf7b9a0d4e0ecef4a1e4b368b290cd8fd07cff9a50013f45a2",
+    x86_64: "24972e3bc859fab2b46ed4c1e51f7d6130f06d3bd550811a114640de3370d0de",
+    aarch64: "f1f6e96e0d8342b9dbf41d7e88255397a6a52ce3d8736ad6a4c6b59c9b62fefa",
   },
 } as const;
 

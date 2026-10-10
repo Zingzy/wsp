@@ -1,4 +1,4 @@
-2.1.280 (Claude Code)
+2.1.296 (Claude Code)
 __WSP_CATALOG_SEP__
 Usage: claude [options] [command] [prompt]
 
@@ -13,10 +13,11 @@ Options:
                                         access to
   --agent <agent>                       Agent for the current session. Overrides
                                         the 'agent' setting.
-  --agents <json>                       JSON object defining custom agents (e.g.
-                                        '{"reviewer": {"description": "Reviews
-                                        code", "prompt": "You are a code
-                                        reviewer"}}')
+  --agents <json-or-file>               JSON object defining custom agents, or
+                                        with --print the path to a file that
+                                        holds one (e.g. '{"reviewer":
+                                        {"description": "Reviews code",
+                                        "prompt": "You are a code reviewer"}}')
   --allow-dangerously-skip-permissions  Enable bypassing all permission checks
                                         as an option, without it being enabled
                                         by default. Recommended only for
@@ -75,6 +76,9 @@ Options:
                                         "!1p,!file")
   --debug-file <path>                   Write debug logs to a specific file path
                                         (implicitly enables debug mode)
+  --desktop                             Open in the Claude Desktop app instead
+                                        of the terminal (with --continue or
+                                        --resume <id> to pick the session)
   --disable-slash-commands              Disable all skills
   --disallowedTools, --disallowed-tools <tools...>
       Comma or space-separated list of tool names to deny (e.g. "Bash(git *)
@@ -132,8 +136,7 @@ Options:
   --model <model>                       Model for the current session. Provide
                                         an alias for the latest model (e.g.
                                         'fable', 'opus', or 'sonnet') or a
-                                        model's full name (e.g.
-                                        'claude-fable-5').
+                                        model's full name.
   -n, --name <name>                     Set a display name for this session
                                         (shown in the prompt box, /resume
                                         picker, and terminal title)
@@ -263,10 +266,11 @@ Options:
 
 Commands:
   agents [options]                      Manage background agents
-  attach <id>                           Open a background session in this
+  attach <id|name>                      Open a background session in this
                                         terminal. <id> is the short id that
                                         `claude --bg` prints and `claude agents`
-                                        lists
+                                        lists. Part of the session name works
+                                        too
   auth                                  Manage authentication
   auto-mode                             Inspect or reset auto mode classifier
                                         configuration
@@ -282,11 +286,13 @@ Commands:
   install [options] [target]            Install Claude Code native build. Use
                                         [target] to specify version (stable,
                                         latest, or specific version)
-  logs <id>                             Print a background session's recent
+  logs <id|name>                        Print a background session's recent
                                         terminal output
   mcp                                   Configure and manage MCP servers
   plugin|plugins                        Manage Claude Code plugins
-  project                               Manage Claude Code project state
+  purge [options] [path]                Delete all Claude Code state for a
+                                        project (transcripts, tasks, file
+                                        history, config entry)
   respawn [options] [id]                Restart a background session, or all of
                                         them with --all, so it runs the current
                                         Claude Code version
@@ -306,5 +312,4 @@ Commands:
   update|upgrade                        Check for updates and install if
                                         available
 __WSP_CATALOG_SEP__
-{"type":"system","subtype":"commands_changed","commands":[{"name":"deep-research","description":"Deep research harness — fan-out web searches, fetch sources, adversarially verify claims, synthesize a cited report. (dynamic workflow)","argumentHint":"","builtin":true},{"name":"design","description":"Grant or revoke Claude agent access to your Design projects","argumentHint":"consent | revoke","builtin":true}],"uuid":"7c6f56dc-c585-42a0-b6e8-783665c45546","session_id":"8ba9226e-a816-4937-8929-ee0272a7c498"}
-{"type":"control_response","response":{"subtype":"success","request_id":"init","response":{"commands":[{"name":"deep-research","description":"Deep research harness — fan-out web searches, fetch sources, adversarially verify claims, synthesize a cited report. (dynamic workflow)","argumentHint":"","builtin":true},{"name":"design","description":"Grant or revoke Claude agent access to your Design projects","argumentHint":"consent | revoke","builtin":true}],"agents":[{"name":"claude","description":"Catch-all for any task that doesn't fit a more specific agent. FleetView's default when no agent name is typed."},{"name":"Explore","description":"Fast read-only search agent for locating code. Use it to find files by pattern (eg. \"src/components/**/*.tsx\"), grep for symbols or keywords (eg. \"API endpoints\"), or answer \"where is X defined / which files reference Y.\" Do NOT use it for code review, design-doc auditing, cross-file consistency checks, or open-ended analysis — it reads excerpts rather than whole files and will miss content past its read window. When calling, specify search breadth: \"quick\" for a single targeted lookup, \"medium\" for moderate exploration, or \"very thorough\" to search across multiple locations and naming conventions.","model":"inherit"}],"output_style":"default","available_output_styles":["default","Proactive","Concise","Explanatory","Learning"],"user_output_styles_dir":"/root/.claude-cfg/output-styles","models":[{"value":"default","resolvedModel":"claude-opus-5-5[1m]","displayName":"Default (recommended)","description":"Use the default model (currently Opus 5.5 (1M context)) · $4/$20 per Mtok","supportsEffort":true,"supportedEffortLevels":["low","medium","high","xhigh","max"],"supportsAdaptiveThinking":true,"supportsFastMode":true,"supportsAutoMode":true},{"value":"opus[1m]","resolvedModel":"claude-opus-5-5[1m]","displayName":"Opus (1M context)","description":"Opus 5.5 with 1M context · Best for everyday, complex tasks · $4/$20 per Mtok","supportsEffort":true,"supportedEffortLevels":["low","medium","high","xhigh","max"],"supportsAdaptiveThinking":true,"supportsFastMode":true,"supportsAutoMode":true},{"value":"claude-fable-5-1[1m]","resolvedModel":"claude-fable-5-1","displayName":"Fable","description":"Fable 5.1 · Most capable for your hardest and longest-running tasks · $10/$50 per Mtok","supportsEffort":true,"supportedEffortLevels":["low","medium","high","xhigh","max"],"supportsAdaptiveThinking":true,"supportsAutoMode":true},{"value":"sonnet","resolvedModel":"claude-sonnet-5","displayName":"Sonnet","description":"Sonnet 5 · Efficient for routine tasks · $2/$10 per Mtok","supportsEffort":true,"supportedEffortLevels":["low","medium","high","xhigh","max"],"supportsAdaptiveThinking":true,"supportsAutoMode":true},{"value":"haiku","resolvedModel":"claude-haiku-4-5-20251001","displayName":"Haiku","description":"Haiku 4.5 · Fastest for quick answers · $1/$5 per Mtok"}],"account":{},"pid":14147,"current_permission_mode":"auto","hooks_applied":true,"analytics_disabled":false,"remote_control_auto_enable":false,"remote_control_auto_connect_default":false,"remote_control_available":true,"remote_control_auto_on_by_default":false,"ide_rc_auto_enable_gate":true,"fast_mode_state":"off","fast_mode_disabled_reason":"sdk_opt_in_required","session_state":"idle"},"pending_permission_requests":[],"pending_user_dialog_requests":[]}}
+{"type":"control_response","response":{"subtype":"success","request_id":"init","response":{"commands":[{"name":"deep-research","description":"Deep research harness — fan-out web searches, fetch sources, adversarially verify claims, synthesize a cited report. (dynamic workflow)","argumentHint":"","builtin":true},{"name":"design","description":"Grant or revoke Claude agent access to your Design projects","argumentHint":"consent | revoke","builtin":true}],"agents":[{"name":"claude","description":"Catch-all for any task that doesn't fit a more specific agent. FleetView's default when no agent name is typed."},{"name":"Explore","description":"Fast read-only search agent for locating code. Use it to find files by pattern (eg. \"src/components/**/*.tsx\"), grep for symbols or keywords (eg. \"API endpoints\"), or answer \"where is X defined / which files reference Y.\" Do NOT use it for code review, design-doc auditing, cross-file consistency checks, or open-ended analysis — it reads excerpts rather than whole files and will miss content past its read window. When calling, specify search breadth: \"quick\" for a single targeted lookup, \"medium\" for moderate exploration, or \"very thorough\" to search across multiple locations and naming conventions.","model":"inherit"}],"output_style":"default","available_output_styles":["default","Proactive","Concise","Explanatory","Learning"],"user_output_styles_dir":"/root/.claude-cfg/output-styles","models":[{"value":"default","resolvedModel":"claude-opus-5-5","displayName":"Default (recommended)","description":"Use the default model (currently Opus 5.5) · $4/$20 per Mtok","supportsEffort":true,"supportedEffortLevels":["low","medium","high","xhigh","max"],"supportsAdaptiveThinking":true,"supportsFastMode":true,"supportsAutoMode":true},{"value":"opus","resolvedModel":"claude-opus-5-5","displayName":"Opus","description":"Opus 5.5 · Best for everyday, complex tasks · $4/$20 per Mtok","supportsEffort":true,"supportedEffortLevels":["low","medium","high","xhigh","max"],"supportsAdaptiveThinking":true,"supportsFastMode":true,"supportsAutoMode":true},{"value":"fable","resolvedModel":"claude-fable-5-1","displayName":"Fable","description":"Fable 5.1 · Most capable for your hardest and longest-running tasks · $10/$50 per Mtok","supportsEffort":true,"supportedEffortLevels":["low","medium","high","xhigh","max"],"supportsAdaptiveThinking":true,"supportsAutoMode":true},{"value":"sonnet","resolvedModel":"claude-sonnet-5-5","displayName":"Sonnet","description":"Sonnet 5.5 · Efficient for routine tasks · $2/$10 per Mtok","supportsEffort":true,"supportedEffortLevels":["low","medium","high","xhigh","max"],"supportsAdaptiveThinking":true,"supportsAutoMode":true},{"value":"haiku","resolvedModel":"claude-haiku-5-5","displayName":"Haiku","description":"Haiku 5.5 · Fastest for quick answers · $0.10/$0.50 per Mtok ($0.50/$2.50 for prompts over 100k)","supportsEffort":true,"supportedEffortLevels":["low","medium","high","xhigh","max"],"supportsAdaptiveThinking":true,"supportsAutoMode":true}],"account":{},"pid":56273,"claude_code_version":"2.1.296","current_permission_mode":"auto","hooks_applied":true,"feedback_mode":{"kind":"post"},"analytics_disabled":false,"remote_control_auto_enable":false,"remote_control_auto_connect_default":false,"remote_control_available":true,"remote_control_auto_on_by_default":false,"ide_rc_auto_enable_gate":true,"fast_mode_state":"off","fast_mode_disabled_reason":"sdk_opt_in_required","session_state":"idle","capabilities":["ui_surface_v1"]},"pending_permission_requests":[],"pending_user_dialog_requests":[]}}

@@ -648,7 +648,7 @@ describe("runtime session history", () => {
       const ws = await createOn(rt, { golden: "snap_g", name: "a" });
       const first = (await rt.harnesses.list(ws.id)).find(c => c.harness === "claude")!;
       expect(first).toMatchObject({ source: "table", version: CLAUDE_PIN });
-      expect(first.models.map(m => m.value)).toEqual(["claude-opus-5-5", "claude-fable-5-1", "claude-sonnet-5", "claude-haiku-4-5-20251001"]);
+      expect(first.models.map(m => m.value)).toEqual(["claude-opus-5-5", "claude-fable-5-1", "claude-sonnet-5-5", "claude-haiku-5-5"]);
       backend.execImpl = (_m, cmd) => ({ exitCode: 0, stdout: cmd.includes("claude --help") ? "garbage\n" : "", stderr: "" });
       await rt.harnesses.list(ws.id);
       expect(probes(backend)).toHaveLength(1);
