@@ -551,7 +551,7 @@ export interface Api {
    * the workspaces standing on it and the record. */
   /** What a remove of that computer takes with it, read now: its tasks and projects, and the work among them no remote has. */
   placeHolds?(placeId: string): Promise<PlaceHolds>;
-  removePlace?(placeId: string, sudoPassword?: string, force?: boolean): Promise<PlaceRemoved>;
+  removePlace?(placeId: string, sudoPassword?: string, force?: boolean, forget?: boolean): Promise<PlaceRemoved>;
   /** Puts this wsp's daemon on the computer where that computer runs an older one; what it was set up with stays.
    * Answers what the daemon half came to where it ran. A client without it holds Update rather than offering one
    * that asks nobody. */
@@ -1102,7 +1102,7 @@ export function makeApi(c: ProtocolClient): Api {
     initSignInCode: async o => InitJob.parse((await c.request<{ job?: unknown }>("init.signInCode", { ...o })).job),
     initCancel: async () => InitJob.parse((await c.request<{ job?: unknown }>("init.cancel")).job),
     placeHolds: async placeId => PlaceHolds.parse(await c.request("places.holds", { placeId })),
-    removePlace: async (placeId, sudoPassword, force) => PlaceRemoved.parse(await c.request("places.remove", { placeId, ...(sudoPassword === undefined ? {} : { sudoPassword }), ...(force === true ? { force: true } : {}) })),
+    removePlace: async (placeId, sudoPassword, force, forget) => PlaceRemoved.parse(await c.request("places.remove", { placeId, ...(sudoPassword === undefined ? {} : { sudoPassword }), ...(force === true ? { force: true } : {}), ...(forget === true ? { forget: true } : {}) })),
     // Parsed, not trusted: the row the answer lands on is redrawn off it, so only what the wire type vouches for
     // reaches the table.
     dialPlace: async placeId => PlaceDial.parse(await c.request<Record<string, unknown>>("places.dial", { placeId })),

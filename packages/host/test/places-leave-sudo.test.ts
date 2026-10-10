@@ -410,6 +410,27 @@ describe("wsp remove, asked once", () => {
     expect(asked.find(a => a.op === "places.remove")?.params).toEqual({ placeId: "p_1", force: true });
   });
 
+  it("refuses a computer that is not answering, before it asks, until --forget, whose one question says its order", async () => {
+    const home = tmp("remove-forget");
+    const asked: { op: string; params?: Record<string, unknown> }[] = [];
+    const questions: string[] = [];
+    const away = { ...HELD, away: true as const };
+    const io = { ...captured(), isTTY: true, ask: async (q: string) => (questions.push(q), "yes" as const) };
+    await expect(removeCommand(io, optsIn(home), ["hetzner"], {}, deps(hetzner(away, [], asked)))).rejects.toThrow("hetzner is not answering, and its forks and projects go over its link. Turn hetzner on and remove it again once it answers; if it never will, wsp remove hetzner --forget");
+    expect(questions).toEqual([]);
+    expect(asked.map(a => a.op)).not.toContain("places.remove");
+    expect(await removeCommand(io, optsIn(home), ["hetzner"], { forget: true }, deps(hetzner(away, [], asked)))).toBe(0);
+    expect(questions).toEqual(["Forget hetzner?\nhetzner leaves this wsp with its fork yoo with 3 threads and its project wsp-vm, and nothing is done on hetzner: whatever of wsp's stays there comes off with wsp leave run on that computer."]);
+    expect(asked.find(a => a.op === "places.remove")?.params).toEqual({ placeId: "p_1", forget: true });
+  });
+
+  it("refuses --forget on a computer that answers, before it asks", async () => {
+    const home = tmp("remove-forget-answers");
+    const asked: { op: string; params?: Record<string, unknown> }[] = [];
+    await expect(removeCommand(captured(), optsIn(home), ["hetzner"], { yes: true, forget: true }, deps(hetzner(HELD, [], asked)))).rejects.toThrow("hetzner is answering, so there is nothing to forget");
+    expect(asked.map(a => a.op)).not.toContain("places.remove");
+  });
+
   it("names the work a forced remove takes in its one question", async () => {
     const home = tmp("remove-forced-asked");
     const questions: string[] = [];

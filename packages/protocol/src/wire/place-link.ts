@@ -251,6 +251,11 @@ export const hostKeyRefusal = (url: string): string => `the host at ${url} did n
  * that computer is not, since nothing could reach it to sweep. */
 export const placeStillInstalledLine = (name: string): string => `${name} is off this host, but the daemon on it is still installed; run ${PLACE_LEAVE_LINE} on that computer when it is back`;
 
+/** What a forget says about a computer whose forks and projects went here with no road to it: nothing was done
+ * there, and the one line that clears what wsp may have left on it. */
+export const placeForgottenLine = (name: string, forks: boolean): string =>
+  `${name} is forgotten here and nothing was done on it; whatever of wsp's is still there${forks ? ", the copies its forks ran in among it," : ""} comes off with ${PLACE_LEAVE_LINE} run on that computer`;
+
 /** What a remove took off that computer by its agent's own command: a plugin the setup put on there. */
 export const pluginOffLine = (name: string): string => `plugin ${name}`;
 

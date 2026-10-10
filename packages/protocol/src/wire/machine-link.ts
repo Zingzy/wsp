@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { z } from "zod";
-import { THIS_COMPUTER } from "../format.js";
+import { PLACE_LEAVE_LINE, THIS_COMPUTER } from "../format.js";
 import { plural } from "../words/base.js";
 import type { SysHistoryReply as WireSysHistoryReply } from "../generated/SysHistoryReply.js";
 import type { SysPoint as WireSysPoint } from "../generated/SysPoint.js";
@@ -300,10 +300,17 @@ export const placeUnsavedRefusal = (place: string, unsaved: readonly string[]): 
 });
 
 /** What a remove of a computer is refused with while a fork or a project stands on it and its link is down: the forks
- * are deleted and the project folders read over that link, so nothing about them can be done or known until it is back. */
+ * are deleted and the project folders read over that link, so nothing about them can be done or known until it is
+ * back. A computer that will never answer again is forgotten instead. */
 export const placeAwayRefusal = (place: string, sentence: string): { said: string; fix: string } => ({
   said: `${sentence}, and its forks and projects go over its link`,
-  fix: `Turn ${place} on and remove it again once it answers.`,
+  fix: `Turn ${place} on and remove it again once it answers; if it never will, wsp remove ${place} --forget takes it, its forks, projects and threads out of this wsp, with nothing done on it beyond a try at wsp's own leave over ssh.`,
+});
+
+/** What a forget of a computer is refused with while its link answers: a remove takes wsp off it. */
+export const placeForgetAnswersRefusal = (place: string): { said: string; fix: string } => ({
+  said: `${place} is answering, so there is nothing to forget`,
+  fix: `wsp remove ${place} takes it out and takes wsp off it.`,
 });
 
 /** What a remove that stopped part way through the forks and projects on a computer says: why, and which of them had
@@ -321,17 +328,30 @@ export const projectUnsavedRefusal = (project: string, unsaved: string): { said:
  * which is where a person goes to keep what is there. */
 export const projectFolderNamed = (project: string, checkout: string): string => `${project} at ${checkout}`;
 
+type PlaceHeld = { forks: readonly { name: string; threads: number }[]; projects: readonly { name: string; threads: number }[] };
+
+const heldPart = (rows: readonly { name: string; threads: number }[], noun: string): string | undefined => {
+  if (rows.length === 0) return undefined;
+  const threads = rows.reduce((sum, r) => sum + r.threads, 0);
+  const named = `${rows.length === 1 ? noun : `${rows.length} ${noun}s`} ${rows.map(r => r.name).join(", ")}`;
+  return threads === 0 ? named : `${named} with ${plural(threads, "thread")}`;
+};
+
+/** What a forget of a computer whose link is down does, in its order, the one sentence the command line asks with
+ * and the app's dialog says before its button: the leave tried over the ssh login it was added on where it has one,
+ * then the records leaving this wsp, and nothing else done on it. */
+export function placeForgetLine(name: string, held: PlaceHeld, ssh?: string): string {
+  const goes = [heldPart(held.forks, "fork"), heldPart(held.projects, "project")].filter(p => p !== undefined).map(p => `its ${p}`);
+  const leaves = `${name} leaves this wsp${goes.length === 0 ? "" : ` with ${goes.join(" and ")}`}`;
+  const tried = ssh === undefined ? `${leaves}, and nothing is done on ${name}` : `wsp tries to take itself off ${name} over ${ssh} first. Then ${leaves}, and nothing more is done on ${name}`;
+  return `${tried}: whatever of wsp's stays there comes off with ${PLACE_LEAVE_LINE} run on that computer.`;
+}
+
 /** What goes with a computer, the one sentence its remove asks with and answers with: its forks deleted, its projects
  * out of this wsp, each with its threads. Nothing where it holds neither. */
-export function placeHoldsLine(held: { forks: readonly { name: string; threads: number }[]; projects: readonly { name: string; threads: number }[] }): string | undefined {
-  const part = (rows: readonly { name: string; threads: number }[], noun: string): string | undefined => {
-    if (rows.length === 0) return undefined;
-    const threads = rows.reduce((sum, r) => sum + r.threads, 0);
-    const named = `${rows.length === 1 ? noun : `${rows.length} ${noun}s`} ${rows.map(r => r.name).join(", ")}`;
-    return threads === 0 ? named : `${named} with ${plural(threads, "thread")}`;
-  };
-  const forks = part(held.forks, "fork");
-  const projects = part(held.projects, "project");
+export function placeHoldsLine(held: PlaceHeld): string | undefined {
+  const forks = heldPart(held.forks, "fork");
+  const projects = heldPart(held.projects, "project");
   if (forks === undefined && projects === undefined) return undefined;
   return [forks === undefined ? undefined : `its ${forks} deleted`, projects === undefined ? undefined : `its ${projects} out of this wsp`].filter(p => p !== undefined).join(", and ");
 }
