@@ -32,6 +32,14 @@ describe("what moved in a followed recipe", () => {
     ]);
   });
 
+  it("reads the one answer about the servers' keys moving as every server that stays changed, carried by the servers step", () => {
+    const yes = RecipeFile.parse({ ...BEFORE, copyKeys: true });
+    expect(recipeChanges(BEFORE, ITEMS, yes, ITEMS).map(c => [c.key, c.how])).toEqual([["mcp/linear", "changed"]]);
+    expect([...stepsFor(recipeChanges(BEFORE, ITEMS, yes, ITEMS), yes)]).toEqual(["mcp"]);
+    expect(recipeChanges(yes, ITEMS, BEFORE, ITEMS).map(c => [c.key, c.how])).toEqual([["mcp/linear", "changed"]]);
+    expect(recipeChanges(yes, ITEMS, yes, ITEMS)).toEqual([]);
+  });
+
   it("reads every row with an item as edited once, on a computer that kept no items", () => {
     expect(recipeChanges(BEFORE, undefined, BEFORE, ITEMS).map(c => c.key)).toEqual(["agents/claude", "mcp/linear", "clis/jq", "skills/unslop", "configs/git"]);
   });

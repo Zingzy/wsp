@@ -304,6 +304,18 @@ export async function skipRow(api: Api | null, placeId: string, row: string): Pr
   }
 }
 
+/** Copy the keys on a computer that follows no recipe: its picks with the yes, set up again, which puts on the servers
+ * that waited on it. */
+export async function copyKeysOn(api: Api | null, place: Pick<PlaceView, "id" | "picks">): Promise<Failure | null> {
+  if (api?.placesSetup === undefined || place.picks === undefined) return null;
+  try {
+    showSetup(await api.placesSetup(place.id, { choices: { ...place.picks, copyKeys: true } }));
+    return null;
+  } catch (e) {
+    return failureOf(e);
+  }
+}
+
 /** Retry on a computer whose setup missed something: the host runs again whatever is not there. */
 export async function retrySetup(api: Api | null, placeId: string): Promise<Failure | null> {
   if (api?.placesSetup === undefined) return null;

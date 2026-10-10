@@ -134,22 +134,46 @@ interface ArgRead {
   show?: string;
   /** Nothing where the argument carries no value of the person's. */
   secret?: string;
+  /** What the value goes by where it is one: its variable, its flag or its place among the arguments. */
+  key?: string;
 }
 
 const size = (v: string): string => `(${Buffer.byteLength(v)} B)`;
 
-/** An `API_KEY=value` argument wherever it stands, a bare one or a flag's value: the name is shown and the value
- * hidden and counted, so a variable set behind `-e` reads as the variable it is. Nothing for any other argument. */
+/** An address under any scheme: `https://`, `postgres://`. */
+const ADDRESS = /^[A-Za-z][A-Za-z0-9+.-]*:\/\//;
+/** A path segment long and token-like enough to be a key the address carries, as Zapier's per-person path is. */
+const KEYLIKE_SEGMENT = /^[A-Za-z0-9_=-]{24,}$/;
+
+/** An address that carries nothing of the person's: no login, no query and no path segment shaped like a key. One that
+ * carries any of them is a value, since asking costs a question and not asking can carry a key. */
+const plainAddress = (s: string): boolean => {
+  try {
+    const u = new URL(s);
+    return u.username === "" && u.password === "" && u.search === "" && !u.pathname.split("/").some(seg => KEYLIKE_SEGMENT.test(seg));
+  } catch {
+    return false;
+  }
+};
+
+/** An `API_KEY=value` argument wherever it stands, a bare one or a flag's value: under a secret's name, or holding an
+ * address that is not plain, the name is shown and the value hidden and counted, so a variable set behind `-e` reads
+ * as the variable it is; any other is shown whole. Nothing for any other argument. */
 const assignRead = (arg: string): ArgRead | undefined => {
   const name = assignName(arg);
-  return name === undefined ? undefined : { show: `${name}=…`, secret: `arg ${name} ${size(arg.slice(arg.indexOf("=") + 1))}` };
+  if (name === undefined) return undefined;
+  const value = arg.slice(arg.indexOf("=") + 1);
+  return secretNamed(name) || (ADDRESS.test(value) && !plainAddress(value)) ? { show: `${name}=…`, secret: `arg ${name} ${size(value)}`, key: name } : { show: arg };
 };
+
+/** A positional argument that is the definition's own word and no value of the person's: a path, or a plain address. */
+const plainArg = (arg: string): boolean => arg.startsWith("/") || arg.startsWith("~/") || (ADDRESS.test(arg) && plainAddress(arg));
 
 /** The one reading of a definition's arguments, for the line a person reads and for what the row carries alike.
  * npx's own yes switch is dropped and takes no value. A dashed flag's next argument is that flag's value, read
  * like any other argument and shown unless the flag is secret-named or hides its value whatever its name says.
- * `--` ends the flags. Every argument past the program is a value this definition does not name, so it is hidden
- * and counted, and the row takes the copy answer. */
+ * `--` ends the flags. A path or a plain address past the program is shown; every other argument there is a value
+ * this definition does not name, so it is hidden and counted, and the row takes the copy answer. */
 function readArgs(t: { command: string; args: readonly string[] }, home: string): ArgRead[] {
   const out: ArgRead[] = [];
   const shown = (a: string): string => (isUrl(a) ? `(${shownUrl(a)})` : tilde(home, a));
@@ -172,19 +196,19 @@ function readArgs(t: { command: string; args: readonly string[] }, home: string)
       if (a.includes("=")) {
         const value = a.slice(a.indexOf("=") + 1);
         if (hides) {
-          out.push({ show: `${flag!}=…`, secret: `flag ${flag!} ${size(value)}` });
+          out.push({ show: `${flag!}=…`, secret: `flag ${flag!} ${size(value)}`, key: flag! });
           continue;
         }
         // `--env=NAME=value` is the spaced spelling written short: its value is read the same way.
         const assigned = assignRead(value);
-        out.push(assigned === undefined ? { show: shown(a) } : { show: `${a.slice(0, a.indexOf("=") + 1)}${assigned.show!}`, secret: assigned.secret });
+        out.push(assigned === undefined ? { show: shown(a) } : { ...assigned, show: `${a.slice(0, a.indexOf("=") + 1)}${assigned.show!}` });
         continue;
       }
       out.push({ show: a });
       const value = t.args[i + 1];
       if (!takesValue(value)) continue;
       i++;
-      out.push(hides ? { show: "…", secret: `flag ${a} ${size(value)}` } : (assignRead(value) ?? { show: shown(value) }));
+      out.push(hides ? { show: "…", secret: `flag ${a} ${size(value)}`, key: a } : (assignRead(value) ?? { show: shown(value) }));
       continue;
     }
     const assigned = assignRead(a);
@@ -192,12 +216,12 @@ function readArgs(t: { command: string; args: readonly string[] }, home: string)
       out.push(assigned);
       continue;
     }
-    if (program) {
+    if (program || plainArg(a)) {
       program = false;
       out.push({ show: shown(a) });
       continue;
     }
-    out.push({ show: "…", secret: `arg ${i + 1} ${size(a)}` });
+    out.push({ show: "…", secret: `arg ${i + 1} ${size(a)}`, key: `argument ${i + 1}` });
   }
   return out;
 }
@@ -217,6 +241,8 @@ export function stdioLine(t: Extract<McpTransport, { kind: "stdio" }>, home: str
 
 interface Carried {
   secrets: string[];
+  /** What each of the secrets goes by, for the question that asks to copy them. */
+  keys: string[];
   notes: string[];
   paths: string[];
   bytes: number;
@@ -264,12 +290,15 @@ async function homeDeps(host: Host, server: McpServer, carriedPaths: readonly st
 /** What a definition carries: secret-named env values by size, the file such a value points at (which travels on
  * the row), header values, and where its mcp-remote sign-in or, as the agent's entry says, its http sign-in lives. Nothing is read. */
 async function carried(host: Host, server: McpServer, agent: McpAgent, remoteTokens: ReadonlyMap<string, number>): Promise<Carried> {
-  const out: Carried = { secrets: [], notes: [], paths: [], bytes: 0, signIn: "none" };
+  const out: Carried = { secrets: [], keys: [], notes: [], paths: [], bytes: 0, signIn: "none" };
   const t = server.transport;
   // The names the server reads its secret under, whether the definition carries the value or the machine sets it.
   const named = [...server.envRefs];
   if (t.kind === "http") {
-    for (const [k, v] of Object.entries(t.headers)) out.secrets.push(`header ${k} (${Buffer.byteLength(v)} B)`);
+    for (const [k, v] of Object.entries(t.headers)) {
+      out.secrets.push(`header ${k} (${Buffer.byteLength(v)} B)`);
+      out.keys.push(k);
+    }
     if (agent.mcp.httpAuth !== undefined) out.notes.push(agent.mcp.httpAuth);
     const headers = Object.keys(t.headers);
     out.signIn = headers.length > 0 || named.length > 0 ? keyOrToken([...headers, ...named]) : agent.mcp.httpAuth !== undefined ? "oauth" : "none";
@@ -286,14 +315,18 @@ async function carried(host: Host, server: McpServer, agent: McpAgent, remoteTok
         continue;
       }
       out.secrets.push(`the file ${k} points at (${fmtBytes(st.bytes)})`);
+      out.keys.push(k);
       out.paths.push(`~${abs.slice(host.home.length)}`);
       out.bytes += st.bytes;
       continue;
     }
     out.secrets.push(`env ${k} (${Buffer.byteLength(v)} B)`);
+    out.keys.push(k);
   }
-  const args = readArgs(t, host.home).flatMap(r => (r.secret !== undefined ? [r.secret] : []));
+  const read = readArgs(t, host.home).filter(r => r.secret !== undefined);
+  const args = read.map(r => r.secret!);
   out.secrets.push(...args);
+  out.keys.push(...read.flatMap(r => (r.key !== undefined ? [r.key] : [])));
   const hash = mcpRemoteHash(t.args);
   if (hash !== undefined) {
     const bytes = remoteTokens.get(hash);
@@ -327,7 +360,7 @@ function serverRow(agent: McpAgent, server: McpServer, fit: LinuxFit, deps: Home
     default: reason === undefined && !deps.gone ? "bring" : "skip",
     ...(reason !== undefined ? { reason } : {}),
     // A server that carries a secret travels only on a copy answer, never on a bare tick.
-    ...(c.secrets.length > 0 ? { consent: true } : {}),
+    ...(c.secrets.length > 0 ? { consent: true, keys: [...new Set(c.keys)] } : {}),
     detail: words.join("; "),
     signIn: c.signIn,
   };

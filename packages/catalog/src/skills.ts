@@ -83,6 +83,10 @@ export const HERMES_BUNDLED_SKILLS: BundledSkills = {
  * from, and the lines that put one plugin on by the agent's own commands there. The plugin's folder never travels. */
 export interface PluginRoad {
   marketplaces: string;
+  /** The agent's settings file here, which switches each installed plugin on or off. */
+  settings: string;
+  /** The plugins that file switches on, by `name@marketplace`; none off a file that does not parse. */
+  enabled(text: string): string[];
   /** Where a marketplace is fetched from, off that file's text; nothing where it names none. */
   sourceOf(text: string, marketplace: string): string | undefined;
   /** The lines for one plugin, `name@marketplace`, from that source. */
@@ -104,6 +108,15 @@ export const CLAUDE_PLUGINS: PluginRoad = {
       return at?.source === "github" ? at.repo : at?.url;
     } catch {
       return undefined;
+    }
+  },
+  settings: "~/.claude/settings.json",
+  enabled: text => {
+    try {
+      const on: unknown = (JSON.parse(text) as { enabledPlugins?: unknown }).enabledPlugins;
+      return isObject(on) ? Object.keys(on).filter(name => on[name] === true) : [];
+    } catch {
+      return [];
     }
   },
   // --json with no input refuses a plugin that asks for a command at once, naming the command's sha256.

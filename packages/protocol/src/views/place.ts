@@ -237,6 +237,8 @@ export const PlaceProvisionRow = z.object({
   note: z.string().optional(),
   /** On a row that did not land: what to do about it, beside the note that says what happened. */
   fix: z.string().optional(),
+  /** On a server set aside for want of a yes to copying its keys: what they go by, names only. */
+  keys: z.array(z.string().min(1)).optional(),
   ms: z.number().int().nonnegative().optional(),
   /** On an installed row: an earlier setup put it on, and the run that wrote the row found it there. */
   earlier: z.boolean().optional(),

@@ -475,6 +475,44 @@ describe("Add a computer's picks read the host's facts", () => {
     expect(note("old")).toBeUndefined();
   });
 
+  it("asks once whether to copy the keys of the ticked servers that carry one, naming each server and what its keys go by, and keeps the answer in the picks", async () => {
+    const keyed = { recipesOptions: async () => ({ ...FACTS, mcp: FACTS.mcp.map(s => (s.name === "context7" ? { ...s, keys: ["CONTEXT7_API_KEY"] } : s.name === "github" ? { ...s, keys: ["GITHUB_PERSONAL_ACCESS_TOKEN"] } : s)) }) } as Partial<Api>;
+    await open("mcp", undefined, keyed);
+    await waitFor(() => expect(ticked("context7")).toBe(true));
+    const question = (): HTMLElement | null => dialog()!.querySelector<HTMLElement>("[data-grid='server-keys']");
+    const choice = (id: string): Element | null | undefined => question()?.querySelector(`[data-choice='${id}']`);
+    const picked = (): string | null | undefined => [...(question()?.querySelectorAll("[data-choice]") ?? [])].find(c => c.querySelector("[role=radio]")?.getAttribute("aria-checked") === "true")?.getAttribute("data-choice");
+    const note = (row: string): string | null | undefined => dialog()!.querySelector(`[data-pick-row='${row}'] [data-pick-note]`)?.textContent;
+    expect(dialog()!.querySelectorAll("[data-grid='server-keys']")).toHaveLength(1);
+    expect(choice("copy")?.textContent).toBe("Copy the keys to studiocontext7: CONTEXT7_API_KEY; github: GITHUB_PERSONAL_ACCESS_TOKEN.");
+    expect(choice("leave")?.textContent).toBe("Leave them on zingzy's MacBook Procontext7 and github are skipped on studio until you copy their keys.");
+    // Nothing is copied on a tick alone: the answer starts at no, and the rows say so.
+    expect(picked()).toBe("leave");
+    expect(["context7", "github", "linear"].map(note)).toEqual(["Skipped until you copy its keys.", "Skipped until you copy its keys.", "Signs in on studio."]);
+    const answer = (): boolean | undefined => useAddFlow.getState().picks!.copyKeys;
+    const before = useAddFlow.getState().picks!.mcp;
+    expect(answer()).toBeUndefined();
+    await press(choice("copy")!.querySelector("[role=radio]"));
+    expect(picked()).toBe("copy");
+    // One answer, kept once on the picks: the server rows are as they were.
+    expect(answer()).toBe(true);
+    expect(useAddFlow.getState().picks!.mcp).toEqual(before);
+    expect(["context7", "github"].map(note)).toEqual(["Key copied.", "Token copied."]);
+    // A server that carries a key, ticked again after the yes, stands under the yes.
+    await press(dialog()!.querySelector("[data-pick-row='github'] [role=checkbox]"));
+    expect(question()?.textContent).not.toContain("github");
+    await press(dialog()!.querySelector("[data-pick-row='github'] [role=checkbox]"));
+    expect(picked()).toBe("copy");
+    expect(note("github")).toBe("Token copied.");
+    await press(choice("leave")!.querySelector("[role=radio]"));
+    expect(answer()).toBeUndefined();
+    expect(["context7", "github"].map(note)).toEqual(["Skipped until you copy its keys.", "Skipped until you copy its keys."]);
+    // With no ticked server carrying a key there is nothing to ask.
+    await press(dialog()!.querySelector("[data-pick-row='context7'] [role=checkbox]"));
+    await press(dialog()!.querySelector("[data-pick-row='github'] [role=checkbox]"));
+    expect(question()).toBeNull();
+  });
+
   it("ticks no CLI to start, puts the ones the agents ran most first with how often, and ticks every one they ran on one act", async () => {
     await open("clis");
     const rows = (): string[] => [...dialog()!.querySelectorAll<HTMLElement>("[data-pick-row]")].map(r => r.dataset["pickRow"]!);
@@ -809,6 +847,32 @@ describe("Add a computer while the setup runs", () => {
     expect(row.querySelector("[data-k=step-refusal]")?.textContent).toBe("a link inside points at a folder");
     await press(row.querySelector("[data-k=retry]"));
     expect(fake.asked.setups).toEqual([{ ref: studio.id, o: {} }]);
+  });
+
+  it("offers Copy the keys on a server set aside for its keys where the computer follows no recipe, which sets it up again with the yes", async () => {
+    const fake = host();
+    const done: PlaceSetup = { ...RUNNING, state: "done", steps: [{ step: "floor", state: "done" }, { step: "mcp", state: "done" }] };
+    const applied: PlaceView["applied"] = { hash: "h", at: "x", rows: [{ id: "agents/mcp/codex/sentry", label: "Codex sentry", outcome: "skipped", kind: "server", step: "mcp", note: "not copied: it needs SENTRY_ACCESS_TOKEN", keys: ["SENTRY_ACCESS_TOKEN"] }] };
+    const picks = RecipeFile.parse({ name: "studio", agents: { codex: { signin: "machine" } }, mcp: { sentry: { agents: ["codex"] } } });
+    useStore.setState({ places: [here, { ...placed(done, applied), picks, recipe: "none" }] });
+    mountSettings({ api: fake.api, at: { kind: "group", group: "computers" } });
+    act(() => openSetup(studio.id));
+    await settle();
+    const row = dialog()!.querySelector<HTMLElement>("[data-step-row='agents/mcp/codex/sentry']")!;
+    expect(row.textContent).toContain("Not copied: it needs SENTRY_ACCESS_TOKEN.");
+    await press(row.querySelector("[data-k=copy-keys]"));
+    expect(fake.asked.setups).toEqual([{ ref: studio.id, o: { choices: { ...picks, copyKeys: true } } }]);
+  });
+
+  it("offers no Copy the keys on a computer that follows a recipe, whose page gives the yes for every computer that follows it", async () => {
+    const done: PlaceSetup = { ...RUNNING, state: "done", steps: [{ step: "floor", state: "done" }, { step: "mcp", state: "done" }] };
+    const applied: PlaceView["applied"] = { hash: "h", at: "x", rows: [{ id: "agents/mcp/codex/sentry", label: "Codex sentry", outcome: "skipped", kind: "server", step: "mcp", note: "not copied", keys: ["SENTRY_ACCESS_TOKEN"] }] };
+    useStore.setState({ places: [here, { ...placed(done, applied), picks: RecipeFile.parse({ name: "Builders" }), recipe: "builders" }] });
+    mountSettings({ api: host().api, at: { kind: "group", group: "computers" } });
+    act(() => openSetup(studio.id));
+    await settle();
+    expect(dialog()!.querySelector("[data-step-row='agents/mcp/codex/sentry']")?.textContent).toContain("Not copied: it needs SENTRY_ACCESS_TOKEN; to send it, pick Copy the keys under MCP servers on the recipe Builders in Settings > Recipes.");
+    expect(dialog()!.querySelector("[data-k=copy-keys]")).toBeNull();
   });
 
   it("offers Skip for now on a sign-in that waits and Skip on an item that failed, each answered onto the row", async () => {

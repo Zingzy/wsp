@@ -325,6 +325,6 @@ export async function provisionMcp(
   return results.map(r => {
     const outcome = r.outcome === "skipped" ? "skipped" : present.has(r.id) ? "present" : "installed";
     const note = [outcome !== "present" ? r.note : undefined, outcome === "skipped" ? undefined : unreached.get(r.id)].filter((n): n is string => n !== undefined).join("; ");
-    return { id: r.id, label: `${r.agent} ${r.name}`, outcome, kind: "server" as const, ...(note !== "" ? { note } : {}) };
+    return { id: r.id, label: `${r.agent} ${r.name}`, outcome, kind: "server" as const, ...(note !== "" ? { note } : {}), ...(r.keys !== undefined ? { keys: r.keys } : {}) };
   });
 }

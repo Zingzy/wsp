@@ -575,7 +575,8 @@ function recipeRowWords(kind: (typeof RECIPE_KINDS)[number], file: RecipeFile): 
   });
 }
 
-/** wsp recipes show: the recipe's name and who follows it, every kind it holds with its rows, and its hash. */
+/** wsp recipes show: the recipe's name and who follows it, every kind it holds with its rows, the one yes to copying
+ * the servers' keys where it gives one, and its hash. */
 export function recipeShownLines(recipe: RecipeView, hash: string): string[] {
   return [
     `${recipe.name}: ${recipe.summary}`,
@@ -583,6 +584,7 @@ export function recipeShownLines(recipe: RecipeView, hash: string): string[] {
       const rows = recipeRowWords(kind, recipe.file);
       return rows.length === 0 ? [] : [`  ${kind.padEnd(8)} ${rows.join(", ")}`];
     }),
+    ...(recipe.file.copyKeys === true ? ["  keys     copied with the servers that carry them"] : []),
     `  followed by ${recipe.machines.length === 0 ? "no computer" : recipe.machines.join(", ")}`,
     `  hash     ${hash}`,
   ];

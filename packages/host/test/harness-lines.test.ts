@@ -13,8 +13,8 @@ import { harnessLine } from "@wsp/catalog";
 const SRC = join(dirname(fileURLToPath(import.meta.url)), "..", "src");
 
 /** Where the catalog hands out a line of an agent's own command: a server check, a server sign-in's command or line,
- * an agent's login and its status. */
-const READS_A_LINE = /\bcheck\.line\(|\broad\.(command|line)\b|\bstatus\??\.(typed|command)\b|\bfallback \?\?|\blogin\.command\(|\.pasted\(/;
+ * an agent's login and its status, a plugin's install and uninstall. */
+const READS_A_LINE = /\bcheck\.line\(|\broad\.(command|line)\b|\broad\.(install|uninstall)\(|\bstatus\??\.(typed|command)\b|\bfallback \?\?|\blogin\.command\(|\.pasted\(/;
 
 /** Files whose matches are no agent's line on a computer you joined, with why. */
 const NOT_ON_A_BOX: Record<string, string> = {

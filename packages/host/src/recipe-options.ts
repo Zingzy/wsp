@@ -82,7 +82,7 @@ const under = (path: string, dir: string): boolean => path.startsWith(`${dir}/`)
 /** The options off what was read: the manifest less wsp's own packages, the person's own skills less the ones an
  * agent's install seeded, the plugins, which config rows this computer has files for, and how often the agents ran
  * each CLI. */
-export function recipeOptions(manifest: Manifest, o: { skills: readonly SkillRow[]; bundled?: readonly Bundled[]; wsp?: ReadonlySet<string>; plugins: readonly string[]; configs: readonly ("git" | "shell")[]; github: boolean; gh?: { account?: string; scopes?: string[] }; calls?: CommandCalls }): RecipeOptions {
+export function recipeOptions(manifest: Manifest, o: { skills: readonly SkillRow[]; bundled?: readonly Bundled[]; wsp?: ReadonlySet<string>; plugins: readonly string[]; enabled?: readonly string[]; configs: readonly ("git" | "shell")[]; github: boolean; gh?: { account?: string; scopes?: string[] }; calls?: CommandCalls }): RecipeOptions {
   const agents = manifest.entries.flatMap(e => {
     const id = agentOfRow(e);
     const entry = id === undefined ? undefined : CATALOG_AGENTS.find(a => a.id === id);
@@ -90,14 +90,15 @@ export function recipeOptions(manifest: Manifest, o: { skills: readonly SkillRow
     const bytes = agentBytes(entry.id);
     return [{ id: entry.id, name: entry.name, signins: signinsOf(entry.id), kind: entry.signIn.kind, ...(bytes !== undefined ? { bytes } : {}) }];
   });
-  const servers = new Map<string, { agents: Set<string>; kind?: ServerSignIn }>();
+  const servers = new Map<string, { agents: Set<string>; kind?: ServerSignIn; keys: Set<string> }>();
   for (const e of manifest.entries) {
     if (!e.id.startsWith(MCP_ID_PREFIX) || e.reason !== undefined || wspOwnServer(e.label)) continue;
     const agent = e.id.slice(MCP_ID_PREFIX.length).split("/")[0];
     if (agent === undefined || !CATALOG_AGENTS.some(a => a.id === agent)) continue;
-    const held = servers.get(e.label) ?? servers.set(e.label, { agents: new Set() }).get(e.label)!;
+    const held = servers.get(e.label) ?? servers.set(e.label, { agents: new Set(), keys: new Set() }).get(e.label)!;
     held.agents.add(agent);
     held.kind ??= e.signIn;
+    if (e.consent === true) for (const key of e.keys ?? []) held.keys.add(key);
   }
   const clis = manifest.entries.flatMap(e => {
     const manager = e.id.split("/")[1];
@@ -117,10 +118,10 @@ export function recipeOptions(manifest: Manifest, o: { skills: readonly SkillRow
   });
   return {
     agents,
-    mcp: [...servers].map(([name, on]) => ({ name, agents: [...on.agents].sort(), ...(on.kind !== undefined ? { kind: on.kind } : {}) })).sort((a, b) => a.name.localeCompare(b.name)),
+    mcp: [...servers].map(([name, on]) => ({ name, agents: [...on.agents].sort(), ...(on.kind !== undefined ? { kind: on.kind } : {}), ...(on.keys.size > 0 ? { keys: [...on.keys] } : {}) })).sort((a, b) => a.name.localeCompare(b.name)),
     clis,
     skills,
-    plugins: o.plugins.map(name => ({ name })),
+    plugins: o.plugins.map(name => ({ name, ...(o.enabled?.includes(name) === true ? { on: true as const } : {}) })),
     configs: [
       ...(o.configs.includes("git") ? [{ id: "git" as const, label: "git settings and identity" }] : []),
       ...(o.configs.includes("shell") ? [{ id: "shell" as const, label: "zsh or fish, the prompt, tmux and the rest of the shell's look" }] : []),
@@ -191,9 +192,10 @@ export async function readRecipeOptions(host: Host, cache?: HistoryCache): Promi
   const [read, bundled] = await Promise.all([skillRoots(host).then(roots => detectSkills(host, roots)), bundledSkills(host)]);
   const indexes = await Promise.all(CATALOG_AGENTS.flatMap(a => (a.pluginSkills === undefined ? [] : [host.fs.readText(expand(host, a.pluginSkills.index))])));
   const plugins = [...new Set(indexes.flatMap(userPlugins))].sort();
+  const settings = await Promise.all(CATALOG_AGENTS.flatMap(a => (a.plugins === undefined ? [] : [host.fs.readText(expand(host, a.plugins.settings)).then(text => (text === undefined ? [] : a.plugins!.enabled(text)))])));
   const has = async (paths: readonly string[]): Promise<boolean> => (await Promise.all(paths.map(p => host.fs.stat(expand(host, `~/${p}`))))).some(s => s !== undefined);
   const configs = [...((await has(CONFIG_PATHS.git)) ? (["git"] as const) : []), ...((await has(CONFIG_PATHS.shell)) ? (["shell"] as const) : [])];
   const github = manifest.entries.some(e => e.id === "logins/gh");
   const wsp = await wspPackages(host, manifest.entries.flatMap(e => (e.rung === "tools" && e.id.split("/").length >= 3 ? [{ name: packageOf(e), via: e.id.split("/")[1] ?? "" }] : [])));
-  return recipeOptions(manifest, { skills: read.skills, bundled, wsp, plugins, configs, github, calls: commandCalls(histories), ...(github ? { gh: await githubHere(host.exec) } : {}) });
+  return recipeOptions(manifest, { skills: read.skills, bundled, wsp, plugins, enabled: settings.flat(), configs, github, calls: commandCalls(histories), ...(github ? { gh: await githubHere(host.exec) } : {}) });
 }

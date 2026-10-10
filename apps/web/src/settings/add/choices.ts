@@ -37,14 +37,15 @@ const githubOf = (signins: readonly GitHubSignIn[] | undefined): { signin?: GitH
 };
 
 /** Every row the options offer, each agent signing in the first way it can, GitHub signing in on the computer, and every
- * project here. No CLI: each one is a person's pick, made from how often their agents ran it. */
+ * project here. No CLI: each one is a person's pick, made from how often their agents ran it. No plugin switched off
+ * here: it is offered and left off. */
 export function everything(name: string, options: RecipeOptions, projects: readonly Pick<ProjectView, "id" | "name" | "path">[], looks: Record<string, { icon?: ProjectIcon; hue?: ProjectHue }>): RecipeFile {
   return RecipeFile.parse({
     name: fileName(name),
     agents: Object.fromEntries(options.agents.map(a => [a.id, a.signins[0] === undefined ? {} : { signin: a.signins[0] }])),
     mcp: Object.fromEntries(options.mcp.map(s => [s.name, { agents: s.agents }])),
     skills: Object.fromEntries(options.skills.map(s => [s.name, { from: s.from }])),
-    plugins: Object.fromEntries(options.plugins.map(p => [p.name, {}])),
+    plugins: Object.fromEntries(options.plugins.filter(p => p.on === true).map(p => [p.name, {}])),
     folders: Object.fromEntries(projects.map(p => [folderKey(p.name), folderOf(p, looks[p.id])])),
     configs: Object.fromEntries(options.configs.map(c => [c.id, c.id === "github" ? githubOf(c.signins) : {}])),
   });
@@ -53,6 +54,19 @@ export function everything(name: string, options: RecipeOptions, projects: reado
 /** A saved recipe as the picks for this computer: its rows as the host hands them out, wsp's own pieces left out
  * there, and every choice it saved, GitHub's included. */
 export const fromRecipe = (file: RecipeFile, name: string): RecipeFile => ({ ...file, name });
+
+/** The ticked servers that carry a key, each with what its keys go by. */
+export const keyedServers = (picks: RecipeFile, options: RecipeOptions): { name: string; keys: string[] }[] =>
+  options.mcp.flatMap(s => (picks.mcp[s.name] !== undefined && s.keys !== undefined && s.keys.length > 0 ? [{ name: s.name, keys: s.keys }] : []));
+
+/** Whether the picks said yes to copying the keys of the ticked servers that carry one: one answer for all of them. */
+export const copiesKeys = (picks: RecipeFile): boolean => picks.copyKeys === true;
+
+/** The one answer about keys. */
+export function setCopyKeys(picks: RecipeFile, on: boolean): RecipeFile {
+  const { copyKeys: _was, ...rest } = picks;
+  return on ? { ...rest, copyKeys: true } : rest;
+}
 
 /** One row ticked or not: ticked takes the row the options give for it, unticked takes it out. */
 export function tick(picks: RecipeFile, kind: Exclude<TickKind, "folders">, name: string, on: boolean, options: RecipeOptions): RecipeFile {

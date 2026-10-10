@@ -472,6 +472,13 @@
                       "fix": {
                         "type": "string"
                       },
+                      "keys": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
                       "ms": {
                         "type": "integer",
                         "minimum": 0
@@ -566,6 +573,10 @@
                     "minLength": 1
                   },
                   "default": {}
+                },
+                "copyKeys": {
+                  "type": "boolean",
+                  "const": true
                 },
                 "clis": {
                   "type": "object",
@@ -1465,6 +1476,13 @@
                       "fix": {
                         "type": "string"
                       },
+                      "keys": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
                       "ms": {
                         "type": "integer",
                         "minimum": 0
@@ -1559,6 +1577,10 @@
                     "minLength": 1
                   },
                   "default": {}
+                },
+                "copyKeys": {
+                  "type": "boolean",
+                  "const": true
                 },
                 "clis": {
                   "type": "object",

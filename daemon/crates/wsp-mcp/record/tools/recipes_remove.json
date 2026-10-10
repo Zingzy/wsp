@@ -92,6 +92,10 @@
                   },
                   "default": {}
                 },
+                "copyKeys": {
+                  "type": "boolean",
+                  "const": true
+                },
                 "clis": {
                   "type": "object",
                   "additionalProperties": {
@@ -363,6 +367,10 @@
                     "minLength": 1
                   },
                   "default": {}
+                },
+                "copyKeys": {
+                  "type": "boolean",
+                  "const": true
                 },
                 "clis": {
                   "type": "object",
