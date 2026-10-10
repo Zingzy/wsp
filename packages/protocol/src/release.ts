@@ -9,8 +9,8 @@ import { compareVersions } from "./semver.mjs";
 export const ReleaseLatest = z.object({ version: z.string(), tag: z.string(), url: z.string(), publishedAt: z.string() });
 export type ReleaseLatest = z.infer<typeof ReleaseLatest>;
 
-/** `checking` until this host's first ask since it started has answered, `read` after an answer, `unreached` after
- * an ask that failed, `off` under the switch. */
+/** `checking` while an ask is out or before any was made, `read` where the last ask was answered, `unreached` where
+ * it failed, `off` under the switch. */
 export const ReleaseState = z.enum(["checking", "read", "unreached", "off"]);
 export type ReleaseState = z.infer<typeof ReleaseState>;
 

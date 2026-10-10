@@ -12,12 +12,13 @@ import { WsClient, wsRequest } from "./ws-client.js";
 const CHECKING: ReleaseView = { state: "checking" };
 const READ: ReleaseView = { ...CHECKING, state: "read", latest: { version: "0.3.0", tag: "v0.3.0", url: "https://github.com/wsp-labs/wsp/releases/tag/v0.3.0", publishedAt: "2026-09-24T10:00:00Z" } };
 
-function fakeDoor(): ReleaseDoor {
+function fakeDoor(forced: boolean[] = []): ReleaseDoor {
   let view = CHECKING;
   const listeners = new Set<(e: ReleaseChangedEvent) => void>();
   return {
     get: () => view,
-    check: async () => {
+    check: async force => {
+      forced.push(force === true);
       view = READ;
       for (const fn of listeners) fn({ type: "release.changed", release: view });
       return view;
@@ -48,6 +49,15 @@ describe("the newest release over the wire", () => {
     } finally {
       watcher.close();
     }
+  });
+
+  it("hands a person's press to the host as a forced check, and an opening of About as one the floor holds", async () => {
+    const forced: boolean[] = [];
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {} });
+    srv = await serveRuntime(rt, { port: 0, authToken: "t", release: fakeDoor(forced) });
+    await wsRequest(srv.port, "t", { op: "release.check" });
+    await wsRequest(srv.port, "t", { op: "release.check", force: true });
+    expect(forced).toEqual([false, true]);
   });
 
   it("a server with no reading refuses both ops in one line", async () => {

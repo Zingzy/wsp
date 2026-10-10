@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { HOST_NO_RESTART_LINE, RELEASE_API_ENV, UP_RESTART_LINE, UPDATE_CHECK_ENV, releaseAbove, type ReleaseChangedEvent } from "@wsp/protocol";
+import { releaseFetch } from "../src/release-fetch.js";
 import { RELEASE_BODY_MAX_BYTES, RELEASE_EVERY_MS, RELEASE_FIRST_MS, RELEASE_FLOOR_MS, RELEASE_TIMEOUT_MS, latestWords, parseRelease, releaseFileFor, releaseAssetUrl, releaseReading, releaseTagUrl, releaseUrl, releaseWatch, type ReleaseWatchOptions } from "../src/release.js";
 
 const ANSWER = JSON.parse(readFileSync(new URL("./release-latest.json", import.meta.url), "utf8")) as Record<string, unknown>;
@@ -138,9 +141,12 @@ describe("the host's reading of the newest release", () => {
     tick(RELEASE_FLOOR_MS + 1);
     expect((await watch.check()).latest).toEqual(read.latest);
 
-    // A host that starts offline shows what it last read before it asks at all.
+    // A host that starts offline shows what it last read, and whether its last ask failed, before it asks at all.
     const again = watchOn(statePath, { fetch: fakeGithub([]).fetch }).watch;
-    expect(again.get()).toMatchObject({ state: "checking", latest: read.latest, checkedAt: read.checkedAt });
+    expect(again.get()).toMatchObject({ state: "unreached", latest: read.latest, checkedAt: read.checkedAt });
+    const answered = stateIn();
+    await watchOn(answered, { fetch: fakeGithub([ok()]).fetch }).watch.check();
+    expect(watchOn(answered, { fetch: fakeGithub([]).fetch }).watch.get()).toMatchObject({ state: "read", latest: read.latest });
 
     const never = watchOn(stateIn(), { fetch: fakeGithub([new Error("offline")]).fetch }).watch;
     const none = await never.check();
@@ -169,6 +175,46 @@ describe("the host's reading of the newest release", () => {
     tick(RELEASE_FLOOR_MS - 1);
     await watch.check();
     expect(github.asked).toHaveLength(1);
+  });
+
+  it("a person's press asks inside the floor and moves to the newer release the release server names", async () => {
+    const versions = ["0.2.0", "0.3.0"];
+    const server = createServer((req, res) => {
+      const version = versions.shift();
+      if (req.url !== "/repos/wsp-labs/wsp/releases/latest" || version === undefined) return void res.writeHead(500).end();
+      res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ ...ANSWER, tag_name: `v${version}` }));
+    });
+    await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+    try {
+      const { port } = server.address() as AddressInfo;
+      const { watch, tick } = watchOn(stateIn(), { fetch: releaseFetch(), env: { [RELEASE_API_ENV]: `http://127.0.0.1:${port}` } });
+      expect((await watch.check()).latest?.version).toBe("0.2.0");
+      tick(60_000);
+      expect((await watch.check()).latest?.version).toBe("0.2.0");
+      expect(versions).toEqual(["0.3.0"]);
+      const pressed = await watch.check(true);
+      expect(pressed).toMatchObject({ state: "read", latest: { version: "0.3.0" }, checkedAt: "2026-09-24T12:01:00.000Z" });
+      expect(releaseAbove(pressed, "0.2.0")).toBe(true);
+    } finally {
+      server.close();
+    }
+  });
+
+  it("says checking while an ask is out, to every listener, then the answer", async () => {
+    let answer!: (res: Response) => void;
+    const github = fakeGithub([ok(), () => new Promise<Response>(resolve => (answer = resolve))]);
+    const { watch, tick } = watchOn(stateIn(), { fetch: github.fetch });
+    const read = await watch.check();
+    const heard: ReleaseChangedEvent[] = [];
+    watch.on(e => heard.push(e));
+    tick(60_000);
+    const pressed = watch.check(true);
+    expect(watch.get()).toMatchObject({ state: "checking", latest: read.latest });
+    expect(heard.map(e => e.release.state)).toEqual(["checking"]);
+    await vi.waitFor(() => expect(answer).toBeDefined());
+    answer(notModified());
+    expect((await pressed).state).toBe("read");
+    expect(heard.map(e => e.release.state)).toEqual(["checking", "read"]);
   });
 
   it("asks nothing and shows no number under the switch, from the environment or from the .env beside the state file", async () => {
