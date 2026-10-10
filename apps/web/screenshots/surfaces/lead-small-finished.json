@@ -1,0 +1,13 @@
+{
+  "at": "/",
+  "fixture": "lead-small",
+  "steps": [
+    "1440:row-id=thread:lead",
+    "390:key:Escape",
+    "390:sidebar=trigger",
+    "row-id=finished:thread:lead",
+    "pointer-off"
+  ],
+  "wait": "row-id=thread:m-done",
+  "settleMs": 1200
+}

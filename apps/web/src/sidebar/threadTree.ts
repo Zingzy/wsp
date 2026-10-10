@@ -245,9 +245,9 @@ export function tileTree({ nowMs, settleMs }: { nowMs: number; settleMs: number 
   return { threadOf: node => node.thread.thread, kidsOf: node => node.children, nowMs, settleMs };
 }
 
-/** Whether a tile draws anything under it: a child or a subagent that is not settled. */
+/** Whether a tile draws anything under it: a child thread, settled or not, or a subagent that is not settled. */
 export function drawsUnder(node: TileNode, tree: Tree<TileNode>): boolean {
-  return leadNodes(node.thread.thread, node.children, tree).some(child => partOf(child, tree) !== "settled");
+  return leadNodes(node.thread.thread, node.children, tree).some(child => !("subagent" in child) || partOf(child, tree) !== "settled");
 }
 
 /** The inbox's tiles out of one tree, top first and then down each branch: every thread that asks or failed and is
