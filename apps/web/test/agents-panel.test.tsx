@@ -149,16 +149,17 @@ describe("the agents", () => {
     expect(rowOf("codex").querySelector("[data-k=agent-update]")).toBeNull();
   });
 
-  it("lists the agents not installed in a card of their own, who each is under its name and Install alone", () => {
+  it("lists the agents not installed in a card of their own, who each is under its name, and no Install while it has no road", () => {
     drawPanel({ ctx: { where: "here" } });
     const available = panel().querySelector<HTMLElement>("[data-settings-card=agents-available]")!;
     expect(available.querySelector("[data-settings-head]")?.textContent).toBe(W.availableToInstall);
     expect([...available.querySelectorAll<HTMLElement>("[data-settings-row]")].map(r => r.dataset["settingsRow"])).toEqual(["pi"]);
     expect(panel().querySelector("[data-settings-card=agents-on] [data-settings-row=pi]")).toBeNull();
     expect(descriptionOf("pi")).toBe("A small coding agent for the terminal with read, bash, edit and write tools and saved sessions.");
-    expect(slotOf("pi")).toEqual(["Install"]);
-    expect(stepOf("pi", "install")?.closest("[title]")?.getAttribute("title")).toBe(W.notYet);
+    expect(slotOf("pi")).toEqual([]);
+    expect(stepOf("pi", "install")).toBeNull();
     expect(stateOf("pi")).toBeNull();
+    expect(panel().querySelectorAll("[data-held]").length).toBe(0);
   });
 });
 

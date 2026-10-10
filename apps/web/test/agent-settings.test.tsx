@@ -140,14 +140,16 @@ describe("the Agents page", () => {
     expect(status("codex")?.textContent).toBe("Signed in");
     expect(rowOf("claude")!.textContent).not.toContain("effort");
     expect(rowOf("claude")!.textContent).not.toContain("access");
-    // Not installed: a card of its own says it, the line says who the agent is, and the slot holds only Install.
+    // Not installed: a card of its own says it and the line says who the agent is. Install has no road in this wsp, so
+    // the slot holds nothing, as Update and Uninstall hold nothing where they have none.
     expect(document.querySelector("[data-settings-card=agents-on] [data-settings-row=opencode]")).toBeNull();
     expect(document.querySelector("[data-settings-card=agents-available] [data-settings-head]")?.textContent).toBe("Available to install");
     const opencode = catalogEntry("opencode");
     expect(descriptionOf("opencode")).toBe(opencode?.kind === "agent" ? opencode.about.description : "");
     expect(descriptionOf("opencode")).not.toBe("");
-    expect(rowOf("opencode")!.querySelector("[data-k=act-install]")?.textContent).toBe("Install");
+    expect(rowOf("opencode")!.querySelector("[data-k=act-install]")).toBeNull();
     expect(status("opencode")).toBeNull();
+    expect(page().querySelectorAll("[data-held]").length).toBe(0);
     fireEvent.click(claude);
     await settle();
     expect(pageAt()).toBe("agent:claude");
@@ -184,6 +186,16 @@ describe("the Agents page", () => {
 
 describe("an agent's page", () => {
   const atClaude: SettingsAt = { kind: "agent", id: "claude" };
+
+  it("draws no act it holds: an agent not installed says so and offers no Install, nor an installed one Update or Uninstall", async () => {
+    for (const id of ["opencode", "claude"]) {
+      await mount(agentsApi().api, { kind: "agent", id });
+      expect(control("agent-head")).not.toBeNull();
+      for (const k of ["install", "update", "uninstall"]) expect(page().querySelector(`[data-k=act-${k}]`)).toBeNull();
+      expect(page().querySelectorAll("[data-held]").length).toBe(0);
+      cleanup();
+    }
+  });
 
   it("heads with its version and how it is signed in, offers the update to the newer version, and turns it off on the picked computer through the host", async () => {
     const made = agentsApi();

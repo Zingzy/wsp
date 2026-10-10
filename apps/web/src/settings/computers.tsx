@@ -534,13 +534,13 @@ function AgentsLink({ place, ctx }: { place: PlaceView; ctx: SettingsContext }) 
 
 /** One computer's or cloud's own page. A cloud keeps no computer to read: its agents are the image's, and every word
  * about the image stands under the rule the cloud's key does, since a cloud row drawn for a workspace alone is a
- * machine somebody else's key made. */
+ * machine somebody else's key made. A computer's image is a cloud's too, so it stands only where a cloud is offered. */
 export function ComputerPage({ place, ctx }: { place: PlaceView; ctx: SettingsContext }) {
   const here = place.id === HERE_PLACE_ID;
   const cloud = isProviderPlace(place);
   const name = placeName(place);
   const fact = versionFact(place, ctx.shell.host);
-  const held = !cloud || keyHeld(place.name, ctx.reads.setup);
+  const held = cloud ? keyHeld(place.name, ctx.reads.setup) : cloudsOffered(ctx.reads.setup).length > 0;
   const standing = useImageStanding(place, ctx);
   const image = cloud && held ? (ctx.reads.image?.image ?? null) : null;
   // After the dialog has closed: the page under it goes with the computer, and a portal torn down with its page
