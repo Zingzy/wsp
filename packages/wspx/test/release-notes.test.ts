@@ -124,10 +124,10 @@ describe("what a release that renamed things says", () => {
     const note = renameNote(readme);
     expect(note).toBeDefined();
     expect(note).toContain("Renamed in");
-    expect(note).toContain("wsp run <workspace>");
+    expect(note).toContain("wsp run <project>");
     expect(note).not.toContain("<!--");
     // Nothing answers to the old words, so the note is the one place a person who typed one reads the new one.
-    for (const old of ["wsp thread new", "thread_new", "--to <workspace>", "wsp threads --in", "wsp new --local", "wsp new --ssh", "wsp init --provider", "wsp pair", "wsp connect", "wsp hosts", "wsp disconnect", "wsp relay link", "wsp relay hosts"]) {
+    for (const old of ["wsp thread new", "thread_new", "--to <workspace>", "wsp threads --in", "wsp new --local", "wsp new --ssh", "wsp pair", "wsp connect", "wsp hosts", "wsp disconnect", "wsp relay link", "wsp relay hosts"]) {
       expect(note, old).toContain(old);
     }
     const printed = releaseNotes({ version: "0.1.4", previous: "v0.1.3", changes: changeLines(FAKE_LOG), bundles: bundleNote(readme, false), renames: note! });

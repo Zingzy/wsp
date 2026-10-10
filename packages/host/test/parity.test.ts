@@ -490,6 +490,22 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
     }
   });
 
+  it("every wsp line in the README parses, and the renames table's old lines answer nothing, so the page cannot drift from the verbs", () => {
+    const readme = readFileSync(new URL("../../../README.md", import.meta.url), "utf8");
+    const renames = /<!-- renames:start -->\n([\s\S]*?)<!-- renames:end -->/.exec(readme)?.[1] ?? "";
+    // The left column is what an older release took, kept for a person who types one; every other line works today.
+    const was = [...renames.matchAll(/^\| (.+?) \| .+ \|$/gm)].map(m => m[1]!).filter(cell => !/^-+$/.test(cell) && cell !== "was");
+    const today = was.reduce((text, cell) => text.replace(`| ${cell} |`, "|"), readme);
+    const commands = wspCommands(today);
+    expect(commands.length).toBeGreaterThan(20);
+    expect(commands.map(argv => usageError(argv, COMMAND_LINES)).filter(e => e !== undefined)).toEqual([]);
+    const old = wspCommands(was.join("\n"));
+    expect(old.length).toBeGreaterThan(5);
+    expect(old.filter(argv => usageError(argv, COMMAND_LINES) === undefined).map(argv => argv.join(" "))).toEqual([]);
+    // The verbs no longer take a workspace or a place, and the front page of wsp --help names neither.
+    for (const noun of [/\bworkspaces?\b/i, /\bplaces?\b/i]) for (const text of [HELP, today]) expect(text, String(noun)).not.toMatch(noun);
+  });
+
   it("a line of two words or more advertises the flags its first word reads, so the usage table refuses what a terminal refuses", async () => {
     // --host is one key in the shared parse, and the command line refuses it on a word that runs here. A line whose
     // flags were written out beside it advertised the flag anyway, and this table is what every skill example is
