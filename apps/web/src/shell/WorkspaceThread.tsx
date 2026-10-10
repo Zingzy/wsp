@@ -79,7 +79,11 @@ function Slot({ workspaceId, thread, answer }: { workspaceId: string; thread: Ch
   const docked = prompt !== null && folded !== prompt.askId;
   // The panel takes the place of any bar, and once it is answered the composer comes back, not that bar.
   useEffect(() => {
-    if (docked) useComposerBarStore.getState().closeBar(key);
+    if (!docked) return;
+    const bars = useComposerBarStore.getState();
+    bars.closeBar(key);
+    bars.dock(key, true);
+    return () => bars.dock(key, false);
   }, [docked, key]);
   useTypeToWrite(workspaceId, docked, () => {
     if (prompt !== null) useComposerBarStore.getState().fold(key, prompt.askId);

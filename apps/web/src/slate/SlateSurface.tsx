@@ -11,8 +11,8 @@ import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../components/ui/menu.js
 import { cn } from "../lib/utils.js";
 import { ScrollArea } from "../components/ui/scroll-area.js";
 import { useSelectedThreadId, useStore } from "../protocol/store.js";
-import { requestComposerFocus } from "../shell/shellRequests.js";
 import { useComposerDraftStore } from "../components/chat/composerDraftStore.js";
+import { foldBar, useComposerBarStore } from "../components/chat/composerBar.js";
 import { ApprovalsSheet, batchable } from "./approvals.js";
 import { askKind } from "./askKinds.js";
 import { cadenceOf, HeldRuns, LinkConsent } from "./consent.js";
@@ -36,6 +36,7 @@ export const SLATE_WORDS = {
   nothing: "Nothing here yet",
   ask: "The agent builds this panel when there is something to watch, track, fill in or press. Ask for one.",
   askButton: "Ask for one",
+  askHeld: "Answer the prompt in the thread first.",
   askPrompt: "Build a slate for this thread that shows ",
   cleared: "Cleared",
   rewound: "Rewound to before this slate existed",
@@ -289,12 +290,15 @@ function LinkPrompt({ threadId }: { threadId: string }) {
 function EmptySlate({ threadId, entry }: { threadId: string; entry: SlateEntry }) {
   const api = useStore(s => s.api?.slates ?? null);
   const [refused, setRefused] = useState<string | undefined>(undefined);
+  // A prompt in the composer's place leaves no composer to take the words or the caret.
+  const held = useComposerBarStore(s => s.docked[threadId] === true);
   const first = entry.newer !== undefined ? SLATE_WORDS.newer(entry.newer) : entry.record?.empty === "cleared" ? SLATE_WORDS.cleared : entry.record?.empty === "rewound-before" ? SLATE_WORDS.rewound : null;
   const ask = () => {
     const workspaceId = threadWorkspace(threadId);
     if (workspaceId === null) return;
     useComposerDraftStore.getState().setDraft(workspaceId, { prompt: SLATE_WORDS.askPrompt, cursor: SLATE_WORDS.askPrompt.length });
-    requestComposerFocus(workspaceId);
+    // A bar the person opened gives the composer's place back, as it does to a typed letter.
+    foldBar(threadId, workspaceId);
   };
   return (
     <Empty data-slate-empty={entry.record?.empty ?? (entry.newer !== undefined ? "newer" : "none")} className="flex-1">
@@ -307,7 +311,7 @@ function EmptySlate({ threadId, entry }: { threadId: string; entry: SlateEntry }
       </EmptyHeader>
       {entry.newer === undefined ? (
         <div className="flex gap-2">
-          <Button variant="outline" size="xs" onClick={ask}>
+          <Button variant="outline" size="xs" disabled={held} onClick={ask}>
             {SLATE_WORDS.askButton}
           </Button>
           {entry.record?.canUndo === true ? (
@@ -324,6 +328,7 @@ function EmptySlate({ threadId, entry }: { threadId: string; entry: SlateEntry }
           ) : null}
         </div>
       ) : null}
+      {held && entry.newer === undefined ? <p data-slate-held className="text-note leading-5 text-muted-foreground">{SLATE_WORDS.askHeld}</p> : null}
       {refused === undefined ? null : <p data-slate-refused className="text-[13px] leading-5 text-error-foreground">{refused}</p>}
     </Empty>
   );

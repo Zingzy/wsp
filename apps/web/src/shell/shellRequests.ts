@@ -138,6 +138,15 @@ export function requestComposerFocus(workspaceId: string): void {
   for (const listener of [...composerFocusListeners]) listener(workspaceId);
 }
 
+/** Hears every request for one workspace's composer without taking it, for what stands over that composer. */
+export function onComposerFocusAsked(workspaceId: string, listener: () => void): () => void {
+  const hear = (target: string): void => {
+    if (target === workspaceId) listener();
+  };
+  composerFocusListeners.add(hear);
+  return () => composerFocusListeners.delete(hear);
+}
+
 /** Takes the pending focus for one workspace, whether it was asked for before or after that composer mounted. */
 export function onComposerFocusRequest(workspaceId: string, listener: () => void): () => void {
   const take = (target: string): void => {
