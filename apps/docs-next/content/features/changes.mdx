@@ -1,10 +1,10 @@
 # Changes and commits
 
-{/* Written from apps/web/src/diffs/, apps/web/src/components/chat/ChangedFilesTree.tsx, apps/web/src/pull-request/gitAction.logic.ts, wsp commit, discard and update in packages/host/src/verbs/workspaces.ts, daemon/crates/wsp-daemon/src/git.rs, apps/web/src/pull-request/GitSplit.tsx, packages/runtime/src/threads/threads.ts. */}
+{/* Written from apps/web/src/diffs/, apps/web/src/components/chat/ChangedFilesTree.tsx, apps/web/src/pull-request/gitAction.logic.ts, wsp commit, discard and update in packages/host/src/verbs/workspaces.ts, daemon/crates/wsp-daemon/src/git.rs, apps/web/src/pull-request/GitSplit.tsx. */}
 
-The Changes pane shows the git changes in the thread's folder, read on the computer the thread runs on. You can read the diff, comment on lines, edit a file, discard a file and commit, without leaving the app.
+The Changes pane shows the git changes in the thread's folder. You can read the diff, comment on lines, edit or discard a file and commit, without leaving the app.
 
-To open it, click **Add a panel**, the **+** at the top of the right panel, and pick **Changes**. If the right panel is empty, it has no **+**. Click the pane in the list the empty panel shows instead. In that menu or that list, `D` picks it too. You can also click **Open diff** on a turn's list of changed files.
+To open it, click **Add a panel**, the **+** at the top of the right panel, and pick **Changes**. If the right panel is empty, pick it from the list there. In that menu or that list, `D` picks it too. You can also click **Open diff** on a turn's list of changed files.
 
 <Image src="/shots/docs-changes.webp" alt="The Changes pane: the changed files as a tree and a split diff." />
 
@@ -19,65 +19,45 @@ The scope menu at the top of the pane has four choices:
 | Working tree | The changes that are not staged. |
 | Staged | The changes that are staged. |
 
-The default branch is `origin/HEAD`, else `main`, else `master`. In Branch changes, the header shows the two ends, for example `HEAD → main`. Branch changes and Uncommitted also list new files that git does not track yet.
-
-The pane keeps your pick of scope for each thread's folder.
+Branch changes and Uncommitted also list new files that git does not track yet.
 
 ## Read the diff
 
-At the top is a tree of the changed files, with a count such as `3 of 7 viewed`. It folds, and past a set height it scrolls. The diff is under it.
+At the top is a tree of the changed files, with a count such as `3 of 7 viewed`. The diff is under it.
 
-- **Stacked view** shows each file as one column. **Split view** shows the old and the new side by side.
-- Tick a file as viewed to fold it. The tick stays until the file changes again.
-- **Expand all files** and **Collapse all files** open or fold every file.
-- **Refresh changes** reads the folder again.
-
-The pane follows the folder the agent works in. To keep it on one folder, click the pin, **Stay in this folder**.
-
-The daemon sends at most 2 MB of patches. Past that, the pane lists the other files without their patches.
+- **Stacked view** and **Split view** switch between one column and old beside new.
+- Tick a file as viewed to fold it until it changes again.
+- Click the pin, **Stay in this folder**, to stop the pane following the agent to another folder.
 
 ## Comment on lines
 
-Select a line, or several lines, to open a comment box under them. Type the comment. When you are done, click **Send to thread** at the top of the pane. Your comments go into the composer as a draft, so you can add to them before you send.
+Select one or more lines and type a comment. Click **Send to thread** at the top of the pane to put your comments into the composer as a draft.
 
-## Edit a file
+## Edit or discard a file
 
-Click the edit button on a file to change it in place, then click save. wsp writes the whole file on the thread's computer. Edit is not offered in the Staged scope, or for a deleted file, a binary file or a file whose patch was cut.
+Click the edit button on a file to change it in place, then click save.
 
-## Discard a file
-
-To throw away the changes to one file, click its trash icon. The dialog asks **Discard changes to *file*?** The file goes back to how its last commit has it. If no commit has the file, discarding deletes it. A discard cannot be undone.
-
-Discard is not offered in the Branch changes scope, since a commit holds those changes. There is no Discard all and no button to stage a file.
+To throw away the changes to one file, click its trash icon and confirm. The file goes back to its last commit, or is deleted if no commit has it. A discard cannot be undone.
 
 ## Commit
 
 1. Pick the **Uncommitted** scope.
 2. Click **Commit**. Every changed file is ticked.
 3. Untick the files you want to leave out.
-4. Read the message. The thread's agent drafts it from the diff, and the box says **Drafting a message** meanwhile. Change it if you want.
+4. Read the message the agent drafted from the diff, and change it if you want.
 5. Click **Commit**.
 
-The commit runs the folder's git hooks, as git does. If a hook says no, the commit stops with the hook's last line. While the agent still works, the box says **The agent is still working**, so you know the files can still change.
-
-A commit stays on the computer. Nothing goes to a remote until you push.
+The commit runs the folder's git hooks, and stops if one fails. Nothing leaves the computer until you push.
 
 ## Push and open a pull request
 
-The git button in the thread's top bar does the next step for the folder. Its label changes with the state: **Commit**, **Commit and push**, **Push**, **Commit, push and PR**, **Push and create PR**, **Create PR** or **View PR**. Its menu, **More git actions**, has the rest.
+The git button in the thread's top bar does the next step for the folder, such as **Commit and push**, **Push and create PR** or **View PR**. Its menu, **More git actions**, has the rest.
 
-**Commit and push** and **Commit, push and PR** commit every changed file, with the message the agent drafts. You do not see the message or the list of files first. To pick the files or read the message, commit from the Changes pane first, then push. wsp opens the pull request with the GitHub command line, `gh`.
-
-The [pull request pane](/features/pull-requests) shows the pull request after that.
+**Commit and push** and **Commit, push and PR** commit every changed file with the agent's message, without showing you either. To pick the files, commit from the Changes pane first. The [pull request pane](/features/pull-requests) then shows the pull request.
 
 ## A turn's changed files
 
-Under each turn, the thread lists the files that the turn changed. Click **Open diff** to open them in the Changes pane, scoped to that turn.
-
-Several threads can work in one folder. If other threads worked there too, the list shows one of two forms:
-
-- If the agent named the files it edited, the list shows those files. A second list under it, **Also changed in this folder**, holds the other files that changed.
-- If the agent named none, the list says **N changed files in this folder** and holds every file that changed in the folder.
+Under each turn, the thread lists the files that the turn changed. Click **Open diff** to see them in the Changes pane.
 
 ## From the command line
 
@@ -87,6 +67,6 @@ Several threads can work in one folder. If other threads worked there too, the l
 | `wsp discard <thread> <path> [--yes]` | Puts one file back as its last commit has it. It asks first, unless you pass `--yes`. |
 | `wsp update <thread>` | Merges the newest commits of the base branch from the remote into the branch, with a merge commit. |
 
-`wsp update` never rewrites a branch, so a branch you already pushed stays safe to push again. If the folder has changes no commit holds, it stops and names the files. If the merge conflicts, it takes the merge back at once and names the files. [`wsp fix`](/reference/cli/fix) then hands those files to the agent. None of the three commands pushes.
+`wsp update` never rewrites a branch. If the folder has uncommitted changes or the merge conflicts, it stops and names the files. [`wsp fix`](/reference/cli/fix) hands a conflict to the agent. None of these commands pushes.
 
 The command line reference has every flag: [commit](/reference/cli/commit), [discard](/reference/cli/discard) and [update](/reference/cli/update).

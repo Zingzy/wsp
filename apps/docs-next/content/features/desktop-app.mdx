@@ -2,31 +2,17 @@
 
 {/* Written from apps/desktop/src/ (tray.ts, quit.ts, awake.ts, needs-you.ts, self-update.ts, get-bundle.ts), the General rows in apps/web/src/settings/format.ts, apps/web/src/settings/about.tsx, apps/web/src/notices/hostNotices.ts, apps/desktop/src/main.ts. */}
 
-The wsp app on a Mac is the same app you get in a browser tab, in a window of its own. It adds a menu bar menu, system notifications and sounds, it keeps the Mac awake while threads work, and it updates itself.
-
-wsp itself runs in the background as a service on your Mac. The window is a view of it. Closing the window, or quitting the app, does not stop your threads unless you ask it to. But the menu bar menu, the notifications and keeping the Mac awake are the app's, so they stop when you quit it.
+The wsp app on a Mac is the same app you get in a browser tab, in a window of its own. It adds a menu bar menu and notifications, keeps the Mac awake while threads work, and updates itself. wsp runs in the background, so closing the window or quitting the app does not stop your threads unless you ask it to.
 
 ## The menu bar
 
-On a Mac, the app stays in the menu bar when you close its window. The icon shows how many threads work. It turns into a question mark while a thread waits for you.
+The app stays in the menu bar when you close its window. The icon shows how many threads work, and turns into a question mark while a thread waits for you.
 
-<Image src="/shots/docs-menu-bar.webp" alt="The menu bar menu with live threads, and Allow and Deny on a prompt." />
-
-The menu has:
-
-- A line such as **2 working, 1 waiting on you**, or **No threads working**.
-- One row for each thread that works or waits, and for each thread that failed and that you have not opened since. Each row names the thread's state and its computer.
-- **Open wsp** and **Quit wsp**.
-
-Each thread's row has **Open** and **Stop**. While the thread waits on a permission prompt, the row also has **Allow** and **Deny**, so you can answer it from the menu. A failed thread has **Open** only.
-
-If wsp is not running, the menu says **wsp is not running** and offers **Start wsp**.
-
-If the window shows a host on another computer, the menu shows that host's threads and names it.
+The menu lists each thread that works, waits or failed, with **Open** and **Stop**. A thread on a permission prompt also has **Allow** and **Deny**, so you can answer from the menu. If wsp is not running, the menu offers **Start wsp**.
 
 ## Notifications and sounds
 
-While the wsp window does not have focus, the app tells you when something happens. Settings > General > Notifications has two rows for threads:
+While the wsp window does not have focus, the app tells you when something happens. **Settings > General > Notifications** has two rows for threads:
 
 | Row | When | Default |
 |---|---|---|
@@ -35,44 +21,36 @@ While the wsp window does not have focus, the app tells you when something happe
 
 Each row takes **Off**, **Notify**, **Sound** or **Notify and sound**. A thread that an agent started reports to that agent, not to you.
 
-Click a notification to bring the window up on what it is about. While no window is open, the Dock icon counts the threads that need you.
-
-The third row, the **When a plan window runs low** switch, sends a notification with no sound. It does so when an account used 70% and 90% of a plan window, and when the account reaches its limit. See [Usage](/features/usage).
+Click a notification to open what it is about. The **When a plan window runs low** switch tells you when an account nears its plan limit. See [Usage](/features/usage).
 
 ## Keep the Mac awake
 
-While a thread works on your Mac, the app keeps the Mac from going to sleep by itself. It keeps the system awake, not the display.
-
-The app does this, not wsp in the background. So the app must be running, and its window must show the host on this Mac. After you quit the app with **Keep threads running**, the threads go on, but the Mac can sleep.
-
-Only a thread that runs on this Mac counts. A thread on another computer does not, and a thread that waits for you does not. To turn this off, use **Keep *name* awake** in Settings > General, where *name* is your Mac's name.
+While a thread works on your Mac, the app keeps the Mac from going to sleep. The display can still sleep. After you quit the app, the Mac can sleep even if threads go on. To turn this off, use **Keep *name* awake** in **Settings > General**.
 
 ## Quit
 
-Click **Quit wsp** in the menu, or press `Cmd+Q`. What happens next is set by **When you quit** in Settings > General:
+Click **Quit wsp** in the menu, or press `Cmd+Q`. What happens next is set by **When you quit** in **Settings > General**:
 
 | Choice | What a quit does |
 |---|---|
 | Ask each time | Asks **Quit wsp?** with **Quit**, **Quit and stop wsp** and **Cancel**. This is the default. |
 | Keep threads running | Quits the app. wsp keeps running, so threads go on and the `wsp` command still answers. |
-| Stop wsp too | Stops the threads on this Mac, then stops wsp, then quits. |
+| Stop wsp too | Stops the threads on your Mac, then stops wsp, then quits. |
 
-**Start wsp at login**, beside it, starts wsp when you log in, with no window open.
-
-A window on a host on another computer quits without asking. That host keeps running.
+**Start wsp at login** starts wsp in the background when you log in.
 
 ## Updates
 
-wsp looks for a new release 30 seconds after it starts, then every 6 hours. Settings > General > **Version** shows the version of wsp. If the app and the host run different versions, it shows both, as **App** and **Host**. While a newer release is out, the card says ***version* is out**. Click **What's new** to read the release notes.
+**Settings > General > Version** shows the version of wsp, and says when a newer one is out.
 
 If the app is in your Applications folder, it updates itself:
 
-1. When a release is out, the app downloads it in the background. It makes sure that the sha256 and the signature of the download are right.
+1. The app downloads a new release in the background and checks it.
 2. A notice says **wsp *version* is ready to install**.
 3. Click **Restart**. Running threads go on. Open terminals close.
 
-Click **Later** to skip it for now. To update later, click **Get *version*** in the Version card. When the download is ready, the button says **Restart to update**.
+Click **Later** to skip it for now. To update later, click **Get *version*** in the Version card, then **Restart to update**.
 
-If the app runs from a disk image or from a temporary copy that macOS made, it cannot replace itself. Move it to Applications and open it again. Until then, **Get *version*** in the Version card downloads the disk image and makes sure that its sha256 is right. Then **Quit and open** opens it, and you drag the new app over the old one.
+If the app runs from a disk image, it cannot replace itself. Move it to Applications and open it again. Until then, **Get *version*** downloads the disk image, and **Quit and open** opens it so you can drag the new app over the old one.
 
-The builds are not signed with an Apple Developer ID. When you open an app that you downloaded this way for the first time, macOS asks you to allow it. Click **Open Anyway** in System Settings > Privacy & Security.
+The builds are not signed with an Apple Developer ID. The first time you open the app, macOS asks you to allow it. Click **Open Anyway** in **System Settings > Privacy & Security**.

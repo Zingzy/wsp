@@ -1,87 +1,54 @@
 # Threads
 
-A thread is one conversation with a coding agent in one project. Each thread is a row in the sidebar. Each message you send starts a turn, which is one run of the agent's process for that message.
+A thread is one conversation with a coding agent in one project, and a row in the sidebar. Each message you send starts a turn, one run of the agent's process for that message.
 
 <Image src="/shots/docs-composer.webp" alt="The sidebar with a lead and its sub-threads, beside the lead's thread: its transcript, and the composer below it with the model and effort pickers" caption="A lead's thread beside its tree in the sidebar, with the composer at the bottom." />
 
 ## Send a message
 
-Type in the composer and press Enter. Shift+Enter makes a new line.
+Type in the composer and press Enter. Shift+Enter makes a new line. To send with ⌘ Enter instead (Ctrl Enter off a Mac), set **Send with** in **Settings > General**.
 
-To send with ⌘ Enter instead (Ctrl Enter off a Mac), open **Settings > General** and set **Send with**. The other key then makes a new line.
-
-At the top or the bottom edge of the box, the up and down arrows walk through the prompts you sent before. ⌘ S (Ctrl S off a Mac) stashes the draft. In an empty box, the same keys bring a stashed draft back.
+The up and down arrows at the edge of the box walk through your earlier prompts. ⌘ S (Ctrl S off a Mac) stashes the draft, and brings it back in an empty box.
 
 ## Send while the agent works
 
-While a turn runs, the **Send** button becomes **Stop**. Press the send key to send a message anyway. What happens next depends on **Settings > General > A message while a thread works**:
+While a turn runs, **Send** becomes **Stop**, and the send key still sends. What happens then depends on **Settings > General > A message while a thread works**:
 
-- **Queue** is the default. The message waits until the turn ends. Then the oldest waiting message starts the next turn.
-- **Steer** hands the message to the agent now. It reaches the agent at the next tool call of the running turn, and the reply comes in that turn. In the transcript, the hover on that message says "Sent while the agent was working".
+- **Queue**, the default, holds the message until the turn ends, then starts the next turn with it.
+- **Steer** hands the message to the agent at its next tool call, and the reply comes in the running turn. It works only for an agent that takes a message mid-turn and a message with no files. Otherwise the message queues.
 
-Steer works only when the agent takes a message in the middle of a turn, and only for a message with no files. Otherwise the message waits in the queue. Steer never stops the turn.
+Waiting messages show in a row above the composer. Click it to **Edit** or **Cancel** each one.
 
-Waiting messages show as a row above the composer, such as "2 messages waiting", with the first line of the oldest one. Click the row to see each message. **Edit** puts the words and files back in the box. **Cancel** drops the message. Press Esc to go back to the box.
+## Mentions and commands
 
-## Mention files, pull requests and skills
-
-Three characters open a menu in the composer:
-
-- `@` lists the files in the thread's folder. A pick puts `@path` in the message, and the agent reads that text.
-- `#` lists the open pull requests and issues of the project's repository.
-- `$` lists the skills the thread's agent loads.
-
-If the folder holds more than 20,000 files, the `@` menu lists the first 20,000.
-
-## Run a command
-
-Type `/` at the start of the box to see the agent's own commands. The list is what the agent's command line announced when its session started. Commands that work only in the agent's own terminal are left out. The agent's skills are in the same menu, under **Skills**.
-
-wsp adds one command of its own, `/btw`. It asks a side question that the thread never keeps. See [Side question](/features/side-question). Today Claude Code and Codex take side questions. For any other agent, wsp holds the draft and says "takes no side question; drop the /btw to send it to the thread".
+In the composer, `@` lists the files in the thread's folder, `#` the open pull requests and issues, and `$` the agent's skills. `/` at the start lists the agent's own commands, plus wsp's `/btw`, which asks a [side question](/features/side-question).
 
 ## Attach files
 
-To attach a file, paste it, drop it on the thread, or click the paperclip. One message takes at most 5 files:
+Paste a file, drop it on the thread, or click the paperclip. One message takes at most 5 files of up to 10 MB each:
 
-| File | Types | Size limit | Where it goes |
-|---|---|---|---|
-| Image | PNG, JPEG, GIF, WebP | 10 MB | To the agent, as an image |
-| Any other file | Any | 10 MB | Into `.wsp-files/<thread>/<send>/` in the thread's folder. The message tells the agent where. |
+| File | Where it goes |
+|---|---|
+| PNG, JPEG, GIF or WebP image | To the agent, as an image |
+| Any other file | Into `.wsp-files/` in the thread's folder, which git ignores. The message tells the agent where. |
 
-The `.wsp-files` folder stays out of git, through the checkout's own exclude file. Your `.gitignore` does not change.
-
-A paste of 200 lines or more, or of 32 KB or more, becomes a file instead of text in the box.
-
-Some agents take no image. If you attach an image for one of them, wsp refuses the message and says so. Describe the image in words, or use an agent that reads images.
+A long paste becomes a file. Some agents take no image, so describe it in words or switch agents.
 
 ## Pick a model and effort
 
-The pickers under the box set the model and the effort for the next turn. wsp reads both lists from the agent's own command line on the computer the thread runs on. Each release of an agent changes them, so this page does not list them.
+The pickers under the box set the model and effort for the next turn. The lists come from the agent itself, so they change with each release.
 
 ## Read the turn line
 
-While a turn runs, a line at the end of the transcript says what the agent does:
-
-- "Working for" and a timer, while the agent works.
-- "Waiting for you" and a timer, while the turn waits on a prompt. See [Needs you](/features/needs-you).
-
-When the turn ends, its steps fold into one line, "Worked for" and the time it took. Click the line to open the steps. A turn you stopped says "You stopped after" and the time.
+While a turn runs, the line at the end of the transcript says "Working for", or "Waiting for you" while the turn waits on a [prompt](/features/needs-you). When the turn ends, its steps fold into one line. Click it to open them.
 
 ## Stop a turn
 
-Click **Stop**, the red square in place of **Send**. You can also right-click the thread in the sidebar and choose **Stop thread**. From a terminal, run `wsp stop <thread>`.
-
-A stop ends the running turn. The thread stays. If you stop a lead, every thread under it stops too. See [Leads and sub-threads](/features/leads).
+Click **Stop**, the red square in place of **Send**, or run `wsp stop <thread>`. The thread stays. Stopping a lead stops every thread under it too. See [Leads and sub-threads](/features/leads).
 
 ## Titles
 
-A new thread takes the first sentence of its opening message as its title, cut to 48 characters. During the first turn, wsp asks the agent once, on its smallest model, for a short title, and that title replaces the first one. wsp never replaces a title you gave.
-
-To rename a thread, double-click its title in the sidebar or in the top bar, or right-click the thread and choose **Rename thread**. From a terminal, run `wsp thread rename <thread> "<title>"`. For an agent whose own store keeps no names, wsp refuses the rename and says so.
-
-## Who opened a thread
-
-You open a thread from the app or with `wsp run`. An agent opens one with `wsp run` or the `run` tool. A thread that an agent opened sits under that agent's thread in the sidebar, and its top bar names the thread that opened it. See [Leads and sub-threads](/features/leads).
+wsp titles a new thread from its opening message, and never replaces a title you gave. To rename a thread, double-click its title, or run `wsp thread rename <thread> "<title>"`.
 
 ## From the command line
 
@@ -92,15 +59,15 @@ wsp run lab "Fix the flaky login test."
 wsp send 1a2b3c4d "Also cover the codex case in the test."
 ```
 
-A send is never refused because a turn runs. Each send has one of four outcomes. The outcome is the `outcome` field under `--json` and in the answer of the `run` and `send` tools. On stderr, the command line prints a line for it instead:
+A send is never refused because a turn runs. Its `outcome` under `--json` is one of:
 
-| Outcome | When | What stderr says |
-|---|---|---|
-| `started` | No turn runs. The message starts a new turn. | Nothing. |
-| `steered` | A turn runs and the agent takes a message mid-turn. The message joins that turn. | `joined the running turn`. If you named `--model`, `--effort`, `--access` or `--fast`, the line says the running turn drops them. |
-| `queued` | A turn runs and the agent takes no message mid-turn, or the turn replied and its process has not exited yet. The message runs as the next turn. | `waiting behind the running turn`, then `queued behind the running turn; it has ended and this turn started`. |
-| `held` | The computer runs as many threads as it allows at once. The turn starts when a slot frees. See [Computers](/features/computers). | `waiting while <computer> is running <n> of <m> threads` |
+| Outcome | When |
+|---|---|
+| `started` | No turn ran. The message starts a new turn. |
+| `steered` | The message joined the running turn. |
+| `queued` | The agent takes no message mid-turn. The message runs as the next turn. |
+| `held` | The computer runs as many threads as it allows. The turn starts when one ends. See [Computers](/features/computers). |
 
-The command line steers whenever the agent can. The **Queue** setting in the app changes only the composer.
+The command line steers whenever the agent can. The **Queue** setting changes only the app.
 
 Every flag is on the [`wsp run`](/reference/cli/run), [`wsp send`](/reference/cli/send) and [`wsp stop`](/reference/cli/stop) pages.

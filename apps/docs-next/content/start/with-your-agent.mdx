@@ -20,9 +20,9 @@ Before you start, install wsp ([on a Mac](/install/mac) or [on Linux](/install/l
 
 <video src="/shots/docs-mcp-install.mp4" autoPlay muted loop playsInline aria-label="wsp mcp install writing the wsp tools and skill for an agent" />
 
-`--agent` takes the id of any agent in the catalog, which is the list of agents that wsp knows. For example, it takes `claude`, `codex`, `gemini`, `opencode` or `cursor`. To set up more than one agent, give `--agent` again for each one. If one agent fails, the others still get the tools.
+`--agent` takes an agent's id, for example `claude`, `codex`, `gemini`, `opencode` or `cursor`. To set up more than one agent, give `--agent` again for each one.
 
-The catalog has an MCP configuration for `claude`, `codex`, `gemini` and `opencode`. For any other agent, such as Cursor, the command writes the skill and the wsp section, but not the MCP server. For Cursor, the skill goes to `~/.cursor/skills/wsp/SKILL.md`. To give that agent the tools, add an MCP server in the agent that runs `wsp mcp`.
+For any agent other than `claude`, `codex`, `gemini` and `opencode`, such as Cursor, the command writes the skill and the wsp section but not the MCP server. To give that agent the tools, add an MCP server in the agent that runs `wsp mcp`.
 
 For `claude`, `codex`, `gemini` and `opencode`, the command writes three things:
 
@@ -32,7 +32,7 @@ For `claude`, `codex`, `gemini` and `opencode`, the command writes three things:
 | The wsp skill | The agent's skills folder, for example `~/.claude/skills/wsp/SKILL.md`. |
 | A short wsp section | `AGENTS.md` in the folder where you ran the command, and `CLAUDE.md` beside it for Claude Code. |
 
-If you run the command again, it replaces the wsp section and leaves the other lines of the file as they are. To take the section out, run `wsp mcp install --agent <id> --remove`. That leaves the MCP configuration and the skill in place.
+If you run the command again, it replaces the wsp section and leaves the rest of the file alone. To take the section out, run `wsp mcp install --agent <id> --remove`. That leaves the MCP configuration and the skill in place.
 
 The last line that the command prints tells you what to say to the agent next.
 
@@ -50,11 +50,7 @@ In another agent, type:
 Use the wsp skill and set up wsp for me.
 ```
 
-The agent follows the setup steps in the skill. It stops at the first step whose result is not what the skill expects, and tells you.
-
-1. It runs `wsp --version` and `wsp threads --json`. If no host runs, the second command starts one.
-2. It records your project with `wsp add`.
-3. It opens your first thread with `wsp run`. The thread shows in your sidebar, and you can read and answer it there.
+The agent checks that wsp runs, records your project and opens your first thread. The thread shows in your sidebar, and you can read and answer it there. If a step goes wrong, the agent stops and tells you.
 
 The agent can also add a computer for you. It runs `wsp add user@host`, and you pick what goes on the computer in the app. [Add your first computer](/start/first-computer) shows those steps.
 
@@ -65,7 +61,7 @@ Until the agent restarts, it can do the same work with the `wsp` command line.
 Two things are yours, and the agent cannot do them for you:
 
 - Sign-ins. When a tool must sign in, the agent gives you a page and a code. You finish the sign-in in your own browser.
-- Keys. If you pay Anthropic by the token, write `ANTHROPIC_API_KEY=<key>` in `~/.wsp/.env` yourself. On a Claude subscription, you sign in instead. Do not paste a key into the conversation. The host reads the key from that file.
+- Keys. If you pay Anthropic by the token, write `ANTHROPIC_API_KEY=<key>` in `~/.wsp/.env` yourself. On a Claude subscription, you sign in instead. Do not paste a key into the conversation.
 
 A `sudo` password also stays with you. If a computer's `sudo` asks for one, the agent tells you where to type it: in a terminal or in the app.
 
