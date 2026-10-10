@@ -2,7 +2,7 @@
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { threadWord, isLocalWorkspace, SETTLE_MS } from "@wsp/protocol";
+import { FsImageReply, threadWord, isLocalWorkspace, SETTLE_MS } from "@wsp/protocol";
 import { lazySlates } from "../lazy-slates.js";
 import type { Slates } from "../slates.js";
 import type { RuntimeContext, SlatesArea } from "../context.js";
@@ -40,6 +40,11 @@ export function slatesArea(ctx: RuntimeContext): SlatesArea {
     machineOf: threadId => {
       const entry = ctx.boxOf(threadId);
       return entry?.machine;
+    },
+    imageOn: threadId => {
+      const entry = ctx.boxOf(threadId);
+      if (entry === undefined) return undefined;
+      return { name: ctx.computerOf(entry), read: path => ctx.withDaemon(entry, async ask => FsImageReply.parse(await ask({ op: "fs.image", path }))) };
     },
     asleep: threadId => {
       const entry = ctx.boxOf(threadId);

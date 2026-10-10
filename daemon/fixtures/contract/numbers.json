@@ -1,5 +1,5 @@
 {
-  "daemonVersion": 143,
+  "daemonVersion": 144,
   "execBodyMax": 16384,
   "prReplyBodyMax": 65536,
   "guestMessageCapBytes": 4194304,
@@ -20,6 +20,7 @@
   "authDeadlineMs": 5000,
   "tunnelCap": 64,
   "fsReadCapBytes": 2097152,
+  "fsImageCapBytes": 10485760,
   "fsWriteCapBytes": 2097152,
   "fsListCapEntries": 10000,
   "fsFilesCapEntries": 20000,

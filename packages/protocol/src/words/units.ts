@@ -29,6 +29,13 @@ export function fmtBytes(n: number): string {
   return `${Number.isInteger(Number(gb.toFixed(1))) ? Math.round(gb) : gb.toFixed(1)} GB`;
 }
 
+/** A size said to be over a cap: past 1 MB with one decimal rounded up, so a file a byte over a cap never reads as
+ * the cap itself. */
+export function fmtBytesOver(n: number): string {
+  if (n < MIB || n >= GIB) return fmtBytes(n);
+  return `${(Math.ceil((n / MIB) * 10) / 10).toFixed(1)} MB`;
+}
+
 /** What a row reads where the catalog has measured no size. */
 export const UNKNOWN_SIZE = "size unknown";
 

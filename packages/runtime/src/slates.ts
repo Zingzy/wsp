@@ -25,6 +25,7 @@ import {
   type SlateValuesEvent,
   type SlateView,
   type SlateWriteAnswer,
+  type SlatesImageAnswer,
 } from "@wsp/protocol";
 import {
   applySlatePatch,
@@ -69,6 +70,8 @@ import { SLATES } from "./lazy-slates.js";
 import { createSlateRuns, HELD_APPROVAL, lastResult, mapStrings, restartedRecord, rewoundRecord, runningRecord, type CmdRunDecl, type RunApprovals, type RunAsk, type RunBy, type RunInput, type RunRecord, type SlateRuns, type SlateRunsDeps } from "./slate-runs.js";
 import { boxLedger, boxRoad, boxSlateDir } from "./slate-box.js";
 import { pathsNamed, scriptsNamed, withFiles } from "./slate-files.js";
+import { slateImage, type ImageOn } from "./slate-images.js";
+import { cutAt, defanged, longest } from "./slate-message.js";
 import { HELD_CONFIRM, consentKey, createSlateMcp, slateSecretMark, type McpRunDecl, type McpServerSpec } from "./slate-mcp.js";
 import { HOST_SLATE_SOURCES, resolveIn, viewSources, type SlateSourceContext } from "./slate-sources/index.js";
 
@@ -143,6 +146,8 @@ export interface SlatesDeps {
   loaded?(): Promise<void>;
   /** The machine a thread runs on where that is not this computer, which its slate's commands then run on too. */
   machineOf?(threadId: string): Machine | undefined;
+  /** Where the thread runs on another computer: reads an image file there through its daemon, by its whole path. */
+  imageOn?(threadId: string): ImageOn | undefined;
   /** That machine naps: a timer never wakes it, a press does, through wake. */
   asleep?(threadId: string): boolean;
   /** Readies that machine for a run a press starts: waits out the sweep a starting host has out there, which would end
@@ -274,30 +279,6 @@ const commandOf = (decl: SlateRunDecl): SlateJson => {
   return asJson(what);
 };
 
-/** A carried value with any line that would read as a second `slate:` line made harmless (12, injection). */
-function defanged(value: SlateJson): SlateJson {
-  if (typeof value === "string") return value.replace(/^(\s*slate)\s*:(?=\s*\{)/gm, "$1：");
-  if (Array.isArray(value)) return value.map(defanged);
-  if (value !== null && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, defanged(v)]));
-  return value;
-}
-
-
-/** The longest string inside a value, by the path to it, for cutting a message down to its cap. */
-function longest(value: SlateJson, at: (string | number)[] = []): { at: (string | number)[]; length: number } | undefined {
-  if (typeof value === "string") return { at, length: value.length };
-  const kids = Array.isArray(value) ? value.map((v, i) => longest(v, [...at, i])) : value !== null && typeof value === "object" ? Object.entries(value).map(([k, v]) => longest(v, [...at, k])) : [];
-  return kids.reduce<{ at: (string | number)[]; length: number } | undefined>((best, k) => (k !== undefined && (best === undefined || k.length > best.length) ? k : best), undefined);
-}
-
-function cutAt(value: SlateJson, at: (string | number)[], keep: number): SlateJson {
-  if (at.length === 0) return typeof value === "string" ? `${value.slice(0, keep)} (cut)` : value;
-  const [head, ...rest] = at;
-  if (Array.isArray(value)) return value.map((v, i) => (i === head ? cutAt(v, rest, keep) : v));
-  if (value !== null && typeof value === "object") return { ...value, [head as string]: cutAt(value[head as string]!, rest, keep) };
-  return value;
-}
-
 /** What each outcome reads as under the pressed piece (09, "Delivery"). */
 const SAID: Record<"send" | "steer" | "queue", Record<"started" | "steered" | "queued", string>> = {
   send: { started: "Sent", steered: "Sent into the running turn", queued: "Waiting for the turn to end" },
@@ -329,6 +310,7 @@ export interface Slates {
   /** A window's hold on sources for a thread's slate; the release goes when the window lets go or its socket closes. */
   subscribe(p: { threadId: string; sources: string[] }): () => void;
   resolve(p: { threadId: string; paths: string[] }): Promise<{ values: Record<string, SlateJson> }>;
+  image(p: { threadId: string; src: string; have?: string }): Promise<SlatesImageAnswer>;
   /** A turn ended: its snapshot is written. */
   turnEnded(o: { threadId: string; turnId: string }): Promise<void>;
   /** The runtime rewound a thread to the end of turnId, cutting the turns named. */
@@ -1535,6 +1517,11 @@ export function createSlates(deps: SlatesDeps): Slates {
       const views = await viewsFor(r, p.paths);
       const ctx = contextOf(r, views);
       return { values: Object.fromEntries(p.paths.map(path => [path, mapStrings(evaluateSlateExpression(path, ctx) ?? null, s => scrub(r, s))])) };
+    },
+
+    image: async p => {
+      const r = await needRecord(p.threadId);
+      return slateImage(p.src, { thread: p.threadId, have: p.have, folder: deps.thread(p.threadId)?.folder, on: deps.imageOn?.(p.threadId), allowed: domain => r.approvals[slateDomainKey(domain)]?.state === "allowed" });
     },
 
     async turnEnded({ threadId, turnId }) {

@@ -101,6 +101,7 @@ function linkFor(threadId: string): SlateLink {
     fill: text => host?.fill(threadId, text),
     pane: kind => (host === null ? false : host.openPane(host.selected().panelKey, kind)),
     open: href => openLink(threadId, href),
+    image: (src, have) => (api?.image === undefined ? gone() : api.image(threadId, src, have)),
   };
 }
 

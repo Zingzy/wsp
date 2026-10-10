@@ -153,6 +153,7 @@ const DAEMON_CONTENTS = [
   "df80acbb03e838c04d4d2de65181fbd28ed47015cd41058773a07249fe883af7",
   "97757fce8a1af0f854aeebb94852334e4be7a749abd8b59d26482e51cb6f5f93",
   "f11092ebbda4c528bd4264ebe7e541e50941f573227f29a641a6c977b1281385",
+  "30e5f5cfa31e466e2c1ef6c48698cfd4bca296363eb0a625c98d07edc7cdf017",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -564,7 +565,12 @@ const DAEMON_CONTENTS = [
  * the copy's remote starts every copy on with the code on-default-branch, and git.status answers that branch as
  * defaultBranch off the same read, origin/HEAD by the branch's own name, else a main or a master here, so the host and
  * the daemon call one branch the default.
- * Version 143: verbs, tools and the skill take a thread, not a workspace. */
+ * Version 143: verbs, tools and the skill take a thread, not a workspace.
+ * Version 144: fs.image reads a slate's image by its whole path, anywhere on the computer or inside the workspace it
+ * names with no link followed there, opened without blocking and judged on the handle, and answers its size, modified
+ * time, inode and change time with its bytes only where it is a regular file under the image cap whose own bytes name
+ * an image type the protocol allows, and says svg where an SVG document stands there; a folder, device, pipe or socket
+ * is refused not-a-file and a missing path not-found. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary

@@ -40,6 +40,7 @@ function slateOps() {
     op("slates.subscribe"),
     op("slates.unsubscribe"),
     op("slates.resolve"),
+    op("slates.image"),
   ] as const;
 }
 
@@ -1096,6 +1097,7 @@ export const DEVICE_OPS: readonly string[] = [
   "slates.subscribe",
   "slates.unsubscribe",
   "slates.resolve",
+  "slates.image",
 ];
 
 /** The one sentence a thread's own token is refused an op with. It names the op rather than guessing why a caller

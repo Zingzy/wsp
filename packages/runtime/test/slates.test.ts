@@ -9,11 +9,14 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { LocalBackend } from "@wsp/engine";
 import { DEVICE_OPS, REWIND_NO_UNDO_LINE, THREAD_OPS, type AdapterEvent, type Caller, type EventUnion, type SlateView, type TurnResult } from "@wsp/protocol";
+import { slateDomainKey } from "@wsp/protocol/slate";
 import { createRuntime, type HarnessAdapterFactory, type HarnessStartOptions, type LocalWiring, type Runtime } from "../src/runtime.js";
 import { localExecStream } from "../src/local-exec.js";
 import { SLATES } from "../src/lazy-slates.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { STARTS_PER_MINUTE } from "../src/slate-runs.js";
+import { serveRuntime } from "../src/serve.js";
+import { WsClient } from "./ws-client.js";
 import { stubBackend, testPlatform } from "./stub-backend.js";
 
 const TOKEN = "vcl_tok_9f8e7d6c5b4a3210";
@@ -1012,6 +1015,47 @@ describe("a slate's files on the host", () => {
     expect(read.text).toContain('<file name="hits.py">{`\n    print(1)\n  `}</file>');
     await rt.slates.write({ text: '<file name="hits.py">{`print(22)`}</file>' }, asThread);
     expect((await rt.slates.read({}, asThread)).text).toContain("    print(22)\n");
+  }, 30_000);
+
+  it("an image piece reads a file from any path and under the thread's folder, and fetches an address only once its domain is allowed", async () => {
+    const { rt, root, threadId, asThread } = await threadOn("wsp-slates-image-");
+    const png = Buffer.from("89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da63f8cfc0f01f0005000201a3b0d8f60000000049454e44ae426082", "hex");
+    mkdirSync(join(root, "plain", "shots"));
+    writeFileSync(join(root, "plain", "shots", "home.png"), png);
+    writeFileSync(join(root, "elsewhere.png"), png);
+    await rt.slates.write({ text: `<slate><column><image src="shots/home.png" /></column></slate>` }, asThread);
+    const code = async (src: string) => { const a = await rt.slates.image({ threadId, src }); return "problem" in a ? `${a.problem.code} ${a.problem.message}` : "ask" in a ? `ask ${a.ask.domain}` : "unchanged" in a ? "unchanged" : a.mediaType; };
+    expect(await rt.slates.image({ threadId, src: "shots/home.png" })).toMatchObject({ mediaType: "image/png", bytes: png.toString("base64") });
+    expect(await code(join(root, "elsewhere.png"))).toBe("image/png");
+    expect(await code("../elsewhere.png")).toBe("image/png");
+    expect(await code("shots/gone.png")).toBe("R900 no file at shots/gone.png");
+    // The domain's word is the one a link's prompt keeps; with it the host goes to fetch, and refuses this computer.
+    expect(await code("http://localhost:9/a.png")).toBe("ask localhost");
+    await rt.slates.approve({ threadId, key: slateDomainKey("localhost"), scope: "thread" });
+    expect(await code("http://localhost:9/a.png")).toMatch(/^R917 http:\/\/localhost:9\/a\.png resolves to (127\.0\.0\.1|::1), which is this computer or its network/);
+    expect(await code("http://other.localhost:9/a.png")).toBe("ask other.localhost");
+  }, 30_000);
+});
+
+describe("a slate over the host's socket", () => {
+  it("answers a window's get, image, hold and release, and a refused state in its reply", async () => {
+    const { rt, root, threadId, asThread } = await threadOn("wsp-slates-socket-");
+    const png = Buffer.from("89504e470d0a1a0a0000000d494844520000000100000001", "hex");
+    writeFileSync(join(root, "plain", "home.png"), png);
+    await rt.slates.write({ text: `<slate><column><image src="home.png" /></column></slate>` }, asThread);
+    const srv = await serveRuntime(rt, { port: 0, authToken: "secret", devices: rt.devices });
+    const client = await WsClient.connect(srv.port, { token: "secret" });
+    try {
+      expect(((await client.request("slates.get", { threadId }))["slate"] as SlateView).version).toBe(1);
+      expect(await client.request("slates.image", { threadId, src: "home.png" })).toMatchObject({ ok: true, mediaType: "image/png", bytes: png.toString("base64") });
+      expect(await client.request("slates.image", { threadId, src: "https://img.acme.test/a.png" })).toMatchObject({ ok: true, ask: { domain: "img.acme.test" } });
+      expect(await client.request("slates.subscribe", { threadId, sources: ["git"] })).toMatchObject({ ok: true });
+      expect(await client.request("slates.unsubscribe", { threadId, sources: ["git"] })).toMatchObject({ ok: true });
+      expect(await client.request("slates.state", { threadId, values: { $nope: 1 } })).toMatchObject({ ok: false });
+    } finally {
+      client.close();
+      await srv.close();
+    }
   }, 30_000);
 });
 

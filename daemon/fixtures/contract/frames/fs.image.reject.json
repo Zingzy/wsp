@@ -1,0 +1,17 @@
+[
+  {
+    "id": 1,
+    "op": "fs.image"
+  },
+  {
+    "id": 1,
+    "op": "fs.image",
+    "path": 7
+  },
+  {
+    "id": 1,
+    "op": "fs.image",
+    "path": "/tmp/home.png",
+    "machineId": 1
+  }
+]

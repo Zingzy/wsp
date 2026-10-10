@@ -218,6 +218,17 @@ pub enum DaemonOp {
         #[ts(optional)]
         machine_id: Option<String>,
     },
+    /// A slate's image by its whole path, anywhere on this computer or inside the named workspace: answered with
+    /// its bytes only where it is a regular file, at most FS_IMAGE_CAP_BYTES, whose own bytes say PNG, JPEG, GIF or
+    /// WebP, so no other file leaves the computer through it.
+    #[serde(rename = "fs.image", rename_all = "camelCase")]
+    FsImage {
+        path: String,
+        /// The workspace this frame is for, as on fs.list above.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        machine_id: Option<String>,
+    },
     /// Replaces an existing regular file's contents whole, keeping its mode and owner: a pane's save.
     #[serde(rename = "fs.write", rename_all = "camelCase")]
     FsWrite {
@@ -842,7 +853,7 @@ fn usage_stores<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<UsageStore
     Ok(list)
 }
 
-pub const DAEMON_OPS: [&str; 73] = [
+pub const DAEMON_OPS: [&str; 74] = [
     "pty.create",
     "pty.attach",
     "pty.detach",
@@ -867,6 +878,7 @@ pub const DAEMON_OPS: [&str; 73] = [
     "fs.list",
     "fs.files",
     "fs.read",
+    "fs.image",
     "fs.search",
     "git.status",
     "git.diff",

@@ -276,6 +276,37 @@ pub struct FsReadReply {
     pub truncated: bool,
 }
 
+/// An image's size and modified time, with its type and bytes in base64 only where it is one of the four types under
+/// the cap.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct FsImageReply {
+    pub size: u64,
+    /// When the file was last written, in ms: what the host tells a changed file by, beside its size.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub modified: Option<u64>,
+    /// The file's inode and when its inode last changed, in ns: a copy that keeps the source's modified time and size
+    /// still moves these, so the host tells it apart.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub inode: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub changed: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub media_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub content: Option<String>,
+    /// Set where what stands there is not an image but an SVG document, so the refusal names it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub svg: Option<bool>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct FsWriteReply {
