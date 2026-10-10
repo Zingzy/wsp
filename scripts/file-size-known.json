@@ -12,5 +12,5 @@
   "packages/host/src/doctor.ts": 2003,
   "packages/host/src/init.ts": 1748,
   "packages/runtime/src/serve.ts": 2069,
-  "packages/runtime/src/slates.ts": 1589
+  "packages/runtime/src/slates.ts": 1587
 }

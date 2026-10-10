@@ -30,8 +30,8 @@ interface AskKind<A> {
 export const ASK_KINDS: { [K in SlateAsk["kind"]]: AskKind<Extract<SlateAsk, { kind: K }>> } = {
   cmd: {
     sheet: p => <ConsentSheet key={p.ask.key} ask={p.ask} cadence={p.cadence} more={p.more} answer={p.answer} onClose={p.onClose} />,
-    // A command that names confirm asks alone, on every start.
-    row: { batchable: ask => ask.confirm === undefined, label: ask => ask.cmd, body: (ask, cadence) => <CommandBody ask={ask} cadence={cadence} lines={4} />, command: true },
+    // A command that names confirm asks alone, on every start, and one with no Always asks alone, since Allow all is one.
+    row: { batchable: ask => ask.confirm === undefined && ask.noAlways !== true, label: ask => ask.cmd, body: (ask, cadence) => <CommandBody ask={ask} cadence={cadence} lines={4} />, command: true },
   },
   server: {
     sheet: p => <ServerConsentSheet key={p.ask.key} ask={p.ask} cadence={p.cadence} answer={p.answer} onClose={p.onClose} />,
