@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Adapted from pingdotgg/t3code apps/web/src/components/ChatMarkdown.tsx at 57a66608 (MIT).
-// Differs from upstream: useTheme is the resolvedTheme prop, getClientSettings().wordWrap is the wordWrap prop, the right-panel store is the onOpenFile prop; citations, the selection toolbar, asset images, the video player, toasts and PR link resolution are removed.
+// Differs from upstream: useTheme is the resolvedTheme prop, getClientSettings().wordWrap is the wordWrap prop, the right-panel store is the onOpenFile prop; citations, the selection toolbar, asset images, the video player, toasts, PR link resolution and the link favicon fetched from Google are removed.
 import { FileIcon, GlobeIcon } from "lucide-react";
-import React, { Children, memo, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
+import React, { Children, memo, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import {
   CHAT_INLINE_CHIP_CLASS_NAME,
   CHAT_INLINE_CHIP_LABEL_CLASS_NAME,
@@ -123,36 +123,16 @@ export function resolveExternalWebLinkHost(href: string | undefined): string | n
   }
 }
 
-const MARKDOWN_LINK_FAVICON_CLASS_NAME = "block size-full shrink-0 select-none";
-
-/** Hosts whose favicon request already failed this session; skip straight to the globe. */
-const failedFaviconHosts = new Set<string>();
-
-const MarkdownLinkFavicon = memo(function MarkdownLinkFavicon({ host }: { host: string }) {
-  const [failedHost, setFailedHost] = useState<string | null>(null);
+function MarkdownLinkGlyph() {
   return (
     <span
       className="ms-[0.25em] me-[0.2em] inline-flex size-[14px] [vertical-align:-0.125em]"
       aria-hidden
     >
-      {failedHost === host || failedFaviconHosts.has(host) ? (
-        <GlobeIcon className={MARKDOWN_LINK_FAVICON_CLASS_NAME} />
-      ) : (
-        <img
-          src={`https://www.google.com/s2/favicons?domain=${encodeURIComponent(host)}&sz=32`}
-          alt=""
-          loading="lazy"
-          draggable={false}
-          className={cn(MARKDOWN_LINK_FAVICON_CLASS_NAME, "rounded-sm")}
-          onError={() => {
-            failedFaviconHosts.add(host);
-            setFailedHost(host);
-          }}
-        />
-      )}
+      <GlobeIcon className="block size-full shrink-0 select-none" />
     </span>
   );
-});
+}
 
 function leadingExternalLinkTextLength(text: string): number {
   const protocol = /^(?:https?:\/\/)/i.exec(text)?.[0];
@@ -191,8 +171,8 @@ export function plainHastText(node: unknown): string | null {
 
 /**
  * Whether the link carries any words of its own. An anchor that is only an image (a badge, a
- * "Fix in Cursor" button) already shows its identity, and a favicon bolted on in front of it
- * is a stray logo rather than a hint.
+ * "Fix in Cursor" button) already shows its identity, and a glyph bolted on in front of it
+ * is a stray mark rather than a hint.
  */
 export function hastHasText(node: unknown): boolean {
   if (!node || typeof node !== "object") return false;
@@ -268,11 +248,9 @@ export function handleMarkdownFragmentClick(event: ReactMouseEvent<HTMLAnchorEle
 }
 
 export function MarkdownExternalLinkContent({
-  host,
   plainText,
   children,
 }: {
-  host: string;
   plainText: string | null;
   children: ReactNode;
 }) {
@@ -281,7 +259,7 @@ export function MarkdownExternalLinkContent({
     return (
       <>
         <span className="whitespace-nowrap">
-          <MarkdownLinkFavicon host={host} />
+          <MarkdownLinkGlyph />
           {plainText.slice(0, leadingLength)}
         </span>
         {breakableExternalLinkText(plainText.slice(leadingLength))}
@@ -297,7 +275,7 @@ export function MarkdownExternalLinkContent({
     return (
       <>
         <span className="whitespace-nowrap">
-          <MarkdownLinkFavicon host={host} />
+          <MarkdownLinkGlyph />
           {firstChild.slice(0, leadingLength)}
         </span>
         {breakableExternalLinkText(firstChild.slice(leadingLength))}
@@ -309,7 +287,7 @@ export function MarkdownExternalLinkContent({
   return (
     <>
       <span className="whitespace-nowrap">
-        <MarkdownLinkFavicon host={host} />
+        <MarkdownLinkGlyph />
         {firstChild}
       </span>
       {childNodes.slice(1)}

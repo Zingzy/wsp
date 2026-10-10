@@ -53,7 +53,7 @@ export function Privacy() {
           <strong>Update checks</strong> ask GitHub for new wsp releases, and npm, GitHub and Anthropic for each agent's newest version. <code>WSP_UPDATE_CHECK=0</code> stops them. The app downloads its own updates from GitHub.
         </li>
         <li>
-          <strong>Icons.</strong> To draw an icon, the host name of a remote tool server, and of a link in an agent's reply, is sent to Google's icon service. Settings, Privacy turns off the tool server icons.
+          <strong>Icons.</strong> To draw a remote tool server's icon, its host name is sent to Google's icon service. Settings, Privacy turns this off.
         </li>
         <li>The Usage page downloads a model price table from GitHub. Searching for skills sends your search words to skills.sh. Images in replies and pull request avatars load from wherever they are hosted.</li>
       </ul>
