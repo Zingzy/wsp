@@ -10,7 +10,7 @@ import { execDetached, type ExecResult } from "@wsp/engine";
 
 /** The detached launch starts its run under setsid, which macOS lacks; detached runs only start on Linux machines. */
 const noSetsid = spawnSync("sh", ["-c", "command -v setsid"]).status !== 0;
-import { DAEMON_VERSION, PERMISSION_ALLOW, RUN_GONE_LINE, TURN_TOKEN_ENV, foldThreads, threadWordOf, type AdapterEvent, type Caller, type ExecStream, type SessionView, type TurnResult } from "@wsp/protocol";
+import { DAEMON_VERSION, PERMISSION_ALLOW, RUN_GONE_LINE, TURN_TOKEN_ENV, foldThreads, stillRunningLine, threadWordOf, type AdapterEvent, type Caller, type ExecStream, type SessionView, type TurnResult } from "@wsp/protocol";
 import { TRANSCRIPTS_HELD, createRuntime, type HarnessAdapterFactory, type HarnessSession, type ProjectLander, type Runtime } from "../src/runtime.js";
 import { TRANSCRIPT_CAP } from "../src/types/internal.js";
 import { memoryStore, type Store } from "../src/store.js";
@@ -917,7 +917,7 @@ describe("a turn the host comes back to", () => {
     await rt2.close();
   });
 
-  it("a reply held over background work has its line sent once, not again on the replay, and the held end sends none", async () => {
+  it("a reply held over background work has its line sent once, not again on the replay, and the held end sends its outcome alone", async () => {
     const backend = stubBackend();
     const store = memoryStore();
     const h = machineRuns();
@@ -936,7 +936,8 @@ describe("a turn the host comes back to", () => {
     h.emit(run, { type: "turn.done", sessionId: "sess-1", result: reply, held: true });
     h.emit(run, { type: "session.end", sessionId: "sess-1", exitCode: 0, sawResult: true });
     await until(async () => (await rt2.sessions.list(ws.id))[0]!.status === "completed");
-    expect((await rt2.sessions.history(ws.id)).map(e => e.type)).toEqual(["session.start", "session.notify", "session.done", "session.end"]);
+    expect((await rt2.sessions.history(ws.id)).map(e => e.type)).toEqual(["session.start", "session.notify", "session.notify", "session.done", "session.end"]);
+    expect((await notifies(rt2, ws.id)).map(t => t.replace(/^thread \w+ /, ""))).toEqual([`finished (completed): ${stillRunningLine(1)}`, "finished (completed)"]);
     await rt2.close();
   });
 
@@ -984,7 +985,7 @@ describe("a turn the host comes back to", () => {
     h.emit(h.handles()[2]!, { type: "turn.done", sessionId: "sess-1", result: { status: "completed", text: "read it" } });
     h.emit(h.handles()[2]!, { type: "session.end", sessionId: "sess-1", exitCode: 0, sawResult: true });
     await until(() => h.prompts.length === 4).catch(() => {});
-    expect(h.prompts.slice(2).map(p => p.replace(/^thread \w+ finished \(completed\): /, "")).sort()).toEqual(["first reply: pushed, CI in the background", "second reply: CI passed"]);
+    expect(h.prompts.slice(2).map(p => p.replace(/^thread \w+ finished \(completed\): /, "")).sort()).toEqual([`first reply: pushed, CI in the background\n\n${stillRunningLine(1)}`, "second reply: CI passed"]);
     await rt2.close();
   });
 
@@ -1002,7 +1003,7 @@ describe("a turn the host comes back to", () => {
     expect((await rt2.sessions.list(ws.id)).map(s => s.status)).toEqual(["running"]);
     h.emit(run, { type: "session.end", sessionId: "sess-1", exitCode: 0, sawResult: true });
     await until(async () => (await rt2.sessions.list(ws.id))[0]!.status === "completed");
-    expect((await notifies(rt2, ws.id)).map(t => t.replace(/^thread \w+ finished \(completed\): /, ""))).toEqual(["Pushed; CI runs in the background.", "CI passed."]);
+    expect((await notifies(rt2, ws.id)).map(t => t.replace(/^thread \w+ finished \(completed\): /, ""))).toEqual([stillRunningLine(1), "CI passed."]);
     await rt2.close();
   });
 
@@ -1019,11 +1020,11 @@ describe("a turn the host comes back to", () => {
     h.emit(run, { type: "turn.done", sessionId: "sess-1", result: { status: "interrupted", text: "Pushed; CI runs in the background." } });
     h.emit(run, { type: "session.end", sessionId: "sess-1", exitCode: null, sawResult: true });
     await until(async () => (await rt2.sessions.list(ws.id))[0]!.status === "interrupted");
-    expect((await notifies(rt2, ws.id)).map(t => t.replace(/^thread \w+ /, ""))).toEqual(["finished (completed): Pushed; CI runs in the background.", "finished (interrupted)"]);
+    expect((await notifies(rt2, ws.id)).map(t => t.replace(/^thread \w+ /, ""))).toEqual([`finished (completed): ${stillRunningLine(1)}`, "finished (interrupted)"]);
     await rt2.close();
   });
 
-  it("a held reply's line is not sent again by a restarted host whose transcript the cap trimmed past that line", async () => {
+  it("a held reply's line is not sent again by a restarted host whose transcript the cap trimmed past that line, and its end sends the outcome alone", async () => {
     const backend = stubBackend();
     const store = memoryStore();
     const h = machineRuns();
@@ -1039,18 +1040,18 @@ describe("a turn the host comes back to", () => {
     h.emit(run, { type: "turn.done", sessionId: "sess-1", result: { status: "completed", text: "Pushed; CI runs in the background." }, held: true });
     h.emit(run, { type: "session.end", sessionId: "sess-1", exitCode: 0, sawResult: true });
     await until(async () => (await rt2.sessions.list(ws.id))[0]!.status === "completed");
-    expect(told).toEqual([]);
+    expect(told).toEqual([expect.stringMatching(/^thread \w+ finished \(completed\)$/)]);
     await rt2.close();
   });
 
-  it("a host cut after a held reply's line sends no second line: a nap, and a restart that finds the run gone", async () => {
+  it("a host cut after a held reply's line sends the cut's line, which the held line promised: a nap, and a restart that finds the run gone", async () => {
     const backend = stubBackend();
     const store = memoryStore();
     const h = machineRuns();
     const napped = await heldLineSent(h, store, backend);
     await napped.rt.workspaces.nap(napped.ws.id);
     await until(async () => (await napped.rt.sessions.list(napped.ws.id))[0]!.status !== "running");
-    expect(await notifies(napped.rt, napped.ws.id)).toHaveLength(1);
+    expect((await notifies(napped.rt, napped.ws.id)).map(t => t.replace(/^thread \w+ /, ""))).toEqual([`finished (completed): ${stillRunningLine(1)}`, expect.stringMatching(/^finished \(failed[^)]*\): /)]);
     await napped.rt.close();
 
     const store2 = memoryStore();
@@ -1059,7 +1060,8 @@ describe("a turn the host comes back to", () => {
     h.sweep(gone.run);
     const rt2 = createRuntime({ backend, store: store2, adapters: { claude: h.adapter } });
     expect((await rt2.sessions.list(gone.ws.id)).map(s => s.status)).not.toContain("running");
-    expect((await rt2.sessions.history(gone.ws.id)).map(e => e.type)).toEqual(["session.start", "session.notify", "session.end"]);
+    expect((await rt2.sessions.history(gone.ws.id)).map(e => e.type)).toEqual(["session.start", "session.notify", "session.notify", "session.end"]);
+    expect((await notifies(rt2, gone.ws.id))[1]).toMatch(/finished \(failed[^)]*\): /);
     await rt2.close();
   });
 
