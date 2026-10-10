@@ -403,8 +403,8 @@ describe("the run on the computer itself", () => {
     ]);
     expect(rows[0]!.note).toContain("The current working directory must be readable");
     // What the log on that computer reads says the row twice: as the loop said it, then as the check left it, so
-    // the log and the rows the record keeps cannot disagree.
-    expect(seen.filter(l => l.startsWith("bat: "))).toEqual(["bat: installed", expect.stringContaining("bat: failed (the check did not pass")]);
+    // the log and the rows the record keeps cannot disagree. The check's command is the log's and never the row's.
+    expect(seen.filter(l => l.startsWith("bat: "))).toEqual(["bat: installed", "bat: the check did not pass: brew list --versions bat", "bat: failed (Error: The current working directory must be readable to linuxbrew to run brew.)"]);
     expect(seen.filter(l => l.startsWith("eza: "))).toEqual(["eza: installed"]);
   });
 

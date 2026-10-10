@@ -8,10 +8,12 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { BREW_ID_PREFIX, MCP_ID_PREFIX, packageOf, shellLine, shellQuote, TOOLS_PATH, toolRowId, toolRowPrefix, type LoginChoice, type RecipeCustomRow, type RecipeDigest } from "@wsp/protocol";
 import { APT, PRELUDE } from "./dotfiles-presets.js";
-import { APT_ENV, APT_INDEX, APT_UPDATE, asLinuxbrew, atCatalogPin, belowLine, pinnedNote, asLinuxbrewScript, BASE_FLOOR, BASE_IMAGE_COMMANDS, baseEntryFor, BREW, BREW_ENV, BREW_PREFIX, BREW_REAL, BREW_REPO, brewHasCheck, LINUXBREW_HOME, MAC_BIN_DIRS, MAC_BREW, MAC_ONLY, CATALOG_AGENTS, CATALOG_TOOLS, catalogEntry, catalogToolFor, editJson, GUEST_HOME, installEnv, installHomes, loginSignIn, mintsToken, HOMEBREW, HOMEBREW_STEP, fixesVersion, installAfter, installLine, LINUXBREW_SHIM, NODE_BIN, NODE_PATH_LINE, NODE_RELEASES, nodeInstallScript, parseJsonc, ROAD_MODULES, roadModule, ROADS, rewrittenRel, rowRoadReader, smokeOf, standingPin, unpinned, UV_INSTALL, versionOf, type AgentEntry, type InstallRoad, type NodeMajor, type RoadName, type ToolEntry, type ToolPin } from "@wsp/catalog";
+import { BREW_TOOLCHAIN, brewSharedCheck, brewSharedDeps } from "./brew-shared.js";
+import { APT_ENV, APT_INDEX, APT_UPDATE, asLinuxbrew, atCatalogPin, belowLine, pinnedNote, BASE_FLOOR, BASE_IMAGE_COMMANDS, baseEntryFor, BREW, BREW_ENV, BREW_PREFIX, BREW_REAL, BREW_REPO, brewHasCheck, LINUXBREW_HOME, MAC_BIN_DIRS, MAC_BREW, MAC_ONLY, CATALOG_AGENTS, CATALOG_TOOLS, catalogEntry, catalogToolFor, editJson, GUEST_HOME, installEnv, installHomes, loginSignIn, mintsToken, HOMEBREW, HOMEBREW_STEP, fixesVersion, installAfter, installLine, LINUXBREW_SHIM, NODE_BIN, NODE_PATH_LINE, NODE_RELEASES, nodeInstallScript, parseJsonc, ROAD_MODULES, roadModule, ROADS, rewrittenRel, rowRoadReader, smokeOf, standingPin, unpinned, UV_INSTALL, versionOf, type AgentEntry, type InstallRoad, type NodeMajor, type RoadName, type ToolEntry, type ToolPin } from "@wsp/catalog";
 
 export { CLAUDE_KEY_FILE, HOMEBREW, NODE_PATH_LINE, NODE_RELEASES, UV, UV_INSTALL, nodeInstallScript, type NodeMajor, type NodeRelease, type ToolPin } from "@wsp/catalog";
 export { packageOf } from "@wsp/protocol";
+export { BREW_TOOLCHAIN } from "./brew-shared.js";
 
 export type { RecipeDigest };
 
@@ -823,42 +825,6 @@ const withPath = (cmd: string, path: string, prefix?: string): string => `${path
  * left a 2.4 GB llvm@21 behind), then the bottle cache and old kegs (5.5 GB measured). */
 export const brewHousekeeping = (path: string): readonly string[] => [withPath(asLinuxbrew("autoremove"), path), withPath(asLinuxbrew("cleanup -s --prune=all"), path)];
 
-/** Dependencies two or more of the formulae share install in one brew process before any
- * of them, marked as dependencies so autoremove still owns them; each formula then finds
- * its shared dependencies present and installs only its own. */
-/** The line that puts the dependencies two or more of the formulae share in `shared`, Homebrew's own toolchain
- * left out: the step installs them and its check reads them back, so the list is derived once and the two cannot
- * ask about different formulae. */
-const sharedDepsLine = (formulae: readonly string[]): string =>
-  `shared=$(${BREW} deps --for-each ${formulae.map(shellQuote).join(" ")} | sed 's/^[^:]*: *//' | tr ' ' '\\n' | grep -vx -e '' ${BREW_TOOLCHAIN.map(f => `-e ${f}`).join(" ")} | sort | uniq -d || true)`;
-
-function brewSharedDeps(formulae: readonly string[]): string {
-  return asLinuxbrewScript(
-    [
-      "set -uo pipefail",
-      sharedDepsLine(formulae),
-      'if [ -z "$shared" ]; then echo "no shared dependencies"; exit 0; fi',
-      'echo "shared: $(echo $shared)"',
-      `${BREW} install $shared; rc=$?`,
-      `${BREW} tab --no-installed-on-request $shared || true`,
-      "exit $rc",
-    ].join("\n"),
-  );
-}
-
-/** Whether the dependencies the shared step installs are already on the machine: the same list that step derives,
- * read back by Homebrew's own list. A list with nothing in it is a step with nothing to do rather than a row that
- * failed, and a formula of its own that did not install is that row's failure and not this one's. */
-const brewSharedCheck = (formulae: readonly string[]): string =>
-  asLinuxbrewScript(
-    [
-      "set -uo pipefail",
-      sharedDepsLine(formulae),
-      'if [ -z "$shared" ]; then exit 0; fi',
-      `${BREW} list --versions $shared >/dev/null`,
-    ].join("\n"),
-  );
-
 function homebrewBootstrap(): string {
   return [
     "set -euo pipefail",
@@ -947,13 +913,6 @@ const depOf = (planned: PlannedRow): string | undefined => planned.after ?? ROAD
 
 /** The manager rows the collector writes (`tools/<manager>/<package>`), in the order their steps run. */
 const MANAGER_ORDER: readonly ("npm" | "pnpm" | "bun" | "uv" | "pipx" | "cargo" | "go")[] = ["npm", "pnpm", "bun", "uv", "pipx", "cargo", "go"];
-
-// Homebrew's Linux bottles are built against a newer glibc than the base image
-// ships, so its first formula pulls Homebrew's own glibc and gcc in and, on
-// 6.0.21, a nested brew racing the parent for those locks fails one run in
-// two (measured: 4 of 7 plain runs failed, 3 of 3 passed with these first).
-// Each is its own single brew process, in this order, before any formula.
-export const BREW_TOOLCHAIN: readonly string[] = ["glibc", "gcc"];
 
 /** The catalog tool this Mac's formula stands for, when a manager comes by that tool and the catalog brings it some
  * other way: cargo's toolchain is rustup's whatever the Brewfile names, so the row takes the catalog's road and
