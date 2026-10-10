@@ -18,8 +18,8 @@ import { resolveActions } from "../actions/registry.js";
 import { ActButton, LeadMark } from "../components/agents/agentsParts.js";
 import { imageAgentsReport, type FlowView, type RowAct, type RowsContext } from "../components/agents/agentsRows.js";
 import { AGENTS_KIND } from "../components/agents/kinds/agents.js";
-import type { KindModule, Lead } from "../components/agents/kinds/kind.js";
-import { SERVERS_KIND } from "../components/agents/kinds/servers.js";
+import { byName, type KindModule, type Lead } from "../components/agents/kinds/kind.js";
+import { foldServers, SERVERS_KIND } from "../components/agents/kinds/servers.js";
 import { SignInFlowView } from "../components/agents/SignInFlowView.js";
 import { StateMark } from "../components/status/StateMark.js";
 import { AddButton } from "../components/ui/add-button.js";
@@ -413,7 +413,8 @@ function KindGrid({ id, head, lines }: { id: string; head: string; lines: readon
 /** The agents installed there and the MCP servers set up there, off one report. */
 function ReportLists({ report, ctx }: { report: AgentsReport; ctx: RowsContext }) {
   const agents = AGENTS_KIND.items(report, ctx).filter(item => item.row.installed);
-  const servers = SERVERS_KIND.items(report, ctx);
+  // One line per server however many agents name it, as this page lists what the computer holds.
+  const servers = foldServers(report.servers).sort(byName);
   // Each time a report stands, the servers kind asks what it checks there, as its tab does.
   const shown = useRef<() => void>(() => {});
   shown.current = () => SERVERS_KIND.shown?.(servers, ctx);

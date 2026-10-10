@@ -25,7 +25,7 @@ const WIDTHS = [480, 360] as const;
 const TABS = ["Agents", "Tool servers", "Skills"] as const;
 const PAGES = [
   { tab: "Agents", row: "claude", name: "agent" },
-  { tab: "Tool servers", row: "server-global-github-stdio-npx -y @modelcontextprotocol/server-github", name: "server" },
+  { tab: "Tool servers", row: "server-opencode-global-github-stdio-npx -y @modelcontextprotocol/server-github", name: "server" },
   { tab: "Skills", row: "skill-user-frontend-design", name: "skill" },
 ] as const;
 
@@ -106,7 +106,7 @@ describe.skipIf(renderSkipped !== undefined)("the agents panel laid out in Chrom
     await open("screen=agents-widths&theme=dark");
     await page!.waitForSelector("[data-agent-row]");
     await pickTab(480, "Tool servers");
-    await openRow(480, "server-global-github-stdio-npx -y @modelcontextprotocol/server-github");
+    await openRow(480, "server-opencode-global-github-stdio-npx -y @modelcontextprotocol/server-github");
     expect(await page!.evaluate(() => document.activeElement?.getAttribute("data-k"))).toBe("agents-back");
     await page!.keyboard.press("Escape");
     await at(480).locator("[data-k=kind-head]").waitFor({ state: "detached" });
@@ -154,7 +154,7 @@ describe.skipIf(renderSkipped !== undefined)("the agents panel laid out in Chrom
   }, 120_000);
 
   it("draws a server's browser sign-in under its row: Finish in your browser with its Open on one 40 px line and the address field on another, inside the panel at 480 and 360 in both themes, photographed", async () => {
-    const row = "server-global-linear-http-mcp.linear.app";
+    const row = "server-claude-global-linear-http-mcp.linear.app";
     for (const theme of ["dark", "light"] as const) {
       for (const width of WIDTHS) {
         await open(`screen=agents-widths&theme=${theme}`);
@@ -175,7 +175,7 @@ describe.skipIf(renderSkipped !== undefined)("the agents panel laid out in Chrom
   }, 120_000);
 
   it("draws a server's failed sign-in under its row as its one line with no empty room above it, at 480 and 360 in both themes, photographed", async () => {
-    const row = "server-global-linear-http-mcp.linear.app";
+    const row = "server-claude-global-linear-http-mcp.linear.app";
     for (const theme of ["dark", "light"] as const) {
       for (const width of WIDTHS) {
         await open(`screen=agents-widths&theme=${theme}&signin=unset`);

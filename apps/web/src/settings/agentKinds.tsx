@@ -271,7 +271,7 @@ function KindRow({ kind, item, rows, computer, open }: { kind: AnyKind; item: un
 /** A group's head: its name, and a project's folder after it. */
 const groupHead = (group: GroupView<unknown>, first: ReactNode | undefined) => (
   <span className="flex min-w-0 items-baseline gap-2">
-    <span className="truncate">{first ?? group.label}</span>
+    <span data-k="group-label" className="truncate">{first ?? group.label}</span>
     {group.path === undefined ? null : <span className={cn(FACT, "shrink-0 font-normal")}>{group.path}</span>}
   </span>
 );
@@ -375,6 +375,8 @@ export function KindPages({ kind, read, rows, on, nav, now, misses }: { kind: An
     if (gone) open(null);
   }, [gone, open]);
   const back = (): void => open(null);
+  // Held here rather than in the list, so a page opened from the groups behind the link comes back to them shown.
+  const others = useState(false);
 
   if (level?.kind === "item" && current !== undefined) return <ItemPage row={kind.row(current, rows)} detail={kind.detail(current, rows)} computer={name} now={now} />;
   if (level?.kind === "found" && found !== undefined) return <ItemPage detail={found} computer={name} now={now} />;
@@ -384,15 +386,24 @@ export function KindPages({ kind, read, rows, on, nav, now, misses }: { kind: An
     return <Page report={report} ctx={rows} done={back} />;
   }
   // An add is read against the report, so it waits for one.
-  return <KindList kind={kind} items={items} read={read} rows={rows} on={on} now={now} misses={misses} open={open} add={report === null ? undefined : (adder?.title ?? form?.title)} />;
+  return <KindList kind={kind} items={items} read={read} rows={rows} on={on} now={now} misses={misses} open={open} add={report === null ? undefined : (adder?.title ?? form?.title)} others={others} />;
 }
 
-function KindList({ kind, items, read, rows, on, now, misses, open, add }: { kind: AnyKind; items: readonly unknown[]; read: KindRead; rows: RowsContext; on: OnComputer; now: number; misses: readonly RefusedLine[]; open: KindNav["open"]; add: string | undefined }) {
+function KindList({ kind, items, read, rows, on, now, misses, open, add, others: [showOthers, setShowOthers] }: { kind: AnyKind; items: readonly unknown[]; read: KindRead; rows: RowsContext; on: OnComputer; now: number; misses: readonly RefusedLine[]; open: KindNav["open"]; add: string | undefined; others: [boolean, (shown: boolean) => void] }) {
   const { report, reading, error, readAt, refresh } = read;
   const name = on.name;
   const [query, setQuery] = useState("");
   const matching = items.filter(item => kind.matches(item, query));
-  const groups = kind.groups(matching).filter(g => g.items.length > 0);
+  const standing = kind.groups(matching, rows).filter(g => g.items.length > 0 || g.empty !== undefined);
+  const groups = standing.filter(g => g.other !== true);
+  const behind = standing.filter(g => g.other === true);
+  const count = behind.reduce((n, g) => n + g.items.length, 0);
+  const link =
+    count === 0 || kind.others === undefined ? undefined : (
+      <Button data-k="kind-others" variant="link" aria-expanded={showOthers} className="h-auto p-0 text-muted-foreground hover:text-foreground" onClick={() => setShowOthers(!showOthers)}>
+        {kind.others(count)}
+      </Button>
+    );
   const lines: RefusedLine[] = [...(report === null ? [] : refusedLines(report.refused)), ...misses, ...(report === null && error !== null ? [{ id: "read-refused", label: error }] : [])];
   const again = (): void => {
     forgetServerIcons();
@@ -425,8 +436,14 @@ function KindList({ kind, items, read, rows, on, now, misses, open, add }: { kin
             {report === null ? null : <Line id="kind-none" label={query.trim() === "" ? kind.empty(name) : L.nothingMatches(query.trim())} empty />}
           </Card>
         ) : (
-          groups.map((group, at) => (
-            <Card key={group.id} id={`kind-${group.id}`} head={at === 0 ? head(groupHead(group, computerHead(group.label === undefined ? W.on(name) : W.groupOn(group.label, name), on))) : groupHead(group, undefined)}>
+          [...groups, ...(showOthers ? behind : [])].map((group, at) => (
+            <Card
+              key={group.id}
+              id={`kind-${group.id}`}
+              head={at === 0 ? head(groupHead(group, computerHead(group.label === undefined ? W.on(name) : group.whole === true ? group.label : W.groupOn(group.label, name), on))) : groupHead(group, undefined)}
+              {...(at === groups.length - 1 && link !== undefined ? { under: link } : {})}
+            >
+              {group.items.length === 0 ? <Line id="kind-agent-none" label={query.trim() === "" ? (group.empty ?? "") : L.nothingMatches(query.trim())} empty /> : null}
               {group.items.map(item => (
                 <KindRow key={kind.key(item)} kind={kind} item={item} rows={rows} computer={name} open={() => open({ kind: "item", key: kind.key(item), name: kind.row(item, rows).title })} />
               ))}

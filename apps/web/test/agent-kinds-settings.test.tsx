@@ -18,13 +18,13 @@ const MAC = "zingzy's MacBook Pro";
 const here: PlaceView = { id: "here", kind: "computer", name: "zingzy-mbp", label: MAC, default: true, present: true, takesForks: false, engine: "none", shape: { cpu: 8, memMb: 16384 } };
 const HERE: AgentsTarget = { placeId: "here" };
 
-const AIRTABLE = "server-global-airtable-stdio-npx -y airtable-mcp-server";
-const GITHUB = "server-global-github-stdio-npx -y @modelcontextprotocol/server-github";
-const LINEAR = "server-global-linear-http-mcp.linear.app";
-const NOTION = "server-global-notion-http-mcp.notion.com";
-const SENTRY = "server-global-sentry-http-mcp.sentry.dev";
-const WSP = "server-global-wsp-stdio-wsp mcp";
-const METRICS = "server-project-pr_wsp-spoo-metrics-stdio-node scripts/metrics-mcp.js --token ${METRICS_TOKEN}";
+const AIRTABLE = "server-claude-global-airtable-stdio-npx -y airtable-mcp-server";
+const GITHUB = "server-opencode-global-github-stdio-npx -y @modelcontextprotocol/server-github";
+const LINEAR = "server-claude-global-linear-http-mcp.linear.app";
+const NOTION = "server-claude-global-notion-http-mcp.notion.com";
+const SENTRY = "server-codex-global-sentry-http-mcp.sentry.dev";
+const WSP = "server-claude-global-wsp-stdio-wsp mcp";
+const METRICS = "server-claude-project-pr_wsp-spoo-metrics-stdio-node scripts/metrics-mcp.js --token ${METRICS_TOKEN}";
 
 /** An api over this Mac's report with every server and skill in it, recording each ask the tabs make. A server's
  * tools answer as the wireframe's do; wsp's own is still being asked. */
@@ -85,17 +85,16 @@ afterEach(() => {
 });
 
 describe("the Tool servers tab", () => {
-  it("puts the person's own servers under the computer's name and a project's under its own, each row with its reach, its agents and its state in words", async () => {
+  it("puts each agent's servers under its name, the first with the computer's, a project's with its folder, each row with its reach and its state in words", async () => {
     await mountTab(toolsApi().api, "servers");
-    expect(headOf("kind-global")).toContain(`Global on ${MAC}`);
-    expect(card("kind-global").querySelector("[data-k=agents-read-at]")?.textContent).toBe("checked just now");
-    expect(card("kind-global").querySelector("[data-k=agents-refresh]")).not.toBeNull();
-    expect(headOf("kind-project-pr_wsp")).toBe("wsp~/wsp");
+    expect(headOf("kind-claude-global")).toContain(`Claude Code on ${MAC}`);
+    expect(card("kind-claude-global").querySelector("[data-k=agents-read-at]")?.textContent).toBe("checked just now");
+    expect(card("kind-claude-global").querySelector("[data-k=agents-refresh]")).not.toBeNull();
+    expect(headOf("kind-claude-project-pr_wsp")).toBe("Claude Code~/wsp");
+    expect(headOf("kind-codex-global")).toBe("Codex");
     expect(descriptionOf(AIRTABLE)).toBe("npx -y airtable-mcp-server");
     expect(descriptionOf(LINEAR)).toBe("mcp.linear.app");
-    const marks = (key: string): string[] => [...rowOf(key)!.querySelectorAll<HTMLElement>("[data-row-marks] [data-harness-mark]")].map(m => m.dataset["harnessMark"] ?? "");
-    expect(marks(NOTION)).toEqual(["codex", "claude"]);
-    expect(marks(AIRTABLE)).toEqual(["claude"]);
+    expect(page().querySelectorAll("[data-settings-row] [data-row-marks]")).toHaveLength(0);
     // The state in the page's own words, its tool count with it, and the dot's tone.
     expect(status(AIRTABLE)?.textContent).toBe("Connected with 3 tools");
     expect(status(AIRTABLE)?.dataset["tone"]).toBe("good");
@@ -103,7 +102,7 @@ describe("the Tool servers tab", () => {
     expect(status(SENTRY)?.dataset["tone"]).toBe("quiet");
     expect(status(WSP)?.textContent).toBe("Checking");
     expect(status(METRICS)?.textContent).toBe("No sign-in needed");
-    expect(rowOf(METRICS)!.closest("[data-settings-card]")?.getAttribute("data-settings-card")).toBe("kind-project-pr_wsp");
+    expect(rowOf(METRICS)!.closest("[data-settings-card]")?.getAttribute("data-settings-card")).toBe("kind-claude-project-pr_wsp");
   });
 
   it("says a failed server as its status with Reconnect as an icon beside it and no line under the row, and stands Sign in in its state's place", async () => {
@@ -196,7 +195,7 @@ describe("the Tool servers tab", () => {
     const field = page().querySelector<HTMLInputElement>("input[data-k=kind-search]")!;
     expect(field.placeholder).toBe("Search tool servers");
     fireEvent.change(field, { target: { value: "notion" } });
-    expect([...page().querySelectorAll<HTMLElement>("[data-kind-row]")].map(r => r.dataset["kindRow"])).toEqual([NOTION]);
+    expect([...page().querySelectorAll<HTMLElement>("[data-kind-row]")].map(r => r.dataset["kindRow"])).toEqual([NOTION, "server-codex-global-notion-http-mcp.notion.com"]);
     fireEvent.change(field, { target: { value: "opencode" } });
     expect([...page().querySelectorAll<HTMLElement>("[data-kind-row]")].map(r => r.dataset["kindRow"])).toEqual([GITHUB]);
     fireEvent.change(field, { target: { value: "zzz" } });

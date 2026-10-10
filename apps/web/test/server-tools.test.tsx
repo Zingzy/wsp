@@ -19,10 +19,10 @@ import { AGENTS_REPORT, SERVER_TOOLS } from "./fixtures/agents-report.js";
 import { back, head, headAct, NOW, openRow, panel, stepOf } from "./agents-panel-harness.js";
 
 const READ_AT = "2026-09-24T12:00:00.000Z";
-const AIRTABLE = "server-global-airtable-stdio-npx -y airtable-mcp-server";
-const GITHUB = "server-global-github-stdio-npx -y @modelcontextprotocol/server-github";
-const LINEAR = "server-global-linear-http-mcp.linear.app";
-const METRICS = "server-project-pr_wsp-spoo-metrics-stdio-node scripts/metrics-mcp.js --token ${METRICS_TOKEN}";
+const AIRTABLE = "server-claude-global-airtable-stdio-npx -y airtable-mcp-server";
+const GITHUB = "server-opencode-global-github-stdio-npx -y @modelcontextprotocol/server-github";
+const LINEAR = "server-claude-global-linear-http-mcp.linear.app";
+const METRICS = "server-claude-project-pr_wsp-spoo-metrics-stdio-node scripts/metrics-mcp.js --token ${METRICS_TOKEN}";
 
 function List({ heldWhy = null, where = "here" }: { heldWhy?: string | null; where?: "here" | "box" }) {
   const tools = useServerTools(AGENTS_REPORT.target);
@@ -87,7 +87,7 @@ describe("a server's state and tools", () => {
     expect(checking[AIRTABLE]).toBe("Checking");
     // A project's server and one turned off are not asked.
     expect(checking[METRICS]).toBe("No sign-in needed");
-    expect(checking["server-global-sentry-http-mcp.sentry.dev"]).toBe("Off");
+    expect(checking["server-codex-global-sentry-http-mcp.sentry.dev"]).toBe("Off");
     await answerAll(asks);
     expect(statuses()[AIRTABLE]).toBe("Connected with 3 tools");
     expect(statuses()[GITHUB]).toBe("Failed");
@@ -104,7 +104,7 @@ describe("a server's state and tools", () => {
       ["codex", "notion"],
       ["claude", "notion"],
     ]);
-    for (const key of [AIRTABLE, GITHUB, "server-global-wsp-stdio-wsp mcp"]) {
+    for (const key of [AIRTABLE, GITHUB, "server-claude-global-wsp-stdio-wsp mcp"]) {
       expect(stepOf(key, "check")?.textContent, key).toBe(W.check);
       expect(stepOf(key, "check")?.closest("[title]")?.getAttribute("title"), key).toBe(W.startsOnce);
     }

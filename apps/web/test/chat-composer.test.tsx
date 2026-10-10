@@ -23,6 +23,7 @@ import { COMPOSER_STATE_WORDS } from "../src/composer-state-words.js";
 import { NOT_READY_NAMES } from "../screenshots/ready.mjs";
 import { useComposerModesStore } from "../src/components/chat/composerModesStore.js";
 import { useComposerOptionsStore } from "../src/components/chat/composerOptionsStore.js";
+import { useComposerAgentStore } from "../src/components/chat/composerAgentStore.js";
 import { useComposerDraftStore } from "../src/components/chat/composerDraftStore.js";
 import { requestComposerFocus, requestNewThread } from "../src/shell/shellRequests.js";
 import { CHAT_HARNESS, CHAT_STREAM, CHAT_T0, CHAT_TURN, CHAT_WS } from "./fixtures/chat-stream.js";
@@ -191,6 +192,19 @@ describe("composer keys", () => {
     expect(editor.textContent).toBe("never mind");
     expect(draft()).toBe("never mind");
     expect(started.length).toBe(0);
+  });
+
+  it("tells the panel beside it which agent it sends with, as the pick moves, and nothing once it is gone", async () => {
+    const codex: HarnessCatalog = { ...CLAUDE_CATALOG, harness: "codex", label: "Codex" };
+    const { api } = fixtureApi([workspace], {}, [], { listHarnesses: async () => [CLAUDE_CATALOG, codex] });
+    const view = await setup(api);
+    const shown = () => useComposerAgentStore.getState().byWorkspaceId[WS];
+    expect(shown()).toBe("claude");
+    act(() => useComposerOptionsStore.getState().pick(WS, "harness", "codex"));
+    await waitFor(() => expect(shown()).toBe("codex"));
+    view.unmount();
+    expect(shown()).toBeUndefined();
+    act(() => useComposerOptionsStore.getState().drop(WS, WS));
   });
 
   it("keeps the draft across a tab switch", async () => {

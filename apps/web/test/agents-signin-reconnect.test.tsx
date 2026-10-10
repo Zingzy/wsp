@@ -88,7 +88,7 @@ const settle = async (): Promise<void> => {
     for (let i = 0; i < 8; i++) await new Promise(r => setTimeout(r, 0));
   });
 };
-const LINEAR = "server-global-linear-http-mcp.linear.app";
+const LINEAR = "server-claude-global-linear-http-mcp.linear.app";
 const toolServers = (): void => void fireEvent.click(screen.getByRole("radio", { name: /^Tool servers/ }));
 const lines = (): number => flow()?.querySelectorAll("[data-sign-in-line]").length ?? 0;
 const codeShown = (): string | null | undefined => flow()?.querySelector("[data-k=sign-in-code]")?.textContent;

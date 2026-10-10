@@ -18,8 +18,9 @@ import { back, descriptionOf, drawPanel, factOf, factsOf, head, headAct, headAct
 
 afterEach(cleanup);
 
-const SERVER = { notion: "server-global-notion-http-mcp.notion.com", airtable: "server-global-airtable-stdio-npx -y airtable-mcp-server", github: "server-global-github-stdio-npx -y @modelcontextprotocol/server-github", linear: "server-global-linear-http-mcp.linear.app", sentry: "server-global-sentry-http-mcp.sentry.dev", wsp: "server-global-wsp-stdio-wsp mcp" };
-const METRICS = "server-project-pr_wsp-spoo-metrics-stdio-node scripts/metrics-mcp.js --token ${METRICS_TOKEN}";
+const SERVER = { notion: "server-claude-global-notion-http-mcp.notion.com", airtable: "server-claude-global-airtable-stdio-npx -y airtable-mcp-server", github: "server-opencode-global-github-stdio-npx -y @modelcontextprotocol/server-github", linear: "server-claude-global-linear-http-mcp.linear.app", sentry: "server-codex-global-sentry-http-mcp.sentry.dev", wsp: "server-claude-global-wsp-stdio-wsp mcp" };
+const CODEX_NOTION = "server-codex-global-notion-http-mcp.notion.com";
+const METRICS = "server-claude-project-pr_wsp-spoo-metrics-stdio-node scripts/metrics-mcp.js --token ${METRICS_TOKEN}";
 
 /** A tools road the test answers by hand, as the hook would hold its answers. */
 function fakeTools(): ServerTools & { asks: [string, string, boolean][]; answer(name: string, a: ServerToolsAnswer): void } {
@@ -60,7 +61,7 @@ describe("the head and the tabs", () => {
     fireEvent.click(screen.getByRole("button", { name: "Read the agents again" }));
     expect(refresh).toHaveBeenCalledTimes(1);
     tab("Tool servers");
-    expect(headsOf()[0]).toBe("Global on spoochecked 3 min ago");
+    expect(headsOf()[0]).toBe("Claude Code on spoochecked 3 min ago");
     fireEvent.click(screen.getByRole("button", { name: "Open spoo in Settings" }));
     expect(open).toHaveBeenCalledTimes(2);
     cleanup();
@@ -164,15 +165,13 @@ describe("the agents", () => {
 });
 
 describe("the tool servers and the skills", () => {
-  it("folds a server two agents name the same way into one row with both marks, its worst state as its word", () => {
+  it("lists a server two agents name the same way once under each, each with its own state", () => {
     drawPanel();
     tab("Tool servers");
-    expect(rowIds()).toEqual([SERVER.airtable, SERVER.github, SERVER.linear, SERVER.notion, SERVER.sentry, SERVER.wsp, METRICS]);
-    const notion = rowOf(SERVER.notion);
-    expect([...notion.querySelectorAll("[data-row-marks] [data-harness-mark]")].map(m => m.getAttribute("data-harness-mark"))).toEqual(["codex", "claude"]);
-    expect(notion.querySelector("[data-row-marks]")?.getAttribute("title")).toBe("Codex, Claude Code");
+    expect(rowIds()).toEqual([SERVER.airtable, SERVER.linear, SERVER.notion, SERVER.wsp, METRICS, CODEX_NOTION, SERVER.sentry, SERVER.github]);
     expect(descriptionOf(SERVER.notion)).toBe("mcp.notion.com");
     expect(stateOf(SERVER.notion)).toEqual(["Needs sign-in", "waiting"]);
+    expect(stateOf(CODEX_NOTION)).toEqual(["Not checked", "quiet"]);
   });
 
   it("says every server's state as its word and tone, and the one step only where it has a road", () => {
@@ -188,7 +187,7 @@ describe("the tool servers and the skills", () => {
     expect(stateOf(SERVER.linear)).toEqual(["Needs sign-in", "waiting"]);
     // Off is a state the row says; Turn on is the switch on the server's own page.
     expect(stateOf(SERVER.sentry)).toEqual(["Off", "quiet"]);
-    expect(stateOf("server-global-wsp-http-wsp.example")).toEqual(["Connected", "good"]);
+    expect(stateOf("server-claude-global-wsp-http-wsp.example")).toEqual(["Connected", "good"]);
     expect(stateOf(SERVER.github)).toEqual(["Connected with 33 tools", "good"]);
     expect(descriptionOf(METRICS)).toBe("node scripts/metrics-mcp.js --token ${METRICS_TOKEN}");
     // A project's server is what a repo names: never asked when the tab shows it, it keeps its config's word.
@@ -210,7 +209,6 @@ describe("the tool servers and the skills", () => {
       expect(factsOf(), where).toEqual([
         ["Command", "wsp mcp"],
         ["Config location", W.onEveryLaunch],
-        ["", W.onEveryLaunch],
       ]);
       expect(headActs(), where).toEqual([]);
       expect(panel().querySelector("[data-k=act-remove]"), where).toBeNull();
@@ -248,7 +246,7 @@ describe("the tool servers and the skills", () => {
     const report: AgentsReport = { ...AGENTS_REPORT, servers: [...AGENTS_REPORT.servers, { agent: "codex", name: "posthog", scope: "user", file: "~/.codex/config.toml", transport: { kind: "http", host: "mcp.posthog.com" }, envNames: ["POSTHOG_TOKEN"], auth: "env-key", enabled: true }] };
     drawPanel({ report, ctx: { where: "here" } });
     tab("Tool servers");
-    const key = "server-global-posthog-http-mcp.posthog.com";
+    const key = "server-codex-global-posthog-http-mcp.posthog.com";
     expect(stateOf(key)).toEqual(["Key from the environment", "quiet"]);
     openRow(key);
     expect(headActs()).not.toContain("Sign in");
@@ -259,7 +257,7 @@ describe("the tool servers and the skills", () => {
     tools.answer("github", SERVER_TOOLS["github"]!);
     drawPanel({ ctx: { where: "box", tools } });
     tab("Tool servers");
-    expect(headsOf().slice(0, 2)).toEqual(["Global on spoochecked 3 min ago", "wsp~/wsp"]);
+    expect(headsOf().slice(0, 2)).toEqual(["Claude Code on spoochecked 3 min ago", "Claude Code~/wsp"]);
     expect(stateOf(SERVER.github)).toEqual(["Failed", "bad"]);
     const reconnect = stepOf(SERVER.github, "reconnect")!;
     expect(reconnect.textContent).toBe("");
@@ -455,19 +453,22 @@ describe("an item's page", () => {
     expect(headActs()).toEqual(["Add the wsp tools", "Sign in"]);
   });
 
-  it("shows a folded server's command, each agent's file with its own state where they disagree, and its sign-in on that agent's line", () => {
+  it("shows a server's command and its own agent's file alone, where another agent names the same server", () => {
     drawPanel();
     tab("Tool servers");
-    openRow(SERVER.notion);
+    openRow(CODEX_NOTION);
     expect(factsOf()).toEqual([
       ["URL", "mcp.notion.com"],
       ["Headers", "Authorization"],
       ["Config location", "~/.codex/config.toml"],
-      ["", "~/.claude.json"],
     ]);
-    expect([...panel().querySelectorAll<HTMLElement>("[data-settings-line^=fact-config-] [data-k=kind-status]")].map(s => s.textContent)).toEqual(["Not checked", "Needs sign-in"]);
-    expect([...panel().querySelectorAll("[data-settings-line^=fact-config-] [data-harness-mark]")].map(m => m.getAttribute("data-harness-mark"))).toEqual(["codex", "claude"]);
-    expect(factOf("config-claude")?.querySelector("[data-k=act-sign-in]")).not.toBeNull();
+    back();
+    openRow(SERVER.notion);
+    expect(factsOf()).toEqual([
+      ["URL", "mcp.notion.com"],
+      ["Config location", "~/.claude.json"],
+    ]);
+    expect([...panel().querySelectorAll("[data-settings-line^=fact-config-] [data-harness-mark]")].map(m => m.getAttribute("data-harness-mark"))).toEqual(["claude"]);
     expect(factOf("reach")?.querySelector("[data-k=fact-copy]")).not.toBeNull();
     expect(panel().querySelector("[data-settings-card=kind-remove] [data-k=act-remove]")?.textContent).toBe("Remove");
   });

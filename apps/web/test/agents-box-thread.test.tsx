@@ -22,8 +22,8 @@ import { settingsApi, settle } from "./settings-harness.js";
 const here: PlaceView = { id: "here", kind: "computer", name: "zingzy-mbp", default: true, present: true, takesForks: false, engine: "none", buildsImages: false };
 const hetzner: PlaceView = { id: "p_2", kind: "computer", name: "hetzner", default: false, present: true, takesForks: true, engine: "docker", buildsImages: true };
 const THREAD: WorkspaceView = { id: "ws_b", project: { id: "pr_wsp", name: "wsp", path: "~/wsp", computer: "p_2" }, name: "ws_b", kind: "place", place: "p_2", machineId: "p_2", phase: "running", golden: "", createdAt: "2026-10-07T00:00:00.000Z" };
-const NOTION = "server-global-notion-http-mcp.notion.com";
-const METRICS = "server-project-pr_wsp-spoo-metrics-stdio-node scripts/metrics-mcp.js --token ${METRICS_TOKEN}";
+const NOTION = "server-claude-global-notion-http-mcp.notion.com";
+const METRICS = "server-claude-project-pr_wsp-spoo-metrics-stdio-node scripts/metrics-mcp.js --token ${METRICS_TOKEN}";
 const FRONTEND = "skill-user-frontend-design";
 
 function host() {
@@ -89,10 +89,7 @@ describe("a thread on a box", () => {
     fireEvent.click(remove);
     fireEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: W.remove }));
     await settle();
-    expect(h.removes).toEqual([
-      [{ placeId: "p_2" }, { agent: "codex", name: "notion", scope: "user" }],
-      [{ placeId: "p_2" }, { agent: "claude", name: "notion", scope: "user" }],
-    ]);
+    expect(h.removes).toEqual([[{ placeId: "p_2" }, { agent: "claude", name: "notion", scope: "user" }]]);
   });
 
   it("removes the thread's own project's server from that project's folder on the box", async () => {

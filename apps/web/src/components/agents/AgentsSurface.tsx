@@ -11,6 +11,7 @@ import { openImageRecipe } from "../../settings/openAt.js";
 import { hereName, placeName, placeOf } from "../../settings/places.js";
 import { useSettingsStore } from "../../settings/settingsStore.js";
 import { openPanelTerminalWith } from "../../shell/shellCommands.js";
+import { useComposerAgent } from "../chat/composerAgentStore.js";
 import { NOT_ANSWERING_AFTER_MS, saysNotAnswering, type AgentsWhere } from "./agentsRows.js";
 import { AgentsPanel } from "./AgentsPanel.js";
 import { useAgentActs } from "./useAgentActs.js";
@@ -60,6 +61,7 @@ export function AgentsSurface({ workspaceId }: { workspaceId: string }) {
   const acts = useAgentActs(actsAt);
   const skills = useSkillActs(actsAt);
   const servers = useServerActs(actsAt);
+  const agent = useComposerAgent(workspaceId);
   const cloud = place === undefined ? undefined : placeName(place);
   const computer = where === "here" ? hereName(places) : where === "fork" && workspace !== null ? PANEL_WORDS.fork(workspace.name, cloud ?? "") : (cloud ?? "");
   const placeId = place?.id ?? (where === "here" ? HERE_PLACE_ID : undefined);
@@ -84,6 +86,7 @@ export function AgentsSurface({ workspaceId }: { workspaceId: string }) {
           ...(acts === undefined ? {} : { acts }),
           ...(skills === undefined ? {} : { skills }),
           ...(servers === undefined ? {} : { servers }),
+          ...(agent === undefined ? {} : { agent }),
           ...(where === "here" ? { typeInTerminal: (typed: string) => void openPanelTerminalWith(workspaceId, typed) } : {}),
         }}
         now={Date.now()}
