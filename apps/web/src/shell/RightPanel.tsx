@@ -31,6 +31,7 @@ import { isOpenable, useRightPanelStore, type RightPanelSurface, type WorkspaceR
 import { HERE_KEY } from "../terminal/computer.js";
 import { getTerminals } from "../terminal/link.js";
 import { openPanelTerminal } from "./shellCommands.js";
+import { onComposerFocusAsked } from "./shellRequests.js";
 import { useTerminalSurfaces, WorkspaceTerminalPanel } from "../components/WorkspaceTerminalPanel.js";
 import { AsideSurface } from "../components/chat/AsideSurface.js";
 import { useAside, useAsideStore } from "../components/chat/asideStore.js";
@@ -129,6 +130,8 @@ export function RightPanel({
   useEffect(() => {
     pruneBrowserTabs(workspaceId, openBrowserTabIds);
   }, [pruneBrowserTabs, workspaceId, openBrowserTabIds]);
+  // A narrow window's sheet stands over the composer, so a road to the caret there has to take the sheet away.
+  useEffect(() => (mode === "sheet" && !hidden ? onComposerFocusAsked(workspaceId, () => close(workspaceId)) : undefined), [mode, hidden, workspaceId, close]);
 
   const pr = useStatus(here ? null : workspaceId)?.pr;
   const threadId = useSelectedThreadId();

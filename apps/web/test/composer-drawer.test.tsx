@@ -8,7 +8,7 @@
 // composer's field however it closes; a letter typed while it stands lands in
 // that field and opens no pane. A keystroke in the composer draws no row again.
 // Same fixture api shape as prompt-dock.test.tsx; no live daemon.
-import { act, fireEvent, render, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -29,6 +29,8 @@ import { DEFAULT_PREFERENCES, QUESTION_TOOL, questionOptions, type EventUnion, t
 import type { Api, ProtocolEvent } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { WorkspaceThread } from "../src/shell/WorkspaceThread.js";
+import { SlateSurface } from "../src/slate/SlateSurface.js";
+import type { SlateApi } from "../src/slate/wire.js";
 import { RightPanelTabs } from "../src/components/RightPanelTabs.js";
 import { TooltipProvider } from "../src/components/ui/tooltip.js";
 import { PANE_KINDS, type RightPanelKind } from "../src/panes.js";
@@ -322,6 +324,20 @@ describe("the composer's drawer", () => {
     fireEvent.click(back());
     await waitFor(() => expect(composer()).not.toBeNull());
     await waitFor(editorFocused);
+  });
+
+  it("gives the place back to the composer when the slate's Ask for one writes into it under a bar", async () => {
+    const { api } = fixture({ asks: false });
+    api.slates = { get: async () => ({ record: null }), subscribe: async () => {}, unsubscribe: async () => {} } as unknown as SlateApi;
+    await setup(api, <SlateSurface />);
+    act(() => useStore.setState({ selectedId: WS, selectedThreadId: THREAD }));
+    await waitFor(() => expect(rows().map(r => r.dataset["drawerRow"])).toEqual(["tasks"]));
+    fireEvent.click(row("tasks"));
+    await waitFor(() => expect(bar()?.dataset["composerBar"]).toBe("tasks"));
+    fireEvent.click(await screen.findByRole("button", { name: "Ask for one" }));
+    await waitFor(() => expect(bar()).toBeNull());
+    expect(composerEditor().textContent).toBe("Build a slate for this thread that shows ");
+    editorFocused();
   });
 
   it("hands focus to the composer's field when a bar closes by itself", async () => {

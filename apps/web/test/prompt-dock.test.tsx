@@ -10,6 +10,8 @@ import { installFakeLayout } from "./fake-layout.js";
 import { useStore } from "../src/protocol/store.js";
 import type { Api, ProtocolEvent } from "../src/protocol/client.js";
 import { WorkspaceThread } from "../src/shell/WorkspaceThread.js";
+import { SlateSurface } from "../src/slate/SlateSurface.js";
+import type { SlateApi } from "../src/slate/wire.js";
 import { useComposerDraftStore } from "../src/components/chat/composerDraftStore.js";
 import { keyBelongsElsewhere } from "../src/keyOwners.js";
 import { CHAT_T0, CHAT_WS } from "./fixtures/chat-stream.js";
@@ -284,6 +286,36 @@ describe("the prompt dock", () => {
     await setup(api);
     press(root(), "Escape");
     await waitFor(() => expect(composer()).not.toBeNull());
+    await waitFor(() => expect(composer()!.contains(document.activeElement)).toBe(true));
+  });
+
+  it("stands Ask for one down while it holds the composer's place, saying to answer it first, and lets it write once folded", async () => {
+    const { api } = fixture([]);
+    const own = { ...sc, threadId: "t_dock" };
+    api.sessionHistory = async () => [{ type: "session.start", ...own, at: T0, model: "claude-sonnet-5", prompt: "set it up" }, { ...bash("ask_s"), threadId: "t_dock" }];
+    api.listSessions = async () => [{ id: sc.sessionId, workspaceId: WS, harness: "claude", status: "running", threadId: "t_dock", startedAt: T0 }];
+    api.slates = { get: async () => ({ record: null }), subscribe: async () => {}, unsubscribe: async () => {} } as unknown as SlateApi;
+    useStore.setState({ conn: "connecting", workspaces: [], statuses: {}, harnesses: [], harnessesByWorkspace: {}, launches: {} });
+    useStore.getState().bind(api);
+    useStore.getState().setConn("live");
+    await waitFor(() => expect(useStore.getState().sessions[WS]?.length).toBe(1));
+    act(() => useStore.setState({ selectedId: WS, selectedThreadId: "t_dock" }));
+    render(
+      <>
+        <WorkspaceThread workspaceId={WS} threadId="t_dock" />
+        <SlateSurface />
+      </>,
+    );
+    await waitFor(() => expect(document.querySelector('[data-prompt-dock="ask_s"]')).not.toBeNull());
+    const ask = await screen.findByRole("button", { name: "Ask for one" });
+    await waitFor(() => expect(ask.hasAttribute("disabled")).toBe(true));
+    expect(screen.getByText("Answer the prompt in the thread first.")).toBeTruthy();
+    press(root(), "Escape");
+    await waitFor(() => expect(composer()).not.toBeNull());
+    await waitFor(() => expect(ask.hasAttribute("disabled")).toBe(false));
+    expect(screen.queryByText("Answer the prompt in the thread first.")).toBeNull();
+    await act(async () => fireEvent.click(ask));
+    await waitFor(() => expect(composer()!.querySelector("[data-testid='composer-editor']")?.textContent).toBe("Build a slate for this thread that shows "));
     await waitFor(() => expect(composer()!.contains(document.activeElement)).toBe(true));
   });
 });
