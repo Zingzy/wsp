@@ -141,7 +141,8 @@ function projectWhere(project: ProjectView, places: readonly PlaceView[], named:
   return <Facts parts={[at, project.path]} className="overflow-hidden" />;
 }
 
-/** The page New thread picks a project from: every project in pick order, the first nine on a pick key. */
+/** The page New thread picks a project from: every project in pick order, the first nine on a pick key, then New
+ * project. */
 function newThreadPage(input: PaletteItemsInput): CommandPaletteSubmenuItem {
   const named = placeNames(input.places);
   const keyed = pickKeysReach();
@@ -166,7 +167,19 @@ function newThreadPage(input: PaletteItemsInput): CommandPaletteSubmenuItem {
     addonIcon: <ArrowLeftIcon className="text-icon-muted" />,
     placeholder: `${SWITCHER_WORDS.search}...`,
     emptyStateMessage: "No matching projects.",
-    groups: [{ value: "projects", label: SWITCHER_WORDS.list, items }],
+    groups: [{ value: "projects", label: SWITCHER_WORDS.list, items: [...items, newProjectItem(input)] }],
+  };
+}
+
+/** The page's last row, the sidebar's New project: the dialog it opens opens the project it records. */
+function newProjectItem(input: PaletteItemsInput): CommandPaletteActionItem {
+  return {
+    kind: "action",
+    value: "action:new-project",
+    searchTerms: ["new project", "add a project", "folder", "repository", "clone"],
+    icon: <PlusIcon className={ITEM_ICON_CLASS} />,
+    title: PROJECT_WORDS.new,
+    run: sync(input.handlers.addProject),
   };
 }
 

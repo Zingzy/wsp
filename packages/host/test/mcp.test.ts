@@ -683,10 +683,12 @@ describe("the MCP server over the host", () => {
     expect((cloned.structured as { project: ProjectView }).project).toMatchObject({ name: "site", path: "/root/site", base: "trunk", computer: "default" });
     expect(await call("projects_add", { source: "https://github.com/dev/site.git", on: "default" })).toMatchObject({ isError: true });
     expect(await call("projects_add", { source: "https://github.com/dev/other.git" })).toMatchObject({ isError: true });
-    // A folder to clone into reaches the host, which refuses one that holds something before any clone runs.
-    const full = realpathSync(mkdtempSync(join(tmpdir(), "wsp-mcp-into-")));
-    writeFileSync(join(full, "notes.txt"), "mine");
-    expect(await call("projects_add", { source: "https://github.com/dev/other.git", into: full })).toMatchObject({ isError: true, text: expect.stringContaining(cloneIntoTakenLine(full)) });
+    // A folder to clone into reaches the host, which clones into the repo's folder inside it and refuses that folder
+    // when it holds something, before any clone runs.
+    const picked = realpathSync(mkdtempSync(join(tmpdir(), "wsp-mcp-into-")));
+    mkdirSync(join(picked, "other"));
+    writeFileSync(join(picked, "other", "notes.txt"), "mine");
+    expect(await call("projects_add", { source: "https://github.com/dev/other.git", into: picked })).toMatchObject({ isError: true, text: expect.stringContaining(cloneIntoTakenLine(join(picked, "other"), join(picked, "other-2"))) });
 
     const listed = (await call("projects")).structured as { projects: ProjectView[] };
     expect(listed.projects.map(p => p.name)).toContain("site");

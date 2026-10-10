@@ -51,7 +51,8 @@ export function useNewThreadPicks(open: boolean): ProjectView[] {
   return useMemo(() => (held === null ? ranked : [...held.flatMap(id => projects.filter(project => project.id === id)), ...projects.filter(project => !held.includes(project.id))]), [held, projects, ranked]);
 }
 
-/** The heading's project name, which is the project picker: every project and Add a project. */
+/** The heading's project name, which is the project picker: every project, then New project, whose dialog opens the
+ * project it records. */
 export function HomeProjectPicker({ project }: { project: ProjectView }) {
   const places = usePlaces();
   const open = useStore(s => s.openProjectHome);
@@ -76,9 +77,9 @@ export function HomeProjectPicker({ project }: { project: ProjectView }) {
           })}
         </MenuRadioGroup>
         <MenuSeparator />
-        <MenuItem onClick={requestAddProject}>
+        <MenuItem onClick={requestAddProject} data-new-thread-add-project>
           <PlusIcon />
-          {PROJECT_WORDS.add}
+          {PROJECT_WORDS.new}
         </MenuItem>
       </MenuPopup>
     </Menu>
