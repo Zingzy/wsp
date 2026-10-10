@@ -258,7 +258,7 @@ export async function stageUpdate(zip: string, version: string, bundle: string, 
   }
 }
 
-/** Deletes whatever is staged beside the bundle: the person said Later, or a newer release replaces it. */
+/** Deletes whatever is staged beside the bundle: the person dismissed the update, or a newer release replaces it. */
 export const discardStage = (bundle: string): Promise<void> => rm(stageOf(bundle), { recursive: true, force: true });
 
 /** The swap, as a script the app hands its own pid and paths and then quits under. Every tool is named by its path.

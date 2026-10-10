@@ -9,6 +9,7 @@ import { MaterialTuner } from "./dev/MaterialTuner.js";
 import { useHostNotices } from "./notices/hostNotices.js";
 import { useWorkspaceLineNotices } from "./notices/workspaceLines.js";
 import { useShellVersionEffect } from "./shell/shellVersion.js";
+import { useUpdateInBackground } from "./shell/update.js";
 import { FirstRun } from "./shell/FirstRun.js";
 import { ProjectHome } from "./shell/ProjectHome.js";
 import { WorkspaceCreation } from "./shell/WorkspaceCreation.js";
@@ -63,6 +64,7 @@ export function App({ wsUrl, token, onUnauthorized }: AppProps) {
   useHostNotices();
   useWorkspaceLineNotices();
   useShellVersionEffect();
+  useUpdateInBackground();
   return SHELL;
 }
 

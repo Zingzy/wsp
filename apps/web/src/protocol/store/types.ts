@@ -169,6 +169,8 @@ export interface State {
   /** The person's view preferences, the host's one record; until the host answers, the defaults with what this browser
    * kept of the last record, so the first paint is the side, the width and the body the person picked. */
   preferences: Preferences;
+  /** Whether the host's record has landed, not only the first paint's guess: the host answers release.get first. */
+  preferencesRead: boolean;
   /** The newest release as the host last read it; null until it answers, and on a host that reads none. */
   release: ReleaseView | null;
   /** Every sign-in's row by its key, as usage.accounts answered and usage.account pushes keep it; null until a slate

@@ -14,10 +14,9 @@
 // a failure and a machine that came up as things that finished. An account's
 // plan running low, blocked or back is a notice and a notification with no
 // sound while the person keeps that switch on. The
-// dock's badge counts the threads waiting on the person. A newer release on an
-// app that replaces itself is downloaded and checked in the background, then
-// said once it is ready, with Restart and Later.
-import { GET_THE_APP_WORD, NOTIFY_ME, releaseAbove, waitLine, setupNeedsYouLine, setupReadyLine, askingLine, exitLine, foldThreads, initJobBuilding, initNeedsYouLine, needsYouCount, outsideLine, planAlertLine, threadFinishedLine, threadStoppedLine, titleWithNeed, type OutsideLine, type BundleOutcome, type DesktopBridge, type OutsideMoment, type PlaceView, type ReleaseView, type TurnResult } from "@wsp/protocol";
+// dock's badge counts the threads waiting on the person. A newer release is
+// never a notice: the sidebar's update card says it.
+import { NOTIFY_ME, waitLine, setupNeedsYouLine, setupReadyLine, askingLine, exitLine, foldThreads, initJobBuilding, initNeedsYouLine, needsYouCount, outsideLine, planAlertLine, threadFinishedLine, threadStoppedLine, titleWithNeed, type OutsideLine, type OutsideMoment, type PlaceView, type TurnResult } from "@wsp/protocol";
 import { useCallback, useEffect, useRef } from "react";
 import type { ProtocolEvent } from "../protocol/client.js";
 import { threadOnScreen, useProtocolEvents, useStore } from "../protocol/store.js";
@@ -26,13 +25,9 @@ import { placeName } from "../settings/places.js";
 import { openSetup, useAddFlow } from "../settings/add/addFlow.js";
 import { useSettingsStore } from "../settings/settingsStore.js";
 import { needsYouRoad, type NeedsYouRoad } from "../shell/needsYou.js";
-import { releaseAhead, shellVersions } from "../shell/shellVersion.js";
 import { copyName } from "../sidebar/workspaceRows.js";
 import { addNotice, useNotices, type NoticeAction, type NoticeInput } from "./store.js";
 
-/** Where this page's storage keeps the last release version the update notice has said, so a reload says it no more. */
-export const RELEASE_SAID_KEY = "wsp:release-said";
-const VERSION_SHAPE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 /** A turn whose session.end never arrived (a socket gap) is not held past this many later turns. */
 const RESULTS_HELD = 64;
 
@@ -48,17 +43,7 @@ export const HOST_NOTICE_WORDS = {
   gone: (name: string, reason: string): string => `${name} is gone: ${reason}`,
   imageNotBuilt: (said: string | undefined): string => (said === undefined ? "The image was not built" : `The image was not built: ${said}`),
   imageSealed: (version: number | undefined): string => (version === undefined ? "Image sealed" : `Image v${version} sealed`),
-  released: (version: string): string => `wsp ${version} is out`,
-  ready: (version: string): string => `wsp ${version} is ready to install`,
-  keepRunning: (running: number): string => `${running === 1 ? "Your running thread carries" : `Your ${running} running threads carry`} on. Open terminals close.`,
-  restart: "Restart",
-  later: "Later",
-  notReady: (version: string, said: string): string => `wsp ${version} was not downloaded: ${said}`,
-  notRestarted: (said: string): string => `wsp did not restart: ${said}`,
 };
-
-/** The key the ready notice stands under, so a second download of the same release replaces it. */
-export const UPDATE_READY_KEY = "update-ready";
 
 const NEED_KEY = "needs-you";
 const askKey = (workspaceId: string, threadId: string | undefined, askId: string): string => `${askPrefix(workspaceId, threadId)}${askId}`;
@@ -106,11 +91,6 @@ const openUsage: NoticeAction = {
   },
 };
 
-const versionOnScreen = (): boolean => {
-  const at = useSettingsStore.getState().at;
-  return useStore.getState().settingsOpen && at.kind === "group" && at.group === "general";
-};
-
 const openThread = (workspaceId: string, threadId: string | undefined): NoticeAction => ({ word: HOST_NOTICE_WORDS.open, run: () => useStore.getState().select(workspaceId, threadId ?? null) });
 /** A setup's notice opens Add a computer on that computer's running steps, where whatever it asks is answered. */
 const openSetupOf = (placeId: string): NoticeAction => ({ word: HOST_NOTICE_WORDS.open, run: () => openSetup(placeId) });
@@ -133,8 +113,6 @@ interface Held {
   shown: boolean;
   /** The jobs whose end has been said. */
   jobsEnded: Set<string>;
-  /** The last release version said, read from this page's storage on mount. */
-  released: string | undefined;
   /** Each running turn's result, by turn id, from its session.done until the session.end that always follows it. */
   results: Map<string, TurnResult>;
   /** The sign-in waits said, by computer and sign-in row, with the computer and the run they were said for: each is
@@ -189,67 +167,6 @@ function endAsks(workspaceId: string, threadId: string | undefined): void {
   const prefix = askPrefix(workspaceId, threadId);
   const notices = useNotices.getState();
   for (const key of new Set(notices.notices.map(n => n.key).filter((k): k is string => k?.startsWith(prefix) === true))) notices.end(key);
-}
-
-function releaseSaid(): string | undefined {
-  try {
-    const stored = window.localStorage.getItem(RELEASE_SAID_KEY);
-    return stored !== null && VERSION_SHAPE.test(stored) ? stored : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-/** The release downloaded and checked beside the app, then the ready notice; the shell answers only the app's own
- * host's page, so a page on a host somewhere else asks nothing. */
-async function updateInBackground(bridge: Partial<DesktopBridge>, version: string): Promise<void> {
-  const { getBundle, quitAndOpen, discardUpdate, hosts } = bridge;
-  if (getBundle === undefined || quitAndOpen === undefined) return;
-  if (hosts !== undefined && (await hosts().catch(() => undefined))?.current !== null) return;
-  const got = await getBundle({ version }).catch((e: unknown): BundleOutcome => ({ ok: false, error: e instanceof Error ? e.message : String(e) }));
-  if (!got.ok) {
-    addNotice({ kind: "error", text: HOST_NOTICE_WORDS.notReady(version, got.error) });
-    return;
-  }
-  const running = Object.values(useStore.getState().sessions)
-    .flat()
-    .filter(row => row.status === "running").length;
-  const restart = (): void =>
-    void quitAndOpen().then(
-      done => {
-        if (!done.ok) addNotice({ kind: "error", text: HOST_NOTICE_WORDS.notRestarted(done.error) });
-      },
-      (e: unknown) => addNotice({ kind: "error", text: HOST_NOTICE_WORDS.notRestarted(e instanceof Error ? e.message : String(e)) }),
-    );
-  addNotice({
-    kind: "note",
-    key: UPDATE_READY_KEY,
-    text: HOST_NOTICE_WORDS.ready(version),
-    ...(running === 0 ? {} : { detail: HOST_NOTICE_WORDS.keepRunning(running) }),
-    action: { word: HOST_NOTICE_WORDS.restart, run: restart },
-    later: { word: HOST_NOTICE_WORDS.later, run: () => void discardUpdate?.().catch(() => undefined) },
-  });
-}
-
-function sayRelease(held: Held, release: ReleaseView | null): void {
-  const versions = shellVersions();
-  const ahead = releaseAhead(release, versions);
-  if (release === null || ahead === undefined || held.released === ahead.version) return;
-  held.released = ahead.version;
-  try {
-    window.localStorage.setItem(RELEASE_SAID_KEY, ahead.version);
-  } catch {
-    // A storage that refuses only means the next page says it again.
-  }
-  const bridge = desktopBridge();
-  const appBehind = versions.app !== undefined && releaseAbove(release, versions.app);
-  if (appBehind && bridge?.updatesInPlace === true) {
-    void updateInBackground(bridge, ahead.version);
-    return;
-  }
-  if (versionOnScreen()) return;
-  const why = appBehind ? bridge?.updateWhy : undefined;
-  addNotice({ kind: "note", text: HOST_NOTICE_WORDS.released(ahead.version), ...(why === undefined ? {} : { detail: why }), action: { word: GET_THE_APP_WORD, run: () => void window.open(ahead.url, "_blank", "noopener,noreferrer") } });
 }
 
 type Rule<T extends ProtocolEvent["type"]> = (e: Extract<ProtocolEvent, { type: T }>, held: Held) => void;
@@ -391,7 +308,7 @@ export function useHostNotices(): void {
   const needed = useStore(s => s.initJob?.needsYou !== undefined || Object.values(s.sessions).some(rows => rows.some(row => row.asking !== undefined)));
   // Counted where the rows land, so a window showing a thread, which moves its read stamp, takes it off the dock.
   const waiting = useStore(s => needsYouCount(Object.values(s.sessions).flat()));
-  const held = useRef<Held>({ road: null, need: undefined, shown: false, jobsEnded: new Set(), released: undefined, results: new Map(), waits: new Map() });
+  const held = useRef<Held>({ road: null, need: undefined, shown: false, jobsEnded: new Set(), results: new Map(), waits: new Map() });
   useEffect(() => {
     const h = held.current;
     const built = needsYouRoad();
@@ -409,11 +326,8 @@ export function useHostNotices(): void {
   }, [waiting]);
   useEffect(() => {
     const h = held.current;
-    h.released = releaseSaid();
-    sayRelease(h, useStore.getState().release);
     h.shown = buildOnScreen(useStore.getState().initJob?.place?.id);
     const offStore = useStore.subscribe((s, prev) => {
-      if (s.release !== prev.release) sayRelease(h, s.release);
       if (s.places !== prev.places && h.waits.size > 0) settleWaits(h, s.places);
       if (s.initJob !== prev.initJob && h.need !== undefined && s.initJob?.needsYou?.what !== h.need) {
         h.need = undefined;

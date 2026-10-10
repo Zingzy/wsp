@@ -404,6 +404,9 @@ importers:
       smol-toml:
         specifier: 1.9.0
         version: 1.9.0
+      undici:
+        specifier: 7.29.0
+        version: 7.29.0
       ws:
         specifier: ^8.21.3
         version: 8.21.3

@@ -13,13 +13,15 @@ import { HOST_NO_RESTART_LINE, RELEASE_API_ENV, ReleaseLatest, UPDATE_CHECK_ENV,
 import type { ReleaseDoor } from "@wsp/runtime";
 import { RELEASES, REPO, RELEASE_TAG } from "../../protocol/src/bundles.mjs";
 import { keyIn, savedEnv } from "./env-keys.js";
+import { RELEASE_ANSWER_MS, RELEASE_CONNECT_MS, RELEASE_TRIES, releaseFetch } from "./release-fetch.js";
 
 export const RELEASE_API = "https://api.github.com";
 export const RELEASE_FIRST_MS = 30_000;
 export const RELEASE_EVERY_MS = 6 * 60 * 60_000;
 /** Unauthenticated, GitHub allows 60 asks an hour per address and a 304 counts (measured 2026-09-24). */
 export const RELEASE_FLOOR_MS = 10 * 60_000;
-export const RELEASE_TIMEOUT_MS = 5_000;
+/** Every connect the update road's fetch tries, then the answer. */
+export const RELEASE_TIMEOUT_MS = RELEASE_TRIES * RELEASE_CONNECT_MS + RELEASE_ANSWER_MS + 10_000;
 /** Eight times GitHub's own body limit with every asset row beside it; the timeout bounds time, not size. */
 export const RELEASE_BODY_MAX_BYTES = 1024 * 1024;
 const RELEASE_FILE = "release.json";
@@ -122,7 +124,7 @@ export interface ReleaseWatch extends ReleaseDoor {
 
 export function releaseWatch(opts: ReleaseWatchOptions): ReleaseWatch {
   const env = opts.env ?? process.env;
-  const fetcher = opts.fetch ?? fetch;
+  const fetcher = opts.fetch ?? releaseFetch();
   const now = opts.now ?? Date.now;
   const path = releaseFileFor(opts.statePath);
   const listeners = new Set<(e: ReleaseChangedEvent) => void>();

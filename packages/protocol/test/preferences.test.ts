@@ -221,6 +221,18 @@ describe("transparency on the preferences record", () => {
   });
 });
 
+describe("the dismissed update on the preferences record", () => {
+  it("is absent until the person dismisses a release, then holds that version through a patch that names none, and a later one replaces it", () => {
+    expect(DEFAULT_PREFERENCES.updateDismissed).toBeUndefined();
+    const dismissed = applyPreferencesPatch(DEFAULT_PREFERENCES, { updateDismissed: "0.3.3" });
+    expect(dismissed).toEqual({ ...DEFAULT_PREFERENCES, updateDismissed: "0.3.3" });
+    expect(applyPreferencesPatch(dismissed, { theme: "dark" }).updateDismissed).toBe("0.3.3");
+    expect(applyPreferencesPatch(dismissed, { updateDismissed: "0.3.4" }).updateDismissed).toBe("0.3.4");
+    expect(preferencesFrom({ updateDismissed: "0.3.3" }).updateDismissed).toBe("0.3.3");
+    expect(PreferencesPatch.safeParse({ updateDismissed: 3 }).success).toBe(false);
+  });
+});
+
 describe("the project order on the preferences record", () => {
   it("a project order lands whole, the list the person dragged", () => {
     const ordered = applyPreferencesPatch(DEFAULT_PREFERENCES, { projectOrder: ["pr_b", "pr_a"] });

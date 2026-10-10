@@ -262,6 +262,8 @@ const ALLOWED: Record<Rule, readonly Allowed[]> = {
     { text: "expect(Date.now() - t0).toBeLessThan(5_000);", count: 1, why: "a settled row answers under 2 to 5 s where its deadline is 10 to 30 s" },
     { text: "expect(Date.now() - started).toBeLessThan(5_000);", count: 8, why: "a held shell, a hung computer, an oversized callback, a killed line, a cut child or a turn whose host went ends under 5 s, where its own wait is 30 s or more" },
     { text: "expect(Date.now() - started).toBeGreaterThanOrEqual(300);", count: 2, why: "a lower bound: a turn whose host went, or a redial, waits out its whole 300 ms window first, which load only lengthens" },
+    { text: "expect(took).toBeGreaterThanOrEqual(12_000);", count: 1, why: "a lower bound: the download waits out the server's whole 12 s hold before its handshake, which load only lengthens" },
+    { text: "expect(Date.now() - started).toBeGreaterThanOrEqual(3_000);", count: 1, why: "a lower bound: three connects each wait out their whole 1 s window, which load only lengthens" },
     { text: "expect(Date.now() - began).toBeLessThan(10_000);", count: 1, why: "an answer under 7 to 10 s where the deadline it must not reach is 20 s" },
     { text: "expect(Date.now() - started).toBeLessThan(7_000);", count: 1, why: "an answer under 7 to 10 s where the deadline it must not reach is 20 s" },
     { text: "expect(performance.now() - started).toBeLessThan(250);", count: 1, why: "tight: a config of hostile names reads under 250 ms; the fault it guards takes seconds" },

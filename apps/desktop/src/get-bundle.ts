@@ -87,6 +87,7 @@ export interface BundleDeps {
   dir: string;
   env: Env;
   userAgent: string;
+  /** The update road's fetch, `releaseFetch` in the app, whose connect window and tries bound each ask. */
   fetch: typeof fetch;
   stallMs?: number;
 }
@@ -126,12 +127,15 @@ async function download(url: string, file: string, want: Published, asset: strin
   const hash = createHash("sha256");
   const stallMs = deps.stallMs ?? BUNDLE_STALL_MS;
   const stalled = new AbortController();
-  let timer = setTimeout(() => stalled.abort(), stallMs);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const arm = (): void => {
+    clearTimeout(timer);
+    timer = setTimeout(() => stalled.abort(), stallMs);
+  };
   let bytes = 0;
   const tee = new Transform({
     transform(chunk: Buffer, _enc, done) {
-      clearTimeout(timer);
-      timer = setTimeout(() => stalled.abort(), stallMs);
+      arm();
       bytes += chunk.length;
       if (bytes > want.size) return done(new PastSize());
       hash.update(chunk);
@@ -140,7 +144,9 @@ async function download(url: string, file: string, want: Published, asset: strin
   });
   let failed: string | undefined;
   try {
+    // Armed once answered: the fetch bounds its own connect tries and the wait for an answer.
     const res = await deps.fetch(url, { headers: { "user-agent": deps.userAgent }, signal: stalled.signal });
+    arm();
     if (!res.ok || res.body === null) return { ok: false, error: BUNDLE_WORDS.unreached(asset, `GitHub answered ${res.status}`) };
     await rm(part, { force: true });
     // Exclusive create refuses a link planted at the name between the removal and the open.
@@ -195,7 +201,7 @@ export async function openBundle(kept: { file: string; platform: NodeJS.Platform
 export interface BundleShell {
   get(raw: unknown): Promise<BundleOutcome>;
   open(): Promise<BundleOutcome>;
-  /** Deletes the checked copy an app that replaces itself holds, which Later asks for. */
+  /** Deletes the checked copy an app that replaces itself holds, which dismissing the update card asks for. */
   discard(): Promise<BundleOutcome>;
 }
 

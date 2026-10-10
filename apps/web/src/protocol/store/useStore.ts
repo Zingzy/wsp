@@ -151,7 +151,7 @@ export const useStore = create<State>((set, get) => {
   /** A record the host answered, and its agent lists read again where it moved what they are marked by: the host's
    * and every workspace's, since a mark the host moved is lost to the composer once the default under it goes. */
   const preferencesLanded = (preferences: Preferences, before: Preferences): void => {
-    set({ preferences });
+    set({ preferences, preferencesRead: true });
     const api = get().api;
     if (!agentListsMoved(before, preferences) || api?.listHarnesses === undefined) return;
     void api
@@ -353,7 +353,7 @@ export const useStore = create<State>((set, get) => {
     void api
       .preferences?.()
       .then(preferences => {
-        if (preferenceSetsInFlight === 0) set({ preferences });
+        set(preferenceSetsInFlight === 0 ? { preferences, preferencesRead: true } : { preferencesRead: true });
         // What this browser kept before the record existed goes onto the record once, then the old keys go.
         const legacy = legacyPreferences(window.localStorage);
         if (legacy !== null) void get().setPreferences(legacy).then(() => clearLegacyPreferences(window.localStorage));
@@ -416,6 +416,7 @@ export const useStore = create<State>((set, get) => {
     ready: false,
     gaps: 0,
     preferences: bootPreferences(),
+    preferencesRead: false,
     release: null,
     usageAccounts: null,
     loadUsageAccounts() {
