@@ -32,7 +32,7 @@ wsp runs coding agents (Claude Code, Codex, OpenCode, Cursor) as threads on your
 curl --proto '=https' --tlsv1.2 -fsSL https://usewsp.com/install | sh
 ```
 
-On a Mac this puts wsp.app in Applications and opens it; on Linux it puts the AppImage in `~/Applications`. Either way the `wsp` command lands in `~/.wsp/bin`, on PATH in a new terminal. Each download comes from this repo's releases and is checked against the sha256 GitHub publishes for it. `WSP_VERSION=1.2.3` installs that release; running it again upgrades in place.
+On a Mac this puts wsp.app in Applications and opens it; on Linux it puts the AppImage in `~/Applications`. Either way the `wsp` command lands in `~/.wsp/bin`, on PATH in a new terminal. Each download comes from this repo's releases and is checked against the sha256 GitHub publishes for it. `WSP_VERSION=1.2.3` installs that release; running it again updates wsp.
 
 The desktop bundles for macOS and Linux are also on the [releases page](https://github.com/wsp-labs/wsp/releases).
 
@@ -98,29 +98,27 @@ wsp mcp                         the verbs as tools for agents on this computer
 `wsp --help` lists them all, `wsp <verb> --help` gives a verb's flags, and `wsp --help agent` has the ones your agents use. The command line and the MCP tools are the same verbs.
 
 <!-- renames:start -->
-### Renamed in 0.3.0
+### Renamed in 0.3
 
-The front page of `wsp --help` is sixteen words on five nouns: image, place, workspace, thread, project. Every command is `wsp <verb> <workspace> ...`, the workspace first. Nothing answers to the old words, so here they are, once.
+A thread runs in your project's folder on one of your computers, and `wsp --help` names computers, projects and threads. A verb takes a project or a thread right after it. Nothing answers to the old lines, so here they are, once.
 
 | was | is |
 | --- | --- |
-| `wsp thread new --in <workspace> "<task>"` | `wsp run <workspace> "<task>"` |
+| `wsp thread new --in <workspace> "<task>"` | `wsp run <project> "<message>"` |
 | the MCP tool `thread_new` | the MCP tool `run` |
-| `wsp import <folder> --to <workspace>` | `wsp import <workspace> <folder>` |
-| `wsp threads --in <workspace>` | `wsp threads <workspace>` |
-| `wsp new --local [name]` | `wsp new <name> --on <place>`, naming the computer you are at |
-| `wsp new --ssh <user@host>` | `wsp add user@host` (or an alias from your ssh config), then `wsp new <name> --on <that place>` |
-| `wsp init --provider <id>` | `wsp add <id>` |
+| `wsp threads --in <workspace>` | `wsp threads <project>` |
+| `wsp new --local [name]`, `wsp import <folder> --to <workspace>` | `wsp add <folder>`, a project on this computer |
+| `wsp new --ssh <user@host>` | `wsp add user@host` (or an alias from your ssh config), a computer |
+| `wsp places` | `wsp computers` |
+| `wsp stop <thread> --task <id>` | `wsp stop <thread> --subagent <id>`, the id in the SUBAGENT column of `wsp threads` |
 | `wsp pair`, `wsp devices` | `wsp host pair`, `wsp host devices` |
 | `wsp connect <url>` | `wsp login`: a host on your account needs no code |
-| `wsp hosts default`, `wsp disconnect` | nothing: a line goes to your account's one host, `--host` names another, and `wsp logout` drops them |
+| `wsp disconnect` | nothing: a line goes to your account's one host, `--host` names another, and `wsp logout` drops them |
 | `wsp relay link`, `wsp relay unlink` | `wsp host link`, `wsp host unlink` |
 | `wsp relay hosts`, `wsp host linked`, `wsp host list` | `wsp hosts`, the hosts on your account |
 | `wsp relay clients`, `wsp host clients` | `wsp login`, and `wsp logout <id>` to sign one out |
-| `wsp up` to get going | nothing: the first command that needs a host starts one, and `wsp down` stops it |
-| plain `wsp` serving | plain `wsp` prints the help |
 
-This computer and every computer or provider you add are places, and `wsp places` lists them; `--on <place>` on `wsp new` is the one flag you meet, and only once you have more than one. `wsp add` is the one way a place joins: `wsp add user@host` for a computer over ssh (an alias from your `~/.ssh/config` works as well), `wsp add <provider>` for a provider, `wsp add` alone for the line another computer types. `wsp up` is still there for a host you want to watch in a terminal or one that serves beyond this computer.
+A new thread in the folder another thread works in is `wsp run --beside <thread> "<message>"`. `wsp commit`, `wsp discard`, `wsp update`, `wsp exec`, `wsp merge` and `wsp fix` take a thread and act in the folder it works in. `wsp computers set <computer>` renames a computer and `wsp remove <computer>` takes one out. Plain `wsp` prints the help, the first line that needs a host starts one, and `wsp up` is still there for a host you want to watch in a terminal or one that serves beyond this computer.
 
 Agents on this computer get the new skill the first time the new host starts; a project folder whose `AGENTS.md` carries the old section gets the new one at the next `wsp mcp install` there.
 <!-- renames:end -->
