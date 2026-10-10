@@ -233,6 +233,9 @@ export interface PlaceProvisioner {
   /** What taking rows out of a computer's picks runs there, planned off the picks as they were. Absent, a row taken
    * out of a recipe stays where it is. */
   undo?(before: RecipeFile, removed: readonly { kind: RecipeKind; name: string }[], on: { home: string; stores?: Readonly<Record<string, string>> }): Promise<PlaceUndo[]>;
+  /** The servers a turn in the picked folder `key` gets on this computer that its checkout does not bring, carried
+   * into the project it became at `path` there once it is there. Absent, a project's servers stay on this computer. */
+  projectServers?(machine: Machine, picks: RecipeFile, key: string, path: string, stage: ProvisionStage, on: ProvisionOn & { recipe?: string }): Promise<PlaceProvisionRow[]>;
   /** What some picks weigh on a box, read on this computer, and how many rows nobody measured. */
   estimate?(picks: RecipeFile): Promise<{ bytes: number; unmeasured: number }>;
 }
@@ -373,9 +376,9 @@ export type PlaceInstaller = (req: PlaceInstallRequest, stage: PlaceStaging) => 
 /** The one road into the runtime a place needs, handed in because it is the runtime's own: a place holds its forks
  * and the projects recorded on it, and a remove refuses to take the place out from under either. */
 export interface PlaceRecording {
-  /** The projects recorded on this place, which every workspace of them is a copy for, each with the checkout an older
-   * wsp cloned it into there, where it has one. */
-  projectsOn(placeId: string): Promise<{ id: string; name: string; checkout?: string }[]>;
+  /** The projects recorded on this place, which every workspace of them is a copy for, each with its folder there and
+   * the checkout an older wsp cloned it into there, where it has one. */
+  projectsOn(placeId: string): Promise<{ id: string; name: string; path: string; checkout?: string }[]>;
   /** The forks standing on this place and the projects recorded on it, each with its threads, and the work among
    * them no remote has: a fork's checkout read fresh, a project's folder there read by its computer. With read false,
    * none of that work is read, for a computer whose link is down. */

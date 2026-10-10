@@ -374,6 +374,7 @@
                           "plugins",
                           "configs",
                           "folders",
+                          "folderServers",
                           "github",
                           "context"
                         ]
@@ -1363,6 +1364,7 @@
                           "plugins",
                           "configs",
                           "folders",
+                          "folderServers",
                           "github",
                           "context"
                         ]

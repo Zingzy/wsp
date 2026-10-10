@@ -14,7 +14,7 @@ import {
   absentCommands,
   landConfigs,
   mcpOpening,
-  mcpRowId,
+  scopeRowId,
   mcpRows,
   parseConfigs,
   readConfigsCmd,
@@ -60,6 +60,10 @@ export const theirServerLine = (agent: string, name: string, path: string): stri
  * launch there hands it none, so its threads there start that server without it. */
 export const keyUnreachedLine = (agent: string, names: readonly string[]): string => `its key in ${names.join(", ")} does not reach ${agent}'s threads on that computer yet`;
 
+/** Why a project's servers are set aside: their agent reads them only in a folder its own file trusts, and that file
+ * could not be made to trust it. */
+export const untrustedLine = (agent: string, folder: string, why: string): string => `${agent} reads them only in a folder it trusts, and ${folder} could not be marked trusted (${why})`;
+
 /** Why one server is set aside on a round that never got this computer's copy of the agent's file to that
  * computer: the recipe's servers are read out of that copy, so a name that is not already in the file there is a
  * name this run has nothing to say about, and the file stands as it is. */
@@ -72,7 +76,8 @@ const travelledPath = (home: string, file: string): string | undefined => (file.
 /** One of a scope's files, on that computer and in the tree that travelled. */
 interface Candidate {
   own: string;
-  travelled: string;
+  /** Absent for a scope whose copy is handed in. */
+  travelled?: string;
 }
 
 /** The digest one key is owned by, read off one scope's file: the entry standing under that name, by the one
@@ -107,6 +112,8 @@ interface Merged {
   noCopy: Map<string, string>;
   /** Row id to the file that name's definition belongs in. */
   where: Map<string, string>;
+  /** Agent and folder, joined by a NUL, to why the agent's own file could not be made to trust that folder. */
+  untrusted: Map<string, string>;
 }
 
 /** Each agent's headless keys in its own config in the store its threads there read, on a Linux computer: `key =
@@ -153,25 +160,28 @@ export async function provisionMcp(
   const configs = plan.agents.flatMap(a => {
     const agent = MCP_AGENTS.find(m => m.id === a.id);
     const store = o.stores?.[a.id];
-    return a.scopes.map(() => (agent === undefined || store === undefined ? undefined : ownServerConfig(agent, o.home, store)));
+    return a.scopes.map(s => s.own ?? (agent === undefined || store === undefined ? undefined : ownServerConfig(agent, o.home, store)));
   });
   const bases = new Map(configs.flatMap(c => (c === undefined ? [] : c.files.map(f => [f, c.base] as const))));
+  // A scope whose copy is handed in reads its own file alone: the first of its files that is there, else the first.
   const candidates: Candidate[][] = scopes.map((s, at) =>
-    s.files.flatMap(file => {
-      const travelled = travelledPath(o.home, file);
-      return travelled === undefined ? [] : [{ own: configs[at]?.files[0] ?? file, travelled }];
-    }),
+    s.travelled !== undefined
+      ? (configs[at]?.files ?? s.files).map(own => ({ own }))
+      : s.files.flatMap(file => {
+          const travelled = travelledPath(o.home, file);
+          return travelled === undefined ? [] : [{ own: configs[at]?.files[0] ?? file, travelled }];
+        }),
   );
   // Both sides in one read, the agents' own files first and the copies that travelled after them. The answer is
   // every one of those files whole, the servers' env and headers with it, so it goes by the road that says its
   // output is not a log's.
-  const asked = [...candidates.map(c => ({ files: c.map(x => x.own) })), ...candidates.map(c => ({ files: c.map(x => x.travelled) }))];
+  const asked = [...candidates.map(c => ({ files: c.map(x => x.own) })), ...candidates.map(c => ({ files: c.flatMap(x => x.travelled ?? []) }))];
   const res = await machine.run(readConfigsCmd(asked), { deadlineMs: READ_MS, unlogged: true }).catch(refused);
   const read = res.exitCode === 0 ? parseConfigs(res.stdout, asked) : undefined;
   const own: (ScopeFile | undefined)[] = scopes.map((_, at) => read?.[at]);
-  const travelled: (ScopeFile | undefined)[] = scopes.map((_, at) => read?.[scopes.length + at]);
+  const travelled: (Pick<ScopeFile, "path" | "text"> | undefined)[] = scopes.map((s, at) => (s.travelled !== undefined ? { path: "", text: s.travelled } : read?.[scopes.length + at]));
   /** The file each scope's merge writes: the agent's own where the computer has one, else where its copy would sit. */
-  const target = scopes.map((_, at) => own[at]?.path ?? candidates[at]!.find(c => c.travelled === travelled[at]?.path)?.own);
+  const target = scopes.map((s, at) => own[at]?.path ?? (s.travelled !== undefined ? candidates[at]![0]?.own : candidates[at]!.find(c => c.travelled === travelled[at]?.path)?.own));
   /** That file as it stood before this round, by path, for the digests the records are read off. */
   const stood = new Map(
     scopes.flatMap((_, at) => {
@@ -189,13 +199,14 @@ export async function provisionMcp(
    * scopes of one agent share a file. It runs twice as the image's edit does: the first pass says each kept
    * server's command, and the second is what lands once the servers whose command the machine does not have are
    * out. A scope whose copy never travelled is read and not written: what is in its file stands as it is. */
-  const mergeAll = (agents: readonly McpAgentPlan[]): Merged => {
+  const mergeAll = async (agents: readonly McpAgentPlan[]): Promise<Merged> => {
     const texts = new Map<string, string>();
     const outcomes: ScopeOutcome[] = [];
     const same = new Set<string>();
     const theirs = new Map<string, string>();
     const noCopy = new Map<string, string>();
     const where = new Map<string, string>();
+    const untrusted = new Map<string, string>();
     const wrote: { id: string; name: string; scope: McpScope; path: string }[] = [];
     /** Every row id this round planned where it had both the file there and a copy of this computer's to merge:
      * a scope with neither knows nothing about those names and says nothing about them. */
@@ -206,7 +217,7 @@ export async function provisionMcp(
         const here = at++;
         const path = target[here];
         const arrived = travelled[here]?.text;
-        const id = (name: string): string => mcpRowId(agent.id, scope.project !== undefined, name);
+        const id = (name: string): string => scopeRowId(agent.id, scope, name);
         if (path === undefined) {
           outcomes.push({ file: null, results: [] });
           continue;
@@ -235,8 +246,10 @@ export async function provisionMcp(
               return left !== undefined && left === entryDigest(scope, standing, name);
             });
         try {
-          const merged = scope.format.merge(lib, { keep: scope.keep, drop: scope.drop.map(d => d.name), replace, ...(scope.project !== undefined ? { project: scope.project } : {}) }, standing, arrived);
-          if (merged.text !== (standing ?? "")) texts.set(path, merged.text);
+          const merged = names.length === 0 ? { text: standing ?? "", results: [] } : scope.format.merge(lib, { keep: scope.keep, drop: scope.drop.map(d => d.name), replace, ...(scope.project !== undefined ? { project: scope.project } : {}) }, standing, arrived);
+          const trusted = scope.trust === undefined || scope.format.trust === undefined ? merged.text : (await scope.format.trust(merged.text, scope.trust)).text;
+          const edited = scope.edit === undefined ? trusted : scope.edit(trusted === "" ? undefined : trusted);
+          if (edited !== (standing ?? "")) texts.set(path, edited);
           planned.push(...names.map(id));
           for (const r of merged.results) {
             if (r.outcome === "same") same.add(id(r.name));
@@ -245,7 +258,9 @@ export async function provisionMcp(
           }
           outcomes.push({ file: path, results: merged.results });
         } catch (e) {
-          outcomes.push({ file: path, error: e instanceof Error ? e.message : String(e), results: [] });
+          const said = e instanceof Error ? e.message : String(e);
+          if (scope.trust !== undefined) untrusted.set(`${agent.id}\0${scope.trust}`, said);
+          outcomes.push({ file: path, error: said, results: [] });
         }
       }
     }
@@ -257,7 +272,7 @@ export async function provisionMcp(
         return digest === undefined ? [] : [[w.id, digest] as const];
       }),
     );
-    return { outcomes, texts, records, tombstones: planned.filter(id => !records.has(id)), same, theirs, noCopy, where };
+    return { outcomes, texts, records, tombstones: planned.filter(id => !records.has(id)), same, theirs, noCopy, where, untrusted };
   };
 
   const missing = new Set<string>();
@@ -265,15 +280,18 @@ export async function provisionMcp(
   let merged: Merged | undefined;
   let failure = read === undefined ? readFailed(res) : undefined;
   if (read !== undefined) {
-    const first = mergeAll(agents);
+    const first = await mergeAll(agents);
     // Two kinds of kept name are not this run's to write, and each joins the servers it takes out so that its row
     // says why: a name an agent or a person has their own definition under, which the merge leaves alone, and a
     // name that is in neither the file there nor a copy of this computer's, since none arrived.
     agents = agents.map(agent => ({
       ...agent,
       scopes: agent.scopes.map(scope => {
+        const folder = scope.folder;
+        const distrust = folder === undefined ? undefined : first.untrusted.get(`${agent.id}\0${folder}`);
         const aside = scope.keep.flatMap(name => {
-          const id = mcpRowId(agent.id, scope.project !== undefined, name);
+          if (folder !== undefined && distrust !== undefined) return [{ name, reason: untrustedLine(agent.label, folder, distrust) }];
+          const id = scopeRowId(agent.id, scope, name);
           const theirs = first.theirs.get(id);
           if (theirs !== undefined) return [{ name, reason: theirServerLine(agent.label, name, theirs) }];
           const nothing = first.noCopy.get(id);
@@ -284,7 +302,7 @@ export async function provisionMcp(
     }));
     for (const command of await absentCommands(machine, plan, first.outcomes, o.path)) missing.add(command);
     agents = withoutAbsent(plan, agents, first.outcomes, missing, o.tools);
-    merged = mergeAll(agents);
+    merged = await mergeAll(agents);
     failure = await landConfigs(machine, path => bases.get(path) ?? o.home, own, merged.texts);
   }
   // A server is present where its entry was already the one that travelled and the file it sits in did not arrive
@@ -314,7 +332,7 @@ export async function provisionMcp(
         for (const name of scope.keep) {
           const server = servers.find(s => s.name === name && (s.scope === "home") === (scope.project !== undefined));
           const misses = server === undefined || server.disabled === true ? [] : launchMisses(agent.id, scope.format, server, o.held);
-          if (misses.length > 0) unreached.set(mcpRowId(agent.id, scope.project !== undefined, name), keyUnreachedLine(agent.label, misses));
+          if (misses.length > 0) unreached.set(scopeRowId(agent.id, scope, name), keyUnreachedLine(agent.label, misses));
         }
       }
     }

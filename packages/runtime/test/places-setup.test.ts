@@ -19,6 +19,7 @@ import {
   waitsForInstallLine,
   installingFirstLine,
   NEEDS_GITHUB_LINE,
+  FOLDER_SERVERS_WAIT_LINE,
   WAITS_ON_GITHUB_LINE,
   SETUP_LOG_TAIL_BYTES,
   SKIPPED_FOR_NOW,
@@ -210,6 +211,8 @@ function provisioner(
     holds?: EngineStep[];
     throws?: { step: EngineStep; error: Error };
     undo?: (removed: readonly { kind: string; name: string }[]) => PlaceUndo[];
+    /** A project's own servers are carried, one row each landed folder. */
+    projectServers?: true;
   } = {},
 ) {
   let release = (): void => {};
@@ -222,6 +225,9 @@ function provisioner(
   };
   for (const step of o.holds ?? []) arm(step);
   const ran: EngineStep[] = [];
+  /** Each folder whose servers were carried, with the steps that had ended by then. */
+  const carried: { key: string; path: string; after: EngineStep[] }[] = [];
+  const ended: EngineStep[] = [];
   /** The plan each step was handed. */
   const plans: Partial<Record<EngineStep, ProvisionPlan>> = {};
   const stages = new Map<EngineStep, ProvisionStage>();
@@ -251,8 +257,17 @@ function provisioner(
       if (o.hold === step) await held;
       await each.get(step)?.at;
       if (o.throws?.step === step) throw o.throws.error;
+      ended.push(step);
       return rows[step] ?? [];
     },
+    ...(o.projectServers === true
+      ? {
+          projectServers: async (_machine, _picks, key, path) => {
+            carried.push({ key, path, after: [...ended] });
+            return [{ id: `agents/mcp/claude/@${encodeURIComponent(path)}/kept`, label: "Claude Code kept", outcome: "installed" }];
+          },
+        }
+      : {}),
     estimate: async picks => ({ bytes: Object.keys(picks.agents).length * 1024 ** 3, unmeasured: Object.keys(picks.plugins).length }),
     undo: async (before, removed) => {
       undone.push({ before, removed: removed.map(r => `${r.kind}/${r.name}`) });
@@ -262,7 +277,7 @@ function provisioner(
   const undone: { before: RecipeFile; removed: string[] }[] = [];
   /** A running step says a row has landed, as the tools loop does while the rest of its rows install. */
   const say = (step: EngineStep, row: PlaceProvisionRow): void => stages.get(step)?.(`${row.label}: ${row.outcome}`, undefined, { ...row, step });
-  return { wired, ran, plans, ons, floors, picked, undone, release: () => release(), let: (step: EngineStep) => each.get(step)?.let(), arm, say };
+  return { wired, ran, carried, plans, ons, floors, picked, undone, release: () => release(), let: (step: EngineStep) => each.get(step)?.let(), arm, say };
 }
 
 /** Sign-ins as the app's own road runs them, each waiting on the test: the page and the code, then the end. The
@@ -538,6 +553,35 @@ describe("a remove of a computer set up with picks", () => {
     expect(removed.note).toBe(pluginsKeptLine("spoo", ["stuck@market"]));
   });
 
+  it("carries a folder's own servers into the project it became there once the servers step has ended, though the folder landed before it started", async () => {
+    const { folder, seed } = seededFolder();
+    // The skills hold the files lane, so the servers step cannot start while the folder lands.
+    const p = provisioner({ projectServers: true, holds: ["skills"] });
+    await hosting({ provision: p.wired, checkouts: {}, seed });
+    const picks = RecipeFile.parse({ name: "laptop", agents: { claude: { signin: "vault" } }, folders: { app: { from: folder, name: "app", keep: [] } } });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: picks }, Date.now());
+    await until(async () => (await rowOf(place.id)).applied?.rows.find(r => r.id === "folders/app")?.outcome === "installed" && p.ran.includes("skills"));
+    const path = (await runtime!.projects.list())[0]!.path;
+    await new Promise(r => setTimeout(r, 20));
+    expect(p.ran).not.toContain("mcp");
+    expect(p.carried).toEqual([]);
+    p.let("skills");
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    expect(p.carried).toEqual([{ key: "app", path, after: expect.arrayContaining(["mcp", "plugins"]) }]);
+    expect((await rowOf(place.id)).applied?.rows.find(r => r.id === `agents/mcp/claude/@${encodeURIComponent(path)}/kept`)).toMatchObject({ outcome: "installed", step: "folderServers" });
+  });
+
+  it("carries nothing into the agents' files where the servers step did not land them, and says the servers wait", async () => {
+    const { folder, seed } = seededFolder();
+    const p = provisioner({ projectServers: true, rows: { mcp: [{ id: "files/.claude-cfg/.claude.json", label: "Claude Code", outcome: "failed", note: "the landing failed" }] } });
+    await hosting({ provision: p.wired, checkouts: {}, seed });
+    const picks = RecipeFile.parse({ name: "laptop", agents: { claude: { signin: "vault" } }, folders: { app: { from: folder, name: "app", keep: [] } } });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: picks }, Date.now());
+    await until(async () => ["done", "failed"].includes((await rowOf(place.id)).setup?.state ?? ""));
+    expect(p.carried).toEqual([]);
+    expect((await rowOf(place.id)).applied?.rows.find(r => r.id === "folders/app/servers")).toMatchObject({ outcome: "skipped", note: FOLDER_SERVERS_WAIT_LINE, step: "folderServers" });
+  });
+
   it("reads a folder a setup made as wsp's through a second setup, which ends ready, and the remove takes its project off", async () => {
     const { folder, seed } = seededFolder();
     const { frames } = await hosting({ provision: provisioner().wired, checkouts: {}, seed });
@@ -741,7 +785,7 @@ describe("a computer added with its picks", () => {
     expect(row.recipe).toBe("laptop");
     // Every step ended once, each after what it waits on.
     const lines = row.setup!.steps.map(l => l.step);
-    expect([...lines].sort()).toEqual(["agents", "clis", "configs", "context", "floor", "folders", "github", "mcp", "plugins", "signins", "skills"]);
+    expect([...lines].sort()).toEqual(["agents", "clis", "configs", "context", "floor", "folderServers", "folders", "github", "mcp", "plugins", "signins", "skills"]);
     expect(row.setup!.steps.every(l => l.state === "done")).toBe(true);
     const before = (a: PlaceSetupStep, b: PlaceSetupStep): boolean => lines.indexOf(a) < lines.indexOf(b);
     expect([before("floor", "agents"), before("agents", "clis"), before("clis", "mcp"), before("mcp", "plugins"), before("github", "folders"), before("folders", "context")]).toEqual([true, true, true, true, true, true]);
@@ -1061,7 +1105,8 @@ describe("a computer added with its picks", () => {
       mcp: ["end agents", "landed tools/brew/jq"],
       plugins: ["end mcp"],
       folders: ["end github"],
-      context: ["agents", "signins", "skills", "configs", "clis", "github", "mcp", "plugins", "folders"].map(s => `end ${s}`),
+      folderServers: ["end mcp", "end plugins", "end folders"],
+      context: ["agents", "signins", "skills", "configs", "clis", "github", "mcp", "plugins", "folders", "folderServers"].map(s => `end ${s}`),
     };
     const at = order();
     for (const [step, before] of Object.entries(needs)) {
@@ -1171,6 +1216,28 @@ describe("a computer added with its picks", () => {
     expect(row.applied?.rows.find(r => r.id === "github")).toMatchObject({ outcome: "installed", step: "github" });
     expect(row.applied?.rows.find(r => r.id === "folders/app")?.note).not.toBe(NEEDS_GITHUB_LINE);
     expect(row.setup?.waiting).toEqual([]);
+  });
+
+  it("carries a folder that waited on GitHub its own servers after every step has ended, and still says the end once", async () => {
+    const s = signIns();
+    const { folder: repo, seed } = seededFolder();
+    execFileSync("git", ["init", "-q", repo]);
+    execFileSync("git", ["-C", repo, "remote", "add", "origin", "git@github.com:acme/private.git"]);
+    const p = provisioner({ projectServers: true });
+    const { frames } = await hosting({ local: true, provision: p.wired, acts: s.acts, cmds: [], checkouts: {}, seed, answer: cmd => (cmd.includes("ls-remote") ? { exitCode: 128 } : undefined) });
+    const picks = RecipeFile.parse({ name: "laptop", agents: { claude: { signin: "vault" } }, folders: { app: { from: repo, keep: [] } }, configs: { github: { signin: "machine" } } });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: picks }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    await until(async () => (await rowOf(place.id)).setup?.waiting.some(w => w.code !== undefined) === true);
+    expect(p.carried).toEqual([]);
+    const heard = frames.length;
+    s.end("gh", { state: "signed-in" });
+    await until(async () => (await rowOf(place.id)).applied?.rows.some(r => r.id.startsWith("agents/mcp/claude/@")) === true);
+    await new Promise(resolve => setTimeout(resolve, 30));
+    const path = (await runtime!.projects.list())[0]!.path;
+    expect(p.carried).toEqual([{ key: "app", path, after: expect.arrayContaining(["mcp", "plugins", "context"]) }]);
+    expect((await rowOf(place.id)).applied?.rows.find(r => r.id === `agents/mcp/claude/@${encodeURIComponent(path)}/kept`)).toMatchObject({ outcome: "installed", step: "folderServers" });
+    expect(ended(frames.slice(heard))).toHaveLength(1);
   });
 
   it("reads a private folder as needing GitHub once the GitHub sign-in on the box failed", async () => {
@@ -1447,6 +1514,26 @@ describe("a host that stops in the middle of a setup", () => {
     await until(async () => (await rowOf(place.id)).setup?.waiting.some(w => w.url !== undefined) === true);
     expect(s2.started).toEqual(["codex"]);
     expect((await rowOf(place.id)).setup?.waiting).toEqual([expect.objectContaining({ row: "signins/codex", url: "https://auth.example/codex/1", code: "CODE-1" })]);
+  });
+
+  it("resumes a setup that stopped after its folders and servers steps by carrying the folders those steps landed", async () => {
+    const store = memoryStore();
+    const { folder, seed } = seededFolder();
+    const first = await hosting({ provision: provisioner({ projectServers: true }).wired, store, checkouts: {}, seed });
+    const picks = RecipeFile.parse({ name: "laptop", agents: { claude: { signin: "vault" } }, folders: { app: { from: folder, name: "app", keep: [] } } });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: picks }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    // Written back as a host that stopped before the folders' servers were carried would have left it.
+    const held = (await store.get("places", place.id)) as PlaceRecord;
+    const steps = held.setup!.steps.filter(l => l.step !== "folderServers" && l.step !== "context");
+    await store.put("places", place.id, { ...held, setup: { ...held.setup!, state: "running", steps, finishedAt: undefined }, applied: { ...held.applied!, rows: held.applied!.rows.filter(r => r.step !== "folderServers") } });
+    await stopHost();
+    const again = provisioner({ projectServers: true });
+    await hosting({ provision: again.wired, store, hostKey: first.hostKey, checkouts: {}, seed });
+    await dialsBack(first.hostKey, place.id, first.joined[0]!.pair);
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    expect(again.ran).toEqual(["context"]);
+    expect(again.carried.map(c => c.key)).toEqual(["app"]);
   });
 
   it("resumes a waiting sign-in the person finished by hand between runs as already there, with no second start", async () => {

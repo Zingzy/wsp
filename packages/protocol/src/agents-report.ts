@@ -220,13 +220,14 @@ export type McpRowTransport = z.infer<typeof McpRowTransport>;
 export const McpAuth = z.enum(["open", "env-key", "connected", "signed-in", "needs-sign-in", "failed", "unknown"]);
 export type McpAuth = z.infer<typeof McpAuth>;
 
-/** `home`: Claude Code's servers kept for the home folder itself; `project`: a workspace's project files. */
 /** Where a page that returns to localhost reaches the harness: `here`, the computer the browser is on; `relay`, a
  * computer whose callback port this host forwards from here; `none`, a computer it does not. */
 export const PageReach = z.enum(["here", "relay", "none"]);
 export type PageReach = z.infer<typeof PageReach>;
 
-export const McpScope = z.enum(["user", "home", "project"]);
+/** `home`: Claude Code's servers kept for the home folder itself; `local`: those it keeps for a project's folder, in its
+ * own file; `project`: a file in the project's folder or a folder above it. */
+export const McpScope = z.enum(["user", "home", "local", "project"]);
 export type McpScope = z.infer<typeof McpScope>;
 
 /** One MCP server of one agent's config on a target, in the scope the report read it from; the person's own when
@@ -266,7 +267,7 @@ export const McpRow = z.object({
   /** On a computer you own: whether wsp's recipe job put it there. Absent where no recipe job keeps a record. */
   inRecipe: z.boolean().optional(),
   tools: z.array(McpTool).optional(),
-  /** The project a project server is set up in. */
+  /** The project a project or a local server is set up for. */
   project: AgentsProject.optional(),
   /** The line the person runs there to sign it in where its page cannot come back here, as that computer runs its
    * agent's command: absent where the agent has no such command. */
