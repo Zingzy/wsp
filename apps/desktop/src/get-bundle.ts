@@ -142,6 +142,7 @@ async function download(url: string, file: string, want: Published, asset: strin
     },
   });
   let failed: string | undefined;
+  let cause: string | undefined;
   try {
     // Armed once answered: the fetch bounds its own connect tries and the wait for an answer.
     const res = await deps.fetch(url, { headers: { "user-agent": deps.userAgent }, signal: stalled.signal });
@@ -158,20 +159,40 @@ async function download(url: string, file: string, want: Published, asset: strin
       : stalled.signal.aborted ? `no bytes for ${stallMs / 1000} s`
       : e instanceof Error && "path" in e ? BUNDLE_WORDS.unsaved(asset)
       : e instanceof Error ? e.message : String(e);
+    if (!(e instanceof PastSize) && !stalled.signal.aborted) cause = causeOf(e);
   } finally {
     clearTimeout(timer);
   }
   if (failed === undefined) return { ok: true };
   await rm(part, { force: true });
-  return { ok: false, error: failed };
+  return { ok: false, error: failed, ...(cause === undefined ? {} : { cause }) };
 }
+
+const said = (e: unknown): string => (e instanceof Error ? e.message : String(e));
+
+/** What a failed fetch was caused by, each link with its own code: undici's connect timeout and the address it tried
+ * sit under a "fetch failed" the sentence alone would keep, and a host of several addresses fails as an AggregateError
+ * with no message, one error per address. */
+function causeOf(e: unknown): string | undefined {
+  const links: string[] = [];
+  for (let at = (e as { cause?: unknown } | null)?.cause; at !== undefined && at !== null && links.length < 5; at = (at as { cause?: unknown }).cause) {
+    const code = (at as { code?: unknown }).code;
+    const message = at instanceof AggregateError && at.message === "" ? at.errors.map(said).join(", ") : said(at);
+    links.push(typeof code === "string" ? `${code}: ${message}` : message);
+  }
+  return links.length === 0 ? undefined : links.join("; ");
+}
+
+/** One update step's ending as the app log keeps it, a failure's cause beside the sentence the page shows. */
+export const updateLogLine = (step: string, outcome: BundleOutcome): string =>
+  `update: ${step} ${outcome.ok ? "done" : `failed: ${outcome.error}${outcome.cause === undefined ? "" : ` (cause: ${outcome.cause})`}`}`;
 
 /** The release's zip an installed mac app replaces itself from. */
 export const zipAsset = (version: string): string => bundleNames(version).macZip;
 
 /** This release's bundle for this platform in the download folder, verified against the published sha256; `pick`
  * names another of its assets. */
-export async function getBundle(version: string, deps: BundleDeps, pick?: (version: string) => string): Promise<{ ok: true; file: string; sum: string } | { ok: false; error: string }> {
+export async function getBundle(version: string, deps: BundleDeps, pick?: (version: string) => string): Promise<{ ok: true; file: string; sum: string } | { ok: false; error: string; cause?: string }> {
   const road = BUNDLE_ROADS[deps.platform];
   if (road === undefined) return { ok: false, error: BUNDLE_WORDS.noBundle(deps.platform) };
   const tag = `v${version}`;
@@ -180,7 +201,8 @@ export async function getBundle(version: string, deps: BundleDeps, pick?: (versi
   try {
     want = await published(tag, asset, deps);
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+    const cause = causeOf(e);
+    return { ok: false, error: e instanceof Error ? e.message : String(e), ...(cause === undefined ? {} : { cause }) };
   }
   if (want === undefined) return { ok: false, error: BUNDLE_WORDS.noDigest(asset) };
   const file = join(deps.dir, asset);

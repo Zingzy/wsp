@@ -102,8 +102,9 @@ export interface HostsView {
 /** How a host move ended: done, or refused in the host's own words. */
 export type HostOutcome = { ok: true } | { ok: false; error: string };
 
-/** How the shell's fetch or open of a release's bundle ended: done, or refused in one line the page shows as it is. */
-export type BundleOutcome = { ok: true } | { ok: false; error: string };
+/** How the shell's fetch or open of a release's bundle ended: done, or refused in one line the page shows as it is,
+ * with what a failed fetch was caused by for the app log alone. */
+export type BundleOutcome = { ok: true } | { ok: false; error: string; cause?: string };
 
 /** The class the desktop preload puts on the html element when the window has no title bar of its own: the app's
  * header row is the window's frame, the traffic lights sit in it and the sidebar shows the window's frosted glass. */
