@@ -249,7 +249,7 @@ import { backstopMs, createIdlePolicy } from "./idle.js";
 import { connectDaemon, type DaemonReach } from "./reach.js";
 import { POLL_INTERVAL_MS, createStatusTracker, machineStateOf, phaseLeavingGone, providerSaid, type StatusApi, type StatusListOptions, type StatusWatchOptions } from "./status.js";
 import { makeDevices, type DeviceDoor, type ScopedRoad } from "./devices.js";
-import { servableOptions } from "./places/helpers.js";
+import { loginHere, servableOptions } from "./places/helpers.js";
 import { makePlaceDoor, NO_PLACE_DOOR, PlaceForksNowhereError, PlaceProvisioningError, type PlaceDoor, type PlaceRecord, type PlaceWiring } from "./places.js";
 import type { BlobMark, Store } from "./store.js";
 import { memoryGitHubCache, type GitHubCache } from "./github-cache.js";
@@ -633,6 +633,7 @@ function runtimeCore(ctx: RuntimeContext, opts: RuntimeOptions): RuntimeCore {
         },
         signInLine: (placeId, agent) => ctx.agentsRead.signInLine({ placeId }, { agent }),
         storesOn: (placeId, home) => ctx.placeStores(placeId, home),
+        loginHere: agent => loginHere(ctx.homesHere, agent),
         // The app's own sign-in road on that computer, read as a setup's row waiting on the person.
         signIn: async (placeId, agent, emit) => {
           const handle = await ctx.agentsRead.signIn({ placeId }, { agent, toolThere: true }, emit);
@@ -947,8 +948,20 @@ function runtimeOf(ctx: RuntimeContext): Runtime {
     slates: ctx.slates,
     devices: deviceDoor,
     ...(placeDoor !== undefined ? { places: placeDoor } : {}),
-    // An agent's sign-in from the vault is offered only where the vault can serve it, read at every ask.
-    ...(opts.recipes !== undefined ? { recipes: { ...opts.recipes, options: async folders => servableOptions(await opts.recipes!.options(folders), opts.vault?.() ?? {}) } } : {}),
+    // An agent's sign-in to copy is offered only where the vault or this computer's login can serve it, read at every ask.
+    ...(opts.recipes !== undefined
+      ? {
+          recipes: {
+            ...opts.recipes,
+            options: async folders => {
+              const options = await opts.recipes!.options(folders);
+              const homes = ctx.homesHere().catch(() => ({}));
+              const held = await Promise.all(options.agents.map(async a => ((await loginHere(() => homes, a.id)) === undefined ? [] : [a.id])));
+              return servableOptions(options, opts.vault?.() ?? {}, new Set(held.flat()));
+            },
+          },
+        }
+      : {}),
     hereChannel: async onEvent => ctx.heldToOwner(HERE_PLACE_ID, await ctx.channelOver(await ctx.localRoad(), THIS_COMPUTER, onEvent)),
     agents: { ...ctx.agentsRead, homesHere: ctx.homesHere },
     preferences: ctx.preferences,
