@@ -11,7 +11,7 @@ import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { join, posix } from "node:path";
 import type { Host, Manifest, ManifestEntry, Platform } from "@wsp/collect";
 import { expand, nodeHost } from "@wsp/collect";
-import { CATALOG_AGENTS, COMPILER_ROW, MCP_AGENTS, SHARED_SKILLS, TOOL_PREFIX, catalogEntry, catalogIdOfRow, installHomes, ownSkillFolder, rewrittenRel, roadModule } from "@wsp/catalog";
+import { CATALOG_AGENTS, COMPILER_ROW, aptNeedRows, MCP_AGENTS, SHARED_SKILLS, TOOL_PREFIX, catalogEntry, catalogIdOfRow, installHomes, ownSkillFolder, rewrittenRel, roadModule } from "@wsp/catalog";
 import {
   agentStateFile,
   newSetupRun,
@@ -295,6 +295,11 @@ export async function undoPlan(before: RecipeFile, removed: readonly { kind: Rec
         // was never wsp's to keep.
         const dests = agentOwnPaths(name).map(p => rewrittenRel(p.replace(/^~\//, "")));
         out.push({ key, label: CATALOG_AGENTS.find(a => a.id === name)?.name ?? name, ids: [`agents/${name}`, signInRowId(name), ...dests.map(d => `files/${d}`)], owner: `agents/${name}`, dests, ...catalogUninstall(name, path, prefix) });
+        for (const need of aptNeedRows(name)) {
+          const apt = { road: "apt" as const, packages: [need.package] };
+          const r = roadModule(apt).uninstall(apt, need.command);
+          out.push({ key: need.id, label: need.package, ids: [need.id], owner: need.id, ...("cmd" in r ? { cmd: `${pathLine(path, prefix)}\n${r.cmd}` } : { note: r.note }) });
+        }
         break;
       }
       case "plugins": {

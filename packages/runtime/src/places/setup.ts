@@ -70,7 +70,7 @@ import type { PlaceRecordsArea } from "./records.js";
 /** The links' waits, the setup and the sync of a computer to its recipe, and the link a machine there is driven over. */
 export function placeSetup(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea) {
   const { opts, wiring, recording, clockNow, frameWaitMs, relinkWaitMs, live, kept, signInsHere } = ctx;
-  const { recordOf, change } = recordArea;
+  const { recordOf, change, loginListed } = recordArea;
 
   /** Who is reading one computer's daemon events, by place id: the channels a road on this host opened over that
    * computer's link. A channel is the one road the events it asked for come back on, so a pty on one computer is
@@ -402,14 +402,19 @@ export function placeSetup(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea) 
       );
     };
     /** Whether an agent is signed in on that computer, by its own status command run there as the hand sign-in
-     * plans it; the logins that computer's daemon last listed only where that status cannot be read. */
+     * plans it; the logins that computer's daemon last listed only where that status cannot be read. A login the
+     * status reads goes on that list, which a login copied or signed in there by hand is not on until the next dial. */
     const agentSignedIn = async (agent: string, plan: ProvisionPlan): Promise<boolean> => {
       const check = loginSignIn(agent)?.status;
       if (check !== undefined) {
         const line = await recording.signInLine?.(placeId, agent).catch(() => undefined);
         const res = line?.status === undefined ? undefined : await machine.exec(withEnvFromInput(`${pathLine(plan.path, plan.prefix)}\n${line.status} 2>&1`), { timeoutMs: SIGNIN_STATUS_MS, stdin: envInput(line.env ?? {}) }).catch(() => undefined);
         // A status cut at its deadline said nothing about the login, so it is not read as signed out.
-        if (res !== undefined && res.exitCode !== EXEC_DEADLINE_EXIT) return check.signedIn(res.stdout, res.exitCode);
+        if (res !== undefined && res.exitCode !== EXEC_DEADLINE_EXIT) {
+          const signedIn = check.signedIn(res.stdout, res.exitCode);
+          if (signedIn) await loginListed(placeId, agent);
+          return signedIn;
+        }
       }
       return signInsHere(placeId)?.[agent] === "signed-in";
     };

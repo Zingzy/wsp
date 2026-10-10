@@ -339,6 +339,13 @@ describe("a computer's picks planned for a sync", () => {
 });
 
 describe("what taking rows out of a computer's picks runs there", () => {
+  it("takes the bubblewrap Codex's row put on off with Codex, only where that row put it on", async () => {
+    const before = { name: "laptop", agents: { codex: { signin: "vault" as const } }, mcp: {}, clis: {}, skills: {}, plugins: {}, folders: {}, configs: {} };
+    const undo = await undoPlan(before, [{ kind: "agents", name: "codex" }], { home: "/root" }, async () => new Map());
+    const by = new Map(undo.map(u => [u.key, u]));
+    expect(by.get("agents/codex/bubblewrap")).toMatchObject({ ids: ["agents/codex/bubblewrap"], owner: "agents/codex/bubblewrap", cmd: expect.stringContaining("apt-get purge -y -qq bubblewrap") });
+  });
+
   it("takes gh off for the GitHub row only by the row that put gh on, and git-lfs's filters off before the tool", async () => {
     const before = { name: "laptop", agents: {}, mcp: {}, clis: { "git-lfs": { via: "brew" }, gh: { via: "brew" } }, skills: {}, plugins: {}, folders: {}, configs: { github: { signin: "machine" as const } } };
     const undo = await undoPlan(before, [{ kind: "configs", name: "github" }, { kind: "clis", name: "git-lfs" }], { home: "/root" }, async () => new Map());
