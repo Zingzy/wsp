@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The app's lockup (apps/web/src/brand): the tilde mark beside the stroked wordmark.
+// The app's lockup (apps/web/src/brand): the tilde mark, raised like the brand avatar's, beside the stroked wordmark.
 import { cn } from "@/lib/utils";
 
 export function Lockup({ className }: { className?: string }) {
   return (
     <span className={cn("inline-flex items-center gap-[0.32em] text-foreground", className)}>
       <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" className="h-[0.86em] w-auto" aria-hidden>
+        <path d="M1.6 8A3.4 3.4 0 0 1 8 8A3.4 3.4 0 0 0 14.4 8" transform="translate(0 0.5)" opacity="0.6" />
         <path d="M1.6 8A3.4 3.4 0 0 1 8 8A3.4 3.4 0 0 0 14.4 8" />
       </svg>
       <svg viewBox="0 0 34 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-[0.78em] w-auto" aria-hidden>
