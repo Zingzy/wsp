@@ -416,18 +416,21 @@ describe("a box thread's image", () => {
 });
 
 describe("an Always for a box thread's command", () => {
-  it("covers the script an on=host command names in this computer's folder, and is refused for one that names a file on the box", async () => {
+  it("covers the script an on=host command names in this computer's folder, and is not offered for one that names a file on the box", async () => {
     const machine = bashMachine();
     const thread = `t-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     made.push(boxSlateDir(thread));
     const hereFolder = temp();
+    const boxFolder = temp();
+    const script = join(boxFolder, ".wsp-system-resources.py");
     writeFileSync(join(hereFolder, "deploy.sh"), "echo one");
+    writeFileSync(script, "print('one')");
     const slates = createSlates({
       store: memoryStore(),
       now: () => Date.now(),
       record: () => {},
       emit: () => {},
-      thread: () => ({ workspaceId: "w1", rootThreadId: thread, sessionId: "s1", folder: "/root/project", hostFolder: hereFolder, computer: "spoo" }),
+      thread: () => ({ workspaceId: "w1", rootThreadId: thread, sessionId: "s1", folder: boxFolder, hostFolder: hereFolder, computer: "spoo" }),
       machineOf: () => machine,
       under: lead => [lead],
       threadOfToken: () => thread,
@@ -438,22 +441,28 @@ describe("an Always for a box thread's command", () => {
     const asThread: Caller = { origin: "here", by: { kind: "thread", threadId: thread, workspaceId: "w1", rootThreadId: thread } };
     await slates.write({ text: `<slate title="Deploy">
   <run name="here" cmd="bash deploy.sh" on="host" timeout={20} />
-  <run name="there" cmd="bash deploy.sh" timeout={20} />
+  <run name="there" cmd="python3 ${script}" timeout={20} />
   <column><button id="h" label="Here" onPress={start($here)} /><button id="t" label="There" onPress={start($there)} /></column>
 </slate>` }, asThread);
     const press = async (piece: string) => slates.event({ threadId: thread, version: (await slates.get(thread))!.version, piece, event: "press", requestId: `${piece}-${Math.random()}` });
-    const value = async (run: string) => (await slates.get(thread))!.values[run] as { state: string; out?: string };
+    const done = async (run: string, out: string) => vi.waitFor(async () => expect((await slates.get(thread))!.values[run]).toMatchObject({ state: "done", out }), { timeout: 10_000 });
 
     const here = await press("h");
+    expect(here.ask).not.toHaveProperty("noAlways");
     await slates.approve({ threadId: thread, key: here.ask!.key, scope: "thread" });
-    for (let i = 0; i < 100 && (await value("here")).state !== "done"; i++) await new Promise(r => setTimeout(r, 100));
-    expect(await value("here")).toMatchObject({ state: "done", out: "one\n" });
+    await done("here", "one\n");
     writeFileSync(join(hereFolder, "deploy.sh"), "echo two");
     expect((await press("h")).ask).toBeDefined();
 
+    // The sheet offers Run once and Don't alone, so no choice it offers is refused; Run once runs it on the box.
     const there = await press("t");
-    await expect(slates.approve({ threadId: thread, key: there.ask!.key, scope: "thread" })).rejects.toThrow(/deploy\.sh/);
+    expect(there.ask).toMatchObject({ run: "there", noAlways: true });
+    expect((await slates.get(thread))!.asks.find(a => a.run === "there")).toMatchObject({ noAlways: true });
     await slates.approve({ threadId: thread, key: there.ask!.key, scope: "once" });
+    await done("there", "one\n");
+    // No command line verb or tool approves a slate; another caller of slates.approve that asks for an Always is told why.
+    const again = await press("t");
+    await expect(slates.approve({ threadId: thread, key: again.ask!.key, scope: "thread" })).rejects.toThrow(/\.wsp-system-resources\.py there, which this computer cannot read/);
     slates.close();
   }, 30_000);
 });
