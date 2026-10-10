@@ -1212,10 +1212,10 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               send({ id: msg.id, ok: true, workspaces: (await rt.workspaces.list(origin)).map(handed) });
               return;
             case "workspaces.resolve":
-              send({ id: msg.id, ok: true, workspace: handed(await rt.workspaces.resolve(msg.ref, origin, msg.verb)) });
+              send({ id: msg.id, ok: true, workspace: handed(await rt.workspaces.resolve(msg.ref, origin)) });
               return;
             case "workspaces.get":
-              send({ id: msg.id, ok: true, workspace: handed(await rt.workspaces.get(msg.workspaceId, origin)) });
+              send({ id: msg.id, ok: true, workspace: handed(await rt.workspaces.get(msg.workspaceId, origin, msg.threadId)) });
               return;
             case "workspaces.nap":
               send({ id: msg.id, ok: true, workspace: handed(await rt.workspaces.nap(msg.workspaceId, origin)) });
@@ -1239,11 +1239,6 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             case "workspaces.look":
               send({ id: msg.id, ok: true, workspace: handed(await rt.workspaces.look(msg.workspaceId, { ...(msg.theme !== undefined ? { theme: msg.theme } : {}), ...(msg.glyph !== undefined ? { glyph: msg.glyph } : {}) }, origin)) });
               return;
-            case "workspaces.agents": {
-              const { id, op, workspaceId, origin: _sent, ...patch } = msg;
-              send({ id: msg.id, ok: true, workspace: handed(await rt.workspaces.agents(workspaceId, patch, origin)) });
-              return;
-            }
             case "workspaces.bringBack": {
               const brought = await rt.workspaces.bringBack(
                 { workspaceId: msg.workspaceId, ...(msg.title !== undefined ? { title: msg.title } : {}), ...(msg.body !== undefined ? { body: msg.body } : {}) },
@@ -1266,13 +1261,13 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               send({ id: msg.id, ok: true, ...(await rt.workspaces.checkout(msg.workspaceId, origin)) });
               return;
             case "workspaces.discard":
-              send({ id: msg.id, ok: true, ...(await rt.workspaces.discard({ workspaceId: msg.workspaceId, path: msg.path, ...(msg.check === true ? { check: true } : {}) }, origin)) });
+              send({ id: msg.id, ok: true, ...(await rt.workspaces.discard({ workspaceId: msg.workspaceId, path: msg.path, ...(msg.check === true ? { check: true } : {}), ...(msg.threadId !== undefined ? { threadId: msg.threadId } : {}) }, origin)) });
               return;
             case "workspaces.commit":
-              send({ id: msg.id, ok: true, ...(await rt.workspaces.commit({ workspaceId: msg.workspaceId, message: msg.message, ...(msg.paths !== undefined ? { paths: msg.paths } : {}) }, origin)) });
+              send({ id: msg.id, ok: true, ...(await rt.workspaces.commit({ workspaceId: msg.workspaceId, message: msg.message, ...(msg.paths !== undefined ? { paths: msg.paths } : {}), ...(msg.threadId !== undefined ? { threadId: msg.threadId } : {}) }, origin)) });
               return;
             case "workspaces.commitDraft":
-              send({ id: msg.id, ok: true, ...(await rt.workspaces.commitDraft({ workspaceId: msg.workspaceId, ...(msg.paths !== undefined ? { paths: msg.paths } : {}) }, origin)) });
+              send({ id: msg.id, ok: true, ...(await rt.workspaces.commitDraft({ workspaceId: msg.workspaceId, ...(msg.paths !== undefined ? { paths: msg.paths } : {}), ...(msg.threadId !== undefined ? { threadId: msg.threadId } : {}) }, origin)) });
               return;
             case "workspaces.viewed":
               send({
@@ -1313,7 +1308,10 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               send({
                 id: msg.id,
                 ok: true,
-                ...(await rt.workspaces.fix({ workspaceId: msg.workspaceId, ...(msg.check !== undefined ? { check: msg.check } : {}), ...(msg.child !== undefined ? { child: msg.child } : {}) }, origin)),
+                ...(await rt.workspaces.fix(
+                  { workspaceId: msg.workspaceId, ...(msg.check !== undefined ? { check: msg.check } : {}), ...(msg.child !== undefined ? { child: msg.child } : {}), ...(msg.threadId !== undefined ? { threadId: msg.threadId } : {}), ...(msg.childThreadId !== undefined ? { childThreadId: msg.childThreadId } : {}) },
+                  origin,
+                )),
               });
               return;
             case "workspaces.merge":
@@ -1326,16 +1324,17 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
                     ...(msg.method !== undefined ? { method: msg.method } : {}),
                     ...(msg.whenChecksPass !== undefined ? { whenChecksPass: msg.whenChecksPass } : {}),
                     ...(msg.head !== undefined ? { head: msg.head } : {}),
+                    ...(msg.threadId !== undefined ? { threadId: msg.threadId } : {}),
                   },
                   origin,
                 )),
               });
               return;
             case "workspaces.update":
-              send({ id: msg.id, ok: true, ...(await rt.workspaces.update({ workspaceId: msg.workspaceId }, origin)) });
+              send({ id: msg.id, ok: true, ...(await rt.workspaces.update({ workspaceId: msg.workspaceId, ...(msg.threadId !== undefined ? { threadId: msg.threadId } : {}) }, origin)) });
               return;
             case "workspaces.mergeIn":
-              send({ id: msg.id, ok: true, ...(await rt.workspaces.mergeIn({ workspaceId: msg.workspaceId, child: msg.child }, origin)) });
+              send({ id: msg.id, ok: true, ...(await rt.workspaces.mergeIn({ workspaceId: msg.workspaceId, child: msg.child, ...(msg.threadId !== undefined ? { threadId: msg.threadId } : {}), ...(msg.childThreadId !== undefined ? { childThreadId: msg.childThreadId } : {}) }, origin)) });
               return;
             case "workspaces.start":
               send({
@@ -1386,7 +1385,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               });
               return;
             case "workspaces.reviewPost":
-              send({ id: msg.id, ok: true, ...(await rt.workspaces.reviewPost({ workspaceId: msg.workspaceId }, origin)) });
+              send({ id: msg.id, ok: true, ...(await rt.workspaces.reviewPost({ workspaceId: msg.workspaceId, ...(msg.threadId !== undefined ? { threadId: msg.threadId } : {}) }, origin)) });
               return;
             case "workspaces.delete":
               await rt.workspaces.delete(msg.workspaceId, origin);
@@ -1812,7 +1811,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             case "forwards.stop": {
               const refusal = await rt.workspaces.originRefusal(msg.workspaceId, origin);
               if (refusal !== undefined) throw new Error(refusal);
-              if (!forwards.stop(msg.workspaceId, msg.port)) throw new Error(`nothing is forwarding localhost:${msg.port} for that workspace`);
+              if (!forwards.stop(msg.workspaceId, msg.port)) throw new Error(`nothing is forwarding localhost:${msg.port} there`);
               send({ id: msg.id, ok: true });
               return;
             }

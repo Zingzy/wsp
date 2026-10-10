@@ -38,7 +38,7 @@ describe("wsp verbs over the host: prompts, answers and what a turn prints", () 
     ],
   };
 
-  it("the thread id is printed the moment the thread exists, ahead of the turn's first delta", async () => {
+  it.runIf(CLOUD_ON)("the thread id is printed the moment the thread exists, ahead of the turn's first delta", async () => {
     const held = heldAgent(false);
     await h.restartHost({ claude: held.adapter });
     await h.run("new", "alpha");
@@ -54,7 +54,7 @@ describe("wsp verbs over the host: prompts, answers and what a turn prints", () 
     expect(started.io.screen.startsWith(`thread ${row!.threadId}  ${THREAD_PREFIX_WORD}\n10`)).toBe(true);
   });
 
-  it("a turn stopped on a prompt says so in the terminal that is blocked, with the keys that answer it, and a typed y answers it", async () => {
+  it.runIf(CLOUD_ON)("a turn stopped on a prompt says so in the terminal that is blocked, with the keys that answer it, and a typed y answers it", async () => {
     const held = heldAgent(false);
     await h.restartHost({ claude: held.adapter });
     await h.run("new", "alpha");
@@ -88,7 +88,7 @@ describe("wsp verbs over the host: prompts, answers and what a turn prints", () 
     expect(await ended).toBe(0);
   });
 
-  it("a turn stopped on two prompts is waiting on the older one, and the line that answers closes the one the listing named", async () => {
+  it.runIf(CLOUD_ON)("a turn stopped on two prompts is waiting on the older one, and the line that answers closes the one the listing named", async () => {
     const held = heldAgent(false);
     await h.restartHost({ claude: held.adapter });
     await h.run("new", "alpha");
@@ -114,7 +114,7 @@ describe("wsp verbs over the host: prompts, answers and what a turn prints", () 
     expect(await running.ended).toBe(0);
   });
 
-  it("a prompt that asks the person something rather than for consent says so: no key and no verb here stands for its own answers", async () => {
+  it.runIf(CLOUD_ON)("a prompt that asks the person something rather than for consent says so: no key and no verb here stands for its own answers", async () => {
     const asked: PermissionAsk = {
       askId: "ask_q",
       toolName: QUESTION_TOOL,
@@ -144,7 +144,7 @@ describe("wsp verbs over the host: prompts, answers and what a turn prints", () 
     expect(await running.ended).toBe(0);
   });
 
-  it("--json at a terminal offers no keys and waits on none: it writes the events and no stream, so its caller answers by the verb", async () => {
+  it.runIf(CLOUD_ON)("--json at a terminal offers no keys and waits on none: it writes the events and no stream, so its caller answers by the verb", async () => {
     const held = heldAgent(false);
     await h.restartHost({ claude: held.adapter });
     await h.run("new", "alpha");
@@ -170,7 +170,7 @@ describe("wsp verbs over the host: prompts, answers and what a turn prints", () 
     expect(await ended).toBe(0);
   });
 
-  it("a caller with no terminal gets the same words and the verbs that answer by thread id, and those verbs answer the open prompt", async () => {
+  it.runIf(CLOUD_ON)("a caller with no terminal gets the same words and the verbs that answer by thread id, and those verbs answer the open prompt", async () => {
     const held = heldAgent(false);
     await h.restartHost({ claude: held.adapter });
     await h.run("new", "alpha");
@@ -211,7 +211,6 @@ describe("wsp verbs over the host: prompts, answers and what a turn prints", () 
     const folder = join(h.dir, "here");
     mkdirSync(folder, { recursive: true });
     const workspaceLines: [string, string[]][] = [
-      ["exec", ["exec", "nope", "--", "true"]],
       ["pause", ["pause", "nope"]],
       ["wake", ["wake", "nope"]],
       ["rename", ["rename", "nope", "other"]],
@@ -239,11 +238,19 @@ describe("wsp verbs over the host: prompts, answers and what a turn prints", () 
       ["thread deny", ["thread", "deny", "nope"]],
       ["send", ["send", "nope", "hello"]],
       ["stop", ["stop", "nope"]],
+      ["exec", ["exec", "nope", "--", "true"]],
+      ["commit", ["commit", "nope"]],
+      ["discard", ["discard", "nope", "a.ts", "--yes"]],
+      ["update", ["update", "nope"]],
+      ["fix", ["fix", "nope"]],
+      ["merge", ["merge", "nope"]],
+      ["review post", ["review", "post", "nope"]],
+      ["skills", ["skills", "nope"]],
     ];
     expect(await walked(threadLines)).toEqual(threadLines.map(([verb]) => [verb, EXIT_CODES.usage, [`wsp ${verb}: no thread nope`]]));
   });
 
-  it("run opens a thread under the named agent, announces it, streams the reply and prints the last message", async () => {
+  it.runIf(CLOUD_ON)("run opens a thread under the named agent, announces it, streams the reply and prints the last message", async () => {
     await h.run("new", "alpha");
     const [alpha] = await h.rt.workspaces.list();
     const { code, io } = await h.run("run", "alpha", "--agent", "codex", "write tests");
@@ -299,7 +306,7 @@ describe("wsp verbs over the host: prompts, answers and what a turn prints", () 
     expect(refused).toEqual(lines.map(([word]) => [word, EXIT_CODES.usage, []]));
   });
 
-  it("a turn watched at a terminal shows its reply once: the prose as it streamed, ended on a line of its own, and the finished line under it carries no copy of it", async () => {
+  it.runIf(CLOUD_ON)("a turn watched at a terminal shows its reply once: the prose as it streamed, ended on a line of its own, and the finished line under it carries no copy of it", async () => {
     const held = heldAgent(false);
     await h.restartHost({ claude: held.adapter });
     await h.run("new", "alpha");
@@ -317,7 +324,7 @@ describe("wsp verbs over the host: prompts, answers and what a turn prints", () 
     expect(io.lines).toEqual([`thread ${row!.threadId}  ${THREAD_PREFIX_WORD}`]);
   });
 
-  it("a turn watched at a terminal that streamed no prose prints its reply once under the work it showed, since nothing on the screen carries it yet", async () => {
+  it.runIf(CLOUD_ON)("a turn watched at a terminal that streamed no prose prints its reply once under the work it showed, since nothing on the screen carries it yet", async () => {
     await h.restartHost({ claude: toolingAgent([{ toolName: "Bash", input: { command: "uname -r" }, output: "25.4.0" }], { status: "completed", text: "the kernel is 25.4.0" }) });
     await h.run("new", "alpha");
     const io = captured();
@@ -329,7 +336,7 @@ describe("wsp verbs over the host: prompts, answers and what a turn prints", () 
     expect(io.lines).toEqual([`thread ${row!.threadId}  ${THREAD_PREFIX_WORD}`, "the kernel is 25.4.0"]);
   });
 
-  it("wsp send at a terminal prints the reply once, the copy that streamed, and down a pipe prints it whole at the end", async () => {
+  it.runIf(CLOUD_ON)("wsp send at a terminal prints the reply once, the copy that streamed, and down a pipe prints it whole at the end", async () => {
     // Marco read each send's reply twice and called it noise. A terminal has the streamed prose in front of the
     // same eyes, so stdout adds no copy of it; a pipe is somebody else's reader and carries the reply whole.
     const held = heldAgent(false);
@@ -358,7 +365,7 @@ describe("wsp verbs over the host: prompts, answers and what a turn prints", () 
     expect(piped.io.streamed).toBe("the answer is still 42\ncompleted\n");
   });
 
-  it("a turn whose stdout is a pipe prints the reply once, at the end, with the stream beside it the person's own view of the work", async () => {
+  it.runIf(CLOUD_ON)("a turn whose stdout is a pipe prints the reply once, at the end, with the stream beside it the person's own view of the work", async () => {
     const held = heldAgent(false);
     await h.restartHost({ claude: held.adapter });
     await h.run("new", "alpha");
@@ -372,7 +379,7 @@ describe("wsp verbs over the host: prompts, answers and what a turn prints", () 
     expect(piped.io.streamed).toBe("25.4.0\ncompleted\n");
   });
 
-  it("a reply printed under a stream that stopped mid-line starts its own line, so the answer is never glued to the work above it", async () => {
+  it.runIf(CLOUD_ON)("a reply printed under a stream that stopped mid-line starts its own line, so the answer is never glued to the work above it", async () => {
     await h.run("new", "alpha");
     const io = captured();
     io.isTTY = true;
@@ -383,7 +390,7 @@ describe("wsp verbs over the host: prompts, answers and what a turn prints", () 
     expect(io.lines).toEqual([`thread ${row!.threadId}  ${THREAD_PREFIX_WORD}`, "re: build it"]);
   });
 
-  it("--json prints the turn's events and its one turn value, at a terminal as into a pipe, and writes no stream", async () => {
+  it.runIf(CLOUD_ON)("--json prints the turn's events and its one turn value, at a terminal as into a pipe, and writes no stream", async () => {
     const held = heldAgent(false);
     await h.restartHost({ claude: held.adapter });
     await h.run("new", "alpha");
@@ -403,7 +410,7 @@ describe("wsp verbs over the host: prompts, answers and what a turn prints", () 
     expect(io.streamed).toBe("");
   });
 
-  it("a turn on this computer prices its figure as the agent's list price, and a turn at a provider leaves the figure alone", async () => {
+  it.runIf(CLOUD_ON)("a turn on this computer prices its figure as the agent's list price, and a turn at a provider leaves the figure alone", async () => {
     // A turn here runs on the person's own sign-in, so nobody is billed for it and the number is the agent's own
     // table, which is the word the app's footer already gives the figure. A fork is billed and says nothing extra.
     await h.restartHost({ claude: toolingAgent([], { status: "completed", text: "had a look", durationMs: 72_000, costUsd: 0.19 }) });
@@ -419,7 +426,7 @@ describe("wsp verbs over the host: prompts, answers and what a turn prints", () 
     expect(forked.streamed).not.toContain(LIST_PRICE_WORD);
   });
 
-  it("a turn's two replies stream as two paragraphs: what the agent said while its background command ran, then what it said when that command woke it", async () => {
+  it.runIf(CLOUD_ON)("a turn's two replies stream as two paragraphs: what the agent said while its background command ran, then what it said when that command woke it", async () => {
     await h.restartHost({
       claude: sayingAgent(
         [
@@ -441,7 +448,7 @@ describe("wsp verbs over the host: prompts, answers and what a turn prints", () 
     ]);
   });
 
-  it("a turn whose messages sit either side of a tool call prints no blank line: the call's own lines have parted them already", async () => {
+  it.runIf(CLOUD_ON)("a turn whose messages sit either side of a tool call prints no blank line: the call's own lines have parted them already", async () => {
     await h.restartHost({
       claude: sayingAgent(
         [
@@ -459,7 +466,7 @@ describe("wsp verbs over the host: prompts, answers and what a turn prints", () 
     expect(io.streamed.split("\n")).toEqual(["Looking.", "~$ ls~", "~a.txt~", "One file.", "~completed~", ""]);
   });
 
-  it("a harness's note about itself streams muted above the reply, with no word of failure, and the turn reads completed", async () => {
+  it.runIf(CLOUD_ON)("a harness's note about itself streams muted above the reply, with no word of failure, and the turn reads completed", async () => {
     const warning = "loading hooks from both /root/.codex/hooks.json and /root/.codex/config.toml; prefer a single representation for this layer";
     await h.restartHost({ claude: sayingAgent([{ kind: "note", text: warning }, { kind: "text", text: "ready", messageId: "msg_a" }], { status: "completed", text: "ready" }) });
     await h.run("new", "alpha");
@@ -470,7 +477,7 @@ describe("wsp verbs over the host: prompts, answers and what a turn prints", () 
     expect(io.streamed).not.toContain("failed");
   });
 
-  it("a turn's tool calls stream one muted line each as they land, what each answered behind it, and its end reads as the app's status line", async () => {
+  it.runIf(CLOUD_ON)("a turn's tool calls stream one muted line each as they land, what each answered behind it, and its end reads as the app's status line", async () => {
     await h.restartHost({
       claude: toolingAgent(
         [
@@ -518,7 +525,7 @@ describe("wsp verbs over the host: prompts, answers and what a turn prints", () 
     ]);
   });
 
-  it("run without an agent takes the runtime's default; an agent the host has no adapter for is refused naming the agents it has, before a napping machine is woken", async () => {
+  it.runIf(CLOUD_ON)("run without an agent takes the runtime's default; an agent the host has no adapter for is refused naming the agents it has, before a napping machine is woken", async () => {
     await h.run("new", "alpha");
     const ok = await h.run("run", "alpha", "hello");
     expect(ok.code).toBe(0);
@@ -531,7 +538,7 @@ describe("wsp verbs over the host: prompts, answers and what a turn prints", () 
     expect(await h.rt.sessions.list()).toHaveLength(1);
   });
 
-  it("run without an agent on a project whose default agent is Codex runs Codex, and a model named alone is read against Codex's list", async () => {
+  it.runIf(CLOUD_ON)("run without an agent on a project whose default agent is Codex runs Codex, and a model named alone is read against Codex's list", async () => {
     expect((await h.run("projects", "set", h.cloud.name, "--agent", "codex")).code).toBe(0);
     await h.run("new", "alpha");
     const ok = await h.run("run", "alpha", "hello");
@@ -585,7 +592,7 @@ describe("wsp verbs over the host: prompts, answers and what a turn prints", () 
     expect(await h.rt.sessions.list()).toHaveLength(1);
   });
 
-  it("a failed turn exits 1 with the error on stderr and no last message", async () => {
+  it.runIf(CLOUD_ON)("a failed turn exits 1 with the error on stderr and no last message", async () => {
     await h.run("new", "alpha");
     const { code, io } = await h.run("run", "alpha", "die");
     expect(code).toBe(1);
@@ -594,7 +601,7 @@ describe("wsp verbs over the host: prompts, answers and what a turn prints", () 
     expect(io.errors).toEqual(["wsp run: the harness died"]);
   });
 
-  it("a turn the agent refused for want of a sign-in reads failed, exits with the auth code and says the refusal once, on the command line and in the read alike", async () => {
+  it.runIf(CLOUD_ON)("a turn the agent refused for want of a sign-in reads failed, exits with the auth code and says the refusal once, on the command line and in the read alike", async () => {
     const refusal = `Not logged in · Please run /login; ${signInRefusalLine({ kind: "local" })}`;
     await h.restartHost({ claude: toolingAgent([], { status: "failed", durationMs: 88, costUsd: 0, error: refusal, refusal: "sign-in" }) });
     await h.run("new", "alpha");
@@ -612,7 +619,7 @@ describe("wsp verbs over the host: prompts, answers and what a turn prints", () 
     expect(read.io.lines.join("\n").split("Not logged in")).toHaveLength(2);
   });
 
-  it("a refusal the agent named no cause for exits the provider code, so the auth code says a sign-in and nothing else", async () => {
+  it.runIf(CLOUD_ON)("a refusal the agent named no cause for exits the provider code, so the auth code says a sign-in and nothing else", async () => {
     await h.restartHost({ claude: toolingAgent([], { status: "failed", durationMs: 40, error: "API Error: 529 overloaded" }) });
     await h.run("new", "alpha");
 
@@ -625,7 +632,7 @@ describe("wsp verbs over the host: prompts, answers and what a turn prints", () 
     expect(JSON.parse(asJson.io.errors.at(-1)!)).toMatchObject({ class: "provider", exit: EXIT_CODES.provider });
   });
 
-  it("a send into a thread whose last turn was cut says so on stderr before the reply; the send after that says nothing", async () => {
+  it.runIf(CLOUD_ON)("a send into a thread whose last turn was cut says so on stderr before the reply; the send after that says nothing", async () => {
     await h.run("new", "alpha");
     const cut = await h.run("run", "alpha", "cut");
     expect(cut.code).toBe(1);
@@ -642,7 +649,7 @@ describe("wsp verbs over the host: prompts, answers and what a turn prints", () 
     expect(h.json(asJson.io).filter(e => (e as { type: string }).type === "session.start")).toEqual([expect.not.objectContaining({ afterCut: true })]);
   });
 
-  it("a send into a thread whose launch never reached the machine runs the message as that thread's first turn, on the same thread, instead of refusing", async () => {
+  it.runIf(CLOUD_ON)("a send into a thread whose launch never reached the machine runs the message as that thread's first turn, on the same thread, instead of refusing", async () => {
     const agent = bornDeadAgent(prompt => `re: ${prompt}`);
     await h.restartHost({ claude: agent.adapter, codex: h.codex.adapter });
     await h.run("new", "alpha");
@@ -666,7 +673,7 @@ describe("wsp verbs over the host: prompts, answers and what a turn prints", () 
     expect(agent.starts[2]!.resume).toBe(rows[1]!.claudeSessionId);
   });
 
-  it("a launch that never reached the agent on a workspace it woke puts that workspace back to sleep and says so on its last line", async () => {
+  it.runIf(CLOUD_ON)("a launch that never reached the agent on a workspace it woke puts that workspace back to sleep and says so on its last line", async () => {
     const agent = bornDeadAgent(prompt => `re: ${prompt}`);
     await h.restartHost({ claude: agent.adapter });
     await h.run("new", "alpha");
@@ -682,7 +689,7 @@ describe("wsp verbs over the host: prompts, answers and what a turn prints", () 
     expect(dead.io.errors).toEqual(["waking alpha", `wsp run: ${UNREACHED_LINE}\n${workspaceAsleepAgainLine("alpha")}`]);
   });
 
-  it("a launch that never reached the agent leaves a workspace it did not wake alone and says nothing about it", async () => {
+  it.runIf(CLOUD_ON)("a launch that never reached the agent leaves a workspace it did not wake alone and says nothing about it", async () => {
     const agent = bornDeadAgent(prompt => `re: ${prompt}`);
     await h.restartHost({ claude: agent.adapter });
     await h.run("new", "alpha");
@@ -694,7 +701,7 @@ describe("wsp verbs over the host: prompts, answers and what a turn prints", () 
     expect((await h.rt.workspaces.get(alpha.id)).phase).toBe("running");
   });
 
-  it("a launch that dies on a running machine whose daemon is dark leaves that machine up: an unreachable machine is not one this launch woke", async () => {
+  it.runIf(CLOUD_ON)("a launch that dies on a running machine whose daemon is dark leaves that machine up: an unreachable machine is not one this launch woke", async () => {
     const agent = bornDeadAgent(prompt => `re: ${prompt}`);
     await h.restartHost({ claude: agent.adapter });
     await h.run("new", "alpha");

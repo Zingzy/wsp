@@ -32,7 +32,7 @@ describe("help", () => {
     setup();
     // The sentence lives on the flag's own row, which is what wsp init --help prints, not on the front page.
     expect(SHARED_FLAGS.find(f => f.name === "yes")!.says).toContain(
-      "a login with a browser or device sign-in, or one held in the Keychain, is left to the first time you need it on the workspace unless a saved recipe answered copy, so macOS has nothing to ask either and the build waits on nobody",
+      "a login with a browser or device sign-in, or one held in the Keychain, is left to the first time you need it on the machine unless a saved recipe answered copy, so macOS has nothing to ask either and the build waits on nobody",
     );
   });
 });

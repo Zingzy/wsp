@@ -30,7 +30,7 @@ const usage = (sentence: string): Error => Object.assign(new Error(sentence), { 
 /** The project a target holds, which a project's skill needs. */
 function theProject(on: AgentsOn): string {
   const project = projectOf(on);
-  if (project === undefined) throw usage("A project's skill goes in from a workspace of that project, or from its computer's page.");
+  if (project === undefined) throw usage("A project's skill goes in from a thread of that project, or from its computer's page.");
   return project;
 }
 

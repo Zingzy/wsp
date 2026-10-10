@@ -276,7 +276,7 @@ export interface RulesArea {
   readonly leadActsOn: (record: WorkspaceLike, caller: Caller | undefined) => string | undefined;
   readonly talksToItsTree: (caller: Caller | undefined) => boolean;
   readonly refusalFor: (record: WorkspaceLike | undefined, caller: Caller | undefined) => string | undefined;
-  readonly refuseRelayed: (record: WorkspaceLike | undefined, caller: Caller | undefined, act?: AcrossAct) => void;
+  readonly refuseRelayed: (record: WorkspaceLike | undefined, caller: Caller | undefined, act?: AcrossAct, thread?: string) => void;
   readonly refuseNamed: (workspaceId: string, caller: Caller | undefined) => void;
   readonly held: () => LiveWorkspace[];
   readonly listedFor: (caller: Caller | undefined) => LiveWorkspace[];
@@ -466,8 +466,8 @@ export interface BootArea {
   readonly rereadHeld: (id: string, by: GoneSeenBy) => Promise<void>;
   readonly hydrateWorkspace: (raw: unknown, seen?: FoundMachine) => Promise<LiveWorkspace | undefined>;
   readonly ready: () => Promise<void>;
-  readonly entryOf: (id: string, origin?: Caller, o?: { now?: true; act?: AcrossAct }) => Promise<LiveWorkspace>;
-  readonly childOf: (lead: LiveWorkspace, ref: string, origin?: Caller) => Promise<LiveWorkspace>;
+  readonly entryOf: (id: string, origin?: Caller, o?: { now?: true; act?: AcrossAct; thread?: string }) => Promise<LiveWorkspace>;
+  readonly childOf: (lead: LiveWorkspace, ref: string, origin?: Caller, threads?: { lead?: string; child?: string }) => Promise<LiveWorkspace>;
   readonly reachesRow: (row: { threadId?: string; workspaceId: string }, caller: Caller | undefined, talk?: TreeTalk) => boolean;
   readonly entryOfRow: (row: { threadId?: string; workspaceId: string }, origin: Caller | undefined, talk?: TreeTalk) => Promise<LiveWorkspace | undefined>;
   readonly listedRows: (held: readonly (Map<string, SessionEntry> extends Map<string, infer V> ? V : never)[]) => SessionView[];

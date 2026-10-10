@@ -364,6 +364,8 @@ describe("a slash command that works only in the CLI's own terminal", () => {
     const local = { kind: "local" as const };
     expect(signInRoad(local)).toBe(`sign in from a terminal on ${THIS_COMPUTER}`);
     expect(signInRoad(cloud)).toBe("sign this workspace in from the Workspace panel");
+    // A thread in a project's folder on a box signs in where it runs, as one on this computer does.
+    expect(signInRoad({ kind: "place" })).toBe("sign in from a terminal on the computer the thread runs on");
     // A record from before kinds existed is a provider fork, so it reads the machine's road here too.
     expect(signInRoad({})).toBe(signInRoad(cloud));
     for (const view of [cloud, local, {}]) {

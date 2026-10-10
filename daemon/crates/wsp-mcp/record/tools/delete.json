@@ -1,21 +1,17 @@
 {
   "cloudOff": {
     "name": "delete",
-    "description": "Takes a thread on this computer away, named by thread: its turns and checkpoints go, and where it ran in a worktree wsp made, that worktree goes with every thread in it, refused over files no commit holds; the project folder is never touched. Named by workspace, a workspace on a box goes as before: its machine is deleted at the provider and its record and threads dropped from this computer and the person's sidebar, and everything on that machine's disk that was not exported or pushed goes with it. Called without confirm it deletes nothing and answers with what would go, which is the line to put to the person.",
+    "description": "Takes a thread away, named by thread: its turns and checkpoints go, and where it ran in a worktree wsp made, that worktree goes with every thread in it, refused over files no commit holds; the project folder is never touched. Called without confirm it deletes nothing and answers with what would go, which is the line to put to the person.",
     "inputSchema": {
       "type": "object",
       "properties": {
         "thread": {
           "type": "string",
-          "description": "a thread on this computer, by its id or a prefix that names one"
-        },
-        "workspace": {
-          "type": "string",
-          "description": "the workspace's name, or its id when two share a name"
+          "description": "the thread, by its id or a prefix of it that names one"
         },
         "confirm": {
           "type": "boolean",
-          "description": "true deletes the machine; absent or false answers with what would go and deletes nothing, so a person can be asked first"
+          "description": "true deletes it; absent or false answers with what would go and deletes nothing, so a person can be asked first"
         }
       },
       "additionalProperties": false,
@@ -59,13 +55,13 @@
   },
   "cloudOn": {
     "name": "delete",
-    "description": "Takes a thread on this computer away, named by thread: its turns and checkpoints go, and where it ran in a worktree wsp made, that worktree goes with every thread in it, refused over files no commit holds; the project folder is never touched. Named by workspace, a workspace on a box goes as before: its machine is deleted at the provider and its record and threads dropped from this computer and the person's sidebar, and everything on that machine's disk that was not exported or pushed goes with it. Called without confirm it deletes nothing and answers with what would go, which is the line to put to the person.",
+    "description": "Takes a thread away, named by thread: its turns and checkpoints go, and where it ran in a worktree wsp made, that worktree goes with every thread in it, refused over files no commit holds; the project folder is never touched. Named by workspace, a workspace goes as before: its machine is deleted at the provider and its record and threads dropped from this computer and the person's sidebar, and everything on that machine's disk that was not exported or pushed goes with it. Called without confirm it deletes nothing and answers with what would go, which is the line to put to the person.",
     "inputSchema": {
       "type": "object",
       "properties": {
         "thread": {
           "type": "string",
-          "description": "a thread on this computer, by its id or a prefix that names one"
+          "description": "the thread, by its id or a prefix of it that names one"
         },
         "workspace": {
           "type": "string",
@@ -73,7 +69,7 @@
         },
         "confirm": {
           "type": "boolean",
-          "description": "true deletes the machine; absent or false answers with what would go and deletes nothing, so a person can be asked first"
+          "description": "true deletes it; absent or false answers with what would go and deletes nothing, so a person can be asked first"
         }
       },
       "additionalProperties": false,

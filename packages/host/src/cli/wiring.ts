@@ -115,7 +115,7 @@ export function localWiring(
     },
     why => {
       const last = why.split("\n").map(l => l.trim()).filter(l => l !== "").at(-1) ?? why;
-      return cappedLine(`the daemon for this computer's workspace did not start, so its terminal, files and processes have nothing to dial: ${last}`);
+      return cappedLine(`the daemon for this computer did not start, so its terminal, files and processes have nothing to dial: ${last}`);
     },
   );
   return {
@@ -142,7 +142,7 @@ export function localWiring(
       // A dial that lands while the host is closing must leave no socket behind: a listening one keeps this process up.
       if (shutting) {
         await started.close().catch(() => {});
-        throw new Error("this host is closing; its local workspace has no daemon to dial");
+        throw new Error("this host is closing; this computer's daemon is not there to dial");
       }
       return started.road;
     },

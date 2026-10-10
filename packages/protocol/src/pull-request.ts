@@ -353,7 +353,7 @@ export function childPushedLine(branch: string): string {
 
 /** What a merge, a fix or a pull request's page is refused with on a workspace with no pull request read. */
 export function noPullRequestRefusal(workspace: string): string {
-  return `${workspace} has no pull request: bring the work back first`;
+  return `${workspace} has no pull request: push its branch and open one with gh pr create first`;
 }
 
 /** A check a fix names that the pull request does not have, with the ones it has. */

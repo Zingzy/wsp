@@ -1,17 +1,17 @@
 {
   "cloudOff": {
     "name": "merge_in",
-    "description": "Merges a child workspace's branch into its lead's copy with a merge commit, so the lead's history shows each child landing: fetched from the project's remote, or from the child's own folder where the project has none and both copies sit on this computer. The lead is woken first where it sleeps. A lead with changes no commit holds is refused first with the files named, and a merge that conflicts is taken back at once and answered with the files, the lead's copy left exactly as it was; fix with child hands those to the lead's agent. Refused, naming the thread, while a turn runs on the lead in any thread but the asking one (a lead's thread merges from inside its own turn), for a workspace that is not the lead's child, and for a thread merging into any workspace but its own. Nothing is pushed.",
+    "description": "Merges a child thread's branch into the folder its lead works in with a merge commit, so the lead's history shows each child landing: fetched from the project's remote, or from the child's own folder where the project has none and both sit on this computer. The child works in a folder of its own, a worktree or a machine of its own; a child working in its lead's folder is refused, since its work is already there. The lead's machine is woken first where it sleeps. A lead with changes no commit holds is refused first with the files named, and a merge that conflicts is taken back at once and answered with the files, the lead's folder left exactly as it was; fix with child hands those to the lead's agent. Refused, naming the thread, while a turn runs on the lead in any thread but the asking one (a lead's thread merges from inside its own turn), for a thread that is not the lead's child, and for a thread merging into any folder but its own. Nothing is pushed.",
     "inputSchema": {
       "type": "object",
       "properties": {
         "lead": {
           "type": "string",
-          "description": "the workspace's name, or its id when two share a name"
+          "description": "the thread, by its id or a prefix of it that names one, as threads lists them"
         },
         "child": {
           "type": "string",
-          "description": "the child workspace whose branch is merged in, by name or id"
+          "description": "the child thread whose branch is merged in, by its id or a prefix of it"
         }
       },
       "required": [
@@ -67,17 +67,17 @@
   },
   "cloudOn": {
     "name": "merge_in",
-    "description": "Merges a child workspace's branch into its lead's copy with a merge commit, so the lead's history shows each child landing: fetched from the project's remote, or from the child's own folder where the project has none and both copies sit on this computer. The lead is woken first where it sleeps. A lead with changes no commit holds is refused first with the files named, and a merge that conflicts is taken back at once and answered with the files, the lead's copy left exactly as it was; fix with child hands those to the lead's agent. Refused, naming the thread, while a turn runs on the lead in any thread but the asking one (a lead's thread merges from inside its own turn), for a workspace that is not the lead's child, and for a thread merging into any workspace but its own. Nothing is pushed.",
+    "description": "Merges a child thread's branch into the folder its lead works in with a merge commit, so the lead's history shows each child landing: fetched from the project's remote, or from the child's own folder where the project has none and both sit on this computer. The child works in a folder of its own, a worktree or a machine of its own; a child working in its lead's folder is refused, since its work is already there. The lead's machine is woken first where it sleeps. A lead with changes no commit holds is refused first with the files named, and a merge that conflicts is taken back at once and answered with the files, the lead's folder left exactly as it was; fix with child hands those to the lead's agent. Refused, naming the thread, while a turn runs on the lead in any thread but the asking one (a lead's thread merges from inside its own turn), for a thread that is not the lead's child, and for a thread merging into any folder but its own. Nothing is pushed.",
     "inputSchema": {
       "type": "object",
       "properties": {
         "lead": {
           "type": "string",
-          "description": "the workspace's name, or its id when two share a name"
+          "description": "the thread, by its id or a prefix of it that names one, as threads lists them"
         },
         "child": {
           "type": "string",
-          "description": "the child workspace whose branch is merged in, by name or id"
+          "description": "the child thread whose branch is merged in, by its id or a prefix of it"
         }
       },
       "required": [

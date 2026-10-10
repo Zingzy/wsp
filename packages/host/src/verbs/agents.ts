@@ -20,49 +20,49 @@ import {
 import { usageIs, tool, type Verb, flag, flagList } from "./client.js";
 import { HOST_SIDE_VAULT } from "./workspaces-help.js";
 import { asText, ACCESS_IN_WORDS, confirmed } from "./io.js";
-import { aimedUsage, agentsTarget, projectAsked, toolsProject, agentsReport, AGENTS_FRAME, reportFacts, agentRowLines, skillRowLines, serverRowLines, toolLines, serverToolsOf, serverChanged, serverValues, serverCommand, serverScope, ServerNameIn, ServerAgentIn, ServerScopeIn, ServerProjectIn, SERVER_CHANGE_WORDS, SERVER_TOOLS_WORDS, toolsAddedLine, addTools, signInHere, signedInLine, searchSkillsSh, skillHitLines, skillShown, shownText, skillAdded, isInLine, addedLine, goneFromLine, turnedInLine, removedLine, skillChanged, turnedLine, SkillNameIn, SkillProjectIn, SKILL_CHANGE_WORDS, AGENT_SET_RESETS, AGENT_SETUP_RESETS, agentDefaultsSet, agentDefaultsLine, defaultAgentSet, defaultAgentLine, envNameOf, agentSetupSet, agentSetupLines, AgentsWorkspaceIn, AgentsOnIn, AGENTS_READ_WORDS } from "./agents-help.js";
+import { aimedUsage, agentsTarget, projectAsked, toolsProject, agentsReport, AGENTS_FRAME, reportFacts, agentRowLines, skillRowLines, serverRowLines, toolLines, serverToolsOf, serverChanged, serverValues, serverCommand, serverScope, ServerNameIn, ServerAgentIn, ServerScopeIn, ServerProjectIn, SERVER_CHANGE_WORDS, SERVER_TOOLS_WORDS, toolsAddedLine, addTools, signInHere, signedInLine, searchSkillsSh, skillHitLines, skillShown, shownText, skillAdded, isInLine, addedLine, goneFromLine, turnedInLine, removedLine, skillChanged, turnedLine, SkillNameIn, SkillProjectIn, SKILL_CHANGE_WORDS, AGENT_SET_RESETS, AGENT_SETUP_RESETS, agentDefaultsSet, agentDefaultsLine, defaultAgentSet, defaultAgentLine, envNameOf, agentSetupSet, agentSetupLines, AgentsThreadIn, AgentsOnIn, AGENTS_READ_WORDS } from "./agents-help.js";
 
 export const AGENT_VERBS: readonly Verb[] = [
   {
     name: "agents",
-    usage: "wsp agents [<workspace>] [--on <computer>]",
-    about: "the coding agents on this computer, a box you added or a workspace: each one's version and the newest out, whether it is signed in there, and whether it carries the wsp tools",
+    usage: "wsp agents [<thread>] [--on <computer>]",
+    about: "the coding agents on this computer, a box you added or where a thread runs: each one's version and the newest out, whether it is signed in there, and whether it carries the wsp tools",
     page: "agent",
     options: { on: { type: "string" } },
     run: async ctx => {
-      if (ctx.args.length > 1) throw usageRefusal("wsp agents takes one workspace at most.", usageIs(ctx));
-      const report = await agentsReport(await ctx.client(), ctx.args[0], flag(ctx.flags, "on"), usageIs(ctx));
+      if (ctx.args.length > 1) throw usageRefusal("wsp agents takes one thread at most.", usageIs(ctx));
+      const report = await agentsReport(await ctx.client(), ctx.args[0], flag(ctx.flags, "on"), usageIs(ctx), "wsp agents");
       ctx.out.emit({ ...reportFacts(report), agents: report.agents }, agentRowLines(report).join("\n"));
       return 0;
     },
     tool: tool({
-      description: `The coding agents the catalog knows, as they stand on one computer or workspace: whether each is on that login's PATH and where, the version its command answers, the newest its vendor publishes as this host last read it (asked of npm, GitHub or the vendor from this host alone, kept a day, never with Newest agent versions off in Settings > Privacy or WSP_UPDATE_CHECK=0) and the version wsp's install pins, its sign-in there (signed in, your key from this host's vault, not signed in, or unknown) and how it stands in the status command's own words (signInDetail), the kind of that login (signInKind: api-key, subscription or oauth) and the plan it names (signInPlan), how a person signs it in, whether its threads there get the wsp tools (one of its MCP config files names the wsp server, or on any computer but the one the app runs on, its launch hands the server over), the vendor's own command that brings it up to the newest where it is older (update, which wsp shows and never runs), and on a computer how the person set it to run there (setup: on or off, the program, the config folder, the launch words and the names of its variables, never a value). ${AGENTS_READ_WORDS}`,
-      input: { workspace: AgentsWorkspaceIn, on: AgentsOnIn },
+      description: `The coding agents the catalog knows, as they stand on one computer or where a thread runs: whether each is on that login's PATH and where, the version its command answers, the newest its vendor publishes as this host last read it (asked of npm, GitHub or the vendor from this host alone, kept a day, never with Newest agent versions off in Settings > Privacy or WSP_UPDATE_CHECK=0) and the version wsp's install pins, its sign-in there (signed in, your key from this host's vault, not signed in, or unknown) and how it stands in the status command's own words (signInDetail), the kind of that login (signInKind: api-key, subscription or oauth) and the plan it names (signInPlan), how a person signs it in, whether its threads there get the wsp tools (one of its MCP config files names the wsp server, or on any computer but the one the app runs on, its launch hands the server over), the vendor's own command that brings it up to the newest where it is older (update, which wsp shows and never runs), and on a computer how the person set it to run there (setup: on or off, the program, the config folder, the launch words and the names of its variables, never a value). ${AGENTS_READ_WORDS}`,
+      input: { thread: AgentsThreadIn, on: AgentsOnIn },
       output: { ...AGENTS_FRAME, agents: z.array(AgentRow) },
-      call: async ({ workspace, on }, deps) => {
-        const report = await agentsReport(await deps.client(), workspace, on, "agents takes a workspace or on, not both");
+      call: async ({ thread, on }, deps) => {
+        const report = await agentsReport(await deps.client(), thread, on, aimedUsage("agents"), "wsp agents");
         return asText(agentRowLines(report).join("\n"), { ...reportFacts(report), agents: report.agents });
       },
     }),
   },
   {
     name: "skills",
-    usage: "wsp skills [<workspace>] [--on <computer>]",
-    about: "the skills on this computer, a box you added or a workspace, each by name with every folder it lives in and which agent loads it from there",
+    usage: "wsp skills [<thread>] [--on <computer>]",
+    about: "the skills on this computer, a box you added or where a thread runs, each by name with every folder it lives in and which agent loads it from there",
     page: "agent",
     options: { on: { type: "string" } },
     run: async ctx => {
-      if (ctx.args.length > 1) throw usageRefusal("wsp skills takes one workspace at most.", usageIs(ctx));
-      const report = await agentsReport(await ctx.client(), ctx.args[0], flag(ctx.flags, "on"), usageIs(ctx));
+      if (ctx.args.length > 1) throw usageRefusal("wsp skills takes one thread at most.", usageIs(ctx));
+      const report = await agentsReport(await ctx.client(), ctx.args[0], flag(ctx.flags, "on"), usageIs(ctx), "wsp skills");
       ctx.out.emit({ ...reportFacts(report), skills: report.skills }, skillRowLines(report).join("\n"));
       return 0;
     },
     tool: tool({
-      description: `Every skill on one computer or workspace, one row per folder name: its description off its SKILL.md, every folder it lives in with the agent whose own folder that is (none for the shared ~/.agents/skills) and where a folder links to, and whether it is the person's own, a project's inside a workspace, or a plugin's. ${AGENTS_READ_WORDS}`,
-      input: { workspace: AgentsWorkspaceIn, on: AgentsOnIn },
+      description: `Every skill on one computer or where a thread runs, one row per folder name: its description off its SKILL.md, every folder it lives in with the agent whose own folder that is (none for the shared ~/.agents/skills) and where a folder links to, and whether it is the person's own, a project's inside a thread, or a plugin's. ${AGENTS_READ_WORDS}`,
+      input: { thread: AgentsThreadIn, on: AgentsOnIn },
       output: { ...AGENTS_FRAME, skills: z.array(SkillRow) },
-      call: async ({ workspace, on }, deps) => {
-        const report = await agentsReport(await deps.client(), workspace, on, "skills takes a workspace or on, not both");
+      call: async ({ thread, on }, deps) => {
+        const report = await agentsReport(await deps.client(), thread, on, aimedUsage("skills"), "wsp skills");
         return asText(skillRowLines(report).join("\n"), { ...reportFacts(report), skills: report.skills });
       },
     }),
@@ -94,79 +94,79 @@ export const AGENT_VERBS: readonly Verb[] = [
   },
   {
     name: "skills show",
-    usage: "wsp skills show <skill> [<workspace>] [--on <computer>] [--project [<name>]]",
-    about: "prints a skill's SKILL.md: one on skills.sh by its <owner>/<repo>/<skill> before it is installed, or one already on this computer, a box you added or a workspace by its name",
+    usage: "wsp skills show <skill> [<thread>] [--on <computer>] [--project [<name>]]",
+    about: "prints a skill's SKILL.md: one on skills.sh by its <owner>/<repo>/<skill> before it is installed, or one already on this computer, a box you added or where a thread runs by its name",
     page: "agent",
     options: { on: { type: "string" }, project: { type: "string", valueWith: "on" } },
     run: async ctx => {
-      const [skill, workspace, ...rest] = ctx.args;
-      if (skill === undefined || rest.length > 0) throw usageRefusal("wsp skills show takes one skill and one workspace at most.", usageIs(ctx));
-      const shown = await skillShown(await ctx.client(), skill, workspace, flag(ctx.flags, "on"), projectAsked(ctx.flags["project"] as string | undefined, workspace, flag(ctx.flags, "on"), usageIs(ctx)), usageIs(ctx));
+      const [skill, thread, ...rest] = ctx.args;
+      if (skill === undefined || rest.length > 0) throw usageRefusal("wsp skills show takes one skill and one thread at most.", usageIs(ctx));
+      const shown = await skillShown(await ctx.client(), skill, thread, flag(ctx.flags, "on"), projectAsked(ctx.flags["project"] as string | undefined, thread, flag(ctx.flags, "on"), usageIs(ctx)), usageIs(ctx), "wsp skills show");
       ctx.out.emit(shown, shownText(shown));
       return 0;
     },
     tool: tool({
-      description: `A skill's SKILL.md as text, its first ${SKILL_PREVIEW_BYTES / 1024} KB and the whole file's size: a skill on skills.sh by its <owner>/<repo>/<skill>, read by the host with nothing installed, or a skill already on one computer or workspace by its name. Nothing in it runs.`,
-      input: { skill: z.string().describe("an <owner>/<repo>/<skill> off skills_search, or the name of a skill skills lists"), workspace: AgentsWorkspaceIn, on: AgentsOnIn, project: SkillProjectIn },
+      description: `A skill's SKILL.md as text, its first ${SKILL_PREVIEW_BYTES / 1024} KB and the whole file's size: a skill on skills.sh by its <owner>/<repo>/<skill>, read by the host with nothing installed, or a skill already on one computer or where a thread runs by its name. Nothing in it runs.`,
+      input: { skill: z.string().describe("an <owner>/<repo>/<skill> off skills_search, or the name of a skill skills lists"), thread: AgentsThreadIn, on: AgentsOnIn, project: SkillProjectIn },
       output: SkillPreview.shape,
-      call: async ({ skill, workspace, on, project }, deps) => {
-        const shown = await skillShown(await deps.client(), skill, workspace, on, projectAsked(project, workspace, on, "skills_show"), aimedUsage("skills_show"));
+      call: async ({ skill, thread, on, project }, deps) => {
+        const shown = await skillShown(await deps.client(), skill, thread, on, projectAsked(project, thread, on, "skills_show"), aimedUsage("skills_show"), "wsp skills show");
         return asText(shownText(shown), shown);
       },
     }),
   },
   {
     name: "skills add",
-    usage: "wsp skills add <skill> [<workspace>] [--on <computer>] [--agent <id>]... [--project [<name>]]",
+    usage: "wsp skills add <skill> [<thread>] [--on <computer>] [--agent <id>]... [--project [<name>]]",
     about: "installs a skill off skills.sh by its <owner>/<repo>/<skill> into the shared skills folder, with a link or a copy for each agent named that does not read that folder; every file is checked first and lands as a plain file that runs nothing",
     page: "agent",
     options: { on: { type: "string" }, agent: { type: "string", multiple: true }, project: { type: "string", valueWith: "on" } },
     run: async ctx => {
-      const [skill, workspace, ...rest] = ctx.args;
-      if (skill === undefined || rest.length > 0) throw usageRefusal("wsp skills add takes one skill and one workspace at most.", usageIs(ctx));
+      const [skill, thread, ...rest] = ctx.args;
+      if (skill === undefined || rest.length > 0) throw usageRefusal("wsp skills add takes one skill and one thread at most.", usageIs(ctx));
       const agents = flagList(ctx.flags, "agent");
-      const added = await skillAdded(await ctx.client(), skill, workspace, flag(ctx.flags, "on"), agents.length > 0 ? agents : undefined, projectAsked(ctx.flags["project"] as string | undefined, workspace, flag(ctx.flags, "on"), usageIs(ctx)), usageIs(ctx));
+      const added = await skillAdded(await ctx.client(), skill, thread, flag(ctx.flags, "on"), agents.length > 0 ? agents : undefined, projectAsked(ctx.flags["project"] as string | undefined, thread, flag(ctx.flags, "on"), usageIs(ctx)), usageIs(ctx), "wsp skills add");
       ctx.out.emit(added, addedLine(skill, added));
       return 0;
     },
     tool: tool({
       description:
-        "Installs one skill off skills.sh on one computer or workspace, as the login it was added with: its files land once in ~/.agents/skills/<name> (the project's .agents/skills with project, from a workspace), and each agent named that does not read that folder gets a link to it or a copy in its own skills folder; with no agent named, every agent whose own folder's home is there gets it. The download is checked whole before anything lands: every path plain and inside the skill, at most 200 files, 1 MB each and 5 MB in all, a SKILL.md at its root; every file lands 0644 and nothing in the skill runs. A skill already there is refused rather than written over.",
+        "Installs one skill off skills.sh on one computer or where a thread runs, as the login it was added with: its files land once in ~/.agents/skills/<name> (the project's .agents/skills with project, from a thread), and each agent named that does not read that folder gets a link to it or a copy in its own skills folder; with no agent named, every agent whose own folder's home is there gets it. The download is checked whole before anything lands: every path plain and inside the skill, at most 200 files, 1 MB each and 5 MB in all, a SKILL.md at its root; every file lands 0644 and nothing in the skill runs. A skill already there is refused rather than written over.",
       input: {
         skill: z.string().describe("the skill's <owner>/<repo>/<skill>, as skills_search answers it"),
-        workspace: AgentsWorkspaceIn,
+        thread: AgentsThreadIn,
         on: AgentsOnIn,
         agent: z.array(z.string()).optional().describe("the catalog ids of the agents to put it in; every agent whose folder is there without it"),
-        project: z.union([z.boolean(), z.string()]).optional().describe("put it in a project rather than the home: true for the workspace's own, or the project's name, as projects lists it, with on"),
+        project: z.union([z.boolean(), z.string()]).optional().describe("put it in a project rather than the home: true for the thread's own, or the project's name, as projects lists it, with on"),
       },
       output: SkillAdded.shape,
-      call: async ({ skill, workspace, on, agent, project }, deps) => {
-        const added = await skillAdded(await deps.client(), skill, workspace, on, agent, projectAsked(project, workspace, on, "skills_add"), aimedUsage("skills_add"));
+      call: async ({ skill, thread, on, agent, project }, deps) => {
+        const added = await skillAdded(await deps.client(), skill, thread, on, agent, projectAsked(project, thread, on, "skills_add"), aimedUsage("skills_add"), "wsp skills add");
         return asText(addedLine(skill, added), added);
       },
     }),
   },
   {
     name: "skills remove",
-    usage: "wsp skills remove <name> [<workspace>] [--on <computer>] [--project [<name>]] [--yes]",
+    usage: "wsp skills remove <name> [<thread>] [--on <computer>] [--project [<name>]] [--yes]",
     about: "removes a skill by its name: every folder it lives in and every link to it, where a link's own folder elsewhere stays",
     page: "agent",
     options: { on: { type: "string" }, project: { type: "string", valueWith: "on" }, yes: { type: "boolean" } },
     run: async ctx => {
-      const [name, workspace, ...rest] = ctx.args;
-      if (name === undefined || rest.length > 0) throw usageRefusal("wsp skills remove takes one skill's name and one workspace at most.", usageIs(ctx));
-      const project = projectAsked(ctx.flags["project"] as string | undefined, workspace, flag(ctx.flags, "on"), usageIs(ctx));
+      const [name, thread, ...rest] = ctx.args;
+      if (name === undefined || rest.length > 0) throw usageRefusal("wsp skills remove takes one skill's name and one thread at most.", usageIs(ctx));
+      const project = projectAsked(ctx.flags["project"] as string | undefined, thread, flag(ctx.flags, "on"), usageIs(ctx));
       if (!(await confirmed(ctx, `Remove the skill ${name}?\nEvery folder it lives in and every link to it go.`, name))) return 1;
-      const removed = await skillChanged(await ctx.client(), "skills.remove", name, workspace, flag(ctx.flags, "on"), project, undefined, usageIs(ctx));
+      const removed = await skillChanged(await ctx.client(), "skills.remove", name, thread, flag(ctx.flags, "on"), project, undefined, usageIs(ctx), "wsp skills remove");
       ctx.out.emit({ removed }, removedLine(name, removed));
       return 0;
     },
     tool: tool({
-      description: `Removes one skill on one computer or workspace by its name, as the login it was added with: every folder skills lists for it and every link to it; a folder a link points to outside the skills folders stays. ${SKILL_CHANGE_WORDS}`,
-      input: { name: SkillNameIn, workspace: AgentsWorkspaceIn, on: AgentsOnIn, project: SkillProjectIn },
+      description: `Removes one skill on one computer or where a thread runs by its name, as the login it was added with: every folder skills lists for it and every link to it; a folder a link points to outside the skills folders stays. ${SKILL_CHANGE_WORDS}`,
+      input: { name: SkillNameIn, thread: AgentsThreadIn, on: AgentsOnIn, project: SkillProjectIn },
       output: { removed: z.array(z.string()) },
-      call: async ({ name, workspace, on, project }, deps) => {
-        const removed = await skillChanged(await deps.client(), "skills.remove", name, workspace, on, projectAsked(project, workspace, on, "skills_remove"), undefined, aimedUsage("skills_remove"));
+      call: async ({ name, thread, on, project }, deps) => {
+        const removed = await skillChanged(await deps.client(), "skills.remove", name, thread, on, projectAsked(project, thread, on, "skills_remove"), undefined, aimedUsage("skills_remove"), "wsp skills remove");
         return asText(removedLine(name, removed), { removed });
       },
     }),
@@ -174,23 +174,23 @@ export const AGENT_VERBS: readonly Verb[] = [
   ...(["disable", "enable"] as const).map(
     (word): Verb => ({
       name: `skills ${word}`,
-      usage: `wsp skills ${word} <name> [<workspace>] [--on <computer>]`,
+      usage: `wsp skills ${word} <name> [<thread>] [--on <computer>]`,
       about: word === "disable" ? "turns a skill off by its name, its SKILL.md renamed SKILL.md.off where it lives, so no agent loads it until it is turned on" : "turns a skill that was turned off on again, its SKILL.md.off renamed back",
       page: "agent",
       options: { on: { type: "string" } },
       run: async ctx => {
-        const [name, workspace, ...rest] = ctx.args;
-        if (name === undefined || rest.length > 0) throw usageRefusal(`wsp skills ${word} takes one skill's name and one workspace at most.`, usageIs(ctx));
-        const paths = await skillChanged(await ctx.client(), "skills.toggle", name, workspace, flag(ctx.flags, "on"), { project: false }, word === "enable", usageIs(ctx));
+        const [name, thread, ...rest] = ctx.args;
+        if (name === undefined || rest.length > 0) throw usageRefusal(`wsp skills ${word} takes one skill's name and one thread at most.`, usageIs(ctx));
+        const paths = await skillChanged(await ctx.client(), "skills.toggle", name, thread, flag(ctx.flags, "on"), { project: false }, word === "enable", usageIs(ctx), `wsp skills ${word}`);
         ctx.out.emit({ paths }, turnedLine(name, word === "enable"));
         return 0;
       },
       tool: tool({
-        description: `Turns one skill ${word === "enable" ? "on again" : "off"} on one computer or workspace by its name, as the login it was added with: its SKILL.md is renamed ${word === "enable" ? "back from SKILL.md.off" : "SKILL.md.off"} in each folder it really lives in, which every link to it follows, and no agent config is edited. A project's skill lives in the repo and is refused. ${SKILL_CHANGE_WORDS}`,
-        input: { name: SkillNameIn, workspace: AgentsWorkspaceIn, on: AgentsOnIn },
+        description: `Turns one skill ${word === "enable" ? "on again" : "off"} on one computer or where a thread runs by its name, as the login it was added with: its SKILL.md is renamed ${word === "enable" ? "back from SKILL.md.off" : "SKILL.md.off"} in each folder it really lives in, which every link to it follows, and no agent config is edited. A project's skill lives in the repo and is refused. ${SKILL_CHANGE_WORDS}`,
+        input: { name: SkillNameIn, thread: AgentsThreadIn, on: AgentsOnIn },
         output: { paths: z.array(z.string()) },
-        call: async ({ name, workspace, on }, deps) => {
-          const paths = await skillChanged(await deps.client(), "skills.toggle", name, workspace, on, { project: false }, word === "enable", aimedUsage(`skills_${word}`));
+        call: async ({ name, thread, on }, deps) => {
+          const paths = await skillChanged(await deps.client(), "skills.toggle", name, thread, on, { project: false }, word === "enable", aimedUsage(`skills_${word}`), `wsp skills ${word}`);
           return asText(turnedLine(name, word === "enable"), { paths });
         },
       }),
@@ -198,38 +198,38 @@ export const AGENT_VERBS: readonly Verb[] = [
   ),
   {
     name: "servers",
-    usage: "wsp servers [<workspace>] [--on <computer>]",
-    about: "the MCP servers the agents on this computer, a box you added or a workspace are set up with: how each is reached, the file it is defined in and its sign-in as its config says it",
+    usage: "wsp servers [<thread>] [--on <computer>]",
+    about: "the MCP servers the agents on this computer, a box you added or where a thread runs are set up with: how each is reached, the file it is defined in and its sign-in as its config says it",
     page: "agent",
     options: { on: { type: "string" } },
     run: async ctx => {
-      if (ctx.args.length > 1) throw usageRefusal("wsp servers takes one workspace at most.", usageIs(ctx));
-      const report = await agentsReport(await ctx.client(), ctx.args[0], flag(ctx.flags, "on"), usageIs(ctx));
+      if (ctx.args.length > 1) throw usageRefusal("wsp servers takes one thread at most.", usageIs(ctx));
+      const report = await agentsReport(await ctx.client(), ctx.args[0], flag(ctx.flags, "on"), usageIs(ctx), "wsp servers");
       ctx.out.emit({ ...reportFacts(report), servers: report.servers }, serverRowLines(report).join("\n"));
       return 0;
     },
     tool: tool({
-      description: `Every MCP server each agent's own config file defines on one computer or workspace, and a workspace's project files: the agent, the file, how it is reached (its command with every value hidden, or its url's host), the names of the variables it sets or reads and never their values, whether the file switches it off, whether wsp's recipe put it there on a box, and its sign-in as the config alone says it: open for a command or a fixed header, unknown for a remote server until something connects. On any computer but the one the app runs on it also lists the wsp server each thread's launch there hands an agent that takes servers on its launch, marked launch, with no file, and never turned off or removed. ${AGENTS_READ_WORDS}`,
-      input: { workspace: AgentsWorkspaceIn, on: AgentsOnIn },
+      description: `Every MCP server each agent's own config file defines on one computer or where a thread runs, and a thread's project files: the agent, the file, how it is reached (its command with every value hidden, or its url's host), the names of the variables it sets or reads and never their values, whether the file switches it off, whether wsp's recipe put it there on a box, and its sign-in as the config alone says it: open for a command or a fixed header, unknown for a remote server until something connects. On any computer but the one the app runs on it also lists the wsp server each thread's launch there hands an agent that takes servers on its launch, marked launch, with no file, and never turned off or removed. ${AGENTS_READ_WORDS}`,
+      input: { thread: AgentsThreadIn, on: AgentsOnIn },
       output: { ...AGENTS_FRAME, servers: z.array(McpRow) },
-      call: async ({ workspace, on }, deps) => {
-        const report = await agentsReport(await deps.client(), workspace, on, "servers takes a workspace or on, not both");
+      call: async ({ thread, on }, deps) => {
+        const report = await agentsReport(await deps.client(), thread, on, aimedUsage("servers"), "wsp servers");
         return asText(serverRowLines(report).join("\n"), { ...reportFacts(report), servers: report.servers });
       },
     }),
   },
   {
     name: "agents signin",
-    usage: "wsp agents signin <agent> [<workspace>]",
-    about: "signs an agent in on this computer or in a workspace, its own sign-in run there and shown in this terminal; a box you added takes wsp add <computer> --sign-in <agent>",
+    usage: "wsp agents signin <agent> [<thread>]",
+    about: "signs an agent in on this computer or where a thread runs, its own sign-in run there and shown in this terminal; a box you added takes wsp add <computer> --sign-in <agent>",
     page: "agent",
     options: {},
     cliOnly: "runs the agent's own sign-in in a terminal a person types into, which is where the ones that ask them to pick a provider are answered",
     run: async ctx => {
-      const [agent, workspace, ...rest] = ctx.args;
-      if (agent === undefined || rest.length > 0) throw usageRefusal("wsp agents signin takes one agent and one workspace at most.", usageIs(ctx));
-      const target = await agentsTarget(await ctx.client(), workspace, undefined, usageIs(ctx));
-      const where = workspace ?? THIS_COMPUTER;
+      const [agent, thread, ...rest] = ctx.args;
+      if (agent === undefined || rest.length > 0) throw usageRefusal("wsp agents signin takes one agent and one thread at most.", usageIs(ctx));
+      const target = await agentsTarget(await ctx.client(), thread, undefined, usageIs(ctx), "wsp agents signin");
+      const where = thread === undefined ? THIS_COMPUTER : `thread ${thread}`;
       const answer = await signInHere(ctx, target, { agent }, where);
       ctx.io.log(signedInLine(agentName(agent), where, answer));
       return answer.signedIn ? 0 : 1;
@@ -417,19 +417,19 @@ export const AGENT_VERBS: readonly Verb[] = [
   },
   {
     name: "servers signin",
-    usage: "wsp servers signin <name> --agent <id> [<workspace>] [--on <computer>]",
+    usage: "wsp servers signin <name> --agent <id> [<thread>] [--on <computer>]",
     about: "signs one MCP server in by its agent's own command for it, run where the server is set up and shown in this terminal",
     page: "agent",
     options: { agent: { type: "string" }, on: { type: "string" } },
     cliOnly: "runs the harness's own sign-in for the server in a terminal a person types into, where the page's answer is pasted",
     run: async ctx => {
-      const [name, workspace, ...rest] = ctx.args;
+      const [name, thread, ...rest] = ctx.args;
       const agent = flag(ctx.flags, "agent");
-      if (name === undefined || rest.length > 0) throw usageRefusal("wsp servers signin takes one server's name and one workspace at most.", usageIs(ctx));
+      if (name === undefined || rest.length > 0) throw usageRefusal("wsp servers signin takes one server's name and one thread at most.", usageIs(ctx));
       if (agent === undefined) throw usageRefusal("wsp servers signin needs --agent, the agent whose config names the server, as wsp servers shows it.", usageIs(ctx));
       const on = flag(ctx.flags, "on");
-      const target = await agentsTarget(await ctx.client(), workspace, on, usageIs(ctx));
-      const where = workspace ?? on ?? THIS_COMPUTER;
+      const target = await agentsTarget(await ctx.client(), thread, on, usageIs(ctx), "wsp servers signin");
+      const where = thread === undefined ? (on ?? THIS_COMPUTER) : `thread ${thread}`;
       const answer = await signInHere(ctx, target, { agent, name }, where);
       ctx.io.log(signedInLine(name, where, answer));
       return answer.signedIn ? 0 : 1;
@@ -437,17 +437,17 @@ export const AGENT_VERBS: readonly Verb[] = [
   },
   {
     name: "servers tools",
-    usage: "wsp servers tools <name> --agent <id> [<workspace>] [--on <computer>] [--project <name>] [--refresh]",
+    usage: "wsp servers tools <name> --agent <id> [<thread>] [--on <computer>] [--project <name>] [--refresh]",
     about: "starts one MCP server once where it is set up and lists its tools with their descriptions, and says whether it needs a sign-in",
     page: "agent",
     options: { agent: { type: "string" }, on: { type: "string" }, project: { type: "string", valueWith: "on" }, refresh: { type: "boolean" } },
     run: async ctx => {
-      const [name, workspace, ...rest] = ctx.args;
+      const [name, thread, ...rest] = ctx.args;
       const agent = flag(ctx.flags, "agent");
-      if (name === undefined || rest.length > 0) throw usageRefusal("wsp servers tools takes one server's name and one workspace at most.", usageIs(ctx));
+      if (name === undefined || rest.length > 0) throw usageRefusal("wsp servers tools takes one server's name and one thread at most.", usageIs(ctx));
       if (agent === undefined) throw usageRefusal("wsp servers tools needs --agent, the agent whose config names the server, as wsp servers shows it.", usageIs(ctx));
-      const project = toolsProject(ctx.flags["project"] as string | undefined, workspace, flag(ctx.flags, "on"), usageIs(ctx));
-      const answer = await serverToolsOf(await ctx.client(), name, agent, workspace, flag(ctx.flags, "on"), ctx.flags["refresh"] === true, usageIs(ctx), project);
+      const project = toolsProject(ctx.flags["project"] as string | undefined, thread, flag(ctx.flags, "on"), usageIs(ctx));
+      const answer = await serverToolsOf(await ctx.client(), name, agent, thread, flag(ctx.flags, "on"), ctx.flags["refresh"] === true, usageIs(ctx), "wsp servers tools", project);
       ctx.out.emit(answer, toolLines(name, answer).join("\n"));
       return 0;
     },
@@ -456,89 +456,89 @@ export const AGENT_VERBS: readonly Verb[] = [
       input: {
         name: z.string().describe("the server's name, as servers lists it"),
         agent: z.string().describe("the catalog id of the agent whose config names it, as servers lists it"),
-        workspace: AgentsWorkspaceIn,
+        thread: AgentsThreadIn,
         on: AgentsOnIn,
-        project: z.string().optional().describe("the project on that computer whose server it is, by the name projects lists, with on; a workspace finds its own project's servers"),
+        project: z.string().optional().describe("the project on that computer whose server it is, by the name projects lists, with on; a thread finds its own project's servers"),
         refresh: z.boolean().optional().describe("start it again even where an answer from the last three minutes stands"),
       },
       output: ServerToolsAnswer.shape,
-      call: async ({ name, agent, workspace, on, project, refresh }, deps) => {
+      call: async ({ name, agent, thread, on, project, refresh }, deps) => {
         const usage = aimedUsage("servers_tools");
-        const answer = await serverToolsOf(await deps.client(), name, agent, workspace, on, refresh === true, usage, toolsProject(project, workspace, on, usage));
+        const answer = await serverToolsOf(await deps.client(), name, agent, thread, on, refresh === true, usage, "wsp servers tools", toolsProject(project, thread, on, usage));
         return asText(toolLines(name, answer).join("\n"), answer);
       },
     }),
   },
   {
     name: "servers add",
-    usage: "wsp servers add <name> [<workspace>] [--on <computer>] --agent <id> (--command \"<line>\" | --url <address> [--header <name>=<VARIABLE>]...) [--env <NAME>]... [--project [<name>]]",
+    usage: "wsp servers add <name> [<thread>] [--on <computer>] --agent <id> (--command \"<line>\" | --url <address> [--header <name>=<VARIABLE>]...) [--env <NAME>]... [--project [<name>]]",
     about: "writes one MCP server into an agent's own config: a command with its arguments and variables, or an address with its headers, each value read off this terminal's environment and written into that file on this computer, a variable's value kept in the vault as well; on any other the file names a variable and the value goes to the vault, an argument or the address naming a variable as ${NAME} keeps that name there, and an agent that reads no variable there refuses it",
     page: "agent",
     options: { agent: { type: "string" }, on: { type: "string" }, command: { type: "string" }, env: { type: "string", multiple: true }, url: { type: "string" }, header: { type: "string", multiple: true }, project: { type: "string", valueWith: "on" } },
     run: async ctx => {
-      const [name, workspace, ...rest] = ctx.args;
+      const [name, thread, ...rest] = ctx.args;
       const agent = flag(ctx.flags, "agent");
-      if (name === undefined || rest.length > 0) throw usageRefusal("wsp servers add takes one server's name and one workspace at most.", usageIs(ctx));
+      if (name === undefined || rest.length > 0) throw usageRefusal("wsp servers add takes one server's name and one thread at most.", usageIs(ctx));
       if (agent === undefined) throw usageRefusal("wsp servers add needs --agent, the agent whose config takes the server.", usageIs(ctx));
       const command = flag(ctx.flags, "command");
       const url = flag(ctx.flags, "url");
       const values = serverValues(ctx.env, flagList(ctx.flags, "env"), flagList(ctx.flags, "header"), usageIs(ctx));
-      const project = projectAsked(ctx.flags["project"] as string | undefined, workspace, flag(ctx.flags, "on"), usageIs(ctx));
+      const project = projectAsked(ctx.flags["project"] as string | undefined, thread, flag(ctx.flags, "on"), usageIs(ctx));
       const body = { agent, name, ...serverCommand(command, usageIs(ctx)), ...(url !== undefined ? { url } : {}), ...values, ...(project.project ? { project: true } : {}) };
-      const added = await serverChanged(await ctx.client(), "servers.add", body, workspace, flag(ctx.flags, "on"), usageIs(ctx), project.name);
+      const added = await serverChanged(await ctx.client(), "servers.add", body, thread, flag(ctx.flags, "on"), usageIs(ctx), "wsp servers add", project.name);
       ctx.out.emit(added, isInLine(name, added.file));
       return 0;
     },
     tool: tool({
-      description: `Writes one MCP server into one agent's own config on one computer or workspace, the project's file with project from a workspace: a command with its arguments and the variables it is given, or an address with its headers. Every value is read by name off the environment the wsp tools run with and never goes into an answer: on this computer it goes into that file, a variable's value into the vault as well, and on any other the file names a variable and the value goes to the vault, which hands it to each turn there: on a computer the person added only to Claude Code and Codex, in that turn's launch and never its environment, and not to a Codex server whose own config reads its token through its bearer variable; elsewhere in the turn's environment. A header travels as WSP_MCP_<SERVER>_<HEADER>, and a Codex copy reads an Authorization: Bearer header whole as WSP_MCP_<SERVER>_AUTHORIZATION_BEARER, which the vault fills from the token it keeps alone under WSP_MCP_<SERVER>_AUTHORIZATION. An argument or the address may name one of those variables as \${NAME}, an address's variables being only the ones it names: on this computer the value is put in place, on any other the name stays in the agent's own syntax, and an agent that reads no variable there is refused. A name already in the file is refused rather than written over. ${SERVER_CHANGE_WORDS}`,
+      description: `Writes one MCP server into one agent's own config on one computer or where a thread runs, the project's file with project from a thread: a command with its arguments and the variables it is given, or an address with its headers. Every value is read by name off the environment the wsp tools run with and never goes into an answer: on this computer it goes into that file, a variable's value into the vault as well, and on any other the file names a variable and the value goes to the vault, which hands it to each turn there: on a computer the person added only to Claude Code and Codex, in that turn's launch and never its environment, and not to a Codex server whose own config reads its token through its bearer variable; elsewhere in the turn's environment. A header travels as WSP_MCP_<SERVER>_<HEADER>, and a Codex copy reads an Authorization: Bearer header whole as WSP_MCP_<SERVER>_AUTHORIZATION_BEARER, which the vault fills from the token it keeps alone under WSP_MCP_<SERVER>_AUTHORIZATION. An argument or the address may name one of those variables as \${NAME}, an address's variables being only the ones it names: on this computer the value is put in place, on any other the name stays in the agent's own syntax, and an agent that reads no variable there is refused. A name already in the file is refused rather than written over. ${SERVER_CHANGE_WORDS}`,
       input: {
         name: z.string().describe("what to call the server in the agent's config"),
         agent: z.string().describe("the catalog id of the agent whose config takes it"),
-        workspace: AgentsWorkspaceIn,
+        thread: AgentsThreadIn,
         on: AgentsOnIn,
         command: z.string().optional().describe("the line the server runs, the program and its arguments as a shell would split them, nothing expanded; or url"),
         env: z.array(z.string()).optional().describe("variables the server is given, or the address names as ${NAME}, each by its name, its value read off the same name in the environment the wsp tools run with; an argument or the address may name one as ${NAME}"),
         url: z.string().optional().describe("the server's https address; or command"),
         header: z.array(z.string()).optional().describe("headers sent to the address, each <name>=<VARIABLE>, its value read off that variable in the environment the wsp tools run with"),
-        project: z.union([z.boolean(), z.string()]).optional().describe("put it in a project's file rather than the agent's own: true for the workspace's own project, or the project's name, as projects lists it, with on"),
+        project: z.union([z.boolean(), z.string()]).optional().describe("put it in a project's file rather than the agent's own: true for the thread's own project, or the project's name, as projects lists it, with on"),
       },
       output: { file: z.string() },
-      call: async ({ name, agent, workspace, on, command, env, url, header, project }, deps) => {
+      call: async ({ name, agent, thread, on, command, env, url, header, project }, deps) => {
         const usage = aimedUsage("servers_add");
         const values = serverValues(deps.env, env ?? [], header ?? [], usage);
-        const asked = projectAsked(project, workspace, on, usage);
+        const asked = projectAsked(project, thread, on, usage);
         const body = { agent, name, ...serverCommand(command, usage), ...(url !== undefined ? { url } : {}), ...values, ...(asked.project ? { project: true } : {}) };
-        const added = await serverChanged(await deps.client(), "servers.add", body, workspace, on, usage, asked.name);
+        const added = await serverChanged(await deps.client(), "servers.add", body, thread, on, usage, "wsp servers add", asked.name);
         return asText(isInLine(name, added.file), added);
       },
     }),
   },
   {
     name: "servers remove",
-    usage: "wsp servers remove <name> [<workspace>] [--on <computer>] --agent <id> [--scope <user|home|project>] [--project [<name>]] [--yes]",
+    usage: "wsp servers remove <name> [<thread>] [--on <computer>] --agent <id> [--scope <user|home|project>] [--project [<name>]] [--yes]",
     about: "takes one MCP server's entry out of an agent's own config, every other line of the file as it was, and, once no agent's config on this computer lists that server, frees the vault's values kept for it that no other server holds",
     page: "agent",
     options: { agent: { type: "string" }, on: { type: "string" }, scope: { type: "string" }, project: { type: "string", valueWith: "on" }, yes: { type: "boolean" } },
     run: async ctx => {
-      const [name, workspace, ...rest] = ctx.args;
+      const [name, thread, ...rest] = ctx.args;
       const agent = flag(ctx.flags, "agent");
-      if (name === undefined || rest.length > 0) throw usageRefusal("wsp servers remove takes one server's name and one workspace at most.", usageIs(ctx));
+      if (name === undefined || rest.length > 0) throw usageRefusal("wsp servers remove takes one server's name and one thread at most.", usageIs(ctx));
       if (agent === undefined) throw usageRefusal("wsp servers remove needs --agent, the agent whose config names the server, as wsp servers shows it.", usageIs(ctx));
-      const project = projectAsked(ctx.flags["project"] as string | undefined, workspace, flag(ctx.flags, "on"), usageIs(ctx));
+      const project = projectAsked(ctx.flags["project"] as string | undefined, thread, flag(ctx.flags, "on"), usageIs(ctx));
       const scope = serverScope(flag(ctx.flags, "scope"), usageIs(ctx), project);
       if (!(await confirmed(ctx, `Remove ${name} from the ${agent} config?\nEvery other line of the file stays.`, name))) return 1;
-      const removed = await serverChanged(await ctx.client(), "servers.remove", { agent, name, ...scope }, workspace, flag(ctx.flags, "on"), usageIs(ctx), project.name);
+      const removed = await serverChanged(await ctx.client(), "servers.remove", { agent, name, ...scope }, thread, flag(ctx.flags, "on"), usageIs(ctx), "wsp servers remove", project.name);
       ctx.out.emit(removed, goneFromLine(name, removed.file));
       return 0;
     },
     tool: tool({
-      description: `Takes one MCP server's entry out of one agent's own config on one computer or workspace, in the scope servers lists it under, every other server and line of the file as it was, and, once no agent's config on this computer lists that server, frees the vault's values kept for it that no other server holds. ${SERVER_CHANGE_WORDS}`,
-      input: { name: ServerNameIn, agent: ServerAgentIn, workspace: AgentsWorkspaceIn, on: AgentsOnIn, scope: ServerScopeIn, project: ServerProjectIn },
+      description: `Takes one MCP server's entry out of one agent's own config on one computer or where a thread runs, in the scope servers lists it under, every other server and line of the file as it was, and, once no agent's config on this computer lists that server, frees the vault's values kept for it that no other server holds. ${SERVER_CHANGE_WORDS}`,
+      input: { name: ServerNameIn, agent: ServerAgentIn, thread: AgentsThreadIn, on: AgentsOnIn, scope: ServerScopeIn, project: ServerProjectIn },
       output: { file: z.string() },
-      call: async ({ name, agent, workspace, on, scope, project }, deps) => {
+      call: async ({ name, agent, thread, on, scope, project }, deps) => {
         const usage = aimedUsage("servers_remove");
-        const asked = projectAsked(project, workspace, on, usage);
-        const removed = await serverChanged(await deps.client(), "servers.remove", { agent, name, ...serverScope(scope, usage, asked) }, workspace, on, usage, asked.name);
+        const asked = projectAsked(project, thread, on, usage);
+        const removed = await serverChanged(await deps.client(), "servers.remove", { agent, name, ...serverScope(scope, usage, asked) }, thread, on, usage, "wsp servers remove", asked.name);
         return asText(goneFromLine(name, removed.file), removed);
       },
     }),
@@ -546,29 +546,29 @@ export const AGENT_VERBS: readonly Verb[] = [
   ...(["disable", "enable"] as const).map(
     (word): Verb => ({
       name: `servers ${word}`,
-      usage: `wsp servers ${word} <name> [<workspace>] [--on <computer>] --agent <id> [--scope <user|home|project>] [--project [<name>]]`,
+      usage: `wsp servers ${word} <name> [<thread>] [--on <computer>] --agent <id> [--scope <user|home|project>] [--project [<name>]]`,
       about: word === "disable" ? "turns one MCP server off by the switch its agent reads, so the agent leaves it out until it is turned on" : "turns an MCP server that was turned off on again",
       page: "agent",
       options: { agent: { type: "string" }, on: { type: "string" }, scope: { type: "string" }, project: { type: "string", valueWith: "on" } },
       run: async ctx => {
-        const [name, workspace, ...rest] = ctx.args;
+        const [name, thread, ...rest] = ctx.args;
         const agent = flag(ctx.flags, "agent");
-        if (name === undefined || rest.length > 0) throw usageRefusal(`wsp servers ${word} takes one server's name and one workspace at most.`, usageIs(ctx));
+        if (name === undefined || rest.length > 0) throw usageRefusal(`wsp servers ${word} takes one server's name and one thread at most.`, usageIs(ctx));
         if (agent === undefined) throw usageRefusal(`wsp servers ${word} needs --agent, the agent whose config names the server, as wsp servers shows it.`, usageIs(ctx));
-        const project = projectAsked(ctx.flags["project"] as string | undefined, workspace, flag(ctx.flags, "on"), usageIs(ctx));
+        const project = projectAsked(ctx.flags["project"] as string | undefined, thread, flag(ctx.flags, "on"), usageIs(ctx));
         const scope = serverScope(flag(ctx.flags, "scope"), usageIs(ctx), project);
-        const changed = await serverChanged(await ctx.client(), "servers.toggle", { agent, name, ...scope, on: word === "enable" }, workspace, flag(ctx.flags, "on"), usageIs(ctx), project.name);
+        const changed = await serverChanged(await ctx.client(), "servers.toggle", { agent, name, ...scope, on: word === "enable" }, thread, flag(ctx.flags, "on"), usageIs(ctx), `wsp servers ${word}`, project.name);
         ctx.out.emit(changed, turnedInLine(name, word === "enable", changed.file));
         return 0;
       },
       tool: tool({
-        description: `Turns one MCP server ${word === "enable" ? "on again" : "off"} in one agent's own config on one computer or workspace, by the switch that agent reads (Codex's enabled line, OpenCode's enabled field, Gemini CLI's mcp.excluded); Claude Code keeps no such switch per server and is refused. ${SERVER_CHANGE_WORDS}`,
-        input: { name: ServerNameIn, agent: ServerAgentIn, workspace: AgentsWorkspaceIn, on: AgentsOnIn, scope: ServerScopeIn, project: ServerProjectIn },
+        description: `Turns one MCP server ${word === "enable" ? "on again" : "off"} in one agent's own config on one computer or where a thread runs, by the switch that agent reads (Codex's enabled line, OpenCode's enabled field, Gemini CLI's mcp.excluded); Claude Code keeps no such switch per server and is refused. ${SERVER_CHANGE_WORDS}`,
+        input: { name: ServerNameIn, agent: ServerAgentIn, thread: AgentsThreadIn, on: AgentsOnIn, scope: ServerScopeIn, project: ServerProjectIn },
         output: { file: z.string() },
-        call: async ({ name, agent, workspace, on, scope, project }, deps) => {
+        call: async ({ name, agent, thread, on, scope, project }, deps) => {
           const usage = aimedUsage(`servers_${word}`);
-          const asked = projectAsked(project, workspace, on, usage);
-          const changed = await serverChanged(await deps.client(), "servers.toggle", { agent, name, ...serverScope(scope, usage, asked), on: word === "enable" }, workspace, on, usage, asked.name);
+          const asked = projectAsked(project, thread, on, usage);
+          const changed = await serverChanged(await deps.client(), "servers.toggle", { agent, name, ...serverScope(scope, usage, asked), on: word === "enable" }, thread, on, usage, `wsp servers ${word}`, asked.name);
           return asText(turnedInLine(name, word === "enable", changed.file), changed);
         },
       }),

@@ -1,7 +1,7 @@
 {
   "cloudOff": {
     "name": "skills_remove",
-    "description": "Removes one skill on one computer or workspace by its name, as the login it was added with: every folder skills lists for it and every link to it; a folder a link points to outside the skills folders stays. The skill wsp writes and a plugin's are always on and are refused; a napping workspace is not woken. The report there reads again at once.",
+    "description": "Removes one skill on one computer or where a thread runs by its name, as the login it was added with: every folder skills lists for it and every link to it; a folder a link points to outside the skills folders stays. The skill wsp writes and a plugin's are always on and are refused; a napping machine is not woken. The report there reads again at once.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -9,20 +9,20 @@
           "type": "string",
           "description": "the skill's name, as skills lists it"
         },
-        "workspace": {
+        "thread": {
           "type": "string",
-          "description": "the workspace to read, by its name, or its id when two share a name; absent reads a computer"
+          "description": "a thread, by its id or a prefix of it, whose computer and project to read; absent reads a computer"
         },
         "on": {
           "type": "string",
-          "description": "the computer to read, by the name computers lists; absent with no workspace is the computer the app runs on"
+          "description": "the computer to read, by the name computers lists; absent with no thread is the computer the app runs on"
         },
         "project": {
           "type": [
             "boolean",
             "string"
           ],
-          "description": "the project's skill of that name rather than the one that is not a project's: true from a workspace, or the project's name, as projects lists it, with on"
+          "description": "the project's skill of that name rather than the one that is not a project's: true with a thread, the thread's own project, or the project's name, as projects lists it, with on"
         }
       },
       "required": [
@@ -56,7 +56,7 @@
   },
   "cloudOn": {
     "name": "skills_remove",
-    "description": "Removes one skill on one computer or workspace by its name, as the login it was added with: every folder skills lists for it and every link to it; a folder a link points to outside the skills folders stays. The skill wsp writes and a plugin's are always on and are refused; a napping workspace is not woken. The report there reads again at once.",
+    "description": "Removes one skill on one computer or where a thread runs by its name, as the login it was added with: every folder skills lists for it and every link to it; a folder a link points to outside the skills folders stays. The skill wsp writes and a plugin's are always on and are refused; a napping machine is not woken. The report there reads again at once.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -64,20 +64,20 @@
           "type": "string",
           "description": "the skill's name, as skills lists it"
         },
-        "workspace": {
+        "thread": {
           "type": "string",
-          "description": "the workspace to read, by its name, or its id when two share a name; absent reads a computer"
+          "description": "a thread, by its id or a prefix of it, whose computer and project to read; absent reads a computer"
         },
         "on": {
           "type": "string",
-          "description": "the computer to read, by the name computers lists; absent with no workspace is the computer the app runs on"
+          "description": "the computer to read, by the name computers lists; absent with no thread is the computer the app runs on"
         },
         "project": {
           "type": [
             "boolean",
             "string"
           ],
-          "description": "the project's skill of that name rather than the one that is not a project's: true from a workspace, or the project's name, as projects lists it, with on"
+          "description": "the project's skill of that name rather than the one that is not a project's: true with a thread, the thread's own project, or the project's name, as projects lists it, with on"
         }
       },
       "required": [

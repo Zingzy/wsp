@@ -1280,7 +1280,7 @@ describe("local workspace", () => {
   it("a host that wired no daemon for this computer says so rather than minting a preview route", async () => {
     const rt = runtime();
     const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
-    await expect(rt.workspaces.daemonReach(ws.id)).rejects.toThrow("wired no daemon for its local workspace");
+    await expect(rt.workspaces.daemonReach(ws.id)).rejects.toThrow("wired no daemon for this computer");
   });
 
   it("the status probe reads the local road: reachable with one wired, unsupported without", async () => {

@@ -152,6 +152,7 @@ const DAEMON_CONTENTS = [
   "5d6d78c548416aae6c65876d3499f0462c47fe2203c534982501a2eab32e7f94",
   "df80acbb03e838c04d4d2de65181fbd28ed47015cd41058773a07249fe883af7",
   "97757fce8a1af0f854aeebb94852334e4be7a749abd8b59d26482e51cb6f5f93",
+  "f11092ebbda4c528bd4264ebe7e541e50941f573227f29a641a6c977b1281385",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -562,7 +563,8 @@ const DAEMON_CONTENTS = [
  * Version 142: A push measured against a base the caller named, as a fork names its lead's branch, refuses the branch
  * the copy's remote starts every copy on with the code on-default-branch, and git.status answers that branch as
  * defaultBranch off the same read, origin/HEAD by the branch's own name, else a main or a master here, so the host and
- * the daemon call one branch the default. */
+ * the daemon call one branch the default.
+ * Version 143: verbs, tools and the skill take a thread, not a workspace. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary

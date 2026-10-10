@@ -2593,7 +2593,7 @@ async fn the_computers_daemon_answers_a_workspaces_files_and_git_for_the_workspa
     assert_eq!((escaped["ok"].as_bool(), escaped["code"].as_str()), (Some(false), Some("outside-root")), "{escaped}");
     // The refusal names the path the frame gave, as the workspace sees it, and not where this computer keeps that
     // workspace's files: the person who asked knows the folder by the one and never by the other.
-    assert_eq!(escaped["error"].as_str(), Some(format!("{at}/escape resolves outside the workspace root").as_str()), "{escaped}");
+    assert_eq!(escaped["error"].as_str(), Some(format!("{at}/escape resolves outside the folders wsp serves here").as_str()), "{escaped}");
     assert!(!escaped["error"].as_str().unwrap_or_default().contains(&root().display().to_string()), "{escaped}");
     // A search takes the same road: the checkout's own files are found, and the link out of the workspace is never
     // walked, listed or read, though the file it names has the word searched for on its first line.

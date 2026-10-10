@@ -255,8 +255,8 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * verb never denies a workspace the listing just showed. `verb` is exec when exec names it, so a thread's refusal
    * speaks of exec; absent, it speaks of starting children, which a run naming a project falls through to. Replies
    * with { workspace }. */
-  z.object({ id: reqId, op: z.literal("workspaces.resolve"), ref: z.string(), verb: z.literal("exec").optional() }),
-  z.object({ id: reqId, op: z.literal("workspaces.get"), workspaceId: z.string() }),
+  z.object({ id: reqId, op: z.literal("workspaces.resolve"), ref: z.string() }),
+  z.object({ id: reqId, op: z.literal("workspaces.get"), workspaceId: z.string(), threadId: z.string().optional() }),
   z.object({ id: reqId, op: z.literal("workspaces.nap"), workspaceId: z.string() }),
   z.object({ id: reqId, op: z.literal("workspaces.wake"), workspaceId: z.string() }),
   /** Starts another daemon for a workspace whose daemon this host owns as a child of its own process, replacing
@@ -292,13 +292,15 @@ const RuntimeOp = z.discriminatedUnion("op", [
   /** The copy's checkout, read again unless the host read it moments ago, and answered as a CheckoutReply. */
   z.object({ id: reqId, op: z.literal("workspaces.checkout"), workspaceId: z.string() }),
   /** Puts one changed file of the copy back as HEAD has it and answers a GitDiscardReply. */
-  z.object({ id: reqId, op: z.literal("workspaces.discard"), workspaceId: z.string(), path: z.string(), check: z.boolean().optional() }),
+  /** threadId, here and on the git and pull request ops after it, is the thread the verb was named by, which a refusal
+   * names in place of the copy. */
+  z.object({ id: reqId, op: z.literal("workspaces.discard"), workspaceId: z.string(), path: z.string(), check: z.boolean().optional(), threadId: z.string().optional() }),
   /** Commits the files named in the copy with the message given, hooks and all, and answers a GitCommitReply; paths
    * absent is every changed file, and an empty list is refused as nothing to commit. */
-  z.object({ id: reqId, op: z.literal("workspaces.commit"), workspaceId: z.string(), message: z.string(), paths: z.array(z.string()).optional() }),
+  z.object({ id: reqId, op: z.literal("workspaces.commit"), workspaceId: z.string(), message: z.string(), paths: z.array(z.string()).optional(), threadId: z.string().optional() }),
   /** A commit message for those files, or every changed file where paths is absent, drafted by the workspace's own
    * agent with no thread and no tool, answered as a CommitDraft. */
-  z.object({ id: reqId, op: z.literal("workspaces.commitDraft"), workspaceId: z.string(), paths: z.array(z.string()).optional() }),
+  z.object({ id: reqId, op: z.literal("workspaces.commitDraft"), workspaceId: z.string(), paths: z.array(z.string()).optional(), threadId: z.string().optional() }),
   /** The workspace's viewed marks, answered as ViewedMarks; with a path, the mark on that file is set against the
    * blob given, or taken off where the blob is null. */
   z.object({ id: reqId, op: z.literal("workspaces.viewed"), workspaceId: z.string(), path: z.string().optional(), blob: z.string().nullable().optional() }),
@@ -334,11 +336,11 @@ const RuntimeOp = z.discriminatedUnion("op", [
   /** Asks the workspace's agent to fix a failed check, named, with its log's failed steps; with no check, updates the
    * copy from its base first and asks it to fix the conflicts where the merge had any. Answered as a FixResult at
    * once, the turn going on without the caller. */
-  z.object({ id: reqId, op: z.literal("workspaces.fix"), workspaceId: z.string(), check: z.string().optional(), child: z.string().optional() }),
+  z.object({ id: reqId, op: z.literal("workspaces.fix"), workspaceId: z.string(), check: z.string().optional(), child: z.string().optional(), threadId: z.string().optional(), childThreadId: z.string().optional() }),
   /** Merges the workspace's pull request by the method named, or the repository's default, only while its head is
    * the commit named in head, which a window sends as the one it drew; absent is the head the host holds, never a
    * fresh read. whenChecksPass arms it to merge once they do. Answered as a MergeResult. */
-  z.object({ id: reqId, op: z.literal("workspaces.merge"), workspaceId: z.string(), method: MergeMethod.optional(), whenChecksPass: z.boolean().optional(), head: z.string().min(1).optional() }),
+  z.object({ id: reqId, op: z.literal("workspaces.merge"), workspaceId: z.string(), method: MergeMethod.optional(), whenChecksPass: z.boolean().optional(), head: z.string().min(1).optional(), threadId: z.string().optional() }),
   /** A workspace started off a GitHub issue or pull request link: the link matched to a project here by its remote
    * (project names one where two match), the text read on this computer, the copy made and, for a pull request, put
    * on its head branch, and a thread opened with the composed task at the agent, model, effort and access given or
@@ -378,18 +380,15 @@ const RuntimeOp = z.discriminatedUnion("op", [
   }),
   /** Posts the draft on the pull request in one call as the person, pinned to the head it was written against, the
    * ticked comments alone. Answered as a ReviewPostResult. The person's act alone. */
-  z.object({ id: reqId, op: z.literal("workspaces.reviewPost"), workspaceId: z.string() }),
+  z.object({ id: reqId, op: z.literal("workspaces.reviewPost"), workspaceId: z.string(), threadId: z.string().optional() }),
   /** Merges the base's latest commits into the copy's branch, answered as a GitUpdateReply: the files that conflict
    * where it could not, the copy left as it was. */
-  z.object({ id: reqId, op: z.literal("workspaces.update"), workspaceId: z.string() }),
+  z.object({ id: reqId, op: z.literal("workspaces.update"), workspaceId: z.string(), threadId: z.string().optional() }),
   /** Merges a child's branch into the lead's copy with a merge commit through the lead's own daemon, answered as a
    * MergeInResult: merged with the commits it brought, merged nothing, or the files it stopped on with the copy left as
    * it was. Refused for a workspace that is not the lead's child and while a turn runs on the lead. */
-  z.object({ id: reqId, op: z.literal("workspaces.mergeIn"), workspaceId: z.string(), child: z.string() }),
+  z.object({ id: reqId, op: z.literal("workspaces.mergeIn"), workspaceId: z.string(), child: z.string(), threadId: z.string().optional(), childThreadId: z.string().optional() }),
   z.object({ id: reqId, op: z.literal("workspaces.delete"), workspaceId: z.string() }),
-  /** Turns the workspace's agents switch on or off and names its caps. Every key left out keeps what the record
-   * holds, so the two flags a person gives on one line never clear the third. */
-  z.object({ id: reqId, op: z.literal("workspaces.agents"), workspaceId: z.string() }).extend(WorkspaceAgents.partial().shape),
   /** Drops a workspace whose machine the provider no longer has: the record, its transcripts and its sessions leave the
    * store and workspace.deleted follows, once twelve reads in a row find the machine gone; nothing is asked of the
    * machine. Refused with the reason (kind "conflict") while any read still finds it: pause it or delete it at the provider first. */
@@ -1035,7 +1034,6 @@ export const DEVICE_OPS: readonly string[] = [
   "workspaces.upgrade",
   "workspaces.rename",
   "workspaces.look",
-  "workspaces.agents",
   "workspaces.delete",
   "workspaces.forget",
   "workspaces.snapshot",

@@ -7,7 +7,7 @@ import { ECOSYSTEM_MODULES } from "@wsp/catalog";
 import { CHILD_TIMED_OUT, INLINE_EXEC_MS, LOCAL_MACHINE_ID } from "@wsp/engine";
 import type { ProjectView, Caller } from "@wsp/protocol";
 import { threadWord, scopeOf } from "@wsp/protocol";
-import { hereDaemonBehindLine, homeShortened, DAEMON_VERSION, folderName, NAME_A_PROJECT_LINE, BRANCH_OR_CWD_LINE, notOnThisComputerLine, cwdOutsideLine, noBranchesLine, notMadeWorktreeLine, OLD_COPY_WORDS, ProjectCopy, WORKTREE_BUSY_LINE, worktreeChangedLine, keptChangedLine, KEPT_RUNNING_LINE, KEPT_ABANDONED_LINE, type WorktreeFolder, type WorktreeSettled, copiesFolder, guestNamesWorkspaceLine, placeBranchLine, refusalLine, runsInFolder, shellLine, workspaceLands, worktreeCommandFailedLine, worktreeCommandRunningLine, worktreeStepWords, worktreeSetupLine, type CarryModule, type WorktreeReport } from "@wsp/protocol";
+import { hereDaemonBehindLine, homeShortened, DAEMON_VERSION, folderName, NAME_A_PROJECT_LINE, BRANCH_OR_CWD_LINE, notOnThisComputerLine, cwdOutsideLine, noBranchesLine, notMadeWorktreeLine, OLD_COPY_WORDS, ProjectCopy, WORKTREE_BUSY_LINE, worktreeChangedLine, keptChangedLine, KEPT_RUNNING_LINE, KEPT_ABANDONED_LINE, type WorktreeFolder, type WorktreeSettled, copiesFolder, guestNamesWorkspaceLine, GUEST_NAMES_FIX, placeBranchLine, refusalLine, runsInFolder, shellLine, workspaceLands, worktreeCommandFailedLine, worktreeCommandRunningLine, worktreeStepWords, worktreeSetupLine, type CarryModule, type WorktreeReport } from "@wsp/protocol";
 import { takenNameAfter } from "@wsp/protocol";
 import type { StartPicksAsked } from "../types/harness.js";
 import { type WorkspaceRecord, type LiveWorkspace, CLONE_MS, folderNamed, NO_COPIER_HERE, lastLineOf } from "../types/wiring.js";
@@ -154,7 +154,7 @@ export function foldersArea(ctx: RuntimeContext): FoldersArea {
     const scope = scopeOf(origin);
     const asking = scope === undefined ? undefined : live.get(scope.workspaceId);
     // A thread on a machine wsp forked has no folder to run beside: it names the workspace it means.
-    if (o.project === undefined && asking !== undefined && !runsInFolder(asking.record.kind)) throw Object.assign(new Error(refusalLine(guestNamesWorkspaceLine, "Name the workspace on the line.")), { kind: "usage" });
+    if (o.project === undefined && asking !== undefined && !runsInFolder(asking.record.kind)) throw Object.assign(new Error(refusalLine(guestNamesWorkspaceLine, GUEST_NAMES_FIX)), { kind: "usage" });
     // A thread on a computer the person joined starts threads on that computer alone, said before the project rule
     // reads the word as absent. A word its own project answers is its own, whatever another computer's is called.
     const own = asking === undefined || asking.record.place === undefined ? undefined : ctx.projectHeld(asking.record.project);

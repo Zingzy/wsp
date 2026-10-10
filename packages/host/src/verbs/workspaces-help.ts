@@ -105,6 +105,10 @@ import {
   StartResult,
   type ReviewVerdict,
   tableName,
+  sharedFolderLine,
+  noProjectLine,
+  READ_PROJECTS_FIX,
+  refusal,
 } from "@wsp/protocol";
 import { gitRootOf } from "../repo-root.js";
 import { type HostClient, pushedFrames, type Out, hostPlatform, flagFor, type SshAsked, type VerbContext, absolutePath, accessWordOf, under, otherVersion, threadIdOf, openedThreadSaid } from "./client.js";
@@ -129,8 +133,8 @@ export async function threads(client: HostClient, workspaceId?: string): Promise
 /** A workspace as a person names it: by id, else by its name when exactly one carries it. The host reads the name off
  * the same list it prints, so a workspace the listing shows is never denied here as absent, and one this caller may
  * not drive is refused in the words of the rule that hides it. */
-export async function workspaceOf(client: HostClient, ref: string, verb?: "exec"): Promise<WorkspaceOut> {
-  const { workspace } = await client.request<{ workspace?: unknown }>("workspaces.resolve", { ref, ...(verb !== undefined ? { verb } : {}) });
+export async function workspaceOf(client: HostClient, ref: string): Promise<WorkspaceOut> {
+  const { workspace } = await client.request<{ workspace?: unknown }>("workspaces.resolve", { ref });
   const read = WorkspaceOut.safeParse(workspace);
   if (!read.success) throw new Error(otherVersion("workspaces.resolve"));
   return read.data;
@@ -167,18 +171,13 @@ export async function threadRows(client: HostClient, within?: string): Promise<T
   const all = await workspaces(client);
   const { sessions } = await client.request<{ sessions: SessionView[] }>("sessions.list", {});
   const stood = new Map(sessions.map(s => [s.workspaceId, s] as const));
-  const rows = foldThreads(sessions).filter(t => {
-    if (within === undefined) return true;
-    const w = all.find(x => x.id === t.workspaceId);
-    const project = stood.get(t.workspaceId)?.project;
-    return project?.id === within || project?.name === within || (w !== undefined && (w.id === within || w.name === within));
-  });
+  const named = (project: { id: string; name: string } | undefined): boolean => project !== undefined && (project.id === within || project.name === within);
+  if (within !== undefined && !sessions.some(s => named(s.project)) && !(await projectsHere(client).catch(() => [])).some(named)) throw refusal(noProjectLine(within), READ_PROJECTS_FIX, "not-found");
+  const rows = foldThreads(sessions).filter(t => within === undefined || named(stood.get(t.workspaceId)?.project));
   const branches = new Map<string, string>();
   return rows.map(t => {
     const workspace = all.find(w => w.id === t.workspaceId);
-    // A thread whose worktree is gone runs its next turn in the folder its record answers now, and is listed there.
-    const moved = workspace?.worktree?.gone === true && t.cwd !== undefined && under(t.cwd, workspace.worktree.path);
-    const folder = (moved ? undefined : t.cwd) ?? workspace?.folder ?? workspace?.project.path ?? "";
+    const folder = threadCwd(t, workspace) ?? workspace?.folder ?? workspace?.project.path ?? "";
     if (!branches.has(folder)) branches.set(folder, (isLocalWorkspace(workspace ?? {}) ? branchHere(folder) : undefined) ?? (workspace?.worktree?.gone === true ? undefined : workspace?.worktree?.branch) ?? "");
     return {
       ...t,
@@ -390,44 +389,45 @@ export async function awake(client: HostClient, workspace: WorkspaceView, action
   return { workspace: woken, woke: MACHINE_DOWN.has(before) && workspaceState({ phase: woken.phase }) === "running" };
 }
 
-/** Why a commit has no message when the workspace's agent drafted none, and what to do instead. */
+/** Why a commit has no message when the thread's agent drafted none, and what to do instead. */
 export const noDraftLine = (note: string | undefined): string => `no message was drafted: ${note ?? "the agent gave none"}`;
 export const NO_DRAFT_FIX = 'Pass one with --message "<message>".';
 
-/** A commit of the files named, or of every changed file, with the message given; without one the workspace's agent
- * drafts it and the draft is said on the line given before the commit is made with it. */
-export async function committed(client: HostClient, workspaceId: string, message: string | undefined, files: string[], say: (line: string) => void): Promise<GitCommitReply> {
+/** A commit of the files named, or of every changed file, with the message given; without one the agent of the thread
+ * named drafts it and the draft is said on the line given before the commit is made with it. */
+export async function committed(client: HostClient, workspaceId: string, message: string | undefined, files: string[], say: (line: string) => void, threadId?: string): Promise<GitCommitReply> {
   const named = files.length > 0 ? { paths: files } : {};
   let text = message;
   if (text === undefined) {
-    const draft = CommitDraft.parse(await client.request("workspaces.commitDraft", { workspaceId, ...named }));
+    const draft = CommitDraft.parse(await client.request("workspaces.commitDraft", { workspaceId, ...named, ...(threadId !== undefined ? { threadId } : {}) }));
     if (draft.message === null) throw usageRefusal(noDraftLine(draft.note), NO_DRAFT_FIX);
     say(draft.message);
     text = draft.message;
   }
-  return GitCommitReply.parse(await client.request("workspaces.commit", { workspaceId, message: text, ...named }));
+  return GitCommitReply.parse(await client.request("workspaces.commit", { workspaceId, message: text, ...named, ...(threadId !== undefined ? { threadId } : {}) }));
 }
 
-/** A fix asked of the host, one road for the command line and the tool. */
-export async function askedToFix(client: HostClient, workspaceId: string, check: string | undefined, child?: string): Promise<FixResult> {
-  const read = FixResult.safeParse(await client.request("workspaces.fix", { workspaceId, ...(check !== undefined ? { check } : {}), ...(child !== undefined ? { child } : {}) }));
+/** A fix asked of the host for the thread named, which the message goes to; one road for the command line and the tool. */
+export async function askedToFix(client: HostClient, workspaceId: string, check: string | undefined, child: { workspaceId: string; threadId: string } | undefined, threadId: string): Promise<FixResult> {
+  const read = FixResult.safeParse(
+    await client.request("workspaces.fix", { workspaceId, ...(check !== undefined ? { check } : {}), ...(child !== undefined ? { child: child.workspaceId, childThreadId: child.threadId } : {}), threadId }),
+  );
   if (!read.success) throw new Error(otherVersion("workspaces.fix"));
   return read.data;
 }
 
 /** A merge of a child into its lead asked of the host, the lead woken first; one road for the command line and the tool. */
-export async function mergedIn(client: HostClient, leadRef: string, child: string, said: (line: string) => void): Promise<MergeInResult> {
-  const lead = await workspaceOf(client, leadRef);
-  const { workspace: awoken } = await awake(client, lead, "merge in", said);
-  return MergeInResult.parse(await client.request("workspaces.mergeIn", { workspaceId: awoken.id, child }));
+export async function mergedIn(client: HostClient, lead: { workspace: WorkspaceOut; threadId: string }, child: { workspaceId: string; threadId: string }, said: (line: string) => void): Promise<MergeInResult> {
+  const { workspace: awoken } = await awake(client, lead.workspace, "merge in", said);
+  return MergeInResult.parse(await client.request("workspaces.mergeIn", { workspaceId: awoken.id, child: child.workspaceId, threadId: lead.threadId, childThreadId: child.threadId }));
 }
 
-/** What a fix reads as: which agent was asked to fix what, with the wait where its computer holds the turn back, or that
- * the update left nothing to fix. */
-export function fixLine(workspace: string, asked: FixResult): string {
-  if (asked.outcome === "updated") return fixNothingLine(workspace, asked.base);
+/** What a fix reads as, opening with the thread asked and naming a child by its own label: which agent was asked to
+ * fix what, with the wait where its computer holds the turn back, or that the update left nothing to fix. */
+export function fixLine(thread: string, asked: FixResult, child?: string): string {
+  if (asked.outcome === "updated") return fixNothingLine(thread, asked.base);
   const agent = agentName(asked.agent);
-  const line = asked.child !== undefined ? fixMergeChildLine(workspace, agent, asked.child) : asked.check !== undefined ? fixAskedLine(workspace, agent, asked.check) : fixConflictsLine(workspace, agent, asked.base);
+  const line = asked.child !== undefined ? fixMergeChildLine(thread, agent, child ?? asked.child) : asked.check !== undefined ? fixAskedLine(thread, agent, asked.check) : fixConflictsLine(thread, agent, asked.base);
   return asked.outcome === "held" && asked.capped !== undefined ? `${line}\n${capWaitLine(asked.capped)}` : line;
 }
 
@@ -446,9 +446,9 @@ export async function reviewStarted(client: HostClient, o: { url?: string; works
 }
 
 /** A review posted, its draft edited first where a verdict or a summary is named. */
-export async function reviewPosted(client: HostClient, workspaceId: string, edits: { verdict?: ReviewVerdict; summary?: string }): Promise<ReviewPostResult> {
+export async function reviewPosted(client: HostClient, workspaceId: string, edits: { verdict?: ReviewVerdict; summary?: string }, threadId: string): Promise<ReviewPostResult> {
   if (edits.verdict !== undefined || edits.summary !== undefined) await client.request("workspaces.reviewDraft", { workspaceId, ...edits });
-  return ReviewPostResult.parse(await client.request("workspaces.reviewPost", { workspaceId }));
+  return ReviewPostResult.parse(await client.request("workspaces.reviewPost", { workspaceId, threadId }));
 }
 
 /** The two lines a start or a review prints: what was made from what, then the thread as the command line's detached
@@ -457,12 +457,36 @@ export function startedLines(started: StartResult, thread: (threadId: string) =>
   return `${START_WORDS.made(started.workspace.name, started.workspace.from)}\n${thread(started.threadId)}`;
 }
 
+/** The two lines a review prints: the reviewer thread first, which review post takes, then what it was made from. */
+export function reviewLines(started: StartResult, thread: (threadId: string) => string = id => openedThreadSaid(id, undefined)): string {
+  return `${thread(started.threadId)}\n${START_WORDS.made(`thread ${threadWord(started.threadId)}`, started.workspace.from)}`;
+}
+
+/** A thread as an answer line opens with it. */
+export const threadLabel = (thread: ThreadView): string => `thread ${threadWord(threadIdOf(thread))}`;
+
+/** The folder a thread works in, as its latest turn ran there; absent where that was a worktree since gone, whose next
+ * turn runs in the folder its record answers now, which is where it is listed and where exec runs. */
+export function threadCwd(t: Pick<ThreadView, "cwd">, workspace: Pick<WorkspaceOut, "worktree"> | undefined): string | undefined {
+  const moved = workspace?.worktree?.gone === true && t.cwd !== undefined && under(t.cwd, workspace.worktree.path);
+  return moved ? undefined : t.cwd;
+}
+
+/** The folder a record holds its checkout in, as a person reads it. */
+export const folderOf = (workspace: WorkspaceOut): string => homeShortened(workspace.folder ?? workspace.project.path, homedir());
+
+/** An answer line with the threads that share the folder under it. */
+export const withShared = (line: string, shared: readonly string[]): string => (shared.length === 0 ? line : `${line}\n${sharedFolderLine(shared.map(threadWord))}`);
+
+/** The field an answer carries for them, absent where none do. */
+export const sharedOf = (shared: readonly string[]): { sharedWith?: string[] } => (shared.length === 0 ? {} : { sharedWith: [...shared] });
+
 /** The verdict a line names, in the command line's dashed spelling or the host's own. */
 export const VERDICTS: Record<string, ReviewVerdict> = { comment: "comment", approve: "approve", "request-changes": "request_changes", request_changes: "request_changes" };
 
 /** A merge asked of the host, one road for the command line and the tool. */
-export async function mergedPr(client: HostClient, workspaceId: string, method: MergeMethod | undefined, whenChecksPass: boolean): Promise<MergeResult> {
-  return MergeResult.parse(await client.request("workspaces.merge", { workspaceId, ...(method !== undefined ? { method } : {}), ...(whenChecksPass ? { whenChecksPass } : {}) }));
+export async function mergedPr(client: HostClient, workspaceId: string, method: MergeMethod | undefined, whenChecksPass: boolean, threadId: string): Promise<MergeResult> {
+  return MergeResult.parse(await client.request("workspaces.merge", { workspaceId, ...(method !== undefined ? { method } : {}), ...(whenChecksPass ? { whenChecksPass } : {}), threadId }));
 }
 
 /** What an update reads as: the commits it brought from the base, or the files that conflict with it. */
@@ -523,16 +547,16 @@ export interface Stopped {
 /** Stops the running turn of the thread a person names, or with task one of its agent's own subagents alone, through
  * the runtime as the app's stop button does; the machine is not touched. Parsed, not trusted: an outcome outside the
  * enum must not read as stopped. */
-export async function stop(client: HostClient, ref: string, task?: string): Promise<Stopped> {
+export async function stop(client: HostClient, ref: string, subagent?: string): Promise<Stopped> {
   const thread = await threadOf(client, ref);
-  const { outcome, under, error, left } = SessionInterruptResult.parse(await client.request("sessions.interrupt", { sessionId: thread.sessionId, ...(task !== undefined ? { task } : {}) }));
-  return { threadId: thread.id, ...(task !== undefined ? { task } : {}), outcome, ...(under !== undefined && under.length > 0 ? { under } : {}), ...(error !== undefined ? { error } : {}), ...(left !== undefined ? { left } : {}) };
+  const { outcome, under, error, left } = SessionInterruptResult.parse(await client.request("sessions.interrupt", { sessionId: thread.sessionId, ...(subagent !== undefined ? { task: subagent } : {}) }));
+  return { threadId: thread.id, ...(subagent !== undefined ? { task: subagent } : {}), outcome, ...(under !== undefined && under.length > 0 ? { under } : {}), ...(error !== undefined ? { error } : {}), ...(left !== undefined ? { left } : {}) };
 }
 
 const STOP_WORDS: Record<SessionInterruptOutcome, string> = { accepted: "stopped", "not-running": "not running", "not-found": "not found by the host", refused: "not stopped", unsupported: "not stopped" };
 
 export function stopLine(stopped: Stopped): string {
-  const named = `thread ${stopped.threadId}${stopped.task !== undefined ? ` task ${stopped.task}` : ""}`;
+  const named = `thread ${stopped.threadId}${stopped.task !== undefined ? ` subagent ${stopped.task}` : ""}`;
   if (stopped.error !== undefined) return `${named}: ${stopped.error}`;
   const under = stopped.under ?? [];
   const tree = under.length === 0 ? "" : `, and with it ${under.length} ${under.length === 1 ? "thread" : "threads"} its agents spawned: ${under.map(threadWord).join(", ")}`;
@@ -695,10 +719,10 @@ export function shortenedEnd(text: string, width: number): string {
   return text.length <= width ? text : `${text.slice(0, width - 1)}…`;
 }
 
-export const THREAD_HEAD = ["PROJECT", "FOLDER", "BRANCH", "THREAD", "TASK", "AGENT", "STATE", "BY", "COMPUTER", "TITLE"];
+export const THREAD_HEAD = ["PROJECT", "FOLDER", "BRANCH", "THREAD", "SUBAGENT", "AGENT", "STATE", "BY", "COMPUTER", "TITLE"];
 
-/** A thread's line and one line per subagent of its agent's under it, a step in: a subagent's THREAD and TASK are the
- * two words `wsp stop <thread> --task <task>` takes, and BY is the agent that started it. */
+/** A thread's line and one line per subagent of its agent's under it, a step in: a subagent's THREAD and SUBAGENT are
+ * the two words `wsp stop <thread> --subagent <id>` takes, and BY is the agent that started it. */
 export function threadLines(t: ThreadRow, indent = ""): string[][] {
   const folder = shortenedFront(homeShortened(t.folder, homedir()), FOLDER_WIDTH);
   const own = [t.projectName, folder, t.branch, `${indent}${t.id}`, "", t.harness, threadWordOf(t), t.startedBy, t.computerName, shortenedEnd(t.title, TITLE_WIDTH)];
@@ -869,11 +893,6 @@ export async function removeProjectImage(client: HostClient, id: string): Promis
   return ProjectGoldenRemoved.parse(await client.request("projectGoldens.remove", { snapshotId: id }));
 }
 
-/** Sets what the agents on the workspace a person names may ask of this host; the record, as every director shows it. */
-export async function setAgents(client: HostClient, ref: string, agents: Partial<WorkspaceAgents>): Promise<WorkspaceOut> {
-  const source = await workspaceOf(client, ref);
-  return (await client.request<{ workspace: WorkspaceOut }>("workspaces.agents", { workspaceId: source.id, ...agents })).workspace;
-}
 
 /** Snapshots the workspace a person names as a project golden; the record, as every director shows it. */
 export async function snapshot(client: HostClient, ref: string): Promise<ProjectGolden> {

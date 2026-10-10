@@ -448,7 +448,7 @@ describe("adding an MCP server", () => {
     const acts = serversActs({ here: () => here(at) });
     expect(await acts.add({ kind: "here", projects: [{ id: "pr_app", name: "app", path: at.project }] }, { agent: "claude", name: "acme", project: true, command: "npx", args: [] })).toEqual({ file: "~/code/app/.mcp.json" });
     expect(Object.keys(json(join(at.project, ".mcp.json")).mcpServers!)).toEqual(["project-db", "acme"]);
-    await expect(acts.add(HERE, { agent: "claude", name: "acme2", project: true, command: "npx" })).rejects.toThrow("A project's server is changed from a workspace of that project, or from its computer's page.");
+    await expect(acts.add(HERE, { agent: "claude", name: "acme2", project: true, command: "npx" })).rejects.toThrow("A project's server is changed from a thread of that project, or from its computer's page.");
   });
 
   it("puts a project's server in that project's file on a computer you own, as its login, where the page names the project", async () => {
@@ -457,7 +457,7 @@ describe("adding an MCP server", () => {
     const on: AgentsOn = { ...box(at, machine), projects: [{ id: "pr_app", name: "app", path: at.project }] };
     expect(await serversActs({}).add(on, { agent: "claude", name: "acme", project: true, command: "npx", args: [] })).toEqual({ file: "~/code/app/.mcp.json" });
     expect(Object.keys(json(join(at.project, ".mcp.json")).mcpServers!)).toEqual(["project-db", "acme"]);
-    await expect(serversActs({}).add(box(at, machine), { agent: "claude", name: "acme2", project: true, command: "npx" })).rejects.toThrow("A project's server is changed from a workspace of that project, or from its computer's page.");
+    await expect(serversActs({}).add(box(at, machine), { agent: "claude", name: "acme2", project: true, command: "npx" })).rejects.toThrow("A project's server is changed from a thread of that project, or from its computer's page.");
   });
 
   it("never writes over a server of that name, and leaves the file as it was", async () => {

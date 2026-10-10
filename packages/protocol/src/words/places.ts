@@ -319,7 +319,7 @@ const REFUSAL_REASON_MAX = 80;
  * rather than reading as a colon with nothing behind it; `login` is the catalog's sign-in command for a machine. */
 export function codexKeyRefusedLine(keyEnv: string, reason: string, login: string): string {
   const said = reason.trim().slice(0, REFUSAL_REASON_MAX).trim();
-  return `OpenAI refused your ${keyEnv}${said === "" ? "" : `: ${said}`}. Put a working key in ~/.wsp/.env, or sign Codex in where this workspace runs with ${login}.`;
+  return `OpenAI refused your ${keyEnv}${said === "" ? "" : `: ${said}`}. Put a working key in ~/.wsp/.env, or sign Codex in where this thread runs with ${login}.`;
 }
 
 /** The verb alone, for the host road that runs that leave on another computer over the line that computer said

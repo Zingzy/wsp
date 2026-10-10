@@ -3,7 +3,7 @@
 import { z } from "zod";
 import { WorkspaceGlyph, WorkspaceTheme } from "../workspace-look.js";
 import { portCloseDetail } from "../wire/helpers.js";
-import { EventAsker, WorkspaceAgents, WorkspacePhase, WorkspaceStatus, WorkspaceView } from "./workspace.js";
+import { EventAsker, WorkspacePhase, WorkspaceStatus, WorkspaceView } from "./workspace.js";
 
 // --- workspace / port / inbox events ----------------------------------------
 
@@ -68,9 +68,6 @@ export const WorkspaceLookEvent = z.object({
   theme: WorkspaceTheme.nullable(),
   glyph: WorkspaceGlyph.nullable(),
 });
-/** A person changed what the agents on a workspace may ask of this host. The whole switch travels, so a client
- * never merges one key into what it holds; nothing about the machine changed. */
-export const WorkspaceAgentsEvent = z.object({ type: z.literal("workspace.agents"), workspaceId: z.string(), agents: WorkspaceAgents });
 export const WorkspaceDeletedEvent = z.object({ type: z.literal("workspace.deleted"), workspaceId: z.string() });
 /** The provider stopped knowing the machine: the workspace's phase is gone from here until a rebuild or a delete.
  * Sessions on it ended, the rate is 0, the idle window is dropped; reason carries the provider's words. */

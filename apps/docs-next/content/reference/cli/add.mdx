@@ -43,12 +43,12 @@ usage: wsp add
                   from what it holds, running only what is missing
   --update        the place named is already in this wsp: put the daemon this
                   wsp deploys on it, over the link it is holding or over the ssh
-                  road it was added on, restart its agent and keep the
-                  workspaces standing on it
-  --sign-in       the agent to sign in on the place named, once, outside every
-                  workspace on it: the sign-in runs on that computer and every
-                  workspace there shares the one login. Offered by the join
-                  itself; this is the same road for a computer already in
+                  road it was added on, restart its agent and keep the threads
+                  and machines standing on it
+  --sign-in       the agent to sign in on the place named, once: the sign-in
+                  runs on that computer and every thread there shares the one
+                  login. Offered by the join itself; this is the same road for a
+                  computer already in
   --on            the computer a project lives on, by the name wsp computers
                   lists: a repo a computer clones needs one, and a folder here
                   takes one to have that computer clone the folder's own remote,
@@ -58,8 +58,8 @@ usage: wsp add
   --into          the empty folder on this computer to clone a repo into, one
                   that does not exist yet or holds nothing; the project is then
                   that folder, worked where it sits
-  --base          the branch a workspace of the project starts on; the remote's
-                  own default branch at the clone without it
+  --base          the branch a thread of the project starts on; the remote's own
+                  default branch at the clone without it
   --yes           send the ticked rows of the seed menu; without it a folder
                   seeding a project on another computer prints the menu and
                   sends nothing, since what git ignores in your folder is yours

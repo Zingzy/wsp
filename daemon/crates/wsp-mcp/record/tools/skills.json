@@ -1,17 +1,17 @@
 {
   "cloudOff": {
     "name": "skills",
-    "description": "Every skill on one computer or workspace, one row per folder name: its description off its SKILL.md, every folder it lives in with the agent whose own folder that is (none for the shared ~/.agents/skills) and where a folder links to, and whether it is the person's own, a project's inside a workspace, or a plugin's. Read as the login the computer was added with, off each agent's config and whether its files are there: no MCP server is started and no login file is opened. A napping workspace answers what stood there when it last ran, marked stale, and is not woken.",
+    "description": "Every skill on one computer or where a thread runs, one row per folder name: its description off its SKILL.md, every folder it lives in with the agent whose own folder that is (none for the shared ~/.agents/skills) and where a folder links to, and whether it is the person's own, a project's inside a thread, or a plugin's. Read as the login the computer was added with, off each agent's config and whether its files are there: no MCP server is started and no login file is opened. A napping machine answers what stood there when it last ran, marked stale, and is not woken.",
     "inputSchema": {
       "type": "object",
       "properties": {
-        "workspace": {
+        "thread": {
           "type": "string",
-          "description": "the workspace to read, by its name, or its id when two share a name; absent reads a computer"
+          "description": "a thread, by its id or a prefix of it, whose computer and project to read; absent reads a computer"
         },
         "on": {
           "type": "string",
-          "description": "the computer to read, by the name computers lists; absent with no workspace is the computer the app runs on"
+          "description": "the computer to read, by the name computers lists; absent with no thread is the computer the app runs on"
         }
       },
       "additionalProperties": false,
@@ -179,17 +179,17 @@
   },
   "cloudOn": {
     "name": "skills",
-    "description": "Every skill on one computer or workspace, one row per folder name: its description off its SKILL.md, every folder it lives in with the agent whose own folder that is (none for the shared ~/.agents/skills) and where a folder links to, and whether it is the person's own, a project's inside a workspace, or a plugin's. Read as the login the computer was added with, off each agent's config and whether its files are there: no MCP server is started and no login file is opened. A napping workspace answers what stood there when it last ran, marked stale, and is not woken.",
+    "description": "Every skill on one computer or where a thread runs, one row per folder name: its description off its SKILL.md, every folder it lives in with the agent whose own folder that is (none for the shared ~/.agents/skills) and where a folder links to, and whether it is the person's own, a project's inside a thread, or a plugin's. Read as the login the computer was added with, off each agent's config and whether its files are there: no MCP server is started and no login file is opened. A napping machine answers what stood there when it last ran, marked stale, and is not woken.",
     "inputSchema": {
       "type": "object",
       "properties": {
-        "workspace": {
+        "thread": {
           "type": "string",
-          "description": "the workspace to read, by its name, or its id when two share a name; absent reads a computer"
+          "description": "a thread, by its id or a prefix of it, whose computer and project to read; absent reads a computer"
         },
         "on": {
           "type": "string",
-          "description": "the computer to read, by the name computers lists; absent with no workspace is the computer the app runs on"
+          "description": "the computer to read, by the name computers lists; absent with no thread is the computer the app runs on"
         }
       },
       "additionalProperties": false,

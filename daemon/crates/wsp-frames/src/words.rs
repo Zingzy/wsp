@@ -49,7 +49,7 @@ pub const GUEST_IN_FLIGHT_FULL: &str = "too many guest bytes are waiting to be r
 /// Why an open is refused where this workspace already holds as many sessions as it may: the sessions standing
 /// are the ones a host is still reading, so the one asking is told to end one of its own rather than the
 /// workspace losing them all.
-pub const GUEST_WORKSPACE_FULL: &str = "this workspace already holds as many guest sessions as it may; end one and run it again";
+pub const GUEST_WORKSPACE_FULL: &str = "this folder already holds as many guest sessions as it may; end one and run it again";
 /// Why a session is ended once nobody has watched it for a whole span: the guest prints this and exits, so the
 /// agent that ran the line can run it again against a host that is there.
 pub const GUEST_UNWATCHED: &str = "the host stopped watching; run it again";

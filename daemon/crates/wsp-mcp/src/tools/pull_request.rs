@@ -1,15 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-//! The three tools that act on a workspace's pull request: fix asks the workspace's agent to fix a failed check or
-//! the conflicts an update from the base met, merge merges it as the person, and update merges the base's latest
-//! commits into the copy's branch. Who may ask for each is the host's to say off the token.
+//! The three tools that act on the pull request of the branch a thread's folder is on: fix asks that thread's agent
+//! to fix a failed check or the conflicts an update from the base met, merge merges it as the person, and update
+//! merges the base's latest commits into the folder's branch. Who may ask for each is the host's to say off the token.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Number, Value};
 
-use super::named::other_version;
+use super::changes::shared_of;
+use super::named::{child_of, other_version, sharing_with, thread_at, thread_label, with_shared, Aim};
 use super::said::turns;
 use super::turn::CapWait;
-use super::workspace::{self, awake, counted_number, params, read, workspace_of};
+use super::workspace::{self, awake, counted_number, params, read, Workspace};
 use super::{input, Answer, Refused, Tool};
 use crate::failure::Failure;
 use crate::host::Host;
@@ -20,7 +21,7 @@ type Arc<T> = std::sync::Arc<T>;
 #[derive(Debug, Serialize, Deserialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct FixIn {
-    pub workspace: String,
+    pub thread: String,
     #[serde(default)]
     pub check: Option<String>,
     #[serde(default)]
@@ -49,7 +50,7 @@ pub struct FixOut {
 #[derive(Debug, Serialize, Deserialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct MergeIn {
-    pub workspace: String,
+    pub thread: String,
     #[serde(default)]
     pub method: Option<String>,
     #[serde(default)]
@@ -71,24 +72,26 @@ pub struct MergeOut {
 #[derive(Debug, Serialize, Deserialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct UpdateIn {
-    pub workspace: String,
+    pub thread: String,
 }
 
-/// packages/protocol's GitUpdateReply, in its order.
+/// packages/protocol's GitUpdateReply, in its order, with the threads that share the folder.
 #[derive(Debug, Serialize, Deserialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase")]
 pub struct UpdateOut {
     base: String,
     merged: bool,
     #[cfg_attr(test, schemars(with = "i64"))]
     commits: Number,
     conflicts: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    shared_with: Option<Vec<String>>,
 }
 
 #[derive(Deserialize)]
 struct Woken {
     id: String,
-    name: String,
 }
 
 const FIX_NAME: &str = "fix";
@@ -111,37 +114,46 @@ pub const UPDATE: Tool = Tool {
     call: |host, args| Box::pin(update(host, args)),
 };
 
-/// A named check is read off the pull request as it stands, so the copy is not woken for it; without one the host
-/// updates the copy from its base first, which needs its machine.
+/// A named check is read off the pull request as it stands, so the folder is not woken for it; without one the host
+/// updates the folder from its base first, which needs its machine. The message goes to the thread named.
 async fn fix(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
-    let FixIn { workspace, check, child } = input(FIX_NAME, arguments)?;
+    let FixIn { thread, check, child } = input(FIX_NAME, arguments)?;
     if check.is_some() && child.is_some() {
         return Err(Failure::new(workspace::words().fix_check_or_child.clone()).into());
     }
     let client = host.client().await?;
-    let source = workspace_of(&client, &workspace).await?;
-    let (id, name) = if check.is_none() {
+    let words = workspace::words();
+    let aim = Aim { line: "wsp fix", or_computer: false, cloud: host.cloud() };
+    let (thread, source): (_, Workspace) = thread_at(&client, &thread, &aim).await?;
+    let kid = match &child {
+        Some(named) => Some(child_of::<Value>(&client, &thread, &source.id, named, &aim).await?),
+        None => None,
+    };
+    let id = if check.is_none() {
         let woken: Woken = read(&awake(&client, &source, "fix").await?, "workspaces.wake")?;
-        (woken.id, woken.name)
+        woken.id
     } else {
-        (source.id.clone(), source.name.clone())
+        source.id.clone()
     };
     let mut asked = params([("workspaceId", Value::from(id))]);
     if let Some(check) = check {
         asked.insert("check".to_owned(), Value::from(check));
     }
-    if let Some(child) = child {
-        asked.insert("child".to_owned(), Value::from(child));
+    if let Some((kid_thread, _, kid_workspace)) = &kid {
+        asked.insert("child".to_owned(), Value::from(kid_workspace.as_str()));
+        asked.insert("childThreadId".to_owned(), Value::from(kid_thread.runtime_id()));
     }
+    asked.insert("threadId".to_owned(), Value::from(thread.runtime_id()));
     let done: FixOut = client.request("workspaces.fix", asked).await?;
-    let words = workspace::words();
+    let name = thread_label(&thread);
     if done.outcome == "updated" {
         return Ok(Answer::text(fill(&words.fix_nothing, &[("name", &name), ("base", &done.base)]), &done));
     }
     let Some(id) = &done.agent else { return Err(other_version("workspaces.fix").into()) };
     let agent = turns().agents.get(id).cloned().unwrap_or_else(|| id.clone());
     let said = if let Some(child) = &done.child {
-        fill(&words.fix_merge_child, &[("name", &name), ("agent", &agent), ("child", child)])
+        let child = kid.as_ref().map_or_else(|| child.clone(), |(kid, _, _)| thread_label(kid));
+        fill(&words.fix_merge_child, &[("name", &name), ("agent", &agent), ("child", &child)])
     } else if let Some(check) = &done.check {
         fill(&words.fix_asked, &[("name", &name), ("agent", &agent), ("check", check)])
     } else {
@@ -156,9 +168,11 @@ async fn fix(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
 
 /// The host merges on the head it last read, so a push since then fails in the git host's own words.
 async fn merge(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
-    let MergeIn { workspace, method, when_checks_pass } = input(MERGE_NAME, arguments)?;
+    let MergeIn { thread, method, when_checks_pass } = input(MERGE_NAME, arguments)?;
     let client = host.client().await?;
-    let source = workspace_of(&client, &workspace).await?;
+    let words = workspace::words();
+    let aim = Aim { line: "wsp merge", or_computer: false, cloud: host.cloud() };
+    let (thread, source): (_, Workspace) = thread_at(&client, &thread, &aim).await?;
     let mut asked = params([("workspaceId", Value::from(source.id.as_str()))]);
     if let Some(method) = method {
         asked.insert("method".to_owned(), Value::from(method));
@@ -166,36 +180,43 @@ async fn merge(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
     if when_checks_pass == Some(true) {
         asked.insert("whenChecksPass".to_owned(), Value::Bool(true));
     }
+    asked.insert("threadId".to_owned(), Value::from(thread.runtime_id()));
     let done: MergeOut = client.request("workspaces.merge", asked).await?;
-    let words = workspace::words();
     let number = done.number.to_string();
+    let name = thread_label(&thread);
     let said = if done.merged {
-        fill(&words.merged, &[("name", &source.name), ("number", &number), ("method", &done.method)])
+        fill(&words.merged, &[("name", &name), ("number", &number), ("method", &done.method)])
     } else {
-        fill(&words.merge_armed, &[("name", &source.name), ("number", &number)])
+        fill(&words.merge_armed, &[("name", &name), ("number", &number)])
     };
     Ok(Answer::text(said, &done))
 }
 
 async fn update(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
-    let UpdateIn { workspace } = input(UPDATE_NAME, arguments)?;
+    let UpdateIn { thread } = input(UPDATE_NAME, arguments)?;
     let client = host.client().await?;
-    let source = workspace_of(&client, &workspace).await?;
-    let woken: Woken = read(&awake(&client, &source, "update").await?, "workspaces.wake")?;
-    let done: UpdateOut = client.request("workspaces.update", params([("workspaceId", Value::from(woken.id))])).await?;
     let words = workspace::words();
+    let aim = Aim { line: "wsp update", or_computer: false, cloud: host.cloud() };
+    let (thread, source): (_, Workspace) = thread_at(&client, &thread, &aim).await?;
+    let woken: Woken = read(&awake(&client, &source, "update").await?, "workspaces.wake")?;
+    let mut done: UpdateOut = client
+        .request("workspaces.update", params([("workspaceId", Value::from(woken.id)), ("threadId", Value::from(thread.runtime_id()))]))
+        .await?;
+    let name = thread_label(&thread);
     let said = if done.merged {
         let line = if done.commits.as_f64() == Some(0.0) {
             words.updated_none.clone()
         } else {
             counted_number(&done.commits, &words.updated_one, &words.updated_many)
         };
-        fill(&line, &[("name", &woken.name), ("base", &done.base)])
+        fill(&line, &[("name", &name), ("base", &done.base)])
     } else {
         let files = done.conflicts.join(&words.update_conflicts_join);
-        fill(&words.update_conflicts, &[("name", &woken.name), ("base", &done.base), ("files", &files)])
+        fill(&words.update_conflicts, &[("name", &name), ("base", &done.base), ("files", &files)])
     };
-    Ok(Answer::text(said, &done))
+    let shared = sharing_with(&client, &thread, &source.id).await?;
+    done.shared_with = shared_of(shared.clone());
+    Ok(Answer::text(with_shared(said, &shared), &done))
 }
 
 #[cfg(test)]

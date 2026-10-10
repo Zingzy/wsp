@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { LocalBackend, type MachineBackend } from "@wsp/engine";
 import { HERE_PLACE_ID,
   AGENTS_ON,
+  agentsOffComputerRefusal,
   HOST_KEY_ENV,
   HOST_TOKEN_ENV,
   HOST_URL_ENV,
@@ -170,8 +171,6 @@ describe("agents spawning agents", () => {
     const scope: ThreadScope = { kind: "thread", threadId: "t_root", workspaceId: ws.id, rootThreadId: "t_root" };
     await expect(rt.sessions.start(ws.id, { prompt: "hi" }, asThread(scope))).rejects.toThrow(agentsOffRefusal("b1", "thread_new"));
     await expect(createOn(rt, { name: "b2" }, asThread(scope))).rejects.toThrow(agentsOffRefusal("b1", "fork"));
-    // Turned back on with no numbers, it keeps the caps it held rather than none.
-    expect((await rt.workspaces.agents(ws.id, { spawn: true })).agents).toEqual(AGENTS_ON);
     await rt.close();
   });
 
@@ -525,7 +524,6 @@ describe("agents spawning agents", () => {
     const scope: ThreadScope = { kind: "thread", threadId: "t_root", workspaceId: ws.id, rootThreadId: "t_root" };
     await expect(rt.workspaces.delete(ws.id, asThread(scope))).rejects.toThrow(spawnActRefusal("t_root", "delete", MACHINE_WSP_FORKS));
     await expect(rt.workspaces.nap(ws.id, asThread(scope))).rejects.toThrow(spawnActRefusal("t_root", "pause", MACHINE_WSP_FORKS));
-    await expect(rt.workspaces.agents(ws.id, { spawn: false }, asThread(scope))).rejects.toThrow(spawnActRefusal("t_root", "agents", MACHINE_WSP_FORKS));
     await rt.close();
   });
 
@@ -1019,7 +1017,6 @@ describe("agents spawning agents", () => {
       expect(refused).toContain("projects.add");
       expect(refused).toContain("projects.remove");
       expect(refused).toContain("workspaces.delete");
-      expect(refused).toContain("workspaces.agents");
       // A thread never lifts a running turn's access mode and never answers a permission prompt, its own or a
       // sibling's: that guard is the person's on the agent, and an agent moving it is the guard moving itself.
       expect(refused).toContain("sessions.access");
@@ -1227,29 +1224,6 @@ describe("agents spawning agents", () => {
     await rt.close();
   });
 
-  it("turning the lead's switch off stops the tree it spawned, not only the threads on the lead", async () => {
-    const held = heldAdapter();
-    const rt = runtimeWith({ claude: held.factory });
-    const lead = await createOn(rt, { golden: "snap_g", name: "lead", agents: { spawn: true, maxMachines: 3, maxDepth: 2 } });
-    const opener = await rt.sessions.start(lead.id, { prompt: "lead" });
-    const rootThread = opener.view().threadId!;
-    const rootScope: ThreadScope = { kind: "thread", threadId: rootThread, workspaceId: lead.id, rootThreadId: rootThread };
-    const forked = await createOn(rt, { name: "builder" }, asThread(rootScope));
-    // The fork carries the tree and no switch of its own, so what it may do is read off the lead every time.
-    expect(forked.agents).toEqual({ spawn: true, maxMachines: 3, maxDepth: 2 });
-    const onFork = await rt.sessions.start(forked.id, { prompt: "build" }, asThread(rootScope));
-    const forkScope: ThreadScope = { kind: "thread", threadId: onFork.view().threadId!, workspaceId: forked.id, rootThreadId: rootThread };
-    await rt.workspaces.agents(lead.id, { spawn: false });
-    // The refusal names the switch it read, the lead's, since turning the fork's own on changes nothing.
-    await expect(createOn(rt, { name: "deeper" }, asThread(forkScope))).rejects.toThrow(agentsOffRefusal("lead", "fork"));
-    await expect(rt.sessions.start(forked.id, { prompt: "again" }, asThread(forkScope))).rejects.toThrow(agentsOffRefusal("lead", "thread_new"));
-    // And the fork's own listing says so, so a person reading the card is not told the old answer.
-    expect((await rt.workspaces.get(forked.id)).agents).toEqual({ spawn: false, maxMachines: 3, maxDepth: 2 });
-    held.end(1);
-    held.end(0);
-    await rt.close();
-  });
-
   it("a thread on a fork is handed a token too, and under a lead allowing two levels it forks once more", async () => {
     const held = heldAdapter();
     const rt = runtimeWith({ claude: held.factory });
@@ -1274,13 +1248,24 @@ describe("agents spawning agents", () => {
     await rt.close();
   });
 
+  it("a lead whose computer's switch is off is told so as its thread, with the line that turns the switch on", async () => {
+    const held = heldAdapter();
+    const rt = runtimeWith({ claude: held.factory });
+    const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "proj" });
+    const opener = await rt.sessions.start(ws.id, { prompt: "lead" });
+    const rootThread = opener.view().threadId!;
+    const lead: Caller = { origin: "here", by: { kind: "thread", threadId: rootThread, workspaceId: ws.id, rootThreadId: rootThread } };
+    await rt.places!.set(HERE_PLACE_ID, { spawn: { spawn: false } });
+    const here = rt.places!.nameOf(HERE_PLACE_ID);
+    await expect(rt.sessions.start(ws.id, { prompt: "a child" }, lead)).rejects.toThrow(agentsOffComputerRefusal(rootThread, here, "thread_new"));
+    held.end(0);
+    await rt.close();
+  });
+
   it("this computer takes the switch as a fork does, since its agents reach the host as themselves", async () => {
     const rt = runtimeWith({ claude: heldAdapter().factory });
-    const mac = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
-    expect((await rt.workspaces.agents(mac.id, { spawn: true })).agents?.spawn).toBe(true);
-    await rt.workspaces.agents(mac.id, { spawn: false });
-    const cloud = await createOn(rt, { golden: "snap_g", name: "b1" });
-    expect((await rt.workspaces.agents(cloud.id, { spawn: true })).agents?.spawn).toBe(true);
+    expect((await createOn(rt, { on: HERE_PLACE_ID, name: "mac", agents: { spawn: true } })).agents?.spawn).toBe(true);
+    expect((await createOn(rt, { golden: "snap_g", name: "b1", agents: { spawn: true } })).agents?.spawn).toBe(true);
     await rt.close();
   });
 
@@ -1340,8 +1325,8 @@ describe("agents spawning agents", () => {
     expect(await rt.sessions.rename(theirs.id, "mine now", asThread(scope))).toEqual({ outcome: "not-found" });
 
     // A send into either is refused as no thread at all.
-    await expect(rt.sessions.start(ws.id, { prompt: "hi", thread: mineThread }, asThread(scope))).rejects.toThrow(`no thread ${mineThread} on this workspace`);
-    await expect(rt.sessions.start(ws.id, { prompt: "hi", thread: otherThread }, asThread(scope))).rejects.toThrow(`no thread ${otherThread} on this workspace`);
+    await expect(rt.sessions.start(ws.id, { prompt: "hi", thread: mineThread }, asThread(scope))).rejects.toThrow(`no thread ${mineThread} in this folder`);
+    await expect(rt.sessions.start(ws.id, { prompt: "hi", thread: otherThread }, asThread(scope))).rejects.toThrow(`no thread ${otherThread} in this folder`);
     expect((await rt.sessions.list(ws.id)).filter(v => v.threadId === mineThread || v.threadId === otherThread).every(v => v.status !== "running")).toBe(true);
 
     // Its own tree it drives.
@@ -1436,11 +1421,12 @@ describe("agents spawning agents", () => {
   it("the line a child's end delivers starts the target's turn under the thread that named it, and a refused line tells the person once", async () => {
     const held = heldAdapter();
     const rt = runtimeWith({ claude: held.factory });
-    const ws = await createOn(rt, { golden: "snap_g", name: "lead", agents: { spawn: true, maxMachines: 2, maxDepth: 2 } });
+    // On this computer with no switch of its own, so the computer's is the one over it, which the person can turn off.
+    const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "lead" });
     const opener = await rt.sessions.start(ws.id, { prompt: "lead" });
     const rootThread = opener.view().threadId!;
     const scope: ThreadScope = { kind: "thread", threadId: rootThread, workspaceId: ws.id, rootThreadId: rootThread };
-    const kid = await rt.sessions.start(ws.id, { prompt: "build it", notify: [rootThread] }, asThread(scope));
+    const kid = await rt.sessions.start(ws.id, { prompt: "build it", notify: [rootThread] }, { origin: "here", by: scope });
     const kidThread = kid.view().threadId!;
     const stored = async (): Promise<{ threadId?: string; notifyBy?: ThreadScope }[]> => ((await store.get("sessions", ws.id)) as { sessions: { threadId?: string; notifyBy?: ThreadScope }[] } | undefined)?.sessions ?? [];
     await until(async () => (await stored()).some(r => r.threadId === kidThread && r.notifyBy !== undefined));
@@ -1449,40 +1435,10 @@ describe("agents spawning agents", () => {
 
     // The switch goes off after the registration: the door is read again when the line goes, so nothing starts on
     // the lead and the person is told once instead of the turn running as theirs.
-    await rt.workspaces.agents(ws.id, { spawn: false });
+    await rt.places!.set(HERE_PLACE_ID, { spawn: { spawn: false } });
     const before = (await rt.sessions.list(ws.id)).length;
     held.end(held.launches.length - 1);
     const told = async (): Promise<string[]> => (await rt.sessions.history(ws.id)).filter(e => e.type === "session.notify" && e.threadId === kidThread).map(e => (e as { notify: string }).notify);
-    await until(async () => (await told()).length === 2);
-    expect((await told()).sort()).toEqual([NOTIFY_ME, rootThread].sort());
-    expect((await rt.sessions.list(ws.id)).length).toBe(before);
-    for (let nth = held.launches.length - 1; nth >= 0; nth--) held.end(nth);
-    await rt.close();
-  });
-
-  it("a line held for a napping workspace keeps the road that tells the person, and falls away to them on the wake", async () => {
-    const held = heldAdapter();
-    // No daemon road on the machine: the wake this case waits on is the provider's, not a daemon's.
-    const rt = runtimeWith({ claude: held.factory }, undefined, stubBackend());
-    const ws = await createOn(rt, { golden: "snap_g", name: "lead", agents: { spawn: true, maxMachines: 2, maxDepth: 2 } });
-    const opener = await rt.sessions.start(ws.id, { prompt: "lead" });
-    const rootThread = opener.view().threadId!;
-    const scope: ThreadScope = { kind: "thread", threadId: rootThread, workspaceId: ws.id, rootThreadId: rootThread };
-    // The lead's own turn is over, so it has a session for its line to resume.
-    held.end(0);
-    await opener.finished;
-    const kid = await rt.sessions.start(ws.id, { prompt: "build it", notify: [rootThread] }, asThread(scope));
-    const kidThread = kid.view().threadId!;
-    await rt.workspaces.agents(ws.id, { spawn: false });
-    // The nap ends the kid's turn and the workspace takes no start while it sleeps, so the line waits for the wake.
-    await rt.workspaces.nap(ws.id);
-    const told = async (): Promise<string[]> => (await rt.sessions.history(ws.id)).filter(e => e.type === "session.notify" && e.threadId === kidThread).map(e => (e as { notify: string }).notify);
-    expect(await told()).toEqual([rootThread]);
-    const before = (await rt.sessions.list(ws.id)).length;
-
-    await rt.workspaces.wake(ws.id);
-    // The door reads the switch when the line finally goes, hours later as far as this road knows, and the person
-    // is told the report is there rather than the line going quiet.
     await until(async () => (await told()).length === 2);
     expect((await told()).sort()).toEqual([NOTIFY_ME, rootThread].sort());
     expect((await rt.sessions.list(ws.id)).length).toBe(before);
@@ -1503,9 +1459,11 @@ describe("agents spawning agents", () => {
     const kidThread = kid.view().threadId!;
     const stored = async (): Promise<{ threadId?: string; notifyBy?: ThreadScope }[]> => ((await store.get("sessions", ws.id)) as { sessions: { threadId?: string; notifyBy?: ThreadScope }[] } | undefined)?.sessions ?? [];
     await until(async () => (await stored()).some(r => r.threadId === kidThread && r.notifyBy !== undefined));
-    // The switch goes off and the host goes down under the running turn, so its line is the load's to send.
-    await first.workspaces.agents(ws.id, { spawn: false });
+    // The host goes down under the running turn, so its line is the load's to send, and comes back to a lead whose
+    // switch the store holds off.
     await first.close();
+    const record = (await store.get("workspaces", ws.id)) as Record<string, unknown>;
+    await store.put("workspaces", ws.id, { ...record, agents: { spawn: false, maxMachines: 2, maxDepth: 2 } });
     // The document as a host from before this rule wrote it: the targets, and nothing about who named them.
     const doc = (await store.get("sessions", ws.id)) as { workspaceId: string; sessions: Record<string, unknown>[] };
     await store.put("sessions", ws.id, { ...doc, sessions: doc.sessions.map(({ notifyBy: _named, ...row }) => row) });
@@ -1677,7 +1635,7 @@ describe("agents spawning agents", () => {
     expect((await rt.workspaces.list(asThread(childScope))).map(w => w.id)).toEqual([copy.id]);
     // A thread of another tree on that workspace reads as no thread, the person's own and a second lead's alike.
     for (const [row, threadId] of [[mine, mineThread], [other, otherThread]] as const) {
-      await expect(rt.sessions.start(ws.id, { prompt: "hi", thread: threadId }, asThread(childScope))).rejects.toThrow(`no thread ${threadId} on this workspace`);
+      await expect(rt.sessions.start(ws.id, { prompt: "hi", thread: threadId }, asThread(childScope))).rejects.toThrow(`no thread ${threadId} in this folder`);
       expect(await rt.sessions.interrupt(row.id, asThread(childScope))).toEqual({ outcome: "not-found" });
       expect(await rt.sessions.steer(row.id, { prompt: "x" }, asThread(childScope))).toEqual({ outcome: "not-found" });
       expect(await rt.sessions.rename(row.id, "x", asThread(childScope))).toEqual({ outcome: "not-found" });

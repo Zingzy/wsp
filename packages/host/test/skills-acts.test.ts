@@ -125,7 +125,7 @@ describe("installing a skill off skills.sh", () => {
     const added = await skillsActs({ fetch: skillsSh(at).fetch, here: () => here(at) }).add({ kind: "here", projects: [{ id: "pr_app", name: "app", path: at.project }] }, { skill: "acme/skills/memo", agents: ["claude"], project: true });
     expect(added).toEqual({ path: "~/code/app/.agents/skills/memo", agents: [{ agent: "claude", path: "~/code/app/.claude/skills/memo" }] });
     expect(readlinkSync(join(at.project, ".claude/skills/memo"))).toBe("../../.agents/skills/memo");
-    await expect(skillsActs({ fetch: skillsSh(at).fetch, here: () => here(at) }).add({ kind: "here" }, { skill: "acme/skills/memo", project: true })).rejects.toThrow("A project's skill goes in from a workspace of that project, or from its computer's page.");
+    await expect(skillsActs({ fetch: skillsSh(at).fetch, here: () => here(at) }).add({ kind: "here" }, { skill: "acme/skills/memo", project: true })).rejects.toThrow("A project's skill goes in from a thread of that project, or from its computer's page.");
   });
 
   it("refuses a download whose SKILL.md names another skill, or one that claims the name wsp keeps", async () => {

@@ -3,17 +3,18 @@
 {/* Written by apps/docs-next/scripts/cli.ts: change the script or its source and run pnpm --filter @wsp/docs-next generate. */}
 
 ```text
-usage: wsp stop <thread> [--task <id>]
-  stops the thread's running turn, as the app's stop does, or with --task one of
-  its agent's own subagents alone; the machine stays up
+usage: wsp stop <thread> [--subagent <id>]
+  stops the thread's running turn, as the app's stop does, or with --subagent
+  one of its agent's own subagents alone; the computer stays up
 
-  --task     stop one of the agent's own subagents alone, by its TASK id off wsp
-             threads; the turn and its other subagents run on
-  --json     print the raw protocol values, one JSON object per line, with
-             everything else on stderr
-  --state    the state file the host serves
-  --host     run the line against a host on your account, by the name wsp hosts
-             lists it under; WSP_HOST names one for a whole shell
+  --subagent    stop one of the agent's own subagents alone, by its id in the
+                SUBAGENT column of wsp threads; the turn and its other subagents
+                run on
+  --json        print the raw protocol values, one JSON object per line, with
+                everything else on stderr
+  --state       the state file the host serves
+  --host        run the line against a host on your account, by the name wsp
+                hosts lists it under; WSP_HOST names one for a whole shell
 ```
 
 MCP tool: [`stop`](/reference/mcp-tools#stop).

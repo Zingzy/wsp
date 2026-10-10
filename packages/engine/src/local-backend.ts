@@ -196,7 +196,7 @@ export class LocalBackend implements MachineBackend {
   }
 
   async create(): Promise<Machine> {
-    throw new Error("this computer already exists; a local workspace is not created, it is the machine wsp already runs on");
+    throw new Error("this computer already exists; it is not created, it is the computer wsp already runs on");
   }
 
   /** The folder a command on this computer starts in, made on the first ask and not at construction: a host builds

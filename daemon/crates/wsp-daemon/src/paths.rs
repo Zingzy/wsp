@@ -31,7 +31,7 @@ impl From<io::Error> for OpError {
 }
 
 pub(crate) fn outside_root(requested: &str) -> OpError {
-    OpError::coded(DaemonErrorCode::OutsideRoot, format!("{requested} resolves outside the workspace root"))
+    OpError::coded(DaemonErrorCode::OutsideRoot, format!("{requested} resolves outside the folders wsp serves here"))
 }
 
 pub(crate) fn not_found(requested: &str) -> OpError {
@@ -240,13 +240,13 @@ mod tests {
         let resolving = t.root.path().join("escape").to_string_lossy().into_owned();
         let refused = resolve_inside_named(&r, &resolving, inside_the_workspace).unwrap_err();
         assert_eq!(refused.code, Some(DaemonErrorCode::OutsideRoot));
-        assert_eq!(refused.message, format!("{inside_the_workspace} resolves outside the workspace root"));
+        assert_eq!(refused.message, format!("{inside_the_workspace} resolves outside the folders wsp serves here"));
         assert!(!refused.message.contains(&t.root.path().display().to_string()), "{}", refused.message);
         // A path that is not there reads the same way, and the two sentences are the ones a path under this
         // daemon's own root is refused with: the name is what differs, never the words.
         let missing = resolve_inside_named(&r, &t.root.path().join("nowhere").to_string_lossy(), "/root/repo/nowhere").unwrap_err();
         assert_eq!((missing.code, missing.message.as_str()), (Some(DaemonErrorCode::NotFound), "/root/repo/nowhere does not exist"));
-        assert_eq!(resolve_inside(&r, "..").unwrap_err().message, ".. resolves outside the workspace root");
+        assert_eq!(resolve_inside(&r, "..").unwrap_err().message, ".. resolves outside the folders wsp serves here");
     }
 
     #[test]
@@ -298,7 +298,7 @@ mod tests {
         let secret = t.outside.path().join("secret.txt");
         let err = resolve_inside(&both, secret.to_str().unwrap()).unwrap_err();
         assert_eq!(err.code, Some(DaemonErrorCode::OutsideRoot));
-        assert_eq!(err.message, format!("{} resolves outside the workspace root", secret.display()));
+        assert_eq!(err.message, format!("{} resolves outside the folders wsp serves here", secret.display()));
         let sibling = format!("{}-sibling/x", t.project.path().display());
         assert_eq!(code(resolve_inside(&both, &sibling)), Some(DaemonErrorCode::OutsideRoot));
         assert_eq!(code(resolve_inside(&both, "escape/secret.txt")), Some(DaemonErrorCode::OutsideRoot));

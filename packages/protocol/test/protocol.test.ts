@@ -259,11 +259,11 @@ describe("what a computer says about its agents, and what a person reads off it"
   it("a key the provider turned down is said as a refused key, with what the provider said about it", () => {
     const login = "codex login --device-auth";
     expect(wire.codexKeyRefusedLine("OPENAI_API_KEY", "invalid_api_key", login)).toBe(
-      `OpenAI refused your OPENAI_API_KEY: invalid_api_key. Put a working key in ~/.wsp/.env, or sign Codex in where this workspace runs with ${login}.`,
+      `OpenAI refused your OPENAI_API_KEY: invalid_api_key. Put a working key in ~/.wsp/.env, or sign Codex in where this thread runs with ${login}.`,
     );
     // A refusal the provider said nothing after drops the clause rather than reading as a colon with nothing behind it.
     expect(wire.codexKeyRefusedLine("OPENAI_API_KEY", "", login)).toBe(
-      `OpenAI refused your OPENAI_API_KEY. Put a working key in ~/.wsp/.env, or sign Codex in where this workspace runs with ${login}.`,
+      `OpenAI refused your OPENAI_API_KEY. Put a working key in ~/.wsp/.env, or sign Codex in where this thread runs with ${login}.`,
     );
     // The provider's reason is a clause in somebody else's sentence, so it is cut before it becomes a paragraph.
     expect(wire.codexKeyRefusedLine("OPENAI_API_KEY", "x".repeat(200), login)).toContain(`: ${"x".repeat(80)}.`);
@@ -2188,13 +2188,7 @@ describe("bringing work back", () => {
     );
     expect(wire.elsewhereWorkspaceLine("theirs", "default", "hetzner", "work")).toBe("theirs is on default, and a thread on hetzner cannot work there yet; ask the person");
     // A switch that is off on a computer, over a folder there holding none of its own, is turned on where it is held.
-    expect(wire.agentsOffComputerRefusal("my box", "thread_new")).toBe(`agents on my box may not ${wire.SPAWN_ACTS["thread_new"]}; turn it on with wsp computers set 'my box' --spawn on`);
-    // Exec starts nothing, so its refusals say what the word is and name exec on the thread's own machine as the road.
-    expect(wire.refusalLine(wire.execOutsideRefusal("thread_a1b2c3d4", "lab-two", "folder"), wire.execOutsideFix("my lab"))).toBe(
-      `thread ${wire.threadWord("thread_a1b2c3d4")} may not exec in lab-two: it is a folder the person keeps of this repository, outside your tree. Run the command in your own tree with wsp exec 'my lab' -- <command>, or ask the person.`,
-    );
-    expect(wire.execOutsideRefusal("thread_a1b2c3d4", "docs", "project")).toBe(`thread ${wire.threadWord("thread_a1b2c3d4")} may not exec in docs: it is a project of another repository, outside your tree`);
-    expect(wire.execOutsideRefusal("thread_a1b2c3d4", "nightly", "workspace")).toBe(`thread ${wire.threadWord("thread_a1b2c3d4")} may not exec in nightly: it is a workspace of another repository, outside your tree`);
+    expect(wire.agentsOffComputerRefusal("t_1234567890", "my box", "thread_new")).toBe(`thread t_123456 may not ${wire.SPAWN_ACTS["thread_new"]}, since agents on my box are off; turn them on with wsp computers set 'my box' --spawn on`);
     // Bringing work back is one of the acts a thread may ask for, and it is named in the table like the rest.
     expect(wire.SPAWN_ACTS_ALLOWED).toContain("bring_back");
     expect(wire.SPAWN_ACTS["bring_back"]).toBe("bring its work back");

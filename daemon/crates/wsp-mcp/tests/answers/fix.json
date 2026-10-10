@@ -4,41 +4,52 @@
     {
       "case": "a failed check",
       "arguments": {
-        "workspace": "alpha",
+        "thread": "t-1",
         "check": "ci \u0085 / test 🧪"
       },
       "replies": {
-        "workspaces.resolve": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha \\\"one\\\" \u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"napping\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\"}}",
+        "sessions.list": "{\"id\":1,\"ok\":true,\"sessions\":[{\"id\":\"s-1\",\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"completed\",\"threadId\":\"t-1 \u0085 lead\"}]}",
+        "workspaces.get": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha \\\"one\\\" \u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"napping\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\"}}",
         "workspaces.fix": "{\"id\":1,\"ok\":true,\"outcome\":\"steered\",\"threadId\":\"t-1\",\"check\":\"ci \u0085 / test 🧪\",\"base\":\"main\",\"agent\":\"codex\"}"
       },
-      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"alpha \\\"one\\\" \\u0085 🧪: asked Codex to fix ci \\u0085 / test 🧪\"}],\"structuredContent\":{\"outcome\":\"steered\",\"threadId\":\"t-1\",\"check\":\"ci \\u0085 / test 🧪\",\"base\":\"main\",\"agent\":\"codex\"}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"thread t-1 \\u0085 le: asked Codex to fix ci \\u0085 / test 🧪\"}],\"structuredContent\":{\"outcome\":\"steered\",\"threadId\":\"t-1\",\"check\":\"ci \\u0085 / test 🧪\",\"base\":\"main\",\"agent\":\"codex\"}},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
         {
-          "op": "workspaces.resolve",
-          "ref": "alpha"
+          "op": "sessions.list"
+        },
+        {
+          "op": "workspaces.get",
+          "workspaceId": "ws-1",
+          "threadId": "t-1 \u0085 lead"
         },
         {
           "op": "workspaces.fix",
           "workspaceId": "ws-1",
-          "check": "ci \u0085 / test 🧪"
+          "check": "ci \u0085 / test 🧪",
+          "threadId": "t-1 \u0085 lead"
         }
       ]
     },
     {
       "case": "the conflicts sent",
       "arguments": {
-        "workspace": "alpha"
+        "thread": "t-1"
       },
       "replies": {
-        "workspaces.resolve": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha \\\"one\\\" \u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"napping\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\"}}",
+        "sessions.list": "{\"id\":1,\"ok\":true,\"sessions\":[{\"id\":\"s-1\",\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"completed\",\"threadId\":\"t-1 \u0085 lead\"}]}",
+        "workspaces.get": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha \\\"one\\\" \u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"napping\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\"}}",
         "workspaces.wake": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha \\\"one\\\" \u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\"}}",
         "workspaces.fix": "{\"id\":1,\"ok\":true,\"outcome\":\"started\",\"threadId\":\"t-2\",\"base\":\"main\",\"agent\":\"claude\"}"
       },
-      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"alpha \\\"one\\\" \\u0085 🧪: asked Claude Code to fix the conflicts with main\"}],\"structuredContent\":{\"outcome\":\"started\",\"threadId\":\"t-2\",\"base\":\"main\",\"agent\":\"claude\"}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"thread t-1 \\u0085 le: asked Claude Code to fix the conflicts with main\"}],\"structuredContent\":{\"outcome\":\"started\",\"threadId\":\"t-2\",\"base\":\"main\",\"agent\":\"claude\"}},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
         {
-          "op": "workspaces.resolve",
-          "ref": "alpha"
+          "op": "sessions.list"
+        },
+        {
+          "op": "workspaces.get",
+          "workspaceId": "ws-1",
+          "threadId": "t-1 \u0085 lead"
         },
         {
           "op": "workspaces.wake",
@@ -46,25 +57,31 @@
         },
         {
           "op": "workspaces.fix",
-          "workspaceId": "ws-1"
+          "workspaceId": "ws-1",
+          "threadId": "t-1 \u0085 lead"
         }
       ]
     },
     {
       "case": "a sent fix naming no agent",
       "arguments": {
-        "workspace": "alpha"
+        "thread": "t-1"
       },
       "replies": {
-        "workspaces.resolve": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha \\\"one\\\" \u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\"}}",
+        "sessions.list": "{\"id\":1,\"ok\":true,\"sessions\":[{\"id\":\"s-1\",\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"completed\",\"threadId\":\"t-1 \u0085 lead\"}]}",
+        "workspaces.get": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha \\\"one\\\" \u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\"}}",
         "workspaces.wake": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha \\\"one\\\" \u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\"}}",
         "workspaces.fix": "{\"id\":1,\"ok\":true,\"outcome\":\"started\",\"threadId\":\"t-5\",\"base\":\"main\"}"
       },
       "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"the host answered workspaces.fix in a shape this wsp does not read; it runs another version of wsp, restart it with wsp restart\"}],\"structuredContent\":{\"error\":\"the host answered workspaces.fix in a shape this wsp does not read; it runs another version of wsp, restart it with wsp restart\",\"class\":\"provider\",\"exit\":1},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
         {
-          "op": "workspaces.resolve",
-          "ref": "alpha"
+          "op": "sessions.list"
+        },
+        {
+          "op": "workspaces.get",
+          "workspaceId": "ws-1",
+          "threadId": "t-1 \u0085 lead"
         },
         {
           "op": "workspaces.wake",
@@ -72,25 +89,31 @@
         },
         {
           "op": "workspaces.fix",
-          "workspaceId": "ws-1"
+          "workspaceId": "ws-1",
+          "threadId": "t-1 \u0085 lead"
         }
       ]
     },
     {
       "case": "an agent the catalog does not name",
       "arguments": {
-        "workspace": "alpha"
+        "thread": "t-1"
       },
       "replies": {
-        "workspaces.resolve": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha \\\"one\\\" \u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\"}}",
+        "sessions.list": "{\"id\":1,\"ok\":true,\"sessions\":[{\"id\":\"s-1\",\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"completed\",\"threadId\":\"t-1 \u0085 lead\"}]}",
+        "workspaces.get": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha \\\"one\\\" \u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\"}}",
         "workspaces.wake": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha \\\"one\\\" \u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\"}}",
         "workspaces.fix": "{\"id\":1,\"ok\":true,\"outcome\":\"queued\",\"threadId\":\"t-3\",\"base\":\"develop\",\"agent\":\"someone-else\"}"
       },
-      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"alpha \\\"one\\\" \\u0085 🧪: asked someone-else to fix the conflicts with develop\"}],\"structuredContent\":{\"outcome\":\"queued\",\"threadId\":\"t-3\",\"base\":\"develop\",\"agent\":\"someone-else\"}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"thread t-1 \\u0085 le: asked someone-else to fix the conflicts with develop\"}],\"structuredContent\":{\"outcome\":\"queued\",\"threadId\":\"t-3\",\"base\":\"develop\",\"agent\":\"someone-else\"}},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
         {
-          "op": "workspaces.resolve",
-          "ref": "alpha"
+          "op": "sessions.list"
+        },
+        {
+          "op": "workspaces.get",
+          "workspaceId": "ws-1",
+          "threadId": "t-1 \u0085 lead"
         },
         {
           "op": "workspaces.wake",
@@ -98,25 +121,31 @@
         },
         {
           "op": "workspaces.fix",
-          "workspaceId": "ws-1"
+          "workspaceId": "ws-1",
+          "threadId": "t-1 \u0085 lead"
         }
       ]
     },
     {
       "case": "updated clean, nothing sent",
       "arguments": {
-        "workspace": "alpha"
+        "thread": "t-1"
       },
       "replies": {
-        "workspaces.resolve": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha \\\"one\\\" \u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\"}}",
+        "sessions.list": "{\"id\":1,\"ok\":true,\"sessions\":[{\"id\":\"s-1\",\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"completed\",\"threadId\":\"t-1 \u0085 lead\"}]}",
+        "workspaces.get": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha \\\"one\\\" \u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\"}}",
         "workspaces.wake": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha \\\"one\\\" \u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\"}}",
         "workspaces.fix": "{\"id\":1,\"ok\":true,\"outcome\":\"updated\",\"base\":\"main \u0085 🧪\"}"
       },
-      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"alpha \\\"one\\\" \\u0085 🧪: updated from main \\u0085 🧪, nothing to fix\"}],\"structuredContent\":{\"outcome\":\"updated\",\"base\":\"main \\u0085 🧪\"}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"thread t-1 \\u0085 le: updated from main \\u0085 🧪, nothing to fix\"}],\"structuredContent\":{\"outcome\":\"updated\",\"base\":\"main \\u0085 🧪\"}},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
         {
-          "op": "workspaces.resolve",
-          "ref": "alpha"
+          "op": "sessions.list"
+        },
+        {
+          "op": "workspaces.get",
+          "workspaceId": "ws-1",
+          "threadId": "t-1 \u0085 lead"
         },
         {
           "op": "workspaces.wake",
@@ -124,49 +153,70 @@
         },
         {
           "op": "workspaces.fix",
-          "workspaceId": "ws-1"
+          "workspaceId": "ws-1",
+          "threadId": "t-1 \u0085 lead"
         }
       ]
     },
     {
       "case": "refused",
       "arguments": {
-        "workspace": "alpha",
+        "thread": "t-1",
         "check": "lint"
       },
       "replies": {
-        "workspaces.resolve": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha \\\"one\\\" \u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\"}}",
+        "sessions.list": "{\"id\":1,\"ok\":true,\"sessions\":[{\"id\":\"s-1\",\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"completed\",\"threadId\":\"t-1 \u0085 lead\"}]}",
+        "workspaces.get": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha \\\"one\\\" \u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\"}}",
         "workspaces.fix": "{\"id\":1,\"ok\":false,\"error\":\"lint has not failed on #4\",\"kind\":\"usage\"}"
       },
       "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"lint has not failed on #4\"}],\"structuredContent\":{\"error\":\"lint has not failed on #4\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
         {
-          "op": "workspaces.resolve",
-          "ref": "alpha"
+          "op": "sessions.list"
+        },
+        {
+          "op": "workspaces.get",
+          "workspaceId": "ws-1",
+          "threadId": "t-1 \u0085 lead"
         },
         {
           "op": "workspaces.fix",
           "workspaceId": "ws-1",
-          "check": "lint"
+          "check": "lint",
+          "threadId": "t-1 \u0085 lead"
         }
       ]
     },
     {
       "case": "a child to merge",
       "arguments": {
-        "workspace": "alpha",
-        "child": "beta \u0085 🧪"
+        "thread": "t-1",
+        "child": "t-4"
       },
       "replies": {
-        "workspaces.resolve": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha \\\"one\\\" \u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"napping\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\"}}",
+        "sessions.list": "{\"id\":1,\"ok\":true,\"sessions\":[{\"id\":\"s-1\",\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"completed\",\"threadId\":\"t-1 \u0085 lead\"},{\"id\":\"s-4\",\"workspaceId\":\"ws-4\",\"harness\":\"claude\",\"status\":\"completed\",\"threadId\":\"t-4 child\"}]}",
+        "workspaces.get": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha \\\"one\\\" \u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"napping\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\"}}",
+        "workspaces.get #2": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"beta \u0085\",\"id\":\"ws-4\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\",\"parentWorkspaceId\":\"ws-1\"}}",
         "workspaces.wake": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha \\\"one\\\" \u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\"}}",
-        "workspaces.fix": "{\"id\":1,\"ok\":true,\"outcome\":\"started\",\"threadId\":\"t-4\",\"child\":\"beta \u0085 🧪\",\"base\":\"tree/lead\",\"agent\":\"claude\"}"
+        "workspaces.fix": "{\"id\":1,\"ok\":true,\"outcome\":\"started\",\"threadId\":\"t-1\",\"child\":\"ws-4\",\"base\":\"tree/lead\",\"agent\":\"claude\"}"
       },
-      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"alpha \\\"one\\\" \\u0085 🧪: asked Claude Code to merge beta \\u0085 🧪\"}],\"structuredContent\":{\"outcome\":\"started\",\"threadId\":\"t-4\",\"child\":\"beta \\u0085 🧪\",\"base\":\"tree/lead\",\"agent\":\"claude\"}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"thread t-1 \\u0085 le: asked Claude Code to merge thread t-4 chil\"}],\"structuredContent\":{\"outcome\":\"started\",\"threadId\":\"t-1\",\"child\":\"ws-4\",\"base\":\"tree/lead\",\"agent\":\"claude\"}},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
         {
-          "op": "workspaces.resolve",
-          "ref": "alpha"
+          "op": "sessions.list"
+        },
+        {
+          "op": "workspaces.get",
+          "workspaceId": "ws-1",
+          "threadId": "t-1 \u0085 lead"
+        },
+        {
+          "op": "sessions.list"
+        },
+        {
+          "op": "workspaces.get",
+          "workspaceId": "ws-4",
+          "threadId": "t-4 child"
         },
         {
           "op": "workspaces.wake",
@@ -175,39 +225,78 @@
         {
           "op": "workspaces.fix",
           "workspaceId": "ws-1",
-          "child": "beta \u0085 🧪"
+          "child": "ws-4",
+          "childThreadId": "t-4 child",
+          "threadId": "t-1 \u0085 lead"
+        }
+      ]
+    },
+    {
+      "case": "a child in its lead's folder",
+      "arguments": {
+        "thread": "t-1",
+        "child": "t-4"
+      },
+      "replies": {
+        "sessions.list": "{\"id\":1,\"ok\":true,\"sessions\":[{\"id\":\"s-1\",\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"completed\",\"threadId\":\"t-1 \u0085 lead\"},{\"id\":\"s-4\",\"workspaceId\":\"ws-4\",\"harness\":\"claude\",\"status\":\"completed\",\"threadId\":\"t-4 child\"}]}",
+        "workspaces.get": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha \\\"one\\\" \u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\"}}",
+        "workspaces.get #2": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha \\\"one\\\" \u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\"}}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"thread t-4 chil works in the same folder as thread t-1 \\u0085 le; there is nothing apart to merge. Name a child that works in a folder of its own.\"}],\"structuredContent\":{\"error\":\"thread t-4 chil works in the same folder as thread t-1 \\u0085 le; there is nothing apart to merge. Name a child that works in a folder of its own.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "sessions.list"
+        },
+        {
+          "op": "workspaces.get",
+          "workspaceId": "ws-1",
+          "threadId": "t-1 \u0085 lead"
+        },
+        {
+          "op": "sessions.list"
+        },
+        {
+          "op": "workspaces.get",
+          "workspaceId": "ws-4",
+          "threadId": "t-4 child"
         }
       ]
     },
     {
       "case": "held by its computer's threads at once",
       "arguments": {
-        "workspace": "alpha",
+        "thread": "t-1",
         "check": "ci"
       },
       "replies": {
-        "workspaces.resolve": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha \\\"one\\\" \u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\"}}",
+        "sessions.list": "{\"id\":1,\"ok\":true,\"sessions\":[{\"id\":\"s-1\",\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"completed\",\"threadId\":\"t-1 \u0085 lead\"}]}",
+        "workspaces.get": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha \\\"one\\\" \u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\"}}",
         "workspaces.fix": "{\"id\":1,\"ok\":true,\"outcome\":\"held\",\"threadId\":\"t-6\",\"check\":\"ci\",\"base\":\"main\",\"agent\":\"claude\",\"capped\":{\"placeId\":\"p_hetzner\",\"place\":\"hetzner \u0085 🧪\",\"running\":2,\"atOnce\":1}}"
       },
-      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"alpha \\\"one\\\" \\u0085 🧪: asked Claude Code to fix ci\\nwaiting while hetzner \\u0085 🧪 is running 2 of 1 thread\"}],\"structuredContent\":{\"outcome\":\"held\",\"threadId\":\"t-6\",\"check\":\"ci\",\"base\":\"main\",\"agent\":\"claude\",\"capped\":{\"placeId\":\"p_hetzner\",\"place\":\"hetzner \\u0085 🧪\",\"running\":2,\"atOnce\":1}}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"thread t-1 \\u0085 le: asked Claude Code to fix ci\\nwaiting while hetzner \\u0085 🧪 is running 2 of 1 thread\"}],\"structuredContent\":{\"outcome\":\"held\",\"threadId\":\"t-6\",\"check\":\"ci\",\"base\":\"main\",\"agent\":\"claude\",\"capped\":{\"placeId\":\"p_hetzner\",\"place\":\"hetzner \\u0085 🧪\",\"running\":2,\"atOnce\":1}}},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
         {
-          "op": "workspaces.resolve",
-          "ref": "alpha"
+          "op": "sessions.list"
+        },
+        {
+          "op": "workspaces.get",
+          "workspaceId": "ws-1",
+          "threadId": "t-1 \u0085 lead"
         },
         {
           "op": "workspaces.fix",
           "workspaceId": "ws-1",
-          "check": "ci"
+          "check": "ci",
+          "threadId": "t-1 \u0085 lead"
         }
       ]
     },
     {
       "case": "a check and a child",
       "arguments": {
-        "workspace": "alpha",
+        "thread": "t-1",
         "check": "lint",
-        "child": "beta"
+        "child": "t-4"
       },
       "replies": {},
       "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"name a failed check or a child to merge, not both\"}],\"structuredContent\":{\"error\":\"name a failed check or a child to merge, not both\",\"class\":\"provider\",\"exit\":1},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
@@ -216,16 +305,21 @@
     {
       "case": "gone",
       "arguments": {
-        "workspace": "alpha"
+        "thread": "t-1"
       },
       "replies": {
-        "workspaces.resolve": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha \\\"one\\\" \u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"gone\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\",\"gone\":\"the provider has no machine m-1 \u009b\"}}"
+        "sessions.list": "{\"id\":1,\"ok\":true,\"sessions\":[{\"id\":\"s-1\",\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"completed\",\"threadId\":\"t-1 \u0085 lead\"}]}",
+        "workspaces.get": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha \\\"one\\\" \u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"gone\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\",\"gone\":\"the provider has no machine m-1 \u009b\"}}"
       },
       "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"alpha \\\"one\\\" \\u0085 🧪's machine is gone with its disk, so work that was not pushed is lost; rebuild it to fix, which brings back its home folder from the last saved nap (the provider has no machine m-1 \\u009b)\"}],\"structuredContent\":{\"error\":\"alpha \\\"one\\\" \\u0085 🧪's machine is gone with its disk, so work that was not pushed is lost; rebuild it to fix, which brings back its home folder from the last saved nap (the provider has no machine m-1 \\u009b)\",\"class\":\"provider\",\"exit\":1},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
         {
-          "op": "workspaces.resolve",
-          "ref": "alpha"
+          "op": "sessions.list"
+        },
+        {
+          "op": "workspaces.get",
+          "workspaceId": "ws-1",
+          "threadId": "t-1 \u0085 lead"
         }
       ]
     }

@@ -115,7 +115,7 @@ function configOf(road: Road, on: AgentsOn, agentId: string, scope: McpScope): C
     return { agent, ...own, ...(own.base !== home ? { store: own.base } : {}), ...(scope === "home" ? { folder: home } : {}) };
   }
   const project = projectOf(on);
-  if (project === undefined) throw usage("A project's server is changed from a workspace of that project, or from its computer's page.");
+  if (project === undefined) throw usage("A project's server is changed from a thread of that project, or from its computer's page.");
   const files = (agent.mcp.projectFiles ?? []).map(f => posix.join(project, f));
   if (files.length === 0) throw usage(noServersConfigRefusal(agentName(agentId)));
   return { agent, files, base: project };

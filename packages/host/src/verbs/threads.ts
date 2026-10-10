@@ -27,11 +27,13 @@ import {
   WorktreeMade,
   worktreeRemovedLine,
   turnSpendWord,
+  BESIDE_ALONE_LINE,
+  BESIDE_ALONE_FIX,
 } from "@wsp/protocol";
 import { hostBack, type VerbDeps, type VerbContext, usageIs, tool, type CliVerb, type Verb, PICK_OPTIONS, SEND_OPTIONS, flag, flagList, absolutePath, absoluteFolder } from "./client.js";
-import { workspaceOf, threadOf, SSH_PIPES_HERE_LINE, sshWorkspaceOf, pipeBytes, awake, napAfterDeadLaunch, withLine, stop, stopLine, forgetThread, threadForgotLine, rename, renameLine, threadsOf, settleThreads, restoreThreads, settledLines, restoredLines } from "./workspaces-help.js";
-import { type Turn, pickFlags, checkedStart, runTarget, forkFor, worktreeFor, openingOf, notifyOf, replacedOf, messageTo, startDetached, follow, hostRestartedLine, restartHost, readThread, readLine, threadHead, headLine, type AnswerRoad, ANSWER_ROADS, answerOpenAsk, followVerb, beforeSending, detachVerb, turnView } from "./turns-help.js";
-import { confirmed, execOn, type ExportRequest, exportProject, withReplaceHint, agentsFlag, QUIET_LINE, QUIET_TURN, SEND_MEETS, CAP_MEETS, TurnOut, Argv, asJson, asText, turnText, detachedOut, turnOut, WorkspaceIn, AgentIn, NotifyIn, RunProjectIn, BranchIn, RunCwdIn, CwdIn, DetachIn, TitleIn, ReplacesIn, FilesIn, FastIn, PICK_INPUTS, SEND_INPUTS, schemeFlag, hostFolders, initSetup, folderLines, REASON_FLAG } from "./io.js";
+import { workspaceOf, threadOf, threadCwd, SSH_PIPES_HERE_LINE, sshWorkspaceOf, pipeBytes, awake, napAfterDeadLaunch, withLine, stop, stopLine, forgetThread, threadForgotLine, rename, renameLine, threadsOf, settleThreads, restoreThreads, settledLines, restoredLines } from "./workspaces-help.js";
+import { type Turn, threadAt, pickFlags, checkedStart, runTarget, forkFor, worktreeFor, openingOf, notifyOf, replacedOf, messageTo, startDetached, follow, hostRestartedLine, restartHost, readThread, readLine, threadHead, headLine, type AnswerRoad, ANSWER_ROADS, answerOpenAsk, followVerb, beforeSending, detachVerb, turnView } from "./turns-help.js";
+import { confirmed, execOn, type ExportRequest, exportProject, withReplaceHint, agentsFlag, QUIET_LINE, QUIET_TURN, SEND_MEETS, CAP_MEETS, TurnOut, Argv, asJson, asText, turnText, detachedOut, turnOut, WorkspaceIn, ThreadIn, AgentIn, NotifyIn, RunProjectIn, BesideIn, BranchIn, RunCwdIn, ExecCwdIn, DetachIn, TitleIn, ReplacesIn, FilesIn, FastIn, PICK_INPUTS, SEND_INPUTS, schemeFlag, hostFolders, initSetup, folderLines, REASON_FLAG } from "./io.js";
 import { SLATE_VERBS } from "./slate.js";
 
 /** The lines another terminal answers a thread's open prompt with, one per road that carries a verb: the same op the
@@ -66,11 +68,11 @@ const ANSWER_VERBS: readonly CliVerb[] = ANSWER_ROADS.filter((road): road is Ans
 export const THREAD_VERBS: readonly Verb[] = [
   {
     name: "run",
-    usage: 'wsp run [<project>] [--branch <branch>] [--cwd <path>] [--agent <id>] [--model, --effort, --access <word>] [--fast] [--notify <thread|me>] [--title <title>] [--replaces <thread>] [--file <path>] [--detach] "<message>"',
+    usage: 'wsp run [<project>] [--beside <thread>] [--branch <branch>] [--cwd <path>] [--agent <id>] [--model, --effort, --access <word>] [--fast] [--notify <thread|me>] [--title <title>] [--replaces <thread>] [--file <path>] [--detach] "<message>"',
     about:
-      "an agent works in the project's folder and you read its reply: a thread with the agent, model, effort and access the app offers; a project on a box runs in its folder there as the login the box was added with, and a project anywhere else gets a new machine forked from the image, named off the message as the app's New thread names one; --branch runs it in a worktree of the project's repo on that branch, made under wsp's folder unless one already holds it, and --cwd in a folder inside the project or one of its worktrees; with no project, run from inside one of your project folders, or from a thread, beside it; follows its first turn, or with --detach prints the id and returns",
+      "an agent works in the project's folder and you read its reply: a thread with the agent, model, effort and access the app offers; a project on a box runs in its folder there as the login the box was added with<!-- cloud -->, and a project on a cloud gets a new machine forked from the image, named off the message as the app's New thread names one<!-- /cloud -->; --beside runs it in the folder another thread works in, on that thread's computer; --branch runs it in a worktree of the project's repo on that branch, made under wsp's folder unless one already holds it, and --cwd in a folder inside the project or one of its worktrees; with no project, run from inside one of your project folders, or from a thread, beside it; follows its first turn, or with --detach prints the id and returns",
     page: "front",
-    options: { branch: { type: "string" }, cwd: { type: "string" }, agent: { type: "string" }, ...PICK_OPTIONS, fast: { type: "boolean" }, notify: { type: "string", multiple: true }, title: { type: "string" }, replaces: { type: "string" }, file: { type: "string", multiple: true }, detach: { type: "boolean" } },
+    options: { beside: { type: "string" }, branch: { type: "string" }, cwd: { type: "string" }, agent: { type: "string" }, ...PICK_OPTIONS, fast: { type: "boolean" }, notify: { type: "string", multiple: true }, title: { type: "string" }, replaces: { type: "string" }, file: { type: "string", multiple: true }, detach: { type: "boolean" } },
     run: async ctx => {
       if (ctx.args.length === 0) throw usageRefusal(EMPTY_MESSAGE_LINE, 'Put the message in quotes: wsp run <project> "say hi".');
       if (ctx.args.length > 2) throw usageRefusal(`wsp run takes a project and a message; ${ctx.args[2]!} reads as a third word.`, usageIs(ctx));
@@ -79,8 +81,10 @@ export const THREAD_VERBS: readonly Verb[] = [
       const picks = pickFlags(ctx.flags);
       const [ref, message] = ctx.args.length === 2 ? [ctx.args[0], ctx.args[1]!] : [undefined, ctx.args[0]!];
       const where = { branch: flag(ctx.flags, "branch"), cwd: flag(ctx.flags, "cwd") };
+      const beside = flag(ctx.flags, "beside");
+      if (beside !== undefined && (ref !== undefined || where.branch !== undefined)) throw usageRefusal(BESIDE_ALONE_LINE, usageIs(ctx));
       const { opened, woken, opening } = await beforeSending(client, async () => {
-        const named = await runTarget(client, ref, ctx.cwd, ctx.env, ctx.elsewhere, where);
+        const named = beside !== undefined ? { workspace: (await threadAt(client, beside, "wsp run --beside")).workspace } : await runTarget(client, ref, ctx.cwd, ctx.env, ctx.elsewhere, where);
         await checkedStart(client, message, harness, picks, "workspace" in named ? named.workspace.id : undefined, "fork" in named ? named.fork.id : undefined);
         const read = openingOf(ctx.env, "workspace" in named ? named.workspace : named, message, { harness, ...picks, notify: await notifyOf(client, flagList(ctx.flags, "notify")), title: flag(ctx.flags, "title"), replaces: await replacedOf(client, flag(ctx.flags, "replaces")), files: flagList(ctx.flags, "file"), elsewhere: ctx.elsewhere, ...("here" in named ? {} : { cwd: where.cwd }) });
         const target = "fork" in named ? { workspace: await forkFor(client, named.fork, message, line => ctx.io.error(line)) } : named;
@@ -97,13 +101,14 @@ export const THREAD_VERBS: readonly Verb[] = [
       return 0;
     },
     tool: tool({
-      description: `Opens a thread under the named agent, on the model, effort and access mode named or the catalog's defaults (a cheaper model for a review, say), and follows its first turn; returns the reply text as soon as it is complete, with the thread id for send. It runs in the project's folder, on a box in its folder there as the login the box was added with, and on a project anywhere else in a new machine forked from the image, named off the message as the app's New thread names one; with branch, in a worktree of the project's repo on that branch (one that already holds the branch, wherever it is, else one wsp makes under its own folder with the dependencies carried in); with cwd, in that folder, which must be inside the project or one of its worktrees. With no project, from a thread, it runs beside that thread in its folder. With detach true it returns the thread id the moment the turn is started, without the reply: the road for a turn that runs for minutes or an hour. ${TURN_END_WORDS}. With notify, each turn of the thread sends one line (outcome, duration, cost, and the reply whole into a thread or its last line to the person) to every target named, so a caller need not wait here or poll. ${NOTIFY_WORDS}. ${NOTIFY_CALLER}. With replaces, the thread restarts a stopped or failed one, which settles once it starts, so the person sees one row. ${CAP_MEETS}. ${ANOTHER_AGENT_WORDS}.`,
-      input: { project: RunProjectIn, branch: BranchIn, cwd: RunCwdIn, message: z.string(), agent: AgentIn, ...PICK_INPUTS, fast: FastIn, notify: NotifyIn, title: TitleIn, replaces: ReplacesIn, files: FilesIn, detach: DetachIn },
+      description: `Opens a thread under the named agent, on the model, effort and access mode named or the catalog's defaults (a cheaper model for a review, say), and follows its first turn; returns the reply text as soon as it is complete, with the thread id for send. It runs in the project's folder, on a box in its folder there as the login the box was added with<!-- cloud -->, and on a project on a cloud in a new machine forked from the image, named off the message as the app's New thread names one<!-- /cloud -->; with beside, in the folder that thread works in, on its computer, which is how a fresh thread picks up where a long one stands; with branch, in a worktree of the project's repo on that branch (one that already holds the branch, wherever it is, else one wsp makes under its own folder with the dependencies carried in); with cwd, in that folder, which must be inside the project or one of its worktrees. With no project, from a thread, it runs beside that thread in its folder. With detach true it returns the thread id the moment the turn is started, without the reply: the road for a turn that runs for minutes or an hour. ${TURN_END_WORDS}. With notify, each turn of the thread sends one line (outcome, duration, cost, and the reply whole into a thread or its last line to the person) to every target named, so a caller need not wait here or poll. ${NOTIFY_WORDS}. ${NOTIFY_CALLER}. With replaces, the thread restarts a stopped or failed one, which settles once it starts, so the person sees one row. ${CAP_MEETS}. ${ANOTHER_AGENT_WORDS}.`,
+      input: { project: RunProjectIn, beside: BesideIn, branch: BranchIn, cwd: RunCwdIn, message: z.string(), agent: AgentIn, ...PICK_INPUTS, fast: FastIn, notify: NotifyIn, title: TitleIn, replaces: ReplacesIn, files: FilesIn, detach: DetachIn },
       output: TurnOut.shape,
-      call: async ({ project: ref, branch, cwd, message, agent: harness, notify: tell, title, replaces, files, detach, ...input }, deps) => {
+      call: async ({ project: ref, beside, branch, cwd, message, agent: harness, notify: tell, title, replaces, files, detach, ...input }, deps) => {
+        if (beside !== undefined && (ref !== undefined || branch !== undefined)) throw usageRefusal(BESIDE_ALONE_LINE, BESIDE_ALONE_FIX);
         const client = await deps.client();
         const { opened, woken, opening } = await beforeSending(client, async () => {
-          const named = await runTarget(client, ref, deps.cwd, deps.env, deps.elsewhere, { branch, cwd });
+          const named = beside !== undefined ? { workspace: (await threadAt(client, beside, "wsp run --beside")).workspace } : await runTarget(client, ref, deps.cwd, deps.env, deps.elsewhere, { branch, cwd });
           await checkedStart(client, message, harness, input, "workspace" in named ? named.workspace.id : undefined, "fork" in named ? named.fork.id : undefined);
           const read = openingOf(deps.env, "workspace" in named ? named.workspace : named, message, { harness, ...input, notify: await notifyOf(client, tell ?? []), title, replaces: await replacedOf(client, replaces), files, elsewhere: deps.elsewhere, ...("here" in named ? {} : { cwd }) });
           const target = "fork" in named ? { workspace: await forkFor(client, named.fork, message, QUIET_LINE) } : named;
@@ -414,29 +419,30 @@ export const THREAD_VERBS: readonly Verb[] = [
   },
   {
     name: "stop",
-    usage: "wsp stop <thread> [--task <id>]",
-    about: "stops the thread's running turn, as the app's stop does, or with --task one of its agent's own subagents alone; the machine stays up",
+    usage: "wsp stop <thread> [--subagent <id>]",
+    about: "stops the thread's running turn, as the app's stop does, or with --subagent one of its agent's own subagents alone; the computer stays up",
     page: "front",
-    options: { task: { type: "string" } },
+    options: { subagent: { type: "string" } },
     run: async ctx => {
       const [ref] = ctx.args;
       if (ref === undefined || ctx.args.length !== 1) throw usageRefusal("wsp stop takes one thread.", usageIs(ctx));
-      const stopped = await stop(await ctx.client(), ref, flag(ctx.flags, "task"));
+      const stopped = await stop(await ctx.client(), ref, flag(ctx.flags, "subagent"));
       ctx.out.emit(stopped, stopLine(stopped));
       return 0;
     },
     tool: tool({
-      description: "Stops the thread's running turn (by id, or a prefix of it), as the app's stop button does; the machine stays up and the thread takes the next send. outcome accepted means the turn ended interrupted; not-running means it had already ended, which is an answer, not an error. A thread whose agents spawned threads of their own stops as one: under names each of those that was running and was stopped with it. Given the id of one of the agent's own subagents (off threads' subagents), that one is stopped alone and the turn runs on: accepted means the agent took the stop, refused and unsupported carry the reason in error. On a computer the person added, left says what the thread started there that the stop could not end, or that the computer is not answering, in which case the turn reads stopped now and ends there once that computer connects again; a stop on a message waiting for that end gives the message up and says so in left.",
-      input: { thread: z.string(), task: z.string().optional() },
+      description: "Stops the thread's running turn (by id, or a prefix of it), as the app's stop button does; the computer stays up and the thread takes the next send. outcome accepted means the turn ended interrupted; not-running means it had already ended, which is an answer, not an error. A thread whose agents spawned threads of their own stops as one: under names each of those that was running and was stopped with it. Given the id of one of the agent's own subagents (off threads' subagents), that one is stopped alone and the turn runs on: accepted means the agent took the stop, refused and unsupported carry the reason in error. On a computer the person added, left says what the thread started there that the stop could not end, or that the computer is not answering, in which case the turn reads stopped now and ends there once that computer connects again; a stop on a message waiting for that end gives the message up and says so in left.",
+      input: { thread: z.string(), subagent: z.string().optional().describe("one of the agent's own subagents, by the id threads lists it under, to stop alone") },
       output: { threadId: z.string(), task: z.string().optional(), outcome: SessionInterruptOutcome, under: z.array(z.string()).optional(), error: z.string().optional(), left: z.string().optional() },
-      call: async ({ thread: ref, task }, deps) => {
-        const stopped = await stop(await deps.client(), ref, task);
+      call: async ({ thread: ref, subagent }, deps) => {
+        const stopped = await stop(await deps.client(), ref, subagent);
         return asText(stopLine(stopped), { ...stopped });
       },
     }),
   },
   {
     name: "ssh",
+    cloud: true,
     usage: "wsp ssh <workspace>",
     about: "carries one ssh connection to the workspace's own ssh server, starting it there, over this computer's stdin and stdout: the ProxyCommand wsp's ssh config gives every wsp- alias, so `ssh wsp-<name>` and an editor's remote window land inside the workspace",
     page: "agent",
@@ -457,16 +463,18 @@ export const THREAD_VERBS: readonly Verb[] = [
   },
   {
     name: "exec",
-    usage: "wsp exec <workspace> [--cwd <dir>] -- <command...>",
-    about: "runs the command on the machine, each word as given, in --cwd or the folder a thread would start in",
+    usage: "wsp exec <thread> [--cwd <dir>] -- <command...>",
+    about: "runs the command where the thread works, each word as given, in --cwd or the thread's own folder",
     page: "agent",
     options: { cwd: { type: "string" } },
     run: async ctx => {
       const [ref, ...words] = ctx.args;
-      if (ref === undefined || words.length === 0) throw usageRefusal("wsp exec takes a workspace, then -- and the command.", usageIs(ctx));
+      if (ref === undefined || words.length === 0) throw usageRefusal("wsp exec takes a thread, then -- and the command.", usageIs(ctx));
+      const given = absoluteFolder(flag(ctx.flags, "cwd"));
       const client = await ctx.client();
-      const { workspace } = await awake(client, await workspaceOf(client, ref, "exec"), "exec", line => ctx.io.error(line));
-      const folder = absoluteFolder(flag(ctx.flags, "cwd"));
+      const at = await threadAt(client, ref, "wsp exec");
+      const { workspace } = await awake(client, at.workspace, "exec", line => ctx.io.error(line));
+      const folder = given ?? threadCwd(at.thread, at.workspace);
       const { exit, ranIn } = await execOn(client, workspace.id, words, folder, e => {
         if (e.type === "exec.output") ctx.out.emit(e, e.text);
       });
@@ -476,14 +484,16 @@ export const THREAD_VERBS: readonly Verb[] = [
       return exit.exitCode ?? EXIT_CODES.provider;
     },
     tool: tool({
-      description: "Runs a command on the workspace's machine as argv (each word as given; use sh -c for a shell line), in the folder cwd names or the one a thread would start in (the workspace's last used or only project, else its own folder), and returns its output lines, exit code and the folder it ran in. A non-zero exit is a result; the machine going away is an error.",
-      input: { workspace: WorkspaceIn, argv: Argv, cwd: CwdIn },
-      output: { exitCode: z.number().int().nullable(), output: z.array(z.string()), cwd: z.string().optional().describe("the folder the command ran in, as the host resolved it; absent only on a machine whose kind names no folder, where its own home is where the command ran") },
+      description: "Runs a command on the computer the thread runs on as argv (each word as given; use sh -c for a shell line), in the folder cwd names or the folder the thread works in, and returns its output lines, exit code and the folder it ran in. A non-zero exit is a result; the computer going away is an error.",
+      input: { thread: ThreadIn, argv: Argv, cwd: ExecCwdIn },
+      output: { exitCode: z.number().int().nullable(), output: z.array(z.string()), cwd: z.string().optional().describe("the folder the command ran in, as the host resolved it; absent only where the thread's computer names no folder, where its own home is where the command ran") },
       stream: ["output"],
-      call: async ({ workspace: ref, argv, cwd: folder }, deps) => {
-        const asked = absoluteFolder(folder);
+      call: async ({ thread: ref, argv, cwd: folder }, deps) => {
+        const given = absoluteFolder(folder);
         const client = await deps.client();
-        const { workspace: target } = await awake(client, await workspaceOf(client, ref, "exec"), "exec", QUIET_LINE);
+        const at = await threadAt(client, ref, "wsp exec");
+        const asked = given ?? threadCwd(at.thread, at.workspace);
+        const { workspace: target } = await awake(client, at.workspace, "exec", QUIET_LINE);
         const output: string[] = [];
         const { exit, ranIn } = await execOn(client, target.id, argv, asked, e => {
           if (e.type === "exec.output") output.push(e.text);
@@ -570,6 +580,7 @@ export const THREAD_VERBS: readonly Verb[] = [
   },
   {
     name: "export",
+    cloud: true,
     usage: "wsp export <workspace> <folder> [--from <path on the machine>] [--replace] [--agents <ids>]",
     about: "brings a project folder and the agent sessions keyed to it home from the machine",
     page: "agent",

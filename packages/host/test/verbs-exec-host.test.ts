@@ -7,7 +7,7 @@ import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type AddressInfo, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { noProjectImageLine, projectImageInUseRefusal, projectImageRemoveNotice, projectImageRemovedLine, HERE_PLACE_ID, runForTheList, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, noWorkspaceRefusal, execOutsideFix, refusalLine, spawnReachRefusal, EXIT_CODES, HOST_STOPPING_LINE, UP_RESTART_LINE, noReplyLine, notifyLine, RuntimeRequest, WorkspaceView } from "@wsp/protocol";
+import { noProjectImageLine, projectImageInUseRefusal, projectImageRemoveNotice, projectImageRemovedLine, HERE_PLACE_ID, runForTheList, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, notAThreadLine, NAME_A_THREAD_FIX, refusalLine, EXIT_CODES, HOST_STOPPING_LINE, UP_RESTART_LINE, noReplyLine, notifyLine, RuntimeRequest, WorkspaceView } from "@wsp/protocol";
 import { describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
 import { cli } from "../src/cli.js";
@@ -17,7 +17,7 @@ import { CLI_VERBS, dialHost, firstEnded, noHostServingLine, threadRows, threads
 import { HOST_RESTARTING_LINE, hostAgain, hostRestartedLine, THREAD_PREFIX_WORD } from "../src/verbs.js";
 import { restartRoads, type RestartRoad } from "../src/restart.js";
 import { withDaemonRoads } from "./stub-backend.js";
-import { projectOn, CUT_LINE, captured, doneOnlyAgent, execGuest, heldAgent, lastingAgent, launchedScript, launchedScripts, stuckAgent, type Captured } from "./verbs-fixture.js";
+import { projectOn, threadOn, CUT_LINE, captured, doneOnlyAgent, execGuest, heldAgent, lastingAgent, launchedScripts, stuckAgent, type Captured } from "./verbs-fixture.js";
 import { runsFromItsOwnFolder } from "./own-folder.js";
 import { CLOUD_ON } from "../src/cloud.js";
 import { verbsHost } from "./verbs-host.js";
@@ -49,9 +49,19 @@ describe("wsp verbs over the host: wait, read, exec and the host itself", () => 
     await vi.waitFor(async () => expect(await h.rt.sessions.list()).toHaveLength(1), { timeout: 10_000, interval: 10 });
     const thread = (await h.rt.sessions.list())[0]!.threadId!;
 
+    // The wait reads the listing twice, naming the thread and then once subscribed; the launch gives up only after
+    // both, since a give-up before the naming leaves no thread to name, however long that takes on a slow computer.
+    const list = h.rt.sessions.list.bind(h.rt.sessions);
+    let read = 0;
+    const listed = vi.spyOn(h.rt.sessions, "list").mockImplementation(async (...asked) => {
+      const rows = await list(...asked);
+      read++;
+      return rows;
+    });
     let answered = false;
     const waiting = h.run("threads", "wait", thread, "--timeout", "3600").then(r => ((answered = true), r));
-    await new Promise(r => setTimeout(r, 50));
+    await vi.waitFor(() => expect(read).toBeGreaterThanOrEqual(2), { timeout: 10_000, interval: 5 });
+    listed.mockRestore();
     expect(answered).toBe(false);
     letProbe();
     await expect(giving).rejects.toThrow(WOULD_NOT_LAUNCH);
@@ -98,7 +108,7 @@ describe("wsp verbs over the host: wait, read, exec and the host itself", () => 
     }
   });
 
-  it("a send that never launches on a thread that has worked leaves every reading of its last turn alone: the table, the read, the reply and the wait all say what that turn came to", async () => {
+  it.runIf(CLOUD_ON)("a send that never launches on a thread that has worked leaves every reading of its last turn alone: the table, the read, the reply and the wait all say what that turn came to", async () => {
     const held = heldAgent(false);
     let launches = 0;
     await h.restartHost({
@@ -131,7 +141,7 @@ describe("wsp verbs over the host: wait, read, exec and the host itself", () => 
     expect((await h.run("threads", "wait", thread, "--tail")).io.lines).toEqual([`thread ${thread.slice(0, 8)} finished (completed): all green`]);
   });
 
-  it("threads wait on a turn the runtime ended says failed with the runtime's reason, as the notify line would; a turn the transport cut says the cut line", async () => {
+  it.runIf(CLOUD_ON)("threads wait on a turn the runtime ended says failed with the runtime's reason, as the notify line would; a turn the transport cut says the cut line", async () => {
     await h.restartHost({ claude: stuckAgent() });
     await h.run("new", "alpha");
     await h.run("run", "alpha", "--detach", "loop forever");
@@ -152,7 +162,7 @@ describe("wsp verbs over the host: wait, read, exec and the host itself", () => 
     expect(cutWait.io.lines).toEqual([`thread ${cut.threadId!.slice(0, 8)} finished (failed): ${CUT_LINE}`]);
   });
 
-  it("thread read prints the thread's messages as the app lists them, one line per tool call, --last the whole final message alone, and a thread that has not replied says so", async () => {
+  it.runIf(CLOUD_ON)("thread read prints the thread's messages as the app lists them, one line per tool call, --last the whole final message alone, and a thread that has not replied says so", async () => {
     await h.run("new", "alpha");
     await h.run("run", "alpha", "build it");
     const [row] = await h.rt.sessions.list();
@@ -191,7 +201,7 @@ describe("wsp verbs over the host: wait, read, exec and the host itself", () => 
     expect(missing.io.errors).toEqual(["wsp thread read: no thread nope"]);
   });
 
-  it("takes --state wherever it sits: before the verb's words, between them and after them", async () => {
+  it.runIf(CLOUD_ON)("takes --state wherever it sits: before the verb's words, between them and after them", async () => {
     await h.run("new", "alpha");
     await h.run("run", "alpha", "build it");
     const id = (await h.rt.sessions.list())[0]!.threadId!;
@@ -206,7 +216,7 @@ describe("wsp verbs over the host: wait, read, exec and the host itself", () => 
     expect(after.io.lines[0]).toContain("build it");
   });
 
-  it("takes --json wherever it sits, so a line that asks for JSON before the verb's words prints JSON", async () => {
+  it.runIf(CLOUD_ON)("takes --json wherever it sits, so a line that asks for JSON before the verb's words prints JSON", async () => {
     await h.run("new", "alpha");
     await h.run("run", "alpha", "build it");
     const id = (await h.rt.sessions.list())[0]!.threadId!;
@@ -221,7 +231,7 @@ describe("wsp verbs over the host: wait, read, exec and the host itself", () => 
     expect(h.json(after.io)).toEqual(answer);
   });
 
-  it("hands the verb the rest of the line in the order it was typed, so its own flags are read beside a shared one", async () => {
+  it.runIf(CLOUD_ON)("hands the verb the rest of the line in the order it was typed, so its own flags are read beside a shared one", async () => {
     await h.run("new", "alpha");
     await h.run("run", "alpha", "build it");
     const id = (await h.rt.sessions.list())[0]!.threadId!;
@@ -280,15 +290,30 @@ describe("wsp verbs over the host: wait, read, exec and the host itself", () => 
     expect((await h.rt.sessions.history(row!.workspaceId)).map(e => e.type)).not.toContain("session.end");
   });
 
-  it("exec runs the command on the workspace's machine, streams its output and exits with its code", async () => {
+  it("exec with no --cwd runs in the folder the thread works in, a folder inside its project", async () => {
     await h.run("new", "alpha");
+    const workspace = (await h.rt.workspaces.list())[0]!;
+    const sub = `${workspace.project.path}/packages`;
+    const started = await h.rt.sessions.start(workspace.id, { prompt: "lead the work", cwd: sub });
+    await started.finished;
+    const thread = started.view().threadId!;
+    execGuest(h.backend, "ok\n", 0);
+    const ran = await h.run("exec", thread, "--json", "--", "true");
+    expect(h.json(ran.io).at(-1)).toEqual({ exitCode: 0, cwd: sub });
+    const asked = await h.run("exec", thread, "--cwd", workspace.project.path, "--json", "--", "true");
+    expect(h.json(asked.io).at(-1)).toEqual({ exitCode: 0, cwd: workspace.project.path });
+  });
+
+  it("exec runs the command where the thread works, streams its output and exits with its code", async () => {
+    await h.run("new", "alpha");
+    const thread = await threadOn(h.rt, "alpha");
     execGuest(h.backend, "one\ntwo\n", 3);
-    const { code, io } = await h.run("exec", "alpha", "--", "sh", "-c", "printf 'one\\ntwo\\n'; exit 3");
+    const { code, io } = await h.run("exec", thread, "--", "sh", "-c", "printf 'one\\ntwo\\n'; exit 3");
     expect(code).toBe(3);
     expect(io.lines).toEqual(["one", "two"]);
-    expect(launchedScript(h.backend)).toContain("'sh' '-c' 'printf '\\''one\\ntwo\\n'\\''; exit 3'\n");
+    expect(launchedScripts(h.backend).at(-1)).toContain("'sh' '-c' 'printf '\\''one\\ntwo\\n'\\''; exit 3'\n");
 
-    const raw = await h.run("exec", "alpha", "--json", "--", "true");
+    const raw = await h.run("exec", thread, "--json", "--", "true");
     expect(raw.code).toBe(3);
     expect(h.json(raw.io)).toEqual([
       { type: "exec.output", execId: expect.any(String), text: "one" },
@@ -296,9 +321,14 @@ describe("wsp verbs over the host: wait, read, exec and the host itself", () => 
       // The command ran in the workspace's project, and the reply says where rather than restating the rule.
       { exitCode: 3, cwd: (await h.rt.workspaces.list())[0]!.project.path },
     ]);
-    const bare = await h.run("exec", "alpha");
+    const bare = await h.run("exec", thread);
     expect(bare.code).toBe(3);
-    expect(bare.io.errors).toEqual(["wsp exec takes a workspace, then -- and the command. usage: wsp exec <workspace> [--cwd <dir>] -- <command...>"]);
+    expect(bare.io.errors).toEqual(["wsp exec takes a thread, then -- and the command. usage: wsp exec <thread> [--cwd <dir>] -- <command...>"]);
+    // A project's name where the thread goes is refused saying the line takes a thread, before anything runs.
+    const project = (await h.rt.workspaces.list())[0]!.project.name;
+    const named = await h.run("exec", project, "--", "true");
+    expect(named.code).toBe(3);
+    expect(named.io.errors).toEqual([`wsp exec: ${refusalLine(notAThreadLine(project, "project", "wsp exec"), NAME_A_THREAD_FIX)}`]);
   });
 
   describe("one list behind every verb", () => {
@@ -323,86 +353,79 @@ describe("wsp verbs over the host: wait, read, exec and the host itself", () => 
       return { code: await cli(argv, io, undefined, h.env), io };
     }
 
-    it("every verb takes the workspaces the caller's own listing prints, by name and by id", async () => {
+    it.runIf(CLOUD_ON)("every verb takes the threads the caller's own listing prints, by id and by a prefix", async () => {
       const alpha = await leadWorkspace();
       await h.run("run", "alpha", "hello");
       const [row] = await h.rt.sessions.list();
       await asThread(alpha, "t_lead");
-      execGuest(h.backend, "Linux\n", 0);
-      expect((await line("exec", "alpha", "--", "uname")).io.lines).toEqual(["Linux"]);
-      expect((await line("exec", alpha.id, "--", "uname")).io.lines).toEqual(["Linux"]);
-      const listedThreads = await line("threads", "alpha", "--json");
+      const listedThreads = await line("threads", "--json");
       expect(listedThreads.code, listedThreads.io.errors.join("\n")).toBe(0);
-      // The person's own thread is another tree on the same workspace: the caller's listing leaves it out and its
-      // id reads as no thread at all, so a thread cannot send into one it did not open.
+      // The person's own thread is another tree on the same machine: the caller's listing leaves it out and its id
+      // reads as no thread at all, so a thread cannot send into one it did not open, nor run a command where it works.
       expect(h.json(listedThreads.io)).toEqual([{ threads: [] }]);
       expect((await line("send", row!.threadId!, "and the rest")).io.errors).toEqual([`wsp send: no thread ${row!.threadId}`]);
+      expect((await line("exec", row!.threadId!, "--", "uname")).io.errors).toEqual([`wsp exec: no thread ${row!.threadId}`]);
       // The thread it opened for itself is the one it drives, on the same ids the same listing prints.
       const opened = await line("run", "alpha", "kid");
       expect(opened.code, opened.io.errors.join("\n")).toBe(0);
       const kid = (await h.rt.sessions.list()).find(r => r.threadId !== row!.threadId)!;
-      expect(h.json(await line("threads", "alpha", "--json").then(r => r.io))).toEqual([{ threads: [expect.objectContaining({ threadId: kid.threadId })] }]);
+      expect(h.json(await line("threads", "--json").then(r => r.io))).toEqual([{ threads: [expect.objectContaining({ threadId: kid.threadId })] }]);
+      execGuest(h.backend, "Linux\n", 0);
+      expect((await line("exec", kid.threadId!, "--", "uname")).io.lines).toEqual(["Linux"]);
+      expect((await line("exec", kid.threadId!.slice(0, 8), "--", "uname")).io.lines).toEqual(["Linux"]);
       expect((await line("send", kid.threadId!, "and the rest")).code).toBe(0);
     });
 
-    it("a workspace the caller's reach hides is refused by the tree rule by its whole name or id, and reads as absent by the start of an id", async () => {
+    it.runIf(CLOUD_ON)("a thread outside the caller's tree reads as absent to exec, by its whole id or the start of one, and so does a word nothing here holds", async () => {
       const alpha = await leadWorkspace();
       await h.run("new", "beta");
-      const beta = (await h.rt.workspaces.list()).find(w => w.name === "beta")!;
+      const outside = await threadOn(h.rt, "beta");
       await asThread(alpha, "t_lead");
-      // A whole name or id the person holds is refused by the rule in the word typed, with exec's road on the thread's
-      // own machine; the start of an id reads as absent, so walking this host's ids by prefix tells a thread nothing.
-      const outside = (word: string): string => `wsp exec: ${refusalLine(spawnReachRefusal("t_lead", word), execOutsideFix("alpha"))}`;
-      expect((await line("exec", "beta", "--", "uname")).io.errors).toEqual([outside("beta")]);
-      expect((await line("exec", beta.id, "--", "uname")).io.errors).toEqual([outside(beta.id)]);
-      // The start has to miss alpha's id too, which a random pair shares for several characters now and then.
-      let n = 6;
-      while (alpha.id.startsWith(beta.id.slice(0, n))) n++;
-      const start = beta.id.slice(0, n);
-      expect((await line("exec", start, "--", "uname")).io.errors).toEqual([`wsp exec: ${noWorkspaceRefusal(start)}`]);
-      expect(h.json((await line("threads", "beta", "--json")).io)).toEqual([{ threads: [] }]);
-      // A name nothing here carries reads the same, which is the whole of what the two have to say to a thread.
-      expect((await line("exec", "gamma", "--", "uname")).io.errors).toEqual([`wsp exec: ${noWorkspaceRefusal("gamma")}`]);
+      expect((await line("exec", outside, "--", "uname")).io.errors).toEqual([`wsp exec: no thread ${outside}`]);
+      expect((await line("exec", outside.slice(0, 8), "--", "uname")).io.errors).toEqual([`wsp exec: no thread ${outside.slice(0, 8)}`]);
+      expect((await line("exec", "gamma", "--", "uname")).io.errors).toEqual(["wsp exec: no thread gamma"]);
     });
   });
 
   it("exec hands the machine each argument as it was given: a quoted word stays one word", async () => {
     await h.run("new", "alpha");
+    const thread = await threadOn(h.rt, "alpha");
     execGuest(h.backend, "", 0);
-    const { code } = await h.run("exec", "alpha", "--", "grep", "a b", "file.txt");
+    const { code } = await h.run("exec", thread, "--", "grep", "a b", "file.txt");
     expect(code).toBe(0);
     const held = (await h.rt.workspaces.list())[0]!.project.path;
-    expect(launchedScript(h.backend)).toContain(`\ncd '${held}' && 'grep' 'a b' 'file.txt'\n`);
+    expect(launchedScripts(h.backend).at(-1)).toContain(`\ncd '${held}' && 'grep' 'a b' 'file.txt'\n`);
   });
 
-  it("exec runs in --cwd when given, else in the workspace's project folder; a failing command says on stderr where it ran", async () => {
+  it("exec runs in --cwd when given, else in the folder the thread works in; a failing command says on stderr where it ran", async () => {
     await h.run("new", "alpha");
     const [alpha] = await h.rt.workspaces.list();
     const held = alpha!.project.path;
+    const thread = await threadOn(h.rt, "alpha");
     execGuest(h.backend, "", 0);
-    const inProject = await h.run("exec", "alpha", "--", "git", "status");
+    const inProject = await h.run("exec", thread, "--", "git", "status");
     expect(inProject.code).toBe(0);
     expect(inProject.io.errors).toEqual([]);
     expect(launchedScripts(h.backend).at(-1)).toContain(`\ncd '${held}' && 'git' 'status'\n`);
 
-    const named = await h.run("exec", "alpha", "--cwd", "/root/work/else where", "--", "git", "status");
+    const named = await h.run("exec", thread, "--cwd", "/root/work/else where", "--", "git", "status");
     expect(named.code).toBe(0);
     expect(launchedScripts(h.backend).at(-1)).toContain("\ncd '/root/work/else where' && 'git' 'status'\n");
 
     execGuest(h.backend, "fatal: not a git repository\n", 128);
-    const failing = await h.run("exec", "alpha", "--", "git", "status");
+    const failing = await h.run("exec", thread, "--", "git", "status");
     expect(failing.code).toBe(128);
     expect(failing.io.lines).toEqual(["fatal: not a git repository"]);
     expect(failing.io.errors).toEqual([`ran in ${held}`]);
 
-    const overridden = await h.run("exec", "alpha", "--cwd", "/root", "--", "git", "status");
+    const overridden = await h.run("exec", thread, "--cwd", "/root", "--", "git", "status");
     expect(overridden.code).toBe(128);
     expect(launchedScripts(h.backend).at(-1)).toContain("\ncd '/root' && 'git' 'status'\n");
     expect(overridden.io.errors).toEqual(["ran in /root"]);
 
-    const relative = await h.run("exec", "alpha", "--cwd", "packages/host", "--", "git", "status");
+    const relative = await h.run("exec", thread, "--cwd", "packages/host", "--", "git", "status");
     expect(relative.code).toBe(3);
-    expect(relative.io.errors).toEqual(['--cwd is a path on the machine, absolute, and got "packages/host". Give a path that opens with /, since whoever reads it works in a folder this line cannot see. usage: wsp exec <workspace> [--cwd <dir>] -- <command...>']);
+    expect(relative.io.errors).toEqual(['--cwd is a path on the machine, absolute, and got "packages/host". Give a path that opens with /, since whoever reads it works in a folder this line cannot see. usage: wsp exec <thread> [--cwd <dir>] -- <command...>']);
   });
 
   it("a failing exec says the folder the host ran it in, which on this computer is the project's folder", async () => {
@@ -410,18 +433,20 @@ describe("wsp verbs over the host: wait, read, exec and the host itself", () => 
     execFileSync("git", ["init", "-q", folder]);
     const here = await projectOn(h.rt, HERE_PLACE_ID, folder, { name: "mac" });
     await h.run("new", here.name, "mac");
-    const local = await h.run("exec", "mac", "--", "false");
+    const thread = await threadOn(h.rt, "mac");
+    const local = await h.run("exec", thread, "--", "false");
     expect(local.code).toBe(1);
     expect(local.io.errors).toEqual([`ran in ${folder}`]);
-    const raw = await h.run("exec", "mac", "--json", "--", "false");
+    const raw = await h.run("exec", thread, "--json", "--", "false");
     expect(h.json(raw.io).at(-1)).toEqual({ exitCode: 1, cwd: folder });
     rmSync(folder, { recursive: true, force: true });
   });
 
   it("a host that stops under an exec says so and that the turn goes on, in one line with exit 1 instead of hanging", async () => {
     await h.run("new", "alpha");
+    const thread = await threadOn(h.rt, "alpha");
     execGuest(h.backend, "", undefined);
-    const command = h.run("exec", "alpha", "--", "sleep", "600");
+    const command = h.run("exec", thread, "--", "sleep", "600");
     await new Promise(r => setTimeout(r, 300));
     await h.handle!.close();
     h.handle = undefined;
@@ -430,7 +455,7 @@ describe("wsp verbs over the host: wait, read, exec and the host itself", () => 
     expect(c.io.errors).toEqual([`wsp exec: ${HOST_STOPPING_LINE}`]);
   });
 
-  it("a run and a threads wait whose host restarts under them wait for it to come back, and the run prints the reply whole though its stream was cut", async () => {
+  it.runIf(CLOUD_ON)("a run and a threads wait whose host restarts under them wait for it to come back, and the run prints the reply whole though its stream was cut", async () => {
     const lasting = lastingAgent();
     await h.restartHost({ claude: lasting.adapter });
     await h.run("new", "alpha");
@@ -457,7 +482,7 @@ describe("wsp verbs over the host: wait, read, exec and the host itself", () => 
     expect(w.io.errors).toEqual([HOST_RESTARTING_LINE]);
   });
 
-  it("restart has the host restart on the road it came up on and answers once the host that replaced it serves, with the threads running on it; a host wsp up holds in a terminal refuses in that road's words", async () => {
+  it.runIf(CLOUD_ON)("restart has the host restart on the road it came up on and answers once the host that replaced it serves, with the threads running on it; a host wsp up holds in a terminal refuses in that road's words", async () => {
     const lasting = lastingAgent();
     // The verb's road as the host takes it: the host closes, and the one that replaces it serves the same state file.
     const road: RestartRoad = { shape: "verb", restart: () => h.restartHost({ claude: lasting.adapter }, h.store, undefined, h.backend, road) };
@@ -507,10 +532,11 @@ describe("wsp verbs over the host: wait, read, exec and the host itself", () => 
     expect(Date.now() - started).toBeLessThan(600);
   });
 
-  it("the workspace being deleted under a running exec fails the verb with the reason and exit 1", async () => {
+  it("the machine being deleted under a running exec fails the verb with the reason and exit 1", async () => {
     await h.run("new", "alpha");
+    const thread = await threadOn(h.rt, "alpha");
     execGuest(h.backend, "", undefined);
-    const command = h.run("exec", "alpha", "--", "sleep", "600");
+    const command = h.run("exec", thread, "--", "sleep", "600");
     await new Promise(r => setTimeout(r, 300));
     const [alpha] = await h.rt.workspaces.list();
     await h.rt.workspaces.delete(alpha!.id);
@@ -519,7 +545,7 @@ describe("wsp verbs over the host: wait, read, exec and the host itself", () => 
     expect(c.io.errors).toEqual(["wsp exec: machine deleted while the agent was working"]);
   });
 
-  it("a host whose sessions.start reply has no turn id or outcome is refused in one line before the follow, never printed as undefined", async () => {
+  it.runIf(CLOUD_ON)("a host whose sessions.start reply has no turn id or outcome is refused in one line before the follow, never printed as undefined", async () => {
     await h.handle!.close();
     h.handle = undefined;
     const old = new WebSocketServer({ port: 0, host: "127.0.0.1" });
@@ -572,23 +598,28 @@ describe("wsp verbs over the host: wait, read, exec and the host itself", () => 
       socket.on("message", raw => {
         const { id, op } = JSON.parse(String(raw)) as { id: number; op: string };
         if (op === "workspaces.exec") return void socket.send(JSON.stringify({ id, ok: false, error: refusal }));
-        const reply = op === "workspaces.resolve" || op === "workspaces.wake" ? { workspace } : {};
+        const reply =
+          op === "workspaces.get" || op === "workspaces.wake"
+            ? { workspace }
+            : op === "sessions.list"
+              ? { sessions: [{ id: "s_1", threadId: "t_alpha", workspaceId: workspace.id, harness: "claude", status: "completed", startedAt: 1, prompt: "lead the work", startedBy: "person" }] }
+              : {};
         socket.send(JSON.stringify({ id, ok: true, ...reply }));
       });
     });
     try {
-      const ran = await h.run("exec", "alpha", "--", "ls");
+      const ran = await h.run("exec", "t_alpha", "--", "ls");
       expect(ran.code).toBe(EXIT_CODES.usage);
-      expect(ran.io.errors).toEqual(["wsp exec: the host would not read the workspace and the command on this line. usage: wsp exec <workspace> [--cwd <dir>] -- <command...>"]);
+      expect(ran.io.errors).toEqual(["wsp exec: the host would not read the command on this line. usage: wsp exec <thread> [--cwd <dir>] -- <command...>"]);
       // None of the wire's own words reach the person: not a field name, not a code, not one of the ops it listed.
       expect(ran.io.errors[0]).not.toContain("workspaceId");
       expect(ran.io.errors[0]).not.toContain("invalid_type");
 
       // An op the host does not know is the two builds differing, which no argument of the line can fix.
       refusal = RuntimeRequest.safeParse({ id: 1, op: "a.verb.this.host.has.never.served" }).error!.message;
-      const skewed = await h.run("exec", "alpha", "--", "ls");
+      const skewed = await h.run("exec", "t_alpha", "--", "ls");
       expect(skewed.code).toBe(EXIT_CODES.usage);
-      expect(skewed.io.errors).toEqual(["wsp exec: the host does not serve this line; it runs another version of wsp, restart it with wsp restart. usage: wsp exec <workspace> [--cwd <dir>] -- <command...>"]);
+      expect(skewed.io.errors).toEqual(["wsp exec: the host does not serve this line; it runs another version of wsp, restart it with wsp restart. usage: wsp exec <thread> [--cwd <dir>] -- <command...>"]);
       expect(skewed.io.errors[0]).not.toContain("discriminator");
       expect(skewed.io.errors[0]).not.toContain("workspaces.createLocal");
     } finally {

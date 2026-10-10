@@ -9,7 +9,7 @@ import { SessionSlateEvent, SlateRunEvent, SlateValuesEvent } from "../slate/wir
 import { ReleaseChangedEvent } from "../release.js";
 import { sequenced } from "./helpers.js";
 import { SessionBehindEvent, SessionCappedEvent, SessionChangesEvent, SessionCheckpointEvent, SessionDeltaEvent, SessionDoneEvent, SessionEndEvent, SessionHeldEvent, SessionMovedEvent, SessionNotifyEvent, SessionPermissionClosedEvent, SessionPermissionEvent, SessionPlanEvent, SessionCompactedEvent, SessionContextEvent, SessionQueuedEvent, SessionRowEvent, SessionRunEvent, SessionStartEvent, SessionStartingEvent, SessionSteerEvent, SessionSubagentEvent } from "../views/session-events.js";
-import { InboxFileEvent, PortCloseEvent, PortOpenEvent, WorkspaceAgentsEvent, WorkspaceCostEvent, WorkspaceCreatedEvent, WorkspaceCreatingEvent, WorkspaceDeletedEvent, WorkspaceGoneEvent, WorkspaceLookEvent, WorkspaceNappedEvent, WorkspaceRenamedEvent, WorkspaceReviewEvent, WorkspaceStatusEvent, WorkspaceUpgradedEvent, WorkspaceViewedEvent, WorkspaceWokenEvent } from "../views/workspace-events.js";
+import { InboxFileEvent, PortCloseEvent, PortOpenEvent, WorkspaceCostEvent, WorkspaceCreatedEvent, WorkspaceCreatingEvent, WorkspaceDeletedEvent, WorkspaceGoneEvent, WorkspaceLookEvent, WorkspaceNappedEvent, WorkspaceRenamedEvent, WorkspaceReviewEvent, WorkspaceStatusEvent, WorkspaceUpgradedEvent, WorkspaceViewedEvent, WorkspaceWokenEvent } from "../views/workspace-events.js";
 import { ProjectExportEvent, ProjectImportEvent } from "../views/project-bundle.js";
 import { PreferencesChangedEvent, ThreadHeadEvent, ThreadMarkedEvent, ThreadRewoundEvent } from "../views/preferences.js";
 import { GoldenStageEvent } from "../views/golden-image.js";
@@ -23,7 +23,6 @@ export const EventUnion = z.discriminatedUnion("type", [
   WorkspaceUpgradedEvent.extend(sequenced),
   WorkspaceRenamedEvent.extend(sequenced),
   WorkspaceLookEvent.extend(sequenced),
-  WorkspaceAgentsEvent.extend(sequenced),
   WorkspaceDeletedEvent.extend(sequenced),
   WorkspaceGoneEvent.extend(sequenced),
   WorkspaceStatusEvent.extend(sequenced),

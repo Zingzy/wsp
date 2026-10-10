@@ -678,7 +678,7 @@ async fn roots_beyond_home_are_listed_and_read_what_is_outside_every_root_is_ref
     assert_eq!(c.request("fs.list", json!({ "path": "." })).await["ok"], true);
     let out = c.request("fs.list", json!({ "path": t.outside() })).await;
     refused(&out, "outside-root");
-    assert_eq!(out["error"], format!("{} resolves outside the workspace root", t.outside().display()));
+    assert_eq!(out["error"], format!("{} resolves outside the folders wsp serves here", t.outside().display()));
     refused(&c.request("git.status", json!({ "cwd": t.outside() })).await, "outside-root");
     fs::write(t.roots_path(), format!("{}\n{}\n", project.path().display(), t.outside().display())).unwrap();
     assert_eq!(c.request("fs.list", json!({ "path": t.outside() })).await["ok"], true);

@@ -563,8 +563,12 @@ const CONTROL_WORDS: Record<Exclude<ScreenControl, "sign-in">, string> = {
  * panel signs one in and this computer is signed in from its own terminal. Both the composer's line for a sign-in
  * command and a turn the agent refused for want of a sign-in read this rule, so the two never send a person two ways. */
 export function signInRoad(view: Pick<WorkspaceView, "kind">): string {
-  return isLocalWorkspace(view) ? `sign in from a terminal on ${THIS_COMPUTER}` : "sign this workspace in from the Workspace panel";
+  if (isLocalWorkspace(view)) return `sign in from a terminal on ${THIS_COMPUTER}`;
+  return kindWords(workspaceKind(view)).inFolder ? "sign in from a terminal on the computer the thread runs on" : CLOUD_SIGN_IN_ROAD;
 }
+
+/** The road for a cloud's machine, whose panel in the app signs it in. */
+export const CLOUD_SIGN_IN_ROAD = "sign this workspace in from the Workspace panel";
 
 /** wsp's half of a turn the agent refused for want of a sign-in: the road above, and that the turn is the person's
  * to send again once they have taken it. The agent's own sentence names its login command; this names where. */

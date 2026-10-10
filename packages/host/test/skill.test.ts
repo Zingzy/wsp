@@ -10,12 +10,24 @@ import { ANOTHER_AGENT_WORDS, BACKGROUND_WORK_WORDS, COORDINATOR_HANDOFF, LOGIN_
 import { slateCatalog } from "@wsp/protocol/slate";
 import { instructions, INSTRUCTIONS_KEPT, SLATE_WORDS, THREAD_SLATE_WORDS, RULES_HEADING, SETUP_HEADING, SHELL_HEADING, SKILL_NAME, VERBS_HEADING, wspSkill, agentsLine, instructionsOf, skillFor } from "../src/skill.js";
 import { CLOUD_ON } from "../src/cloud.js";
-import { hasTool, CLI_VERBS, VERBS, toolName } from "../src/verbs.js";
+import { ALL_VERBS, hasTool, CLI_VERBS, VERBS, toolName } from "../src/verbs.js";
 import { SERVICE_MANAGERS } from "../src/service.js";
 
 const said = (text: string, word: string): boolean => new RegExp(`\\b${word}\\b`, "i").test(text);
 
 describe("the wsp skill", () => {
+  it("names, in the skill a public build carries, no verb or tool that build lacks, a bare backticked name included", () => {
+    const publicSkill = skillFor(readFileSync(new URL("../../../skills/wsp/SKILL.md", import.meta.url), "utf8"), false);
+    const names = ALL_VERBS.flatMap(v => [v.name, ...(hasTool(v) ? [toolName(v.name)] : [])].map(name => ({ name, cloudOnly: "cloud" in v && v.cloud === true })));
+    // A span names the longest verb or tool its words open with, so `image build` is not read as the public `image`.
+    const named = (span: string) =>
+      names.filter(n => span === n.name || span.startsWith(`${n.name} `) || span.startsWith(`${n.name}(`)).sort((a, b) => b.name.length - a.name.length)[0];
+    const lacking = [...publicSkill.matchAll(/`([^`\n]+)`/g)].map(m => m[1]!.replace(/^wsp /, "")).filter(span => named(span)?.cloudOnly === true);
+    expect(lacking).toEqual([]);
+    expect(named("pause")?.cloudOnly).toBe(true);
+    expect(named("image build")?.cloudOnly).toBe(true);
+  });
+
   it("is the repo's skills/wsp/SKILL.md as this process reads it, with the frontmatter name and a one-line description without a colon or a quote", () => {
     expect(wspSkill()).toBe(skillFor(readFileSync(new URL("../../../skills/wsp/SKILL.md", import.meta.url), "utf8"), CLOUD_ON));
     const [open, name, description, close] = wspSkill().split("\n");
@@ -283,7 +295,7 @@ describe("the wsp skill", () => {
       expect(setup).toContain("wsp snapshot first");
     }
     expect(setup).toContain("Do not ask them to paste a key into this conversation");
-    for (const step of ["wsp recipe scan", "wsp recipe --tick used", "--set <id>=on|off", "--add <id>=", `--signin <id>=${LOGIN_CHOICES.join("|")}`, "--project <folder>", "wsp wake first", "wsp run <project>"]) expect(setup, step).toContain(step);
+    for (const step of ["wsp recipe scan", "wsp recipe --tick used", "--set <id>=on|off", "--add <id>=", `--signin <id>=${LOGIN_CHOICES.join("|")}`, "--project <folder>", ...(CLOUD_ON ? ["wsp wake first"] : []), "wsp run <project>"]) expect(setup, step).toContain(step);
     // Eight steps, since nothing in the walkthrough starts or restarts a host by hand any more.
     expect(setup.split("\n").filter(l => /^\d+\. /.test(l))).toHaveLength(8);
   });
@@ -355,12 +367,12 @@ describe("the wsp skill", () => {
     expect(instructions()).not.toContain("## ");
   });
 
-  it("the rules for running work on a machine are fourteen lines stated as facts about machines, thirteen with no cloud, and the instructions carry the first two and the background one", () => {
+  it("the rules for running work on a machine are fourteen lines stated as facts about machines, twelve with no cloud, and the instructions carry the first two and the background one", () => {
     const from = wspSkill().indexOf(`\n${RULES_HEADING}\n`);
     expect(from, RULES_HEADING).toBeGreaterThan(-1);
     const section = wspSkill().slice(from, wspSkill().indexOf("\n## ", from + 1));
     const rules = section.split("\n").filter(line => line.startsWith("- "));
-    expect(rules).toHaveLength(CLOUD_ON ? 14 : 13);
+    expect(rules).toHaveLength(CLOUD_ON ? 14 : 12);
     // A command meant for the person closes the section, in the one sentence the launch context quotes too.
     expect(rules.at(-1)).toBe(`- ${RUN_BLOCK_WORDS}.`);
     // The two roads to a child's end open the section: which one holds is the first thing a caller has to decide.
@@ -388,6 +400,7 @@ describe("the wsp skill", () => {
       expect(section).toContain("anything that should not touch this computer");
       expect(section).toContain("`wsp snapshot <workspace>`");
       expect(section).toContain("every later machine of that project starts with the install already there");
+      expect(section).toContain("`wsp pause <workspace>`");
     } else {
       expect(section).not.toContain("wsp snapshot");
       expect(section).not.toContain("--from");
@@ -398,7 +411,6 @@ describe("the wsp skill", () => {
     expect(section).toContain(BACKGROUND_WORK_WORDS);
     expect(section).toContain("a send into a thread whose turn is still running opens no second turn");
     expect(section).toContain("Restarting the host cuts every turn running anywhere");
-    expect(section).toContain("`wsp pause <workspace>`");
     expect(section).toContain("shows in their sidebar");
     expect(section).toContain("`--title`");
   });

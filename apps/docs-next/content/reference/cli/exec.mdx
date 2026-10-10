@@ -3,12 +3,12 @@
 {/* Written by apps/docs-next/scripts/cli.ts: change the script or its source and run pnpm --filter @wsp/docs-next generate. */}
 
 ```text
-usage: wsp exec <workspace> [--cwd <dir>] -- <command...>
-  runs the command on the machine, each word as given, in --cwd or the folder a
-  thread would start in
+usage: wsp exec <thread> [--cwd <dir>] -- <command...>
+  runs the command where the thread works, each word as given, in --cwd or the
+  thread's own folder
 
-  --cwd      the folder on the machine to work in; the project's folder without
-             it
+  --cwd      the folder to run the command in, absolute; the folder the thread
+             works in without it
   --json     print the raw protocol values, one JSON object per line, with
              everything else on stderr
   --state    the state file the host serves

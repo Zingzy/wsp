@@ -70,7 +70,7 @@ pub struct DenyIn {
 pub struct StopIn {
     pub thread: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub task: Option<String>,
+    pub subagent: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -90,7 +90,7 @@ pub struct StopOut {
 }
 
 async fn stop(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
-    let StopIn { thread, task } = input("stop", arguments)?;
+    let StopIn { thread, subagent: task } = input("stop", arguments)?;
     let client = host.client().await?;
     let thread = thread_of(&client, &thread).await?;
     #[derive(Deserialize)]

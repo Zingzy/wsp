@@ -6,7 +6,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { homeShortened, localWorktreeRefusal, threadDeletedLine, HERE_PLACE_ID, askingLine, type PermissionAsk, PERMISSION_ALLOW, effortsFor, EXIT_CODES, markedDefault, noThreadTargetLine, threadForgetRefusal, threadOpenedLine, threadWithoutIdRefusal, ThreadView, thisComputer, type HarnessCatalogAnswer, BUILT_IN_LIST_CLAUSE, BUILT_IN_TABLE_CLAUSE } from "@wsp/protocol";
+import { homeShortened, refusalLine, noProjectLine, READ_PROJECTS_FIX, localWorktreeRefusal, threadDeletedLine, HERE_PLACE_ID, askingLine, type PermissionAsk, PERMISSION_ALLOW, effortsFor, EXIT_CODES, markedDefault, noThreadTargetLine, threadForgetRefusal, threadOpenedLine, threadWithoutIdRefusal, ThreadView, thisComputer, type HarnessCatalogAnswer, BUILT_IN_LIST_CLAUSE, BUILT_IN_TABLE_CLAUSE } from "@wsp/protocol";
 import { harnessCatalog } from "@wsp/runtime";
 import { describe, expect, it, vi } from "vitest";
 import { cli } from "../src/cli.js";
@@ -26,7 +26,7 @@ vi.mock("node:fs", async importOriginal => (await import("../../runtime/test/fs-
 describe("wsp verbs over the host: threads, projects and agent defaults", () => {
   const h = verbsHost();
 
-  it("thread forget drops the row a launch that never got going left, and refuses a thread whose turn did work and a row from before threads", async () => {
+  it.runIf(CLOUD_ON)("thread forget drops the row a launch that never got going left, and refuses a thread whose turn did work and a row from before threads", async () => {
     const agent = bornDeadAgent(prompt => `re: ${prompt}`);
     await h.restartHost({ claude: agent.adapter });
     await h.run("new", "alpha");
@@ -89,7 +89,7 @@ describe("wsp verbs over the host: threads, projects and agent defaults", () => 
     expect(discard.io.errors.join("\n")).not.toContain("There is no terminal to answer on");
   });
 
-  it("threads is the sidebar's data: one row per thread with its folder and branch, agent, state and who opened it, within one project or machine when named", async () => {
+  it.runIf(CLOUD_ON)("threads is the sidebar's data: one row per thread with its folder and branch, agent, state and who opened it, within one project when named", async () => {
     await h.run("new", "alpha");
     await h.run("new", "beta");
     const [alpha, beta] = await h.rt.workspaces.list();
@@ -99,7 +99,7 @@ describe("wsp verbs over the host: threads, projects and agent defaults", () => 
     const { code, io } = await h.run("threads");
     expect(code).toBe(0);
     const rows = io.lines[0]!.split("\n");
-    expect(rows[0]).toMatch(/^PROJECT\s+FOLDER\s+BRANCH\s+THREAD\s+TASK\s+AGENT\s+STATE\s+BY\s+COMPUTER\s+TITLE$/);
+    expect(rows[0]).toMatch(/^PROJECT\s+FOLDER\s+BRANCH\s+THREAD\s+SUBAGENT\s+AGENT\s+STATE\s+BY\s+COMPUTER\s+TITLE$/);
     const [a] = await h.rt.sessions.list(alpha!.id);
     const [b] = await h.rt.sessions.list(beta!.id);
     // Each row reads project, the folder the thread works in, its branch (none on a machine whose checkout the record
@@ -117,18 +117,23 @@ describe("wsp verbs over the host: threads, projects and agent defaults", () => 
     const both = await h.run("threads");
     expect(both.io.lines[0]!.split("\n").slice(1).map(r => r.split(/ {2,}/)[4])).toEqual(["Idle", "Idle"]);
 
-    const scoped = await h.run("threads", "beta", "--json");
+    // A word is a project's: a machine's name lists nothing and says so.
+    const machine = await h.run("threads", "beta");
+    expect(machine.code).toBe(3);
+    expect(machine.io.errors).toEqual([`wsp threads: ${refusalLine(noProjectLine("beta"), READ_PROJECTS_FIX)}`]);
+    const scoped = await h.run("threads", beta!.project.name, "--json");
     expect(scoped.code).toBe(0);
     const [{ threads }] = h.json(scoped.io) as [{ threads: (ThreadView & { folder: string; branch: string; projectName: string; computerName: string })[] }];
     // The rows the tool answers with: the sidebar's view plus the names the table shows beside it.
     const bare = ({ folder: _f, branch: _b, projectName: _p, computerName: _c, ...t }: (typeof threads)[number]) => t;
     expect(threads.map(t => ThreadView.parse(bare(t)))).toEqual(threads.map(bare));
     expect(threads).toEqual([
+      expect.objectContaining({ id: a!.threadId, workspaceId: alpha!.id }),
       expect.objectContaining({ id: b!.threadId, workspaceId: beta!.id, folder: beta!.project.path, branch: "", projectName: beta!.project.name, computerName: beta!.project.computer, harness: "codex", startedBy: "person", turns: 1 }),
     ]);
   });
 
-  it("threads reads a thread stopped on a permission prompt as needing the person, and as working again once it is answered", async () => {
+  it.runIf(CLOUD_ON)("threads reads a thread stopped on a permission prompt as needing the person, and as working again once it is answered", async () => {
     const ASKED: PermissionAsk = { askId: "ask_1", toolName: "Write", detail: "out.txt", input: '{"file_path":"/root/out.txt"}', options: [{ id: PERMISSION_ALLOW, label: "Allow", effect: "allow" }] };
     const held = heldAgent(false);
     await h.restartHost({ claude: held.adapter });
@@ -149,7 +154,7 @@ describe("wsp verbs over the host: threads, projects and agent defaults", () => 
     expect(after.io.lines[0]!.split("\n")[1]).toContain("Done");
   });
 
-  it("run --cwd is the folder the turn starts in, the same field the app's composer sends; without it the workspace's project folder, else none and the harness starts in its own home", async () => {
+  it.runIf(CLOUD_ON)("run --cwd is the folder the turn starts in, the same field the app's composer sends; without it the workspace's project folder, else none and the harness starts in its own home", async () => {
     await h.run("new", "alpha");
     const [alpha] = await h.rt.workspaces.list();
     const picked = await h.run("run", "alpha", "--agent", "codex", "--cwd", "/root/work/elsewhere", "write tests");
@@ -167,7 +172,7 @@ describe("wsp verbs over the host: threads, projects and agent defaults", () => 
     expect(h.claude.starts).toHaveLength(2);
   });
 
-  it("run with no folder named starts the thread in the workspace's project, and --cwd wins over it", async () => {
+  it.runIf(CLOUD_ON)("run with no folder named starts the thread in the workspace's project, and --cwd wins over it", async () => {
     await h.run("new", "alpha");
     const [alpha] = await h.rt.workspaces.list();
     const named = await h.run("run", "alpha", "build it");
@@ -181,7 +186,7 @@ describe("wsp verbs over the host: threads, projects and agent defaults", () => 
     expect((await h.rt.preferences.get()).target).toEqual({ workspace: alpha!.id });
   });
 
-  it("run names a project here and the thread runs in its folder, or in a worktree for --branch; from inside a project's folder it goes to that project and says so; outside every project it is refused in one line and nothing starts", async () => {
+  it.runIf(CLOUD_ON)("run names a project here and the thread runs in its folder, or in a worktree for --branch; from inside a project's folder it goes to that project and says so; outside every project it is refused in one line and nothing starts", async () => {
     const folder = realpathSync(mkdtempSync(join(tmpdir(), "wsp-repo-")));
     execFileSync("git", ["init", "-q", "-b", "main", folder]);
     execFileSync("git", ["-C", folder, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "first"]);
@@ -229,7 +234,7 @@ describe("wsp verbs over the host: threads, projects and agent defaults", () => 
     }
   });
 
-  it("delete names a thread first: a thread in the project folder goes alone and the folder stays, a thread in a worktree wsp made takes the worktree with it", async () => {
+  it.runIf(CLOUD_ON)("delete names a thread first: a thread in the project folder goes alone and the folder stays, a thread in a worktree wsp made takes the worktree with it", async () => {
     const folder = realpathSync(mkdtempSync(join(tmpdir(), "wsp-repo-")));
     execFileSync("git", ["init", "-q", "-b", "main", folder]);
     execFileSync("git", ["-C", folder, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "first"]);
@@ -491,7 +496,7 @@ describe("wsp verbs over the host: threads, projects and agent defaults", () => 
     expect(dangling.io.errors).toEqual(['wsp fork: --model says how a thread opens, and this line opens none. Add --send "<task>", or drop --model.']);
   });
 
-  it("a refusal off wsp's built-in list says so, and one off the machine's own answer does not", async () => {
+  it.runIf(CLOUD_ON)("a refusal off wsp's built-in list says so, and one off the machine's own answer does not", async () => {
     await h.run("new", "alpha");
     const described = { version: "0.153.0", models: [{ slug: "gpt-5.6-sol", label: "GPT-5.6-Sol", contextWindows: [], isDefault: true }], efforts: ["low", "high"], permissionModes: ["read-only"] };
     h.backend.execImpl = (_m, cmd) => (cmd === PROBE_CMD ? { exitCode: 0, stdout: JSON.stringify(described), stderr: "" } : guestAnswer(cmd));
@@ -548,7 +553,7 @@ describe("wsp verbs over the host: threads, projects and agent defaults", () => 
     expect(h.claude.starts).toHaveLength(1);
   });
 
-  it("a refusal off wsp's built-in list that quotes no list says whose word it is, as one sentence", async () => {
+  it.runIf(CLOUD_ON)("a refusal off wsp's built-in list that quotes no list says whose word it is, as one sentence", async () => {
     await h.run("new", "alpha");
     const none = await h.run("run", "alpha", "--model", "claude-haiku-4-5-20251001", "--effort", "high", "review it");
     expect(none.code).toBe(3);
@@ -557,7 +562,7 @@ describe("wsp verbs over the host: threads, projects and agent defaults", () => 
     expect(h.claude.starts).toEqual([]);
   });
 
-  it("runs a legacy model at an effort the binary lists for it", async () => {
+  it.runIf(CLOUD_ON)("runs a legacy model at an effort the binary lists for it", async () => {
     await h.run("new", "alpha");
     const older = await h.run("run", "alpha", "--model", "claude-opus-5", "--effort", "high", "review it");
     expect(older.code).toBe(0);
@@ -618,7 +623,7 @@ describe("wsp verbs over the host: threads, projects and agent defaults", () => 
     expect(projects.find(p => p.name === deep.name)!.path).toBe(deep.path);
   });
 
-  it("threads shows a multi-paragraph brief as one row, titled by the protocol's rule: its first sentence cut at a word to 48 characters, the same title the sidebar shows", async () => {
+  it.runIf(CLOUD_ON)("threads shows a multi-paragraph brief as one row, titled by the protocol's rule: its first sentence cut at a word to 48 characters, the same title the sidebar shows", async () => {
     await h.run("new", "alpha");
     const brief = "You are a builder for the wsp repo, which is at /Users/zingzy/wsp on this machine.\n\nTicket: wsp-labs/wsp-map#292.\nBuild: the fix.";
     await h.run("run", "alpha", brief);

@@ -156,7 +156,7 @@ export function kindsArea(ctx: RuntimeContext): KindsArea {
     return { url: reach.url, expiresAt: reach.expiresAt, ...(token !== undefined ? { daemonToken: token } : {}) };
   };
   const localRoad = async (): Promise<DaemonReachView> => {
-    if (local?.daemonRoad === undefined) throw new Error("this host wired no daemon for its local workspace, so nothing on this computer can be dialled");
+    if (local?.daemonRoad === undefined) throw new Error("this host wired no daemon for this computer, so nothing on it can be dialled");
     return local.daemonRoad();
   };
   /** Puts this runtime's daemon on a fork and hands it this runtime's token: the deploy writes one of its own,

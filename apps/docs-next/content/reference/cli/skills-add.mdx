@@ -3,7 +3,7 @@
 {/* Written by apps/docs-next/scripts/cli.ts: change the script or its source and run pnpm --filter @wsp/docs-next generate. */}
 
 ```text
-usage: wsp skills add <skill> [<workspace>] [--on <computer>] [--agent <id>]...
+usage: wsp skills add <skill> [<thread>] [--on <computer>] [--agent <id>]...
        [--project [<name>]]
   installs a skill off skills.sh by its <owner>/<repo>/<skill> into the shared
   skills folder, with a link or a copy for each agent named that does not read
@@ -11,11 +11,11 @@ usage: wsp skills add <skill> [<workspace>] [--on <computer>] [--agent <id>]...
   nothing
 
   --on         the computer to read, by the name wsp computers shows; this
-               computer without it, and a workspace names its own
+               computer without it, and a thread names its own
   --agent      an agent to put the skill in, by its catalog id; repeats, and
                every agent whose folder is there without it
-  --project    put it in a project rather than the home: alone for the
-               workspace's own, or the project's name with --on
+  --project    put it in a project rather than the home: alone with a thread,
+               the thread's own project, or the project's name with --on
   --json       print the raw protocol values, one JSON object per line, with
                everything else on stderr
   --state      the state file the host serves

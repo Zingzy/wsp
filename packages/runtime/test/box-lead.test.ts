@@ -13,7 +13,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { agentsOffComputerRefusal, agentsOffRefusal, childToLeadsComputerLine, elsewhereWorkspaceLine, execOutsideFix, execOutsideRefusal, HERE_PLACE_ID, noWorkspaceRefusal, refusalLine, rootGoneRefusal, sendFilesAcrossLine, SEND_FILES_ACROSS_FIX, spawnDepthRefusal, spawnFolderRefusal, spawnReachFix, spawnReachRefusal, spawnRepositoryRefusal, spawnRepositoryWorkspaceRefusal, SPAWN_FOLDER_FIX, SPAWN_REPOSITORY_FIX, SPAWN_REPOSITORY_WORKSPACE_FIX, TURN_TOKEN_ENV, waitAcrossLine, WAIT_ACROSS_FIX, type AcrossAct, type Caller, type ThreadScope } from "@wsp/protocol";
+import { agentsOffComputerRefusal, agentsOffRefusal, childToLeadsComputerLine, elsewhereWorkspaceLine, HERE_PLACE_ID, noWorkspaceRefusal, refusalLine, rootGoneRefusal, sendFilesAcrossLine, SEND_FILES_ACROSS_FIX, spawnDepthRefusal, spawnFolderRefusal, spawnReachFix, spawnReachRefusal, spawnRepositoryRefusal, spawnRepositoryWorkspaceRefusal, SPAWN_FOLDER_FIX, SPAWN_REPOSITORY_FIX, SPAWN_REPOSITORY_WORKSPACE_FIX, TURN_TOKEN_ENV, waitAcrossLine, WAIT_ACROSS_FIX, type AcrossAct, type Caller, type ThreadScope } from "@wsp/protocol";
 import { copyKey } from "../src/runtime.js";
 import { code, join as joinHost, placesOf, sockets } from "./places-fixture.js";
 import { report } from "./place-join.js";
@@ -169,13 +169,8 @@ describe("the tree rule over a lead's children on a computer the person joined",
       // Where `wsp run lab-cloud` lands once the project door's refusal is dropped and the listing holds no such name.
       await expect(rt.workspaces.resolve(word, child.caller)).rejects.toThrow(road);
     }
-    // A machine of it the person made stands outside the lead's tree too, so the person is the road there, and an exec
-    // keeps its own words, which name the road that runs the command.
-    for (const word of ["theirs", theirs.id]) {
-      await expect(rt.workspaces.resolve(word, child.caller)).rejects.toThrow(elsewhereWorkspaceLine(word, "default", "hetzner", "work"));
-      await expect(rt.workspaces.resolve(word, child.caller, "exec")).rejects.toThrow(refusalLine(spawnReachRefusal(child.threadId, word), execOutsideFix("lab-box")));
-    }
-    await expect(rt.workspaces.resolve("lab-cloud", child.caller, "exec")).rejects.toThrow(noWorkspaceRefusal("lab-cloud"));
+    // A machine of it the person made stands outside the lead's tree too, so the person is the road there.
+    for (const word of ["theirs", theirs.id]) await expect(rt.workspaces.resolve(word, child.caller)).rejects.toThrow(elsewhereWorkspaceLine(word, "default", "hetzner", "work"));
     expect((await rt.workspaces.list()).map(w => w.name)).not.toContain("from-the-box");
   });
 
@@ -219,8 +214,7 @@ describe("the tree rule over a lead's children on a computer the person joined",
     });
     for (const at of [forked, sibling]) {
       for (const [act, run] of Object.entries(acts(at.id, child.caller))) await expect(run()).rejects.toThrow(road(at.name, act as AcrossAct));
-      // The name door knows exec alone among the verbs, and says what any other asks of the machine.
-      await expect(rt.workspaces.resolve(at.name, child.caller, "exec")).rejects.toThrow(road(at.name, "exec"));
+      // The name door says what any verb asks of the machine.
       await expect(rt.workspaces.resolve(at.name, child.caller)).rejects.toThrow(road(at.name, "work"));
     }
     expect((await rt.workspaces.list(child.caller)).map(w => w.name)).toEqual(["lab-box"]);
@@ -236,7 +230,7 @@ describe("the tree rule over a lead's children on a computer the person joined",
         expect(((await act.exec()) as { exitCode: number }).exitCode).toBe(0);
         expect(((await act.wake()) as { id: string }).id).toBe(at.id);
         for (const daemon of [act.commit, act.update, act.fix]) await expect(daemon()).rejects.toThrow("without preview URLs");
-        expect((await rt.workspaces.resolve(at.name, caller, "exec")).id).toBe(at.id);
+        expect((await rt.workspaces.resolve(at.name, caller)).id).toBe(at.id);
       }
     }
     // A thread of its tree now stands there, and still nothing but a message reaches it: the wake a send asks for on
@@ -244,7 +238,6 @@ describe("the tree rule over a lead's children on a computer the person joined",
     const act = acts(forked.id, child.caller);
     for (const name of ["exec", "commit", "update", "fix"] as const) await expect(act[name]()).rejects.toThrow(road(forked.name, name));
     await expect(rt.workspaces.resolve(forked.name, child.caller)).rejects.toThrow(road(forked.name, "work"));
-    await expect(rt.workspaces.resolve(forked.id, child.caller, "exec")).rejects.toThrow(road(forked.id, "exec"));
     expect((await rt.workspaces.resolve(forked.id, child.caller)).id).toBe(forked.id);
     expect(((await act.wake()) as { id: string }).id).toBe(forked.id);
     const turns = starts.length;
@@ -306,7 +299,6 @@ describe("the tree rule over a lead's children on a computer the person joined",
       await expect(rt.workspaces.folderFor({ project: word }, grand.caller)).rejects.toThrow(road);
     }
     const exec = elsewhereWorkspaceLine(forked.name, "default", "hetzner", "exec", threadId);
-    await expect(rt.workspaces.resolve(forked.name, grand.caller, "exec")).rejects.toThrow(exec);
     await expect(rt.workspaces.exec(forked.id, "true", undefined, grand.caller)).rejects.toThrow(exec);
   });
 
@@ -438,23 +430,19 @@ describe("the tree rule over a lead's children on a computer the person joined",
     await (await rt.sessions.start(folder.id, { prompt: "one more beside", harness: "claude" }, sub.caller)).finished;
   });
 
-  it("stops the child spawning when any one switch over it is off, the lead's, its folder's or its computer's, and names that switch", async () => {
+  it("stops the child spawning while its computer's switch is off, read at each act, and caps its depth at the smaller of the lead's and the computer's", async () => {
     const held = await leadAndBox();
-    const { rt, folder, placeId } = held;
+    const { rt, placeId } = held;
     const child = await childIn(held, "lab-box");
     const beside = () => rt.sessions.start(child.workspaceId, { prompt: "a grandchild", harness: "claude" }, child.caller);
-    await rt.workspaces.agents(folder.id, { spawn: false });
-    await expect(beside()).rejects.toThrow(agentsOffRefusal("lab", "thread_new"));
-    await rt.workspaces.agents(folder.id, { spawn: true });
-    // The box folder holds no switch of its own yet, so the computer's is the one over it.
+    // The box folder holds no switch of its own, so the computer's is the one over it.
     await rt.places!.set(placeId, { spawn: { spawn: false } });
-    await expect(beside()).rejects.toThrow(agentsOffComputerRefusal("hetzner", "thread_new"));
-    await rt.places!.set(placeId, { spawn: { spawn: true } });
-    await rt.workspaces.agents(child.workspaceId, { spawn: false });
-    await expect(beside()).rejects.toThrow(agentsOffRefusal("lab-box", "thread_new"));
-    // Depth is counted from the lead, under the smaller cap: the box folder's one level stops the child at one.
-    await rt.workspaces.agents(child.workspaceId, { spawn: true, maxDepth: 1 });
-    await expect(beside()).rejects.toThrow(spawnDepthRefusal(child.threadId, 1, 1, { workspace: "lab-box" }));
+    await expect(beside()).rejects.toThrow(agentsOffComputerRefusal(child.threadId, "hetzner", "thread_new"));
+    // Depth is counted from the lead, under the smaller cap: the lead allows two, the box one, so the child stops at one.
+    await rt.places!.set(placeId, { spawn: { spawn: true, maxDepth: 1 } });
+    await expect(beside()).rejects.toThrow(spawnDepthRefusal(child.threadId, 1, 1, { computer: "hetzner" }));
+    await rt.places!.set(placeId, { spawn: { spawn: true, maxDepth: 2 } });
+    await (await beside()).finished;
   });
 
   it("answers a child on the box naming another repository's project with the repository rule and the person's other folder with the folder rule, never a road to the lead", async () => {
@@ -476,11 +464,9 @@ describe("the tree rule over a lead's children on a computer the person joined",
     const folderRule = refusalLine(spawnFolderRefusal(child.threadId, "lab-two"), SPAWN_FOLDER_FIX);
     await expect(rt.projects.resolve("lab-two", child.caller)).rejects.toThrow(folderRule);
     await expect(rt.workspaces.folderFor({ project: "lab-two" }, child.caller)).rejects.toThrow(folderRule);
-    // Its folder's record, once a thread of the person's opened there, takes the folder rule too, and an exec there
-    // keeps exec's own words, which name the road that runs the command.
+    // Its folder's record, once a thread of the person's opened there, takes the folder rule too.
     const folder = await rt.workspaces.create({ project: "lab-two", name: "lab-two" });
     await expect(rt.workspaces.resolve(folder.name, child.caller)).rejects.toThrow(folderRule);
-    await expect(rt.workspaces.resolve(folder.name, child.caller, "exec")).rejects.toThrow(refusalLine(execOutsideRefusal(child.threadId, folder.name, "folder"), execOutsideFix("lab-box")));
   });
 });
 
@@ -508,12 +494,9 @@ describe("a lead's tree on a computer the person joined, once the folder's rows 
     // The lead still sends to its child, and lists it under itself after.
     await (await rt.sessions.start(first.workspaceId, { thread: first.threadId, prompt: "rebase on main", harness: "claude" }, lead)).finished;
     expect((await rt.sessions.list(undefined, lead)).filter(r => r.threadId === first.threadId)).toEqual([expect.objectContaining({ parentThreadId: threadId, rootThreadId: threadId })]);
-    // The person's message keeps the other child under the lead, so the lead's switch still governs what it spawns.
+    // The person's message keeps the other child under the lead.
     await (await rt.sessions.start(second.workspaceId, { thread: second.threadId, prompt: "and the changelog", harness: "claude" })).finished;
     const kept = (await rt.sessions.list()).find(r => r.threadId === second.threadId)!;
     expect(kept).toMatchObject({ parentThreadId: threadId, rootThreadId: threadId });
-    const asSecond: Caller = { origin: "relayed", by: { kind: "thread", threadId: second.threadId, workspaceId: second.workspaceId, rootThreadId: kept.rootThreadId! } };
-    await rt.workspaces.agents(folder.id, { spawn: false });
-    await expect(rt.sessions.start(second.workspaceId, { prompt: "a grandchild", harness: "claude" }, asSecond)).rejects.toThrow(agentsOffRefusal("lab", "thread_new"));
   });
 });

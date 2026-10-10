@@ -90,8 +90,8 @@ export const SLATE_SOURCES: Readonly<Record<string, SlateSourceModule>> = slateT
     example: "pct(usage.week.percent)",
   },
   cost: {
-    name: "cost", level: "core", indexed: ["rateUsdPerHour", "accruedUsd"], purpose: "The workspace's cost: the rate now and what it has run up.",
-    update: "push", cost: "none beyond today", scope: "the thread's workspace",
+    name: "cost", level: "core", indexed: ["rateUsdPerHour", "accruedUsd"], purpose: "What the thread's computer costs: the rate now and what it has run up.",
+    update: "push", cost: "none beyond today", scope: "the computer the thread runs on",
     shape: rec({ rateUsdPerHour: "number", accruedUsd: "number" }),
     notes: { "cost.rateUsdPerHour": "0 on this computer, which usd() reads as free" },
     example: "usd(cost.accruedUsd)",

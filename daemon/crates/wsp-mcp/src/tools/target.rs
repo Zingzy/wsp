@@ -1,16 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-//! What the tools that act on one computer or workspace share with packages/host/src/verbs.ts: the target a
-//! workspace or a computer names (`agentsTarget`), a project asked by flag or by name (`projectAsked`), and a line
+//! What the tools that act on one computer or where a thread runs share with packages/host/src/verbs.ts: the target
+//! a thread or a computer names (`agentsTarget`), a project asked by flag or by name (`projectAsked`), and a line
 //! as a terminal prints it (`cell`, `printable`, `table`). Every sentence is the recorded one.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
+use super::named::{thread_at, Aim};
 use crate::client::Client;
 use crate::failure::Failure;
 use crate::record::{fill, Words};
 
-/// A tool's `project`: true for the workspace's own, or a project's name.
+/// A tool's `project`: true for the thread's own, or a project's name.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 #[serde(untagged)]
@@ -19,7 +20,7 @@ pub enum ProjectIn {
     Named(String),
 }
 
-/// A project as the act reads it: not a project's, the workspace's own, or a project on a computer by its name.
+/// A project as the act reads it: not a project's, the thread's own, or a project on a computer by its name.
 #[derive(Debug, Default)]
 pub struct Asked {
     pub project: bool,
@@ -57,21 +58,25 @@ fn own_project(words: &Words, on: Option<&str>, usage: &str) -> Result<Asked, Fa
     }
 }
 
-/// The computer or workspace a call names: a workspace by its name, a computer by the name computers lists it
-/// under, and the computer the host runs on where neither is given; a project on that computer by its name.
+/// The computer a call names: where a thread runs, with its own project, by the thread's id; a computer by the name
+/// computers lists it under; and the computer the host runs on where neither is given; a project on that computer
+/// by its name. `tool` is the tool's own name, whose line a project's name given for a thread is refused in.
+#[allow(clippy::too_many_arguments)]
 pub async fn target(
     client: &Client,
     words: &Words,
-    workspace: Option<&str>,
+    thread: Option<&str>,
     on: Option<&str>,
     usage: &str,
     project: Option<&str>,
+    tool: &str,
+    cloud: bool,
 ) -> Result<Value, Failure> {
     let mut target = Map::new();
-    match (workspace, on) {
+    match (thread, on) {
         (Some(_), Some(_)) => return Err(refused(&words.aimed_both, &[], usage)),
-        (Some(workspace), None) => {
-            target.insert("workspaceId".to_owned(), Value::from(workspace_id(client, words, workspace).await?));
+        (Some(thread), None) => {
+            target.insert("workspaceId".to_owned(), Value::from(thread_folder(client, thread, tool, cloud).await?));
         }
         (None, Some(on)) => {
             target.insert("placeId".to_owned(), Value::from(place_id(client, words, on).await?));
@@ -86,20 +91,16 @@ pub async fn target(
     Ok(Value::Object(target))
 }
 
-/// A workspace by id, or by its name where one carries it, as the host resolves it.
-async fn workspace_id(client: &Client, words: &Words, reference: &str) -> Result<String, Failure> {
+/// The record of the folder a thread works in, by its id, for a tool that takes a thread or a computer.
+pub async fn thread_folder(client: &Client, thread: &str, tool: &str, cloud: bool) -> Result<String, Failure> {
     #[derive(Deserialize)]
-    struct Resolved {
-        #[serde(default)]
-        workspace: Option<Value>,
+    struct Folder {
+        id: String,
     }
-    let mut asked = Map::new();
-    asked.insert("ref".to_owned(), Value::from(reference));
-    let resolved: Resolved = client.request("workspaces.resolve", asked).await?;
-    match resolved.workspace.as_ref().and_then(|w| w.get("id")).and_then(Value::as_str) {
-        Some(id) => Ok(id.to_owned()),
-        None => Err(Failure::new(fill(&words.other_version, &[("op", "workspaces.resolve")]))),
-    }
+    let line = format!("wsp {}", tool.replace('_', " "));
+    let aim = Aim { line: &line, or_computer: true, cloud };
+    let (_, folder): (_, Folder) = thread_at(client, thread, &aim).await?;
+    Ok(folder.id)
 }
 
 /// A computer by the name or the id the list carries; a word nothing holds is refused with the names there are.

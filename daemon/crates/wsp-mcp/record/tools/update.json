@@ -1,17 +1,17 @@
 {
   "cloudOff": {
     "name": "update",
-    "description": "Merges the latest commits of the workspace's base from the remote into the branch its copy is on, with a merge commit, so a branch already pushed is never rewritten. A copy with changes no commit holds is refused first with the files named. A merge that conflicts is taken back at once and answered with the files that conflict, the copy left exactly as it was; fix sends those to the agent. Nothing is pushed.",
+    "description": "Merges the latest commits of the base from the remote into the branch the thread's folder is on, with a merge commit, so a branch already pushed is never rewritten; other threads working in the same folder get them too, and the answer names them in sharedWith. A folder with changes no commit holds is refused first with the files named. A merge that conflicts is taken back at once and answered with the files that conflict, the folder left exactly as it was; fix sends those to the agent. Nothing is pushed.",
     "inputSchema": {
       "type": "object",
       "properties": {
-        "workspace": {
+        "thread": {
           "type": "string",
-          "description": "the workspace's name, or its id when two share a name"
+          "description": "the thread, by its id or a prefix of it that names one, as threads lists them"
         }
       },
       "required": [
-        "workspace"
+        "thread"
       ],
       "additionalProperties": false,
       "$schema": "http://json-schema.org/draft-07/schema#"
@@ -34,6 +34,13 @@
           "items": {
             "$ref": "#/properties/base"
           }
+        },
+        "sharedWith": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "the other threads working in the same folder, by id, whose changes the act took in too; absent where none do"
         }
       },
       "required": [
@@ -54,17 +61,17 @@
   },
   "cloudOn": {
     "name": "update",
-    "description": "Merges the latest commits of the workspace's base from the remote into the branch its copy is on, with a merge commit, so a branch already pushed is never rewritten. A copy with changes no commit holds is refused first with the files named. A merge that conflicts is taken back at once and answered with the files that conflict, the copy left exactly as it was; fix sends those to the agent. Nothing is pushed.",
+    "description": "Merges the latest commits of the base from the remote into the branch the thread's folder is on, with a merge commit, so a branch already pushed is never rewritten; other threads working in the same folder get them too, and the answer names them in sharedWith. A folder with changes no commit holds is refused first with the files named. A merge that conflicts is taken back at once and answered with the files that conflict, the folder left exactly as it was; fix sends those to the agent. Nothing is pushed.",
     "inputSchema": {
       "type": "object",
       "properties": {
-        "workspace": {
+        "thread": {
           "type": "string",
-          "description": "the workspace's name, or its id when two share a name"
+          "description": "the thread, by its id or a prefix of it that names one, as threads lists them"
         }
       },
       "required": [
-        "workspace"
+        "thread"
       ],
       "additionalProperties": false,
       "$schema": "http://json-schema.org/draft-07/schema#"
@@ -87,6 +94,13 @@
           "items": {
             "$ref": "#/properties/base"
           }
+        },
+        "sharedWith": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "the other threads working in the same folder, by id, whose changes the act took in too; absent where none do"
         }
       },
       "required": [

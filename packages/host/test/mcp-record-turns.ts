@@ -295,7 +295,7 @@ export async function turnWords(): Promise<Record<string, unknown>> {
     picks: await pickWords(),
     noThreadTarget: await refused(() => runTarget(answering({}), undefined, "/", {}, false, {})),
     guestNamesWorkspace: await refused(() => runTarget(answering({}), undefined, "/", {}, true, {})),
-    branchHereOnly: await refused(() => runTarget(answering({ "projects.list": { projects: [] }, "workspaces.resolve": { workspace: WORKSPACE } }), "{ref}", undefined, {}, false, { branch: "b" })),
+    branchHereOnly: await refused(() => runTarget(answering({ "projects.resolve": { project: { id: "p-9", name: "{ref}", path: "/root/{ref}", computer: "pl-attic" } } }), "{ref}", undefined, {}, false, { branch: "b" })),
     threadOpened: threadOpenedLine("{thread}", "{project}", "{folder}"),
     threadOpenedIn: threadOpenedLine("{thread}", undefined, "{folder}"),
     moved: threadMovedLine("{from}", "{to}", false),
@@ -350,6 +350,8 @@ const SESSIONS = [
 ];
 const listed = (rows: readonly unknown[] = SESSIONS): string => ok({ sessions: rows });
 const resolved = (workspace: unknown = WORKSPACE): string => ok({ workspace });
+/** A thread's replies: the index THREAD is read off, on the record given, and that record. */
+const atThread = (workspace: { id: string; [field: string]: unknown } = WORKSPACE): Record<string, string> => ({ "sessions.list": listed([{ id: "s-1", workspaceId: workspace.id, harness: "claude", status: "completed", threadId: THREAD }]), "workspaces.get": resolved(workspace) });
 /** A project in a folder on this computer, and the list a run reads it off, with a box project beside it. */
 const HERE_PROJECT = { id: "p-1", name: "wsp", computer: "here", source: { kind: "folder", path: "/Users/me/wsp" }, path: "/Users/me/wsp", git: { top: "/Users/me/wsp" } };
 const PROJECTS = { "projects.list": ok({ projects: [HERE_PROJECT, { ...HERE_PROJECT, id: "p-2", name: "site", computer: "pl-attic", path: "/root/site" }] }) };
@@ -415,10 +417,10 @@ export const TURN_ANSWERED: Record<string, TurnCase[]> = {
     { case: "stopped, a process it started left running", arguments: { thread: THREAD }, replies: { "sessions.list": listed(), "sessions.interrupt": ok({ outcome: "accepted", left: threadLeftLine("hetzner", [4242]) }) } },
     { case: "not running", arguments: { thread: THREAD }, replies: { "sessions.list": listed(), "sessions.interrupt": ok({ outcome: "not-running", under: [] }) } },
     { case: "not found by the host", arguments: { thread: OTHER }, replies: { "sessions.list": listed(), "sessions.interrupt": ok({ outcome: "not-found" }) } },
-    { case: "one subagent stopped", arguments: { thread: THREAD, task: "a1b2c3" }, replies: { "sessions.list": listed(), "sessions.interrupt": ok({ outcome: "accepted" }) } },
-    { case: "one subagent already over", arguments: { thread: THREAD, task: "a1b2c3" }, replies: { "sessions.list": listed(), "sessions.interrupt": ok({ outcome: "not-running" }) } },
-    { case: "one subagent the agent would not stop", arguments: { thread: THREAD, task: "zz9" }, replies: { "sessions.list": listed(), "sessions.interrupt": ok({ outcome: "refused", error: "Claude Code would not stop it: No task found with ID: zz9" }) } },
-    { case: "no stop for one subagent", arguments: { thread: THREAD, task: "a1b2c3" }, replies: { "sessions.list": listed(), "sessions.interrupt": ok({ outcome: "unsupported", error: "Stop is not available for Codex subagents; stop the thread to stop them all" }) } },
+    { case: "one subagent stopped", arguments: { thread: THREAD, subagent: "a1b2c3" }, replies: { "sessions.list": listed(), "sessions.interrupt": ok({ outcome: "accepted" }) } },
+    { case: "one subagent already over", arguments: { thread: THREAD, subagent: "a1b2c3" }, replies: { "sessions.list": listed(), "sessions.interrupt": ok({ outcome: "not-running" }) } },
+    { case: "one subagent the agent would not stop", arguments: { thread: THREAD, subagent: "zz9" }, replies: { "sessions.list": listed(), "sessions.interrupt": ok({ outcome: "refused", error: "Claude Code would not stop it: No task found with ID: zz9" }) } },
+    { case: "no stop for one subagent", arguments: { thread: THREAD, subagent: "a1b2c3" }, replies: { "sessions.list": listed(), "sessions.interrupt": ok({ outcome: "unsupported", error: "Stop is not available for Codex subagents; stop the thread to stop them all" }) } },
     { case: "a prefix of two", arguments: { thread: "thread-" }, replies: { "sessions.list": listed() } },
     { case: "no such thread", arguments: { thread: "nope" }, replies: { "sessions.list": listed() } },
   ],
@@ -484,15 +486,27 @@ export const TURN_ANSWERED: Record<string, TurnCase[]> = {
   exec: [
     {
       case: "output and the folder",
-      arguments: { workspace: "attic-work", argv: ["sh", "-c", "echo hi"] },
-      replies: { "workspaces.resolve": resolved(), "workspaces.wake": resolved(), "workspaces.exec": ok({ execId: "exec-1", cwd: "/root/wsp" }) },
+      arguments: { thread: THREAD, argv: ["sh", "-c", "echo hi"] },
+      replies: { ...atThread(), "workspaces.wake": resolved(), "workspaces.exec": ok({ execId: "exec-1", cwd: "/root/wsp" }) },
       pushed: { "workspaces.exec": [frame({ type: "exec.output", execId: "exec-0", text: "someone else's" }), frame({ type: "exec.output", execId: "exec-1", text: "hi \u0085 \"there\"" }), frame({ type: "exec.output", execId: "exec-1", text: "é" }), frame({ type: "exec.exit", execId: "exec-1", exitCode: 3 })] },
     },
-    { case: "no folder named and no output", arguments: { workspace: "ws-1", argv: ["true"], cwd: "/tmp" }, replies: { "workspaces.resolve": resolved(NAPPING), "workspaces.wake": resolved(), "workspaces.exec": ok({ execId: "exec-2" }) }, pushed: { "workspaces.exec": [frame({ type: "exec.exit", execId: "exec-2", exitCode: null })] } },
-    { case: "the machine went away", arguments: { workspace: "ws-1", argv: ["true"] }, replies: { "workspaces.resolve": resolved(), "workspaces.wake": resolved(), "workspaces.exec": ok({ execId: "exec-3" }) }, pushed: { "workspaces.exec": [frame({ type: "exec.exit", execId: "exec-3", exitCode: null, error: "the machine stopped answering" })] } },
-    { case: "a relative folder", arguments: { workspace: "ws-1", argv: ["true"], cwd: "src" }, replies: {} },
-    { case: "gone", arguments: { workspace: "ws-1", argv: ["true"] }, replies: { "workspaces.resolve": resolved({ ...GONE, gone: "" }) } },
-    { case: "no such workspace", arguments: { workspace: "nope", argv: ["true"] }, replies: { "workspaces.resolve": no("no workspace nope; wsp workspaces lists them", "not-found") } },
+    { case: "no folder named and no output", arguments: { thread: THREAD, argv: ["true"], cwd: "/tmp" }, replies: { ...atThread(NAPPING), "workspaces.wake": resolved(), "workspaces.exec": ok({ execId: "exec-2" }) }, pushed: { "workspaces.exec": [frame({ type: "exec.exit", execId: "exec-2", exitCode: null })] } },
+    {
+      case: "no folder named runs in the thread's own",
+      arguments: { thread: THREAD, argv: ["pwd"] },
+      replies: {
+        "sessions.list": listed([{ id: "s-1", workspaceId: WORKSPACE.id, harness: "claude", status: "completed", threadId: THREAD, cwd: "/root/wsp/packages" }]),
+        "workspaces.get": resolved(WORKSPACE),
+        "workspaces.wake": resolved(),
+        "workspaces.exec": ok({ execId: "exec-4", cwd: "/root/wsp/packages" }),
+      },
+      pushed: { "workspaces.exec": [frame({ type: "exec.exit", execId: "exec-4", exitCode: 0 })] },
+    },
+    { case: "the machine went away", arguments: { thread: THREAD, argv: ["true"] }, replies: { ...atThread(), "workspaces.wake": resolved(), "workspaces.exec": ok({ execId: "exec-3" }) }, pushed: { "workspaces.exec": [frame({ type: "exec.exit", execId: "exec-3", exitCode: null, error: "the machine stopped answering" })] } },
+    { case: "a relative folder", arguments: { thread: THREAD, argv: ["true"], cwd: "src" }, replies: {} },
+    { case: "gone", arguments: { thread: THREAD, argv: ["true"] }, replies: atThread({ ...GONE, gone: "" }) },
+    { case: "no such thread", arguments: { thread: "nope", argv: ["true"] }, replies: { "sessions.list": listed([]), "projects.list": ok({ projects: [] }) } },
+    { case: "a project's name", arguments: { thread: "wsp", argv: ["true"] }, replies: { "sessions.list": listed([]), "projects.list": ok({ projects: [WORKSPACE.project] }) } },
   ],
   threads_wait: [
     { case: "already over", arguments: { threads: ["thread-b0"] }, replies: { "sessions.list": listed(), "sessions.history": history(frame({ type: "session.start", workspaceId: "ws-1", sessionId: "sess-3", threadId: OTHER, turnId: "t3" }), frame({ type: "session.done", workspaceId: "ws-1", sessionId: "sess-3", threadId: OTHER, turnId: "t3", result: REPLY })) } },

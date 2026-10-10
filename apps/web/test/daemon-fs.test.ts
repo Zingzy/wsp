@@ -148,6 +148,6 @@ describe("daemon-fs over a real daemon link through the host", () => {
 
     const err = await fsRead(link, "../outside.txt").catch((e: unknown) => e);
     expect(err).toBeInstanceOf(DaemonOpError);
-    expect((err as Error).message).toMatch(/outside the workspace root/);
+    expect((err as Error).message).toMatch(/outside the folders wsp serves here/);
   });
 });

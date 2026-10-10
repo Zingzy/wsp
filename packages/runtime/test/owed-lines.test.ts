@@ -11,7 +11,7 @@ import { createCodexAdapter } from "@wsp/adapter-codex";
 import { MachineUnreachableError, MachineUnreached, PlaceAbsentError, type ExecResult } from "@wsp/engine";
 import { LINK_RETRY_WINDOW_MS, NOTIFY_ME, TURN_TOKEN_ENV, agentsOffRefusal, notFoundRefusal, usageRefusal, type Caller, type ExecStreamFactory } from "@wsp/protocol";
 import type { Clock } from "../src/clock.js";
-import { createRuntime, type Runtime } from "../src/runtime.js";
+import { createRuntime, type HarnessAdapterFactory, type Runtime } from "../src/runtime.js";
 import { memoryStore } from "../src/store.js";
 import { openDaemonChannel } from "../src/daemon-channel.js";
 import { NOTIFY_OWED } from "../src/types/internal.js";
@@ -69,8 +69,18 @@ describe("a child's finished line its lead cannot take yet", () => {
     // Each run carries the workspace it was launched for, so a case with two leads tells their launches apart.
     const execOn = (workspaceId: string): ExecStreamFactory =>
       Object.assign((command: string, eo: Parameters<ExecStreamFactory>[1]) => fed.factory(command, { ...eo, env: { ...eo.env, LAB_WORKSPACE: workspaceId } }), { attach: fed.factory.attach }) as ExecStreamFactory;
+    // Once a case says so, the agent refuses outright to start on the lead's folder, a plain refusal rather than a
+    // computer that did not answer; each one it refused is counted.
+    const refusing = { on: undefined as string | undefined, refused: 0 };
+    const claude = (c: Parameters<HarnessAdapterFactory>[0]) => {
+      if (refusing.on !== undefined && c.workspaceId === refusing.on) {
+        refusing.refused++;
+        throw new Error("claude will not start here");
+      }
+      return createClaudeAdapter({ exec: execOn(c.workspaceId), configDir: "/root/.claude-cfg", resultExitMs: o.resultExitMs ?? 60_000 });
+    };
     const host = (on: Clock): Runtime => {
-      const rt = createRuntime({ backend, store, clock: on, adapters: { claude: c => createClaudeAdapter({ exec: execOn(c.workspaceId), configDir: "/root/.claude-cfg", resultExitMs: o.resultExitMs ?? 60_000 }) } });
+      const rt = createRuntime({ backend, store, clock: on, adapters: { claude } });
       runtimes.push(rt);
       return rt;
     };
@@ -159,7 +169,9 @@ describe("a child's finished line its lead cannot take yet", () => {
         await settle();
       }
     };
-    return { fed, store, leadRun, leadWs, lead, leadThread, leadWaits, leadExits, kidEnds, toPerson, launches, steers, nextTry, taken, owed, restart, keepFailing, rt: () => rt, kidThread: () => kidThread! };
+    const refuseStarts = (): void => void (refusing.on = leadWs.id);
+    const refusedStarts = (): number => refusing.refused;
+    return { fed, store, leadRun, leadWs, lead, leadThread, leadWaits, leadExits, kidEnds, toPerson, launches, steers, nextTry, taken, owed, restart, keepFailing, refuseStarts, refusedStarts, rt: () => rt, kidThread: () => kidThread! };
   };
 
   it("a steer whose write landed but whose answer was lost reaches the lead once, and the person is told nothing", async () => {
@@ -323,18 +335,18 @@ describe("a child's finished line its lead cannot take yet", () => {
     expect(await s.owed()).toBe(0);
   });
 
-  it("a line the lead's door refuses goes to the person at once and is never tried again", async () => {
+  it("a line whose start the lead's agent refuses goes to the person at once and is never tried again", async () => {
     const at = fakeClock();
     const s = await setup(at.clock);
-    const token = s.leadRun.env[TURN_TOKEN_ENV]!;
-    const caller: Caller = { origin: "relayed", by: { kind: "thread", threadId: s.leadThread, workspaceId: s.leadWs.id, rootThreadId: s.leadThread } };
-    // The person turns agents off on the lead's workspace while the child works: the line's start is refused.
-    await s.kidEnds({ caller, turnToken: token, meanwhile: async () => void (await s.rt().workspaces.agents(s.leadWs.id, { spawn: false })) });
+    await s.leadWaits();
+    // The agent refuses to start on the lead once the child works, so the line's own start is refused outright.
+    await s.kidEnds({ meanwhile: async () => s.refuseStarts() });
     await until(async () => (await s.toPerson()).length === 1);
+    expect(s.refusedStarts()).toBe(1);
     at.advance(2 * HOUR);
     await settle();
+    expect(s.refusedStarts()).toBe(1);
     expect(s.launches()).toEqual([]);
-    expect(s.steers()).toEqual([]);
     expect(await s.toPerson()).toHaveLength(1);
     expect(await s.owed()).toBe(0);
   });
