@@ -80,6 +80,10 @@
                           "$ref": "#/properties/recipe/properties/name"
                         },
                         "minItems": 1
+                      },
+                      "copy": {
+                        "type": "boolean",
+                        "const": true
                       }
                     },
                     "required": [
@@ -356,6 +360,10 @@
                           "$ref": "#/properties/recipe/properties/name"
                         },
                         "minItems": 1
+                      },
+                      "copy": {
+                        "type": "boolean",
+                        "const": true
                       }
                     },
                     "required": [

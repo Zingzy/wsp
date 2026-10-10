@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The words the settings page and its palette row say, one place, keyed by the
 // preference value where a value has words of its own.
-import { fmtPx, listWords, offlineFor, type MidTurn, type NewThreadIn, type NotifyChoice, type OnQuit, type PlaceDialRoad, type PlaceProvisionRow, type ProductUsageOff, type SendKey, type ServerSignIn, type SettleAfter, type TerminalSizeSource, type ThemePreference } from "@wsp/protocol";
+import { COPY_KEYS_WORD, fmtPx, listWords, offlineFor, type MidTurn, type NewThreadIn, type NotifyChoice, type OnQuit, type PlaceDialRoad, type PlaceProvisionRow, type ProductUsageOff, type SendKey, type ServerSignIn, type SettleAfter, type TerminalSizeSource, type ThemePreference } from "@wsp/protocol";
 
 /** The muted sans with tabular figures a state word or a description of machine words wears, and the foreground one
  * a value a person reads wears: an address, a size, a path, a time, a version. Two class strings the page, the sheet
@@ -165,6 +165,14 @@ export const ADD_COMPUTER_WORDS = {
   tokenCopied: "Token copied.",
   /** Who the token the GitHub row would copy signs in as, and what it may do. */
   githubAccount: (account: string, scopes: readonly string[]): string => `Signed in as ${account}${scopes.length === 0 ? "" : ` with ${listWords(scopes)}`}.`,
+  /** The one question about the keys the ticked servers carry: copy them to the computer, or leave them here, each
+   * server named with what its keys go by and never a value. */
+  copyKeys: (box: string): string => `${COPY_KEYS_WORD} to ${box === "" ? "its computers" : box}`,
+  keysNamed: (servers: readonly { name: string; keys: readonly string[] }[]): string => `${servers.map(s => `${s.name}: ${s.keys.join(", ")}`).join("; ")}.`,
+  leaveKeys: (here: string): string => `Leave them on ${here}`,
+  keysLeft: (names: readonly string[], box: string): string => `${listWords(names)} ${names.length === 1 ? "is" : "are"} skipped on ${box === "" ? "its computers" : box} until you copy ${names.length === 1 ? "its keys" : "their keys"}.`,
+  /** A ticked server whose keys the answer leaves here. */
+  keysStay: "Skipped until you copy its keys.",
   /** How an MCP server signs in on the computer, by the kind the host read off its definition. */
   serverSignIn: (kind: ServerSignIn, box: string): string =>
     ({ none: "No sign-in.", key: "Key copied.", token: "Token copied.", oauth: box === "" ? "Signs in there." : `Signs in on ${box}.` })[kind],

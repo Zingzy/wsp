@@ -475,6 +475,42 @@ describe("Add a computer's picks read the host's facts", () => {
     expect(note("old")).toBeUndefined();
   });
 
+  it("asks once whether to copy the keys of the ticked servers that carry one, naming each server and what its keys go by, and keeps the answer in the picks", async () => {
+    const keyed = { recipesOptions: async () => ({ ...FACTS, mcp: FACTS.mcp.map(s => (s.name === "context7" ? { ...s, keys: ["CONTEXT7_API_KEY"] } : s.name === "github" ? { ...s, keys: ["GITHUB_PERSONAL_ACCESS_TOKEN"] } : s)) }) } as Partial<Api>;
+    await open("mcp", undefined, keyed);
+    await waitFor(() => expect(ticked("context7")).toBe(true));
+    const question = (): HTMLElement | null => dialog()!.querySelector<HTMLElement>("[data-grid='server-keys']");
+    const choice = (id: string): Element | null | undefined => question()?.querySelector(`[data-choice='${id}']`);
+    const picked = (): string | null | undefined => [...(question()?.querySelectorAll("[data-choice]") ?? [])].find(c => c.querySelector("[role=radio]")?.getAttribute("aria-checked") === "true")?.getAttribute("data-choice");
+    const note = (row: string): string | null | undefined => dialog()!.querySelector(`[data-pick-row='${row}'] [data-pick-note]`)?.textContent;
+    expect(dialog()!.querySelectorAll("[data-grid='server-keys']")).toHaveLength(1);
+    expect(choice("copy")?.textContent).toBe("Copy the keys to studiocontext7: CONTEXT7_API_KEY; github: GITHUB_PERSONAL_ACCESS_TOKEN.");
+    expect(choice("leave")?.textContent).toBe("Leave them on zingzy's MacBook Procontext7 and github are skipped on studio until you copy their keys.");
+    // Nothing is copied on a tick alone: the answer starts at no, and the rows say so.
+    expect(picked()).toBe("leave");
+    expect(["context7", "github", "linear"].map(note)).toEqual(["Skipped until you copy its keys.", "Skipped until you copy its keys.", "Signs in on studio."]);
+    const mcp = (): RecipeFile["mcp"] => useAddFlow.getState().picks!.mcp;
+    expect(Object.values(mcp()).some(row => row.copy !== undefined)).toBe(false);
+    await press(choice("copy")!.querySelector("[role=radio]"));
+    expect(picked()).toBe("copy");
+    expect(mcp()["context7"]).toEqual({ agents: ["claude", "codex"], copy: true });
+    expect(mcp()["github"]).toEqual({ agents: ["codex"], copy: true });
+    expect(mcp()["linear"]).toEqual({ agents: ["claude"] });
+    expect(["context7", "github"].map(note)).toEqual(["Key copied.", "Token copied."]);
+    // A server that carries a key, ticked again after the yes, takes the yes.
+    await press(dialog()!.querySelector("[data-pick-row='github'] [role=checkbox]"));
+    expect(question()?.textContent).not.toContain("github");
+    await press(dialog()!.querySelector("[data-pick-row='github'] [role=checkbox]"));
+    expect(mcp()["github"]).toEqual({ agents: ["codex"], copy: true });
+    await press(choice("leave")!.querySelector("[role=radio]"));
+    expect(mcp()["context7"]).toEqual({ agents: ["claude", "codex"] });
+    expect(mcp()["github"]).toEqual({ agents: ["codex"] });
+    // With no ticked server carrying a key there is nothing to ask.
+    await press(dialog()!.querySelector("[data-pick-row='context7'] [role=checkbox]"));
+    await press(dialog()!.querySelector("[data-pick-row='github'] [role=checkbox]"));
+    expect(question()).toBeNull();
+  });
+
   it("ticks no CLI to start, puts the ones the agents ran most first with how often, and ticks every one they ran on one act", async () => {
     await open("clis");
     const rows = (): string[] => [...dialog()!.querySelectorAll<HTMLElement>("[data-pick-row]")].map(r => r.dataset["pickRow"]!);

@@ -7,6 +7,7 @@
 import { z } from "zod";
 import { plural } from "./format.js";
 import { ProjectHue, ProjectIcon } from "./project-look.js";
+import { listWords } from "./usage.js";
 import { MCP_SERVER_NAME } from "./wsp-tools.js";
 
 /** How an agent or the GitHub row signs in on the computer: the token this computer's vault holds, set in the
@@ -46,12 +47,14 @@ const row = <T extends z.ZodRawShape>(shape: T) => z.object(shape);
 
 /** One recipe file, `<state dir>/recipes/<slug>.toml`. Every table is keyed by the name the row goes by here: an
  * agent's catalog id, a server's name, a CLI's package, a skill's folder name, a plugin's `name@marketplace`, a
- * folder's own key. `needs` is the one way a row asks for the C toolchain, which the floor carries only then. */
+ * folder's own key. `needs` is the one way a row asks for the C toolchain, which the floor carries only then. A
+ * server's `copy` is the person's yes to copying the keys its definition carries; without it a server that carries
+ * one is set aside. */
 export const RecipeFile = z
   .object({
     name: z.string().trim().min(1).max(64),
     agents: z.record(NAME, row({ signin: SIGN_IN })).default({}),
-    mcp: z.record(NAME, row({ agents: NAMES.min(1) })).default({}),
+    mcp: z.record(NAME, row({ agents: NAMES.min(1), copy: z.literal(true).optional() })).default({}),
     clis: z.record(NAME, row({ via: NAME, needs: NAMES.optional() })).default({}),
     skills: z.record(NAME, row({ from: NAME })).default({}),
     plugins: z.record(NAME, row({})).default({}),
@@ -161,12 +164,14 @@ export interface RecipeOptions {
   /** `kind` is how the agent's own sign-in works (a token minted here, a key, a browser page, a device code), and
    * `bytes` what it weighs on a box where a build measured it. */
   agents: { id: string; name: string; signins: RecipeSignIn[]; kind?: string; bytes?: number }[];
-  /** `kind` is how the server signs in, as the collector read its definition. */
-  mcp: { name: string; agents: string[]; kind?: ServerSignIn }[];
+  /** `kind` is how the server signs in, as the collector read its definition; `keys` what the values it carries go
+   * by, names only, on a server that goes only on a yes to copying them. */
+  mcp: { name: string; agents: string[]; kind?: ServerSignIn; keys?: string[] }[];
   /** `calls` is how many times the person's agents ran the CLI, off their session histories; never run, it is left off. */
   clis: { name: string; via: string; version?: string; needs?: string[]; bytes?: number; calls?: number }[];
   skills: { name: string; from: string; linked: boolean }[];
-  plugins: { name: string }[];
+  /** `on` where the agent's own settings here switch the plugin on. */
+  plugins: { name: string; on?: true }[];
   /** The GitHub row carries the sign-in words it can take here: the vault only where this computer holds a gh login,
    * with the account that login signs in as and its token's scopes where gh said them. */
   configs: { id: "git" | "shell" | "github"; label: string; signins?: GitHubSignIn[]; account?: string; scopes?: string[] }[];
@@ -175,6 +180,14 @@ export interface RecipeOptions {
    * signed in there to clone. */
   folders?: { name: string; path: string; remote?: string; private?: boolean; unpushed?: number; bytes?: number }[];
 }
+
+/** The answer, on the one question about the ticked servers' keys, that copies them. */
+export const COPY_KEYS_WORD = "Copy the keys";
+
+/** Why a ticked server stayed off a computer for want of a yes to copying its keys: what they go by, and where that
+ * yes is given. */
+export const keysKeptLine = (keys: readonly string[]): string =>
+  `not copied: it needs ${keys.length === 0 ? "a key" : listWords(keys)}; to send ${keys.length === 1 ? "it" : "them"}, pick ${COPY_KEYS_WORD} under MCP servers on the recipe this computer follows, in Settings > Recipes`;
 
 /** The refusal a recipe whose name makes no file name gets. */
 export const RECIPE_NAME_REFUSAL = "a recipe's name needs a letter or a digit";

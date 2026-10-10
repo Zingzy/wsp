@@ -51,6 +51,22 @@ describe("Settings, Recipes", () => {
     expect(Object.keys((saved[0]!.from as { file: RecipeFile }).file.agents)).toEqual(["claude", "codex"]);
   });
 
+  it("asks the one question about the keys its ticked servers carry, and a yes is written into the recipe its computers follow", async () => {
+    const keyed: RecipeOptions = { ...OPTIONS, mcp: [{ name: "context7", agents: ["claude"], keys: ["CONTEXT7_API_KEY"] }] };
+    const saved: { name: string; from: unknown }[] = [];
+    const fake = settingsApi({ recipesList: async () => [builders], recipesOptions: async () => keyed, recipesSave: async (name: string, from: unknown) => (saved.push({ name, from }), builders) } as Partial<Api>);
+    mountSettings({ api: fake.api, at: { kind: "group", group: "recipes" } });
+    await settle();
+    fireEvent.click(document.querySelector("[data-recipe-row='builders']")!);
+    await settle();
+    const question = document.querySelector("[data-settings-card='recipe-servers'] [data-grid='server-keys']");
+    expect(question?.querySelector("[data-choice='copy']")?.textContent).toBe("Copy the keys to spoo and studiocontext7: CONTEXT7_API_KEY.");
+    expect(question?.querySelector("[data-choice='leave']")?.textContent).toContain("context7 is skipped on spoo and studio until you copy its keys.");
+    fireEvent.click(question!.querySelector("[data-choice='copy'] [role=radio]")!);
+    await settle();
+    expect((saved[0]!.from as { file: RecipeFile }).file.mcp).toEqual({ context7: { agents: ["claude"], copy: true } });
+  });
+
   it("asks before deleting a recipe, naming what its computers keep, and the icon picked is kept with the person's looks", async () => {
     const removed: string[] = [];
     const fake = settingsApi({ recipesList: async () => [builders], recipesOptions: async () => OPTIONS, recipesRemove: async (name: string) => (removed.push(name), builders) } as Partial<Api>);

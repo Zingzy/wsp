@@ -643,7 +643,8 @@ export function placeSetup(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea) 
     const undo = async (): Promise<void> => {
       const removed = sync?.changes.filter(c => c.how === "removed") ?? [];
       if (sync === undefined || removed.length === 0 || provisioner.undo === undefined) return;
-      const planned = await provisioner.undo(sync.before, removed, { home });
+      const stores = await storesHere();
+      const planned = await provisioner.undo(sync.before, removed, { home, ...(stores !== undefined ? { stores } : {}) });
       for (const u of planned) {
         // What wsp put there, read off the one row its road installed: a sign-in or a file wsp landed for a tool the
         // box had before wsp says nothing about who put the tool there.
@@ -674,7 +675,8 @@ export function placeSetup(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea) 
     try {
       if (picks.configs.github !== undefined && githubWord === "vault" && vault()[GITHUB_TOKEN_ENV] === undefined) await wiring.githubToken?.().catch(() => undefined);
       await undo();
-      const planned = await provisioner.setup(picks, { home }, sync?.steps);
+      const stores = await storesHere();
+      const planned = await provisioner.setup(picks, { home, ...(stores !== undefined ? { stores } : {}) }, sync?.steps);
       // A sync puts on only the plugins it added; the rest are there, and their install would run again.
       const kept = sync === undefined || planned.plugins === undefined ? planned : { ...planned, plugins: planned.plugins.filter(p => sync.moved.has(p.id)) };
       // gh comes with the CLIs where it is one of them, first among them, and on its own before them otherwise; the

@@ -518,6 +518,10 @@
                             "minLength": 1
                           },
                           "minItems": 1
+                        },
+                        "copy": {
+                          "type": "boolean",
+                          "const": true
                         }
                       },
                       "required": [
@@ -1509,6 +1513,10 @@
                             "minLength": 1
                           },
                           "minItems": 1
+                        },
+                        "copy": {
+                          "type": "boolean",
+                          "const": true
                         }
                       },
                       "required": [

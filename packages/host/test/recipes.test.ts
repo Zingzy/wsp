@@ -387,6 +387,18 @@ describe("what a recipe picks from", () => {
     expect(options.clis.map(c => c.name)).toEqual(["gh"]);
   });
 
+  it("offers every plugin installed here and marks on only the ones Claude Code's settings switch on", async () => {
+    const installed = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m"].map(n => `${n}@acme`);
+    const on = installed.slice(0, 6);
+    mkdirSync(join(home, ".claude", "plugins"), { recursive: true });
+    writeFileSync(join(home, ".claude", "plugins", "installed_plugins.json"), JSON.stringify({ version: 2, plugins: Object.fromEntries(installed.map(n => [n, [{ scope: "user", installPath: `/x/${n}` }]])) }));
+    writeFileSync(join(home, ".claude", "settings.json"), JSON.stringify({ enabledPlugins: { ...Object.fromEntries(installed.map(n => [n, false])), ...Object.fromEntries(on.map(n => [n, true])) } }));
+    const options = await readRecipeOptions({ ...nodeHost(), home, platform: "linux", exec: { which: async () => false, run: async () => undefined } });
+    expect(options.plugins).toHaveLength(13);
+    expect(options.plugins.filter(p => p.on === true).map(p => p.name)).toEqual(on);
+    expect(options.plugins.find(p => p.name === "m@acme")).toEqual({ name: "m@acme" });
+  });
+
   it("offers a person's own skills and leaves a plugin's to its plugin", () => {
     const options = recipeOptions(
       { entries: [] },

@@ -11,7 +11,7 @@ import { writeStub } from "../../protocol/test/stub-script.js";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { Manifest } from "@wsp/collect";
-import { PLACE_SUDO_KIND, RecipeFile, SETUP_STEP_WORDS, TOOL_PREFIX, type AddLine, type PlaceSetup, type PlaceView, type PlaceWait } from "@wsp/protocol";
+import { keysKeptLine, PLACE_SUDO_KIND, RecipeFile, SETUP_STEP_WORDS, TOOL_PREFIX, type AddLine, type PlaceSetup, type PlaceView, type PlaceWait } from "@wsp/protocol";
 import { sshWordReach, type SshLocalRun } from "@wsp/engine";
 import { PassThrough } from "node:stream";
 import { gunzipSync } from "node:zlib";
@@ -385,6 +385,63 @@ describe("the plan off a computer's picks", () => {
     expect(ticked).toEqual(expect.arrayContaining(["agents/claude", "agents/mcp/claude/linear", "tools/brew/bat"]));
     for (const id of ["agents/codex", "agents/mcp/codex/linear", "agents/mcp/claude/notion", "tools/brew/jq", "tools/cargo/cargo-nextest", "shell/zshrc"]) expect(ticked).not.toContain(id);
     expect(rows.find(e => e.id === "agents/claude")?.paths).toEqual(["~/.claude/settings.json"]);
+  });
+
+  /** A server whose definition carries a key, under both agents, and the picks that tick it for both. */
+  const keyed: Manifest = {
+    entries: [
+      ...manifest.entries,
+      { rung: "agents", id: "agents/mcp/claude/sentry", label: "sentry", group: "Claude Code MCP servers", paths: [], bytes: 0, default: "bring", consent: true, keys: ["SENTRY_ACCESS_TOKEN"] },
+      { rung: "agents", id: "agents/mcp/codex/sentry", label: "sentry", group: "Codex MCP servers", paths: [], bytes: 0, default: "bring", consent: true, keys: ["SENTRY_ACCESS_TOKEN"] },
+    ],
+  };
+  const sentry = (copy: boolean): RecipeFile => ({ ...picks, agents: { ...picks.agents, codex: { signin: "vault" } }, mcp: { ...picks.mcp, sentry: { agents: ["claude", "codex"], ...(copy ? { copy: true as const } : {}) } } });
+
+  it("answers copy on a server that carries a key only where the picks said yes to copying keys, and on no other row", () => {
+    const yes = picksRows(keyed, sentry(true), { home: "/Users/dev", brew: new Map() });
+    expect(yes.filter(e => e.rung === "agents" && e.choice !== undefined).map(e => [e.id, e.bring, e.choice])).toEqual([
+      ["agents/mcp/claude/sentry", true, "copy"],
+      ["agents/mcp/codex/sentry", true, "copy"],
+    ]);
+    const no = picksRows(keyed, sentry(false), { home: "/Users/dev", brew: new Map() });
+    expect(no.filter(e => e.id.endsWith("/sentry")).map(e => [e.id, e.bring, e.choice])).toEqual([
+      ["agents/mcp/claude/sentry", true, "skip"],
+      ["agents/mcp/codex/sentry", true, "skip"],
+    ]);
+    // A yes on a server that carries nothing answers nothing: a plain server travels on its tick.
+    const plain = picksRows(keyed, { ...picks, mcp: { linear: { agents: ["claude"], copy: true } } }, { home: "/Users/dev", brew: new Map() });
+    expect(plain.find(e => e.id === "agents/mcp/claude/linear")).toMatchObject({ bring: true });
+    expect(plain.find(e => e.id === "agents/mcp/claude/linear")?.choice).toBeUndefined();
+  });
+
+  it("keeps a server that carries a key on a yes, and on a no sets it aside saying which keys it needed and where the yes is given", async () => {
+    const home = tmp("plan-keys");
+    const provision = placeProvisioner({ statePath: join(home, "state.json"), home, platform: "darwin", collect: async () => keyed, brew: async () => new Map() });
+    const scopes = (plan: Awaited<ReturnType<typeof provision.setup>>) => plan.mcp?.agents.map(a => [a.id, a.scopes.flatMap(s => s.keep), a.scopes.flatMap(s => s.drop.map(d => [d.name, d.reason]))]);
+    expect(scopes(await provision.setup(sentry(true), { home: "/root" }))).toEqual([
+      ["claude", ["linear", "sentry"], [["notion", "unticked"]]],
+      ["codex", ["sentry"], [["linear", "unticked"]]],
+    ]);
+    const no = await provision.setup(sentry(false), { home: "/root" });
+    expect(scopes(no)).toEqual([
+      ["claude", ["linear"], [["notion", "unticked"], ["sentry", keysKeptLine(["SENTRY_ACCESS_TOKEN"])]]],
+      ["codex", [], [["linear", "unticked"], ["sentry", keysKeptLine(["SENTRY_ACCESS_TOKEN"])]]],
+    ]);
+    expect(keysKeptLine(["SENTRY_ACCESS_TOKEN"])).toBe("not copied: it needs SENTRY_ACCESS_TOKEN; to send it, pick Copy the keys under MCP servers on the recipe this computer follows, in Settings > Recipes");
+  });
+
+  it("puts a plugin on, and takes one off, pointed at the folder Claude Code's threads there read, never its default home", async () => {
+    const home = tmp("plan-plugins");
+    mkdirSync(join(home, ".claude", "plugins"), { recursive: true });
+    writeFileSync(join(home, ".claude", "plugins", "known_marketplaces.json"), JSON.stringify({ acme: { source: { source: "github", repo: "acme/plugins" } } }));
+    const provision = placeProvisioner({ statePath: join(home, "state.json"), home, platform: "darwin", collect: async () => manifest, brew: async () => new Map() });
+    const stores = { claude: "/root/.claude-cfg", codex: "/wsp/logins/codex" };
+    const plan = await provision.setup({ ...picks, plugins: { "lint@acme": {} } }, { home: "/root", stores }, new Set(["plugins"]));
+    expect(plan.plugins?.map(p => p.cmd)).toEqual([["export CLAUDE_CONFIG_DIR='/root/.claude-cfg'", "claude plugin marketplace add 'acme/plugins' || true", "claude plugin install 'lint@acme' --json </dev/null"].join("\n")]);
+    const full = await provision.setup({ ...picks, plugins: { "lint@acme": {} } }, { home: "/root", stores });
+    expect(full.plugins?.[0]?.cmd.split("\n")[0]).toBe("export CLAUDE_CONFIG_DIR='/root/.claude-cfg'");
+    const undo = await provision.undo!({ ...picks, plugins: { "lint@acme": {} } }, [{ kind: "plugins", name: "lint@acme" }], { home: "/root", stores });
+    expect(undo[0]?.cmd?.split("\n").slice(-2)).toEqual(["export CLAUDE_CONFIG_DIR='/root/.claude-cfg'", "claude plugin uninstall 'lint@acme' </dev/null"]);
   });
 
   it("asks for the C toolchain only where a picked row needs it, lands skills at their real path and never a bash file", async () => {

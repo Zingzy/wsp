@@ -5,7 +5,7 @@
 // config. Add a computer draws one per step; a recipe's page draws them one
 // under another. Each row is what the computer running the host offers, ticked
 // where the picks hold it.
-import { GitCommitHorizontalIcon, GithubIcon, PlugIcon, PuzzleIcon, ScrollTextIcon, SquareTerminalIcon, TerminalIcon } from "lucide-react";
+import { GitCommitHorizontalIcon, GithubIcon, KeyRoundIcon, PlugIcon, PuzzleIcon, ScrollTextIcon, SquareTerminalIcon, TerminalIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { HERE_PLACE_ID, fmtBytes, fmtCalls, hereName, sizeTone, type GitHubSignIn, type ProjectHue, type ProjectIcon, type RecipeFile, type RecipeOptions, type RecipeSignIn } from "@wsp/protocol";
 import { AgentMarks } from "../../components/agents/agentsParts.js";
@@ -24,7 +24,7 @@ import { ADD_COMPUTER_WORDS, FACT } from "../format.js";
 import { GlyphFrame, Grid } from "../grid.js";
 import { CARD_INSET, LIST_TITLE, NOTE, ROW_FIELD, ROW_FLOOR, SELECT_WIDTH } from "../layout.js";
 import { SizeCell } from "../recipe/rows.js";
-import { githubPick, setGitHub, signIn, tickConfig, tickFolder, tickMany } from "./choices.js";
+import { copiesKeys, githubPick, keyedServers, setCopyKeys, setGitHub, signIn, tickConfig, tickFolder, tickMany } from "./choices.js";
 import { PickList, RANGE_HOVER, type PickChanges } from "./PickList.js";
 import { PickLine, PickRow } from "./PickRow.js";
 
@@ -139,29 +139,51 @@ export function AgentsPicks({ picks, options, onChange, box, versions, onlyTicke
   );
 }
 
-/** The servers, each saying how it signs in on the computer, as an agent's row says it. */
+/** The servers, each saying how it signs in on the computer, as an agent's row says it, and under them the one question
+ * about the keys the ticked ones carry. */
 export function ServersPicks({ picks, options, onChange, box, onlyTicked = false }: PickProps) {
   const items = options.mcp.filter(server => !onlyTicked || picks.mcp[server.name] !== undefined).map(server => ({ key: server.name, name: server.name, on: picks.mcp[server.name] !== undefined, server }));
+  const copied = copiesKeys(picks, options);
   return (
-    <PickList
-      id="servers"
-      items={items}
-      tools={!onlyTicked}
-      onSet={changes => onChange(tickMany(picks, "mcp", changes, options))}
-      row={({ server, on }, tick) => (
-        <PickRow
-          key={server.name}
-          id={server.name}
-          checked={on}
-          onCheckedChange={tick}
-          {...(onlyTicked ? {} : { hover: RANGE_HOVER })}
-          glyph={<PlugIcon aria-hidden className={GLYPH} />}
-          name={server.name}
-          marks={<AgentMarks agents={server.agents} />}
-          {...(server.kind === undefined ? {} : { note: ADD_COMPUTER_WORDS.serverSignIn(server.kind, box) })}
-        />
-      )}
-    />
+    <>
+      <PickList
+        id="servers"
+        items={items}
+        tools={!onlyTicked}
+        onSet={changes => onChange(tickMany(picks, "mcp", changes, options))}
+        row={({ server, on }, tick) => (
+          <PickRow
+            key={server.name}
+            id={server.name}
+            checked={on}
+            onCheckedChange={tick}
+            {...(onlyTicked ? {} : { hover: RANGE_HOVER })}
+            glyph={<PlugIcon aria-hidden className={GLYPH} />}
+            name={server.name}
+            marks={<AgentMarks agents={server.agents} />}
+            {...(on && (server.keys?.length ?? 0) > 0 && !copied ? { note: ADD_COMPUTER_WORDS.keysStay } : server.kind === undefined ? {} : { note: ADD_COMPUTER_WORDS.serverSignIn(server.kind, box) })}
+          />
+        )}
+      />
+      <ServerKeysPick picks={picks} options={options} onChange={onChange} box={box} />
+    </>
+  );
+}
+
+/** Copy the keys the ticked servers carry to the computer, or leave them here, which sets those servers aside there.
+ * Asked once for every such server, each named with what its keys go by and never a value. */
+function ServerKeysPick({ picks, options, onChange, box }: PickProps) {
+  const here = useStore(s => hereName(s.places));
+  const keyed = keyedServers(picks, options);
+  if (keyed.length === 0) return null;
+  const picked = copiesKeys(picks, options) ? "copy" : "leave";
+  return (
+    <RadioGroup value={picked} onValueChange={next => onChange(setCopyKeys(picks, options, next === "copy"))} className="gap-0">
+      <Grid id="server-keys">
+        <Choice id="copy" picked={picked === "copy"} glyph={<KeyRoundIcon aria-hidden className={GLYPH} />} name={ADD_COMPUTER_WORDS.copyKeys(box)} note={ADD_COMPUTER_WORDS.keysNamed(keyed)} />
+        <Choice id="leave" picked={picked === "leave"} glyph={<KeyRoundIcon aria-hidden className={GLYPH} />} name={ADD_COMPUTER_WORDS.leaveKeys(here)} note={ADD_COMPUTER_WORDS.keysLeft(keyed.map(s => s.name), box)} />
+      </Grid>
+    </RadioGroup>
   );
 }
 
