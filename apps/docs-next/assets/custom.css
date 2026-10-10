@@ -44,9 +44,44 @@
   --scalar-sidebar-search-color: #a89d92;
 }
 
-/* Scalar's copy button carries the block's language word and sits over the first line. */
-.t-editor__code {
-  padding-top: 2.25rem;
+/* Code blocks: a quiet card with an icon-only copy button in its corner. Scalar's button also prints the language word,
+ * which took a row of its own; shell lines wrap, while help text keeps its columns and scrolls. */
+.t-editor__code-container {
+  border: 1px solid var(--scalar-border-color);
+  border-radius: 10px;
+  background: var(--scalar-background-2);
+  overflow: hidden;
+}
+.t-editor__code-container pre.t-editor__code {
+  padding: 14px 48px 14px 16px;
+  background: transparent;
+  font-size: 13.5px;
+  line-height: 1.6;
+}
+.t-editor__code-container[data-lang="sh"] pre.t-editor__code,
+.t-editor__code-container[data-lang="sh"] pre.t-editor__code *,
+.t-editor__code-container[data-lang="bash"] pre.t-editor__code,
+.t-editor__code-container[data-lang="bash"] pre.t-editor__code * {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.t-editor__language-picker {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  font-size: 0;
+  padding: 6px;
+  border-radius: 6px;
+  opacity: 0.6;
+  transition: opacity 150ms ease, background 150ms ease;
+}
+.t-editor__language-picker:hover {
+  opacity: 1;
+  background: rgb(236 230 220 / 6%);
+}
+.t-editor__language-picker svg {
+  width: 14px;
+  height: 14px;
 }
 
 /* On the page a header button links to, Scalar draws its label in the header's ink, which is ivory on an ivory key. */
@@ -78,6 +113,11 @@ figure.t-editor__table-wrapper,
   margin-bottom: 28px;
 }
 figure.t-editor__image img {
+  display: block;
+  max-height: 460px;
+  width: auto;
+  max-width: 100%;
+  margin: 0 auto;
   border-radius: 12px;
   filter: drop-shadow(0 20px 40px rgb(0 0 0 / 50%)) drop-shadow(0 2px 6px rgb(0 0 0 / 35%));
 }
