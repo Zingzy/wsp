@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The Tool servers tab: one entry per server across agents, folded where two
-// agents in one scope name the same server with the same command or address.
+// The Tool servers tab: one entry per agent's server, under that agent's name;
+// beside a thread only the thread's agent's stand, the rest behind one link.
+// The computer's page folds two agents in one scope that name the same server
+// with the same command or address into one entry.
 // The row says where it is reached and its state as a word and a dot; the
 // detail is the /mcp view: status, command, names, each agent's file, the
 // tools, and the next step first. A server's state is what its one tools
@@ -47,11 +49,11 @@ export const serverRowId = (agent: string, scope: McpScope, project: string | un
 const rowId = (row: McpRow): string => serverRowId(row.agent, row.scope, row.project?.id, row.name);
 
 /** One entry per server: the same name reached the same way in the same scope, and the same project, is one server
- * set up for each agent. */
-export function foldServers(rows: readonly McpRow[]): ServerEntry[] {
+ * set up for each agent, or with `byAgent` one per agent. */
+export function foldServers(rows: readonly McpRow[], byAgent = false): ServerEntry[] {
   const out = new Map<string, { name: string; scope: Scope; project?: AgentsProject; reach: string; stdio: boolean; rows: McpRow[] }>();
   for (const row of rows) {
-    const key = [scopeOf(row), ...(row.project === undefined ? [] : [row.project.id]), row.name, row.transport.kind, reachOf(row)].join("\0");
+    const key = [...(byAgent ? [row.agent] : []), scopeOf(row), ...(row.project === undefined ? [] : [row.project.id]), row.name, row.transport.kind, reachOf(row)].join("\0");
     const was = out.get(key);
     if (was === undefined) out.set(key, { name: row.name, scope: scopeOf(row), ...(row.project !== undefined ? { project: row.project } : {}), reach: reachOf(row), stdio: row.transport.kind === "stdio", rows: [row] });
     else was.rows.push(row);
@@ -200,20 +202,42 @@ function actsOf(entry: ServerEntry, ctx: RowsContext) {
 /** A tool as a row of its server's tools: its name, and what it does under it. */
 const toolRow = (tool: McpTool): UnderRow => ({ key: tool.name, title: tool.name, ...(tool.description === undefined ? {} : { subtext: tool.description }) });
 
-/** Global first, then one group per project, each by its name with its folder. */
-function scopeGroups(items: readonly ServerEntry[]): GroupView<ServerEntry>[] {
+/** One agent's servers under its name: its global ones, then one group per project with the project's folder. */
+function agentGroups(agent: string, items: readonly ServerEntry[], other: boolean): GroupView<ServerEntry>[] {
+  const label = agentName(agent);
   const global = items.filter(e => e.scope === "global");
-  return [...(global.length === 0 ? [] : [{ id: "global", label: "Global", items: global }]), ...projectGroups(items.filter(e => e.scope === "project"))];
+  const projects = projectGroups(items.filter(e => e.scope === "project")).map(g => ({ ...g, id: `${agent}-${g.id}`, label, ...(other ? { other } : {}) }));
+  return [...(global.length === 0 ? [] : [{ id: `${agent}-global`, label, items: global, ...(other ? { other } : {}) }]), ...projects];
+}
+
+/** The two layouts beside a thread the owner is choosing between: the thread's agent's servers alone with the rest
+ * behind a link, or every agent's in groups with the thread's first. Only a dev build reads the pick. */
+export const SERVERS_VIEW_KEY = "wsp.dev.servers-view";
+const groupsView = (): boolean => import.meta.env.DEV && localStorage.getItem(SERVERS_VIEW_KEY) === "groups";
+
+/** Entries kept apart by agent, so each one's rows are its first's agent's. With no thread every agent's by name;
+ * beside one its agent's first. */
+function byAgentGroups(items: readonly ServerEntry[], ctx: RowsContext): GroupView<ServerEntry>[] {
+  const agentOf = (e: ServerEntry): string => e.rows[0]!.agent;
+  const agents = [...new Set(items.map(agentOf))].sort((a, b) => agentName(a).localeCompare(agentName(b)));
+  const of = (agent: string, other: boolean) => agentGroups(agent, items.filter(e => agentOf(e) === agent), other);
+  if (ctx.agent === undefined) return agents.flatMap(a => of(a, false));
+  const rest = agents.filter(a => a !== ctx.agent);
+  if (groupsView()) return [ctx.agent, ...rest].flatMap(a => of(a, false));
+  const name = agentName(ctx.agent);
+  const own = { id: `${ctx.agent}-thread`, label: W.inThread(name), whole: true, items: items.filter(e => agentOf(e) === ctx.agent), empty: W.noServersFor(name, ctx.on ?? ctx.computer ?? "") };
+  return [own, ...rest.flatMap(a => of(a, true))];
 }
 
 export const SERVERS_KIND: KindModule<ServerEntry> = {
   id: "servers",
   search: "Search tool servers",
   add: "Add a tool server",
-  items: (report: AgentsReport) => foldServers(report.servers).sort(byName),
+  items: (report: AgentsReport) => foldServers(report.servers, true).sort(byName),
   key: entry => entry.key,
   matches: (entry, q) => matchesAny(q, entry.name, entry.reach, entry.project?.name, ...entry.rows.flatMap(r => [agentName(r.agent), r.file ?? ""])),
-  groups: scopeGroups,
+  groups: byAgentGroups,
+  others: W.otherAgents,
   row: (entry, ctx) => {
     const { worst, acts, flow } = actsOf(entry, ctx);
     const status = statusOf(worst);
@@ -224,7 +248,6 @@ export const SERVERS_KIND: KindModule<ServerEntry> = {
       key: entry.key,
       title: entry.name,
       lead: leadOf(entry),
-      marks: entry.rows.map(r => r.agent),
       subtext: entry.reach,
       status: waitingFlow(flow) ? { ...status, words: W.waitingOnYou } : status,
       ...(quick === undefined ? {} : { quick }),

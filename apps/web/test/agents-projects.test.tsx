@@ -126,14 +126,14 @@ afterEach(() => {
 });
 
 describe("a read over a computer's projects", () => {
-  it("stands its servers under Global, then each project by name with its folder, one row per project for one name", () => {
+  it("stands an agent's servers under its name, then each project by name with its folder, one row per project for one name", () => {
     host();
     render(<Page />);
     tab("Tool servers");
     expect(groups()).toEqual([
-      ["kind-global", "Global on spoochecked just now", ["server-global-notion-stdio-npx notion-mcp"]],
-      ["kind-project-pr_app", "app~/code/app", ["server-project-pr_app-db-stdio-npx db-mcp"]],
-      ["kind-project-pr_www", "www~/code/www", ["server-project-pr_www-db-stdio-npx db-mcp"]],
+      ["kind-claude-global", "Claude Code on spoochecked just now", ["server-claude-global-notion-stdio-npx notion-mcp"]],
+      ["kind-claude-project-pr_app", "Claude Code~/code/app", ["server-claude-project-pr_app-db-stdio-npx db-mcp"]],
+      ["kind-claude-project-pr_www", "Claude Code~/code/www", ["server-claude-project-pr_www-db-stdio-npx db-mcp"]],
     ]);
   });
 
@@ -154,10 +154,10 @@ describe("a read over a computer's projects", () => {
     const h = host();
     render(<Page />);
     tab("Tool servers");
-    openRow("server-project-pr_www-db-stdio-npx db-mcp");
+    openRow("server-claude-project-pr_www-db-stdio-npx db-mcp");
     await remove();
     back();
-    openRow("server-global-notion-stdio-npx notion-mcp");
+    openRow("server-claude-global-notion-stdio-npx notion-mcp");
     await remove();
     back();
     tab("Skills");
@@ -175,7 +175,7 @@ describe("a read over a computer's projects", () => {
     const h = host();
     render(<Page />);
     tab("Tool servers");
-    openRow("server-project-pr_app-db-stdio-npx db-mcp");
+    openRow("server-claude-project-pr_app-db-stdio-npx db-mcp");
     fireEvent.click(panel().querySelector<HTMLButtonElement>("[data-settings-card=kind-under] [data-k=agents-refresh]")!);
     const db = h.tools.filter(t => t.name === "db");
     expect(db.map(t => [t.target, t.name])).toEqual([[{ placeId: "p_spoo", project: "pr_app" }, "db"]]);

@@ -17,7 +17,7 @@ import { useStore } from "../src/protocol/store.js";
 import { AGENTS_REPORT } from "./fixtures/agents-report.js";
 import { pickOption } from "./select.js";
 import { back, head, headTitle, NOW, openRow, panel, rowOf, stateOf, tab } from "./agents-panel-harness.js";
-const SERVER = { airtable: "server-global-airtable-stdio-npx -y airtable-mcp-server", github: "server-global-github-stdio-npx -y @modelcontextprotocol/server-github", linear: "server-global-linear-http-mcp.linear.app", notion: "server-global-notion-http-mcp.notion.com", sentry: "server-global-sentry-http-mcp.sentry.dev" };
+const SERVER = { airtable: "server-claude-global-airtable-stdio-npx -y airtable-mcp-server", github: "server-opencode-global-github-stdio-npx -y @modelcontextprotocol/server-github", linear: "server-claude-global-linear-http-mcp.linear.app", notion: "server-claude-global-notion-http-mcp.notion.com", sentry: "server-codex-global-sentry-http-mcp.sentry.dev" };
 
 function List({ report = AGENTS_REPORT, ctx = {} }: { report?: AgentsReport; ctx?: Partial<RowsContext> }) {
   const servers = useServerActs(report.target);
@@ -163,7 +163,7 @@ describe("Add a tool server", () => {
     expect(go().disabled).toBe(true);
     await act(async () => h.pending[0]!.resolve({ file: "~/.claude.json" }));
     expect(panel().querySelector("[data-k=add-server-go]")).toBeNull();
-    expect(panel().querySelector("[data-settings-card=kind-global]")).not.toBeNull();
+    expect(panel().querySelector("[data-settings-card=kind-claude-global]")).not.toBeNull();
   });
   it("sends an address with its headers for the agent picked, and a new name for a header's value never shows", async () => {
     const h = host();
@@ -277,7 +277,7 @@ describe("Turn off, turn on and Remove", () => {
     expect(turn()).toBeNull();
   });
 
-  it("removes a server only once the confirmation is taken, from every file it is set up in, one agent after another", async () => {
+  it("removes a server only once the confirmation is taken, from its own agent's file alone", async () => {
     const h = host();
     render(<List />);
     tab("Tool servers");
@@ -286,16 +286,13 @@ describe("Turn off, turn on and Remove", () => {
     expect(h.removes).toEqual([]);
     const dialog = await screen.findByRole("alertdialog");
     expect(within(dialog).getByText("Remove notion?")).toBeTruthy();
-    expect(within(dialog).getByText("It comes out of ~/.codex/config.toml and ~/.claude.json on spoo.")).toBeTruthy();
+    expect(within(dialog).getByText("It comes out of ~/.claude.json on spoo.")).toBeTruthy();
     const confirm = within(dialog).getByRole("button", { name: W.remove });
     expect(confirm.className).toContain("bg-destructive");
     expect(removeAct().className).not.toContain("bg-destructive");
     fireEvent.click(confirm);
-    expect(h.removes).toEqual([{ agent: "codex", name: "notion", scope: "user" }]);
-    await act(async () => h.pending[0]!.resolve({ file: "~/.codex/config.toml" }));
-    expect(h.removes).toEqual([
-      { agent: "codex", name: "notion", scope: "user" },
-      { agent: "claude", name: "notion", scope: "user" },
-    ]);
+    expect(h.removes).toEqual([{ agent: "claude", name: "notion", scope: "user" }]);
+    await act(async () => h.pending[0]!.resolve({ file: "~/.claude.json" }));
+    expect(h.removes).toHaveLength(1);
   });
 });

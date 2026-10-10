@@ -72,8 +72,9 @@ const settle = async (): Promise<void> => {
 };
 const actIn = (act: string): HTMLButtonElement => headAct(act)!;
 const opened = (): boolean => panel().querySelector("[data-k=kind-head]") !== null;
-const LINEAR = "server-global-linear-http-mcp.linear.app";
-const NOTION = "server-global-notion-http-mcp.notion.com";
+const LINEAR = "server-claude-global-linear-http-mcp.linear.app";
+const NOTION = "server-claude-global-notion-http-mcp.notion.com";
+const CODEX_NOTION = "server-codex-global-notion-http-mcp.notion.com";
 
 afterEach(() => {
   cleanup();
@@ -313,12 +314,12 @@ describe("signing an agent in from its row", () => {
     expect(drawn.textContent).toBe(serverNotSetUpLine("Claude Code", "linear"));
   });
 
-  it("hands a server whose page returns to localhost on another computer the harness's own line, from that agent's own line in a folded entry", async () => {
+  it("hands a server whose page returns to localhost on another computer the harness's own line, from that agent's own row", async () => {
     host();
     render(<List />);
     fireEvent.click(screen.getByRole("radio", { name: /^Tool servers/ }));
-    openRow(NOTION);
-    fireEvent.click(panel().querySelector<HTMLButtonElement>("[data-settings-line=fact-config-codex] [data-k=act-sign-in]")!);
+    openRow(CODEX_NOTION);
+    fireEvent.click(panel().querySelector<HTMLButtonElement>("[data-k=kind-head] [data-k=act-sign-in]")!);
     expect(flow()?.querySelector("[data-k=sign-in-line]")?.textContent).toBe("codex mcp login 'notion'");
     expect(flow()?.querySelector("[data-k=sign-in-why]")?.textContent).toBe("Its page returns to localhost, which wsp does not carry back to spoo yet. Run this in a terminal on spoo:");
   });
@@ -327,8 +328,8 @@ describe("signing an agent in from its row", () => {
     const h = host();
     render(<List report={{ ...AGENTS_REPORT, reach: "relay" }} />);
     fireEvent.click(screen.getByRole("radio", { name: /^Tool servers/ }));
-    openRow(NOTION);
-    fireEvent.click(panel().querySelector<HTMLButtonElement>("[data-settings-line=fact-config-codex] [data-k=act-sign-in]")!);
+    openRow(CODEX_NOTION);
+    fireEvent.click(panel().querySelector<HTMLButtonElement>("[data-k=kind-head] [data-k=act-sign-in]")!);
     await settle();
     expect(h.started.map(s => [s.target, s.agent, s.server])).toEqual([[AGENTS_REPORT.target, "codex", "notion"]]);
     const drawn = flow()!;

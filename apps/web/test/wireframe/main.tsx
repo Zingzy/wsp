@@ -101,7 +101,7 @@
 //                    having no server of that name)
 //   panel-agents     the task on the box selected, its panel open on Agents
 //                    (&fork=solari: the same task a fork at Solari, whose one
-//                    act is Edit image)
+//                    act is Edit image; &agent=codex: the task runs Codex)
 //   any screen with &notices=1 says the host's notices as the app does, so a
 //   build's need left behind on another page stands as its toast
 //   skill-preview    agents-widths with every SKILL.md a hostile one, for the
@@ -113,6 +113,7 @@ import { DAEMON_VERSION, DEFAULT_PREFERENCES, copyFirstLine, hostnameSetLine, ty
 import { AppShell } from "../../src/shell/AppShell";
 import { FirstRun } from "../../src/shell/FirstRun";
 import { AgentsSurface } from "../../src/components/agents/AgentsSurface";
+import { useComposerAgentStore } from "../../src/components/chat/composerAgentStore";
 import { HARNESS_DEFAULTS, HARNESSES } from "../fixtures/harnesses";
 import { AGENTS_PAGE_REPORT, AGENTS_REPORT, AGENTS_SETUP_REPORT, AGENTS_TOOLS_REPORT, HOSTILE_SKILL_MD, SERVER_TOOLS, SKILL_HITS, SKILL_PREVIEWS } from "../fixtures/agents-report";
 import { useSettingsStore, type SettingsAt } from "../../src/settings/settingsStore";
@@ -237,6 +238,8 @@ const WORKSPACES: WorkspaceView[] = [
   // wsp's own folder with no thread in it, as a read of its branch leaves it: no tile, and its project's menu the way to it.
   { id: "ws_wsp", name: "wsp", kind: "local", machineId: "local", project: ref(WSP), phase: "running", golden: "", createdAt: AT },
 ];
+// This page draws no composer, so it says the box task's agent as a mounted composer would, for the panel beside it.
+if (params.get("agent") !== null) useComposerAgentStore.getState().show("ws_box", params.get("agent")!);
 const SESSIONS: Record<string, SessionView[]> = {
   ws_here: [thread("th_quiet", "ws_here", "read the redirect middleware", { status: "completed", endedAt: Date.parse(AT) })],
   ws_copy: [
@@ -246,7 +249,7 @@ const SESSIONS: Record<string, SessionView[]> = {
     thread("th_build", "ws_copy", "build the rows", { startedBy: "agent", parentThreadId: "th_lead" } as Partial<SessionView>),
     thread("th_review", "ws_copy", "review the rows", { startedBy: "agent", parentThreadId: "th_build", asking: "Write out review.md in the repo root" } as Partial<SessionView>),
   ],
-  ws_box: [thread("th_box", "ws_box", "import the stripe customers")],
+  ws_box: [thread("th_box", "ws_box", "import the stripe customers", { harness: params.get("agent") ?? "claude" })],
   ws_fork: [thread("th_child", "ws_fork", "move the pricing table", { startedBy: "agent", parentThreadId: "th_lead" } as Partial<SessionView>)],
 };
 

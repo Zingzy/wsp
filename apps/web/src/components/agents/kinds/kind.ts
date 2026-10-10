@@ -167,6 +167,12 @@ export interface GroupView<T> {
   readonly label?: string;
   /** A project's folder or a file, after the label in the same class. */
   readonly path?: string;
+  /** The label is the whole of the first head, with no computer after it. */
+  readonly whole?: boolean;
+  /** What it says where it holds nothing, so it stands while the search is empty. */
+  readonly empty?: string;
+  /** Behind the kind's link to the rest, shut until it is pressed. */
+  readonly other?: boolean;
   readonly items: readonly T[];
 }
 
@@ -179,7 +185,9 @@ export interface KindModule<T> {
   items(report: AgentsReport, ctx: RowsContext): readonly T[];
   key(item: T): string;
   matches(item: T, query: string): boolean;
-  groups(items: readonly T[]): readonly GroupView<T>[];
+  groups(items: readonly T[], ctx: RowsContext): readonly GroupView<T>[];
+  /** The link to the groups behind it, with how many items they hold. */
+  others?: (count: number) => string;
   row(item: T, ctx: RowsContext): RowView;
   detail(item: T, ctx: RowsContext): DetailView;
   /** What the kind asks of the host each time its tab shows a report. */

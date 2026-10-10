@@ -25,6 +25,9 @@ export const AGENTS_LIST_WORDS = {
   paused: "paused",
   notAnswering: "not answering",
   nothingMatches: (q: string): string => `Nothing matches "${q}".`,
+  inThread: (agent: string): string => `${agent} servers in this thread`,
+  noServersFor: (agent: string, on: string): string => `No tool servers for ${agent} on ${on}.`,
+  otherAgents: (n: number): string => `Other agents' servers (${n})`,
   openComputer: (computer: string): string => `Open ${computer} in Settings`,
   signedIn: "signed in",
   connected: "connected",
@@ -363,6 +366,8 @@ export interface RowsContext {
   readonly on?: string;
   /** Where a sign-in page that returns to localhost reaches, as the host said on the report. */
   readonly reach?: PageReach;
+  /** The agent of the thread the lists stand beside, whose own come first; none in Settings. */
+  readonly agent?: string;
 }
 
 /** Why no act on the list can be taken: the computer is away or the task is paused. */

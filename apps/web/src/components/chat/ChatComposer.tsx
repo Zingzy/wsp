@@ -115,6 +115,7 @@ import { useComposerFocusRequest } from "./composerFocus";
 import { EMPTY_DRAFT, newId, useComposerDraft, useComposerDraftStore, useComposerQueue, useComposerQueueHeld, type QueuedMessage } from "./composerDraftStore";
 import { BarRule, ComposerAccessPicker, ComposerOptionPickers, useAccessPick, useComposerPicks, type AccessTarget } from "./ComposerOptionPickers";
 import { useComposerOptionsStore } from "./composerOptionsStore";
+import { useShowComposerAgent } from "./composerAgentStore";
 import type { ComposerStart } from "./composerPicks";
 import { resolveComposerMenuActiveItemId } from "./composerMenuHighlight";
 import { ComposerModelChips } from "./ComposerModelChips";
@@ -280,6 +281,7 @@ export function ChatComposer({
   const opening = opensThread(thread);
   const folderStart = useMemo(() => (opening ? nextStart : viewCwd !== null ? { cwd: viewCwd } : {}), [nextStart, opening, viewCwd]);
   const { harness: harnessId, startOptions, pinned, latestRow, catalog: harnessCatalog, model: pickedModel, picks } = useComposerPicks(workspaceId, thread);
+  useShowComposerAgent(workspaceId, harnessId);
   const tasks = composerTasks({ latestTurn: thread.view.latestTurn, running: thread.view.running, plan: thread.view.plan });
   const openBar = useOpenBar(threadKey);
   const launching = useStore(s => s.launching);
