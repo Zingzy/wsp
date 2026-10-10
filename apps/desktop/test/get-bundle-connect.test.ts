@@ -94,7 +94,9 @@ describe("the update download on a network slow to connect", () => {
     const started = Date.now();
     // The stall window equals the connect window, as in the app, so a stall timer running while it connects shows.
     const got = await getBundle("0.3.0", deps(env, releaseFetch({ ca: tls.cert, connectMs: 1_000, backoffMs: 50 }), 1_000));
-    expect(got).toEqual({ ok: false, error: "could not reach localhost in 1 s, tried 3 times" });
+    expect(got).toEqual({ ok: false, error: "could not reach localhost in 1 s, tried 3 times", cause: expect.any(String) });
+    // The app log carries undici's own code and the address it tried, which the sentence leaves out.
+    if (!got.ok) expect(got.cause).toMatch(/^fetch failed; UND_ERR_CONNECT_TIMEOUT: .*attempted address(es)?: \S+:\d+/);
     expect(Date.now() - started).toBeGreaterThanOrEqual(3_000);
     expect(host.connects()).toBe(3);
     host.close();

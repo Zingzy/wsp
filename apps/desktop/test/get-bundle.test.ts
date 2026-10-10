@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { RELEASE_API_ENV } from "@wsp/protocol";
-import { BUNDLE_WORDS, IN_PLACE_HOVER, askedVersion, bundleHover, bundleShell, getBundle, openBundle, type BundleDeps, type InPlaceRoad } from "../src/get-bundle.js";
+import { BUNDLE_WORDS, IN_PLACE_HOVER, askedVersion, bundleHover, bundleShell, getBundle, openBundle, updateLogLine, type BundleDeps, type InPlaceRoad } from "../src/get-bundle.js";
 
 const BYTES = Buffer.from("a disk image, as far as this test is concerned");
 const SUM = createHash("sha256").update(BYTES).digest("hex");
@@ -99,6 +99,27 @@ describe("the download", () => {
       expect(hub.asked).toEqual([TAG_URL]);
       expect(readdirSync(d.dir)).toEqual([]);
     }
+  });
+
+  it("keeps what a failed fetch was caused by for the app log, beside the sentence the page shows", async () => {
+    const dns = Object.assign(new Error("getaddrinfo ENOTFOUND api.github.com"), { code: "ENOTFOUND", hostname: "api.github.com" });
+    const failing = vi.fn(async () => {
+      throw new TypeError("fetch failed", { cause: dns });
+    }) as unknown as typeof fetch;
+    const got = await getBundle("0.3.0", deps({ fetch: failing }));
+    expect(got).toEqual({ ok: false, error: "fetch failed", cause: "ENOTFOUND: getaddrinfo ENOTFOUND api.github.com" });
+    expect(updateLogLine("get", got)).toBe("update: get failed: fetch failed (cause: ENOTFOUND: getaddrinfo ENOTFOUND api.github.com)");
+    expect(updateLogLine("get", { ok: false, error: "no verified download to open" })).toBe("update: get failed: no verified download to open");
+    expect(updateLogLine("open", { ok: true })).toBe("update: open done");
+  });
+
+  it("names every address a refused connection tried, which Node keeps under an AggregateError with no message", async () => {
+    const refused = (address: string): Error => Object.assign(new Error(`connect ECONNREFUSED ${address}:443`), { code: "ECONNREFUSED" });
+    const every = Object.assign(new AggregateError([refused("192.0.2.1"), refused("192.0.2.2")], ""), { code: "ECONNREFUSED" });
+    const failing = vi.fn(async () => {
+      throw new TypeError("fetch failed", { cause: every });
+    }) as unknown as typeof fetch;
+    expect(await getBundle("0.3.0", deps({ fetch: failing }))).toMatchObject({ ok: false, cause: "ECONNREFUSED: connect ECONNREFUSED 192.0.2.1:443, connect ECONNREFUSED 192.0.2.2:443" });
   });
 
   it("refuses an answer past the cap and a download GitHub refuses, leaving no file", async () => {
