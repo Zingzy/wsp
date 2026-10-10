@@ -569,8 +569,9 @@ export interface PlaceDoor {
    * place's own daemon port and every fork's daemon port ride the same code. The same pair answers the same local
    * port every time, and the listener stays bound while the link is down, so nothing cached goes stale. */
   /** With pane, a port a Browser pane opens for that workspace: the same number on this computer where it is free,
-   * else the first free one above it, on both loopback families, standing while the pane asks for it (pane-ports.ts). */
-  forward(placeId: string, placePort: number, o?: { pane?: { workspaceId: string; name: string } }): Promise<{ localPort: number }>;
+   * else the first free one above it, on both loopback families, standing while the pane asks for it (pane-ports.ts).
+   * With standing too, only the pane's forward that stands now: it opens none and holds it no longer. */
+  forward(placeId: string, placePort: number, o?: { pane?: { workspaceId: string; name: string }; standing?: boolean }): Promise<{ localPort: number }>;
   /** The ports Browser panes opened, as the app lists and stops them beside the relay's forwards. */
   readonly paneForwards: PaneForwards;
   /** The place a person's word names: an id, a name, or this computer itself, which is answered with no id since

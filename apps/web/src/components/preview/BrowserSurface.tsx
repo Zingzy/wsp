@@ -12,6 +12,7 @@ import { Check, Copy, Laptop } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { isLocalWorkspace, noPreviewRouteLine } from "@wsp/protocol";
 import { stoppedSentence, toPreviewableServers } from "../../adapt/ports.js";
+import { usePortAnswering } from "../../browser/answering.js";
 import { useStoppedPort, useWorkspacePorts, useWorkspacePortsSeeded } from "../../browser/model.js";
 import { recordVisit, removeVisit, useRecents } from "../../browser/recents.js";
 import { useProbedRoute } from "../../browser/refusal.js";
@@ -54,13 +55,19 @@ export function BrowserSurface({ workspaceId, surface }: { workspaceId: string; 
   const workspace = useWorkspace(workspaceId);
   const here = workspace !== null && isLocalWorkspace(workspace);
   const computer = useComputerName(workspaceId);
-  const { reach, refusal } = useProbedRoute(workspaceId, here ? null : port, tab?.reloadNonce ?? 0);
+  const [rechecks, setRechecks] = useState(0);
+  const { reach, refusal } = useProbedRoute(workspaceId, here ? null : port, tab?.reloadNonce ?? 0, rechecks);
   const realUrl =
     address === null ? null : here ? loopbackUrl(address.port, address.path) : reach.state === "ready" ? frameSrc(reach.reach.url, address.path) : null;
   const shownUrl = address !== null ? loopbackAddress(address.port, address.path) : "";
-  const listening = port === null || !portsSeeded || ports.some(p => p.port === port);
+  const listed = port === null || !portsSeeded || ports.some(p => p.port === port);
+  // A port off the list may still answer: Docker's is held by a process of dockerd's, so no event names it. Until
+  // its route and its first fetch are back, nothing is known, and nothing is said.
+  const fetched = listed || here || reach.state !== "ready" ? null : port;
+  const { answering, check } = usePortAnswering(workspaceId, fetched, () => setRechecks(n => n + 1));
+  const listening = listed || (!here && reach.state === "minting") || (fetched !== null && answering !== false);
   const stopped = useStoppedPort(workspaceId, port);
-  const sentence = listening ? "" : stoppedSentence(port, stopped, clockLabel);
+  const sentence = listening ? "" : stoppedSentence(port, computer, stopped, clockLabel, fetched !== null);
   const forwarded = useForwarded(workspaceId, port);
   const zoom = tab?.zoom ?? 1;
   const framed = realUrl !== null && (refusal === null || refusal.keepsFrame);
@@ -70,12 +77,15 @@ export function BrowserSurface({ workspaceId, surface }: { workspaceId: string; 
   }, [framed, realUrl, tab?.reloadNonce]);
 
   // The port listening again is the cue to probe its route anew, whether the last answer was framed or a refusal card.
-  const wasListening = useRef({ port, listening });
+  // The list naming it again counts on its own, since a fetch can find a fast restart up on both sides of it. A route
+  // that only now came back has no frame to reload.
+  const wasListening = useRef({ port, listening, listed, realUrl });
   useEffect(() => {
     const prev = wasListening.current;
-    wasListening.current = { port, listening };
-    if (tabId !== null && realUrl !== null && listening && !prev.listening && prev.port === port) tabs.reload(workspaceId, tabId);
-  }, [port, listening, realUrl, tabId, workspaceId, tabs]);
+    wasListening.current = { port, listening, listed, realUrl };
+    const back = (listening && !prev.listening) || (listed && !prev.listed);
+    if (tabId !== null && realUrl !== null && prev.realUrl !== null && prev.port === port && back) tabs.reload(workspaceId, tabId);
+  }, [port, listening, listed, realUrl, tabId, workspaceId, tabs]);
 
   const frameAddress = (next: Address): void => {
     setHint(null);
@@ -102,6 +112,12 @@ export function BrowserSurface({ workspaceId, surface }: { workspaceId: string; 
   const withTab = (fn: (id: string) => void) => () => {
     if (tabId !== null) fn(tabId);
   };
+  // A route that failed is asked for again, and the frame it brings back is its one load.
+  const reload = withTab(id => {
+    if (reach.state === "failed") return setRechecks(n => n + 1);
+    check();
+    tabs.reload(workspaceId, id);
+  });
 
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col" data-browser-surface>
@@ -110,10 +126,10 @@ export function BrowserSurface({ workspaceId, surface }: { workspaceId: string; 
         loading={loading}
         canGoBack={tab !== null && tab.index > 0}
         canGoForward={tab !== null && tab.index < tab.entries.length - 1}
-        refreshDisabled={realUrl === null}
+        refreshDisabled={port === null}
         onBack={withTab(id => tabs.back(workspaceId, id))}
         onForward={withTab(id => tabs.forward(workspaceId, id))}
-        onRefresh={withTab(id => tabs.reload(workspaceId, id))}
+        onRefresh={reload}
         onSubmit={openUrl}
         onDraft={setQuery}
         onOpenInBrowser={realUrl !== null ? openOutside : undefined}
@@ -125,7 +141,7 @@ export function BrowserSurface({ workspaceId, surface }: { workspaceId: string; 
               tabId={tabId}
               hasPage={realUrl !== null}
               zoomFactor={zoom}
-              onHardReload={withTab(id => tabs.reload(workspaceId, id))}
+              onHardReload={reload}
               onCopyUrl={copyUrl}
               onOpenInBrowser={openOutside}
               onNewTab={() => openBrowser(workspaceId, null)}
@@ -180,7 +196,10 @@ export function BrowserSurface({ workspaceId, surface }: { workspaceId: string; 
                 key={`${loopbackUrl(port, address?.path)}:${tab?.reloadNonce ?? 0}`}
                 title={`:${port}`}
                 src={realUrl}
-                onLoad={() => setLoading(false)}
+                onLoad={() => {
+                  setLoading(false);
+                  check();
+                }}
                 className="block min-h-0 flex-1 border-0 bg-white"
                 style={
                   zoom === 1

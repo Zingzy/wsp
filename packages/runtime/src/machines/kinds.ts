@@ -358,8 +358,9 @@ export function kindsArea(ctx: RuntimeContext): KindsArea {
             },
             // That computer's port at the same number on this one, so a link its threads print opens what they meant;
             // held while the pane showing it asks again inside the hold.
-            portReach: async (entry, port) => {
-              const { localPort } = await placeDoor.forward(entry.record.place!, port, { pane: { workspaceId: entry.record.id, name: entry.record.name } });
+            portReach: async (entry, port, o) => {
+              const pane = { workspaceId: entry.record.id, name: entry.record.name };
+              const { localPort } = await placeDoor.forward(entry.record.place!, port, { pane, ...(o?.standing === true ? { standing: true } : {}) });
               return { url: `http://localhost:${localPort}/`, expiresAt: clock.now() + PANE_HOLD_MS };
             },
             // As root on that computer, since a thread's cgroup is root's to empty and take away; a computer that is
