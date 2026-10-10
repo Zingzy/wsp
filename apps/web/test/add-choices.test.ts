@@ -5,6 +5,7 @@
 import { describe, expect, it } from "vitest";
 import type { RecipeOptions } from "@wsp/protocol";
 import { copiesKeys, everything, keyedServers, setCopyKeys, tick } from "../src/settings/add/choices.js";
+import { setupRows } from "../src/settings/add/setup.js";
 
 const installed = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m"].map(n => `${n}@acme`);
 const OPTIONS: RecipeOptions = {
@@ -34,13 +35,25 @@ describe("the picks a computer starts from", () => {
       { name: "gsc", keys: ["GSC_CREDENTIALS_PATH"] },
       { name: "sentry", keys: ["SENTRY_ACCESS_TOKEN"] },
     ]);
-    expect(copiesKeys(picks, OPTIONS)).toBe(false);
-    const yes = setCopyKeys(picks, OPTIONS, true);
-    expect(yes.mcp).toEqual({ "aws-mcp": { agents: ["claude", "codex"] }, gsc: { agents: ["claude"], copy: true }, sentry: { agents: ["codex"], copy: true } });
-    expect(copiesKeys(yes, OPTIONS)).toBe(true);
-    // Taken out and ticked again, a server takes the answer the others stand on.
-    expect(tick(tick(yes, "mcp", "sentry", false, OPTIONS), "mcp", "sentry", true, OPTIONS).mcp["sentry"]).toEqual({ agents: ["codex"], copy: true });
-    expect(tick(tick(picks, "mcp", "sentry", false, OPTIONS), "mcp", "sentry", true, OPTIONS).mcp["sentry"]).toEqual({ agents: ["codex"] });
-    expect(setCopyKeys(yes, OPTIONS, false).mcp).toEqual(picks.mcp);
+    expect(copiesKeys(picks)).toBe(false);
+    const yes = setCopyKeys(picks, true);
+    // One answer, kept once: no server row carries an answer of its own.
+    expect(yes.copyKeys).toBe(true);
+    expect(yes.mcp).toEqual(picks.mcp);
+    expect(copiesKeys(yes)).toBe(true);
+    // Taken out and ticked again, a server stands under the one answer.
+    expect(copiesKeys(tick(tick(yes, "mcp", "sentry", false, OPTIONS), "mcp", "sentry", true, OPTIONS))).toBe(true);
+    expect(setCopyKeys(yes, false)).toEqual(picks);
+  });
+
+  it("lists a server the setup set aside for its keys under the servers step, by what its keys go by, offering the copy", () => {
+    const rows = setupRows({
+      setup: { state: "done", addId: "a", startedAt: "x", steps: [{ step: "mcp", state: "done" }], waiting: [] },
+      applied: { hash: "h", at: "x", rows: [
+        { id: "agents/mcp/codex/sentry", label: "Codex sentry", outcome: "skipped", kind: "server", step: "mcp", note: "not copied", keys: ["SENTRY_ACCESS_TOKEN"] },
+        { id: "agents/mcp/claude/notion", label: "Claude Code notion", outcome: "skipped", kind: "server", step: "mcp", note: "unticked" },
+      ] },
+    }, "studio");
+    expect(rows.filter(r => r.sub === true).map(r => [r.id, r.state, r.note, r.copyKeys])).toEqual([["agents/mcp/codex/sentry", "skipped", "Not copied: it needs SENTRY_ACCESS_TOKEN.", true]]);
   });
 });

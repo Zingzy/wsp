@@ -64,7 +64,7 @@ describe("Settings, Recipes", () => {
     expect(question?.querySelector("[data-choice='leave']")?.textContent).toContain("context7 is skipped on spoo and studio until you copy its keys.");
     fireEvent.click(question!.querySelector("[data-choice='copy'] [role=radio]")!);
     await settle();
-    expect((saved[0]!.from as { file: RecipeFile }).file.mcp).toEqual({ context7: { agents: ["claude"], copy: true } });
+    expect((saved[0]!.from as { file: RecipeFile }).file).toMatchObject({ copyKeys: true, mcp: { context7: { agents: ["claude"] } } });
   });
 
   it("asks before deleting a recipe, naming what its computers keep, and the icon picked is kept with the person's looks", async () => {

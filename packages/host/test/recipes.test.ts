@@ -11,7 +11,7 @@ import { collect, detectSkills, nodeHost, skillRoots, type Host } from "@wsp/col
 import { NO_RECIPE, RecipeFile, type PlaceReport, type RecipeOptions, type RecipeView } from "@wsp/protocol";
 import { createRuntime, memoryStore, newPlaceKeyPair, serveRuntime, type Runtime, type RuntimeServer } from "@wsp/runtime";
 import { WsClient } from "../../runtime/test/ws-client.js";
-import { recipeLines } from "../src/verbs/client.js";
+import { recipeLines, recipeShownLines } from "../src/verbs/client.js";
 import { gitCut, configTexts } from "../src/recipe-configs.js";
 import { bundledSkills, commandCalls, folderOptions, githubHere, readRecipeOptions, recipeOptions } from "../src/recipe-options.js";
 import { catalogEntry, sizeBytes } from "@wsp/catalog";
@@ -355,6 +355,16 @@ function laptop(): Host {
     exec: { which: async bin => bin === "brew" || bin === "cargo", run: async (bin, args) => out[`${bin} ${args.join(" ")}`] },
   };
 }
+
+describe("wsp recipes show", () => {
+  it("says the one yes to copying the servers' keys where the recipe gives it, and nothing where it does not", () => {
+    const file = RecipeFile.parse({ name: "Builders", mcp: { sentry: { agents: ["codex"] } } });
+    const view = (f: RecipeFile): RecipeView => ({ name: "Builders", slug: "builders", summary: "1 MCP server", machines: [], file: f });
+    expect(recipeShownLines(view({ ...file, copyKeys: true }), "h")).toContain("  keys     copied with the servers that carry them");
+    expect(recipeShownLines(view(file), "h").some(line => line.startsWith("  keys"))).toBe(false);
+    expect(recipeShownLines(view(file), "h")).toContain("  mcp      sentry (agents codex)");
+  });
+});
 
 describe("what a recipe picks from", () => {
   it("leaves out a cask and a formula with no Linux build, and names the C toolchain on a crate", async () => {

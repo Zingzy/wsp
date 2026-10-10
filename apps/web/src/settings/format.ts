@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The words the settings page and its palette row say, one place, keyed by the
 // preference value where a value has words of its own.
-import { COPY_KEYS_WORD, fmtPx, listWords, offlineFor, type MidTurn, type NewThreadIn, type NotifyChoice, type OnQuit, type PlaceDialRoad, type PlaceProvisionRow, type ProductUsageOff, type SendKey, type ServerSignIn, type SettleAfter, type TerminalSizeSource, type ThemePreference } from "@wsp/protocol";
+import { COPY_KEYS_WORD, fmtPx, keysKeptLine, listWords, offlineFor, type MidTurn, type NewThreadIn, type NotifyChoice, type OnQuit, type PlaceDialRoad, type PlaceProvisionRow, type ProductUsageOff, type SendKey, type ServerSignIn, type SettleAfter, type TerminalSizeSource, type ThemePreference } from "@wsp/protocol";
 
 /** The muted sans with tabular figures a state word or a description of machine words wears, and the foreground one
  * a value a person reads wears: an address, a size, a path, a time, a version. Two class strings the page, the sheet
@@ -173,6 +173,9 @@ export const ADD_COMPUTER_WORDS = {
   keysLeft: (names: readonly string[], box: string): string => `${listWords(names)} ${names.length === 1 ? "is" : "are"} skipped on ${box === "" ? "its computers" : box} until you copy ${names.length === 1 ? "its keys" : "their keys"}.`,
   /** A ticked server whose keys the answer leaves here. */
   keysStay: "Skipped until you copy its keys.",
+  /** A server the setup set aside for want of a yes to copying its keys, by what they go by; on a computer that follows
+   * a recipe, with that recipe's page, where the yes is given. */
+  keysNotCopied: (keys: readonly string[], recipe?: string): string => (recipe === undefined ? `Not copied: it needs ${keys.length === 0 ? "a key" : listWords(keys)}.` : `${capitalised(keysKeptLine(keys, recipe))}.`),
   /** How an MCP server signs in on the computer, by the kind the host read off its definition. */
   serverSignIn: (kind: ServerSignIn, box: string): string =>
     ({ none: "No sign-in.", key: "Key copied.", token: "Token copied.", oauth: box === "" ? "Signs in there." : `Signs in on ${box}.` })[kind],

@@ -225,8 +225,9 @@ export interface PlaceProvisioner {
    * job's scripts export is read from, since a directory under it is one the workspaces there write. */
   plan(on: { home: string }): Promise<ProvisionPlan | { noRecipe: string }>;
   /** `only` holds a sync to the steps it runs, so a plan for those alone reads no more of this computer than they need;
-   * `on.stores` is the folder each agent's threads there are pointed at, which a line run as that agent there sets. */
-  setup(picks: RecipeFile, on: { home: string; stores?: Readonly<Record<string, string>> }, only?: ReadonlySet<PlaceSetupStep>): Promise<ProvisionPlan>;
+   * `on.stores` is the folder each agent's threads there are pointed at, which a line run as that agent there sets;
+   * `on.recipe` is the name of the recipe the computer follows, where it follows one. */
+  setup(picks: RecipeFile, on: { home: string; stores?: Readonly<Record<string, string>>; recipe?: string }, only?: ReadonlySet<PlaceSetupStep>): Promise<ProvisionPlan>;
   floor(machine: Machine, on: { home: string }, stage: ProvisionStage): Promise<PlaceProvisionRow[]>;
   step(machine: Machine, plan: ProvisionPlan, step: EngineStep, run: SetupRun, stage: ProvisionStage, on: ProvisionOn): Promise<PlaceProvisionRow[]>;
   /** What taking rows out of a computer's picks runs there, planned off the picks as they were. Absent, a row taken

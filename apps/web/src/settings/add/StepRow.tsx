@@ -9,7 +9,7 @@
 // skill that did not land) steps in by the mark's width.
 import { ChevronRightIcon, CircleIcon, CircleMinusIcon } from "lucide-react";
 import { useEffect, useRef, type ReactNode } from "react";
-import { fmtDuration, fmtElapsed } from "@wsp/protocol";
+import { COPY_KEYS_WORD, fmtDuration, fmtElapsed } from "@wsp/protocol";
 import { Crab } from "../../components/status/Crab.js";
 import { StateMark } from "../../components/status/StateMark.js";
 import { Button } from "../../components/ui/button.js";
@@ -117,6 +117,15 @@ export function RetryActs({ onRetry, busy = false }: { onRetry: () => void; busy
   return (
     <Button size="xs" variant="outline" data-k="retry" held={busy} onClick={onRetry}>
       Retry
+    </Button>
+  );
+}
+
+/** The act a server set aside for want of a yes to copying its keys offers: the yes, held while it asks. */
+export function CopyKeysAct({ onCopy, busy = false }: { onCopy: () => void; busy?: boolean }) {
+  return (
+    <Button size="xs" variant="outline" data-k="copy-keys" held={busy} onClick={onCopy}>
+      {COPY_KEYS_WORD}
     </Button>
   );
 }

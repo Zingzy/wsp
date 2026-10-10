@@ -140,27 +140,34 @@ interface ArgRead {
 
 const size = (v: string): string => `(${Buffer.byteLength(v)} B)`;
 
-/** An `API_KEY=value` argument wherever it stands, a bare one or a flag's value: under a secret's name the name is
- * shown and the value hidden and counted, so a variable set behind `-e` reads as the variable it is; under any other
- * name it is shown whole. Nothing for any other argument. */
-const assignRead = (arg: string): ArgRead | undefined => {
-  const name = assignName(arg);
-  if (name === undefined) return undefined;
-  return secretNamed(name) ? { show: `${name}=…`, secret: `arg ${name} ${size(arg.slice(arg.indexOf("=") + 1))}`, key: name } : { show: arg };
-};
+/** An address under any scheme: `https://`, `postgres://`. */
+const ADDRESS = /^[A-Za-z][A-Za-z0-9+.-]*:\/\//;
+/** A path segment long and token-like enough to be a key the address carries, as Zapier's per-person path is. */
+const KEYLIKE_SEGMENT = /^[A-Za-z0-9_=-]{24,}$/;
 
-/** A positional argument that is the definition's own word and no value of the person's: a path, or an address with
- * no login in it and no secret-named query. */
-const plainArg = (arg: string): boolean => {
-  if (arg.startsWith("/") || arg.startsWith("~/")) return true;
-  if (!isUrl(arg)) return false;
+/** An address that carries nothing of the person's: no login, no query and no path segment shaped like a key. One that
+ * carries any of them is a value, since asking costs a question and not asking can carry a key. */
+const plainAddress = (s: string): boolean => {
   try {
-    const u = new URL(arg);
-    return u.username === "" && u.password === "" && ![...u.searchParams.keys()].some(k => secretNamed(k.replace(/-/g, "_")));
+    const u = new URL(s);
+    return u.username === "" && u.password === "" && u.search === "" && !u.pathname.split("/").some(seg => KEYLIKE_SEGMENT.test(seg));
   } catch {
     return false;
   }
 };
+
+/** An `API_KEY=value` argument wherever it stands, a bare one or a flag's value: under a secret's name, or holding an
+ * address that is not plain, the name is shown and the value hidden and counted, so a variable set behind `-e` reads
+ * as the variable it is; any other is shown whole. Nothing for any other argument. */
+const assignRead = (arg: string): ArgRead | undefined => {
+  const name = assignName(arg);
+  if (name === undefined) return undefined;
+  const value = arg.slice(arg.indexOf("=") + 1);
+  return secretNamed(name) || (ADDRESS.test(value) && !plainAddress(value)) ? { show: `${name}=…`, secret: `arg ${name} ${size(value)}`, key: name } : { show: arg };
+};
+
+/** A positional argument that is the definition's own word and no value of the person's: a path, or a plain address. */
+const plainArg = (arg: string): boolean => arg.startsWith("/") || arg.startsWith("~/") || (ADDRESS.test(arg) && plainAddress(arg));
 
 /** The one reading of a definition's arguments, for the line a person reads and for what the row carries alike.
  * npx's own yes switch is dropped and takes no value. A dashed flag's next argument is that flag's value, read

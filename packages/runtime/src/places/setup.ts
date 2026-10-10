@@ -676,7 +676,8 @@ export function placeSetup(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea) 
       if (picks.configs.github !== undefined && githubWord === "vault" && vault()[GITHUB_TOKEN_ENV] === undefined) await wiring.githubToken?.().catch(() => undefined);
       await undo();
       const stores = await storesHere();
-      const planned = await provisioner.setup(picks, { home, ...(stores !== undefined ? { stores } : {}) }, sync?.steps);
+      const follows = record.recipe !== undefined && record.recipe !== NO_RECIPE;
+      const planned = await provisioner.setup(picks, { home, ...(stores !== undefined ? { stores } : {}), ...(follows ? { recipe: picks.name } : {}) }, sync?.steps);
       // A sync puts on only the plugins it added; the rest are there, and their install would run again.
       const kept = sync === undefined || planned.plugins === undefined ? planned : { ...planned, plugins: planned.plugins.filter(p => sync.moved.has(p.id)) };
       // gh comes with the CLIs where it is one of them, first among them, and on its own before them otherwise; the

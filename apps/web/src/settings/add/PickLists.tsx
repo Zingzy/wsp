@@ -143,7 +143,7 @@ export function AgentsPicks({ picks, options, onChange, box, versions, onlyTicke
  * about the keys the ticked ones carry. */
 export function ServersPicks({ picks, options, onChange, box, onlyTicked = false }: PickProps) {
   const items = options.mcp.filter(server => !onlyTicked || picks.mcp[server.name] !== undefined).map(server => ({ key: server.name, name: server.name, on: picks.mcp[server.name] !== undefined, server }));
-  const copied = copiesKeys(picks, options);
+  const copied = copiesKeys(picks);
   return (
     <>
       <PickList
@@ -176,9 +176,9 @@ function ServerKeysPick({ picks, options, onChange, box }: PickProps) {
   const here = useStore(s => hereName(s.places));
   const keyed = keyedServers(picks, options);
   if (keyed.length === 0) return null;
-  const picked = copiesKeys(picks, options) ? "copy" : "leave";
+  const picked = copiesKeys(picks) ? "copy" : "leave";
   return (
-    <RadioGroup value={picked} onValueChange={next => onChange(setCopyKeys(picks, options, next === "copy"))} className="gap-0">
+    <RadioGroup value={picked} onValueChange={next => onChange(setCopyKeys(picks, next === "copy"))} className="gap-0">
       <Grid id="server-keys">
         <Choice id="copy" picked={picked === "copy"} glyph={<KeyRoundIcon aria-hidden className={GLYPH} />} name={ADD_COMPUTER_WORDS.copyKeys(box)} note={ADD_COMPUTER_WORDS.keysNamed(keyed)} />
         <Choice id="leave" picked={picked === "leave"} glyph={<KeyRoundIcon aria-hidden className={GLYPH} />} name={ADD_COMPUTER_WORDS.leaveKeys(here)} note={ADD_COMPUTER_WORDS.keysLeft(keyed.map(s => s.name), box)} />

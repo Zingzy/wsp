@@ -59,34 +59,23 @@ export const fromRecipe = (file: RecipeFile, name: string): RecipeFile => ({ ...
 export const keyedServers = (picks: RecipeFile, options: RecipeOptions): { name: string; keys: string[] }[] =>
   options.mcp.flatMap(s => (picks.mcp[s.name] !== undefined && s.keys !== undefined && s.keys.length > 0 ? [{ name: s.name, keys: s.keys }] : []));
 
-/** Whether the picks said yes to copying the keys of the ticked servers that carry one: each of them is copied. */
-export function copiesKeys(picks: RecipeFile, options: RecipeOptions): boolean {
-  const keyed = keyedServers(picks, options);
-  return keyed.length > 0 && keyed.every(s => picks.mcp[s.name]?.copy === true);
+/** Whether the picks said yes to copying the keys of the ticked servers that carry one: one answer for all of them. */
+export const copiesKeys = (picks: RecipeFile): boolean => picks.copyKeys === true;
+
+/** The one answer about keys. */
+export function setCopyKeys(picks: RecipeFile, on: boolean): RecipeFile {
+  const { copyKeys: _was, ...rest } = picks;
+  return on ? { ...rest, copyKeys: true } : rest;
 }
 
-/** The one answer about keys, on every ticked server that carries one. */
-export function setCopyKeys(picks: RecipeFile, options: RecipeOptions, on: boolean): RecipeFile {
-  const mcp = { ...picks.mcp };
-  for (const { name } of keyedServers(picks, options)) {
-    const { copy: _was, ...row } = mcp[name]!;
-    mcp[name] = on ? { ...row, copy: true } : row;
-  }
-  return { ...picks, mcp };
-}
-
-/** One row ticked or not: ticked takes the row the options give for it, unticked takes it out. A server ticked that
- * carries a key takes the answer the others stand on. */
+/** One row ticked or not: ticked takes the row the options give for it, unticked takes it out. */
 export function tick(picks: RecipeFile, kind: Exclude<TickKind, "folders">, name: string, on: boolean, options: RecipeOptions): RecipeFile {
   const table = { ...picks[kind] } as Record<string, unknown>;
   if (!on) delete table[name];
   else if (kind === "agents") {
     const signin = options.agents.find(a => a.id === name)?.signins[0];
     table[name] = signin === undefined ? {} : { signin };
-  } else if (kind === "mcp") {
-    const server = options.mcp.find(s => s.name === name);
-    table[name] = { agents: server?.agents ?? [], ...((server?.keys?.length ?? 0) > 0 && copiesKeys(picks, options) ? { copy: true } : {}) };
-  }
+  } else if (kind === "mcp") table[name] = { agents: options.mcp.find(s => s.name === name)?.agents ?? [] };
   else if (kind === "clis") {
     const cli = options.clis.find(c => c.name === name);
     table[name] = { via: cli?.via ?? "apt", ...(cli?.needs === undefined ? {} : { needs: cli.needs }) };

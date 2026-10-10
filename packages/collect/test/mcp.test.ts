@@ -183,6 +183,11 @@ describe("mcp servers", () => {
         login: { command: "npx", args: ["-y", "some-server", "https://acme:pw-test-login@x.example/mcp"] },
         query: { command: "npx", args: ["-y", "some-server", "https://x.example/mcp?api_key=sk-test-query"] },
         named: { command: "npx", args: ["-y", "some-server", "--api-key", "sk-test-flag", "-e", "SENTRY_ACCESS_TOKEN=sntrys-test"], env: { SENTRY_HOST: "sentry.io" } },
+        dburl: { command: "docker", args: ["run", "-e", "DATABASE_URL=postgres://app:pw-test-db@db.example/app", "ghcr.io/acme/lab"] },
+        dsn: { command: "npx", args: ["-y", "some-server", "--metadata", "DSN=https://pk-test-dsn@o1.ingest.example/1"] },
+        zapier: { command: "npx", args: ["-y", "mcp-remote", "https://mcp.zapier.com/api/mcp/s/ZmFrZS16YXBpZXItdGVzdC1wYXRoLXNlY3JldA==/mcp"] },
+        azure: { command: "npx", args: ["-y", "mcp-remote", "https://fn.example.net/runtime/webhooks/mcp/sse?code=az-test-code"] },
+        plaindb: { command: "npx", args: ["-y", "some-server", "--metadata", "DATABASE_URL=postgres://db.example/app"] },
       },
     });
     const rows = await detectMcp(fakeHost({ files: { "~/.claude.json": config, "~/.config/gsc/creds.json": 2100, "~/mcp-gsc/gsc_server.py": 900 } }));
@@ -192,8 +197,15 @@ describe("mcp servers", () => {
       ["login", true, ["argument 3"], "stdio: npx some-server …; runs via npx; carries a secret: arg 3 (40 B)"],
       ["query", true, ["argument 3"], "stdio: npx some-server …; runs via npx; carries a secret: arg 3 (43 B)"],
       ["named", true, ["--api-key", "SENTRY_ACCESS_TOKEN"], "stdio: npx some-server --api-key … -e SENTRY_ACCESS_TOKEN=…; runs via npx; carries secrets: flag --api-key (12 B), arg SENTRY_ACCESS_TOKEN (11 B)"],
+      // An address with a login is a value under any name and any scheme, the same rule a positional one keeps.
+      ["dburl", true, ["argument 1", "DATABASE_URL", "argument 4"], "stdio: docker … -e DATABASE_URL=… …; needs docker on the machine; carries secrets: arg 1 (3 B), arg DATABASE_URL (40 B), arg 4 (16 B)"],
+      ["dsn", true, ["DSN"], "stdio: npx some-server --metadata DSN=…; runs via npx; carries a secret: arg DSN (39 B)"],
+      // A key in an address's path or under a query name that says nothing asks too: asking costs one question.
+      ["zapier", true, ["argument 3"], "stdio: npx mcp-remote …; runs via npx; carries a secret: arg 3 (77 B); no saved sign-in; the browser sign-in runs again on the machine"],
+      ["azure", true, ["argument 3"], "stdio: npx mcp-remote …; runs via npx; carries a secret: arg 3 (65 B); no saved sign-in; the browser sign-in runs again on the machine"],
+      ["plaindb", undefined, undefined, "stdio: npx some-server --metadata DATABASE_URL=postgres://db.example/app; runs via npx; carries no secret"],
     ]);
-    expect(JSON.stringify(rows)).not.toMatch(/pw-test-login|sk-test-query|sk-test-flag|sntrys-test/);
+    expect(JSON.stringify(rows)).not.toMatch(/pw-test-login|sk-test-query|sk-test-flag|sntrys-test|pw-test-db|pk-test-dsn|ZmFrZS16YXBp|az-test-code/);
   });
 
   it("a secret-named env value pointing outside home is named without its value; a home path the server runs against is a dependency, or unticks the row without locking it when it is not here yet", async () => {

@@ -47,14 +47,15 @@ const row = <T extends z.ZodRawShape>(shape: T) => z.object(shape);
 
 /** One recipe file, `<state dir>/recipes/<slug>.toml`. Every table is keyed by the name the row goes by here: an
  * agent's catalog id, a server's name, a CLI's package, a skill's folder name, a plugin's `name@marketplace`, a
- * folder's own key. `needs` is the one way a row asks for the C toolchain, which the floor carries only then. A
- * server's `copy` is the person's yes to copying the keys its definition carries; without it a server that carries
- * one is set aside. */
+ * folder's own key. `needs` is the one way a row asks for the C toolchain, which the floor carries only then.
+ * `copyKeys` is the person's one yes to copying the keys the ticked servers' definitions carry; without it every
+ * server that carries one is set aside. */
 export const RecipeFile = z
   .object({
     name: z.string().trim().min(1).max(64),
     agents: z.record(NAME, row({ signin: SIGN_IN })).default({}),
-    mcp: z.record(NAME, row({ agents: NAMES.min(1), copy: z.literal(true).optional() })).default({}),
+    mcp: z.record(NAME, row({ agents: NAMES.min(1) })).default({}),
+    copyKeys: z.literal(true).optional(),
     clis: z.record(NAME, row({ via: NAME, needs: NAMES.optional() })).default({}),
     skills: z.record(NAME, row({ from: NAME })).default({}),
     plugins: z.record(NAME, row({})).default({}),
@@ -185,9 +186,10 @@ export interface RecipeOptions {
 export const COPY_KEYS_WORD = "Copy the keys";
 
 /** Why a ticked server stayed off a computer for want of a yes to copying its keys: what they go by, and where that
- * yes is given. */
-export const keysKeptLine = (keys: readonly string[]): string =>
-  `not copied: it needs ${keys.length === 0 ? "a key" : listWords(keys)}; to send ${keys.length === 1 ? "it" : "them"}, pick ${COPY_KEYS_WORD} under MCP servers on the recipe this computer follows, in Settings > Recipes`;
+ * yes is given, which is the page of the recipe the computer follows, by its name, or the server's own row in the
+ * computer's setup where it follows none. */
+export const keysKeptLine = (keys: readonly string[], recipe?: string): string =>
+  `not copied: it needs ${keys.length === 0 ? "a key" : listWords(keys)}; to send ${keys.length === 1 ? "it" : "them"}, ${recipe === undefined ? `press ${COPY_KEYS_WORD} on this row in the computer's Setup in Settings > Computers` : `pick ${COPY_KEYS_WORD} under MCP servers on the recipe ${recipe} in Settings > Recipes`}`;
 
 /** The refusal a recipe whose name makes no file name gets. */
 export const RECIPE_NAME_REFUSAL = "a recipe's name needs a letter or a digit";

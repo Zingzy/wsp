@@ -31,7 +31,8 @@ export interface McpScope {
   /** Claude Code's servers local to the laptop's home folder move under the machine's home. */
   project?: { from: string; to: string };
   keep: string[];
-  drop: { name: string; reason: string }[];
+  /** `keys` on a server set aside for want of a yes to copying its keys: what they go by. */
+  drop: { name: string; reason: string; keys?: string[] }[];
 }
 
 export interface McpAgentPlan {
@@ -74,6 +75,8 @@ export interface McpResult {
   name: string;
   outcome: "installed" | "fetched-on-first-use" | "skipped";
   note?: string;
+  /** On a server set aside for want of a yes to copying its keys: what they go by. */
+  keys?: string[];
 }
 
 /** Rows whose last id segment is the binary they put on PATH; taps, casks and the toolchain install none. */
@@ -325,7 +328,7 @@ export function mcpTally(rows: readonly McpResult[]): string | undefined {
   return said.length > 0 ? said.join(", ") : undefined;
 }
 
-const strip = (r: Pending): McpResult => ({ id: r.id, agent: r.agent, name: r.name, outcome: r.outcome, ...(r.notes.length > 0 ? { note: r.notes.join("; ") } : {}) });
+const strip = (r: Pending): McpResult => ({ id: r.id, agent: r.agent, name: r.name, outcome: r.outcome, ...(r.notes.length > 0 ? { note: r.notes.join("; ") } : {}), ...(r.keys !== undefined ? { keys: r.keys } : {}) });
 
 const tail = (id: string): string => id.slice(id.lastIndexOf("/") + 1);
 
@@ -440,7 +443,7 @@ export async function mcpRows(
           shorts: fetcher === undefined ? [] : [`package fetched on first use by ${fetcher}`],
         });
       }
-      for (const d of scope.drop) rows.push(skipped(id(d.name), agent.label, d.name, d.reason));
+      for (const d of scope.drop) rows.push(skipped(id(d.name), agent.label, d.name, d.reason, d.keys));
     }
     for (const a of agent.aside) rows.push(skipped(a.id, agent.label, a.name, a.reason));
   }
@@ -502,4 +505,4 @@ export async function applyMcp(machine: Machine, plan: McpPlan, stage: StageList
   return mcpRows(machine, plan, { agents, report, missing, stage, ...(failure !== undefined ? { failure } : {}) });
 }
 
-const skipped = (id: string, agent: string, name: string, note: string): Pending => ({ id, agent, name, outcome: "skipped", notes: [note], shorts: [] });
+const skipped = (id: string, agent: string, name: string, note: string, keys?: string[]): Pending => ({ id, agent, name, outcome: "skipped", notes: [note], shorts: [], ...(keys !== undefined ? { keys } : {}) });

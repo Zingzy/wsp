@@ -80,10 +80,6 @@
                           "$ref": "#/properties/recipe/properties/name"
                         },
                         "minItems": 1
-                      },
-                      "copy": {
-                        "type": "boolean",
-                        "const": true
                       }
                     },
                     "required": [
@@ -95,6 +91,10 @@
                     "minLength": 1
                   },
                   "default": {}
+                },
+                "copyKeys": {
+                  "type": "boolean",
+                  "const": true
                 },
                 "clis": {
                   "type": "object",
@@ -360,10 +360,6 @@
                           "$ref": "#/properties/recipe/properties/name"
                         },
                         "minItems": 1
-                      },
-                      "copy": {
-                        "type": "boolean",
-                        "const": true
                       }
                     },
                     "required": [
@@ -375,6 +371,10 @@
                     "minLength": 1
                   },
                   "default": {}
+                },
+                "copyKeys": {
+                  "type": "boolean",
+                  "const": true
                 },
                 "clis": {
                   "type": "object",
