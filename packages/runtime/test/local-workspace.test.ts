@@ -13,7 +13,7 @@ import { HERE_PLACE_ID, folderForkFix, folderForkRefusal, refusalLine, inFolder,
 import type { DaemonChannel } from "../src/daemon-channel.js";
 import type { MachineExecOptions } from "../src/machine-exec.js";
 import { createRuntime, type HarnessAdapterContext, type HarnessAdapterFactory, type HarnessSession, type LocalWiring, type ProjectExportOptions, type ProjectImportOptions, type Runtime } from "../src/runtime.js";
-import { writeStub } from "../../protocol/test/stub-script.js";
+import { gateLoop, writeStub } from "../../protocol/test/stub-script.js";
 import { HARNESS_ADAPTERS } from "../src/adapters.js";
 import { localExecStream } from "../src/local-exec.js";
 import { serveRuntime, type ForwardsSource } from "../src/serve.js";
@@ -1401,7 +1401,7 @@ describe("a local turn and a host restart", () => {
     // of it lands whether or not a host is reading at the time. It goes on after the reply, since this process is
     // still holding the reader the first host left and two readers would race to reap the run at its end, which is
     // an artifact of running both hosts here: a real one goes with its process.
-    const rt1 = createRuntime({ backend: stubBackend(), store, adapters: { claude: runAdapter(`echo $$ > ${marker}; echo reading the ticket; while [ ! -f ${gate} ]; do sleep 0.05; done; echo wrote the fix; sleep 30`) }, local: localWiring });
+    const rt1 = createRuntime({ backend: stubBackend(), store, adapters: { claude: runAdapter(`echo $$ > ${marker}; echo reading the ticket; ${gateLoop(gate)}; echo wrote the fix; sleep 30`) }, local: localWiring });
     const ws = await createOn(rt1, { on: HERE_PLACE_ID, name: "mac" });
     await rt1.sessions.start(ws.id, { prompt: "build it" });
     await until(async () => (await rt1.sessions.history(ws.id)).some(e => e.type === "session.delta"));
@@ -1435,7 +1435,7 @@ describe("a local turn and a host restart", () => {
     const asked: string[] = [];
     let answer: (() => void) | undefined;
     const asking: HarnessAdapterFactory = ctx => ({
-      ...runAdapter(`echo $$ > ${marker}; echo reading the ticket; while true; do sleep 0.05; done`)(ctx),
+      ...runAdapter(`echo $$ > ${marker}; echo reading the ticket; ${gateLoop(join(root, "stop"))}`)(ctx),
       mcpServers: true,
       asideServers: true,
       aside: () => {
@@ -1472,7 +1472,7 @@ describe("a local turn and a host restart", () => {
     const reading = new Set<() => void>();
     const walled = (held?: Set<() => void>): LocalWiring => ({ ...localWiring, execStream: o => localExecStream({ root, runDir, ...o, deadlineMs: WALL_MS, ...(held !== undefined ? { reading: held } : {}) }) });
     const startedAt = Date.now();
-    const rt1 = createRuntime({ backend: stubBackend(), store, adapters: { claude: runAdapter(`echo reading the ticket; while [ ! -f ${gate} ]; do sleep 0.05; done; echo the reply`) }, local: walled(reading) });
+    const rt1 = createRuntime({ backend: stubBackend(), store, adapters: { claude: runAdapter(`echo reading the ticket; ${gateLoop(gate)}; echo the reply`) }, local: walled(reading) });
     const ws = await createOn(rt1, { on: HERE_PLACE_ID, name: "mac" });
     await rt1.sessions.start(ws.id, { prompt: "build it" });
     await until(async () => (await rt1.sessions.history(ws.id)).some(e => e.type === "session.delta"));
@@ -1494,7 +1494,7 @@ describe("a local turn and a host restart", () => {
 
   it("turns on two workspaces of this computer both outlive the host: each workspace's sweep of the one run folder they share keeps the other's run", async () => {
     const gate = join(root, "gate");
-    const rt1 = createRuntime({ backend: stubBackend(), store, adapters: { claude: runAdapter(`echo reading the ticket; while [ ! -f ${gate} ]; do sleep 0.05; done; echo wrote the fix; sleep 30`) }, local: localWiring });
+    const rt1 = createRuntime({ backend: stubBackend(), store, adapters: { claude: runAdapter(`echo reading the ticket; ${gateLoop(gate)}; echo wrote the fix; sleep 30`) }, local: localWiring });
     const api = await createOn(rt1, { on: HERE_PLACE_ID, name: "api" });
     const web = await createOn(rt1, { on: HERE_PLACE_ID, name: "web" });
     await rt1.sessions.start(api.id, { prompt: "build the api" });
@@ -1573,6 +1573,7 @@ describe("a local turn and a host restart", () => {
     // Whatever was launched is gone: the person restarted the computer, or the sweep of another host took it.
     const held = readdirSync(runDir).filter(name => name.endsWith(".d"));
     expect(held).toHaveLength(1);
+    await grandchild(join(runDir, held[0]!.replace(/\.d$/, ".pid")));
     for (const name of readdirSync(runDir)) rmSync(join(runDir, name), { recursive: true, force: true });
 
     const rt2 = createRuntime({ backend: stubBackend(), store, adapters: { claude: runAdapter("true") }, local: localWiring });

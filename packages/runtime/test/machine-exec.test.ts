@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { EXEC_ENV, ExecFailedError, INLINE_EXEC_MS, MachineUnreachableError, MachineUnreached, PlaceAbsentError, type ExecResult, type Machine } from "@wsp/engine";
 import { EXEC_BODY_MAX, EXEC_CHUNK_BYTES, LINK_RETRY_WINDOW_MS, absentComputer, execFailedLine, machineUnreachableLine, machineUnreachedLine, TURN_IDLE_MS, shellQuote, workScoreLine } from "@wsp/protocol";
 import { endRun, type ExecStream } from "@wsp/protocol";
+import { gateLoop } from "../../protocol/test/stub-script.js";
 import { GROUP_WORK_AWK, machineExecStream } from "../src/machine-exec.js";
 import { LINUX_SHELL_PRELUDE } from "./linux-shell.js";
 import { scriptGuest, type Step } from "./script-guest.js";
@@ -1141,7 +1142,7 @@ describe("machineExecStream over this machine's bash", () => {
     const { machine, runDir } = localGuest();
     const gate = join(runDir, "..", "gate");
     const factory = machineExecStream(machine, { pollMs: 20, runDir });
-    const launched = factory(`while [ ! -f ${gate} ]; do sleep 0.05; done; echo done`, { env: {}, input: ["go"] });
+    const launched = factory(`${gateLoop(gate)}; echo done`, { env: {}, input: ["go"] });
     await vi.waitFor(() => expect(existsSync(`${launched.run}.in`)).toBe(true));
     const takenNow = async (): Promise<readonly string[] | undefined> => {
       const stream = (await factory.attach!(launched.run!, { input: true, startedAt: Date.now() })) as ExecStream;
@@ -1176,7 +1177,7 @@ describe("machineExecStream keeping a key off the machine's disk", () => {
     const seen = 'case "$ANTHROPIC_API_KEY" in sk-ant-x-*) echo "seen ${#ANTHROPIC_API_KEY}";; esac';
     // A turn as an agent's launch makes one, its prompt on an input channel; an exec as the exec verb makes one.
     const turn = factory(`${seen}; read -r line; echo "got $line"`, { env: { ANTHROPIC_API_KEY: key }, input: ["hello"] });
-    const exec = factory(`${seen}; while [ ! -f ${shellQuote(gate)} ]; do sleep 0.05; done`, { env: { ANTHROPIC_API_KEY: key } });
+    const exec = factory(`${seen}; ${gateLoop(gate)}`, { env: { ANTHROPIC_API_KEY: key } });
     try {
       const turnLines = turn.lines[Symbol.asyncIterator]();
       const execLines = exec.lines[Symbol.asyncIterator]();
@@ -1221,7 +1222,7 @@ describe("machineExecStream keeping a key off the machine's disk", () => {
       children.push(pid);
       return join(runDir, id);
     };
-    const read = await older("aaaaaaaaaaaa", `while [ ! -f ${shellQuote(gate)} ]; do sleep 0.05; done; echo done`);
+    const read = await older("aaaaaaaaaaaa", `${gateLoop(gate)}; echo done`);
     const ended = await older("bbbbbbbbbbbb", "echo done");
     await vi.waitFor(() => expect(readFileSync(`${ended}.exit`, "utf8").trim()).toBe("0"), { timeout: 5_000 });
     expect(holding(runDir, key).sort()).toEqual([`${read}.sh`, `${ended}.sh`]);
@@ -1259,7 +1260,7 @@ describe("machineExecStream ending a run that ignores TERM", () => {
   it("what it printed after the last poll is read before the KILL's reap takes the log, past one chunk of it", async () => {
     const { machine, runDir } = localGuest();
     // A poll slower than the grace, so no read falls between the TERM and the KILL: the lines are read at the end or never.
-    const stream = machineExecStream(machine, { pollMs: 1_500, runDir })(`trap 'head -c ${EXEC_CHUNK_BYTES + 1000} /dev/zero | tr "\\0" x; echo; echo last words' TERM; echo ready; while :; do sleep 0.05; done`, { env: {} });
+    const stream = machineExecStream(machine, { pollMs: 1_500, runDir })(`trap 'head -c ${EXEC_CHUNK_BYTES + 1000} /dev/zero | tr "\\0" x; echo; echo last words' TERM; echo ready; ${gateLoop(join(runDir, "stop"))}`, { env: {} });
     const lines = stream.lines[Symbol.asyncIterator]();
     expect(await lines.next()).toEqual({ value: "ready", done: false });
     await new Promise(resolve => setTimeout(resolve, 100));

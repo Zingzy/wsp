@@ -8,6 +8,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { DAEMON_VERSION, STATE_SHAPE } from "@wsp/protocol";
 import { sqliteStore, STATE_SHAPE_KEY } from "@wsp/runtime";
 import { BIN, DIST, describeWithBin } from "./built-bin.js";
+import { gateLoop } from "../../protocol/test/stub-script.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 
 function canListen(port: number): Promise<boolean> {
@@ -106,7 +107,7 @@ const hostScript = (home: string, statePath: string, pidFile: string, runFile: s
 import { writeFileSync } from "node:fs";
 import { localWiring, stopOnSignals } from ${JSON.stringify(DIST)};
 const wiring = localWiring(${JSON.stringify(home)}, process.env, undefined, ${JSON.stringify(statePath)});
-const stream = wiring.execStream()("echo $$ > ${pidFile}; echo first; while [ ! -f ${gate} ]; do sleep 0.05; done; echo second; sleep 300", { env: { PATH: process.env.PATH } });
+const stream = wiring.execStream()(${JSON.stringify(`echo $$ > ${pidFile}; echo first; ${gateLoop(gate)}; echo second; sleep 300`)}, { env: { PATH: process.env.PATH } });
 writeFileSync(${JSON.stringify(runFile)}, stream.run + "\\n");
 stopOnSignals({ close: () => wiring.close() }, { error: line => console.error(line) });
 console.log("serving");

@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LocalBackend } from "@wsp/engine";
 import { HERE_PLACE_ID, NOTIFY_ME, unreadLine, type Attachment, type Caller, type SessionEvent, type ThreadScope, type TurnImage, type TurnResult } from "@wsp/protocol";
-import { writeStub } from "../../protocol/test/stub-script.js";
+import { gateLoop, writeStub } from "../../protocol/test/stub-script.js";
 import { HARNESS_ADAPTERS } from "../src/adapters.js";
 import { localExecStream } from "../src/local-exec.js";
 import { createRuntime, type HarnessAdapterFactory, type LocalWiring, type Runtime } from "../src/runtime.js";
@@ -232,7 +232,7 @@ read -r steer
 uuid=$(printf '%s\\n' "$steer" | sed -n 's/.*"uuid":"\\([0-9a-f-]*\\)".*/\\1/p')
 [ "$STUB_MODE" = dies ] || lifecycle "$uuid" queued
 : > "$STUB_MARK"
-while [ ! -f "$STUB_GATE" ]; do sleep 0.05; done
+${gateLoop("$STUB_GATE")}
 result "The keeper climbed the stairs."
 [ "$STUB_MODE" = dies ] && exit 1
 lifecycle "$uuid" started
