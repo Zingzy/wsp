@@ -23,7 +23,12 @@ import {
   NO_FOLDER_ROAD,
   noCopyLine,
   signInThereFix,
-  signInWithFix,
+  signInWaysFix,
+  tokenHeldLine,
+  keyHeldLine,
+  noKeyLine,
+  CODE_FROM_ROW,
+  type SignInWay,
   GITHUB_ROW,
   GITHUB_CLI,
   signInRowId,
@@ -50,22 +55,26 @@ import {
   type PlaceWait,
   type SetupEnd,
   type PlaceProvisionRow,
+  type AgentsSignInEvent,
   githubAddress,
   shellQuote,
   toolRowId,
 } from "@wsp/protocol";
 import { GITHUB_TOKEN_ENV, unlandFiles, PlaceAbsentError, PlaceMachine, envInput, hookOf, newSetupRun, pathLine, putFiles, storesReached, withEnvFromInput, type EngineStep, type ExecResult, type Machine, type MachineLink, type ProvisionPlan, type ProvisionStage } from "@wsp/engine";
-import { CATALOG_AGENTS, asksThePerson, hasLogin, loginSignIn, mintsToken, serverValuesOf, sharedOn } from "@wsp/catalog";
+import { CATALOG_AGENTS, asksThePerson, keyEnvOf, loginSignIn, loginThere, mintsToken, serverValuesOf, sharedOn, signInWaysOf } from "@wsp/catalog";
 import { runGraph, type GraphStep } from "../setup-graph.js";
 import { recipeChanges, stepsFor, type RecipeChange } from "../recipe-sync.js";
 import { appliedView, type FolderMove, type HeldApplied, type HeldRow, type PlaceRecord, type RecipeResolver } from "./types.js";
 import {
-  bounded, vaultSignIn, landedOn, type LandedRow, type SyncJob, setupOutcome, UNDO_MS, SIGN_IN_SLACK_MS, GITHUB_MS, cliFirst,
+  bounded, vaultSignIn, vaultHeldLine, landedOn, type LandedRow, type SyncJob, setupOutcome, UNDO_MS, SIGN_IN_SLACK_MS, GITHUB_MS, cliFirst,
   engineRow,
   INSTALLS, FILES, PROBE_MS, SIGNIN_STATUS_MS, firstLineOf, picksHash, PROVISION_LOG_EVERY_MS, PROVISION_LOG_LINES,
 } from "./helpers.js";
 import type { PlaceDoorContext } from "./context.js";
 import type { PlaceRecordsArea } from "./records.js";
+
+/** How a setup's wait starts the sign-in it follows, every step it reaches going to `emit`. */
+type SignInStart = (emit: (e: AgentsSignInEvent) => void) => Promise<{ leave(): void; stop?(): void }>;
 
 /** The links' waits, the setup and the sync of a computer to its recipe, and the link a machine there is driven over. */
 export function placeSetup(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea) {
@@ -328,8 +337,8 @@ export function placeSetup(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea) 
     /** A sign-in on that computer that waits on the person: its row waits with the page and the code as the relay
      * reads them, and when the wait runs out it reads expired and a retry asks for a fresh one. It never holds the
      * job; its row lands whenever the person is through, and `settled` hears whether it signed in. */
-    const signInThere = (ask: string, row: string, label: string, rowStep: PlaceSetupStep, settled?: (ok: boolean) => void): void => {
-      const signIn = recording.signIn;
+    const signInThere = (ask: string, row: string, label: string, rowStep: PlaceSetupStep, settled?: (ok: boolean) => void, how: { start?: SignInStart; note?: string; fix?: string } = {}): void => {
+      const signIn: SignInStart | undefined = how.start ?? (recording.signIn === undefined ? undefined : emit => recording.signIn!(placeId, ask, emit));
       const begun = clockNow();
       const wait: PlaceWait = { row, label, expiresAt: new Date(begun + SIGN_IN_WAIT_MS).toISOString(), state: "waiting" };
       const putWait = (w: PlaceWait | undefined): void => {
@@ -340,7 +349,7 @@ export function placeSetup(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea) 
         skippers.delete(`${placeId}/${row}`);
         held = { ...held, waiting: held.waiting.filter(x => x.row !== row) };
         settled?.(r.outcome === "installed");
-        landRow({ ...r, step: rowStep });
+        landRow({ ...r, ...(r.outcome === "failed" && how.fix !== undefined ? { fix: how.fix } : {}), step: rowStep });
       };
       if (signIn === undefined) {
         landed({ id: row, label, outcome: "failed", note: NO_SIGN_IN_ROAD });
@@ -374,7 +383,7 @@ export function placeSetup(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea) 
         landed({ id: row, label, outcome: "skipped", note: SKIPPED_FOR_NOW });
         await writing;
       });
-      void signIn(placeId, ask, e => {
+      void signIn(e => {
         if (gone) return;
         if (e.state !== "waiting" && e.state !== "running" && signingIn.get(key) === mine) signingIn.delete(key);
         if (e.state === "waiting" || e.state === "running") {
@@ -382,7 +391,7 @@ export function placeSetup(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea) 
           current = { ...current, ...(e.url !== undefined ? { url: e.url } : {}), ...(e.code !== undefined ? { code: e.code } : {}) };
           putWait(current);
         } else if (e.state === "signed-in") {
-          landed({ id: row, label, outcome: "installed", note: SIGNED_IN_THERE, ms: Math.round(clockNow() - begun) });
+          landed({ id: row, label, outcome: "installed", note: how.note ?? SIGNED_IN_THERE, ms: Math.round(clockNow() - begun) });
         } else if (clockNow() >= begun + SIGN_IN_WAIT_MS - SIGN_IN_SLACK_MS) {
           putWait({ ...current, state: "expired" });
           settled?.(false);
@@ -428,7 +437,42 @@ export function placeSetup(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea) 
       // to start from the row once the setup is through, and nothing here has failed.
       const signIn = CATALOG_AGENTS.find(a => a.id === agent)?.signIn;
       if (signIn !== undefined && asksThePerson(signIn)) return landRow({ id, label, outcome: "skipped", note: AT_ITS_TERMINAL, step: "signins" });
+      // A page that hands back a code has nowhere to take it in a setup's wait; the row's own Sign in takes it.
+      if (signIn !== undefined && loginThere(signIn)?.finish === "code") return landRow({ id, label, outcome: "skipped", note: CODE_FROM_ROW, step: "signins", fix: waysFix(agent, label, "machine") ?? signInThereFix(record.name) });
       signInThere(agent, id, label, "signins");
+    };
+
+    /** What a row of an agent with several ways says to do, the way it was picked first; nothing for an agent with one. */
+    const waysFix = (agent: string, label: string, first?: SignInWay): string | undefined => {
+      const ways = signInWaysOf(agent);
+      const signIn = CATALOG_AGENTS.find(a => a.id === agent)?.signIn;
+      if (ways.length === 0 || signIn === undefined) return undefined;
+      const keyEnv = keyEnvOf(signIn);
+      const ordered = first !== undefined && ways.includes(first) ? [first, ...ways.filter(w => w !== first)] : ways;
+      return signInWaysFix(ordered, { name: label, here: here(), box: record.name, ...(mintsToken(signIn) ? { mint: signIn.mint } : {}), ...(keyEnv !== undefined ? { keyEnv } : {}) });
+    };
+
+    /** A sign-in picked to take a token or a key from this host's vault: present where the vault holds it; a token it
+     * lacks is made on this computer, waiting on the person's browser, and lands in the vault for every turn there. */
+    const vaultWay = (agent: string, label: string, way: "token" | "key"): PlaceProvisionRow | undefined => {
+      const id = signInRowId(agent);
+      const signIn = CATALOG_AGENTS.find(a => a.id === agent)?.signIn;
+      const name = signIn === undefined ? undefined : way === "token" ? (mintsToken(signIn) ? signIn.tokenEnv : undefined) : keyEnvOf(signIn);
+      if (name !== undefined && vault()[name] !== undefined) return { id, label, outcome: "present", note: way === "token" ? tokenHeldLine(here()) : keyHeldLine(here()) };
+      if (way === "key") return { id, label, outcome: "failed", note: noKeyLine(name ?? "its key", here()), fix: waysFix(agent, label, "key") ?? signInThereFix(record.name) };
+      const mint = recording.mintHere;
+      if (mint === undefined) return { id, label, outcome: "failed", note: NO_SIGN_IN_ROAD, fix: waysFix(agent, label, "token") ?? signInThereFix(record.name) };
+      signInThere(agent, id, label, "signins", undefined, { start: emit => mint(agent, emit), note: tokenHeldLine(here()), fix: waysFix(agent, label, "token") ?? signInThereFix(record.name) });
+      return undefined;
+    };
+
+    /** A sign-in a retry runs again for a fresh page: the token made here where the row was picked to take one, else
+     * the agent's own sign-in on that computer. */
+    const againSignIn = async (agent: string, plan: ProvisionPlan): Promise<void> => {
+      if (picks.agents[agent]?.signin !== "token") return agentSignIn(agent, plan);
+      const label = CATALOG_AGENTS.find(a => a.id === agent)?.name ?? agent;
+      const row = vaultWay(agent, label, "token");
+      if (row !== undefined) landRow({ ...row, step: "signins" });
     };
 
     /** A login runs where its agent is, and only its agent's status reads one standing there: an agent that did not
@@ -443,7 +487,13 @@ export function placeSetup(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea) 
       for (const [agent, row] of Object.entries(picks.agents)) {
         if (sync !== undefined && !sync.changes.some(c => c.key === `agents/${agent}` && (c.how === "added" || c.how === "changed"))) continue;
         const label = CATALOG_AGENTS.find(a => a.id === agent)?.name ?? agent;
-        if ((row.signin ?? "vault") === "machine") {
+        const way = row.signin ?? "vault";
+        if (way === "token" || way === "key") {
+          const landed = vaultWay(agent, label, way);
+          if (landed !== undefined) out.push(landed);
+          continue;
+        }
+        if (way === "machine") {
           if (notInstalled(agent)) {
             out.push({ id: signInRowId(agent), label, outcome: "skipped", note: waitsForInstallLine(label) });
             continue;
@@ -451,9 +501,8 @@ export function placeSetup(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea) 
           await agentSignIn(agent, plan);
           continue;
         }
-        const signIn = CATALOG_AGENTS.find(a => a.id === agent)?.signIn;
         if (vaultSignIn(agent, vault()) === "vault-key") {
-          out.push({ id: signInRowId(agent), label, outcome: "present", note: copiedFromLine(here()) });
+          out.push({ id: signInRowId(agent), label, outcome: "present", note: vaultHeldLine(agent, vault(), way, here()) });
           continue;
         }
         const copied = await loginCopied(agent, label, plan);
@@ -461,9 +510,7 @@ export function placeSetup(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea) 
           out.push(copied);
           continue;
         }
-        // An agent with no login to run there signs in with the token or key this host keeps for every turn there.
-        const fix = signIn === undefined || hasLogin(signIn) ? signInThereFix(record.name) : signInWithFix(label, mintsToken(signIn) ? "token" : "key");
-        out.push({ id: signInRowId(agent), label, outcome: "failed", note: noCopyLine(label, here()), fix });
+        out.push({ id: signInRowId(agent), label, outcome: "failed", note: noCopyLine(label, here()), fix: waysFix(agent, label) ?? signInThereFix(record.name) });
       }
       return out;
     };
@@ -689,7 +736,7 @@ export function placeSetup(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea) 
       // A sign-in the last run left waiting is run again for a fresh page and code: the pty behind the old one is gone.
       for (const w of rerun) {
         if (w.row === GITHUB_ROW) await githubSignIn(plan);
-        else await agentSignIn(signInOfRow(w.row)!, plan);
+        else await againSignIn(signInOfRow(w.row)!, plan);
       }
       const engine = (s: EngineStep) => async () => {
         const stores = s === "mcp" ? await storesHere() : undefined;

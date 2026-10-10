@@ -570,7 +570,9 @@
                         "type": "string",
                         "enum": [
                           "vault",
-                          "machine"
+                          "machine",
+                          "token",
+                          "key"
                         ]
                       }
                     },
@@ -1557,7 +1559,9 @@
                         "type": "string",
                         "enum": [
                           "vault",
-                          "machine"
+                          "machine",
+                          "token",
+                          "key"
                         ]
                       }
                     },

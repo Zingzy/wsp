@@ -528,7 +528,7 @@ export function agentsArea(ctx: RuntimeContext): AgentsArea {
     const factory = adapters[harness];
     if (!factory) throw new Error(noAdapterLine(harness, Object.keys(adapters)));
     const kind = ctx.moduleOf(entry.record.kind);
-    const vault = opts.vault?.() ?? {};
+    const vault = ctx.vaultOn(entry);
     const place = setupPlace(entry);
     const setup = place === undefined ? undefined : setups.launchOf(place, harness);
     const carried = kind.serverValues === "environment" ? servers : {};

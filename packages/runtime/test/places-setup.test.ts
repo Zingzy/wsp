@@ -35,7 +35,12 @@ import {
   pluginsKeptLine,
   setupRowFix,
   signInThereFix,
-  signInWithFix,
+  signInWaysFix,
+  tokenHeldLine,
+  keyHeldLine,
+  noKeyLine,
+  CODE_FROM_ROW,
+  HERE_PLACE_ID,
   noCopyLine,
   copiedFromLine,
   placeProvisionPaths,
@@ -51,6 +56,7 @@ import {
   seedChoiceFrom,
   readJoinToken,
   type AgentsSignInEvent,
+  type DaemonResponse,
   type PlaceProvisionRow,
   type PlaceSetupEvent,
   type PlaceSetupStep,
@@ -78,6 +84,7 @@ import { stubBackend, testPlatform } from "./stub-backend.js";
 import { fakeClock } from "./fake-clock.js";
 import { until } from "./until.js";
 import type { Clock } from "../src/clock.js";
+import type { DaemonChannel } from "../src/daemon-channel.js";
 import type { WsClient } from "./ws-client.js";
 
 let srv: RuntimeServer | undefined;
@@ -284,7 +291,7 @@ function signIns(o: { status?: boolean } = {}) {
 }
 
 /** A host with the setup wired, serving, and the road an add takes onto a computer that joins over the link. */
-async function hosting(o: { provision: PlaceProvisioner; checkouts?: Checkouts; seed?: SeedWiring; recipes?: RecipeShelf; store?: Store; cmds?: string[]; answer?: (cmd: string, input: string) => { exitCode: number; stdout?: string } | undefined; local?: boolean | LocalWiring; acts?: AgentsActs; vault?: Record<string, string>; report?: PlaceReport; install?: PlaceWiring["install"]; undo?: PlaceWiring["undo"]; leave?: PlaceWiring["leave"]; runOver?: PlaceWiring["runOver"]; hostKey?: PlaceKeyPair; clock?: Clock; update?: PlaceUpdater; adapters?: Record<string, HarnessAdapterFactory>; logins?: string }): Promise<{ hostKey: PlaceKeyPair; store: Store; frames: PlaceSetupEvent[]; joined: { placeId: string; pair: PlaceKeyPair }[] }> {
+async function hosting(o: { provision: PlaceProvisioner; checkouts?: Checkouts; seed?: SeedWiring; recipes?: RecipeShelf; store?: Store; cmds?: string[]; answer?: (cmd: string, input: string) => { exitCode: number; stdout?: string } | undefined; local?: boolean | LocalWiring; acts?: AgentsActs; vault?: Record<string, string>; report?: PlaceReport; install?: PlaceWiring["install"]; undo?: PlaceWiring["undo"]; leave?: PlaceWiring["leave"]; runOver?: PlaceWiring["runOver"]; hostKey?: PlaceKeyPair; clock?: Clock; update?: PlaceUpdater; adapters?: Record<string, HarnessAdapterFactory>; logins?: string; daemonChannel?: () => Promise<DaemonChannel> }): Promise<{ hostKey: PlaceKeyPair; store: Store; frames: PlaceSetupEvent[]; joined: { placeId: string; pair: PlaceKeyPair }[] }> {
   const hostKey = o.hostKey ?? newPlaceKeyPair();
   const joined: { placeId: string; pair: PlaceKeyPair }[] = [];
   const store = o.store ?? memoryStore();
@@ -296,6 +303,7 @@ async function hosting(o: { provision: PlaceProvisioner; checkouts?: Checkouts; 
     ...(o.seed !== undefined ? { seed: o.seed } : {}),
     ...(o.clock !== undefined ? { clock: o.clock } : {}),
     ...(o.acts !== undefined ? { agentsActs: o.acts } : {}),
+    ...(o.daemonChannel !== undefined ? { daemonChannel: o.daemonChannel } : {}),
     ...(o.local === true ? { local: localWiring() } : typeof o.local === "object" ? { local: o.local } : {}),
     ...(o.recipes !== undefined ? { recipes: o.recipes } : {}),
     vault: () => o.vault ?? { CLAUDE_CODE_OAUTH_TOKEN: "sk-ant-oat01-x" },
@@ -402,6 +410,8 @@ function shelf(file: RecipeFile, items: Record<string, string>) {
   return { recipes, move: (next: RecipeFile, nextItems: Record<string, string>, hash: string) => void (now = { file: next, items: nextItems, hash }), resolves: () => resolves };
 }
 
+/** What Claude Code's ways name, on a host whose computer is zingzys-mac. */
+const CLAUDE_FACTS = { name: "Claude Code", here: "zingzys-mac", mint: "claude setup-token", keyEnv: "ANTHROPIC_API_KEY" };
 const rowOf = async (placeId: string): Promise<PlaceView> => (await runtime!.places!.list(Date.now())).find(p => p.id === placeId)!;
 const ended = (frames: readonly PlaceSetupEvent[]): PlaceSetupEvent[] => frames.filter(f => f.end !== undefined);
 
@@ -1861,7 +1871,7 @@ describe("a step the person skips for now", () => {
     await runtime!.places!.skip(place.id, "signins/claude");
     expect((await rowOf(place.id)).applied?.rows.find(r => r.id === "signins/claude")?.outcome).toBe("skipped");
     await runtime!.agents.key("claude", "sk-ant-oat01-x");
-    expect((await rowOf(place.id)).applied?.rows.find(r => r.id === "signins/claude")).toMatchObject({ outcome: "present", note: copiedFromLine("zingzys-mac") });
+    expect((await rowOf(place.id)).applied?.rows.find(r => r.id === "signins/claude")).toMatchObject({ outcome: "present", note: tokenHeldLine("zingzys-mac") });
   });
 
   it("keeps a sign-in landed while the setup still runs: the run lands it among its own rows, so its next write keeps it", async () => {
@@ -1889,10 +1899,63 @@ describe("a step the person skips for now", () => {
     const picks = RecipeFile.parse({ name: "laptop", agents: { claude: { signin: "vault" } } });
     const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: picks }, Date.now());
     await until(async () => (await rowOf(place.id)).setup?.state === "done");
-    // Claude Code has no login to run on a computer, so its fix is the token, not a sign-in there.
-    expect((await rowOf(place.id)).applied?.rows.find(r => r.id === "signins/claude")).toMatchObject({ outcome: "failed", note: noCopyLine("Claude Code", "zingzys-mac"), fix: signInWithFix("Claude Code", "token") });
+    // Claude Code's fix names each of its ways, every one a button on its row.
+    const box = (await rowOf(place.id)).name;
+    expect((await rowOf(place.id)).applied?.rows.find(r => r.id === "signins/claude")).toMatchObject({ outcome: "failed", note: noCopyLine("Claude Code", "zingzys-mac"), fix: signInWaysFix(["token", "key", "machine"], { ...CLAUDE_FACTS, box }) });
     await runtime!.agents.key("claude", "sk-ant-oat01-x");
-    expect((await rowOf(place.id)).applied?.rows.find(r => r.id === "signins/claude")).toMatchObject({ outcome: "present", note: copiedFromLine("zingzys-mac"), label: "Claude Code", step: "signins" });
+    expect((await rowOf(place.id)).applied?.rows.find(r => r.id === "signins/claude")).toMatchObject({ outcome: "present", note: tokenHeldLine("zingzys-mac"), label: "Claude Code", step: "signins" });
+  });
+
+  it("reads a key picked for Claude Code off the vault, and says where the key goes where the vault holds none", async () => {
+    const vault: Record<string, string> = {};
+    await hosting({ provision: provisioner().wired, acts: signIns().acts, vault });
+    const picks = RecipeFile.parse({ name: "laptop", agents: { claude: { signin: "key" } } });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: picks }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    const box = (await rowOf(place.id)).name;
+    expect((await rowOf(place.id)).applied?.rows.find(r => r.id === "signins/claude")).toMatchObject({ outcome: "failed", note: noKeyLine("ANTHROPIC_API_KEY", "zingzys-mac"), fix: signInWaysFix(["key", "token", "machine"], { ...CLAUDE_FACTS, box }) });
+    vault["ANTHROPIC_API_KEY"] = "sk-ant-api03-x";
+    vault["CLAUDE_CODE_OAUTH_TOKEN"] = "sk-ant-oat01-x";
+    await runtime!.places!.setUp(place.id, {});
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    // The key was picked, so it is what that computer's turns get, the token beside it held back.
+    expect((await rowOf(place.id)).applied?.rows.find(r => r.id === "signins/claude")).toMatchObject({ outcome: "present", note: keyHeldLine("zingzys-mac") });
+  });
+
+  it("makes a token picked for Claude Code on this computer where the vault holds none, the row waiting on the person until it lands", async () => {
+    const vault: Record<string, string> = {};
+    const s = signIns();
+    // This computer's daemon, which the token's own command runs under, answers every frame and never closes.
+    const channel: DaemonChannel = { send: async () => ({ ok: true }) as DaemonResponse, close: () => {}, closed: new Promise(() => {}) };
+    await hosting({ provision: provisioner().wired, acts: s.acts, vault, local: { ...localWiring(), daemonRoad: async () => ({ url: "http://127.0.0.1:1", expiresAt: Number.MAX_SAFE_INTEGER, daemonToken: "t" }) }, daemonChannel: async () => channel });
+    const picks = RecipeFile.parse({ name: "laptop", agents: { claude: { signin: "token" } } });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: picks }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.waiting.some(w => w.row === "signins/claude") === true);
+    expect(s.started).toEqual(["claude"]);
+    expect(runtime!.agents.signIns().map(r => r.target)).toEqual([{ placeId: HERE_PLACE_ID }]);
+    s.end("claude", { state: "signed-in" });
+    await until(async () => (await rowOf(place.id)).applied?.rows.find(r => r.id === "signins/claude")?.outcome === "installed");
+    expect((await rowOf(place.id)).applied?.rows.find(r => r.id === "signins/claude")).toMatchObject({ note: tokenHeldLine("zingzys-mac"), step: "signins" });
+    // A token that was not made says what its command said, and its fix still names every way, the token's first.
+    await runtime!.places!.setUp(place.id, {});
+    await until(async () => s.started.length === 2);
+    s.end("claude", { state: "failed", said: "the browser was closed" });
+    await until(async () => (await rowOf(place.id)).applied?.rows.find(r => r.id === "signins/claude")?.outcome === "failed");
+    const box = (await rowOf(place.id)).name;
+    expect((await rowOf(place.id)).applied?.rows.find(r => r.id === "signins/claude")).toMatchObject({ note: "the browser was closed", fix: signInWaysFix(["token", "key", "machine"], { ...CLAUDE_FACTS, box }) });
+  });
+
+  it("leaves Claude Code's own sign-in on the box to its row, whose page hands back a code the setup has nowhere to take", async () => {
+    const s = signIns();
+    await hosting({ provision: provisioner().wired, acts: s.acts, vault: {} });
+    const picks = RecipeFile.parse({ name: "laptop", agents: { claude: { signin: "machine" } } });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: picks }, Date.now());
+    await until(async () => (await rowOf(place.id)).applied?.rows.some(r => r.id === "signins/claude") === true);
+    const box = (await rowOf(place.id)).name;
+    expect((await rowOf(place.id)).applied?.rows.find(r => r.id === "signins/claude")).toMatchObject({ outcome: "skipped", note: CODE_FROM_ROW, fix: signInWaysFix(["machine", "token", "key"], { ...CLAUDE_FACTS, box }) });
+    expect(s.started).toEqual([]);
+    await runtime!.places!.loginLanded(place.id, "claude");
+    expect((await rowOf(place.id)).applied?.rows.find(r => r.id === "signins/claude")).toMatchObject({ outcome: "installed", note: SIGNED_IN_THERE });
   });
 
   it("skips a sign-in whose page ran out, after its login there ended", async () => {

@@ -13,6 +13,12 @@ import {
   waitLine,
   plural,
   GITHUB_ROW,
+  SIGNED_IN_THERE,
+  signInOfRow,
+  copiedFromLine,
+  keyHeldLine,
+  tokenHeldLine,
+  type RecipeSignIn,
   type PlaceApplied,
   type PlaceSetup,
   type PlaceProvisionRow,
@@ -111,22 +117,25 @@ export function takenReport(report: PlaceReport): PlaceReport {
 }
 
 /** What stands for each agent a computer reported, in the one word a person reads: its own login on that computer
- * when the file that login shares is under the logins folder the computer listed, else the vault's variable for
- * that agent when this host holds one, else nothing. Nothing at all where the report carries no logins list, which
- * is a daemon older than that field: unknown reads as unknown and not as none.
+ * when the file that login shares is under the logins folder the computer listed, or, for a login kept in the store
+ * its threads read rather than that folder, when the computer's last setup signed it in there (`rows`); else the
+ * vault's variable for that agent when this host holds one, else nothing. Nothing at all where the report carries no
+ * logins list, which is a daemon older than that field: unknown reads as unknown and not as none.
  *
  * The computer knows no catalog and the host does, so the list of files goes on the wire and the words are worked
  * out here, off the same sign-in rows the sign-in screens and the turns read. */
 export function signInsOf(
   report: Pick<PlaceReport, "agents" | "logins">,
   vault: Readonly<Record<string, string>>,
+  rows: readonly PlaceProvisionRow[] = [],
 ): Record<string, AgentSignInState> | undefined {
   if (report.logins === undefined) return undefined;
   const stands = new Set(report.logins);
+  const signedInThere = new Set(rows.filter(r => r.note === SIGNED_IN_THERE && (r.outcome === "installed" || r.outcome === "present")).map(r => signInOfRow(r.id)));
   const words: Record<string, AgentSignInState> = {};
   for (const id of report.agents) {
     const file = sharedLoginFile(id);
-    if (file !== undefined && stands.has(file)) {
+    if (file !== undefined ? stands.has(file) : signedInThere.has(id)) {
       words[id] = "signed-in";
       continue;
     }
@@ -149,6 +158,27 @@ export function vaultSignIn(agentId: string, vault: Readonly<Record<string, stri
   const token = signIn !== undefined && mintsToken(signIn) ? vault[signIn.tokenEnv] : undefined;
   const keyEnv = signIn === undefined ? undefined : keyEnvOf(signIn);
   return token !== undefined || (keyEnv !== undefined && vault[keyEnv] !== undefined) ? "vault-key" : "none";
+}
+
+/** What a sign-in row says the vault hands an agent's turns on a computer whose row was picked `way`: the key where it
+ * was picked and is held, else the token where one is, else the key; for an agent with one secret, copied from here. */
+export function vaultHeldLine(agentId: string, vault: Readonly<Record<string, string>>, way: RecipeSignIn | undefined, here: string): string {
+  const signIn = CATALOG_AGENTS.find(a => a.id === agentId)?.signIn;
+  if (signIn === undefined || !mintsToken(signIn)) return copiedFromLine(here);
+  const keyEnv = keyEnvOf(signIn);
+  const key = keyEnv !== undefined && vault[keyEnv] !== undefined;
+  return (way === "key" && key) || vault[signIn.tokenEnv] === undefined ? keyHeldLine(here) : tokenHeldLine(here);
+}
+
+/** The vault as a computer's picks hand it to the turns there: an agent picked to take its key, where the vault
+ * holds that key, gets no token beside it, since a token is handed ahead of a key. */
+export function pickedVault(vault: Readonly<Record<string, string>>, picks: Pick<RecipeFile, "agents"> | undefined): Readonly<Record<string, string>> {
+  const dropped = Object.entries(picks?.agents ?? {}).flatMap(([id, row]) => {
+    const signIn = CATALOG_AGENTS.find(a => a.id === id)?.signIn;
+    const keyEnv = signIn === undefined ? undefined : keyEnvOf(signIn);
+    return row.signin === "key" && signIn !== undefined && mintsToken(signIn) && keyEnv !== undefined && vault[keyEnv] !== undefined ? [signIn.tokenEnv] : [];
+  });
+  return dropped.length === 0 ? vault : Object.fromEntries(Object.entries(vault).filter(([name]) => !dropped.includes(name)));
 }
 
 /** The picks a computer can be set up from, as this host can serve them: an agent's sign-in to copy is offered only

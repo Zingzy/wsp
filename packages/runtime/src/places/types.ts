@@ -388,6 +388,10 @@ export interface PlaceRecording {
   /** Signs an agent in on that computer through the sign-in relay, as the app's own sign-in does: every step it
    * reaches, the page and the code among them, goes to `emit`. Absent, a machine sign-in fails its row. */
   signIn?(placeId: string, agent: string, emit: (e: AgentsSignInEvent) => void): Promise<{ leave(): void; stop?(): void }>;
+  /** Makes an agent's token on this computer with its own command, the person approving it in their browser here,
+   * and keeps it in this host's vault: every step goes to `emit`, the token never does. Absent, a token the vault
+   * lacks fails its row. */
+  mintHere?(agent: string, emit: (e: AgentsSignInEvent) => void): Promise<{ leave(): void; stop?(): void }>;
   /** The line an agent's sign-in on that computer runs, its status command and that command's environment among
    * it, as the hand sign-in plans it. */
   signInLine?(placeId: string, agent: string): Promise<SignInLine>;
@@ -553,6 +557,8 @@ export interface PlaceDoor {
   /** Whether GitHub on that computer signs in from this host's vault: the person picked the vault for it there and
    * its row says gh took the token. Answered without a read, since every launch on that computer asks it. */
   githubFromVault(placeId: string): boolean;
+  /** The vault as that computer's picks hand it to the turns there (`pickedVault`). */
+  vaultAt(placeId: string, vault: Readonly<Record<string, string>>): Readonly<Record<string, string>>;
   /** An agent's own sign-in on that computer landed, as the tool's status there said: the file its shared login
    * writes is taken as listed, so every word read before that computer's next report says signed in. */
   loginLanded(placeId: string, agent: string): Promise<void>;

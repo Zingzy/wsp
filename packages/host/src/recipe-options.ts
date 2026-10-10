@@ -6,9 +6,9 @@
 // formula with no Linux build and a server bound to a macOS path are left out.
 import { execFile } from "node:child_process";
 import { posix } from "node:path";
-import { BASE_FLOOR, CATALOG_AGENTS, COMPILER_ROW, catalogEntry, catalogIdOfRow, catalogToolFor, hasLogin, keyEnvOf, mintsToken } from "@wsp/catalog";
-import { collect, detectSkills, expand, readHistories, skillRoots, type HistoryCache, type Host, type Manifest, type Usage } from "@wsp/collect";
-import { agentOfRow, ghStatusOf, githubAddress, MCP_ID_PREFIX, packageOf, wspOwnServer, type RecipeOptions, type RecipeSignIn, type ServerSignIn, type SkillRow } from "@wsp/protocol";
+import { BASE_FLOOR, CATALOG_AGENTS, COMPILER_ROW, catalogEntry, catalogIdOfRow, catalogToolFor, hasLogin, keyEnvOf, mintsToken, signInWaysOf } from "@wsp/catalog";
+import { billedHere, collect, detectSkills, expand, readHistories, skillRoots, type HistoryCache, type Host, type Manifest, type Usage } from "@wsp/collect";
+import { agentOfRow, ghStatusOf, githubAddress, MCP_ID_PREFIX, packageOf, wspOwnServer, type RecipeOptions, type RecipeSignIn, type ServerSignIn, type SignInWay, type SkillRow } from "@wsp/protocol";
 import { agentBytes, cliBytes, folderBytes } from "./pick-sizes.js";
 import { CONFIG_PATHS } from "./recipe-configs.js";
 import { wspPackages } from "./wsp-own.js";
@@ -28,11 +28,18 @@ function needsOf(id: string, manager: string): string[] | undefined {
   return COMPILING_MANAGERS.has(manager) || after === COMPILER_ROW ? [COMPILER_ROW] : undefined;
 }
 
-/** The sign-in words an agent can take on a box: the vault where its token or key can be held here, the machine
- * where it has a login to run there. */
-function signinsOf(agentId: string): RecipeSignIn[] {
+/** The sign-in words an agent can take on a box, the one it starts at first: for an agent that mints its token here,
+ * the key where this computer bills one (`billed`), the token where it holds a subscription login, else its login
+ * on the box; for every other agent the vault where its token or key can be held here, the machine where it has a
+ * login to run there. */
+export function signinsOf(agentId: string, billed?: "key" | "login"): RecipeSignIn[] {
   const entry = CATALOG_AGENTS.find(a => a.id === agentId);
   if (entry === undefined) return [];
+  const ways = signInWaysOf(agentId);
+  if (ways.length > 0) {
+    const first: SignInWay = billed === "key" ? "key" : billed === "login" ? "token" : "machine";
+    return ways.includes(first) ? [first, ...ways.filter(w => w !== first)] : ways;
+  }
   const s = entry.signIn;
   return [...(mintsToken(s) || keyEnvOf(s) !== undefined ? (["vault"] as const) : []), ...(hasLogin(s) ? (["machine"] as const) : [])];
 }
@@ -82,13 +89,13 @@ const under = (path: string, dir: string): boolean => path.startsWith(`${dir}/`)
 /** The options off what was read: the manifest less wsp's own packages, the person's own skills less the ones an
  * agent's install seeded, the plugins, which config rows this computer has files for, and how often the agents ran
  * each CLI. */
-export function recipeOptions(manifest: Manifest, o: { skills: readonly SkillRow[]; bundled?: readonly Bundled[]; wsp?: ReadonlySet<string>; plugins: readonly string[]; enabled?: readonly string[]; configs: readonly ("git" | "shell")[]; github: boolean; gh?: { account?: string; scopes?: string[] }; calls?: CommandCalls }): RecipeOptions {
+export function recipeOptions(manifest: Manifest, o: { skills: readonly SkillRow[]; bundled?: readonly Bundled[]; wsp?: ReadonlySet<string>; plugins: readonly string[]; enabled?: readonly string[]; configs: readonly ("git" | "shell")[]; github: boolean; gh?: { account?: string; scopes?: string[] }; calls?: CommandCalls; billed?: Readonly<Record<string, "key" | "login">> }): RecipeOptions {
   const agents = manifest.entries.flatMap(e => {
     const id = agentOfRow(e);
     const entry = id === undefined ? undefined : CATALOG_AGENTS.find(a => a.id === id);
     if (entry === undefined) return [];
     const bytes = agentBytes(entry.id);
-    return [{ id: entry.id, name: entry.name, signins: signinsOf(entry.id), kind: entry.signIn.kind, ...(bytes !== undefined ? { bytes } : {}) }];
+    return [{ id: entry.id, name: entry.name, signins: signinsOf(entry.id, o.billed?.[entry.id]), kind: entry.signIn.kind, ...(bytes !== undefined ? { bytes } : {}) }];
   });
   const servers = new Map<string, { agents: Set<string>; kind?: ServerSignIn; keys: Set<string> }>();
   for (const e of manifest.entries) {
@@ -188,7 +195,7 @@ export async function bundledSkills(host: Pick<Host, "home" | "fs">): Promise<Bu
  * plugin index, whether any file of each config row is here, and the commands the agents' histories ran, read
  * through the cache the recipe scan keeps so only the session files that changed are opened. */
 export async function readRecipeOptions(host: Host, cache?: HistoryCache): Promise<RecipeOptions> {
-  const [histories, manifest] = await Promise.all([readHistories(host, CATALOG_AGENTS, cache === undefined ? {} : { cache }), collect(host)]);
+  const [histories, manifest, billed] = await Promise.all([readHistories(host, CATALOG_AGENTS, cache === undefined ? {} : { cache }), collect(host), billedHere(host)]);
   const [read, bundled] = await Promise.all([skillRoots(host).then(roots => detectSkills(host, roots)), bundledSkills(host)]);
   const indexes = await Promise.all(CATALOG_AGENTS.flatMap(a => (a.pluginSkills === undefined ? [] : [host.fs.readText(expand(host, a.pluginSkills.index))])));
   const plugins = [...new Set(indexes.flatMap(userPlugins))].sort();
@@ -197,5 +204,5 @@ export async function readRecipeOptions(host: Host, cache?: HistoryCache): Promi
   const configs = [...((await has(CONFIG_PATHS.git)) ? (["git"] as const) : []), ...((await has(CONFIG_PATHS.shell)) ? (["shell"] as const) : [])];
   const github = manifest.entries.some(e => e.id === "logins/gh");
   const wsp = await wspPackages(host, manifest.entries.flatMap(e => (e.rung === "tools" && e.id.split("/").length >= 3 ? [{ name: packageOf(e), via: e.id.split("/")[1] ?? "" }] : [])));
-  return recipeOptions(manifest, { skills: read.skills, bundled, wsp, plugins, enabled: settings.flat(), configs, github, calls: commandCalls(histories), ...(github ? { gh: await githubHere(host.exec) } : {}) });
+  return recipeOptions(manifest, { skills: read.skills, bundled, wsp, plugins, enabled: settings.flat(), configs, github, billed, calls: commandCalls(histories), ...(github ? { gh: await githubHere(host.exec) } : {}) });
 }

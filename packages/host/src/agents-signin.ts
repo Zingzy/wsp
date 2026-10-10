@@ -11,7 +11,7 @@
 // that page's callback port, types what a page hands back, and asks the
 // tool's own status until it says signed in. The vault and the wsp tools are
 // the two writes that sit beside it.
-import { CATALOG, CATALOG_AGENTS, MCP_AGENTS, type CatalogEntry, asksThePerson, hasLogin, keyEnvOf, loginHomeIn, mintsToken, questionsOf, harnessLine, serverSignInRoad, sharedLoginOf, signInRoadOf, tokenIn, type Question, type StatusCheck } from "@wsp/catalog";
+import { CATALOG, CATALOG_AGENTS, MCP_AGENTS, type CatalogEntry, asksThePerson, hasLogin, keyEnvOf, loginHomeIn, loginThere, mintsToken, questionsOf, harnessLine, serverSignInRoad, sharedLoginOf, signInRoadOf, tokenIn, type Question, type StatusCheck, type TokenSignIn } from "@wsp/catalog";
 import { asLogin, targetLogin, type TargetLogin } from "@wsp/engine";
 import {
   addToolsHereRefusal,
@@ -22,6 +22,7 @@ import {
   closedBeforeSignInLine,
   signInUncheckedLine,
   lastLine,
+  mintFailedLine,
   noVaultKeyRefusal,
   notTokenRefusal,
   placeDaemonPaths,
@@ -56,6 +57,9 @@ export interface SignInPlan {
   status?: StatusCheck;
   /** The one line a failure says in place of the tool's own words, where those words have one. */
   refusal?(said: string): string | undefined;
+  /** For a token made on this computer: what takes it off the tool's output once the tool ended well, answering
+   * whether one was there. */
+  took?(said: string): boolean;
 }
 
 const STATUS_MS = 60_000;
@@ -97,7 +101,7 @@ export const pagesOnPty = (command: string): string =>
 
 /** The sign-in as it runs where it stands. `terminal`: the person's own terminal runs it, so a row that asks them to
  * pick is theirs to answer; the app refuses it, since nobody there can. */
-export async function planSignIn(on: AgentsOn, ask: SignInAsk, o: { terminal?: boolean } = {}): Promise<SignInPlan> {
+export async function planSignIn(on: AgentsOn, ask: SignInAsk, o: { terminal?: boolean; keep?: (name: string, value: string) => void } = {}): Promise<SignInPlan> {
   if (hasControlChar(ask.agent) || (ask.server !== undefined && hasControlChar(ask.server))) throw new Error(controlSignInRefusal);
   const entry = agentOf(ask.agent);
   if (ask.server !== undefined) {
@@ -127,8 +131,11 @@ export async function planSignIn(on: AgentsOn, ask: SignInAsk, o: { terminal?: b
       ...(notSetUp === undefined ? {} : { refusal: (said: string) => (notSetUp.test(withoutEscapes(said)) ? serverNotSetUpLine(entry.name, server) : undefined) }),
     };
   }
-  const row = entry.signIn;
-  if (!hasLogin(row)) throw new Error(signInVaultRefusal(entry.name));
+  const signIn = entry.signIn;
+  if (mintsToken(signIn) && on.kind === "here" && o.terminal !== true && o.keep !== undefined) return mintPlan(entry.name, signIn, o.keep);
+  // A token row's own login runs only on a computer you own, where it lands in the store that computer's threads read.
+  const row = hasLogin(signIn) ? signIn : on.kind === "box" ? loginThere(signIn) : undefined;
+  if (row === undefined) throw new Error(signInVaultRefusal(entry.name));
   if (asksThePerson(row) && o.terminal !== true) throw new Error(signInTerminalRefusal(entry.name, `wsp agents signin ${entry.id}`));
   const stores = on.kind === "here" ? undefined : on.stores;
   const command = harnessLine(entry.id, row.fallback ?? row.login, { stores });
@@ -143,6 +150,24 @@ export async function planSignIn(on: AgentsOn, ask: SignInAsk, o: { terminal?: b
   }
   const wrap = await wrapFor(on);
   return { ...plan, line: { command: wrap(command), ...(status !== undefined ? { status: wrap(status) } : {}) } };
+}
+
+/** A token made on this computer by the tool's own command, which opens the person's browser here once: the token
+ * is read off what the command printed once it ended well and kept in the vault, and is never said anywhere. */
+function mintPlan(name: string, row: TokenSignIn, keep: (name: string, value: string) => void): SignInPlan {
+  return {
+    name,
+    line: { command: row.mint, env: { BROWSER: process.env["BROWSER"] || openerCommand() } },
+    questions: [],
+    paste: () => false,
+    refusal: () => mintFailedLine(row.mint),
+    took: said => {
+      const token = [...withoutEscapes(said).matchAll(new RegExp(row.token.source, "g"))].flatMap(m => tokenIn(row, m[0]) ?? []).at(-1);
+      if (token === undefined) return false;
+      keep(row.tokenEnv, token);
+      return true;
+    },
+  };
 }
 
 const withoutEscapes = (text: string): string => text.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "");
@@ -251,7 +276,7 @@ export async function watchSignIn(plan: SignInPlan, run: SignInRun, o: { pollMs?
   if (outcome === undefined) return void run.emit({ state: "failed", said: failure ?? "the sign-in command never ran" });
   if (outcome.stopped) return void run.emit({ state: "failed", said: STOPPED_NOTE });
   if (outcome.dropped) return void run.emit({ state: "failed", said: "the computer's terminal link dropped" });
-  const through = plan.status === undefined ? outcome.exitCode === 0 : await asked();
+  const through = plan.took !== undefined ? outcome.exitCode === 0 && plan.took(said) : plan.status === undefined ? outcome.exitCode === 0 : await asked();
   if (through) return void run.emit({ state: "signed-in" });
   run.emit({ state: "failed", said: plan.refusal?.(said) ?? lastSaid(said, codes) ?? `it ended with exit ${outcome.exitCode}` });
 }
@@ -314,7 +339,7 @@ export function hostActs(o: HostActsOptions): AgentsActs {
   return {
     signInLine: async (on, ask) => (await planSignIn(on, ask, { terminal: true })).line,
     signIn: async (on, ask) => {
-      const plan = await planSignIn(on, ask, { terminal: ask.terminal === true });
+      const plan = await planSignIn(on, ask, { terminal: ask.terminal === true, keep: (name, value) => writeEnvFile(o.vaultFile, { [name]: value }) });
       return run => (ask.terminal === true ? terminalSignIn(plan, run) : watchSignIn(plan, run));
     },
     key: async (agent, key) => {
