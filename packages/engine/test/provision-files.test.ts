@@ -317,11 +317,13 @@ describe("the landing on the computer itself", { timeout: 60_000 }, () => {
     expect(readFileSync(at.landed, "utf8")).not.toContain(".claude.json");
 
     // The agent writes its own file, as it does at every launch: the landing leaves it, whatever this computer's
-    // copy of it says now, and the row says it is there rather than that wsp put it there.
+    // copy of it says now, and the row says it was already there and stands rather than that wsp put it there.
     write(root, ".claude-cfg/.claude.json", '{ "numStartups": 3 }\n');
     const again = await landAgentFiles(machine, { home: root, tar: tar('{ "mcpServers": {} }\n'), lands, say: QUIET });
     expect(again.rows[0]!.outcome).toBe("present");
-    expect(again.rows[0]!.note).toBeUndefined();
+    expect(again.rows[0]!.note).toBe("already there before this run, so it stands as it was");
+    const md = again.rows.find(r => r.id === "files/.claude-cfg/CLAUDE.md");
+    expect([md?.outcome, md?.note], "a file that lands whole says nothing of the kind").toEqual(["present", undefined]);
     expect(read(root, ".claude-cfg/.claude.json")).toBe('{ "numStartups": 3 }\n');
     await closeAgentFiles(machine, root, oncePathsOf(lands));
     expect(readFileSync(at.landed, "utf8")).not.toContain(".claude.json");
