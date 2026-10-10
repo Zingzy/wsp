@@ -9,6 +9,7 @@
 // awake while a thread works on it. A row off its default carries the arrow
 // that puts it back.
 import { DEFAULT_PREFERENCES, NEW_THREAD_IN_CHOICES, NOTIFY_CHOICES, ON_QUIT_CHOICES, SETTLE_CHOICES, type EditorId, type NotifyChoice, type PreferencesPatch } from "@wsp/protocol";
+import { Button } from "../components/ui/button.js";
 import { SegmentedControl } from "../components/ui/segmented-control.js";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../components/ui/select.js";
 import { Switch } from "../components/ui/switch.js";
@@ -66,6 +67,7 @@ export function generalCards(ctx: SettingsContext): SettingsCardData[] {
   const sendKeys = W.sendKeys(isMacPlatform(ctx.platform));
   const loginStart = ctx.reads.loginStart;
   const turnLogin = (on: boolean): void => void desktopBridge()?.setLoginStart?.(on).then(next => useSettingsStore.getState().setReads({ loginStart: next }), ctx.failed);
+  const openLogs = desktopBridge()?.openLogs;
   return [
     {
       id: "composer",
@@ -165,5 +167,24 @@ export function generalCards(ctx: SettingsContext): SettingsCardData[] {
         ...(here === "" ? [] : [row("keep-awake", AWAKE_WORDS.keepAwake(here), AWAKE_WORDS.keepAwakeDescription, <Switch data-k="keep-awake" aria-label={AWAKE_WORDS.keepAwake(here)} checked={p.keepAwake} onCheckedChange={keepAwake => set({ keepAwake })} />, resetOf(ctx, "keepAwake"))]),
       ],
     },
+    // A shell from before the app kept a log has no folder to open, and a browser tab has no shell at all.
+    ...(openLogs === undefined
+      ? []
+      : [
+          {
+            id: "logs",
+            head: W.logs,
+            items: [
+              row(
+                "app-logs",
+                W.appLogs,
+                W.appLogsDescription,
+                <Button size="xs" variant="outline" data-k="open-logs" onClick={() => void openLogs().catch(ctx.failed)}>
+                  {W.openLogs}
+                </Button>,
+              ),
+            ],
+          },
+        ]),
   ];
 }

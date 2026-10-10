@@ -10,13 +10,20 @@ import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs
 import { dirname, join } from "node:path";
 import { redacted } from "@wsp/protocol";
 import type { GoldenExec } from "@wsp/runtime";
+import { blankTokens } from "./token-shapes.js";
 
 export const KEPT_RUNS = 5;
 const HEAD_LINES = 20;
 const TAIL_LINES = 20;
 const RUN_HEAD = /^\S+ run [0-9a-f]+ /;
+/** A name that says credential, anywhere in it. */
+export const SECRET_NAME = /KEY|TOKEN|SECRET|PASSWORD/i;
 /** A NAME=value whose name says credential, quoted or bare; the value goes. */
-const SECRET_ASSIGN = /\b([A-Za-z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD)[A-Za-z0-9_]*)=("[^"]*"|'[^']*'|\S+)/gi;
+const SECRET_ASSIGN = new RegExp(`\\b([A-Za-z0-9_]*(?:${SECRET_NAME.source})[A-Za-z0-9_]*)=("[^"]*"|'[^']*'|\\S+)`, "gi");
+/** The same name as a quoted JSON key, a bearer or basic header value, and a URL's login. */
+const SECRET_FIELD = new RegExp(`("[A-Za-z0-9_-]*(?:${SECRET_NAME.source})[A-Za-z0-9_-]*"\\s*:\\s*)"[^"]*"`, "gi");
+const AUTH_VALUE = /(\bBearer |[Aa]uthorization['"]?:\s*['"]?Basic )[^\s"',;]+/g;
+const URL_LOGIN = /(\b[a-z][a-z0-9+.-]*:\/\/)[^\s/@]+@/gi;
 
 export interface RunLog {
   readonly path: string;
@@ -35,7 +42,8 @@ export function runLogPath(statePath: string): string {
 }
 
 export function redact(text: string, hidden: readonly string[] = []): string {
-  return redacted(text.replace(SECRET_ASSIGN, "$1=<redacted>"), hidden);
+  const named = text.replace(SECRET_ASSIGN, "$1=<redacted>").replace(SECRET_FIELD, '$1"<redacted>"').replace(AUTH_VALUE, "$1<redacted>").replace(URL_LOGIN, "$1<redacted>@");
+  return blankTokens(redacted(named, hidden));
 }
 
 /** The first and last lines of a block with a count of what sits between; an empty block is no lines. */

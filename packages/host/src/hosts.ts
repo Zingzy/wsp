@@ -53,6 +53,11 @@ export function hostsDir(home: string): string {
   return join(home, "hosts");
 }
 
+/** Where the desktop app keeps its log and its crash dumps, which wsp doctor names. */
+export function appLogsDir(home: string): string {
+  return join(home, "logs");
+}
+
 /** An alias is one name, never a path: it becomes a file name under the hosts folder, so a word with a separator or
  * a dot-dot in it is refused before anything is written or read. The characters, the one an alias may open with
  * and the length live here alone, since the name a person types and the name an address is folded into are held to

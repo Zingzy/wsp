@@ -28,6 +28,15 @@ describe("redact", () => {
   it("blanks a hidden value wherever it appears, assignment or not", () => {
     expect(redact("Logged in with gho_fake; also gho_fake\n", ["gho_fake", ""])).toBe("Logged in with <redacted>; also <redacted>\n");
   });
+
+  it("blanks a value shaped like a token, a bearer or basic value, a URL's login and a credential-named JSON field, in any text", () => {
+    const key = `sk-ant-api03-${"x1".repeat(12)}`;
+    expect(redact(`Error: bad key ${key}`)).toBe("Error: bad key <redacted>");
+    expect(redact("Authorization: Bearer opaque.v-123 then authorization: 'Basic dXNlcjpwYXNz'")).toBe("Authorization: Bearer <redacted> then authorization: 'Basic <redacted>'");
+    expect(redact("git push https://me:hunter22@example.com/r and https://tok123@example.com/r")).toBe("git push https://<redacted>@example.com/r and https://<redacted>@example.com/r");
+    expect(redact(`{"apiKey": "plainvalue99", "name": "dev"}`)).toBe(`{"apiKey": "<redacted>", "name": "dev"}`);
+    expect(redact("http://127.0.0.1:32947/ ssh://host:22/x Basic setup")).toBe("http://127.0.0.1:32947/ ssh://host:22/x Basic setup");
+  });
 });
 
 describe("trimLines", () => {

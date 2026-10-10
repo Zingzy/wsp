@@ -17,3 +17,6 @@ const TOKEN_SHAPES: readonly RegExp[] = [
 ];
 
 export const tokenShaped = (text: string): boolean => TOKEN_SHAPES.some(shape => shape.test(text));
+
+/** Every run shaped like a token blanked, for a line a log keeps. */
+export const blankTokens = (text: string): string => TOKEN_SHAPES.reduce((out, shape) => out.replace(new RegExp(shape.source, "g"), "<redacted>"), text);
