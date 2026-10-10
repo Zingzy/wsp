@@ -108,7 +108,8 @@ describe("the download", () => {
     expect(refused.ok).toBe(false);
     expect(readdirSync(big.dir)).toEqual([]);
     const gone = deps({ fetch: github(undefined, BYTES, 404).fetch });
-    expect(await getBundle("0.3.0", gone)).toEqual({ ok: false, error: BUNDLE_WORDS.unreached("wsp-0.3.0-mac.dmg", "GitHub answered 404") });
+    // The page puts "wsp 0.3.0 was not downloaded:" ahead of the reason, so the reason says it no second time.
+    expect(await getBundle("0.3.0", gone)).toEqual({ ok: false, error: "GitHub answered 404" });
     expect(readdirSync(gone.dir)).toEqual([]);
   });
 
@@ -124,7 +125,7 @@ describe("the download", () => {
       return new Response(body);
     }) as unknown as typeof fetch;
     const d = deps({ fetch: stalls, stallMs: 50 });
-    expect(await getBundle("0.3.0", d)).toEqual({ ok: false, error: BUNDLE_WORDS.unreached("wsp-0.3.0-mac.dmg", "no bytes for 0.05 s") });
+    expect(await getBundle("0.3.0", d)).toEqual({ ok: false, error: "no bytes for 0.05 s" });
     expect(readdirSync(d.dir)).toEqual([]);
   });
 
