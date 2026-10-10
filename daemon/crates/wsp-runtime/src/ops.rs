@@ -662,12 +662,12 @@ impl Ops {
                 fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
             }
             bundle::mount_overlay(lower, &upper, &work, &merged).map_err(|e| e.to_string())?;
-            bundle::unmount(&merged).map_err(|e| e.to_string())
+            crate::mount_table::unmount(&merged).map_err(|e| e.to_string())
         })();
         let _ = fs::remove_dir_all(&check);
         overlay.map_err(|e| format!("this computer refuses an overlay mount of {}: {e}", lower.display()))?;
-        let cgroup = Path::new(cgroup::CGROUP_ROOT).join("wsp").join(format!("check-{}", std::process::id()));
-        fs::create_dir_all(&cgroup).map_err(|e| format!("this computer refuses a cgroup under {}/wsp: {e}", cgroup::CGROUP_ROOT))?;
+        let cgroup = layout.cgroup_dir(&format!("check-{}", std::process::id()));
+        fs::create_dir_all(&cgroup).map_err(|e| format!("this computer refuses a cgroup at {}: {e}", cgroup.display()))?;
         let _ = fs::remove_dir(&cgroup);
         net::check()
     }
@@ -1079,7 +1079,7 @@ impl Ops {
         self.stop_engine(&record.id).await;
         self.runtime.stop(&record.id, Some(&record.init)).await?;
         self.net.stop(&record.id).await?;
-        bundle::unmount_under(&self.layout.rootfs(&record.id))?;
+        crate::mount_table::unmount_under(&self.layout.rootfs(&record.id))?;
         // After the unmount, so what goes is the empty file on the computer's own disk and never a mount: a
         // workspace asleep is one nothing holds a login open for, and the wake makes its points again.
         take_off_points(&self.layout, &record.id, &points_of(&self.layout, &record.id)?)?;
@@ -1165,10 +1165,11 @@ impl Ops {
         }
         self.runtime.kill(id, init).await?;
         self.net.down(id).await?;
-        bundle::unmount_under(&self.layout.rootfs(id))?;
+        crate::mount_table::unmount_under(&self.layout.rootfs(id))?;
         // Every bind every life of this workspace staged for the engine, detached and gone with the containers
         // that mounted them.
         clear_binds(&self.layout.binds(id))?;
+        crate::mount_table::nothing_mounted_under(&[self.layout.workspace(id), self.layout.copy_of(id)])?;
         take_off_points(&self.layout, id, &points_of(&self.layout, id)?)?;
         // After the unmount, and the way it was made: a snapshot is a subvolume the kernel takes away, a copied
         // tree is a tree. The copy is the workspace's own, so it goes with it.
@@ -1505,11 +1506,10 @@ fn ready_binds(binds: &Path) -> Result<(), OpError> {
 
 /// Every bind the fence staged detached and the directory holding them gone.
 fn clear_binds(binds: &Path) -> Result<(), OpError> {
-    bundle::unmount_inside(binds).map_err(|e| OpError::plain(format!("{}: {e}", binds.display())))?;
+    crate::mount_table::unmount_under(binds).map_err(|e| OpError::plain(format!("{}: {e}", binds.display())))?;
     match fs::remove_dir_all(binds) {
-        Ok(()) => Ok(()),
-        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(OpError::plain(format!("{}: {e}", binds.display()))),
+        Err(e) if e.kind() != io::ErrorKind::NotFound => Err(OpError::plain(format!("{}: {e}", binds.display()))),
+        _ => Ok(()),
     }
 }
 
@@ -1586,7 +1586,7 @@ fn mark_stopped(layout: &Layout) -> Result<Vec<String>, OpError> {
         if runtime::alive(&record.init) {
             continue;
         }
-        bundle::unmount_under(&layout.rootfs(&record.id))?;
+        crate::mount_table::unmount_under(&layout.rootfs(&record.id))?;
         let state = layout.state_of(&record.id);
         if state.exists() {
             fs::remove_dir_all(&state).map_err(|e| OpError::plain(format!("{}: {e}", state.display())))?;
@@ -1618,7 +1618,7 @@ fn sweep_unfinished(layout: &Layout) -> Result<Unfinished, OpError> {
             // there with the copy bound into them, and a remove that walked in would delete the copy's files
             // through that bind and then answer EBUSY on the mount point itself, which refuses the open rather
             // than clearing it.
-            bundle::unmount_under(&layout.rootfs(&id))?;
+            crate::mount_table::unmount_under(&layout.rootfs(&id))?;
             // After the unmount and before the claim goes, since the claim's own file is the only thing naming
             // what that create put on the computer's own home and it goes with the directory below.
             take_off_points(layout, &id, &points_of(layout, &id)?)?;

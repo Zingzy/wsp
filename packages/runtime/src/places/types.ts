@@ -307,8 +307,11 @@ export interface PlaceLeaveRequest {
   ssh: PlaceLogin;
   /** The password the login's sudo took for this remove, held for it alone. */
   sudoPassword?: string;
-  /** The person forced the remove past work no remote has, which the leave there then takes too. */
+  /** The leave there takes what it takes without a read of its own: the host read it before anything went, or the
+   * person forced the remove past work no remote has. */
   force?: boolean;
+  /** The project folders under that computer's runtime projects folder the host's records name. */
+  projects?: readonly string[];
 }
 
 /** How the agent comes off a computer this host holds no link to: the leave that computer already carries, run
@@ -368,8 +371,9 @@ export type PlaceInstaller = (req: PlaceInstallRequest, stage: PlaceStaging) => 
 /** The one road into the runtime a place needs, handed in because it is the runtime's own: a place holds its forks
  * and the projects recorded on it, and a remove refuses to take the place out from under either. */
 export interface PlaceRecording {
-  /** The projects recorded on this place, which every workspace of them is a copy for. */
-  projectsOn(placeId: string): Promise<{ id: string; name: string }[]>;
+  /** The projects recorded on this place, which every workspace of them is a copy for, each with the checkout an older
+   * wsp cloned it into there, where it has one. */
+  projectsOn(placeId: string): Promise<{ id: string; name: string; checkout?: string }[]>;
   /** The forks standing on this place and the projects recorded on it, each with its threads, and the work among
    * them no remote has: a fork's checkout read fresh, a project's folder there read by its computer. With read false,
    * none of that work is read, for a computer whose link is down. */

@@ -1,8 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { execFileSync, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join as joinPath } from "node:path";
 import { connect as netConnect } from "node:net";
-import { describe, expect, it } from "vitest";
-import { workspaceStateOf, type ProjectView, type TurnResult } from "@wsp/protocol";
+import { describe, expect, it, onTestFinished } from "vitest";
+import { SEEDED_REFS, workspaceStateOf, type PlaceReport, type ProjectView, type TurnResult } from "@wsp/protocol";
 import { copyKey, createRuntime, wiredPlace, type CreatedWorkspace, type HarnessAdapterFactory, type PlaceBackends } from "../src/runtime.js";
 import type { MachineBackend } from "@wsp/engine";
 import { newPlaceKeyPair } from "../src/places.js";
@@ -292,27 +296,72 @@ describe("a fork on a computer you joined", () => {
     }
   };
 
+  /** A checkout whose only commit beyond its remote is on the branch an add's seed made, marked as the seed marks it,
+   * with the store wsp's own install put at its root. */
+  const seededCheckout = (): string => {
+    const root = mkdtempSync(joinPath(tmpdir(), "wsp-seeded-"));
+    onTestFinished(() => rmSync(root, { recursive: true, force: true }));
+    const checkout = joinPath(root, "checkout");
+    const git = (...args: string[]): string =>
+      execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "init.defaultBranch=main", "-C", checkout, ...args], { encoding: "utf8", env: { ...process.env, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null" } });
+    mkdirSync(checkout);
+    git("init", "-q");
+    writeFileSync(joinPath(checkout, "README.md"), "acme\n");
+    git("add", "-A");
+    git("commit", "-qm", "one");
+    execFileSync("git", ["clone", "-q", "--bare", checkout, joinPath(root, "origin.git")]);
+    git("remote", "add", "origin", joinPath(root, "origin.git"));
+    git("fetch", "-q", "origin");
+    git("checkout", "-qb", "experimental");
+    writeFileSync(joinPath(checkout, "two.md"), "two\n");
+    git("add", "-A");
+    git("commit", "-qm", "two");
+    git("update-ref", `${SEEDED_REFS}/experimental`, "HEAD");
+    git("checkout", "-q", "main");
+    mkdirSync(joinPath(checkout, ".pnpm-store", "v10"), { recursive: true });
+    writeFileSync(joinPath(checkout, ".pnpm-store", "v10", "index.json"), "{}\n");
+    return checkout;
+  };
+
+  /** A harness whose every turn ends at once, for a fork that needs a thread to be named by. */
+  const quietHarness: HarnessAdapterFactory = () => ({
+    steers: false,
+    start: ({ onEvent }) => {
+      const sessionId = randomUUID();
+      const result: TurnResult = { status: "completed", text: "ok" };
+      onEvent({ type: "session.start", sessionId });
+      onEvent({ type: "turn.done", sessionId, result });
+      onEvent({ type: "session.end", sessionId, exitCode: 0, sawResult: true });
+      return { localId: sessionId, finished: Promise.resolve(result), interrupt: async () => {} };
+    },
+  });
+
   /** What the unsaved read prints, and nothing for any other command. */
   const counted = (said: string) => (cmd: string) => ({ exitCode: 0, stdout: cmd.includes("rev-list") ? `${said}\n` : "", stderr: "" });
 
   /** A computer that forks, whose fork reads clean and whose project folder holds nothing a remote lacks unless a
    * case says otherwise, and that answers its own leave. */
-  const removable = async (): Promise<{ place: ForkingPlace; placeId: string; asked: string[]; client: { close(): void } }> => {
-    const { hostKey } = await serving();
+  const removable = async (
+    adapters?: Record<string, HarnessAdapterFactory>,
+    over: Partial<PlaceReport> = {},
+  ): Promise<{ place: ForkingPlace; placeId: string; asked: string[]; leaves: Record<string, unknown>[]; client: { close(): void } }> => {
+    const { hostKey } = await serving(adapters === undefined ? {} : { adapters });
     let place!: ForkingPlace;
-    const { client, placeId } = await join(hostKey, { code: await code(), name: "srv", answers: c => (place = forks(c, undefined, undefined, HOLDS_PROJECTS)) });
+    const { client, placeId } = await join(hostKey, { code: await code(), name: "srv", report: report("srv", over), answers: c => (place = forks(c, undefined, undefined, HOLDS_PROJECTS)) });
     sockets.push(client.ws);
     const asked: string[] = [];
+    const leaves: Record<string, unknown>[] = [];
     client.onFrame(raw => {
       const frame = raw as unknown as { id?: number; op?: string };
       if (frame.op !== "place.leave") return;
       asked.push("place.leave");
+      leaves.push(raw as unknown as Record<string, unknown>);
       client.say({ id: frame.id, ok: true, swept: ["/root/.wsp"] });
     });
     place.gitStatus = { branch: { oid: "abc1234", head: "work", ahead: 0, behind: 0 }, entries: [], root: "/srv/spoo-landing" };
     place.onComputer = counted("0 0 0");
     place.onMachine = counted("0 0 0");
-    return { place, placeId, asked, client };
+    return { place, placeId, asked, leaves, client };
   };
 
   /** A project recorded there before a project on a computer you joined was a folder in its login's home: the add
@@ -356,6 +405,56 @@ describe("a fork on a computer you joined", () => {
     const forced = await ctx.runtime!.places!.remove(placeId, { force: true });
     expect(forced.took).toEqual({ forks: [{ name: "x", threads: 0 }], projects: [{ name: "spoo-landing", threads: 0 }] });
     expect(asked).toEqual(["place.leave"]);
+  });
+
+  it("removes with no force a computer whose project folder holds nothing beyond its remote but wsp's own install store and the branch its add carried over", async () => {
+    const { place, placeId, asked } = await removable();
+    const made = await projectOn(ctx.runtime!, "srv", "https://github.com/wsp/spoo-landing.git", { name: "spoo-landing" });
+    Object.assign(await ctx.runtime!.projects.resolve(made.id), { checkout: seededCheckout() });
+    // The unsaved read alone runs for real, on the checkout here; every other line answers as a computer would.
+    place.onComputer = cmd => {
+      if (!cmd.includes("rev-list")) return { exitCode: 0, stdout: "", stderr: "" };
+      const ran = spawnSync("/bin/sh", ["-c", cmd], { encoding: "utf8" });
+      return { exitCode: ran.status ?? 1, stdout: ran.stdout, stderr: ran.stderr };
+    };
+    expect((await ctx.runtime!.places!.holds(placeId)).unsaved).toEqual([]);
+    expect((await ctx.runtime!.places!.remove(placeId)).removed).toBe(true);
+    expect(asked).toEqual(["place.leave"]);
+  });
+
+  it("names a fork by its thread's title, the name the sidebar shows, and says why its read did not run", async () => {
+    const { place, placeId } = await removable({ claude: quietHarness });
+    const fork = await oldFork({ golden: "snap_g", name: "x", on: "srv" });
+    await (await ctx.runtime!.sessions.start(fork.id, { prompt: "Fable waiting", harness: "claude" })).finished;
+    place.onMachine = () => ({ exitCode: 128, stdout: "", stderr: "fatal: not a git repository (or any of the parent directories): .git\n" });
+    expect((await ctx.runtime!.places!.holds(placeId)).unsaved).toEqual(["Fable waiting: could not read what is not pushed: fatal: not a git repository (or any of the parent directories): .git"]);
+  });
+
+  it("tells the leave the folder an older wsp cloned a project into by its name, and that the host read everything it takes", async () => {
+    const { placeId, leaves } = await removable(undefined, { takesRuntime: false });
+    const project = await oldProject();
+    await ctx.runtime!.places!.remove(placeId);
+    expect(leaves).toHaveLength(1);
+    expect(leaves[0]).toMatchObject({ force: true, projects: [project.id] });
+  });
+
+  it("reads the checkouts an older wsp left that no record names, where the leave takes the runtime folder whole, and refuses before anything goes", async () => {
+    const { place, placeId, asked, leaves } = await removable(undefined, { takesRuntime: true });
+    const project = await oldProject();
+    await oldFork({ golden: "snap_g", name: "x", on: "srv", project: project.id });
+    const before = [...place.killed];
+    place.onComputer = cmd => {
+      if (cmd.includes("/*/checkout")) return { exitCode: 0, stdout: `${project.checkout}\n/wsp/projects/pr_0ld/checkout\n`, stderr: "" };
+      return { exitCode: 0, stdout: cmd.includes("rev-list") ? (cmd.includes("pr_0ld") ? "1 0 0\n" : "0 0 0\n") : "", stderr: "" };
+    };
+    expect((await ctx.runtime!.places!.holds(placeId)).unsaved).toEqual(["/wsp/projects/pr_0ld/checkout holds 1 commit not pushed"]);
+    await expect(ctx.runtime!.places!.remove(placeId)).rejects.toThrow("/wsp/projects/pr_0ld/checkout holds 1 commit not pushed");
+    expect(place.killed).toEqual(before);
+    expect(asked).toEqual([]);
+    expect((await ctx.runtime!.projects.list()).map(p => p.name)).toContain("spoo-landing");
+    expect((await placesOf()).some(p => p.id === placeId)).toBe(true);
+    await ctx.runtime!.places!.remove(placeId, { force: true });
+    expect(leaves[0]).toMatchObject({ force: true, projects: [project.id] });
   });
 
   it("reads a fork whose checkout cannot be read as work that may be lost, since nothing says it is not", async () => {
@@ -442,7 +541,7 @@ describe("a fork on a computer you joined", () => {
     expect((await ctx.runtime!.places!.holds(placeId)).unsaved).toEqual([]);
     place.gitStatus = { branch: "not a status" };
     place.onMachine = () => ({ exitCode: 128, stdout: "", stderr: "fatal: not a git repository" });
-    expect((await ctx.runtime!.places!.holds(placeId)).unsaved).toEqual(["x: could not read what is not pushed"]);
+    expect((await ctx.runtime!.places!.holds(placeId)).unsaved).toEqual(["x: could not read what is not pushed: fatal: not a git repository"]);
   });
 });
 

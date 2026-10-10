@@ -39,8 +39,19 @@ pub const WORKSPACE_APPARMOR_PATH: &str = "/etc/apparmor.d/wsp-workspace";
 /// prefix whole, and nothing else of either; a prefix the add found standing keeps every entry it held then.
 pub const TOOL_PREFIX: &str = "/opt/wsp";
 /// Where the daemon of a computer somebody owns keeps everything its workspaces run on, which a leave run as root takes
-/// whole unless the add found it standing or something is still mounted under it.
+/// whole unless something is still mounted under it. Where the add found it standing, the leave takes only what wsp
+/// made there: its `RUNTIME_FOLDERS` and the project folders the host's records name under `RUNTIME_PROJECTS`.
 pub const RUNTIME_ROOT: &str = "/wsp";
+/// The folders of its own state the daemon makes under `RUNTIME_ROOT`, every one wsp's by its name.
+pub const RUNTIME_FOLDERS: [&str; 6] = ["check", "copies", "logins", "put", "run", "state"];
+/// The folder under `RUNTIME_ROOT` the project checkouts of an older wsp sit in, one folder per project id: a folder
+/// there no record names may be the person's own.
+pub const RUNTIME_PROJECTS: &str = "projects";
+/// Where cgroup v2 is mounted, and the two cgroups wsp makes under it: the workspaces' and the threads'. A leave run as
+/// root takes each once nothing stands in it.
+pub const CGROUP_MOUNT: &str = "/sys/fs/cgroup";
+pub const WORKSPACE_CGROUPS: &str = "/wsp";
+pub const THREAD_CGROUPS: &str = "/wsp-threads";
 /// The refs an add's seed leaves on a checkout at the tip of the commits it carried over from the person's own folder:
 /// those commits are on that person's computer, so an unsaved read counts none of them as work a remove would lose.
 pub const SEEDED_REFS: &str = "refs/wsp/seeded";

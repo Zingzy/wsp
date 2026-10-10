@@ -760,12 +760,16 @@ pub enum DaemonOp {
         stdin: Option<String>,
     },
     /// Takes wsp off this computer; refused before anything goes where a checkout under the runtime's folder holds work
-    /// no remote has, unless `force`.
+    /// no remote has, unless `force`. `projects` names the project folders under the runtime's folder the host's records
+    /// made, the only ones a leave over a runtime folder that stood before the add takes there.
     #[serde(rename = "place.leave")]
     PlaceLeave {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[ts(optional)]
         force: Option<bool>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        projects: Option<Vec<String>>,
     },
     /// A process inside this machine opens its session; the token is the thread's, read by the host alone.
     #[serde(rename = "guest.open", rename_all = "camelCase")]

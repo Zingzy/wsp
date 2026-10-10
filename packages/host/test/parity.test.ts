@@ -12,7 +12,7 @@ import { describe, expect, it } from "vitest";
 import { DEFAULT_AGENT } from "@wsp/catalog";
 import { ANOTHER_AGENT_WORDS, COORDINATOR_HANDOFF, DaemonRequest, EXIT_CODES, EXIT_WORDS, ExitClass, NOTIFY_CALLER, NOTIFY_WORDS, RUNTIME_OPS, RuntimeRequest, SessionStartOutcome, TURN_END_WORDS, effortsFor, markedDefault, stillWorkingLine, type WorkspaceView } from "@wsp/protocol";
 import { harnessCatalog } from "@wsp/runtime";
-import { agentPage, cli, COMMAND_LINES, commandPage, COMMANDS_FOR_HELP, HELP, HOST_FLAG, JSON_COMMANDS, PROSE_COMMANDS, SERVE_FLAGS, SHARED_FLAGS, type CliIO, type CommandLine } from "../src/cli.js";
+import { agentPage, cli, COMMAND_LINES, commandPage, COMMANDS_FOR_HELP, HELP, HOST_FLAG, JSON_COMMANDS, PROSE_COMMANDS, SERVE_FLAGS, SHARED_FLAGS, SHARED_OPTIONS, type CliIO, type CommandLine } from "../src/cli.js";
 
 /** One command's own help, as `wsp <words> --help` prints it. */
 const commandPageFor = (words: string): string => commandPage(words, COMMANDS_FOR_HELP[words]!);
@@ -533,6 +533,12 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
       for (const words of readers) expect(commandPageFor(words), `--${flag.name} in wsp ${words} --help`).toMatch(new RegExp(`--${flag.name}\\b`));
       expect(wspSkill(), `--${flag.name} in the skill`).toMatch(new RegExp(`--${flag.name}\\b`));
     }
+  });
+
+  it("every flag of the shared parse has a row naming the lines that read it, so every other line refuses it and the readers' help names it", () => {
+    // help, json and host are every line's, held to each command's own json and host above; a cloud flag with the cloud off is refused on every line.
+    const everyLine = (name: string): boolean => ["help", "json", "host"].includes(name) || (!CLOUD_ON && SERVE_FLAGS.some(f => f.name === name && f.cloud === true));
+    for (const name of Object.keys(SHARED_OPTIONS).filter(n => !everyLine(n))) expect(SHARED_FLAGS.some(f => f.name === name), `--${name} has a row`).toBe(true);
   });
 
   it("every flag a verb reads has a line of its own in that verb's help, and no line is written for a flag nobody reads", () => {

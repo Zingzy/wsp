@@ -223,7 +223,12 @@ pub(crate) async fn handle(conn: &Arc<Conn>, ctx: &Arc<Ctx>, raw: &str) -> Outgo
                 let runtime =
                     ctx.options.runtime_root.clone().unwrap_or_else(|| format!("{install}{}", wsp_frames::numbers::RUNTIME_ROOT).into());
                 let force = frame.get("force").and_then(Value::as_bool).unwrap_or(false);
-                let swept = fs::blocking(move || Ok(crate::place::leave_here(&home, &profile, &install, &runtime, force)))
+                let projects: Vec<String> = frame
+                    .get("projects")
+                    .and_then(Value::as_array)
+                    .map(|named| named.iter().filter_map(|n| n.as_str().map(str::to_owned)).collect())
+                    .unwrap_or_default();
+                let swept = fs::blocking(move || Ok(crate::place::leave_here(&home, &profile, &install, &runtime, force, &projects)))
                     .await
                     .unwrap_or_else(|_| Ok(Vec::new()));
                 return match swept {

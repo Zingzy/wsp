@@ -4,7 +4,7 @@
 // that command's own store sits so its hard links reach the checkout, and the
 // line that runs it with its output in wsp's own folder rather than inside the
 // project. The rows are the catalog's; this is how one of them is run.
-import { GUEST_HOME, seedInstallsFor, type SeedInstall } from "@wsp/catalog";
+import { GUEST_HOME, SEED_ROWS, seedInstallsFor, type SeedInstall } from "@wsp/catalog";
 import { shellQuote } from "@wsp/protocol";
 
 /** One install to run for a project: the catalog row that asked for it and the command as it will run. */
@@ -31,6 +31,10 @@ export const CHECK_MS = 5 * 60_000;
 export function projectInstalls(rootNames: readonly string[], projectDir: string): readonly ProjectInstall[] {
   return seedInstallsFor(rootNames).map(({ row, install }) => ({ row: row.id, command: commandOf(install, projectDir), ...(install.check !== undefined ? { check: install.check } : {}) }));
 }
+
+/** The store folders an install puts at the checkout's root, every one wsp's own: a read of what no remote holds leaves
+ * them out, since a remove that refused over one refused over nothing of the person's. */
+export const INSTALL_STORES: readonly string[] = SEED_ROWS.flatMap(row => (row.installs ?? []).flatMap(install => (install.store === undefined ? [] : [install.store.dir])));
 
 function commandOf(install: SeedInstall, projectDir: string): string {
   if (install.store === undefined) return install.run;

@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { randomBytes } from "node:crypto";
 import {
+  RUNTIME_PROJECTS,
+  RUNTIME_ROOT,
+  lastLine,
+  unpushedUnreadLine,
   HERE_PLACE_ID,
   NO_PLACE_INSTALLER,
   NO_RECIPE,
@@ -63,6 +67,7 @@ import {
 } from "@wsp/protocol";
 import { ownedFloorBytes, PlaceAbsentError, PlaceMachine, keyFingerprint } from "@wsp/engine";
 import { openPlaceForward } from "../place-forward.js";
+import { readUnsaved } from "../project-landing.js";
 import {
   CAPS, type PlaceLogin, type PlaceRecord, type PlaceStaging, type RecipeResolver, type PlaceDoor, NO_PLACE_UPDATER,
   placeUpdateSlowLine, placeSweptOverSshLine, placeLoginRoadLine, placeSweptOverLinkLine, placeElsewhereSweptOverLinkLine, PlaceLoginRefusedError, PlaceHostKeyChangedError,
@@ -79,6 +84,19 @@ import type { PlaceViewsArea } from "./views.js";
 
 /** How long a leave over the link gives the threads' cgroups there to end: each thread's processes get their grace. */
 const THREADS_END_MS = 60_000;
+
+/** Where an older wsp kept a project's checkout on a computer you joined, which a remove reads and its leave takes. */
+const RUNTIME_CHECKOUTS = `${RUNTIME_ROOT}/${RUNTIME_PROJECTS}`;
+
+/** Every project checkout under the runtime's folder, one per line. */
+const runtimeCheckoutsScript = (): string => `for d in ${shellQuote(RUNTIME_CHECKOUTS)}/*/checkout; do [ -d "$d" ] && printf '%s\\n' "$d"; done; true`;
+
+/** The project folder under the runtime's folder a recorded checkout sits in, by its one name, or nothing for a
+ * checkout anywhere else. */
+const runtimeProjectOf = (checkout: string | undefined): string | undefined => {
+  const name = checkout?.startsWith(`${RUNTIME_CHECKOUTS}/`) === true && checkout.endsWith("/checkout") ? checkout.slice(RUNTIME_CHECKOUTS.length + 1, -"/checkout".length) : undefined;
+  return name === undefined || name === "" || name.includes("/") ? undefined : name;
+};
 
 /** The door's half a person drives: add, dial, update, remove, set up, follow a recipe and list the places. */
 export function manageDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, setupArea: PlaceSetupArea, viewArea: PlaceViewsArea): Pick<PlaceDoor, "add" | "dial" | "road" | "exec" | "adds" | "reportOf" | "homeOf" | "list" | "rows" | "set" | "update" | "holds" | "remove" | "find" | "pending" | "choose" | "setUp" | "follow" | "recipeChanged" | "followers" | "skip" | "estimate" | "setupLog" | "unfollow" | "picksOf" | "on" | "close"> {
@@ -134,15 +152,31 @@ export function manageDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, 
   };
 
   /** What goes with a place, read over its link: refused first, naming the computer, where forks or projects stand on
-   * one that is not answering, since none of them can be read or deleted until it is back. */
-  const holdsOf = async (placeId: string, name: string): Promise<PlaceHolds> => {
+   * one that is not answering, since none of them can be read or deleted until it is back. A leave that takes the
+   * runtime's folder whole takes the checkouts an older wsp left there that no record names any more, so those are read
+   * here too, with the rest and before anything goes. */
+  const holdsOf = async (placeId: string, held: PlaceRecord): Promise<PlaceHolds> => {
     const answers = live.get(placeId)?.reach !== undefined;
     const holds = await recording.holdsOn(placeId, answers);
     if (!answers && (holds.forks.length > 0 || holds.projects.length > 0)) {
-      const refused = placeAwayRefusal(name, absentComputer(name, null).said);
+      const refused = placeAwayRefusal(held.name, absentComputer(held.name, null).said);
       throw usageRefusal(refused.said, refused.fix);
     }
+    if (answers && held.report.takesRuntime === true) holds.unsaved.push(...(await unrecordedUnsaved(placeId)));
     return holds;
+  };
+
+  const unrecordedUnsaved = async (placeId: string): Promise<string[]> => {
+    const run = (cmd: string, o: { timeoutMs: number }) => ctx.door.exec(placeId, cmd, o);
+    const recorded = new Set((await recording.projectsOn(placeId)).flatMap(p => (p.checkout === undefined ? [] : [p.checkout])));
+    const listed = await run(runtimeCheckoutsScript(), { timeoutMs: THREADS_END_MS }).catch((e: unknown) => ({ exitCode: -1, stdout: "", stderr: e instanceof Error ? e.message : String(e) }));
+    if (listed.exitCode !== 0) return [unpushedUnreadLine(RUNTIME_CHECKOUTS, lastLine(listed.stderr) ?? `the listing exited ${listed.exitCode}`)];
+    const unsaved: string[] = [];
+    for (const checkout of listed.stdout.split("\n").filter(line => line !== "" && !recorded.has(line))) {
+      const line = await readUnsaved(checkout, checkout, run);
+      if (line !== undefined) unsaved.push(line);
+    }
+    return unsaved;
   };
 
   return {
@@ -506,7 +540,7 @@ export function manageDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, 
 
     holds: async placeId => {
       const held = await recordOf(placeId);
-      return held === undefined ? { forks: [], projects: [], unsaved: [] } : holdsOf(placeId, held.name);
+      return held === undefined ? { forks: [], projects: [], unsaved: [] } : holdsOf(placeId, held);
     },
 
     async remove(placeId, ask = {}) {
@@ -514,7 +548,9 @@ export function manageDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, 
       if (held === undefined) return { removed: false, swept: [] };
       // Read before anything goes: a fork's commits and a project folder's are on that computer alone until they are
       // pushed, and the remove takes that computer's copies with it.
-      const holds = await holdsOf(placeId, held.name);
+      // holdsOf reads over the link only where it stands at this tick, and the leave below is forced only past that read.
+      const read = live.get(placeId)?.reach !== undefined;
+      const holds = await holdsOf(placeId, held);
       if (holds.unsaved.length > 0 && ask.force !== true) {
         const refused = placeUnsavedRefusal(held.name, holds.unsaved);
         throw usageRefusal(refused.said, refused.fix);
@@ -542,6 +578,12 @@ export function manageDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, 
       const stands = reached !== undefined && "stands" in reached;
       const elsewhere = reached !== undefined && "elsewhere" in reached ? reached : undefined;
       const away = elsewhere === undefined ? undefined : placeLoginElsewhere(login!.ssh, held.name, elsewhere.other);
+      // Named while the records stand: the leave takes the project folders an older wsp cloned under the runtime's
+      // folder by these names, and nothing else there. Once the host could read over the link and the computer says
+      // whether its leave takes the runtime's folder whole, the host read all the leave takes before anything went,
+      // so the leave reads nothing of its own and can refuse nothing after the forks and the records are gone.
+      const projects = (await recording.projectsOn(placeId)).flatMap(p => runtimeProjectOf(p.checkout) ?? []);
+      const force = ask.force === true || (read && held.report.takesRuntime !== undefined);
       // The forks and the projects go first, each by its own road, over the link and the login the sweep then takes.
       const went = await recording.dropOn(placeId);
       // Before either road sweeps: a plugin comes off by its agent's own command, which may sit in the install folder
@@ -563,7 +605,7 @@ export function manageDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, 
           loginRoad = { at: login.ssh };
         } else {
           try {
-            swept = [...(await leaver({ placeId, name: held.name, report: held.report, ssh: login, ...(sudoPassword === undefined ? {} : { sudoPassword }), ...(ask.force === true ? { force: true } : {}) }))];
+            swept = [...(await leaver({ placeId, name: held.name, report: held.report, ssh: login, ...(sudoPassword === undefined ? {} : { sudoPassword }), ...(force ? { force: true } : {}), projects }))];
             note = placeSweptOverSshLine(held.name);
           } catch (e) {
             // Two different things, and the line a person reads says which: the login would not stand, or that
@@ -585,7 +627,7 @@ export function manageDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, 
             const took = await unmergedOver(placeId, held);
             // A thread's turns stand in cgroups of their own, outside the unit the leave stops, so they go first.
             const ended = await ctx.door.exec(placeId, threadCgroupsEndScript(), { timeoutMs: THREADS_END_MS }).catch(() => undefined);
-            const answer = await reach.request("place.leave", ask.force === true ? { force: true } : {});
+            const answer = await reach.request("place.leave", { ...(force ? { force: true } : {}), projects });
             swept = [...took, ...(ended?.stdout.split("\n").filter(line => line !== "") ?? []), ...(Array.isArray(answer["swept"]) ? (answer["swept"] as unknown[]).map(String) : [])];
             if (loginRoad !== undefined && away === undefined) note = placeSweptOverLinkLine(held.name, loginRoad.at, loginRoad.said);
           } catch (e) {

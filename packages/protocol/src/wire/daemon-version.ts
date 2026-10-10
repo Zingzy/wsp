@@ -637,6 +637,13 @@ export const LEAVE_ASKS_DAEMON_VERSION = 141;
  * with and never its daemon's: an update moves the daemon alone. A wsp that said none runs an older leave. */
 export const leaveAsks = (report: { wspDaemonVersion?: number }): boolean => (report.wspDaemonVersion ?? 0) >= LEAVE_ASKS_DAEMON_VERSION;
 
+/** The first build whose `wsp leave` takes `--takes`, the project folders under the runtime's folder the host's records
+ * name, read off the version that computer's own wsp says it was built with, as `leaveAsks` reads it. */
+export const LEAVE_TAKES_DAEMON_VERSION = DAEMON_VERSION;
+
+/** Whether the `wsp leave` a computer runs takes `--takes`. */
+export const leaveTakes = (report: { wspDaemonVersion?: number }): boolean => (report.wspDaemonVersion ?? 0) >= LEAVE_TAKES_DAEMON_VERSION;
+
 /** The line that moves a place onto this wsp's daemon, which is the fix half of every sentence about a place that
  * is behind. */
 export const placeUpdateLine = (name: string): string => `wsp add ${name} --update`;

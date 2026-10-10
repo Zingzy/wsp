@@ -1,0 +1,1 @@
+A workspace's stop and remove take its child cgroups and every stacked set of mounts, a boot clears a set a failed stop left, a remove deletes nothing while anything is mounted under it, place.leave takes the project folders the host names, a leave over a /wsp that stood before the add takes only wsp's own folders there, and wsp's empty cgroups go
