@@ -1,3 +1,49 @@
+/* The app's Tungsten theme (apps/web/src/themes/tungsten.css): warm soot with ivory ink. The class is doubled to win over
+ * Scalar's own .dark-mode, whatever order the two sheets load in. */
+.dark-mode.dark-mode {
+  --scalar-background-1: #121110;
+  --scalar-background-2: #1a1816;
+  --scalar-background-3: #211f1c;
+  --scalar-background-accent: rgb(236 230 220 / 8%);
+  --scalar-color-1: #ece6dc;
+  --scalar-color-2: #9c9288;
+  --scalar-color-3: #7d746b;
+  --scalar-color-accent: #ece6dc;
+  --scalar-border-color: #2a2623;
+
+  --scalar-color-green: #8fbf87;
+  --scalar-color-red: #e57368;
+  --scalar-color-orange: #e2a558;
+  --scalar-color-yellow: #e2a558;
+  --scalar-color-blue: #86b0e7;
+  --scalar-color-purple: #c4b5fd;
+
+  --scalar-button-1: #ece6dc;
+  --scalar-button-1-color: #141210;
+  --scalar-button-1-hover: #f6f1ea;
+
+  --scalar-header-background-1: #0f0e0d;
+  --scalar-header-border-color: #2a2623;
+  --scalar-header-color-1: #ece6dc;
+  --scalar-header-color-2: #a89d92;
+  --scalar-header-item-hover-background: rgb(236 230 220 / 4%);
+
+  --scalar-sidebar-background-1: #0f0e0d;
+  --scalar-sidebar-color-1: #ece6dc;
+  --scalar-sidebar-color-2: #a89d92;
+  --scalar-sidebar-color-active: #ece6dc;
+  --scalar-sidebar-border-color: #2a2623;
+  --scalar-sidebar-item-hover-background: rgb(236 230 220 / 4%);
+  --scalar-sidebar-item-hover-color: #ece6dc;
+  --scalar-sidebar-item-active-background: rgb(236 230 220 / 11%);
+  --scalar-sidebar-indent-border: #2a2623;
+  --scalar-sidebar-indent-border-hover: #373129;
+  --scalar-sidebar-indent-border-active: #ece6dc;
+  --scalar-sidebar-search-background: #121110;
+  --scalar-sidebar-search-border-color: #373129;
+  --scalar-sidebar-search-color: #a89d92;
+}
+
 /* Scalar's copy button carries the block's language word and sits over the first line. */
 .t-editor__code {
   padding-top: 2.25rem;
