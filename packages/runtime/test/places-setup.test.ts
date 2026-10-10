@@ -5,7 +5,7 @@
 // stops in the middle of any of it. The engine's steps are a fake here; what
 // is under test is the order, the state on the record and what resumes.
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -107,7 +107,7 @@ type Checkouts = { created?: Promise<void>; answers?: () => boolean };
 
 /** What the computer answers on its link: what it forks with, the machine an add clones in, and every command as
  * its daemon's exec would. */
-function answersFor(cmds: string[], answer?: (cmd: string) => { exitCode: number; stdout?: string } | undefined, checkouts?: Checkouts, logins?: string) {
+function answersFor(cmds: string[], answer?: (cmd: string, input: string) => { exitCode: number; stdout?: string } | undefined, checkouts?: Checkouts, logins?: string) {
   return (c: WsClient): void => {
     let killed = false;
     c.onFrame(async raw => {
@@ -144,7 +144,7 @@ function answersFor(cmds: string[], answer?: (cmd: string) => { exitCode: number
       cmds.push(cmd);
       // gh's own status off the token the run read on its input, as gh prints it.
       const input = typeof frame["stdin"] === "string" ? Buffer.from(frame["stdin"], "base64").toString("utf8") : "";
-      const said = answer?.(cmd);
+      const said = answer?.(cmd, input);
       if (said !== undefined) return void c.say({ id: frame["id"], ok: true, exitCode: said.exitCode, stdout: said.stdout ?? "", stderr: "", truncated: false });
       // An add's claim of a folder in the login's home takes the name it asks for, and its clone waits where the
       // test holds the checkout.
@@ -284,7 +284,7 @@ function signIns(o: { status?: boolean } = {}) {
 }
 
 /** A host with the setup wired, serving, and the road an add takes onto a computer that joins over the link. */
-async function hosting(o: { provision: PlaceProvisioner; checkouts?: Checkouts; seed?: SeedWiring; recipes?: RecipeShelf; store?: Store; cmds?: string[]; answer?: (cmd: string) => { exitCode: number; stdout?: string } | undefined; local?: boolean; acts?: AgentsActs; vault?: Record<string, string>; report?: PlaceReport; install?: PlaceWiring["install"]; undo?: PlaceWiring["undo"]; leave?: PlaceWiring["leave"]; runOver?: PlaceWiring["runOver"]; hostKey?: PlaceKeyPair; clock?: Clock; update?: PlaceUpdater; adapters?: Record<string, HarnessAdapterFactory>; logins?: string }): Promise<{ hostKey: PlaceKeyPair; store: Store; frames: PlaceSetupEvent[]; joined: { placeId: string; pair: PlaceKeyPair }[] }> {
+async function hosting(o: { provision: PlaceProvisioner; checkouts?: Checkouts; seed?: SeedWiring; recipes?: RecipeShelf; store?: Store; cmds?: string[]; answer?: (cmd: string, input: string) => { exitCode: number; stdout?: string } | undefined; local?: boolean | LocalWiring; acts?: AgentsActs; vault?: Record<string, string>; report?: PlaceReport; install?: PlaceWiring["install"]; undo?: PlaceWiring["undo"]; leave?: PlaceWiring["leave"]; runOver?: PlaceWiring["runOver"]; hostKey?: PlaceKeyPair; clock?: Clock; update?: PlaceUpdater; adapters?: Record<string, HarnessAdapterFactory>; logins?: string }): Promise<{ hostKey: PlaceKeyPair; store: Store; frames: PlaceSetupEvent[]; joined: { placeId: string; pair: PlaceKeyPair }[] }> {
   const hostKey = o.hostKey ?? newPlaceKeyPair();
   const joined: { placeId: string; pair: PlaceKeyPair }[] = [];
   const store = o.store ?? memoryStore();
@@ -296,7 +296,7 @@ async function hosting(o: { provision: PlaceProvisioner; checkouts?: Checkouts; 
     ...(o.seed !== undefined ? { seed: o.seed } : {}),
     ...(o.clock !== undefined ? { clock: o.clock } : {}),
     ...(o.acts !== undefined ? { agentsActs: o.acts } : {}),
-    ...(o.local === true ? { local: localWiring() } : {}),
+    ...(o.local === true ? { local: localWiring() } : typeof o.local === "object" ? { local: o.local } : {}),
     ...(o.recipes !== undefined ? { recipes: o.recipes } : {}),
     vault: () => o.vault ?? { CLAUDE_CODE_OAUTH_TOKEN: "sk-ant-oat01-x" },
     placeLinks: {
@@ -344,13 +344,12 @@ async function stopHost(): Promise<void> {
 }
 
 /** This computer as a host reads it, so a folder's own remote is read off git here. */
-function localWiring(): LocalWiring {
-  const root = mkdtempSync(join(tmpdir(), "wsp-setup-local-"));
+function localWiring(root = mkdtempSync(join(tmpdir(), "wsp-setup-local-")), home: (agentId: string) => string = () => join(root, ".claude")): LocalWiring {
   repos.push(root);
   return {
     backend: new LocalBackend({ root }),
     execStream: o => localExecStream({ root, runDir: join(root, "runs"), ...o }),
-    home: () => join(root, ".claude"),
+    home,
     homeDir: root,
     rootsPath: join(root, "roots"),
     env: () => ({ PATH: process.env["PATH"] ?? "/usr/bin:/bin" }),
@@ -1535,6 +1534,97 @@ describe("what a computer can be set up from", () => {
       ["claude", []],
       ["codex", ["machine"]],
     ]);
+  });
+
+  it("offers Codex's sign-in to copy where this computer holds its login, with no key in the vault, and not where that file is empty", async () => {
+    const r = shelf(LAPTOP, {});
+    const options: RecipeOptions = { agents: [{ id: "codex", name: "Codex", signins: ["vault", "machine"] }], mcp: [], clis: [], skills: [], plugins: [], configs: [] };
+    const { local, auth } = codexHere(CODEX_AUTH);
+    await hosting({ provision: provisioner().wired, local, recipes: { ...r.recipes, options: async () => options }, vault: {} });
+    expect((await runtime!.recipes!.options()).agents.map(a => [a.id, a.signins])).toEqual([["codex", ["vault", "machine"]]]);
+    writeFileSync(auth, "");
+    expect((await runtime!.recipes!.options()).agents.map(a => [a.id, a.signins])).toEqual([["codex", ["machine"]]]);
+  });
+});
+
+/** Codex's login as this computer holds it, the way a ChatGPT sign-in writes it. */
+const CODEX_AUTH = `{"auth_mode":"chatgpt","tokens":{"refresh_token":"rt_TESTONLY"}}\n`;
+
+/** This computer with Codex's login in its own folder, each agent's home being its catalog folder under one root. */
+function codexHere(text: string): { local: LocalWiring; auth: string } {
+  const root = mkdtempSync(join(tmpdir(), "wsp-setup-codex-"));
+  mkdirSync(join(root, ".codex"));
+  writeFileSync(join(root, ".codex", "auth.json"), text);
+  return { local: localWiring(root, id => join(root, `.${id}`)), auth: join(root, ".codex", "auth.json") };
+}
+
+describe("an agent's sign-in copied from this computer", () => {
+  it("puts Codex's login from this computer in the box's logins folder on the run's input alone, and reads it signed in with no code", async () => {
+    const s = signIns();
+    const cmds: string[] = [];
+    let landed: string | undefined;
+    const answer = (cmd: string, input: string): { exitCode: number; stdout?: string } | undefined => {
+      if (cmd.startsWith("uname -s;")) return { exitCode: 0, stdout: ["Linux", "0", "root", "root", "1", "/root", "/usr/bin", ""].join("\n") };
+      if (cmd.includes("codex login status")) return landed === undefined ? { exitCode: 1, stdout: "Not logged in\n" } : { exitCode: 0, stdout: "Logged in using ChatGPT\n" };
+      if (cmd.includes("/var/lib/wsp/logins/codex/auth.json")) landed = input;
+      return undefined;
+    };
+    const { frames } = await hosting({
+      provision: provisioner().wired,
+      acts: s.acts,
+      cmds,
+      answer,
+      local: codexHere(CODEX_AUTH).local,
+      logins: "/var/lib/wsp/logins",
+      vault: { CLAUDE_CODE_OAUTH_TOKEN: "sk-ant-oat01-x" },
+      report: report("spoo", { daemonVersion: DAEMON_VERSION, agents: ["claude", "codex"], logins: [], login: { HOME: "/root", USER: "root", PATH: "/usr/bin" } }),
+    });
+    const picks = RecipeFile.parse({ name: "laptop", agents: { claude: { signin: "vault" }, codex: { signin: "vault" } } });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: picks }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    expect(s.started).toEqual([]);
+    expect(landed).toBe(CODEX_AUTH);
+    expect(cmds.some(c => c.includes("rt_TESTONLY"))).toBe(false);
+    const row = await rowOf(place.id);
+    expect(row.setup?.waiting).toEqual([]);
+    expect(row.applied?.rows.find(r => r.id === "signins/codex")).toMatchObject({ outcome: "installed", note: expect.stringMatching(/^copied from /), step: "signins" });
+    expect(ended(frames).map(f => f.end)).toEqual(["ready"]);
+  });
+
+  it("leaves a login Codex already has on the box as it is, and copies nothing over it", async () => {
+    const cmds: string[] = [];
+    await hosting({
+      provision: provisioner().wired,
+      acts: signIns().acts,
+      cmds,
+      answer: codexIn,
+      local: codexHere(CODEX_AUTH).local,
+      logins: "/var/lib/wsp/logins",
+      report: report("spoo", { daemonVersion: DAEMON_VERSION, agents: ["claude", "codex"], logins: [], login: { HOME: "/root", USER: "root", PATH: "/usr/bin" } }),
+    });
+    const picks = RecipeFile.parse({ name: "laptop", agents: { claude: { signin: "vault" }, codex: { signin: "vault" } } });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: picks }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    expect(cmds.some(c => c.includes("auth.json"))).toBe(false);
+    expect((await rowOf(place.id)).applied?.rows.find(r => r.id === "signins/codex")).toMatchObject({ outcome: "present", note: SIGNED_IN_THERE });
+  });
+
+  it("copies nothing where Codex did not install there, since its status cannot read the login that computer may hold", async () => {
+    const cmds: string[] = [];
+    await hosting({
+      provision: provisioner({ rows: { agents: [{ id: "agents/codex", label: "Codex", outcome: "failed", note: "npm ERR! 404" }] } }).wired,
+      acts: signIns().acts,
+      cmds,
+      answer: cmd => (cmd.includes("codex login status") ? { exitCode: 127, stdout: "bash: line 2: codex: command not found\n" } : undefined),
+      local: codexHere(CODEX_AUTH).local,
+      logins: "/var/lib/wsp/logins",
+      report: report("spoo", { daemonVersion: DAEMON_VERSION, agents: ["claude", "codex"], logins: [], login: { HOME: "/root", USER: "root", PATH: "/usr/bin" } }),
+    });
+    const picks = RecipeFile.parse({ name: "laptop", agents: { claude: { signin: "vault" }, codex: { signin: "vault" } } });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: picks }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.state !== "running");
+    expect(cmds.filter(c => c.includes("auth.json"))).toEqual([]);
+    expect((await rowOf(place.id)).applied?.rows.find(r => r.id === "signins/codex")).toMatchObject({ outcome: "skipped", note: waitsForInstallLine("Codex") });
   });
 });
 

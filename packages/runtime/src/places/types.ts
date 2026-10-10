@@ -388,6 +388,8 @@ export interface PlaceRecording {
   /** The folder each agent's threads on that computer keep their config in, by agent id, which the servers step
    * merges into and the remove takes wsp's servers back out of. Absent, the catalog's files under the home. */
   storesOn?(placeId: string, home: string): Readonly<Record<string, string>>;
+  /** The login an agent shares into every thread, as this computer holds it, which a sign-in to copy puts there. */
+  loginHere?(agent: string): Promise<Buffer | undefined>;
   /** Records one folder of this computer's as a project on that computer, seeded with what its pick keeps, by the
    * add's own road. With a move, under that project's id, the project standing there taken off first by the
    * remove's own road once the seed is read. Each line it says on the way goes to `stage`. Answers the folder's row.

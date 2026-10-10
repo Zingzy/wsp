@@ -161,6 +161,8 @@ export const waitsForInstallLine = (name: string): string => `waits for ${name} 
 export const NO_SIGN_IN_ROAD = "this host cannot run a sign-in on that computer; sign in from its page in Settings";
 export const NO_FOLDER_ROAD = "this host cannot move a folder to that computer; add the project from its page in Settings";
 export const noCopyLine = (name: string, here: string): string => `${here} has no ${name} sign-in to copy`;
+/** A sign-in copied from this computer that the agent there still reads as signed out: the login ran out here too. */
+export const copiedNotSignedInLine = (name: string, here: string): string => `${name} still reads signed out there with the sign-in copied from ${here}`;
 /** What to do about a sign-in that had nothing to copy: sign it in on the computer itself where it has a login
  * there, else hand it the token or key it takes. */
 export const signInThereFix = (computer: string): string => `Sign in on ${computer} instead.`;

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { createHash, createPublicKey } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { createServer, type Server, type Socket } from "node:net";
+import { join } from "node:path";
 import {
   LOOPBACK,
   isPlainPath,
@@ -149,12 +151,22 @@ export function vaultSignIn(agentId: string, vault: Readonly<Record<string, stri
   return token !== undefined || (keyEnv !== undefined && vault[keyEnv] !== undefined) ? "vault-key" : "none";
 }
 
-/** The picks a computer can be set up from, as this host can serve them: an agent's sign-in copied from the vault is
- * offered only where the vault holds its token or key, since a setup that picks it with none fails at that row. */
-export const servableOptions = (options: RecipeOptions, vault: Readonly<Record<string, string>>): RecipeOptions => ({
+/** The picks a computer can be set up from, as this host can serve them: an agent's sign-in to copy is offered only
+ * where the vault holds its token or key or this computer holds its login (`held`), since a setup that picks it with
+ * neither fails at that row. */
+export const servableOptions = (options: RecipeOptions, vault: Readonly<Record<string, string>>, held: ReadonlySet<string> = new Set()): RecipeOptions => ({
   ...options,
-  agents: options.agents.map(a => (a.signins.includes("vault") && vaultSignIn(a.id, vault) !== "vault-key" ? { ...a, signins: a.signins.filter(w => w !== "vault") } : a)),
+  agents: options.agents.map(a => (a.signins.includes("vault") && vaultSignIn(a.id, vault) !== "vault-key" && !held.has(a.id) ? { ...a, signins: a.signins.filter(w => w !== "vault") } : a)),
 });
+
+/** The login an agent shares into every thread, as this computer holds it in that agent's folder (`homes`, as
+ * `agents.homesHere` answers): nothing for an agent whose login is no shared file, or where the file is missing or empty. */
+export async function loginHere(homes: () => Promise<Readonly<Record<string, string>>>, agentId: string): Promise<Buffer | undefined> {
+  const shared = sharedOn(agentId);
+  const home = shared === undefined ? undefined : (await homes().catch(() => undefined))?.[agentId];
+  const held = home === undefined || shared === undefined ? undefined : await readFile(join(home, shared.file)).catch(() => undefined);
+  return held === undefined || held.length === 0 ? undefined : held;
+}
 
 /** How long between writes of a linked place's last seen. */
 export const SEEN_EVERY_MS = 60_000;
