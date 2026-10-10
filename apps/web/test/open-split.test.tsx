@@ -82,6 +82,33 @@ describe("the Open split button", () => {
     expect(openInEditor).toHaveBeenCalledWith(WS, "/root");
   });
 
+  it("shows the open in flight from the click to the host's answer, and a second press meanwhile opens nothing more", async () => {
+    const { openInEditor } = setUp({ editor: "zed" });
+    let answer: () => void = () => {};
+    openInEditor.mockImplementationOnce(() => new Promise<"zed">(resolve => (answer = () => resolve("zed"))));
+    render(<OpenSplit workspaceId={WS} />);
+    const main = await screen.findByRole("button", { name: OPEN_WORDS.openIn("Zed") });
+    await act(async () => void fireEvent.click(main));
+    expect(main.getAttribute("aria-busy")).toBe("true");
+    expect(main.querySelector("svg.animate-spin")).not.toBeNull();
+    expect(main.querySelector("[data-editor-mark]")).toBeNull();
+    await act(async () => void fireEvent.click(main));
+    await act(async () => runShellCommand("editor.open", { workspaceId: WS, toggleSidebar: () => {} }, []));
+    expect(openInEditor).toHaveBeenCalledTimes(1);
+    await act(async () => answer());
+    expect(main.hasAttribute("aria-busy")).toBe(false);
+    expect(main.querySelector("[data-editor-mark=zed]")).not.toBeNull();
+  });
+
+  it("ends the in flight state at a refusal, which the person reads", async () => {
+    setUp({ editor: "zed", refuse: "Zed did not open: it exited with code 1" });
+    render(<OpenSplit workspaceId={WS} />);
+    const main = await screen.findByRole("button", { name: OPEN_WORDS.openIn("Zed") });
+    await act(async () => void fireEvent.click(main));
+    await waitFor(() => expect(useNotices.getState().notices.map(n => n.text)).toEqual(["Zed did not open: it exited with code 1"]));
+    expect(main.hasAttribute("aria-busy")).toBe(false);
+  });
+
   it("with no pick takes the first editor the host found, as the host does", async () => {
     setUp();
     render(<OpenSplit workspaceId={WS} />);
