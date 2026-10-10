@@ -640,6 +640,15 @@ function runtimeCore(ctx: RuntimeContext, opts: RuntimeOptions): RuntimeCore {
           for (const project of projects) await each(project.name, () => ctx.projectsDoor.remove(project.id, undefined, { force: true }));
           return rows;
         },
+        forgetOn: async placeId => {
+          const { forks, folders, projects, rows } = await standingOn(placeId);
+          for (const entry of [...forks, ...folders]) {
+            ctx.endSessions(entry.record.id, DELETED_REASON);
+            await ctx.drop(entry.record.id);
+          }
+          for (const project of projects) await forgetProject(project.id);
+          return rows;
+        },
         runningOn: async (placeId, rows) => {
           await ctx.ready();
           const standing = [...live.values()].map(e => ({ ...e.record, provider: ctx.providerOf(e.record) }));
@@ -692,9 +701,7 @@ function runtimeCore(ctx: RuntimeContext, opts: RuntimeOptions): RuntimeCore {
           if (project === undefined) return;
           const standing = [...live.values()].filter(e => e.record.project === project.id).map(e => e.record.name);
           if (standing.length > 0) throw new Error(projectInUseRefusal(project.name, standing));
-          projectsHeld.delete(project.id);
-          await store.delete(PROJECTS, project.id);
-          bus.emit({ type: "project.removed", projectId: project.id });
+          await forgetProject(project.id);
         },
         folderLook,
       },
@@ -860,6 +867,12 @@ function runtimeCore(ctx: RuntimeContext, opts: RuntimeOptions): RuntimeCore {
       projects,
       rows: { forks: forks.map(e => ({ name: forkName(e), threads: threadsOf(e.record.id) })), projects: projects.map(p => ({ name: p.name, threads: threadsOfProject(p.id) })) },
     };
+  };
+  /** A project's record out of this wsp, with nothing done on its computer. */
+  const forgetProject = async (projectId: string): Promise<void> => {
+    projectsHeld.delete(projectId);
+    await store.delete(PROJECTS, projectId);
+    bus.emit({ type: "project.removed", projectId });
   };
   /** A fork as a remove names it: by its one thread's title, which is what the sidebar shows, else by its own name. */
   const forkName = (entry: LiveWorkspace): string => {
