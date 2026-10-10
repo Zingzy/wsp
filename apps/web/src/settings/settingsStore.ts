@@ -93,6 +93,10 @@ export interface SettingsState {
   readonly addAsked: { readonly road: AddRoad | null; readonly n: number } | null;
   /** The Usage page's tab, kept while the window is open so coming back finds the same one. */
   readonly usageTab: UsageTab;
+  /** Each ask to read usage and limits again, from the head's refresh, the minute's tick or the window's focus. */
+  readonly usageAsked: number;
+  /** When the page's two answers were read, the older of them, and whether a read is out, for the head to say. */
+  readonly usageRead: { readonly at: number | null; readonly reading: boolean };
   /** The Agents page's tab and the computer it reads, kept while the window is open. Null reads the one wsp runs on. */
   readonly agentsTab: AgentsTab;
   readonly agentsPlace: string | null;
@@ -110,6 +114,8 @@ export interface SettingsState {
   askRecipe(placeId: string | null): void;
   askAdd(road: AddRoad | null): void;
   pickUsageTab(tab: UsageTab): void;
+  askUsage(): void;
+  setUsageRead(read: { at: number | null; reading: boolean }): void;
   pickAgentsTab(tab: AgentsTab): void;
   pickAgentsPlace(placeId: string | null): void;
   openAgentsLevel(level: AgentsLevel | null): void;
@@ -135,6 +141,8 @@ export const useSettingsStore = create<SettingsState>(set => ({
   recipeAsked: null,
   addAsked: null,
   usageTab: "used",
+  usageAsked: 0,
+  usageRead: { at: null, reading: false },
   agentsTab: "agents",
   agentsPlace: null,
   agentsLevel: null,
@@ -148,6 +156,12 @@ export const useSettingsStore = create<SettingsState>(set => ({
   },
   pickUsageTab(usageTab) {
     set({ usageTab });
+  },
+  askUsage() {
+    set(s => ({ usageAsked: s.usageAsked + 1 }));
+  },
+  setUsageRead(usageRead) {
+    set({ usageRead });
   },
   pickAgentsTab(agentsTab) {
     set({ agentsTab, agentsLevel: null });

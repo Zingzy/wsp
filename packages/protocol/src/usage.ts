@@ -87,6 +87,8 @@ export const USAGE_WORDS = {
   wspThreads: "wsp threads",
   /** The source row of the work the agents' own logs on the computers hold that no wsp thread ran. */
   outsideWsp: "Outside wsp",
+  /** A computer the records name that was removed before its name was kept. */
+  removedComputer: "a removed computer",
 } as const;
 
 /** Why an account row carries no windows: its agent reports none, it signs in with a key, or no turn has run on it. */
@@ -172,6 +174,10 @@ export const USAGE_SPLITS = ["agent", "account", "computer", "project", "model",
 export const UsageSplit = z.enum(USAGE_SPLITS);
 export type UsageSplit = z.infer<typeof UsageSplit>;
 
+/** The read of what was used that the Usage page, wsp usage and its tool all send, so every split counts the same:
+ * wsp's threads and the work the agents logged outside wsp, where the person has not turned that reading off. */
+export const usedAsk = (range: UsageRange, split: UsageSplit): { range: UsageRange; split: UsageSplit; outside: true } => ({ range, split, outside: true });
+
 /** The days a range reaches back over, today included. */
 export const RANGE_DAYS: Record<UsageRange, number> = { day: 1, week: 7, month: 30 };
 
@@ -241,7 +247,8 @@ export const UsedAnswer = z.object({
   until: z.number(),
   /** Whose logs the range counted and on which computers, where it counted any: the agents and computers by name. */
   logs: z.object({ agents: z.array(z.string()), computers: z.array(z.string()) }).optional(),
-  /** Each row's own series, on the same steps as series, so a chart draws one line per split value. */
+  /** Each row's own series, on the same steps as series, so a chart draws one line per split value; a row that used
+   * nothing in the range has none. */
   lines: z.array(z.object({ key: z.string(), label: z.string(), points: z.array(z.number()) })).optional(),
 });
 export type UsedAnswer = z.infer<typeof UsedAnswer>;

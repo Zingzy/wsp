@@ -52,8 +52,13 @@ async fn call(host: std::sync::Arc<Host>, arguments: serde_json::Value) -> Resul
     let mut asked = Map::new();
     asked.insert("range".to_owned(), Value::from(range.unwrap_or_else(|| "day".to_owned())));
     asked.insert("split".to_owned(), Value::from(by.unwrap_or_else(|| "agent".to_owned())));
+    // Every split counts the work logged outside wsp, as the Usage page and wsp usage do.
+    asked.insert("outside".to_owned(), Value::from(true));
+    // The accounts are read with each agent that can say asked for its limits now, as wsp usage reads them.
+    let mut fresh = Map::new();
+    fresh.insert("fresh".to_owned(), Value::from(true));
     let (accounts, used) =
-        tokio::try_join!(client.request::<Accounts>("usage.accounts", Map::new()), client.request::<Used>("usage.used", asked))?;
+        tokio::try_join!(client.request::<Accounts>("usage.accounts", fresh), client.request::<Used>("usage.used", asked))?;
     Ok(Answer::json(&Out { accounts: accounts.accounts, used: used.used }))
 }
 

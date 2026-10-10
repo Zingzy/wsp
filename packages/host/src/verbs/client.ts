@@ -79,6 +79,7 @@ import {
   usedPrice,
   windowCell,
   type LimitKind,
+  usedAsk,
 } from "@wsp/protocol";
 import type { CliIO } from "../cli.js";
 import type { RelayTerminal } from "../signin-relay.js";
@@ -604,9 +605,10 @@ export function oneOf<T extends string>(name: string, words: readonly T[], value
   return value as T;
 }
 
-/** What wsp usage answers: the accounts and what was used, two reads and two answers, each as the host wrote it. */
+/** What wsp usage answers: the accounts, each agent that can say asked for its limits now, and what was used as the
+ * Usage page reads it, outside wsp included, two reads and two answers, each as the host wrote it. */
 export async function readUsage(client: HostClient, range: UsageRange, by: UsageSplit): Promise<{ accounts: unknown; used: unknown }> {
-  const [accounts, used] = await Promise.all([client.request<{ accounts: unknown }>("usage.accounts"), client.request<{ used: unknown }>("usage.used", { range, split: by })]);
+  const [accounts, used] = await Promise.all([client.request<{ accounts: unknown }>("usage.accounts", { fresh: true }), client.request<{ used: unknown }>("usage.used", usedAsk(range, by))]);
   return { accounts: accounts.accounts, used: used.used };
 }
 

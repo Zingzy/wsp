@@ -6,8 +6,8 @@
 // are two ledgers and are never summed.
 import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { agentMark, agentName } from "@wsp/catalog";
-import { BoxIcon, ChartLineIcon, CircleDashedIcon, GaugeIcon, MonitorIcon, UserRoundIcon } from "lucide-react";
-import { USAGE_RANGES, USAGE_SPLITS, USAGE_WORDS, accountState, accountWords, creditsWord, resetQuestion, fmtCost, fmtTokens, listWords, logsLine, resetsWord, type AccountRow, type AccountsAnswer, type LimitKind, type UsageRange, type UsageSplit, type UsedAnswer, type UsedRow } from "@wsp/protocol";
+import { BoxIcon, ChartLineIcon, CircleDashedIcon, GaugeIcon, MessagesSquareIcon, MonitorIcon, RotateCwIcon, SquareTerminalIcon, UserRoundIcon } from "lucide-react";
+import { USAGE_RANGES, USAGE_SPLITS, USAGE_WORDS, accountState, accountWords, asOfWord, creditsWord, resetQuestion, fmtCost, fmtTokens, listWords, logsLine, resetsWord, type AccountRow, type AccountsAnswer, type LimitKind, type UsageRange, type UsageSplit, type UsedAnswer, type UsedRow } from "@wsp/protocol";
 import { HarnessMark } from "../components/chat/HarnessMark.js";
 import { AlertDialog, AlertDialogClose, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogPopup, AlertDialogTitle } from "../components/ui/alert-dialog.js";
 import { Button, NEUTRAL_RING } from "../components/ui/button.js";
@@ -27,6 +27,7 @@ import { useSettingsStore, type UsageTab } from "./settingsStore.js";
 import { CHART_HEIGHT, UsageChart, type ChartLine } from "./usageChart.js";
 import { Skeleton } from "../components/ui/skeleton.js";
 import { DigitRoll } from "../components/ui/digit-roll.js";
+import { useMinuteClock } from "../components/status/useMinuteClock.js";
 
 const ROW_NUMBER = "font-mono text-sm tabular-nums";
 /** A table on this page: a hairline under its head and between its rows, no box, its text on the page's edge. */
@@ -44,11 +45,30 @@ const TABS: ReadonlyArray<{ value: UsageTab; label: ReactNode }> = [
   { value: "limits", label: <><GaugeIcon aria-hidden className="size-4" />{W.tabs.limits}</> },
 ];
 
-/** The page's two tabs, at the top bar's right end: what the agents used, and what each account may still use. */
+/** The page's two tabs, at the top bar's right end: what the agents used, and what each account may still use; before
+ * them when both were read and the refresh, which reads both again at once. */
 export function UsageTabs() {
   const tab = useSettingsStore(state => state.usageTab);
   const pick = useSettingsStore(state => state.pickUsageTab);
-  return <SegmentedControl data-k="usage-tabs" aria-label={W.tab} value={tab} segments={TABS} onChange={pick} className="h-9 [-webkit-app-region:no-drag]" segmentClassName="gap-2 px-3.5 text-sm" />;
+  const read = useSettingsStore(state => state.usageRead);
+  const ask = useSettingsStore(state => state.askUsage);
+  const now = useMinuteClock();
+  return (
+    <span className="flex items-center gap-3 [-webkit-app-region:no-drag]">
+      {read.at === null ? null : (
+        <span data-k="usage-read-at" className="text-xs text-muted-foreground">
+          {W.checked(ABOUT_WORDS.readWhen(Math.max(0, now - read.at)))}
+        </span>
+      )}
+      <Tooltip>
+        <TooltipTrigger render={<Button variant="ghost" size="icon-xs" data-k="usage-refresh" aria-label={W.readAgain} disabled={read.reading} onClick={ask} />}>
+          <RotateCwIcon aria-hidden className={cn("size-3.5", read.reading && "animate-spin motion-reduce:animate-none")} />
+        </TooltipTrigger>
+        <TooltipPopup side="bottom">{W.readAgain}</TooltipPopup>
+      </Tooltip>
+      <SegmentedControl data-k="usage-tabs" aria-label={W.tab} value={tab} segments={TABS} onChange={pick} className="h-9" segmentClassName="gap-2 px-3.5 text-sm" />
+    </span>
+  );
 }
 
 export function usageCards(ctx: SettingsContext): SettingsCardData[] {
@@ -66,8 +86,12 @@ function UsagePage({ ctx }: { ctx: SettingsContext }) {
   const [split, setSplit] = useState<UsageSplit>("agent");
   const readAccounts = api?.usageAccounts;
   const readUsed = api?.usageUsed;
-  const accounts = useHeld<AccountsAnswer>(ACCOUNTS_KEY, readAccounts === undefined ? undefined : () => readAccounts(), { holdMs: USAGE_HOLD_MS });
-  const asked = useHeld<UsedAnswer>(`usage:used:${range}:${split}`, readUsed === undefined ? undefined : () => readUsed(range, split), { holdMs: USAGE_HOLD_MS });
+  const again = useSettingsStore(state => state.usageAsked);
+  const askUsage = useSettingsStore(state => state.askUsage);
+  const setUsageRead = useSettingsStore(state => state.setUsageRead);
+  // Each read asks the agents that can say for their limits now: a turn is otherwise the only thing that reads them.
+  const accounts = useHeld<AccountsAnswer>(ACCOUNTS_KEY, readAccounts === undefined ? undefined : () => readAccounts({ fresh: true }), { holdMs: USAGE_HOLD_MS, asked: again });
+  const asked = useHeld<UsedAnswer>(`usage:used:${range}:${split}`, readUsed === undefined ? undefined : () => readUsed(range, split), { holdMs: USAGE_HOLD_MS, asked: again });
   // The last range's figures stand while the next range is read, so the digits roll from them rather than a skeleton.
   const [used, setUsed] = useState<UsedAnswer | null>(asked.value ?? null);
   useEffect(() => {
@@ -77,7 +101,25 @@ function UsagePage({ ctx }: { ctx: SettingsContext }) {
 
   // By agent, each agent's models stand under it, read as the model split of the same range.
   const nested = split === "agent";
-  const models = useHeld<UsedAnswer>(nested ? `usage:used:${range}:model` : null, readUsed === undefined ? undefined : () => readUsed(range, "model"), { holdMs: USAGE_HOLD_MS });
+  const models = useHeld<UsedAnswer>(nested ? `usage:used:${range}:model` : null, readUsed === undefined ? undefined : () => readUsed(range, "model"), { holdMs: USAGE_HOLD_MS, asked: again });
+
+  const readAt = accounts.answeredAt === undefined || asked.answeredAt === undefined ? null : Math.min(accounts.answeredAt, asked.answeredAt);
+  const reading = accounts.reading || asked.reading;
+  useEffect(() => setUsageRead({ at: readAt, reading }), [readAt, reading, setUsageRead]);
+  useEffect(() => () => setUsageRead({ at: null, reading: false }), [setUsageRead]);
+  // While the page stands open it reads again each hold, and on coming back to the window once a hold has passed.
+  useEffect(() => {
+    const every = setInterval(askUsage, USAGE_HOLD_MS);
+    const back = (): void => {
+      const at = useSettingsStore.getState().usageRead.at;
+      if (at === null || Date.now() - at > USAGE_HOLD_MS) askUsage();
+    };
+    window.addEventListener("focus", back);
+    return () => {
+      clearInterval(every);
+      window.removeEventListener("focus", back);
+    };
+  }, [askUsage]);
 
   return (
     <div key={tab} className="flex animate-settle-in flex-col gap-8 motion-reduce:animate-none">
@@ -101,18 +143,26 @@ interface Segment {
   readonly resetsAt?: number;
   /** The share of the window gone by now, 0 to 1, where its reset is known. */
   readonly elapsed?: number;
+  /** When the reading was taken, where it no longer says how the window stands: its reset has passed, or it is older
+   * than the window runs. */
+  readonly staleAt?: number;
 }
 
 const segmentOf = (account: AccountRow, kind: LimitKind, now: number): Segment | undefined => {
   const w = account.windows?.find(x => x.kind === kind);
   if (w === undefined) return undefined;
   const length = WINDOW_MS[kind];
-  const elapsed = w.resetsAt === undefined || length === undefined ? undefined : Math.min(1, Math.max(0, 1 - (w.resetsAt - now) / length));
-  return { account, used: w.usedPercent, ...(w.resetsAt === undefined ? {} : { resetsAt: w.resetsAt }), ...(elapsed === undefined ? {} : { elapsed }) };
+  const readAt = account.readAt ?? now;
+  const stale = w.resetsAt !== undefined ? w.resetsAt <= now : length !== undefined && now - readAt > length;
+  const elapsed = stale || w.resetsAt === undefined || length === undefined ? undefined : Math.min(1, Math.max(0, 1 - (w.resetsAt - now) / length));
+  return { account, used: w.usedPercent, ...(w.resetsAt === undefined ? {} : { resetsAt: w.resetsAt }), ...(elapsed === undefined ? {} : { elapsed }), ...(stale ? { staleAt: readAt } : {}) };
 };
 
-/** The pool's one sentence: reached, when it runs out at this pace, or how it stands against an even pace. */
-function verdictOf(segments: readonly Segment[], kind: LimitKind, now: number): { word: string; tone: "warn" | "quiet" | "plain" } {
+/** The pool's one sentence: as of when it was read where no reading says how the window stands now, else reached, when
+ * it runs out at this pace, or how it stands against an even pace, off the readings that still stand. */
+function verdictOf(all: readonly Segment[], kind: LimitKind, now: number): { word: string; tone: "warn" | "quiet" | "plain" } {
+  const segments = all.filter(s => s.staleAt === undefined);
+  if (segments.length === 0) return { word: stateWord(asOfWord(Math.min(...all.map(s => s.staleAt!)), now)), tone: "quiet" };
   if (segments.every(s => s.used >= 100)) return { word: W.reached, tone: "warn" };
   const length = WINDOW_MS[kind];
   const soonest = segments.map(s => s.resetsAt).filter((t): t is number => t !== undefined).sort((x, y) => x - y)[0];
@@ -135,6 +185,7 @@ function verdictOf(segments: readonly Segment[], kind: LimitKind, now: number): 
 function PoolWindow({ kind, segments, now }: { kind: LimitKind; segments: readonly Segment[]; now: number }) {
   const used = Math.round(segments.reduce((n, s) => n + Math.min(100, s.used), 0) / segments.length);
   const verdict = verdictOf(segments, kind, now);
+  const stale = segments.every(s => s.staleAt !== undefined);
   return (
     <div data-window={kind} className="grid grid-cols-[minmax(11rem,14rem)_minmax(0,1fr)] items-center gap-x-10 py-4 max-sm:grid-cols-1 max-sm:gap-y-3">
       <div className="flex min-w-0 flex-col gap-1">
@@ -142,7 +193,7 @@ function PoolWindow({ kind, segments, now }: { kind: LimitKind; segments: readon
           {W.windows[kind] ?? kind}
         </span>
         <span className="flex items-baseline gap-2">
-          <DigitRoll rollIn value={`${Math.max(0, 100 - used)}%`} className="font-mono text-2xl leading-8 font-medium text-foreground" data-k="left" />
+          <DigitRoll rollIn value={`${Math.max(0, 100 - used)}%`} className={cn("font-mono text-2xl leading-8 font-medium", stale ? "text-muted-foreground" : "text-foreground")} data-k="left" />
           <span className="text-[12.5px] text-muted-foreground">{W.left}</span>
         </span>
         <span data-k="verdict" className={cn("truncate text-[12.5px] leading-5", verdict.tone === "warn" ? "text-warning-foreground" : verdict.tone === "quiet" ? "text-muted-foreground" : "text-foreground/80")}>
@@ -153,13 +204,13 @@ function PoolWindow({ kind, segments, now }: { kind: LimitKind; segments: readon
         {segments.map(s => (
           <Tooltip key={s.account.key}>
             <TooltipTrigger delay={0} render={<span data-k="segment" className="relative flex-1 overflow-visible rounded-[5px] bg-foreground/[0.09]" />}>
-              <span data-k="meter-fill" className={cn("absolute inset-y-0 left-0 rounded-[5px] transition-[width] duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none", s.used >= 90 ? "bg-warning" : "bg-foreground/55")} style={{ width: `${Math.min(100, Math.max(0, s.used))}%` }} />
+              <span data-k="meter-fill" className={cn("absolute inset-y-0 left-0 rounded-[5px] transition-[width] duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none", s.staleAt !== undefined ? "bg-foreground/20" : s.used >= 90 ? "bg-warning" : "bg-foreground/55")} style={{ width: `${Math.min(100, Math.max(0, s.used))}%` }} />
               {s.elapsed === undefined ? null : <span data-k="pace" aria-hidden className="absolute -inset-y-1 w-0.5 rounded-full bg-foreground/80" style={{ left: `${s.elapsed * 100}%` }} />}
             </TooltipTrigger>
             <TooltipPopup side="top" sideOffset={8}>
               <span className="flex flex-col gap-0.5 text-xs">
                 <span className="text-foreground">{s.account.label}</span>
-                <span className="font-mono text-muted-foreground tabular-nums">{`${Math.round(s.used)}% used${s.resetsAt === undefined ? "" : `, ${resetsWord(s.resetsAt, now)}`}`}</span>
+                <span className="font-mono text-muted-foreground tabular-nums">{`${Math.round(s.used)}% used${s.staleAt !== undefined ? `, ${asOfWord(s.staleAt, now)}` : s.resetsAt === undefined ? "" : `, ${resetsWord(s.resetsAt, now)}`}`}</span>
               </span>
             </TooltipPopup>
           </Tooltip>
@@ -357,8 +408,7 @@ function Identity({ mark, title, line, under }: { mark: ReactNode; title: string
 const agentGlyph = (agent: string): ReactNode => <HarnessMark harness={agent} label={agentName(agent)} className="size-4" />;
 
 const RANGES = USAGE_RANGES.map(value => ({ value, label: W.ranges[value] }));
-// The split by source is the command line's and the tool's; the page leaves it out.
-const SPLITS = USAGE_SPLITS.filter(value => value !== "source").map(value => ({ value, label: W.splits[value] }));
+const SPLITS = USAGE_SPLITS.map(value => ({ value, label: W.splits[value] }));
 
 /** The words a step of the chart goes by: its hour in a day's range, its day otherwise. */
 const stepWord = (used: UsedAnswer): Intl.DateTimeFormat =>
@@ -381,12 +431,23 @@ function ticksOf(used: UsedAnswer): { at: number; word: string }[] {
 /** The hues a computer, an account or a project takes by rank: none of them orange, Claude's, nor the done and failed
  * greens and reds; past them the neutral ramp. */
 const SPLIT_INKS = ["text-sky-500", "text-violet-500", "text-amber-500", "text-pink-500", "text-teal-500", "text-muted-foreground"];
-const BRAND_INK = "[--line:var(--line-light)] dark:[--line:var(--line-dark)] text-(--line)";
+const BRAND_INK = "[--line:var(--line-light)] dark:[--line:var(--line-dark)]";
+/** The shades of one agent's hue its accounts take by rank: its mark's own, then mixed toward the text and toward the
+ * page, so two accounts of one agent read apart in either theme. */
+const AGENT_SHADES = [
+  "text-(--line)",
+  "text-[color:color-mix(in_oklab,var(--line)_50%,var(--foreground))]",
+  "text-[color:color-mix(in_oklab,var(--line)_55%,var(--background))]",
+  "text-[color:color-mix(in_oklab,var(--line)_75%,var(--foreground))]",
+];
+const NEUTRAL_SHADES = ["text-muted-foreground", "text-foreground/80", "text-foreground/40"];
 
-/** An agent's line in its mark's own colour, or down the neutral ramp where its mark carries none. */
-function agentInk(agent: string): ChartLine["ink"] {
+/** An agent's line in its mark's own colour, or down the neutral ramp where its mark carries none; its second account
+ * and on in the next shade. */
+function agentInk(agent: string, rank = 0): ChartLine["ink"] {
   const ink = agentMark(agent)?.inks?.[0];
-  return ink === undefined ? { className: "text-muted-foreground" } : { className: BRAND_INK, style: { "--line-light": ink.light, "--line-dark": ink.dark } as CSSProperties };
+  if (ink === undefined) return { className: NEUTRAL_SHADES[Math.min(rank, NEUTRAL_SHADES.length - 1)]! };
+  return { className: cn(BRAND_INK, AGENT_SHADES[Math.min(rank, AGENT_SHADES.length - 1)]), style: { "--line-light": ink.light, "--line-dark": ink.dark } as CSSProperties };
 }
 
 /** The glyph a split row leads with: its agent's, the computer's or the project's; null where the value has none. */
@@ -397,6 +458,7 @@ function splitGlyph(split: UsageSplit, row: UsedRow, ctx: SettingsContext): Reac
     if (place !== undefined) return <ComputerGlyph place={place} className="size-4 text-foreground/80" />;
   }
   if (split === "project" && ctx.projects.some(p => p.id === row.key)) return <ProjectGlyph projectId={row.key} />;
+  if (split === "source") return row.key === "log" ? <SquareTerminalIcon aria-hidden className="size-4 text-muted-foreground" /> : <MessagesSquareIcon aria-hidden className="size-4 text-muted-foreground" />;
   // A value with no glyph of its own still takes a frame, so every row's name starts at one edge.
   const Fallback = FALLBACK_GLYPHS[split as keyof typeof FALLBACK_GLYPHS];
   return Fallback === undefined ? null : <Fallback aria-hidden className="size-4 text-muted-foreground" />;
@@ -439,7 +501,7 @@ function Totals({ used }: { used: UsedAnswer }) {
   const turns = sumOf(used.rows, r => r.turns);
   const saved = sumOf(used.rows, r => r.saved);
   const stats = [
-    <Stat key="tokens" k="stat-tokens" label={W.tokens} value={fmtTokens(tokens)} note={W.fromCache(percent(cached, input))} />,
+    <Stat key="tokens" k="stat-tokens" label={W.tokens} value={fmtTokens(tokens)} note={W.counts(used.logs !== undefined)} />,
     ...(estimate === undefined ? [] : [<Stat key="estimate" k="stat-estimate" label={W.estimate} value={fmtCost(estimate)} note={W.atListPrice} />]),
     ...(turns === undefined ? [] : [<Stat key="turns" k="stat-turns" label={W.turns} value={turns.toLocaleString("en-US")} note={W.turnsNote} />]),
     <Stat key="cache" k="stat-cache" label={W.cacheHit} value={percent(cached, input)} {...(saved === undefined ? {} : { note: W.saved(fmtCost(saved)) })} />,
@@ -640,12 +702,15 @@ function Used({ used, refused, models, range, split, onRange, onSplit, ctx }: { 
   const picked = new Set(lineRows.map(line => hueOf(line.key)).filter((hue): hue is string => hue !== undefined && hue !== ""));
   const free = SPLIT_INKS.filter(hue => !picked.has(hue));
   let next = 0;
+  const ranks = new Map<string, number>();
   const lines: ChartLine[] = lineRows.map(line => {
     if (used.lines === undefined) return { key: line.key, label: line.label, points: line.points, ink: { className: "text-foreground" } };
     const unowned = split === "project" && !ctx.projects.some(p => p.id === line.key);
     const own = hueOf(line.key);
     const agent = agentByKey.get(line.key);
-    const ink = unowned ? { className: "text-muted-foreground" } : own !== undefined && own !== "" ? { className: own } : agent !== undefined ? agentInk(agent) : { className: free[Math.min(next++, free.length - 1)]! };
+    const rank = agent === undefined ? 0 : (ranks.get(agent) ?? 0);
+    if (agent !== undefined) ranks.set(agent, rank + 1);
+    const ink = unowned ? { className: "text-muted-foreground" } : own !== undefined && own !== "" ? { className: own } : agent !== undefined ? agentInk(agent, rank) : { className: free[Math.min(next++, free.length - 1)]! };
     return { key: line.key, label: line.label, points: line.points, ink };
   });
   const inkByKey = new Map(used.lines === undefined ? [] : lines.map(line => [line.key, line.ink] as const));

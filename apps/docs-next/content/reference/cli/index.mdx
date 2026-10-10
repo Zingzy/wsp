@@ -132,7 +132,7 @@ wsp --version
 | [`wsp threads wait`](/reference/cli/threads-wait) | blocks until one of the threads leaves running and prints its finished line, with the reply whole under it; --tail prints the reply's last line alone, which is what a notify sends, and --timeout gives up after so many seconds and says so on stderr |
 | [`wsp up`](/reference/cli/up) | serve the host in this terminal, for a host you want to watch or one that serves beyond this computer; --service hands the same line to this computer's own service manager, which starts it now and again at every login. A line that needs a host starts one when none serves. |
 | [`wsp update`](/reference/cli/update) | merges the latest commits of the base into the branch of the folder the thread works in, or names the files that conflict |
-| [`wsp usage`](/reference/cli/usage) | what each agent account signed in on any of your computers may still use, and what was used over a day, a week or a month split one way; two answers, never added together |
+| [`wsp usage`](/reference/cli/usage) | what each agent account signed in on any of your computers may still use, and what was used over a day, a week or a month split one way, the work your agents logged outside wsp counted with wsp's threads as on the Usage page (--by source shows how much is outside); two answers, never added together |
 | [`wsp usage reset`](/reference/cli/usage-reset) | spends one of the resets a Codex account has banked, on a computer of yours that holds its login, after reading the account there: its five-hour and weekly windows start again now; asks first unless --yes |
 | [`wsp worktree`](/reference/cli/worktree) | a worktree of the project's repo on the branch, for an agent to work in by path or to start a thread in: the one git already has the branch checked out in, wherever it is, else one wsp makes under its own folder, from the project folder's current commit for a new branch, with the folder's .env files and installed dependencies carried in; prints its path |
 | [`wsp worktree remove`](/reference/cli/worktree-remove) | takes away a worktree wsp made for the branch, with git: refused while a thread is working in it, and over files no commit holds unless --force; the branch stays, and a worktree wsp did not make is never removed |
@@ -218,8 +218,10 @@ up and down for the host, recipe and image for what a machine starts from.
   wsp usage [--range day|week|month]
     [--by agent|account|computer|project|model|source]
       what each agent account signed in on any of your computers may still use,
-      and what was used over a day, a week or a month split one way; two
-      answers, never added together
+      and what was used over a day, a week or a month split one way, the work
+      your agents logged outside wsp counted with wsp's threads as on the Usage
+      page (--by source shows how much is outside); two answers, never added
+      together
   wsp usage reset <account> [--credit <id>] [--on <computer>] [--yes]
       spends one of the resets a Codex account has banked, on a computer of
       yours that holds its login, after reading the account there: its five-hour
