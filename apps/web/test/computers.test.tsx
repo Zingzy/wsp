@@ -528,6 +528,21 @@ describe("a computer's own page", () => {
     for (const k of ["system", "size", "disk-free", "joined", "address", "answered", "copies", "ports", "computer-icon", "workspace-line"]) expect(document.querySelector(`[data-settings-page] [data-k='${k}']`)).toBeNull();
   });
 
+  it("draws the Image list on a computer's page only where the host registered a cloud, since an image is a cloud's", async () => {
+    const image = async () => ({ image: null, copies: [], projects: [] });
+    const places = [here, { ...box, buildsImages: true }];
+    useStore.setState({ places });
+    await mountComputers(computersApi({ image } as Partial<Api>).api, { kind: "computer", id: "p_2" });
+    expect(document.querySelector("[data-settings-page] [data-grid='image']")).not.toBeNull();
+    cleanup();
+    resetSettings();
+    useStore.setState({ places });
+    await mountComputers(computersApi({ image } as Partial<Api>, setupOf({ keys: {} })).api, { kind: "computer", id: "p_2" });
+    expect(document.querySelector("[data-settings-page] [data-k='computer-head']")).not.toBeNull();
+    expect(document.querySelector("[data-settings-page] [data-grid='image']")).toBeNull();
+    expect(document.querySelector("[data-settings-page]")?.textContent).not.toContain(WHERE_WORDS.yourImage);
+  });
+
   it("says a computer that is not answering in the state line with the dial beside it, whose answer takes the sentence's place", async () => {
     const said = "ssh: connect to host 65.21.4.12 port 22: Connection refused";
     const vps: PlaceView = { ...laptop, id: "p_3", name: "vps", road: { ssh: "root@65.21.4.12" }, dialled: { at: "2026-09-12T11:59:00.000Z", answered: false, said } };

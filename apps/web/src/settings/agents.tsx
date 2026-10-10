@@ -12,7 +12,7 @@ import { HERE_PLACE_ID, listWords, modelOf, resolveThreadDefaults, unmarked, wit
 import { agentName, catalogEntry } from "@wsp/catalog";
 import { copyText } from "../actions/clipboard.js";
 import { ActButton } from "../components/agents/agentsParts.js";
-import { AGENTS_LIST_WORDS, heldReason, recipeMissLines, refusedLines, waitingFlow, type RefusedLine, type RowsContext } from "../components/agents/agentsRows.js";
+import { AGENTS_LIST_WORDS, recipeMissLines, refusedLines, waitingFlow, type RefusedLine, type RowsContext } from "../components/agents/agentsRows.js";
 import { AGENTS_KIND, signInWord } from "../components/agents/kinds/agents.js";
 import { AGENTS_KINDS } from "../components/agents/kinds/index.js";
 import { SignInFlowView } from "../components/agents/SignInFlowView.js";
@@ -228,9 +228,9 @@ function AgentLine({ row, rows, computer, notify, open }: { row: AgentRow; rows:
     </GlyphFrame>
   );
   if (!row.installed) {
-    // The line under the name says it; the slot holds only the step, at the chevron's place in the column. Where every
-    // act is another page's, or the computer is away, it holds none.
-    const install = heldReason(rows) === undefined ? kindRow.quick : undefined;
+    // The line under the name says it; the slot holds only the step, at the chevron's place in the column. A step with
+    // no road, held for any reason, is not drawn.
+    const install = kindRow.quick?.run === undefined ? undefined : kindRow.quick;
     return (
       <Row
         id={row.id}
