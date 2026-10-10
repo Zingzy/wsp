@@ -4,7 +4,7 @@
 // stored, and a wake puts nothing back. The kinds that keep an image nap
 // exactly as they did.
 import { describe, expect, it, onTestFinished, vi } from "vitest";
-import { BOX_BUDGETS, BoxBackend, BoxMachine, GuestUnusableError, sudoCommand } from "@wsp/engine";
+import { BOX_BUDGETS, BOX_WORK_DIR, BoxBackend, BoxMachine, GuestUnusableError, sudoCommand } from "@wsp/engine";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { WebSocketServer } from "ws";
@@ -562,6 +562,7 @@ function restoringBox(id: string, o: { state: () => string; restoredAt: number; 
     proofs: 0,
     deleted: false,
     agentFails: false,
+    noWorkDir: false,
     restoredAt: o.restoredAt,
     hold: undefined as Promise<void> | undefined,
     archived: false,
@@ -605,6 +606,7 @@ function restoringBox(id: string, o: { state: () => string; restoredAt: number; 
       }
       if (box.deleted) return missing();
       if (box.archived) return reply(409, { ok: false, status: 409, code: "box_not_running", message: "Box is not running." });
+      if (box.noWorkDir) return reply(400, { ok: false, status: 400, code: "invalid_cwd", message: "cwd must be an existing directory." });
       if (box.agentFails) return reply(500, { ok: false, status: 500, code: "internal_error", message: "Cannot read properties of undefined (reading 'on')" });
       const restoring = clock.at < box.restoredAt;
       box.commands.push(restoring);
@@ -740,6 +742,33 @@ describe("a wake that finds a Boat box already running", () => {
     expect(failed).toBeInstanceOf(GuestUnusableError);
     expect((failed as Error).message).not.toContain("wake it again");
     expect((await t.rt.workspaces.get(t.ws.id)).phase).toBe("running");
+  });
+
+  it("a box whose work folder is gone fails the wake naming the folder and the box, and the rebuild it names replaces the box", async () => {
+    const t = await restarted("napping", 0);
+    t.ready();
+    t.box.noWorkDir = true;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    onTestFinished(() => warn.mockRestore());
+    const failed = await t.rt.workspaces.wake(t.ws.id).then(() => undefined, (e: unknown) => e as Error);
+    expect(failed?.message).toBe(
+      `Boat left ${t.ws.machineId} running but nothing on it can run: ${BOX_WORK_DIR} is missing, and Boat runs every command there (it said: cwd must be an existing directory.); a wake cannot make it again, so a rebuild is the way out, and work not pushed is lost with the old disk`,
+    );
+    const rebuilt = await t.rt.workspaces.rebuild(t.ws.id);
+    expect(rebuilt.phase).toBe("running");
+    expect(rebuilt.machineId).not.toBe(t.ws.machineId);
+  });
+
+  it("a send to a box whose work folder is gone fails with the same line the wake gives", async () => {
+    const t = await restarted("waking", 0);
+    t.ready();
+    t.box.noWorkDir = true;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    onTestFinished(() => warn.mockRestore());
+    const failed = await t.rt.sessions.start(t.ws.id, { prompt: "go" }).then(() => undefined, (e: unknown) => e as Error);
+    expect(failed?.message).toBe(
+      `Boat left ${t.ws.machineId} running but nothing on it can run: ${BOX_WORK_DIR} is missing, and Boat runs every command there (it said: cwd must be an existing directory.); a wake cannot make it again, so a rebuild is the way out, and work not pushed is lost with the old disk`,
+    );
   });
 
   it("a box the provider no longer has during the proof takes the gone road", async () => {

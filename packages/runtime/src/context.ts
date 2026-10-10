@@ -704,7 +704,7 @@ export interface TurnsArea {
     open: (onEvent: (event: AdapterEvent) => void) => HarnessSession;
   }) => SessionHandle;
   readonly sweepRuns: (entry: LiveWorkspace) => Promise<void>;
-  readonly reattach: (s: { view: SessionView; turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin; turnLive?: TurnLive; run?: string; from?: number; asked?: TurnAsked; turnToken?: string; scopeDeviceId?: string; snapshot?: string }) => Promise<Reopened>;
+  readonly reattach: (s: { view: SessionView; turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin; turnLive?: TurnLive; run?: string; from?: number; asked?: TurnAsked; turnToken?: string; scopeDeviceId?: string; snapshot?: string }, again?: boolean) => Promise<Reopened>;
 }
 
 export interface SessionsArea {

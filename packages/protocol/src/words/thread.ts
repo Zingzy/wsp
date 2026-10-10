@@ -125,6 +125,12 @@ export function guestUnusableLine(provider: string, machineId: string, detail: s
   return `${provider} left ${machineId} running but nothing on it can run: ${detail}`;
 }
 
+/** Why nothing runs on a box whose work folder is gone: the provider starts every command there, the wake's own
+ * check included, so only a fresh machine gets past it. */
+export function noWorkFolderLine(provider: string, folder: string, said: string): string {
+  return `${folder} is missing, and ${provider} runs every command there (it said: ${said}); a wake cannot make it again, so a rebuild is the way out, and work not pushed is lost with the old disk`;
+}
+
 /** What a machine is called when the provider answers that it cannot reach it: the provider's own words, then the two
  * roads open on a running machine. A wake of a running machine changes nothing and a rebuild is refused while the
  * machine is only not answering, so neither is named; the machine's id is nothing a person acts on. */

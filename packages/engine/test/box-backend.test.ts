@@ -25,6 +25,7 @@ import {
   BoxBackend,
   type BoxBudgets,
   BoxMachine,
+  BOX_WORK_DIR,
   FILE_PUT_MAX,
   FIREWALL_HOLD_MS,
   FIREWALL_WATCH_MS,
@@ -548,6 +549,18 @@ describe("BoxBackend against a fake Box API", () => {
     // Every other refusal of the endpoint keeps its own kind.
     const busy = new FakeBox().on("POST", "/boxes/bx_tumrjngm/commands", { status: 409, body: ERROR(409, "machine_not_running", "Box machine is not running.") });
     await expect(machineOn(busy).machine.exec("true")).rejects.toMatchObject({ kind: "conflict", code: "machine_not_running" });
+  });
+
+  it("a box whose work folder is gone names the folder and the machine, and says a rebuild is the way out", async () => {
+    for (const status of [400, 500]) {
+      const api = new FakeBox().on("POST", "/boxes/bx_tumrjngm/commands", { status, body: ERROR(status, "invalid_cwd", "cwd must be an existing directory.") });
+      const e = await machineOn(api).machine.exec("true").catch((err: unknown) => err);
+      expect(e).toBeInstanceOf(GuestUnusableError);
+      expect((e as Error).message).toBe(
+        `Boat left bx_tumrjngm running but nothing on it can run: ${BOX_WORK_DIR} is missing, and Boat runs every command there (it said: cwd must be an existing directory.); a wake cannot make it again, so a rebuild is the way out, and work not pushed is lost with the old disk`,
+      );
+      expect((e as GuestUnusableError).status).toBe(status);
+    }
   });
 
   it("a create whose box reads ready and then cannot run a command is deleted, and fails with the provider's line", async () => {
