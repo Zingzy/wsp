@@ -48,3 +48,8 @@
 .t-editor__code {
   padding-top: 2.25rem;
 }
+
+/* On the page a header button links to, Scalar draws its label in the header's ink, which is ivory on an ivory key. */
+.t-header__item--button .t-header__item--active {
+  color: var(--scalar-button-1-color);
+}
