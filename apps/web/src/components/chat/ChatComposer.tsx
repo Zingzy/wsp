@@ -75,8 +75,8 @@
 // off its rows.
 import { cn, isMacPlatform } from "../../lib/utils";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type ClipboardEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { PaperclipIcon } from "lucide-react";
-import { ASIDE_NO_SESSION_LINE, composerHeldLine, HERE_PLACE_ID, hereName, HOST_ASLEEP_SEND, isLocalWorkspace, signedOutLine, type AgentsTarget, FILES_MAX, FILE_MAX_WORDS, IMAGE_MAX_WORDS, IMAGE_TYPE_WORDS, TURN_IN_FLIGHT, movesRunningAccess, noImagesLine, readsImages, screenCommandLine, screenCommandTyped, screenCommandsOf, sendRefusal, steerFilesBlocked, type SendRefusalKind, type TurnLimit, type WorkspaceState } from "@wsp/protocol";
+import { PaperclipIcon, SplitIcon } from "lucide-react";
+import { ASIDE_NO_SESSION_LINE, forkOfLine, forkWhereLine, composerHeldLine, HERE_PLACE_ID, hereName, HOST_ASLEEP_SEND, isLocalWorkspace, signedOutLine, type AgentsTarget, FILES_MAX, FILE_MAX_WORDS, IMAGE_MAX_WORDS, IMAGE_TYPE_WORDS, TURN_IN_FLIGHT, movesRunningAccess, noImagesLine, readsImages, screenCommandLine, screenCommandTyped, screenCommandsOf, sendRefusal, steerFilesBlocked, type SendRefusalKind, type TurnLimit, type WorkspaceState } from "@wsp/protocol";
 import type { ConnStatus } from "../../protocol/client";
 import { hostAsleep } from "../../boot";
 import { projectHomeKey, useAbsentComputer, useHarnessCatalogs, useStore, useThreadSessions, useWorkspace, useWorkspaceState } from "../../protocol/store";
@@ -115,6 +115,8 @@ import { useComposerFocusRequest } from "./composerFocus";
 import { EMPTY_DRAFT, newId, useComposerDraft, useComposerDraftStore, useComposerQueue, useComposerQueueHeld, type QueuedMessage } from "./composerDraftStore";
 import { BarRule, ComposerAccessPicker, ComposerOptionPickers, useAccessPick, useComposerPicks, type AccessTarget } from "./ComposerOptionPickers";
 import { useComposerOptionsStore } from "./composerOptionsStore";
+import { ComposerBanner } from "./ComposerBanner";
+import { useForkDrafts } from "./forks";
 import type { ComposerStart } from "./composerPicks";
 import { resolveComposerMenuActiveItemId } from "./composerMenuHighlight";
 import { ComposerModelChips } from "./ComposerModelChips";
@@ -555,6 +557,24 @@ export function ChatComposer({
   );
 
   const { setSending, appendUserTurn, appendLocalError, thread: into, busy, sending } = thread;
+  // A fork's draft holds its source until the send, while this view stands fresh for it; leaving the fresh view lets it go.
+  const forkDraft = useForkDrafts(s => s.drafts[workspaceId]);
+  const fork = forkDraft !== undefined && thread.fresh && into === undefined ? forkDraft : undefined;
+  const wasFresh = useRef(thread.fresh);
+  useEffect(() => {
+    if (wasFresh.current && !thread.fresh) useForkDrafts.getState().drop(workspaceId);
+    wasFresh.current = thread.fresh;
+  }, [thread.fresh, workspaceId]);
+  const dismissFork = useCallback(() => {
+    const draft = useForkDrafts.getState().drafts[workspaceId];
+    useForkDrafts.getState().drop(workspaceId);
+    if (draft?.before !== undefined) {
+      useComposerDraftStore.getState().setDraft(workspaceId, draft.before.draft);
+      useComposerFilesStore.getState().take(workspaceId);
+      useComposerFilesStore.getState().put(workspaceId, draft.before.files);
+    }
+    if (draft !== undefined) useStore.getState().select(draft.source.workspaceId, draft.source.threadId);
+  }, [workspaceId]);
   /** Starts a turn with the box's files, or with a queued message's own when `rowId` names the card it came off. */
   const start = useCallback(
     (prompt: string, onRefused: () => void, rowId?: string) => {
@@ -574,23 +594,41 @@ export function ChatComposer({
       if (rowId === undefined) dismissRefused(workspaceId);
       // The wake settles or fails before the start is asked; a wake that failed leaves the runtime to refuse the
       // start in its own words, which land in the transcript like any other refusal.
+      // A fork runs where its source runs and on its agent, naming only the picks its draft holds: the source's, which
+      // the draft opened on, or the person's own.
+      const named = (): ComposerStart => {
+        const on = useComposerOptionsStore.getState().pickedOn[workspaceId] ?? {};
+        return Object.fromEntries(Object.entries(startOptions).filter(([key]) => key !== "harness" && on[key as keyof typeof on] === threadKey)) as ComposerStart;
+      };
       void (wakesFirst ? wake(workspaceId) : Promise.resolve())
         .then(() =>
-          api.startSession({
-            workspaceId,
-            prompt,
-            requestId,
-            ...(into !== undefined ? { thread: into } : {}),
-            ...folderStart,
-            ...(attachments.length > 0 ? { attachments } : {}),
-            // A send that opens a thread names the agent the box shows, so the thread runs on what the person read.
-            ...(into === undefined ? { harness: harnessId } : {}),
-            ...sendPicks(pinned, startOptions),
-            ...(fastOn ? { fast: true } : {}),
-          }),
+          api.startSession(
+            fork !== undefined
+              ? { workspaceId, prompt, requestId, fork: fork.fork, ...(fork.branch !== undefined ? { branch: fork.branch } : {}), ...(attachments.length > 0 ? { attachments } : {}), ...named(), ...(fastOn ? { fast: true } : {}) }
+              : {
+                  workspaceId,
+                  prompt,
+                  requestId,
+                  ...(into !== undefined ? { thread: into } : {}),
+                  ...folderStart,
+                  ...(attachments.length > 0 ? { attachments } : {}),
+                  // A send that opens a thread names the agent the box shows, so the thread runs on what the person read.
+                  ...(into === undefined ? { harness: harnessId } : {}),
+                  ...sendPicks(pinned, startOptions),
+                  ...(fastOn ? { fast: true } : {}),
+                },
+          ),
         )
-        .then(() => {
+        .then(session => {
           if (into === undefined) useComposerOptionsStore.getState().drop(workspaceId, threadKey);
+          if (fork === undefined) return;
+          useForkDrafts.getState().drop(workspaceId);
+          // A fork onto a new branch runs in its worktree's own folder record, which is where the person reads it.
+          if (session.workspaceId !== workspaceId && session.threadId !== undefined) {
+            setSending(false);
+            launched(workspaceId, requestId);
+            useStore.getState().select(session.workspaceId, session.threadId);
+          }
         })
         .catch((err: unknown) => {
           setSending(false);
@@ -600,7 +638,7 @@ export function ChatComposer({
           appendLocalError(err instanceof Error ? err.message : String(err));
         });
     },
-    [api, appendLocalError, appendUserTurn, dismissRefused, fastOn, files, folderStart, harnessId, hold, into, launched, launching, pinned, restoreFiles, sendFilesAs, setSending, startOptions, threadKey, wake, wakesFirst, workspaceId],
+    [api, appendLocalError, appendUserTurn, dismissRefused, fastOn, files, folderStart, fork, harnessId, hold, into, launched, launching, pinned, restoreFiles, sendFilesAs, setSending, startOptions, threadKey, wake, wakesFirst, workspaceId],
   );
 
   /** Asks the host beside the thread and opens the side question's tab of the right panel on the answer. */
@@ -1063,7 +1101,24 @@ export function ChatComposer({
   return (
     <div className="relative w-full px-3 pt-1.5 pb-4 sm:px-5 sm:pt-2 sm:pb-5" data-chat-composer>
       {dropZone}
-      <ComposerSurface.Shell tray attached={hasRows(drawer)}>
+      <ComposerSurface.Shell tray attached={hasRows(drawer) || fork !== undefined}>
+        {/* Inside the shell the glass is the shell's, whose dark ink is only ever laid at its own faint opacity. */}
+        {fork === undefined ? null : (
+          <ComposerBanner.Root data-fork-banner className="mx-auto -mb-px w-[calc(100%-2*var(--chat-composer-drawer-inset))] [--glass-opacity:var(--chat-composer-glass-opacity)]">
+            <ComposerBanner.Row>
+              <ComposerBanner.Icon>
+                <SplitIcon />
+              </ComposerBanner.Icon>
+              <ComposerBanner.Content>
+                <span className="min-w-0 truncate text-foreground/80">{forkOfLine(fork.source.title)}</span>
+                <span className="shrink-0 text-muted-foreground">{forkWhereLine(fork.branch)}</span>
+              </ComposerBanner.Content>
+              <ComposerBanner.Actions>
+                <ComposerBanner.Dismiss aria-label="Cancel the fork" data-k="fork-dismiss" onClick={dismissFork} />
+              </ComposerBanner.Actions>
+            </ComposerBanner.Row>
+          </ComposerBanner.Root>
+        )}
         <ComposerDrawer threadKey={threadKey} rows={drawer} />
         <ComposerSurface.Host>
           <form

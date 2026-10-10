@@ -775,8 +775,8 @@ const REPLIES: Record<string, { schema: ZodTypeAny; samples: unknown[] }> = {
   GitCheckpointReply: {
     schema: GitCheckpointReply,
     samples: [
-      { ref: "refs/wsp/checkpoints/spoo-fix-login/thr_01a0e365/turn_3", commit: "5f1c0e2b9a7d4c3e8f6a1b2c3d4e5f60718293a4", changed: true },
-      { ref: "refs/wsp/checkpoints/wsp-boat/thr_01a0e365/turn_4", commit: "5f1c0e2b9a7d4c3e8f6a1b2c3d4e5f60718293a4", changed: false },
+      { ref: "refs/wsp/checkpoints/spoo-fix-login/thr_01a0e365/turn_3", commit: "5f1c0e2b9a7d4c3e8f6a1b2c3d4e5f60718293a4", changed: true, based: true },
+      { ref: "refs/wsp/checkpoints/wsp-boat/thr_01a0e365/turn_4", commit: "5f1c0e2b9a7d4c3e8f6a1b2c3d4e5f60718293a4", changed: false, based: false },
     ],
   },
   GitRestoreReply: { schema: GitRestoreReply, samples: [{ before: "refs/wsp/checkpoints/spoo-fix-login/thr_01a0e365/turn_1-before-1790521483000", files: 3 }] },

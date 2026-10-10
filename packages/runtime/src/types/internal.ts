@@ -30,10 +30,10 @@ import type {
   WorkspaceKind,
   WorkspaceSize,
 } from "@wsp/protocol";
-import { AttachmentRecord, type ThreadPlacement, SessionOrigin, ThreadScope, WorkspaceOrigin } from "@wsp/protocol";
+import { AttachmentRecord, type ForkedFrom, type ThreadPlacement, SessionOrigin, ThreadScope, WorkspaceOrigin } from "@wsp/protocol";
 import { EXEC_OUTPUT_MAX, fmtBytes, fmtDuration, type WorktreeFolder, type DefaultBranchRoad, defaultBranchFix, defaultBranchRefusal, refusal } from "@wsp/protocol";
 import type { MachineExecOptions, TurnWaiting } from "../machine-exec.js";
-import { listedFailure, listedLastLine, threadWord, type SubagentView } from "@wsp/protocol";
+import { copiedFromOf, listedFailure, listedLastLine, threadWord, type SubagentView } from "@wsp/protocol";
 import type { ScopedRoad } from "../devices.js";
 import type { BlobMark } from "../store.js";
 import type { HarnessSession } from "./harness.js";
@@ -314,6 +314,14 @@ export function forgetChild(index: TranscriptIndex, e: SessionEvent): void {
  * subagent's, and a row stamped no thread names none a hit could open. */
 export function foldEvent(index: TranscriptIndex, e: SessionEvent): void {
   if (e.pos !== undefined && e.pos > index.pos) index.pos = e.pos;
+  // A fork's copy of its thread's history names a session, a request and an end that are that thread's, not the fork's:
+  // only its words and its subagents are the fork's to show.
+  if (copiedFromOf(e) !== undefined) {
+    if (e.type === "session.subagent") foldChild(index, e);
+    if (e.type === "session.end" && e.threadId !== undefined) endChildren(index, e.threadId, e.turnId, e.at);
+    if (e.threadId !== undefined) foldWords(index, e);
+    return;
+  }
   if ((e.type === "session.start" || e.type === "session.steer") && e.requestId !== undefined && e.threadId !== undefined && e.turnId !== undefined) {
     index.taken.set(e.requestId, { sessionId: e.sessionId, threadId: e.threadId, turnId: e.turnId, outcome: e.type === "session.start" ? "started" : "steered" });
   }
@@ -330,6 +338,12 @@ export function foldEvent(index: TranscriptIndex, e: SessionEvent): void {
     index.cut.set(e.threadId, e.exitCode === null && !e.sawResult);
     endChildren(index, e.threadId, e.turnId, e.at);
   } else if (e.type === "session.subagent") foldChild(index, e);
+  if (e.threadId !== undefined) foldWords(index, e);
+}
+
+/** A thread's messages and its own agent's replies into the index's words, a reply's pieces joined back into the one
+ * message they are. */
+function foldWords(index: TranscriptIndex, e: SessionEvent & { threadId?: string }): void {
   if (e.threadId === undefined) return;
   const held = index.words.get(e.threadId) ?? { lines: [], open: undefined, last: 0 };
   index.words.set(e.threadId, held);
@@ -635,8 +649,12 @@ export interface ThreadRecord {
   replaces?: string;
   snoozedUntil?: number;
   section?: ThreadPlacement;
-  /** The anchor a rewind kept, held until the next turn of a harness that cuts on its next resume has taken it. */
-  resumeAt?: string;
+  /** The anchor a rewind kept before rewinds copied the session, read off a record a host before that wrote: the
+   * thread's next turn resumes a copy of its session through it, and it goes. */
+  cutOwed?: string;
+  /** The thread this one was forked from and the turn it carries through, with that thread's title at the fork, which
+   * names it once it is deleted. */
+  forkedFrom?: ForkedFrom;
   /** Resume at reset, armed on the turn a usage limit stopped: the reset it goes on at, ms epoch, and that turn's id,
    * so a newer turn leaves it nothing to resume. */
   limitResume?: { at: number; turnId: string };

@@ -79,7 +79,7 @@ const holding: { on: boolean; waiting: (() => void)[] } = { on: false, waiting: 
 function harness(starts: HarnessStartOptions[]): HarnessAdapterFactory {
   return () => ({
     steers: false,
-    resumesAt: true,
+    forkSession: async f => ({ resume: f.session, drop: async () => {} }),
     attachments: "inline",
     start: o => {
       n += 1;

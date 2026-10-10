@@ -77,6 +77,9 @@ const sessionScope = {
    * every event of one host process and starts again with the next. Absent on an event the bus carried that the
    * transcript never recorded. */
   pos: z.number().int().positive().optional(),
+  /** The thread this event was copied from, on the history a fork starts with; absent on every event a thread's own
+   * turns wrote. A copied event names no session, request or end of the fork's own. */
+  copiedFrom: z.string().optional(),
 };
 
 /** What the CLI announces about itself in system/init, beyond model and tools. */
@@ -492,6 +495,9 @@ export const SessionCheckpointEvent = z.object({
   type: z.literal("session.checkpoint"),
   ...sessionScope,
   ref: z.string().optional(),
+  /** The checkpoint's commit stands on the HEAD the turn ended on, which a branch forked from it starts at; absent where
+   * it stands on nothing, as every checkpoint a daemon took before it said so. */
+  based: z.literal(true).optional(),
   anchor: z.string().optional(),
   /** Why the harness cannot cut this thread's conversation, in its own clause, where it said so for this turn. */
   kept: z.string().optional(),
@@ -590,6 +596,10 @@ export const SessionEvent = z.discriminatedUnion("type", [
   SessionSlateEvent,
 ]);
 export type SessionEvent = z.infer<typeof SessionEvent>;
+
+/** The thread an event was copied from, on a fork's history; undefined on every event a thread's own turns wrote and
+ * on a slate's, which no fork copies. */
+export const copiedFromOf = (e: SessionEvent): string | undefined => ("copiedFrom" in e ? e.copiedFrom : undefined);
 
 /** Every type a session event carries, read off the union itself: a client telling a session event from the rest of
  * the bus asks this rather than keeping a list of its own, which one added event leaves quietly short. */

@@ -311,6 +311,7 @@ export interface TranscriptsArea {
   readonly viewedMarks: Map<string, Record<string, string>>;
   readonly persistSessions: (workspaceId: string) => Promise<void>;
   readonly record: (unstamped: SessionEvent) => void;
+  readonly recordCopies: (events: readonly SessionEvent[]) => void;
   readonly accrued: Map<string, number>;
   readonly ranOn: (workspaceId: string, threadId: string, session: string | undefined) => RanPicks;
   readonly boxOf: (threadId: string) => LiveWorkspace | undefined;
@@ -508,7 +509,7 @@ export interface CreateArea {
 
 export interface FoldersArea {
   readonly projectFolder: (project: ProjectView) => Promise<LiveWorkspace>;
-  readonly worktreeFolder: (project: ProjectView, top: string, branch: string, parent?: string, madeFor?: string) => Promise<LiveWorkspace>;
+  readonly worktreeFolder: (project: ProjectView, top: string, branch: string, parent?: string, madeFor?: string, checkpoint?: string) => Promise<LiveWorkspace>;
   readonly folderFor: (o: { project?: string; branch?: string; cwd?: string; picks?: StartPicksAsked }, origin: Caller | undefined) => Promise<{ entry: LiveWorkspace; cwd?: string }>;
   readonly queued: <T>(id: string, work: () => Promise<T>) => Promise<T>;
   readonly removeWorktree: (entry: LiveWorkspace, force: boolean, o?: { ending?: boolean; check?: boolean }) => Promise<void>;
@@ -680,8 +681,6 @@ export interface TurnsArea {
     asked?: TurnAsked;
     /** The harness session this turn resumes, so the row it takes over keeps who opened the thread and with what. */
     resume?: string;
-    /** The rewind's anchor this turn was launched to cut at; the thread lets it go once the turn announces itself. */
-    cutAt?: string;
     /** What the row already knows of this turn's reply: a re-opened turn whose result landed before the restart is
      * still working, and reads as such until the run's own result line comes round again. */
     turnLive?: TurnLive;

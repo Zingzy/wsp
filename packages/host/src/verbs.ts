@@ -472,6 +472,8 @@ export const FLAG_WORDS: Readonly<Record<string, string>> = {
   "run beside": "a thread whose folder the new thread starts in, by its id or a prefix, on the computer it runs on; never with a project or --branch",
   "run branch": "a branch other than the one the project's folder has checked out: the thread runs in the worktree holding it, made under wsp's folder from the folder's current commit for a new branch",
   "run cwd": "a folder inside the project or one of its worktrees, absolute, to start the thread in; the project's folder without it",
+  "run fork": "a thread to fork, by its id or a prefix: the new thread carries its conversation through one finished turn, on its agent and in its folder, or with --branch in a new worktree with that turn's files; never with a project, --beside, --cwd or --replaces",
+  "run at": "with --fork, the finished turn the fork carries through, counted from 1 as wsp thread read lists them; the latest without it",
   "worktree remove force": "remove it over files no commit holds, which go with it",
   "projects remove force": "remove it even where its checkout on a computer of yours holds work no remote has, which goes with it",
   "export from": "the folder on the machine to bring home; the project registered for the folder you named without it",

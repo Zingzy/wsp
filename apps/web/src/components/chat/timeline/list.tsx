@@ -11,7 +11,7 @@ import { CHAT_TIMELINE_ANCHOR_OFFSET, keepTimelineEndVisibleAfterOverlayGrowth }
 import { computeStableMessagesTimelineRows, resolveTimelineIsAtEnd, resolveTimelineMinimapHasPersistentGutter, resolveTimelineMinimapHitStripWidth, type StableMessagesTimelineRowsState } from "../MessagesTimeline.logic";
 import { cn } from "../../../lib/utils";
 import { AssistantSelectionToolbar, type QuotedSelection } from "../AssistantSelectionToolbar";
-import { type TimelineRowSharedState, type ReplyRuns, type MachineWait, type TimelineRowActivityState, TimelineRowCtx, TimelineRowActivityCtx, type WorkGroupViewState } from "./context";
+import { type TimelineRowSharedState, type ReplyRuns, type MachineWait, type ForkedFromLine, type TimelineRowActivityState, TimelineRowCtx, TimelineRowActivityCtx, type WorkGroupViewState } from "./context";
 import { deriveTimelineMinimapItems, resolveTimelineRowTop, resolveTimelineRowHeight, TimelineMinimap } from "./minimap";
 import { TimelineRowContent } from "./rows";
 import { useSpawnedChildren } from "../../threads/SpawnTiles";
@@ -67,6 +67,10 @@ export interface MessagesTimelineProps {
   rewindableMessageIds?: ReadonlySet<MessageId>;
   slatedMessageIds?: ReadonlySet<MessageId>;
   onRewind?: (messageId: MessageId) => void;
+  forkableMessageIds?: ReadonlySet<MessageId>;
+  onFork?: (messageId: MessageId) => void;
+  /** On a fork's page, the thread it came from, drawn as the rule line after the turns it was handed. */
+  forkedFrom?: ForkedFromLine | null;
   /** Answers a relayed permission prompt; the turn it blocks runs or is refused as the option says. */
   onAnswerPermission?: AnswerPrompt;
   /** The prompt answered where the composer stands, by its ask id: its row here keeps the record and offers
@@ -123,6 +127,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   rewindableMessageIds = EMPTY_REWINDABLE,
   slatedMessageIds = EMPTY_SLATED,
   onRewind = NOOP_REWIND,
+  forkableMessageIds = EMPTY_REWINDABLE,
+  onFork = NOOP_REWIND,
+  forkedFrom = null,
   onAnswerPermission = NOOP_ANSWER_PERMISSION,
   dockedAskId = null,
   onImageExpand,
@@ -288,9 +295,10 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         activeTurnStartedAt,
         waitingOn,
         openRun,
+        forked: forkedFrom !== null,
         ...(spawned !== undefined ? { children: spawned } : {}),
       }),
-    [timelineEntries, turns, expandedTurnIds, expandedWorkGroupIds, isWorking, activeTurnStartedAt, waitingOn, openRun, spawned],
+    [timelineEntries, turns, expandedTurnIds, expandedWorkGroupIds, isWorking, activeTurnStartedAt, waitingOn, openRun, forkedFrom, spawned],
   );
   const rows = useStableRows(rawRows);
   const minimapItems = useMemo(() => deriveTimelineMinimapItems(rows), [rows]);
@@ -461,6 +469,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       rewindableMessageIds,
       slatedMessageIds,
       onRewind,
+      forkableMessageIds,
+      onFork,
+      forkedFrom,
       onAnswerPermission,
       dockedAskId,
       onImageExpand,
@@ -484,6 +495,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       rewindableMessageIds,
       slatedMessageIds,
       onRewind,
+      forkableMessageIds,
+      onFork,
+      forkedFrom,
       onAnswerPermission,
       dockedAskId,
       onImageExpand,

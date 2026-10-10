@@ -5,7 +5,9 @@ import { type MessageId, type ProviderSkill, type TurnDiffSummary, type TurnId }
 import { memo, use, useMemo, useState, type ReactNode } from "react";
 import ChatMarkdown from "../../ChatMarkdown";
 import { ReplyRunContext, type ReplyRunScope } from "../InlineRun";
-import { ChevronDownIcon, ChevronRightIcon, Undo2Icon } from "lucide-react";
+import { ChevronDownIcon, ChevronRightIcon, SplitIcon, Undo2Icon } from "lucide-react";
+import { forkedFromLine } from "@wsp/protocol";
+import { TimelineRuleLine } from "../TimelineRuleLine";
 import { Button } from "../../ui/button";
 import { ChatFileRow } from "../ChatFiles";
 import { CLAMP_FADE_MASK, shouldClampText } from "../clamp";
@@ -85,6 +87,7 @@ export const TimelineRowContent = memo(function TimelineRowContent({ row }: { ro
       {row.kind === "spawn" ? <SpawnTimelineRow row={row} /> : null}
       {row.kind === "working" ? <WorkingTimelineRow row={row} /> : null}
       {row.kind === "thinking" ? <ThinkingTimelineRow /> : null}
+      {row.kind === "fork" ? <ForkRuleRow /> : null}
     </div>
   );
 });
@@ -121,6 +124,7 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
             {row.message.text.trim().length > 0 && (
               <MessageCopyButton text={row.message.text} variant="ghost" />
             )}
+            {ctx.forkableMessageIds.has(row.message.id) ? <ForkButton messageId={row.message.id} /> : null}
           </div>
         </div>
       </div>
@@ -140,6 +144,35 @@ function RewindButton({ messageId }: { messageId: MessageId }) {
       </TooltipTrigger>
       <TooltipPopup side="top">Rewind to here</TooltipPopup>
     </Tooltip>
+  );
+}
+
+/** Fork from here on a finished turn's last reply and on the person's message that opened one. */
+function ForkButton({ messageId }: { messageId: MessageId }) {
+  const ctx = use(TimelineRowCtx);
+  return (
+    <Tooltip>
+      <TooltipTrigger render={<Button type="button" size="icon-xs" variant="ghost" onClick={() => ctx.onFork(messageId)} aria-label="Fork from here" data-k="fork-from-here" />}>
+        <SplitIcon className="size-3.5" />
+      </TooltipTrigger>
+      <TooltipPopup side="top">Fork from here</TooltipPopup>
+    </Tooltip>
+  );
+}
+
+/** Where a fork's own history starts: the thread it came from, and Open while that thread stands. */
+function ForkRuleRow() {
+  const ctx = use(TimelineRowCtx);
+  const from = ctx.forkedFrom;
+  if (from === null) return null;
+  return (
+    <TimelineRuleLine data-fork-rule line={forkedFromLine(from.title)}>
+      {from.onOpen === null ? null : (
+        <Button size="xs" variant="outline" className="font-sans text-note font-medium" onClick={from.onOpen}>
+          Open
+        </Button>
+      )}
+    </TimelineRuleLine>
   );
 }
 
@@ -214,6 +247,7 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
             <span className="flex items-center gap-0.5">
               <AssistantCopyButton row={row} />
               {ctx.rewindableMessageIds.has(row.message.id) ? <RewindButton messageId={row.message.id} /> : null}
+              {ctx.forkableMessageIds.has(row.message.id) ? <ForkButton messageId={row.message.id} /> : null}
             </span>
             {!row.message.streaming && (
               <p data-reply-time className="whitespace-nowrap text-muted-foreground tabular-nums">

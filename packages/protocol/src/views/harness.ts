@@ -119,6 +119,11 @@ export const HarnessCatalog = z.object({
   /** Whether a rewind of this harness's thread cuts its conversation at a reply that named no anchor too, by counting
    * the turns after it in the harness's own history; absent is a no, and such a reply offers its files alone. */
   rewindsByCount: z.boolean().optional(),
+  /** Whether a thread of this harness forks from one of its finished turns into a new thread (sessions.start's fork),
+   * and whether it forks from a turn that named no anchor too, by counting turns in the harness's own history. The
+   * adapter in this host declares both; absent is a no. */
+  forks: z.boolean().optional(),
+  forksByCount: z.boolean().optional(),
   /** Set on the harness a start without one runs, so a client can pick its list without the catalog package. */
   isDefault: z.boolean().optional(),
   /** Why the binary described nothing, in its own adapter's words, when it ran and refused for a reason it can name

@@ -14,6 +14,7 @@ import type {
   SessionRenamer,
   SessionAsker,
   SessionReverter,
+  SessionForker,
   SessionTitleMaker,
   SessionTitleReader,
   McpServerSpec,
@@ -109,8 +110,8 @@ export interface HarnessStartOptions {
   /** The turn's images, each already on the road its adapter declared: bytes for an inline adapter, a path on the
    * machine for a file one. Empty on a turn that carries none. */
   images?: readonly TurnImage[];
-  /** On the first resume after a rewind, on a harness that cuts there: the anchor of the turn the rewind kept. */
-  resumeAt?: string;
+  /** A fork's first turn, on a harness whose start forks its session: the session and the turn its forkSession found. */
+  fork?: { session: string; turn: string };
   /** MCP servers this turn gets besides the ones the harness's own config on the machine names, by the name each
    * takes in a config; the adapter hands them to its CLI the way that CLI takes one. Absent on a turn that carries
    * none, which is every turn a person sends. */
@@ -188,12 +189,15 @@ export interface HarnessAdapter {
    * a folder another thread also worked in can tell its own changes from the rest. Absent, that turn's card lists the
    * folder's changes and says so. */
   readonly reportsEdits?: true;
-  /** Whether a rewind of this harness's thread is cut on its next resume, at the anchor the kept turn named; the
-   * runtime holds that anchor on the thread and hands it to that start as resumeAt. */
-  readonly resumesAt?: true;
-  /** Cuts this harness's own history before a turn at once, running no turn; absent where it cuts on its next resume
-   * or keeps its history. */
+  /** Cuts this harness's own history before a turn at once, running no turn; absent where it cuts by a fork of its
+   * session or keeps its history. */
   revert?: SessionReverter;
+  /** Readies a fork of one of this harness's sessions through a turn: a copy a start resumes, or the turn a start forks
+   * itself. A harness with no revert rewinds by it too, onto a copy the thread resumes from then on. Absent where the
+   * harness cannot fork a session. */
+  forkSession?: SessionForker;
+  /** Whether forkSession finds a turn that named no anchor by counting the turns after it. */
+  readonly forksByCount?: true;
   /** How this harness takes an image with a turn, and that it takes one at all: absent, a turn carrying an image is
    * refused in this agent's name before the machine is asked for anything. */
   readonly attachments?: AttachmentRoad;

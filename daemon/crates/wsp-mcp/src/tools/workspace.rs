@@ -103,6 +103,8 @@ pub struct Words {
     pub child_beside_lead: String,
     pub no_project: String,
     pub beside_alone: String,
+    pub fork_beside: String,
+    pub at_without_fork: String,
     pub local_folder: String,
     pub local_worktree: String,
     pub thread_deleted: String,

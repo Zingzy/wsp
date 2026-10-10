@@ -110,7 +110,7 @@ export function verbCopier(binary: string, run: typeof runChild = runChild): Cop
       if (res.exitCode !== 0) throw new Error(line(res));
     },
     async worktree(ask) {
-      const argv = ["copy", "worktree", "--from", ask.from, "--home", ask.home, "--project", ask.project, "--branch", ask.branch, ...ask.modules.flatMap(m => ["--module", JSON.stringify(m)])];
+      const argv = ["copy", "worktree", "--from", ask.from, "--home", ask.home, "--project", ask.project, "--branch", ask.branch, ...ask.modules.flatMap(m => ["--module", JSON.stringify(m)]), ...(ask.checkpoint !== undefined ? ["--checkpoint", ask.checkpoint] : [])];
       return printed(WorktreeReport, "worktree", await run(binary, argv, { timeoutMs: COPY_TIMEOUT_MS }));
     },
     async worktreeMount(o) {

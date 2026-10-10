@@ -456,6 +456,9 @@ export const CODEX_LEGACY_HISTORY = "a Codex older than 0.151.0 made this thread
  * reply the person keeps too. */
 export const CODEX_FEWER_TURNS = "codex lists fewer turns in this thread than the rewind would cut, so it cut nothing";
 
+/** A fork at a Codex turn its server does not list in the thread. */
+export const codexNoTurnLine = (turnId: string): string => `codex lists no turn ${turnId} in this thread`;
+
 /** A rewind to the thread's latest reply, after which nothing stands to cut. */
 export const REWIND_LATEST_LINE = "that is the thread's latest reply, so nothing comes after it to rewind";
 
@@ -480,6 +483,70 @@ export function rewindNote(o: { turns: number; files: boolean; cutsConversation:
   if (!o.files) return `${turnsAfter(o.turns)} the conversation; the files stay as they are.`;
   return `${turnsAfter(o.turns)} the conversation, and the files go back to how they stood at this reply. ${SHARED_FOLDER} ${undo}; the conversation does not come back.`;
 }
+
+/** A rewind to a turn a fork carried over from its thread: the fork's own history starts after it. */
+export const REWIND_COPIED_LINE = "that reply came with the fork from its thread, so a rewind can go back only to the fork's own replies";
+
+/** What a fork's tile card and the rule line after its copied history say, naming the thread it came from. */
+export const forkedFromLine = (title: string): string => `Forked from ${title}`;
+
+/** The banner over a fork's draft, before anything of it exists. */
+export const forkOfLine = (title: string): string => `Fork of ${title}`;
+
+/** The fork dialog's line under its title, and each pick's note. */
+export const forkDialogLine = (title: string): string => `A new thread with this conversation up to here. ${title} does not change.`;
+export const forkFolderNote = (title: string): string => `The files as they are now, shared with ${title}.`;
+export const FORK_BRANCH_NOTE = "A worktree with the files as this turn left them.";
+export const FORK_BRANCH_HEAD_NOTE = "A worktree at today's commit, with this turn's files on top.";
+/** Where the fork's draft will run, beside its banner, and the fork dialog's picks and acts by name. */
+export const forkWhereLine = (branch: string | undefined): string => (branch === undefined ? "in this folder" : `on ${branch}`);
+export const FORK_PICK_WORDS = { folder: "This folder", branch: "New branch", fork: "Fork", title: "Fork from here" } as const;
+/** The branch a fork's worktree takes unless one is named: its source's branch with -fork, numbered past every name taken,
+ * or the source thread's short id on a detached head. */
+export function forkBranchName(source: string | undefined, taken: ReadonlySet<string>, threadId: string): string {
+  const base = source === undefined || source === "" ? `fork-${threadId.slice(0, 8)}` : `${source}-fork`;
+  if (!taken.has(base)) return base;
+  for (let n = 2; ; n++) if (!taken.has(`${base}-${n}`)) return `${base}-${n}`;
+}
+
+/** A fork refused for naming what its thread already decides. */
+export const FORK_BESIDE_LINE = "a fork starts in its thread's folder, or on a new branch with --branch";
+export const FORK_BESIDE_FIX = "Leave out the project, --cwd, --beside and --replaces.";
+
+/** --at with no thread to fork, or a count that is no turn. */
+export const AT_WITHOUT_FORK_LINE = "--at counts the turns of the thread --fork names";
+export const AT_WITHOUT_FORK_FIX = "Name the thread with --fork, or leave --at out.";
+export const atNotATurnLine = (at: string): string => `--at takes a finished turn's number from 1, not ${at}`;
+
+/** A fork refused for naming another agent than its thread's: no agent opens another agent's session. */
+export const forkAgentLine = (agent: string, asked: string): string => `a fork runs on its thread's agent, ${agent}, not ${asked}`;
+export const forkAgentFix = (asked: string): string => `Leave the agent out, or open a new thread on ${asked}.`;
+
+/** A fork refused on an agent that keeps no road to fork its sessions. */
+export const forksNotLine = (agent: string): string => `${agent} cannot fork a thread`;
+export const FORKS_NOT_FIX = "Open a new thread instead.";
+
+/** A fork refused through a turn still running: a fork carries finished turns alone. */
+export const FORK_RUNNING_LINE = "that turn is still running, and a fork carries finished turns alone";
+export const FORK_RUNNING_FIX = "Fork from an earlier reply, or wait for the turn to end.";
+
+/** A fork refused for a turn the thread does not hold, counted as `--at` counts. */
+export const forkTurnsLine = (finished: number): string => (finished === 0 ? "that thread has no finished turn to fork from" : `that thread has ${finished} finished ${finished === 1 ? "turn" : "turns"}`);
+export const forkTurnsFix = (finished: number): string => (finished === 0 ? "Wait for its first turn to end." : `Name one from 1 to ${finished} with --at.`);
+export const forkNoTurnLine = (turnId: string): string => `that thread holds no turn ${turnId}`;
+export const FORK_NO_TURN_FIX = "Fork from a reply the thread shows.";
+
+/** A fork refused at a turn whose agent named no point to cut its conversation at. */
+export const forkNoAnchorLine = (agent: string): string => `${agent} left no point in that turn to fork its conversation at`;
+export const FORK_NO_ANCHOR_FIX = "Fork from another reply.";
+
+/** A fork the agent itself refused, in its own words. */
+export const forkRefusedLine = (agent: string, why: string): string => `${agent} could not fork the conversation: ${why}`;
+export const FORK_REFUSED_FIX = "Fork from another reply, or send it in the thread itself.";
+
+/** A fork onto a new branch whose turn's checkpoint of the files is gone, or never was. */
+export const FORK_NO_CHECKPOINT_LINE = "that turn kept no checkpoint of the files to start a branch from";
+export const FORK_NO_CHECKPOINT_FIX = "Fork it in this folder instead, without --branch.";
 
 /** The refusal of a send into a thread that names another agent. A thread's rows carry the agent its turns ran on
  * and the harness session those turns wrote, which another agent would open as a transcript of its own, at its own

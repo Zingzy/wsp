@@ -342,6 +342,8 @@ export const WorktreeAsk = z.object({
   project: z.string(),
   branch: z.string(),
   modules: z.array(CarryModule),
+  /** A checkpoint ref a new branch forks from: it starts at the commit the checkpoint was taken on, its files laid in uncommitted. */
+  checkpoint: z.string().optional(),
 });
 export type WorktreeAsk = z.infer<typeof WorktreeAsk>;
 

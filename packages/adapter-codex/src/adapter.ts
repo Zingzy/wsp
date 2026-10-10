@@ -19,6 +19,7 @@ import {
   CODEX_LEGACY_HISTORY,
   HUNK_HEAD,
   RUN_EXIT_MS,
+  codexNoTurnLine,
   asideWallLine,
   codexKeyRefusedLine,
   codexMissingEnvLine,
@@ -48,6 +49,7 @@ import type {
   PermissionOutcome,
   PatchHunk,
   SessionAsker,
+  SessionForker,
   SessionRenamer,
   SessionReverter,
   SessionTitleMaker,
@@ -80,6 +82,7 @@ import {
   refuseRequestLine,
   threadCompactStartLine,
   threadForkLine,
+  threadForkThroughLine,
   threadResumeLine,
   threadRevertLine,
   threadStartLine,
@@ -95,6 +98,9 @@ export interface CodexStartOptions {
   prompt: string;
   /** The thread id an earlier turn announced; the server reloads that thread. */
   resume?: string;
+  /** A thread to fork through one of its turns, by that turn's id, in place of a resume: the turn runs on the new
+   * thread the fork answers with, which every later turn resumes. */
+  fork?: { session: string; turn: string };
   cwd?: string;
   model?: string;
   effort?: string;
@@ -207,6 +213,9 @@ export interface CodexAdapter {
   aside: SessionAsker;
   /** Cuts the thread's own history before one of its turns; files are the checkpoint's business, not the server's. */
   revert: SessionReverter;
+  /** Finds the turn a fork carries the thread through, by its id or by count, and hands it to the fork's start. */
+  forkSession: SessionForker;
+  readonly forksByCount: true;
   readonly env: Readonly<Record<string, string>>;
 }
 
@@ -1255,7 +1264,13 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
     const config = options.serverValues?.config ?? {};
     const valued = Object.keys(config).length > 0;
     const thread = { ...(options.cwd !== undefined ? { cwd: options.cwd } : {}), ...(options.model !== undefined ? { model: options.model } : {}), ...(options.fast === true ? { serviceTier: "fast" as const } : {}), access, ...(valued ? { config } : {}) };
-    const threadLine = options.resume === undefined ? threadStartLine(thread) : threadResumeLine({ ...thread, threadId: options.resume });
+    if (options.fork !== undefined && options.resume !== undefined) throw new Error("a codex start forks a thread or resumes one, never both");
+    const threadLine =
+      options.fork !== undefined
+        ? threadForkThroughLine({ ...thread, threadId: options.fork.session, lastTurnId: options.fork.turn })
+        : options.resume === undefined
+          ? threadStartLine(thread)
+          : threadResumeLine({ ...thread, threadId: options.resume });
     const command = buildCommand({ ...(options.cwd !== undefined ? { cwd: options.cwd } : {}), ...(options.mcpServers !== undefined ? { mcpServers: options.mcpServers } : {}), ...(deps.launch !== undefined ? { launch: deps.launch } : {}) });
     const run = deps.exec(command, { env: { ...env }, input: [initializeLine(), INITIALIZED_LINE, ACCOUNT_READ_LINE, rateLimitsReadLine(options.limitDetails === true), threadLine], ...(valued ? { secret: { input: true as const } } : {}) });
     const keeper = options.keep === true ? keepRun(run) : undefined;
@@ -1344,6 +1359,46 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
     if (result.status !== "completed") throw new Error(result.error ?? "codex did not cut the thread");
   };
 
+  /** The turn a fork carries the thread through, found on a server run of its own that loads no thread and runs no turn:
+   * the thread's turns newest first, page by page, until the turn by its id, or the one past the turns after it that
+   * the server opened. A thread whose history the server will not list forks at its anchor as given. */
+  const forkSession: SessionForker = async o => {
+    const command = buildCommand({ ...(deps.launch?.program !== undefined ? { launch: { program: deps.launch.program } } : {}) });
+    const anchor = "anchor" in o.turn ? o.turn.anchor : undefined;
+    let skip = "after" in o.turn ? o.turn.after.filter(serverOpened).length : 0;
+    let found: string | undefined;
+    let cursor: string | null = null;
+    const seen = new Set<string | null>();
+    const page = (): string => {
+      seen.add(cursor);
+      return threadTurnsListLine({ threadId: o.session, cursor, limit: 100 });
+    };
+    const result = await follow({
+      stream: deps.exec(command, { env: { ...env }, input: [initializeLine(), INITIALIZED_LINE, page()] }),
+      localId: randomUUID(),
+      startedAt: Date.now(),
+      command,
+      sideRun: (id, answer) => {
+        if (id !== REQUEST.turns) return { status: "completed" };
+        for (const turn of Array.isArray(answer?.data) ? answer.data : []) {
+          const turnId = str(rec(turn)?.id);
+          if (turnId === undefined) continue;
+          if (anchor !== undefined ? turnId === anchor : skip-- === 0) {
+            found = turnId;
+            return { status: "completed" };
+          }
+        }
+        cursor = str(answer?.nextCursor) ?? null;
+        if (cursor === null) return { status: "failed", error: anchor !== undefined ? codexNoTurnLine(anchor) : CODEX_FEWER_TURNS };
+        return seen.has(cursor) ? { status: "failed", error: "codex could not list the thread's turns: it handed back a page it already gave" } : page();
+      },
+      onEvent: () => {},
+    }).finished;
+    if (found !== undefined) return { fork: { session: o.session, turn: found } };
+    if (anchor !== undefined && result.error?.includes(PAGINATED_ONLY) === true) return { fork: { session: o.session, turn: anchor } };
+    throw new Error(result.error ?? "codex did not find the turn to fork the thread at");
+  };
+
   const attach = deps.exec.attach?.bind(deps.exec);
 
   const launch = deps.launch !== undefined ? { launch: deps.launch } : {};
@@ -1382,6 +1437,8 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
     waitsForPrompt: true,
     aside,
     revert,
+    forkSession,
+    forksByCount: true,
     probeCatalog,
     probeVersion: (exec: HarnessExec) => exec(versionProbeCommand(launch), questionEnv()).then(parseVersion),
     sessionTitle: (threadId, exec) => exec(sessionTitleCommand({ home: deps.home, threadId })).then(parseSessionTitle),

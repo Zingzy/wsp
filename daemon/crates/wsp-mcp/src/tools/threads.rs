@@ -96,6 +96,8 @@ struct Session {
     #[serde(default)]
     folded_at: Option<Box<RawValue>>,
     #[serde(default)]
+    forked_from: Option<Box<RawValue>>,
+    #[serde(default)]
     replaces: Option<String>,
     #[serde(default)]
     replaced_by: Option<String>,
@@ -185,6 +187,9 @@ pub struct Thread {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[cfg_attr(test, schemars(with = "Option<f64>"))]
     pub folded_at: Option<Box<RawValue>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, schemars(with = "Option<serde_json::Map<String, serde_json::Value>>"))]
+    pub forked_from: Option<Box<RawValue>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub replaces: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -365,6 +370,7 @@ fn fold(sessions: Vec<Session>) -> Vec<Thread> {
                 settled_at: latest.settled_at,
                 pinned_at: latest.pinned_at,
                 folded_at: latest.folded_at,
+                forked_from: latest.forked_from,
                 replaces: latest.replaces,
                 replaced_by: latest.replaced_by,
                 snoozed_until: latest.snoozed_until,

@@ -66,6 +66,13 @@ export function threadForkLine(o: { threadId: string; cwd?: string; model?: stri
   });
 }
 
+/** A new thread holding the thread's history through one of its turns and nothing after, written to disk as any thread
+ * is, in the folder and at the access the fork runs at: what a fork of a thread starts on. excludeTurns leaves the
+ * history out of the reply alone. The fork keeps the source's turn ids (measured on 0.162.1). */
+export function threadForkThroughLine(o: ThreadOptions & { threadId: string; lastTurnId: string }): string {
+  return line({ id: REQUEST.thread, method: "thread/fork", params: { threadId: o.threadId, lastTurnId: o.lastTurnId, excludeTurns: true, ...named({ cwd: o.cwd, model: o.model, serviceTier: o.serviceTier }), ...o.access, ...configOf(o) } });
+}
+
 /** The thread's persisted history cut to the turns before one: that turn and every later one leave it. Files are
  * not the server's to touch here. */
 export function threadRevertLine(o: { threadId: string; beforeTurnId: string }): string {

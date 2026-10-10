@@ -34,7 +34,7 @@ function harness(prompts: string[], starts: HarnessStartOptions[] = []): Harness
   let n = 0;
   return () => ({
     steers: false,
-    resumesAt: true,
+    forkSession: async f => ({ resume: f.session, drop: async () => {} }),
     start: o => {
       n += 1;
       prompts.push(o.prompt);

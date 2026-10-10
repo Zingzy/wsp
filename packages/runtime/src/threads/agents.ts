@@ -61,8 +61,10 @@ export function agentsArea(ctx: RuntimeContext): AgentsArea {
       asides: adapter.aside !== undefined,
       ...(adapter.compacts !== undefined ? { compacts: adapter.compacts } : {}),
       ...(adapter.terminalResume !== undefined ? { terminalResume: adapter.terminalResume } : {}),
-      ...(adapter.resumesAt === true || adapter.revert !== undefined ? { rewindsConversation: true } : {}),
+      ...(adapter.forkSession !== undefined || adapter.revert !== undefined ? { rewindsConversation: true } : {}),
       ...(adapter.revert !== undefined ? { rewindsByCount: true } : {}),
+      ...(adapter.forkSession !== undefined ? { forks: true } : {}),
+      ...(adapter.forksByCount === true ? { forksByCount: true } : {}),
       ...(adapter.screenCommands !== undefined ? { screenCommands: [...adapter.screenCommands] } : {}),
     };
     if (adapter.probeCatalog === undefined) return Promise.resolve(known);

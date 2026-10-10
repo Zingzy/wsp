@@ -28,6 +28,8 @@ export interface DeriveRowsInput {
   /** A subagent's page while the subagent runs: its lines carry no turn, its last message is not its answer yet, and
    * its call in progress is live. */
   readonly openRun?: boolean;
+  /** A fork's page: the rule line saying where it came from stands after the turns it was handed. */
+  readonly forked?: boolean;
 }
 
 export function deriveMessagesTimelineRows(input: DeriveRowsInput): MessagesTimelineRow[] {
@@ -121,9 +123,23 @@ export function deriveMessagesTimelineRows(input: DeriveRowsInput): MessagesTime
     }
   };
 
+  // A fork's rule line stands before its first row that is no turn it was handed: its own first message, or the end.
+  const copied = new Set(input.turns.filter(t => t.copied === true).map(t => t.turnId));
+  const ruleAt = input.forked !== true ? -1 : (() => {
+    const own = entries.findIndex(e => {
+      const turn = e.kind === "message" ? e.message.turnId : entryTurnId(e);
+      return turn === null || !copied.has(turn);
+    });
+    return own === -1 ? entries.length : own;
+  })();
+  const pushRule = (): void => {
+    rows.push({ kind: "fork", id: "fork-rule", createdAt: null });
+  };
+
   for (let index = 0; index < entries.length; index++) {
     const entry = entries[index]!;
     sayStopsBefore(index);
+    if (index === ruleAt) pushRule();
     if (input.isWorking && index === activeTurnHeaderIndex) pushWorking();
     if (entry.id === activePlacementId) pushActive();
 
@@ -220,6 +236,7 @@ export function deriveMessagesTimelineRows(input: DeriveRowsInput): MessagesTime
   }
 
   sayStopsBefore(entries.length);
+  if (ruleAt === entries.length) pushRule();
   if (input.isWorking && activeTurnHeaderIndex === entries.length) pushWorking();
   if (behind !== null) rows.push({ kind: "permission", id: `waiting-on:${behind.threadId}:${behind.prompt.askId}`, createdAt: input.activeTurnStartedAt ?? "", permission: borrowedPrompt(behind), asker: waitingAskerLine(behind.title) });
   // A turn stopped on a prompt is waiting, not thinking: the live row would say the agent is at work while it is not.

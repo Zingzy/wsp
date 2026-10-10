@@ -94,6 +94,8 @@ import {
   SSH_TICKET_REFUSAL,
   isLocalWorkspace,
   BRANCH_ON_A_THREAD_LINE,
+  FORK_BESIDE_LINE,
+  FORK_BESIDE_FIX,
   type AccountDevice,
   type AccountView,
   type DeviceView,
@@ -119,7 +121,7 @@ import { NO_DEVICE_DOOR, safeEqual, threadOf, type DeviceDoor, type HeldDevice }
 import { NO_PLACE_DOOR, type PlaceDoor } from "./places.js";
 import { signInSocket } from "./sign-in-socket.js";
 import { keyFingerprint, openFrame, verifyPlaceBytes, type Seal } from "@wsp/keys";
-import { answeredStart } from "./threads/answered-start.js";
+import { answeredStart, startAsked } from "./threads/answered-start.js";
 import type { HostEditor, HostFolders, HostSsh, HostTerminalConfig, InitDoor, ProjectBundler, ProjectLander, RecipeShelf, Runtime } from "./runtime.js";
 
 import { forwardsOf, type ForwardsSource } from "./forwards.js";
@@ -1509,6 +1511,8 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               // A start on this computer names a project, a branch or a folder rather than a record: the folder's record
               // is found or made first, and the start runs on it.
               if (msg.workspaceId !== undefined && msg.branch !== undefined) throw Object.assign(new Error(BRANCH_ON_A_THREAD_LINE), { kind: "usage" });
+              // A fork's folder is its source's, or a new worktree of the source's repo: nothing else may name one.
+              if (msg.fork !== undefined && (msg.workspaceId !== undefined || msg.project !== undefined || msg.cwd !== undefined || msg.thread !== undefined || msg.replaces !== undefined)) throw usageRefusal(FORK_BESIDE_LINE, FORK_BESIDE_FIX);
               const picks = {
                 ...(msg.harness !== undefined ? { harness: msg.harness } : {}),
                 ...(msg.model !== undefined ? { model: msg.model } : {}),
@@ -1517,6 +1521,12 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
                 ...(msg.permissionMode !== undefined ? { permissionMode: msg.permissionMode } : {}),
                 ...(msg.fast === true ? { fast: true } : {}),
               };
+              const asked = startAsked(msg);
+              const fork = msg.fork;
+              if (fork !== undefined) {
+                await answeredStart(msg.answerHeld === true, onHeld => rt.sessions.fork({ ...asked, fork, ...(msg.branch !== undefined ? { branch: msg.branch } : {}), ...(onHeld !== undefined ? { onHeld } : {}) }, origin), reply => send({ id: msg.id, ok: true, ...reply }));
+                return;
+              }
               const at =
                 msg.workspaceId !== undefined
                   ? { workspaceId: msg.workspaceId, cwd: msg.cwd }
@@ -1532,24 +1542,10 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
                       )
                       .then(found => ({ workspaceId: found.workspace.id, cwd: found.cwd }));
               await answeredStart(msg.answerHeld === true, onHeld => rt.sessions.start(at.workspaceId, {
-                prompt: msg.prompt, ...(onHeld !== undefined ? { onHeld } : {}), ...(msg.followed === true ? { followed: true } : {}),
-                ...(msg.harness !== undefined ? { harness: msg.harness } : {}),
+                ...asked, ...(onHeld !== undefined ? { onHeld } : {}),
                 ...(msg.thread !== undefined ? { thread: msg.thread } : {}),
                 ...(at.cwd !== undefined ? { cwd: at.cwd } : {}),
-                ...(msg.model !== undefined ? { model: msg.model } : {}),
-                ...(msg.effort !== undefined ? { effort: msg.effort } : {}),
-                ...(msg.permissionMode !== undefined ? { permissionMode: msg.permissionMode } : {}),
-                ...(msg.access !== undefined ? { access: msg.access } : {}),
-                ...(msg.contextWindow !== undefined ? { contextWindow: msg.contextWindow } : {}),
-                ...(msg.fast !== undefined ? { fast: msg.fast } : {}),
-                ...(msg.startedBy !== undefined ? { startedBy: msg.startedBy } : {}),
-                ...(msg.requestId !== undefined ? { requestId: msg.requestId } : {}),
-                ...(msg.attempt !== undefined ? { attempt: msg.attempt } : {}),
-                ...(msg.notify !== undefined ? { notify: msg.notify } : {}),
-                ...(msg.turnToken !== undefined ? { turnToken: msg.turnToken } : {}),
-                ...(msg.title !== undefined ? { title: msg.title } : {}),
                 ...(msg.replaces !== undefined ? { replaces: msg.replaces } : {}),
-                ...(msg.attachments !== undefined ? { attachments: msg.attachments } : {}),
               }, origin), reply => send({ id: msg.id, ok: true, ...reply }));
               return;
             }

@@ -24,8 +24,8 @@ const CHECKPOINT_IDENTITY: [(&str, &str); 4] = [
 pub(crate) const REFS_PER_THREAD: usize = 100;
 
 /// The checkout's whole tree under `refs/wsp/checkpoints/<scope>/<thread>/<turn>`, the scope the folder record's id
-/// where the host names one, else the folder the checkout's top level sits in. The same tree under the same ref keeps
-/// its commit, and the thread's oldest refs past the hundredth go.
+/// where the host names one, else the folder the checkout's top level sits in. The same tree on the same HEAD under the
+/// same ref keeps its commit, and the thread's oldest refs past the hundredth go.
 pub(crate) async fn checkpoint<R: Runs>(
     runner: &R,
     cwd: &Path,
@@ -167,7 +167,7 @@ pub(crate) async fn restore<R: Runs>(runner: &R, cwd: &Path, scope: Option<&str>
 }
 
 /// The tree into a temporary index seeded from the checkout's own (so git hashes only what changed), then a
-/// commit of it under the ref.
+/// commit of it under the ref whose parent is the HEAD the checkout stands on, none where HEAD has no commit yet.
 async fn record<R: Runs>(runner: &R, top: &Path, name: &str) -> Result<GitCheckpointReply, OpError> {
     let tree = with_index(runner, top, |index| async move {
         let added = git_on(runner, top, &index, &["add", "-A"], None).await?;
@@ -177,25 +177,36 @@ async fn record<R: Runs>(runner: &R, top: &Path, name: &str) -> Result<GitCheckp
         Ok(stdout_text(&written).trim().to_owned())
     })
     .await?;
-    let held =
-        run_git(runner, top, &GitLine::new(&["rev-parse", "--verify", "-q"]).revs(&[&format!("{name}^{{commit}}")]), None, None).await?;
-    if held.code == Some(0) {
-        let commit = stdout_text(&held).trim().to_owned();
-        let tree_then =
-            run_git(runner, top, &GitLine::new(&["rev-parse", "--verify", "-q"]).revs(&[&format!("{commit}^{{tree}}")]), None, None)
-                .await?;
-        if stdout_text(&tree_then).trim() == tree {
-            return Ok(GitCheckpointReply { checkpoint_ref: name.to_owned(), commit, changed: false });
+    let head = match resolved(runner, top, "HEAD^{commit}").await? {
+        Some(head) => Some(Oid::parse(&head).ok_or_else(|| OpError::plain(format!("git rev-parse HEAD answered {head:?}")))?),
+        None => None,
+    };
+    let held = resolved(runner, top, &format!("{name}^{{commit}}")).await?;
+    if let Some(commit) = held {
+        let tree_then = resolved(runner, top, &format!("{commit}^{{tree}}")).await?;
+        let parent_then = resolved(runner, top, &format!("{commit}^")).await?;
+        if tree_then.as_deref() == Some(tree.as_str()) && parent_then.as_deref() == head.as_ref().map(Oid::as_str) {
+            return Ok(GitCheckpointReply { checkpoint_ref: name.to_owned(), commit, changed: false, based: head.is_some() });
         }
     }
     let tree = Oid::parse(&tree).ok_or_else(|| OpError::plain(format!("git write-tree answered {tree:?}")))?;
     let line = CHECKPOINT_IDENTITY.iter().fold(GitLine::new(&["commit-tree", "-m", "wsp checkpoint"]), |line, (k, v)| line.env(k, v));
+    let line = match &head {
+        Some(head) => line.words(&["-p"]).oid(head),
+        None => line,
+    };
     let committed = run_git(runner, top, &line.oid(&tree), None, None).await?;
     ran(&committed, "commit-tree")?;
     let commit = stdout_text(&committed).trim().to_owned();
     let moved = run_git(runner, top, &GitLine::new(&["update-ref"]).revs(&[name, &commit]), None, None).await?;
     ran(&moved, "update-ref")?;
-    Ok(GitCheckpointReply { checkpoint_ref: name.to_owned(), commit, changed: true })
+    Ok(GitCheckpointReply { checkpoint_ref: name.to_owned(), commit, changed: true, based: head.is_some() })
+}
+
+/// The object a revision names, or none where it names nothing in this checkout.
+async fn resolved<R: Runs>(runner: &R, top: &Path, rev: &str) -> Result<Option<String>, OpError> {
+    let read = run_git(runner, top, &GitLine::new(&["rev-parse", "--verify", "-q"]).revs(&[rev]), None, None).await?;
+    Ok((read.code == Some(0)).then(|| stdout_text(&read).trim().to_owned()))
 }
 
 pub(super) async fn top_of<R: Runs>(runner: &R, cwd: &Path) -> Result<PathBuf, OpError> {
@@ -372,6 +383,64 @@ mod tests {
         let edited = checkpoint(&Here::new(), &at, None, "thr_1", "turn_1").await.unwrap();
         assert!(edited.changed);
         assert_ne!(edited.commit, first.commit);
+    }
+
+    fn parents(at: &Path, commit: &str) -> Vec<String> {
+        git(at, &["rev-list", "--parents", "-n", "1", commit]).split(' ').skip(1).map(str::to_owned).collect()
+    }
+
+    #[tokio::test]
+    async fn a_checkpoints_commit_has_the_head_it_was_taken_on_as_its_parent() {
+        let (_dir, at) = copy();
+        fs::write(at.join("one.txt"), "uno\n").unwrap();
+        let taken = checkpoint(&Here::new(), &at, None, "thr_1", "turn_1").await.unwrap();
+        assert_eq!(parents(&at, &taken.commit), [git(&at, &["rev-parse", "HEAD"])]);
+        assert!(taken.based);
+        let again = checkpoint(&Here::new(), &at, None, "thr_1", "turn_1").await.unwrap();
+        assert!(!again.changed && again.based, "the same checkpoint again still says it stands on HEAD");
+    }
+
+    #[tokio::test]
+    async fn the_same_tree_on_a_moved_head_is_a_new_checkpoint_and_on_the_same_head_the_same_one() {
+        let (_dir, at) = copy();
+        fs::write(at.join("one.txt"), "uno\n").unwrap();
+        let first = checkpoint(&Here::new(), &at, None, "thr_1", "turn_1").await.unwrap();
+        git(&at, &["commit", "-q", "-am", "uno"]);
+        let moved = checkpoint(&Here::new(), &at, None, "thr_1", "turn_1").await.unwrap();
+        assert_eq!(tree_of(&at, &moved.commit), tree_of(&at, &first.commit), "the working tree did not change");
+        assert!(moved.changed);
+        assert_ne!(moved.commit, first.commit);
+        assert_eq!(parents(&at, &moved.commit), [git(&at, &["rev-parse", "HEAD"])]);
+        let again = checkpoint(&Here::new(), &at, None, "thr_1", "turn_1").await.unwrap();
+        assert_eq!((again.commit.as_str(), again.changed), (moved.commit.as_str(), false));
+    }
+
+    #[tokio::test]
+    async fn a_checkpoint_with_no_parent_still_restores() {
+        let (_dir, at) = copy();
+        let tree = tree_of(&at, "HEAD");
+        let commit = git(&at, &["commit-tree", &tree, "-m", "old checkpoint"]);
+        let name = "refs/wsp/checkpoints/spoo-fix-login/thr_1/turn_1";
+        git(&at, &["update-ref", name, &commit]);
+        fs::write(at.join("one.txt"), "uno\n").unwrap();
+        fs::write(at.join("two.txt"), "two\n").unwrap();
+        restore(&Here::new(), &at, None, name).await.unwrap();
+        assert_eq!(fs::read_to_string(at.join("one.txt")).unwrap(), "one\n");
+        assert!(!at.join("two.txt").exists());
+    }
+
+    #[tokio::test]
+    async fn a_repo_with_no_commit_yet_checkpoints_with_no_parent() {
+        let dir = tempfile::tempdir().unwrap();
+        let at = dir.path().join("fresh");
+        fs::create_dir_all(&at).unwrap();
+        git(&at, &["init", "-q", "-b", "main"]);
+        fs::write(at.join("one.txt"), "one\n").unwrap();
+        let taken = checkpoint(&Here::new(), &at, None, "thr_1", "turn_1").await.unwrap();
+        assert!(taken.changed);
+        assert!(parents(&at, &taken.commit).is_empty());
+        assert!(!taken.based);
+        assert_eq!(git(&at, &["show", &format!("{}:one.txt", taken.commit)]), "one");
     }
 
     #[tokio::test]

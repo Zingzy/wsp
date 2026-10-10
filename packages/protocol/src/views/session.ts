@@ -109,6 +109,16 @@ export const SubagentView = z.object({
 });
 export type SubagentView = z.infer<typeof SubagentView>;
 
+/** Which of a thread's turns a fork carries through: the turn by its id, or the nth finished turn counted from 1 in
+ * the order `wsp thread read` lists them, 0 carrying none; with neither, the thread's latest finished turn. */
+export const ForkSource = z.object({ threadId: z.string(), turnId: z.string().optional(), at: z.number().int().nonnegative().optional() });
+export type ForkSource = z.infer<typeof ForkSource>;
+
+/** The thread a fork came from and the turn it carries through, absent on a fork that carries none, with the source's
+ * title: its own while it stands, the one it had at the fork once it is deleted. */
+export const ForkedFrom = z.object({ threadId: z.string(), turnId: z.string().optional(), title: z.string() });
+export type ForkedFrom = z.infer<typeof ForkedFrom>;
+
 export const SessionView = z.object({
   id: z.string(),
   workspaceId: z.string(),
@@ -230,6 +240,8 @@ export const SessionView = z.object({
   /** When the thread was last rewound, while the files that rewind replaced can still be put back: until the
    * thread's next turn ends. Kept and stamped as readAt is. */
   rewoundAt: z.number().optional(),
+  /** The thread this row's thread was forked from, off its record and stamped as readAt is. */
+  forkedFrom: ForkedFrom.optional(),
 });
 export type SessionView = z.infer<typeof SessionView>;
 
@@ -292,6 +304,8 @@ export const ThreadView = z.object({
   section: ThreadPlacement.optional(),
   /** As SessionView.rewoundAt: set while Undo rewind can put the files back. */
   rewoundAt: z.number().optional(),
+  /** As SessionView.forkedFrom. */
+  forkedFrom: ForkedFrom.optional(),
   /** The access and the fast mode the latest turn ran at, as its row carries them. */
   permissionMode: z.string().optional(),
   fast: z.boolean().optional(),
@@ -361,6 +375,7 @@ export function foldThreads(sessions: ReadonlyArray<SessionView>): ThreadView[] 
       ...(latest.wokeAt !== undefined ? { wokeAt: latest.wokeAt } : {}),
       ...(latest.section !== undefined ? { section: latest.section } : {}),
       ...(latest.rewoundAt !== undefined ? { rewoundAt: latest.rewoundAt } : {}),
+      ...(latest.forkedFrom !== undefined ? { forkedFrom: latest.forkedFrom } : {}),
       ...(latest.permissionMode !== undefined ? { permissionMode: latest.permissionMode } : {}),
       ...(latest.fast === true ? { fast: true } : {}),
       ...(latest.subagents !== undefined && latest.subagents.length > 0 ? { subagents: latest.subagents } : {}),

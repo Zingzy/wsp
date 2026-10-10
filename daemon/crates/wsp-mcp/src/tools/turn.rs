@@ -6,6 +6,7 @@
 
 use std::collections::HashMap;
 use std::io::Read;
+use std::num::NonZeroU64;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -41,6 +42,10 @@ pub struct RunIn {
     pub project: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub beside: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fork: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at: Option<NonZeroU64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub branch: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1076,14 +1081,68 @@ fn opened_thread(thread_id: &str, opened: Option<&Opened>, folder: Option<&str>)
 }
 
 async fn run(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
-    let RunIn { project, beside, branch, cwd, message, agent, model, effort, access, fast, notify, title, replaces, files, detach } =
-        input("run", arguments)?;
+    let RunIn {
+        project,
+        beside,
+        fork,
+        at,
+        branch,
+        cwd,
+        message,
+        agent,
+        model,
+        effort,
+        access,
+        fast,
+        notify,
+        title,
+        replaces,
+        files,
+        detach,
+    } = input("run", arguments)?;
     let words = super::workspace::words();
     if beside.is_some() && (project.is_some() || branch.is_some()) {
         return Err(Failure::usage(words.beside_alone.clone()).into());
     }
+    if at.is_some() && fork.is_none() {
+        return Err(Failure::usage(words.at_without_fork.clone()).into());
+    }
+    if fork.is_some() && (project.is_some() || beside.is_some() || cwd.is_some() || replaces.is_some()) {
+        return Err(Failure::usage(words.fork_beside.clone()).into());
+    }
     let client = host.client().await?;
     let picks = Picks { model, effort, access, fast };
+    if let Some(fork) = fork {
+        // The thread forked decides the folder and the agent, so the start names it and no workspace.
+        let read = async {
+            let aim = Aim { line: "wsp run --fork", or_computer: false, cloud: host.cloud() };
+            let thread = thread_at::<Workspace>(&client, &fork, &aim).await?.0;
+            checked_start(&client, &message, Some(agent.as_deref().unwrap_or(&thread.harness)), &picks, Some(&thread.workspace_id), None)
+                .await?;
+            let notify = notify_of(&client, notify.as_deref().unwrap_or_default()).await?;
+            let attachments = files_from(files.as_deref().unwrap_or_default(), host.args().guest)?;
+            Ok((thread, notify, attachments))
+        }
+        .await;
+        let (thread, notify, attachments) = before_sending(&client, read)?;
+        let mut source = params([("threadId", Value::from(thread.runtime_id()))]);
+        if let Some(at) = at {
+            source.insert("at".to_owned(), Value::from(at.get()));
+        }
+        let mut named = params([("fork", Value::Object(source))]);
+        if let Some(branch) = branch {
+            named.insert("branch".to_owned(), Value::from(branch));
+        }
+        let mut start = opening_at(&host, named, &message, agent, None, notify);
+        if let Some(title) = title {
+            start.insert("title".to_owned(), Value::from(title));
+        }
+        if !attachments.is_empty() {
+            start.insert("attachments".to_owned(), Value::from(attachments));
+        }
+        picks.wire(&mut start)?;
+        return answered(&host, &client, &start, detach, None, None).await;
+    }
     // Everything the call names is read before a machine is forked or woken for it, so a refusal costs none.
     let read = async {
         let target = match &beside {
@@ -1159,13 +1218,26 @@ async fn run(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
         start.insert("attachments".to_owned(), Value::from(attachments));
     }
     picks.wire(&mut start)?;
+    answered(&host, &client, &start, detach, opened, woken).await
+}
+
+/// A run's start sent: followed to its turn's end, or with detach answered once the turn starts; a machine woken for a
+/// launch that died is put back to sleep.
+async fn answered(
+    host: &Host,
+    client: &Arc<Client>,
+    start: &Map<String, Value>,
+    detach: Option<bool>,
+    opened: Option<Opened>,
+    woken: Option<Woken>,
+) -> Result<Answer, Refused> {
     let mut started = None;
     let answered = if detach == Some(true) {
-        begin_through(&host, client.clone(), &start).await.map(|turn| {
+        begin_through(host, client.clone(), start).await.map(|turn| {
             Answer::text(held_line(opened_thread(&turn.thread_id, opened.as_ref(), turn.cwd.as_deref()), &turn), &turn_out(&turn))
         })
     } else {
-        match follow(&host, client.clone(), &start, &mut started).await {
+        match follow(host, client.clone(), start, &mut started).await {
             Ok(turn) => match turn_refusal(&turn) {
                 Some(refused) => Err(refused),
                 None => {
@@ -1182,7 +1254,7 @@ async fn run(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
     };
     match (answered, woken) {
         (Ok(answer), _) => Ok(answer),
-        (Err(failure), Some(woken)) => Err(with_line(failure, nap_after_dead_launch(&client, &woken, started.as_ref()).await).into()),
+        (Err(failure), Some(woken)) => Err(with_line(failure, nap_after_dead_launch(client, &woken, started.as_ref()).await).into()),
         (Err(failure), None) => Err(failure.into()),
     }
 }

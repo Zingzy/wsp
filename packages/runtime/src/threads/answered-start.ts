@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import type { SessionStartResult, SessionView } from "@wsp/protocol";
+import type { RuntimeRequest, SessionStartResult, SessionView } from "@wsp/protocol";
 import type { SessionHandle } from "../types/wiring.js";
 
 type OnHeld = (held: { view: SessionView; turnId: string }) => void;
@@ -17,4 +17,26 @@ export async function answeredStart(answerHeld: boolean, start: (onHeld?: OnHeld
     if (!answered) throw e;
   });
   if (!answered && handle !== undefined) answer({ session: handle.view(), outcome: handle.outcome, turnId: handle.turnId });
+}
+
+/** What a sessions.start asks of the thread it starts or forks, beside where it runs. */
+export function startAsked(msg: Extract<RuntimeRequest, { op: "sessions.start" }>) {
+  return {
+    prompt: msg.prompt,
+    ...(msg.followed === true ? { followed: true } : {}),
+    ...(msg.harness !== undefined ? { harness: msg.harness } : {}),
+    ...(msg.model !== undefined ? { model: msg.model } : {}),
+    ...(msg.effort !== undefined ? { effort: msg.effort } : {}),
+    ...(msg.permissionMode !== undefined ? { permissionMode: msg.permissionMode } : {}),
+    ...(msg.access !== undefined ? { access: msg.access } : {}),
+    ...(msg.contextWindow !== undefined ? { contextWindow: msg.contextWindow } : {}),
+    ...(msg.fast !== undefined ? { fast: msg.fast } : {}),
+    ...(msg.startedBy !== undefined ? { startedBy: msg.startedBy } : {}),
+    ...(msg.requestId !== undefined ? { requestId: msg.requestId } : {}),
+    ...(msg.attempt !== undefined ? { attempt: msg.attempt } : {}),
+    ...(msg.notify !== undefined ? { notify: msg.notify } : {}),
+    ...(msg.turnToken !== undefined ? { turnToken: msg.turnToken } : {}),
+    ...(msg.title !== undefined ? { title: msg.title } : {}),
+    ...(msg.attachments !== undefined ? { attachments: msg.attachments } : {}),
+  };
 }

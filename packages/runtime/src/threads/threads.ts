@@ -825,17 +825,19 @@ export function threadsArea(ctx: RuntimeContext): ThreadsArea {
   const checkpointsLanding = new Map<string, Promise<void>>();
   const keepCheckpoint = async (entry: LiveWorkspace, turn: { sessionId: string; threadId: string; turnId: string; anchor?: string; kept?: string }): Promise<void> => {
     let ref: string | undefined;
+    let based = false;
     if (!notARepo(entry.record)) {
       try {
         // Scoped by the record's id, so the refs of two folders of one repo never share a prefix.
         const taken = await ctx.withDaemon(entry, ask => ask({ op: "git.checkpoint", cwd: ctx.checkoutOf(entry.record), thread: turn.threadId, turn: turn.turnId, scope: entry.record.id }));
         if (typeof taken["ref"] === "string") ref = taken["ref"];
+        based = taken["based"] === true;
       } catch (e) {
         console.warn(noCheckpointLogLine(turn.threadId, entry.record.id, e instanceof Error ? e.message : String(e)));
       }
     }
     if (ref === undefined && turn.anchor === undefined && turn.kept === undefined) return;
-    ctx.record({ type: "session.checkpoint", workspaceId: entry.record.id, sessionId: turn.sessionId, turnId: turn.turnId, threadId: turn.threadId, ...(ref !== undefined ? { ref } : {}), ...(turn.anchor !== undefined ? { anchor: turn.anchor } : {}), ...(turn.kept !== undefined ? { kept: turn.kept } : {}) });
+    ctx.record({ type: "session.checkpoint", workspaceId: entry.record.id, sessionId: turn.sessionId, turnId: turn.turnId, threadId: turn.threadId, ...(ref !== undefined ? { ref } : {}), ...(ref !== undefined && based ? { based: true as const } : {}), ...(turn.anchor !== undefined ? { anchor: turn.anchor } : {}), ...(turn.kept !== undefined ? { kept: turn.kept } : {}) });
   };
   /** Recorded once the harness took the line, so the row sits where the turn could first see it. */
   /** The handle a start already taken answers with: the turn's own while it runs, and while it does not, one whose

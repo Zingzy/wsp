@@ -7,7 +7,7 @@
 // session id repeats across turns. Wire order is the timeline order. createdAt
 // is the wire's `at` (ms epoch) as ISO, else the caller's receipt clock, else
 // "" for unstamped history.
-import { AFTER_CUT_LINE, LIMIT_WORDS, NOTIFY_ME, compactedLine, spawnsThread, internalToolResult, subagentPrompt, subagentTaskLine, toolActivityLine, toolCallFacts, toolDoneLine, toolResultLine, type PlanStep, type SessionEvent, type SessionHarness, type SessionRunEvent, type SubagentView, type TurnResult } from "@wsp/protocol";
+import { AFTER_CUT_LINE, LIMIT_WORDS, NOTIFY_ME, compactedLine, copiedFromOf, spawnsThread, internalToolResult, subagentPrompt, subagentTaskLine, toolActivityLine, toolCallFacts, toolDoneLine, toolResultLine, type PlanStep, type SessionEvent, type SessionHarness, type SessionRunEvent, type SubagentView, type TurnResult } from "@wsp/protocol";
 import { spawnedThreadOf } from "./spawned.js";
 import type {
   ChatMessage,
@@ -337,6 +337,7 @@ export function createSessionFold(): SessionFold {
       completedAt: null,
       checkpoint: null,
       limit: null,
+      ...(copiedFromOf(event) !== undefined ? { copied: true as const } : {}),
     };
     turns.push(summary);
     return { summary, startCount: count, ordinal: 0, openMessage: null, openMessageId: null, sawText: false, tools: new Map(), childCalls: new Map(), openAnonymousTool: null, subagents: new Map(), reply: null, planRow: null };
@@ -539,7 +540,7 @@ export function createSessionFold(): SessionFold {
         // Taken once the turn is over, so a later turn may already be open: the row goes on its own turn's summary.
         const at = turns.findIndex(t => t.turnId === event.turnId);
         if (at < 0) return;
-        const kept = { ...turns[at]!, checkpoint: { ref: event.ref ?? null, anchor: event.anchor ?? null, ...(event.kept !== undefined ? { kept: event.kept } : {}) } };
+        const kept = { ...turns[at]!, checkpoint: { ref: event.ref ?? null, ...(event.based === true ? { based: true as const } : {}), anchor: event.anchor ?? null, ...(event.kept !== undefined ? { kept: event.kept } : {}) } };
         turns[at] = kept;
         if (turn !== null && turn.summary.turnId === event.turnId) turn.summary = kept;
         return;

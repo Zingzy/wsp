@@ -624,11 +624,13 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
       .join("\n");
     expect(flagDrift(stale, COMMAND_LINES)).toEqual([
       "wsp run reads --access, which its row does not show",
+      "wsp run reads --at, which its row does not show",
       "wsp run reads --beside, which its row does not show",
       "wsp run reads --detach, which its row does not show",
       "wsp run reads --effort, which its row does not show",
       "wsp run reads --fast, which its row does not show",
       "wsp run reads --file, which its row does not show",
+      "wsp run reads --fork, which its row does not show",
       "wsp run reads --model, which its row does not show",
       "wsp run reads --replaces, which its row does not show",
       "wsp run reads --title, which its row does not show",

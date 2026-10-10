@@ -5,7 +5,7 @@
 // CODEX_HOME.
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { asideWallLine, CODEX_FEWER_TURNS, CODEX_LEGACY_HISTORY, codexKeyRefusedLine, codexMissingEnvLine, codexNotSignedInLine, codexReconnectLine, PERMISSION_ALLOW, PERMISSION_DENY, SLATE_SERVER_NAME, toolCallFacts } from "@wsp/protocol";
+import { asideWallLine, CODEX_FEWER_TURNS, CODEX_LEGACY_HISTORY, codexKeyRefusedLine, codexNoTurnLine, codexMissingEnvLine, codexNotSignedInLine, codexReconnectLine, PERMISSION_ALLOW, PERMISSION_DENY, SLATE_SERVER_NAME, toolCallFacts } from "@wsp/protocol";
 import type { AdapterEvent, ExecStream, ExecStreamFactory, TurnResult } from "@wsp/protocol";
 import { createCodexAdapter, creditsOf, type CodexSession } from "../src/adapter.js";
 
@@ -108,7 +108,7 @@ function server(lines: string[], opts: { exitCode?: number; hang?: boolean } = {
     const w = wire({
       ...opts,
       onWrite: (message, self) => {
-        if (message.method === "thread/start" || message.method === "thread/resume") self.push(...head);
+        if (message.method === "thread/start" || message.method === "thread/resume" || message.method === "thread/fork") self.push(...head);
         if (message.method === "turn/start") self.push(...tail);
       },
     });
@@ -1413,6 +1413,67 @@ describe("what a rewind needs of a Codex turn", () => {
 
     const unsaid = history({ turns: NEWEST_FIRST, revert: '{"error":{"code":-32600,"message":"thread/revert only supports paginated threads"},"id":"wsp-revert"}' });
     expect(await adapterOver(unsaid).revert({ session: THREAD_ID, turns: [done("a")] })).toEqual({ kept: CODEX_LEGACY_HISTORY });
+  });
+
+  describe("a fork of a Codex thread", () => {
+    const FORK_ID = "01a12812-adb3-7c12-9acc-a86fcbe74924";
+    const onFork = (line: string): string => line.replaceAll(THREAD_ID, FORK_ID);
+
+    it("forks the thread through the turn on the start's own server run, in the fork's folder and at its access, then starts the turn on the thread it answers", async () => {
+      const launch = launcher(server([...opened(FORK_ID), onFork(turnStarted), onFork(agentMessage("m1", "ALPHA, BETA")), onFork(completed("completed"))]));
+      const { events, onEvent } = collect();
+      const result = await adapterOver(launch).start({ prompt: "list every code word you remember", fork: { session: THREAD_ID, turn: "t8" }, cwd: "/root/app-fork", model: "gpt-5.5", permissionMode: "workspace-write", onEvent }).finished;
+      expect(result).toMatchObject({ status: "completed", text: "ALPHA, BETA" });
+      expect(launch.calls).toHaveLength(1);
+      expect(launch.calls[0]!.command).toBe("cd '/root/app-fork' && codex app-server -c tools.update_plan.enabled='true'");
+      const fork = parse(launch.calls[0]!.input!.at(-1)!);
+      expect(fork).toEqual({ id: "wsp-thread", method: "thread/fork", params: { threadId: THREAD_ID, lastTurnId: "t8", excludeTurns: true, cwd: "/root/app-fork", model: "gpt-5.5", sandbox: "workspace-write", approvalPolicy: "on-request" } });
+      expect(launch.wires[0]!.written.some(m => m.method === "thread/start" || m.method === "thread/resume")).toBe(false);
+      expect(launch.wires[0]!.written.find(m => m.method === "turn/start")!.params).toMatchObject({ threadId: FORK_ID, input: [{ type: "text", text: "list every code word you remember" }] });
+      // The thread every later turn resumes is the fork's own, as the server answered it.
+      expect(events.find(e => e.type === "session.start")).toMatchObject({ sessionId: FORK_ID });
+      expect(() => adapterOver(launch).start({ prompt: "x", fork: { session: THREAD_ID, turn: "t8" }, resume: FORK_ID, onEvent })).toThrow(/never both/);
+    });
+
+    it("fails the turn in the server's words where it will not fork, naming nothing it never opened", async () => {
+      const refused = launcher(seed => {
+        const w = wire({ onWrite: (message, self) => (message.method === "thread/fork" ? self.push('{"id":"wsp-thread","error":{"code":-32600,"message":"turn not found: t8"}}') : undefined) });
+        for (const line of seed) void w.stream.write(line);
+        return w;
+      });
+      const result = await adapterOver(refused).start({ prompt: "x", fork: { session: THREAD_ID, turn: "t8" }, onEvent: () => {} }).finished;
+      expect(result).toMatchObject({ status: "failed", error: "codex could not open the thread: turn not found: t8" });
+      expect(refused.wires[0]!.written.some(m => m.method === "turn/start")).toBe(false);
+    });
+
+    it("finds a turn by its id among the thread's turns on a run that loads no thread, across pages", async () => {
+      const launch = history({ turns: NEWEST_FIRST, pageSize: 2 });
+      expect(await adapterOver(launch).forkSession({ session: THREAD_ID, turn: { anchor: "t6" } })).toEqual({ fork: { session: THREAD_ID, turn: "t6" } });
+      expect(listed(launch).map(p => (p as Json).cursor)).toEqual([null, "2"]);
+      expect(launch.wires[0]!.written.some(m => ["thread/resume", "thread/start", "thread/fork", "turn/start"].includes(String(m.method)))).toBe(false);
+      expect(launch.wires[0]!.closed).toBe(true);
+    });
+
+    it("finds a turn that named no anchor by counting back past the turns after it that the server opened", async () => {
+      const launch = history({ turns: NEWEST_FIRST });
+      const refused: TurnResult = { status: "failed", error: NOT_SIGNED_IN, refusal: "sign-in" };
+      expect(await adapterOver(launch).forkSession({ session: THREAD_ID, turn: { after: [done("a"), { result: refused }, done("b")] } })).toEqual({ fork: { session: THREAD_ID, turn: "t7" } });
+      expect(await adapterOver(history({ turns: NEWEST_FIRST })).forkSession({ session: THREAD_ID, turn: { after: [] } })).toEqual({ fork: { session: THREAD_ID, turn: "t9" } });
+    });
+
+    it("refuses a turn the server does not list, and a count past the turns it lists, before any fork", async () => {
+      await expect(adapterOver(history({ turns: NEWEST_FIRST, pageSize: 2 })).forkSession({ session: THREAD_ID, turn: { anchor: "t1" } })).rejects.toThrow(codexNoTurnLine("t1"));
+      await expect(adapterOver(history({ turns: ["t2", "t1"] })).forkSession({ session: THREAD_ID, turn: { after: [done("a"), done("b")] } })).rejects.toThrow(CODEX_FEWER_TURNS);
+    });
+
+    it("forks a thread an older Codex made at its anchor as given, where the server will not list its turns", async () => {
+      const legacy = launcher(seed => {
+        const w = wire({ onWrite: (message, self) => (message.method === "thread/turns/list" ? self.push(`{"id":"${String(message.id)}","error":{"code":-32600,"message":"thread/turns/list only supports paginated threads"}}`) : undefined) });
+        for (const line of seed) void w.stream.write(line);
+        return w;
+      });
+      expect(await adapterOver(legacy).forkSession({ session: THREAD_ID, turn: { anchor: TURN_ID } })).toEqual({ fork: { session: THREAD_ID, turn: TURN_ID } });
+    });
   });
 });
 

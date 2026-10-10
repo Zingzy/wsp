@@ -44,8 +44,6 @@ export function turnsArea(ctx: RuntimeContext): TurnsArea {
     asked?: TurnAsked;
     /** The harness session this turn resumes, so the row it takes over keeps who opened the thread and with what. */
     resume?: string;
-    /** The rewind's anchor this turn was launched to cut at; the thread lets it go once the turn announces itself. */
-    cutAt?: string;
     /** What the row already knows of this turn's reply: a re-opened turn whose result landed before the restart is
      * still working, and reads as such until the run's own result line comes round again. */
     turnLive?: TurnLive;
@@ -297,8 +295,6 @@ export function turnsArea(ctx: RuntimeContext): TurnsArea {
           if (event.cwd !== undefined) view.cwd = event.cwd;
           if (event.model !== undefined) view.model = event.model;
           entry.record.claudeSessionId = sessionId;
-          // The harness loaded the session up to the rewind's anchor, so the thread no longer holds it for a later start.
-          if (t.cutAt !== undefined && threadRecords.get(threadId)?.resumeAt === t.cutAt) delete threadRecords.get(threadId)!.resumeAt;
           // An agent that announced itself before it was handed the prompt holds it once it announces again; kept on
           // the row, so a host that re-opens the turn in between still reads its request as not taken.
           if (t.asked !== undefined && event.prompted === false && !startRecorded) t.asked.awaitsPrompt = true;

@@ -101,7 +101,7 @@ export type GitPrListReply = WireGitPrListReply;
 type GitPrListReplyHeld = Held<Same<z.infer<typeof GitPrListReply>, GitPrListReply>>;
 
 /** A checkpoint's ref, the commit it names, and whether its tree differs from the one that ref named before. */
-export const GitCheckpointReply = z.object({ ref: z.string(), commit: z.string(), changed: z.boolean() });
+export const GitCheckpointReply = z.object({ ref: z.string(), commit: z.string(), changed: z.boolean(), based: z.boolean() });
 export type GitCheckpointReply = WireGitCheckpointReply;
 type GitCheckpointReplyHeld = Held<Same<z.infer<typeof GitCheckpointReply>, GitCheckpointReply>>;
 /** The checkpoint of the tree as it stood before a restore, which restores it again, and how many files moved. */

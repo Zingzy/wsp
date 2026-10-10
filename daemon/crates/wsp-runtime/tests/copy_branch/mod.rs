@@ -61,7 +61,7 @@ fn carry_names() -> Vec<CarryModule> {
 }
 
 fn ask<'a>(from: &'a Path, home: &'a Path, branch: &'a str, modules: &'a [CarryModule]) -> Ask<'a> {
-    Ask { from, home, project: "prj_1", branch, modules }
+    Ask { from, home, project: "prj_1", branch, modules, checkpoint: None }
 }
 
 /// A clone every disk refuses, so the carry writes every byte: what the tests of a removal's holds stand on,
@@ -1069,4 +1069,152 @@ fn the_listing_reads_paths_branches_and_the_prunable_mark() {
         ]
     );
     assert_eq!(safe("feat/x y@{1}"), "feat-x-y--1-");
+}
+
+fn read(at: &Path, line: GitLine) -> String {
+    let ran = git(at, &line, WRITE_MS).unwrap();
+    assert!(ran.ok(), "{:?}: {}", line.argv(), ran.why());
+    ran.out().to_owned()
+}
+
+/// The folder's whole tree as a checkpoint records it, every file but the ignored ones, committed under the ref
+/// with the parent named and with none where none is.
+fn checkpoint_by_hand(from: &Path, name: &str, parent: Option<&str>) -> String {
+    let held = from.parent().unwrap().join("by-hand.index");
+    let index = held.to_string_lossy();
+    run_line(from, GitLine::new(&["add", "-A"]).env("GIT_INDEX_FILE", &index));
+    let tree = read(from, GitLine::new(&["write-tree"]).env("GIT_INDEX_FILE", &index));
+    fs::remove_file(&held).unwrap();
+    let line = GitLine::new(&["commit-tree", "-m", "wsp checkpoint"]).oid(&Oid::parse(&tree).unwrap());
+    let line = match parent {
+        Some(parent) => line.words(&["-p"]).oid(&Oid::parse(parent).unwrap()),
+        None => line,
+    };
+    let commit = read(from, line);
+    run_line(from, GitLine::new(&["update-ref"]).revs(&[name, &commit]));
+    commit
+}
+
+fn forked<'a>(from: &'a Path, home: &'a Path, branch: &'a str, checkpoint: &'a str) -> Ask<'a> {
+    Ask { checkpoint: Some(checkpoint), ..ask(from, home, branch, &[]) }
+}
+
+#[test]
+fn a_fork_from_a_checkpoint_starts_where_it_was_taken_with_its_files_uncommitted_and_the_config_carried() {
+    let dir = scratch();
+    let from = project(dir.path());
+    let home = dir.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+    fs::write(from.join("a.txt"), b"a\n").unwrap();
+    fs::write(from.join("old.txt"), b"old\n").unwrap();
+    run(&from, &["add", "-A"]);
+    run(&from, &["commit", "--quiet", "-m", "c1"]);
+    let c1 = sha_of(&from, "HEAD").unwrap();
+    fs::write(from.join("a.txt"), b"a edited\n").unwrap();
+    fs::write(from.join("new.txt"), b"new\n").unwrap();
+    fs::remove_file(from.join("old.txt")).unwrap();
+    let name = "refs/wsp/checkpoints/ws_x/thr/turn";
+    let taken = checkpoint_by_hand(&from, name, Some(&c1));
+    // The folder goes on past the checkpoint: its edits committed, then more.
+    run(&from, &["add", "-A"]);
+    run(&from, &["commit", "--quiet", "-m", "c2"]);
+    fs::write(from.join("a.txt"), b"a later\n").unwrap();
+    fs::write(from.join("later.txt"), b"later\n").unwrap();
+    run(&from, &["add", "-A"]);
+    run(&from, &["commit", "--quiet", "-m", "c3"]);
+    let tip = sha_of(&from, "HEAD").unwrap();
+
+    let report = make(&forked(&from, &home, "fork", name)).unwrap();
+    assert!(report.made && report.fresh);
+    assert_eq!(report.branch, "fork");
+    let at = Path::new(&report.path);
+    assert_eq!(sha_of(at, "HEAD").unwrap(), c1, "the branch starts where the checkpoint was taken");
+    assert_eq!(read(at, GitLine::new(&["symbolic-ref", "--short", "HEAD"])), "fork");
+    assert_eq!(sha_of(&from, "HEAD").unwrap(), tip, "the folder moved");
+    assert_eq!(fs::read_to_string(at.join("a.txt")).unwrap(), "a edited\n");
+    assert_eq!(fs::read_to_string(at.join("new.txt")).unwrap(), "new\n");
+    assert!(!at.join("old.txt").exists());
+    assert!(!at.join("later.txt").exists());
+    assert_eq!(read(at, GitLine::new(&["status", "--porcelain"])), "M a.txt\n D old.txt\n?? new.txt");
+    assert_eq!(read(at, GitLine::new(&["diff", "--cached", "--name-only"])), "", "the worktree's own index stands at the start");
+    let now = checkpoint_by_hand(at, "refs/wsp/checkpoints/ws_x/thr/check", None);
+    assert_eq!(
+        read(at, GitLine::new(&["rev-parse", "--verify"]).revs(&[&format!("{now}^{{tree}}")])),
+        read(&from, GitLine::new(&["rev-parse", "--verify"]).revs(&[&format!("{taken}^{{tree}}")])),
+        "the working files are the checkpoint's to the byte"
+    );
+    assert_eq!(fs::read_to_string(at.join(".env.local")).unwrap(), "KEY=1\n");
+    assert!(report.carried.contains(&".env.local".to_owned()), "{:?}", report.carried);
+}
+
+#[test]
+fn a_fork_from_a_checkpoint_with_no_parent_starts_at_the_folders_head() {
+    let dir = scratch();
+    let from = project(dir.path());
+    let home = dir.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+    fs::write(from.join("README.md"), b"checkpointed\n").unwrap();
+    let name = "refs/wsp/checkpoints/ws_x/thr/turn";
+    checkpoint_by_hand(&from, name, None);
+    run(&from, &["checkout", "--quiet", "--", "README.md"]);
+    let head = sha_of(&from, "HEAD").unwrap();
+    let report = make(&forked(&from, &home, "fork", name)).unwrap();
+    let at = Path::new(&report.path);
+    assert_eq!(sha_of(at, "HEAD").unwrap(), head);
+    assert_eq!(fs::read_to_string(at.join("README.md")).unwrap(), "checkpointed\n");
+    assert_eq!(read(at, GitLine::new(&["status", "--porcelain"])), "M README.md");
+}
+
+#[test]
+fn a_fork_onto_a_branch_that_exists_is_refused_and_nothing_is_made() {
+    let dir = scratch();
+    let from = project(dir.path());
+    let home = dir.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+    let name = "refs/wsp/checkpoints/ws_x/thr/turn";
+    let head = sha_of(&from, "HEAD").unwrap();
+    checkpoint_by_hand(&from, name, Some(&head));
+    run(&from, &["branch", "taken"]);
+    let hand = dir.path().join("by-hand");
+    run_line(&from, GitLine::new(&["worktree", "add", "--quiet", "-b", "held"]).operands(&[&hand.to_string_lossy()]));
+    for branch in ["taken", "held", "main"] {
+        let refused = make(&forked(&from, &home, branch, name)).unwrap_err();
+        assert!(refused.contains("already exists"), "{branch}: {refused}");
+    }
+    assert_eq!(worktrees(&from).len(), 2);
+    assert!(!home.join("worktrees").exists(), "nothing was made under the home");
+    assert_eq!(sha_of(&from, "taken").unwrap(), head);
+}
+
+#[test]
+fn a_fork_from_a_ref_that_is_no_checkpoint_or_names_no_commit_is_refused_and_nothing_is_made() {
+    let dir = scratch();
+    let from = project(dir.path());
+    let home = dir.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+    let head = sha_of(&from, "HEAD").unwrap();
+    checkpoint_by_hand(&from, "refs/wsp/checkpoints/ws_x/thr/turn", Some(&head));
+    let tree = read(&from, GitLine::new(&["rev-parse", "--verify"]).revs(&["HEAD^{tree}"]));
+    run_line(&from, GitLine::new(&["update-ref"]).revs(&["refs/wsp/checkpoints/ws_x/thr/tree", &tree]));
+    for bad in [
+        "refs/heads/main",
+        "HEAD",
+        "refs/wsp/checkpoints/ws_x/../../heads/main",
+        "refs/wsp/checkpoints/ws.x/thr/turn",
+        "refs/wsp/checkpoints/ws_x//turn",
+        "refs/wsp/checkpoints/",
+        "refs/wsp/checkpoints",
+        "refs/wsp/checkpointsx/ws_x/thr/turn",
+        "--orphan",
+    ] {
+        let refused = make(&forked(&from, &home, "fork", bad)).unwrap_err();
+        assert!(refused.contains("is not a checkpoint"), "{bad}: {refused}");
+    }
+    for missing in ["refs/wsp/checkpoints/ws_x/thr/nope", "refs/wsp/checkpoints/ws_x/thr/tree"] {
+        let refused = make(&forked(&from, &home, "fork", missing)).unwrap_err();
+        assert!(refused.contains("no commit"), "{missing}: {refused}");
+    }
+    assert!(!has_branch(&from, "fork"));
+    assert_eq!(worktrees(&from).len(), 1);
+    assert!(!home.join("worktrees").exists(), "nothing was made under the home");
 }

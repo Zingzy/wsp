@@ -201,6 +201,10 @@ pub(crate) enum CopyVerb {
         /// of its lockfiles carries its directories under that folder in by one clone each, once per module.
         #[arg(long, value_name = "json", value_parser = module_of)]
         module: Vec<CarryModule>,
+        /// A checkpoint ref a new branch is forked from: it starts at the commit the checkpoint was taken on, with the
+        /// checkpoint's files laid in uncommitted; refused for a branch that exists.
+        #[arg(long, value_name = "ref")]
+        checkpoint: Option<String>,
     },
     /// Mounts again the overlays of a worktree wsp made where a restart took them, before a turn or a command runs
     /// there; one whose folder holds anything now is left as it stands.
@@ -264,8 +268,15 @@ fn copy(verb: CopyVerb) -> i32 {
             wsp_runtime::copy_road::make(&ask).and_then(|report| serde_json::to_string(&report).map_err(|e| e.to_string()))
         }
         CopyVerb::Remove { from, to, road } => wsp_runtime::copy_road::remove(&from, &to, road).map(|()| String::new()),
-        CopyVerb::Worktree { from, home, project, branch, module } => {
-            let ask = branch::Ask { from: &from, home: &home, project: &project, branch: &branch, modules: &module };
+        CopyVerb::Worktree { from, home, project, branch, module, checkpoint } => {
+            let ask = branch::Ask {
+                from: &from,
+                home: &home,
+                project: &project,
+                branch: &branch,
+                modules: &module,
+                checkpoint: checkpoint.as_deref(),
+            };
             branch::make(&ask).and_then(|report| serde_json::to_string(&report).map_err(|e| e.to_string()))
         }
         CopyVerb::WorktreeMount { from, home, path } => branch::mount(&from, &home, &path).map(|()| String::new()),

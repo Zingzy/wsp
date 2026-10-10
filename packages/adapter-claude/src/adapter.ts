@@ -5,12 +5,13 @@
 
 import { randomUUID } from "node:crypto";
 import { ASIDE_WALL_MS, baseModel, INTERRUPT_GRACE_MS, LOST_SESSION_NOTE, PERMISSION_ALLOW, PERMISSION_DENY, QUESTION_TOOL, RUN_EXIT_MS, asideWallLine, backgroundTasksLine, claudeMemoryDir, endAfterResult, endRun, fmtDuration, keepRun, harnessExitLine, lostSessionPrompt, refusedTurn, subagentAsked, taskFinishedLine, titlePrompt } from "@wsp/protocol";
-import type { AdapterAttachOptions, AdapterEvent, AgentLaunch, KeptAgent, KeptRun, KeptTurn, SubagentState, TaskStop, AsideAnswer, AsideQuestion, ExecStream, ExecStreamFactory, HarnessCatalogProbe, HarnessExec, McpServerSpec, PermissionAsk, PermissionOutcome, ScreenCommand, SessionAsker, SessionHarness, SessionRenamer, SessionTitleMaker, SessionTitleReader, TurnImage, TurnRefusal, TurnResult, TurnStatus, CommitDrafter, TurnTokens } from "@wsp/protocol";
+import type { AdapterAttachOptions, AdapterEvent, AgentLaunch, KeptAgent, KeptRun, KeptTurn, SubagentState, TaskStop, AsideAnswer, AsideQuestion, ExecStream, ExecStreamFactory, HarnessCatalogProbe, HarnessExec, McpServerSpec, PermissionAsk, PermissionOutcome, ScreenCommand, SessionAsker, SessionForker, SessionHarness, SessionRenamer, SessionTitleMaker, SessionTitleReader, TurnImage, TurnRefusal, TurnResult, TurnStatus, CommitDrafter, TurnTokens } from "@wsp/protocol";
 import { SKIP_PROMPTS_MODE, controlAllowLine, controlAnswerLine, controlErrorLine, controlLine, interruptLine, modeOptionOn, setModeLine, stopTaskLine } from "./permissions.js";
 import { CLAUDE_SCREEN_COMMANDS, catalogProbeCommand, parseCatalogProbe, versionProbeCommand, parseVersion } from "./catalog.js";
 import { rec, str, num, strArr } from "./fields.js";
 import { limitOf, noteRejected, withLimit } from "./limits.js";
-import { ASIDE_HOOKS_ID, asideAnswer, asideCommand, asideCut, asideHooksLine, asidePrompt, asideTailCommand, asideTextOf, forkCleanupCommand, hookDenyLine, noConversationLine, promptDenyLine } from "./aside.js";
+import { ASIDE_HOOKS_ID, asideAnswer, asideCommand, asideHooksLine, asidePrompt, asideTextOf, hookDenyLine, promptDenyLine } from "./aside.js";
+import { copyCleanupCommand, copySession } from "./chain.js";
 import { draftForCommand, parseDraftFor, parseRename, parseSessionTitle, parseTitleFor, renameCommand, sessionTitleCommand, titleForCommand } from "./session-title.js";
 import { buildCommand, buildEnv, forwardsSubagentText, newSessionId, savedSpendCommand, serverValuesFile, terminalResumeCommand, userMessageLine } from "./landmines.js";
 import { steersOf } from "./steers.js";
@@ -23,9 +24,6 @@ export interface StartOptions {
   prompt: string;
   /** Session id of an earlier run; the CLI reloads its transcript. */
   resume?: string;
-  /** The uuid of the message a rewind kept, on the first resume after it: the CLI loads the session up to that
-   * message and the turn goes on from there, leaving what came after it behind. */
-  resumeAt?: string;
   cwd?: string;
   /** Catalog slugs for --model, --effort and the permission flags; each absent one leaves the CLI's default. */
   model?: string;
@@ -152,8 +150,8 @@ export interface ClaudeAdapter {
   readonly steers: true;
   /** Write, Edit, MultiEdit and NotebookEdit name the file each one wrote. */
   readonly reportsEdits: true;
-  /** A rewind of a Claude Code thread is cut on its next resume, at the message the rewind kept. */
-  readonly resumesAt: true;
+  /** A fork, and a rewind, of a Claude Code thread resumes a copy of its session through the turn's last reply. */
+  readonly forkSession: SessionForker;
   /** The CLI's stream-json user message carries image blocks, so an image never lands on the machine. */
   readonly attachments: "inline";
   /** A message written mid-turn is the same stream-json user message, image blocks and all. */
@@ -1280,7 +1278,6 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
     const valued = serverValuesFile(options.serverValues);
     const command = buildCommand({
       ...(options.resume === undefined ? { sessionId: localId } : { resume: options.resume }),
-      ...(options.resumeAt !== undefined ? { resumeAt: options.resumeAt } : {}),
       cwd: options.cwd,
       model: options.model,
       effort: options.effort,
@@ -1319,7 +1316,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
     let current = first;
     const finished = first.finished.then(async result => {
       if (!lost) return result;
-      const { resume: _gone, resumeAt: _cut, seed: _seed, ...fresh } = options;
+      const { resume: _gone, seed: _seed, ...fresh } = options;
       let noted = false;
       current = launch({
         ...fresh,
@@ -1362,43 +1359,39 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
     return session;
   };
 
-  /** Removes the fork's file on the same road, once the side question's own run has ended; a removal that fails leaves
+  /** Removes a copy's file on the same road, once the side question's own run has ended; a removal that fails leaves
    * the answer standing. */
-  const removeFork = async (fork: string): Promise<void> => {
-    const cleanup = deps.exec(forkCleanupCommand({ fork, configDir: deps.configDir }), { env: { ...env } });
+  const removeCopy = async (fork: string): Promise<void> => {
+    const cleanup = deps.exec(copyCleanupCommand({ fork, configDir: deps.configDir }), { env: { ...env } });
     for await (const _ of cleanup.lines);
     await cleanup.exited;
   };
+  const copyOf = (session: string, through: Parameters<typeof copySession>[0]["through"]) =>
+    copySession({ exec: deps.exec, env, configDir: deps.configDir, session, through, graceMs: deps.interruptGraceMs ?? INTERRUPT_GRACE_MS });
 
-  /** The tail of the thread's session file read on the turn's road, then one run there on a copy cut before any call
-   * still running, read to its end so the answer lands after the copy's file is gone. The hook goes in ahead of the
+  /** The thread's session copied through its turn's last reply, which the fork's first turn resumes; a start that never
+   * ran takes the copy away. */
+  const forkSession: SessionForker = async o => {
+    if (!("anchor" in o.turn)) throw new Error("claude forks a session at the reply a turn ended on, and this turn named none");
+    const { session } = await copyOf(o.session, { anchor: o.turn.anchor });
+    return { resume: session, drop: () => removeCopy(session) };
+  };
+
+  /** A copy of the thread's session through its live end, cut before any call still running, then one run there on
+   * the copy, read to its end so the answer lands after the copy's file is gone. The hook goes in ahead of the
    * question, and every call the copy tries is refused on the control channel. */
   const aside = async (q: AsideQuestion): Promise<AsideAnswer> => {
-    const fork = newSessionId();
     const wallMs = deps.asideWallMs ?? ASIDE_WALL_MS;
+    const { session: fork, running } = await copyOf(q.session, q.cut !== undefined ? { anchor: q.cut } : "live");
     let walled = false;
-    let current = deps.exec(asideTailCommand({ session: q.session, configDir: deps.configDir }), { env: { ...env } });
-    const wall = setTimeout(() => {
-      walled = true;
-      void endRun(current, deps.interruptGraceMs ?? INTERRUPT_GRACE_MS).catch(() => {});
-    }, wallMs);
-    const read: string[] = [];
-    try {
-      for await (const line of current.lines) read.push(line);
-    } finally {
-      await current.exited.catch(() => null);
-    }
-    const total = Number(read[0]);
-    if (walled || read.length === 0 || !Number.isSafeInteger(total)) {
-      clearTimeout(wall);
-      throw new Error(walled ? asideWallLine(wallMs) : (read.at(-1) ?? noConversationLine(q.session)));
-    }
-    const { keep, running } = asideCut(total, read.slice(1));
     const picks = { ...(q.cwd !== undefined ? { cwd: q.cwd } : {}), ...(q.model !== undefined ? { model: q.model } : {}), ...(q.effort !== undefined ? { effort: q.effort } : {}), ...(q.contextWindow !== undefined ? { contextWindow: q.contextWindow } : {}), ...(q.fast === true ? { fast: true } : {}) };
     const valued = serverValuesFile(q.serverValues);
-    const command = asideCommand({ session: q.session, fork, keep, configDir: deps.configDir, ...picks, ...(q.mcpServers !== undefined ? { mcpServers: q.mcpServers } : {}), ...(valued !== undefined ? { serverValues: true as const } : {}), ...memory, ...(deps.launch !== undefined ? { launch: deps.launch } : {}) });
+    const command = asideCommand({ fork, ...picks, ...(q.mcpServers !== undefined ? { mcpServers: q.mcpServers } : {}), ...(valued !== undefined ? { serverValues: true as const } : {}), ...memory, ...(deps.launch !== undefined ? { launch: deps.launch } : {}) });
     const stream = deps.exec(command, { env: { ...env }, input: [asideHooksLine(), userMessageLine(asidePrompt(q.question, running), fork)], ...(valued !== undefined ? { secret: valued } : {}) });
-    current = stream;
+    const wall = setTimeout(() => {
+      walled = true;
+      void endRun(stream, deps.interruptGraceMs ?? INTERRUPT_GRACE_MS).catch(() => {});
+    }, wallMs);
     let answer: AsideAnswer | { error: string } | undefined;
     let said: string | undefined;
     let code: number | null;
@@ -1429,7 +1422,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
       clearTimeout(wall);
       // Every road out, a transport that threw included, waits for the run to end and then removes the fork's file.
       await stream.exited.catch(() => null);
-      await removeFork(fork).catch(() => {});
+      await removeCopy(fork).catch(() => {});
     }
     if (answer !== undefined) {
       if ("error" in answer) throw new Error(answer.error);
@@ -1455,7 +1448,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
     sessions,
     steers: true,
     reportsEdits: true,
-    resumesAt: true,
+    forkSession,
     movesAccess: true,
     compacts: "/compact",
     terminalResume: terminalResumeCommand({ ...(deps.baseEnv !== undefined ? { base: deps.baseEnv } : {}), ...(deps.launch !== undefined ? { launch: deps.launch } : {}) }),
