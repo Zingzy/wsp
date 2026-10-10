@@ -3678,3 +3678,117 @@ async fn a_workspace_reads_the_etc_the_list_allows_and_none_of_the_boxs_own_cred
     let _ = fs::remove_dir_all(&planted);
     w.close().await;
 }
+
+/// How many mounts the box's own table holds at or under the workspace's rootfs: one set while it runs, none
+/// while it naps or once it is gone.
+fn rootfs_mounts(id: &str) -> usize {
+    let rootfs = format!("{}/rootfs", root().join("run").join(id).display());
+    fs::read_to_string("/proc/self/mountinfo")
+        .unwrap()
+        .lines()
+        .filter(|line| line.split(' ').nth(4).is_some_and(|point| point.starts_with(&rootfs)))
+        .count()
+}
+
+/// The ssh server an editor dials stands in a cgroup of its own under the workspace's, `wsp-ssh`, which outlives
+/// its sessions empty. The kernel refuses to remove a cgroup with a child, so a nap and a kill that left it there
+/// failed and kept every mount: a box measured 27 sets stacked under one fork, one per wake.
+#[tokio::test]
+#[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
+async fn a_cgroup_holding_an_empty_child_naps_and_goes_with_no_mount_left() {
+    assert!(root_here(), "{LIVE_REASON}");
+    let mut w = World::open().await;
+    let id = w.create(spec(json!({ "memMb": 256 }))).await;
+    let set = rootfs_mounts(&id);
+    fs::create_dir(Path::new(CGROUPS).join(&id).join("wsp-ssh")).unwrap();
+    w.ok("machine.pause", json!({ "machineId": &id })).await;
+    assert!(!Path::new(CGROUPS).join(&id).exists(), "the nap left the cgroup");
+    assert_eq!(rootfs_mounts(&id), 0, "the nap left mounts");
+    w.ok("machine.resume", json!({ "machineId": &id })).await;
+    assert_eq!(rootfs_mounts(&id), set, "the wake stacked a second set");
+    fs::create_dir(Path::new(CGROUPS).join(&id).join("wsp-ssh")).unwrap();
+    w.ok("machine.kill", json!({ "machineId": &id })).await;
+    w.close().await;
+}
+
+/// A wake over the mounts a stop could not take off binds one set and not a second over them.
+#[tokio::test]
+#[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
+async fn a_wake_over_mounts_a_stop_left_binds_one_set() {
+    assert!(root_here(), "{LIVE_REASON}");
+    let mut w = World::open().await;
+    let (id, at) = stack_case(&mut w, "wake").await;
+    let set = rootfs_mounts(&id);
+    let layout = wsp_runtime::bundle::Layout::new(&root());
+    let tool_roots = wsp_runtime::bundle::tool_roots_present(&numbers::SHARED_TOOL_ROOTS);
+    w.ok("machine.pause", json!({ "machineId": &id })).await;
+    // What a boot mounts, made twice while it naps, as the wakes after two stops that kept their mounts did.
+    for _ in 0..2 {
+        wsp_runtime::bundle::mount_computer(&layout, &id, &tool_roots).unwrap();
+        wsp_runtime::bundle::bind_inside(&layout.inside_of(&id), &layout.copy_of(&id), at).unwrap();
+    }
+    w.ok("machine.resume", json!({ "machineId": &id })).await;
+    assert_eq!(rootfs_mounts(&id), set, "the wake stacked its set over the ones left");
+    w.ok("machine.kill", json!({ "machineId": &id })).await;
+    w.close().await;
+}
+
+/// A kill over a stack of sets takes every one, so the copy bound into each goes with the workspace.
+#[tokio::test]
+#[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
+async fn a_kill_takes_a_stack_of_mounts_whole_and_the_copy_with_it() {
+    assert!(root_here(), "{LIVE_REASON}");
+    let mut w = World::open().await;
+    let (id, at) = stack_case(&mut w, "kill").await;
+    let set = rootfs_mounts(&id);
+    let layout = wsp_runtime::bundle::Layout::new(&root());
+    for _ in 0..2 {
+        wsp_runtime::bundle::bind_into(&layout.rootfs(&id), &layout.rootfs(&id)).unwrap();
+        wsp_runtime::bundle::bind_inside(&layout.inside_of(&id), &layout.copy_of(&id), at).unwrap();
+    }
+    assert!(rootfs_mounts(&id) > set);
+    w.ok("machine.kill", json!({ "machineId": &id })).await;
+    assert_eq!(rootfs_mounts(&id), 0, "the kill left a set");
+    assert!(!root().join("copies").join(&id).exists(), "the kill left the copy");
+    w.close().await;
+}
+
+/// A workspace made with a project's copy, for the two cases above.
+async fn stack_case(w: &mut World, word: &str) -> (String, &'static str) {
+    let from = root().join("projects").join(format!("live-stack-{word}-{}", checkout_key()));
+    let _ = fs::remove_dir_all(&from);
+    checkout(&from);
+    let at = "/work/lab";
+    (w.create(spec(json!({ "memMb": 256, "copy": { "from": from.display().to_string(), "at": at } }))).await, at)
+}
+
+/// A kill that cannot take every mount off deletes nothing: the copy is the work, and a remove that emptied it and
+/// then stopped on a busy folder lost the work and kept the workspace.
+#[tokio::test]
+#[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
+async fn a_kill_that_cannot_finish_deletes_nothing_of_the_copy() {
+    assert!(root_here(), "{LIVE_REASON}");
+    let mut w = World::open().await;
+    let key = checkout_key();
+    let from = root().join("projects").join(format!("live-held-{key}"));
+    let _ = fs::remove_dir_all(&from);
+    checkout(&from);
+    let id = w.create(spec(json!({ "memMb": 256, "copy": { "from": from.display().to_string(), "at": "/work/lab" } }))).await;
+    // A mount nothing of the workspace's made, under its copy.
+    let held = root().join("copies").join(&id).join("held");
+    fs::create_dir_all(&held).unwrap();
+    assert!(std::process::Command::new("mount").args(["-t", "tmpfs", "tmpfs"]).arg(&held).status().unwrap().success());
+    let refused = w.ask("machine.kill", json!({ "machineId": &id })).await;
+    let _ = std::process::Command::new("umount").arg(&held).status();
+    assert_ne!(refused["ok"], true, "{refused}");
+    assert!(refused["error"].as_str().unwrap_or_default().contains(&held.display().to_string()), "{refused}");
+    assert_eq!(
+        fs::read_to_string(root().join("copies").join(&id).join("README.md")).unwrap(),
+        "the checkout\n",
+        "the refused kill deleted the copy"
+    );
+    assert!(root().join("run").join(&id).join("workspace.json").is_file(), "the refused kill deleted the record");
+    w.ok("machine.kill", json!({ "machineId": &id })).await;
+    let _ = fs::remove_dir_all(&from);
+    w.close().await;
+}

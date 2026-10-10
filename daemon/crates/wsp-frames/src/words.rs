@@ -96,6 +96,12 @@ pub fn place_runtime_stands(path: impl std::fmt::Display) -> String {
     format!("{path} still stands: the leave could not remove all of it; remove what is left there by hand")
 }
 
+/// Why a cgroup wsp made is still there after a leave: a process still stands in it or under it, and the leave ends
+/// none. Said on both roads a leave runs on, and pinned to one text by the contract fixture.
+pub fn place_cgroup_stands(path: impl std::fmt::Display) -> String {
+    format!("{path} still stands: a process is still in it; end it and remove the cgroup by hand")
+}
+
 /// Why a leave stopped before it removed anything: checkouts under the runtime's folder hold work no remote has, which
 /// the leave would take with it. Said on both roads a leave runs on, and pinned to one text by the contract fixture.
 pub fn place_leave_unsaved(lines: &[impl AsRef<str>]) -> String {

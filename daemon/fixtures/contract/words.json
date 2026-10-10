@@ -23,6 +23,7 @@
   "placeKeptMounted": "nothing was removed at {path}: {mount} is mounted under it; stop what runs there and leave again",
   "placeKeptMountsUnread": "nothing was removed at {path}: the mount table could not be read ({why}), so what is mounted under it is not known",
   "placeRuntimeStands": "{path} still stands: the leave could not remove all of it; remove what is left there by hand",
+  "placeCgroupStands": "{path} still stands: a process is still in it; end it and remove the cgroup by hand",
   "placeLeaveUnsaved": "nothing was removed: {lines}; that work is on this computer alone",
   "placeUnread": "{path}: could not read what is not pushed",
   "noChange": "{path} has no change",

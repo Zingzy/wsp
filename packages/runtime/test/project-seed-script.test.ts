@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { SeedChoice, SeedPlan } from "@wsp/protocol";
-import { cloneScript, MEMORY_KEPT_MARK, patchCleanupScript, patchScript, seedRestScript, unsavedOf, unsavedScript } from "../src/project-landing.js";
+import { cloneScript, MEMORY_KEPT_MARK, patchCleanupScript, patchScript, readUnsaved, seedRestScript, unsavedOf, unsavedScript } from "../src/project-landing.js";
 import { projectSource } from "../src/project-sources.js";
 
 const roots: string[] = [];
@@ -399,6 +399,16 @@ describe("what a checkout holds that no remote does, read the one way for a fork
     expect(unsavedOf("x", run(unsavedScript(folder), root))).toBe("x holds 1 commit not pushed");
   });
 
+  it("does not count the store wsp's own install put at the checkout's root, and counts one the project keeps deeper", () => {
+    const { folder, root } = originAndClone();
+    mkdirSync(join(folder, ".pnpm-store", "v10"), { recursive: true });
+    writeFileSync(join(folder, ".pnpm-store", "v10", "index.json"), "{}\n");
+    expect(counted(folder, root)).toBe("0 0 0");
+    mkdirSync(join(folder, "apps", ".pnpm-store"), { recursive: true });
+    writeFileSync(join(folder, "apps", ".pnpm-store", "index.json"), "{}\n");
+    expect(counted(folder, root)).toBe("0 1 0");
+  });
+
   it("counts a commit at a detached HEAD, which no branch holds", () => {
     const { folder, root } = originAndClone();
     git(folder, "checkout", "-q", "--detach");
@@ -452,14 +462,14 @@ describe("what a checkout holds that no remote does, read the one way for a fork
       const { folder, root } = originAndClone();
       commit(folder, "two");
       broken(folder);
-      expect(unsavedOf("x", run(unsavedScript(folder), root))).toBe("x: could not read what is not pushed");
+      expect(unsavedOf("x", run(unsavedScript(folder), root))).toMatch(/^x: could not read what is not pushed: \S/);
     }
   });
 
   it("reads a stash list that fails as a read that failed, not as no stashes", () => {
     const { folder, root } = originAndClone();
     writeFileSync(join(folder, ".git", "refs", "stash"), `${"1".repeat(40)}\n`);
-    expect(unsavedOf("x", run(unsavedScript(folder), root))).toBe("x: could not read what is not pushed");
+    expect(unsavedOf("x", run(unsavedScript(folder), root))).toMatch(/^x: could not read what is not pushed: \S/);
   });
 
   it("reads a fresh clone of a remote holding a tag on a branch deleted since as clean", () => {
@@ -480,7 +490,7 @@ describe("what a checkout holds that no remote does, read the one way for a fork
     const { folder, root } = originAndClone();
     rmSync(join(folder, ".git"), { recursive: true });
     symlinkSync(join(root, "gone"), join(folder, ".git"));
-    expect(unsavedOf("x", run(unsavedScript(folder), root))).toBe("x: could not read what is not pushed");
+    expect(unsavedOf("x", run(unsavedScript(folder), root))).toMatch(/^x: could not read what is not pushed: \S/);
   });
 
   it("reads a dangling .git link in a folder inside another repository as could not read, never as that repository", () => {
@@ -490,7 +500,11 @@ describe("what a checkout holds that no remote does, read the one way for a fork
     const inner = join(folder, "inner");
     mkdirSync(inner);
     symlinkSync(join(root, "gone"), join(inner, ".git"));
-    expect(unsavedOf("x", run(unsavedScript(inner), root))).toBe("x: could not read what is not pushed");
+    expect(unsavedOf("x", run(unsavedScript(inner), root))).toMatch(/^x: could not read what is not pushed: \S/);
+  });
+
+  it("says why a read that did not run could not read, off what stopped it", async () => {
+    await expect(readUnsaved("x", "/srv/x", () => Promise.reject(new Error("the fork did not wake")))).resolves.toBe("x: could not read what is not pushed: the fork did not wake");
   });
 
   it("reads a folder git does not track as nothing to lose, and a read that failed as one it could not read", () => {
@@ -498,7 +512,7 @@ describe("what a checkout holds that no remote does, read the one way for a fork
     roots.push(root);
     expect(unsavedOf("x", run(unsavedScript(root), root))).toBeUndefined();
     expect(unsavedOf("x", run(unsavedScript(join(root, "gone")), root))).toBeUndefined();
-    expect(unsavedOf("x", { exitCode: 1, stdout: "", stderr: "" })).toBe("x: could not read what is not pushed");
-    expect(unsavedOf("x", undefined)).toBe("x: could not read what is not pushed");
+    expect(unsavedOf("x", { exitCode: 1, stdout: "", stderr: "" })).toBe("x: could not read what is not pushed: the read exited 1");
+    expect(unsavedOf("x", { exitCode: 0, stdout: "half\n", stderr: "" })).toBe('x: could not read what is not pushed: the read printed "half"');
   });
 });

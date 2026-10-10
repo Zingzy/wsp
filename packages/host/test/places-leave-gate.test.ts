@@ -3,7 +3,7 @@
 // what that leave takes is read off the version the box's wsp says it was built with, which its daemon asks it for,
 // and never off the daemon's own: a box updated from an older add runs this build's daemon over main's wsp.
 import { describe, expect, it } from "vitest";
-import { DAEMON_VERSION, LEAVE_ASKS_DAEMON_VERSION, PLACE_LEAVE_VERB, type PlaceReport } from "@wsp/protocol";
+import { DAEMON_VERSION, LEAVE_ASKS_DAEMON_VERSION, LEAVE_TAKES_DAEMON_VERSION, PLACE_LEAVE_VERB, type PlaceReport } from "@wsp/protocol";
 import { type SshTransport } from "@wsp/engine";
 import { placeLeaver } from "../src/places.js";
 
@@ -22,13 +22,13 @@ const report: PlaceReport = {
   dialed: "http://192.168.1.20:4400",
 };
 
-async function leaveLine(over: Partial<PlaceReport>): Promise<string | undefined> {
+async function leaveLine(over: Partial<PlaceReport>, projects?: string[]): Promise<string | undefined> {
   const scripts: string[] = [];
   const transport: SshTransport = async (_reach, script) => {
     scripts.push(script);
     return { exitCode: 0, stdout: "", stderr: "" };
   };
-  await placeLeaver({ transport })({ placeId: "p_1", name: "vps", report: { ...report, ...over }, ssh: { ssh: "root@65.21.4.12" } });
+  await placeLeaver({ transport })({ placeId: "p_1", name: "vps", report: { ...report, ...over }, ssh: { ssh: "root@65.21.4.12" }, ...(projects === undefined ? {} : { projects }) });
   return scripts[0];
 }
 
@@ -40,6 +40,11 @@ describe("the leave an ssh remove runs on a box whose daemon was updated", () =>
   it("hands --yes to a wsp built at or after the leave that asks", async () => {
     expect(await leaveLine({ wspDaemonVersion: LEAVE_ASKS_DAEMON_VERSION })).toBe(`/usr/bin/node /root/.wsp/daemon/wsp/dist/bin.js ${PLACE_LEAVE_VERB} --yes`);
     expect(await leaveLine({ wspDaemonVersion: LEAVE_ASKS_DAEMON_VERSION + 1 })).toMatch(/ --yes$/);
+  });
+
+  it("names the project folders an older wsp cloned there to a wsp that takes them, and to none before it", async () => {
+    expect(await leaveLine({ wspDaemonVersion: LEAVE_TAKES_DAEMON_VERSION }, ["pr_1a2b3c4d", "pr_5e6f7a8b"])).toMatch(/ --yes --takes pr_1a2b3c4d --takes pr_5e6f7a8b$/);
+    expect(await leaveLine({ wspDaemonVersion: LEAVE_TAKES_DAEMON_VERSION - 1 }, ["pr_1a2b3c4d"])).toMatch(/ --yes$/);
   });
 
   it("hands a wsp built before it the bare leave, on a daemon of any version", async () => {

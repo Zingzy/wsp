@@ -4,13 +4,8 @@
 // them: nothing is set on it but its members. The daemon there is root, so the
 // launch stands itself in it before it hands the line to the login, and every
 // process the turn starts, a server it detached included, stands there too.
+import { CGROUP_MOUNT, THREAD_CGROUPS as THREADS } from "./daemon-contract.js";
 import { shellQuote } from "./shell-quote.js";
-
-/** Where the kernel mounts cgroup v2 on every Linux computer wsp joins. */
-const CGROUP_MOUNT = "/sys/fs/cgroup";
-
-/** The folder under the mount every thread's cgroup sits in. */
-const THREADS = "/wsp-threads";
 
 /** The cgroup a thread's processes stand in, as /proc/[pid]/cgroup names it and a process row carries it. */
 export function threadCgroup(threadId: string): string {

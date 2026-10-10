@@ -594,7 +594,7 @@ function runtimeCore(ctx: RuntimeContext, opts: RuntimeOptions): RuntimeCore {
               if (entry.record.phase !== "running") await ctx.workspaces.wake(entry.record.id);
               return ctx.workspaces.exec(entry.record.id, cmd, o);
             };
-            const line = await readUnsaved(entry.record.name, ctx.checkoutOf(entry.record), run);
+            const line = await readUnsaved(forkName(entry), ctx.checkoutOf(entry.record), run);
             if (line !== undefined) unsaved.push(line);
           }
           for (const project of projects) {
@@ -605,7 +605,7 @@ function runtimeCore(ctx: RuntimeContext, opts: RuntimeOptions): RuntimeCore {
         },
         projectsOn: async placeId => {
           await ctx.ready();
-          return [...projectsHeld.values()].filter(p => p.computer === placeId).map(p => ({ id: p.id, name: p.name }));
+          return [...projectsHeld.values()].filter(p => p.computer === placeId).map(p => ({ id: p.id, name: p.name, ...(p.checkout === undefined ? {} : { checkout: p.checkout }) }));
         },
         dropOn: async placeId => {
           const { forks, folders, projects, rows } = await standingOn(placeId);
@@ -619,7 +619,7 @@ function runtimeCore(ctx: RuntimeContext, opts: RuntimeOptions): RuntimeCore {
             }
             went.push(name);
           };
-          for (const entry of forks) await each(entry.record.name, () => ctx.workspaces.delete(entry.record.id));
+          for (const entry of forks) await each(forkName(entry), () => ctx.workspaces.delete(entry.record.id));
           // A project folder holding threads stops its project's remove, so its threads go with it first.
           for (const entry of folders) await each(entry.record.name, () => ctx.workspaces.delete(entry.record.id));
           for (const project of projects) await each(project.name, () => ctx.projectsDoor.remove(project.id, undefined, { force: true }));
@@ -854,8 +854,13 @@ function runtimeCore(ctx: RuntimeContext, opts: RuntimeOptions): RuntimeCore {
       forks,
       folders,
       projects,
-      rows: { forks: forks.map(e => ({ name: e.record.name, threads: threadsOf(e.record.id) })), projects: projects.map(p => ({ name: p.name, threads: threadsOfProject(p.id) })) },
+      rows: { forks: forks.map(e => ({ name: forkName(e), threads: threadsOf(e.record.id) })), projects: projects.map(p => ({ name: p.name, threads: threadsOfProject(p.id) })) },
     };
+  };
+  /** A fork as a remove names it: by its one thread's title, which is what the sidebar shows, else by its own name. */
+  const forkName = (entry: LiveWorkspace): string => {
+    const titles = foldThreads([...sessions.values()].filter(s => s.view.workspaceId === entry.record.id).map(s => s.view)).map(t => t.title);
+    return titles.length === 1 ? titles[0]! : entry.record.name;
   };
   /** Every exec stream still running, so the machine going away ends it the way it ends a session. */
   const execs = new Set<{ workspaceId: string; end: (reason: string) => void }>();
