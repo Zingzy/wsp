@@ -571,7 +571,7 @@ describe("catalog", () => {
     );
     expect(installLine(catalogEntry("pnpm")!)).toBe("npm install -g pnpm@11.9.0");
     expect(installLine(catalogEntry("wrangler")!)).toBe("npm install -g wrangler");
-    expect(installLine(catalogEntry("go")!)).toMatch(/^su -s \/bin\/bash linuxbrew -c 'cd \.[\s\S]*HOMEBREW_NO_AUTO_UPDATE=1[\s\S]*brew install go'$/);
+    expect(installLine(catalogEntry("go")!)).toMatch(/^su -s \/bin\/bash linuxbrew -c '\[ -d "\$PWD" \][\s\S]*HOMEBREW_NO_AUTO_UPDATE=1[\s\S]*brew install go'$/);
     // A catalog row on the release road downloads the asset the pins table names, at the tag it names, and checks
     // the sum beside it before anything is unpacked: no API read, no listing grepped, no release fetched by date.
     const gh = installLine(catalogEntry("gh")!);
@@ -644,7 +644,7 @@ describe("catalog", () => {
     const gh = ROAD_MODULES.brew.fromRow!(row("gh"));
     // su keeps the caller's folder, and root's home is one linuxbrew cannot read on some images: every brew moves
     // off such a folder before it runs, and stays where it was called when that folder can be read.
-    expect(line(gh)).toMatch(/^su -s \/bin\/bash linuxbrew -c 'cd \. 2>\/dev\/null \|\| cd \/home\/linuxbrew\nHOMEBREW_NO_AUTO_UPDATE=1 .*brew install gh'$/);
+    expect(line(gh)).toMatch(/^su -s \/bin\/bash linuxbrew -c '\[ -d "\$PWD" \] && \[ -r "\$PWD" \] \|\| cd \/home\/linuxbrew\nHOMEBREW_NO_AUTO_UPDATE=1 .*brew install gh'$/);
     expect(off(gh)).toEqual({ cmd: expect.stringMatching(/brew uninstall gh'$/) });
     expect(off({ road: "brew", formula: "zingzy/tap/diskbloom" })).toEqual({ cmd: expect.stringMatching(/^if \[ -x \/home\/linuxbrew\/.linuxbrew\/bin\/brew \] && su [\s\S]*brew list --formula zingzy\/tap\/diskbloom[\s\S]* >\/dev\/null 2>&1; then su [\s\S]*brew uninstall zingzy\/tap\/diskbloom[\s\S]*; else rm -f \/usr\/local\/bin\/'diskbloom'; fi$/) });
     // A release at a tag fetches that tag and prints it; with a pin for the same tag the sum is checked; a row that names no repository only comes off.
