@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { randomUUID } from "node:crypto";
 import { CATALOG_AGENTS, type ThreadAgent, loginHomeIn, sharedOn } from "@wsp/catalog";
-import { type DaemonFrame, THIS_COMPUTER, underProject, absentComputer, HERE_PLACE_ID, isJoinedComputer, workspacePlace, RANGE_DAYS, READINGS_STEP_MS, SysHistoryReply, resetNoLoginsLine, USAGE_WORDS, UsageLogsReply, unknownOpLine, type UsageStore, type ReadingsAnswer, type PlaceView, type AccountsAnswer, type AgentSignInState, type ResetAnswer, type UsageSplit } from "@wsp/protocol";
+import { type DaemonFrame, type HarnessLimit, type ResetRoad, THIS_COMPUTER, underProject, absentComputer, HERE_PLACE_ID, isJoinedComputer, workspacePlace, RANGE_DAYS, READINGS_STEP_MS, SysHistoryReply, resetNoLoginsLine, USAGE_WORDS, UsageLogsReply, unknownOpLine, type UsageStore, type ReadingsAnswer, type PlaceView, type AccountsAnswer, type AgentSignInState, type ResetAnswer, type UsageSplit } from "@wsp/protocol";
 import { envInput, withEnvFromInput } from "@wsp/engine";
 import { NO_PLACE_DOOR } from "../places.js";
 import { harnessCatalog, modelLabel } from "../harness-catalog.js";
 import { LOG_LIMITS, PLAN_RESETS } from "../adapters.js";
-import { accountOf, accountOnComputer, accountRows, createBurn, createPriceTable, createUsageLedger, usageComputerName, type LimitReading, type UsageEntry } from "../usage.js";
+import { accountNames, accountOf, accountOnComputer, accountRows, createBurn, createPriceTable, createUsageLedger, keptComputerNames, usageComputerName, type LimitReading, type UsageEntry } from "../usage.js";
 import { planAlerts } from "../plan-alerts.js";
 import { usageResets, type ResetPlace } from "../usage-reset.js";
-import { type WorkspaceRecord, type LiveWorkspace, LOG_READ_EVERY_MS, LOG_READ_MS, RESET_EXEC_MS, type UsageDoor } from "../types/wiring.js";
+import { type WorkspaceRecord, type LiveWorkspace, LOG_READ_EVERY_MS, LOG_READ_MS, PLAN_READ_EVERY_MS, RESET_EXEC_MS, type UsageDoor } from "../types/wiring.js";
 import { bounded } from "../places/helpers.js";
 import type { RuntimeContext, UsageArea } from "../context.js";
 
@@ -47,15 +47,21 @@ export function usageArea(ctx: RuntimeContext): UsageArea {
   void alerts.resume().catch((e: unknown) => console.warn(`the plan alerts were not armed: ${e instanceof Error ? e.message : String(e)}`));
   const burn = createBurn(clock);
 
+  /** Each computer's name off the list now, else the one the usage records kept from when it was listed. */
+  const computerNamer = async (places: readonly PlaceView[]): Promise<(id: string) => string> => {
+    const kept = await keptComputerNames(store, places);
+    return id => usageComputerName(places, id, kept);
+  };
+
   /** A usage split value as a person reads it: the agent's name, the account's label, the computer's, the project's. */
-  const usageLabel = (places: readonly PlaceView[], accounts: ReadonlyMap<string, string>) => (split: UsageSplit, value: string): string => {
+  const usageLabel = (computerName: (id: string) => string, accounts: ReadonlyMap<string, string>) => (split: UsageSplit, value: string): string => {
     switch (split) {
       case "agent":
         return harnessCatalog(value)?.label ?? value;
       case "project":
         return value === "" ? "No project" : (projectsHeld.get(value)?.name ?? value);
       case "computer":
-        return usageComputerName(places, value);
+        return computerName(value);
       case "account":
         return accounts.get(value) ?? value;
       case "model":
@@ -169,8 +175,12 @@ export function usageArea(ctx: RuntimeContext): UsageArea {
     heldSignIns = undefined;
   });
 
+  const agentLabel = (agent: string): string => harnessCatalog(agent)?.label ?? agent;
+  const planBrand = (agent: string): string | undefined => CATALOG_AGENTS.find(a => a.id === agent)?.planBrand;
+
   const usageAccounts = async (): Promise<AccountsAnswer> => {
     const places = (await placeDoor?.list(clock.now())) ?? [];
+    const nameOf = await computerNamer(places);
     const here = await hereSignIns();
     const listed = places.map(p => ({ id: p.id, name: p.name, ...(p.signIns !== undefined ? { signIns: p.signIns } : {}) }));
     const row = listed.find(p => p.id === HERE_PLACE_ID);
@@ -180,9 +190,9 @@ export function usageArea(ctx: RuntimeContext): UsageArea {
       accounts: accountRows({
         limits: await ledger.limits(),
         places: listed,
-        nameOf: id => usageComputerName(places, id),
-        agentName: agent => harnessCatalog(agent)?.label ?? agent,
-        planBrand: agent => CATALOG_AGENTS.find(a => a.id === agent)?.planBrand,
+        nameOf,
+        agentName: agentLabel,
+        planBrand,
         vaulted: agent => ctx.vaultedFor(agent),
         printsLimits: agent => CATALOG_AGENTS.find(a => a.id === agent)?.printsLimits === true,
         burn: burn.of,
@@ -212,44 +222,80 @@ export function usageArea(ctx: RuntimeContext): UsageArea {
     return lines.join("\n");
   };
 
+  /** Each computer a plan's own read may run on, as the host knows it now. */
+  const planPlaces = async (): Promise<(id: string) => ResetPlace> => {
+    const views = (await placeDoor?.list(clock.now())) ?? [];
+    const here = await hereSignIns();
+    return id => {
+      const name = usageComputerName(views, id);
+      if (id === HERE_PLACE_ID) return { id, name, kind: "here", connected: local !== undefined, signedIn: agent => here[agent] === "signed-in" };
+      const view = views.find(v => v.id === id);
+      if (view === undefined || !isJoinedComputer(view)) return { id, name, kind: "provider", connected: false, signedIn: () => false };
+      return { id, name, kind: "box", connected: placeDoor?.link(id) !== undefined, signedIn: agent => placeDoor?.signInsAt(id)?.[agent] === "signed-in" };
+    };
+  };
+
+  /** Where the agent's login lives on a computer, for a script run there outside any turn. */
+  const planRoad = async (agent: string, at: ResetPlace): Promise<ResetRoad> => {
+    const setup = setups.launchOf(at.id, agent);
+    const launch = setup.launch?.program !== undefined ? { launch: { program: setup.launch.program } } : {};
+    // The script exports nothing of the setup's: the run carries those variables itself.
+    const env = {};
+    if (at.kind === "here") {
+      if (local === undefined) throw new Error(absentComputer(at.name, null).sentence);
+      return { home: setup.configDir ?? local.home(agent), env, ...launch };
+    }
+    if (setup.configDir !== undefined) return { home: setup.configDir, env, ...launch };
+    const logins = (await placeDoor?.list(clock.now()))?.find(v => v.id === at.id)?.logins;
+    const shared = sharedOn(agent);
+    if (logins === undefined || shared === undefined) throw new Error(resetNoLoginsLine(at.name, harnessCatalog(agent)?.label ?? agent));
+    return { home: loginHomeIn(logins, shared), env, ...launch };
+  };
+
+  /** A reading a plan's own read gave, filed the way a turn's is, answering the key it went under. */
+  const filePlanLimit = async ({ agent, place: at, limit }: { agent: string; place: ResetPlace; limit: HarnessLimit }): Promise<string> => {
+    const account = accountOf({ agent, agentName: harnessCatalog(agent)?.label ?? agent, ...(limit.account !== undefined ? { named: limit.account } : {}), vaulted: undefined, computer: { id: at.id, name: at.name } });
+    const { before, after } = await ledger.limit({ key: account.key, agent, label: account.label, road: account.road, computer: at.id, limit });
+    await alerts.read(before, after);
+    return account.key;
+  };
+
+  /** Asks each agent that can say for its plan's limits on every computer it is signed in on and that is connected,
+   * as a refresh does, since a turn is otherwise the only thing that reads them. One agent on one computer is asked
+   * once a minute at most, and a read that fails leaves the last reading standing. */
+  const planReadAt = new Map<string, number>();
+  let planReading: Promise<void> | undefined;
+  const readPlansNow = (): Promise<void> =>
+    (planReading ??= (async () => {
+      const placeOf = await planPlaces();
+      const views = (await placeDoor?.list(clock.now())) ?? [];
+      const ids = [...new Set([HERE_PLACE_ID, ...views.filter(v => isJoinedComputer(v)).map(v => v.id)])];
+      const asks = Object.entries(PLAN_RESETS).flatMap(([agent, resets]) =>
+        ids.map(async id => {
+          const place = placeOf(id);
+          const key = `${agent}@${id}`;
+          if (resets === undefined || place.kind === "provider" || !place.connected || !place.signedIn(agent) || clock.now() - (planReadAt.get(key) ?? -Infinity) < PLAN_READ_EVERY_MS) return;
+          planReadAt.set(key, clock.now());
+          try {
+            const read = resets.parseRead(await bounded(resetRun(place, resets.readCommand(await planRoad(agent, place)), agent), RESET_EXEC_MS, `${agent} limits on ${place.name}`));
+            if (read?.limit !== undefined) await filePlanLimit({ agent, place, limit: read.limit });
+          } catch (e) {
+            console.warn(`${harnessCatalog(agent)?.label ?? agent}'s limits on ${place.name} were not read: ${e instanceof Error ? e.message : String(e)}`);
+          }
+        }),
+      );
+      await Promise.all(asks);
+    })().finally(() => (planReading = undefined)));
+
   const spendReset = usageResets({
     store,
     limits: () => ledger.limits(),
     agentName: agent => harnessCatalog(agent)?.label ?? agent,
     resets: agent => PLAN_RESETS[agent as ThreadAgent],
-    places: async () => {
-      const views = (await placeDoor?.list(clock.now())) ?? [];
-      const here = await hereSignIns();
-      return id => {
-        const name = usageComputerName(views, id);
-        if (id === HERE_PLACE_ID) return { id, name, kind: "here", connected: local !== undefined, signedIn: agent => here[agent] === "signed-in" };
-        const view = views.find(v => v.id === id);
-        if (view === undefined || !isJoinedComputer(view)) return { id, name, kind: "provider", connected: false, signedIn: () => false };
-        return { id, name, kind: "box", connected: placeDoor?.link(id) !== undefined, signedIn: agent => placeDoor?.signInsAt(id)?.[agent] === "signed-in" };
-      };
-    },
-    road: async (agent, at) => {
-      const setup = setups.launchOf(at.id, agent);
-      const launch = setup.launch?.program !== undefined ? { launch: { program: setup.launch.program } } : {};
-      // The script exports nothing of the setup's: the run carries those variables itself.
-      const env = {};
-      if (at.kind === "here") {
-        if (local === undefined) throw new Error(absentComputer(at.name, null).sentence);
-        return { home: setup.configDir ?? local.home(agent), env, ...launch };
-      }
-      if (setup.configDir !== undefined) return { home: setup.configDir, env, ...launch };
-      const logins = (await placeDoor?.list(clock.now()))?.find(v => v.id === at.id)?.logins;
-      const shared = sharedOn(agent);
-      if (logins === undefined || shared === undefined) throw new Error(resetNoLoginsLine(at.name, harnessCatalog(agent)?.label ?? agent));
-      return { home: loginHomeIn(logins, shared), env, ...launch };
-    },
+    places: planPlaces,
+    road: planRoad,
     run: resetRun,
-    file: async ({ agent, place: at, limit }) => {
-      const account = accountOf({ agent, agentName: harnessCatalog(agent)?.label ?? agent, ...(limit.account !== undefined ? { named: limit.account } : {}), vaulted: undefined, computer: { id: at.id, name: at.name } });
-      const { before, after } = await ledger.limit({ key: account.key, agent, label: account.label, road: account.road, computer: at.id, limit });
-      await alerts.read(before, after);
-      return account.key;
-    },
+    file: filePlanLimit,
     row: async key => (await usageAccounts()).accounts.find(a => a.key === key),
     uuid: () => randomUUID(),
   });
@@ -267,7 +313,10 @@ export function usageArea(ctx: RuntimeContext): UsageArea {
       const outside = (q.outside === true || q.split === "source") && (await ctx.preferences.get()).usageLogs;
       if (outside) await readLogs().catch((e: unknown) => console.warn(`the agent logs were not read for usage: ${e instanceof Error ? e.message : String(e)}`));
       const places = (await placeDoor?.list(clock.now())) ?? [];
-      return ledger.used({ range: q.range, split: q.split, label: usageLabel(places, await ledger.accountLabels()), outside });
+      // An account a turn read limits for is named off that reading, as the limits name it; any other as it was filed.
+      const nameOf = await computerNamer(places);
+      const names = accountNames({ limits: await ledger.limits(), nameOf, agentName: agentLabel, planBrand });
+      return ledger.used({ range: q.range, split: q.split, label: usageLabel(nameOf, new Map([...(await ledger.accountLabels()), ...names])), outside });
     },
     readings: async (target, range, origin) => {
       const to = clock.now();
@@ -284,7 +333,10 @@ export function usageArea(ctx: RuntimeContext): UsageArea {
       if (onLink === undefined) throw new Error(absentComputer(placeDoor?.nameOf(target.placeId) ?? target.placeId, null).sentence);
       return ctx.overChannel(onLink, read);
     },
-    accounts: usageAccounts,
+    accounts: async ask => {
+      if (ask?.fresh === true) await readPlansNow();
+      return usageAccounts();
+    },
   };
   return { awayLine, rowReason, ledger, alerts, burn, usageAccounts, usage };
 }

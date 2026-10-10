@@ -3,8 +3,8 @@
 // use: rows filed by day, folded over a range and split four ways, priced off
 // the rate table where no harness put a cost on them, and never added together.
 import { describe, expect, it } from "vitest";
-import { parseRateTable, type AgentSignInState, type HarnessLimit, type PlaceView, type RateTable, type UsageSplit } from "@wsp/protocol";
-import { accountOf, accountRows, createBurn, createPriceTable, createUsageLedger, resetDetailsDue, usageComputerName, type UsageEntry } from "../src/usage.js";
+import { parseRateTable, USAGE_WORDS, type AgentSignInState, type HarnessLimit, type PlaceView, type RateTable, type UsageSplit } from "@wsp/protocol";
+import { accountNames, accountOf, accountRows, createBurn, createPriceTable, createUsageLedger, keptComputerNames, resetDetailsDue, usageComputerName, type UsageEntry } from "../src/usage.js";
 import { memoryStore } from "../src/store.js";
 import { fakeClock } from "./fake-clock.js";
 
@@ -111,6 +111,15 @@ describe("the ledger of what was used", () => {
     const week = await usage.used({ range: "week", split: "agent", label: labelOf });
     expect(week.lines?.map(l => l.points)).toEqual([[0, 0, 0, 0, 0, 0, 120], [0, 0, 0, 0, 40, 0, 35]]);
     expect(week.series.map(p => p.tokens)).toEqual(week.series.map((_, i) => week.lines!.reduce((n, l) => n + l.points[i]!, 0)));
+  });
+
+  it("draws no line for a value that used nothing in the range, and keeps its row at zero", async () => {
+    const { usage } = ledger();
+    await usage.add(turn({ at: NOON, agent: "claude", account: "claude@here", computer: "here", model: "claude-opus-5" }));
+    await usage.add(turn({ at: NOON, agent: "claude", account: "claude@pl_hetzner", computer: "pl_hetzner", model: "claude-opus-5", tokens: {} }));
+    const used = await usage.used({ range: "month", split: "account", label: labelOf });
+    expect(used.rows.map(r => [r.key, r.tokens.input + r.tokens.output])).toEqual([["claude@here", 1_100], ["claude@pl_hetzner", 0]]);
+    expect(used.lines?.map(l => l.key)).toEqual(["claude@here"]);
   });
 
   it("splits by account: one sign-in across two computers is one row, a computer's own login another", async () => {
@@ -377,6 +386,20 @@ describe("a computer in the usage records", () => {
   it("reads as its name: this computer's own, a provider's by its word, never a hostname or a provider's id", () => {
     expect([usageComputerName([mac, boat], "here"), usageComputerName([mac, boat], "box"), usageComputerName([mac], "box")]).toEqual(["zingzy's MacBook Pro", "Boat", "Boat"]);
   });
+
+  it("keeps a joined computer's name, so one removed later reads as itself, and one never named reads as removed, never as its id", async () => {
+    const store = memoryStore();
+    const lab = { id: "p_0a1b2c3d4e5f6a7b", kind: "computer", name: "lab" } as PlaceView;
+    expect(await keptComputerNames(store, [mac, boat, lab])).toEqual(new Map([[lab.id, "lab"]]));
+    const kept = await keptComputerNames(store, [mac, boat]);
+    expect([usageComputerName([mac], lab.id, kept), usageComputerName([mac], "p_9f8e7d6c5b4a3f2e", kept)]).toEqual(["lab", USAGE_WORDS.removedComputer]);
+  });
+
+  it("names each computer of an account once, two removed ones too", () => {
+    const limit = { key: "claude@here", agent: "claude", label: "Claude Code signed in on here", road: "own" as const, keyed: true, windows: [], readAt: NOON, computers: ["here", "p_0a1b2c3d4e5f6a7b", "p_9f8e7d6c5b4a3f2e"] };
+    const rows = accountRows({ limits: [limit], places: [], nameOf: id => usageComputerName([mac], id), agentName: () => "Claude Code", vaulted: () => undefined, printsLimits: () => true });
+    expect(rows[0]!.computers).toEqual(["zingzy's MacBook Pro", USAGE_WORDS.removedComputer]);
+  });
 });
 
 describe("an account's key and label", () => {
@@ -443,6 +466,15 @@ describe("the account rows", () => {
     const pro = { key: "codex:acct_c", agent: "codex", label: "c@example.com", road: "named" as const, plan: "pro", windows: [{ kind: "session" as const, usedPercent: 10 }], readAt: NOON, computers: ["here"] };
     const rows = accountRows({ limits: [plus("acct_a", "a@example.com", "here"), plus("acct_b", "b@example.com", "pl_boat"), pro], places: [], nameOf, agentName, planBrand, printsLimits, vaulted: () => undefined });
     expect(rows.map(r => r.label)).toEqual(["Codex with ChatGPT Plus as a@example.com", "Codex with ChatGPT Plus as b@example.com", "Codex with ChatGPT Pro"]);
+  });
+
+  it("keeps the computer beside the key where two computers' own logins and the vault's key would otherwise read the same", () => {
+    const vault = { key: "claude:vault-key", agent: "claude", label: "Claude Code with an API key", road: "vault" as const, windows: [], keyed: true, readAt: NOON, computers: ["pl_boat"] };
+    const own = (computer: string) => ({ key: `claude@${computer}`, agent: "claude", label: `Claude Code signed in on ${nameOf(computer)}`, road: "own" as const, windows: [], keyed: true, readAt: NOON, computers: [computer] });
+    const limits = [vault, own("here"), own("pl_spoo")];
+    const rows = accountRows({ limits, places: [], nameOf, agentName, planBrand, printsLimits, vaulted: () => "key" });
+    expect(rows.map(r => r.label)).toEqual(["Claude Code with an API key", "Claude Code with an API key on spoo", "Claude Code with an API key on zingzy's MacBook Pro"]);
+    expect(Object.fromEntries(accountNames({ limits, nameOf, agentName }))).toEqual(Object.fromEntries(rows.map(r => [r.key, r.label])));
   });
 
   it("folds a computer's own login into the vault's key where that computer's turns ran on the key, so one key is one row", () => {

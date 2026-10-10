@@ -98,7 +98,7 @@ describe("work on a joined computer outside wsp", () => {
     expect(asked).toHaveLength(1);
     expect(bySource.rows.map(r => [r.key, r.label, r.tokens.input, r.turns])).toEqual([
       ["wsp", USAGE_WORDS.wspThreads, 10, 1],
-      ["log", USAGE_WORDS.outsideWsp, 7, 0],
+      ["log", USAGE_WORDS.outsideWsp, 7, undefined],
     ]);
   });
 

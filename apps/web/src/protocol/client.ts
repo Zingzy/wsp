@@ -133,6 +133,7 @@ import {
   type WorkspaceView,
   PlaceHolds,
   PlaceRemoved,
+  usedAsk,
 } from "@wsp/protocol";
 import { slateApi, type SlateApi } from "../slate/wire.js";
 
@@ -843,7 +844,7 @@ export interface Api {
    * fake it. */
   usageUsed?(range: UsageRange, split: UsageSplit): Promise<UsedAnswer>;
   /** Every sign-in wsp knows, one row per account, with its limits as the agent last reported them. */
-  usageAccounts?(): Promise<AccountsAnswer>;
+  usageAccounts?(ask?: { fresh?: boolean }): Promise<AccountsAnswer>;
   /** Spends one banked reset of the account named by its key, on the person's own road: what it came to, the sentence
    * the command line prints for it, and the account row as it now reads. */
   usageReset?(account: string): Promise<ResetAnswer>;
@@ -1181,8 +1182,8 @@ export function makeApi(c: ProtocolClient): Api {
     // Parsed, not trusted: the chart interpolates whatever numbers it is handed.
     costHistory: async workspaceId => WorkspaceCostEvent.array().parse((await c.request<{ points?: unknown }>("cost.history", { workspaceId })).points),
     // Parsed, not trusted: a figure a person reads as money is a figure the wire type vouched for.
-    usageUsed: async (range, split) => UsedAnswer.parse((await c.request<{ used?: unknown }>("usage.used", { range, split, outside: true })).used),
-    usageAccounts: async () => AccountsAnswer.parse(await c.request<unknown>("usage.accounts")),
+    usageUsed: async (range, split) => UsedAnswer.parse((await c.request<{ used?: unknown }>("usage.used", usedAsk(range, split))).used),
+    usageAccounts: async ask => AccountsAnswer.parse(await c.request<unknown>("usage.accounts", ask?.fresh === true ? { fresh: true } : {})),
     slates: slateApi(c),
     usageReset: async account => ResetAnswer.parse(await c.request<unknown>("usage.reset", { account })),
     placesReadings: async (placeId, range) => ReadingsAnswer.parse(await c.request<unknown>("places.readings", { placeId, range })),

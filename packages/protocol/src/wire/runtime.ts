@@ -610,7 +610,7 @@ const RuntimeOp = z.discriminatedUnion("op", [
   // never one figure.
   /** outside: the rows read from the computers' agent logs, which only the person's own page asks for. */
   z.object({ id: reqId, op: z.literal("usage.used"), range: UsageRange, split: UsageSplit, outside: z.boolean().optional() }),
-  z.object({ id: reqId, op: z.literal("usage.accounts") }),
+  z.object({ id: reqId, op: z.literal("usage.accounts"), fresh: z.boolean().optional() }),
   /** Replies with a ResetAnswer: spends one of the account's banked resets on a computer of the person's that holds
    * its login, the one named where it is one, after reading the account there. The person's own road alone. */
   z.object({ id: reqId, op: z.literal("usage.reset"), account: z.string(), creditId: z.string().optional(), on: z.string().optional() }),
