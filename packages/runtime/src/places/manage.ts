@@ -27,6 +27,9 @@ import {
   noSuchPlaceRefusal,
   placeUnsavedRefusal,
   placeAwayRefusal,
+  placeForgetAnswersRefusal,
+  placeForgetsOnly,
+  placeForgottenLine,
   type PlaceHolds,
   placeNoDaemonPortLine,
   placeNoLinkLine,
@@ -151,18 +154,14 @@ export function manageDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, 
     throw usageRefusal(said.happened, said.fix);
   };
 
-  /** What goes with a place, read over its link: refused first, naming the computer, where forks or projects stand on
-   * one that is not answering, since none of them can be read or deleted until it is back. A leave that takes the
-   * runtime's folder whole takes the checkouts an older wsp left there that no record names any more, so those are read
-   * here too, with the rest and before anything goes. */
+  /** What goes with a place, read over its link, or marked away with nothing read where that link is down. A leave
+   * that takes the runtime's folder whole takes the checkouts an older wsp left there that no record names any more,
+   * so those are read here too, with the rest and before anything goes. */
   const holdsOf = async (placeId: string, held: PlaceRecord): Promise<PlaceHolds> => {
     const answers = live.get(placeId)?.reach !== undefined;
     const holds = await recording.holdsOn(placeId, answers);
-    if (!answers && (holds.forks.length > 0 || holds.projects.length > 0)) {
-      const refused = placeAwayRefusal(held.name, absentComputer(held.name, null).said);
-      throw usageRefusal(refused.said, refused.fix);
-    }
-    if (answers && held.report.takesRuntime === true) holds.unsaved.push(...(await unrecordedUnsaved(placeId)));
+    if (!answers) return { ...holds, away: true };
+    if (held.report.takesRuntime === true) holds.unsaved.push(...(await unrecordedUnsaved(placeId)));
     return holds;
   };
 
@@ -235,6 +234,7 @@ export function manageDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, 
           {
             ...asked,
             code: joinToken(code, keyFingerprint(wiring.hostKey.publicKey)),
+            held: (await records()).map(r => r.id),
             // Written before a byte of wsp's is sent, with what takes the install back and the login that reaches it.
             beforeDeploy: (undo, ssh, hostKey) => movePending({ ...pending, step: "wsp", undo, login: ssh, ...(hostKey !== undefined ? { hostKey } : {}) }),
           },
@@ -551,6 +551,16 @@ export function manageDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, 
       // holdsOf reads over the link only where it stands at this tick, and the leave below is forced only past that read.
       const read = live.get(placeId)?.reach !== undefined;
       const holds = await holdsOf(placeId, held);
+      if (holds.away !== true && ask.forget === true) {
+        const refused = placeForgetAnswersRefusal(held.name);
+        throw usageRefusal(refused.said, refused.fix);
+      }
+      // Forks are deleted and project folders read over the link, so with it down they go only as records, by a
+      // forget the person asked for, since what stands for them on that computer stays there.
+      if (placeForgetsOnly(holds) && ask.forget !== true) {
+        const refused = placeAwayRefusal(held.name, absentComputer(held.name, null).said);
+        throw usageRefusal(refused.said, refused.fix);
+      }
       if (holds.unsaved.length > 0 && ask.force !== true) {
         const refused = placeUnsavedRefusal(held.name, holds.unsaved);
         throw usageRefusal(refused.said, refused.fix);
@@ -574,7 +584,15 @@ export function manageDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, 
       // Root is reachable now, so the place file is read before the plugins or the leave run over that login: a login
       // repointed at another machine would run both there as root. Such a login runs nothing and the record goes all
       // the same, or a failed add tried again would leave a record nothing could take away.
-      const reached = keyChanged ? { elsewhere: true as const } : answers ? await reachesItself(held, login!, sudoPassword) : undefined;
+      // A forget runs nothing on a computer whose login could not be read, rather than stop on it.
+      const reached = keyChanged
+        ? { elsewhere: true as const }
+        : answers
+          ? await reachesItself(held, login!, sudoPassword).catch((e: unknown) => {
+              if (ask.forget !== true) throw e;
+              return { refused: refusalParts(e).said };
+            })
+          : undefined;
       const stands = reached !== undefined && "stands" in reached;
       const elsewhere = reached !== undefined && "elsewhere" in reached ? reached : undefined;
       const away = elsewhere === undefined ? undefined : placeLoginElsewhere(login!.ssh, held.name, elsewhere.other);
@@ -585,7 +603,7 @@ export function manageDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, 
       const projects = (await recording.projectsOn(placeId)).flatMap(p => runtimeProjectOf(p.checkout) ?? []);
       const force = ask.force === true || (read && held.report.takesRuntime !== undefined);
       // The forks and the projects go first, each by its own road, over the link and the login the sweep then takes.
-      const went = await recording.dropOn(placeId);
+      const went = holds.away === true ? await recording.forgetOn(placeId) : await recording.dropOn(placeId);
       // Before either road sweeps: a plugin comes off by its agent's own command, which may sit in the install folder
       // the sweep takes, and nothing on that computer knows which plugins were wsp's.
       const plugins = await pluginsOff(placeId, held, reach !== undefined, stands ? login : undefined, sudoPassword);
@@ -619,7 +637,8 @@ export function manageDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, 
       if (note === undefined) {
         if (away !== undefined) note = reach === undefined ? placeLoginElsewhereRemovedLine(login!.ssh, held.name, elsewhere?.other) : placeElsewhereSweptOverLinkLine(held.name, away);
         if (reach === undefined) {
-          note ??= loginRoad?.said === undefined ? placeStillInstalledLine(held.name) : `${placeLoginRoadLine(held.name, loginRoad.at, loginRoad.said)}; ${placeStillInstalledLine(held.name)}`;
+          const left = ask.forget === true ? placeForgottenLine(held.name, went.forks.length > 0) : placeStillInstalledLine(held.name);
+          note ??= loginRoad?.said === undefined ? left : `${placeLoginRoadLine(held.name, loginRoad.at, loginRoad.said)}; ${left}`;
         } else {
           try {
             // Before the folder holding the list goes with the leave: the servers wsp merged into the agents' own

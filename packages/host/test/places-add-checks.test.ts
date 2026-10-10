@@ -205,6 +205,12 @@ describe("the place file an add reads off a box before anything lands", () => {
     expect(placeHeldRefusal("root@spoo", { ...held, hostName: "studio", hostUrls: ["http://192.168.1.5:4640"] }, undefined)).toContain("studio at http://192.168.1.5:4640;");
     expect(placeHeldRefusal("root@spoo", { ...held, hostUrls: [`http://h/${"a".repeat(9000)}`] }, undefined)).not.toContain("http://h/");
     expect(placeHeldRefusal("root@spoo", { ...held, hostPublicKey: "dGhpcyBob3N0" }, keyFingerprint("dGhpcyBob3N0"))).toBe("root@spoo is already a place in this wsp as spoo]0;owned");
+    expect(placeHeldRefusal("root@spoo", { ...held, hostPublicKey: "dGhpcyBob3N0" }, keyFingerprint("dGhpcyBob3N0"), ["p_x"])).toBe("root@spoo is already a place in this wsp as spoo]0;owned");
+  });
+
+  it("names wsp leave for a box still carrying a place this wsp forgot, rather than a place it no longer lists", () => {
+    const held = { placeId: "p_gone", name: "hetzner", hostName: "studio", hostUrls: [], hostPublicKey: "dGhpcyBob3N0", keyPath: "/root/.wsp/place.key", joinedAt: "2026-09-20T10:00:00Z" };
+    expect(placeHeldRefusal("root@hetzner", held, keyFingerprint("dGhpcyBob3N0"), ["p_other"])).toBe("root@hetzner still carries the wsp of hetzner, which this wsp forgot; wsp leave on it frees it, then add it again");
   });
 });
 

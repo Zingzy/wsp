@@ -643,9 +643,13 @@ export type PlaceUpdateReply = z.infer<typeof PlaceUpdateReply>;
 const PlaceHeldRow = z.object({ name: z.string(), threads: z.number().int() });
 
 /** What a remove of a computer takes with it: the forks wsp made there and the projects recorded on it, each with
- * its threads, and, one line each, the work among them that is on no remote yet, which stops a remove unforced. */
-export const PlaceHolds = z.object({ forks: z.array(PlaceHeldRow), projects: z.array(PlaceHeldRow), unsaved: z.array(z.string()) });
+ * its threads, and, one line each, the work among them that is on no remote yet, which stops a remove unforced.
+ * `away` is a computer whose link is down, whose work nothing read: its forks and projects go only by a forget. */
+export const PlaceHolds = z.object({ forks: z.array(PlaceHeldRow), projects: z.array(PlaceHeldRow), unsaved: z.array(z.string()), away: z.literal(true).optional() });
 export type PlaceHolds = z.infer<typeof PlaceHolds>;
+
+/** Whether a remove of that computer can only forget it: away, with forks or projects on it. */
+export const placeForgetsOnly = (holds: PlaceHolds): boolean => holds.away === true && (holds.forks.length > 0 || holds.projects.length > 0);
 
 /** What places.remove answers: whether a computer of that id was there, the forks and projects that went with it,
  * every line of what the sweep took off it, and the one line for a computer that was not connected to sweep. */

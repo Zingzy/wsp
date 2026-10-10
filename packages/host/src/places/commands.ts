@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { platform } from "node:os";
-import { addedProjectLine, defaultSeedChoice, kindForComputer, ProjectAddEvent, seedChoiceFrom, seedConsentLines, seedMenuRows, sourceKind, copiesFolder, type ProjectView, type SeedChoice, type SeedPlan, LOOPBACK, PLACE_DOOR_UNSERVED, PLACE_ADD_WORDS, PlaceUpdateReply, placeCurrentLine, PlaceAddStep, SETUP_STEP_WORDS, jsonLine, setupLines, waitLine, type AddLine, type PendingComputer, type PlaceSetup, type PlaceSetupStep, type PlaceWait, DAEMON_VERSION, joinToken, placeEngineLine, PlaceView, type DeviceView, type PlaceDoorView, authority, fmtBytes, fmtDuration, fmtSize, placeUpdateLine, shellQuote, hostKeyAsk, hostKeyUnconfirmedRefusal, PLACE_SUDO_KIND, hostKeyUnscannableRefusal, isLoopback, usageRefusal, cloudOffRefusal, SignInLine, PlaceHolds, PlaceRemoved, placeUnsavedRefusal } from "@wsp/protocol";
+import { addedProjectLine, defaultSeedChoice, kindForComputer, ProjectAddEvent, seedChoiceFrom, seedConsentLines, seedMenuRows, sourceKind, copiesFolder, type ProjectView, type SeedChoice, type SeedPlan, LOOPBACK, PLACE_DOOR_UNSERVED, PLACE_ADD_WORDS, PlaceUpdateReply, placeCurrentLine, PlaceAddStep, SETUP_STEP_WORDS, jsonLine, setupLines, waitLine, type AddLine, type PendingComputer, type PlaceSetup, type PlaceSetupStep, type PlaceWait, DAEMON_VERSION, joinToken, placeEngineLine, PlaceView, type DeviceView, type PlaceDoorView, authority, fmtBytes, fmtDuration, fmtSize, placeUpdateLine, shellQuote, hostKeyAsk, hostKeyUnconfirmedRefusal, PLACE_SUDO_KIND, hostKeyUnscannableRefusal, isLoopback, usageRefusal, cloudOffRefusal, SignInLine, PlaceHolds, PlaceRemoved, placeUnsavedRefusal, placeAwayRefusal, placeForgetAnswersRefusal, placeForgetLine, placeForgetsOnly, absentComputer } from "@wsp/protocol";
 import { checkProviderKey, keyCheckLine, knownHostKey, offeredHostKey, sshLoginWord, sshWordReach, type KeyCheck, type MachineBackend, type SshReach } from "@wsp/engine";
 import { sharedOn } from "@wsp/catalog";
 import { randomBytes } from "node:crypto";
@@ -613,10 +613,11 @@ async function runBoxSignIn(io: CliIO, client: HostClient, place: PlaceView, age
 export interface RemoveFlags {
   yes?: boolean;
   force?: boolean;
+  forget?: boolean;
   json?: boolean;
 }
 
-export const REMOVE_USAGE = "wsp remove <computer> [--yes] [--force] [--json]";
+export const REMOVE_USAGE = "wsp remove <computer> [--yes] [--force] [--forget] [--json]";
 
 export async function removeCommand(io: CliIO, opts: PlaceOpts, args: readonly string[], flags: RemoveFlags = {}, deps: PlaceDeps = systemDeps): Promise<number> {
   const [ref] = args;
@@ -634,14 +635,21 @@ export async function removeCommand(io: CliIO, opts: PlaceOpts, args: readonly s
     // What goes with it is read before the one question, so the question names it and work no remote has stops
     // the line before anybody is asked to say yes to losing it.
     const holds = PlaceHolds.parse(await client.request("places.holds", { placeId: place.id }));
-    if (holds.unsaved.length > 0 && flags.force !== true) {
-      const refused = placeUnsavedRefusal(place.name, holds.unsaved);
-      throw usageRefusal(refused.said, refused.fix);
-    }
-    if (!(await confirmedAt(io, flags.yes === true, removeQuestion(place.name, holds), place.name))) return 1;
+    // The host's own refusals, said before the question rather than after a yes.
+    const refused =
+      flags.forget === true && holds.away !== true
+        ? placeForgetAnswersRefusal(place.name)
+        : flags.forget !== true && placeForgetsOnly(holds)
+          ? placeAwayRefusal(place.name, absentComputer(place.name, null).said)
+          : holds.unsaved.length > 0 && flags.force !== true
+            ? placeUnsavedRefusal(place.name, holds.unsaved)
+            : undefined;
+    if (refused !== undefined) throw usageRefusal(refused.said, refused.fix);
+    const question = flags.forget === true ? `Forget ${place.name}?\n${placeForgetLine(place.name, holds, place.road?.ssh)}` : removeQuestion(place.name, holds);
+    if (!(await confirmedAt(io, flags.yes === true, question, place.name))) return 1;
     const answer = PlaceRemoved.parse(
       await withSudoAsk(io, place.road?.ssh ?? place.name, sudoPassword =>
-        client.request("places.remove", { placeId: place.id, ...(sudoPassword !== undefined ? { sudoPassword } : {}), ...(flags.force === true ? { force: true } : {}) }),
+        client.request("places.remove", { placeId: place.id, ...(sudoPassword !== undefined ? { sudoPassword } : {}), ...(flags.force === true ? { force: true } : {}), ...(flags.forget === true ? { forget: true } : {}) }),
       ),
     );
     if (!answer.removed) {

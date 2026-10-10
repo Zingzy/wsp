@@ -921,7 +921,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             }
             case "places.remove": {
               if (refusedOffOwnRoad()) return;
-              send({ id: msg.id, ok: true, ...(await places().remove(msg.placeId, { ...(msg.sudoPassword === undefined ? {} : { sudoPassword: msg.sudoPassword }), ...(msg.force === true ? { force: true } : {}) })) });
+              send({ id: msg.id, ok: true, ...(await places().remove(msg.placeId, { ...(msg.sudoPassword === undefined ? {} : { sudoPassword: msg.sudoPassword }), ...(msg.force === true ? { force: true } : {}), ...(msg.forget === true ? { forget: true } : {}) })) });
               return;
             }
             case "places.holds": {

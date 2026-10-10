@@ -346,6 +346,8 @@ export interface PlaceInstallRequest {
   doorPort?: number;
   /** The relay's address among `hostUrls`, when this host is linked to one. */
   relay?: string;
+  /** The place ids this host holds a record of, against which a place file already on that computer is read. */
+  held?: readonly string[];
   /** Awaited right before anything of wsp's is sent, with the script that would take it all back off that computer:
    * the host writes it down first, so a host that stops mid-install can finish the join or take the install back.
    * The key the box's ssh answered with rides along, which the undo holds that login to before it runs. */
@@ -386,6 +388,9 @@ export interface PlaceRecording {
   /** Deletes every fork on this place, then takes every project recorded on it out of this wsp, each by the road
    * delete and projects remove take; answers what went. Stops at the first that refuses, which says why. */
   dropOn(placeId: string): Promise<Omit<PlaceHolds, "unsaved">>;
+  /** Drops every fork and project folder on this place as records, with their threads, and every project recorded on
+   * it, sending nothing to that computer, for one whose link is down; answers what went. */
+  forgetOn(placeId: string): Promise<Omit<PlaceHolds, "unsaved">>;
   /** How many of what that place's cap counts run there now, read against every row the list holds. */
   runningOn(placeId: string, places: readonly Pick<PlaceView, "id" | "kind">[]): Promise<number>;
   /** Signs an agent in on that computer through the sign-in relay, as the app's own sign-in does: every step it
@@ -640,8 +645,9 @@ export interface PlaceDoor {
   /** What a remove of that place would take with it, read now; an id this host holds no place by holds nothing. */
   holds(placeId: string): Promise<PlaceHolds>;
   /** Takes a place out with everything standing on it, its forks deleted and its projects removed first, then sweeps
-   * wsp off that computer. Refused naming them while any of those holds work no remote has, unless `force`. */
-  remove(placeId: string, ask?: { sudoPassword?: string; force?: boolean }): Promise<PlaceRemoved>;
+   * wsp off that computer. Refused naming them while any of those holds work no remote has, unless `force`. With
+   * its link down, forks and projects go only by `forget`, as records, and nothing goes over that link. */
+  remove(placeId: string, ask?: { sudoPassword?: string; force?: boolean; forget?: boolean }): Promise<PlaceRemoved>;
   /** Every place a word picks, by id or by the name the person gave it: none, one, or the two that share a name,
    * which is a refusal the caller writes with the ids in it. */
   find(ref: string): Promise<PlaceRecord[]>;
