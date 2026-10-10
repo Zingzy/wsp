@@ -18,6 +18,8 @@ export interface ReplyRunScope {
   readonly threadId: string;
   readonly turnId: string;
   readonly messageId: string;
+  /** Where the markdown this scope wraps starts in the reply's text, which a block's own offset counts from. */
+  readonly offset: number;
   /** The thread's folder on its computer, where a run starts. */
   readonly cwd: string | undefined;
   readonly runs: ReadonlyMap<string, SessionRunEvent>;

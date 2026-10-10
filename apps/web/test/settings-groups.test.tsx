@@ -755,6 +755,8 @@ describe("General's Version card", () => {
     triedAt: new Date(Date.now() - 3 * DAY - 60 * 60_000).toISOString(),
     ...over,
   });
+  // Whole minutes before the page's minute clock, which reads the minute floored.
+  const minutesAgo = (n: number): string => new Date(Math.floor(Date.now() / 60_000) * 60_000 - n * 60_000).toISOString();
   const shell = (app: string | undefined, host: string | undefined): void => {
     if (host === undefined) delete (window as unknown as { __WSP__?: unknown }).__WSP__;
     else (window as unknown as { __WSP__?: unknown }).__WSP__ = { tokenHash: "a".repeat(64), wsPath: "/ws", paired: true, version: host };
@@ -833,22 +835,59 @@ describe("General's Version card", () => {
     await show(read("0.3.0", { checkedAt: new Date(Date.now() + 5_000).toISOString() }));
     expect(whatsNew().title).toBe(ABOUT_WORDS.readHover("just now"));
     await show(read("0.2.0"));
-    expect(stateLine()).toBe(ABOUT_WORDS.upToDate);
+    expect(stateLine()).toBe(ABOUT_WORDS.upToDate("3 d ago"));
     await show(read("0.1.0"));
-    expect(stateLine()).toBe(ABOUT_WORDS.upToDate);
+    expect(stateLine()).toBe(ABOUT_WORDS.upToDate("3 d ago"));
     // A reading kept through a failed ask stands, with the failure on the hover.
     const tried = new Date(Date.now() - 5 * 60_000).toISOString();
     await show(read("0.3.0", { state: "unreached", triedAt: tried }));
     expect(stateLine()).toBe(ABOUT_WORDS.available("0.3.0"));
     expect(whatsNew().title).toBe(ABOUT_WORDS.missedHover("3 d ago", builtWhen(tried)));
+    // Level with a reading whose last ask failed is never up to date: the row says when it read and that the ask failed.
+    await show(read("0.2.0", { state: "unreached", triedAt: new Date().toISOString() }));
+    expect(stateLine()).toBe("Checked 3 d ago; could not reach GitHub just now");
+    await show(read("0.2.0", { state: "unreached", triedAt: minutesAgo(5) }));
+    expect(stateLine()).toBe(ABOUT_WORDS.unreached("3 d ago", "5 min ago"));
+    expect(stateLine()).not.toContain("Up to date");
     await show({ state: "checking" });
     expect(stateLine()).toBe(ABOUT_WORDS.checking);
+    await show({ state: "unreached", triedAt: minutesAgo(5) });
+    expect(stateLine()).toBe("Could not reach GitHub 5 min ago");
     await show({ state: "unreached", triedAt: tried });
-    expect(stateLine()).toBe(ABOUT_WORDS.notChecked);
     expect(whatsNew().title).toBe(ABOUT_WORDS.unreachedHover(builtWhen(tried)));
     await show({ state: "off" });
     expect(stateLine()).toBe(ABOUT_WORDS.checksOff);
     expect(whatsNew().title).toBe(ABOUT_WORDS.offHover);
+  });
+
+  it("Check for updates asks the host at once, is held while the ask is out, and the row ends on the answer", async () => {
+    shell("0.2.0", "0.2.0");
+    const asks: Array<boolean | undefined> = [];
+    let answer!: (release: ReleaseView) => void;
+    const releaseCheck = async (force?: boolean): Promise<ReleaseView> => {
+      asks.push(force);
+      return force === true ? new Promise<ReleaseView>(resolve => (answer = resolve)) : useStore.getState().release!;
+    };
+    useStore.setState({ release: read("0.2.0", { state: "unreached", triedAt: new Date().toISOString() }) });
+    await mount({ releaseCheck }, "general");
+    const check = (): HTMLButtonElement => screen.getByRole("button", { name: ABOUT_WORDS.checkNow });
+    expect(buttons()).toEqual([ABOUT_WORDS.checkNow, ABOUT_WORDS.whatsNew]);
+    expect(asks).toEqual([undefined]);
+    fireEvent.click(check());
+    expect(asks).toEqual([undefined, true]);
+    // The host pushes its view with the ask out before it answers.
+    await show(read("0.2.0", { state: "checking" }));
+    expect(stateLine()).toBe(ABOUT_WORDS.checking);
+    expect(check().disabled).toBe(true);
+    await act(async () => answer(read("0.3.0", { checkedAt: new Date().toISOString() })));
+    await settle();
+    expect(stateLine()).toBe(ABOUT_WORDS.available("0.3.0"));
+    expect(buttons()).toEqual([ABOUT_WORDS.get("0.3.0"), ABOUT_WORDS.whatsNew]);
+    await show(read("0.2.0", { checkedAt: minutesAgo(2) }));
+    expect(stateLine()).toBe("Up to date, checked 2 min ago");
+    expect(check().disabled).toBe(false);
+    await show({ state: "off" });
+    expect(buttons()).toEqual([ABOUT_WORDS.whatsNew]);
   });
 
   it("reads the app's half as behind too, and a tab with no shell reads the host alone", async () => {
@@ -859,7 +898,7 @@ describe("General's Version card", () => {
     expect(buttons()).toContain(ABOUT_WORDS.get("0.3.0"));
     shell(undefined, "0.3.0");
     await remount(read("0.3.0"));
-    expect(stateLine()).toBe(ABOUT_WORDS.upToDate);
+    expect(stateLine()).toBe(ABOUT_WORDS.upToDate("3 d ago"));
     expect(buttons()).not.toContain(ABOUT_WORDS.get("0.3.0"));
   });
 
