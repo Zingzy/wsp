@@ -159,7 +159,8 @@ describe("the vault a turn launches with", () => {
     // person signed Codex in on would bill the key and leave that sign-in unused.
     expect(secretsOf(record, "codex", true)).toEqual({});
     expect(secretsOf(record, "codex", false)).toEqual({ apiKey: OPENAI, keyEnv: "OPENAI_API_KEY" });
-    // The token is not a key and no login on a machine stands against it: Claude Code keeps none there at all.
-    expect(secretsOf(record, "claude", true)).toEqual({ oauthToken: TOKEN });
+    // Claude Code ranks its token ahead of its own login too, so a box it signed in on there gets neither.
+    expect(secretsOf(record, "claude", true)).toEqual({});
+    expect(secretsOf(record, "claude", false)).toEqual({ oauthToken: TOKEN });
   });
 });

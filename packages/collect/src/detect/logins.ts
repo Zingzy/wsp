@@ -99,14 +99,27 @@ async function exportedIn(host: Host, name: string): Promise<string | undefined>
 export const CLAUDE_TOKEN_DETAIL = `Claude Code signs in with the token ${SIGN_IN_ROWS.claude.mint} prints on this computer; nothing of its login here travels`;
 
 // Claude Code takes its key from ANTHROPIC_API_KEY first, then the apiKeyHelper, then the OAuth credentials
-// (measured on 2.1.257), so any of them found here is a login this computer has. None of them travels: the
-// workspace reads the long-lived token the row's own command mints, held in the wsp home and set on every turn.
+// (measured on 2.1.257), so a key found here is what it bills, ahead of a login beside it. None of them travels.
+/** How Claude Code signs in on this computer, by presence alone: `key` where the login shell exports its key or its
+ * settings name a helper for one, `login` where only its subscription login stands (the Keychain item on a Mac, the
+ * credentials file on Linux), nothing where neither does. */
+export async function claudeBills(host: Host): Promise<"key" | "login" | undefined> {
+  const helper = apiKeyHelperOf(await host.fs.readText(expand(host, CLAUDE_SETTINGS_FILE)));
+  if (helper !== undefined || (await exportedIn(host, CLAUDE_KEY_ENV)) !== undefined) return "key";
+  const oauth = host.platform === "darwin" ? await keychainHas(host, "Claude Code-credentials") : (await found(host, ["~/.claude/.credentials.json"])).paths.length > 0;
+  return oauth ? "login" : undefined;
+}
+
+/** How each agent that reads this signs in on this computer, by agent id: the fact a box's sign-in row starts from. */
+export async function billedHere(host: Host): Promise<Record<string, "key" | "login">> {
+  const claude = await claudeBills(host);
+  return claude === undefined ? {} : { claude };
+}
+
+// The workspace reads the long-lived token the row's own command mints, held in the wsp home and set on every turn.
 // The row is still here, because it is where the person answers how Claude Code signs in.
 async function claudeRow(host: Host): Promise<ManifestEntry | undefined> {
-  const oauth = host.platform === "darwin" ? (await keychainHas(host, "Claude Code-credentials")) : (await found(host, ["~/.claude/.credentials.json"])).paths.length > 0;
-  const helper = apiKeyHelperOf(await host.fs.readText(expand(host, CLAUDE_SETTINGS_FILE)));
-  const exported = await exportedIn(host, CLAUDE_KEY_ENV);
-  if (!oauth && helper === undefined && exported === undefined) return undefined;
+  if ((await claudeBills(host)) === undefined) return undefined;
   return entry({
     rung: "logins",
     id: "logins/claude",

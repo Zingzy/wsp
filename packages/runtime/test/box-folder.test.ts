@@ -5,16 +5,17 @@
 // runs on the computer itself as that login. The computer is a fake on the
 // link, answering the frames the host sends it and keeping every one.
 import { describe, expect, it } from "vitest";
-import { cgroupJoinLine, childOnAnotherComputerLine, claudeMemoryDir, claudeProjectKey, HERE_PLACE_ID, placeLoginNotRootLine, placeOwnedPaths, rootsPathIn, threadCgroup, type AsideQuestion, type ThreadScope, type TurnResult } from "@wsp/protocol";
+import { cgroupJoinLine, childOnAnotherComputerLine, claudeMemoryDir, claudeProjectKey, HERE_PLACE_ID, placeLoginNotRootLine, placeOwnedPaths, rootsPathIn, SIGNED_IN_THERE, threadCgroup, type AsideQuestion, type ThreadScope, type TurnResult } from "@wsp/protocol";
 import type { HarnessAdapterFactory, HarnessStartOptions } from "../src/runtime.js";
 import type { ServersActs } from "../src/agents-read.js";
+import { secretsOf } from "../src/adapters.js";
 import { freeFolderScript, projectLanding } from "../src/project-landing.js";
 import { placeHomeRefusal } from "../src/places.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { ctx, sockets, relink, serving } from "./places-fixture.js";
 import { until } from "./until.js";
 import { report } from "./place-join.js";
-import { answering, asThread, box, handedLine, HETZNER, joined, pickGitHub, type Box, type Started } from "./box-fixture.js";
+import { answering, asThread, box, handedLine, HETZNER, joined, pickGitHub, pickSignIn, type Box, type Started } from "./box-fixture.js";
 
 /** A harness whose turn is a real launch on the computer, read until it is stopped. */
 function launching(launched: string[]): HarnessAdapterFactory {
@@ -254,6 +255,38 @@ describe("the sign-ins a thread on a computer you joined reads", () => {
     // A server's value rides neither: the launch hands it to the server alone.
     expect(agent["LINEAR_TOKEN"]).toBeUndefined();
     expect(terminal["LINEAR_TOKEN"]).toBeUndefined();
+  });
+
+  for (const [signin, handed, held] of [["key", "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"], ["token", "CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"]] as const) {
+    it(`hand Claude Code the ${signin} it was picked to take there, the vault holding both`, async () => {
+      const starts: Started[] = [];
+      const store = memoryStore();
+      const { rt, project, seen, placeId } = await joined({ adapters: { claude: answering(starts) }, vault: { CLAUDE_CODE_OAUTH_TOKEN: "sk-ant-oat01-fake", ANTHROPIC_API_KEY: "sk-ant-api03-fake" }, store });
+      await pickSignIn(store, placeId, "claude", signin);
+      const { terminal } = await turnAndTerminal(rt, project, seen, starts);
+      expect([terminal[handed] !== undefined, terminal[held] !== undefined]).toEqual([true, false]);
+      expect([starts.at(-1)!.vault?.[handed] !== undefined, starts.at(-1)!.vault?.[held] !== undefined]).toEqual([true, signin === "token"]);
+    });
+  }
+
+  it("hand Claude Code neither the vault's token nor its key on a box whose own Claude Code login stands, since either outranks it", async () => {
+    const starts: Started[] = [];
+    const handed: ReturnType<typeof secretsOf>[] = [];
+    const claude: HarnessAdapterFactory = hctx => (handed.push(secretsOf(hctx.vault, "claude", hctx.loginStands("claude"))), answering(starts)(hctx));
+    const store = memoryStore();
+    const { rt, project, seen, placeId } = await joined({ adapters: { claude }, vault: { CLAUDE_CODE_OAUTH_TOKEN: "sk-ant-oat01-fake", ANTHROPIC_API_KEY: "sk-ant-api03-fake" }, store });
+    const record = (await store.get("places", placeId)) as Record<string, unknown> & { report: Record<string, unknown> };
+    await store.put("places", placeId, {
+      ...record,
+      report: { ...record.report, agents: ["claude"], logins: [] },
+      picks: { agents: { claude: { signin: "machine" } }, configs: {} },
+      applied: { at: new Date().toISOString(), rows: [{ id: "signins/claude", label: "Claude Code", outcome: "installed", note: SIGNED_IN_THERE }] },
+    });
+    await rt.places!.load();
+    expect(rt.places!.signInsAt(placeId)?.["claude"]).toBe("signed-in");
+    const { terminal } = await turnAndTerminal(rt, project, seen, starts);
+    expect([terminal["CLAUDE_CODE_OAUTH_TOKEN"], terminal["ANTHROPIC_API_KEY"]]).toEqual([undefined, undefined]);
+    expect(handed.at(-1)).toEqual({});
   });
 
   for (const signin of ["skip", "machine"] as const) {

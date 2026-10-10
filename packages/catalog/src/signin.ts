@@ -82,6 +82,9 @@ export type TokenSignIn = {
   keyEnv?: string;
   status?: StatusCheck;
   note?: string;
+  /** The tool's own login, run on a computer you own as a third way beside the token and the key: it lands where
+   * that computer's threads keep the tool's store, which the status reads with the same variable pointed there. */
+  there?: { login: string; finish: SignInFinish; headless?: "device" | "code" };
   sources: [];
   stateOnMachine: [];
 };
@@ -136,6 +139,14 @@ export function hasLogin(s: SignIn | { kind: "shell" }): s is LoginSignIn {
 /** A sign-in that is a token minted on this computer: nothing runs on a machine for it. */
 export function mintsToken(s: SignIn | { kind: "shell" }): s is TokenSignIn {
   return s.kind === "token";
+}
+
+/** The login an agent runs on a computer you own: its own row where it has one, else the login a token row names
+ * for that computer, with the row's status. Nothing where neither runs there. */
+export function loginThere(s: SignIn | { kind: "shell" }): LoginSignIn | undefined {
+  if (hasLogin(s)) return s;
+  if (!mintsToken(s) || s.there === undefined) return undefined;
+  return { kind: "oauth", ...s.there, sources: [], stateOnMachine: [], ...(s.status !== undefined ? { status: s.status } : {}) };
 }
 
 /** What this login shares from the computer that runs the workspaces into each of them, or nothing: the one
@@ -433,6 +444,8 @@ export const SIGN_IN_ROWS = {
     token: /sk-ant-oat01-[A-Za-z0-9_-]{20,}/,
     keyEnv: "ANTHROPIC_API_KEY",
     status: { command: "claude auth status", signedIn: claudeSignedIn, detail: claudeSource, kind: claudeKind, plan: claudePlan },
+    // On a computer you own, where no browser is, its page hands back a code to paste.
+    there: { login: "claude auth login --claudeai", finish: "code", headless: "code" },
     sources: [],
     stateOnMachine: [],
   },

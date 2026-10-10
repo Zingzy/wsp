@@ -21,7 +21,6 @@ import {
   placeBehindLine,
   placeDaemonBehind,
   SIGNED_IN_THERE,
-  copiedFromLine,
   GITHUB_CLI,
   GITHUB_ROW,
   signInRowId,
@@ -32,7 +31,7 @@ import { LinkBackend, PlaceAbsentError, PlaceFolderMachine, PlaceMachine, keyFin
 import { connectDaemon } from "../reach.js";
 import { verifyPlaceBytes } from "@wsp/keys";
 import { CAPS, DEFAULT_COLLECTION, DEFAULT_ID, type PlaceRecord, type PlaceDoor, PlaceForksNowhereError, PlaceProvisioningError } from "./types.js";
-import { vaultSignIn, landedOn, type LandedRow, bounded, readsAsEd25519, JOIN_PROVE_MS, PLACE_BAD_KEY_REFUSAL, takenReport, REPLACED, BACKEND_FACTS_MS } from "./helpers.js";
+import { vaultSignIn, vaultHeldLine, pickedVault, landedOn, type LandedRow, bounded, readsAsEd25519, JOIN_PROVE_MS, PLACE_BAD_KEY_REFUSAL, takenReport, REPLACED, BACKEND_FACTS_MS } from "./helpers.js";
 import { panePorts } from "./pane-ports.js";
 import type { PlaceDoorContext } from "./context.js";
 import type { PlaceRecordsArea } from "./records.js";
@@ -40,7 +39,7 @@ import type { PlaceSetupArea } from "./setup.js";
 import type { PlaceViewsArea } from "./views.js";
 
 /** The door's half that joins, proves and holds each computer's link, and answers what a link and a place say. */
-export function linkDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, setupArea: PlaceSetupArea, viewArea: PlaceViewsArea): Pick<PlaceDoor, "answerChallenge" | "join" | "auth" | "hostKey" | "prove" | "attach" | "link" | "channel" | "load" | "nameOf" | "settingsAt" | "turnLimitAt" | "threadsAt" | "signInsAt" | "githubFromVault" | "loginLanded" | "keyLanded" | "ghThere" | "offerOf" | "backendOf" | "forkingBackend" | "joined" | "folderComputer" | "forward" | "paneForwards" | "placeFor" | "defaultPlace" | "markUsed" | "markDefaultIfNone"> {
+export function linkDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, setupArea: PlaceSetupArea, viewArea: PlaceViewsArea): Pick<PlaceDoor, "answerChallenge" | "join" | "auth" | "hostKey" | "prove" | "attach" | "link" | "channel" | "load" | "nameOf" | "settingsAt" | "turnLimitAt" | "threadsAt" | "signInsAt" | "vaultAt" | "githubFromVault" | "loginLanded" | "keyLanded" | "ghThere" | "offerOf" | "backendOf" | "forkingBackend" | "joined" | "folderComputer" | "forward" | "paneForwards" | "placeFor" | "defaultPlace" | "markUsed" | "markDefaultIfNone"> {
   const { opts, store, wiring, clockNow, seenEveryMs, live, kept, signInsHere, backends, forwards, asking, emit } = ctx;
   const panes = panePorts({ forwards, now: clockNow, schedule: ctx.schedule });
   const {
@@ -302,6 +301,10 @@ export function linkDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, se
 
     signInsAt: signInsHere,
 
+    vaultAt(placeId, vault) {
+      return pickedVault(vault, kept.get(placeId)?.picks);
+    },
+
     githubFromVault(placeId) {
       const held = kept.get(placeId);
       const github = held?.picks?.configs.github;
@@ -315,7 +318,7 @@ export function linkDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, se
 
     async keyLanded(agent) {
       if (vaultSignIn(agent, opts.vault?.() ?? {}) !== "vault-key") return;
-      for (const record of await records()) await landSignIn(record.id, { id: signInRowId(agent), outcome: "present", note: copiedFromLine(here()) });
+      for (const record of await records()) await landSignIn(record.id, { id: signInRowId(agent), outcome: "present", note: vaultHeldLine(agent, opts.vault?.() ?? {}, record.picks?.agents[agent]?.signin, here()) });
     },
 
     async ghThere(placeId, stage) {

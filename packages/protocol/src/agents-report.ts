@@ -389,6 +389,9 @@ export const signInTerminalRefusal = (agent: string, line: string): string => `$
 /** Why an agent has no sign-in to run: it signs in with a token or key this host keeps, or not at all. */
 export const signInVaultRefusal = (agent: string): string => `${agent} has no sign-in to run on a computer; it reads a token or key this host keeps.`;
 
+/** A token made here that did not land. None of what the command printed is said, since the token may be in it. */
+export const mintFailedLine = (mint: string): string => `${mint} ended without a token wsp could read`;
+
 /** Why a server's sign-in is not run for the app, with the line the person runs instead. */
 export const serverSignInCopyRefusal = (agent: string, line: string, why: "inside" | "callback"): string =>
   why === "inside" ? `${agent} signs a server in inside its own session: ${line}` : `${agent} finishes a server's sign-in on a page at localhost, which reaches only the computer your browser is on; run ${line} in a terminal there.`;

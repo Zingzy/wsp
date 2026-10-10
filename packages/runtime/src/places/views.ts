@@ -282,9 +282,10 @@ export function placeViews(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, 
       agents: record.report.agents,
       ...(record.report.agentVersions !== undefined ? { agentVersions: record.report.agentVersions } : {}),
       // One word per agent for whether a turn there needs a sign-in first, worked out from what that computer listed
-      // under its logins folder and what this host's vault holds. Nothing from a daemon that lists neither.
+      // under its logins folder, what its setup signed in there and what this host's vault holds. Nothing from a
+      // daemon that lists neither.
       ...((): { signIns?: Record<string, AgentSignInState> } => {
-        const words = signInsOf(record.report, opts.vault?.() ?? {});
+        const words = signInsOf(record.report, opts.vault?.() ?? {}, record.applied?.rows);
         return words === undefined ? {} : { signIns: words };
       })(),
       ...(record.backendFacts?.logins !== undefined ? { logins: record.backendFacts.logins } : {}),

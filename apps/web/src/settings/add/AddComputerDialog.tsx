@@ -8,12 +8,12 @@
 // under itself with its acts. When every row is done, Next opens the ready
 // page: a wash of the theme's hero ink from the top edge behind the box's name
 // and the one act.
-import { CheckIcon, ExternalLinkIcon, ListChecksIcon, ServerIcon, XIcon } from "lucide-react";
+import { CheckIcon, ExternalLinkIcon, KeyRoundIcon, ListChecksIcon, ServerIcon, XIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { fmtBytes, fmtDuration, HERE_PLACE_ID, hereName, NO_RECIPE, recipeCounts, recipeSummary, type AgentsTarget, type PlaceSetupStep, type PlaceView, type ProjectIcon, type RecipeFile, type RecipeOptions, type SshHostSuggestion } from "@wsp/protocol";
-import { agentName } from "@wsp/catalog";
+import { fmtBytes, fmtDuration, HERE_PLACE_ID, hereName, NO_RECIPE, recipeCounts, recipeSummary, signInWayLabel, type SignInWay, type AgentsTarget, type PlaceSetupStep, type PlaceView, type ProjectIcon, type RecipeFile, type RecipeOptions, type SshHostSuggestion } from "@wsp/protocol";
+import { agentName, signInWaysOf } from "@wsp/catalog";
 import { ActButton } from "../../components/agents/agentsParts.js";
-import { AGENTS_LIST_WORDS, agentSignInStart, catalogSignInRow, signInAct, type RowAct, type RowsContext } from "../../components/agents/agentsRows.js";
+import { AGENTS_LIST_WORDS, agentSignInStart, catalogSignInRow, signInAct, wayStart, type RowAct, type RowsContext } from "../../components/agents/agentsRows.js";
 import { SignInFlowView } from "../../components/agents/SignInFlowView.js";
 import { useAgentActs } from "../../components/agents/useAgentActs.js";
 import { useAgentsReport } from "../../components/agents/useAgentsReport.js";
@@ -40,7 +40,7 @@ import { placeName } from "../places.js";
 import { readRecipes, useRecipes } from "../recipesStore.js";
 import { Card, Line } from "../rows.js";
 import { CopyRow, DeviceCode, RefusalSlot } from "../sheetParts.js";
-import { STEP_TITLES, askedHostKey, askedSudo, closeAdd, connect, copyKeysOn, firstCloseOf, firstPick, go, openSetup, readOptions, retrySetup, setPicks, skipRow, setSaveAs, setUp, stepLine, stepsFor, tooBig, useAddFlow, weigh, type AddStep } from "./addFlow.js";
+import { STEP_TITLES, askedHostKey, askedSudo, closeAdd, connect, copyKeysOn, firstCloseOf, firstPick, go, openSetup, readOptions, retrySetup, setupWithWay, setPicks, skipRow, setSaveAs, setUp, stepLine, stepsFor, tooBig, useAddFlow, weigh, type AddStep } from "./addFlow.js";
 import { everything, folderKey, fromRecipe, githubPick, noPicks, servable, tickUsedClis } from "./choices.js";
 import { AgentsPicks, Choice, ClisPicks, GitHubPicks, OtherPicks, PluginsPicks, ProjectsPicks, ServersPicks, SkillsPicks, type FolderOption } from "./PickLists.js";
 import { PickLine, PickRow } from "./PickRow.js";
@@ -337,9 +337,9 @@ function StepLog({ lines }: { lines: readonly string[] | undefined }) {
 }
 
 /** The steps of a setup with what each row asks: Retry where a row did not land, Skip where it is an item the host can
- * set aside, the wait where a sign-in does, and Sign in on the computer where a sign-in was skipped or failed, its
- * page and code drawn under the row as the computer's own Sign-ins draw them. A step that ran opens on a click to its
- * last lines of output, and one that failed stands open until it is closed. */
+ * set aside, the wait where a sign-in does, and Sign in on the computer where a sign-in was skipped or failed, or each
+ * way of an agent that has several, its page and code drawn under the row as the computer's own Sign-ins draw them. A
+ * step that ran opens on a click to its last lines of output, and one that failed stands open until it is closed. */
 export function SetupList({ place, id = "setup", rows = setupRows(place, placeName(place)) }: { place: PlaceView; id?: string; rows?: readonly StepLine[] }) {
   const api = useStore(s => s.api);
   const box = placeName(place);
@@ -365,6 +365,23 @@ export function SetupList({ place, id = "setup", rows = setupRows(place, placeNa
   const copyKeys = (): void => ask(() => copyKeysOn(api, place));
   const skip = (row: string) => (): void => ask(() => skipRow(api, place.id, row));
   const ctx: RowsContext = { where: "box", computer: box, heldWhy: null, ...(signIns === undefined ? {} : { acts: signIns }) };
+  // A token is made on the computer the host runs on, so its sign-in is that computer's.
+  const hereTarget = useMemo<AgentsTarget>(() => ({ placeId: HERE_PLACE_ID }), []);
+  const hereSignIns = useAgentActs(hereTarget);
+  const hereCtx: RowsContext = { where: "here", heldWhy: null, ...(hereSignIns === undefined ? {} : { acts: hereSignIns }) };
+  // An agent with several ways offers each on its row, the one this computer was set up with first.
+  const waysOf = (row: StepLine): SignInWay[] => {
+    if (row.signIn === undefined) return [];
+    const ways = signInWaysOf(row.signIn);
+    const first = ways.find(w => w === place.picks?.agents[row.signIn!]?.signin);
+    return first === undefined ? ways : [first, ...ways.filter(w => w !== first)];
+  };
+  const wayAct = (row: StepLine, way: SignInWay): ReturnType<typeof signInAct> => {
+    const agent = row.signIn!;
+    if (way === "key") return { act: { id: "key", label: signInWayLabel("key", box), icon: KeyRoundIcon, run: () => ask(() => setupWithWay(api, place, agent, "key")) } };
+    const made = signInAct(row.id, wayStart(agent, way), way === "token" ? hereCtx : ctx);
+    return made.act.id === "sign-in" ? { ...made, act: { ...made.act, label: signInWayLabel(way, box) } } : made;
+  };
   // How it signs in there is the agents list's own rule, off that computer's report row where one is read.
   const signInOf = (row: StepLine) => {
     const road = row.signIn === undefined ? undefined : (report?.agents.find(a => a.id === row.signIn) ?? catalogSignInRow(row.signIn));
@@ -379,6 +396,17 @@ export function SetupList({ place, id = "setup", rows = setupRows(place, placeNa
     return { ...signIn.act, label: ADD_COMPUTER_WORDS.signInOn(box) };
   };
   const acts = (row: StepLine): ReactNode => {
+    const ways = waysOf(row);
+    if (ways.length > 0 && row.wait === undefined && (row.state === "failed" || row.state === "skipped")) {
+      return (
+        <>
+          {ways.map(way => (
+            <ActButton key={way} act={wayAct(row, way).act} k={way === "machine" ? "sign-in" : `sign-in-${way}`} />
+          ))}
+          {row.state === "failed" && row.sub === true ? <SkipAct word={ADD_COMPUTER_WORDS.skip} onSkip={skip(row.id)} busy={busy} /> : null}
+        </>
+      );
+    }
     const signIn = signInOf(row);
     const signInButton = signIn === undefined ? null : <ActButton act={actOf(row, signIn)} k="sign-in" />;
     if (row.state === "skipped" && row.copyKeys === true && ownPicks) return <CopyKeysAct onCopy={copyKeys} busy={busy} />;
@@ -392,7 +420,8 @@ export function SetupList({ place, id = "setup", rows = setupRows(place, placeNa
     );
   };
   const flowOf = (row: StepLine): ReactNode => {
-    const flow = signInOf(row)?.flow;
+    const ways = waysOf(row);
+    const flow = ways.length > 0 ? ways.flatMap(way => (way === "key" ? [] : [wayAct(row, way).flow])).find(f => f !== undefined) : signInOf(row)?.flow;
     return flow === undefined ? undefined : <SignInFlowView view={flow} label={row.name} reserve={false} />;
   };
   const toggle = (row: StepLine) => (opensLog(row) ? { open: isOpen(row), onToggle: () => setTurned(was => new Map(was).set(row.id, !isOpen(row))) } : { open: false });

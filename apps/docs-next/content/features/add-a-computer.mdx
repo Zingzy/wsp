@@ -97,6 +97,14 @@ You choose for each agent:
 
 **Copy the key** shows only when your host holds that agent's token or key. To put one there, run `wsp agents key <agent>`. See [Agents and sign-ins](/features/agents).
 
+Claude Code has no login file to copy, so it never offers **Copy the key**. It offers three ways instead, and starts at the one your computer already bills by:
+
+- **Use an API key.** Put `ANTHROPIC_API_KEY` in `~/.wsp/.env` on your computer. Each turn on the new computer gets the key, and wsp never shows it. This is the first way when your computer exports `ANTHROPIC_API_KEY` in a shell file or sets an `apiKeyHelper` in `~/.claude/settings.json`.
+- **Make a token.** wsp runs `claude setup-token` on your computer, and your browser asks you to approve once. The token goes in `~/.wsp/.env` as `CLAUDE_CODE_OAUTH_TOKEN`, and every computer picked to take it gets it on its turns. This is the first way when Claude Code is signed in on your computer with a subscription.
+- **Sign in on** the new computer. Claude Code's own `claude auth login` runs there, and you paste the code its page gives you under the row. The login stays in the folder that computer's threads read, and no token or key from your computer goes over it. This is the first way when your computer has neither a key nor a login.
+
+A Claude Code row that fails shows all three as buttons, and its line says what each one does.
+
 For GitHub, you choose **Use the token from** your computer, **Sign in on** the new computer, or **Skip for now**. If you skip, private repositories do not clone until you sign in later in Settings.
 
 Each MCP server says how it signs in there: no sign-in, its key or token copied, or a sign-in on the new computer. A key written inside a server's definition travels with it.

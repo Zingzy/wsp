@@ -4,7 +4,7 @@
 // status check, the global config that carries over, how it keys project
 // state to a path, and whether it is on by default with the evidence behind
 // that. The wizard's tables read from here; nothing here runs a command.
-import { agentOfRow, compareVersions, packageOf, shellQuote, thisComputer, toolRowPrefix, type PageReach } from "@wsp/protocol";
+import { agentOfRow, compareVersions, packageOf, shellQuote, thisComputer, toolRowPrefix, type PageReach, type SignInWay } from "@wsp/protocol";
 import { AGENT_MODULES } from "./agents/index.js";
 import type { AgentContext } from "./context.js";
 import type { HookCarry } from "./hooks.js";
@@ -16,7 +16,7 @@ import type { BundledSkills, PluginRoad, PluginSkills, SkillRoots } from "./skil
 import { APT_BIN, APT_INDEX, CARGO_BIN, roadModule, type InstallHomes } from "./road-modules.js";
 import type { RoadName } from "./roads.js";
 import { DOCKER_INSTALL, FD_INSTALL, LOCAL_BIN, NODE_RELEASES, OP_INSTALL, PLAYWRIGHT, PLAYWRIGHT_INSTALL, PYTHON_INSTALL, RUSTUP_INSTALL, SWIFT, SWIFT_INSTALL, UV_INSTALL, YARN_INSTALL, nodeInstallScript, type InstallRoad } from "./roads.js";
-import { NO_SIGN_IN, SIGN_IN_ROWS, hasLogin, keysIdOf, keysRowOf, loginIdOf, mintsToken, sharedLoginOf, type KeyFiles, type SharedLogin, type SignIn } from "./signin.js";
+import { NO_SIGN_IN, SIGN_IN_ROWS, hasLogin, keyEnvOf, keysIdOf, keysRowOf, loginIdOf, loginThere, mintsToken, sharedLoginOf, type KeyFiles, type SharedLogin, type SignIn } from "./signin.js";
 
 export type EntryKind = "agent" | "tool";
 
@@ -516,6 +516,14 @@ export function sharedOn(agent: string): SharedLogin | undefined {
 /** The rows a computer's setup puts an agent's Debian packages on as, each under the agent's own row id. */
 export function aptNeedRows(agent: string): { id: string; package: string; command: string }[] {
   return (CATALOG_AGENTS.find(a => a.id === agent)?.aptNeeds ?? []).map(n => ({ id: `agents/${agent}/${n.package}`, ...n }));
+}
+
+/** The ways an agent that mints its token here signs in on a computer you own: the token, the key where it takes one,
+ * and its own login there where it has one. Empty for every other agent, whose choice is the vault or its login. */
+export function signInWaysOf(agent: string): SignInWay[] {
+  const s = CATALOG_AGENTS.find(a => a.id === agent)?.signIn;
+  if (s === undefined || !mintsToken(s)) return [];
+  return ["token", ...(keyEnvOf(s) !== undefined ? (["key"] as const) : []), ...(loginThere(s) !== undefined ? (["machine"] as const) : [])];
 }
 
 /** Which of the agents a computer reported sign in there once rather than in the image, in the order it named them. */

@@ -6,6 +6,7 @@ import { placeAtLimitLine, placeFullLine } from "../place-state.js";
 import type { AbsentComputer } from "../workspace-state.js";
 import { type PendingComputer, type PendingStep, type PlaceApplied, type PlaceProvisionRow, type PlaceSetup, type PlaceSetupStep, type PlaceSync, type PlaceView, type PlaceWait, provisionCounts, provisionCountWord, SETUP_STEP_CLASS, SETUP_STEP_WORDS } from "./place.js";
 import { PLACE_BLOCKED_WORD } from "../wire/machine-link.js";
+import type { RecipeSignIn } from "../recipe-file.js";
 import { placeDaemonBehind } from "../wire/daemon-version.js";
 
 /** What a computer whose recipe is still being put on says to whoever asked for a workspace there, or for a second
@@ -166,7 +167,41 @@ export const copiedNotSignedInLine = (name: string, here: string): string => `${
 /** What to do about a sign-in that had nothing to copy: sign it in on the computer itself where it has a login
  * there, else hand it the token or key it takes. */
 export const signInThereFix = (computer: string): string => `Sign in on ${computer} instead.`;
-export const signInWithFix = (name: string, word: "token" | "key"): string => `Sign in with a ${name} ${word} instead.`;
+
+/** A way an agent that mints its token here signs in on a computer you own: each is a choice in the picker and a
+ * button on its row once that row failed or waits. */
+export type SignInWay = Extract<RecipeSignIn, "token" | "key" | "machine">;
+/** Each way's name, the same on its button, in the picker and at the head of its sentence in the row's fix. */
+export const signInWayLabel = (way: SignInWay, box: string): string => ({ token: "Make a token", key: "Use an API key", machine: `Sign in on ${box}` })[way];
+/** What a row of an agent with several ways says to do: a sentence per way, each opening with its button's name and
+ * saying what pressing it does. `mint` is the command that makes the token, `keyEnv` the variable the key goes under. */
+export function signInWaysFix(ways: readonly SignInWay[], o: SignInWayFacts): string {
+  return ways.map(way => `${signInWayLabel(way, o.box)}: ${signInWayDoes(way, o)}.`).join(" ");
+}
+/** The facts a way's words name: the agent, the computer the host runs on, the box, the command that makes the token
+ * and the variable the key goes under. */
+export interface SignInWayFacts {
+  name: string;
+  here: string;
+  box: string;
+  mint?: string;
+  keyEnv?: string;
+}
+/** What one way does, as its sentence in the fix and the picker's note under a row picked that way both say it. */
+export const signInWayDoes = (way: SignInWay, o: SignInWayFacts): string =>
+  ({
+    token: `${o.mint ?? `${o.name}'s own command`} runs on ${o.here} and asks your browser once`,
+    key: `put ${o.keyEnv ?? "the key"} in ~/.wsp/.env on ${o.here} first, and wsp reads it from there without showing it`,
+    machine: `${o.name}'s own sign-in runs there`,
+  })[way];
+/** What a sign-in row says where the vault holds what its way takes. */
+export const tokenHeldLine = (here: string): string => `the token made on ${here}`;
+export const keyHeldLine = (here: string): string => `the key in ~/.wsp/.env on ${here}`;
+/** What a row picked to take a key says where the vault holds none. */
+export const noKeyLine = (keyEnv: string, here: string): string => `~/.wsp/.env on ${here} holds no ${keyEnv}`;
+/** A sign-in on that computer whose page hands back a code: the setup has nowhere to take the code, so the row's own
+ * Sign in runs it, with the code pasted under the row. */
+export const CODE_FROM_ROW = "its page hands back a code, so it signs in from this row";
 /** What a row the recipe took out says where a file of it stays, since the person has written it there since, and
  * where its files could not be taken off at all. */
 export const editedThereLine = (name: string, kept: readonly string[]): string => `${nameList(kept)} ${kept.length === 1 ? "was" : "were"} edited on ${name}, so ${kept.length === 1 ? "it stays" : "they stay"} and wsp no longer manages ${kept.length === 1 ? "it" : "them"}`;

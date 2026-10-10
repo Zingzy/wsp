@@ -796,7 +796,7 @@ export function bootArea(ctx: RuntimeContext): BootArea {
    * undefined where nothing holds it or no reading says. */
   const heldPast = async (entry: LiveWorkspace, harness: string): Promise<number | undefined> => {
     const limits = await ctx.ledger.limits().catch(() => []);
-    const vaulted = ctx.vaultedFor(harness, ctx.moduleOf(entry.record.kind).loginStands(entry, harness));
+    const vaulted = ctx.vaultedFor(harness, ctx.moduleOf(entry.record.kind).loginStands(entry, harness), ctx.vaultOn(entry));
     const { key } = accountOnComputer({ agent: harness, agentName: harnessCatalog(harness)?.label ?? harness, computer: { id: ctx.usageComputerOf(entry.record), name: ctx.computerOf(entry) }, limits, vaulted });
     return heldUntil(limits.find(l => l.key === key)?.windows ?? [], clock.now());
   };

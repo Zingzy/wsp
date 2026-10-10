@@ -52,7 +52,8 @@ A sign-in waits 10 minutes. Then its state is `expired`, and a retry asks for a 
 
 wsp copies no sign-in file to a box. You sign in on the box, or wsp gives the turn a key from your own computer:
 
-- The agents' keys and tokens stay in the `.env` beside the state file on your computer. The host puts them in each turn's environment, on this computer and on your boxes. Claude Code signs in with the token that `claude setup-token` prints on your computer, as `CLAUDE_CODE_OAUTH_TOKEN`. Nothing of the Claude Code login on your computer goes to a box.
+- The agents' keys and tokens stay in the `.env` beside the state file on your computer. The host puts them in each turn's environment, on this computer and on your boxes.
+- Claude Code takes one of three, picked per box. The token that `claude setup-token` prints on your computer goes in that `.env` as `CLAUDE_CODE_OAUTH_TOKEN`. The key goes in it as `ANTHROPIC_API_KEY`. Or Claude Code signs in on the box itself with `claude auth login`, and that login stays in the folder the box's threads read, `CLAUDE_CONFIG_DIR`, not under `/wsp/logins`. A box signed in that way gets neither the token nor the key. Nothing of the Claude Code login on your computer goes to a box, since two computers sharing one login sign each other out when one renews it.
 - For GitHub, the default is to take your token with `gh auth token` on your computer and keep it in the same `.env` as `GH_TOKEN`. Every thread on the box then gets it. To keep it off the box, choose a sign-in on the box or skip GitHub when you add the box.
 - Codex signs in once on the box. Its `auth.json` sits in `/wsp/logins/codex/`, and every thread on the box shares it.
 - wsp reads the login's output for its URL, its device code and its questions. To decide that a sign-in stood, it reads only the tool's own status command, for example `gh auth status`, `wrangler whoami` or `codex login status`.

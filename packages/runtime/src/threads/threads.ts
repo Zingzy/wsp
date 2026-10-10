@@ -1010,8 +1010,8 @@ export function threadsArea(ctx: RuntimeContext): ThreadsArea {
   const usageComputerOf = (r: WorkspaceRecord): string => r.place ?? (isLocalWorkspace(r) ? HERE_PLACE_ID : (r.provider ?? r.kind));
 
   /** What the vault holds for an agent's sign-in, where the machine's own login does not stand in front of it. */
-  const vaultedFor = (agent: string, loginStands?: boolean): Vaulted => {
-    const secrets = CATALOG_AGENTS.some(a => a.id === agent) ? secretsOf(opts.vault?.() ?? {}, agent as ThreadAgent, loginStands) : {};
+  const vaultedFor = (agent: string, loginStands?: boolean, vault: Readonly<Record<string, string>> = opts.vault?.() ?? {}): Vaulted => {
+    const secrets = CATALOG_AGENTS.some(a => a.id === agent) ? secretsOf(vault, agent as ThreadAgent, loginStands) : {};
     return secrets.oauthToken !== undefined ? "token" : secrets.apiKey !== undefined ? "key" : undefined;
   };
 
@@ -1021,7 +1021,7 @@ export function threadsArea(ctx: RuntimeContext): ThreadsArea {
       agent: harness,
       agentName: harnessCatalog(harness)?.label ?? harness,
       ...(named !== undefined ? { named } : {}),
-      vaulted: vaultedFor(harness, ctx.moduleOf(entry.record.kind).loginStands(entry, harness)),
+      vaulted: vaultedFor(harness, ctx.moduleOf(entry.record.kind).loginStands(entry, harness), ctx.vaultOn(entry)),
       computer: { id: usageComputerOf(entry.record), name: ctx.computerOf(entry) },
     });
 
@@ -1031,7 +1031,7 @@ export function threadsArea(ctx: RuntimeContext): ThreadsArea {
     if (PLAN_RESETS[harness as ThreadAgent] === undefined) return false;
     try {
       const limits = await ctx.ledger.limits();
-      const vaulted = vaultedFor(harness, ctx.moduleOf(entry.record.kind).loginStands(entry, harness));
+      const vaulted = vaultedFor(harness, ctx.moduleOf(entry.record.kind).loginStands(entry, harness), ctx.vaultOn(entry));
       const { key } = accountOnComputer({ agent: harness, agentName: harnessCatalog(harness)?.label ?? harness, computer: { id: usageComputerOf(entry.record), name: ctx.computerOf(entry) }, limits, vaulted });
       return resetDetailsDue(limits.find(l => l.key === key), clock.now());
     } catch {

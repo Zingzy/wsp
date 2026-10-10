@@ -6,7 +6,7 @@
 // Set up hands them to the host. Which step a pending add was left at is this
 // window's own, kept beside its id.
 import { create } from "zustand";
-import { PLACE_HOST_KEY_KIND, PLACE_SUDO_KIND, type PendingComputer, type PlaceAddJob, type PlaceEstimate, type PlaceSetup, type PlaceView, type ProjectIcon, type RecipeFile, type RecipeOptions } from "@wsp/protocol";
+import { PLACE_HOST_KEY_KIND, PLACE_SUDO_KIND, type PendingComputer, type RecipeSignIn, type PlaceAddJob, type PlaceEstimate, type PlaceSetup, type PlaceView, type ProjectIcon, type RecipeFile, type RecipeOptions } from "@wsp/protocol";
 import { noticeFailure } from "../../notices/store.js";
 import type { Api } from "../../protocol/client.js";
 import { useStore } from "../../protocol/store.js";
@@ -321,6 +321,19 @@ export async function retrySetup(api: Api | null, placeId: string): Promise<Fail
   if (api?.placesSetup === undefined) return null;
   try {
     showSetup(await api.placesSetup(placeId, {}));
+    return null;
+  } catch (e) {
+    return failureOf(e);
+  }
+}
+
+/** A computer's setup run again with one agent's sign-in moved to another way. The host sets a computer up from a
+ * saved recipe's own file, so a computer that followed one follows its own picks from here. */
+export async function setupWithWay(api: Api | null, place: PlaceView, agent: string, way: RecipeSignIn): Promise<Failure | null> {
+  if (api?.placesSetup === undefined || place.picks === undefined) return null;
+  const choices: RecipeFile = { ...place.picks, agents: { ...place.picks.agents, [agent]: { ...place.picks.agents[agent], signin: way } } };
+  try {
+    showSetup(await api.placesSetup(place.id, { choices }));
     return null;
   } catch (e) {
     return failureOf(e);

@@ -6,7 +6,7 @@
 import { randomBytes } from "node:crypto";
 import { AgentsReport, GITHUB_CLI, HERE_PLACE_ID, installingFirstLine, refusal, toolNotInstalledFix, toolNotInstalledLine, lastLine, type McpServerSpec as LaunchServer, type PlaceProvisionRow, ptyBareOn, type AgentRow, type AgentSetupSet, type AgentSetupView, THIS_COMPUTER, noSuchAgentsProjectRefusal, sharedAgentsProjectRefusal, ServerToolsAnswer, SignInLine, SkillAdded, SkillHit, SkillPreview, isJoinedComputer, nappingAgentsRefusal, nappingServersRefusal, nappingSignInRefusal, nappingSkillsRefusal, nappingToolsRefusal, noSignInRefusal, noSuchPlaceRefusal, providerAgentsRefusal, type AgentSignInState, type AgentsProject, type AgentsSignInEvent, type AgentsTarget, type DaemonFrame, type PageReach, type ServerAdd, type ServerAsk, type WorkspacePhase, withoutControlChars, SIGN_IN_ENDED_KEPT_MS, type AgentsSignInRun, type McpScope } from "@wsp/protocol";
 import type { Machine } from "@wsp/engine";
-import { catalogEntry } from "@wsp/catalog";
+import { catalogEntry, mintsToken } from "@wsp/catalog";
 import type { DaemonChannel } from "./daemon-channel.js";
 import type { McpServerSpec } from "./slate-mcp.js";
 import { NO_PLACE_DOOR, type PlaceDoor } from "./places.js";
@@ -499,7 +499,10 @@ export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): {
             // again. A sign-in stopped (a skip in the setup) lands nothing, whatever its tool said after.
             if ("placeId" in target && ask.server === undefined && !stoppedBy && run.last?.state === "signed-in") {
               try {
-                await o.places()?.loginLanded(target.placeId, ask.agent);
+                // A sign-in here of an agent that mints its token put that token in the vault, which every computer reads.
+                const signIn = catalogEntry(ask.agent)?.signIn;
+                if (target.placeId === HERE_PLACE_ID && signIn !== undefined && mintsToken(signIn)) await o.places()?.keyLanded(ask.agent);
+                else await o.places()?.loginLanded(target.placeId, ask.agent);
               } catch (e) {
                 log(`sign-in ${signInId}: the landed login was not noted: ${e instanceof Error ? e.message : String(e)}`);
               }
