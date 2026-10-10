@@ -454,8 +454,6 @@ describe("whether agents may start agents, as a place's default", () => {
       expect((await ctx.runtime.workspaces.get(own.id)).agents).toEqual({ ...AGENTS_ON, spawn: false, maxDepth: 3 });
       const mac = await createOn(ctx.runtime, { on: HERE_PLACE_ID, name: "mac" });
       expect((await ctx.runtime.workspaces.get(mac.id)).agents).toEqual({ ...AGENTS_ON, maxMachines: 1 });
-      // A cap named alone on a workspace tightens the switch it reads as, which is its place's.
-      expect((await ctx.runtime.workspaces.agents(after.id, { maxMachines: 2 })).agents).toEqual({ spawn: false, maxMachines: 2, maxDepth: 2 });
       expect(await c.request("places.set", { placeId: "solari", reset: ["spawn"] })).toMatchObject({ ok: true, place: { spawn: AGENTS_ON } });
       expect((await ctx.runtime.workspaces.get(before.id)).agents).toEqual(AGENTS_ON);
       c.close();

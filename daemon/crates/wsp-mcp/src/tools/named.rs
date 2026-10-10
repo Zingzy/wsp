@@ -9,6 +9,7 @@ use serde::Deserialize;
 use serde_json::{Map, Value};
 
 use super::said::{quoted_inside, turns};
+use super::target::refusal_line;
 use crate::client::Client;
 use crate::failure::Failure;
 use crate::record::fill;
@@ -24,6 +25,8 @@ pub struct Thread {
     pub status: String,
     pub session_id: String,
     pub ran: bool,
+    /// The folder its latest turn ran in, absent where none recorded one.
+    pub cwd: Option<String>,
 }
 
 impl Thread {
@@ -50,6 +53,8 @@ struct SessionRow {
     claude_session_id: Option<String>,
     #[serde(default)]
     refusal: Option<Value>,
+    #[serde(default)]
+    cwd: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -78,6 +83,7 @@ fn fold(rows: Vec<SessionRow>) -> Vec<Thread> {
                 harness: first.harness.clone(),
                 status: latest.status.clone(),
                 session_id: latest.id.clone(),
+                cwd: latest.cwd.clone(),
                 ran,
                 id,
             }
@@ -114,6 +120,128 @@ pub async fn threads_of(client: &Client, named: &[String]) -> Result<Vec<Thread>
     named.iter().map(|n| pick(&all, n)).collect()
 }
 
+/// A thread a tool names and the record of the folder it works in, as packages/host/src/verbs/turns-help.ts
+/// `threadAt` reads them: the thread by its id or a prefix naming one, then its record through the host, which
+/// refuses one the caller may not drive. A word that names no thread is read once more, so a project's name, or with
+/// a cloud a machine's, is refused saying the line takes a thread, in the same words as the command line.
+pub async fn thread_at<W: DeserializeOwned>(client: &Client, named: &str, at: &Aim<'_>) -> Result<(Thread, W), Failure> {
+    let thread = match thread_of(client, named).await {
+        Ok(thread) => thread,
+        Err(missing) => {
+            if missing.kind.as_deref() == Some("not-found") {
+                refuse_not_a_thread(client, named, at).await?;
+            }
+            return Err(missing);
+        }
+    };
+    #[derive(Deserialize)]
+    struct Got {
+        #[serde(default)]
+        workspace: Value,
+    }
+    let got: Got = client
+        .request(
+            "workspaces.get",
+            params([("workspaceId", Value::from(thread.workspace_id.as_str())), ("threadId", Value::from(thread.runtime_id()))]),
+        )
+        .await?;
+    let read = workspace_out(&got.workspace).and_then(|_| serde_json::from_value(got.workspace).ok());
+    Ok((thread, read.ok_or_else(|| other_version("workspaces.get"))?))
+}
+
+/// What a tool's thread is refused in the words of: the line's name, whether the line takes a computer too, and
+/// whether a cloud is on, where a machine's name is the word a person may still type.
+pub struct Aim<'a> {
+    pub line: &'a str,
+    pub or_computer: bool,
+    pub cloud: bool,
+}
+
+/// Refuses a word that names a project, or with a cloud a machine, in the words of a line that takes a thread;
+/// nothing for any other word, so the tool's own refusal stands.
+async fn refuse_not_a_thread(client: &Client, named: &str, at: &Aim<'_>) -> Result<(), Failure> {
+    let words = super::workspace::words();
+    let said = |project: &str, on: &str| {
+        let template = if at.or_computer { on } else { project };
+        Failure::usage(refusal_line(&fill(template, &[("word", named), ("line", at.line)]), &words.name_a_thread_fix))
+    };
+    if super::turn::projects_here(client).await.unwrap_or_default().iter().any(|p| p.id == named || p.name == named) {
+        return Err(said(&words.not_a_thread_project, &words.not_a_thread_project_or_on));
+    }
+    if !at.cloud {
+        return Ok(());
+    }
+    #[derive(Deserialize)]
+    struct Listed {
+        workspaces: Vec<Listing>,
+    }
+    #[derive(Deserialize)]
+    struct Listing {
+        id: String,
+        name: String,
+        #[serde(default)]
+        kind: Option<super::workspace::Kind>,
+    }
+    let listed = client.request::<Listed>("workspaces.list", Map::new()).await.map(|l| l.workspaces).unwrap_or_default();
+    if listed.iter().any(|w| !w.kind.is_some_and(super::workspace::Kind::in_folder) && (w.id == named || w.name == named)) {
+        return Err(said(&words.not_a_thread_machine, &words.not_a_thread_machine_or_on));
+    }
+    Ok(())
+}
+
+/// The other threads in a thread's folder, by id, which a commit, a discard or an update acted for too.
+pub async fn sharing_with(client: &Client, thread: &Thread, workspace_id: &str) -> Result<Vec<String>, Failure> {
+    let mine = thread.runtime_id();
+    Ok(threads(client, Some(workspace_id))
+        .await?
+        .into_iter()
+        .filter(|t| t.workspace_id == workspace_id && t.runtime_id() != mine)
+        .map(|t| t.runtime_id().to_owned())
+        .collect())
+}
+
+/// A thread as an answer line opens with it.
+pub fn thread_label(thread: &Thread) -> String {
+    fill(&super::workspace::words().thread_label, &[("thread", &thread_word(thread.runtime_id()))])
+}
+
+/// The first characters of a thread's id a person reads, as packages/protocol's `threadWord` cuts them.
+pub fn thread_word(id: &str) -> String {
+    id.chars().take(8).collect()
+}
+
+/// An answer line with the threads that share the folder under it.
+pub fn with_shared(line: String, shared: &[String]) -> String {
+    let words = super::workspace::words();
+    let short: Vec<String> = shared.iter().map(|id| thread_word(id)).collect();
+    match short.as_slice() {
+        [] => line,
+        [one] => format!("{line}\n{}", fill(&words.shared_one, &[("thread", one)])),
+        [rest @ .., last] => format!("{line}\n{}", fill(&words.shared_many, &[("list", &rest.join(&words.shared_join)), ("last", last)])),
+    }
+}
+
+/// A child thread named to merge into its lead's folder: one in that same folder has nothing apart to merge.
+pub async fn child_of<W: DeserializeOwned>(
+    client: &Client,
+    lead: &Thread,
+    lead_workspace: &str,
+    named: &str,
+    at: &Aim<'_>,
+) -> Result<(Thread, W, String), Failure> {
+    let (kid, raw): (Thread, Value) = thread_at(client, named, at).await?;
+    let kid_workspace = raw.get("id").and_then(Value::as_str).unwrap_or_default().to_owned();
+    if kid_workspace == lead_workspace {
+        let said = fill(
+            &super::workspace::words().child_beside_lead,
+            &[("child", &thread_word(kid.runtime_id())), ("lead", &thread_word(lead.runtime_id()))],
+        );
+        return Err(Failure::usage(said));
+    }
+    let read = serde_json::from_value(raw).map_err(|_| other_version("workspaces.get"))?;
+    Ok((kid, read, kid_workspace))
+}
+
 /// A workspace as far as these tools read one.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Workspace {
@@ -142,11 +270,6 @@ pub async fn workspace_of(client: &Client, named: &str) -> Result<Workspace, Fai
     resolved(client, params([("ref", Value::from(named))])).await
 }
 
-/// The same for exec, which the host's refusal to a thread then speaks of, since exec starts no child.
-pub async fn workspace_for_exec(client: &Client, named: &str) -> Result<Workspace, Failure> {
-    resolved(client, params([("ref", Value::from(named)), ("verb", Value::from("exec"))])).await
-}
-
 async fn resolved(client: &Client, asked: Map<String, Value>) -> Result<Workspace, Failure> {
     #[derive(Deserialize)]
     struct Resolved {
@@ -155,6 +278,19 @@ async fn resolved(client: &Client, asked: Map<String, Value>) -> Result<Workspac
     }
     let resolved: Resolved = client.request("workspaces.resolve", asked).await?;
     workspace_out(&resolved.workspace).ok_or_else(|| other_version("workspaces.resolve"))
+}
+
+/// The folder a thread works in, as its latest turn ran there; none where that was a worktree since gone, whose next
+/// turn runs in the folder its record answers now.
+pub fn thread_cwd(thread: &Thread, record: &Value) -> Option<String> {
+    let cwd = thread.cwd.as_deref()?;
+    let gone = record.pointer("/worktree/gone").and_then(Value::as_bool) == Some(true);
+    let moved = gone
+        && record
+            .pointer("/worktree/path")
+            .and_then(Value::as_str)
+            .is_some_and(|p| cwd == p || cwd.starts_with(&format!("{}/", p.trim_end_matches('/'))));
+    (!moved).then(|| cwd.to_owned())
 }
 
 pub fn other_version(op: &str) -> Failure {
@@ -239,7 +375,19 @@ mod tests {
             status: status.into(),
             claude_session_id: None,
             refusal: None,
+            cwd: None,
         }
+    }
+
+    #[test]
+    fn a_thread_works_in_its_own_folder_unless_that_was_a_worktree_since_gone() {
+        let mut thread = fold(vec![row("s1", Some("t1"), "completed")]).remove(0);
+        thread.cwd = Some("/root/proj/sub".into());
+        assert_eq!(thread_cwd(&thread, &serde_json::json!({ "id": "w" })).as_deref(), Some("/root/proj/sub"));
+        let gone = serde_json::json!({ "id": "w", "worktree": { "path": "/root/proj", "gone": true } });
+        assert_eq!(thread_cwd(&thread, &gone), None);
+        thread.cwd = None;
+        assert_eq!(thread_cwd(&thread, &serde_json::json!({ "id": "w" })), None);
     }
 
     #[test]

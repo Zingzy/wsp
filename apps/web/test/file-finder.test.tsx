@@ -61,14 +61,14 @@ describe("the file finder", () => {
 
   it("says no line holds the word, and says the daemon's refusal as itself", async () => {
     let refuse = false;
-    provideDaemonWire(WS, fakeWire({ "fs.search": () => (refuse ? new Error("/root resolves outside the workspace root") : { hits: [], truncated: false }) }));
+    provideDaemonWire(WS, fakeWire({ "fs.search": () => (refuse ? new Error("/root resolves outside the folders wsp serves here") : { hits: [], truncated: false }) }));
     render(<FileFinder />);
     act(() => openFileFinder("text"));
     type("nowhere");
     await waitFor(() => expect(screen.getByText(FINDER_WORDS.text.none)).toBeTruthy());
     refuse = true;
     type("nowhere at all");
-    await waitFor(() => expect(screen.getByText("/root resolves outside the workspace root")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("/root resolves outside the folders wsp serves here")).toBeTruthy());
   });
 
   it("asks nothing and says so while the open thread's machine is not running", async () => {

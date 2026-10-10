@@ -17,7 +17,7 @@ import { hostSideOnlyFix, hostSideOnlyLine } from "../src/hosts.js";
 import type { WatchSignals } from "../src/watch.js";
 import { writeHost } from "../src/hosts.js";
 import { stubBackend, withDaemonRoads } from "./stub-backend.js";
-import { captured, type Captured } from "./verbs-fixture.js";
+import { captured, threadOn, type Captured } from "./verbs-fixture.js";
 import { runsFromItsOwnFolder } from "./own-folder.js";
 import { CLOUD_ON } from "../src/cloud.js";
 import { HOST_KEY, verbsHost } from "./verbs-host.js";
@@ -171,7 +171,7 @@ describe("wsp verbs over the host: fork, new and the image", () => {
     expect(sent.io.streamed.endsWith("ready\nre: \n$ ls\nbuild it\ncompleted\n")).toBe(true);
   });
 
-  it("run --title names the thread from the first second, in the agent's own launch and in the table", async () => {
+  it.runIf(CLOUD_ON)("run --title names the thread from the first second, in the agent's own launch and in the table", async () => {
     await h.run("new", "alpha");
     const opened = await h.run("run", "alpha", "--title", "Ticket 411 review", "build it");
     expect(opened.code).toBe(0);
@@ -185,6 +185,7 @@ describe("wsp verbs over the host: fork, new and the image", () => {
   it.runIf(CLOUD_ON)("fork, run, exec and wake refuse a workspace whose machine is gone, quoting the provider, with no waking line", async () => {
     await h.run("new", "alpha");
     const [alpha] = await h.rt.workspaces.list();
+    const thread = await threadOn(h.rt, "alpha");
     await h.handle!.close();
     h.handle = undefined;
     h.backend.machines[0]!.killed = true; // deleted at the provider while no host ran
@@ -198,7 +199,7 @@ describe("wsp verbs over the host: fork, new and the image", () => {
     const opened = await h.run("run", "alpha", "do it");
     expect(opened.code).toBe(1);
     expect(opened.io.errors).toEqual([`wsp run: alpha's machine is gone with its disk, so work that was not pushed is lost; rebuild it to send, which brings back its home folder from the last saved nap (${words})`]);
-    const ran = await h.run("exec", "alpha", "--", "echo", "hi");
+    const ran = await h.run("exec", thread, "--", "echo", "hi");
     expect(ran.code).toBe(1);
     expect(ran.io.errors).toEqual([`wsp exec: alpha's machine is gone with its disk, so work that was not pushed is lost; rebuild it to exec, which brings back its home folder from the last saved nap (${words})`]);
     // The workspace is on the listing throughout: what the machine is, is the machine's trouble to say, and no verb

@@ -226,7 +226,7 @@ export async function serve(io: CliIO, opts: ServeOptions): Promise<HostHandle> 
  * so a missing one is a fork with no credentials; a host that forks none runs its turns under the person's own
  * login and their harness's own store, where the sign-in they already made is the one a turn uses. */
 export function noClaudeKeyNote(forksNothing: boolean): string {
-  const what = forksNothing ? "a thread on this computer signs in as your own agents do" : "new workspaces fork without claude credentials";
+  const what = forksNothing ? "a thread on this computer signs in as your own agents do" : "new machines fork without claude credentials";
   return `note: no ANTHROPIC_API_KEY found; ${what}`;
 }
 

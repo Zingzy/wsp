@@ -33,17 +33,17 @@ ${CLOUD_ON ? `  wsp computers                   your computers: this one, each b
                                   you read its reply
   wsp send <thread> "<message>"   the thread's next message
   wsp stop <thread>               end the thread's running turn
-  wsp pause <machine>             sleep a box's machine now; an idle one sleeps
+${CLOUD_ON ? `  wsp pause <machine>             sleep a cloud machine now; an idle one sleeps
                                   by itself
   wsp wake <machine>              wake it now; run and send wake it anyway
-  wsp delete <thread>             gone with its turns; the folder stays
+` : ""}  wsp delete <thread>             gone with its turns; the folder stays
   wsp status                      whether a host serves, and where
   wsp mcp                         the verbs as tools for agents on this computer
 
 A project or a thread comes right after the verb. run and send take the
 agent's own flags, run --help lists them.
 wsp thread read <thread> prints what a thread said.
-Sleeping is automatic. ${HOST_STARTS_ITSELF}
+${CLOUD_ON ? "Sleeping is automatic. " : ""}${HOST_STARTS_ITSELF}
 
 wsp up                 serve a host in this terminal, to watch it
 wsp down               stop it
@@ -64,7 +64,7 @@ export const HELP_PAGES = ["agent", "dev"] as const;
 export function agentPage(): string {
   return [
     "the verbs an agent on this computer reaches for, and the lines you type yourself:",
-    "up and down for the host, recipe and image for what a workspace starts from.",
+    "up and down for the host, recipe and image for what a machine starts from.",
     pageLines("agent"),
     "",
     "  wsp run and wsp send stream the reply as it arrives and print it once: on a",
@@ -72,7 +72,7 @@ export function agentPage(): string {
     "  at the end.",
     wrap(`  ${TURN_END_WORDS}.`, 80).join("\n"),
     "  wsp exec streams the command's output and exits with its code. run, send and",
-    "  exec wake a paused workspace first, with one line on stderr saying so.",
+    "  exec wake a paused machine first, with one line on stderr saying so.",
     "",
     "every verb takes:",
     ...(["json", "state", "host"] as const).flatMap(name => wrap(`  ${`--${name}`.padEnd(15)}${COMMON_FLAG_WORDS[name]}`, HELP_WIDTH, " ".repeat(17))),

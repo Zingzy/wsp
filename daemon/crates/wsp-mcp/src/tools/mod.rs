@@ -96,7 +96,6 @@ pub const TOOLS: &[Tool] = &[
     recipe::SCAN,
     projects_change::ADD,
     projects_change::REMOVE,
-    machine::AGENTS,
     machine::RENAME,
     machine::SNAPSHOT,
     create::FORK,

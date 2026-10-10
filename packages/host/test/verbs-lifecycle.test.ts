@@ -19,9 +19,10 @@ import { TEST_ENV } from "../../../vitest.env.js";
 import { writeStub } from "../../protocol/test/stub-script.js";
 import { runningWsp } from "../src/mcp-install.js";
 import { wspArgvOf } from "../src/place-report.js";
-import { captured, execGuest, type Captured } from "./verbs-fixture.js";
+import { captured, execGuest, threadOn, type Captured } from "./verbs-fixture.js";
 import { runsFromItsOwnFolder } from "./own-folder.js";
 import { verbsHost } from "./verbs-host.js";
+import { CLOUD_ON } from "../src/cloud.js";
 
 runsFromItsOwnFolder();
 
@@ -31,7 +32,7 @@ vi.mock("node:fs", async importOriginal => (await import("../../runtime/test/fs-
 describe("wsp verbs over the host: pause, wake, ssh, rename, forget and delete", () => {
   const h = verbsHost();
 
-  it("pause naps the workspace and says so in the state vocabulary", async () => {
+  it.runIf(CLOUD_ON)("pause naps the workspace and says so in the state vocabulary", async () => {
     await h.run("new", "alpha");
     const { code, io } = await h.run("pause", "alpha");
     expect(code).toBe(0);
@@ -42,7 +43,7 @@ describe("wsp verbs over the host: pause, wake, ssh, rename, forget and delete",
     expect(missing.io.errors).toEqual(["wsp pause: no workspace nope"]);
   });
 
-  it("pause on a machine the provider will not pause refuses with the sentence that says why, class provider, in one stderr line, and --json carries it", async () => {
+  it.runIf(CLOUD_ON)("pause on a machine the provider will not pause refuses with the sentence that says why, class provider, in one stderr line, and --json carries it", async () => {
     await h.run("new", "alpha");
     const m = h.backend.machines[0]!;
     m.pause = async () => {
@@ -59,7 +60,7 @@ describe("wsp verbs over the host: pause, wake, ssh, rename, forget and delete",
     expect((await h.rt.workspaces.list())[0]!.phase).toBe("running");
   });
 
-  it("wake wakes a paused workspace, one line on stderr while it does, and prints its state after; on a running one the runtime is asked and the state printed is the one read", async () => {
+  it.runIf(CLOUD_ON)("wake wakes a paused workspace, one line on stderr while it does, and prints its state after; on a running one the runtime is asked and the state printed is the one read", async () => {
     await h.run("new", "alpha");
     await h.run("pause", "alpha");
     const woken = await h.run("wake", "alpha");
@@ -79,7 +80,7 @@ describe("wsp verbs over the host: pause, wake, ssh, rename, forget and delete",
     expect(missing.io.errors).toEqual(["wsp wake: no workspace nope"]);
   });
 
-  it("wake says a machine that came up and answers nothing is up and not answering yet", async () => {
+  it.runIf(CLOUD_ON)("wake says a machine that came up and answers nothing is up and not answering yet", async () => {
     await h.run("new", "alpha");
     await h.run("pause", "alpha");
     const edge = createHttpServer((_req, res) => {
@@ -99,11 +100,12 @@ describe("wsp verbs over the host: pause, wake, ssh, rename, forget and delete",
     }
   });
 
-  it("a machine the provider paused on its own, under a record that says running, is woken by wake and by exec: the runtime's one state read settles it", async () => {
+  it.runIf(CLOUD_ON)("a machine the provider paused on its own, under a record that says running, is woken by wake and by exec: the runtime's one state read settles it", async () => {
     await h.run("new", "alpha");
+    const thread = await threadOn(h.rt, "alpha");
     h.backend.machines[0]!.paused = true;
     execGuest(h.backend, "awake-ok\n", 0);
-    const ran = await h.run("exec", "alpha", "--", "echo", "awake-ok");
+    const ran = await h.run("exec", thread, "--", "echo", "awake-ok");
     expect(ran.code).toBe(0);
     expect(ran.io.lines).toEqual(["awake-ok"]);
     expect(h.backend.machines[0]!.paused).toBe(false);
@@ -134,7 +136,7 @@ describe("wsp verbs over the host: pause, wake, ssh, rename, forget and delete",
     return { code: await ended, io, said: Buffer.concat(got).toString() };
   }
 
-  it("ssh pipes its stdin and stdout to the workspace's ssh server through the port the host answers, the workspace named by its alias", async () => {
+  it.runIf(CLOUD_ON)("ssh pipes its stdin and stdout to the workspace's ssh server through the port the host answers, the workspace named by its alias", async () => {
     await h.run("new", "Cart rounding");
     const echo = createServer(c => {
       c.on("data", d => c.write(`echo: ${String(d)}`));
@@ -154,7 +156,7 @@ describe("wsp verbs over the host: pause, wake, ssh, rename, forget and delete",
     }
   });
 
-  it("ssh refuses an alias two workspaces go by, naming both, and writes nothing on stdout", async () => {
+  it.runIf(CLOUD_ON)("ssh refuses an alias two workspaces go by, naming both, and writes nothing on stdout", async () => {
     await h.run("new", "Cart rounding");
     await h.run("new", "cart-rounding");
     const asked: string[] = [];
@@ -168,7 +170,7 @@ describe("wsp verbs over the host: pause, wake, ssh, rename, forget and delete",
     expect(asked).toEqual([]);
   });
 
-  it("ssh with no terminal of this computer's to pipe, as on a line carried from a machine, says so and asks the host nothing", async () => {
+  it.runIf(CLOUD_ON)("ssh with no terminal of this computer's to pipe, as on a line carried from a machine, says so and asks the host nothing", async () => {
     await h.run("new", "Cart rounding");
     const asked: string[] = [];
     await withSsh({ port: async w => (asked.push(w.name), 1), include: async () => false, setInclude: async on => on });
@@ -203,22 +205,24 @@ describe("wsp verbs over the host: pause, wake, ssh, rename, forget and delete",
     expect(readFileSync(said, "utf8").split("\n").slice(0, -1)).toEqual(["--state", served, "ssh", "wsp-cart-rounding"]);
   });
 
-  it("exec on a paused workspace wakes it first, says so on stderr, then runs the command; a running one is not woken", async () => {
+  it.runIf(CLOUD_ON)("exec on a paused machine wakes it first, says so on stderr, then runs the command; a running one is not woken", async () => {
     await h.run("new", "alpha");
+    const thread = await threadOn(h.rt, "alpha");
     await h.run("pause", "alpha");
     execGuest(h.backend, "awake-ok\n", 0);
-    const { code, io } = await h.run("exec", "alpha", "--", "echo", "awake-ok");
+    const { code, io } = await h.run("exec", thread, "--", "echo", "awake-ok");
     expect(code).toBe(0);
     expect(io.errors).toEqual(["waking alpha"]);
     expect(io.lines).toEqual(["awake-ok"]);
     expect((await h.rt.workspaces.list())[0]!.phase).toBe("running");
-    const again = await h.run("exec", "alpha", "--", "echo", "awake-ok");
+    const again = await h.run("exec", thread, "--", "echo", "awake-ok");
     expect(again.code).toBe(0);
     expect(again.io.errors).toEqual([]);
   });
 
-  it("a record that says paused while the provider runs the machine: exec goes on without a resume and the store ends running; pause pauses for real", async () => {
+  it.runIf(CLOUD_ON)("a record that says paused while the provider runs the machine: exec goes on without a resume and the store ends running; pause pauses for real", async () => {
     await h.run("new", "alpha");
+    const thread = await threadOn(h.rt, "alpha");
     await h.run("pause", "alpha");
     const m = h.backend.machines[0]!;
     // The nap never took at the provider, and a resume on a running machine is refused.
@@ -230,7 +234,7 @@ describe("wsp verbs over the host: pause, wake, ssh, rename, forget and delete",
     };
     runningAtProvider();
     execGuest(h.backend, "awake-ok\n", 0);
-    const ran = await h.run("exec", "alpha", "--", "echo", "awake-ok");
+    const ran = await h.run("exec", thread, "--", "echo", "awake-ok");
     expect(ran.code).toBe(0);
     expect(ran.io.lines).toEqual(["awake-ok"]);
     const [alpha] = await h.rt.workspaces.list();
@@ -247,7 +251,7 @@ describe("wsp verbs over the host: pause, wake, ssh, rename, forget and delete",
     expect((await h.rt.workspaces.list())[0]!.phase).toBe("napping");
   });
 
-  it("run and send on a paused workspace wake it first, one line on stderr, then run the turn", async () => {
+  it.runIf(CLOUD_ON)("run and send on a paused workspace wake it first, one line on stderr, then run the turn", async () => {
     await h.run("new", "alpha");
     await h.run("pause", "alpha");
     const opened = await h.run("run", "alpha", "hello");
@@ -263,7 +267,7 @@ describe("wsp verbs over the host: pause, wake, ssh, rename, forget and delete",
     expect((await h.rt.workspaces.list())[0]!.phase).toBe("running");
   });
 
-  it("rename names the workspace and prints both names; a name another workspace holds and a blank one are refused and nothing is renamed", async () => {
+  it.runIf(CLOUD_ON)("rename names the workspace and prints both names; a name another workspace holds and a blank one are refused and nothing is renamed", async () => {
     await h.run("new", "alpha");
     await h.run("new", "beta");
     const alpha = (await h.rt.workspaces.list()).find(w => w.name === "alpha")!;
@@ -295,7 +299,7 @@ describe("wsp verbs over the host: pause, wake, ssh, rename, forget and delete",
     expect(short.io.errors).toEqual(["wsp rename takes a workspace and one name. usage: wsp rename <workspace> \"<name>\""]);
   });
 
-  it("forget asks once, naming what goes, drops a workspace whose machine is gone, and is refused with the reason while the machine exists", async () => {
+  it.runIf(CLOUD_ON)("forget asks once, naming what goes, drops a workspace whose machine is gone, and is refused with the reason while the machine exists", async () => {
     await h.run("new", "alpha");
     await h.run("new", "beta");
     await h.run("run", "alpha", "build it");
@@ -364,7 +368,7 @@ describe("wsp verbs over the host: pause, wake, ssh, rename, forget and delete",
     expect(deleteQuestion(await deleting(atCloud, "fix-login"))).not.toContain("copy on");
   });
 
-  it("delete asks once in the words the app shows, kills the machine at the provider, and drops the record and its threads", async () => {
+  it.runIf(CLOUD_ON)("delete asks once in the words the app shows, kills the machine at the provider, and drops the record and its threads", async () => {
     await h.run("new", "alpha");
     await h.run("new", "beta");
     await h.run("run", "alpha", "build it");
@@ -407,7 +411,7 @@ describe("wsp verbs over the host: pause, wake, ssh, rename, forget and delete",
     expect(missing.io.errors).toEqual(["wsp delete: no workspace nope"]);
   });
 
-  it("delete by name takes away a create the provider refused, in words that name no computer going", async () => {
+  it.runIf(CLOUD_ON)("delete by name takes away a create the provider refused, in words that name no computer going", async () => {
     h.backend.create = async () => {
       throw Object.assign(new Error("Snapshot not found"), { kind: "missing", status: 404 });
     };
@@ -422,7 +426,7 @@ describe("wsp verbs over the host: pause, wake, ssh, rename, forget and delete",
     expect((await h.run("delete", "fleet-check", "--yes")).io.errors).toEqual(["wsp delete: no workspace fleet-check"]);
   });
 
-  it("forget and delete named a project's folder on this computer refuse it and send the person to its threads", async () => {
+  it.runIf(CLOUD_ON)("forget and delete named a project's folder on this computer refuse it and send the person to its threads", async () => {
     await h.macProject("mac");
     const here = (await h.rt.workspaces.list())[0]!;
     for (const verb of ["forget", "delete"]) {

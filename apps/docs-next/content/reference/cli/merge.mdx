@@ -3,8 +3,9 @@
 {/* Written by apps/docs-next/scripts/cli.ts: change the script or its source and run pnpm --filter @wsp/docs-next generate. */}
 
 ```text
-usage: wsp merge <workspace> [--method merge|squash|rebase] [--when-checks-pass]
-  merges the workspace's pull request, or merges it once its checks pass
+usage: wsp merge <thread> [--method merge|squash|rebase] [--when-checks-pass]
+  merges the pull request of the thread's branch, or merges it once its checks
+  pass
 
   --method              merge, squash or rebase; the repository's own default
                         without one

@@ -13,11 +13,11 @@
   "stopLeft": ", but {left}",
   "stopUnderSome": ", and with it {count} threads its agents spawned: {under}",
   "stoppedTask": {
-    "accepted": "thread {thread} task {task} stopped",
-    "not-running": "thread {thread} task {task} not running",
-    "not-found": "thread {thread} task {task} not found by the host"
+    "accepted": "thread {thread} subagent {task} stopped",
+    "not-running": "thread {thread} subagent {task} not running",
+    "not-found": "thread {thread} subagent {task} not found by the host"
   },
-  "stopTaskSaid": "thread {thread} task {task}: {error}",
+  "stopTaskSaid": "thread {thread} subagent {task}: {error}",
   "renamed": {
     "renamed": "thread {thread} named {title}, in {agent} too",
     "unsupported": "thread {thread} not named: {agent} keeps no name of a person's for a session",
@@ -123,7 +123,7 @@
     ]
   },
   "noThreadTarget": "<project> is needed outside your projects: run from inside a project's folder, or name the project. Run wsp projects to read the names.",
-  "guestNamesWorkspace": "a line from a workspace names the workspace it means, since the folder it was typed in is not one this host can read. Name the workspace on the line.",
+  "guestNamesWorkspace": "a line from a machine names the project it means, since the folder it was typed in is not one this host can read. Name the project on the line.",
   "branchHereOnly": "--branch takes a project on this computer, where wsp makes worktrees. Name a project on this computer.",
   "threadOpened": "thread {thread} on {project} in {folder}",
   "threadOpenedIn": "thread {thread} in {folder}",

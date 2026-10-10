@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { resolve } from "node:path";
+import { CLOUD_ON } from "../cloud.js";
+import { cloudText } from "../cloud-text.js";
 import { z } from "zod";
 import {
   ProjectGolden,
@@ -39,42 +41,18 @@ import {
   START_WORDS,
   StartResult,
 } from "@wsp/protocol";
-import { hostBack, usageIs, tool, type Verb, PICK_FLAGS, PICK_OPTIONS, flag, flagList, absoluteFolder, openedThreadLine } from "./client.js";
-import { workspaceOf, pauseModeOf, stateLine, wokeLine, nap, rebuild, rebuiltLine, imageView, buildImageAt, imageLines, HOST_SIDE_VAULT, imagePassphrase, renameWorkspace, renamedWorkspaceLine, awake, committed, askedToFix, mergedIn, fixLine, startedFrom, reviewStarted, reviewPosted, startedLines, VERDICTS, mergedPr, updateLine, madeWorktree, dropping, deleting, forgetQuestion, forget, forgotLine, deleteQuestion, imageRemoveQuestion, deleteWorkspace, deletedLine, projectOf, createFor, agentsAsked, projectImageOf, removeProjectImage, setAgents, snapshot, projectGoldenLine } from "./workspaces-help.js";
-import { pickFlags, checkedStart, threadHere, refuseMachineThread, threadDeleted, openingOf, notifyOf, follow, turnFailure, followVerb, beforeSending, turnView } from "./turns-help.js";
-import { confirmed, QUIET, QUIET_LINE, QUIET_TURN, Created, TurnOut, asJson, asText, WorkspaceIn, AgentIn, NotifyIn, CwdIn, ConfirmIn, PICK_INPUTS, SizeIn, SpawnIn, MaxMachinesIn, MaxDepthIn, AGENTS_ASKED_NOTHING_LINE, agentsToolAskedNothing } from "./io.js";
+import { hostBack, usageIs, tool, type Verb, PICK_FLAGS, PICK_OPTIONS, flag, flagList, absoluteFolder, openedThreadLine, threadIdOf } from "./client.js";
+import { workspaceOf, pauseModeOf, stateLine, wokeLine, nap, rebuild, rebuiltLine, imageView, buildImageAt, imageLines, HOST_SIDE_VAULT, imagePassphrase, renameWorkspace, renamedWorkspaceLine, awake, committed, askedToFix, mergedIn, fixLine, startedFrom, reviewStarted, reviewPosted, startedLines, reviewLines, threadLabel, folderOf, withShared, sharedOf, VERDICTS, mergedPr, updateLine, madeWorktree, dropping, deleting, forgetQuestion, forget, forgotLine, deleteQuestion, imageRemoveQuestion, deleteWorkspace, deletedLine, projectOf, createFor, agentsAsked, projectImageOf, removeProjectImage, snapshot, projectGoldenLine } from "./workspaces-help.js";
+import { pickFlags, checkedStart, threadHere, threadAt, childOf, sharingWith, refuseMachineThread, threadDeleted, openingOf, notifyOf, follow, turnFailure, followVerb, beforeSending, turnView } from "./turns-help.js";
+import { confirmed, QUIET, QUIET_LINE, QUIET_TURN, Created, TurnOut, asJson, asText, WorkspaceIn, ThreadIn, SHARED_WITH, AgentIn, NotifyIn, CwdIn, ConfirmIn, PICK_INPUTS, SizeIn, SpawnIn, MaxMachinesIn, MaxDepthIn } from "./io.js";
+
+/** What a delete naming no thread says to do instead, on the line and on the tool. */
+const NO_THREAD_FIX = "Name a thread wsp threads lists.";
 
 export const WORKSPACE_VERBS: readonly Verb[] = [
   {
-    name: "workspaces agents",
-    usage: "wsp workspaces agents <workspace> [--spawn on|off] [--max-machines <n>] [--max-depth <n>]",
-    about: "what the agents inside the workspace may ask of this host: threads and machines under the thread they run in, capped, which is the default, or off",
-    page: "agent",
-    options: { spawn: { type: "string" }, "max-machines": { type: "string" }, "max-depth": { type: "string" } },
-    run: async ctx => {
-      const [ref] = ctx.args;
-      if (ref === undefined || ctx.args.length !== 1) throw usageRefusal("wsp workspaces agents takes one workspace.", usageIs(ctx));
-      const asked = agentsAsked(flag(ctx.flags, "spawn"), flag(ctx.flags, "max-machines"), flag(ctx.flags, "max-depth"));
-      if (asked === undefined) throw usageRefusal(AGENTS_ASKED_NOTHING_LINE, usageIs(ctx));
-      const workspace = await setAgents(await ctx.client(), ref, asked);
-      ctx.out.emit({ workspace }, `${workspace.name}: ${agentsLine(workspace.agents)}`);
-      return 0;
-    },
-    tool: tool({
-      description:
-        "Turns the workspace's agents switch on or off, names its caps, or both; a cap named alone tightens the switch as it stands. Every turn on a workspace is launched with a token into this host scoped to its own thread. With the switch on, which is what every workspace reads as until it is turned off, that thread may open threads and fork machines under itself, up to maxMachines machines at once under one root thread and maxDepth levels deep, and may touch no other workspace, delete nothing, pause nothing and pair no computer. On this Mac the token is identity, not confinement: a thread there runs as the person and can read the host's own token file. Off, each of those acts is refused in one line. A caller that is itself a thread on a machine is refused: what agents may do is the person's to decide.",
-      input: { workspace: WorkspaceIn, spawn: SpawnIn, max_machines: MaxMachinesIn, max_depth: MaxDepthIn },
-      output: { workspace: WorkspaceOut },
-      call: async ({ workspace: ref, spawn, max_machines: maxMachines, max_depth: maxDepth }, deps) => {
-        const asked = agentsAsked(spawn, maxMachines, maxDepth);
-        if (asked === undefined) throw agentsToolAskedNothing();
-        const workspace = await setAgents(await deps.client(), ref, asked);
-        return asText(`${workspace.name}: ${agentsLine(workspace.agents)}`, { workspace });
-      },
-    }),
-  },
-  {
     name: "rename",
+    cloud: true,
     usage: 'wsp rename <workspace> "<name>"',
     about: "names the workspace on this computer; the name is unique here, so one another workspace holds is refused",
     page: "agent",
@@ -182,171 +160,183 @@ export const WORKSPACE_VERBS: readonly Verb[] = [
   },
   {
     name: "commit",
-    usage: 'wsp commit <workspace> [--message "<message>"] [--file <path>]...',
-    about: "commits the files the workspace's copy changed, or the ones named; without a message its agent drafts one",
+    usage: 'wsp commit <thread> [--message "<message>"] [--file <path>]...',
+    about: "commits every changed file in the folder the thread works in, other threads' changes there included, or the files named; without a message the thread's agent drafts one",
     page: "agent",
     options: { message: { type: "string", short: "m" }, file: { type: "string", multiple: true } },
     run: async ctx => {
       const [ref] = ctx.args;
-      if (ref === undefined || ctx.args.length !== 1) throw usageRefusal("wsp commit takes one workspace.", usageIs(ctx));
+      if (ref === undefined || ctx.args.length !== 1) throw usageRefusal("wsp commit takes one thread.", usageIs(ctx));
       const client = await ctx.client();
-      const workspace = await workspaceOf(client, ref);
-      const { workspace: awoken } = await awake(client, workspace, "commit", line => ctx.io.error(line));
-      const made = await committed(client, awoken.id, flag(ctx.flags, "message"), flagList(ctx.flags, "file"), line => ctx.io.error(line));
-      ctx.out.emit({ ...made }, committedLine(awoken.name, made));
+      const at = await threadAt(client, ref, "wsp commit");
+      const { workspace: awoken } = await awake(client, at.workspace, "commit", line => ctx.io.error(line));
+      const made = await committed(client, awoken.id, flag(ctx.flags, "message"), flagList(ctx.flags, "file"), line => ctx.io.error(line), threadIdOf(at.thread));
+      const shared = await sharingWith(client, at);
+      ctx.out.emit({ ...made, ...sharedOf(shared) }, withShared(committedLine(threadLabel(at.thread), made), shared));
       return 0;
     },
     tool: tool({
       description:
-        "Commits the files the workspace's copy changed against its last commit, untracked ones added, with the message given, running the copy's hooks as git does; files names some of them by path from the checkout's top and leaves the rest uncommitted. Without a message the workspace's own agent drafts one from the diff and the task its newest thread was opened with, on its own command line with no thread and no tool, and the commit is made with that. Refused in one line when a file named has no change, when git knows no author in the copy (with the command that sets one), when a hook said no (with its last line), and when another git in the copy holds the index after one wait. Nothing reaches a remote: the app's Push is what pushes.",
+        "Commits the files changed in the folder the thread works in against its last commit, untracked ones added, with the message given, running the folder's hooks as git does. Other threads working in the same folder share its changes, so a commit of every file takes theirs too and the answer names them in sharedWith; files names some by path from the checkout's top and leaves the rest uncommitted. Without a message the thread's own agent drafts one from the diff and the message the thread was opened with, on its own command line with no thread and no tool, and the commit is made with that. Refused in one line when a file named has no change, when git knows no author in the folder (with the command that sets one), when a hook said no (with its last line), and when another git in the folder holds the index after one wait. Nothing reaches a remote: the app's Push is what pushes.",
       input: {
-        workspace: WorkspaceIn,
-        message: z.string().optional().describe("the commit message, a subject line then a blank line and the body; without one the workspace's agent drafts it"),
+        thread: ThreadIn,
+        message: z.string().optional().describe("the commit message, a subject line then a blank line and the body; without one the thread's agent drafts it"),
         files: z.array(z.string()).optional().describe("the files to commit, by path from the checkout's top as git status names them; without it every changed file"),
       },
-      output: GitCommitReply.shape,
-      call: async ({ workspace: ref, message, files }, deps) => {
+      output: { ...GitCommitReply.shape, ...SHARED_WITH },
+      call: async ({ thread: ref, message, files }, deps) => {
         const client = await deps.client();
-        const workspace = await workspaceOf(client, ref);
-        const { workspace: awoken } = await awake(client, workspace, "commit", QUIET_LINE);
-        const made = await committed(client, awoken.id, message, files ?? [], () => {});
-        return asText(committedLine(awoken.name, made), { ...made });
+        const at = await threadAt(client, ref, "wsp commit");
+        const { workspace: awoken } = await awake(client, at.workspace, "commit", QUIET_LINE);
+        const made = await committed(client, awoken.id, message, files ?? [], () => {}, threadIdOf(at.thread));
+        const shared = await sharingWith(client, at);
+        return asText(withShared(committedLine(threadLabel(at.thread), made), shared), { ...made, ...sharedOf(shared) });
       },
     }),
   },
   {
     name: "discard",
-    usage: "wsp discard <workspace> <path> [--yes]",
-    about: "puts one changed file of the workspace's copy back as its last commit has it, or removes it where that has none",
+    usage: "wsp discard <thread> <path> [--yes]",
+    about: "puts one changed file in the folder the thread works in back as its last commit has it, or removes it where that has none",
     page: "agent",
     options: { yes: { type: "boolean" } },
     run: async ctx => {
       const [ref, path] = ctx.args;
-      if (ref === undefined || path === undefined || ctx.args.length !== 2) throw usageRefusal("wsp discard takes one workspace and one file.", usageIs(ctx));
+      if (ref === undefined || path === undefined || ctx.args.length !== 2) throw usageRefusal("wsp discard takes one thread and one file.", usageIs(ctx));
       const client = await ctx.client();
-      const workspace = await workspaceOf(client, ref);
-      const { workspace: awoken } = await awake(client, workspace, "discard", line => ctx.io.error(line));
+      const at = await threadAt(client, ref, "wsp discard");
+      const { workspace: awoken } = await awake(client, at.workspace, "discard", line => ctx.io.error(line));
       // The host's own refusal of a file with no change first, so the one question is asked only of a discard that would go.
-      await client.request("workspaces.discard", { workspaceId: awoken.id, path, check: true });
-      if (!(await confirmed(ctx, `Discard the change to ${path} in ${workspace.name}?\nThe file goes back to its last commit, which cannot be undone.`, path))) return 1;
-      const put = GitDiscardReply.parse(await client.request("workspaces.discard", { workspaceId: awoken.id, path }));
-      ctx.out.emit({ ...put }, discardedLine(awoken.name, put.path));
+      await client.request("workspaces.discard", { workspaceId: awoken.id, path, check: true, threadId: threadIdOf(at.thread) });
+      if (!(await confirmed(ctx, `Discard the change to ${path} in ${folderOf(at.workspace)}?\nThe file goes back to its last commit, which cannot be undone.`, path))) return 1;
+      const put = GitDiscardReply.parse(await client.request("workspaces.discard", { workspaceId: awoken.id, path, threadId: threadIdOf(at.thread) }));
+      const shared = await sharingWith(client, at);
+      ctx.out.emit({ ...put, ...sharedOf(shared) }, withShared(discardedLine(threadLabel(at.thread), put.path), shared));
       return 0;
     },
     tool: tool({
       description:
-        "Puts one changed file of the workspace's copy back as its last commit has it: an edit or a deletion is undone, a rename takes its new name away and brings the old one back, and a file the last commit does not have is removed. Only the file named moves, and it cannot be undone. Refused in one line when the file has no change.",
-      input: { workspace: WorkspaceIn, path: z.string().describe("the file, by path from the checkout's top as git status names it") },
-      output: GitDiscardReply.shape,
-      call: async ({ workspace: ref, path }, deps) => {
+        "Puts one changed file in the folder the thread works in back as its last commit has it: an edit or a deletion is undone, a rename takes its new name away and brings the old one back, and a file the last commit does not have is removed. Only the file named moves, and it cannot be undone; other threads working in the same folder lose the change too, and the answer names them in sharedWith. Refused in one line when the file has no change.",
+      input: { thread: ThreadIn, path: z.string().describe("the file, by path from the checkout's top as git status names it") },
+      output: { ...GitDiscardReply.shape, ...SHARED_WITH },
+      call: async ({ thread: ref, path }, deps) => {
         const client = await deps.client();
-        const workspace = await workspaceOf(client, ref);
-        const { workspace: awoken } = await awake(client, workspace, "discard", QUIET_LINE);
-        const put = GitDiscardReply.parse(await client.request("workspaces.discard", { workspaceId: awoken.id, path }));
-        return asText(discardedLine(awoken.name, put.path), { ...put });
+        const at = await threadAt(client, ref, "wsp discard");
+        const { workspace: awoken } = await awake(client, at.workspace, "discard", QUIET_LINE);
+        const put = GitDiscardReply.parse(await client.request("workspaces.discard", { workspaceId: awoken.id, path, threadId: threadIdOf(at.thread) }));
+        const shared = await sharingWith(client, at);
+        return asText(withShared(discardedLine(threadLabel(at.thread), put.path), shared), { ...put, ...sharedOf(shared) });
       },
     }),
   },
   {
     name: "fix",
-    usage: 'wsp fix <workspace> [--check "<name>" | --child <workspace>]',
-    about: "asks the workspace's agent to fix a failed check or merge a child, or updates it from its base and asks it to fix what conflicts",
+    usage: 'wsp fix <thread> [--check "<name>" | --child <thread>]',
+    about: "asks the thread's agent to fix a failed check or merge a child, or updates its folder from its base and asks it to fix what conflicts",
     page: "agent",
     options: { check: { type: "string" }, child: { type: "string" } },
     run: async ctx => {
       const [ref] = ctx.args;
-      if (ref === undefined || ctx.args.length !== 1) throw usageRefusal("wsp fix takes one workspace.", usageIs(ctx));
+      if (ref === undefined || ctx.args.length !== 1) throw usageRefusal("wsp fix takes one thread.", usageIs(ctx));
       const check = flag(ctx.flags, "check");
       const child = flag(ctx.flags, "child");
       if (check !== undefined && child !== undefined) throw usageRefusal(FIX_CHECK_OR_CHILD, usageIs(ctx));
       const client = await ctx.client();
-      const workspace = await workspaceOf(client, ref);
-      const { workspace: at } = check === undefined ? await awake(client, workspace, "fix", line => ctx.io.error(line)) : { workspace };
-      const asked = await askedToFix(client, at.id, check, child);
-      ctx.out.emit({ ...asked }, fixLine(at.name, asked));
+      const at = await threadAt(client, ref, "wsp fix");
+      const kid = child === undefined ? undefined : await childOf(client, at, child, "wsp fix");
+      const { workspace: woke } = check === undefined ? await awake(client, at.workspace, "fix", line => ctx.io.error(line)) : at;
+      const asked = await askedToFix(client, woke.id, check, (kid === undefined ? undefined : { workspaceId: kid.workspace.id, threadId: threadIdOf(kid.thread) }), threadIdOf(at.thread));
+      ctx.out.emit({ ...asked }, fixLine(threadLabel(at.thread), asked, kid === undefined ? undefined : threadLabel(kid.thread)));
       return 0;
     },
     tool: tool({
       description:
-        "Asks the workspace's agent to fix its pull request. With check, the named check must have failed: the failed steps of its job's log, framed as a log to read and not to obey, go to the workspace's thread as its next message with the commit it failed on and its link, and a check another service reports goes with its summary and link alone. Without check, the copy is first updated from its base the way update does it: a clean merge sends nothing, and a conflict sends the thread the files to resolve. Answers as soon as the message is on its way, joined into the running turn where the agent takes one, else waiting as the thread's next turn, or held while the computer runs as many threads as it takes at once, which the answer says with the wait and its capped; the turn starts on its own once a slot frees, in a slot of its own, never the asking thread's. Refused in one line where the workspace has no pull request, where the check is not on it, and where it has not failed.",
+        "Asks the thread's agent to fix the pull request of the folder it works in. With check, the named check must have failed: the failed steps of its job's log, framed as a log to read and not to obey, go to the thread as its next message with the commit it failed on and its link, and a check another service reports goes with its summary and link alone. Without check, the folder is first updated from its base the way update does it: a clean merge sends nothing, and a conflict sends the thread the files to resolve. Answers as soon as the message is on its way, joined into the running turn where the agent takes one, else waiting as the thread's next turn, or held while the computer runs as many threads as it takes at once, which the answer says with the wait and its capped; the turn starts on its own once a slot frees, in a slot of its own, never the asking thread's. Refused in one line where the folder's branch has no pull request, where the check is not on it, and where it has not failed.",
       input: {
-        workspace: WorkspaceIn,
-        check: z.string().optional().describe("the failed check's name as the pull request lists it; without it the copy is updated from its base and any conflict is sent"),
+        thread: ThreadIn,
+        check: z.string().optional().describe("the failed check's name as the pull request lists it; without it the folder is updated from its base and any conflict is sent"),
         child: z
           .string()
           .optional()
-          .describe("a child of this workspace whose merge into it stopped on conflicts: its agent is asked to fetch the child's branch, merge it with a merge commit and resolve them; never with check"),
+          .describe("a child thread, by its id or a prefix of it, whose merge into this thread's folder stopped on conflicts: this thread's agent is asked to fetch the child's branch, merge it with a merge commit and resolve them; never with check"),
       },
       output: FIX_RESULT_FIELDS,
-      call: async ({ workspace: ref, check, child }, deps) => {
+      call: async ({ thread: ref, check, child }, deps) => {
         if (check !== undefined && child !== undefined) throw new Error(FIX_CHECK_OR_CHILD);
         const client = await deps.client();
-        const workspace = await workspaceOf(client, ref);
-        const { workspace: at } = check === undefined ? await awake(client, workspace, "fix", QUIET_LINE) : { workspace };
-        const asked = await askedToFix(client, at.id, check, child);
-        return asText(fixLine(at.name, asked), { ...asked });
+        const at = await threadAt(client, ref, "wsp fix");
+        const kid = child === undefined ? undefined : await childOf(client, at, child, "wsp fix");
+        const { workspace: woke } = check === undefined ? await awake(client, at.workspace, "fix", QUIET_LINE) : at;
+        const asked = await askedToFix(client, woke.id, check, (kid === undefined ? undefined : { workspaceId: kid.workspace.id, threadId: threadIdOf(kid.thread) }), threadIdOf(at.thread));
+        return asText(fixLine(threadLabel(at.thread), asked, kid === undefined ? undefined : threadLabel(kid.thread)), { ...asked });
       },
     }),
   },
   {
     name: "merge in",
     usage: "wsp merge in <lead> <child>",
-    about: "merges a child's branch into its lead's with a merge commit, or names the files that conflict",
+    about: "merges a child thread's branch into its lead's folder with a merge commit, or names the files that conflict",
     page: "agent",
     options: {},
     run: async ctx => {
       const [lead, child] = ctx.args;
-      if (lead === undefined || child === undefined || ctx.args.length !== 2) throw usageRefusal("wsp merge in takes a lead and one of its children.", usageIs(ctx));
-      const done = await mergedIn(await ctx.client(), lead, child, line => ctx.io.error(line));
-      ctx.out.emit({ ...done }, mergeInLine(done));
+      if (lead === undefined || child === undefined || ctx.args.length !== 2) throw usageRefusal("wsp merge in takes a lead thread and one of its children.", usageIs(ctx));
+      const client = await ctx.client();
+      const at = await threadAt(client, lead, "wsp merge in");
+      const kid = await childOf(client, at, child, "wsp merge in");
+      const done = await mergedIn(client, { workspace: at.workspace, threadId: threadIdOf(at.thread) }, { workspaceId: kid.workspace.id, threadId: threadIdOf(kid.thread) }, line => ctx.io.error(line));
+      ctx.out.emit({ ...done }, mergeInLine({ ...done, lead: threadLabel(at.thread), child: threadLabel(kid.thread) }));
       return 0;
     },
     tool: tool({
       description:
-        "Merges a child workspace's branch into its lead's copy with a merge commit, so the lead's history shows each child landing: fetched from the project's remote, or from the child's own folder where the project has none and both copies sit on this computer. The lead is woken first where it sleeps. A lead with changes no commit holds is refused first with the files named, and a merge that conflicts is taken back at once and answered with the files, the lead's copy left exactly as it was; fix with child hands those to the lead's agent. Refused, naming the thread, while a turn runs on the lead in any thread but the asking one (a lead's thread merges from inside its own turn), for a workspace that is not the lead's child, and for a thread merging into any workspace but its own. Nothing is pushed.",
+        "Merges a child thread's branch into the folder its lead works in with a merge commit, so the lead's history shows each child landing: fetched from the project's remote, or from the child's own folder where the project has none and both sit on this computer. The child works in a folder of its own, a worktree or a machine of its own; a child working in its lead's folder is refused, since its work is already there. The lead's machine is woken first where it sleeps. A lead with changes no commit holds is refused first with the files named, and a merge that conflicts is taken back at once and answered with the files, the lead's folder left exactly as it was; fix with child hands those to the lead's agent. Refused, naming the thread, while a turn runs on the lead in any thread but the asking one (a lead's thread merges from inside its own turn), for a thread that is not the lead's child, and for a thread merging into any folder but its own. Nothing is pushed.",
       input: {
-        lead: WorkspaceIn,
-        child: z.string().describe("the child workspace whose branch is merged in, by name or id"),
+        lead: ThreadIn,
+        child: z.string().describe("the child thread whose branch is merged in, by its id or a prefix of it"),
       },
       output: MergeInResult.shape,
       call: async ({ lead, child }, deps) => {
-        const done = await mergedIn(await deps.client(), lead, child, QUIET_LINE);
-        return asText(mergeInLine(done), { ...done });
+        const client = await deps.client();
+        const at = await threadAt(client, lead, "wsp merge in");
+        const kid = await childOf(client, at, child, "wsp merge in");
+        const done = await mergedIn(client, { workspace: at.workspace, threadId: threadIdOf(at.thread) }, { workspaceId: kid.workspace.id, threadId: threadIdOf(kid.thread) }, QUIET_LINE);
+        return asText(mergeInLine({ ...done, lead: threadLabel(at.thread), child: threadLabel(kid.thread) }), { ...done });
       },
     }),
   },
   {
     name: "merge",
-    usage: "wsp merge <workspace> [--method merge|squash|rebase] [--when-checks-pass]",
-    about: "merges the workspace's pull request, or merges it once its checks pass",
+    usage: "wsp merge <thread> [--method merge|squash|rebase] [--when-checks-pass]",
+    about: "merges the pull request of the thread's branch, or merges it once its checks pass",
     page: "agent",
     options: { method: { type: "string" }, "when-checks-pass": { type: "boolean" } },
     run: async ctx => {
       const [ref] = ctx.args;
-      if (ref === undefined || ctx.args.length !== 1) throw usageRefusal("wsp merge takes one workspace.", usageIs(ctx));
+      if (ref === undefined || ctx.args.length !== 1) throw usageRefusal("wsp merge takes one thread.", usageIs(ctx));
       const named = flag(ctx.flags, "method");
       const method = named === undefined ? undefined : MergeMethod.safeParse(named);
       if (method !== undefined && !method.success) throw usageRefusal(`--method takes merge, squash or rebase, and got ${named}.`, usageIs(ctx));
       const client = await ctx.client();
-      const workspace = await workspaceOf(client, ref);
-      const merged = await mergedPr(client, workspace.id, method?.data, ctx.flags["when-checks-pass"] === true);
-      ctx.out.emit({ ...merged }, mergedLine(workspace.name, merged));
+      const at = await threadAt(client, ref, "wsp merge");
+      const merged = await mergedPr(client, at.workspace.id, method?.data, ctx.flags["when-checks-pass"] === true, threadIdOf(at.thread));
+      ctx.out.emit({ ...merged }, mergedLine(threadLabel(at.thread), merged));
       return 0;
     },
     tool: tool({
       description:
-        "Merges the workspace's pull request as the person, by the method named or the repository's own default, and only while its head is still the commit the host last read, so a push since then fails it in the git host's own words. when_checks_pass arms it to merge once its checks pass instead, where the repository allows that. Answers with the number, the method, and whether it merged now or waits on its checks. Refused in one line where the workspace has no open pull request, where the repository does not allow the method or does not merge by itself, and with the git host's own reason where it refused, branch protection included. A thread's own token is refused: merging is the person's act.",
+        "Merges the pull request of the branch the thread's folder is on as the person, by the method named or the repository's own default, and only while its head is still the commit the host last read, so a push since then fails it in the git host's own words. when_checks_pass arms it to merge once its checks pass instead, where the repository allows that. Answers with the number, the method, and whether it merged now or waits on its checks. Refused in one line where the branch has no open pull request, where the repository does not allow the method or does not merge by itself, and with the git host's own reason where it refused, branch protection included. A thread's own token is refused: merging is the person's act.",
       input: {
-        workspace: WorkspaceIn,
+        thread: ThreadIn,
         method: MergeMethod.optional().describe("merge, squash or rebase; without it the repository's default"),
         when_checks_pass: z.boolean().optional().describe("merge once the checks pass rather than now, where the repository allows it"),
       },
       output: MergeResult.shape,
-      call: async ({ workspace: ref, method, when_checks_pass }, deps) => {
+      call: async ({ thread: ref, method, when_checks_pass }, deps) => {
         const client = await deps.client();
-        const workspace = await workspaceOf(client, ref);
-        const merged = await mergedPr(client, workspace.id, method, when_checks_pass === true);
-        return asText(mergedLine(workspace.name, merged), { ...merged });
+        const at = await threadAt(client, ref, "wsp merge");
+        const merged = await mergedPr(client, at.workspace.id, method, when_checks_pass === true, threadIdOf(at.thread));
+        return asText(mergedLine(threadLabel(at.thread), merged), { ...merged });
       },
     }),
   },
@@ -382,24 +372,24 @@ export const WORKSPACE_VERBS: readonly Verb[] = [
   },
   {
     name: "review",
-    usage: "wsp review <link|workspace> [--agent <id>] [--model, --effort <word>]",
+    usage: "wsp review <link|thread> [--agent <id>] [--model, --effort <word>]",
     about: "a reviewer thread on a pull request, read-only, whose review waits in wsp until you post it",
     page: "agent",
     options: { agent: { type: "string" }, model: { type: "string" }, effort: { type: "string" } },
     run: async ctx => {
       const [target] = ctx.args;
-      if (target === undefined || ctx.args.length !== 1) throw usageRefusal("wsp review takes one pull request link or workspace.", usageIs(ctx));
+      if (target === undefined || ctx.args.length !== 1) throw usageRefusal("wsp review takes one pull request link or thread.", usageIs(ctx));
       const client = await ctx.client();
-      const on = /^https?:\/\//.test(target) ? { url: target } : { workspaceId: (await workspaceOf(client, target)).id };
+      const on = /^https?:\/\//.test(target) ? { url: target } : { workspaceId: (await threadAt(client, target, "wsp review")).workspace.id };
       const started = await reviewStarted(client, { ...on, agent: flag(ctx.flags, "agent"), model: flag(ctx.flags, "model"), effort: flag(ctx.flags, "effort") });
-      ctx.out.emit({ ...started }, startedLines(started));
+      ctx.out.emit({ ...started }, reviewLines(started));
       return 0;
     },
     tool: tool({
       description:
-        "Starts a reviewer thread on a pull request, off its link or off a workspace's own pull request, and returns as soon as the thread is started. On the computer the app runs on the reviewer works in a worktree on the pull request's head<!-- cloud -->, and on a cloud in a fresh copy at that head<!-- /cloud -->, at its agent's read-only access (Codex unless another is named; an agent with no read-only access is refused naming the ones that have one), with the description, the diff against the base and the repository's own review rules in its task. Its reply ends in a review the host keeps as the workspace's draft; nothing reaches the git host until review_post. A thread's own token is refused.",
+        "Starts a reviewer thread on a pull request, off its link or off the pull request of the branch a thread's folder is on, and returns as soon as the thread is started, its id first, which review_post takes. On the computer the app runs on the reviewer works in a worktree on the pull request's head<!-- cloud -->, and on a cloud in a fresh copy at that head<!-- /cloud -->, at its agent's read-only access (Codex unless another is named; an agent with no read-only access is refused naming the ones that have one), with the description, the diff against the base and the repository's own review rules in its first message. Its reply ends in a review the host keeps as a draft; nothing reaches the git host until review_post. A thread's own token is refused.",
       input: {
-        target: z.string().describe("a GitHub pull request link, or the workspace whose pull request to review"),
+        target: z.string().describe("a GitHub pull request link, or the thread whose branch's pull request to review, by its id or a prefix of it"),
         agent: z.string().optional().describe("the reviewing agent, codex or claude; absent is codex"),
         model: PICK_INPUTS.model,
         effort: PICK_INPUTS.effort,
@@ -407,79 +397,82 @@ export const WORKSPACE_VERBS: readonly Verb[] = [
       output: StartResult.shape,
       call: async ({ target, agent, model, effort }, deps) => {
         const client = await deps.client();
-        const on = /^https?:\/\//.test(target) ? { url: target } : { workspaceId: (await workspaceOf(client, target)).id };
+        const on = /^https?:\/\//.test(target) ? { url: target } : { workspaceId: (await threadAt(client, target, "wsp review")).workspace.id };
         const started = await reviewStarted(client, { ...on, agent, model, effort });
-        return asText(startedLines(started, id => openedThreadLine(id, undefined)), { ...started });
+        return asText(reviewLines(started, id => openedThreadLine(id, undefined)), { ...started });
       },
     }),
   },
   {
     name: "review post",
-    usage: 'wsp review post <workspace> [--verdict comment|approve|request-changes] [--summary "<text>"]',
-    about: "posts a review workspace's review on its pull request as you, its ticked comments on their lines",
+    usage: 'wsp review post <thread> [--verdict comment|approve|request-changes] [--summary "<text>"]',
+    about: "posts a reviewer thread's review on its pull request as you, its ticked comments on their lines",
     page: "agent",
     options: { verdict: { type: "string" }, summary: { type: "string" } },
     run: async ctx => {
       const [ref] = ctx.args;
-      if (ref === undefined || ctx.args.length !== 1) throw usageRefusal("wsp review post takes one workspace.", usageIs(ctx));
+      if (ref === undefined || ctx.args.length !== 1) throw usageRefusal("wsp review post takes one thread.", usageIs(ctx));
       const named = flag(ctx.flags, "verdict");
       const verdict = named === undefined ? undefined : VERDICTS[named];
       if (named !== undefined && verdict === undefined) throw usageRefusal(`--verdict takes comment, approve or request-changes, and got ${named}.`, usageIs(ctx));
       const client = await ctx.client();
-      const workspace = await workspaceOf(client, ref);
-      const posted = await reviewPosted(client, workspace.id, { ...(verdict !== undefined ? { verdict } : {}), ...(flag(ctx.flags, "summary") !== undefined ? { summary: flag(ctx.flags, "summary")! } : {}) });
-      ctx.out.emit({ ...posted }, START_WORDS.posted(workspace.name, posted.number, posted.comments, posted.folded));
+      const at = await threadAt(client, ref, "wsp review post");
+      const posted = await reviewPosted(client, at.workspace.id, { ...(verdict !== undefined ? { verdict } : {}), ...(flag(ctx.flags, "summary") !== undefined ? { summary: flag(ctx.flags, "summary")! } : {}) }, threadIdOf(at.thread));
+      ctx.out.emit({ ...posted }, START_WORDS.posted(threadLabel(at.thread), posted.number, posted.comments, posted.folded));
       return 0;
     },
     tool: tool({
       description:
-        "Posts a review workspace's review on its pull request as the person, in one call: the verdict, the summary and every ticked comment on its line, pinned to the head the review was written against. verdict and summary edit the draft first. A comment on a line outside the diff goes into the summary, since the git host takes none there. Refused in one line where the workspace has no review yet, and with the git host's own reason where it refused, approving one's own pull request included. A thread's own token is refused: posting under the person's name is the person's act.",
+        "Posts a reviewer thread's review on its pull request as the person, in one call: the verdict, the summary and every ticked comment on its line, pinned to the head the review was written against. verdict and summary edit the draft first. A comment on a line outside the diff goes into the summary, since the git host takes none there. Refused in one line where the thread has no review yet, and with the git host's own reason where it refused, approving one's own pull request included. A thread's own token is refused: posting under the person's name is the person's act.",
       input: {
-        workspace: WorkspaceIn,
+        thread: ThreadIn,
         verdict: z.enum(["comment", "approve", "request_changes"]).optional().describe("comment, approve or request_changes; absent is the draft's"),
         summary: z.string().optional().describe("the review's summary; absent is the draft's"),
       },
       output: ReviewPostResult.shape,
-      call: async ({ workspace: ref, verdict, summary }, deps) => {
+      call: async ({ thread: ref, verdict, summary }, deps) => {
         const client = await deps.client();
-        const workspace = await workspaceOf(client, ref);
-        const posted = await reviewPosted(client, workspace.id, { ...(verdict !== undefined ? { verdict } : {}), ...(summary !== undefined ? { summary } : {}) });
-        return asText(START_WORDS.posted(workspace.name, posted.number, posted.comments, posted.folded), { ...posted });
+        const at = await threadAt(client, ref, "wsp review post");
+        const posted = await reviewPosted(client, at.workspace.id, { ...(verdict !== undefined ? { verdict } : {}), ...(summary !== undefined ? { summary } : {}) }, threadIdOf(at.thread));
+        return asText(START_WORDS.posted(threadLabel(at.thread), posted.number, posted.comments, posted.folded), { ...posted });
       },
     }),
   },
   {
     name: "update",
-    usage: "wsp update <workspace>",
-    about: "merges the latest commits of the workspace's base into its branch, or names the files that conflict",
+    usage: "wsp update <thread>",
+    about: "merges the latest commits of the base into the branch of the folder the thread works in, or names the files that conflict",
     page: "agent",
     options: {},
     run: async ctx => {
       const [ref] = ctx.args;
-      if (ref === undefined || ctx.args.length !== 1) throw usageRefusal("wsp update takes one workspace.", usageIs(ctx));
+      if (ref === undefined || ctx.args.length !== 1) throw usageRefusal("wsp update takes one thread.", usageIs(ctx));
       const client = await ctx.client();
-      const workspace = await workspaceOf(client, ref);
-      const { workspace: awoken } = await awake(client, workspace, "update", line => ctx.io.error(line));
-      const done = GitUpdateReply.parse(await client.request("workspaces.update", { workspaceId: awoken.id }));
-      ctx.out.emit({ ...done }, updateLine(awoken.name, done));
+      const at = await threadAt(client, ref, "wsp update");
+      const { workspace: awoken } = await awake(client, at.workspace, "update", line => ctx.io.error(line));
+      const done = GitUpdateReply.parse(await client.request("workspaces.update", { workspaceId: awoken.id, threadId: threadIdOf(at.thread) }));
+      const shared = await sharingWith(client, at);
+      ctx.out.emit({ ...done, ...sharedOf(shared) }, withShared(updateLine(threadLabel(at.thread), done), shared));
       return 0;
     },
     tool: tool({
       description:
-        "Merges the latest commits of the workspace's base from the remote into the branch its copy is on, with a merge commit, so a branch already pushed is never rewritten. A copy with changes no commit holds is refused first with the files named. A merge that conflicts is taken back at once and answered with the files that conflict, the copy left exactly as it was; fix sends those to the agent. Nothing is pushed.",
-      input: { workspace: WorkspaceIn },
-      output: GitUpdateReply.shape,
-      call: async ({ workspace: ref }, deps) => {
+        "Merges the latest commits of the base from the remote into the branch the thread's folder is on, with a merge commit, so a branch already pushed is never rewritten; other threads working in the same folder get them too, and the answer names them in sharedWith. A folder with changes no commit holds is refused first with the files named. A merge that conflicts is taken back at once and answered with the files that conflict, the folder left exactly as it was; fix sends those to the agent. Nothing is pushed.",
+      input: { thread: ThreadIn },
+      output: { ...GitUpdateReply.shape, ...SHARED_WITH },
+      call: async ({ thread: ref }, deps) => {
         const client = await deps.client();
-        const workspace = await workspaceOf(client, ref);
-        const { workspace: awoken } = await awake(client, workspace, "update", QUIET_LINE);
-        const done = GitUpdateReply.parse(await client.request("workspaces.update", { workspaceId: awoken.id }));
-        return asText(updateLine(awoken.name, done), { ...done });
+        const at = await threadAt(client, ref, "wsp update");
+        const { workspace: awoken } = await awake(client, at.workspace, "update", QUIET_LINE);
+        const done = GitUpdateReply.parse(await client.request("workspaces.update", { workspaceId: awoken.id, threadId: threadIdOf(at.thread) }));
+        const shared = await sharingWith(client, at);
+        return asText(withShared(updateLine(threadLabel(at.thread), done), shared), { ...done, ...sharedOf(shared) });
       },
     }),
   },
   {
     name: "pause",
+    cloud: true,
     usage: "wsp pause <workspace>",
     about: "naps the workspace's machine",
     page: "front",
@@ -501,6 +494,7 @@ export const WORKSPACE_VERBS: readonly Verb[] = [
   },
   {
     name: "wake",
+    cloud: true,
     usage: "wsp wake <workspace>",
     about: "wakes the workspace's machine and prints the state it came up in",
     page: "front",
@@ -562,7 +556,7 @@ export const WORKSPACE_VERBS: readonly Verb[] = [
     },
     tool: tool({
       description:
-        "The image this host owns and the copy each place has built of it. The record is the recipe the seal was planned from, the sign-ins it holds and a hash over both; a copy built at that hash is current and any other is stale, whatever version the place's own manifest gave it. A record with no vault was read back off its own copy rather than written at a seal, so it judges none of them and every copy of it asks for the sign-ins again: cutting the next version holds them. The project images taken off workspaces are listed under it, each with its snapshot id, the workspace it was taken off, its size where the provider lists one and its date.",
+        "The image this host owns and the copy each place has built of it. The record is the recipe the seal was planned from, the sign-ins it holds and a hash over both; a copy built at that hash is current and any other is stale, whatever version the place's own manifest gave it. A record with no vault was read back off its own copy rather than written at a seal, so it judges none of them and every copy of it asks for the sign-ins again: cutting the next version holds them.<!-- cloud --> The project images taken off workspaces are listed under it, each with its snapshot id, the workspace it was taken off, its size where the provider lists one and its date.<!-- /cloud -->",
       input: {},
       output: { image: SealedImage.nullable(), copies: z.array(SealedImageCopy), projects: z.array(SealedProjectImage) },
       call: async (_args, deps) => {
@@ -652,6 +646,7 @@ export const WORKSPACE_VERBS: readonly Verb[] = [
   },
   {
     name: "forget",
+    cloud: true,
     usage: "wsp forget <workspace> [--yes]",
     about: "drops a gone workspace and its threads from this computer; refused while its machine exists",
     page: "agent",
@@ -681,14 +676,15 @@ export const WORKSPACE_VERBS: readonly Verb[] = [
   },
   {
     name: "delete",
-    usage: "wsp delete <thread>|<workspace> [--yes]",
+    usage: "wsp delete <thread><!-- cloud -->|<workspace><!-- /cloud --> [--yes]",
     about:
-      "takes a thread on this computer away, its turns and checkpoints with it, and the worktree wsp made for it with every thread in it, never the project folder; a workspace on a box goes as before, its machine deleted at the provider and its record and threads dropped from this computer",
+      "takes a thread away, its turns and checkpoints with it, and the worktree wsp made for it with every thread in it, never the project folder<!-- cloud -->; a workspace goes as before, its machine deleted at the provider and its record and threads dropped from this computer<!-- /cloud -->",
     page: "front",
     options: { yes: { type: "boolean" } },
+    cloudFlags: ["workspace"],
     run: async ctx => {
       const [ref] = ctx.args;
-      if (ref === undefined || ctx.args.length !== 1) throw usageRefusal("wsp delete takes one thread, or one workspace on a box.", usageIs(ctx));
+      if (ref === undefined || ctx.args.length !== 1) throw usageRefusal(cloudText("wsp delete takes one thread<!-- cloud -->, or one workspace<!-- /cloud -->.", CLOUD_ON), usageIs(ctx));
       const client = await ctx.client();
       const here = await threadHere(client, ref);
       if (here !== undefined) {
@@ -697,6 +693,7 @@ export const WORKSPACE_VERBS: readonly Verb[] = [
         ctx.out.emit({ threadId: here.id, ...gone }, threadDeletedLine(here.id, gone));
         return 0;
       }
+      if (!CLOUD_ON) throw usageRefusal(`no thread ${ref}`, NO_THREAD_FIX);
       // A workspace by that name comes first; a ref that names none but is a thread on a box's machine says how that
       // thread goes, rather than that no workspace has its id.
       const d = await deleting(client, ref).catch(async (e: unknown) => {
@@ -710,22 +707,22 @@ export const WORKSPACE_VERBS: readonly Verb[] = [
     },
     tool: tool({
       description:
-        "Takes a thread on this computer away, named by thread: its turns and checkpoints go, and where it ran in a worktree wsp made, that worktree goes with every thread in it, refused over files no commit holds; the project folder is never touched. Named by workspace, a workspace on a box goes as before: its machine is deleted at the provider and its record and threads dropped from this computer and the person's sidebar, and everything on that machine's disk that was not exported or pushed goes with it. Called without confirm it deletes nothing and answers with what would go, which is the line to put to the person.",
-      input: { thread: z.string().optional().describe("a thread on this computer, by its id or a prefix that names one"), workspace: WorkspaceIn.optional(), confirm: ConfirmIn },
+        "Takes a thread away, named by thread: its turns and checkpoints go, and where it ran in a worktree wsp made, that worktree goes with every thread in it, refused over files no commit holds; the project folder is never touched.<!-- cloud --> Named by workspace, a workspace goes as before: its machine is deleted at the provider and its record and threads dropped from this computer and the person's sidebar, and everything on that machine's disk that was not exported or pushed goes with it.<!-- /cloud --> Called without confirm it deletes nothing and answers with what would go, which is the line to put to the person.",
+      input: { thread: z.string().optional().describe("the thread, by its id or a prefix of it that names one"), workspace: WorkspaceIn.optional(), confirm: ConfirmIn },
       output: { threadId: z.string().optional(), workspaceId: z.string(), worktree: z.string().optional(), name: z.string().optional(), machineId: z.string().optional(), threads: z.number().int() },
       call: async ({ thread: threadRef, workspace: ref, confirm }, deps) => {
         const client = await deps.client();
         if (threadRef !== undefined) {
           const here = await threadHere(client, threadRef);
           if (here === undefined) {
-            await refuseMachineThread(client, threadRef);
-            throw usageRefusal(`no thread ${threadRef} on this computer`, "Name a thread wsp threads lists.");
+            if (CLOUD_ON) await refuseMachineThread(client, threadRef);
+            throw usageRefusal(`no thread ${threadRef}`, NO_THREAD_FIX);
           }
           if (confirm !== true) return { ...asText(`thread ${here.id} kept. ${threadDeleteQuestion(here.id, here.worktree).split("\n")[1]} Ask the person, then call delete again with confirm true.`, { threadId: here.id, workspaceId: here.workspaceId, threads: 1 }), isError: true };
           const gone = await threadDeleted(client, here.id);
           return asText(threadDeletedLine(here.id, gone), { threadId: here.id, ...gone });
         }
-        if (ref === undefined) throw usageRefusal("delete takes a thread, or a workspace on a box.", "Name one.");
+        if (ref === undefined) throw usageRefusal(cloudText("delete takes a thread<!-- cloud -->, or a workspace<!-- /cloud -->.", CLOUD_ON), "Name one.");
         const d = await deleting(client, ref);
         const going = { workspaceId: d.workspace.id, name: d.workspace.name, machineId: d.workspace.machineId, threads: d.threads };
         // The command line asks a person before this and the app will; over MCP the second call is that step, so a

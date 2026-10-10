@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // --project on the skills and servers lines, and project on their tools: bare,
-// the workspace's own project as it always was; a name with --on, that
-// computer's project of the name, which rides the target to the host. A name
-// with a workspace, and a bare flag with --on, are refused before anything is
-// sent.
+// the thread's own project; a name with --on, that computer's project of the
+// name, which rides the target to the host. A name with a thread, and a bare
+// flag with --on, are refused before anything is sent.
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -29,7 +28,7 @@ const REPORT = {
 const dir = mkdtempSync(join(tmpdir(), "wsp-project-flag-"));
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
-/** A host that lists two computers and one workspace, records every act it is asked, and answers each the shape its
+/** A host that lists two computers and one thread, records every act it is asked, and answers each the shape its
  * verb reads. */
 function fakeHost() {
   const acts: { op: string; params: Record<string, unknown> }[] = [];
@@ -52,7 +51,8 @@ function fakeHost() {
             { id: "p_1", kind: "computer", name: "spoo", default: false, present: true },
           ],
         } as T;
-      if (op === "workspaces.resolve")
+      if (op === "sessions.list") return { sessions: [{ id: "s_1", threadId: "t_landing", workspaceId: "ws_1", harness: "claude", status: "completed", startedAt: 1, prompt: "build it", startedBy: "person" }] } as T;
+      if (op === "workspaces.get")
         return { workspace: { id: "ws_1", name: "landing", machineId: "m1", phase: "running", golden: "snap_gold", createdAt: "2026-09-25T00:00:00.000Z", project: { id: "pr_1", name: "api", path: "/root/api", computer: "p_1" } } } as T;
       acts.push({ op, params });
       if (!(op in answers)) throw new Error(`asked for ${op}`);
@@ -95,16 +95,16 @@ describe("--project on the skills and servers lines", () => {
     }
   });
 
-  it("stays the workspace's own project bare, before or after the workspace, and a word after it is still the workspace", async () => {
+  it("stays the thread's own project bare, before or after the thread, and a word after it is still the thread", async () => {
     for (const argv of [
-      ["skills", "remove", "deploy", "landing", "--project", "--yes"],
-      ["skills", "remove", "deploy", "--project", "landing", "--yes"],
+      ["skills", "remove", "deploy", "t_landing", "--project", "--yes"],
+      ["skills", "remove", "deploy", "--project", "t_landing", "--yes"],
     ]) {
       const { code, acts } = await run(argv);
       expect(code, argv.join(" ")).toBe(0);
       expect(acts).toEqual([{ op: "skills.remove", params: expect.objectContaining({ target: { workspaceId: "ws_1" }, name: "deploy", project: true }) }]);
     }
-    const scoped = await run(["servers", "remove", "db", "landing", "--agent", "claude", "--project", "--yes"]);
+    const scoped = await run(["servers", "remove", "db", "t_landing", "--agent", "claude", "--project", "--yes"]);
     expect(scoped.acts).toEqual([{ op: "servers.remove", params: expect.objectContaining({ target: { workspaceId: "ws_1" }, scope: "project" }) }]);
   });
 
@@ -129,8 +129,8 @@ describe("project on the skills and servers tools", () => {
     return { result, acts: host.acts };
   };
 
-  it("takes true for the workspace's project and a name with on for that computer's", async () => {
-    expect((await call("skills remove", { name: "deploy", workspace: "landing", project: true })).acts).toEqual([
+  it("takes true for the thread's project and a name with on for that computer's", async () => {
+    expect((await call("skills remove", { name: "deploy", thread: "t_landing", project: true })).acts).toEqual([
       { op: "skills.remove", params: expect.objectContaining({ target: { workspaceId: "ws_1" }, project: true }) },
     ]);
     expect((await call("skills remove", { name: "deploy", on: "spoo", project: "www" })).acts).toEqual([

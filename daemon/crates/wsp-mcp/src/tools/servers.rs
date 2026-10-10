@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 //! The MCP server tools: one server started once for its tools, and a server written into, taken out of, or turned
-//! off and on in one agent's own config on one computer or workspace; and the wsp server itself written into an
+//! off and on in one agent's own config on one computer or where a thread runs; and the wsp server itself written into an
 //! agent's config on the computer the host runs on. Each answers a line of its own with the value beside it, as
 //! asText does.
 
@@ -59,7 +59,7 @@ pub struct ToolsIn {
     pub name: String,
     pub agent: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub workspace: Option<String>,
+    pub thread: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub on: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -109,7 +109,7 @@ async fn tools(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
     struct Answered {
         answer: ToolsAnswer,
     }
-    let ToolsIn { name, agent, workspace, on, project, refresh } = input("servers_tools", arguments)?;
+    let ToolsIn { name, agent, thread, on, project, refresh } = input("servers_tools", arguments)?;
     let client = host.client().await?;
     let words = record::words();
     let usage = target::usage(&words, "servers_tools");
@@ -118,7 +118,9 @@ async fn tools(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
         Some("") => return Err(refused(&words.tools_project_bare, &[], &usage).into()),
         Some(named) => target::project_asked(&words, Some(&ProjectIn::Named(named.to_owned())), on.as_deref(), &usage)?.name,
     };
-    let aimed = target::target(&client, &words, workspace.as_deref(), on.as_deref(), &usage, project.as_deref()).await?;
+    let aimed =
+        target::target(&client, &words, thread.as_deref(), on.as_deref(), &usage, project.as_deref(), "servers_tools", host.cloud())
+            .await?;
     let mut asking = Map::new();
     asking.insert("target".to_owned(), aimed);
     asking.insert("agent".to_owned(), Value::from(agent));
@@ -160,7 +162,7 @@ pub struct AddIn {
     pub name: String,
     pub agent: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub workspace: Option<String>,
+    pub thread: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub on: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -177,7 +179,7 @@ pub struct AddIn {
 
 /// Every value an add names is read off the environment the server runs in and goes to the host alone.
 async fn add(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
-    let AddIn { name, agent, workspace, on, command, env, url, header, project } = input("servers_add", arguments)?;
+    let AddIn { name, agent, thread, on, command, env, url, header, project } = input("servers_add", arguments)?;
     let words = record::words();
     let usage = target::usage(&words, "servers_add");
     let mut adding = values(&words, host.env(), &env.unwrap_or_default(), &header.unwrap_or_default(), &usage)?;
@@ -199,7 +201,9 @@ async fn add(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
         adding.insert("project".to_owned(), Value::Bool(true));
     }
     let client = host.client().await?;
-    let aimed = target::target(&client, &words, workspace.as_deref(), on.as_deref(), &usage, asked.name.as_deref()).await?;
+    let aimed =
+        target::target(&client, &words, thread.as_deref(), on.as_deref(), &usage, asked.name.as_deref(), "servers_add", host.cloud())
+            .await?;
     adding.insert("target".to_owned(), aimed);
     let out: Written = client.request("servers.add", adding).await?;
     Ok(Answer::text(fill(&words.is_in, &[("name", &name), ("path", &out.file)]), &out))
@@ -279,7 +283,7 @@ pub struct ChangeIn {
     pub name: String,
     pub agent: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub workspace: Option<String>,
+    pub thread: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub on: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -290,7 +294,7 @@ pub struct ChangeIn {
 
 /// A server taken out, or turned off or on where `turn` says which, in the scope it is listed under.
 async fn changed(host: Arc<Host>, arguments: Value, tool: &'static str, turn: Option<bool>) -> Result<Answer, Refused> {
-    let ChangeIn { name, agent, workspace, on, scope, project } = input(tool, arguments)?;
+    let ChangeIn { name, agent, thread, on, scope, project } = input(tool, arguments)?;
     let words = record::words();
     let usage = target::usage(&words, tool);
     let asked = target::project_asked(&words, project.as_ref(), on.as_deref(), &usage)?;
@@ -304,7 +308,8 @@ async fn changed(host: Arc<Host>, arguments: Value, tool: &'static str, turn: Op
     if let Some(turn) = turn {
         changing.insert("on".to_owned(), Value::Bool(turn));
     }
-    let aimed = target::target(&client, &words, workspace.as_deref(), on.as_deref(), &usage, asked.name.as_deref()).await?;
+    let aimed =
+        target::target(&client, &words, thread.as_deref(), on.as_deref(), &usage, asked.name.as_deref(), tool, host.cloud()).await?;
     changing.insert("target".to_owned(), aimed);
     let op = if turn.is_some() { "servers.toggle" } else { "servers.remove" };
     let out: Written = client.request(op, changing).await?;

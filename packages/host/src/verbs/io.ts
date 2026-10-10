@@ -3,6 +3,8 @@ import { resolve } from "node:path";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { CATALOG_AGENTS, THREAD_AGENTS } from "@wsp/catalog";
+import { CLOUD_ON } from "../cloud.js";
+import { cloudText } from "../cloud-text.js";
 import {
   AFTER_CUT_LINE,
   HostFolderListing,
@@ -314,6 +316,7 @@ export function turnOut(turn: Turn): z.infer<typeof TurnOut> {
 const PLAN_ONLY_TOOL = "nothing imported; call import again with yes true to take these defaults, or keep and cut per secret-shaped row";
 
 export const WorkspaceIn = z.string().describe("the workspace's name, or its id when two share a name");
+export const ThreadIn = z.string().describe("the thread, by its id or a prefix of it that names one, as threads lists them");
 export const AgentIn = z.string().optional().describe(`the agent to run in the thread, one of ${THREAD_AGENTS.join(", ")}; absent means the host's default`);
 export const NotifyIn = z
   .array(z.string())
@@ -322,9 +325,21 @@ export const NotifyIn = z
   .describe(
     `who is told each time a turn of the new thread ends, each one a thread (by id, or a prefix of it) the line goes into as a message carrying that turn's whole reply, or me, which is the thread this call came out of when it came out of one and otherwise the person's app, where the line is its last reply line alone. Several targets each get the line once, which is how a builder's end reaches its orchestrator and a reviewer together; a target whose thread is gone by then falls back to the person, and the new thread's own id is refused. ${NOTIFY_CALLER}.`,
   );
-export const RunProjectIn = z.string().optional().describe("the project the thread works on, by the name or the id projects lists; one on another computer gets a new machine forked from the image for the thread, and a machine named in its place runs it there as before. Absent from a thread, the thread runs beside the one asking, in its folder");
+export const RunProjectIn = z
+  .string()
+  .optional()
+  .describe(
+    cloudText(
+      "the project the thread works on, by the name or the id projects lists<!-- cloud -->; one on a cloud gets a new machine forked from the image for the thread, and a machine named in its place runs it there as before<!-- /cloud -->. Absent from a thread, the thread runs beside the one asking, in its folder",
+      CLOUD_ON,
+    ),
+  );
+export const BesideIn = z.string().optional().describe("a thread, by its id or a prefix of it, beside which the new thread runs: in the folder that thread works in, on the computer it runs on; never with project or branch");
 export const BranchIn = z.string().optional().describe("a branch other than the one the project's folder has checked out: the thread runs in the worktree holding it, made under wsp's folder from the project folder's current commit for a new branch");
 export const RunCwdIn = z.string().optional().describe("a folder inside the project or one of its worktrees, absolute, which the thread starts in");
+/** The threads an act on a shared folder took in too, on the answers of commit, discard and update. */
+export const SHARED_WITH = { sharedWith: z.array(z.string()).optional().describe("the other threads working in the same folder, by id, whose changes the act took in too; absent where none do") };
+export const ExecCwdIn = z.string().optional().describe("the folder the command runs in, absolute; absent means the folder the thread works in");
 export const CwdIn = z.string().optional().describe("the folder on the machine the thread works in or the command runs in, absolute. Absent means the workspace's own project, which is where a thread there starts unless it says otherwise");
 export const DetachIn = z.boolean().optional().describe(`true answers with the thread id the moment the turn is started, without the reply, and the turn's end reaches whoever notify named; for a turn that runs for minutes or an hour, so this call does not block for it. ${NOTIFY_CALLER}.`);
 export const TitleIn = z.string().optional().describe("the thread's name, as a person's: it shows in the sidebar and in the agent's own list from the first second, and the title the host asks the agent for as the turn starts never replaces it; absent lets the thread be titled by its opening words until, seconds in, the agent names it");
@@ -336,7 +351,7 @@ export const FilesIn = z
     `paths on this computer, absolute or relative to the folder wsp runs in, of files to send with the message, at most ${FILES_MAX}. An image (${IMAGE_TYPE_WORDS}, up to ${IMAGE_MAX_WORDS}) goes to the agent as an image; any other file, up to ${FILE_MAX_WORDS}, lands in the folder the thread works in, under .wsp-files where git lists none of it, and the message names its path. The host reads each file and sends its bytes, so the machine never reaches back for this computer\u2019s files; an image to an agent that reads none is refused naming that agent.`,
   );
 export const FastIn = z.boolean().optional().describe("true runs the turn in the agent's fast mode, on a model that offers one, and is refused naming the model otherwise; absent runs at the agent's usual speed");
-export const ConfirmIn = z.boolean().optional().describe("true deletes the machine; absent or false answers with what would go and deletes nothing, so a person can be asked first");
+export const ConfirmIn = z.boolean().optional().describe("true deletes it; absent or false answers with what would go and deletes nothing, so a person can be asked first");
 /** What a thread may do without asking, in wsp's four words, on every door that opens one or sets a default. */
 export const ACCESS_IN_WORDS =
   "how far the agent may go without asking, in wsp's words: ask (asks about each action that needs permission), auto-edit (edits files without asking), full (every action without asking) or plan (reads and proposes, changes nothing); each is mapped to the agent's own mode and refused where the agent has none, and a harness's own spelling is refused. Absent means the project's access, else the one set for that agent, else full";
@@ -353,9 +368,6 @@ export const SizeIn = z.string().optional().describe("the machine size as <cpu>x
 export const SpawnIn = z.enum(["on", "off"]).optional().describe("whether the agents on this workspace may drive this host: open threads and fork machines under the thread they run in, capped. Absent is on under the default caps, which is what every workspace made without it reads as");
 export const MaxMachinesIn = z.number().int().min(0).optional().describe("how many machines may stand at once under one root thread while spawn is on; defaults to 3");
 export const MaxDepthIn = z.number().int().min(1).optional().describe("how many levels deep the tree under a root thread may go while spawn is on, 2 by default; 1 stops at the root's own children");
-/** What the agents verb says when it was named nothing to change, on the line and on the tool. */
-export const AGENTS_ASKED_NOTHING_LINE = "wsp workspaces agents takes --spawn on or off, --max-machines or --max-depth.";
-export const agentsToolAskedNothing = (): Error => usageRefusal("workspaces_agents takes spawn, max_machines or max_depth.", "Name at least one; with none of them there is nothing to change.");
 
 export const PROJECT_FOLDERS = z.array(z.string()).optional().describe("folders on this computer, absolute, to weigh the histories by: only sessions that ran in one of them or under it count");
 /** The same folders on the write verb, where naming them is also naming a rule input, so it re-decides the ticks. */

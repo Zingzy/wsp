@@ -143,7 +143,7 @@ describe("wsp verbs over the host: folders, export and what a person sets", () =
 
 
 
-  it("export brings the folder home to the path given, streams the stages, prints the done line, and keys the sessions to the folder in the homes here", async () => {
+  it.runIf(CLOUD_ON)("export brings the folder home to the path given, streams the stages, prints the done line, and keys the sessions to the folder in the homes here", async () => {
     const guest = exportGuest(h.backend);
     await h.run("new", "alpha");
     const dest = join(h.dir, "out", "proj");
@@ -161,7 +161,7 @@ describe("wsp verbs over the host: folders, export and what a person sets", () =
     expect(guest.sources).toEqual([EXPORT_SOURCE]);
   });
 
-  it("export refuses an existing folder in two lines, the second naming --replace, and replaces it when asked; --from defaults to the folder's own path; --agents narrows; --json prints the result", async () => {
+  it.runIf(CLOUD_ON)("export refuses an existing folder in two lines, the second naming --replace, and replaces it when asked; --from defaults to the folder's own path; --agents narrows; --json prints the result", async () => {
     const guest = exportGuest(h.backend);
     await h.run("new", "alpha");
     const dest = join(h.dir, "out", "proj");
@@ -182,7 +182,7 @@ describe("wsp verbs over the host: folders, export and what a person sets", () =
     expect(existsSync(join(h.dir, "user", ".claude"))).toBe(false);
   });
 
-  it("export refuses an --agents id the catalog does not know before anything reaches the machine, naming it and the ids it knows", async () => {
+  it.runIf(CLOUD_ON)("export refuses an --agents id the catalog does not know before anything reaches the machine, naming it and the ids it knows", async () => {
     const guest = exportGuest(h.backend);
     await h.run("new", "alpha");
     const typo = await h.run("export", "alpha", join(h.dir, "out", "proj"), "--agents", "claude,codx");
@@ -248,12 +248,12 @@ describe("wsp verbs over the host: folders, export and what a person sets", () =
       const fallback = (here.capDefault as { threads: number }).threads;
       const set = await h.run("computers", "set", HERE_PLACE_ID, "--threads", "2");
       expect(set.code, set.io.errors.join("\n")).toBe(0);
-      expect(set.io.lines).toEqual([`${here.name}: 2 threads at once (${fallback} by default), no turn limit (the default), agents may spawn: up to 3 workspaces (the default), 2 levels deep (the default)`]);
+      expect(set.io.lines).toEqual([`${here.name}: 2 threads at once (${fallback} by default), no turn limit (the default), agents may spawn: up to 3 machines (the default), 2 levels deep (the default)`]);
       expect((await h.rt.places!.rows()).find(p => p.id === HERE_PLACE_ID)).toMatchObject({ cap: { threads: 2 }, settings: { threads: 2 } });
       const asJson = await h.run("computers", "set", here.name, "--threads", "1", "--json");
       expect(h.json(asJson.io).at(-1)).toMatchObject({ computer: { id: HERE_PLACE_ID, cap: { threads: 1 }, capDefault: { threads: fallback } } });
       const back = await h.run("computers", "set", HERE_PLACE_ID, "--reset", "threads");
-      expect(back.io.lines).toEqual([`${here.name}: ${fallback} ${fallback === 1 ? "thread" : "threads"} at once (the default), no turn limit (the default), agents may spawn: up to 3 workspaces (the default), 2 levels deep (the default)`]);
+      expect(back.io.lines).toEqual([`${here.name}: ${fallback} ${fallback === 1 ? "thread" : "threads"} at once (the default), no turn limit (the default), agents may spawn: up to 3 machines (the default), 2 levels deep (the default)`]);
       expect((await h.rt.places!.rows()).find(p => p.id === HERE_PLACE_ID)!.settings).toBeUndefined();
     });
 
@@ -332,63 +332,11 @@ describe("wsp verbs over the host: folders, export and what a person sets", () =
     });
   });
 
-  describe("what the agents on a workspace may do", () => {
-    it("the switch is on under the default caps until a person turns it off, and the record carries it", async () => {
-      await h.run("new", "alpha");
-      expect((await h.rt.workspaces.list())[0]!.agents).toEqual(AGENTS_ON);
-      const on = await h.run("workspaces", "agents", "alpha", "--spawn", "on", "--max-machines", "2");
-      expect(on.code).toBe(0);
-      expect(on.io.lines).toEqual(["alpha: agents may spawn: up to 2 workspaces"]);
-      expect((await h.rt.workspaces.list())[0]!.agents).toEqual({ spawn: true, maxMachines: 2, maxDepth: 2 });
-      const back = await h.run("workspaces", "agents", "alpha", "--spawn", "off");
-      expect(back.io.lines).toEqual(["alpha: agents may not spawn"]);
-      // Off keeps the numbers it was given rather than throwing them away, so turning it on again is one word.
-      expect((await h.rt.workspaces.list())[0]!.agents).toEqual({ spawn: false, maxMachines: 2, maxDepth: 2 });
-    });
-
-    it("a cap alone tightens the switch it finds and leaves it on or off, and a word that is neither on nor off, or no word at all, is refused", async () => {
-      await h.run("new", "alpha");
-      const tightened = await h.run("workspaces", "agents", "alpha", "--max-machines", "2");
-      expect(tightened.code, tightened.io.errors.join("\n")).toBe(0);
-      expect((await h.rt.workspaces.list())[0]!.agents).toEqual({ ...AGENTS_ON, maxMachines: 2 });
-      expect((await h.run("workspaces", "agents", "alpha", "--spawn", "off")).code).toBe(0);
-      expect((await h.run("workspaces", "agents", "alpha", "--max-depth", "2")).code).toBe(0);
-      expect((await h.rt.workspaces.list())[0]!.agents).toEqual({ spawn: false, maxMachines: 2, maxDepth: 2 });
-      expect((await h.run("workspaces", "agents", "alpha", "--spawn", "on")).code).toBe(0);
-      const wrong = await h.run("workspaces", "agents", "alpha", "--spawn", "yes");
-      expect(wrong.code).toBe(EXIT_CODES.usage);
-      expect(wrong.io.errors[0]).toContain("--spawn takes on or off");
-      const none = await h.run("workspaces", "agents", "alpha");
-      expect(none.code).toBe(EXIT_CODES.usage);
-      expect(none.io.errors[0]).toContain("--max-machines");
-      expect((await h.rt.workspaces.list())[0]!.agents).toEqual({ spawn: true, maxMachines: 2, maxDepth: 2 });
-      // A new workspace takes a cap alone the same way, on the default switch.
-      expect((await h.run("new", "beta", "--max-machines", "1")).code).toBe(0);
-      expect((await h.rt.workspaces.list()).find(w => w.name === "beta")!.agents).toEqual({ ...AGENTS_ON, maxMachines: 1 });
-    });
-
+  describe("what the agents on a computer may do", () => {
     it("--max-depth 0 is a usage sentence, not a shape the wire refuses", async () => {
-      await h.run("new", "alpha");
-      const zero = await h.run("workspaces", "agents", "alpha", "--spawn", "on", "--max-depth", "0");
+      const zero = await h.run("computers", "set", HERE_PLACE_ID, "--spawn", "on", "--max-depth", "0");
       expect(zero.code).toBe(EXIT_CODES.usage);
-      expect(zero.io.errors[0]).toBe('wsp workspaces agents: --max-depth takes a whole number of one or more, and got "0". Write it as --max-depth <n>.');
-      // Zero machines is a switch that is on and forks nothing, which is a thing a person may mean.
-      const none = await h.run("workspaces", "agents", "alpha", "--spawn", "on", "--max-machines", "0");
-      expect(none.code).toBe(0);
-      expect((await h.rt.workspaces.list())[0]!.agents).toEqual({ spawn: true, maxMachines: 0, maxDepth: 2 });
-    });
-
-    it("a project folder on this computer takes the switch, by the project's name, since its agents reach the host as themselves", async () => {
-      const folder = realpathSync(mkdtempSync(join(h.dir, "repo-mine-")));
-      execFileSync("git", ["init", "-q", folder]);
-      await projectOn(h.rt, HERE_PLACE_ID, folder, { name: "mine" });
-      const made = await h.run("new", "mine", "mine", "--spawn", "on");
-      expect(made.io.errors).toEqual([]);
-      expect(made.code).toBe(0);
-      expect((await h.rt.workspaces.list())[0]!.agents).toEqual({ spawn: true, maxMachines: 3, maxDepth: 2 });
-      const set = await h.run("workspaces", "agents", "mine", "--spawn", "off");
-      expect(set.code, set.io.errors.join("\n")).toBe(0);
-      expect((await h.rt.workspaces.list()).find(w => w.name === "mine")!.agents?.spawn).toBe(false);
+      expect(zero.io.errors[0]).toBe('wsp computers set: --max-depth for here takes a whole number of one or more, and got "0". Write it as --max-depth <n>.');
     });
 
     it("a create with --spawn on turns the switch on", async () => {
@@ -431,7 +379,7 @@ describe("wsp verbs over the host: folders, export and what a person sets", () =
       return path;
     };
 
-    it("wsp send --file reads the file here and sends its bytes, so the machine never reaches back for this computer's files", async () => {
+    it.runIf(CLOUD_ON)("wsp send --file reads the file here and sends its bytes, so the machine never reaches back for this computer's files", async () => {
       await h.run("new", "alpha");
       await h.run("run", "alpha", "hello");
       const [row] = await h.rt.sessions.list();
@@ -444,7 +392,7 @@ describe("wsp verbs over the host: folders, export and what a person sets", () =
       expect(JSON.stringify(start)).not.toContain(path);
     });
 
-    it("the flag repeats, and the images reach the agent in the order they were named", async () => {
+    it.runIf(CLOUD_ON)("the flag repeats, and the images reach the agent in the order they were named", async () => {
       await h.run("new", "alpha");
       await h.run("run", "alpha", "hello");
       const [row] = await h.rt.sessions.list();
@@ -455,7 +403,7 @@ describe("wsp verbs over the host: folders, export and what a person sets", () =
       expect(h.claude.starts.at(-1)!.images?.map(i => i.bytes)).toEqual([readFileSync(one).toString("base64"), readFileSync(two).toString("base64")]);
     });
 
-    it("run --file opens the thread with the image on its first turn", async () => {
+    it.runIf(CLOUD_ON)("run --file opens the thread with the image on its first turn", async () => {
       await h.run("new", "alpha");
       const path = pngFile(h.dir, "opening.png", 256);
       const opened = await h.run("run", "alpha", "--file", path, "what is this?");
@@ -463,14 +411,14 @@ describe("wsp verbs over the host: folders, export and what a person sets", () =
       expect(h.claude.starts.at(-1)!.images).toEqual([{ mediaType: "image/png", bytes: readFileSync(path).toString("base64") }]);
     });
 
-    it("the person's turn prints one bracket per image on stderr, since a terminal draws no pixels", async () => {
+    it.runIf(CLOUD_ON)("the person's turn prints one bracket per image on stderr, since a terminal draws no pixels", async () => {
       await h.run("new", "alpha");
       const path = pngFile(h.dir, "big.png", 1_258_291);
       const opened = await h.run("run", "alpha", "--file", path, "what is this?");
       expect(opened.io.streamed).toContain("[image 1 MB png]");
     });
 
-    it("a path this computer has no file at answers in a sentence, not in the reader's own error", async () => {
+    it.runIf(CLOUD_ON)("a path this computer has no file at answers in a sentence, not in the reader's own error", async () => {
       await h.run("new", "alpha");
       const missing = join(h.dir, "not-here.png");
       const refused = await h.run("send", "--file", missing, "x", "y");
@@ -481,14 +429,14 @@ describe("wsp verbs over the host: folders, export and what a person sets", () =
       expect(h.claude.starts).toHaveLength(0);
     });
 
-    it("a folder named where an image should be is refused the same way, rather than failing on the read", async () => {
+    it.runIf(CLOUD_ON)("a folder named where an image should be is refused the same way, rather than failing on the read", async () => {
       await h.run("new", "alpha");
       const refused = await h.run("run", "alpha", "--file", h.dir, "look");
       expect(refused.code).toBe(EXIT_CODES.usage);
       expect(refused.io.errors).toEqual([`wsp run: there is no file at ${h.dir} on this computer. Name a file that is already here.`]);
     });
 
-    it("a file that is not an image travels under its own name, and the agent is told where it landed", async () => {
+    it.runIf(CLOUD_ON)("a file that is not an image travels under its own name, and the agent is told where it landed", async () => {
       await h.run("new", "alpha");
       const path = join(h.dir, "notes.pdf");
       writeFileSync(path, "%PDF-1.7 not an image at all");
@@ -500,7 +448,7 @@ describe("wsp verbs over the host: folders, export and what a person sets", () =
       expect(opened.io.streamed).toContain("[file 28 B notes.pdf]");
     });
 
-    it("a 12 MB image is refused with the cap in the sentence, and the file is never read whole", async () => {
+    it.runIf(CLOUD_ON)("a 12 MB image is refused with the cap in the sentence, and the file is never read whole", async () => {
       await h.run("new", "alpha");
       const path = pngFile(h.dir, "huge.png", 12 * 1024 * 1024);
       const refused = await h.run("run", "alpha", "--file", path, "look");
@@ -509,7 +457,7 @@ describe("wsp verbs over the host: folders, export and what a person sets", () =
       expect(h.claude.starts).toHaveLength(0);
     });
 
-    it("six files are refused with both counts", async () => {
+    it.runIf(CLOUD_ON)("six files are refused with both counts", async () => {
       await h.run("new", "alpha");
       const paths = Array.from({ length: 6 }, (_, i) => pngFile(h.dir, `n${i}.png`, 64));
       const refused = await h.run("run", "alpha", ...paths.flatMap(p => ["--file", p]), "look");
@@ -517,7 +465,7 @@ describe("wsp verbs over the host: folders, export and what a person sets", () =
       expect(refused.io.errors).toEqual(["wsp run: only 5 files fit one message; this one carries 6. Drop that one and send the rest."]);
     });
 
-    it("--fast runs the turn in the agent's fast mode on a model that offers one, and is refused by the model's name on one that does not", async () => {
+    it.runIf(CLOUD_ON)("--fast runs the turn in the agent's fast mode on a model that offers one, and is refused by the model's name on one that does not", async () => {
       await h.run("new", "alpha");
       const opened = await h.run("run", "alpha", "--fast", "hello");
       expect(opened.code).toBe(0);
@@ -530,7 +478,7 @@ describe("wsp verbs over the host: folders, export and what a person sets", () =
       expect(h.claude.starts.at(-1)!.fast).toBe(true);
     });
 
-    it("--fast on a send that names no model is checked against the model the thread runs on", async () => {
+    it.runIf(CLOUD_ON)("--fast on a send that names no model is checked against the model the thread runs on", async () => {
       await h.run("new", "alpha");
       expect((await h.run("run", "alpha", "--model", "claude-haiku-4-5-20251001", "hello")).code).toBe(0);
       const haiku = (await h.rt.sessions.list()).at(-1)!;

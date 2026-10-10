@@ -2061,7 +2061,7 @@ pub(crate) mod tests {
         assert_eq!(reply(&b, &c, json!({"id": 3, "op": "fs.list", "path": missing})).await["code"], "not-found");
         assert_eq!(
             reply(&b, &c, json!({"id": 4, "op": "git.status", "cwd": "/etc"})).await,
-            json!({"id": 4, "ok": false, "code": "outside-root", "error": "/etc resolves outside the workspace root"})
+            json!({"id": 4, "ok": false, "code": "outside-root", "error": "/etc resolves outside the folders wsp serves here"})
         );
         let listed = reply(&b, &c, json!({"id": 5, "op": "fs.list", "path": "."})).await;
         assert_eq!(listed, json!({"id": 5, "ok": true, "entries": [], "truncated": false, "total": 0}));

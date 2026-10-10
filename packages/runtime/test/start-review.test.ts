@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { SPAWN_ACTS, START_WORDS, type Caller, type DaemonFrame, type DaemonResponse, type PullRequest, type ThreadScope, type TurnResult } from "@wsp/protocol";
+import { SPAWN_ACTS, START_WORDS, threadWord, type Caller, type DaemonFrame, type DaemonResponse, type PullRequest, type ThreadScope, type TurnResult } from "@wsp/protocol";
 import { LocalBackend } from "@wsp/engine";
 import { copyKey, createRuntime, type HarnessAdapterFactory, type HarnessStartOptions, type LocalWiring, type Runtime } from "../src/runtime.js";
 import type { DaemonChannel, DaemonChannelOptions } from "../src/daemon-channel.js";
@@ -306,6 +306,7 @@ describe("reviewing a pull request", () => {
     const started = await rt!.workspaces.review({ url: `https://github.com/${repo}/pull/7` });
     const id = started.workspace.id;
     await expect(rt!.workspaces.reviewPost({ workspaceId: id })).rejects.toThrow(START_WORDS.noReviewYet(started.workspace.name));
+    await expect(rt!.workspaces.reviewPost({ workspaceId: id, threadId: started.threadId })).rejects.toThrow(START_WORDS.noReviewYet(`thread ${threadWord(started.threadId)}`));
     await until(async () => (await rt!.workspaces.reviewDraft({ workspaceId: id })).review !== undefined);
     const drafted = (await rt!.workspaces.reviewDraft({ workspaceId: id })).review as { comments: { id: string }[] };
     await rt!.workspaces.reviewDraft({ workspaceId: id, verdict: "comment", summary: "One unused variable, and a nit.", on: [{ id: drafted.comments[0]!.id, on: false }] });

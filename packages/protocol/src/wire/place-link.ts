@@ -296,7 +296,7 @@ export const PLACES_TICKET_REFUSAL = "a socket let in on a ticket cannot see or 
 
 /** The refusal for a daemon channel that named both a workspace and a computer, or neither: a channel is one
  * daemon's, and which one is the caller's to say. */
-export const DAEMON_OPEN_ONE_OF = "daemon.open opens a channel to one daemon: name the workspace or the place, not both";
+export const DAEMON_OPEN_ONE_OF = "daemon.open opens a channel to one daemon: name workspaceId or placeId, not both";
 
 /** Where a computer you own dials this wsp: the port the door answers on and every address it can be reached at.
  * A host that already binds beyond this computer answers its own port and opens nothing. */

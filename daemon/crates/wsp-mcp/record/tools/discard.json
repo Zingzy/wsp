@@ -1,13 +1,13 @@
 {
   "cloudOff": {
     "name": "discard",
-    "description": "Puts one changed file of the workspace's copy back as its last commit has it: an edit or a deletion is undone, a rename takes its new name away and brings the old one back, and a file the last commit does not have is removed. Only the file named moves, and it cannot be undone. Refused in one line when the file has no change.",
+    "description": "Puts one changed file in the folder the thread works in back as its last commit has it: an edit or a deletion is undone, a rename takes its new name away and brings the old one back, and a file the last commit does not have is removed. Only the file named moves, and it cannot be undone; other threads working in the same folder lose the change too, and the answer names them in sharedWith. Refused in one line when the file has no change.",
     "inputSchema": {
       "type": "object",
       "properties": {
-        "workspace": {
+        "thread": {
           "type": "string",
-          "description": "the workspace's name, or its id when two share a name"
+          "description": "the thread, by its id or a prefix of it that names one, as threads lists them"
         },
         "path": {
           "type": "string",
@@ -15,7 +15,7 @@
         }
       },
       "required": [
-        "workspace",
+        "thread",
         "path"
       ],
       "additionalProperties": false,
@@ -26,6 +26,13 @@
       "properties": {
         "path": {
           "type": "string"
+        },
+        "sharedWith": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "the other threads working in the same folder, by id, whose changes the act took in too; absent where none do"
         }
       },
       "required": [
@@ -43,13 +50,13 @@
   },
   "cloudOn": {
     "name": "discard",
-    "description": "Puts one changed file of the workspace's copy back as its last commit has it: an edit or a deletion is undone, a rename takes its new name away and brings the old one back, and a file the last commit does not have is removed. Only the file named moves, and it cannot be undone. Refused in one line when the file has no change.",
+    "description": "Puts one changed file in the folder the thread works in back as its last commit has it: an edit or a deletion is undone, a rename takes its new name away and brings the old one back, and a file the last commit does not have is removed. Only the file named moves, and it cannot be undone; other threads working in the same folder lose the change too, and the answer names them in sharedWith. Refused in one line when the file has no change.",
     "inputSchema": {
       "type": "object",
       "properties": {
-        "workspace": {
+        "thread": {
           "type": "string",
-          "description": "the workspace's name, or its id when two share a name"
+          "description": "the thread, by its id or a prefix of it that names one, as threads lists them"
         },
         "path": {
           "type": "string",
@@ -57,7 +64,7 @@
         }
       },
       "required": [
-        "workspace",
+        "thread",
         "path"
       ],
       "additionalProperties": false,
@@ -68,6 +75,13 @@
       "properties": {
         "path": {
           "type": "string"
+        },
+        "sharedWith": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "the other threads working in the same folder, by id, whose changes the act took in too; absent where none do"
         }
       },
       "required": [

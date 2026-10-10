@@ -3,7 +3,7 @@
 {/* Written by apps/docs-next/scripts/cli.ts: change the script or its source and run pnpm --filter @wsp/docs-next generate. */}
 
 ```text
-usage: wsp servers add <name> [<workspace>] [--on <computer>] --agent <id>
+usage: wsp servers add <name> [<thread>] [--on <computer>] --agent <id>
        (--command "<line>" | --url <address> [--header <name>=<VARIABLE>]...)
        [--env <NAME>]... [--project [<name>]]
   writes one MCP server into an agent's own config: a command with its arguments
@@ -16,7 +16,7 @@ usage: wsp servers add <name> [<workspace>] [--on <computer>] --agent <id>
 
   --agent      the agent whose config takes the server, by its catalog id
   --on         the computer to read, by the name wsp computers shows; this
-               computer without it, and a workspace names its own
+               computer without it, and a thread names its own
   --command    the line the server runs, its program and arguments in one quoted
                value, split as a shell splits it and nothing expanded; or --url
   --env        a variable the server is given, or one the address names as
@@ -26,8 +26,9 @@ usage: wsp servers add <name> [<workspace>] [--on <computer>] --agent <id>
   --url        the server's https address; or --command
   --header     <name>=<VARIABLE>, a header sent to the address with its value
                read off that variable in this terminal's environment; repeats
-  --project    put it in a project's file rather than the agent's own: alone for
-               the workspace's own project, or the project's name with --on
+  --project    put it in a project's file rather than the agent's own: alone
+               with a thread, the thread's own project, or the project's name
+               with --on
   --json       print the raw protocol values, one JSON object per line, with
                everything else on stderr
   --state      the state file the host serves

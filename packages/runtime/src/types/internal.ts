@@ -33,7 +33,7 @@ import type {
 import { AttachmentRecord, type ThreadPlacement, SessionOrigin, ThreadScope, WorkspaceOrigin } from "@wsp/protocol";
 import { EXEC_OUTPUT_MAX, fmtBytes, fmtDuration, type WorktreeFolder, type DefaultBranchRoad, defaultBranchFix, defaultBranchRefusal, refusal } from "@wsp/protocol";
 import type { MachineExecOptions, TurnWaiting } from "../machine-exec.js";
-import { listedFailure, listedLastLine, type SubagentView } from "@wsp/protocol";
+import { listedFailure, listedLastLine, threadWord, type SubagentView } from "@wsp/protocol";
 import type { ScopedRoad } from "../devices.js";
 import type { BlobMark } from "../store.js";
 import type { HarnessSession } from "./harness.js";
@@ -141,6 +141,9 @@ export const DELETED_REASON = "machine deleted while the agent was working";
 export const RESTARTED_REASON = "host restarted while the agent was working";
 export const GONE_REASON = "machine gone at the provider while the agent was working";
 /** The host log's one line for a workspace found gone, from the road and from the record load alike. */
+/** How a refusal names the copy a verb acts on: the thread the verb was named by, else the record's own name. */
+export const labelOf = (entry: { record: { name: string } }, threadId: string | undefined): string => (threadId === undefined ? entry.record.name : `thread ${threadWord(threadId)}`);
+
 export const goneLogLine = (workspaceId: string, words: string): string => `workspace ${workspaceId} is gone: ${words}`;
 /** The host log's one line for the runs a connecting host ended on a machine because no row of its own held them. */
 export const sweptRunsLogLine = (workspaceId: string, runs: readonly string[]): string =>

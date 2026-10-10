@@ -25,11 +25,6 @@ pub struct Words {
     pub rebuild_refused: HashMap<String, String>,
     pub on_machine: String,
     pub renamed: String,
-    pub agents_set: String,
-    pub agents_off: String,
-    pub agents_one: String,
-    pub agents_many: String,
-    pub agents_nothing: String,
     pub forgot_one: String,
     pub forgot_many: String,
     /// What a delete calls a joined computer whose name the caller could not read.
@@ -95,6 +90,19 @@ pub struct Words {
     pub no_thread_here: String,
     pub thread_on_machine: String,
     pub delete_names_nothing: String,
+    pub delete_names_nothing_cloud: String,
+    pub not_a_thread_project: String,
+    pub not_a_thread_project_or_on: String,
+    pub not_a_thread_machine: String,
+    pub not_a_thread_machine_or_on: String,
+    pub name_a_thread_fix: String,
+    pub thread_label: String,
+    pub shared_one: String,
+    pub shared_many: String,
+    pub shared_join: String,
+    pub child_beside_lead: String,
+    pub no_project: String,
+    pub beside_alone: String,
     pub local_folder: String,
     pub local_worktree: String,
     pub thread_deleted: String,
@@ -337,28 +345,6 @@ pub fn agents_asked(
         asked.insert("maxDepth".to_owned(), Value::Number(n.clone()));
     }
     Ok(Some(asked))
-}
-
-/// The switch as one line: off, or on with the machines it may hold.
-pub fn agents_line(agents: Option<&Agents>) -> String {
-    let words = words();
-    match agents {
-        Some(Agents { spawn: true, max_machines }) => {
-            if max_machines.as_f64() == Some(1.0) {
-                words.agents_one
-            } else {
-                fill(&words.agents_many, &[("count", &max_machines.to_string())])
-            }
-        }
-        _ => words.agents_off,
-    }
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Agents {
-    pub spawn: bool,
-    pub max_machines: Number,
 }
 
 /// A string as JSON.stringify writes it, less its quotes: the part of a sentence that quotes a word as it was given.

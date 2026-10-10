@@ -3,6 +3,7 @@
 // status carries them; what a child's record keeps of its landing; the replies of the three git frames the tree
 // takes; and every word a child's card, the fork and the merge say.
 import { z } from "zod";
+import { threadWord } from "./words/computer.js";
 
 const text = z.string();
 const count = z.number().int().nonnegative();
@@ -111,7 +112,7 @@ export function nothingToMergeLine(lead: string, child: string): string {
 
 /** Why a merge waits: a turn runs on the lead in a thread other than the one asking, and a merge would land under it. */
 export function leadBusyRefusal(lead: string, threadIds: readonly string[]): string {
-  const named = threadIds.map(id => id.slice(0, 8)).join(", ");
+  const named = threadIds.map(threadWord).join(", ");
   return `${lead} has a turn running in thread ${named}; merge once it ends, or from inside that turn`;
 }
 
@@ -120,9 +121,9 @@ export function notTheLeadsChildRefusal(child: string, lead: string): string {
   return `${child} is not a child of ${lead}; a lead merges only its own children`;
 }
 
-/** Why a thread may merge only into the workspace it runs on. */
+/** Why a thread may merge only into the folder it works in. */
 export function mergeIntoOwnRefusal(threadId: string): string {
-  return `thread ${threadId.slice(0, 8)} may merge a child only into its own workspace`;
+  return `thread ${threadWord(threadId)} may merge a child only into its own folder`;
 }
 
 /** Why a child is not merged where its copy is on no branch at all. */

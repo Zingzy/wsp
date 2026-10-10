@@ -394,7 +394,7 @@ describe("where the composer's model lists came from, in one line", () => {
 
   it("says the adapter's own reason where the binary answered and named one, in place of naming the table", () => {
     expect(catalogSourceLine({ ...TABLE, refusal: codexNotSignedInLine("codex login") }, THIS_COMPUTER)).toBe(
-      "Codex is not signed in where this workspace runs; run codex login there, app-server 0.153.0, 2026-09-07",
+      "Codex is not signed in where this thread runs; run codex login there, app-server 0.153.0, 2026-09-07",
     );
   });
 
@@ -490,9 +490,9 @@ describe("the depth refusal", () => {
     expect(spawnDepthRefusal("th_0123456789", 2, 2, { computer: "my box" })).toContain("wsp computers set 'my box' --max-depth 3");
   });
 
-  it("names a workspace's own switch where that holds the cap", () => {
+  it("names the machine whose own cap holds, which stands for its life", () => {
     expect(spawnDepthRefusal("th_0123456789", 1, 1, { workspace: "lead" })).toBe(
-      "thread th_01234 is 1 deep under its root and its workspace allows 1, so a thread this deep may not spawn; raise it with wsp workspaces agents lead --max-depth 2",
+      "thread th_01234 is 1 deep under its root and lead allows 1, so a thread this deep may not spawn; lead was made with that cap; ask the person",
     );
   });
 });
@@ -951,7 +951,7 @@ describe("a refusal the host's own validator wrote", () => {
 
   it("names the argument the host refused, in the words the line was typed in", () => {
     expect(validatorRefusal(issues([{ code: "invalid_type", expected: "string", received: "number", path: ["cwd"], message: "Expected string, received number" }]))).toBe("the host would not read --cwd on this line");
-    expect(validatorRefusal(issues([{ code: "invalid_type", path: ["workspaceId"], message: "Required" }, { code: "invalid_type", path: ["argv", 0], message: "Required" }]))).toBe("the host would not read the workspace and the command on this line");
+    expect(validatorRefusal(issues([{ code: "invalid_type", path: ["workspaceId"], message: "Required" }, { code: "invalid_type", path: ["argv", 0], message: "Required" }]))).toBe("the host would not read the command on this line");
   });
 
   it("says the line alone where the field it named is one no line carries", () => {

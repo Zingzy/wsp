@@ -18,25 +18,49 @@
       ]
     },
     {
-      "case": "a workspace",
+      "case": "a thread",
       "arguments": {
-        "workspace": "ws one"
+        "thread": "t-1"
       },
       "replies": {
-        "workspaces.resolve": "{\"id\":1,\"ok\":true,\"workspace\":{\"id\":\"ws-1\",\"name\":\"parser\",\"machineId\":\"m-1\",\"phase\":\"running\",\"golden\":\"golden-1\",\"createdAt\":\"2026-09-27T00:00:00.000Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"wsp\",\"path\":\"/w\",\"computer\":\"place-9\"}}}",
+        "sessions.list": "{\"id\":1,\"ok\":true,\"sessions\":[{\"id\":\"s-1\",\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"completed\",\"threadId\":\"t-1 one\"}]}",
+        "workspaces.get": "{\"id\":1,\"ok\":true,\"workspace\":{\"id\":\"ws-1\",\"name\":\"parser\",\"machineId\":\"m-1\",\"phase\":\"running\",\"golden\":\"golden-1\",\"createdAt\":\"2026-09-27T00:00:00.000Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"wsp\",\"path\":\"/w\",\"computer\":\"place-9\"}}}",
         "agents.read": "{\"id\":1,\"ok\":true,\"report\":{\"target\":{\"workspaceId\":\"ws-1\"},\"home\":\"/root\",\"user\":\"root\",\"readAt\":\"2026-09-27T10:00:00.000Z\",\"agents\":[],\"skills\":[],\"servers\":[],\"refused\":[]}}"
       },
       "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"AGENT  VERSION  LATEST  SIGN-IN  WSP TOOLS  UPDATE  PATH\"}],\"structuredContent\":{\"target\":{\"workspaceId\":\"ws-1\"},\"home\":\"/root\",\"user\":\"root\",\"readAt\":\"2026-09-27T10:00:00.000Z\",\"refused\":[],\"agents\":[]}},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
         {
-          "op": "workspaces.resolve",
-          "ref": "ws one"
+          "op": "sessions.list"
+        },
+        {
+          "op": "workspaces.get",
+          "workspaceId": "ws-1",
+          "threadId": "t-1 one"
         },
         {
           "op": "agents.read",
           "target": {
             "workspaceId": "ws-1"
           }
+        }
+      ]
+    },
+    {
+      "case": "a project's name",
+      "arguments": {
+        "thread": "wsp"
+      },
+      "replies": {
+        "sessions.list": "{\"id\":1,\"ok\":true,\"sessions\":[]}",
+        "projects.list": "{\"id\":1,\"ok\":true,\"projects\":[{\"id\":\"proj-1\",\"name\":\"wsp\",\"path\":\"/w\",\"computer\":\"place-9\"}]}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"wsp is a project; wsp agents takes a thread, or a computer with --on, as wsp threads wsp lists them. Name a thread by its id.\"}],\"structuredContent\":{\"error\":\"wsp is a project; wsp agents takes a thread, or a computer with --on, as wsp threads wsp lists them. Name a thread by its id.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "sessions.list"
+        },
+        {
+          "op": "projects.list"
         }
       ]
     },
@@ -65,11 +89,11 @@
     {
       "case": "both",
       "arguments": {
-        "workspace": "w",
+        "thread": "w",
         "on": "attic"
       },
       "replies": {},
-      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"A workspace already names its computer; give the workspace or --on <computer>, not both. agents takes a workspace or on, not both\"}],\"structuredContent\":{\"error\":\"A workspace already names its computer; give the workspace or --on <computer>, not both. agents takes a workspace or on, not both\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"A thread already names its computer; give the thread or --on <computer>, not both. agents takes a thread or on, not both\"}],\"structuredContent\":{\"error\":\"A thread already names its computer; give the thread or --on <computer>, not both. agents takes a thread or on, not both\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": []
     },
     {
@@ -93,7 +117,7 @@
       "replies": {
         "agents.read": "{\"id\":1,\"ok\":true,\"report\":{\"readAt\":\"2026-09-27T10:00:00.000Z\",\"user\":\"zingzy\",\"home\":\"/Users/zingzy\",\"target\":{\"placeId\":\"here\"},\"unknownTop\":{\"anything\":1},\"stale\":\"napping\",\"agents\":[{\"name\":5}],\"skills\":[{\"scope\":\"user\",\"name\":\"unslop\",\"description\":\"cut the tells\",\"paths\":[{\"path\":\"~/.claude/skills/unslop\",\"agent\":\"claude\",\"linkTo\":\"~/.agents/skills/unslop\"},{\"path\":\"~/.agents/skills/unslop\"}]},{\"name\":\"tab\\there\\nnew \u0085line\",\"paths\":[{\"path\":\"~/p/.claude/skills/x\",\"off\":true}],\"scope\":\"project\",\"project\":{\"path\":\"~/p\",\"name\":\"wsp \\u0007bell\",\"id\":\"proj-1\"}},{\"name\":\"plug\",\"paths\":[{\"path\":\"~/.claude/plugins/p/skills/plug\"}],\"scope\":\"plugin\"}],\"servers\":[{\"name\":\"linear\",\"agent\":\"claude\",\"scope\":\"user\",\"file\":\"~/.claude.json\",\"transport\":{\"kind\":\"http\",\"host\":\"mcp.linear.app\"},\"envNames\":[],\"auth\":\"unknown\",\"enabled\":true,\"inRecipe\":false},{\"agent\":\"codex\",\"name\":\"wsp\",\"scope\":\"project\",\"file\":\"~/p/.codex/config.toml\",\"transport\":{\"line\":\"wsp mcp --scoped\",\"kind\":\"stdio\"},\"envNames\":[\"WSP_HOST_URL\",\"WSP_HOST_TOKEN\"],\"auth\":\"open\",\"enabled\":false,\"project\":{\"id\":\"proj-1\",\"name\":\"wsp\",\"path\":\"~/p\"}},{\"agent\":\"not-in-catalog\",\"name\":\"odd\",\"scope\":\"home\",\"file\":\"~/.x\",\"transport\":{\"kind\":\"stdio\",\"line\":\"odd é\"},\"envNames\":[],\"auth\":\"open\",\"enabled\":true,\"tools\":[{\"name\":\"t\"}]}],\"refused\":[\"codex: config.toml did not \u0085parse\\nat line 3\"],\"projects\":[{\"name\":\"wsp\",\"id\":\"proj-1\",\"path\":\"~/p\",\"extra\":true}],\"reach\":\"here\"}}"
       },
-      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"the host would not read this line. usage: wsp agents [<workspace>] [--on <computer>]\"}],\"structuredContent\":{\"error\":\"the host would not read this line. usage: wsp agents [<workspace>] [--on <computer>]\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"the host would not read this line. usage: wsp agents [<thread>] [--on <computer>]\"}],\"structuredContent\":{\"error\":\"the host would not read this line. usage: wsp agents [<thread>] [--on <computer>]\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
         {
           "op": "agents.read",
@@ -104,18 +128,21 @@
       ]
     },
     {
-      "case": "refused",
+      "case": "no such thread",
       "arguments": {
-        "workspace": "gone"
+        "thread": "gone"
       },
       "replies": {
-        "workspaces.resolve": "{\"id\":1,\"ok\":false,\"error\":\"no workspace gone\",\"kind\":\"not-found\"}"
+        "sessions.list": "{\"id\":1,\"ok\":true,\"sessions\":[]}",
+        "projects.list": "{\"id\":1,\"ok\":true,\"projects\":[]}"
       },
-      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"no workspace gone\"}],\"structuredContent\":{\"error\":\"no workspace gone\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"no thread gone\"}],\"structuredContent\":{\"error\":\"no thread gone\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
         {
-          "op": "workspaces.resolve",
-          "ref": "gone"
+          "op": "sessions.list"
+        },
+        {
+          "op": "projects.list"
         }
       ]
     }

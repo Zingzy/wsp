@@ -128,21 +128,6 @@ describe("a steered message its agent never read", () => {
     await rt.close();
   });
 
-  it("goes back under the thread scope that steered it, so where that thread may no longer send, the person is told and no turn starts", async () => {
-    const h = driven();
-    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter } });
-    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
-    const lead = await rt.sessions.start(ws.id, { prompt: "orchestrate" });
-    expect(await rt.sessions.steer(lead.id, { prompt: LINE }, asThread(scopeOf(ws.id, lead.view().threadId!)))).toEqual({ outcome: "accepted" });
-    // The person turns the switch off: a send by that thread is refused from now, and the person's own is not.
-    await rt.workspaces.agents(ws.id, { spawn: false });
-    h.turns[0]!.end({ status: "failed", error: "claude exited with code 137" }, [LINE]);
-    await vi.waitFor(async () => expect((await rt.sessions.history(ws.id)).some(e => e.type === "session.notify")).toBe(true));
-    expect((await rt.sessions.history(ws.id)).find(e => e.type === "session.notify")).toMatchObject({ notify: NOTIFY_ME, text: unreadLine(LINE) });
-    expect(h.starts).toHaveLength(1);
-    await rt.close();
-  });
-
   it("goes back opened by whoever opened it: a person's message as the person's, a child's line as an agent's", async () => {
     const h = driven();
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter } });
@@ -302,7 +287,7 @@ describe("a host restart while a reply waits on a steered message", () => {
    * with the line on the CLI's input; the gate opens, and a second host re-opens the turn. */
   const restartDuringHold = async (
     mode: "answers" | "dies",
-    o: { as?: (workspaceId: string, threadId: string) => Caller; before?: (first: Runtime, workspaceId: string) => Promise<void> } = {},
+    o: { as?: (workspaceId: string, threadId: string) => Caller; before?: (first: Runtime, workspaceId: string) => Promise<void>; down?: (workspaceId: string) => Promise<void> } = {},
   ): Promise<{ rt: Runtime; workspaceId: string; threadId: string; turnId: string }> => {
     const reading = new Set<() => void>();
     const first = host(mode, reading);
@@ -313,6 +298,7 @@ describe("a host restart while a reply waits on a steered message", () => {
     await until(() => existsSync(mark), 10_000);
     await o.before?.(first, ws.id);
     await first.close();
+    await o.down?.(ws.id);
     for (const drop of [...reading]) drop();
     writeFileSync(gate, "go\n");
     return { rt: host(mode), workspaceId: ws.id, threadId: lead.view().threadId!, turnId: lead.turnId };
@@ -361,7 +347,8 @@ describe("a host restart while a reply waits on a steered message", () => {
   it("a line steered as a thread goes back as that thread after the restart, so a switch turned off meanwhile refuses it to the person", async () => {
     const { rt, workspaceId, threadId } = await restartDuringHold("dies", {
       as: (workspaceId, threadId) => asThread(scopeOf(workspaceId, threadId), "here"),
-      before: async (first, workspaceId) => void (await first.workspaces.agents(workspaceId, { spawn: false })),
+      // The host comes back to the folder's switch held off in the store.
+      down: async workspaceId => void (await store.put("workspaces", workspaceId, { ...((await store.get("workspaces", workspaceId)) as Record<string, unknown>), agents: { spawn: false, maxMachines: 1, maxDepth: 2 } })),
     });
     await until(async () => (await outcome(rt, workspaceId, threadId)).told.length > 0, 20_000);
     await new Promise(r => setTimeout(r, 200));

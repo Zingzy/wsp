@@ -463,11 +463,6 @@
                     "title": "wsp exec",
                     "filepath": "content/reference/cli/exec.mdx"
                   },
-                  "/export": {
-                    "type": "page",
-                    "title": "wsp export",
-                    "filepath": "content/reference/cli/export.mdx"
-                  },
                   "/fix": {
                     "type": "page",
                     "title": "wsp fix",
@@ -477,11 +472,6 @@
                     "type": "page",
                     "title": "wsp folders",
                     "filepath": "content/reference/cli/folders.mdx"
-                  },
-                  "/forget": {
-                    "type": "page",
-                    "title": "wsp forget",
-                    "filepath": "content/reference/cli/forget.mdx"
                   },
                   "/host-devices": {
                     "type": "page",
@@ -558,11 +548,6 @@
                     "title": "wsp merge in",
                     "filepath": "content/reference/cli/merge-in.mdx"
                   },
-                  "/pause": {
-                    "type": "page",
-                    "title": "wsp pause",
-                    "filepath": "content/reference/cli/pause.mdx"
-                  },
                   "/projects": {
                     "type": "page",
                     "title": "wsp projects",
@@ -612,11 +597,6 @@
                     "type": "page",
                     "title": "wsp remove",
                     "filepath": "content/reference/cli/remove.mdx"
-                  },
-                  "/rename": {
-                    "type": "page",
-                    "title": "wsp rename",
-                    "filepath": "content/reference/cli/rename.mdx"
                   },
                   "/restart": {
                     "type": "page",
@@ -738,11 +718,6 @@
                     "title": "wsp slate write",
                     "filepath": "content/reference/cli/slate-write.mdx"
                   },
-                  "/ssh": {
-                    "type": "page",
-                    "title": "wsp ssh",
-                    "filepath": "content/reference/cli/ssh.mdx"
-                  },
                   "/start": {
                     "type": "page",
                     "title": "wsp start",
@@ -832,16 +807,6 @@
                     "type": "page",
                     "title": "wsp usage reset",
                     "filepath": "content/reference/cli/usage-reset.mdx"
-                  },
-                  "/wake": {
-                    "type": "page",
-                    "title": "wsp wake",
-                    "filepath": "content/reference/cli/wake.mdx"
-                  },
-                  "/workspaces-agents": {
-                    "type": "page",
-                    "title": "wsp workspaces agents",
-                    "filepath": "content/reference/cli/workspaces-agents.mdx"
                   },
                   "/worktree": {
                     "type": "page",

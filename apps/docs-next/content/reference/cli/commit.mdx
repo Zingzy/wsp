@@ -3,12 +3,13 @@
 {/* Written by apps/docs-next/scripts/cli.ts: change the script or its source and run pnpm --filter @wsp/docs-next generate. */}
 
 ```text
-usage: wsp commit <workspace> [--message "<message>"] [--file <path>]...
-  commits the files the workspace's copy changed, or the ones named; without a
-  message its agent drafts one
+usage: wsp commit <thread> [--message "<message>"] [--file <path>]...
+  commits every changed file in the folder the thread works in, other threads'
+  changes there included, or the files named; without a message the thread's
+  agent drafts one
 
   --message    the commit message, a subject line, a blank line, then the body,
-               -m for short; the workspace's agent drafts it without one
+               -m for short; the thread's agent drafts it without one
   --file       a file to commit, by path from the checkout's top, once per file;
                every changed file without one
   --json       print the raw protocol values, one JSON object per line, with

@@ -86,7 +86,7 @@ describe("what a place's settings read as in a line", () => {
     expect(placeSettingsLine({ ...spoo, takesForks: true, napDefault: 60 * 60_000, capDefault: { threads: 2 }, napMs: 5 * 60_000, settings: { napMs: 5 * 60_000 } })).toBe("spoo: 2 threads at once (the default), naps after 5m (60m by default)");
     expect(placeSettingsLine({ ...solari, cap: { machines: 5, spendPerDayUsd: 2.5 }, capDefault: CLOUD_CAP_DEFAULT, settings: { machines: 5, spendPerDayUsd: 2.5 } })).toBe("solari: 5 machines at once (3 by default), $2.50 a day ($10 by default)");
     expect(NAP_AFTER_MS).toBe(20 * 60_000);
-    expect(placeSettingsLine({ ...spoo, capDefault: { threads: 2 }, spawn: AGENTS_ON, spawnDefault: AGENTS_ON })).toBe("spoo: 2 threads at once (the default), agents may spawn: up to 3 workspaces (the default), 2 levels deep (the default)");
+    expect(placeSettingsLine({ ...spoo, capDefault: { threads: 2 }, spawn: AGENTS_ON, spawnDefault: AGENTS_ON })).toBe("spoo: 2 threads at once (the default), agents may spawn: up to 3 machines (the default), 2 levels deep (the default)");
     expect(placeSettingsLine({ ...spoo, capDefault: { threads: 2 }, spawn: { ...AGENTS_ON, spawn: false }, spawnDefault: AGENTS_ON, settings: { spawn: { spawn: false } } })).toBe("spoo: 2 threads at once (the default), agents may not spawn (on, up to 3 by default), 2 levels deep (the default)");
   });
 });

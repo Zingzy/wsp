@@ -3,7 +3,7 @@
 {/* Written by apps/docs-next/scripts/cli.ts: change the script or its source and run pnpm --filter @wsp/docs-next generate. */}
 
 ```text
-usage: wsp servers tools <name> --agent <id> [<workspace>] [--on <computer>]
+usage: wsp servers tools <name> --agent <id> [<thread>] [--on <computer>]
        [--project <name>] [--refresh]
   starts one MCP server once where it is set up and lists its tools with their
   descriptions, and says whether it needs a sign-in
@@ -11,9 +11,9 @@ usage: wsp servers tools <name> --agent <id> [<workspace>] [--on <computer>]
   --agent      the agent whose config names the server, by its catalog id as wsp
                servers shows it
   --on         the computer to read, by the name wsp computers shows; this
-               computer without it, and a workspace names its own
+               computer without it, and a thread names its own
   --project    the project on the computer --on names whose server it is, by
-               name; a workspace finds its own project's servers
+               name; a thread finds its own project's servers
   --refresh    start the server again even where an answer from the last three
                minutes stands
   --json       print the raw protocol values, one JSON object per line, with

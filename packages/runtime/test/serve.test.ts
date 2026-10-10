@@ -619,7 +619,7 @@ describe("serveRuntime session interrupt", () => {
     expect(byThread).toMatchObject({ ok: true, outcome: "steered", turnId: first["turnId"] });
     expect(h.steered).toEqual(["and STEERED", "and BY THREAD"]);
     const unknown = await c.request("sessions.start", { workspaceId, prompt: "nowhere", thread: "thr_nope" });
-    expect(unknown).toMatchObject({ ok: false, error: "no thread thr_nope on this workspace" });
+    expect(unknown).toMatchObject({ ok: false, error: "no thread thr_nope in this folder" });
     h.complete();
     c.close();
   });
@@ -865,7 +865,7 @@ describe("serveRuntime forwards (the host's, listed and stopped from the app)", 
     expect((await c.request("forwards.stop", { workspaceId: "ws_1", port: 8123 })).ok).toBe(true);
     const again = await c.request("forwards.stop", { workspaceId: "ws_1", port: 8123 });
     expect(again.ok).toBe(false);
-    expect(again["error"]).toBe("nothing is forwarding localhost:8123 for that workspace");
+    expect(again["error"]).toBe("nothing is forwarding localhost:8123 there");
     expect(stops).toEqual([["ws_1", 8123], ["ws_1", 8123]]);
     expect((await c.request("forwards.list"))["forwards"]).toEqual([]);
     // Below 1024 never reaches the source: the wire refuses it.

@@ -13,7 +13,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-use super::named::{absolute_folder, awake, history, params, thread_of, threads, workspace_of, Thread, Woken, Workspace};
+use super::named::{absolute_folder, awake, history, params, thread_at, thread_of, threads, workspace_of, Aim, Thread, Woken, Workspace};
 use super::said::{fmt_bytes, fmt_uptime, js_space, js_trim, turns};
 use super::wait::TurnResult;
 use super::{input, Answer, Refused, Tool};
@@ -39,6 +39,8 @@ pub const SEND: Tool = Tool {
 pub struct RunIn {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub beside: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub branch: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -443,9 +445,9 @@ fn opening_at(
 
 /// A project as a run reads the list: what names it, the computer it is on, its folder and its repo's top.
 #[derive(Deserialize, Clone)]
-struct ProjectRow {
-    id: String,
-    name: String,
+pub(super) struct ProjectRow {
+    pub(super) id: String,
+    pub(super) name: String,
     computer: String,
     #[serde(default)]
     path: String,
@@ -473,7 +475,7 @@ enum Target {
 
 /// The projects a caller may name: the host's own list, and for a caller the host answers as a thread, which reads
 /// its own tree rather than the person's records, the projects its workspaces hold.
-async fn projects_here(client: &Client) -> Result<Vec<ProjectRow>, Failure> {
+pub(super) async fn projects_here(client: &Client) -> Result<Vec<ProjectRow>, Failure> {
     #[derive(Deserialize)]
     struct Projects {
         projects: Vec<ProjectRow>,
@@ -557,11 +559,20 @@ async fn run_target(
             if branch.is_some() {
                 return branch_refused();
             }
-            if !workspace_names(client).await?.iter().any(|n| n == named) {
+            if !host.cloud() || !workspace_names(client).await?.iter().any(|n| n == named) {
                 return Ok(Target::Fork(project));
             }
         }
-        // The host answers a word the listing lacks first (a workspace, a typo, a project hidden from a thread), then the branch line.
+        // Without a cloud a word is a project or nothing; the project door answers one hidden from a thread in its own words.
+        if !host.cloud() {
+            if let Err(refused) = client.request::<Value>("projects.resolve", params([("ref", Value::from(named))])).await {
+                if refused.kind.as_deref() != Some("not-found") {
+                    return Err(refused);
+                }
+            }
+            return Err(Failure::of_kind(fill(&super::workspace::words().no_project, &[("word", named)]), "not-found"));
+        }
+        // The host answers a word the listing lacks first (a machine, a typo, a project hidden from a thread), then the branch line.
         let workspace = workspace_of(client, named).await?;
         if branch.is_some() {
             return branch_refused();
@@ -1065,13 +1076,23 @@ fn opened_thread(thread_id: &str, opened: Option<&Opened>, folder: Option<&str>)
 }
 
 async fn run(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
-    let RunIn { project, branch, cwd, message, agent, model, effort, access, fast, notify, title, replaces, files, detach } =
+    let RunIn { project, beside, branch, cwd, message, agent, model, effort, access, fast, notify, title, replaces, files, detach } =
         input("run", arguments)?;
+    let words = super::workspace::words();
+    if beside.is_some() && (project.is_some() || branch.is_some()) {
+        return Err(Failure::usage(words.beside_alone.clone()).into());
+    }
     let client = host.client().await?;
     let picks = Picks { model, effort, access, fast };
     // Everything the call names is read before a machine is forked or woken for it, so a refusal costs none.
     let read = async {
-        let target = run_target(&host, &client, project.as_deref(), branch, cwd.clone()).await?;
+        let target = match &beside {
+            Some(beside) => {
+                let aim = Aim { line: "wsp run --beside", or_computer: false, cloud: host.cloud() };
+                Target::Box(thread_at::<Workspace>(&client, beside, &aim).await?.1)
+            }
+            None => run_target(&host, &client, project.as_deref(), branch, cwd.clone()).await?,
+        };
         let (on, fork_of) = match &target {
             Target::Box(found) => (Some(found.id.as_str()), None),
             Target::Fork(project) => (None, Some(project.id.as_str())),

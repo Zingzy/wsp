@@ -953,7 +953,7 @@ async function onGitHubHere(o: { sub?: string } = {}) {
   h.daemon.answers["git.prRead"] = () => ({ id: 1, ok: true, pr: fact }) as DaemonResponse;
   h.daemon.answers["git.issueRead"] = () => ({ id: 1, ok: true, issue: { number: 7, url, title: "one", body: "", state: "OPEN", comments: [] } }) as DaemonResponse;
   h.daemon.answers["git.fetchBranch"] = f => {
-    if (!inRoots(h.roots, String(f["cwd"]))) return { id: 1, ok: false, code: "outside-root", error: `${String(f["cwd"])} resolves outside the workspace root` } as DaemonResponse;
+    if (!inRoots(h.roots, String(f["cwd"]))) return { id: 1, ok: false, code: "outside-root", error: `${String(f["cwd"])} resolves outside the folders wsp serves here` } as DaemonResponse;
     const into = String(f["into"] ?? f["branch"]);
     try {
       git(String(f["cwd"]), "fetch", "-q", "--no-tags", String(f["remote"]), `refs/heads/${String(f["branch"])}:refs/heads/${into}`);
@@ -964,7 +964,7 @@ async function onGitHubHere(o: { sub?: string } = {}) {
   };
   h.daemon.answers["git.update"] = f => {
     const cwd = String(f["cwd"]);
-    if (!inRoots(h.roots, cwd)) return { id: 1, ok: false, code: "outside-root", error: `${cwd} resolves outside the workspace root` } as DaemonResponse;
+    if (!inRoots(h.roots, cwd)) return { id: 1, ok: false, code: "outside-root", error: `${cwd} resolves outside the folders wsp serves here` } as DaemonResponse;
     git(cwd, "fetch", "-q", "--no-tags", "origin", `refs/heads/${String(f["base"])}`);
     git(cwd, "merge", "-q", "--ff-only", "FETCH_HEAD");
     return { id: 1, ok: true, base: String(f["base"]), merged: true, commits: 1, conflicts: [] } as DaemonResponse;
@@ -981,7 +981,7 @@ describe("a project folder outside the daemon's home", () => {
     const h = here();
     let snapshots = 0;
     h.daemon.answers["git.snapshot"] = f => {
-      if (!inRoots(h.roots, String(f["cwd"]))) return { id: 1, ok: false, code: "outside-root", error: `${String(f["cwd"])} resolves outside the workspace root` } as DaemonResponse;
+      if (!inRoots(h.roots, String(f["cwd"]))) return { id: 1, ok: false, code: "outside-root", error: `${String(f["cwd"])} resolves outside the folders wsp serves here` } as DaemonResponse;
       snapshots += 1;
       return { id: 1, ok: true, commit: String(snapshots).repeat(40) } as DaemonResponse;
     };

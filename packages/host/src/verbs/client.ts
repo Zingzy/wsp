@@ -513,6 +513,9 @@ export const hostPlatform = (): Platform => (platform() === "darwin" ? "darwin" 
  * since nothing about a machine exists there until one is forked. No row is marked default: which computer a
  * workspace lands on is its project's to say. The platform is handed in, since what this computer is called is
  * read where the host runs and not guessed here, and so is the spend, which is a read of its own. */
+/** Where the forks column stands in the table below. */
+const FORKS_AT = 8;
+
 export function computerLines(places: readonly PlaceView[], platform: "darwin" | "linux", spend: readonly PlaceSpend[] = [], pending: readonly PendingComputer[] = []): string[] {
   if (places.length === 0) return ["This host holds no computer. wsp add prints the join line for a computer you are sitting at."];
   const todayOf = (p: PlaceView): number | undefined => spend.find(s => s.place === p.id)?.todayUsd;
@@ -546,7 +549,9 @@ export function computerLines(places: readonly PlaceView[], platform: "darwin" |
     const word = pendingWord(p);
     return [p.name ?? p.address, "pending", "", "", "", "", "", "", "", "", "", "", word.word, "", "", "", word.sentence ?? "", ""];
   });
-  return table([["COMPUTER", "KIND", "CORES", "MEMORY", "DISK FREE", "ENGINE", "COPIES", "PRESENT", "WORKSPACES", "THREADS", "MACHINES", "SPEND", "STATE", "LAST SEEN", "BEHIND", "IMAGE", "TOOLS", "AGENTS"], ...rows, ...waiting]);
+  // The forks a computer holds of the room it has are a cloud's machines; with no cloud no computer forks one.
+  const shown = (row: readonly string[]): string[] => (CLOUD_ON ? [...row] : row.filter((_, at) => at !== FORKS_AT));
+  return table([["COMPUTER", "KIND", "CORES", "MEMORY", "DISK FREE", "ENGINE", "COPIES", "PRESENT", "WORKSPACES", "THREADS", "MACHINES", "SPEND", "STATE", "LAST SEEN", "BEHIND", "IMAGE", "TOOLS", "AGENTS"], ...rows, ...waiting].map(shown));
 }
 
 /** What a computer set to follow a recipe prints: the recipe it follows now, or that it keeps what it has. */

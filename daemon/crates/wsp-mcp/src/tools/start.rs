@@ -7,8 +7,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 use serde_json::{Map, Number, Value};
 
+use super::named::{thread_at, thread_label, Aim};
 use super::said::turns;
-use super::workspace::{self, counted_number, params, read, workspace_of};
+use super::workspace::{self, counted_number, params, read};
 use super::{input, Answer, Refused, Tool};
 use crate::host::Host;
 use crate::record::fill;
@@ -57,7 +58,7 @@ pub struct StartOut {
 #[derive(Debug, Serialize, Deserialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct ReviewPostIn {
-    pub workspace: String,
+    pub thread: String,
     #[serde(default)]
     pub verdict: Option<String>,
     #[serde(default)]
@@ -116,18 +117,33 @@ fn named<const N: usize>(fields: [(&str, Option<Value>); N]) -> Map<String, Valu
     fields.into_iter().filter_map(|(key, value)| value.map(|v| (key.to_owned(), v))).collect()
 }
 
-/// What was made from what, then the thread as a detached run prints it.
-fn started_lines(done: &StartOut) -> Result<String, Refused> {
-    let made: Made = read(&done.workspace, "workspaces.start")?;
+/// What was made from what, said as a start's line.
+/// `name` is what the line calls the made copy, its record's own name where absent.
+fn made_line(done: &StartOut, op: &str, name: Option<&str>) -> Result<String, Refused> {
+    let made: Made = read(&done.workspace, op)?;
     let words = workspace::words();
-    let line = match &made.from {
-        None => fill(&words.made_bare, &[("name", &made.name)]),
+    let name = name.unwrap_or(&made.name);
+    Ok(match &made.from {
+        None => fill(&words.made_bare, &[("name", name)]),
         Some(from) => {
             let template = if from.kind == "issue" { &words.made_issue } else { &words.made_pull_request };
-            fill(template, &[("name", &made.name), ("number", &from.number.to_string())])
+            fill(template, &[("name", name), ("number", &from.number.to_string())])
         }
-    };
-    Ok(format!("{line}\n{}", fill(&turns().opened_thread, &[("thread", &done.thread_id)])))
+    })
+}
+
+/// What was made from what, then the thread as a detached run prints it.
+fn started_lines(done: &StartOut) -> Result<String, Refused> {
+    Ok(format!("{}\n{}", made_line(done, "workspaces.start", None)?, fill(&turns().opened_thread, &[("thread", &done.thread_id)])))
+}
+
+/// The reviewer thread first, which review_post takes, then what it was made from.
+fn review_lines(done: &StartOut) -> Result<String, Refused> {
+    Ok(format!(
+        "{}\n{}",
+        fill(&turns().opened_thread, &[("thread", &done.thread_id)]),
+        made_line(done, "workspaces.review", Some(&format!("thread {}", super::named::thread_word(&done.thread_id))))?
+    ))
 }
 
 async fn start(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
@@ -148,14 +164,20 @@ async fn start(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
     Ok(Answer::text(started_lines(&done)?, &done))
 }
 
-/// A link is reviewed off its pull request; any other target is a workspace, whose own pull request is.
+/// A link is reviewed off its pull request; any other target is a thread, the pull request of whose branch is.
 async fn review(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
+    #[derive(Deserialize)]
+    struct Folder {
+        id: String,
+    }
     let ReviewIn { target, agent, model, effort } = input(REVIEW_NAME, arguments)?;
     let client = host.client().await?;
     let on = if target.starts_with("http://") || target.starts_with("https://") {
         ("url", Value::from(target))
     } else {
-        ("workspaceId", Value::from(workspace_of(&client, &target).await?.id))
+        let aim = Aim { line: "wsp review", or_computer: false, cloud: host.cloud() };
+        let (_, folder): (_, Folder) = thread_at(&client, &target, &aim).await?;
+        ("workspaceId", Value::from(folder.id))
     };
     let asked = named([
         (on.0, Some(on.1)),
@@ -164,14 +186,20 @@ async fn review(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
         ("effort", effort.map(Value::from)),
     ]);
     let done: StartOut = client.request("workspaces.review", asked).await?;
-    Ok(Answer::text(started_lines(&done)?, &done))
+    Ok(Answer::text(review_lines(&done)?, &done))
 }
 
 /// A verdict or a summary named edits the draft first, so the post carries them.
 async fn review_post(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
-    let ReviewPostIn { workspace, verdict, summary } = input(REVIEW_POST_NAME, arguments)?;
+    #[derive(Deserialize)]
+    struct Folder {
+        id: String,
+    }
+    let ReviewPostIn { thread, verdict, summary } = input(REVIEW_POST_NAME, arguments)?;
     let client = host.client().await?;
-    let source = workspace_of(&client, &workspace).await?;
+    let words = workspace::words();
+    let aim = Aim { line: "wsp review post", or_computer: false, cloud: host.cloud() };
+    let (thread, source): (_, Folder) = thread_at(&client, &thread, &aim).await?;
     if verdict.is_some() || summary.is_some() {
         let edits = named([
             ("workspaceId", Some(Value::from(source.id.as_str()))),
@@ -180,10 +208,15 @@ async fn review_post(host: Arc<Host>, arguments: Value) -> Result<Answer, Refuse
         ]);
         let _: Value = client.request("workspaces.reviewDraft", edits).await?;
     }
-    let done: ReviewPostOut = client.request("workspaces.reviewPost", params([("workspaceId", Value::from(source.id.as_str()))])).await?;
-    let words = workspace::words();
+    let done: ReviewPostOut = client
+        .request(
+            "workspaces.reviewPost",
+            params([("workspaceId", Value::from(source.id.as_str())), ("threadId", Value::from(thread.runtime_id()))]),
+        )
+        .await?;
     let template = counted_number(&done.comments, &words.posted_one, &words.posted_many);
-    let said = fill(&template, &[("name", &source.name), ("number", &done.number.to_string()), ("folded", &done.folded.to_string())]);
+    let said =
+        fill(&template, &[("name", &thread_label(&thread)), ("number", &done.number.to_string()), ("folded", &done.folded.to_string())]);
     Ok(Answer::text(said, &done))
 }
 

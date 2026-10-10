@@ -3,15 +3,15 @@
 {/* Written by apps/docs-next/scripts/cli.ts: change the script or its source and run pnpm --filter @wsp/docs-next generate. */}
 
 ```text
-usage: wsp fix <workspace> [--check "<name>" | --child <workspace>]
-  asks the workspace's agent to fix a failed check or merge a child, or updates
-  it from its base and asks it to fix what conflicts
+usage: wsp fix <thread> [--check "<name>" | --child <thread>]
+  asks the thread's agent to fix a failed check or merge a child, or updates its
+  folder from its base and asks it to fix what conflicts
 
   --check    the failed check to send, by its name on the pull request; without
-             it the copy is updated from its base and a conflict is sent
-  --child    a child of the workspace whose merge into it stopped on conflicts,
-             by name or id; its agent is asked to merge it and resolve them, and
-             nothing is updated
+             it the folder is updated from its base and a conflict is sent
+  --child    a child thread whose merge into this thread's folder stopped on
+             conflicts, by its id or a prefix; this thread's agent is asked to
+             merge it and resolve them, and nothing is updated
   --json     print the raw protocol values, one JSON object per line, with
              everything else on stderr
   --state    the state file the host serves

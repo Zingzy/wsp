@@ -173,7 +173,7 @@ export const PROJECT_VERBS: readonly Verb[] = [
   {
     name: "threads",
     usage: "wsp threads [<project>] [--tree] [--watch]",
-    about: "who is working, where and on which computer: every thread as the sidebar lists it, with its project, the folder it works in, that folder's branch, the agent, the state and who opened it, and under each thread the agent's own subagents with their TASK id; --tree indents the threads an agent spawned under the one that spawned them, and --watch draws the same table again every second where it stands",
+    about: "who is working, where and on which computer: every thread as the sidebar lists it, with its project, the folder it works in, that folder's branch, the agent, the state and who opened it, and under each thread the agent's own subagents with their SUBAGENT id; --tree indents the threads an agent spawned under the one that spawned them, and --watch draws the same table again every second where it stands",
     page: "front",
     options: { tree: { type: "boolean" }, watch: { type: "boolean" } },
     run: async ctx => {

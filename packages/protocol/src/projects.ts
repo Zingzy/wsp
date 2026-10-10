@@ -336,7 +336,7 @@ export const seedMemoryKeptLine = (computer: string): string =>
 
 /** Why a project cannot be dropped yet, with the workspaces standing on it. */
 export const projectInUseRefusal = (name: string, workspaces: readonly string[]): string =>
-  `${name} has ${workspaces.length === 1 ? "a workspace" : "workspaces"} standing on it: ${workspaces.join(", ")}; delete ${workspaces.length === 1 ? "it" : "them"} first`;
+  `${name} has ${workspaces.length === 1 ? "a workspace" : "workspaces"} standing on it: ${workspaces.join(", ")}; delete ${workspaces.length === 1 ? "its threads" : "their threads"} first`;
 
 /** The whole of what a caller held to one project reads about a word naming another: absence and nothing else,
  * since the names of what else this host holds are not a thread's to learn from a refusal. */

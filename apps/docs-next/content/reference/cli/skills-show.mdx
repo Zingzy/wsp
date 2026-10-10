@@ -3,17 +3,16 @@
 {/* Written by apps/docs-next/scripts/cli.ts: change the script or its source and run pnpm --filter @wsp/docs-next generate. */}
 
 ```text
-usage: wsp skills show <skill> [<workspace>] [--on <computer>]
-       [--project [<name>]]
+usage: wsp skills show <skill> [<thread>] [--on <computer>] [--project [<name>]]
   prints a skill's SKILL.md: one on skills.sh by its <owner>/<repo>/<skill>
-  before it is installed, or one already on this computer, a box you added or a
-  workspace by its name
+  before it is installed, or one already on this computer, a box you added or
+  where a thread runs by its name
 
   --on         the computer to read, by the name wsp computers shows; this
-               computer without it, and a workspace names its own
+               computer without it, and a thread names its own
   --project    the project's skill of that name rather than the one that is not
-               a project's: alone from a workspace, or the project's name with
-               --on
+               a project's: alone with a thread, the thread's own project, or
+               the project's name with --on
   --json       print the raw protocol values, one JSON object per line, with
                everything else on stderr
   --state      the state file the host serves

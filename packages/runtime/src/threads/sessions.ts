@@ -279,7 +279,7 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
       const named = opened.thread === undefined ? undefined : ctx.latestOn(opened.thread);
       const fromTranscript = opened.thread === undefined ? undefined : ctx.startedAs(workspaceId, opened.thread);
       const heldOn = opened.thread === undefined ? undefined : (named?.workspaceId ?? threadRecords.get(opened.thread)?.workspaceId ?? (fromTranscript !== undefined ? workspaceId : undefined));
-      if (opened.thread !== undefined && heldOn !== workspaceId) throw new Error(`no thread ${opened.thread} on this workspace`);
+      if (opened.thread !== undefined && heldOn !== workspaceId) throw new Error(`no thread ${opened.thread} in this folder`);
       // Read again where the thread becomes this send's to run: the id it must resume may not exist yet.
       let resume = named?.claudeSessionId ?? fromTranscript;
       const threadId = opened.thread ?? randomUUID();
@@ -299,7 +299,7 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
         if (away !== undefined) throw away;
       }
       const reached = opens ? await ctx.entryOf(workspaceId, opensThere ? undefined : origin) : await ctx.entryOfRow({ threadId, workspaceId }, origin, "send");
-      if (reached === undefined) throw new Error(`no thread ${opened.thread} on this workspace`);
+      if (reached === undefined) throw new Error(`no thread ${opened.thread} in this folder`);
       const entry = reached;
       // A restart is read before the machine is asked: a send into a thread that has run replaces nothing.
       const replaces = opened.replaces;

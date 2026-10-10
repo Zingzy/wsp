@@ -259,7 +259,7 @@ describe("rewinding a thread to one of its replies", () => {
 
   it("a harness whose turns named no anchor is handed how each cut turn ended, and the transcript is cut", async () => {
     const reverted: Parameters<SessionReverter>[0][] = [];
-    const refused: TurnResult = { status: "failed", error: "Codex is not signed in where this workspace runs", refusal: "sign-in" };
+    const refused: TurnResult = { status: "failed", error: "Codex is not signed in where this thread runs", refusal: "sign-in" };
     const { ws, daemon } = await workspace(harness({ cuts: "revert", reverted, anchorless: true, ends: { 2: refused } }));
     const { threadId, turns } = await threeTurns(ws.id);
     expect(await rt!.sessions.rewind(threadId, { turnId: turns[0]!, files: true })).toEqual({ turns: 2, files: 2 });

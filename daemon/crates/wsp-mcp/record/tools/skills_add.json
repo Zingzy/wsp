@@ -1,7 +1,7 @@
 {
   "cloudOff": {
     "name": "skills_add",
-    "description": "Installs one skill off skills.sh on one computer or workspace, as the login it was added with: its files land once in ~/.agents/skills/<name> (the project's .agents/skills with project, from a workspace), and each agent named that does not read that folder gets a link to it or a copy in its own skills folder; with no agent named, every agent whose own folder's home is there gets it. The download is checked whole before anything lands: every path plain and inside the skill, at most 200 files, 1 MB each and 5 MB in all, a SKILL.md at its root; every file lands 0644 and nothing in the skill runs. A skill already there is refused rather than written over.",
+    "description": "Installs one skill off skills.sh on one computer or where a thread runs, as the login it was added with: its files land once in ~/.agents/skills/<name> (the project's .agents/skills with project, from a thread), and each agent named that does not read that folder gets a link to it or a copy in its own skills folder; with no agent named, every agent whose own folder's home is there gets it. The download is checked whole before anything lands: every path plain and inside the skill, at most 200 files, 1 MB each and 5 MB in all, a SKILL.md at its root; every file lands 0644 and nothing in the skill runs. A skill already there is refused rather than written over.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -9,13 +9,13 @@
           "type": "string",
           "description": "the skill's <owner>/<repo>/<skill>, as skills_search answers it"
         },
-        "workspace": {
+        "thread": {
           "type": "string",
-          "description": "the workspace to read, by its name, or its id when two share a name; absent reads a computer"
+          "description": "a thread, by its id or a prefix of it, whose computer and project to read; absent reads a computer"
         },
         "on": {
           "type": "string",
-          "description": "the computer to read, by the name computers lists; absent with no workspace is the computer the app runs on"
+          "description": "the computer to read, by the name computers lists; absent with no thread is the computer the app runs on"
         },
         "agent": {
           "type": "array",
@@ -29,7 +29,7 @@
             "boolean",
             "string"
           ],
-          "description": "put it in a project rather than the home: true for the workspace's own, or the project's name, as projects lists it, with on"
+          "description": "put it in a project rather than the home: true for the thread's own, or the project's name, as projects lists it, with on"
         }
       },
       "required": [
@@ -80,7 +80,7 @@
   },
   "cloudOn": {
     "name": "skills_add",
-    "description": "Installs one skill off skills.sh on one computer or workspace, as the login it was added with: its files land once in ~/.agents/skills/<name> (the project's .agents/skills with project, from a workspace), and each agent named that does not read that folder gets a link to it or a copy in its own skills folder; with no agent named, every agent whose own folder's home is there gets it. The download is checked whole before anything lands: every path plain and inside the skill, at most 200 files, 1 MB each and 5 MB in all, a SKILL.md at its root; every file lands 0644 and nothing in the skill runs. A skill already there is refused rather than written over.",
+    "description": "Installs one skill off skills.sh on one computer or where a thread runs, as the login it was added with: its files land once in ~/.agents/skills/<name> (the project's .agents/skills with project, from a thread), and each agent named that does not read that folder gets a link to it or a copy in its own skills folder; with no agent named, every agent whose own folder's home is there gets it. The download is checked whole before anything lands: every path plain and inside the skill, at most 200 files, 1 MB each and 5 MB in all, a SKILL.md at its root; every file lands 0644 and nothing in the skill runs. A skill already there is refused rather than written over.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -88,13 +88,13 @@
           "type": "string",
           "description": "the skill's <owner>/<repo>/<skill>, as skills_search answers it"
         },
-        "workspace": {
+        "thread": {
           "type": "string",
-          "description": "the workspace to read, by its name, or its id when two share a name; absent reads a computer"
+          "description": "a thread, by its id or a prefix of it, whose computer and project to read; absent reads a computer"
         },
         "on": {
           "type": "string",
-          "description": "the computer to read, by the name computers lists; absent with no workspace is the computer the app runs on"
+          "description": "the computer to read, by the name computers lists; absent with no thread is the computer the app runs on"
         },
         "agent": {
           "type": "array",
@@ -108,7 +108,7 @@
             "boolean",
             "string"
           ],
-          "description": "put it in a project rather than the home: true for the workspace's own, or the project's name, as projects lists it, with on"
+          "description": "put it in a project rather than the home: true for the thread's own, or the project's name, as projects lists it, with on"
         }
       },
       "required": [

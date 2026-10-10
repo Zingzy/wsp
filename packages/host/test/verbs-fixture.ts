@@ -503,3 +503,12 @@ export function createOn(rt: ProjectMaker & WorkspaceMaker, o: CreateOn, origin?
 
 type ProjectMaker = { projects: Pick<Runtime["projects"], "add" | "computers"> };
 type WorkspaceMaker = { workspaces: Pick<Runtime["workspaces"], "create" | "get"> };
+
+/** A thread on the record a case made, by its id: the lines that act where a thread works name one, and a machine
+ * made in a case has none until one is started on it. */
+export async function threadOn(rt: Pick<Runtime, "workspaces" | "sessions">, name: string): Promise<string> {
+  const workspace = (await rt.workspaces.list()).find(w => w.name === name || w.id === name)!;
+  const started = await rt.sessions.start(workspace.id, { prompt: "lead the work" });
+  await started.finished;
+  return started.view().threadId!;
+}

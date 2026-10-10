@@ -1,13 +1,13 @@
 {
   "cloudOff": {
     "name": "review",
-    "description": "Starts a reviewer thread on a pull request, off its link or off a workspace's own pull request, and returns as soon as the thread is started. On the computer the app runs on the reviewer works in a worktree on the pull request's head, at its agent's read-only access (Codex unless another is named; an agent with no read-only access is refused naming the ones that have one), with the description, the diff against the base and the repository's own review rules in its task. Its reply ends in a review the host keeps as the workspace's draft; nothing reaches the git host until review_post. A thread's own token is refused.",
+    "description": "Starts a reviewer thread on a pull request, off its link or off the pull request of the branch a thread's folder is on, and returns as soon as the thread is started, its id first, which review_post takes. On the computer the app runs on the reviewer works in a worktree on the pull request's head, at its agent's read-only access (Codex unless another is named; an agent with no read-only access is refused naming the ones that have one), with the description, the diff against the base and the repository's own review rules in its first message. Its reply ends in a review the host keeps as a draft; nothing reaches the git host until review_post. A thread's own token is refused.",
     "inputSchema": {
       "type": "object",
       "properties": {
         "target": {
           "type": "string",
-          "description": "a GitHub pull request link, or the workspace whose pull request to review"
+          "description": "a GitHub pull request link, or the thread whose branch's pull request to review, by its id or a prefix of it"
         },
         "agent": {
           "type": "string",
@@ -549,13 +549,13 @@
   },
   "cloudOn": {
     "name": "review",
-    "description": "Starts a reviewer thread on a pull request, off its link or off a workspace's own pull request, and returns as soon as the thread is started. On the computer the app runs on the reviewer works in a worktree on the pull request's head, and on a cloud in a fresh copy at that head, at its agent's read-only access (Codex unless another is named; an agent with no read-only access is refused naming the ones that have one), with the description, the diff against the base and the repository's own review rules in its task. Its reply ends in a review the host keeps as the workspace's draft; nothing reaches the git host until review_post. A thread's own token is refused.",
+    "description": "Starts a reviewer thread on a pull request, off its link or off the pull request of the branch a thread's folder is on, and returns as soon as the thread is started, its id first, which review_post takes. On the computer the app runs on the reviewer works in a worktree on the pull request's head, and on a cloud in a fresh copy at that head, at its agent's read-only access (Codex unless another is named; an agent with no read-only access is refused naming the ones that have one), with the description, the diff against the base and the repository's own review rules in its first message. Its reply ends in a review the host keeps as a draft; nothing reaches the git host until review_post. A thread's own token is refused.",
     "inputSchema": {
       "type": "object",
       "properties": {
         "target": {
           "type": "string",
-          "description": "a GitHub pull request link, or the workspace whose pull request to review"
+          "description": "a GitHub pull request link, or the thread whose branch's pull request to review, by its id or a prefix of it"
         },
         "agent": {
           "type": "string",

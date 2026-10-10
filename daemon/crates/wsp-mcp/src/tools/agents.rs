@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-//! `agents`, `skills` and `servers`: one read of what stands on a computer or a workspace, each tool answering its own
+//! `agents`, `skills` and `servers`: one read of what stands on a computer or where a thread runs, each tool answering its own
 //! rows beside the report's facts, its text the table the command line prints. The report is parsed as the TypeScript
 //! tool parses it, so its fields come out in the schema's order and without any the schema does not name.
 
@@ -29,7 +29,7 @@ pub const SERVERS: Tool = Tool { name: "servers", listed: SERVERS_LISTED, call: 
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct In {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub workspace: Option<String>,
+    pub thread: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub on: Option<String>,
 }
@@ -177,11 +177,6 @@ struct Report {
 }
 
 #[derive(Deserialize)]
-struct Resolved {
-    workspace: Option<Box<RawValue>>,
-}
-
-#[derive(Deserialize)]
 struct Place {
     id: String,
     name: String,
@@ -206,33 +201,16 @@ pub async fn place_named(client: &Client, word: &str) -> Result<(String, String)
     }
 }
 
-/// The workspace a person names, by id or by its name when one carries it: `workspaceOf`, whose id is all this reads.
-pub async fn workspace_id(client: &Client, reference: &str) -> Result<String, Failure> {
-    let op = "workspaces.resolve";
-    let mut params = Map::new();
-    params.insert("ref".to_owned(), Value::from(reference));
-    let resolved = client.request::<Resolved>(op, params).await?;
-    #[derive(Deserialize)]
-    struct Id {
-        id: String,
-    }
-    resolved
-        .workspace
-        .and_then(|w| serde_json::from_str::<Id>(w.get()).ok())
-        .map(|w| w.id)
-        .ok_or_else(|| Failure::new(fill(&record::words().other_version, &[("op", op)])))
-}
-
-/// The computer or workspace the read names: `agentsTarget`.
-async fn target(client: &Client, asked: &In, tool: &str) -> Result<Value, Failure> {
+/// The computer the read names, or where a thread runs: `agentsTarget`.
+async fn target(client: &Client, asked: &In, tool: &str, cloud: bool) -> Result<Value, Failure> {
     let mut target = Map::new();
-    match (&asked.workspace, &asked.on) {
+    match (&asked.thread, &asked.on) {
         (Some(_), Some(_)) => {
             let words = record::words();
             return Err(Failure::usage(words.both_targets.get(tool).cloned().unwrap_or_default()));
         }
-        (Some(workspace), None) => {
-            target.insert("workspaceId".to_owned(), Value::from(workspace_id(client, workspace).await?));
+        (Some(thread), None) => {
+            target.insert("workspaceId".to_owned(), Value::from(super::target::thread_folder(client, thread, tool, cloud).await?));
         }
         (None, Some(on)) => {
             target.insert("placeId".to_owned(), Value::from(place_named(client, on).await?.0));
@@ -256,7 +234,7 @@ async fn call(host: Arc<Host>, arguments: Value, rows: Rows) -> Result<Answer, R
     let asked: In = input(name, arguments)?;
     let client = host.client().await?;
     let mut params = Map::new();
-    params.insert("target".to_owned(), target(&client, &asked, name).await?);
+    params.insert("target".to_owned(), target(&client, &asked, name, host.cloud()).await?);
     let reply = client.request::<Report>("agents.read", params).await?;
     let report = reply.report.ok_or_else(|| unread(name))?;
     let (facts, own) = read(&report, rows, host.cloud()).ok_or_else(|| unread(name))?;
