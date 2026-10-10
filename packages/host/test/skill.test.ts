@@ -6,7 +6,7 @@ import { CLOUD_ENV, RUN_BLOCK_WORDS, thisComputerLine } from "@wsp/protocol";
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import { CATALOG_AGENTS, MCP_AGENT_IDS, THREAD_AGENTS } from "@wsp/catalog";
-import { ANOTHER_AGENT_WORDS, BACKGROUND_WORK_WORDS, COORDINATOR_HANDOFF, LOGIN_CHOICES, NOTIFY_CALLER, SessionStartOutcome, SLATE_BRIEF, backgroundTasksLine, notifyLine, stillWorkingLine } from "@wsp/protocol";
+import { ANOTHER_AGENT_WORDS, BACKGROUND_WORK_WORDS, COORDINATOR_HANDOFF, LOGIN_CHOICES, NOTIFY_CALLER, SessionStartOutcome, SLATE_BRIEF, backgroundTasksLine, notifyLine, stillRunningLine, stillWorkingLine } from "@wsp/protocol";
 import { slateCatalog } from "@wsp/protocol/slate";
 import { instructions, INSTRUCTIONS_KEPT, SLATE_WORDS, THREAD_SLATE_WORDS, RULES_HEADING, SETUP_HEADING, SHELL_HEADING, SKILL_NAME, VERBS_HEADING, wspSkill, agentsLine, instructionsOf, skillFor } from "../src/skill.js";
 import { CLOUD_ON } from "../src/cloud.js";
@@ -235,6 +235,7 @@ describe("the wsp skill", () => {
   it("quotes the line a reply ends on when a background command is still running, as the adapter words it", () => {
     const rules = wspSkill().slice(wspSkill().indexOf("## Rules learned the hard way"));
     expect(rules).toContain(`\`${backgroundTasksLine(1)}\``);
+    expect(rules).toContain(`\`${stillRunningLine(1)}\``);
   });
 
   it("tells an agent how to add a tool the catalog does not carry, and what not to add", () => {

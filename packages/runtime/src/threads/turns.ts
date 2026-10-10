@@ -3,7 +3,7 @@ import {
   type AdapterEvent, type PermissionAsk, type PermissionOption, type PermissionOutcome, type SessionEvent,
   type SessionAnswerResult, type SessionStartOutcome, type SessionView, type AttachmentRecord, type TurnImage, type TurnResult,
   type TurnStatus, ThreadScope, WorkspaceOrigin, threadWord, leadAsk, askingLine, permissionModeOptionLabel,
-  pickedOptions, deniedLine, toolCallFacts, notifyBody, turnLines,
+  pickedOptions, deniedLine, toolCallFacts, notifyBody, stillRunningLine, turnLines,
 } from "@wsp/protocol";
 import { harnessCatalog } from "../harness-catalog.js";
 import type { HarnessSession, HarnessAdapter } from "../types/harness.js";
@@ -187,14 +187,17 @@ export function turnsArea(ctx: RuntimeContext): TurnsArea {
     };
     /** What a turn's end tells whoever its start named once a held reply's line went: the end whole where the agent
      * said something new, its outcome alone where only that changed, as a stop does, and nothing where both are what
-     * the line said. A held end carries the told words by the adapter's word, whatever task lines it adds under them. */
+     * the line said. A held end carries the told words by the adapter's word, and the task lines it adds under them
+     * are what the lead was promised: how the work ended, or that it was left running, with nobody woken. A line that
+     * said its work was still running promised another, so that end sends at least its outcome. */
     const afterTold = (result: TurnResult, held: boolean): TurnResult | undefined => {
       const told = turnLive.toldAs;
       if (told === undefined) return held ? undefined : result;
       if (!held && notifyBody(result, "whole") !== told.body) return result;
-      if (result.status === told.status) return undefined;
-      const { text: _text, error: _error, ...outcome } = result;
-      return outcome;
+      const { text, error: _error, ...outcome } = result;
+      const added = held && told.said !== undefined && text?.startsWith(told.said) === true ? text.slice(told.said.length).trim() : "";
+      if (added !== "") return { ...outcome, text: added };
+      return result.status === told.status && told.promised !== true ? undefined : outcome;
     };
 
     /** The one expression that says the turn is waiting on something outside its own process, which its stream's
@@ -290,8 +293,6 @@ export function turnsArea(ctx: RuntimeContext): TurnsArea {
       const sessionId = event.sessionId;
       switch (event.type) {
         case "session.start": {
-          // Under a held reply this is the CLI waking its agent, whose end is a new word.
-          delete turnLive.toldLast;
           view.claudeSessionId = sessionId;
           if (event.cwd !== undefined) view.cwd = event.cwd;
           if (event.model !== undefined) view.model = event.model;
@@ -498,11 +499,13 @@ export function turnsArea(ctx: RuntimeContext): TurnsArea {
           tasksRunning = event.running > 0;
           readsWaiting();
           // The agent's final reply, given while that work runs: the turn goes on, and nothing reads the reply again
-          // until the work wakes it, so its line goes now. A run re-read after a restart already sent the ones it told.
+          // until the work wakes it, so its line goes now, saying the turn is still open. A run re-read after a restart
+          // already sent the ones it told.
           if (event.replied !== undefined) {
-            const replied = withWaited(event.replied);
-            turnLive.toldLast = true;
-            turnLive.toldAs = { status: replied.status, body: notifyBody(replied, "whole") };
+            const reply = withWaited(event.replied);
+            const said = reply.text ?? "";
+            const replied = reply.status === "completed" && event.running > 0 ? { ...reply, text: [said, stillRunningLine(event.running)].filter(Boolean).join("\n\n") } : reply;
+            turnLive.toldAs = { status: replied.status, body: notifyBody(reply, "whole"), said, ...(replied !== reply ? { promised: true as const } : {}) };
             if (replayingTold > 0) replayingTold--;
             else if (notify !== undefined) {
               ctx.notifyEnd({ view, turnId, turnLive }, notify, ctx.tellAs(t), replied);

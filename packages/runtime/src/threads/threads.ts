@@ -793,9 +793,9 @@ export function threadsArea(ctx: RuntimeContext): ThreadsArea {
   };
   /** Settles a running row whose process the runtime ended or lost before the harness's own session.end: to the reply
    * it held, whose line already went, or failed with `cutLine` as the parent's word when it never replied, interrupted
-   * where a stop settled it. A reply held
-   * over background work whose line went, with nothing waking the agent since, is the turn's last word: no line. The
-   * session.end carries `reason` either way. The one rule for both roads, the runtime's end() and the restart load. */
+   * where a stop settled it. A reply held over background work whose line went said another line follows, so its cut
+   * sends one too. The session.end carries `reason` either way. The one rule for both roads, the runtime's end() and
+   * the restart load. */
   const settleCut = (s: { view: SessionView; turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin; turnLive?: TurnLive; snapshot?: string; asked?: TurnAsked }, reason: string, cutLine: (endedAt: number) => string, stopped = false): void => {
     const reply = s.turnLive?.reply;
     delete s.snapshot;
@@ -810,7 +810,7 @@ export function threadsArea(ctx: RuntimeContext): ThreadsArea {
     delete s.view.asking;
     if (s.view.threadId !== undefined) leadAsks.delete(s.view.threadId);
     const cut: TurnResult = { status: stopped ? "interrupted" : "failed", error: cutLine(endedAt) };
-    if (reply === undefined && s.turnLive?.toldLast !== true && s.notify !== undefined && !lineTry(s)) notifyEnd(s, s.notify, tellAs(s), cut);
+    if (reply === undefined && s.notify !== undefined && !lineTry(s)) notifyEnd(s, s.notify, tellAs(s), cut);
     const sessionId = s.view.claudeSessionId ?? s.view.id;
     // A stop the process never heard is still the turn's reply, so every client reads the turn stopped, not failed.
     if (reply === undefined && stopped) ctx.record({ type: "session.done", workspaceId: s.view.workspaceId, sessionId, turnId: s.turnId, threadId: s.view.threadId, result: cut });

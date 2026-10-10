@@ -205,6 +205,12 @@ export function backgroundTasksLine(running: number): string {
   return `ended with ${plural(running, "background task")} running`;
 }
 
+/** The last line of the line a lead is sent at a reply given over the agent's own running background tasks: the turn
+ * is still open, and a lead that read the reply alone took the child for finished and waiting on nothing. */
+export function stillRunningLine(running: number): string {
+  return `${plural(running, "background task")} still running; another line comes when this turn ends`;
+}
+
 /** One line under a held reply for a background command that finished after the agent's words without waking it: the
  * command as the harness described it, how it ended and how long after the reply, so the thread's last message says
  * what the turn stayed open for and what came of it. Where the harness wakes the agent instead, its own next reply
@@ -281,8 +287,8 @@ export const backgroundWorkWords = (road?: string): string =>
 export const BACKGROUND_WORK_WORDS = backgroundWorkWords();
 
 /** When the notify line goes, quoted the same way: with the reply, once, never again at the exit. A reply the agent
- * gave while work it started was still running is delivered when that work is done, and the line goes with it. */
-export const NOTIFY_WORDS = "The notify line goes once, at the reply, and a reply given with background tasks still running goes once they are done";
+ * gave while work it started was still running goes at once, saying so, and the turn's end sends what came after it. */
+export const NOTIFY_WORDS = "The notify line goes once, at the reply; a reply given with background tasks still running says so, and a second line goes at the turn's end";
 
 /** Which road a caller takes to its children's ends, in the two sentences every door quotes whole: the skill's rules,
  * the tool descriptions and the command line. Which one holds is decided by whether the caller is a thread, which its

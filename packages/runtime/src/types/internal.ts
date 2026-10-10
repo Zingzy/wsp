@@ -436,11 +436,10 @@ export interface TurnLive {
   /** The finished lines it sent for replies its agent gave over background work, before its end: a re-opened run
    * skips that many, read off the row since the transcript's cap can drop the lines' own rows. */
   told?: number;
-  /** The last of those replies is still the agent's latest word, nothing having woken it since: a cut sends no line. */
-  toldLast?: true;
   /** The outcome and the words the last of those lines carried, set again as a re-opened run replays its reply: an end
-   * that says nothing new is not told again. In memory alone. */
-  toldAs?: { status: TurnStatus; body?: string };
+   * that says nothing new is not told again, and `said` is the reply's own words, which a held end's task lines sit
+   * under. `promised` is a line that said its work was still running, whose end is always told. In memory alone. */
+  toldAs?: { status: TurnStatus; body?: string; said?: string; promised?: true };
   /** Each message steered into the turn, by the id the harness was handed it under: one its agent never read goes back
    * with these words and as its steerer, past a host restart too, and an id missing here is a line this host never
    * wrote, which goes nowhere. */
@@ -664,7 +663,7 @@ export interface SessionIndexRecord {
    * for it; from is where the turn starts in that run's log, on a process that served the thread's earlier turns. All
    * of these are written for a running row alone. snapshot is the commit the turn's launch took of its
    * folder, which the turn's changes are read against wherever it ends; written while the turn runs and until that
-   * read is in. told, toldLast and steered are a running row's `TurnLive` fields of the same names. */
+   * read is in. told and steered are a running row's `TurnLive` fields of the same names; toldLast is an older host's, read and dropped. */
   sessions: (SessionView & { turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin; reply?: TurnStatus; told?: number; toldLast?: true; steered?: Record<string, Steered>; run?: string; from?: number; asked?: TurnAsked; turnToken?: string; scopeDeviceId?: string; snapshot?: string })[];
   /** Every thread of the workspace by its runtime id; absent on a document from before threads had a record. */
   threads?: Record<string, ThreadRecord>;
