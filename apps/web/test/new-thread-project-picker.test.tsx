@@ -42,7 +42,7 @@ afterEach(() => {
 });
 
 describe("the New thread project pickers", () => {
-  it("ends with New project under the sidebar's own glyph, whose dialog picks the project it records", async () => {
+  it("ends with Add a project under the sidebar's own glyph, whose dialog picks the project it records", async () => {
     const projectsAdd = vi.fn(async () => LAB);
     const hostFolders = vi.fn(async () => REPOS);
     useStore.setState({ api: { subscribe: () => () => {}, hostFolders, projectsAdd } as unknown as Api, places: [HERE], projects: [ACME], projectHome: ACME.id } as never);
@@ -52,10 +52,10 @@ describe("the New thread project pickers", () => {
     fireEvent.click(trigger());
     const items = await screen.findAllByRole("menuitem");
     const last = items.at(-1)!;
-    expect(last.textContent).toBe(PROJECT_WORDS.new);
+    expect(last.textContent).toBe(PROJECT_WORDS.add);
     expect(last.hasAttribute("data-new-thread-add-project")).toBe(true);
     expect(last.querySelector("svg.lucide-plus")).not.toBeNull();
-    expect([...document.querySelectorAll("[role=menuitem], [role=menuitemradio]")].map(el => el.textContent)).toEqual([ACME.name, PROJECT_WORDS.new]);
+    expect([...document.querySelectorAll("[role=menuitem], [role=menuitemradio]")].map(el => el.textContent)).toEqual([ACME.name, PROJECT_WORDS.add]);
 
     fireEvent.click(last);
     await waitFor(() => expect(document.querySelector("[data-k=add-project]")).not.toBeNull());
@@ -71,13 +71,13 @@ describe("the New thread project pickers", () => {
     expect(trigger().textContent).toBe(LAB.name);
   });
 
-  it("the palette's page of projects New thread asks from ends with New project too, which opens the same dialog", async () => {
+  it("the palette's page of projects New thread asks from ends with Add a project too, which opens the same dialog", async () => {
     const addProject = vi.fn();
     const openProjectHome = vi.fn();
     const items = buildPaletteItems({ projects: [], selectedId: null, query: "", messageHits: [], canCreate: true, recorded: [ACME], picks: [ACME], asks: true, handlers: { addProject, openProjectHome } as never, verbs: {} as never, places: [HERE] });
     const page = items.actionItems.find((item): item is CommandPaletteSubmenuItem => item.value === NEW_THREAD_PAGE)!;
     const rows = page.groups.flatMap(group => group.items) as CommandPaletteActionItem[];
-    expect(rows.map(row => row.title)).toEqual([ACME.name, PROJECT_WORDS.new]);
+    expect(rows.map(row => row.title)).toEqual([ACME.name, PROJECT_WORDS.add]);
     expect(render(<>{rows.at(-1)!.icon}</>).container.querySelector("svg.lucide-plus")).not.toBeNull();
     await rows.at(-1)!.run();
     expect(addProject).toHaveBeenCalledOnce();

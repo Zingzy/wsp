@@ -336,7 +336,7 @@ describe("General", () => {
     const checked = (k: string) => document.querySelector(`[data-k=${k}] [data-checked]`)?.textContent;
     expect([checked("send-with"), checked("mid-turn")]).toEqual(["Enter", "Queue"]);
     const said = (k: string) => document.querySelector(`[data-settings-page] [data-k=${k}]`)?.textContent;
-    expect([said("notify-needs"), said("notify-done"), said("new-thread-in"), said("settle-after")]).toEqual(["Notify and sound", "Notify", "Ask every time", "2 hours"]);
+    expect([said("notify-needs"), said("notify-done"), said("new-thread-in"), said("settle-after")]).toEqual(["Notify and sound", "Notify", "Current project", "2 hours"]);
     expect(document.querySelector("[data-k=plan-alerts]")!.getAttribute("aria-checked")).toBe("true");
     expect(document.querySelector("[data-k=ask-delete]")!.getAttribute("aria-checked")).toBe("true");
   });
@@ -395,8 +395,8 @@ describe("General", () => {
   });
 
   it("puts an arrow on each row off its default, and the arrow writes that one field back", async () => {
-    const { api, sets } = settingsApi({ editorList: async () => [] } as Partial<Api>, { ...DEFAULT_PREFERENCES, labs: false, sendWith: "mod-enter", notifyDone: "notify-sound", newThreadIn: "current", settleAfter: "1d", askDelete: false });
-    useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, sendWith: "mod-enter", notifyDone: "notify-sound", newThreadIn: "current", settleAfter: "1d", askDelete: false } });
+    const { api, sets } = settingsApi({ editorList: async () => [] } as Partial<Api>, { ...DEFAULT_PREFERENCES, labs: false, sendWith: "mod-enter", notifyDone: "notify-sound", newThreadIn: "ask", settleAfter: "1d", askDelete: false });
+    useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, sendWith: "mod-enter", notifyDone: "notify-sound", newThreadIn: "ask", settleAfter: "1d", askDelete: false } });
     mountSettings({ api, at: { kind: "group", group: "general" } });
     await settle();
     const arrowed = [...document.querySelectorAll("[data-settings-page] [data-k=row-reset]")].map(b => b.closest("[data-settings-row]")!.getAttribute("data-settings-row"));
@@ -632,7 +632,7 @@ describe("Keybindings", () => {
     expect(label("commandPalette.toggle")).toEqual([["⇧⌘P"], ["⌘K"]]);
     expect(label("settings.toggle")).toEqual([["⌘,"]]);
     expect(label("editor.open")).toEqual([["⌘O"]]);
-    expect(label("chat.new")).toEqual([["⌘N"], ["⌘T"]]);
+    expect(label("chat.new")).toEqual([["⇧⌘O"], ["⌘T"], ["⌘N"]]);
     expect(label("workspace.next")).toEqual([["⌥⌘Right"], ["⌃Tab"]]);
     expect(label("rightPanel.nextTab")).toEqual([["⌃Tab"]]);
     expect(label("rightPanel.previousTab")).toEqual([["⌃⇧Tab"]]);
@@ -640,10 +640,10 @@ describe("Keybindings", () => {
     expect(label("workspace.select.1")).toEqual([["⌘1"], ["⌘9"]]);
     // On another platform the same rules read Ctrl.
     expect(label("commandPalette.toggle", { platform: "Linux x86_64", desktopShell: true })).toEqual([["Ctrl+Shift+P"], ["Ctrl+K"]]);
-    // In a browser tab the chords the tab keeps are not drawn: New thread reads its one remaining chord, the
+    // In a browser tab the chords the tab keeps are not drawn: New thread reads the one chord a tab hands the page, the
     // workspace switch on a Mac has none left and the thread switch keeps its arrows.
     const tab = { platform: "MacIntel", desktopShell: false };
-    expect(label("chat.new", tab)).toEqual([["⌘N"]]);
+    expect(label("chat.new", tab)).toEqual([["⇧⌘O"]]);
     expect(label("workspace.next", tab)).toEqual([]);
     expect(label("rightPanel.nextTab", tab)).toEqual([]);
     expect(label("thread.next", tab)).toEqual([["⌥⌘Down"]]);

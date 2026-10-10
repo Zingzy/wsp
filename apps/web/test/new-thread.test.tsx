@@ -21,6 +21,7 @@ import { openCommandPalette } from "../src/commandPaletteBus.js";
 import { runShellCommand } from "../src/shell/shellCommands.js";
 import { onAddProjectRequest } from "../src/shell/shellRequests.js";
 import { PROJECT_PICK_KEY } from "../src/sidebar/picks.js";
+import { PROJECT_WORDS } from "../src/sidebar/words.js";
 import { composerEditor, press, typeInto } from "./composer-harness.js";
 import { installFakeLayout } from "./fake-layout.js";
 import { caps } from "./caps.js";
@@ -133,8 +134,8 @@ const search = () => palette()!.querySelector<HTMLInputElement>("input")!;
 const paletteRows = () => [...palette()!.querySelectorAll<HTMLElement>("[data-slot=command-item]")];
 const rowTitle = (row: HTMLElement) => row.querySelector("span.truncate")?.textContent;
 const pageRows = () => [...palette()!.querySelectorAll<HTMLElement>("[data-palette-group=projects] [data-slot=command-item]")];
-/** The page's projects, without the New project row that ends it. */
-const projectRows = () => pageRows().filter(row => rowTitle(row) !== "New project");
+/** The page's projects, without the Add a project row that ends it. */
+const projectRows = () => pageRows().filter(row => rowTitle(row) !== PROJECT_WORDS.add);
 const ASK: Preferences = { ...DEFAULT_PREFERENCES, newThreadIn: "ask" };
 const CURRENT: Preferences = { ...DEFAULT_PREFERENCES, newThreadIn: "current" };
 /** The desktop shell, told apart by the bridge its preload puts on the page; a browser tab keeps the mod digits. */
@@ -161,7 +162,7 @@ describe("New thread from Cmd+T", () => {
     expect(heading().textContent).toBe("What should we build in py_spoo_url?");
   });
 
-  it("the heading's project name is the project picker: the projects and New project", async () => {
+  it("the heading's project name is the project picker: the projects and Add a project", async () => {
     await mount();
     cmdT();
     const picker = await screen.findByRole("button", { name: "Project: wsp" });
@@ -174,7 +175,7 @@ describe("New thread from Cmd+T", () => {
     let asked = 0;
     const stop = onAddProjectRequest(() => void (asked += 1));
     fireEvent.click(await screen.findByRole("button", { name: "Project: py_spoo_url" }));
-    fireEvent.click(within(await screen.findByRole("menu")).getByRole("menuitem", { name: "New project" }));
+    fireEvent.click(within(await screen.findByRole("menu")).getByRole("menuitem", { name: PROJECT_WORDS.add }));
     stop();
     expect(asked).toBe(1);
   });
@@ -243,7 +244,7 @@ describe("New thread when the setting asks every time", () => {
     await waitFor(() => expect(palette()).not.toBeNull());
     expect(useStore.getState()).toMatchObject({ selectedId: PLANNER.id, projectHome: null });
     expect(palette()!.querySelector("[data-palette-group=projects] [data-slot=command-group-label]")?.textContent).toBe("Projects");
-    expect(pageRows().map(rowTitle)).toEqual(["wsp", "py_spoo_url", "wsp", "New project"]);
+    expect(pageRows().map(rowTitle)).toEqual(["wsp", "py_spoo_url", "wsp", PROJECT_WORDS.add]);
     const [here, spoo, there] = projectRows();
     expect(spoo!.querySelector("svg.lucide-rocket")?.getAttribute("data-hue")).toBe("teal");
     expect(here!.querySelector("[data-item-description]")?.textContent).toBe(`this Mac ${WSP.path}`);
@@ -251,16 +252,16 @@ describe("New thread when the setting asks every time", () => {
     expect(there!.querySelector("[data-item-description]")?.textContent).toBe(`spoo ${WSP_ON_SPOO.path}`);
     expect(there!.querySelector("[data-item-description] [data-computer-glyph]")).not.toBeNull();
     expect(projectRows().map(row => row.querySelector("[data-slot=command-shortcut]")?.textContent)).toEqual(["⌘1", "⌘2", "⌘3"]);
-    expect(search().getAttribute("placeholder")).toBe("Search projects...");
+    expect(search().getAttribute("placeholder")).toBe("New thread in...");
     expect(palette()!.querySelector("[data-slot=autocomplete-start-addon] svg.lucide-arrow-left")).not.toBeNull();
     expect([...palette()!.querySelectorAll("[data-slot=command-footer] [data-slot=kbd-group] > span")].map(hint => hint.textContent)).toEqual(["Navigate", "Select", "Close"]);
   });
 
-  it("asks for the project by default: Cmd+T on preferences that name no choice opens the projects page", async () => {
+  it("opens on the current project by default: Cmd+T on preferences that name no choice opens its page, no list", async () => {
     await mount([WSP, SPOO], DEFAULT_PREFERENCES);
     cmdT();
-    await waitFor(() => expect(palette()).not.toBeNull());
-    expect(projectRows().map(rowTitle)).toEqual(expect.arrayContaining([WSP.name, SPOO.name]));
+    await waitFor(() => expect(useStore.getState().projectHome).toBe(WSP.id));
+    expect(palette()).toBeNull();
   });
 
   it("Cmd and a digit open that row's project while the page is open, and the chord leaves the sidebar's rows alone", async () => {
@@ -482,5 +483,186 @@ describe("New thread's send", () => {
     await waitFor(() => expect(starts).toHaveLength(1));
     expect(starts[0]!.attachments).toEqual([{ mediaType: "image/png", bytes: "iVBORw0KGgoBAgME", name: "shot.png" }]);
     await waitFor(() => expect(document.querySelector("[data-chat-image-row=true] [data-chat-image='shot.png'] img")).not.toBeNull());
+  });
+});
+
+describe("one road to New thread from every screen", () => {
+  const LINUX = "Linux x86_64";
+  const SPOO_RUN: WorkspaceView = { id: "ws_spoo", name: "py_spoo_url", machineId: "local", project: { id: SPOO.id, name: SPOO.name, path: SPOO.path, computer: "here" }, phase: "running", golden: "", createdAt: "2026-10-01T00:00:00Z" };
+  const spooThread = { [SPOO_RUN.id]: [{ id: "s_spoo", workspaceId: SPOO_RUN.id, harness: "claude", status: "completed" as const, threadId: "th_spoo", prompt: "fix the redirect", startedAt: Date.now() }] };
+  const row = () => document.querySelector<HTMLElement>("[data-new-thread-row]")!;
+  const glyph = () => document.querySelector<HTMLElement>("[data-new-thread-glyph]");
+  const searchRow = () => document.querySelector<HTMLElement>("[data-search-row]")!;
+  const sidebarToggle = () => document.querySelector<HTMLElement>('[data-slot="sidebar-header"] [data-slot="sidebar-trigger"]')!;
+  const collapse = async () => {
+    fireEvent.click(sidebarToggle());
+    await waitFor(() => expect(document.querySelector("[data-sidebar-state=collapsed]")).not.toBeNull());
+  };
+  const onPage = (project: ProjectView) => expect(useStore.getState()).toMatchObject({ selectedId: null, projectHome: project.id, settingsOpen: false });
+  const chord = (key: string, mods: KeyboardEventInit) => fireEvent.keyDown(document.body, { key, ctrlKey: true, ...mods });
+
+  it("the sidebar's first row is New thread with its pencil and chord, and the Search row under it holds no pencil", async () => {
+    vi.spyOn(navigator, "platform", "get").mockReturnValue(LINUX);
+    asDesktopShell();
+    await mount();
+    const top = document.querySelector<HTMLElement>("[data-sidebar-search]")!;
+    expect(top.firstElementChild).toBe(row());
+    expect(row().nextElementSibling).toBe(searchRow());
+    expect(row().dataset["sidebar"]).toBe("menu-button");
+    expect(row().className).toContain("h-9");
+    expect(row().textContent).toBe("New threadCtrl+N");
+    expect(row().querySelector("svg.lucide-square-pen")).not.toBeNull();
+    expect(searchRow().parentElement!.querySelector("svg.lucide-square-pen")).toBe(row().querySelector("svg.lucide-square-pen"));
+    expect(searchRow().querySelector("svg.lucide-square-pen")).toBeNull();
+    expect(searchRow().className.split(/\s+/)).not.toContain("pe-8");
+    fireEvent.click(row());
+    onPage(WSP);
+  });
+
+  it("with no project the row is held and its tooltip still names it, and under the md breakpoint its chord is not drawn", async () => {
+    vi.spyOn(navigator, "platform", "get").mockReturnValue(LINUX);
+    asDesktopShell();
+    await mount([]);
+    expect(row().getAttribute("aria-disabled")).toBe("true");
+    expect(row().querySelector("[data-new-thread-chord]")!.className).toContain("max-md:hidden");
+    fireEvent.focus(row());
+    await waitFor(() => expect(document.querySelector("[data-slot=tooltip-popup]")?.textContent).toBe("New thread (Ctrl+N)"));
+    fireEvent.click(row());
+    expect(useStore.getState().projectHome).toBeNull();
+  });
+
+  it("with the sidebar collapsed the header holds the New thread glyph right after the toggle, and it opens New thread", async () => {
+    await mount();
+    expect(glyph()).toBeNull();
+    await collapse();
+    const header = screen.getByRole("banner");
+    expect(header.contains(glyph())).toBe(true);
+    expect(header.querySelector('[data-slot="sidebar-trigger"]')!.nextElementSibling).toBe(glyph());
+    expect(glyph()!.getAttribute("aria-label")).toBe("New thread");
+    fireEvent.click(glyph()!);
+    onPage(WSP);
+  });
+
+  it("with Settings open the Settings sidebar's header holds the glyph between the toggle and the wordmark, and it opens New thread, closing Settings", async () => {
+    await mount();
+    act(() => useStore.getState().openSettings());
+    await waitFor(() => expect(glyph()).not.toBeNull());
+    expect(document.querySelectorAll("[data-new-thread-glyph]")).toHaveLength(1);
+    expect(glyph()!.previousElementSibling!.getAttribute("data-slot")).toBe("sidebar-trigger");
+    expect(glyph()!.closest('[data-slot="sidebar-header"]')).not.toBeNull();
+    fireEvent.click(glyph()!);
+    onPage(WSP);
+    // Settings over a collapsed sidebar: the page's own header row holds it.
+    act(() => useStore.getState().openSettings());
+    await waitFor(() => expect(glyph()).not.toBeNull());
+    fireEvent.click(glyph()!.previousElementSibling!);
+    await waitFor(() => expect(document.querySelector("[data-sidebar-state=collapsed]")).not.toBeNull());
+    const inHeader = screen.getByRole("banner").querySelector<HTMLElement>("[data-new-thread-glyph]")!;
+    expect(inHeader.previousElementSibling!.getAttribute("data-slot")).toBe("sidebar-trigger");
+    fireEvent.click(inHeader);
+    onPage(WSP);
+  });
+
+  it("a sidebar filtered to a project with no threads offers New thread in it under No threads yet.", async () => {
+    window.localStorage.setItem(PROJECT_PICK_KEY, JSON.stringify(SPOO.id));
+    await mount();
+    const empty = await screen.findByText("No threads yet.");
+    const offer = empty.parentElement!.querySelector<HTMLElement>("[data-k=new-thread-in]")!;
+    expect(offer.textContent).toBe("New thread in py_spoo_url");
+    expect(empty.compareDocumentPosition(offer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(offer.className).toContain("h-9");
+    fireEvent.click(offer);
+    onPage(SPOO);
+  });
+
+  it.each([["Current project", CURRENT], ["Ask every time", ASK]])("with one project the row, the glyph, the chord and the palette open its page with no list under %s", async (_name, preferences) => {
+    vi.spyOn(navigator, "platform", "get").mockReturnValue(LINUX);
+    asDesktopShell();
+    await mount([WSP], preferences);
+    const back = () => act(() => useStore.getState().select(PLANNER.id));
+    fireEvent.click(row());
+    onPage(WSP);
+    back();
+    chord("n", {});
+    onPage(WSP);
+    back();
+    act(() => openCommandPalette());
+    await waitFor(() => expect(palette()).not.toBeNull());
+    fireEvent.click(paletteRows().find(r => rowTitle(r) === "New thread")!);
+    await waitFor(() => expect(palette()).toBeNull());
+    onPage(WSP);
+    back();
+    await collapse();
+    fireEvent.click(glyph()!);
+    onPage(WSP);
+    expect(palette()).toBeNull();
+  });
+
+  it("the list and the heading's picker put the sidebar's filter first: filtered to wsp with a spoo thread open, wsp leads", async () => {
+    window.localStorage.setItem(PROJECT_PICK_KEY, JSON.stringify(WSP.id));
+    await mount([WSP, SPOO], ASK);
+    act(() => useStore.setState({ workspaces: [PLANNER, SPOO_RUN], sessions: spooThread }));
+    act(() => useStore.getState().select(SPOO_RUN.id, "th_spoo"));
+    cmdT();
+    await waitFor(() => expect(projectRows().map(rowTitle)).toEqual(["wsp", "py_spoo_url"]));
+    expect(search().getAttribute("placeholder")).toBe("New thread in...");
+    fireEvent.keyDown(search(), { key: "Escape" });
+    await waitFor(() => expect(palette()).toBeNull());
+    act(() => useStore.getState().openProjectHome(SPOO.id));
+    fireEvent.click(await screen.findByRole("button", { name: "Project: py_spoo_url" }));
+    const menu = await screen.findByRole("menu");
+    expect(within(menu).getAllByRole("menuitemradio").map(item => item.textContent)).toEqual(["wsp", "py_spoo_url"]);
+  });
+
+  it("mod+n, mod+t and mod+shift+o in the desktop shell each open New thread from a thread, the New thread page, Settings and a filtered empty sidebar", async () => {
+    vi.spyOn(navigator, "platform", "get").mockReturnValue(LINUX);
+    asDesktopShell();
+    window.localStorage.setItem(PROJECT_PICK_KEY, JSON.stringify(SPOO.id));
+    await mount();
+    expect(row().querySelector("[data-new-thread-chord]")!.textContent).toBe("Ctrl+N");
+    const screens: Array<[string, () => void, ProjectView]> = [
+      ["a thread", () => useStore.getState().select(PLANNER.id), SPOO],
+      ["the New thread page", () => useStore.getState().openProjectHome(WSP.id), SPOO],
+      ["Settings", () => { useStore.getState().select(PLANNER.id); useStore.getState().openSettings(); }, SPOO],
+    ];
+    for (const [key, mods] of [["n", {}], ["t", {}], ["O", { shiftKey: true }]] as const) {
+      for (const [, show, lands] of screens) {
+        act(show);
+        chord(key, mods);
+        onPage(lands);
+      }
+      // The filtered sidebar with no thread in it, Escape-free: nothing selected, the page fallen back to.
+      act(() => useStore.getState().select(null));
+      expect(await screen.findByText("No threads yet.")).toBeTruthy();
+      chord(key, mods);
+      onPage(SPOO);
+    }
+  });
+
+  it("the header over the New thread page reads the project and New thread, opened or fallen back to on launch, and never says task", async () => {
+    await mount([WSP]);
+    act(() => useStore.getState().select(null));
+    await waitFor(() => expect(heading().textContent).toBe("What should we build in wsp?"));
+    expect(useStore.getState().projectHome).toBeNull();
+    expect(crumb()).toBe("wsp/New thread");
+    act(() => useStore.getState().openProjectHome(WSP.id));
+    expect(crumb()).toBe("wsp/New thread");
+    act(() => useStore.setState({ projects: [] }));
+    expect(crumb()).not.toMatch(/task/i);
+  });
+
+  it("every road to adding a project says Add a project: the switcher's foot, the heading's picker and the list's last row", async () => {
+    await mount([WSP, SPOO], ASK);
+    fireEvent.click(document.querySelector<HTMLButtonElement>("[data-k=project-switcher]")!);
+    expect(document.querySelector<HTMLElement>("[data-project-switcher-menu]")!.textContent).toContain(PROJECT_WORDS.add);
+    fireEvent.keyDown(document.querySelector<HTMLElement>("[data-project-switcher-menu]")!, { key: "Escape" });
+    cmdT();
+    await waitFor(() => expect(pageRows().map(rowTitle).at(-1)).toBe(PROJECT_WORDS.add));
+    fireEvent.keyDown(search(), { key: "Escape" });
+    await waitFor(() => expect(palette()).toBeNull());
+    act(() => useStore.getState().openProjectHome(WSP.id));
+    fireEvent.click(await screen.findByRole("button", { name: "Project: wsp" }));
+    expect(within(await screen.findByRole("menu")).getAllByRole("menuitem").map(item => item.textContent)).toEqual([PROJECT_WORDS.add]);
+    expect(document.body.textContent).not.toContain("New project");
   });
 });

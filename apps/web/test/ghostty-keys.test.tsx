@@ -88,7 +88,14 @@ describe("isTerminalAppShortcut", () => {
     expect(isTerminalAppShortcut(event("k", { metaKey: true }), undefined, MAC)).toBe(true);
     expect(isTerminalAppShortcut(event("b", { metaKey: true }), undefined, MAC)).toBe(true);
     expect(isTerminalAppShortcut(event("d", { metaKey: true }), undefined, MAC)).toBe(true);
-    expect(isTerminalAppShortcut(event("n", { metaKey: true }), undefined, MAC)).toBe(true);
+    // A browser tab keeps Command N for its own new window, so only the desktop shell's terminal takes it.
+    expect(isTerminalAppShortcut(event("n", { metaKey: true }), undefined, MAC)).toBe(false);
+    window.wsp = {};
+    try {
+      expect(isTerminalAppShortcut(event("n", { metaKey: true }), undefined, MAC)).toBe(true);
+    } finally {
+      delete window.wsp;
+    }
   });
 
   it("leaves unbound Command chords and the shell's Control chords to the terminal", () => {

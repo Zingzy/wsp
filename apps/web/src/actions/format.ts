@@ -10,7 +10,7 @@ import { MAX_TERMINALS_PER_GROUP } from "../terminal/groups.js";
 export const WORKSPACE_WORDS = {
   stopWake: "Stop waking",
   rebuild: "Rebuild task",
-  newThread: "New thread",
+  newThread: "New thread here",
   openTerminal: "Open terminal",
   openBrowser: "Open browser",
   bringBack: "Bring back",

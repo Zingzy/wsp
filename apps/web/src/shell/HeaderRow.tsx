@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Where the window has no title bar, the frame row is its drag region and leaves room for the window's controls; every
-// control in it is no-drag.
+// control in it is no-drag. A frame row that stands where the sidebar's New thread row is not on screen holds the New
+// thread glyph right after the toggle.
 import type { ComponentPropsWithoutRef } from "react";
 import { SidebarTrigger } from "../components/ui/sidebar.js";
+import { NewThreadGlyph } from "../sidebar/NewThreadRow.js";
 import { headerIsWindowFrame } from "../lib/desktopShell.js";
 import { cn } from "../lib/utils.js";
 
-export function HeaderRow({ frame, className, children, ...props }: ComponentPropsWithoutRef<"div"> & { readonly frame: boolean }) {
+export function HeaderRow({ frame, compose = false, className, children, ...props }: ComponentPropsWithoutRef<"div"> & { readonly frame: boolean; readonly compose?: boolean }) {
   return (
     <div
       className={cn(
@@ -19,6 +21,7 @@ export function HeaderRow({ frame, className, children, ...props }: ComponentPro
       {...props}
     >
       {frame ? <SidebarTrigger aria-label="Toggle main sidebar" /> : null}
+      {frame && compose ? <NewThreadGlyph /> : null}
       {children}
     </div>
   );

@@ -9,9 +9,9 @@ import { Lockup } from "../brand/Brand";
 import { SidebarFooter } from "../components/ui/sidebar";
 import { HeaderRow } from "../shell/HeaderRow";
 
-export const SidebarChromeHeader = memo(function SidebarChromeHeader({ children }: { children?: ReactNode }) {
+export const SidebarChromeHeader = memo(function SidebarChromeHeader({ compose = false, children }: { compose?: boolean; children?: ReactNode }) {
   return (
-    <HeaderRow frame className="@container/sidebar-header relative" data-slot="sidebar-header">
+    <HeaderRow frame compose={compose} className="@container/sidebar-header relative" data-slot="sidebar-header">
       {/* At 14px tall the optical centre sits 2px above the box's middle, so the box drops 2px onto the row's centre line. */}
       <Lockup className="h-3.5 w-fit shrink-0 translate-y-0.5 text-muted-foreground" />
       {children}

@@ -1,0 +1,15 @@
+{
+  "at": "/",
+  "steps": [
+    "390:key:Escape",
+    "390:sidebar=trigger",
+    "1440:row-id=thread:redirect",
+    "menu:row-id=thread:redirect"
+  ],
+  "wait": "menu-item=new-thread",
+  "widths": [
+    1440,
+    390
+  ],
+  "reason": "The menu opens at the tile at its own width, so 1280 draws it as 1440 does; 390 opens the sidebar over the page."
+}

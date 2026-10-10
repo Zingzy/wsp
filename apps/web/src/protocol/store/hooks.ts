@@ -126,3 +126,9 @@ export function useProjectsRead(): boolean { return useStore(s => s.projectsRead
 export function useFirstRun(): boolean {
   return useStore(s => s.ready && s.projectsRead && s.projectsRefused === null && s.projects.length === 0 && s.workspaces.length === 0);
 }
+
+/** The project whose New thread page the centre shows while no workspace is picked: the one opened, else the first.
+ * The centre and the header read it here, so the page reads the same whether it was opened or fallen back to. */
+export function useHomeProject(): ProjectView | undefined {
+  return useStore(s => s.projects.find(p => p.id === s.projectHome) ?? s.projects[0]);
+}
