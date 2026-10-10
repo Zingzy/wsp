@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { act, cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { HostFolderListing, PlaceView, ProjectView } from "@wsp/protocol";
+import { cloneIntoTakenLine, type HostFolderListing, type PlaceView, type ProjectView } from "@wsp/protocol";
 import type { Api } from "../protocol/client.js";
 import { useStore } from "../protocol/store.js";
 import { AddProjectDialog } from "./AddProjectDialog.js";
@@ -58,6 +58,8 @@ function mount({ places = [HERE], projects = [], add }: { places?: PlaceView[]; 
     dialog,
   };
 }
+
+const storeAddProject = useStore.getState().addProject;
 
 const settle = async (): Promise<void> => {
   await act(async () => {
@@ -145,6 +147,40 @@ describe("Add a project", () => {
     await settle();
     expect(t.addProject).toHaveBeenCalledWith("https://github.com/spoo-me/spoo.me", undefined, "~/tmp/clones");
     expect(t.onClose).toHaveBeenCalled();
+  });
+
+  it("clones a repo address into a folder of its name inside the folder picked, and that folder is the project the sidebar shows", async () => {
+    const lab = recorded("/Users/dev/Downloads/lab");
+    const projectsAdd = vi.fn(async () => lab);
+    const t = mount();
+    useStore.setState({ api: { ...useStore.getState().api, projectsAdd } as unknown as Api, addProject: storeAddProject } as never);
+    await settle();
+    fireEvent.change(t.field(), { target: { value: "https://github.com/acme/lab" } });
+    const folder = t.dialog().querySelector<HTMLInputElement>("[data-k=clone-into-folder]")!;
+    expect(folder.placeholder).toBe("The folder to put lab in, like ~/code");
+    fireEvent.change(folder, { target: { value: "~/Downloads" } });
+    fireEvent.click(t.addButton());
+    await settle();
+    expect(projectsAdd).toHaveBeenCalledWith("https://github.com/acme/lab", undefined, "~/Downloads");
+    expect(useStore.getState().projects.map(p => p.path)).toEqual(["/Users/dev/Downloads/lab"]);
+    expect(useStore.getState().projectHome).toBe(lab.id);
+    expect(t.onClose).toHaveBeenCalled();
+  });
+
+  it("says in one line when the repo's folder inside the one picked holds files, naming it and offering the next name", async () => {
+    const t = mount({
+      add: async () => {
+        throw new Error(cloneIntoTakenLine("~/Downloads/lab", "~/Downloads/lab-2"));
+      },
+    });
+    await settle();
+    fireEvent.change(t.field(), { target: { value: "https://github.com/acme/lab" } });
+    fireEvent.change(t.dialog().querySelector<HTMLInputElement>("[data-k=clone-into-folder]")!, { target: { value: "~/Downloads" } });
+    fireEvent.click(t.addButton());
+    await settle();
+    const refusal = t.dialog().querySelector<HTMLElement>("[data-k=add-project-refusal]")!;
+    expect(refusal.textContent).toBe("~/Downloads/lab already holds files; clone into ~/Downloads/lab-2, or pick another folder");
+    expect(t.onClose).not.toHaveBeenCalled();
   });
 
   it("reads owner/repo as a search while a repo here matches it and as a repo to clone once none does, and the picker fills the folder", async () => {

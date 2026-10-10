@@ -11,7 +11,7 @@ usage: wsp add
        [--ssh-key <path>] [--host-key <key>]
   a computer of yours over ssh by user@host or by an alias from your ssh config,
   or a project: a folder on this computer, a git repo or not, whose threads run
-  in it, or a repo cloned into an empty folder here with --into <folder> or by a
+  in it, or a repo cloned into a folder here with --into <folder> or by a
   computer with --on <computer>; nothing prints the join line another computer
   types, a computer with --update puts this wsp's daemon on one already in, and
   a computer with --sign-in signs that agent in there once, outside every
@@ -55,9 +55,13 @@ usage: wsp add
                   with the folder seeding what git ignores; without it a folder
                   here, or a repo cloned --into a folder here, is worked where
                   it sits
-  --into          the empty folder on this computer to clone a repo into, one
-                  that does not exist yet or holds nothing; the project is then
-                  that folder, worked where it sits
+  --into          the folder on this computer to clone a repo in, as git clone
+                  does: the repo lands in a folder of its own name inside it,
+                  made where it does not exist yet, unless the folder named
+                  carries the repo's name or that name with a number (lab,
+                  lab-2), when it is the clone's folder itself; a clone's folder
+                  that holds files is refused with the next free name; the
+                  project is then the clone's folder, worked where it sits
   --base          the branch a thread of the project starts on; the remote's own
                   default branch at the clone without it
   --yes           send the ticked rows of the seed menu; without it a folder

@@ -132,7 +132,9 @@ const palette = () => document.querySelector<HTMLElement>("[data-command-palette
 const search = () => palette()!.querySelector<HTMLInputElement>("input")!;
 const paletteRows = () => [...palette()!.querySelectorAll<HTMLElement>("[data-slot=command-item]")];
 const rowTitle = (row: HTMLElement) => row.querySelector("span.truncate")?.textContent;
-const projectRows = () => [...palette()!.querySelectorAll<HTMLElement>("[data-palette-group=projects] [data-slot=command-item]")];
+const pageRows = () => [...palette()!.querySelectorAll<HTMLElement>("[data-palette-group=projects] [data-slot=command-item]")];
+/** The page's projects, without the New project row that ends it. */
+const projectRows = () => pageRows().filter(row => rowTitle(row) !== "New project");
 const ASK: Preferences = { ...DEFAULT_PREFERENCES, newThreadIn: "ask" };
 const CURRENT: Preferences = { ...DEFAULT_PREFERENCES, newThreadIn: "current" };
 /** The desktop shell, told apart by the bridge its preload puts on the page; a browser tab keeps the mod digits. */
@@ -159,7 +161,7 @@ describe("New thread from Cmd+T", () => {
     expect(heading().textContent).toBe("What should we build in py_spoo_url?");
   });
 
-  it("the heading's project name is the project picker: the projects and Add a project", async () => {
+  it("the heading's project name is the project picker: the projects and New project", async () => {
     await mount();
     cmdT();
     const picker = await screen.findByRole("button", { name: "Project: wsp" });
@@ -172,7 +174,7 @@ describe("New thread from Cmd+T", () => {
     let asked = 0;
     const stop = onAddProjectRequest(() => void (asked += 1));
     fireEvent.click(await screen.findByRole("button", { name: "Project: py_spoo_url" }));
-    fireEvent.click(within(await screen.findByRole("menu")).getByRole("menuitem", { name: "Add a project" }));
+    fireEvent.click(within(await screen.findByRole("menu")).getByRole("menuitem", { name: "New project" }));
     stop();
     expect(asked).toBe(1);
   });
@@ -241,7 +243,7 @@ describe("New thread when the setting asks every time", () => {
     await waitFor(() => expect(palette()).not.toBeNull());
     expect(useStore.getState()).toMatchObject({ selectedId: PLANNER.id, projectHome: null });
     expect(palette()!.querySelector("[data-palette-group=projects] [data-slot=command-group-label]")?.textContent).toBe("Projects");
-    expect(projectRows().map(rowTitle)).toEqual(["wsp", "py_spoo_url", "wsp"]);
+    expect(pageRows().map(rowTitle)).toEqual(["wsp", "py_spoo_url", "wsp", "New project"]);
     const [here, spoo, there] = projectRows();
     expect(spoo!.querySelector("svg.lucide-rocket")?.getAttribute("data-hue")).toBe("teal");
     expect(here!.querySelector("[data-item-description]")?.textContent).toBe(`this Mac ${WSP.path}`);
