@@ -3,9 +3,10 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { adoptLoginPath, agentsHere, aimedHost, computerNameHere, daemonBinaryHere, dialHost, installEach, mcpServerSpec, releaseFetch, runningWsp, serviceAddressHere, shimPath, systemService, wspHome, VERSION, type CliIO } from "@wsp/host";
-import { DEFAULT_PREFERENCES, HOME_ENV, HOST_WORDS, OutsideLine, ThemePreference, hostMenuAction, hostsMenuItems } from "@wsp/protocol";
-import { BrowserWindow, Menu, Notification, Tray, app, dialog, ipcMain, nativeImage, nativeTheme, powerSaveBlocker, shell, type IpcMainEvent, type IpcMainInvokeEvent } from "electron";
+import { adoptLoginPath, agentsHere, aimedHost, appLogsDir, computerNameHere, daemonBinaryHere, dialHost, installEach, mcpServerSpec, releaseFetch, runningWsp, serviceAddressHere, shimPath, systemService, wspHome, VERSION, type CliIO } from "@wsp/host";
+import { DEFAULT_PREFERENCES, HOME_ENV, type BundleOutcome, HOST_WORDS, OutsideLine, ThemePreference, hostMenuAction, hostsMenuItems } from "@wsp/protocol";
+import { BrowserWindow, Menu, Notification, Tray, app, crashReporter, dialog, ipcMain, nativeImage, nativeTheme, powerSaveBlocker, shell, type IpcMainEvent, type IpcMainInvokeEvent } from "electron";
+import { openAppLog, rendererReport } from "./app-log.js";
 import { awakeWanted } from "./awake.js";
 import { chooseFrom, contextMenuTemplate, parseContextMenuItems } from "./context-menu.js";
 import { deepLinks, linkInArgv } from "./deep-link.js";
@@ -32,8 +33,24 @@ const ONBOARDING_PAGE = here("./onboarding.html");
 /** The wsp command the shim runs, bundled beside this main. */
 const CLI_SCRIPT = here("./cli.mjs");
 
+/** The app's log and crash dumps, under the home this launch serves. */
+const LOGS = appLogsDir(homeOf(launch()));
+const appLog = openAppLog(LOGS, { env: process.env });
+
 const refuse = (q: string): Promise<string> => Promise.reject(new Error(`no terminal to ask: ${q}`));
-const io: CliIO = { log: l => console.log(l), error: l => console.error(l), ask: refuse, askSecret: refuse };
+const io: CliIO = {
+  log: l => {
+    console.log(l);
+    appLog.write("info", l);
+  },
+  error: l => {
+    console.error(l);
+    appLog.write("error", l);
+  },
+  ask: refuse,
+  askSecret: refuse,
+};
+const stackOf = (e: unknown): string => (e instanceof Error ? (e.stack ?? e.message) : String(e));
 
 /** The bundle a packaged mac app runs from; the smoke drives its bundle out of dist and takes no update. */
 const ownBundle = process.platform === "darwin" && app.isPackaged && process.env["WSP_DESKTOP_SMOKE"] !== "1" ? bundleOf(process.execPath) : undefined;
@@ -57,6 +74,16 @@ app.setPath("userData", userDataIn(launch()));
 // One app per home: the lock is keyed on the folder just set, so a second launch on the same home hands its
 // arguments, a wsp:// link among them on Linux and Windows, to this one and quits.
 if (!app.requestSingleInstanceLock()) app.exit(0);
+
+appLog.write("info", `wsp app ${app.getVersion()} started (pid ${process.pid}, ${process.platform} ${process.arch}, electron ${process.versions.electron}${app.isPackaged ? "" : ", unpackaged"})`);
+// A monitor sees the throw and changes nothing: Electron still answers it the way it did.
+process.on("uncaughtExceptionMonitor", (e, origin) => appLog.write("error", `main: ${origin}: ${stackOf(e)}`));
+process.on("unhandledRejection", e => appLog.write("error", `main: unhandled rejection: ${stackOf(e)}`));
+// Before the app is ready, as Electron asks of both. The dumps stay on this computer: nothing is ever uploaded.
+app.setPath("crashDumps", join(LOGS, "crashes"));
+crashReporter.start({ uploadToServer: false });
+app.on("render-process-gone", (_event, contents, details) => appLog.write("error", `renderer gone: ${details.reason} (exit ${details.exitCode}) at ${contents.getURL()}; dumps in ${app.getPath("crashDumps")}`));
+app.on("child-process-gone", (_event, details) => appLog.write("error", `${details.type} process gone: ${details.reason} (exit ${details.exitCode}); dumps in ${app.getPath("crashDumps")}`));
 
 /** The host the window is on; every bridge call is gated on its origin and on what a page on it may ask for. */
 let session: HostSession | undefined;
@@ -207,6 +234,23 @@ listen("outside:say", (event, line) => {
 
 listen("badge:set", (_event, count) => showBadge(count, app));
 
+// What a page threw and nobody caught, from whichever page the window holds, the first launch's included: the page
+// says it and the log keeps it, bounded and blanked like every other line.
+listen(
+  "log:renderer",
+  (_event, raw) => {
+    const report = rendererReport(raw);
+    if (report !== undefined) appLog.write("error", report);
+  },
+  true,
+);
+
+// The logs are this app's whichever host the window is on, and opening their folder hands the page nothing back.
+answer("logs:open", async () => {
+  const failed = await shell.openPath(LOGS);
+  if (failed !== "") throw new Error(failed);
+});
+
 // Whether this computer's service starts at login is this computer's to say, so only the app's own host's page asks.
 answer("service:login", () => loginStart(where().statePath, systemService()));
 answer("service:login-set", (_event, on) => setLoginStart(where().statePath, on === true, systemService()));
@@ -250,9 +294,21 @@ const bundles = (): BundleShell =>
           },
         }),
   }));
-answer("bundle:get", (_event, ask) => bundles().get(ask));
-answer("bundle:open", () => bundles().open());
-answer("bundle:discard", () => bundles().discard());
+/** One step of an update and how it ended, in the log: a failed download's whole sentence is kept nowhere else. */
+async function updateStep(step: string, run: () => Promise<BundleOutcome>): Promise<BundleOutcome> {
+  appLog.write("info", `update: ${step}`);
+  try {
+    const outcome = await run();
+    appLog.write(outcome.ok ? "info" : "error", `update: ${step} ${outcome.ok ? "done" : `failed: ${outcome.error}`}`);
+    return outcome;
+  } catch (e) {
+    appLog.write("error", `update: ${step} threw: ${stackOf(e)}`);
+    throw e;
+  }
+}
+answer("bundle:get", (_event, ask) => updateStep(`get ${JSON.stringify(ask)}`, () => bundles().get(ask)));
+answer("bundle:open", () => updateStep("open", () => bundles().open()));
+answer("bundle:discard", () => updateStep("discard", () => bundles().discard()));
 
 // The device token of a host somewhere else is the shell's to hold: the page asks for it over the bridge and it never
 // rides in the page the host served.
@@ -334,7 +390,8 @@ async function showApp(on: HostSession): Promise<void> {
   const { statePath } = where();
   session = on;
   local = on;
-  io.log(`attached ${on.url} (state ${statePath})`);
+  // A host on this computer serves this app's own release or the launch stopped before here, so its version is the app's.
+  io.log(on.remote ? `attached ${on.label} at ${on.url}` : `attached ${on.url} (wsp ${VERSION}, state ${statePath})`);
   // Dark until the page says otherwise: the page opens on its dark side too, and tells the shell the preference once it has read it.
   nativeTheme.themeSource = "dark";
   win = newWindow(PRELOAD);
@@ -563,7 +620,11 @@ async function dialHere(): Promise<Awaited<ReturnType<typeof dialHost>>> {
   try {
     const found = await hostTurn(() => recheck(hostOptions()));
     if (found.kind === "replaced") await movedHere(found.session);
-    if (found.kind === "again" && found.first) void dialog.showMessageBox({ type: "warning", ...servesAgainNotice(found.release, found.failed) });
+    if (found.kind === "again" && found.first) {
+      const notice = servesAgainNotice(found.release, found.failed);
+      appLog.write("warn", `${notice.message}. ${notice.detail}`);
+      void dialog.showMessageBox({ type: "warning", ...notice });
+    }
   } catch (e) {
     // As at start: the person kept the older host serving, and this app draws no page but its own release's.
     if (e instanceof KeptOtherRelease) {

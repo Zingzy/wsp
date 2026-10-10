@@ -270,6 +270,10 @@ export const GENERAL_WORDS = {
   onQuitChoices: { ask: "Ask each time", keep: "Keep threads running", stop: "Stop wsp too" } satisfies Record<OnQuit, string>,
   loginStart: "Start wsp at login",
   loginStartDescription: (here: string): string => onceNamed(here, h => `wsp keeps running on ${h} with no window open, so threads carry on.`),
+  logs: "Logs",
+  appLogs: "App logs",
+  appLogsDescription: "The app's log and its crash reports. Nothing in them is sent anywhere.",
+  openLogs: "Open logs",
 } as const;
 
 export const PRIVACY_WORDS = {

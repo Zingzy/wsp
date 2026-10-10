@@ -2,7 +2,7 @@
 // Drives the packaged app (pnpm --filter @wsp/desktop build first). Gated on
 // WSP_DESKTOP_SMOKE=1 so the unit suite stays free of a 200 MB binary.
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { connect } from "node:net";
 import { tmpdir } from "node:os";
@@ -1257,6 +1257,53 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
       await new Promise<void>(done => requestAnimationFrame(() => requestAnimationFrame(() => done())));
     });
     expect(await win.locator("[data-notice]", { hasText: VERSION_LINE }).count()).toBe(0);
+  });
+
+  it("keeps a log and crash dumps under ~/.wsp/logs: a forced error in main and in the page each land in app.log with a time, and a forced renderer crash leaves a dump that is never uploaded and a line", async () => {
+    existing = await startHost({ runtime: testRuntime(true), webDir: workspaceAsset("web"), port: 0 });
+    launched = await launch({ WSP_HOME: undefined }, home => seedServingLock(join(home, ".wsp"), { port: existing!.port, token: existing!.authToken }));
+    const logs = join(launched.home, ".wsp", "logs");
+    const TIME = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z /;
+    /** The log's entries, each line that opens with its time, the time taken off; a stack's lines open with none. */
+    const entries = (): string[] => (existsSync(join(logs, "app.log")) ? readFileSync(join(logs, "app.log"), "utf8").split("\n").filter(line => TIME.test(line)).map(line => line.replace(TIME, "")) : []);
+    const win = await windowAt(launched.app, APP_URL);
+    await win.waitForSelector("[data-slot=sidebar-container]");
+    expect(await launched.app.evaluate(({ crashReporter }) => crashReporter.getUploadToServer())).toBe(false);
+    await launched.app.evaluate(() => void setTimeout(() => void Promise.reject(new Error("forced main error"))));
+    await win.evaluate(() => void setTimeout(() => {
+      throw new Error("forced renderer error");
+    }));
+    await vi.waitFor(() => expect(entries()).toContain("error main: unhandled rejection: Error: forced main error"), { timeout: 10_000, interval: 100 });
+    await vi.waitFor(() => expect(entries()).toContain("error renderer: uncaught at /: Uncaught Error: forced renderer error"), { timeout: 10_000, interval: 100 });
+    expect(entries().filter(e => e.startsWith(`info attached http://127.0.0.1:${existing!.port} (wsp ${VERSION}, state `))).toHaveLength(1);
+    await launched.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.webContents.forcefullyCrashRenderer());
+    // The reason is the platform's: Linux crashes the renderer outright, while macOS dumps it as hung and shuts it down.
+    const gone = new RegExp(`^error renderer gone: [a-z-]+ \\(exit -?\\d+\\) at http://127\\.0\\.0\\.1:${existing.port}/; dumps in .*${join(".wsp", "logs", "crashes").replace(/\//g, "\\/")}$`);
+    await vi.waitFor(() => expect(entries().filter(e => gone.test(e)), entries().join("\n")).toHaveLength(1), { timeout: 10_000, interval: 100 });
+    // Crashpad files a dump under the folder's own pending or completed, by platform and by upload state.
+    const crashFiles = (): string[] => readdirSync(join(logs, "crashes"), { recursive: true }) as string[];
+    await vi.waitFor(() => expect(crashFiles().filter(file => file.endsWith(".dmp")), crashFiles().join("\n")).not.toHaveLength(0), { timeout: 20_000, interval: 200 });
+  });
+
+  it.runIf(process.platform === "linux")("Settings > General's Open logs opens the logs folder in the file manager", async () => {
+    existing = await startHost({ runtime: testRuntime(true), webDir: workspaceAsset("web"), port: 0 });
+    // The file manager a Linux desktop opens a folder with, standing in first on the app's PATH: it says what it was handed.
+    const stubs = mkdtempSync(join(tmpdir(), "wsp-desktop-smoke-open-"));
+    const opened = join(stubs, "opened");
+    writeStub(join(stubs, "xdg-open"), `#!/bin/sh\nprintf '%s\\n' "$1" >> ${JSON.stringify(opened)}\n`);
+    try {
+      launched = await launch({ WSP_HOME: undefined, PATH: `${stubs}:${process.env["PATH"] ?? ""}` }, home => seedServingLock(join(home, ".wsp"), { port: existing!.port, token: existing!.authToken }));
+      const win = await windowAt(launched.app, APP_URL);
+      await win.locator("[data-k=settings-row]").click();
+      await win.locator("[data-k=settings-general]").click();
+      const open = win.locator("[data-k=open-logs]");
+      await open.scrollIntoViewIfNeeded();
+      await photographPage(win, join(SHOTS, "settings-general-logs.png"));
+      await open.click();
+      await vi.waitFor(() => expect(existsSync(opened) ? readFileSync(opened, "utf8") : "").toBe(`${join(launched!.home, ".wsp", "logs")}\n`), { timeout: 10_000, interval: 100 });
+    } finally {
+      rmSync(stubs, { recursive: true, force: true });
+    }
   });
 
   it("a turn that finished while the window was away is a system notification with the page's line by default, held past a collection, its click raises the window on that thread, and a click after the window closed opens it again", async () => {

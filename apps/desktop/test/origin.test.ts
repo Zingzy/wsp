@@ -43,8 +43,8 @@ describe("fromOnboardingPage", () => {
 describe("what a page may ask the shell for", () => {
   const here = { url: "http://127.0.0.1:4400", remote: false };
   const away = { url: "http://box.example:4400", remote: true };
-  /** Its own device token, the hosts list, a move home, and the shell's own presentation. */
-  const REMOTE = ["hosts:token", "hosts:list", "hosts:switch", "menu:context", "terminal:focus", "theme:set", "glass:set", "titlebar:set", "outside:say", "badge:set"];
+  /** Its own device token, the hosts list, a move home, the shell's own presentation and the app's own log. */
+  const REMOTE = ["hosts:token", "hosts:list", "hosts:switch", "menu:context", "terminal:focus", "theme:set", "glass:set", "titlebar:set", "outside:say", "badge:set", "log:renderer", "logs:open"];
   /** This computer's files, its pictures, its picker, the download of a new app and its service's login switch. */
   const HERE_ONLY = ["fonts:local", "fonts:families", "folder:pick", "preview:capture", "preview:read", "drop:allowed", "bundle:get", "bundle:open", "service:login", "service:login-set"];
 

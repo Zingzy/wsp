@@ -9,7 +9,7 @@ import { lockPathFor, refuseIfServed, startedByEnv } from "../host-lock.js";
 import { registeredService } from "../service.js";
 import { serviceServesState, type HostStarter } from "../host-start.js";
 import { hostsCommand, loginCommand, logoutCommand, relayCommand } from "../relay-link.js";
-import type { HostPick } from "../hosts.js";
+import { appLogsDir, wspHome, type HostPick } from "../hosts.js";
 import { devicesCommand, pairCommand } from "../pairing.js";
 import { addCommand, addFlags, dialHere, joinCommand, leaveCommand, placeWiring, removeCommand, REMOVE_USAGE } from "../places.js";
 import type { PortProbes } from "../ports.js";
@@ -324,6 +324,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
     cliOnly: "runs for minutes, makes and deletes a machine on the computer you named, and on a cloud account forks a live machine that bills while it runs; a person decides that at a terminal",
     run: async (io, opts, values, args, deps) => {
       await adoptLoginPath(line => io.log(line));
+      io.log(`app logs ${appLogsDir(wspHome(opts.env))}: the desktop app's app.log and its crash dumps`);
       // One wiring for this computer, so the daemon the copy road would run and the one the doctor reads the
       // version off are the same process. Its sink keeps nothing: this is a person's screen, and what the daemon
       // says on its own stderr as it starts is not the answer they asked for.
