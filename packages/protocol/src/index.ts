@@ -166,6 +166,7 @@ export * from "./plan-alerts.js";
 export * from "./outside-line.js";
 export * from "./pull-request.js";
 export * from "./run-block.js";
+export * from "./tool-result.js";
 export * from "./tree.js";
 export * from "./start.js";
 export * from "./daemon-contract.js";
