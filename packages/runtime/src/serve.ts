@@ -285,7 +285,7 @@ export interface PlaceDoctor {
  * `on` is a host source like the init door's, so its events carry no sequence and are not replayed. */
 export interface ReleaseDoor {
   get(): ReleaseView;
-  check(): Promise<ReleaseView>;
+  check(force?: boolean): Promise<ReleaseView>;
   on(fn: (e: ReleaseChangedEvent) => void): () => void;
 }
 
@@ -921,7 +921,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             }
             case "places.remove": {
               if (refusedOffOwnRoad()) return;
-              send({ id: msg.id, ok: true, ...(await places().remove(msg.placeId, { ...(msg.sudoPassword === undefined ? {} : { sudoPassword: msg.sudoPassword }), ...(msg.force === true ? { force: true } : {}) })) });
+              send({ id: msg.id, ok: true, ...(await places().remove(msg.placeId, { ...(msg.sudoPassword === undefined ? {} : { sudoPassword: msg.sudoPassword }), ...(msg.force === true ? { force: true } : {}), ...(msg.forget === true ? { forget: true } : {}) })) });
               return;
             }
             case "places.holds": {
@@ -1981,7 +1981,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               send({ id: msg.id, ok: true, release: release().get() });
               return;
             case "release.check":
-              send({ id: msg.id, ok: true, release: await release().check() });
+              send({ id: msg.id, ok: true, release: await release().check(msg.force === true) });
               return;
             case "host.restart": {
               if (!ownRoad()) {

@@ -551,7 +551,7 @@ export interface Api {
    * the workspaces standing on it and the record. */
   /** What a remove of that computer takes with it, read now: its tasks and projects, and the work among them no remote has. */
   placeHolds?(placeId: string): Promise<PlaceHolds>;
-  removePlace?(placeId: string, sudoPassword?: string, force?: boolean): Promise<PlaceRemoved>;
+  removePlace?(placeId: string, sudoPassword?: string, force?: boolean, forget?: boolean): Promise<PlaceRemoved>;
   /** Puts this wsp's daemon on the computer where that computer runs an older one; what it was set up with stays.
    * Answers what the daemon half came to where it ran. A client without it holds Update rather than offering one
    * that asks nobody. */
@@ -786,8 +786,9 @@ export interface Api {
   setPreferences?(patch: PreferencesPatch): Promise<Preferences & { notice?: string }>;
   /** The newest release as the host last read it, asking nobody. Optional so fixtures without About need not fake it. */
   releaseGet?(): Promise<ReleaseView>;
-  /** Asks the host to read the newest release again; the host keeps asks ten minutes apart and answers its reading. */
-  releaseCheck?(): Promise<ReleaseView>;
+  /** Asks the host to read the newest release again; the host keeps asks ten minutes apart unless `force`, a person's
+   * press, and answers its reading. */
+  releaseCheck?(force?: boolean): Promise<ReleaseView>;
   /** Restarts the host on the files it was installed from; the socket drops on its stopping code and reconnects. */
   hostRestart?(): Promise<void>;
   /** Brings a folder and the agent sessions keyed to it home from the workspace's machine; progress rides project.export
@@ -1085,7 +1086,7 @@ export function makeApi(c: ProtocolClient): Api {
       return typeof notice === "string" ? { ...record, notice } : record;
     },
     releaseGet: async () => ReleaseView.parse((await c.request<{ release?: unknown }>("release.get")).release),
-    releaseCheck: async () => ReleaseView.parse((await c.request<{ release?: unknown }>("release.check")).release),
+    releaseCheck: async (force?: boolean) => ReleaseView.parse((await c.request<{ release?: unknown }>("release.check", force === true ? { force } : {})).release),
     hostRestart: async () => void (await c.request("host.restart")),
     // Parsed, not trusted: the dialog renders only what the wire type vouches for.
     exportProject: async opts => ProjectExportResult.parse((await c.request<{ exported?: unknown }>("project.export", { ...opts })).exported),
@@ -1101,7 +1102,7 @@ export function makeApi(c: ProtocolClient): Api {
     initSignInCode: async o => InitJob.parse((await c.request<{ job?: unknown }>("init.signInCode", { ...o })).job),
     initCancel: async () => InitJob.parse((await c.request<{ job?: unknown }>("init.cancel")).job),
     placeHolds: async placeId => PlaceHolds.parse(await c.request("places.holds", { placeId })),
-    removePlace: async (placeId, sudoPassword, force) => PlaceRemoved.parse(await c.request("places.remove", { placeId, ...(sudoPassword === undefined ? {} : { sudoPassword }), ...(force === true ? { force: true } : {}) })),
+    removePlace: async (placeId, sudoPassword, force, forget) => PlaceRemoved.parse(await c.request("places.remove", { placeId, ...(sudoPassword === undefined ? {} : { sudoPassword }), ...(force === true ? { force: true } : {}), ...(forget === true ? { forget: true } : {}) })),
     // Parsed, not trusted: the row the answer lands on is redrawn off it, so only what the wire type vouches for
     // reaches the table.
     dialPlace: async placeId => PlaceDial.parse(await c.request<Record<string, unknown>>("places.dial", { placeId })),

@@ -1202,6 +1202,76 @@ describe("a lead's tree in the sidebar", () => {
     await waitFor(() => expect(settleThreads).toHaveBeenCalledWith(["f1"]));
   });
 
+  it("keeps a child settled under a running lead in the lead's Finished fold, after the finished, muted, and opens it on a click", async () => {
+    mount({ projects: [project("pr_1", "spoo")], workspaces: [workspace("ws_a", "pricing page", "pr_1")] });
+    const tree = [
+      { ws: "ws_a", id: "lead", prompt: "coordinator", startedAgo: 2 * MIN },
+      { ws: "ws_a", id: "c-live", prompt: "still building", parent: "lead", startedAgo: 3 * MIN },
+      { ws: "ws_a", id: "c-done", prompt: "child done", parent: "lead", status: "completed", startedAgo: 9 * MIN, endedAgo: 8 * MIN },
+      { ws: "ws_a", id: "c-put", prompt: "child put away", parent: "lead", status: "completed", startedAgo: 30 * MIN, endedAgo: 20 * MIN, settledAgo: MIN },
+    ];
+    await act(async () => useStore.setState({ sessions: sessions(tree) } as never));
+    const fold = await waitFor(() => document.querySelector<HTMLElement>("[data-child-fold=finished]")!);
+    expect(fold.textContent).toBe("Finished2");
+    expect(document.querySelector("[data-row-id=settled]")).toBeNull();
+    expect(screen.queryByText("child put away")).toBeNull();
+    fireEvent.click(fold);
+    await waitFor(() => expect(rowIds()).toEqual(["thread:lead", "thread:c-live", "finished:thread:lead", "thread:c-done", "thread:c-put"]));
+    const put = rowOf("child put away");
+    expect(put.dataset["slim"]).toBe("true");
+    expect(put.closest("li")!.parentElement).toBe(fold.closest("ul"));
+    const slot = put.querySelector<HTMLElement>("[data-thread-status]")!;
+    expect(slot.textContent).toBe("20m");
+    expect(slot.dataset["tone"]).toBeUndefined();
+    expect(put.parentElement!.querySelector("[data-tile-settle]")).toBeNull();
+    expect(await menuOf(put)).toContain("restore");
+    fireEvent.click(put);
+    await waitFor(() => expect(useStore.getState().selectedThreadId).toBe("c-put"));
+    expect(rowOf("child put away")).toBeDefined();
+  });
+
+  it("a folded tile over a settled child alone counts its Finished fold's row", async () => {
+    mount({ projects: [project("pr_1", "spoo")], workspaces: [workspace("ws_a", "pricing page", "pr_1")] });
+    await act(async () =>
+      useStore.setState({
+        sessions: sessions([
+          { ws: "ws_a", id: "lead", prompt: "coordinator", startedAgo: 2 * MIN, foldedAgo: MIN },
+          { ws: "ws_a", id: "c-put", prompt: "child put away", parent: "lead", status: "completed", startedAgo: 30 * MIN, endedAgo: 20 * MIN, settledAgo: MIN },
+        ]),
+      } as never),
+    );
+    await waitFor(() => expect(rowOf("coordinator").querySelector<HTMLElement>("[data-tile-fold]")!.textContent).toBe("1"));
+  });
+
+  it("a settled row past the second level names its opener on its card, and a fold of settled rows alone leaves its right-click to the sidebar's own menu", async () => {
+    mount({ projects: [project("pr_1", "spoo")], workspaces: [workspace("ws_a", "pricing page", "pr_1")] });
+    const chain = [{ id: "lead", prompt: "coordinator" }, { id: "l1", prompt: "level one", parent: "lead" }, { id: "l2", prompt: "level two", parent: "l1" }].map((row, i) => ({ ws: "ws_a", startedAgo: (10 - i) * MIN, ...row }));
+    await act(async () => useStore.setState({ sessions: sessions([...chain, { ws: "ws_a", id: "l3", prompt: "level three", parent: "l2", status: "completed", startedAgo: 7 * MIN, endedAgo: 6 * MIN, settledAgo: MIN }]) } as never));
+    const fold = await waitFor(() => document.querySelector<HTMLElement>("[data-row-id='finished:thread:l2']")!);
+    let ids: string[] = [];
+    window.wsp = { contextMenu: async (items: Array<{ id: string }>) => ((ids = items.map(item => item.id)), null) } as never;
+    fireEvent.contextMenu(fold);
+    delete (window as { wsp?: unknown }).wsp;
+    expect(ids).toEqual(["settle-read"]);
+    fireEvent.click(fold);
+    fireEvent.mouseEnter(await waitFor(() => document.querySelector<HTMLElement>("[data-row-id='thread:l3']")!));
+    const card = await waitFor(() => [...document.querySelectorAll("[data-tile-card]")].find(at => at.querySelector("[data-tile-card-title]")!.textContent === "level three")!);
+    expect(card.querySelector("[data-tile-card-line=started-by]")?.textContent).toBe("Started by coordinator / level one / level two");
+  });
+
+  it("moves the whole tree into Settled once the lead settles too, the child nested under it there and no Finished fold left", async () => {
+    mount({ projects: [project("pr_1", "spoo")], workspaces: [workspace("ws_a", "pricing page", "pr_1")] });
+    const child = { ws: "ws_a", id: "c-put", prompt: "child put away", parent: "lead", status: "completed", startedAgo: 30 * MIN, endedAgo: 20 * MIN, settledAgo: 10 * MIN };
+    await act(async () => useStore.setState({ sessions: sessions([{ ws: "ws_a", id: "lead", prompt: "coordinator", startedAgo: 2 * MIN }, child]) } as never));
+    await waitFor(() => expect(rowIds()).toEqual(["thread:lead", "finished:thread:lead"]));
+    await act(async () => useStore.setState({ sessions: sessions([{ ws: "ws_a", id: "lead", prompt: "coordinator", status: "completed", startedAgo: 9 * MIN, endedAgo: 5 * MIN, settledAgo: MIN }, child]) } as never));
+    await waitFor(() => expect(rowIds()).toEqual(["settled"]));
+    fireEvent.click(document.querySelector<HTMLElement>("[data-row-id=settled]")!);
+    await waitFor(() => expect(rowIds()).toEqual(["settled", "thread:lead", "thread:c-put"]));
+    expect(rowOf("child put away").closest("li")!.parentElement).toBe(rowOf("coordinator").closest("li")!.querySelector(":scope > ul"));
+    expect(document.querySelector("[data-child-fold=finished]")).toBeNull();
+  });
+
   it("a quiet tile offers Settle beside its button, a working one and one over a working child nothing", async () => {
     const { settleThreads } = mount({ projects: [project("pr_1", "spoo")], workspaces: [workspace("ws_a", "pricing page", "pr_1")] });
     await act(async () =>

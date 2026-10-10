@@ -23,7 +23,7 @@
 import { openProjectSettings } from "../settings/openAt.js";
 import { ChevronDownIcon, CopyIcon, PlusIcon, SquarePenIcon, Trash2Icon } from "lucide-react";
 import { Fragment, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type ReactNode } from "react";
-import { HOST_ASLEEP_LINE, SETTLE_MS, copiesFolder, kindForComputer, modelOf, runsInFolder, modelPicks, workspaceKind, workspaceState, type WorkspaceState, type WorkspaceView } from "@wsp/protocol";
+import { HOST_ASLEEP_LINE, SETTLE_MS, copiesFolder, isHere, kindForComputer, modelOf, runsInFolder, modelPicks, workspaceKind, workspaceState, type WorkspaceState, type WorkspaceView } from "@wsp/protocol";
 import { openContextMenu, runAction } from "../actions/contextMenu.js";
 import { THREAD_TREE_WORKING, rebuildRefusedLine } from "../actions/format.js";
 import { CREATE_ASKED, CREATE_STEP_WORDS, currentStep, stepWords, stoppedStep } from "../shell/creationLog.js";
@@ -31,7 +31,7 @@ import { actionById, actionIfAny, resolveActions, type ResolvedAction } from "..
 import { projectActions, type ProjectVerbs } from "../actions/projectActions.js";
 import { settleSaying, settledFoldActions, threadActions, threadTarget, type ThreadVerbs } from "../actions/threadActions.js";
 import { useChildVerbs, useThreadVerbs, useWorkspaceVerbs } from "../actions/verbs.js";
-import { childActs, finishedTake, kindOf, leadActs, leadNodes } from "../components/threads/leadTree.js";
+import { childActs, finishedTake, kindOf, leadActs, leadNodes, type ChildPart } from "../components/threads/leadTree.js";
 import { workspaceActions, workspaceTarget } from "../actions/workspaceActions.js";
 import type { SidebarProjectSnapshot } from "../adapt/index.js";
 import { ForgetWorkspaceDialog } from "../components/ForgetWorkspaceDialog.js";
@@ -354,7 +354,7 @@ export function WorkspaceSidebar() {
    * a root or a tile whose opener runs on another copy, carries every one of that copy's verbs after the thread's own.
    * A tile's verbs reach the machine its own copy runs on, so a thread on a machine that is gone is refused wherever it
    * is drawn. */
-  const tileItem = (node: TileNode, depth: number, above: string | null, settled = false, group: ReadonlyArray<string> = [], part: "live" | "finished" = "live", path: ReadonlyArray<string> = []): ReactNode => {
+  const tileItem = (node: TileNode, depth: number, above: string | null, settled = false, group: ReadonlyArray<string> = [], part: ChildPart = "live", path: ReadonlyArray<string> = []): ReactNode => {
     const { thread: item, children } = node;
     const { runs, thread } = item;
     if (item.groupTitle !== undefined) {
@@ -396,22 +396,23 @@ export function WorkspaceSidebar() {
       // A settle, a restore, a pin and a snooze take a root and its whole tree; a tile under one settles its own.
       const root = isRoot ? { ...treeSettle(real), workspaceIds: treeWorkspaceIds(real), pinned: thread.pinnedAt !== null, settled } : null;
       const catalog = catalogIn({ harnesses, harnessesByWorkspace }, thread.workspaceId, thread.harness);
-      const target = threadTarget(thread, { catalog, ...machineOf(runs) }, root, group);
+      const target = threadTarget(thread, { catalog, ...machineOf(runs), ...(place.at !== undefined && !isHere(place.at) ? { elsewhere: place.computer } : {}) }, root, group);
       const actionsOf = resolveActions(threadActions, target, inbox === undefined || !canRename ? threadVerbs : { ...threadVerbs, rename: () => setRenaming({ rowId, saving: false }) });
       const lead = { node: real, thread };
       const asChild = childActs(lead, part, tree, childVerbs);
       const settle = settled ? undefined : root !== null ? actionIfAny(actionsOf, "settle") : actionIfAny(asChild, "settle");
+      const restore = root === null ? actionIfAny(asChild, "restore") : undefined;
       const restartOpens = asChild.filter(action => action.id === "open-replaced" || action.id === "open-restart");
       const quiet = !settled && settle !== undefined && settle.refusal === null && settlesOnHover(real, tree);
       const kids = leadNodes(thread, real.children, tree);
-      const own = [...actionsOf, ...restartOpens, ...(root === null && settle !== undefined ? [settle] : []), ...leadActs(thread, finishedTake(kids, tree), childVerbs)];
+      const own = [...actionsOf, ...restartOpens, ...(root === null && settle !== undefined ? [settle] : []), ...(restore === undefined ? [] : [restore]), ...leadActs(thread, finishedTake(kids, tree), childVerbs)];
       // The tree under the tile: drawn while it stands open, counted while it is folded, and folded only where the host
       // can open it again.
       const drawsTree = !settled && part === "live" && inbox === undefined && item.snoozedWorking === undefined && drawsUnder(real, tree);
       const folds = drawsTree && canMark;
       const folded = folds && thread.foldedAt !== null;
       if (drawsTree && !folded)
-        under = <LeadTree lead={thread} kids={children} depth={depth + 1} tree={tree} verbs={childVerbs} tile={(child, childPart) => tileItem(child, depth + 1, runs.id, false, [], childPart, [...path, thread.title])} />;
+        under = <LeadTree lead={thread} kids={children} depth={depth + 1} tree={tree} verbs={childVerbs} tile={(child, childPart) => tileItem(child, depth + 1, runs.id, childPart === "settled", [], childPart, [...path, thread.title])} />;
       tile = (
         <ThreadTile
           thread={thread}
@@ -426,7 +427,7 @@ export function WorkspaceSidebar() {
           renaming={renaming?.rowId === rowId}
           saving={renaming?.rowId === rowId && renaming.saving}
           {...(inbox === undefined ? {} : { inboxOf: inbox })}
-          {...(inbox === undefined && !settled && depth > 2 ? { openers: path } : {})}
+          {...(inbox === undefined && (!settled || part === "settled") && depth > 2 ? { openers: path } : {})}
           {...(part === "finished" ? { finished: kindOf(lead, "finished") } : {})}
           {...(folds ? { fold: folded ? rowsUnder(thread, children, tree) : ("open" as const) } : {})}
           {...(group.length > 0 && thread.model !== null ? { label: catalog === null ? thread.model : modelOf(catalog, modelPicks(thread.model).model)?.label } : {})}

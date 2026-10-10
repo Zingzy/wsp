@@ -4,6 +4,7 @@ import { z } from "zod";
 import { effortsFor, everyModel, markedDefault, modelOf } from "../harness-picks.js";
 import { AccessChoice } from "../thread-defaults.js";
 import { listed } from "../wire/helpers.js";
+import { shellLine } from "../shell-quote.js";
 import { WorkspaceOut } from "./workspace.js";
 
 // --- harness catalog (what the composer's pickers may offer) -------------------
@@ -108,6 +109,10 @@ export const HarnessCatalog = z.object({
    * adapter in this host declares it, as with mcpServers. Absent where wsp has no road to the agent's own compaction,
    * and nothing offers one. */
   compacts: z.string().optional(),
+  /** The command that opens one of this harness's sessions in the person's own terminal, the session id going after
+   * it, with the program and the config folder a turn there runs with; the adapter in this host declares it, as with
+   * mcpServers. Absent where the CLI has no such road, and nothing offers to continue a thread there. */
+  terminalResume: z.string().optional(),
   /** Whether rewinding a thread of this harness cuts its conversation too, in the harness's own history; absent is a
    * no, and a rewind there puts back the files alone while the harness keeps every turn it ran. */
   rewindsConversation: z.boolean().optional(),
@@ -194,6 +199,13 @@ export function takesMcpServers(catalog: Pick<HarnessCatalog, "mcpServers"> | nu
  * the person's next message. */
 export function movesRunningAccess(catalog: Pick<HarnessCatalog, "movesAccess"> | null | undefined): boolean {
   return catalog?.movesAccess === true;
+}
+
+/** The line a person pastes in their own terminal to go on with a thread there: into the folder its agent ran in,
+ * then the harness's own resume of its session. Null where the harness declares no such command. */
+export function terminalResumeLine(catalog: Pick<HarnessCatalog, "terminalResume"> | null | undefined, folder: string, sessionId: string): string | null {
+  const command = catalog?.terminalResume;
+  return command === undefined ? null : `cd ${shellLine([folder])} && ${command} ${shellLine([sessionId])}`;
 }
 
 /** Whatever carries a harness's screen-only commands: the catalog itself, or a caller that holds the list alone. */

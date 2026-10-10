@@ -283,12 +283,12 @@ const COMMANDS: Readonly<Record<string, Command>> = {
   remove: {
     page: "front",
     usage: REMOVE_USAGE,
-    about: "take a computer out, asked once: its forks are deleted and its projects leave this wsp with their threads, then the agent and its files go and the computer is left as wsp found it. Stopped by a fork or a project folder there holding work no remote has, naming each",
+    about: "take a computer out, asked once: its forks are deleted and its projects leave this wsp with their threads, then the agent and its files go and the computer is left as wsp found it. Stopped by a fork or a project folder there holding work no remote has, naming each. A computer that will never answer again is forgotten with --forget",
     json: true,
     host: "hostSide",
     cliOnly: "takes a computer out of this wsp and sweeps wsp off it, which belongs with the terminal that joined it",
     run: (io, opts, values, args) =>
-      removeCommand(io, startingPick(opts, values), args, { ...(values.yes === true ? { yes: true } : {}), ...(values.force === true ? { force: true } : {}), ...(values.json === true ? { json: true } : {}) }),
+      removeCommand(io, startingPick(opts, values), args, { ...(values.yes === true ? { yes: true } : {}), ...(values.force === true ? { force: true } : {}), ...(values.forget === true ? { forget: true } : {}), ...(values.json === true ? { json: true } : {}) }),
   },
   join: {
     page: "agent",
@@ -570,6 +570,7 @@ export const SHARED_FLAGS: readonly SharedFlag[] = [
   { name: "yes", on: ["init"], says: "take every default and ask nothing, which a run off a terminal needs; a login with a browser or device sign-in, or one held in the Keychain, is left to the first time you need it on the machine unless a saved recipe answered copy, so macOS has nothing to ask either and the build waits on nobody" },
   { name: "yes", on: ["remove", PLACE_LEAVE_VERB], says: FLAG_WORDS["yes"]! },
   { name: "force", on: ["remove"], says: "remove it even where a fork or a project folder there holds work no remote has, which goes with it" },
+  { name: "forget", on: ["remove"], says: "for a computer whose link will never answer again: it, its forks, its projects and their threads leave this wsp as records, wsp tries the leave over the ssh login it was added on, and nothing else is done on it; wsp leave there clears what stays" },
   { name: "force", on: [PLACE_LEAVE_VERB], says: "leave even where a project checkout on this computer holds work no remote has, which goes with it" },
   { name: "takes", on: [PLACE_LEAVE_VERB], says: "one project folder under /wsp/projects that wsp made, taken where /wsp stood before the add, which otherwise keeps every folder wsp did not make; given once per folder, as a remove names them" },
   { name: "yes", on: ["doctor"], says: "also delete the snapshots and templates this host left behind, which is not reversible" },

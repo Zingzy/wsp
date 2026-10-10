@@ -7,7 +7,7 @@
 // that adds another computer.
 import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { type InitJob, COPY_CURRENT, DAEMON_VERSION, DEFAULT_PREFERENCES, PLACES_TICKET_REFUSAL, PLACES_WORDS, PLACE_LOGIN_REFUSED_KIND, placeSshOtherRefusal, placeSshUncheckedRefusal, usageRefusal, PLACE_SUDO_KIND, PlaceAddStep, absentRoad, fmtBytes, fmtMemGb, fmtSize, imageCopyLine, placeAddSheetWord, placeDaemonBehind, placeNoDialLine, placeSettingDropped, setupWord, type PlaceSettings, type AgentsReport, type AgentsTarget, type EventUnion, type InitSetup, type PlaceAddJob, type PlaceApplied, type PlaceSetup, type PlaceView, type SealedImage, type SessionView, type WorkspaceStatus, type WorkspaceView, PLACE_INSTALL, PROVIDER_KEY_WORDS, placeUnsavedRefusal, type ProjectView } from "@wsp/protocol";
+import { type InitJob, COPY_CURRENT, DAEMON_VERSION, DEFAULT_PREFERENCES, PLACES_TICKET_REFUSAL, PLACES_WORDS, PLACE_LOGIN_REFUSED_KIND, placeSshOtherRefusal, placeSshUncheckedRefusal, usageRefusal, PLACE_SUDO_KIND, PlaceAddStep, absentRoad, fmtBytes, fmtMemGb, fmtSize, imageCopyLine, placeAddSheetWord, placeDaemonBehind, placeNoDialLine, placeSettingDropped, setupWord, type PlaceSettings, type AgentsReport, type AgentsTarget, type EventUnion, type InitSetup, type PlaceAddJob, type PlaceApplied, type PlaceSetup, type PlaceView, type SealedImage, type SessionView, type WorkspaceStatus, type WorkspaceView, PLACE_INSTALL, PROVIDER_KEY_WORDS, placeUnsavedRefusal, placeAwayRefusal, placeForgetAnswersRefusal, placeForgetLine, type PlaceHolds, type ProjectView } from "@wsp/protocol";
 import { render } from "@testing-library/react";
 import { makeApi, ProtocolClient, RequestError, type Api, type SshLogin } from "../src/protocol/client.js";
 import { useContextMenuStore } from "../src/actions/contextMenu.js";
@@ -650,6 +650,65 @@ describe("a computer's own page", () => {
     expect(document.querySelector("[data-k='remove-confirm']")?.textContent).toBe(WHERE_WORDS.removeAnyway);
     fireEvent.click(document.querySelector("[data-k='remove-confirm']")!);
     await waitFor(() => expect(forced).toEqual([true]));
+  });
+
+  it("offers an offline computer holding forks or projects only the forget the host takes, saying its order before the button, and a bare one the plain remove", async () => {
+    const ssh = "root@203.0.113.7";
+    const cases = [
+      { place: { ...laptop, road: { ssh } } as PlaceView, holds: { forks: [], projects: [{ name: "spoo-landing", threads: 3 }], unsaved: [], away: true as const }, forgets: true },
+      { place: laptop, holds: { forks: [{ name: "x", threads: 0 }], projects: [], unsaved: [], away: true as const }, forgets: true },
+      { place: { ...laptop, road: { ssh } } as PlaceView, holds: { forks: [], projects: [], unsaved: [], away: true as const }, forgets: false },
+    ];
+    for (const c of cases) {
+      cleanup();
+      useStore.setState({ places: [here, c.place], projects: [], workspaces: [] });
+      const asked: (boolean | undefined)[] = [];
+      await mountComputers(
+        computersApi({
+          placeHolds: async () => c.holds,
+          removePlace: async (_id: string, _sudo?: string, _force?: boolean, forget?: boolean) => (asked.push(forget), { removed: true, swept: [] }),
+        } as unknown as Partial<Api>).api,
+        { kind: "computer", id: "p_1" },
+      );
+      fireEvent.click(document.querySelector("[data-settings-page] [data-k='remove']")!);
+      await waitFor(() => expect(document.querySelector("[data-k='remove-refusal']")?.textContent).not.toBe(WHERE_WORDS.readingHolds));
+      const confirm = document.querySelector<HTMLButtonElement>("[data-k='remove-confirm']")!;
+      const sentence = document.querySelector("[data-k='remove-sentence']")?.textContent;
+      if (c.forgets) {
+        expect(screen.getByText("Forget old-macbook?")).toBeTruthy();
+        expect(sentence).toBe(`${placeAwayRefusal("old-macbook", "old-macbook is not answering").said}. ${placeForgetLine("old-macbook", c.holds, c.place.road?.ssh)}`);
+        expect(confirm.textContent).toBe(WHERE_WORDS.forget);
+      } else {
+        expect(screen.getByText("Remove old-macbook?")).toBeTruthy();
+        expect(confirm.textContent).toBe(WHERE_WORDS.remove);
+      }
+      expect(document.querySelector("[data-k='remove-refusal']")?.textContent).toBe("");
+      expect(confirm.disabled).toBe(false);
+      fireEvent.click(confirm);
+      await waitFor(() => expect(asked).toEqual([c.forgets]));
+    }
+  });
+
+  it("reads the holds again after a refusal, so a link that came back while the dialog stood turns its Forget into Remove", async () => {
+    useStore.setState({ places: [here, laptop], projects: [], workspaces: [] });
+    let holds: PlaceHolds = { forks: [], projects: [{ name: "spoo-landing", threads: 3 }], unsaved: [], away: true };
+    const answers = placeForgetAnswersRefusal("old-macbook");
+    const asked: (boolean | undefined)[] = [];
+    const removePlace = async (_id: string, _sudo?: string, _force?: boolean, forget?: boolean) => {
+      asked.push(forget);
+      if (forget !== true) return { removed: true, swept: [] };
+      holds = { forks: [], projects: [{ name: "spoo-landing", threads: 3 }], unsaved: [] };
+      throw new RequestError(`${answers.said}. ${answers.fix}`, undefined, answers.fix);
+    };
+    await mountComputers(computersApi({ placeHolds: async () => holds, removePlace } as unknown as Partial<Api>).api, { kind: "computer", id: "p_1" });
+    fireEvent.click(document.querySelector("[data-settings-page] [data-k='remove']")!);
+    await waitFor(() => expect(document.querySelector("[data-k='remove-confirm']")?.textContent).toBe(WHERE_WORDS.forget));
+    fireEvent.click(document.querySelector("[data-k='remove-confirm']")!);
+    await waitFor(() => expect(document.querySelector("[data-k='remove-refusal']")?.textContent).toContain(answers.said));
+    await waitFor(() => expect(document.querySelector("[data-k='remove-confirm']")?.textContent).toBe(WHERE_WORDS.remove));
+    expect(screen.getByText("Remove old-macbook?")).toBeTruthy();
+    fireEvent.click(document.querySelector("[data-k='remove-confirm']")!);
+    await waitFor(() => expect(asked).toEqual([true, false]));
   });
 
   it("draws a refused remove in the refusal slot, the host's fix in the fix ink, and a remove the host did not make in that same slot", async () => {

@@ -2,9 +2,10 @@
 // The host's reading of the newest release: GitHub's releases/latest, which
 // the release workflow moves last, after npm and both bundles have landed.
 // Asked 30 s after the host starts and every six hours after, and when About
-// opens, never twice in ten minutes. The last answer lives in release.json
-// beside the state file, so a host that starts offline still shows it, and
-// wsp status and wsp doctor read it without asking any host.
+// opens, never twice in ten minutes; a person's press asks at once. The last
+// answer lives in release.json beside the state file, so a host that starts
+// offline still shows it, and wsp status and wsp doctor read it without
+// asking any host.
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { z } from "zod";
@@ -129,7 +130,6 @@ export function releaseWatch(opts: ReleaseWatchOptions): ReleaseWatch {
   const path = releaseFileFor(opts.statePath);
   const listeners = new Set<(e: ReleaseChangedEvent) => void>();
   let kept = readKept(path);
-  let answered: "read" | "unreached" | undefined;
   // npm rewrites the files in place, so a read mid-install can fail; the last reading stands until one succeeds.
   const readInstalled = (last: string): string => {
     try {
@@ -151,8 +151,10 @@ export function releaseWatch(opts: ReleaseWatchOptions): ReleaseWatch {
     const own = { ...(opts.shape !== undefined ? { shape: opts.shape } : {}), ...(restartRefusal !== undefined ? { restartRefusal } : {}), ...(installed !== opts.running ? { installed } : {}) };
     if (off()) return { state: "off", ...own };
     const update = opts.update !== undefined && kept.latest !== undefined && releaseAbove(kept, opts.running) ? opts.update(kept.latest.version) : undefined;
+    // Every answer stamps both times and a failed ask only triedAt, so the file says how the last ask ended.
+    const state = asking !== undefined || kept.triedAt === undefined ? "checking" : kept.checkedAt === kept.triedAt ? "read" : "unreached";
     return {
-      state: answered ?? "checking",
+      state,
       ...(kept.latest !== undefined ? { latest: kept.latest } : {}),
       ...(update !== undefined ? { update } : {}),
       ...(kept.checkedAt !== undefined ? { checkedAt: kept.checkedAt } : {}),
@@ -182,10 +184,8 @@ export function releaseWatch(opts: ReleaseWatchOptions): ReleaseWatch {
         const etag = res.headers.get("etag");
         kept = { latest: parseRelease(JSON.parse(await cappedText(res, RELEASE_BODY_MAX_BYTES))), checkedAt: at, triedAt: at, ...(etag !== null ? { etag } : {}) };
       } else throw new Error(`GitHub answered ${res.status}`);
-      answered = "read";
     } catch {
       kept = { ...kept, triedAt: at };
-      answered = "unreached";
     } finally {
       clearTimeout(timer);
       closer.signal.removeEventListener("abort", cut);
@@ -198,15 +198,17 @@ export function releaseWatch(opts: ReleaseWatchOptions): ReleaseWatch {
     }
   };
 
-  const check = async (): Promise<ReleaseView> => {
+  const check = async (force = false): Promise<ReleaseView> => {
     if (asking !== undefined) return asking;
     const before = JSON.stringify(view());
     installed = readInstalled(installed);
     const since = kept.triedAt === undefined ? undefined : now() - Date.parse(kept.triedAt);
-    if (off() || (since !== undefined && since >= 0 && since < RELEASE_FLOOR_MS)) return told(before, view());
+    if (off() || (!force && since !== undefined && since >= 0 && since < RELEASE_FLOOR_MS)) return told(before, view());
+    let during = before;
     asking = ask()
-      .then(() => told(before, view()))
-      .finally(() => (asking = undefined));
+      .finally(() => (asking = undefined))
+      .then(() => told(during, view()));
+    during = JSON.stringify(told(before, view()));
     return asking;
   };
 

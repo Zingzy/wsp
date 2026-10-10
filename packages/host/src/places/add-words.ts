@@ -327,10 +327,14 @@ export function addFlags(
 }
 
 /** What an add is refused with on a box that already belongs to a wsp: this one, where a second install would be
- * a second record of one box, or another, whose agent and link a second join would stand beside. */
-export function placeHeldRefusal(address: string, file: PlaceFile, ownKey: string | undefined): string {
+ * a second record of one box, or another, whose agent and link a second join would stand beside. A place file
+ * naming this host under an id it no longer holds is one a forget left there. */
+export function placeHeldRefusal(address: string, file: PlaceFile, ownKey: string | undefined, held?: readonly string[]): string {
   const name = boxWord(file.name);
-  if (ownKey !== undefined && keyFingerprint(file.hostPublicKey) === ownKey) return `${address} is already a place in this wsp as ${name}`.slice(0, SSH_LINE_CAP);
+  if (ownKey !== undefined && keyFingerprint(file.hostPublicKey) === ownKey) {
+    const forgotten = held !== undefined && !held.includes(file.placeId);
+    return (forgotten ? `${address} still carries the wsp of ${name}, which this wsp forgot; ${PLACE_LEAVE_LINE} on it frees it, then add it again` : `${address} is already a place in this wsp as ${name}`).slice(0, SSH_LINE_CAP);
+  }
   const url = file.hostUrls[0];
   const at = isHttpUrl(url) ? ` at ${boxWord(url)}` : "";
   return `${address} already belongs to the wsp on ${boxWord(file.hostName)}${at}; ${PLACE_LEAVE_LINE} on it frees it, or wsp add ${name} --update from that wsp updates it there`.slice(0, SSH_LINE_CAP);

@@ -2,7 +2,7 @@
 // Adapted from pingdotgg/t3code apps/web/src/components/chat/MessagesTimeline.tsx at 57a66608 (MIT).
 // Differs from upstream: store hooks are props (threadKey replaces the route and thread refs, expansion state is local, checkpoint data and callbacks arrive as optional props); rows come from the adapter; attachments, subagent rows, citations, user-message decorations, artifact templates, editor menus and the load-earlier header are removed.
 import { type MessageId, type ProviderSkill, type TurnDiffSummary, type TurnId } from "../adapt";
-import { memo, use, useMemo, useState } from "react";
+import { memo, use, useMemo, useState, type ReactNode } from "react";
 import ChatMarkdown from "../../ChatMarkdown";
 import { ReplyRunContext, type ReplyRunScope } from "../InlineRun";
 import { ChevronDownIcon, ChevronRightIcon, Undo2Icon } from "lucide-react";
@@ -17,7 +17,9 @@ import { SpawnTiles } from "../../threads/SpawnTiles";
 import { ProposedPlanCard } from "../ProposedPlanCard";
 import { ChangedFilesCard } from "../ChangedFilesTree";
 import { MessageCopyButton } from "../MessageCopyButton";
-import { resolveAssistantMessageCopyState, shouldPreserveAssistantLineBreaks } from "../MessagesTimeline.logic";
+import { resolveAssistantMessageCopyState } from "../MessagesTimeline.logic";
+import { splitInsights } from "../insight";
+import { GROUP_LABEL } from "../../../lib/microLabel";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../../ui/tooltip";
 import { cn } from "../../../lib/utils";
 import { formatChatTimestamp } from "../../../lib/timestampFormat";
@@ -173,26 +175,34 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
   const messageText = row.message.text || (row.message.streaming ? "" : "(empty response)");
   const runs = ctx.replyRuns;
   const turnId = row.message.turnId;
-  const runScope = useMemo<ReplyRunScope | null>(
-    () => (runs === null || turnId === null ? null : { workspaceId: runs.workspaceId, threadId: runs.threadId, turnId, messageId: row.message.id, cwd: runs.cwd, runs: runs.runs }),
-    [runs, turnId, row.message.id],
+  const streaming = Boolean(row.message.streaming);
+  const segments = useMemo(() => splitInsights(messageText, streaming), [messageText, streaming]);
+  const runScopes = useMemo<(ReplyRunScope | null)[]>(
+    () => segments.map(({ offset }) => (runs === null || turnId === null ? null : { workspaceId: runs.workspaceId, threadId: runs.threadId, turnId, messageId: row.message.id, offset, cwd: runs.cwd, runs: runs.runs })),
+    [runs, turnId, row.message.id, segments],
   );
 
   return (
     <>
       <div className="relative min-w-0 px-1 py-0.5" {...{ [QUOTE_SOURCE_ATTRIBUTE]: row.message.id }}>
-        <ReplyRunContext value={runScope}>
-          <ChatMarkdown
-            text={messageText}
-            cwd={ctx.markdownCwd}
-            isStreaming={Boolean(row.message.streaming)}
-            lineBreaks={shouldPreserveAssistantLineBreaks(messageText)}
-            skills={ctx.skills}
-            onImageExpand={ctx.onImageExpand}
-            onOpenFile={ctx.onOpenFile}
-            resolvedTheme={ctx.resolvedTheme}
-          />
-        </ReplyRunContext>
+        <div className="flex flex-col gap-2.5">
+          {segments.map((segment, index) => {
+            const markdown = (
+              <ReplyRunContext key={index} value={runScopes[index] ?? null}>
+                <ChatMarkdown
+                  text={segment.text}
+                  cwd={ctx.markdownCwd}
+                  isStreaming={streaming && index === segments.length - 1}
+                  skills={ctx.skills}
+                  onImageExpand={ctx.onImageExpand}
+                  onOpenFile={ctx.onOpenFile}
+                  resolvedTheme={ctx.resolvedTheme}
+                />
+              </ReplyRunContext>
+            );
+            return segment.kind === "insight" ? <InsightNote key={index}>{markdown}</InsightNote> : markdown;
+          })}
+        </div>
         <AssistantChangedFilesSection
           turnSummary={ctx.turnDiffSummaryByAssistantMessageId.get(row.message.id)}
           resolvedTheme={ctx.resolvedTheme}
@@ -214,6 +224,16 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
         ) : null}
       </div>
     </>
+  );
+}
+
+/** An insight block from Claude Code's Explanatory and Learning output styles, drawn without its star and dashes. */
+function InsightNote({ children }: { children: ReactNode }) {
+  return (
+    <div role="note" data-insight className="border-l-2 border-border pl-3">
+      <p className={cn(GROUP_LABEL, "mb-1 text-muted-foreground")}>Insight</p>
+      {children}
+    </div>
   );
 }
 

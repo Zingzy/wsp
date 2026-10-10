@@ -12,7 +12,7 @@ import { rec, str, num, strArr } from "./fields.js";
 import { limitOf, noteRejected, withLimit } from "./limits.js";
 import { ASIDE_HOOKS_ID, asideAnswer, asideCommand, asideCut, asideHooksLine, asidePrompt, asideTailCommand, asideTextOf, forkCleanupCommand, hookDenyLine, noConversationLine, promptDenyLine } from "./aside.js";
 import { draftForCommand, parseDraftFor, parseRename, parseSessionTitle, parseTitleFor, renameCommand, sessionTitleCommand, titleForCommand } from "./session-title.js";
-import { buildCommand, buildEnv, forwardsSubagentText, newSessionId, savedSpendCommand, serverValuesFile, userMessageLine } from "./landmines.js";
+import { buildCommand, buildEnv, forwardsSubagentText, newSessionId, savedSpendCommand, serverValuesFile, terminalResumeCommand, userMessageLine } from "./landmines.js";
 import { steersOf } from "./steers.js";
 import { newPlanBook, readPlanCall, type PlanBook } from "./plans.js";
 import { endAnswer, heldCall, interimEnd, laterEnd, newHandbackBook, noteLine, readAnswer, taskEnded, type HandbackBook, type TurnDelta } from "./handback.js";
@@ -166,6 +166,8 @@ export interface ClaudeAdapter {
   /** The CLI's own /compact runs headless as a turn's message: it compacts the session and writes its compact_boundary
    * with what the model holds after (measured on 2.1.289, 2026-10-05). */
   readonly compacts: "/compact";
+  /** The command that opens one of its sessions in the person's own terminal, as terminalResumeCommand words it. */
+  readonly terminalResume: string;
   /** The commands the CLI runs only in its own terminal; the composer keeps them out of its menu and sends none. */
   readonly screenCommands: ReadonlyArray<ScreenCommand>;
   /** Makes the binary describe itself under the same config dir as a session; null when it did not answer. The
@@ -1462,6 +1464,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
     resumesAt: true,
     movesAccess: true,
     compacts: "/compact",
+    terminalResume: terminalResumeCommand({ ...(deps.baseEnv !== undefined ? { base: deps.baseEnv } : {}), ...(deps.launch !== undefined ? { launch: deps.launch } : {}) }),
     attachments: "inline",
     steersImages: true,
     mcpServers: true,

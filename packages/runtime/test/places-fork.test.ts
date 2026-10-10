@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join as joinPath } from "node:path";
 import { connect as netConnect } from "node:net";
 import { describe, expect, it, onTestFinished } from "vitest";
-import { SEEDED_REFS, workspaceStateOf, type PlaceReport, type ProjectView, type TurnResult } from "@wsp/protocol";
+import { SEEDED_REFS, placeForgottenLine, workspaceStateOf, type PlaceReport, type ProjectView, type TurnResult } from "@wsp/protocol";
 import { copyKey, createRuntime, wiredPlace, type CreatedWorkspace, type HarnessAdapterFactory, type PlaceBackends } from "../src/runtime.js";
 import type { MachineBackend } from "@wsp/engine";
 import { newPlaceKeyPair } from "../src/places.js";
@@ -497,9 +497,37 @@ describe("a fork on a computer you joined", () => {
         (e: unknown) => e as Error & { fix?: string },
       );
       expect(refused?.message).toContain("srv is not answering, and its forks and projects go over its link");
-      expect(refused?.fix).toBe("Turn srv on and remove it again once it answers.");
+      expect(refused?.fix).toContain("wsp remove srv --forget");
     }
-    await expect(ctx.runtime!.places!.holds(placeId)).rejects.toThrow("srv is not answering");
+    expect(await ctx.runtime!.places!.holds(placeId)).toMatchObject({ forks: [{ name: "x", threads: 0 }], unsaved: [], away: true });
+    expect((await placesOf()).some(p => p.id === placeId)).toBe(true);
+  });
+
+  it("forgets a computer whose link never answers, with its project, its threads and its workspaces, and runs nothing there", async () => {
+    const { place, placeId, asked, client } = await removable({ claude: quietHarness }, { login: ROOT_LOGIN });
+    place.onComputer = asRoot;
+    const project = await projectOn(ctx.runtime!, "srv", "https://github.com/wsp/spoo-landing.git", { name: "spoo-landing" });
+    const folder = await createOn(ctx.runtime!, { name: "spoo-landing", on: "srv", project: project.id });
+    const thread = await ctx.runtime!.sessions.start(folder.id, { prompt: "one", harness: "claude" });
+    await thread.finished;
+    await oldFork({ golden: "snap_g", name: "x", on: "srv", project: project.id });
+    const killed = [...place.killed];
+    client.close();
+    await until(async () => (await placesOf()).find(p => p.id === placeId)!.present === false);
+    const answer = await ctx.runtime!.places!.remove(placeId, { forget: true });
+    expect(answer).toMatchObject({ removed: true, took: { forks: [{ name: "x", threads: 0 }], projects: [{ name: "spoo-landing", threads: 1 }] }, swept: [] });
+    expect(answer.note).toBe(placeForgottenLine("srv", true));
+    expect(place.killed).toEqual(killed);
+    expect(asked).toEqual([]);
+    expect(await ctx.runtime!.workspaces.list()).toEqual([]);
+    expect((await ctx.runtime!.projects.list()).map(p => p.name)).not.toContain("spoo-landing");
+    expect(await ctx.runtime!.sessions.list()).toEqual([]);
+    expect((await placesOf()).some(p => p.id === placeId)).toBe(false);
+  });
+
+  it("refuses to forget a computer that answers, since a remove takes wsp off it", async () => {
+    const { placeId } = await removable();
+    await expect(ctx.runtime!.places!.remove(placeId, { forget: true })).rejects.toThrow("srv is answering");
     expect((await placesOf()).some(p => p.id === placeId)).toBe(true);
   });
 

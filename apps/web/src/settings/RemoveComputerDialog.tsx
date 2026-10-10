@@ -12,12 +12,13 @@
 // projects the sentence names are the store's, there before the dialog opens.
 //
 // A computer that is not answering cannot be swept from here, so the dialog
-// hands over the line that sweeps it on the computer itself. Where the login
+// hands over the line that sweeps it on the computer itself. One with forks or
+// projects on it, which go over its link, is only forgotten here. Where the login
 // it was added over runs sudo only with a password, the refusal asks for it
 // in a field under the slot, held in this dialog alone and sent with the next
 // Remove.
 import { useEffect, useState } from "react";
-import { PLACE_SUDO_KIND, PLACES_WORDS, placeUnsavedRefusal, type PlaceHolds, type PlaceView } from "@wsp/protocol";
+import { PLACE_SUDO_KIND, PLACES_WORDS, placeForgetsOnly, placeUnsavedRefusal, type PlaceHolds, type PlaceView } from "@wsp/protocol";
 import { AlertDialog, AlertDialogClose, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogPopup, AlertDialogTitle } from "../components/ui/alert-dialog.js";
 import { Button, NEUTRAL_RING } from "../components/ui/button.js";
 import { Input } from "../components/ui/input.js";
@@ -26,7 +27,7 @@ import { failureOf } from "../protocol/failure.js";
 import { useStore } from "../protocol/store.js";
 import { ADD_COMPUTER_WORDS, WHERE_WORDS } from "./format.js";
 import { ROW_FIELD } from "./layout.js";
-import { hereName, placeIsOffline, placeName, removeSentence, removeTitle, type PlaceHolding } from "./places.js";
+import { forgetSentence, forgetTitle, hereName, placeIsOffline, placeName, removeSentence, removeTitle, type PlaceHolding } from "./places.js";
 import { CopyRow, RefusalSlot } from "./sheetParts.js";
 
 /** What the app says when its own client carries no remove road: the same shape the forget dialog's refusal has. */
@@ -41,6 +42,7 @@ export function RemoveComputerDialog({ place, holding, imageBytes, open, onOpenC
   const [password, setPassword] = useState("");
   const [holds, setHolds] = useState<PlaceHolds | null>(null);
   const unsaved = holds?.unsaved ?? [];
+  const forgets = holds !== null && placeForgetsOnly(holds);
   const reading = open && api?.placeHolds !== undefined && holds === null && refusal === null;
   const projects = useStore(s => s.projects).filter(p => p.computer === place.id).map(p => p.name);
 
@@ -81,7 +83,7 @@ export function RemoveComputerDialog({ place, holding, imageBytes, open, onOpenC
     setBusy(true);
     setRefusal(null);
     try {
-      const answer = await api.removePlace(place.id, typed, unsaved.length > 0);
+      const answer = await api.removePlace(place.id, typed, unsaved.length > 0, forgets);
       // A remove the host did not make is not a failure to report twice: the row is already gone from the list.
       if (answer.note !== undefined && !answer.removed) setRefusal({ said: answer.note });
       else {
@@ -94,6 +96,8 @@ export function RemoveComputerDialog({ place, holding, imageBytes, open, onOpenC
       const sudo = failure.kind === PLACE_SUDO_KIND;
       setAsksSudo(sudo);
       setRefusal({ said: failure.said, ...(sudo ? { fix: ADD_COMPUTER_WORDS.sudoFix } : failure.fix === undefined ? {} : { fix: failure.fix }) });
+      // The link may have come or gone since the dialog opened, which moves the road the host takes.
+      api.placeHolds?.(place.id).then(setHolds, () => undefined);
     } finally {
       setBusy(false);
     }
@@ -103,8 +107,8 @@ export function RemoveComputerDialog({ place, holding, imageBytes, open, onOpenC
     <AlertDialog open={open} onOpenChange={change}>
       <AlertDialogPopup data-remove-place-dialog>
         <AlertDialogHeader>
-          <AlertDialogTitle data-k="remove-title">{removeTitle(place)}</AlertDialogTitle>
-          <AlertDialogDescription data-k="remove-sentence">{removeSentence(place, { ...holding, projects }, hereName(places), imageBytes)}</AlertDialogDescription>
+          <AlertDialogTitle data-k="remove-title">{forgets ? forgetTitle(place) : removeTitle(place)}</AlertDialogTitle>
+          <AlertDialogDescription data-k="remove-sentence">{forgets && holds !== null ? forgetSentence(place, holds) : removeSentence(place, { ...holding, projects }, hereName(places), imageBytes)}</AlertDialogDescription>
         </AlertDialogHeader>
         {placeIsOffline(place) ? (
           <div className="flex flex-col gap-3 px-5 pt-2">
@@ -127,7 +131,7 @@ export function RemoveComputerDialog({ place, holding, imageBytes, open, onOpenC
         <AlertDialogFooter>
           <AlertDialogClose render={<Button variant="outline" className={NEUTRAL_RING} />}>{WHERE_WORDS.cancel}</AlertDialogClose>
           <Button data-k="remove-confirm" variant="destructive" disabled={busy || reading || (asksSudo && password === "")} onClick={() => void remove()}>
-            {busy ? WHERE_WORDS.removing : unsaved.length > 0 ? WHERE_WORDS.removeAnyway : WHERE_WORDS.remove}
+            {busy ? (forgets ? WHERE_WORDS.forgetting : WHERE_WORDS.removing) : forgets ? WHERE_WORDS.forget : unsaved.length > 0 ? WHERE_WORDS.removeAnyway : WHERE_WORDS.remove}
           </Button>
         </AlertDialogFooter>
       </AlertDialogPopup>

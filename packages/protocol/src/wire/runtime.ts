@@ -87,8 +87,9 @@ const RuntimeOp = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("places.holds"), placeId: z.string() }),
   /** Takes a place back out: deletes the forks standing on it, takes the projects recorded on it out of this wsp,
    * sweeps wsp off that computer and drops the place record. Refused, naming them, while a fork or a project there
-   * holds work no remote has, unless `force`. Answers a PlaceRemoved. */
-  z.object({ id: reqId, op: z.literal("places.remove"), placeId: z.string(), sudoPassword: SudoPassword.optional(), force: z.boolean().optional() }),
+   * holds work no remote has, unless `force`. With `forget`, a place whose link is down has its forks, projects and
+   * threads dropped here with no road over that link. Answers a PlaceRemoved. */
+  z.object({ id: reqId, op: z.literal("places.remove"), placeId: z.string(), sudoPassword: SudoPassword.optional(), force: z.boolean().optional(), forget: z.boolean().optional() }),
   /** Runs the doctor's computer road here, for a computer this host holds the link to: the six steps against that
    * link, and every line of them pushed as a doctor.line event under `doctorId` to the sockets subscribed to
    * events. The id is the caller's own, minted before the request, since the first line is said before the reply
@@ -817,9 +818,9 @@ const RuntimeOp = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("preferences.set"), patch: PreferencesPatch }),
   /** Replies with { release: ReleaseView }: the newest release as this host last read it, asking nobody. */
   z.object({ id: reqId, op: z.literal("release.get") }),
-  /** Asks GitHub again unless the last ask was under ten minutes ago and replies with { release: ReleaseView }; a
-   * changed view is pushed to every socket as release.changed. */
-  z.object({ id: reqId, op: z.literal("release.check") }),
+  /** Asks GitHub again unless the last ask was under ten minutes ago, or at once with `force`, and replies with
+   * { release: ReleaseView }; a changed view is pushed to every socket as release.changed. */
+  z.object({ id: reqId, op: z.literal("release.check"), force: z.boolean().optional() }),
   /** Replies { ok } and then restarts this host on the files it was installed from, by the road it came up on;
    * refused where that road would not bring it back. The socket closes on the host's stopping code. */
   z.object({ id: reqId, op: z.literal("host.restart") }),
