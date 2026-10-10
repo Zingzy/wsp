@@ -9,10 +9,11 @@ import { execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join as joinPath } from "node:path";
-import { createConnection, createServer, type Server } from "node:net";
+import { createServer as createHttpServer, type Server as HttpServer } from "node:http";
+import { createConnection, createServer, type Server, type Socket } from "node:net";
 import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
-import { DAEMON_VERSION, FORWARD_MAX_PER_TARGET, paneForwardCapLine, paneForwardFloorLine, paneForwardQuietLine, paneForwardStoppedLine, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, TURN_TOKEN_ENV, cgroupEndScript, cgroupJoinLine, threadCgroup, threadCgroupsEndScript, threadLeftLine, type TurnResult } from "@wsp/protocol";
+import { DAEMON_VERSION, FORWARD_MAX_PER_TARGET, paneForwardCapLine, paneForwardFloorLine, paneForwardGoneLine, paneForwardQuietLine, paneForwardStoppedLine, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, TURN_TOKEN_ENV, cgroupEndScript, cgroupJoinLine, threadCgroup, threadCgroupsEndScript, threadLeftLine, type TurnResult } from "@wsp/protocol";
 import type { HarnessAdapterFactory, HarnessStartOptions } from "../src/runtime.js";
 import type { DaemonChannel } from "../src/daemon-channel.js";
 import { namedWatchRefusal } from "../src/account/box-panels.js";
@@ -37,6 +38,8 @@ interface Box {
 /** How the fake computer answers: how long a thread's end takes there. */
 interface BoxShape {
   endMs?: number;
+  /** A tunnel there reaches that port on this computer's loopback, as the daemon reaches one on its own. */
+  tunnels?: boolean;
   /** A thread's end there leaves a process standing, as one stuck in the kernel does. */
   endFails?: boolean;
   /** A thread's end there is never answered. */
@@ -47,6 +50,23 @@ interface BoxShape {
 function box(client: WsClient, login: { home: string; owner: string }, listening: () => number[], shape: BoxShape = {}): Box {
   const seen: Box = { frames: [], execs: [], order: [], client };
   let stopped = false;
+  const tunnels = new Map<string, Socket>();
+  const tunnel = (op: string, frame: Record<string, unknown>, say: (payload: Record<string, unknown>) => void): void => {
+    const tunnelId = String(frame["tunnelId"]);
+    if (op === "tunnel.write") tunnels.get(tunnelId)?.write(Buffer.from(String(frame["data"]), "base64"));
+    if (op === "tunnel.close") tunnels.get(tunnelId)?.destroy();
+    if (op !== "tunnel.open") return say({});
+    const conn = createConnection({ host: "127.0.0.1", port: Number(frame["port"]) });
+    conn.once("error", () => client.say({ id: frame["id"], ok: false, error: "connection refused" }));
+    conn.once("connect", () => {
+      tunnels.set(tunnelId, conn);
+      say({});
+    });
+    conn.on("data", (d: Buffer) => client.say({ type: "tunnel.data", tunnelId, data: d.toString("base64") }));
+    conn.on("close", () => {
+      if (tunnels.delete(tunnelId)) client.say({ type: "tunnel.end", tunnelId });
+    });
+  };
   client.onFrame(raw => {
     const frame = raw as unknown as Record<string, unknown>;
     const op = typeof frame["op"] === "string" ? frame["op"] : undefined;
@@ -56,6 +76,7 @@ function box(client: WsClient, login: { home: string; owner: string }, listening
     if (op === "machine.backend") return say(KEEPS_NO_IMAGE);
     if (op === "ports.watch") return say({ ports: listening().map(port => ({ port, pid: 900, uid: 0, loopback: true })) });
     if (op === "pty.create") return say({ ptyId: "pty_1", pid: 4242 });
+    if (op?.startsWith("tunnel.") && shape.tunnels === true) return tunnel(op, frame, say);
     if (op !== "exec") return say({});
     const cmd = String(frame["cmd"]);
     seen.execs.push(cmd);
@@ -242,6 +263,36 @@ describe("the ports of a thread in a folder on a computer the person joined", ()
     expect(Number(url.port)).toBeGreaterThan(port);
     expect(url.hostname).toBe("localhost");
   });
+
+  it("is fetched through the one forward while that computer's server restarts: refused while it is down, answering at once when it is back, ten times", async () => {
+    const port = await freePort();
+    const { rt, workspaceId } = await joined({ adapters: { claude: answering([]) }, shape: { tunnels: true } });
+    const serve = (): Promise<HttpServer> =>
+      new Promise(resolve => {
+        const s = createHttpServer((_req, res) => res.end("<!doctype html>"));
+        s.listen(port, "127.0.0.1", () => resolve(s));
+      });
+    let server = await serve();
+    // The server holds the number on this computer too, so the forward stands one above it.
+    const forwardPort = Number(new URL((await rt.workspaces.portReach(workspaceId, port)).url).port);
+    expect(forwardPort).toBeGreaterThan(port);
+    expect(await rt.workspaces.portProbe(workspaceId, port)).toMatchObject({ status: 200 });
+    const took: number[] = [];
+    for (let restart = 0; restart < 10; restart++) {
+      server.closeAllConnections();
+      await new Promise(resolve => server.close(resolve));
+      await expect(rt.workspaces.portProbe(workspaceId, port)).rejects.toThrow();
+      server = await serve();
+      const back = Date.now();
+      expect(await rt.workspaces.portProbe(workspaceId, port)).toMatchObject({ status: 200, body: "<!doctype html>" });
+      took.push(Date.now() - back);
+      expect(Number(new URL((await rt.workspaces.portReach(workspaceId, port)).url).port)).toBe(forwardPort);
+    }
+    server.closeAllConnections();
+    server.close();
+    console.log(`fetch answering after each of ten restarts, ms: ${took.join(", ")}`);
+    expect(Math.max(...took)).toBeLessThan(1_000);
+  });
 });
 
 /** Whether a connection to this computer's port is taken now. */
@@ -313,6 +364,10 @@ describe("a port a Browser pane opens for a thread in a folder on a computer the
     c.close();
     expect(await connects(ports[0]!)).toBe(false);
     expect(await portsList()).toHaveLength(FORWARD_MAX_PER_TARGET - 1);
+    // The pane's fetch of the port, which it repeats while the port is off the folder's list, reaches only a forward
+    // that stands: it opens none and leaves the stop for the pane's next ask to be told.
+    await expect(rt.workspaces.portProbe(workspaceId, ports[0]!)).rejects.toThrow(paneForwardGoneLine(ports[0]!));
+    expect(await connects(ports[0]!)).toBe(false);
     // The pane still showing it asks again within its hold and is told it was stopped, so the frame goes and the
     // forward stays closed until the person opens the address again.
     await expect(rt.workspaces.portReach(workspaceId, ports[0]!)).rejects.toThrow(paneForwardStoppedLine(ports[0]!));

@@ -75,15 +75,29 @@ describe("stoppedSentence", () => {
   const clock = () => "12:04";
   const base: StoppedPort = { port: 8412, pid: 53479, process: "python3", command: "python3 -m http.server 8412", exited: true, left: false, at: "2026-09-05T12:04:00.000Z", seenAt: 0, movedTo: null };
 
+  const DOWN = ":8412 on acme-box is not answering; this tab reconnects when it does";
+
   it.each<[string, StoppedPort | undefined, string]>([
-    ["nothing known", undefined, ":8412 stopped listening"],
-    ["time only", { ...base, pid: null, process: null, command: null, exited: null }, ":8412 stopped listening at 12:04"],
-    ["holder that exited", base, ":8412 stopped listening at 12:04, held by python3 -m http.server 8412 (pid 53479), which exited"],
-    ["holder still running", { ...base, exited: false }, ":8412 stopped listening at 12:04, held by python3 -m http.server 8412 (pid 53479), which is still running"],
-    ["comm when the argv is unknown", { ...base, command: null }, ":8412 stopped listening at 12:04, held by python3 (pid 53479), which exited"],
-    ["pid when neither comm nor argv is known", { ...base, process: null, command: null }, ":8412 stopped listening at 12:04, held by pid 53479, which exited"],
-    ["moved to another port", { ...base, movedTo: 8413 }, ":8412 stopped listening at 12:04, held by python3 -m http.server 8412 (pid 53479), which exited, now on :8413"],
+    ["nothing known", undefined, DOWN],
+    ["time only", { ...base, pid: null, process: null, command: null, exited: null }, `${DOWN}. It stopped listening at 12:04`],
+    ["holder that exited", base, `${DOWN}. It stopped listening at 12:04, held by python3 -m http.server 8412 (pid 53479), which exited`],
+    ["holder still running", { ...base, exited: false }, `${DOWN}. It stopped listening at 12:04, held by python3 -m http.server 8412 (pid 53479), which is still running`],
+    ["comm when the argv is unknown", { ...base, command: null }, `${DOWN}. It stopped listening at 12:04, held by python3 (pid 53479), which exited`],
+    ["pid when neither comm nor argv is known", { ...base, process: null, command: null }, `${DOWN}. It stopped listening at 12:04, held by pid 53479, which exited`],
+    ["moved to another port", { ...base, movedTo: 8413 }, `${DOWN}. It stopped listening at 12:04, held by python3 -m http.server 8412 (pid 53479), which exited, now on :8413`],
   ])("%s", (_name, stopped, sentence) => {
-    expect(stoppedSentence(8412, stopped, clock)).toBe(sentence);
+    expect(stoppedSentence(8412, "acme-box", stopped, clock)).toBe(sentence);
+  });
+
+  it("a holder that is no longer the workspace's still listens, so the line says it left rather than that it is down", () => {
+    expect(stoppedSentence(8412, "acme-box", { ...base, exited: false, left: true }, clock)).toBe(
+      ":8412 is no longer this workspace's at 12:04, held by python3 -m http.server 8412 (pid 53479), which still listens",
+    );
+  });
+
+  it("a holder that left, with a fetch of the port that just failed, is not said to still listen", () => {
+    expect(stoppedSentence(8412, "acme-box", { ...base, exited: false, left: true }, clock, true)).toBe(
+      ":8412 is no longer this workspace's at 12:04, held by python3 -m http.server 8412 (pid 53479)",
+    );
   });
 });

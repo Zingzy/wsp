@@ -282,6 +282,9 @@ export const paneForwardQuietLine = (port: number): string => `localhost:${port}
 /** A Browser pane asking again for a port whose forward the person stopped in Ports. */
 export const paneForwardStoppedLine = (port: number): string => `localhost:${port} was stopped in Ports; open the address again to forward it`;
 
+/** A pane's fetch of a port whose forward does not stand: the fetch never opens one, the pane's own ask does. */
+export const paneForwardGoneLine = (port: number): string => `localhost:${port} is not forwarded to this computer now`;
+
 /** Why a build on a joined computer stopped when that computer's link went and it never dialled back in time. */
 export const placeWentAwayLine = (name: string): string => `${name} went away before the build finished`;
 

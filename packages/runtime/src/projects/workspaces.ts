@@ -1080,7 +1080,9 @@ export function workspacesArea(ctx: RuntimeContext): WorkspacesArea {
       await ctx.copyBlocked(entry);
       const own = ctx.moduleOf(entry.record.kind).portReach;
       if (own !== undefined) {
-        const res = await fetch((await own(entry, port)).url, { redirect: "manual", signal: AbortSignal.timeout(PORT_PROBE_TIMEOUT_MS) });
+        // The pane repeats this fetch while the port is off the folder's list, so it must not open a forward the
+        // person stopped in Ports, nor take the pane's word that it was stopped.
+        const res = await fetch((await own(entry, port, { standing: true })).url, { redirect: "manual", signal: AbortSignal.timeout(PORT_PROBE_TIMEOUT_MS) });
         return { status: res.status, body: await readBodyUpTo(res, PORT_PROBE_BODY_CAP) };
       }
       const reach = await entry.ws.portReach(port);
