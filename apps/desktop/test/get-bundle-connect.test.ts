@@ -94,7 +94,7 @@ describe("the update download on a network slow to connect", () => {
     const started = Date.now();
     // The stall window equals the connect window, as in the app, so a stall timer running while it connects shows.
     const got = await getBundle("0.3.0", deps(env, releaseFetch({ ca: tls.cert, connectMs: 1_000, backoffMs: 50 }), 1_000));
-    expect(got).toEqual({ ok: false, error: BUNDLE_WORDS.unreached(ASSET, "could not reach localhost in 1 s, tried 3 times") });
+    expect(got).toEqual({ ok: false, error: "could not reach localhost in 1 s, tried 3 times" });
     expect(Date.now() - started).toBeGreaterThanOrEqual(3_000);
     expect(host.connects()).toBe(3);
     host.close();
