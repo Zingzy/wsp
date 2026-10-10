@@ -18,6 +18,7 @@ import { wspHome } from "./hosts.js";
 import { nodeHost, readGhosttyConfig } from "@wsp/collect";
 import { closeStandInGuests } from "./fake-guest.js";
 import { editorHost } from "./editor.js";
+import { loginEnv } from "./login-path.js";
 import { hostFolders } from "./host-folders.js";
 import { projectBundler } from "./project-bundle.js";
 import { imageExporter } from "./image.js";
@@ -632,7 +633,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
       imageExport: imageExporter,
       folders: hostFolders(() => rt.workspaces.list()),
       terminalConfig: { read: scheme => readGhosttyConfig(nodeHost(), scheme) },
-      editor: editorHost(),
+      editor: editorHost({ loginEnv }),
       ssh: opts.ssh ?? sshDoor(relay, sshFiles({ wspHome: opts.home ?? wspHome(), personHome: homedir() }), () => proxyWsp(wspArgvOf(runningWsp()), opts.statePath)),
       sshHosts: async places => sshHostsIn(join(homedir(), ".ssh"), places),
       // Read at every ask rather than once at start: a sign-in taken at the terminal while the app stands open is

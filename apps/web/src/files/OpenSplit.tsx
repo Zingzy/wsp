@@ -8,19 +8,21 @@
 // arrive. A running workspace on another computer lists only the editors with
 // a road there, opens in the default where it has one and in the first that
 // does otherwise, and on a small machine the menu says what an editor costs
-// there. A napping one draws nothing.
+// there. A napping one draws nothing. While an open waits on the host the
+// main part wears a spinner in place of the mark.
 import { isLocalWorkspace, type EditorChoice } from "@wsp/protocol";
 import { ChevronDownIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Button } from "../components/ui/button.js";
 import { Kbd } from "../components/ui/kbd.js";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../components/ui/menu.js";
+import { Spinner } from "../components/ui/spinner.js";
 import { cn } from "../lib/utils.js";
 import { useStatus, useStore, useWorkspace } from "../protocol/store.js";
 import { useShortcutLabel } from "../shell/useKeybindings.js";
 import { EditorGlyph } from "./EditorGlyph.js";
 import { EDITOR_SSH_WORDS, EditorConsent } from "./EditorConsent.js";
-import { openCopyInEditor, opensInEditor } from "./openCopy.js";
+import { openCopyInEditor, opensInEditor, useOpening } from "./openCopy.js";
 
 /** Memory at or under this, a workspace on another computer hears what an editor there costs: the editors' own
  * servers took 1.1 to 1.8 GB on the wsp repo, measured 2026-09-29. */
@@ -56,6 +58,7 @@ export function OpenSplit({ workspaceId }: { workspaceId: string }) {
   const editors = useEditors();
   const shortcut = useShortcutLabel("editor.open");
   const memMb = useStatus(workspaceId)?.size?.memMb;
+  const opening = useOpening(s => s.ids.includes(workspaceId));
   const here = workspace !== null && isLocalWorkspace(workspace);
   const usable = editors === null ? null : here ? editors : editors.filter(e => e.remote === true);
   if (workspace === null || !opensInEditor(workspace) || usable?.length === 0) return null;
@@ -64,8 +67,8 @@ export function OpenSplit({ workspaceId }: { workspaceId: string }) {
   const openCurrent = (): void => void openCopyInEditor(workspaceId, undefined, here ? undefined : current?.id);
   return (
     <div data-open-split className={cn("flex shrink-0 items-center", current === null && "invisible")} {...(current === null ? { "aria-hidden": true, inert: true } : {})}>
-      <Button variant="outline" data-k="open" aria-label={openIn} title={openIn} onClick={openCurrent} className="rounded-e-none [-webkit-app-region:no-drag]">
-        {current === null ? <span className="size-4" /> : <EditorGlyph id={current.id} />}
+      <Button variant="outline" data-k="open" aria-label={openIn} title={openIn} onClick={openCurrent} {...(opening ? { "aria-busy": true } : {})} className="rounded-e-none [-webkit-app-region:no-drag]">
+        {current === null ? <span className="size-4" /> : opening ? <Spinner className="size-4" /> : <EditorGlyph id={current.id} />}
         {/* A phone's header has room for the mark alone; the button still says what it does to a reader. */}
         <span className="max-sm:sr-only">{OPEN_WORDS.open}</span>
       </Button>
