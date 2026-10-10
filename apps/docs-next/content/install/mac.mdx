@@ -15,22 +15,7 @@ wsp is one app for every Mac, with Apple silicon or an Intel chip. The app also 
 
 3. Open a new terminal window, and run `wsp --version`. It prints `wsp` and the version that you installed.
 
-The install line does these steps:
-
-1. It reads the latest release of [wsp-labs/wsp](https://github.com/wsp-labs/wsp/releases) from GitHub.
-2. It downloads the app and compares its sha256 with the sha256 that GitHub publishes for the release. If they do not match, it stops before it unpacks anything.
-3. It makes sure that the app's signature is valid.
-4. It puts `wsp.app` in `/Applications`. If your user cannot write to `/Applications`, it puts the app in `~/Applications`.
-5. It writes the `wsp` command at `~/.wsp/bin/wsp`.
-6. It adds `~/.wsp/bin` to your `PATH` in the file that your shell reads. The table below names the file.
-7. It opens the app.
-
-| Shell | File |
-|---|---|
-| zsh | `~/.zshrc` |
-| bash | `~/.bash_profile` |
-| fish | `~/.config/fish/conf.d/wsp.fish` |
-| Any other shell | `~/.profile` |
+The line downloads the latest release from [GitHub](https://github.com/wsp-labs/wsp/releases), checks its sha256 and signature, puts `wsp.app` in `/Applications`, and opens it. It also adds the `wsp` command to your `PATH`, which is why the new window can find it.
 
 If wsp is open when you run the line, the line quits wsp first.
 
