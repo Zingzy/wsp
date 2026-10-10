@@ -5,11 +5,11 @@
 // does not already satisfy, then the machine context. Nothing here knows how
 // the computer is reached: it drives a Machine, which for a box is that
 // computer over the link its daemon holds.
-import { COMPILER_ROW, ROAD_MODULES, catalogEntry, catalogIdOfRow, nodeAtLeast } from "@wsp/catalog";
+import { COMPILER_ROW, ROAD_MODULES, aptNeedRows, catalogEntry, catalogIdOfRow, nodeAtLeast } from "@wsp/catalog";
 import { TOOL_PREFIX, agentOfRow, plural, presentElsewhereLine, provisionServersLine, shellQuote, type PlaceProvisionRow } from "@wsp/protocol";
 import { markersOf, pagedReads } from "./exec-detached.js";
 import { baseInstalls, installBase } from "./golden-base.js";
-import { TOOLS_PATH, agentSteps, pathLine, type SkippedPath, type ToolInstall } from "./golden-import.js";
+import { TOOLS_PATH, agentSteps, pathLine, viaRoad, type SkippedPath, type ToolInstall } from "./golden-import.js";
 import type { McpPlan } from "./golden-mcp.js";
 import { diskUse, installTools, ownedFloorBytes, type ToolResult } from "./golden-tools.js";
 import type { GoldenImport, ImportResult, PackFiles } from "./golden.js";
@@ -68,7 +68,8 @@ export type ProvisionStage = (detail: string, at?: { label: string; index: numbe
  * set-aside rows as the plan's. The files, the shell and the MCP servers of that import are not put on a computer
  * somebody lives on; what installs is what this plan carries. */
 export function provisionPlanOf(imp: GoldenImport, recipeAt: string, path: string, prefix?: string, extras: ProvisionExtras = { compiler: true }): ProvisionPlan {
-  const agents = agentSteps({ installs: imp.agents, skipped: [], ...(imp.node !== undefined ? { node: imp.node } : {}) }, undefined, path, prefix);
+  const installs = agentSteps({ installs: imp.agents, skipped: [], ...(imp.node !== undefined ? { node: imp.node } : {}) }, undefined, path, prefix);
+  const agents = [...installs, ...aptNeedSteps(installs, path, prefix)];
   const files = imp.files;
   const once = onceDests(imp);
   return {
@@ -85,6 +86,16 @@ export function provisionPlanOf(imp: GoldenImport, recipeAt: string, path: strin
     ...(files !== undefined && files.lands.length > 0 ? { files: { lands: oncePerDest(files.lands).map(l => (once.has(l.dest) ? { ...l, once: true as const } : l)), pack: files.pack } } : {}),
     ...(imp.mcp !== undefined ? { mcp: imp.mcp } : {}),
   };
+}
+
+/** Each agent's Debian packages as apt rows of the agents step, each run only once its agent is on. */
+function aptNeedSteps(agents: readonly ToolInstall[], path: string, prefix?: string): ToolInstall[] {
+  return agents.flatMap(a =>
+    aptNeedRows(agentOfRow(a) ?? "").flatMap(need => {
+      const step = viaRoad({ road: "apt", packages: [need.package] }, need.command, path, prefix);
+      return "cmd" in step ? [{ id: need.id, label: need.package, manager: "apt" as const, ...step, bin: need.command, after: a.id }] : [];
+    }),
+  );
 }
 
 /** Which of the recipe's destinations land once rather than on every run: the file an agent keeps its own MCP

@@ -273,6 +273,16 @@ describe("the agents report off this computer and off a workspace", () => {
     nothingLeaked(at, read, lines);
   });
 
+  it("asks each agent's status with the store its turns there read, so a login kept there reads as signed in", async () => {
+    const at = fixture();
+    const store = join(at.root, "logins", "codex");
+    mkdirSync(store, { recursive: true });
+    writeStub(join(at.bin, "codex"), `#!/bin/sh\ncase "$1" in --version) echo "codex-cli 0.155.1";; login) [ "$CODEX_HOME" = ${JSON.stringify(store)} ] && echo "Logged in using ChatGPT" && exit 0; echo "Not logged in"; exit 1;; *) exit 2;; esac\n`);
+    const { machine } = road(at);
+    const read = await agentsReader({ vault: () => ({}) }).read({ kind: "machine", machine, stores: { codex: store } });
+    expect(read.agents.find(a => a.id === "codex")).toMatchObject({ signIn: "signed-in", signInKind: "subscription" });
+  });
+
   it("reads every project a computer holds in one read, each project's rows naming it, and says which projects it covered", async () => {
     const at = fixture();
     const www = join(at.home, "code", "www");

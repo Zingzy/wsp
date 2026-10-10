@@ -22,6 +22,8 @@ export const CODEX: AgentEntry = {
   latest: { from: "npm", package: "@openai/codex" },
   updateLine: "npm i -g @openai/codex@latest",
   node: 16,
+  // 0.155.1 runs its default sandbox under bubblewrap on Linux: with no bwrap on PATH a turn says so and runs read-only.
+  aptNeeds: [{ package: "bubblewrap", command: "bwrap" }],
   signIn: SIGN_IN_ROWS.codex,
   // https://developers.openai.com/codex/config-basic (project scope is a trusted repo's .codex/config.toml)
   mcp: { format: CODEX_TOML, files: [CODEX_CONFIG_FILE], projectFiles: [".codex/config.toml"], scope: "user scope", login: CODEX_MCP_LOGIN },

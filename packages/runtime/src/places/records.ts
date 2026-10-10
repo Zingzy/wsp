@@ -30,7 +30,7 @@ import {
 import { CHILD_TIMED_OUT, type MachineBackend } from "@wsp/engine";
 import { freshEphemeral, makeSeal, sealKeys, sharedSecret, signPlaceBytes } from "@wsp/keys";
 import { PLACES, CAPS, DEFAULT_COLLECTION, DEFAULT_ID, type PlaceRecord, isPlaceRecord, type PlaceLogin, type PlaceChallenge, PlaceLoginRefusedError } from "./types.js";
-import { bounded, ADDS_KEPT, UPDATE_POLL_MS } from "./helpers.js";
+import { bounded, sharedLoginFile, ADDS_KEPT, UPDATE_POLL_MS } from "./helpers.js";
 import type { PlaceDoorContext } from "./context.js";
 
 /** The place records as the store keeps them, the providers beside them, and the turns every write of one takes. */
@@ -319,11 +319,22 @@ export function placeRecords(ctx: PlaceDoorContext) {
       return next === undefined ? undefined : keep(next);
     });
 
+  /** A login an agent shares into every thread, now standing on that computer, put on the list its daemon gave at
+   * its last dial: that list is what every sign-in word for that computer reads, and it is not read again until the
+   * next dial. */
+  const loginListed = (placeId: string, agent: string): Promise<PlaceRecord | undefined> => {
+    const file = sharedLoginFile(agent);
+    return change(placeId, now => {
+      const listed = now.report.logins;
+      return file === undefined || listed === undefined || listed.includes(file) ? undefined : { ...now, report: { ...now.report, logins: [...listed, file].sort() } };
+    });
+  };
+
   return {
     records, wiredProvider, providerIds, providerBackend, providerRate, providerSizes, imageFacts, recordOf,
     settingsOf, settingsHeld, rowIds, withCap, untilDaemonVersion, awaiting, adds, putAdd, loginOf, rootOver,
     loginAnswers, reachedOver, holdBack, keep, defaultId, inTurn, markDefault, markHeld, challenge, signedRefusal, writeSeen,
-    inRecordTurn, change,
+    inRecordTurn, change, loginListed,
   };
 }
 export type PlaceRecordsArea = ReturnType<typeof placeRecords>;

@@ -162,6 +162,16 @@ describe("what a computer already satisfies", () => {
     expect(present.get("tools/custom/ace")).toEqual({});
   });
 
+  it("puts bubblewrap on by apt in the agents step once Codex is on, since Codex's sandbox runs under it on Linux", () => {
+    const planOf = (...ids: string[]): ProvisionPlan => provisionPlanOf({ recipeHash: "h1", agents: agentInstallsFor(ids.map(id => row(id))).installs, node: agentInstallsFor(ids.map(id => row(id))).node!, tools: [] }, "2026-09-17T10:00:00.000Z", TOOLS_PATH);
+    const plan = planOf("agents/claude", "agents/codex");
+    const agents = plan.steps.slice(0, plan.agents);
+    expect(agents.map(s => s.id)).toEqual(["agents/node", "agents/claude", "agents/codex", "agents/codex/bubblewrap"]);
+    expect(agents.at(-1)).toMatchObject({ manager: "apt", bin: "bwrap", after: "agents/codex", label: "bubblewrap" });
+    expect(agents.at(-1)!.cmd).toContain("apt-get install -y -qq bubblewrap");
+    expect(planOf("agents/claude").steps.map(s => s.id)).not.toContain("agents/codex/bubblewrap");
+  });
+
   it("is every step of a plan the computer already answers, so a second run of that recipe installs nothing", async () => {
     // The recipe spoo gets: the node step, Claude Code by its own installer, Codex by npm at the version the
     // catalog pins, Homebrew and its toolchain, the shared step and two formulae. Every one of them carries a
