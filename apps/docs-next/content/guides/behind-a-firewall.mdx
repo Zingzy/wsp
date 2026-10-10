@@ -80,8 +80,6 @@ log         /root/.wsp/place.log
 wsp leave takes this computer back out.
 ```
 
-<video src="/shots/docs-join.mp4" autoPlay muted loop playsInline aria-label="wsp join on the box: it dials the host, checks its key and loads the service" />
-
 The box keeps the addresses on its join line for good. The join writes them into the box's record once, and the daemon dials only those. A new link gives your host a new name on the relay. So while a box last reached your host through the relay's address, `wsp host unlink` refuses and names that box. To keep a second way in, give the join line every address that the box can reach, for example `wsp join http://192.168.1.12:4420 https://h1a2b3c4d5e6f7a8b.usewsp.com --code <code>`. If the box loses your host, join it again in this order:
 
 1. On your computer, run `wsp remove office`. A new join makes a new record, and your host keeps the old one until you remove it. Two records with one name make every command that names `office` refuse.
@@ -91,7 +89,7 @@ The box keeps the addresses on its join line for good. The join writes them into
 
 The box now shows in Settings > Computers on your computer, beside the computers that you added over ssh.
 
-<Image src="/shots/docs-firewall-computer.webp" alt="Settings > Computers with the joined box beside the computers added over ssh" />
+<Image src="/shots/docs-firewall-computer.webp" alt="The Name and SSH login rows of the joined box: It joined with a code and has no login." />
 
 ## Step 4: Set it up and start a thread
 

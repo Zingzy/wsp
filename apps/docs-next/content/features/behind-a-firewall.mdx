@@ -4,7 +4,7 @@
 
 The computer that dials joins your wsp with a one-time code. wsp then runs on it as a systemd service that dials your host again at every boot.
 
-<Image src="/shots/docs-firewall-computer.webp" alt="Settings > Computers with a joined computer beside two computers added over ssh" caption="A computer that joined with a code, beside two added over ssh." />
+<Image src="/shots/docs-firewall-computer.webp" alt="The Name and SSH login rows of a computer that joined with a code: It joined with a code and has no login." caption="A computer that joined with a code has no ssh login." />
 
 ## Join a computer
 
@@ -19,8 +19,6 @@ The computer that joins must run Linux. A Mac refuses to join. You need root on 
 
 2. Install wsp on the computer that joins. See [Install on Linux](/install/linux).
 3. On that computer, as root, run the `wsp join` line that reaches your host.
-
-<video src="/shots/docs-join.mp4" autoPlay muted loop playsInline aria-label="wsp join run on a Linux computer: it dials the host, joins, and installs its service" />
 
 The code works once, and for 10 minutes. If it runs out, run `wsp add` again for a new one.
 
