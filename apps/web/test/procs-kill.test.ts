@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { ARM_MS, ESCALATE_MS, IDLE, offered, press, settle, type KillState } from "../src/components/procs/kill.js";
+import { ARM_MS } from "../src/components/arm.js";
+import { ESCALATE_MS, IDLE, offered, press, settle, type KillState } from "../src/components/procs/kill.js";
 
 describe("kill flow", () => {
   it("first press arms TERM, a second within two seconds sends it", () => {

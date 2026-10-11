@@ -572,8 +572,10 @@ const diagramHistory: SessionEvent[] = [
 ];
 
 // ?marks=1 lets a thread be pinned and snoozed and a project be exported, so the Snooze and Export dialogs open.
+// ?stop=1 lets a running thread be stopped, so its tile offers Stop on hover.
 const api: Api = {
   ...(params.get("marks") === "1" ? { markThreads: async () => {}, exportProject: async opts => ({ dest: opts.dest, files: 0, bytes: 0, excluded: [], agents: [] }) } : {}),
+  ...(params.get("stop") === "1" ? { interruptSession: async () => ({ outcome: "accepted" as const }) } : {}),
   ...(params.get("consent") === "1" ? { editorList: async () => [{ id: "vscode", name: "VS Code", remote: true }], sshInclude: async () => false } : {}),
   listWorkspaces: async () => workspaces,
   getWorkspace: async id => workspaces.find(w => w.id === id)!,

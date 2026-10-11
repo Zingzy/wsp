@@ -298,6 +298,8 @@ describe("the fixtures a lab serves", () => {
       replies: "no cloud",
       meter: "no cloud",
       usage: "no cloud",
+      "tree-drag": "no cloud",
+      "tree-drag-plain": "no cloud",
     });
     // Every fixture with a cloud machine names the cloud it is standing in for, and no fixture without one does.
     for (const name of FIXTURE_NAMES) {
@@ -468,6 +470,8 @@ describe("the provider a fixture's host runs under", () => {
       replies: "fake",
       meter: "none",
       usage: "none",
+      "tree-drag": "none",
+      "tree-drag-plain": "none",
     });
   });
 

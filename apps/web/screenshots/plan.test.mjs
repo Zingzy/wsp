@@ -54,6 +54,11 @@ describe("a click or wait word", () => {
     expect(stepFor("390:focus:row-id=thread:redirect", [1440, 390])).toEqual({ width: 390, focus: `[data-row-id="thread:${threadId("redirect")}"]` });
   });
 
+  it("reads a drag: word as one element held over another, at a depth into it where it names one", () => {
+    expect(stepFor("drag:row-id=thread:notes > section-head=pinned", [1440, 390])).toEqual({ drag: { from: `[data-row-id="thread:${threadId("notes")}"]`, to: '[data-section-head="pinned"]' } });
+    expect(stepFor("1440:drag:row-id=thread:notes > row-id=thread:webhook@40", [1440, 390])).toEqual({ width: 1440, drag: { from: `[data-row-id="thread:${threadId("notes")}"]`, to: `[data-row-id="thread:${threadId("webhook")}"]`, dy: 40 } });
+  });
+
   it("reads a menu: word as the right-click that opens a row's own menu", () => {
     expect(stepFor("menu:row-id=thread:redirect", [1440, 390])).toEqual({ menu: `[data-row-id="thread:${threadId("redirect")}"]` });
   });
@@ -178,7 +183,12 @@ describe("every row the surfaces list aims at", () => {
     for (const surface of SURFACES) {
       const state = fixtureState(surface.fixture ?? "mac-in-use");
       const threads = new Set(Object.values(state.sessions).flatMap(doc => doc.sessions.map(row => row.threadId)));
-      for (const step of surface.steps ?? []) {
+      // A drag names two rows, the one it picks up and the one it holds over, each checked as a step of its own.
+      const words = (surface.steps ?? []).flatMap(step => {
+        const bare = step.replace(/^\d+:/, "");
+        return bare.startsWith("drag:") ? bare.slice("drag:".length).replace(/@-?\d+$/, "").split(" > ") : [step];
+      });
+      for (const step of words) {
         const word = step.includes(":") && !step.startsWith("row-id=") && !step.startsWith("place-row=") ? step.slice(step.indexOf(":") + 1) : step;
         // This computer's row and a cloud's are the host's own, so they are in no fixture's places collection.
         // A workspace is a tile of its own only while it holds no thread; one that does is reached by its threads.

@@ -14,7 +14,11 @@
 // panels wait for a workspace.
 import { SETTLE_MS } from "@wsp/protocol";
 import { terminalRefusedLine } from "../actions/format.js";
-import { settleSaying } from "../actions/threadActions.js";
+import { settleSaying, threadActions, threadTarget } from "../actions/threadActions.js";
+import { copyText } from "../actions/clipboard.js";
+import { resolveActions, type ResolvedAction } from "../actions/registry.js";
+import { withHeldThreads } from "../protocol/store/heldKeys.js";
+import { moveRoot, rootPlace, type MoveStep } from "../sidebar/treeMoves.js";
 import { deriveSidebarProjects, type SidebarProjectSnapshot, type SidebarThreadSnapshot } from "../adapt/index.js";
 import { toggleCommandPalette } from "../commandPaletteBus.js";
 import { openFileFinder } from "../files/finderBus.js";
@@ -141,8 +145,8 @@ export function splitActivePanelTerminal(workspaceId: string, direction: SplitDi
     creation row has no workspace to switch to, and counting one would move every slot under the person's fingers
     while a fork is in flight. */
 function sidebarProjects(): SidebarProjectSnapshot[] {
-  const { workspaces, statuses, sessions, landings } = useStore.getState();
-  return deriveSidebarProjects({ workspaces, statuses, sessions, pauseModes: pauseModesOf(landings) });
+  const { workspaces, statuses, sessions, heldKeys, landings } = useStore.getState();
+  return withHeldThreads(deriveSidebarProjects({ workspaces, statuses, sessions, pauseModes: pauseModesOf(landings) }), heldKeys);
 }
 
 function orderedWorkspaceIds(): string[] {
@@ -198,11 +202,13 @@ export function cycleThreadInSpace(step: 1 | -1): void {
 
 /** The sidebar's live list as it draws it under the project and computer picks, the thread open in the centre named
  * by its fold key so it stands there however long it has been quiet. */
-function sidebarLive(fleet: SidebarProjectSnapshot[], open: string | null): TileNode[] {
+function sidebarDrawn(fleet: SidebarProjectSnapshot[], open: string | null): ReturnType<typeof sidebarTiles> {
   const { places, projects: recorded, preferences } = useStore.getState();
   const { projects, picked } = underPicks(fleet, { places, recorded, order: preferences.projectOrder, stored: storedPicks() });
-  return sidebarTiles(projects, { picked: picked?.project.id ?? null, nowMs: Date.now(), open, settleMs: SETTLE_MS[preferences.settleAfter] }).live;
+  return sidebarTiles(projects, { picked: picked?.project.id ?? null, nowMs: Date.now(), open, settleMs: SETTLE_MS[preferences.settleAfter] });
 }
+
+const sidebarLive = (fleet: SidebarProjectSnapshot[], open: string | null): TileNode[] => sidebarDrawn(fleet, open).live;
 
 /** Every thread the sidebar lists that a walk can land on, in the order it draws them; the Settled fold is left out. */
 function sidebarThreads(): WalkableThread[] {
@@ -260,6 +266,24 @@ export function settleOpenThread(): void {
   const settle = treeSettle(root);
   if (!settle.working) void settleSaying(settle.threadIds, { settle: settleThreads, restore: restoreThreads });
 }
+
+/** The moves of the open thread's root tree, as its tile's menu offers them, held where they are held there: the
+ * palette's Move up, Move down and Move to top. None while the open thread's tree stands in neither Pinned nor the list. */
+export function openRootMoves(): ResolvedAction[] {
+  const { selectedId, selectedThreadId, api } = useStore.getState();
+  const fleet = sidebarProjects();
+  const runs = fleet.find(project => project.id === selectedId);
+  const open = runs === undefined ? undefined : ((selectedThreadId === null ? undefined : runs.threads.find(thread => thread.threadId === selectedThreadId)) ?? topSidebarThread(runs.threads));
+  if (open == null) return [];
+  const drawn = sidebarDrawn(fleet, open.id);
+  const root = rootHolding(drawn.live, open.id);
+  const thread = root?.thread.thread;
+  if (root === undefined || thread == null) return [];
+  const tree = { ...treeSettle(root), workspaceIds: [], pinned: thread.pinnedAt !== null, settled: false, place: rootPlace(drawn.sections, root.thread.id) };
+  const verbs = { copyText, ...(api?.markThreads === undefined ? {} : { move: (_threadId: string, step: MoveStep) => void moveRoot(drawn.sections, root, step) }) };
+  return resolveActions(threadActions, threadTarget(thread, { catalog: null, state: "running" }, tree), verbs).filter(action => MOVE_ACTIONS.has(action.id));
+}
+const MOVE_ACTIONS: ReadonlySet<string> = new Set(["move-up", "move-down", "move-top"]);
 
 /** Opens the next thread after the open one that needs the person, in the order the sidebar draws its list under the
  * project and computer picks, wrapping; nothing while none it shows does. */

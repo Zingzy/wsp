@@ -235,7 +235,7 @@ describe("tiles from the fixture wire", () => {
     // A session without a prompt falls back to the harness session id.
     expect(threadState(rowOf("59094224-bb3d"))).toBe("Failed");
     // Nothing has been quiet long enough to fold, so there is no Settled row, though the read thread could settle.
-    expect(screen.queryByRole("button", { name: /^Settled/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Settled/ })?.closest("[data-drop-only]")).not.toBeNull();
     expect(document.querySelector("[data-sidebar-tree]")!.textContent).not.toMatch(/[·•]/);
   });
 

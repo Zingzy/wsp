@@ -17,7 +17,7 @@ import { noticeFailure } from "../../notices/store.js";
 import { useSelectedThreadId, useSelectedWorkspaceId, useSidebarProjects, useStore } from "../../protocol/store.js";
 import { copyText } from "../../actions/clipboard.js";
 import { useRightPanelStore } from "../../rightPanelStore.js";
-import { cycleThreadInSpace, goToAdjacentWorkspace, goToWorkspace } from "../../shell/shellCommands.js";
+import { cycleThreadInSpace, goToAdjacentWorkspace, goToWorkspace, openRootMoves } from "../../shell/shellCommands.js";
 import { useKeybindings } from "../../shell/useKeybindings.js";
 import { newThreadAsks, openNewThread, useNewThreadPicks } from "../../shell/NewThreadPicks.js";
 import { requestAddProject } from "../../shell/shellRequests.js";
@@ -143,14 +143,16 @@ export function CommandPalette({ keybindings: given }: { keybindings?: ResolvedK
   // Built only while open, since the items read every thread and a shut palette draws none of them; a shut one keeps
   // what it last drew for its closing frames.
   const built = useRef<PaletteItems>(SHUT);
+  // Read once per open: they derive the whole sidebar, and the items are built again on every key typed.
+  const threadMoves = useMemo(() => (open ? openRootMoves() : []), [open]);
   const items = useMemo(() => {
     if (open) {
       const project = listed === null ? null : (recorded.find(p => p.id === listed) ?? null);
       const conversations = { project, computer: project === null ? "" : (placeNames(places).get(project.computer) ?? project.computer), read: conversationsRead, pick: (row: Parameters<typeof pickConversation>[1]) => project !== null && pickConversation(project.id, row) };
-      built.current = buildPaletteItems({ projects, selectedId, query, messageHits, canCreate: api !== null, recorded, picks, asks, handlers, verbs, places, conversations });
+      built.current = buildPaletteItems({ projects, threadMoves, selectedId, query, messageHits, canCreate: api !== null, recorded, picks, asks, handlers, verbs, places, conversations });
     }
     return built.current;
-  }, [api, asks, conversationsRead, handlers, listed, messageHits, open, picks, places, projects, query, recorded, selectedId, verbs]);
+  }, [api, asks, conversationsRead, handlers, listed, messageHits, open, picks, places, projects, query, recorded, selectedId, threadMoves, verbs]);
   // A page whose row is gone or held, as the last project's removal leaves it, reads as the root.
   const page = useMemo(() => {
     const at = pages.at(-1);

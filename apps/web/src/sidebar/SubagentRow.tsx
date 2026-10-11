@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // One of an agent's own subagents in the sidebar, under the thread whose agent runs it: the slim one-line row with
 // the bot's glyph, its title and its status, its card on rest, and while it runs Stop subagent beside the row in
-// the status's place on hover and alone in its menu. It names no project or computer of its own for a tile's first
+// the status's place on hover, in the two presses every row's Stop takes, and alone in its menu. It names no project or computer of its own for a tile's first
 // row to carry. A press opens its own page; the row of the page open is marked.
 import type { SubagentView } from "@wsp/protocol";
-import { BotIcon, SquareIcon } from "lucide-react";
+import { BotIcon } from "lucide-react";
 import { memo, type MouseEvent } from "react";
 import { openContextMenu, runAction } from "../actions/contextMenu.js";
 import { resolveActions } from "../actions/registry.js";
@@ -16,11 +16,12 @@ import { LINE_SLOT_CLASS, ThreadStatus } from "../components/status/ThreadStatus
 import { subagentStatus } from "../components/threads/leadTree.js";
 import { SubagentCard } from "../components/threads/SubagentCard.js";
 import { sameSubagentRow } from "../components/threads/ThreadRows.js";
-import { SidebarMenuAction, SidebarMenuButton } from "../components/ui/sidebar.js";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.js";
+import { SidebarMenuButton } from "../components/ui/sidebar.js";
+import { Tooltip, TooltipTrigger } from "../components/ui/tooltip.js";
 import { cn } from "../lib/utils.js";
 import { useStore } from "../protocol/store.js";
-import { GLYPH_ROW_CLASS, HOVER_GLYPH_CLASS, ONE_LINE_ROW_CLASS, SLOT_YIELDS_CLASS, SLOT_ACT_CLASS } from "./rowGrammar.js";
+import { GLYPH_ROW_CLASS, ONE_LINE_ROW_CLASS, SLOT_YIELDS_CLASS, STOP_ROOM_CLASS } from "./rowGrammar.js";
+import { StopAct } from "./StopAct.js";
 
 /** How long the pointer rests on the row before its card opens, the tile card's own delay. */
 const CARD_DELAY_MS = 450;
@@ -45,7 +46,7 @@ export const SubagentRow = memo(function SubagentRow({ subagent, target, kind, n
   const ended = subagent.endedAt === undefined ? null : new Date(subagent.endedAt).toISOString();
   const status = subagentStatus(subagent);
   return (
-    <div className="group/menu-item relative min-w-0" {...(stop !== undefined ? { "data-has-action": "" } : {})}>
+    <div className="group/menu-item relative min-w-0" data-stop-row {...(stop !== undefined ? { "data-has-action": "" } : {})}>
       <Tooltip>
         <TooltipTrigger
           delay={CARD_DELAY_MS}
@@ -67,20 +68,13 @@ export const SubagentRow = memo(function SubagentRow({ subagent, target, kind, n
         >
           <BotIcon aria-hidden data-subagent-mark className="size-3 shrink-0 text-sidebar-muted-foreground" />
           <span className="min-w-0 flex-1 truncate text-sidebar-muted-foreground">{subagent.title}</span>
-          <span className={cn("flex shrink-0", stop !== undefined && SLOT_YIELDS_CLASS)}>
+          <span className={cn("flex shrink-0", stop !== undefined && [SLOT_YIELDS_CLASS, STOP_ROOM_CLASS])}>
             <ThreadStatus thread={status} age={restingAge({ startedAt: status.startedAt, endedAt: ended })} kind={kind} className={LINE_SLOT_CLASS} />
           </span>
         </TooltipTrigger>
         <SubagentCard subagent={subagent} harness={target.harness} workspaceId={lead?.workspaceId ?? null} kind={kind} reason={note} />
       </Tooltip>
-      {stop === undefined ? null : (
-        <Tooltip>
-          <TooltipTrigger render={<SidebarMenuAction showOnHover data-subagent-stop aria-label={stop.title} className={cn(HOVER_GLYPH_CLASS, SLOT_ACT_CLASS)} onClick={() => void runAction(stop)} />}>
-            <SquareIcon aria-hidden className="size-3.5" />
-          </TooltipTrigger>
-          <TooltipPopup side="top">{stop.title}</TooltipPopup>
-        </Tooltip>
-      )}
+      {stop === undefined ? null : <StopAct on="sidebar" label={stop.title} onStop={() => void runAction(stop)} />}
     </div>
   );
 }, (a, b) => a.depth === b.depth && a.rowId === b.rowId && a.active === b.active && a.lead?.workspaceId === b.lead?.workspaceId && a.lead?.threadId === b.lead?.threadId && sameSubagentRow(a, b));

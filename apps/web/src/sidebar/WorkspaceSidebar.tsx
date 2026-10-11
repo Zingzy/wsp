@@ -23,14 +23,15 @@
 import { openCommandPalette } from "../commandPaletteBus.js";
 import { openProjectSettings } from "../settings/openAt.js";
 import { ChevronDownIcon, CopyIcon, PlusIcon, SquarePenIcon, Trash2Icon } from "lucide-react";
-import { Fragment, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type ReactNode } from "react";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { HOST_ASLEEP_LINE, SETTLE_MS, copiesFolder, isHere, kindForComputer, modelOf, runsInFolder, modelPicks, workspaceKind, workspaceState, type WorkspaceState, type WorkspaceView } from "@wsp/protocol";
 import { openContextMenu, runAction } from "../actions/contextMenu.js";
 import { THREAD_TREE_WORKING, rebuildRefusedLine, rowNewThread } from "../actions/format.js";
 import { CREATE_ASKED, CREATE_STEP_WORDS, currentStep, stepWords, stoppedStep } from "../shell/creationLog.js";
 import { actionById, actionIfAny, resolveActions, type ResolvedAction } from "../actions/registry.js";
 import { projectActions, type ProjectVerbs } from "../actions/projectActions.js";
-import { settleSaying, settledFoldActions, threadActions, threadTarget, type ThreadVerbs } from "../actions/threadActions.js";
+import { MOVE_KEYS, settleSaying, settledFoldActions, threadActions, threadTarget, type ThreadVerbs } from "../actions/threadActions.js";
+import { matchesShortcut } from "../keybindings.js";
 import { useChildVerbs, useThreadVerbs, useWorkspaceVerbs } from "../actions/verbs.js";
 import { childActs, finishedTake, kindOf, leadActs, leadNodes, type ChildPart } from "../components/threads/leadTree.js";
 import { workspaceActions, workspaceTarget } from "../actions/workspaceActions.js";
@@ -57,6 +58,9 @@ import { SearchRow } from "./SearchRow.js";
 import { resolveAdjacentThreadId, threadSection, topSidebarThread } from "./Sidebar.logic.js";
 import { SIDEBAR_SECTIONS, drawnCount, drawsUnder, dropMarks, nodeOf, settleableRoots, sidebarTiles, tileTree, treeSettle, treeThreadIds, treeWorkspaceIds, type ProjectGroup, type SidebarSection, type TileNode } from "./threadTree.js";
 import { LeadTree, rowsUnder, settlesOnHover } from "./LeadTree.js";
+import { useTreeDrag, type DropTree } from "./treeDrag.js";
+import { holdLiveRegion, moveRoot, rootPlaces } from "./treeMoves.js";
+import { rootThreads } from "./treeOrder.js";
 import { SnoozeDialog } from "./SnoozeDialog.js";
 import { SidebarCorner } from "./SidebarCorner.js";
 import { UpdateCard } from "./UpdateCard.js";
@@ -111,11 +115,11 @@ interface ProjectTripState extends ProjectTripRequest {
 /** The copies one send to several models made, under one head: the sidebar's one-line row, the task's name, how many
  * copies it holds, and the chevron that folds them, so the group reads as a row a person can act on rather than a
  * title standing above a list. Its tiles keep the tile's own pitch on the rail. */
-function AttemptGroup({ title, copies, children }: { title: string; copies: number; children: ReactNode }) {
+function AttemptGroup({ title, copies, root, children }: { title: string; copies: number; root?: { id: string; drags: boolean } | undefined; children: ReactNode }) {
   const [open, setOpen] = useState(true);
   return (
-    <li data-thread-item data-attempt-group className="min-w-0">
-      <SidebarMenuButton size="sm" data-attempt-head aria-expanded={open} className={ONE_LINE_ROW_CLASS} onClick={() => setOpen(was => !was)}>
+    <li data-thread-item data-attempt-group className={cn("min-w-0", ROOT_ITEM_CLASS)} {...(root === undefined ? {} : { "data-root": root.id })}>
+      <SidebarMenuButton size="sm" data-attempt-head aria-expanded={open} className={ONE_LINE_ROW_CLASS} onClick={() => setOpen(was => !was)} {...(root?.drags === true ? { draggable: true } : {})}>
         <CopyIcon aria-hidden className="size-4 shrink-0 text-sidebar-muted-foreground" />
         <span data-attempt-title className="min-w-0 flex-1 truncate text-sidebar-foreground" title={title}>
           {title}
@@ -129,6 +133,18 @@ function AttemptGroup({ title, copies, children }: { title: string; copies: numb
     </li>
   );
 }
+
+/** A root's item while its tree is dragged: its tile at half opacity and its tree folded, still mounted, so the drag
+ * draws nothing and a drop or an Escape opens it again as it was. */
+const ROOT_ITEM_CLASS = "data-[drag-source]:[&>:first-child]:opacity-50 data-[drag-source]:[&>ul]:hidden";
+/** A head or a section that stands only while a tree is dragged: no box, so no screen reader reaches it, and its head
+ * carries no row id, so the keys pass it, until the drag's frame shows it. */
+const DROP_ONLY_CLASS = "hidden data-[drop-shown]:block";
+/** The fill a head under a dragged tree takes, today's row hover. */
+const DROP_OVER_CLASS = "rounded-[var(--control-radius)] transition-colors duration-150 data-[drop-over]:bg-sidebar-row-hover";
+
+/** The thread's acts a tile's draw reads: Stop and Settle for its slot, Rename for a double-click on its name. */
+const DRAWN_ACTS = threadActions.filter(entry => entry.id === "stop" || entry.id === "settle" || entry.id === "rename");
 
 /** The workspace entries a project's row leaves off its folder's: renaming and removing a record no row shows. */
 const FOLDER_LEFT_OFF = new Set(["edit", "remove"]);
@@ -177,10 +193,7 @@ export function WorkspaceSidebar() {
   const [trip, setTrip] = useState<ProjectTripState | null>(null);
   /** The root whose snooze is being picked, by fold key. */
   const [snoozing, setSnoozing] = useState<string | null>(null);
-  /** The root tile being dragged, by fold key, and the place under the pointer it would land in. */
-  const [dragging, setDragging] = useState<string | null>(null);
   const tileHandlers = useTileHandlers();
-  const [over, setOver] = useState<SidebarSection | "settled" | null>(null);
   const [forgetting, setForgetting] = useState<{ workspaceIds: ReadonlyArray<string>; act: "forget" | "delete"; copies?: true } | null>(null);
   /** The tile whose name is being typed, by the row id every tile carries, and whether that name is on its way; one
    * tile at a time, the tile is the only editor, and the field stays until the store has the name. */
@@ -203,11 +216,18 @@ export function WorkspaceSidebar() {
   // The sidebar draws the tiles, so it owns the rename's opener, as it owns the forget's dialog; a client that cannot
   // send the name offers no box, and the action carries that refusal.
   const defaultThreadVerbs = useThreadVerbs();
+  /** The tiles as the last committed draw holds them: what a move from the menu, the keys or a drop reads. */
+  const drawnTiles = useRef<ReturnType<typeof sidebarTiles> | null>(null);
+  const moveTree = (threadId: string, to: Parameters<typeof moveRoot>[2]): boolean => {
+    const at = drawnTiles.current;
+    const node = at?.live.find(root => root.thread.id === threadId);
+    return at !== null && node !== undefined && moveRoot(at.sections, node, to);
+  };
   const threadVerbs = useMemo<ThreadVerbs>(
     () => ({
       ...defaultThreadVerbs,
       ...(canRename ? { rename: (threadId: string) => setRenaming({ rowId: threadRowId(threadId), saving: false }) } : {}),
-      ...(canMark ? { snooze: setSnoozing } : {}),
+      ...(canMark ? { snooze: setSnoozing, move: (threadId: string, step: "up" | "down" | "top") => void moveTree(threadId, step) } : {}),
       ...(canDelete
         ? {
             keep: (workspaceIds: ReadonlyArray<string>) => setForgetting({ workspaceIds, act: "delete" }),
@@ -245,6 +265,10 @@ export function WorkspaceSidebar() {
     setHeld({ open, held: folded ? null : open });
   }
   const tiles = useMemo(() => sidebarTiles(projects, { picked: picked?.project.id ?? null, nowMs, open: held.held, settleMs: SETTLE_MS[settleAfter] }), [projects, picked, nowMs, held.held, settleAfter]);
+  const standings = useMemo(() => rootPlaces(tiles.sections), [tiles]);
+  useLayoutEffect(() => {
+    drawnTiles.current = tiles;
+  });
   // One landing per project, for the pause mode a copy's phase verb reads. Asked here, where the tiles are drawn,
   // so no tile asks for itself.
   useEffect(() => {
@@ -355,20 +379,23 @@ export function WorkspaceSidebar() {
    * a root or a tile whose opener runs on another copy, carries every one of that copy's verbs after the thread's own.
    * A tile's verbs reach the machine its own copy runs on, so a thread on a machine that is gone is refused wherever it
    * is drawn. */
-  const tileItem = (node: TileNode, depth: number, above: string | null, settled = false, group: ReadonlyArray<string> = [], part: ChildPart = "live", path: ReadonlyArray<string> = []): ReactNode => {
+  const tileItem = (node: TileNode, depth: number, above: string | null, settled = false, group: ReadonlyArray<string> = [], part: ChildPart = "live", path: ReadonlyArray<string> = [], section?: SidebarSection): ReactNode => {
     const { thread: item, children } = node;
     const { runs, thread } = item;
+    // A root of a section is an item a dragged tree lands beside, and one that moves is dragged by its tile.
+    const rootOf = section === undefined ? undefined : { id: item.id, drags: canMark && !settled && item.snoozedWorking === undefined && (item.inboxOf?.parent ?? null) === null && (item.groupTitle !== undefined || thread !== null) };
     if (item.groupTitle !== undefined) {
       const copies = children.map(child => child.thread.runs.id);
       return (
-        <AttemptGroup key={item.id} title={item.groupTitle} copies={children.length}>
+        <AttemptGroup key={item.id} title={item.groupTitle} copies={children.length} root={rootOf}>
           {children.map(child => tileItem(child, depth + 1, null, settled, copies.filter(id => id !== child.thread.runs.id), "live", path))}
         </AttemptGroup>
       );
     }
     const inbox = item.inboxOf;
     const real = inbox === undefined ? node : (nodeOf(tiles.live, item.id) ?? node);
-    const copyActions = above === runs.id ? [] : resolveActions(workspaceActions, workspaceTarget(runs.workspace, runs.status, places), verbs);
+    // Read at the press: a draw of 400 tiles that resolved every copy's menu up front was most of its own cost.
+    const copyActions = (): ResolvedAction[] => (above === runs.id ? [] : resolveActions(workspaceActions, workspaceTarget(runs.workspace, runs.status, places), verbs));
     const place = placeOf(runs);
     const checkout = checkoutOf(runs);
     const slim = settled || part === "finished";
@@ -386,7 +413,7 @@ export function WorkspaceSidebar() {
           renaming={renaming?.rowId === item.id}
           saving={renaming?.rowId === item.id && renaming.saving}
           onSelect={() => select(runs.id)}
-          onContextMenu={event => void openContextMenu(event, copyActions)}
+          onContextMenu={event => void openContextMenu(event, copyActions())}
           onRename={name => void sendName(item.id, () => renameWorkspace({ workspaceId: runs.id, name }))}
           onRenameCancel={() => setRenaming(null)}
         />
@@ -395,18 +422,22 @@ export function WorkspaceSidebar() {
       const isRoot = inbox === undefined ? depth === 0 : inbox.parent === null;
       const rowId = inbox === undefined ? threadRowId(thread.id) : `inbox:${threadRowId(thread.id)}`;
       // A settle, a restore, a pin and a snooze take a root and its whole tree; a tile under one settles its own.
-      const root = isRoot ? { ...treeSettle(real), workspaceIds: treeWorkspaceIds(real), pinned: thread.pinnedAt !== null, settled } : null;
+      const root = isRoot ? { ...treeSettle(real), workspaceIds: treeWorkspaceIds(real), pinned: thread.pinnedAt !== null, settled, place: settled ? null : (standings.get(item.id) ?? null) } : null;
       const catalog = catalogIn({ harnesses, harnessesByWorkspace }, thread.workspaceId, thread.harness);
       const target = threadTarget(thread, { catalog, ...machineOf(runs), ...(place.at !== undefined && !isHere(place.at) ? { elsewhere: place.computer } : {}) }, root, group);
-      const actionsOf = resolveActions(threadActions, target, inbox === undefined || !canRename ? threadVerbs : { ...threadVerbs, rename: () => setRenaming({ rowId, saving: false }) });
+      const tileVerbs = inbox === undefined || !canRename ? threadVerbs : { ...threadVerbs, rename: () => setRenaming({ rowId, saving: false }) };
+      // The draw reads three of the thread's acts; the menu resolves the rest at the press.
+      const actionsOf = resolveActions(DRAWN_ACTS, target, tileVerbs);
       const lead = { node: real, thread };
       const asChild = childActs(lead, part, tree, childVerbs);
       const settle = settled ? undefined : root !== null ? actionIfAny(actionsOf, "settle") : actionIfAny(asChild, "settle");
       const restore = root === null ? actionIfAny(asChild, "restore") : undefined;
       const restartOpens = asChild.filter(action => action.id === "open-replaced" || action.id === "open-restart");
-      const quiet = !settled && settle !== undefined && settle.refusal === null && settlesOnHover(real, tree);
+      const stop = settled ? undefined : actionIfAny(root !== null ? actionsOf : asChild, "stop");
+      const stops = stop !== undefined && stop.refusal === null;
+      const quiet = !settled && !stops && settle !== undefined && settle.refusal === null && settlesOnHover(real, tree);
       const kids = leadNodes(thread, real.children, tree);
-      const own = [...actionsOf, ...restartOpens, ...(root === null && settle !== undefined ? [settle] : []), ...(restore === undefined ? [] : [restore]), ...leadActs(thread, finishedTake(kids, tree), childVerbs)];
+      const own = (): ResolvedAction[] => [...resolveActions(threadActions, target, tileVerbs), ...restartOpens, ...(root === null && settle !== undefined ? [settle] : []), ...(restore === undefined ? [] : [restore]), ...leadActs(thread, finishedTake(kids, tree), childVerbs)];
       // The tree under the tile: drawn while it stands open, counted while it is folded, and folded only where the host
       // can open it again.
       const drawsTree = !settled && part === "live" && inbox === undefined && item.snoozedWorking === undefined && drawsUnder(real, tree);
@@ -432,27 +463,17 @@ export function WorkspaceSidebar() {
           {...(part === "finished" ? { finished: kindOf(lead, "finished") } : {})}
           {...(folds ? { fold: folded ? rowsUnder(thread, children, tree) : ("open" as const) } : {})}
           {...(group.length > 0 && thread.model !== null ? { label: catalog === null ? thread.model : modelOf(catalog, modelPicks(thread.model).model)?.label } : {})}
+          {...(rootOf?.drags === true ? { drags: true } : {})}
+          {...(stops && real.children.length > 0 ? { stopsTree: true } : {})}
           {...tileHandlers(rowId, {
             onSelect: () => select(thread.workspaceId, thread.threadId),
-            onContextMenu: event => void openContextMenu(event, [...own, ...copyActions]),
+            onContextMenu: event => void openContextMenu(event, [...own(), ...copyActions()]),
             onRename: title => void sendName(rowId, () => renameThread({ sessionId: thread.sessionId, workspaceId: thread.workspaceId, harness: thread.harness, title })),
             onRenameCancel: () => setRenaming(null),
             onRenameOpen: openerOf(actionById(actionsOf, "rename")),
             ...(quiet ? { onSettle: () => void runAction(settle!) } : {}),
+            ...(stops ? { onStop: () => void runAction(stop) } : {}),
             ...(folds ? { onFold: () => void markThreads([thread.id], { folded: !folded }) } : {}),
-            ...(isRoot && !settled
-              ? {
-                  onDragStart: (event: DragEvent<HTMLElement>) => {
-                    event.dataTransfer.setData("text/plain", thread.title);
-                    event.dataTransfer.effectAllowed = "move";
-                    setDragging(item.id);
-                  },
-                  onDragEnd: () => {
-                    setDragging(null);
-                    setOver(null);
-                  },
-                }
-              : {}),
           })}
         />
       );
@@ -460,7 +481,14 @@ export function WorkspaceSidebar() {
     // Past the second level a tile's own tree stands at its x, in the list it stands in.
     const nests = depth < 2;
     const li = (
-      <li key={item.id} data-thread-item data-workspace-id={runs.id} {...(slim && thread !== null ? { "data-slim": "" } : {})} className={cn("min-w-0", depth > 0 && RAIL_ITEM_CLASS)}>
+      <li
+        key={item.id}
+        data-thread-item
+        data-workspace-id={runs.id}
+        {...(slim && thread !== null ? { "data-slim": "" } : {})}
+        {...(rootOf === undefined ? {} : { "data-root": rootOf.id, ...(item.snoozedWorking === undefined ? {} : { "data-root-fixed": "" }) })}
+        className={cn("min-w-0", depth > 0 && RAIL_ITEM_CLASS, rootOf !== undefined && ROOT_ITEM_CLASS)}
+      >
         {tile}
         {under !== null && nests ? <ul className={CHILD_LIST_CLASS}>{under}</ul> : null}
         {settled && children.length > 0 ? <ul className={CHILD_LIST_CLASS}>{children.map(child => tileItem(child, depth + 1, runs.id, true))}</ul> : null}
@@ -514,41 +542,39 @@ export function WorkspaceSidebar() {
   const made = creations.filter(creation => picked === null || creation.project === picked.project.id);
   /** A workspace being made files where a thread in its state does: the list while it is made, Needs you once refused. */
   const madeIn = (id: SidebarSection): Creation[] => made.filter(creation => (creation.failed === null ? "threads" : "needs-you") === id);
-  /** A root dropped on a section or on the fold: the marks the drop writes, or the settle of its tree. */
-  const drop = (rootId: string, place: SidebarSection | "settled"): void => {
-    const node = tiles.live.find(root => root.thread.id === rootId);
-    if (node === undefined || node.thread.thread === null) return;
+  /** A root dropped on a section's head or on the fold: the marks the drop writes, or the settle of its tree. A group
+   * one send to several models opened goes as one: pinned or unpinned together, each of its trees settled. */
+  const dropOnHead = (node: TileNode, place: SidebarSection | "settled"): void => {
+    const threads = rootThreads(node);
+    if (threads.length === 0) return;
     if (place === "settled") {
       // The menu's Settle is held with this sentence while the tree works, and a drop says the same.
-      const tree = treeSettle(node);
-      if (tree.working) addNotice({ kind: "error", text: THREAD_TREE_WORKING });
-      else void settleSaying(tree.threadIds, { settle: settleThreads, restore: restoreThreads });
+      const trees = node.thread.groupTitle === undefined ? [treeSettle(node)] : node.children.map(treeSettle);
+      if (trees.some(tree => tree.working)) addNotice({ kind: "error", text: THREAD_TREE_WORKING });
+      else void settleSaying(trees.flatMap(tree => tree.threadIds), { settle: settleThreads, restore: restoreThreads });
       return;
     }
-    const marks = dropMarks(node, place);
-    if (marks !== null) void markThreads([node.thread.thread.id], marks);
+    const marks = node.thread.groupTitle === undefined ? dropMarks(node, place) : place === "pinned" ? { pinned: true } : threads.some(thread => thread.pinnedAt !== null) ? { pinned: false } : null;
+    if (marks !== null) void markThreads(threads.map(thread => thread.id), marks);
   };
-  /** What makes a section, or the fold, a place a dragged root lands in. */
-  const dropZone = (place: SidebarSection | "settled") => ({
-    onDragOver: (event: DragEvent<HTMLElement>) => {
-      if (dragging === null) return;
-      event.preventDefault();
-      event.dataTransfer.dropEffect = "move";
-      if (over !== place) setOver(place);
-    },
-    onDrop: (event: DragEvent<HTMLElement>) => {
-      event.preventDefault();
-      const rootId = dragging;
-      setDragging(null);
-      setOver(null);
-      if (rootId !== null) drop(rootId, place);
-    },
-  });
-  // While a root is dragged every section stands, the empty ones too, so any of them can take it.
-  const sections = SIDEBAR_SECTIONS.flatMap(id => {
-    const found = tiles.sections.find(section => section.id === id);
-    return found !== undefined ? [found] : dragging !== null || madeIn(id).length > 0 ? [{ id, roots: [] }] : [];
-  });
+  /** Where a dragged root lands, read at the drop off the tiles the last draw committed. */
+  const dropTree = useRef<DropTree>(() => {});
+  dropTree.current = (rootId, at) => {
+    const drawn = drawnTiles.current;
+    const node = drawn?.live.find(root => root.thread.id === rootId);
+    if (drawn === null || node === undefined) return;
+    if (at.kind === "head") return dropOnHead(node, at.place);
+    const roots = drawn.sections.find(section => section.id === at.section)?.roots.filter(root => root.thread.id !== rootId && root.thread.snoozedWorking === undefined) ?? [];
+    const next = roots.findIndex(root => root.thread.id === at.rootId);
+    if (next >= 0) moveTree(rootId, { section: at.section, at: next + (at.after ? 1 : 0) });
+  };
+  useTreeDrag(rootRef, dropTree);
+  // Every section is drawn: one with nothing in it stands only while a tree is dragged, as a place to drop it.
+  const sections = SIDEBAR_SECTIONS.map(id => tiles.sections.find(section => section.id === id) ?? { id, roots: [] });
+  const standsBare = (section: { id: SidebarSection; roots: ReadonlyArray<TileNode> }): boolean => section.roots.length === 0 && madeIn(section.id).length === 0;
+  /** Whether a section keeps the sections' own gap over it at rest: one stands above it, or it is a bare head itself.
+   * Where neither, the gap stands only while a drag shows the bare heads above, so the list starts where it did. */
+  const gapsAtRest = (index: number): boolean => standsBare(sections[index]!) || sections.slice(0, index).some(above => !standsBare(above));
   const settledCount = tiles.settled.reduce((sum, node) => sum + tileCount(node), 0);
   const settleable = settleableRoots(tiles.live);
   const settledRowActions = resolveActions(settledFoldActions, { threadIds: settleable.flatMap(root => treeSettle(root).threadIds), workspaceIds: [...new Set(tiles.settled.flatMap(treeWorkspaceIds))] }, threadVerbs);
@@ -559,9 +585,25 @@ export function WorkspaceSidebar() {
     if (id === null) return;
     rows().find(r => r.dataset["rowId"] === id)?.focus();
   };
+  /** The row a move from the keys left focused, put back once the move has drawn. */
+  const refocus = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    const id = refocus.current;
+    if (id === null) return;
+    refocus.current = null;
+    const row = rows().find(r => r.dataset["rowId"] === id);
+    if (row !== undefined && document.activeElement !== row) row.focus();
+  });
   const onKeyDown = (e: KeyboardEvent<HTMLElement>): void => {
     const ids = rows().map(r => r.dataset["rowId"] ?? "");
     const current = (e.target as HTMLElement).closest<HTMLElement>("[data-sidebar-row]")?.dataset["rowId"] ?? null;
+    const step = matchesShortcut(e, MOVE_KEYS.up) ? "up" : matchesShortcut(e, MOVE_KEYS.down) ? "down" : null;
+    if (step !== null) {
+      const id = current?.match(/^thread:(.+)$/)?.[1];
+      if (id !== undefined && moveTree(id, step)) refocus.current = current;
+      e.preventDefault();
+      return;
+    }
     switch (e.key) {
       case "ArrowDown":
         focusRow(resolveAdjacentThreadId({ threadIds: ids, currentThreadId: current, direction: "next" }) ?? current);
@@ -627,15 +669,15 @@ export function WorkspaceSidebar() {
       <SidebarChromeHeader />
       <div ref={rootRef} onKeyDown={onKeyDown} className="flex min-h-0 flex-1 flex-col">
         <SidebarContent fixedHeader={header} className="min-h-full" onContextMenu={event => void openContextMenu(event, settledRowActions.filter(action => action.id === "settle-read"))}>
-          <ul data-sidebar-tree className="flex w-full min-w-0 flex-col px-[var(--sidebar-content-inset)]">
+          <ul data-sidebar-tree className="relative flex w-full min-w-0 flex-col px-[var(--sidebar-content-inset)]">
             {launchItems}
             {sections.map((section, index) => (
               <li
                 key={section.id}
                 data-section={section.id}
                 data-thread-selection-safe
-                className={cn("min-w-0 rounded-[var(--control-radius)] transition-colors duration-150", index > 0 && "mt-3", over === section.id && "bg-sidebar-row-hover")}
-                {...dropZone(section.id)}
+                {...(standsBare(section) ? { "data-drop-only": "" } : index > 0 && !gapsAtRest(index) ? { "data-drop-gap": "" } : {})}
+                className={cn("min-w-0", DROP_OVER_CLASS, index > 0 && (gapsAtRest(index) ? "mt-3" : "data-[drop-shown]:mt-3"), standsBare(section) && DROP_ONLY_CLASS)}
               >
                 {/* The one list stands bare between Needs you and Settled, as T3 Code's active list. */}
                 {section.id === "threads" ? null : (
@@ -644,30 +686,28 @@ export function WorkspaceSidebar() {
                     count={section.roots.reduce((sum, node) => sum + drawnCount(node, read), 0) + madeIn(section.id).length}
                     collapsed={folded.includes(section.id)}
                     onToggle={() => toggleFold(section.id)}
-                    rowId={sectionRowId(section.id)}
+                    rowId={standsBare(section) ? undefined : sectionRowId(section.id)}
                     head={section.id}
                   />
                 )}
                 {section.id !== "threads" && folded.includes(section.id) ? null : (
                   <ul className="flex min-w-0 flex-col">
                     {madeIn(section.id).map(creationItem)}
-                    {section.roots.map(node => tileItem(node, 0, null))}
+                    {section.roots.map(node => tileItem(node, 0, null, false, [], "live", [], section.id))}
                   </ul>
                 )}
               </li>
             ))}
-            {tiles.settled.length > 0 || dragging !== null ? (
-              <li data-thread-selection-safe className={cn("mt-3 rounded-[var(--control-radius)] transition-colors duration-150", over === "settled" && "bg-sidebar-row-hover")} {...dropZone("settled")}>
-                <SectionRow
-                  label={SECTION_WORDS.settled}
-                  count={settledCount}
-                  collapsed={!settledOpen}
-                  onToggle={() => toggleFold("settled")}
-                  onContextMenu={event => void openContextMenu(event, settledRowActions)}
-                  rowId={SETTLED_ROW_ID}
-                />
-              </li>
-            ) : null}
+            <li data-thread-selection-safe data-drop-settled {...(tiles.settled.length === 0 ? { "data-drop-only": "" } : {})} className={cn("mt-3", DROP_OVER_CLASS, tiles.settled.length === 0 && DROP_ONLY_CLASS)}>
+              <SectionRow
+                label={SECTION_WORDS.settled}
+                count={settledCount}
+                collapsed={!settledOpen}
+                onToggle={() => toggleFold("settled")}
+                onContextMenu={event => void openContextMenu(event, settledRowActions)}
+                rowId={tiles.settled.length === 0 ? undefined : SETTLED_ROW_ID}
+              />
+            </li>
             {settledOpen ? tiles.settled.map(node => tileItem(node, 0, null, true)) : null}
             {ready && groups.length > 0 && launchItems.length + tiles.live.length + tiles.settled.length + made.length === 0 ? (
               <li data-thread-selection-safe>
@@ -697,8 +737,10 @@ export function WorkspaceSidebar() {
                 </SidebarMenuButton>
               </li>
             ) : null}
+            <li data-drop-line aria-hidden hidden className="pointer-events-none absolute inset-x-[var(--sidebar-content-inset)] top-0 z-10 h-0.5 bg-ring" />
           </ul>
           <ForwardsList />
+          <p ref={holdLiveRegion} aria-live="polite" data-move-said className="sr-only" />
         </SidebarContent>
         <SidebarChromeFooter>
           <SettingUpSection collapsed={folded.includes("setting-up")} onToggle={() => toggleFold("setting-up")} />

@@ -1,0 +1,14 @@
+{
+  "at": "/",
+  "fixture": "tree-drag",
+  "steps": [
+    "row-id=thread:alone-279",
+    "drag:row-id=thread:alone-279 > row-id=thread:lead-0@40"
+  ],
+  "wait": "tree-dragging",
+  "settleMs": 500,
+  "widths": [
+    1440
+  ],
+  "reason": "what a drag and a hover show is the pointer's, drawn from md up; a phone has neither"
+}

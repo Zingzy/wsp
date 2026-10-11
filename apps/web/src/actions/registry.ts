@@ -7,8 +7,8 @@
 // serializes that list for a menu, native or in-app.
 import type { LucideIcon } from "lucide-react";
 import type { ContextMenuItem } from "@wsp/protocol";
-import { acceleratorForCommand, shortcutLabelForCommand, type ShortcutMatchOptions } from "../keybindings.js";
-import type { KeybindingCommand, ResolvedKeybindingsConfig } from "../keybindingTypes.js";
+import { acceleratorForCommand, formatAccelerator, formatShortcutLabel, shortcutLabelForCommand, type ShortcutMatchOptions } from "../keybindings.js";
+import type { KeybindingCommand, KeybindingShortcut, ResolvedKeybindingsConfig } from "../keybindingTypes.js";
 
 export interface ActionEntry<Target, Verbs> {
   readonly id: string;
@@ -16,6 +16,8 @@ export interface ActionEntry<Target, Verbs> {
   readonly group: string;
   readonly icon?: (target: Target) => LucideIcon;
   readonly shortcutCommand?: KeybindingCommand;
+  /** A chord the surface that hears it fixes, outside the one table: named on the action's menu row alone. */
+  readonly keys?: KeybindingShortcut;
   readonly destructive?: boolean;
   /** What the palette matches beyond the title. */
   readonly searchTerms?: ReadonlyArray<string>;
@@ -40,6 +42,7 @@ export interface ResolvedAction {
   readonly group: string;
   readonly icon?: LucideIcon;
   readonly shortcutCommand?: KeybindingCommand;
+  readonly keys?: KeybindingShortcut;
   readonly destructive: boolean;
   readonly searchTerms: ReadonlyArray<string>;
   readonly title: string;
@@ -63,6 +66,7 @@ export function resolveActions<Target, Verbs>(registry: ReadonlyArray<ActionEntr
       group: entry.group,
       ...(entry.icon !== undefined ? { icon: entry.icon(target) } : {}),
       ...(entry.shortcutCommand !== undefined ? { shortcutCommand: entry.shortcutCommand } : {}),
+      ...(entry.keys !== undefined ? { keys: entry.keys } : {}),
       destructive: entry.destructive === true,
       searchTerms: entry.searchTerms ?? [],
       title: entry.title(target),
@@ -93,8 +97,8 @@ export function actionIfAny(actions: ReadonlyArray<ResolvedAction>, id: string):
 /** The items for a menu; shortcuts resolve against the focus context the menu opens in (a terminal's menu reads the terminal's chords). */
 export function toMenuItems(actions: ReadonlyArray<ResolvedAction>, keybindings: ResolvedKeybindingsConfig, shortcuts?: ShortcutMatchOptions): ContextMenuItem[] {
   return actions.map(action => {
-    const shortcut = action.shortcutCommand === undefined ? null : shortcutLabelForCommand(keybindings, action.shortcutCommand, shortcuts);
-    const accelerator = action.shortcutCommand === undefined ? null : acceleratorForCommand(keybindings, action.shortcutCommand, shortcuts);
+    const shortcut = action.shortcutCommand !== undefined ? shortcutLabelForCommand(keybindings, action.shortcutCommand, shortcuts) : action.keys !== undefined ? formatShortcutLabel(action.keys, shortcuts?.platform) : null;
+    const accelerator = action.shortcutCommand !== undefined ? acceleratorForCommand(keybindings, action.shortcutCommand, shortcuts) : action.keys !== undefined ? formatAccelerator(action.keys) : null;
     return {
       id: action.id,
       label: action.title,

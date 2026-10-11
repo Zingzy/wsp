@@ -49,6 +49,10 @@ const FILE = /^file:([^:]+):(\d+)$/;
 /** A step that hands a project's Icon row the file a person picks: a logo the window fits, or a 20000 px image it
  * refuses before decoding. */
 const IMAGE = /^image:(logo|huge)$/;
+/** A step that picks up one data attribute and holds it over another, the pointer still down when the shot is
+ * taken, `dy` pixels into the second where it names any and at its middle where not: a tree mid-drag, its drop line
+ * and the heads a drag shows. `drag:row-id=thread:notes > row-id=thread:webhook@40`. */
+const DRAG = /^drag:(.+?) > (.+?)(?:@(-?\d+))?$/;
 /** The one step that is none of those: the network under the window goes, which is what a window on another computer
  * sees the moment the computer running wsp falls asleep. The rows stay as they were last known. */
 const OFFLINE = "offline";
@@ -93,6 +97,7 @@ export function stepFor(word, widths) {
   const hovered = HOVER.exec(typeof bare === "string" ? bare : "");
   const filed = FILE.exec(typeof bare === "string" ? bare : "");
   const imaged = IMAGE.exec(typeof bare === "string" ? bare : "");
+  const dragged = DRAG.exec(typeof bare === "string" ? bare : "");
   const step =
     bare === OFFLINE ? { offline: true }
     : bare === POINTER_OFF ? { pointerOff: true }
@@ -103,6 +108,7 @@ export function stepFor(word, widths) {
     : hovered !== null ? { hover: selectorFor(withThreadId(hovered[1])) }
     : filed !== null ? { file: { name: filed[1], bytes: Number(filed[2]) } }
     : imaged !== null ? { image: imaged[1] }
+    : dragged !== null ? { drag: { from: selectorFor(withThreadId(dragged[1])), to: selectorFor(withThreadId(dragged[2])), ...(dragged[3] === undefined ? {} : { dy: Number(dragged[3]) }) } }
     : key === null ? { click: selectorFor(withThreadId(bare)) }
     : { key: key[1] };
   return width === undefined ? step : { width, ...step };
@@ -119,6 +125,7 @@ const stepWords = step =>
   : step.hover !== undefined ? `the pointer on \`${step.hover}\``
   : step.file !== undefined ? `attaching \`${step.file.name}\` of ${step.file.bytes} bytes`
   : step.image !== undefined ? `picking the ${step.image} image for the project`
+  : step.drag !== undefined ? `\`${step.drag.from}\` dragged and held over \`${step.drag.to}\``
   : step.key !== undefined ? `the ${step.key} key`
   : `\`${step.click}\``;
 

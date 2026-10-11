@@ -7,7 +7,7 @@
 // passes brings its thread back reading Done.
 import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { AGENTS_ON, foldThreads, threadNeedsYou, threadWordOf, type EventUnion, type ThreadScope, type TurnResult } from "@wsp/protocol";
+import { AGENTS_ON, ThreadMarks, foldThreads, threadNeedsYou, threadWordOf, type EventUnion, type ThreadScope, type TurnResult } from "@wsp/protocol";
 import { createRuntime, type HarnessAdapterFactory } from "../src/runtime.js";
 import { memoryStore } from "../src/store.js";
 import { fakeClock } from "./fake-clock.js";
@@ -139,6 +139,47 @@ describe("a thread's read and settled stamps", () => {
     const [cleared] = foldThreads(await again.sessions.list(ws.id));
     expect(cleared).not.toHaveProperty("pinnedAt");
     expect(cleared).not.toHaveProperty("section");
+    await again.close();
+  });
+
+  it("a pin's key and a list order ride every row, outlive a restart, reach every window, and a key that is no number is refused", async () => {
+    const store = await keptSinceLongAgo();
+    const { clock } = aheadClock();
+    const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: working }, clock });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
+    const events: EventUnion[] = [];
+    rt.events.on("*", e => events.push(e));
+    const done = await rt.sessions.start(ws.id, { prompt: "build it" });
+    await done.finished;
+    const threadId = done.view().threadId!;
+    // A key between two neighbours keeps its fraction: a cut to the millisecond would tie them.
+    const pinKey = clock.now() - 1234.5625;
+    const orderKey = 1_727_431_200_000.25;
+
+    await rt.sessions.mark([threadId], { pinned: pinKey, order: orderKey });
+
+    const rows = await rt.sessions.list(ws.id);
+    expect(rows.every(row => row.pinnedAt === pinKey && row.order === orderKey)).toBe(true);
+    expect(foldThreads(rows)[0]).toMatchObject({ pinnedAt: pinKey, order: orderKey });
+    expect(events.filter(e => e.type === "thread.marked")).toMatchObject([{ workspaceId: ws.id, threadIds: [threadId] }]);
+    for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+      await expect(rt.sessions.mark([threadId], { order: bad })).rejects.toMatchObject({ kind: "usage" });
+      await expect(rt.sessions.mark([threadId], { pinned: bad })).rejects.toMatchObject({ kind: "usage" });
+    }
+    expect(ThreadMarks.safeParse({ order: Number.NaN }).success).toBe(false);
+    expect(ThreadMarks.safeParse({ pinned: Number.POSITIVE_INFINITY }).success).toBe(false);
+    expect(ThreadMarks.safeParse({ pinned: 5, order: null }).success).toBe(true);
+    await rt.close();
+
+    const again = createRuntime({ backend: stubBackend(), store, adapters: { claude: working }, clock });
+    expect(foldThreads(await again.sessions.list(ws.id))[0]).toMatchObject({ pinnedAt: pinKey, order: orderKey });
+    // Unpinning leaves the place in the list, so the tree goes back where the person last put it.
+    await again.sessions.mark([threadId], { pinned: false });
+    const [unpinned] = foldThreads(await again.sessions.list(ws.id));
+    expect(unpinned).not.toHaveProperty("pinnedAt");
+    expect(unpinned).toMatchObject({ order: orderKey });
+    await again.sessions.mark([threadId], { order: null });
+    expect(foldThreads(await again.sessions.list(ws.id))[0]).not.toHaveProperty("order");
     await again.close();
   });
 

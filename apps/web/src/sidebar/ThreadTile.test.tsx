@@ -9,15 +9,17 @@ import { TooltipProvider } from "../components/ui/tooltip.js";
 import { ThreadTile, WorkspaceTile, useTileHandlers, type TilePlace } from "./ThreadTile.js";
 import { SubagentRow } from "./SubagentRow.js";
 import { settlesOnHover } from "./LeadTree.js";
+import { STOP_ROOM_CLASS } from "./rowGrammar.js";
 import { tileTree, type TileNode } from "./threadTree.js";
 import { childTarget, kindOf, noteOf } from "../components/threads/leadTree.js";
 import type { SubagentView } from "@wsp/protocol";
 import { useStore } from "../protocol/store.js";
 import type { TileCheckout } from "./tileCheckout.js";
 import type { PlaceView } from "@wsp/protocol";
+import { pointerLeave } from "../../test/pointer.js";
 
 const thread = (over: Partial<SidebarThreadSnapshot> = {}): SidebarThreadSnapshot => {
-  const base = { id: "th_1", threadId: "th_1", sessionId: "s_1", workspaceId: "ws_a", title: "Cart total rounding", status: "running" as const, ran: true, startedAt: "2026-09-17T00:00:00.000Z", endedAt: null, harness: "claude", startedBy: "person" as const, project: "spoo", parentThreadId: null, attempt: null, model: null, asking: null, costUsd: null, unread: false, readAt: null, settledAt: null, needsYou: false, pinnedAt: null, snoozedUntil: null, section: null, subagents: [], lastLine: null, failure: null, foldedAt: null, replaces: null, replacedBy: null };
+  const base = { id: "th_1", threadId: "th_1", sessionId: "s_1", workspaceId: "ws_a", title: "Cart total rounding", status: "running" as const, ran: true, startedAt: "2026-09-17T00:00:00.000Z", endedAt: null, harness: "claude", startedBy: "person" as const, project: "spoo", parentThreadId: null, attempt: null, model: null, asking: null, costUsd: null, unread: false, readAt: null, settledAt: null, needsYou: false, pinnedAt: null, order: null, snoozedUntil: null, section: null, subagents: [], lastLine: null, failure: null, foldedAt: null, replaces: null, replacedBy: null };
   const merged = { ...base, ...over };
   return { ...merged, indicator: threadIndicator({ status: merged.status, ...(merged.asking === null ? {} : { asking: merged.asking }) }) };
 };
@@ -499,7 +501,7 @@ describe("a tile's acts on hover", () => {
     draw({ id: "sa", title: "Read the map", state: "running", startedAt: Date.now() - 60_000 });
     const row = document.querySelector<HTMLElement>("[data-subagent-row]")!;
     expect(row.querySelector("svg.lucide-bot")).not.toBeNull();
-    const stop = row.parentElement!.querySelector<HTMLElement>(":scope > [data-subagent-stop]")!;
+    const stop = row.parentElement!.querySelector<HTMLElement>(":scope > [data-stop-act]")!;
     expect(stop.getAttribute("aria-label")).toBe("Stop subagent");
     expect(stop.className).toContain("opacity-0");
     expect(row.contains(stop)).toBe(false);
@@ -513,7 +515,7 @@ describe("a tile's acts on hover", () => {
     }
     cleanup();
     draw({ id: "sa", title: "Read the map", state: "done", startedAt: Date.now() - 60_000, endedAt: Date.now() - 30_000 });
-    expect(document.querySelector("[data-subagent-stop]")).toBeNull();
+    expect(document.querySelector("[data-stop-act]")).toBeNull();
     expect(document.querySelector("[data-has-action]")).toBeNull();
     useStore.setState({ api: null } as never);
   });
@@ -569,5 +571,150 @@ describe("a tile's acts on hover", () => {
       useStore.setState({ harnesses: [] } as never);
       vi.useRealTimers();
     }
+  });
+});
+
+describe("a tile's Stop", () => {
+  const stopOn = ({ over = {}, stops = true, onSettle, stopsTree = false, slim = false }: { over?: Partial<SidebarThreadSnapshot>; stops?: boolean; onSettle?: () => void; stopsTree?: boolean; slim?: boolean } = {}) => {
+    const onStop = vi.fn();
+    render(
+      <TooltipProvider>
+        <SidebarProvider defaultOpen>
+          <ThreadTile thread={thread(over)} place={PLACE} model={null} time="3m" depth={0} active={false} settled={slim} renaming={false} saving={false} onSelect={() => {}} onContextMenu={() => {}} onRename={() => {}} onRenameCancel={() => {}} {...(stops ? { onStop } : {})} {...(onSettle === undefined ? {} : { onSettle })} stopsTree={stopsTree} />
+        </SidebarProvider>
+      </TooltipProvider>,
+    );
+    return { onStop };
+  };
+  const stop = (): HTMLElement => document.querySelector<HTMLElement>("[data-stop-act]")!;
+
+  it("holds one act in the slot: Stop while the tree works, beside the button, from md up; never with Settle, and none on a settled tile", () => {
+    stopOn({ onSettle: vi.fn() });
+    const item = tile().parentElement!;
+    expect(item.hasAttribute("data-has-action")).toBe(true);
+    expect(item.hasAttribute("data-stop-row")).toBe(true);
+    expect(tile().contains(stop())).toBe(false);
+    expect(stop().className.split(" ")).toEqual(expect.arrayContaining(["opacity-0", "max-md:hidden", "group-hover/menu-item:opacity-100", "group-focus-within/menu-item:opacity-100", "top-3.75"]));
+    expect(stop().querySelector("svg.lucide-square")).not.toBeNull();
+    expect(document.querySelector("[data-tile-settle]")).toBeNull();
+    expect(slot().parentElement!.className).toContain("md:group-hover/menu-item:invisible");
+    cleanup();
+    stopOn({ stops: false, onSettle: vi.fn(), over: { status: "completed", endedAt: "2026-09-17T00:05:00.000Z" } });
+    expect(document.querySelector("[data-stop-act]")).toBeNull();
+    expect(document.querySelector("[data-tile-settle]")).not.toBeNull();
+    cleanup();
+    stopOn({ slim: true });
+    expect(document.querySelector("[data-stop-act]")).toBeNull();
+    expect(document.querySelector("[data-tile-settle]")).toBeNull();
+  });
+
+  it("arms on the first press, the word Stop in the danger ink, stops on a second within two seconds, and lapses at two seconds", () => {
+    vi.useFakeTimers();
+    try {
+      const { onStop } = stopOn();
+      // The working tile's own clock runs at rest; Stop adds nothing to it until it arms.
+      const rest = vi.getTimerCount();
+      fireEvent.click(stop());
+      expect(onStop).not.toHaveBeenCalled();
+      expect(stop().hasAttribute("data-armed")).toBe(true);
+      expect(stop().textContent).toBe("Stop");
+      expect(stop().className.split(" ")).toEqual(expect.arrayContaining(["text-error-foreground", "text-xs", "font-medium", "w-auto"]));
+      expect(stop().getAttribute("aria-label")).toBe("Press again to stop");
+      // One timeout while armed, and no interval.
+      expect(vi.getTimerCount()).toBe(rest + 1);
+      act(() => void vi.advanceTimersByTime(1999));
+      expect(stop().hasAttribute("data-armed")).toBe(true);
+      fireEvent.click(stop());
+      expect(onStop).toHaveBeenCalledTimes(1);
+      expect(stop().hasAttribute("data-armed")).toBe(false);
+      expect(vi.getTimerCount()).toBe(rest);
+      fireEvent.click(stop());
+      act(() => void vi.advanceTimersByTime(1999));
+      expect(stop().hasAttribute("data-armed")).toBe(true);
+      act(() => void vi.advanceTimersByTime(1));
+      expect(stop().hasAttribute("data-armed")).toBe(false);
+      expect(stop().querySelector("svg.lucide-square")).not.toBeNull();
+      expect(vi.getTimerCount()).toBe(rest);
+      fireEvent.click(stop());
+      expect(onStop).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("disarms when the pointer leaves the row, when the focus leaves it, and on Escape", () => {
+    const { onStop } = stopOn();
+    const row = tile().parentElement!;
+    fireEvent.click(stop());
+    pointerLeave(row);
+    expect(stop().hasAttribute("data-armed")).toBe(false);
+    fireEvent.click(stop());
+    act(() => void window.dispatchEvent(new Event("blur")));
+    expect(stop().hasAttribute("data-armed")).toBe(false);
+    fireEvent.click(stop());
+    fireEvent.focusOut(row, { relatedTarget: document.body });
+    expect(stop().hasAttribute("data-armed")).toBe(false);
+    fireEvent.click(stop());
+    // Focus moving inside the row, or going nowhere, keeps it armed.
+    fireEvent.focusOut(row, { relatedTarget: tile() });
+    expect(stop().hasAttribute("data-armed")).toBe(true);
+    fireEvent.focusOut(row, { relatedTarget: null });
+    expect(stop().hasAttribute("data-armed")).toBe(true);
+    fireEvent.keyDown(stop(), { key: "Escape" });
+    expect(stop().hasAttribute("data-armed")).toBe(false);
+    expect(onStop).not.toHaveBeenCalled();
+  });
+
+  it("stops on a second tap: a touch's own pointerleave before its click leaves the arm alone", () => {
+    const { onStop } = stopOn();
+    const row = tile().parentElement!;
+    // Chrome sends a tap as pointerdown, pointerup, pointerleave, click.
+    const tap = (): void => {
+      fireEvent.pointerDown(stop());
+      fireEvent.pointerUp(stop());
+      pointerLeave(row, "touch");
+      fireEvent.click(stop());
+    };
+    tap();
+    expect(stop().hasAttribute("data-armed")).toBe(true);
+    tap();
+    expect(onStop).toHaveBeenCalledTimes(1);
+  });
+
+  it("lets go of the window's blur once it disarms or unmounts", () => {
+    const added = vi.spyOn(window, "addEventListener");
+    const removed = vi.spyOn(window, "removeEventListener");
+    try {
+      stopOn();
+      const before = added.mock.calls.length;
+      fireEvent.click(stop());
+      const blur = added.mock.calls.slice(before).find(([type]) => type === "blur")?.[1];
+      expect(blur).toBeDefined();
+      cleanup();
+      expect(removed.mock.calls.some(([type, fn]) => type === "blur" && fn === blur)).toBe(true);
+    } finally {
+      added.mockRestore();
+      removed.mockRestore();
+    }
+  });
+
+  it("gives row one's words up to the armed word: the row says it is armed and the slot keeps the word's room", () => {
+    stopOn();
+    const row = tile().parentElement!;
+    const room = slot().parentElement!;
+    expect(row.hasAttribute("data-stop-armed")).toBe(false);
+    fireEvent.click(stop());
+    expect(row.hasAttribute("data-stop-armed")).toBe(true);
+    expect(room.className.split(" ")).toContain(STOP_ROOM_CLASS);
+    fireEvent.keyDown(stop(), { key: "Escape" });
+    expect(row.hasAttribute("data-stop-armed")).toBe(false);
+  });
+
+  it("says Stop thread on a thread with nothing under it and that the whole tree stops on one with threads under it", () => {
+    stopOn();
+    expect(stop().getAttribute("aria-label")).toBe("Stop thread");
+    cleanup();
+    stopOn({ stopsTree: true });
+    expect(stop().getAttribute("aria-label")).toBe("Stop this thread and every thread under it");
   });
 });

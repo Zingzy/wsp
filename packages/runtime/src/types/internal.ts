@@ -634,6 +634,8 @@ export interface ThreadRecord {
   /** The person's marks on the thread, kept here for the same reason; snoozedUntil is kept after it passes, since
    * the thread reads Done off it until a window shows it. */
   pinnedAt?: number;
+  /** The key the person moved the thread to in the sidebar's list, in place of its start. */
+  order?: number;
   /** When the person folded the thread's tree in the sidebar; the mark is the host's so every window draws it alike. */
   foldedAt?: number;
   /** The thread this one restarts, as its start named it; the thread that restarts this one is read off the others. */

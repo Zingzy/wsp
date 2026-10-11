@@ -31,7 +31,7 @@ const thread = (id: string, workspaceId: string, over: Partial<SidebarThreadSnap
   readAt: null,
   settledAt: null,
   needsYou: false,
-  pinnedAt: null,
+  pinnedAt: null, order: null,
   snoozedUntil: null,
   section: null,
   subagents: [],
