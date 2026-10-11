@@ -194,6 +194,7 @@ function deriveThread(thread: ThreadView, workspace: Pick<WorkspaceView, "projec
         ? null
         : { threadId: thread.replaces, failed: replaced?.status === "failed", endedAt: replaced?.endedAt !== undefined ? new Date(replaced.endedAt).toISOString() : null },
     replacedBy: thread.replacedBy ?? null,
+    ...(thread.forkedFrom !== undefined ? { forkedFrom: { threadId: thread.forkedFrom.threadId, title: thread.forkedFrom.title } } : {}),
   };
 }
 

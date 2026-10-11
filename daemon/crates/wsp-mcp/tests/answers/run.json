@@ -165,6 +165,120 @@
       ]
     },
     {
+      "case": "a fork through the thread's latest finished turn",
+      "arguments": {
+        "fork": "thread-7f3a",
+        "message": "what do you remember?",
+        "detach": true
+      },
+      "replies": {
+        "sessions.list": "{\"id\":1,\"ok\":true,\"sessions\":[{\"id\":\"s-1\",\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"completed\",\"threadId\":\"thread-7f3a9c21e4b5\"}]}",
+        "workspaces.get": "{\"id\":1,\"ok\":true,\"workspace\":{\"id\":\"ws-1\",\"name\":\"attic-work\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"default\",\"createdAt\":\"2026-09-27T00:00:00.000Z\",\"project\":{\"id\":\"p-1\",\"name\":\"wsp\",\"path\":\"/root/wsp\",\"computer\":\"here\"},\"home\":\"/root\"}}",
+        "harnesses.list": "{\"id\":1,\"ok\":true,\"harnesses\":[{\"harness\":\"claude\",\"label\":\"Claude Code\",\"source\":\"harness\",\"version\":\"2.1.0\",\"models\":[{\"value\":\"claude-sonnet-5\",\"label\":\"Sonnet 5\",\"isDefault\":true},{\"value\":\"claude-opus-5-5\",\"label\":\"Opus 5.5\",\"efforts\":[\"high\",\"max\"]},{\"value\":\"claude-haiku\",\"label\":\"Haiku\",\"efforts\":[]}],\"legacyModels\":[{\"value\":\"claude-3\",\"label\":\"Claude 3\"}],\"efforts\":[{\"value\":\"low\",\"label\":\"Low\"},{\"value\":\"high\",\"label\":\"High\",\"isDefault\":true},{\"value\":\"max\",\"label\":\"Max\"}],\"contextWindows\":[],\"permissionModes\":[{\"value\":\"acceptEdits\",\"label\":\"Accept edits\"},{\"value\":\"bypassPermissions\",\"label\":\"Bypass \u0085\",\"isDefault\":true}],\"access\":{\"auto-edit\":\"acceptEdits\",\"full\":\"bypassPermissions\"},\"steers\":true,\"renames\":true,\"images\":true,\"isDefault\":true},{\"harness\":\"codex\",\"label\":\"Codex\",\"source\":\"table\",\"version\":\"2.1.0\",\"models\":[{\"value\":\"gpt-5\",\"label\":\"GPT-5\",\"isDefault\":true}],\"efforts\":[{\"value\":\"low\",\"label\":\"Low\"},{\"value\":\"high\",\"label\":\"High\",\"isDefault\":true},{\"value\":\"max\",\"label\":\"Max\"}],\"contextWindows\":[],\"permissionModes\":[{\"value\":\"acceptEdits\",\"label\":\"Accept edits\"},{\"value\":\"bypassPermissions\",\"label\":\"Bypass \u0085\",\"isDefault\":true}],\"access\":{\"auto-edit\":\"acceptEdits\",\"full\":\"bypassPermissions\"},\"steers\":true,\"renames\":true,\"images\":true,\"isDefault\":false}]}",
+        "sessions.start": "{\"id\":1,\"ok\":true,\"session\":{\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"running\",\"id\":\"sess-9\",\"threadId\":\"thread-9d8c7b6a5f4e\",\"startedBy\":\"agent\"},\"outcome\":\"started\",\"turnId\":\"turn-9\"}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"thread thread-9d8c7b6a5f4e\"}],\"structuredContent\":{\"threadId\":\"thread-9d8c7b6a5f4e\",\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"outcome\":\"started\"}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "sessions.list"
+        },
+        {
+          "op": "workspaces.get",
+          "workspaceId": "ws-1",
+          "threadId": "thread-7f3a9c21e4b5"
+        },
+        {
+          "op": "harnesses.list",
+          "workspaceId": "ws-1"
+        },
+        {
+          "op": "sessions.start",
+          "fork": {
+            "threadId": "thread-7f3a9c21e4b5"
+          },
+          "prompt": "what do you remember?",
+          "startedBy": "agent",
+          "requestId": "<request id>",
+          "answerHeld": true
+        }
+      ]
+    },
+    {
+      "case": "a fork through its second turn onto a new branch",
+      "arguments": {
+        "fork": "thread-7f3a",
+        "at": 2,
+        "branch": "main-fork",
+        "message": "what do you remember?",
+        "detach": true
+      },
+      "replies": {
+        "sessions.list": "{\"id\":1,\"ok\":true,\"sessions\":[{\"id\":\"s-1\",\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"completed\",\"threadId\":\"thread-7f3a9c21e4b5\"}]}",
+        "workspaces.get": "{\"id\":1,\"ok\":true,\"workspace\":{\"id\":\"ws-1\",\"name\":\"attic-work\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"default\",\"createdAt\":\"2026-09-27T00:00:00.000Z\",\"project\":{\"id\":\"p-1\",\"name\":\"wsp\",\"path\":\"/root/wsp\",\"computer\":\"here\"},\"home\":\"/root\"}}",
+        "harnesses.list": "{\"id\":1,\"ok\":true,\"harnesses\":[{\"harness\":\"claude\",\"label\":\"Claude Code\",\"source\":\"harness\",\"version\":\"2.1.0\",\"models\":[{\"value\":\"claude-sonnet-5\",\"label\":\"Sonnet 5\",\"isDefault\":true},{\"value\":\"claude-opus-5-5\",\"label\":\"Opus 5.5\",\"efforts\":[\"high\",\"max\"]},{\"value\":\"claude-haiku\",\"label\":\"Haiku\",\"efforts\":[]}],\"legacyModels\":[{\"value\":\"claude-3\",\"label\":\"Claude 3\"}],\"efforts\":[{\"value\":\"low\",\"label\":\"Low\"},{\"value\":\"high\",\"label\":\"High\",\"isDefault\":true},{\"value\":\"max\",\"label\":\"Max\"}],\"contextWindows\":[],\"permissionModes\":[{\"value\":\"acceptEdits\",\"label\":\"Accept edits\"},{\"value\":\"bypassPermissions\",\"label\":\"Bypass \u0085\",\"isDefault\":true}],\"access\":{\"auto-edit\":\"acceptEdits\",\"full\":\"bypassPermissions\"},\"steers\":true,\"renames\":true,\"images\":true,\"isDefault\":true},{\"harness\":\"codex\",\"label\":\"Codex\",\"source\":\"table\",\"version\":\"2.1.0\",\"models\":[{\"value\":\"gpt-5\",\"label\":\"GPT-5\",\"isDefault\":true}],\"efforts\":[{\"value\":\"low\",\"label\":\"Low\"},{\"value\":\"high\",\"label\":\"High\",\"isDefault\":true},{\"value\":\"max\",\"label\":\"Max\"}],\"contextWindows\":[],\"permissionModes\":[{\"value\":\"acceptEdits\",\"label\":\"Accept edits\"},{\"value\":\"bypassPermissions\",\"label\":\"Bypass \u0085\",\"isDefault\":true}],\"access\":{\"auto-edit\":\"acceptEdits\",\"full\":\"bypassPermissions\"},\"steers\":true,\"renames\":true,\"images\":true,\"isDefault\":false}]}",
+        "sessions.start": "{\"id\":1,\"ok\":true,\"session\":{\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"running\",\"id\":\"sess-9\",\"threadId\":\"thread-9d8c7b6a5f4e\",\"startedBy\":\"agent\"},\"outcome\":\"started\",\"turnId\":\"turn-9\"}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"thread thread-9d8c7b6a5f4e\"}],\"structuredContent\":{\"threadId\":\"thread-9d8c7b6a5f4e\",\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"outcome\":\"started\"}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "sessions.list"
+        },
+        {
+          "op": "workspaces.get",
+          "workspaceId": "ws-1",
+          "threadId": "thread-7f3a9c21e4b5"
+        },
+        {
+          "op": "harnesses.list",
+          "workspaceId": "ws-1"
+        },
+        {
+          "op": "sessions.start",
+          "fork": {
+            "threadId": "thread-7f3a9c21e4b5",
+            "at": 2
+          },
+          "branch": "main-fork",
+          "prompt": "what do you remember?",
+          "startedBy": "agent",
+          "requestId": "<request id>",
+          "answerHeld": true
+        }
+      ]
+    },
+    {
+      "case": "a turn counted with no fork",
+      "arguments": {
+        "at": 2,
+        "message": "what do you remember?"
+      },
+      "replies": {},
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"--at counts the turns of the thread --fork names. Name the thread with --fork, or leave --at out.\"}],\"structuredContent\":{\"error\":\"--at counts the turns of the thread --fork names. Name the thread with --fork, or leave --at out.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": []
+    },
+    {
+      "case": "a fork beside a project",
+      "arguments": {
+        "fork": "thread-7f3a",
+        "project": "attic-work",
+        "message": "what do you remember?"
+      },
+      "replies": {},
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"a fork starts in its thread's folder, or on a new branch with --branch. Leave out the project, --cwd, --beside and --replaces.\"}],\"structuredContent\":{\"error\":\"a fork starts in its thread's folder, or on a new branch with --branch. Leave out the project, --cwd, --beside and --replaces.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": []
+    },
+    {
+      "case": "a fork beside a resume",
+      "arguments": {
+        "fork": "thread-7f3a",
+        "resume": "conv-7f3a",
+        "message": "what do you remember?"
+      },
+      "replies": {},
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"a fork carries a thread's conversation and --resume carries one kept outside wsp, so a start takes one of them. Name the thread with --fork, or the conversation with --resume and --copy, not both.\"}],\"structuredContent\":{\"error\":\"a fork carries a thread's conversation and --resume carries one kept outside wsp, so a start takes one of them. Name the thread with --fork, or the conversation with --resume and --copy, not both.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": []
+    },
+    {
       "case": "a failed turn on a machine it woke goes back to sleep",
       "arguments": {
         "project": "attic-work",

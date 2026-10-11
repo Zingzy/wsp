@@ -139,6 +139,7 @@ import {
   PlaceHolds,
   PlaceRemoved,
   usedAsk,
+  type ForkSource,
 } from "@wsp/protocol";
 import { slateApi, type SlateApi } from "../slate/wire.js";
 
@@ -932,6 +933,10 @@ export interface StartSessionOptions {
   /** The files the message carries. The host refuses over the caps, and refuses an image naming the agent when that
    * agent reads none, both before its machine is asked for anything. */
   attachments?: readonly Attachment[];
+  /** The thread this start forks and the turn it carries through: the host runs it where that thread runs, so the
+   * start goes with no workspace, and with branch in a new worktree on that branch. */
+  fork?: ForkSource;
+  branch?: string;
 }
 
 /** Where a new thread's send would open it and on what: a workspace, or a project whose folder the host finds, with
@@ -1013,7 +1018,7 @@ export function makeApi(c: ProtocolClient): Api {
     onSysSample: fn => c.onSysSample(fn),
     portReach: async (id, port) => (await c.request<{ reach: PortReachView }>("workspaces.portReach", { workspaceId: id, port })).reach,
     portProbe: async (id, port) => (await c.request<{ probe: PortProbeView }>("workspaces.portProbe", { workspaceId: id, port })).probe,
-    startSession: async opts => (await c.request<{ session: SessionView }>("sessions.start", { ...opts })).session,
+    startSession: async ({ workspaceId, ...opts }) => (await c.request<{ session: SessionView }>("sessions.start", opts.fork === undefined ? { workspaceId, ...opts } : { ...opts })).session,
     warmAgent: async opts => void (await c.request("sessions.warm", { ...opts })),
     sessionHistory: async id => (await c.request<{ events: SessionEvent[] }>("sessions.history", { workspaceId: id })).events,
     sessionHead: async threadId => {

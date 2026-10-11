@@ -5,7 +5,8 @@
 //! shares blocks, an overlay of a frozen copy of the folder's own on one that does not), and taken away only with
 //! nothing in it uncommitted. A branch some worktree already holds is answered with that worktree, since git checks a
 //! branch out in one place; nothing here resets a branch the person has, so an existing branch is checked out as it
-//! stands and only a new one starts at the folder's HEAD.
+//! stands and only a new one starts at the folder's HEAD, or forked from a checkpoint at the commit it was taken on
+//! with the checkpoint's files laid in uncommitted.
 
 use std::fs;
 use std::io;
@@ -13,11 +14,11 @@ use std::os::unix::fs::{DirBuilderExt, MetadataExt};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use wsp_frames::{words, CarryModule, FoundModule, GitWorktree, WorktreeRemoval, WorktreeReport};
+use wsp_frames::{checkpoint_id_ok, words, CarryModule, FoundModule, GitWorktree, WorktreeRemoval, WorktreeReport, CHECKPOINT_REFS};
 
 use super::aside::{remove_later, sweep, ASIDE_PREFIX};
 use super::rules::{config_files_in, git, has_branch, ignored, is_repo_top, sha_of, READ_MS, WRITE_MS};
-use crate::git_line::GitLine;
+use crate::git_line::{GitLine, Oid};
 
 /// One worktree as the verb is asked for it.
 pub struct Ask<'a> {
@@ -30,6 +31,9 @@ pub struct Ask<'a> {
     pub branch: &'a str,
     /// The ecosystems a new worktree is read for: each folder holding one's lockfile carries its directories in.
     pub modules: &'a [CarryModule],
+    /// A checkpoint ref the new branch is forked from: the branch starts at the commit the checkpoint was taken on
+    /// and the checkpoint's files are laid in uncommitted.
+    pub checkpoint: Option<&'a str>,
 }
 
 /// How one carried directory came to be in the worktree.
@@ -80,6 +84,7 @@ pub fn make_with(ask: &Ask, clone: CloneDir) -> Result<WorktreeReport, String> {
         }
     }
     branch_name(from, ask.branch)?;
+    let fork = ask.checkpoint.map(|checkpoint| fork_point(from, ask.branch, checkpoint)).transpose()?;
     let home = fs::canonicalize(ask.home).map_err(|e| format!("{}: {e}", ask.home.display()))?;
     let held = listed(from)?.into_iter().find(|w| w.branch.as_deref() == Some(ask.branch));
     if let Some(held) = held {
@@ -118,7 +123,8 @@ pub fn make_with(ask: &Ask, clone: CloneDir) -> Result<WorktreeReport, String> {
     let added = if existing {
         git(from, &GitLine::new(&["worktree", "add", "--quiet"]).operands(&[&to, ask.branch]), WRITE_MS)
     } else {
-        git(from, &GitLine::new(&["worktree", "add", "--quiet"]).value("-b", ask.branch).operands(&[&to, "HEAD"]), WRITE_MS)
+        let start = fork.as_ref().map_or("HEAD", |fork| fork.start.as_str());
+        git(from, &GitLine::new(&["worktree", "add", "--quiet"]).value("-b", ask.branch).operands(&[&to, start]), WRITE_MS)
     }
     .map_err(|e| format!("git worktree add: {e}"))?;
     if !added.ok() {
@@ -128,7 +134,11 @@ pub fn make_with(ask: &Ask, clone: CloneDir) -> Result<WorktreeReport, String> {
     let found = found_in(&path, from, ask.modules);
     // Two makes of this project at once would each read the other's frozen copies as nobody's.
     let frozen = hold_frozen(&dir);
-    match carry(from, &path, &found, clone) {
+    let carried = carry(from, &path, &found, clone).and_then(|carried| match &fork {
+        Some(fork) => lay(&path, fork).map(|()| carried),
+        None => Ok(carried),
+    });
+    match carried {
         Ok(Carry { carried, plain, overlaid, governed, frozen: keys }) => {
             if frozen.is_ok() {
                 keep_newest(&dir, &keys);
@@ -166,6 +176,81 @@ pub fn make_with(ask: &Ask, clone: CloneDir) -> Result<WorktreeReport, String> {
             Err(why)
         }
     }
+}
+
+/// Where a fork from a checkpoint starts and what it lays on top.
+struct Fork {
+    /// The checkpoint's commit, whose tree is the fork's files.
+    checkpoint: Oid,
+    /// The commit the new branch starts at: the HEAD the checkpoint was taken on, else the folder's HEAD.
+    start: Oid,
+}
+
+/// The checkpoint a new branch forks from, read before anything is written: a ref under the checkpoint refs naming a
+/// commit, and a branch that is not there yet, since a fork never moves a branch the person has.
+fn fork_point(from: &Path, branch: &str, checkpoint: &str) -> Result<Fork, String> {
+    let named = checkpoint
+        .strip_prefix(CHECKPOINT_REFS)
+        .and_then(|rest| rest.strip_prefix('/'))
+        .is_some_and(|rest| rest.split('/').all(checkpoint_id_ok));
+    if !named {
+        return Err(format!(
+            "{checkpoint} is not a checkpoint, so no worktree was made; a fork starts from a ref under {CHECKPOINT_REFS}/"
+        ));
+    }
+    if has_branch(from, branch) || listed(from)?.iter().any(|w| w.branch.as_deref() == Some(branch)) {
+        return Err(format!(
+            "the branch {branch} already exists, so no worktree was made; a fork makes a new branch, so name one that is not there yet"
+        ));
+    }
+    let commit = |rev: &str| sha_of(from, rev).and_then(|sha| Oid::parse(&sha));
+    let checkpoint_commit =
+        commit(checkpoint).ok_or_else(|| format!("{checkpoint} names no commit in this folder, so no worktree was made"))?;
+    let start = commit(&format!("{}^", checkpoint_commit.as_str()))
+        .or_else(|| commit("HEAD"))
+        .ok_or_else(|| format!("{} has no commit yet, so a fork has nowhere to start", from.display()))?;
+    Ok(Fork { checkpoint: checkpoint_commit, start })
+}
+
+/// The checkpoint's tree laid over a worktree standing at the fork's start, as a restore lays one: every file the
+/// start holds that the checkpoint lacks removed, then every file of the checkpoint written from an index of its own,
+/// so the worktree's index stays at the start and what was uncommitted then is uncommitted again.
+fn lay(at: &Path, fork: &Fork) -> Result<(), String> {
+    let gone = GitLine::new(&["diff", "--name-only", "--no-renames", "--diff-filter=D", "-z"]).oid(&fork.start).oid(&fork.checkpoint);
+    let gone = git(at, &gone, READ_MS).map_err(|e| format!("git diff: {e}"))?;
+    if !gone.ok() {
+        return Err(gone.why());
+    }
+    for name in gone.stdout.split('\0').filter(|name| !name.is_empty()) {
+        if !downward(name) {
+            return Err(format!("{name:?} is not a path inside the worktree, so the checkpoint was not laid"));
+        }
+        match fs::remove_file(at.join(name)) {
+            Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(format!("{}: {e}", at.join(name).display())),
+            _ => {}
+        }
+    }
+    let named = format!("wsp-fork-{}-{}.index", std::process::id(), now_nanos());
+    let path = git(at, &GitLine::new(&["rev-parse"]).value("--git-path", &named), READ_MS).map_err(|e| format!("git rev-parse: {e}"))?;
+    if !path.ok() {
+        return Err(path.why());
+    }
+    let index = at.join(path.out());
+    let index_word = index.to_string_lossy();
+    let read = GitLine::new(&["read-tree"]).oid(&fork.checkpoint).env("GIT_INDEX_FILE", &index_word);
+    let laid = git(at, &read, WRITE_MS).and_then(|read| {
+        if !read.ok() {
+            return Ok(read);
+        }
+        let out = GitLine::new(&["-c", "core.fsmonitor=false", "checkout-index", "-a", "-f"]).env("GIT_INDEX_FILE", &index_word);
+        git(at, &out, WRITE_MS)
+    });
+    let _ = fs::remove_file(&index);
+    let laid = laid.map_err(|e| format!("git checkout-index: {e}"))?;
+    if !laid.ok() {
+        return Err(laid.why());
+    }
+    Ok(())
 }
 
 /// The overlays of a worktree wsp made of this folder mounted again where a restart took them, before a turn or a

@@ -5,7 +5,7 @@
 // changed, then whatever holds the thread. The tile itself keeps two rows and
 // one mark: an open pull request's icon.
 import { agentName } from "@wsp/catalog";
-import { PULL_REQUEST_WORDS, type PullRequestState } from "@wsp/protocol";
+import { PULL_REQUEST_WORDS, forkedFromLine, type PullRequestState } from "@wsp/protocol";
 import { PR_WORDS } from "../pull-request/words.js";
 import type { TilePlace } from "./ThreadTile.js";
 
@@ -14,6 +14,8 @@ export interface TileCardInput {
   readonly place: TilePlace;
   /** Where a thread in the Needs you inbox hangs, in words, for a thread under a tree. */
   readonly startedBy?: string | undefined;
+  /** The title of the thread this one was forked from. */
+  readonly forkedFrom?: string | undefined;
   /** The folder the workspace works in: its copy, or the project's own. */
   readonly folder?: string | undefined;
   /** Empty where the workspace is on no branch or none is known. */
@@ -28,7 +30,7 @@ export interface TileCardInput {
   readonly notes: ReadonlyArray<string | null>;
 }
 
-export type TileCardLine = { readonly kind: "started-by" | "project" | "computer" | "folder" | "branch" | "agent" | "pr" | "changed" | "note"; readonly text: string };
+export type TileCardLine = { readonly kind: "started-by" | "forked" | "project" | "computer" | "folder" | "branch" | "agent" | "pr" | "changed" | "note"; readonly text: string };
 
 export function tileCardLines(o: TileCardInput): { title: string; lines: TileCardLine[] } {
   const line = (kind: TileCardLine["kind"], text: string | null | undefined): TileCardLine[] => (text === null || text === undefined || text === "" ? [] : [{ kind, text }]);
@@ -36,6 +38,7 @@ export function tileCardLines(o: TileCardInput): { title: string; lines: TileCar
     title: o.title,
     lines: [
       ...line("started-by", o.startedBy),
+      ...line("forked", o.forkedFrom === undefined ? undefined : forkedFromLine(o.forkedFrom)),
       ...line("project", o.place.project),
       ...line("computer", o.place.computer),
       ...line("folder", o.folder),

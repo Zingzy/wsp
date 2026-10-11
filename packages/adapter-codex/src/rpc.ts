@@ -67,9 +67,11 @@ export function threadForkLine(o: { threadId: string; cwd?: string; model?: stri
 }
 
 /** A copy of the thread that is written to disk as a thread of its own, the original left as it was: what a thread
- * another process writes is continued on. The answer names the copy, which the turn then runs on. */
-export function threadCopyLine(o: ThreadOptions & { threadId: string }): string {
-  return line({ id: REQUEST.thread, method: "thread/fork", params: { threadId: o.threadId, ephemeral: false, excludeTurns: true, ...named({ cwd: o.cwd, model: o.model, serviceTier: o.serviceTier }), ...o.access, ...configOf(o) } });
+ * another process writes is continued on, and with lastTurnId what a fork of a thread starts on, its history through
+ * that turn and nothing after. The fork keeps the source's turn ids (measured on 0.162.1). The answer names the copy,
+ * which the turn then runs on; excludeTurns leaves the history out of the reply alone. */
+export function threadCopyLine(o: ThreadOptions & { threadId: string; lastTurnId?: string }): string {
+  return line({ id: REQUEST.thread, method: "thread/fork", params: { threadId: o.threadId, ...(o.lastTurnId !== undefined ? { lastTurnId: o.lastTurnId } : {}), ephemeral: false, excludeTurns: true, ...named({ cwd: o.cwd, model: o.model, serviceTier: o.serviceTier }), ...o.access, ...configOf(o) } });
 }
 
 /** The thread let go of on this connection once its turn is over, so a process outside wsp may write it: the server

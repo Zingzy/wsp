@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import type { RuntimeRequest } from "@wsp/protocol";
+import { BRANCH_ON_A_THREAD_LINE, FORK_BESIDE_FIX, FORK_BESIDE_LINE, FORK_RESUME_FIX, FORK_RESUME_LINE, usageRefusal, type Caller, type RuntimeRequest, type SessionStartResult } from "@wsp/protocol";
+import { answeredStart, startAt } from "./threads/answered-start.js";
 import type { OutsideOpening, Runtime } from "./types/api.js";
 
 type StartAsked = Extract<RuntimeRequest, { op: "sessions.start" }>;
@@ -29,4 +30,22 @@ export function startOptionsOf(msg: StartAsked, at: { cwd?: string | undefined }
     ...(msg.attachments !== undefined ? { attachments: msg.attachments } : {}),
     ...(outside !== undefined ? { outside } : {}),
   };
+}
+
+/** A sessions.start off the socket: a fork in its source's folder, else a conversation kept outside wsp where it ran,
+ * else the folder of the record, project, branch or folder it names, found or made first. */
+export async function serveStart(rt: Pick<Runtime, "sessions" | "workspaces" | "conversations">, msg: StartAsked, origin: Caller | undefined, reply: (r: SessionStartResult) => void): Promise<void> {
+  if (msg.workspaceId !== undefined && msg.branch !== undefined) throw Object.assign(new Error(BRANCH_ON_A_THREAD_LINE), { kind: "usage" });
+  // A fork's folder is its source's, or a new worktree of the source's repo: nothing else may name one.
+  if (msg.fork !== undefined && (msg.workspaceId !== undefined || msg.project !== undefined || msg.cwd !== undefined || msg.thread !== undefined || msg.replaces !== undefined)) throw usageRefusal(FORK_BESIDE_LINE, FORK_BESIDE_FIX);
+  if (msg.fork !== undefined && msg.resume !== undefined) throw usageRefusal(FORK_RESUME_LINE, FORK_RESUME_FIX);
+  const fork = msg.fork;
+  if (fork !== undefined) {
+    await answeredStart(msg.answerHeld === true, onHeld => rt.sessions.fork({ ...startOptionsOf(msg, {}, undefined, onHeld !== undefined ? { onHeld } : {}), fork, ...(msg.branch !== undefined ? { branch: msg.branch } : {}) }, origin), reply);
+    return;
+  }
+  // A conversation the agent kept outside wsp says where its thread runs, so it is read before the folder is.
+  const resumed = msg.resume === undefined ? undefined : await rt.conversations.placed(msg, msg.resume, origin);
+  const at = resumed ?? (await startAt(rt.workspaces, msg, origin));
+  await answeredStart(msg.answerHeld === true, onHeld => rt.sessions.start(at.workspaceId, startOptionsOf(msg, at, resumed?.outside, onHeld !== undefined ? { onHeld } : {}), origin), reply);
 }

@@ -13,7 +13,7 @@
 // under it folds it by the control at row two's end; a tile in the Needs you
 // inbox under a tree names the thread that started it in row one.
 import { memo, useLayoutEffect, useRef, type ComponentProps, type DragEvent, type MouseEvent, type ReactNode } from "react";
-import { AlarmClockIcon, ArchiveIcon, ChevronDownIcon, ChevronRightIcon, CornerDownRightIcon, FileDiffIcon, FolderIcon, GitBranchIcon, GitPullRequestIcon } from "lucide-react";
+import { AlarmClockIcon, ArchiveIcon, ChevronDownIcon, ChevronRightIcon, CornerDownRightIcon, FileDiffIcon, FolderIcon, GitBranchIcon, GitPullRequestIcon, SplitIcon } from "lucide-react";
 import { agentName } from "@wsp/catalog";
 import type { PlaceView, ThreadCapWait } from "@wsp/protocol";
 import { THREAD_WORDS, WORKSPACE_WORDS } from "../actions/format.js";
@@ -55,7 +55,7 @@ const whereWords = (place: TilePlace): string => [place.project, place.computer]
 /** How long the pointer rests on a tile before its card opens, so a pass of the pointer down the list opens none. */
 const CARD_DELAY_MS = 450;
 
-const CARD_GLYPHS: Partial<Record<TileCardLine["kind"], typeof FolderIcon>> = { "started-by": CornerDownRightIcon, folder: FolderIcon, branch: GitBranchIcon, pr: GitPullRequestIcon, changed: FileDiffIcon };
+const CARD_GLYPHS: Partial<Record<TileCardLine["kind"], typeof FolderIcon>> = { "started-by": CornerDownRightIcon, forked: SplitIcon, folder: FolderIcon, branch: GitBranchIcon, pr: GitPullRequestIcon, changed: FileDiffIcon };
 
 /** The card a tile opens to its right: the full title, its status row, then one line per fact with its glyph, then
  * what holds it. */
@@ -326,6 +326,7 @@ export const ThreadTile = memo(function ThreadTile(props: ThreadTileProps) {
     title: thread.title,
     place,
     ...(path === undefined ? {} : { startedBy: TREE_WORDS.startedBy(path) }),
+    ...(thread.forkedFrom === undefined ? {} : { forkedFrom: thread.forkedFrom.title }),
     folder: checkout.folder, branch: checkout.branch,
     harness: thread.harness,
     model,

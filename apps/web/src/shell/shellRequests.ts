@@ -8,6 +8,8 @@
 // and asks in one handler, and the composer it names remounts after that
 // handler returns.
 
+import type { ForkPick } from "../components/chat/forks.js";
+
 const NEW_THREAD_EVENT = "wsp:new-thread";
 const ADD_PROJECT_EVENT = "wsp:add-project";
 
@@ -33,6 +35,33 @@ export function onNewThreadRequest(listener: (detail: NewThreadRequest) => void)
   const handler = (event: Event) => listener((event as CustomEvent<NewThreadRequest>).detail);
   window.addEventListener(NEW_THREAD_EVENT, handler);
   return () => window.removeEventListener(NEW_THREAD_EVENT, handler);
+}
+
+const FORK_EVENT = "wsp:fork";
+
+/** What Fork from here asks the fork dialog for: the thread and the message's pick, and the folder a new branch is named
+ * from where the fork can have one. */
+export interface ForkRequest {
+  readonly workspaceId: string;
+  readonly threadId: string;
+  readonly title: string;
+  /** The agent the thread runs on and the model and effort its latest turn ran at, which the draft's pickers show. */
+  readonly harness: string;
+  readonly model?: string;
+  readonly effort?: string;
+  readonly pick: ForkPick;
+  /** The folder whose branches a new branch is named past; null where the fork can only run in this folder. */
+  readonly branchFrom: string | null;
+}
+
+export function requestFork(detail: ForkRequest): void {
+  window.dispatchEvent(new CustomEvent(FORK_EVENT, { detail }));
+}
+
+export function onForkRequest(listener: (detail: ForkRequest) => void): () => void {
+  const handler = (event: Event) => listener((event as CustomEvent<ForkRequest>).detail);
+  window.addEventListener(FORK_EVENT, handler);
+  return () => window.removeEventListener(FORK_EVENT, handler);
 }
 
 const REWIND_EVENT = "wsp:rewind";

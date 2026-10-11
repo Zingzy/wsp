@@ -34,7 +34,7 @@ afterEach(async () => {
 function harness(): HarnessAdapterFactory {
   return () => ({
     steers: false,
-    resumesAt: true,
+    forkSession: async f => ({ resume: f.session, drop: async () => {} }),
     start: o => {
       const sessionId = o.resume ?? "66666666-6666-4666-8666-000000000001";
       const result: TurnResult = { status: "completed", text: "ok" };

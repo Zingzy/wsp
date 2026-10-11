@@ -23,6 +23,7 @@ import {
   type DaemonFrame,
   type DaemonResponse,
   type EventUnion,
+  type SessionForker,
   type SessionReverter,
   type TurnResult,
 } from "@wsp/protocol";
@@ -35,7 +36,7 @@ const FIRST_SESSION = "44444444-4444-4444-8444-444444444444";
 const DAEMON_TOKEN = "cafef00d".repeat(3);
 
 /** A daemon that answers each checkpoint with a ref of the turn it names and records every frame. */
-function fakeDaemon(o: { refuseCheckpoint?: boolean } = {}) {
+function fakeDaemon(o: { refuseCheckpoint?: boolean; unbased?: boolean } = {}) {
   const frames: Record<string, unknown>[] = [];
   let seen: string | undefined;
   /** The folder the first checkpoint was asked at: the stub names each checkout it makes by a count of its own. */
@@ -47,7 +48,7 @@ function fakeDaemon(o: { refuseCheckpoint?: boolean } = {}) {
       if (f["op"] === "git.checkpoint") {
         seen ??= String(f["cwd"]);
         if (o.refuseCheckpoint === true) return { id: 1, ok: false, code: "not-a-git-repo", error: "not inside a git repository" } as DaemonResponse;
-        return { id: 1, ok: true, ref: `refs/wsp/checkpoints/stub-1/${String(f["thread"])}/${String(f["turn"])}`, commit: `c-${String(f["turn"])}`, changed: true } as DaemonResponse;
+        return { id: 1, ok: true, ref: `refs/wsp/checkpoints/stub-1/${String(f["thread"])}/${String(f["turn"])}`, commit: `c-${String(f["turn"])}`, changed: true, based: o.unbased !== true } as DaemonResponse;
       }
       if (f["op"] === "git.restore") return { id: 1, ok: true, before: `${String(f["checkpoint"])}-before-1`, files: 2 } as DaemonResponse;
       return { id: 1, ok: false, error: `no ${String(f["op"])} here` } as DaemonResponse;
@@ -59,9 +60,12 @@ function fakeDaemon(o: { refuseCheckpoint?: boolean } = {}) {
 }
 
 /** A harness whose every turn announces one session, names its end `a<n>`, says `reply <n>` and replies at once.
- * cuts: "next" takes the cut on its next resume (Claude Code), "revert" cuts at once (Codex), "none" keeps its own. */
+ * cuts: "copy" rewinds onto a copy of its session through the kept turn's anchor (Claude Code), "revert" cuts at once
+ * (Codex), "none" keeps its own. */
 function harness(o: {
-  cuts: "next" | "revert" | "none";
+  cuts: "copy" | "revert" | "none";
+  /** Each copy the harness was asked for, by the session it copied and the turn it ends at. */
+  copied?: Parameters<SessionForker>[0][];
   reverted?: Parameters<SessionReverter>[0][];
   revertFails?: boolean;
   /** What the harness answers a revert with where it keeps the conversation whole. */
@@ -80,7 +84,14 @@ function harness(o: {
   let turns = 0;
   return () => ({
     steers: false,
-    ...(o.cuts === "next" ? { resumesAt: true as const } : {}),
+    ...(o.cuts === "copy"
+      ? {
+          forkSession: async (f: Parameters<SessionForker>[0]) => {
+            o.copied?.push(f);
+            return { resume: `c0c0c0c0-0000-4000-8000-${String(o.copied?.length ?? 0).padStart(12, "0")}`, drop: async () => {} };
+          },
+        }
+      : {}),
     ...(o.cuts === "revert"
       ? {
           revert: async (r: Parameters<SessionReverter>[0]) => {
@@ -165,18 +176,29 @@ const texts = async (workspaceId: string) => (await rt!.sessions.history(workspa
 
 describe("a checkpoint at every turn's end", () => {
   it("asks the workspace's daemon for one at the checkout, named by the record, the thread and the turn, and keeps it with the anchor", async () => {
-    const { ws, daemon } = await workspace(harness({ cuts: "next" }));
+    const { ws, daemon } = await workspace(harness({ cuts: "copy" }));
     const run = await rt!.sessions.start(ws.id, { prompt: "one" });
     await run.finished;
     await settle();
     const threadId = run.view().threadId!;
     expect(daemon.frames.filter(f => f["op"] === "git.checkpoint")).toEqual([{ op: "git.checkpoint", cwd: daemon.checkout(), thread: threadId, turn: run.turnId, scope: ws.id }]);
     const kept = (await rt!.sessions.history(ws.id)).filter(e => e.type === "session.checkpoint");
-    expect(kept).toMatchObject([{ type: "session.checkpoint", turnId: run.turnId, threadId, ref: `refs/wsp/checkpoints/stub-1/${threadId}/${run.turnId}`, anchor: "a1" }]);
+    expect(kept).toMatchObject([{ type: "session.checkpoint", turnId: run.turnId, threadId, ref: `refs/wsp/checkpoints/stub-1/${threadId}/${run.turnId}`, based: true, anchor: "a1" }]);
+  });
+
+  it("keeps no based mark where the checkpoint stands on no commit, so a branch forked from it starts at the folder's HEAD", async () => {
+    const { ws } = await workspace(harness({ cuts: "copy" }), fakeDaemon({ unbased: true }));
+    const run = await rt!.sessions.start(ws.id, { prompt: "one" });
+    await run.finished;
+    await settle();
+    const kept = (await rt!.sessions.history(ws.id)).filter(e => e.type === "session.checkpoint");
+    expect(kept).toHaveLength(1);
+    expect(kept[0]).toMatchObject({ ref: expect.any(String), anchor: "a1" });
+    expect(kept[0]).not.toHaveProperty("based");
   });
 
   it("a checkout that takes none leaves the turn as it ended and keeps the anchor alone", async () => {
-    const { ws } = await workspace(harness({ cuts: "next" }), fakeDaemon({ refuseCheckpoint: true }));
+    const { ws } = await workspace(harness({ cuts: "copy" }), fakeDaemon({ refuseCheckpoint: true }));
     const run = await rt!.sessions.start(ws.id, { prompt: "one" });
     expect((await run.finished).status).toBe("completed");
     await settle();
@@ -189,9 +211,10 @@ describe("a checkpoint at every turn's end", () => {
 });
 
 describe("rewinding a thread to one of its replies", () => {
-  it("puts the files back, cuts the turns after it from the transcript, says so, and cuts the conversation on the next resume", async () => {
+  it("puts the files back, cuts the turns after it from the transcript, says so, and moves the thread onto a copy of its session through the kept turn", async () => {
     const starts: HarnessStartOptions[] = [];
-    const { ws, daemon, events } = await workspace(harness({ cuts: "next", starts }));
+    const copied: Parameters<SessionForker>[0][] = [];
+    const { ws, daemon, events } = await workspace(harness({ cuts: "copy", starts, copied }));
     const { threadId, turns } = await threeTurns(ws.id);
     daemon.frames.length = 0;
 
@@ -203,17 +226,21 @@ describe("rewinding a thread to one of its replies", () => {
     expect(events.filter(e => e.type === "thread.rewound")).toMatchObject([{ type: "thread.rewound", workspaceId: ws.id, threadId }]);
     expect(foldThreads(await rt!.sessions.list(ws.id)).find(t => t.threadId === threadId)?.rewoundAt).toEqual(expect.any(Number));
 
-    // The cut rides the next resume, at the kept turn's own end, and only that one.
+    // The copy ends at the kept turn's own end, and every later turn resumes it, never the session the cut turns ran on.
+    expect(copied).toEqual([{ session: FIRST_SESSION, turn: { anchor: "a1" } }]);
+    const COPY = "c0c0c0c0-0000-4000-8000-000000000001";
+    expect(foldThreads(await rt!.sessions.list(ws.id)).find(t => t.threadId === threadId)?.claudeSessionId).toBe(COPY);
     await (await rt!.sessions.start(ws.id, { prompt: "four", thread: threadId })).finished;
     await (await rt!.sessions.start(ws.id, { prompt: "five", thread: threadId })).finished;
-    expect(starts.map(s => s.resumeAt)).toEqual([undefined, undefined, undefined, "a1", undefined]);
+    expect(starts.map(s => s.resume)).toEqual([undefined, FIRST_SESSION, FIRST_SESSION, COPY, COPY]);
+    expect(starts.map(s => s.prompt)).toEqual(["one", "two", "three", "four", "five"]);
     await settle();
     // Undo lasts until the turn after the rewind ends.
     expect(foldThreads(await rt!.sessions.list(ws.id)).find(t => t.threadId === threadId)?.rewoundAt).toBeUndefined();
   });
 
   it("with the conversation alone leaves the files where they are", async () => {
-    const { ws, daemon } = await workspace(harness({ cuts: "next" }));
+    const { ws, daemon } = await workspace(harness({ cuts: "copy" }));
     const { threadId, turns } = await threeTurns(ws.id);
     daemon.frames.length = 0;
     expect(await rt!.sessions.rewind(threadId, { turnId: turns[1]!, files: false })).toEqual({ turns: 1 });
@@ -223,7 +250,7 @@ describe("rewinding a thread to one of its replies", () => {
   });
 
   it("lists the last line and the failure of the turn that is now the thread's last", async () => {
-    const { ws } = await workspace(harness({ cuts: "next", ends: { 1: { status: "failed", error: "API Error: 529 overloaded\nretry" } } }));
+    const { ws } = await workspace(harness({ cuts: "copy", ends: { 1: { status: "failed", error: "API Error: 529 overloaded\nretry" } } }));
     const { threadId, turns } = await threeTurns(ws.id);
     const listed = async () => foldThreads(await rt!.sessions.list(ws.id)).find(t => t.threadId === threadId)!;
     expect(await listed()).toMatchObject({ lastLine: "reply 3" });
@@ -307,7 +334,7 @@ describe("rewinding a thread to one of its replies", () => {
   it("tells a window which harness the host rewinds by count, so a reply with no anchor is offered too", async () => {
     const { ws } = await workspace(harness({ cuts: "revert" }));
     expect((await rt!.harnesses.list(ws.id)).find(c => c.harness === "claude")).toMatchObject({ rewindsConversation: true, rewindsByCount: true });
-    const other = await workspace(harness({ cuts: "next" }));
+    const other = await workspace(harness({ cuts: "copy" }));
     expect((await rt!.harnesses.list(other.ws.id)).find(c => c.harness === "claude")?.rewindsByCount).toBeUndefined();
   });
 
@@ -320,12 +347,12 @@ describe("rewinding a thread to one of its replies", () => {
   });
 
   it("tells a window whether a harness cuts its conversation", async () => {
-    const { ws } = await workspace(harness({ cuts: "next" }));
+    const { ws } = await workspace(harness({ cuts: "copy" }));
     expect((await rt!.harnesses.list(ws.id)).find(c => c.harness === "claude")?.rewindsConversation).toBe(true);
   });
 
   it("undoes by putting back the files the rewind replaced, once, and says when there is nothing to undo", async () => {
-    const { ws, daemon } = await workspace(harness({ cuts: "next" }));
+    const { ws, daemon } = await workspace(harness({ cuts: "copy" }));
     const { threadId, turns } = await threeTurns(ws.id);
     await expect(rt!.sessions.rewind(threadId, { undo: true })).rejects.toThrow(REWIND_NO_UNDO_LINE);
     await rt!.sessions.rewind(threadId, { turnId: turns[0]!, files: true });
@@ -338,7 +365,7 @@ describe("rewinding a thread to one of its replies", () => {
   });
 
   it("leaves the slate as the rewind left it on undo, since undo never puts the conversation back", async () => {
-    const { ws } = await workspace(harness({ cuts: "next" }));
+    const { ws } = await workspace(harness({ cuts: "copy" }));
     const { threadId, turns } = await threeTurns(ws.id);
     const asThread: Caller = { origin: "here", by: { kind: "thread", threadId, workspaceId: ws.id, rootThreadId: threadId } };
     await rt!.slates.write({ text: `<slate><value name="pick" start="C" /><text id="t">Version {$pick}</text></slate>` }, asThread);
@@ -354,7 +381,7 @@ describe("rewinding a thread to one of its replies", () => {
   });
 
   it("refuses before anything is written: a working thread, the latest reply, and files a turn kept no checkpoint of", async () => {
-    const { ws, daemon } = await workspace(harness({ cuts: "next", hangFrom: 3 }));
+    const { ws, daemon } = await workspace(harness({ cuts: "copy", hangFrom: 3 }));
     const first = await rt!.sessions.start(ws.id, { prompt: "one" });
     await first.finished;
     const threadId = first.view().threadId!;
@@ -371,7 +398,7 @@ describe("rewinding a thread to one of its replies", () => {
     await settle();
     expect(await texts(ws.id)).toEqual(["reply 1", "reply 2"]);
 
-    const refusing = await workspace(harness({ cuts: "next" }), fakeDaemon({ refuseCheckpoint: true }));
+    const refusing = await workspace(harness({ cuts: "copy" }), fakeDaemon({ refuseCheckpoint: true }));
     const { threadId: other, turns } = await threeTurns(refusing.ws.id);
     await expect(rt!.sessions.rewind(other, { turnId: turns[0]!, files: true })).rejects.toThrow(REWIND_NO_CHECKPOINT_LINE);
     // The conversation alone still goes, off the anchor the turn kept.
@@ -379,7 +406,7 @@ describe("rewinding a thread to one of its replies", () => {
   });
 
   it("refuses a thread whose threads under it still run, naming them", async () => {
-    const { ws } = await workspace(harness({ cuts: "next", hangFrom: 4 }));
+    const { ws } = await workspace(harness({ cuts: "copy", hangFrom: 4 }));
     const { threadId, turns } = await threeTurns(ws.id);
     // A thread this one's agent opened, still working; the lead itself is idle.
     const by = { origin: "here", by: { kind: "thread", threadId, workspaceId: ws.id, rootThreadId: threadId } } as const;
@@ -393,7 +420,7 @@ describe("rewinding a thread to one of its replies", () => {
   });
 
   it("moves no files once another thread worked in the folder after the checkpoint, running or done, and the conversation still goes", async () => {
-    const { ws, daemon } = await workspace(harness({ cuts: "next", hangFrom: 4 }));
+    const { ws, daemon } = await workspace(harness({ cuts: "copy", hangFrom: 4 }));
     const { threadId, turns } = await threeTurns(ws.id);
     // A second thread of the person's on the same workspace, so in the same folder, mid-turn.
     const beside = await rt!.sessions.start(ws.id, { prompt: "move the pricing table" });
@@ -408,7 +435,7 @@ describe("rewinding a thread to one of its replies", () => {
   });
 
   it("will not undo while another thread in the folder works, and any turn that ends in the folder closes every undo there", async () => {
-    const { ws, daemon, events } = await workspace(harness({ cuts: "next", hangFrom: 4 }));
+    const { ws, daemon, events } = await workspace(harness({ cuts: "copy", hangFrom: 4 }));
     const { threadId, turns } = await threeTurns(ws.id);
     await rt!.sessions.rewind(threadId, { turnId: turns[0]!, files: true });
     const beside = await rt!.sessions.start(ws.id, { prompt: "move the pricing table" });

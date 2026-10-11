@@ -123,12 +123,15 @@ export function ComposerCheckoutRow({
   thread,
   access = null,
   stash = null,
+  starts,
 }: {
   workspaceId: string;
   thread: ChatThreadHandle;
   access?: ReactNode;
   /** The word that counts the stashed prompts and opens them; nothing while there are none. */
   stash?: ReactNode;
+  /** The new branch the send opens its thread on, a fork's, which no folder here holds yet. */
+  starts?: string;
 }) {
   const wire = useDaemonWire(workspaceId);
   const follow = useRootStore(s => s.follow);
@@ -167,7 +170,7 @@ export function ComposerCheckoutRow({
       <RowComputer name={computer} place={place} />
       {access}
       {stash}
-      <RowBranch head={head !== null && head !== DETACHED_HEAD ? head : null} why={onCheckout || branch.kind === "repo" ? "detached" : branch.kind} />
+      <RowBranch head={starts ?? (head !== null && head !== DETACHED_HEAD ? head : null)} why={onCheckout || branch.kind === "repo" ? "detached" : branch.kind} />
     </ComposerSurface.Tray>
   );
 }

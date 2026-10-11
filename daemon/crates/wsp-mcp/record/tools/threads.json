@@ -274,6 +274,25 @@
               "rewoundAt": {
                 "type": "number"
               },
+              "forkedFrom": {
+                "type": "object",
+                "properties": {
+                  "threadId": {
+                    "type": "string"
+                  },
+                  "turnId": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "threadId",
+                  "title"
+                ],
+                "additionalProperties": false
+              },
               "permissionMode": {
                 "type": "string"
               },
@@ -654,6 +673,25 @@
               },
               "rewoundAt": {
                 "type": "number"
+              },
+              "forkedFrom": {
+                "type": "object",
+                "properties": {
+                  "threadId": {
+                    "type": "string"
+                  },
+                  "turnId": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "threadId",
+                  "title"
+                ],
+                "additionalProperties": false
               },
               "permissionMode": {
                 "type": "string"

@@ -13,7 +13,7 @@ import { type AddressInfo } from "node:net";
 import { promisify } from "node:util";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { HOST_TOKEN_ENV, HOST_URL_ENV, notAThreadLine, NAME_A_THREAD_FIX, NOT_UNDER_FIX, notUnderLine, replacesWorkingFix, replacesWorkingLine, CLOUD_ENV, DAEMON_TOKEN_PATH, deniedLine, noSuchAccountLine, PERMISSION_DENY, pushedForChildLine, EXIT_CODES, refusalLine, SCOPED_MCP_ARG, scopedNoPairLine, HERE_PLACE_ID, shellQuote, TURN_TOKEN_ENV, VerbFailure, WS_PATH } from "@wsp/protocol";
+import { FORK_RESUME_FIX, FORK_RESUME_LINE, HOST_TOKEN_ENV, HOST_URL_ENV, notAThreadLine, NAME_A_THREAD_FIX, NOT_UNDER_FIX, notUnderLine, replacesWorkingFix, replacesWorkingLine, CLOUD_ENV, DAEMON_TOKEN_PATH, deniedLine, noSuchAccountLine, PERMISSION_DENY, pushedForChildLine, EXIT_CODES, refusalLine, SCOPED_MCP_ARG, scopedNoPairLine, HERE_PLACE_ID, shellQuote, TURN_TOKEN_ENV, VerbFailure, WS_PATH } from "@wsp/protocol";
 import { CLOUD_ON } from "../src/cloud.js";
 import { copyKey, createRuntime, DAEMON_TOKEN_SET, localExecStream, memoryStore, type Runtime, type Store } from "@wsp/runtime";
 import { fakeCopier, LocalBackend } from "@wsp/engine";
@@ -183,7 +183,8 @@ describe("the agent contract on the command line and the tool door", () => {
       statePath,
       backend,
       store,
-      adapters: { claude: claude.adapter, codex: bornDeadAgent(prompt => `re: ${prompt}`).adapter },
+      // Claude Code here forks the way Codex does, the start making the fork, since the scripted agent names no anchors.
+      adapters: { claude: ctx => ({ ...claude.adapter(ctx), forksByCount: true, forkSession: async f => ({ fork: { session: f.session, turn: "anchor" in f.turn ? f.turn.anchor : "counted" } }) }), codex: bornDeadAgent(prompt => `re: ${prompt}`).adapter },
       goneConfirmMs: 0,
       // This computer's own daemon, which the pull request's reads and its merge go through, answered by the same
       // stand-in below as the daemon inside a workspace.
@@ -461,6 +462,25 @@ describe("the agent contract on the command line and the tool door", () => {
     const opened = (await last("run", "run", "--beside", lead, "hello")) as { threadId: string; text: string };
     expect(opened).toMatchObject({ threadId: expect.any(String), text: "re: hello", outcome: "started" });
     await last("send", "send", opened.threadId, "again");
+    // A fork of it through its first turn: a new thread on its agent, answered as any run is.
+    const forked = (await last("run", "run", "--fork", opened.threadId, "--at", "1", "what do you remember?")) as { threadId: string; text: string };
+    expect(forked).toMatchObject({ threadId: expect.any(String), text: "re: what do you remember?", outcome: "started" });
+    expect(forked.threadId).not.toBe(opened.threadId);
+    // Its read opens on the history it carries, the source's first turn, then its own.
+    const forkRead = (await last("thread read", "thread", "read", forked.threadId)) as { messages: { who: string; text: string }[] };
+    expect(forkRead.messages.filter(m => m.who === "person").map(m => m.text)).toEqual(["hello", "what do you remember?"]);
+    // What the thread forked decides, a start beside --fork may not name: each a usage refusal, exit 3, nothing started.
+    for (const beside of [["alpha", "--fork", opened.threadId], ["--fork", opened.threadId, "--beside", lead], ["--fork", opened.threadId, "--cwd", "/tmp"], ["--fork", opened.threadId, "--replaces", lead], ["--at", "1"], ["--fork", opened.threadId, "--agent", "codex"], ["--fork", opened.threadId, "--at", "0"]]) {
+      const refused = await run("run", ...beside, "x", "--json");
+      expect(refused.code, `wsp run ${beside.join(" ")}`).toBe(EXIT_CODES.usage);
+      expect(failure(refused.io).error).not.toBe("");
+    }
+    // A fork carries a thread's conversation and --resume one kept outside wsp: a start takes one of them.
+    for (const beside of [["--resume", "conv-7f3a"], ["--resume", "conv-7f3a", "--copy"], ["--copy"]]) {
+      const refused = await run("run", "--fork", opened.threadId, ...beside, "x", "--json");
+      expect(refused.code, `wsp run --fork ${beside.join(" ")}`).toBe(EXIT_CODES.usage);
+      expect(failure(refused.io).error).toBe(refusalLine(FORK_RESUME_LINE, FORK_RESUME_FIX));
+    }
     // The turn is over, so the wait answers off the transcript at once.
     expect(await last("threads wait", "threads", "wait", opened.threadId)).toEqual({ finished: { threadId: opened.threadId, status: "completed", reply: "re: again" } });
     // The read is off the transcript the host holds: the same turn, its rows, and its reply whole under --last.

@@ -16,7 +16,7 @@ import { PROJECT_ICON_MAX_BYTES, ProjectIconHash } from "../project-look.js";
 import { reqId } from "./helpers.js";
 import { RelayPort } from "./limits.js";
 import { type EventAsker, SeedChoice, WorkspaceAgents, WorkspaceOrigin } from "../views/workspace.js";
-import { SessionOrigin, SessionView, ThreadMarks } from "../views/session.js";
+import { ForkSource, SessionOrigin, SessionView, ThreadMarks } from "../views/session.js";
 import { RunStep } from "../views/session-events.js";
 import { TerminalScheme } from "../views/project-bundle.js";
 import { EditorId, HISTORY_PAGE_MAX, PreferencesPatch } from "../views/preferences.js";
@@ -505,6 +505,11 @@ const RuntimeOp = z.discriminatedUnion("op", [
      * first turn starts the host settles the one it replaces. Refused on a send into a thread that has run, for a
      * thread still working or asking, for one that already has a restart, and for one a thread's token may not settle. */
     replaces: z.string().optional(),
+    /** The thread this start's new thread forks, by its runtime id: the new thread runs on that thread's agent and
+     * its conversation through one finished turn and nothing after, in that thread's folder or, with branch, in a new
+     * worktree whose files are that turn's checkpoint. ForkSource says which turn. Refused beside thread, project,
+     * cwd, workspaceId, replaces or another agent. */
+    fork: ForkSource.optional(),
     /** The files the message carries, in the order the person added them; refused with filesRefusal's line over the
      * caps, and refused naming the agent before the machine is asked when an image goes to an agent that reads none.
      * An image rides its harness's road; any other file lands in the thread's folder and the prompt names it. */

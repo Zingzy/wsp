@@ -558,6 +558,16 @@ export function transcriptsArea(ctx: RuntimeContext): TranscriptsArea {
   // for the debounce.
   const record = (unstamped: SessionEvent): void => {
     const event: SessionEvent = { ...unstamped, at: Date.now(), pos: indexFor(unstamped.workspaceId).pos + 1 };
+    append(event);
+    bus.emit(event);
+    if ((event.type === "session.start" || event.type === "session.end") && event.threadId !== undefined) ctx.pushHead(event.threadId);
+  };
+  /** The history a fork opens on, written as record writes an event, each under a position of its own and at the moment
+   * it was first written. No client is told of them: a fork is opened on its history, never handed it live. */
+  const recordCopies = (events: readonly SessionEvent[]): void => {
+    for (const e of events) append({ ...e, pos: indexFor(e.workspaceId).pos + 1 });
+  };
+  const append = (event: SessionEvent): void => {
     const id = event.workspaceId;
     const kept = keptEvent(event);
     const size = eventBytes(kept);
@@ -578,8 +588,6 @@ export function transcriptsArea(ctx: RuntimeContext): TranscriptsArea {
     else if (event.type !== "session.delta" && !transcriptTimers.has(event.workspaceId)) {
       transcriptTimers.set(event.workspaceId, clock.schedule(() => void flushTranscript(event.workspaceId), TRANSCRIPT_FLUSH_MS));
     }
-    bus.emit(event);
-    if ((event.type === "session.start" || event.type === "session.end") && event.threadId !== undefined) ctx.pushHead(event.threadId);
   };
 
   /** The newest accrued cost each workspace's meter pushed, for a slate's cost source. */
@@ -605,6 +613,6 @@ export function transcriptsArea(ctx: RuntimeContext): TranscriptsArea {
   return {
     keptWrites, keepSentImages, dropSentImages, moveTranscript, loadIndex, moveBlobs, transcriptQueue, openTranscript,
     transcriptReader, dropFromTranscript, transcriptTimers, daemonTokens, daemonTokenOf, cancelFlush, flushTranscript,
-    viewedMarks, persistSessions, record, accrued, ranOn, boxOf,
+    viewedMarks, persistSessions, record, recordCopies, accrued, ranOn, boxOf,
   };
 }

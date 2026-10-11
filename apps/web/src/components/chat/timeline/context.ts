@@ -28,6 +28,11 @@ export interface TimelineRowSharedState {
   /** The last replies of the turns the agent wrote the slate in. */
   slatedMessageIds: ReadonlySet<MessageId>;
   onRewind: (messageId: MessageId) => void;
+  /** The messages Fork from here stands on: each finished turn's last reply and the person's message that opened it. */
+  forkableMessageIds: ReadonlySet<MessageId>;
+  onFork: (messageId: MessageId) => void;
+  /** On a fork's page, the thread it came from: its title, and Open where it still stands. */
+  forkedFrom: ForkedFromLine | null;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   onOpenFile: ((path: string, line?: number) => void) | undefined;
   /** Opens Changes on a turn's range, at a file where one is named; an edit's file the turn recorded no change for
@@ -42,6 +47,12 @@ export interface TimelineRowSharedState {
   replyRuns: ReplyRuns | null;
   /** The thread whose children the transcript's spawn rows draw, by its key; null where it holds none. */
   leadKey: string | null;
+}
+
+/** The rule line after a fork's handed history: the source's title, and the road to it while it stands. */
+export interface ForkedFromLine {
+  readonly title: string;
+  readonly onOpen: (() => void) | null;
 }
 
 /** What a reply's shell blocks need to run where they stand: the thread they belong to, its folder and its runs. */

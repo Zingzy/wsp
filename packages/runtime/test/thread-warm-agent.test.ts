@@ -2,7 +2,7 @@
 // A new thread's agent process started ahead of its first send, as the composer asks when it takes focus: the shipped
 // Claude adapter over this computer's runs, driving a stand-in agent that says its pid and arguments as it starts and
 // names the process and the turn token in every reply.
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -188,6 +188,34 @@ describe("an agent process started ahead of a new thread's first send", () => {
     const [, warm] = await upCount(2);
     const child = await send(rt, ws.id, "child", { harness: "claude" }, asLead);
     expect(pidOf(child.result.text)).not.toBe(warm!.pid);
+    expect(alive(warm!.pid)).toBe(true);
+    const mine = await send(rt, ws.id, "mine", { harness: "claude" });
+    expect(pidOf(mine.result.text)).toBe(warm!.pid);
+  }, 30_000);
+
+  it("a fork neither takes the one standing nor ends it: that process holds no conversation, and a fork resumes its source's", async () => {
+    const rt = host();
+    const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
+    const source = await send(rt, ws.id, "source", { harness: "claude" });
+    const session = (await rt.sessions.list(ws.id)).find(r => r.threadId === source.threadId)!.claudeSessionId!;
+    // The stand-in writes no session file, so the source's one turn is written here as the CLI files it.
+    const opener = "0000aaaa-0000-4000-8000-000000000001";
+    const lines = [
+      { type: "user", uuid: opener, parentUuid: null, sessionId: session, message: { role: "user", content: "source" } },
+      { type: "assistant", uuid: "a1", parentUuid: opener, sessionId: session, message: { id: "msg1", role: "assistant", content: [{ type: "text", text: "said" }] } },
+    ];
+    mkdirSync(join(root, ".claude", "projects", "-acme"), { recursive: true });
+    writeFileSync(join(root, ".claude", "projects", "-acme", `${session}.jsonl`), lines.map(l => `${JSON.stringify(l)}\n`).join(""));
+    await rt.sessions.warm(ws.id, { harness: "claude" });
+    const [, warm] = await upCount(2);
+    // The stand-in announces another model than it was launched on, so the fork names the one the source ran.
+    const forked = await rt.sessions.start(ws.id, { prompt: "forked", model: "claude-opus-5-5", fork: { threadId: source.threadId } });
+    const result = await forked.finished;
+    expect(result.status).toBe("completed");
+    expect(pidOf(result.text)).not.toBe(warm!.pid);
+    const [, , own] = await upCount(3);
+    expect(own!.args).toMatch(/--resume [0-9a-f-]{36}/);
+    expect(own!.args).not.toContain(session);
     expect(alive(warm!.pid)).toBe(true);
     const mine = await send(rt, ws.id, "mine", { harness: "claude" });
     expect(pidOf(mine.result.text)).toBe(warm!.pid);

@@ -20,9 +20,12 @@ import {
   type McpServerSpec, type SessionAsker, refusal, RESUME_A_THREAD_LINE, RESUME_A_THREAD_FIX, sendFilesAcrossLine, SEND_FILES_ACROSS_FIX, waitAcrossLine, WAIT_ACROSS_FIX,
   TURN_STOPPED_LINE, workspacePlace, STOP_REACH_MS, sendGivenUpLine, threadResult, listedFailure, turnLines,
   type Caller, type SessionSettleResult, SETTLE_MS, SETTLE_WORKING, SETTLE_ALREADY, subagentSettleLine,
-  SUBAGENT_SETTLE_FIX, notUnderLine, NOT_UNDER_FIX, replacesWorkingLine, replacesWorkingFix, replacedAlreadyLine, replacedAlreadyFix, RESTART_OPENS_LINE, RESTART_OPENS_FIX,
+  SUBAGENT_SETTLE_FIX, notUnderLine, NOT_UNDER_FIX, type ForkedSession, usageRefusal, FORK_BESIDE_LINE, FORK_BESIDE_FIX, FORK_RESUME_LINE, FORK_RESUME_FIX,
+  forkAgentLine, forkAgentFix, forksNotLine, FORKS_NOT_FIX, forkRefusedLine, FORK_REFUSED_FIX, REWIND_COPIED_LINE, copiedFromOf,
+  replacesWorkingLine, replacesWorkingFix, replacedAlreadyLine, replacedAlreadyFix, RESTART_OPENS_LINE, RESTART_OPENS_FIX,
 } from "@wsp/protocol";
 import { harnessCatalog } from "../harness-catalog.js";
+import { copiedEvents, copyImages, forkStart, forkTurnOf, moveSession, payCutOwed, readFork, readyFork } from "./forks.js";
 import { headShape } from "../transcript-reader.js";
 import type { HarnessAdapter, HarnessStartOptions } from "../types/harness.js";
 import { SESSION_TITLE_TIMEOUT_MS } from "../types/events.js";
@@ -122,6 +125,7 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
       ...(resume !== undefined ? { claudeSessionId: resume } : {}),
       ...(cwd !== undefined ? { cwd } : {}),
       ...(r.permissionMode !== undefined ? { permissionMode: r.permissionMode } : {}),
+      ...(r.forkedFrom !== undefined ? { forkedFrom: r.forkedFrom } : {}),
     };
   };
   /** A stop on one turn; `marked` lets a held turn's next look go on once the stop has marked it, or will not. */
@@ -287,6 +291,26 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
         const answered = await ctx.takenTurn(workspaceId, taken);
         if (answered !== undefined) return answered;
       }
+      // A fork reads its source first, every refusal of it before anything is written, and runs on that thread's agent
+      // at its picks unless the start names others: a fork is that thread's conversation, carried on.
+      if (opened.fork !== undefined && (opened.thread !== undefined || opened.replaces !== undefined)) throw usageRefusal(FORK_BESIDE_LINE, FORK_BESIDE_FIX);
+      if (opened.fork !== undefined && opened.outside !== undefined) throw usageRefusal(FORK_RESUME_LINE, FORK_RESUME_FIX);
+      const plan = opened.fork === undefined ? undefined : await readFork(ctx, opened.fork, origin);
+      if (plan !== undefined) {
+        const source = plan.source.harness;
+        if (opened.harness !== undefined && opened.harness !== source) throw refusal(forkAgentLine(ctx.agentLabel(source), ctx.agentLabel(opened.harness)), forkAgentFix(ctx.agentLabel(opened.harness)), "usage");
+        const { model, effort, contextWindow, fast, permissionMode } = plan.picks;
+        opened = {
+          ...opened,
+          harness: source,
+          ...(opened.model === undefined && model !== undefined ? { model } : {}),
+          ...(opened.effort === undefined && effort !== undefined ? { effort } : {}),
+          ...(opened.contextWindow === undefined && contextWindow !== undefined ? { contextWindow } : {}),
+          ...(opened.fast === undefined && fast === true ? { fast } : {}),
+          ...(opened.permissionMode === undefined && opened.access === undefined && permissionMode !== undefined ? { permissionMode } : {}),
+          ...(opened.cwd === undefined && plan.source.cwd !== undefined && plan.source.workspaceId === workspaceId ? { cwd: plan.source.cwd } : {}),
+        };
+      }
       // The thread this start lands in is read before the workspace is: a send into a thread of the caller's tree
       // reaches it on whatever workspace it runs, and only a start that opens a thread is a workspace act.
       // A thread whose rows fell off the index cap, or whose index is gone, is still the thread its record or its
@@ -302,9 +326,10 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
       let resume = named?.claudeSessionId ?? fromTranscript ?? (outside !== undefined && !outside.copy ? outside.id : undefined);
       // A send of the person's opening a thread runs on the process the composer started for it, where one stands for
       // this workspace and agent: the thread takes the id that process's token and tools were minted for. Never a
-      // thread's send, whose child sits in a tree that process's token is not, and never one launching otherwise.
+      // thread's send, whose child sits in a tree that process's token is not, and never one launching otherwise. Nor
+      // a fork, which resumes its source's conversation where a warm process holds none.
       const warmed =
-        opened.thread === undefined && outside === undefined && scopeOf(origin) === undefined && opened.harness !== undefined && opened.replaces === undefined && opened.title === undefined && opened.mcpServers === undefined && opened.asksUntilStopped === undefined
+        opened.thread === undefined && plan === undefined && outside === undefined && scopeOf(origin) === undefined && opened.harness !== undefined && opened.replaces === undefined && opened.title === undefined && opened.mcpServers === undefined && opened.asksUntilStopped === undefined
           ? ctx.claimWarm(workspaceId, opened.harness)
           : undefined;
       if (warmed !== undefined) claimedBy.set(opened, warmed);
@@ -452,6 +477,17 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
         throw e;
       }
       const { harness, adapter } = built;
+      // A fork's agent has to fork, at a turn it can cut at, which is known before the row is held.
+      let forkTurn: ReturnType<typeof forkTurnOf>;
+      try {
+        if (plan !== undefined && plan.turn !== undefined && (adapter.forkSession === undefined || plan.source.session === undefined)) {
+          throw adapter.forkSession === undefined ? refusal(forksNotLine(ctx.agentLabel(harness)), FORKS_NOT_FIX, "usage") : refusal(forkRefusedLine(ctx.agentLabel(harness), ASIDE_NO_SESSION_LINE), FORK_REFUSED_FIX, "conflict");
+        }
+        forkTurn = plan === undefined ? undefined : forkTurnOf(plan, adapter.forksByCount === true);
+      } catch (e) {
+        dropScope();
+        throw e;
+      }
       // Only on this computer: a box keeps the prompt in its launch seed, since a write there is one more exec trip.
       const promptsLate = adapter.waitsForPrompt === true && copiesFolder(entry.record.kind);
       // The wsp tools ride every launch, for a harness that takes servers with one: under the same name as the
@@ -560,6 +596,7 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
       let handedOver = false;
       let failure: string | undefined;
       let keptTaken: KeptProcess | undefined;
+      let readied: ForkedSession | undefined;
       try {
         const { catalog, picksFor } = await launchPicks(entry, harness, adapter, prefs, threadId, o);
         // A pick the lists do not carry is refused here, before this send waits on anything; the picks themselves
@@ -684,6 +721,16 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
             filePaths = await ctx.landFiles(entry, landing, sendFilesDir(landing, threadId, o.requestId, minted), (o.attachments ?? []).filter(a => !isImage(a.mediaType)));
             if (filePaths.length > 0) filesFolder = landing;
             if (adapter.mcpServers === true) serverValues = await ctx.serverValuesFor(entry, harness, landing);
+            // A fork's session is readied now, on the source's computer: a copy this turn resumes, or the turn the
+            // start forks itself.
+            if (plan !== undefined) {
+              if (forkTurn !== undefined) {
+                readied = await readyFork(adapter, plan.source.session!, forkTurn, why => refusal(forkRefusedLine(ctx.agentLabel(harness), why), FORK_REFUSED_FIX, "conflict"));
+                if ("resume" in readied) resume = readied.resume;
+              }
+              await copyImages(ctx, plan, { workspaceId, threadId });
+            }
+            if (!opens && resume !== undefined) resume = await payCutOwed(ctx, adapter, { workspaceId, threadId }, resume);
             const taken = promptsLate ? ctx.snapshotOf(entry, landing) : await ctx.snapshotOf(entry, landing);
             snapshot = taken === undefined ? undefined : { from: taken, cwd: landing };
             refuse();
@@ -743,12 +790,11 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
         // none of them can be answered from the row they are about. Written before adapter.start, so events that
         // fire synchronously inside start() land on the same view.
         Object.assign(view, picks, cwd !== undefined ? { cwd } : {}, resume !== undefined ? { claudeSessionId: resume } : {});
-        // A rewind's cut rides the first resume after it, on a harness that takes one there.
-        const cutAt = resume !== undefined && adapter.resumesAt === true ? threadRecords.get(threadId)?.resumeAt : undefined;
         const handed = attachedFilesPrompt(o.prompt, filePaths);
         // What a launch fixes for the life of the agent's process: a turn runs on the thread's kept process only where
-        // its own launch would be the same, and a rewind's cut is a launch of its own.
-        const launchKey: KeptLaunch | undefined = ctx.moduleOf(entry.record.kind).keepsAgents && cutAt === undefined ? { fixed: launchFixed(entry, harness, cwd, o.mcpServers, catalog?.version), picks: { ...picks } } : undefined;
+        // its own launch would be the same, and a fork is a launch of its own.
+        const forkOnStart = readied !== undefined && "fork" in readied ? readied.fork : undefined;
+        const launchKey: KeptLaunch | undefined = ctx.moduleOf(entry.record.kind).keepsAgents && forkOnStart === undefined ? { fixed: launchFixed(entry, harness, cwd, o.mcpServers, catalog?.version), picks: { ...picks } } : undefined;
         // Matched on what this send named and the thread's access alone: a pick it left out is the thread's own, which
         // is the kept process's, even where the agent announced its model in other words than it was launched with.
         const asked = { ...(o.model !== undefined ? { model: picks.model } : {}), ...(o.effort !== undefined ? { effort: picks.effort } : {}), ...(o.contextWindow !== undefined ? { contextWindow: picks.contextWindow } : {}), ...(picks.permissionMode !== undefined ? { permissionMode: picks.permissionMode } : {}), ...(picks.fast === true ? { fast: true } : {}) };
@@ -757,6 +803,8 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
         if (kept !== undefined) dropScope();
         const promptAfter = promptsLate && snapshot?.from instanceof Promise ? snapshot.from.then(() => {}) : undefined;
         keptTaken = kept;
+        // The fork's history opens its transcript, ahead of every event of its own first turn.
+        if (plan !== undefined) ctx.recordCopies(copiedEvents(plan, { workspaceId, threadId }));
         // The conversation so far, once, ahead of the prompt the turn opens with.
         for (const row of outside?.earlier ?? []) ctx.record({ type: "session.earlier", workspaceId, sessionId: outside!.id, threadId, who: row.who, text: row.text });
         const handle = ctx.runTurn({
@@ -780,7 +828,6 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
           ...(imagesDir !== undefined ? { imagesDir } : {}),
           ...(snapshot !== undefined ? { snapshot } : {}),
           ...(resume !== undefined ? { resume } : {}),
-          ...(cutAt !== undefined ? { cutAt } : {}),
           waiting: kept?.waiting ?? waiting,
           open: onEvent =>
             kept !== undefined
@@ -788,7 +835,7 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
               : adapter.start({
               prompt: handed,
               ...(outside?.copy === true ? { resume: outside.id, copy: true as const } : resume !== undefined ? { resume } : {}),
-              ...(cutAt !== undefined ? { resumeAt: cutAt } : {}),
+              ...(forkOnStart !== undefined ? { fork: forkOnStart } : {}),
               ...(cwd !== undefined ? { cwd } : {}),
               ...picks,
               ...(title !== undefined ? { title } : {}),
@@ -811,7 +858,7 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
         // launch that never opened leaves none; a thread from before the record existed gets one here too, off what
         // its rows said this turn runs at, so it is read the one way from now on. Persisted with the row as the turn
         // announces itself and at its end.
-        if (!threadRecords.has(threadId)) threadRecords.set(threadId, { workspaceId, harness, ...tree, ...(picks.permissionMode !== undefined ? { permissionMode: picks.permissionMode } : {}), ...(replaces !== undefined ? { replaces } : {}), worked: threadRan(ctx.rowsOn(threadId).filter(r => r.status !== "running")) });
+        if (!threadRecords.has(threadId)) threadRecords.set(threadId, { workspaceId, harness, ...tree, ...(picks.permissionMode !== undefined ? { permissionMode: picks.permissionMode } : {}), ...(replaces !== undefined ? { replaces } : {}), ...(plan !== undefined ? { forkedFrom: plan.forkedFrom } : {}), worked: threadRan(ctx.rowsOn(threadId).filter(r => r.status !== "running")) });
         const thread = threadRecords.get(threadId)!;
         // A newer turn leaves Resume at reset nothing to resume.
         if (thread.limitResume !== undefined) {
@@ -867,9 +914,18 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
           launched();
         }
         if (!handedOver && imagesDir !== undefined) ctx.dropImages(entry, imagesDir);
+        // A fork that never ran leaves no copy of its source's session and no image of its history behind.
+        if (!handedOver && plan !== undefined) {
+          if (readied !== undefined && "drop" in readied) void readied.drop().catch((e: unknown) => console.warn(`the copy a fork of thread ${threadWord(plan.source.threadId)} made was not removed: ${e instanceof Error ? e.message : String(e)}`));
+          void ctx.dropSentImages(workspaceId, [threadId]);
+        }
         // A kept process taken for a turn that never opened on it holds the thread's token with nobody to answer for it.
         if (!handedOver && keptTaken !== undefined) ctx.endKept(threadId, keptTaken);
       }
+    },
+
+    async fork(o, origin) {
+      return forkStart(ctx, (workspaceId, opts) => sessionsApi.start(workspaceId, opts, origin), o, origin);
     },
 
     async list(workspaceId, origin) {
@@ -1167,7 +1223,9 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
       const onText = askId === undefined ? undefined : (text: string): void => bus.pass({ type: "aside.text", workspaceId: latest.workspaceId, threadId, askId, text });
       // What the thread's latest turn ran at, so a harness that copies the session sends the request its turns sent.
       const ran = { ...(latest.cwd !== undefined ? { cwd: latest.cwd } : {}), ...(latest.model !== undefined ? { model: latest.model } : {}), ...(latest.effort !== undefined ? { effort: latest.effort } : {}), ...(latest.contextWindow !== undefined ? { contextWindow: latest.contextWindow } : {}), ...(latest.fast === true ? { fast: true } : {}) };
-      const ask = { session: latest.claudeSessionId, question, ...ran, ...(onText !== undefined ? { onText } : {}) };
+      // A thread a rewind from before copied rewinds left owing its cut has its conversation end there, not at its file's end.
+      const cut = threadRecords.get(threadId)?.cutOwed;
+      const ask = { session: latest.claudeSessionId, question, ...(cut !== undefined ? { cut } : {}), ...ran, ...(onText !== undefined ? { onText } : {}) };
       const answered = async (asker: SessionAsker, q: AsideQuestion): Promise<{ text: string }> => {
         const { text } = await asker(q);
         if (text.trim() === "") throw new Error(ASIDE_EMPTY_LINE);
@@ -1270,6 +1328,7 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
       const at = opts.turnId === undefined ? -1 : order.indexOf(opts.turnId);
       if (at < 0) throw notFoundRefusal(`no turn ${opts.turnId ?? ""} on thread ${threadWord(threadId)}`);
       if (at === order.length - 1) throw conflict(REWIND_LATEST_LINE);
+      if (events.some(e => e.threadId === threadId && e.turnId === order[at] && copiedFromOf(e) !== undefined)) throw conflict(REWIND_COPIED_LINE);
       const cut = order.slice(at + 1);
       const keptOf = (turnId: string): Extract<SessionEvent, { type: "session.checkpoint" }> | undefined => {
         for (let i = events.length - 1; i >= 0; i--) {
@@ -1292,8 +1351,10 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
       // A harness that said it cannot cut this thread keeps every turn: the files alone go back and it is not asked.
       const uncut = events.find((e): e is Extract<SessionEvent, { type: "session.checkpoint" }> => e.type === "session.checkpoint" && e.threadId === threadId && e.kept !== undefined)?.kept;
       if (uncut !== undefined && !files) throw conflict(shared ? REWIND_SHARED_LINE : rewindKeptLine(uncut, false));
-      const cutsConversation = (adapter.resumesAt === true || adapter.revert !== undefined) && uncut === undefined;
-      if (adapter.resumesAt === true && kept?.anchor === undefined) throw conflict(rewindNoAnchorLine(agent));
+      // A harness with no revert of its own is rewound onto a copy of its session through the kept turn's anchor.
+      const copies = adapter.revert === undefined && adapter.forkSession !== undefined;
+      const cutsConversation = (copies || adapter.revert !== undefined) && uncut === undefined;
+      if (copies && kept?.anchor === undefined) throw conflict(rewindNoAnchorLine(agent));
       if (!cutsConversation && !files) throw conflict(shared ? REWIND_SHARED_LINE : rewindNoAnchorLine(agent));
 
       // Files first, since they alone can be put back: a harness that then will not cut has them restored again and
@@ -1324,9 +1385,18 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
           throw e;
         }
       }
+      if (copies && cutsConversation && latest?.claudeSessionId !== undefined) {
+        try {
+          const copy = await adapter.forkSession!({ session: latest.claudeSessionId, turn: { anchor: kept!.anchor! } });
+          if ("resume" in copy) moveSession(ctx, threadId, latest.claudeSessionId, copy.resume);
+        } catch (e) {
+          if (before !== undefined) await restore(before).catch((back: unknown) => console.warn(`the files of thread ${threadWord(threadId)} were not put back after a refused rewind: ${back instanceof Error ? back.message : String(back)}`));
+          throw e;
+        }
+      }
       const record = held ?? { workspaceId, harness };
       threadRecords.set(threadId, record);
-      if (adapter.resumesAt === true) record.resumeAt = kept!.anchor!;
+      if (copies && cutsConversation) delete record.cutOwed;
       if (before !== undefined) record.rewound = { before, at: clock.now() };
       if (keptWhy !== undefined) {
         await done();

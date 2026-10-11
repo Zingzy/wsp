@@ -230,11 +230,13 @@ export interface TurnSummary {
   readonly completedAt: string | null;
   /** What the turn kept to rewind to once it was over: the checkpoint of the files (null where none was taken) and
    * the harness's anchor for its end (null where it named none). Null until the turn's session.checkpoint lands. */
-  readonly checkpoint: { readonly ref: string | null; readonly anchor: string | null; readonly kept?: string } | null;
+  readonly checkpoint: { readonly ref: string | null; readonly based?: true; readonly anchor: string | null; readonly kept?: string } | null;
   /** The agent wrote the thread's slate during the turn: its last reply carries one line saying so. */
   readonly slated?: true;
   /** The usage limit that stopped the turn, off its result; null on a turn that ended another way. */
   readonly limit?: TurnLimit | null;
+  /** The turn came with a fork from the thread it was forked from: it forks again, and never rewinds. */
+  readonly copied?: true;
 }
 
 export type ToolGroupAction = "read" | "edit" | "command" | "code-search" | "search" | "other" | "update";
@@ -317,7 +319,9 @@ export type MessagesTimelineRow =
        * elapsed count is time the person has kept it waiting, not time it worked. */
       readonly waitingOnYou: boolean;
     }
-  | { readonly kind: "thinking"; readonly id: string; readonly createdAt: string | null };
+  | { readonly kind: "thinking"; readonly id: string; readonly createdAt: string | null }
+  /** Where a fork's own history starts, after the turns it was handed. */
+  | { readonly kind: "fork"; readonly id: string; readonly createdAt: string | null };
 
 // --- composer prompts ---------------------------------------------------------
 
@@ -462,6 +466,8 @@ export interface SidebarThreadSnapshot {
   readonly replaces: { readonly threadId: string; readonly failed: boolean; readonly endedAt: string | null } | null;
   /** The thread that restarts this one; null while none does. */
   readonly replacedBy: string | null;
+  /** The thread this one was forked from, with its title as the host says it now. */
+  readonly forkedFrom?: { readonly threadId: string; readonly title: string };
 }
 
 /** A send whose thread the runtime has written no row for yet: what the sidebar draws in place of that row, so the

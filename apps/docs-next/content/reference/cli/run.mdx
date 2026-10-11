@@ -3,23 +3,33 @@
 {/* Written by apps/docs-next/scripts/cli.ts: change the script or its source and run pnpm --filter @wsp/docs-next generate. */}
 
 ```text
-usage: wsp run [<project>] [--beside <thread>] [--branch <branch>]
-       [--cwd <path>] [--agent <id>] [--model, --effort, --access <word>]
-       [--fast] [--notify <thread|me>] [--title <title>] [--replaces <thread>]
-       [--file <path>] [--resume <id> [--copy]] [--detach] "<message>"
+usage: wsp run [<project>] [--beside <thread>] [--fork <thread> [--at <n>]]
+       [--branch <branch>] [--cwd <path>] [--agent <id>]
+       [--model, --effort, --access <word>] [--fast] [--notify <thread|me>]
+       [--title <title>] [--replaces <thread>] [--file <path>]
+       [--resume <id> [--copy]] [--detach] "<message>"
   an agent works in the project's folder and you read its reply: a thread with
   the agent, model, effort and access the app offers; a project on a box runs in
   its folder there as the login the box was added with; --beside runs it in the
   folder another thread works in, on that thread's computer; --branch runs it in
   a worktree of the project's repo on that branch, made under wsp's folder
   unless one already holds it, and --cwd in a folder inside the project or one
-  of its worktrees; with no project, run from inside one of your project
-  folders, or from a thread, beside it; follows its first turn, or with --detach
-  prints the id and returns
+  of its worktrees; --fork starts it from another thread's conversation through
+  its latest finished turn, or the one --at counts from 1, on that thread's
+  agent in its folder, or with --branch in a new worktree whose files are that
+  turn's; with no project, run from inside one of your project folders, or from
+  a thread, beside it; follows its first turn, or with --detach prints the id
+  and returns
 
   --beside      a thread whose folder the new thread starts in, by its id or a
                 prefix, on the computer it runs on; never with a project or
                 --branch
+  --fork        a thread to fork, by its id or a prefix: the new thread carries
+                its conversation through one finished turn, on its agent and in
+                its folder, or with --branch in a new worktree with that turn's
+                files; never with a project, --beside, --cwd or --replaces
+  --at          with --fork, the finished turn the fork carries through, counted
+                from 1 as wsp thread read lists them; the latest without it
   --branch      a branch other than the one the project's folder has checked
                 out: the thread runs in the worktree holding it, made under
                 wsp's folder from the folder's current commit for a new branch

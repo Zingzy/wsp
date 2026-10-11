@@ -69,7 +69,7 @@ export function foldersArea(ctx: RuntimeContext): FoldersArea {
   /** The record of the worktree holding a branch of the project's repo: the one git already has the branch checked
    * out in, wherever it is, or one the daemon binary makes under this host's folder. The project folder itself
    * answers when it is the one holding the branch. */
-  const worktreeFolder = (project: ProjectView, top: string, branch: string, parent?: string, madeFor?: string): Promise<LiveWorkspace> =>
+  const worktreeFolder = (project: ProjectView, top: string, branch: string, parent?: string, madeFor?: string, checkpoint?: string): Promise<LiveWorkspace> =>
     ctx.oneFolder(`${project.id}\0${branch}`, async () => {
       const copier = local?.copier;
       if (copier === undefined) throw Object.assign(new Error(NO_COPIER_HERE), { kind: "invalid" });
@@ -79,7 +79,7 @@ export function foldersArea(ctx: RuntimeContext): FoldersArea {
         const version = await here.version();
         if (version < DAEMON_VERSION) throw new Error(hereDaemonBehindLine(version, DAEMON_VERSION, here.fix));
       }
-      const made = await copier.worktree({ from: top, home: ctx.stateFolder(), project: project.id, branch, modules: CARRY_MODULES });
+      const made = await copier.worktree({ from: top, home: ctx.stateFolder(), project: project.id, branch, modules: CARRY_MODULES, ...(checkpoint !== undefined ? { checkpoint } : {}) });
       if (made.path === top) return projectFolder(project);
       const entry = await worktreeRecordAt(project, { path: made.path, branch: made.branch, made: made.made, ...(madeFor !== undefined ? { madeFor } : {}) }, parent);
       if (made.fresh) {

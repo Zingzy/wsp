@@ -462,6 +462,9 @@ export type CommitDrafter = (ask: DraftAsk, exec: HarnessExec) => Promise<string
 export interface AsideQuestion {
   session: string;
   question: string;
+  /** The message the thread's conversation ends at where its session file runs past it, a rewind's cut its next turn
+   * has not taken yet; absent, the copy ends at the session's live end. */
+  cut?: string;
   cwd?: string;
   /** The model, effort, window and speed the thread's latest turn ran at, so the copy sends the request its turns do. */
   model?: string;
@@ -498,9 +501,32 @@ export type SessionAsker = (question: AsideQuestion) => Promise<AsideAnswer>;
  * boundary by counting the ones it opened: a turn with an anchor was opened, and one that said nothing counts as
  * opened too. Files are not its business. Answers `kept`, a clause saying why, where the harness
  * keeps that session's history in a form it cannot cut, and rejects with the harness's own words when it would not
- * cut otherwise. Absent on an adapter whose harness cuts at its next turn instead (resumesAt) or cannot cut at all.
+ * cut otherwise. Absent on an adapter whose harness cuts by a fork of its session instead or cannot cut at all.
  */
 export type SessionReverter = (o: { session: string; cwd?: string } & ({ beforeTurn: string } | { turns: readonly { anchor?: string; result?: TurnResult }[] })) => Promise<void | { kept: string }>;
+
+/** One turn of a session as a harness counts it where the turn named no anchor: the anchor it kept and what it ended
+ * as, where it said. */
+export interface CountedTurn {
+  anchor?: string;
+  result?: TurnResult;
+}
+
+/** The turn a fork carries a session through: the anchor it announced, or where it announced none, the turns after it
+ * in the session, oldest first, which the harness counts back past to find it. */
+export type ForkTurn = { anchor: string } | { after: readonly CountedTurn[] };
+
+/** What a fork's start takes off a harness that readied it: a session copied through the turn, resumed like any other
+ * and dropped by `drop` where the start never ran, or the session and the turn the start forks itself. */
+export type ForkedSession = { resume: string; drop(): Promise<void> } | { fork: { session: string; turn: string } };
+
+/**
+ * Readies a fork of one of a harness's sessions through one of its turns, before anything of the fork is written:
+ * the conversation up to that turn's end and nothing after, every later turn and every branch an earlier rewind left
+ * out. The session it reads is not written. Rejects with the harness's own words where the session or the turn is not
+ * there. Absent on an adapter whose harness cannot fork a session.
+ */
+export type SessionForker = (o: { session: string; turn: ForkTurn }) => Promise<ForkedSession>;
 
 /** Where a reset script runs: the agent's own home on that computer, the variables its launch exports (the PATH it
  * finds the binary on among them), and the person's program in place of the agent's word. */

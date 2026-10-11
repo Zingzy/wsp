@@ -8,6 +8,7 @@ import { CommandPalette } from "../components/palette/CommandPalette.js";
 import { BrowserGuests } from "../components/preview/BrowserGuests.js";
 import { ConversationConfirm } from "./ConversationConfirm.js";
 import { RewindDialogHost } from "../components/chat/RewindDialog.js";
+import { ForkDialogHost } from "../components/chat/ForkDialog.js";
 import { AddComputerDialog } from "../settings/add/AddComputerDialog.js";
 import { FileFinder } from "../files/FileFinder.js";
 import { OpenSplit } from "../files/OpenSplit.js";
@@ -71,6 +72,7 @@ const HOSTS = (
     <FileFinder />
     <ContextMenuHost />
     <RewindDialogHost />
+    <ForkDialogHost />
     <AddComputerDialog />
     <WorkspaceSwitcher />
     <BrowserGuests />

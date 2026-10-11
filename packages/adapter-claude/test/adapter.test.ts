@@ -8,6 +8,7 @@ import { createClaudeAdapter, type ClaudeSession } from "../src/adapter.js";
 import { CLAUDE_SCREEN_COMMANDS } from "../src/catalog.js";
 import { userMessageLine } from "../src/landmines.js";
 import { asideCommand } from "../src/aside.js";
+import { chainReadCommand, chainWriteCommand, copyCleanupCommand } from "../src/chain.js";
 import { AGENT_A_CALL, AGENT_A_ID, AGENT_A_PROMPT, AGENT_B_CALL, AGENT_B_ID, AGENT_B_PROMPT, subagentFixtureLines } from "./subagent-fixture.js";
 
 const FIXTURE_SESSION_ID = "e16ed170-8257-4668-879e-fe836341633c";
@@ -1783,18 +1784,24 @@ describe("what a rewind needs of a Claude Code turn", () => {
     expect(events.find(e => e.type === "turn.anchor")).toMatchObject({ anchor: "1a2b3c4d-0006-4aaa-8bbb-000000000006" });
   });
 
-  it("carries the cut on the next resume and never otherwise, by uuid alone", async () => {
-    const adapter = adapterOver(scriptedExec(fixtureLines()));
-    expect(adapter.resumesAt).toBe(true);
-    const exec = scriptedExec(fixtureLines());
-    const plain = adapterOver(exec);
-    await plain.start({ prompt: "next", resume: FIXTURE_SESSION_ID, onEvent: () => {} }).finished;
-    expect(exec.calls[0]!.command).not.toContain("--resume-session-at");
-    await plain.start({ prompt: "after the rewind", resume: FIXTURE_SESSION_ID, resumeAt: "1a2b3c4d-0002-4aaa-8bbb-000000000002", onEvent: () => {} }).finished;
-    expect(exec.calls[1]!.command).toContain(`--resume ${FIXTURE_SESSION_ID} --resume-session-at 1a2b3c4d-0002-4aaa-8bbb-000000000002`);
-    expect(exec.calls[1]!.command).not.toContain("--resume-drops-turn");
-    expect(() => plain.start({ prompt: "x", resume: FIXTURE_SESSION_ID, resumeAt: "$(rm -rf /)", onEvent: () => {} })).toThrow(/UUID/);
-    expect(() => plain.start({ prompt: "x", resumeAt: "1a2b3c4d-0002-4aaa-8bbb-000000000002", onEvent: () => {} })).toThrow(/resume/);
+  it("forks a session through a turn's anchor on a copy, and never resumes at a message", async () => {
+    // The copy's read answers the fixture's two message lines; the write and the removal print nothing.
+    const first = JSON.stringify({ parentUuid: null, type: "user", message: { role: "user", content: "hi" }, uuid: "1a2b3c4d-0001-4aaa-8bbb-000000000001" });
+    const reply = JSON.stringify({ parentUuid: "1a2b3c4d-0001-4aaa-8bbb-000000000001", type: "assistant", message: { id: "m1", content: [{ type: "text", text: "hello" }] }, uuid: "1a2b3c4d-0002-4aaa-8bbb-000000000002" });
+    const exec = scriptedExec(["2", `1:${first}`, `2:${reply}`]);
+    const adapter = adapterOver(exec);
+    const forked = await adapter.forkSession({ session: FIXTURE_SESSION_ID, turn: { anchor: "1a2b3c4d-0002-4aaa-8bbb-000000000002" } });
+    if (!("resume" in forked)) throw new Error("a Claude Code fork resumes a copy");
+    expect(forked.resume).toMatch(/^[0-9a-f-]{36}$/);
+    expect(forked.resume).not.toBe(FIXTURE_SESSION_ID);
+    expect(exec.calls[0]!.command).toBe(chainReadCommand({ session: FIXTURE_SESSION_ID, configDir: "/root/.claude-cfg" }));
+    expect(exec.calls[1]).toMatchObject({ command: chainWriteCommand({ session: FIXTURE_SESSION_ID, fork: forked.resume, configDir: "/root/.claude-cfg", count: 2 }), input: ["1-2"] });
+    await forked.drop();
+    expect(exec.calls[2]!.command).toBe(copyCleanupCommand({ fork: forked.resume, configDir: "/root/.claude-cfg" }));
+    await expect(adapter.forkSession({ session: FIXTURE_SESSION_ID, turn: { after: [] } })).rejects.toThrow(/named none/);
+    await adapter.start({ prompt: "next", resume: forked.resume, onEvent: () => {} }).finished;
+    expect(exec.calls.at(-1)!.command).toContain(`--resume ${forked.resume}`);
+    expect(exec.calls.map(c => c.command).join("\n")).not.toContain("--resume-session-at");
   });
 });
 
@@ -1946,7 +1953,7 @@ describe("a person's setup for Claude Code on a computer", () => {
       expect(command).not.toContain("--debug");
     }
     // The side question sends the request a turn sends, and the person's words can shape it, so it carries them too.
-    expect(asideCommand({ session: FIXTURE_SESSION_ID, fork: "11111111-2222-4333-8444-555555555555", keep: 0, configDir: "/root/.claude-cfg", launch })).toContain(`'/opt/my claude/bin/claude' -p '--debug' 'a b' --input-format stream-json`);
+    expect(asideCommand({ fork: "11111111-2222-4333-8444-555555555555", launch })).toContain(`'/opt/my claude/bin/claude' -p '--debug' 'a b' --input-format stream-json`);
   });
 
   it("with no setup the line is the CLI's own", async () => {

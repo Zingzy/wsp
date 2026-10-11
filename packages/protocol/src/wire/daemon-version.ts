@@ -645,6 +645,10 @@ export function placeDaemonBehind(place: { daemonVersion?: number }): string | u
 /** The first daemon that answers fs.folders. */
 export const FS_FOLDERS_DAEMON_VERSION = 73;
 
+/** The first daemon whose checkpoints record the HEAD they were taken on and whose copy worktree takes --checkpoint,
+ * which a fork onto a new branch needs. */
+export const FORK_BRANCH_DAEMON_VERSION = DAEMON_VERSION;
+
 /** The first build whose `wsp leave` takes --yes and --force, asks off a terminal without --yes, and takes the
  * runtime's folder. A gate written as this build's own daemon is pinned to its number by the landing's cut. */
 export const LEAVE_ASKS_DAEMON_VERSION = 141;

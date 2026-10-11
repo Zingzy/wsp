@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// A side question on Claude Code: a copy of the thread's session file, cut
-// before any call still running, resumed on the thread's own launch, every
-// tool call refused by a hook this process serves, the answer read off the
-// stream-json result. The copy's id is minted by the caller, and a second run
+// A side question on Claude Code: a copy of the thread's session through its
+// live end, cut before any call still running, resumed on the thread's own
+// launch, every tool call refused by a hook this process serves, the answer
+// read off the stream-json result. The copy is chain.ts's, and a last run
 // removes its file once the CLI's run has ended, since the kill a stuck one
 // gets takes its shell with it.
 
@@ -10,65 +10,9 @@ import { ASIDE_TOOL_LINE, shellQuote } from "@wsp/protocol";
 import type { AgentLaunch, AsideAnswer, McpServerSpec } from "@wsp/protocol";
 import { UUID_RE, buildCommand } from "./landmines.js";
 
-/** How many of the session file's last lines the cut reads: a message's first line to its last call's result spanned
- * 12 lines at most across 15 long sessions of 2.1.280. */
-export const ASIDE_TAIL_LINES = 40;
-
-/** The length from which a string in a tail line is printed empty: every id and tool name the cut reads is shorter,
- * and 255 is the most a repeat count may say on macOS's sed. */
-const ASIDE_TAIL_STRING = 200;
-
-/** The words the CLI itself says for a session its store does not hold. */
-export const noConversationLine = (session: string): string => `No conversation found with session ID: ${session}`;
-
-const sessionFile = (configDir: string, session: string): string => {
-  if (!UUID_RE.test(session)) throw new Error(`session identifier must be a UUID, got "${session}"`);
-  return `src=$(ls ${shellQuote(`${configDir}/projects`)}/*/${session}.jsonl 2>/dev/null | head -n 1); [ -n "$src" ] || { echo ${shellQuote(noConversationLine(session))} >&2; exit 1; }`;
-};
-
-/** Prints how many whole lines the thread's session file holds, then the last of those lines, every long string in
- * them printed empty so a read of a thread on a box carries kilobytes, not the tool results and file bodies it holds.
- * A line still being written has no newline yet and is left out of both, so a running thread's file reads as it stood. */
-export function asideTailCommand(options: { session: string; configDir: string }): string {
-  const blank = shellQuote(String.raw`s/"([^"\\]|\\.){${ASIDE_TAIL_STRING},}"/""/g`);
-  return `${sessionFile(options.configDir, options.session)}; n=$(wc -l < "$src"); echo $n; head -n "$n" "$src" | tail -n ${ASIDE_TAIL_LINES} | sed -E ${blank}`;
-}
-
-/**
- * Where the copy ends, off the file's line count and its last lines: before the assistant message holding a call with
- * no result yet, else at the end. Resumed with that call in it, 2.1.280 wrote "[Request interrupted by user for tool
- * use]" as its result, then "Continue from where you left off." and "No response requested.", and every answer said
- * the call was interrupted, once by the person (7 of 7 on Sonnet 5). `running` names each call cut, for the question.
- */
-export function asideCut(total: number, tail: readonly string[]): { keep: number; running: string[] } {
-  const events = tail.map(line => {
-    try {
-      return JSON.parse(line) as { type?: string; message?: { id?: string; content?: unknown } };
-    } catch {
-      return {};
-    }
-  });
-  const blocks = (e: (typeof events)[number]): Record<string, unknown>[] => (Array.isArray(e.message?.content) ? (e.message.content as Record<string, unknown>[]) : []);
-  const answered = new Set(events.flatMap(e => (e.type === "user" ? blocks(e) : []).filter(b => b.type === "tool_result").map(b => b.tool_use_id)));
-  let lastIndex = events.length - 1;
-  while (lastIndex >= 0 && events[lastIndex]!.type !== "assistant") lastIndex--;
-  const id = events[lastIndex]?.message?.id;
-  if (lastIndex === -1 || id === undefined) return { keep: total, running: [] };
-  const first = events.findIndex(e => e.type === "assistant" && e.message?.id === id);
-  const open = events.filter(e => e.type === "assistant" && e.message?.id === id).flatMap(blocks).filter(b => b.type === "tool_use" && !answered.has(b.id));
-  if (open.length === 0) return { keep: total, running: [] };
-  return { keep: total - (tail.length - first), running: open.map(b => `${String(b.name)} ${JSON.stringify(b.input ?? {}).slice(0, 300)}`) };
-}
-
 export interface AsideCommandOptions {
-  /** The thread's own session, as the CLI keys it. */
-  session: string;
-  /** The id the copy is written under, minted by the caller so its file can be removed after. */
+  /** The id of the copy the question is asked on, written beside the thread's session file by copySession. */
   fork: string;
-  /** How many of the thread's session lines the copy takes, off asideCut. */
-  keep: number;
-  /** The CLI's config dir on the machine, whose projects folder holds every session file. */
-  configDir: string;
   cwd?: string;
   /** The model, effort, window and speed the thread's turns run at. */
   model?: string;
@@ -85,19 +29,17 @@ export interface AsideCommandOptions {
 }
 
 /**
- * The one shell line a side question runs: the copy written beside the thread's session file, the first `keep` lines
- * byte for byte, then the thread's turn launch resumed on it. The request it sends is the thread's own to the byte up
- * to the cut, so it reads the thread's prompt cache: on 2.1.280 against a thread of 54k tokens the copy read 53k of
- * them cached, where --tools '' with --disallowedTools 'mcp__*' read none and wrote 41k afresh on every question.
- * Nothing that thread loaded is dropped either, since a resumed session is told of every CLAUDE.md and server it lost
- * and the answer opened on that notice (2.1.289). No tool runs: the hook asideHooksLine registers refuses every call,
- * and the CLI stops at two calls.
+ * The one shell line a side question runs: the thread's turn launch resumed on the copy. The request it sends is the
+ * thread's own to the byte up to the cut, so it reads the thread's prompt cache: on 2.1.280 against a thread of 54k
+ * tokens the copy read 53k of them cached, where --tools '' with --disallowedTools 'mcp__*' read none and wrote 41k
+ * afresh on every question. Nothing that thread loaded is dropped either, since a resumed session is told of every
+ * CLAUDE.md and server it lost and the answer opened on that notice (2.1.289). No tool runs: the hook asideHooksLine
+ * registers refuses every call, and the CLI stops at two calls.
  */
 export function asideCommand(options: AsideCommandOptions): string {
-  const { session, fork, keep, configDir, cwd, model, effort, contextWindow, fast, mcpServers, serverValues, memoryDir, launch } = options;
+  const { fork, cwd, model, effort, contextWindow, fast, mcpServers, serverValues, memoryDir, launch } = options;
   if (!UUID_RE.test(fork)) throw new Error(`session identifier must be a UUID, got "${fork}"`);
-  if (!Number.isSafeInteger(keep) || keep < 0) throw new Error(`a copy keeps a whole number of lines, got ${keep}`);
-  const claude = buildCommand({
+  return buildCommand({
     resume: fork,
     aside: true,
     ...(cwd !== undefined ? { cwd } : {}),
@@ -110,7 +52,6 @@ export function asideCommand(options: AsideCommandOptions): string {
     ...(memoryDir !== undefined ? { memoryDir } : {}),
     ...(launch !== undefined ? { launch } : {}),
   });
-  return `${sessionFile(configDir, session)}; head -n ${keep} "$src" > "\${src%/*}/${fork}.jsonl" && ${claude}`;
 }
 
 /** The id of the request that registers the side question's hook, which the CLI's answer to it carries back. */
@@ -159,14 +100,6 @@ export function asidePrompt(question: string, running: readonly string[] = []): 
     "",
     question,
   ].join("\n");
-}
-
-/** Removes the fork's transcript and its folder wherever the CLI filed them under the projects folder, leaving the
- * thread's own session beside them. */
-export function forkCleanupCommand(options: { fork: string; configDir: string }): string {
-  if (!UUID_RE.test(options.fork)) throw new Error(`session identifier must be a UUID, got "${options.fork}"`);
-  const projects = shellQuote(`${options.configDir}/projects`);
-  return `rm -rf ${projects}/*/${options.fork}.jsonl ${projects}/*/${options.fork}`;
 }
 
 /** A piece of the answer's words off a partial message line; undefined for every other line. */

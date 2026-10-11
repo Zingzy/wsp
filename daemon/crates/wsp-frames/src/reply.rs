@@ -765,8 +765,9 @@ pub struct GitPrListReply {
     pub no_cli_for: Option<String>,
 }
 
-/// The checkpoint a git.checkpoint took: its ref, the commit it names, and whether the tree differs from the one
-/// that ref named before, which a turn that changed nothing reads as false.
+/// The checkpoint a git.checkpoint took: its ref, the commit it names, whether the tree differs from the one
+/// that ref named before, which a turn that changed nothing reads as false, and whether the commit stands on the
+/// HEAD it was taken on, which it does not where HEAD had no commit yet.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 #[serde(rename_all = "camelCase")]
@@ -775,6 +776,7 @@ pub struct GitCheckpointReply {
     pub checkpoint_ref: String,
     pub commit: String,
     pub changed: bool,
+    pub based: bool,
 }
 
 /// What a git.checkpointDrop took away: how many of the thread's checkpoint refs went.

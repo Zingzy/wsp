@@ -53,7 +53,7 @@ claude -p --input-format stream-json --output-format stream-json --verbose \
 - A thread with a slate also gets `--append-system-prompt` with the slate's brief.
 - A permission question comes out on stdout as a control request. Your answer in the app goes back on stdin.
 - A message that you send while the turn runs goes in on stdin as one more line. The turn takes it at its next tool round.
-- A later turn resumes with `--resume <uuid>`. After a rewind, it resumes with `--resume-session-at <message>` too, which cuts the conversation at that message.
+- A later turn resumes with `--resume <uuid>`. A rewind and a fork copy the session's lines up to the kept message into a new session file beside it, and the thread resumes that copy. A copy works from before a compaction, where `--resume-session-at` fails.
 - On the computer that the app runs on, the process stays up between turns, so a stop sends it an interrupt request. If the turn does not stop, wsp ends the process. On a box, a stop ends the process at once.
 - The access of a running turn can change without a restart.
 - wsp removes inherited `CLAUDE_CODE_*` variables and sets its own. It signs the turn in with `CLAUDE_CODE_OAUTH_TOKEN`, the token that `claude setup-token` prints, or with `ANTHROPIC_API_KEY`, from the keys file of the host. On the computer that the app runs on, it does not set `CLAUDE_CONFIG_DIR`, and a value in the host's environment comes through. A host that you start from your shell has your shell's value. The app's service host has only the variables that its unit lists. On a box, it sets `CLAUDE_CONFIG_DIR` to the folder that it keeps for Claude Code there.

@@ -7,6 +7,7 @@ import { z } from "zod";
 import { agentName } from "@wsp/catalog";
 import {
   AccessChoice,
+  atNotATurnLine,
   accessWordRefusal,
   pickRefusal,
   AFTER_CUT_LINE,
@@ -387,7 +388,7 @@ export async function worktreeFor(client: HostClient, project: string, branch: s
  * turn they are running inside on a start: it is what the host reads NOTIFY_ME against, and there is none when the
  * caller is not a turn; the environment it is read off is the caller's, handed in, never this process's. A fork's
  * start carries no workspace until its machine stands, so the files are read before that machine is made. */
-export function openingOf(env: VerbDeps["env"], at: Pick<WorkspaceView, "id"> | FolderTarget | ForkTarget, prompt: string, opts: Picks & { harness?: string; cwd?: string; notify?: readonly string[]; title?: string; replaces?: string; files?: readonly string[]; elsewhere?: boolean; resume?: ResumeAsk } = {}): Record<string, unknown> {
+export function openingOf(env: VerbDeps["env"], at: Pick<WorkspaceView, "id"> | FolderTarget | ForkTarget | ThreadFork, prompt: string, opts: Picks & { harness?: string; cwd?: string; notify?: readonly string[]; title?: string; replaces?: string; files?: readonly string[]; elsewhere?: boolean; resume?: ResumeAsk } = {}): Record<string, unknown> {
   // A conversation says where its thread runs, so the folder the line was typed in is not where it goes.
   const cwd = opts.resume !== undefined ? undefined : absoluteFolder("here" in at ? at.here.cwd : opts.cwd);
   const attachments = filesFrom(opts.files ?? [], opts.elsewhere);
@@ -397,7 +398,9 @@ export function openingOf(env: VerbDeps["env"], at: Pick<WorkspaceView, "id"> | 
       ? { ...(at.here.project !== undefined ? { project: at.here.project.id } : {}), ...(at.here.branch !== undefined ? { branch: at.here.branch } : {}) }
       : "fork" in at
         ? {}
-        : { workspaceId: at.id }),
+        : "forks" in at
+          ? { fork: at.forks, ...(at.branch !== undefined ? { branch: at.branch } : {}) }
+          : { workspaceId: at.id }),
     prompt,
     ...(cwd !== undefined ? { cwd } : {}),
     ...(opts.harness !== undefined ? { harness: opts.harness } : {}),
@@ -409,6 +412,23 @@ export function openingOf(env: VerbDeps["env"], at: Pick<WorkspaceView, "id"> | 
     ...(opts.resume !== undefined ? { resume: opts.resume } : {}),
     ...picksOf(opts),
   };
+}
+
+/** A thread another one forks, as a start names it: the thread by its full id and the turn --at counts, and the branch of
+ * the worktree it lands in where one was named. */
+export interface ThreadFork {
+  forks: { threadId: string; at?: number };
+  branch?: string;
+}
+
+/** The fork --fork names, its thread read by id or prefix and its picks held against that thread's agent before
+ * anything starts; --at counts a finished turn from 1. */
+export async function threadFork(client: HostClient, ref: string, at: string | number | undefined, branch: string | undefined, task: string, harness: string | undefined, picks: Picks): Promise<ThreadFork> {
+  const count = at === undefined ? undefined : Number(at);
+  if (count !== undefined && (!Number.isSafeInteger(count) || count < 1)) throw usageRefusal(atNotATurnLine(String(at)), "Name one with --at 1 for the thread's first.");
+  const { thread } = await threadAt(client, ref, "wsp run --fork");
+  await checkedStart(client, task, harness ?? thread.harness, picks, thread.workspaceId);
+  return { forks: { threadId: threadIdOf(thread), ...(count !== undefined ? { at: count } : {}) }, ...(branch !== undefined ? { branch } : {}) };
 }
 
 /** What --resume and --copy ask, refused where they cannot go together with where the line asked the thread to run:

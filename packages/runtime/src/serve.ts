@@ -93,7 +93,6 @@ import {
   sshIncludeLine,
   SSH_TICKET_REFUSAL,
   isLocalWorkspace,
-  BRANCH_ON_A_THREAD_LINE,
   type AccountDevice,
   type AccountView,
   type DeviceView,
@@ -119,14 +118,14 @@ import { NO_DEVICE_DOOR, safeEqual, threadOf, type DeviceDoor, type HeldDevice }
 import { NO_PLACE_DOOR, type PlaceDoor } from "./places.js";
 import { signInSocket } from "./sign-in-socket.js";
 import { keyFingerprint, openFrame, verifyPlaceBytes, type Seal } from "@wsp/keys";
-import { answeredStart, startAt } from "./threads/answered-start.js";
+import { startAt } from "./threads/answered-start.js";
 import type { HostEditor, HostFolders, HostSsh, HostTerminalConfig, InitDoor, ProjectBundler, ProjectLander, RecipeShelf, Runtime } from "./runtime.js";
 
 import { forwardsOf, type ForwardsSource } from "./forwards.js";
 import { costMoved } from "./status.js";
 import { answerProject, isProjectRequest } from "./serve-projects.js";
 import { answerSlate, isSlateRequest, type SlateHolds } from "./serve-slates.js";
-import { startOptionsOf } from "./serve-start.js";
+import { serveStart } from "./serve-start.js";
 export type { ForwardsSource };
 
 /** The address a host binds when nobody names another and the path the runtime answers upgrades on, both the
@@ -1509,16 +1508,9 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               send({ id: msg.id, ok: true });
               return;
             }
-            case "sessions.start": {
-              // A start on this computer names a project, a branch or a folder rather than a record: the folder's record
-              // is found or made first, and the start runs on it.
-              if (msg.workspaceId !== undefined && msg.branch !== undefined) throw Object.assign(new Error(BRANCH_ON_A_THREAD_LINE), { kind: "usage" });
-              // A conversation the agent kept outside wsp says where its thread runs, so it is read before the folder is.
-              const resumed = msg.resume === undefined ? undefined : await rt.conversations.placed(msg, msg.resume, origin);
-              const at = resumed ?? (await startAt(rt.workspaces, msg, origin));
-              await answeredStart(msg.answerHeld === true, onHeld => rt.sessions.start(at.workspaceId, startOptionsOf(msg, at, resumed?.outside, onHeld !== undefined ? { onHeld } : {}), origin), reply => send({ id: msg.id, ok: true, ...reply }));
+            case "sessions.start":
+              await serveStart(rt, msg, origin, reply => send({ id: msg.id, ok: true, ...reply }));
               return;
-            }
             case "sessions.warm": {
               const { id: _id, op: _op, workspaceId: _ws, project: _project, cwd: _cwd, ...picks } = msg;
               const at = await startAt(rt.workspaces, msg, origin);

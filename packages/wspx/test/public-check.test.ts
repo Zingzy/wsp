@@ -58,6 +58,12 @@ describe("the check a public build passes", () => {
     expect(providerWords(built({ "dist/bin.js": `${code}\n` }))).toHaveLength(1);
   });
 
+  it("takes the content hash in a chunk's name for what it is, and still finds a provider's name beside one", () => {
+    const root = built({ "assets/web/assets/diagram-CDSNMT55-znMX1FvI.js": 'import("./chunk-2Q5K7J3B-BoAt6AKT.js");\nexport const css = "assets/index-sOlarI9x.css";\n' });
+    expect(providerWords(root)).toEqual([]);
+    expect(providerWords(built({ "dist/bin.js": 'import("./boat-2Q5K7J3B.js");\n' }))).toHaveLength(1);
+  });
+
   it("reads a daemon binary's strings, and takes the operating system named Solaris for what it is", () => {
     const elf = (text: string): string => `\x7fELF\x02\x01\x01\x00${text}\x00`;
     const root = built({ "assets/daemon/x86_64-unknown-linux-musl/wsp-daemon": elf('{"providers":["box","solari"]}'), "assets/daemon/aarch64-apple-darwin/wsp-daemon": elf("target_os = solaris") });

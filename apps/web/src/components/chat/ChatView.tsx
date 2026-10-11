@@ -19,7 +19,7 @@ import { answerPrompt } from "./answerPrompt.js";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ArrowDownIcon } from "lucide-react";
 import type { LegendListRef } from "@legendapp/list/react";
-import { CAP_RAISE_ACT, threadKeyOf, USAGE_WORDS, WAKE_ACT, capWaitLine, folderOnJoined, workspaceKind, workspaceWord } from "@wsp/protocol";
+import { CAP_RAISE_ACT, HERE_PLACE_ID, threadKeyOf, USAGE_WORDS, WAKE_ACT, capWaitLine, copiesFolder, FORK_BRANCH_DAEMON_VERSION, foldThreads, folderOnJoined, workspaceKind, workspaceWord } from "@wsp/protocol";
 import { openComputerSettings } from "../../settings/openAt";
 import { Button } from "../ui/button";
 import { useCapabilities, useHarnessCatalog, usePlaces, useSidebarProjects, useStore, useThreadSessions, useWorkspace, useWorkspaceState } from "../../protocol/store";
@@ -42,7 +42,9 @@ import { useNewThreadRequests } from "./newThreadRequests";
 import { useChatThread, type ChatThreadHandle } from "./useChatThread";
 import { useOpenSubagentRun } from "./openSubagent";
 import { lastReplies, rewindableReplies, type RewindableReply } from "./RewindDialog";
-import { requestRewind } from "../../shell/shellRequests";
+import { requestFork, requestRewind } from "../../shell/shellRequests";
+import { forkableMessages } from "./forks";
+import type { ForkedFromLine } from "./timeline/context";
 import { TRANSCRIPT_LOADING } from "../../transcript-words";
 import { useAppDark } from "../../settings/theme";
 import { insertIntoComposer } from "./composerInsert";
@@ -280,7 +282,12 @@ export function ChatView({
   // Rewind to here stands on each earlier reply that kept something to go back to, and opens the one dialog.
   const cutsConversation = catalog?.rewindsConversation === true;
   const byCount = catalog?.rewindsByCount === true;
-  const rewindable = useMemo(() => (api?.rewindThread === undefined || agent === null ? new Map<string, RewindableReply>() : rewindableReplies(view.turns, view.entries, cutsConversation, byCount)), [agent, api, view.turns, view.entries, cutsConversation, byCount]);
+  // A turn a fork was handed rewinds nothing: the fork's own history starts after it.
+  const rewindable = useMemo(() => {
+    if (api?.rewindThread === undefined || agent === null) return new Map<string, RewindableReply>();
+    const copied = new Set(view.turns.filter(t => t.copied === true).map(t => t.turnId));
+    return new Map([...rewindableReplies(view.turns, view.entries, cutsConversation, byCount)].filter(([, reply]) => !copied.has(reply.turnId)));
+  }, [agent, api, view.turns, view.entries, cutsConversation, byCount]);
   // The set and the handler reach every row through the timeline's shared context, so they move only when which
   // replies can be rewound moves, never on a streamed chunk: a settled reply would redraw on every one.
   const rewindableKey = [...rewindable.keys()].join("\n");
@@ -300,6 +307,45 @@ export function ChatView({
     },
     [workspaceId],
   );
+  // Fork from here stands on each finished turn's last reply and on the person's message that opened one, on an agent
+  // that forks; a new branch is offered where the thread runs in a git folder on this computer, whose daemon cuts
+  // worktrees at a checkpoint, and the turn kept one.
+  const forkable = useMemo(
+    () => (api === null || agent === null || subagent !== null ? new Map<string, never>() : forkableMessages(view.turns, view.entries, { forks: catalog?.forks === true, byCount: catalog?.forksByCount === true })),
+    [agent, api, catalog?.forks, catalog?.forksByCount, subagent, view.turns, view.entries],
+  );
+  const forkableKey = [...forkable.keys()].join("\n");
+  const forkableIds = useMemo(() => new Set(forkableKey === "" ? [] : forkableKey.split("\n")), [forkableKey]);
+  const folded = foldThreads(turnRows)[0];
+  const projectGit = useStore(s => (workspace === null ? false : s.projects.some(p => p.id === workspace.project.id && p.git !== undefined)));
+  const hereCuts = useStore(s => {
+    const here = s.places.find(p => p.id === HERE_PLACE_ID);
+    return here?.daemonVersion !== undefined && here.daemonVersion >= FORK_BRANCH_DAEMON_VERSION;
+  });
+  const branchFolder = workspace !== null && copiesFolder(workspaceKind(workspace)) && projectGit && hereCuts ? (cwd ?? threadFolderOf(workspaceId)) : null;
+  const lastRow = turnRows.at(-1);
+  const forkPicks = { ...(lastRow?.model !== undefined ? { model: lastRow.model } : {}), ...(lastRow?.effort !== undefined ? { effort: lastRow.effort } : {}) };
+  const forkRef = useRef({ forkable, threadId: lastRow?.threadId ?? threadId, title: folded?.title ?? "", harness: agent ?? "", picks: forkPicks, branchFolder });
+  forkRef.current = { forkable, threadId: lastRow?.threadId ?? threadId, title: folded?.title ?? "", harness: agent ?? "", picks: forkPicks, branchFolder };
+  const onFork = useCallback(
+    (messageId: string) => {
+      const now = forkRef.current;
+      const pick = now.forkable.get(messageId);
+      if (pick === undefined || now.threadId === null) return;
+      requestFork({ workspaceId, threadId: now.threadId, title: now.title, harness: now.harness, ...now.picks, pick, branchFrom: pick.checkpoint === null ? null : now.branchFolder });
+    },
+    [workspaceId],
+  );
+  // A fork's page names where it came from after the history it was handed, with Open while that thread stands.
+  const source = folded?.forkedFrom;
+  const sourceStands = useStore(s => source !== undefined && Object.values(s.sessions).some(rows => rows.some(r => threadKeyOf(r) === source.threadId)));
+  const select = useStore(s => s.select);
+  const forkedFrom = useMemo<ForkedFromLine | null>(() => {
+    if (source === undefined) return null;
+    if (!sourceStands) return { title: source.title, onOpen: null };
+    const at = Object.values(useStore.getState().sessions).flat().find(r => threadKeyOf(r) === source.threadId);
+    return { title: source.title, onOpen: at === undefined ? null : () => select(at.workspaceId, source.threadId) };
+  }, [select, source, sourceStands]);
   // A turn that completed says so by its reply standing, and one that failed in words by the row those words stand
   // in; any other ending keeps its own line, since the state word is the news. A turn a usage limit stopped says the
   // Usage page's own word for it, in the muted ink: it is news, not a fault, and the strip over the composer carries
@@ -357,6 +403,9 @@ export function ChatView({
               rewindableMessageIds={pageEntries === null ? rewindableIds : NO_IDS}
               slatedMessageIds={pageEntries === null ? slatedIds : NO_IDS}
               onRewind={onRewind}
+              forkableMessageIds={pageEntries === null ? forkableIds : NO_IDS}
+              onFork={onFork}
+              forkedFrom={pageEntries === null ? forkedFrom : null}
               replyRuns={pageEntries === null ? replyRuns : null}
               {...(pageEntries === null ? { onReachTop: thread.older } : {})}
             />

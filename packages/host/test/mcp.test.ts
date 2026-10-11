@@ -200,7 +200,7 @@ describe("the MCP server over the host", () => {
     expect(Object.keys((tools.find(t => t.name === "terminal_config")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["scheme"]);
     for (const t of tools) expect(t.description, t.name).toMatch(/\S/);
     expect(Object.keys((tools.find(t => t.name === "rename")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["name", "workspace"]);
-    expect(Object.keys((tools.find(t => t.name === "run")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["access", "agent", "beside", "branch", "copy", "cwd", "detach", "effort", "fast", "files", "message", "model", "notify", "project", "replaces", "resume", "title"]);
+    expect(Object.keys((tools.find(t => t.name === "run")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["access", "agent", "at", "beside", "branch", "copy", "cwd", "detach", "effort", "fast", "files", "fork", "message", "model", "notify", "project", "replaces", "resume", "title"]);
     expect(Object.keys((tools.find(t => t.name === "fork")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["access", "agent", "cwd", "effort", "max_depth", "max_machines", "model", "name", "notify", "size", "spawn", "task", "workspace"]);
     // No access among them: a thread's access is the thread's own and a message does not change it.
     expect(Object.keys((tools.find(t => t.name === "send")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["detach", "effort", "fast", "files", "message", "model", "thread"]);

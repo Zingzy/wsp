@@ -48,7 +48,7 @@ import type {
   WorkspaceCreatingEvent,
 } from "@wsp/protocol";
 import type { BringBackResult, GitCommitReply, GitDiscardReply, GitUpdateReply, MergeInResult, PullRequestPage, GitPrReplyReply, GitPrResolveReply, GitPrReactReply, ReactionContent, PullRequestItem, PullRequestSendResult, FixResult, MergeMethod, MergeResult, CheckoutReply, CommitDraft, ViewedMarks, RunStep, SessionRunEvent } from "@wsp/protocol";
-import type { WorktreeMade, KeptAttachment, WorkspaceKind, ConversationsAnswer, ResumeAsk, SessionEarlierEvent } from "@wsp/protocol";
+import type { WorktreeMade, KeptAttachment, WorkspaceKind, ForkSource, ConversationsAnswer, ResumeAsk, SessionEarlierEvent } from "@wsp/protocol";
 import type { CallbackForwards, SignInAsk, SkillAsk } from "../agents-read.js";
 import type { DaemonChannel } from "../daemon-channel.js";
 import type { AccessChoice, AgentRow, AgentSetupSet, ThreadDefaults } from "@wsp/protocol";
@@ -398,6 +398,11 @@ export interface Runtime {
          * turn starts. Rejects on a send into a thread that has run, for a thread working or asking, for one that already
          * has a restart and for one the caller may not settle, all before the machine is asked for anything. */
         replaces?: string;
+        /** The thread this start's new thread forks and the turn it carries through: it runs on that thread's agent, at
+         * its picks where this start names none, in its folder where this start names none. Refused beside thread or
+         * replaces, beside another agent, for a running turn, and where the agent cannot fork at that turn, all before
+         * anything is written. */
+        fork?: ForkSource;
         /** The images the message carries. Rejects over the caps, and rejects naming the agent when that agent's
          * adapter reads no image, both before the machine is asked for anything. */
         attachments?: readonly Attachment[];
@@ -476,6 +481,11 @@ export interface Runtime {
     /** Whether a start may name this thread in replaces, read alone and refused as that start would refuse it: a
      * thread working or asking anywhere in its tree, one the caller may not settle, and one that already has a restart. */
     replaceable(threadId: string, origin?: Caller): Promise<void>;
+    /** Starts a thread that forks another, in that thread's folder, or with branch in a new worktree of its repo whose
+     * files are the forked turn's checkpoint, made at that checkpoint's commit; a worktree made for a start that then
+     * refuses goes again, its branch with it. Refused with branch where the turn kept no checkpoint or it is gone, where
+     * the folder is no git repo, and on a computer whose threads run in no worktree, before anything is made. */
+    fork(opts: Omit<Parameters<Runtime["sessions"]["start"]>[1], "fork" | "thread" | "cwd" | "replaces"> & { fork: ForkSource; branch?: string }, origin?: Caller): Promise<SessionHandle>;
     /** Starts the agent's process for the thread a person's next send on this workspace opens, where the workspace's
      * computer keeps agents between turns and the agent starts before its message: one per workspace and agent, a
      * standing one launched with other picks ended and replaced, one launched as asked given its window again. A send

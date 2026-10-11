@@ -47,8 +47,13 @@ export function codeOf(text, fileName = "bundle.js") {
   return out.join("\n");
 }
 
+/** The content hash the bundler puts in an emitted file's name, eight letters of base64url before its extension: a
+ * name a script imports another chunk by can spell a provider's name by chance (chunk-2Q5K7J3B-BoAt6AKT.js). */
+const ASSET_HASH = /-[\w-]{8}(?=\.(?:m?js|css)\b)/g;
+
 /** Every provider word in one file's text, each once, with the code around it. */
-export function wordsIn(text) {
+export function wordsIn(read) {
+  const text = read.replace(ASSET_HASH, "");
   return PROVIDER_WORDS.flatMap(word => {
     const at = text.search(word);
     return at < 0 ? [] : [{ word: word.source, near: text.slice(Math.max(0, at - 40), at + 40).replace(/\s+/g, " ") }];

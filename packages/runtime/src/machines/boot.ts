@@ -2,7 +2,7 @@
 import { randomBytes } from "node:crypto";
 import { hostname } from "node:os";
 import { OWNER_LABEL, goldenHead, isMissing, readGone, sightMachine, type Machine, type MachineBackend, isNoProvider, isPlaceAbsent } from "@wsp/engine";
-import { type AcrossAct, type PlaceKind, type ProjectView, type SessionView, type Caller, type WorkspacePhase, ThreadPlacement, ThreadScope, TurnStatus, WorkspaceOrigin, notTheLeadsChildRefusal, foldThreads, threadKeyOf, threadWord, scopeOf, goneWords, NO_IMAGE_YET, noWorkspaceRefusal, notFoundRefusal, goneUnconfirmedLine, type GoneSeenBy, copiesFolder, kindForComputer, RUN_GONE_LINE, HERE_PLACE_ID, workspaceLands, type ThreadFacts, threadSettled, refusal, LIMIT_RESUME_PROMPT, heldUntil, capRestartedLine, tableName, threadsFollowed, LINK_RETRY_WINDOW_MS } from "@wsp/protocol";
+import { type AcrossAct, type PlaceKind, type ProjectView, type SessionView, type Caller, type WorkspacePhase, ForkedFrom, ThreadPlacement, ThreadScope, TurnStatus, WorkspaceOrigin, notTheLeadsChildRefusal, foldThreads, threadKeyOf, threadWord, scopeOf, goneWords, NO_IMAGE_YET, noWorkspaceRefusal, notFoundRefusal, goneUnconfirmedLine, type GoneSeenBy, copiesFolder, kindForComputer, RUN_GONE_LINE, HERE_PLACE_ID, workspaceLands, type ThreadFacts, threadSettled, refusal, LIMIT_RESUME_PROMPT, heldUntil, capRestartedLine, tableName, threadsFollowed, LINK_RETRY_WINDOW_MS } from "@wsp/protocol";
 import { keyOf } from "../agent-setup.js";
 import { harnessCatalog } from "../harness-catalog.js";
 import { accountOnComputer } from "../usage.js";
@@ -385,7 +385,12 @@ export function bootArea(ctx: RuntimeContext): BootArea {
             ...(typeof held.replaces === "string" ? { replaces: held.replaces } : {}),
             ...(typeof held.snoozedUntil === "number" ? { snoozedUntil: held.snoozedUntil } : {}),
             ...(placed.success ? { section: placed.data } : {}),
-            ...(typeof held.resumeAt === "string" ? { resumeAt: held.resumeAt } : {}),
+            ...((): { cutOwed?: string } => {
+              // A record a host from before copied rewinds wrote names the cut it owes as resumeAt.
+              const owed = (held as { resumeAt?: unknown }).resumeAt ?? held.cutOwed;
+              return typeof owed === "string" ? { cutOwed: owed } : {};
+            })(),
+            ...(ForkedFrom.safeParse(held.forkedFrom).success ? { forkedFrom: ForkedFrom.parse(held.forkedFrom) } : {}),
             ...(typeof held.limitResume?.at === "number" && typeof held.limitResume.turnId === "string" ? { limitResume: { at: held.limitResume.at, turnId: held.limitResume.turnId } } : {}),
             ...(typeof held.rewound?.before === "string" && typeof held.rewound.at === "number" ? { rewound: { before: held.rewound.before, at: held.rewound.at } } : {}),
             ...(typeof held.worked === "boolean" ? { worked: held.worked } : {}),
@@ -621,6 +626,12 @@ export function bootArea(ctx: RuntimeContext): BootArea {
     await ctx.bootWork.get(row.workspaceId);
     return live.get(row.workspaceId) ?? entry;
   };
+  /** Where a fork came from as a listing says it: the source's title as it reads now while the source stands, the
+   * one it had at the fork once it is gone. */
+  const forkedFromNow = (from: ForkedFrom): ForkedFrom => {
+    const [source] = foldThreads(ctx.rowsOn(from.threadId));
+    return source === undefined ? from : { ...from, title: source.title };
+  };
   /** Rows as a listing answers them: each with the stamps and marks its thread's record keeps, and with what only a
    * live turn knows, which rides the answer and never the row. */
   const listedRows = (held: readonly (typeof sessions extends Map<string, infer V> ? V : never)[]): SessionView[] => {
@@ -663,6 +674,7 @@ export function bootArea(ctx: RuntimeContext): BootArea {
         ...(marks?.section !== undefined ? { section: marks.section } : {}),
         ...(marks?.rewound !== undefined ? { rewoundAt: marks.rewound.at } : {}),
         ...(marks?.limitResume !== undefined && marks.limitResume.turnId === s.turnId ? { resumeAt: marks.limitResume.at } : {}),
+        ...(marks?.forkedFrom !== undefined ? { forkedFrom: forkedFromNow(marks.forkedFrom) } : {}),
       };
     });
   };

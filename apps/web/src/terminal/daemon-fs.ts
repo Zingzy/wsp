@@ -12,6 +12,7 @@ import {
   FsWriteReply,
   GitDiffReply,
   GitStatusReply,
+  GitBranchesReply,
   type FsReadEncoding,
   type FsSearchMode,
   type GitDiffScope,
@@ -76,6 +77,11 @@ export function fsSearch(wire: TerminalWire, path: string, query: string, mode: 
 
 export function gitStatus(wire: TerminalWire, cwd: string): Promise<GitStatusReply> {
   return call(wire, "git.status", { cwd }, GitStatusReply);
+}
+
+/** The checkout's local branches and the one it is on. */
+export function gitBranches(wire: TerminalWire, cwd: string): Promise<GitBranchesReply> {
+  return call(wire, "git.branches", { cwd }, GitBranchesReply);
 }
 
 /** paths names files from the checkout's top; whole gives each patch its whole file in one hunk. */

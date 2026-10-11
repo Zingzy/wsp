@@ -110,6 +110,16 @@ describe("the copy verb as a child of this host", () => {
     ]);
   });
 
+  it("hands the worktree verb the checkpoint a fork starts from, and no such flag without one", async () => {
+    const printed = { path: "/w/fork", branch: "fork", made: true, carried: [], fresh: true, modules: [], ms: 3 };
+    const asked = runner({ stdout: `${JSON.stringify(printed)}\n` });
+    const checkpoint = "refs/wsp/checkpoints/ws_1/thr_1/turn_2";
+    await verbCopier(BIN, asked.run as never).worktree({ from: "/repo", home: "/h", project: "prj_1", branch: "fork", modules: [], checkpoint });
+    await verbCopier(BIN, asked.run as never).worktree({ from: "/repo", home: "/h", project: "prj_1", branch: "fork", modules: [] });
+    expect(asked.calls[0]!.args).toEqual(["copy", "worktree", "--from", "/repo", "--home", "/h", "--project", "prj_1", "--branch", "fork", "--checkpoint", checkpoint]);
+    expect(asked.calls[1]!.args).toEqual(["copy", "worktree", "--from", "/repo", "--home", "/h", "--project", "prj_1", "--branch", "fork"]);
+  });
+
   it("mounts a worktree's overlays again by its path, and throws the verb's own sentence where it refused", async () => {
     const asked = runner({});
     await verbCopier(BIN, asked.run as never).worktreeMount({ from: "/repo", home: "/h", path: "/h/worktrees/prj_1/feat-x" });

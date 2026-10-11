@@ -1,19 +1,19 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The side question on Claude Code: the tail of the thread's session file read
-// to find where a copy must end, the copy written beside it and resumed on the
-// thread's own launch with every tool refused by a hook, the answer read off
-// its result, and the copy's file removed by a last run once the CLI's has
-// ended, whichever way it ended.
-import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+// The side question on Claude Code: a copy of the thread's session through its
+// live end, written beside it and resumed on the thread's own launch with every
+// tool refused by a hook, the answer read off its result, and the copy's file
+// removed by a last run once the CLI's has ended, whichever way it ended.
+import { spawn } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { ASIDE_TOOL_LINE, asideWallLine } from "@wsp/protocol";
+import { ASIDE_TOOL_LINE, asideWallLine, shellQuote } from "@wsp/protocol";
 import type { ExecStream, ExecStreamFactory } from "@wsp/protocol";
 import { createClaudeAdapter } from "../src/adapter.js";
-import { ASIDE_HOOKS_ID, asideCommand, asideCut, asideHooksLine, asidePrompt, asideTailCommand, forkCleanupCommand, noConversationLine } from "../src/aside.js";
+import { ASIDE_HOOKS_ID, asideCommand, asideHooksLine, asidePrompt } from "../src/aside.js";
+import { chainReadCommand, chainThrough, chainWriteCommand, copyCleanupCommand, lineRanges, liveEnd, noConversationLine, readChain } from "../src/chain.js";
 import { buildCommand, userMessageLine } from "../src/landmines.js";
 import { writeStub } from "../../protocol/test/stub-script.js";
 
@@ -37,8 +37,13 @@ const RESULT = {
   usage: { input_tokens: 12, cache_read_input_tokens: 18435, output_tokens: 31 },
 };
 
-/** A finished thread's session file as the tail read prints it: its line count, then the lines. */
-const FINISHED = ["2", JSON.stringify({ type: "user", message: { role: "user", content: "hi" } }), JSON.stringify({ type: "assistant", message: { id: "m1", content: [{ type: "text", text: "hello" }] } })];
+const U1 = "1a2b3c4d-0000-4aaa-8bbb-000000000001";
+const U2 = "1a2b3c4d-0000-4aaa-8bbb-000000000002";
+/** A finished thread's session file as the copy's read prints it: its line count, then each message line by number. */
+const FINISHED = ["2", `1:${JSON.stringify({ parentUuid: null, type: "user", message: { role: "user", content: "hi" }, uuid: U1 })}`, `2:${JSON.stringify({ parentUuid: U1, type: "assistant", message: { id: "m1", content: [{ type: "text", text: "hello" }] }, uuid: U2 })}`];
+
+/** A session file as the copy's read prints it. */
+const readOf = (file: readonly string[]): string[] => [String(file.length), ...file.map((l, i) => `${i + 1}:${l}`)];
 
 interface Call {
   command: string;
@@ -47,9 +52,9 @@ interface Call {
   secret?: { files?: Readonly<Record<string, string>> };
 }
 
-/** The tail read prints `tail` and ends with `tailCode`; the CLI's run prints `lines`, then ends with `exitCode`, or in
- * hang mode only once it is torn down; any later run (the copy's removal) prints nothing and ends at once. `order`
- * notes each launch and each end. */
+/** The copy's read prints `tail` and ends with `tailCode`, and its write ends at once; the CLI's run prints `lines`,
+ * then ends with `exitCode`, or in hang mode only once it is torn down; any later run (the copy's removal) prints
+ * nothing and ends at once. `order` notes each launch and each end. */
 function scripted(lines: string[], opts: { exitCode?: number; hang?: boolean; tail?: string[]; tailCode?: number } = {}) {
   const calls: Call[] = [];
   const order: string[] = [];
@@ -67,7 +72,7 @@ function scripted(lines: string[], opts: { exitCode?: number; hang?: boolean; ta
           yield* opts.tail ?? FINISHED;
           return end(opts.tailCode ?? 0);
         }
-        if (n !== 2) return end(0);
+        if (n !== 3) return end(0);
         yield* lines;
         if (opts.hang === true) await exited;
         else end(opts.exitCode ?? 0);
@@ -95,13 +100,13 @@ function scripted(lines: string[], opts: { exitCode?: number; hang?: boolean; ta
 const forkOf = (command: string): string => /--resume ([0-9a-f-]+)$/.exec(command)?.[1] ?? "";
 
 describe("asideCommand", () => {
-  it("copies the thread's session up to the cut and launches the copy as the thread's turns launch, with its hooks off", () => {
+  it("launches the copy as the thread's turns launch, with its hooks off", () => {
     const servers = { wsp: { command: "wsp", args: ["mcp", "--scoped"] } };
     const memoryDir = `${CONFIG}/projects/-root-spoo/memory`;
     const picks = { cwd: "/root/spoo", model: "claude-opus-5", effort: "high", contextWindow: "1m", mcpServers: servers, memoryDir };
     const turn = buildCommand({ resume: SESSION, ...picks });
-    const line = asideCommand({ session: SESSION, fork: FORK, keep: 12, configDir: CONFIG, ...picks });
-    expect(line).toContain(`head -n 12 "$src" > "\${src%/*}/${FORK}.jsonl" && cd '/root/spoo' && claude -p `);
+    const line = asideCommand({ fork: FORK, ...picks });
+    expect(line.startsWith("cd '/root/spoo' && claude -p ")).toBe(true);
     // Every flag that shapes the request the model is sent: the model and its window, the effort, the servers whose
     // tools head the prompt, and the slate's brief at the end of the system prompt.
     for (const flag of [/--model '[^']*'/, /--effort '[^']*'/, /--mcp-config '[^']*'/, /--append-system-prompt '[^']*'/]) {
@@ -119,136 +124,105 @@ describe("asideCommand", () => {
     ]) expect(line, part).toContain(part);
     expect(line.endsWith(`--max-turns 2 --resume ${FORK}`)).toBe(true);
     // A tool list the turn did not have is a prompt the cache has never seen, and the copy pays the whole thread again.
-    for (const absent of ["--tools", "--disallowedTools", "--allowed-tools", "--dangerously-skip-permissions", "--fork-session", "--session-id", "--strict-mcp-config", "--safe-mode", "--bare", "--no-session-persistence"]) expect(line, absent).not.toContain(absent);
+    for (const absent of ["--tools", "--disallowedTools", "--allowed-tools", "--dangerously-skip-permissions", "--fork-session", "--session-id", "--strict-mcp-config", "--safe-mode", "--bare", "--no-session-persistence", "--resume-session-at"]) expect(line, absent).not.toContain(absent);
   });
 
   it("keeps the copy's hooks off where the person's launch words name a settings file, which would replace its flag", () => {
     const launch = { args: ["--debug", "--settings", "/root/my-settings.json"] };
-    const line = asideCommand({ session: SESSION, fork: FORK, keep: 3, configDir: CONFIG, launch });
+    const line = asideCommand({ fork: FORK, launch });
     expect(line).toContain(`--settings '{"disableAllHooks":true}'`);
     expect(line).not.toContain("my-settings.json");
     expect(line).toContain("claude -p '--debug' --input-format");
     // A turn keeps the person's file, as the CLI reads it.
     expect(buildCommand({ resume: SESSION, launch })).toContain("'--settings' '/root/my-settings.json'");
-    expect(asideCommand({ session: SESSION, fork: FORK, keep: 3, configDir: CONFIG, launch: { args: ["--settings=/root/my-settings.json"] } })).not.toContain("my-settings.json");
+    expect(asideCommand({ fork: FORK, launch: { args: ["--settings=/root/my-settings.json"] } })).not.toContain("my-settings.json");
   });
 
   it("hands the copy the servers the thread's turns are handed, on the flag a turn takes them on", () => {
     const servers = { wsp: { command: "wsp", args: ["mcp", "--scoped"] } };
-    const line = asideCommand({ session: SESSION, fork: FORK, keep: 0, configDir: CONFIG, mcpServers: servers });
+    const line = asideCommand({ fork: FORK, mcpServers: servers });
     const turn = buildCommand({ resume: SESSION, mcpServers: servers });
     const flag = /--mcp-config '[^']*'/.exec(turn)?.[0];
     expect(flag).toBeDefined();
     expect(line).toContain(flag!);
   });
 
-  it("the cleanup refuses a copy id that is not the CLI's shape, so a glob never reaches rm", () => {
-    expect(() => forkCleanupCommand({ fork: "*", configDir: CONFIG })).toThrow(/UUID/);
-    expect(forkCleanupCommand({ fork: FORK, configDir: CONFIG })).toBe(`rm -rf '/root/.claude-cfg/projects'/*/${FORK}.jsonl '/root/.claude-cfg/projects'/*/${FORK}`);
-  });
-
-  it("leaves the model out when the row names none and refuses an id or a count that is not the shape it must be", () => {
-    expect(asideCommand({ session: SESSION, fork: FORK, keep: 0, configDir: CONFIG })).not.toContain("--model");
-    expect(asideCommand({ session: SESSION, fork: FORK, keep: 0, configDir: CONFIG })).toContain(" && cd ~ && ");
-    expect(() => asideCommand({ session: "../x", fork: FORK, keep: 0, configDir: CONFIG })).toThrow(/UUID/);
-    expect(() => asideCommand({ session: SESSION, fork: "*", keep: 0, configDir: CONFIG })).toThrow(/UUID/);
-    expect(() => asideCommand({ session: SESSION, fork: FORK, keep: -1, configDir: CONFIG })).toThrow(/whole number/);
-    expect(() => asideTailCommand({ session: "*", configDir: CONFIG })).toThrow(/UUID/);
+  it("leaves the model out when the row names none and refuses a copy id that is not the CLI's shape", () => {
+    expect(asideCommand({ fork: FORK })).not.toContain("--model");
+    expect(asideCommand({ fork: FORK }).startsWith("cd ~ && ")).toBe(true);
+    expect(() => asideCommand({ fork: "*" })).toThrow(/UUID/);
   });
 });
 
-describe("asideCut", () => {
-  it("ends the copy before the message whose call has no result, and names that call", () => {
-    const cut = asideCut(MID_TURN.length, MID_TURN);
-    // The last message's three lines (its thinking, its words, its Bash call) go; the result before them stays last.
-    expect(cut.keep).toBe(MID_TURN.length - 3);
-    expect((JSON.parse(MID_TURN[cut.keep - 1]!) as { message: { content: { type: string }[] } }).message.content[0]!.type).toBe("tool_result");
-    expect(cut.running).toHaveLength(1);
-    expect(cut.running[0]).toMatch(/^Bash \{"command":"\.\/check\.sh"/);
-    // Read as a tail of a longer file, the count is the file's.
-    expect(asideCut(100 + MID_TURN.length, MID_TURN).keep).toBe(100 + MID_TURN.length - 3);
-  });
-
-  it("keeps the whole file where every call has its result, or where the tail holds no assistant line", () => {
-    expect(asideCut(MID_TURN.length - 3, MID_TURN.slice(0, -3))).toEqual({ keep: MID_TURN.length - 3, running: [] });
-    expect(asideCut(2, FINISHED.slice(1))).toEqual({ keep: 2, running: [] });
-    expect(asideCut(7, ["not json", JSON.stringify({ type: "user" })])).toEqual({ keep: 7, running: [] });
-  });
-});
+/** Runs each command in /bin/sh with its input lines on stdin, stdout and stderr read as one stream of lines. */
+function shellExec(env: Record<string, string>): ExecStreamFactory {
+  return (command, options) => {
+    const child = spawn("/bin/sh", ["-c", command], { env: { ...env, ...options.env }, stdio: ["pipe", "pipe", "pipe"] });
+    // A command that never reads its stdin closes it under the lines still being written.
+    child.stdin.on("error", () => {});
+    for (const line of options.input ?? []) child.stdin.write(`${line}\n`);
+    const chunks: string[] = [];
+    child.stdout.on("data", (d: Buffer) => chunks.push(d.toString()));
+    child.stderr.on("data", (d: Buffer) => chunks.push(d.toString()));
+    const exited = new Promise<number | null>(resolve => child.on("close", code => resolve(code)));
+    if (options.input === undefined) child.stdin.end();
+    return {
+      lines: (async function* () {
+        await exited;
+        yield* chunks.join("").split("\n").filter(l => l !== "");
+      })(),
+      teardown: () => child.kill("SIGTERM"),
+      kill: () => child.kill("SIGKILL"),
+      write: async () => "gone",
+      closeInput: () => child.stdin.end(),
+      exited,
+    };
+  };
+}
 
 describe("run by a shell against a stand-in CLI", () => {
   let root: string;
   afterEach(() => rmSync(root, { recursive: true, force: true }));
 
-  it("copies the recorded mid-turn session byte for byte up to the cut, leaving no call without its result, and removes only the copy", () => {
+  /** A config dir holding the thread's session file, and a stand-in claude that answers with the words "Remember"
+   * opens in the copy it was resumed on, which it finds by the id after its last flag. */
+  const setUp = (file: readonly string[]) => {
     root = mkdtempSync(join(tmpdir(), "wsp-aside-"));
     const config = join(root, "it's config");
     const project = join(config, "projects", "-root-spoo");
     mkdirSync(project, { recursive: true });
-    const thread = `${MID_TURN.join("\n")}\n`;
+    const thread = `${file.join("\n")}\n`;
     writeFileSync(join(project, `${SESSION}.jsonl`), thread);
     const bin = join(root, "bin");
     mkdirSync(bin);
-    // The stand-in prints its result and exits with a code of its own.
-    writeStub(join(bin, "claude"), `#!/bin/sh\nprintf '%s\\n' '{"type":"result"}'\nexit 3\n`);
-    const env = { PATH: `${bin}:/usr/bin:/bin` };
-    const read = execFileSync("/bin/bash", ["-c", asideTailCommand({ session: SESSION, configDir: config })], { env, encoding: "utf8" }).trim().split("\n");
-    expect(read[0]).toBe(String(MID_TURN.length));
-    expect(read.slice(1)).toHaveLength(MID_TURN.length);
-    const { keep } = asideCut(Number(read[0]), read.slice(1));
-    expect(asideCut(Number(read[0]), read.slice(1))).toEqual(asideCut(MID_TURN.length, MID_TURN));
-    const line = asideCommand({ session: SESSION, fork: FORK, keep, configDir: config, cwd: root });
-    let code = 0;
-    let out = "";
-    try {
-      out = execFileSync("/bin/bash", ["-c", line], { env, encoding: "utf8" });
-    } catch (e) {
-      code = (e as { status: number }).status;
-      out = String((e as { stdout: string }).stdout);
-    }
-    expect(out.trim()).toBe('{"type":"result"}');
-    expect(code).toBe(3);
-    const copy = readFileSync(join(project, `${FORK}.jsonl`), "utf8");
-    expect(thread.startsWith(copy)).toBe(true);
-    // Resumed with a call that has no result, 2.1.280 wrote "[Request interrupted by user for tool use]" as its result,
-    // and every answer said the call was interrupted; the copy holds no such call for the CLI to answer.
-    const events = copy.trim().split("\n").map(l => JSON.parse(l) as { type: string; message: { content: { type: string; id?: string; tool_use_id?: string }[] } });
-    const blocks = events.flatMap(e => (Array.isArray(e.message.content) ? e.message.content : []));
-    const calls = blocks.filter(b => b.type === "tool_use").map(b => b.id);
-    const results = new Set(blocks.filter(b => b.type === "tool_result").map(b => b.tool_use_id));
-    expect(calls.filter(id => !results.has(id))).toEqual([]);
-    execFileSync("/bin/bash", ["-c", forkCleanupCommand({ fork: FORK, configDir: config })], { env });
-    expect(existsSync(join(project, `${FORK}.jsonl`))).toBe(false);
+    // The stand-in finds the copy it was resumed on by the id after its last flag, and answers with what it holds.
+    const copy = `${shellQuote(project)}/"$last".jsonl`;
+    writeStub(
+      join(bin, "claude"),
+      `#!/bin/sh\nfor a; do last="$a"; done\nsaid=$(grep -o 'Remember [A-Z]*' ${copy} | tr '\\n' ' ')\nlines=$(wc -l < ${copy})\nprintf '{"type":"result","subtype":"success","is_error":false,"result":"%s| %s lines"}\\n' "$said" $lines\n`,
+    );
+    const adapter = createClaudeAdapter({ exec: shellExec({ PATH: `${bin}:/usr/bin:/bin` }), configDir: config, baseEnv: { PATH: `${bin}:/usr/bin:/bin` }, resultExitMs: 5, interruptGraceMs: 5 });
+    return { project, thread, adapter, cwd: root };
+  };
+
+  it("asks the recorded mid-turn thread on a copy cut before its running call, and removes only the copy", async () => {
+    const { project, thread, adapter, cwd } = setUp(MID_TURN);
+    const answer = await adapter.aside!({ session: SESSION, question: "btw what's the status?", cwd });
+    // The last message's three lines (its thinking, its words, its Bash call) stay out of the copy.
+    expect(answer.text.endsWith(`| ${MID_TURN.length - 3} lines`)).toBe(true);
+    expect(readdirSync(project)).toEqual([`${SESSION}.jsonl`]);
     expect(readFileSync(join(project, `${SESSION}.jsonl`), "utf8")).toBe(thread);
   });
 
-  it("the tail read of a long thread carries kilobytes, its long strings printed empty, and cuts where the whole file would", () => {
-    root = mkdtempSync(join(tmpdir(), "wsp-aside-"));
-    const project = join(root, "projects", "-root-spoo");
-    mkdirSync(project, { recursive: true });
-    const body = `say \\"hi\\" ${"x".repeat(1 << 20)}`;
-    const bigResult = (n: number) => JSON.stringify({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: `toolu_r${n}`, content: body }] } });
-    const lines = [...Array.from({ length: 200 }, (_, n) => MID_TURN[n % 4]!), bigResult(1), bigResult(2), ...MID_TURN];
-    writeFileSync(join(project, `${SESSION}.jsonl`), `${lines.join("\n")}\n`);
-    expect(lines.join("\n").length).toBeGreaterThan(2 << 20);
-    const out = execFileSync("/bin/bash", ["-c", asideTailCommand({ session: SESSION, configDir: root })], { env: { PATH: "/usr/bin:/bin" }, encoding: "utf8", maxBuffer: 64 << 20 });
-    expect(out.length).toBeLessThan(64 << 10);
-    const read = out.trim().split("\n");
-    expect(read[0]).toBe(String(lines.length));
-    for (const line of read.slice(1)) JSON.parse(line);
-    expect(asideCut(Number(read[0]), read.slice(1))).toEqual(asideCut(lines.length, lines));
-    expect(asideCut(Number(read[0]), read.slice(1)).keep).toBe(lines.length - 3);
-  });
-
-  it("the tail read says the CLI's own words for a session its store does not hold", () => {
-    root = mkdtempSync(join(tmpdir(), "wsp-aside-"));
-    let said = "";
-    try {
-      execFileSync("/bin/bash", ["-c", asideTailCommand({ session: SESSION, configDir: root })], { env: { PATH: "/usr/bin:/bin" }, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
-    } catch (e) {
-      said = String((e as { stderr: string }).stderr).trim();
-    }
-    expect(said).toBe(noConversationLine(SESSION));
+  it("answers from the live conversation of a thread whose session file holds a branch a rewind left behind", async () => {
+    const id = (n: number): string => `1a2b3c4d-0000-4aaa-8bbb-${String(n).padStart(12, "0")}`;
+    const line = (n: number, parent: number | null, type: string, text: string) => JSON.stringify({ parentUuid: parent === null ? null : id(parent), type, message: { role: type, ...(type === "assistant" ? { id: `msg_${n}` } : {}), content: [{ type: "text", text }] }, uuid: id(n) });
+    // ALPHA, BETA, then a rewind to ALPHA's reply and OMEGA hung off it: BETA's turn is still in the file, after which
+    // the last-prompt line points at the live end as 2.1.296 writes it.
+    const rewound = [line(1, null, "user", "Remember ALPHA."), line(2, 1, "assistant", "OK"), line(3, 2, "user", "Remember BETA."), line(4, 3, "assistant", "OK"), line(5, 2, "user", "Remember OMEGA."), line(6, 5, "assistant", "OK"), JSON.stringify({ type: "last-prompt", leafUuid: id(6) })];
+    const { adapter, cwd } = setUp(rewound);
+    const answer = await adapter.aside!({ session: SESSION, question: "which code words?", cwd });
+    expect(answer.text).toBe("Remember ALPHA Remember OMEGA | 4 lines");
   });
 });
 
@@ -256,7 +230,7 @@ describe("the adapter's aside", () => {
   const adapter = (factory: ExecStreamFactory, extra: { asideWallMs?: number } = {}) =>
     createClaudeAdapter({ exec: factory, configDir: CONFIG, baseEnv: { PATH: "/bin", CLAUDE_CODE_ENTRYPOINT: "cli" }, oauthToken: "sk-ant-oat-x", projectDirName: "-root-spoo", resultExitMs: 5, interruptGraceMs: 5, ...extra });
 
-  it("reads the session's tail and runs the copy on the turn's road with the turn's environment, the question its one user line", async () => {
+  it("copies the session through its live end and runs the copy on the turn's road with the turn's environment, the question its one user line", async () => {
     const exec = scripted([
       JSON.stringify({ type: "system", subtype: "init", session_id: FORK, cwd: "/root/spoo", tools: [] }),
       JSON.stringify({ type: "assistant", message: { id: "m1", content: [{ type: "text", text: "You are in /root/spoo" }] }, session_id: FORK }),
@@ -265,13 +239,14 @@ describe("the adapter's aside", () => {
     const servers = { wsp: { command: "wsp", args: ["mcp"] } };
     const answer = await adapter(exec.factory).aside!({ session: SESSION, question: "which folder, and what did I last ask?", cwd: "/root/spoo", model: "claude-opus-5", mcpServers: servers });
     expect(answer).toEqual({ text: RESULT.result, usage: RESULT.usage });
-    // The tail of the thread's session file, read first on the same road, says where the copy ends.
-    expect(exec.calls[0]).toMatchObject({ command: asideTailCommand({ session: SESSION, configDir: CONFIG }), input: undefined });
-    const call = exec.calls[1]!;
+    // The thread's session file, read first on the same road, says where the copy ends, and the write takes its lines.
+    expect(exec.calls[0]).toMatchObject({ command: chainReadCommand({ session: SESSION, configDir: CONFIG }), input: undefined });
+    const call = exec.calls[2]!;
     const fork = forkOf(call.command);
     expect(fork).toMatch(/^[0-9a-f-]{36}$/);
     expect(fork).not.toBe(SESSION);
-    expect(call.command).toBe(asideCommand({ session: SESSION, fork, keep: 2, configDir: CONFIG, cwd: "/root/spoo", model: "claude-opus-5", mcpServers: servers, memoryDir: `${CONFIG}/projects/-root-spoo/memory` }));
+    expect(exec.calls[1]).toMatchObject({ command: chainWriteCommand({ session: SESSION, fork, configDir: CONFIG, count: 2 }), input: ["1-2"] });
+    expect(call.command).toBe(asideCommand({ fork, cwd: "/root/spoo", model: "claude-opus-5", mcpServers: servers, memoryDir: `${CONFIG}/projects/-root-spoo/memory` }));
     // The copy reads the memory the thread's turns read, in the one settings flag that turns its hooks off.
     expect(call.command).toContain(`--settings '{"autoMemoryDirectory":"${CONFIG}/projects/-root-spoo/memory","disableAllHooks":true}'`);
     // The turn's own environment: the login it signs in with and the folder key the thread's session is stored under.
@@ -283,24 +258,25 @@ describe("the adapter's aside", () => {
     for (const line of call.input!) expect(JSON.parse(line)).not.toHaveProperty("uuid");
     expect(exec.order).toContain("closeInput");
     // The copy's file goes by a last run on the same road and environment, once the CLI's own run has ended.
-    expect(exec.calls[2]).toMatchObject({ command: forkCleanupCommand({ fork, configDir: CONFIG }), input: undefined });
-    expect(exec.calls[2]!.env).toMatchObject({ PATH: "/bin" });
+    expect(exec.calls[3]).toMatchObject({ command: copyCleanupCommand({ fork, configDir: CONFIG }), input: undefined });
+    expect(exec.calls[3]!.env).toMatchObject({ PATH: "/bin" });
     expect(exec.order.indexOf("exited 1")).toBeLessThan(exec.order.indexOf("launch 2"));
     expect(exec.order.indexOf("exited 2")).toBeLessThan(exec.order.indexOf("launch 3"));
-    expect(exec.calls).toHaveLength(3);
+    expect(exec.order.indexOf("exited 3")).toBeLessThan(exec.order.indexOf("launch 4"));
+    expect(exec.calls).toHaveLength(4);
   });
 
   it("hands the copy each server's value the thread's turns get, in a file of the run's on the flag a turn takes it on", async () => {
     const exec = scripted([JSON.stringify(RESULT)]);
     const entries = { tracker: { type: "http", url: "https://mcp.linear.app/mcp", headers: { Authorization: "Bearer lin_TESTONLY" } } };
     await adapter(exec.factory).aside!({ session: SESSION, question: "what did I last ask?", cwd: "/root/spoo", serverValues: { entries } });
-    const call = exec.calls[1]!;
+    const call = exec.calls[2]!;
     expect(call.secret).toEqual({ files: { WSP_MCP_VALUES: JSON.stringify({ mcpServers: entries }) } });
     expect(call.command).toContain('--mcp-config "$WSP_MCP_VALUES"');
     expect(call.command).not.toContain("lin_TESTONLY");
     expect(JSON.stringify(call.env)).not.toContain("lin_TESTONLY");
-    // The tail read and the copy's removal carry none.
-    expect([exec.calls[0]!, exec.calls[2]!].map(c => c.secret)).toEqual([undefined, undefined]);
+    // The copy's read, its write and its removal carry none.
+    expect([exec.calls[0]!, exec.calls[1]!, exec.calls[3]!].map(c => c.secret)).toEqual([undefined, undefined, undefined]);
   });
 
   it("hands each piece of the answer on as the CLI writes it, and still answers the whole result", async () => {
@@ -342,10 +318,10 @@ describe("the adapter's aside", () => {
   it("rejects with what the CLI printed when it exits with no result, and still removes the copy's file", async () => {
     const exec = scripted([noConversationLine(SESSION)], { exitCode: 1 });
     await expect(adapter(exec.factory).aside!({ session: SESSION, question: "hi" })).rejects.toThrow("No conversation found with session ID");
-    expect(exec.calls[2]!.command).toBe(forkCleanupCommand({ fork: forkOf(exec.calls[1]!.command), configDir: CONFIG }));
+    expect(exec.calls[3]!.command).toBe(copyCleanupCommand({ fork: forkOf(exec.calls[2]!.command), configDir: CONFIG }));
   });
 
-  it("rejects with the tail read's own line where the thread's session file is not there, and runs nothing more", async () => {
+  it("rejects with the copy's read's own line where the thread's session file is not there, and runs nothing more", async () => {
     const exec = scripted([JSON.stringify(RESULT)], { tail: [noConversationLine(SESSION)], tailCode: 1 });
     await expect(adapter(exec.factory).aside!({ session: SESSION, question: "hi" })).rejects.toThrow(noConversationLine(SESSION));
     expect(exec.calls).toHaveLength(1);
@@ -354,11 +330,11 @@ describe("the adapter's aside", () => {
   it("ends a CLI that says nothing for the whole wall and says so", async () => {
     const exec = scripted([], { hang: true });
     await expect(adapter(exec.factory, { asideWallMs: 20 }).aside!({ session: SESSION, question: "hi" })).rejects.toThrow(asideWallLine(20));
-    expect(exec.order.slice(2, 4)).toEqual(["launch 2", "teardown"]);
+    expect(exec.order.indexOf("launch 3")).toBeLessThan(exec.order.indexOf("teardown"));
     // The kill took the CLI's shell with it, so the copy's file goes by a run of its own once that one has ended.
-    const fork = forkOf(exec.calls[1]!.command);
-    expect(exec.calls[2]!.command).toBe(forkCleanupCommand({ fork, configDir: CONFIG }));
-    expect(exec.order.indexOf("exited 2")).toBeLessThan(exec.order.indexOf("launch 3"));
+    const fork = forkOf(exec.calls[2]!.command);
+    expect(exec.calls[3]!.command).toBe(copyCleanupCommand({ fork, configDir: CONFIG }));
+    expect(exec.order.indexOf("exited 3")).toBeLessThan(exec.order.indexOf("launch 4"));
   });
 
   it("registers a PreToolUse hook on the control channel and refuses every call through it, ahead of any allow rule or mode", async () => {
@@ -382,11 +358,12 @@ describe("the adapter's aside", () => {
   });
 
   it("asks about the recorded mid-turn thread on a copy cut before its running call, and says that call is still running", async () => {
-    const exec = scripted([JSON.stringify(RESULT)], { tail: [String(MID_TURN.length), ...MID_TURN] });
+    const exec = scripted([JSON.stringify(RESULT)], { tail: readOf(MID_TURN) });
     await adapter(exec.factory).aside!({ session: SESSION, question: "btw what's the status?" });
-    const { keep, running } = asideCut(MID_TURN.length, MID_TURN);
-    expect(exec.calls[1]!.command).toContain(`head -n ${keep} "$src"`);
-    const line = JSON.parse(exec.calls[1]!.input![1]!) as { message: { content: { type: string; text: string }[] } };
+    const { lines } = readChain(readOf(MID_TURN));
+    const { anchor, running } = liveEnd(lines)!;
+    expect(exec.calls[1]!.input).toEqual([lineRanges(chainThrough(lines, anchor))]);
+    const line = JSON.parse(exec.calls[2]!.input![1]!) as { message: { content: { type: string; text: string }[] } };
     const asked = line.message.content.map(block => block.text).join("");
     expect(asked).toBe(asidePrompt("btw what's the status?", running));
     expect(asked.endsWith("btw what's the status?")).toBe(true);
