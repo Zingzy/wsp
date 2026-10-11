@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-//! This computer's own processes, the processes module of the local kind: ps for the columns the pane already
-//! shows, filtered to the person's own processes, since this machine is theirs and another account's work is not
-//! the workspace's. Two reads per tick, because both the accounting name and the argv can hold spaces and one row
-//! cannot carry both unambiguously: the name read is pid then the rest of the line, and the column read ends in
-//! the argv. The C locale is forced because the columns are printed words, and -ww because ps formats to a window:
-//! with no terminal on any of its streams a Mac's ps falls back to 79 columns and cuts every row there, and a
-//! daemon has pipes for streams.
+//! This computer's own processes, the processes module of the local kind, filtered to the person's own processes,
+//! since this machine is theirs and another account's work is not the workspace's. One road per system. A Mac reads
+//! the kernel through libproc: memory as the physical footprint Activity Monitor shows, where ps's resident set read
+//! the host at a seventh of it, and nothing spawned, where the two ps runs a tick cost 80 ms of a core. Linux reads
+//! ps for the columns the pane shows. Two reads per tick there, because both the accounting name and the argv can
+//! hold spaces and one row cannot carry both unambiguously: the name read is pid then the rest of the line, and the
+//! column read ends in the argv. The C locale is forced because the columns are printed words, and -ww because ps
+//! formats to a window: with no terminal on any of its streams ps falls back to 79 columns and cuts every row there,
+//! and a daemon has pipes for streams.
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -32,13 +34,15 @@ const PS_NAMES: &str = "pid=,ucomm=";
 /// is whole seconds, so the same process reads up to a second apart from one tick to the next.
 const SAME_START_MS: i64 = 2_000;
 
-/// One process as ps read it, before the sampler's own clock turns its cpu time into a share of the window.
+/// One process as either road read it, before the sampler's own clock turns its cpu time into a share of the window.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct PsRow {
     pub(crate) pid: u32,
     pub(crate) ppid: u32,
     pub(crate) user: String,
     pub(crate) state: String,
+    /// The accounting name; empty for a pid ps named between its two reads, until the next tick.
+    pub(crate) comm: String,
     pub(crate) cmdline: String,
     /// Seconds of cpu this process has spent since it started.
     pub(crate) cpu_seconds: f64,
@@ -117,6 +121,7 @@ pub(crate) fn parse_ps(text: &str, at: i64) -> Vec<PsRow> {
             ppid,
             user: user.to_owned(),
             state: letter.to_string(),
+            comm: String::new(),
             cmdline,
             cpu_seconds: ps_seconds(time),
             rss: rss * RSS_UNIT,
@@ -127,24 +132,131 @@ pub(crate) fn parse_ps(text: &str, at: i64) -> Vec<PsRow> {
     rows
 }
 
-/// The TCP ports one pid listens on, by the road this computer reads them: /proc on Linux, lsof on a Mac. The
+/// The TCP ports one pid listens on, by the road this computer reads them: /proc on Linux, libproc on a Mac. The
 /// scan itself never reads ports; only an inspect does.
 pub(crate) type PortsOfPid = Arc<dyn Fn(u32) -> Result<Vec<u16>, String> + Send + Sync>;
 
-pub(crate) fn ports_of_pid_road(platform: &str) -> PortsOfPid {
-    if platform == "linux" {
-        return Arc::new(|pid| Ok(listening_ports_of(Path::new("/proc"), pid)));
+/// The person's processes as rows, by the road this computer reads them, for the user and the scan's clock.
+type RowsOf = Box<dyn Fn(&str, i64) -> Result<Vec<PsRow>, String> + Send + Sync>;
+
+/// How this computer is read: its processes, one pid's listening ports and one pid's folder.
+pub(crate) struct Road {
+    rows: RowsOf,
+    pub(crate) ports: PortsOfPid,
+    folder: fn(u32) -> Option<String>,
+}
+
+/// The road for the system the daemon runs on, by the platform word the readings pick it with: libproc on a Mac, ps
+/// with /proc's sockets and lsof's folders everywhere else, which is Linux.
+pub(crate) fn road_for(platform: &str) -> Road {
+    #[cfg(target_os = "macos")]
+    if platform == "macos" {
+        return mac::road();
     }
-    Arc::new(|pid| {
-        let output = host_command("lsof", &["-a", "-p", &pid.to_string(), "-iTCP", "-sTCP:LISTEN", "-P", "-n", "-Fn"])
-            .output()
-            .map_err(|e| format!("lsof: {e}"))?;
-        let text = String::from_utf8_lossy(&output.stdout);
-        let mut ports: Vec<u16> = text.lines().filter_map(|l| l.strip_prefix('n')?.rsplit(':').next()?.parse().ok()).collect();
-        ports.sort_unstable();
-        ports.dedup();
-        Ok(ports)
-    })
+    let ports: PortsOfPid =
+        if platform == "linux" { Arc::new(|pid| Ok(listening_ports_of(Path::new("/proc"), pid))) } else { Arc::new(|_| Ok(Vec::new())) };
+    Road { rows: Box::new(ps_rows), ports, folder: lsof_folder }
+}
+
+/// ps exits non-zero with what it printed when a selection matches nothing, so a run that printed rows is read
+/// whatever its status; one that printed nothing is a machine this module cannot read, and the refusal travels so the
+/// pane says so instead of showing an empty table as a fact.
+fn ps_read(user: &str, columns: &str) -> Result<String, String> {
+    let output = host_command("ps", &["-ww", "-U", user, "-o", columns]).output().map_err(|e| format!("ps: {e}"))?;
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+    if stdout.trim().is_empty() {
+        return Err(format!("ps -U {user} printed nothing: {}", String::from_utf8_lossy(&output.stderr).trim()));
+    }
+    Ok(stdout)
+}
+
+fn ps_rows(user: &str, at: i64) -> Result<Vec<PsRow>, String> {
+    let printed = ps_read(user, PS_COLUMNS)?;
+    let names = parse_ps_names(&ps_read(user, PS_NAMES)?);
+    let mut rows = parse_ps(&printed, at);
+    for row in &mut rows {
+        row.comm = names.get(&row.pid).cloned().unwrap_or_default();
+    }
+    Ok(rows)
+}
+
+#[cfg(target_os = "macos")]
+mod mac {
+    use std::collections::{HashMap, HashSet};
+    use std::sync::{Arc, Mutex};
+
+    use wsp_frames::numbers;
+
+    use super::{PsRow, Road};
+    use crate::libproc;
+
+    pub(super) fn road() -> Road {
+        let argvs: Mutex<HashMap<u32, Argv>> = Mutex::new(HashMap::new());
+        Road {
+            rows: Box::new(move |user, _| rows(user, &argvs)),
+            ports: Arc::new(|pid| {
+                let mut ports: Vec<u16> = libproc::listeners(pid).into_iter().map(|l| l.port).collect();
+                ports.sort_unstable();
+                ports.dedup();
+                Ok(ports)
+            }),
+            folder: |pid| libproc::cwd(pid).map(|p| p.to_string_lossy().into_owned()),
+        }
+    }
+
+    /// An argv as it was read, with what tells the next scan whether it is still this process's: its start time, which
+    /// a new process under the same pid moves, and its accounting name, which an exec moves.
+    struct Argv {
+        started_ms: i64,
+        comm: String,
+        argv: String,
+    }
+
+    /// The person's processes off the kernel. An argv is read once per process and exec, since it is the one read here
+    /// that costs more than a call; a process that rewrites its own title in place keeps the one it started with.
+    fn rows(user: &str, argvs: &Mutex<HashMap<u32, Argv>>) -> Result<Vec<PsRow>, String> {
+        let uid = nix::unistd::User::from_name(user)
+            .ok()
+            .flatten()
+            .map(|u| u.uid.as_raw())
+            .or_else(|| user.parse::<u32>().ok())
+            .ok_or_else(|| format!("no account named {user} on this computer"))?;
+        let mut argvs = argvs.lock().unwrap_or_else(|e| e.into_inner());
+        let mut rows = Vec::new();
+        for pid in libproc::pids() {
+            let Some(id) = libproc::identity(pid) else { continue };
+            if id.ruid != uid {
+                continue;
+            }
+            let spent = libproc::usage(pid);
+            let cmdline = match argvs.get(&pid) {
+                Some(held) if held.started_ms == id.started_ms && held.comm == id.comm => held.argv.clone(),
+                _ => {
+                    let argv = libproc::argv(pid, numbers::CMDLINE_BYTES).unwrap_or_default();
+                    argvs.insert(pid, Argv { started_ms: id.started_ms, comm: id.comm.clone(), argv: argv.clone() });
+                    argv
+                }
+            };
+            rows.push(PsRow {
+                pid,
+                ppid: id.ppid,
+                user: user.to_owned(),
+                state: id.state.to_string(),
+                comm: id.comm,
+                cmdline,
+                cpu_seconds: spent.map_or(0.0, |s| s.cpu_seconds),
+                rss: spent.map_or(0, |s| s.footprint),
+                started_at: id.started_ms,
+            });
+        }
+        let seen: HashSet<u32> = rows.iter().map(|r| r.pid).collect();
+        argvs.retain(|pid, _| seen.contains(pid));
+        if rows.is_empty() {
+            return Err(format!("no processes of {user} on this computer"));
+        }
+        rows.sort_by_key(|r| r.pid);
+        Ok(rows)
+    }
 }
 
 /// What a pid was doing at the last scan, so the next one has a window to divide by.
@@ -153,11 +265,11 @@ struct Spent {
     cpu_seconds: f64,
 }
 
-/// This computer's processes as the person's own ps shows them.
+/// This computer's processes as the person's own ps or Activity Monitor shows them.
 pub(crate) struct LocalProcSource {
     /// Whose processes the pane lists: the person running the host by default, which is whose machine this is.
     user: String,
-    ports: PortsOfPid,
+    road: Road,
     cap: usize,
     /// Per pid across scans, the cpu time the next delta runs from; a pid whose start time moved is a new process.
     spent: Mutex<HashMap<u32, Spent>>,
@@ -170,26 +282,14 @@ pub(crate) fn current_user() -> String {
 }
 
 impl LocalProcSource {
-    pub(crate) fn new(user: Option<String>, ports: PortsOfPid, cap: usize) -> LocalProcSource {
-        LocalProcSource { user: user.unwrap_or_else(current_user), ports, cap, spent: Mutex::new(HashMap::new()) }
-    }
-
-    /// ps exits non-zero with what it printed when a selection matches nothing, so a run that printed rows is read
-    /// whatever its status; one that printed nothing is a machine this module cannot read, and the refusal travels so
-    /// the pane says so instead of showing an empty table as a fact.
-    fn read(&self, columns: &str) -> Result<String, String> {
-        let output = host_command("ps", &["-ww", "-U", &self.user, "-o", columns]).output().map_err(|e| format!("ps: {e}"))?;
-        let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
-        if stdout.trim().is_empty() {
-            return Err(format!("ps -U {} printed nothing: {}", self.user, String::from_utf8_lossy(&output.stderr).trim()));
-        }
-        Ok(stdout)
+    pub(crate) fn new(user: Option<String>, road: Road, cap: usize) -> LocalProcSource {
+        LocalProcSource { user: user.unwrap_or_else(current_user), road, cap, spent: Mutex::new(HashMap::new()) }
     }
 
     /// The busy share of one core over the window just passed, the same column the guest's road reads out of its own
     /// tick counters, and the start time the pid keeps while it is the same process. ps's own %cpu is not that: on
     /// Linux it is the average over the whole life of the process, so a process that burned a second an hour ago
-    /// still reads busy. Linux ps prints whole seconds of cpu, so this quantises there; macOS prints hundredths.
+    /// still reads busy. Linux ps prints whole seconds of cpu, so this quantises there; libproc reads nanoseconds.
     fn share(&self, spent: &mut HashMap<u32, Spent>, row: &PsRow, elapsed_ms: i64) -> (f64, i64) {
         let before =
             spent.get(&row.pid).filter(|b| (b.started_at - row.started_at).abs() <= SAME_START_MS).map(|b| (b.started_at, b.cpu_seconds));
@@ -207,10 +307,7 @@ impl LocalProcSource {
 
 impl ProcSource for LocalProcSource {
     fn scan(&self, input: &ProcScanInput) -> Result<ProcScan, String> {
-        let printed = self.read(PS_COLUMNS)?;
-        let named = self.read(PS_NAMES)?;
-        let names = parse_ps_names(&named);
-        let rows = parse_ps(&printed, input.at);
+        let rows = (self.road.rows)(&self.user, input.at)?;
         let mut spent = self.spent.lock().unwrap_or_else(|e| e.into_inner());
         let mut seen = HashSet::new();
         let mut procs = Vec::with_capacity(rows.len().min(self.cap));
@@ -222,8 +319,7 @@ impl ProcSource for LocalProcSource {
                 ppid: row.ppid,
                 user: row.user.clone(),
                 state: row.state.clone(),
-                // A pid ps named between the two reads carries no name until the next tick rather than a guessed one.
-                comm: names.get(&row.pid).cloned().unwrap_or_default(),
+                comm: row.comm.clone(),
                 cmdline: row.cmdline.clone(),
                 cpu,
                 rss: row.rss,
@@ -236,22 +332,21 @@ impl ProcSource for LocalProcSource {
         Ok(ProcScan { total: rows.len() as u64, procs })
     }
 
-    /// What this computer can say about one process beyond its row: the ports it listens on, its folder from lsof,
-    /// and its children out of the scan. ps carries no thread count on macOS, so no kind reads one here and the
-    /// field is left off.
+    /// What this computer can say about one process beyond its row: the ports it listens on, its folder, and its
+    /// children out of the scan. ps carries no thread count on macOS, so no kind reads one here and the field is
+    /// left off.
     fn inspect(&self, pid: u32, procs: &[ProcEntry]) -> Result<ProcInspectReply, OpError> {
         if !procs.iter().any(|p| p.pid == pid) {
             return Err(no_process(pid));
         }
-        let ports = (self.ports)(pid).map_err(OpError::plain)?;
-        Ok(ProcInspectReply { pid, cwd: working_folder(pid), ports, threads: None, children: children_of(pid, procs) })
+        let ports = (self.road.ports)(pid).map_err(OpError::plain)?;
+        Ok(ProcInspectReply { pid, cwd: (self.road.folder)(pid), ports, threads: None, children: children_of(pid, procs) })
     }
 }
 
-/// The folder a process is in, as lsof names it: the one road to another process's cwd that answers on both
-/// platforms, since /proc has it on Linux only. None where lsof is absent or the process is out of reach, which is
+/// The folder a process is in, as lsof names it. None where lsof is absent or the process is out of reach, which is
 /// what the pane already prints as unreadable.
-fn working_folder(pid: u32) -> Option<String> {
+fn lsof_folder(pid: u32) -> Option<String> {
     let output = host_command("lsof", &["-a", "-p", &pid.to_string(), "-d", "cwd", "-Fn"]).output().ok()?;
     let text = String::from_utf8_lossy(&output.stdout);
     text.lines().find_map(|l| l.strip_prefix('n').filter(|rest| !rest.is_empty())).map(str::to_owned)
@@ -278,8 +373,13 @@ mod tests {
     const MAC_PS_NAMES: &str = "  4212 claude\n  4213 Google Chrome Helper\n";
     const AT: i64 = 1_757_000_000_000;
 
-    fn no_ports() -> PortsOfPid {
-        Arc::new(|_| Ok(vec![]))
+    /// Every road this computer has: its own system's, and ps's, which runs on a Mac as well and is Linux's road.
+    fn roads() -> Vec<(&'static str, Road)> {
+        let mut roads = vec![("linux", road_for("linux"))];
+        if std::env::consts::OS != "linux" {
+            roads.push((std::env::consts::OS, road_for(std::env::consts::OS)));
+        }
+        roads
     }
 
     fn scan_at(source: &LocalProcSource, at: i64, elapsed_ms: i64, pty: HashMap<u32, String>) -> ProcScan {
@@ -325,6 +425,7 @@ mod tests {
                 ppid: 0,
                 user: "root".into(),
                 state: "S".into(),
+                comm: String::new(),
                 cmdline: "/sbin/init".into(),
                 cpu_seconds: 3.0,
                 rss: 7040 * 1024,
@@ -374,17 +475,21 @@ mod tests {
 
     #[test]
     fn lists_this_computers_own_processes_this_test_among_them_named_and_with_the_daemons_ptys_marked() {
-        let source = LocalProcSource::new(None, no_ports(), numbers::PROC_CAP);
-        let me = std::process::id();
-        let scan = scan_at(&source, now_ms(), 0, HashMap::from([(me, "pty_1".to_owned())]));
-        let this = scan.procs.iter().find(|p| p.pid == me).expect("this process is listed");
-        assert_eq!(this.user, current_user());
-        assert_ne!(this.cmdline, "");
-        assert_ne!(this.comm, "");
-        assert_eq!(this.pty.as_deref(), Some("pty_1"));
-        assert!(this.started_at <= now_ms());
-        assert!(scan.total >= scan.procs.len() as u64);
-        assert!(scan.procs.iter().all(|p| p.cpu >= 0.0));
+        for (platform, road) in roads() {
+            let source = LocalProcSource::new(None, road, numbers::PROC_CAP);
+            let me = std::process::id();
+            let scan = scan_at(&source, now_ms(), 0, HashMap::from([(me, "pty_1".to_owned())]));
+            let this = scan.procs.iter().find(|p| p.pid == me).expect("this process is listed");
+            assert_eq!(this.user, current_user(), "{platform}");
+            assert_ne!(this.cmdline, "", "{platform}");
+            assert_ne!(this.comm, "", "{platform}");
+            assert_eq!(this.ppid, std::os::unix::process::parent_id(), "{platform}");
+            assert!(this.rss > 0, "{platform}");
+            assert_eq!(this.pty.as_deref(), Some("pty_1"), "{platform}");
+            assert!(this.started_at <= now_ms(), "{platform}");
+            assert!(scan.total >= scan.procs.len() as u64, "{platform}");
+            assert!(scan.procs.iter().all(|p| p.cpu >= 0.0), "{platform}");
+        }
     }
 
     #[test]
@@ -400,30 +505,51 @@ mod tests {
             .stdout(Stdio::null())
             .spawn()
             .unwrap();
-        let source = LocalProcSource::new(None, no_ports(), numbers::PROC_CAP);
         let before = std::env::var_os("COLUMNS");
         std::env::set_var("COLUMNS", "79");
-        let row = scan_until(&source, long.id(), "a row at all", |r| r.is_some());
+        let rows: Vec<(&str, ProcEntry)> = roads()
+            .into_iter()
+            .map(|(platform, road)| {
+                let source = LocalProcSource::new(None, road, numbers::PROC_CAP);
+                (platform, scan_until(&source, long.id(), "a row at all", |r| r.is_some()))
+            })
+            .collect();
         match before {
             Some(v) => std::env::set_var("COLUMNS", v),
             None => std::env::remove_var("COLUMNS"),
         }
         long.kill().unwrap();
         long.wait().unwrap();
-        assert!(row.cmdline.contains(tail), "{}", row.cmdline);
-        assert!(row.cmdline.len() > 120);
+        for (platform, row) in rows {
+            assert!(row.cmdline.contains(tail), "{platform}: {}", row.cmdline);
+            assert!(row.cmdline.len() > 120, "{platform}");
+        }
     }
 
     #[test]
     fn a_machine_whose_ps_says_nothing_at_all_is_refused_so_no_pane_reads_an_empty_table_as_a_fact() {
-        let source = LocalProcSource::new(Some("no-such-person-here".into()), no_ports(), numbers::PROC_CAP);
+        let source = LocalProcSource::new(Some("no-such-person-here".into()), road_for("linux"), numbers::PROC_CAP);
         let err = source.scan(&ProcScanInput { at: now_ms(), elapsed_ms: 0, pty: HashMap::new() }).unwrap_err();
         assert!(err.starts_with("ps -U no-such-person-here printed nothing"), "{err}");
     }
 
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_mac_refuses_a_person_it_has_no_account_for_rather_than_reading_an_empty_table() {
+        let source = LocalProcSource::new(Some("no-such-person-here".into()), road_for("macos"), numbers::PROC_CAP);
+        let err = source.scan(&ProcScanInput { at: now_ms(), elapsed_ms: 0, pty: HashMap::new() }).unwrap_err();
+        assert_eq!(err, "no account named no-such-person-here on this computer");
+    }
+
     #[test]
     fn the_cpu_column_is_the_window_just_passed_not_the_whole_life_of_the_process() {
-        let source = LocalProcSource::new(None, no_ports(), numbers::PROC_CAP);
+        for (_, road) in roads() {
+            cpu_is_the_window_just_passed(road);
+        }
+    }
+
+    fn cpu_is_the_window_just_passed(road: Road) {
+        let source = LocalProcSource::new(None, road, numbers::PROC_CAP);
         // This test's own process has burned cpu since it started; ps's own %cpu would report that average for
         // ever. The first scan has no window to divide by, so every row reads zero.
         let first = scan_at(&source, now_ms(), 0, HashMap::new());
@@ -460,7 +586,7 @@ mod tests {
     fn inspects_one_of_them_its_ports_off_the_ports_road_its_children_out_of_the_scan_and_nothing_for_a_pid_that_is_gone() {
         let me = std::process::id();
         let ports: PortsOfPid = Arc::new(move |pid| Ok(if pid == me { vec![8080, 8080] } else { vec![22] }));
-        let source = LocalProcSource::new(None, ports, numbers::PROC_CAP);
+        let source = LocalProcSource::new(None, Road { ports, ..road_for(std::env::consts::OS) }, numbers::PROC_CAP);
         let scan = scan_at(&source, now_ms(), 0, HashMap::new());
         let kid = scan.procs.iter().find(|p| p.ppid == me).map(|p| p.pid);
         let reply = source.inspect(me, &scan.procs).unwrap();
@@ -474,13 +600,18 @@ mod tests {
         assert_eq!(source.inspect(1 << 22 | 1, &scan.procs).unwrap_err().code, Some(wsp_frames::DaemonErrorCode::NotFound));
     }
 
-    #[cfg(target_os = "linux")]
     #[test]
-    fn on_linux_the_ports_road_reads_a_pids_sockets_out_of_proc() {
+    fn the_ports_road_of_this_computer_reads_a_pids_listening_sockets_and_its_folder() {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
-        let ports = ports_of_pid_road("linux")(std::process::id()).unwrap();
+        let road = road_for(std::env::consts::OS);
+        let ports = (road.ports)(std::process::id()).unwrap();
         assert!(ports.contains(&port), "{ports:?} lacks {port}");
+        // Linux reads the folder with lsof, which not every box carries; a Mac reads it off the kernel.
+        if cfg!(target_os = "macos") {
+            let folder = (road.folder)(std::process::id()).map(std::path::PathBuf::from);
+            assert_eq!(folder, Some(std::env::current_dir().unwrap().canonicalize().unwrap()));
+        }
         drop(listener);
     }
 }

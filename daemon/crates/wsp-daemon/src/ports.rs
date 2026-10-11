@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 //! This machine's listening TCP ports, one road per platform: Linux reads /proc/net/tcp and finds each socket's
-//! holder through the /proc/[pid]/fd tables (pgrep is not on every guest); macOS asks lsof. Each watching socket is
+//! holder through the /proc/[pid]/fd tables (pgrep is not on every guest); macOS asks the kernel through libproc,
+//! where an lsof every five seconds kept a daemon at 1% of a core with only the host watching. Each watching socket is
 //! told what opened and what closed against what it was last told. A browser's DevTools debugging port is no server
 //! and is dropped here, where every reader of the ports gets them, once it has answered as one. On a computer
 //! somebody owns, every workspace there shares this daemon, so a workspace's socket names roots and sees only the
@@ -17,7 +18,6 @@ use std::time::Duration;
 
 use wsp_frames::{numbers, DaemonEvent, ListeningPort};
 
-use crate::sys_local::host_command;
 use crate::{clock, Outbound};
 
 mod scope;
@@ -73,20 +73,6 @@ fn hex_address_bytes(addr: &str) -> Vec<u8> {
 
 pub(crate) fn is_loopback_hex(addr: &str) -> bool {
     is_loopback_bytes(&hex_address_bytes(addr))
-}
-
-/// The address bytes behind a numeric host as lsof prints it: a dotted quad, an IPv6 address with its brackets
-/// already off, or an IPv4-mapped one. Empty for a wildcard and for anything that does not parse.
-fn host_address_bytes(host: &str) -> Vec<u8> {
-    if host.contains(':') {
-        host.parse::<std::net::Ipv6Addr>().map(|a| a.octets().to_vec()).unwrap_or_default()
-    } else {
-        host.parse::<std::net::Ipv4Addr>().map(|a| a.octets().to_vec()).unwrap_or_default()
-    }
-}
-
-pub(crate) fn is_loopback_host(host: &str) -> bool {
-    is_loopback_bytes(&host_address_bytes(host))
 }
 
 /// /proc/net/tcp (or tcp6; same layout, wider address) as LISTEN rows. The file carries socket inodes, not pids;
@@ -191,74 +177,44 @@ pub(crate) fn proc_net_tcp_source(proc_root: PathBuf) -> PortSource {
     })
 }
 
-/// lsof's field output for the listening TCP sockets this user can see: numeric hosts and ports, untruncated
-/// command names, and one field per line. A process set opens with its pid and carries its command and uid; each
-/// socket under it opens with its fd and carries its address.
-const LSOF_ARGS: [&str; 8] = ["-nP", "-w", "+c", "0", "-F", "pcfnu", "-iTCP", "-sTCP:LISTEN"];
-
-/// lsof field output into LISTEN rows. The fd lines only separate one socket from the next; a row is the process
-/// set's pid, command and uid with that socket's address. lsof names neither an argv nor a socket inode.
-pub(crate) fn parse_lsof_listeners(text: &str) -> Vec<ListeningPort> {
-    let mut rows = Vec::new();
-    let (mut pid, mut uid, mut process): (Option<u32>, u32, Option<String>) = (None, 0, None);
-    for line in text.lines() {
-        let Some(field) = line.chars().next() else { continue };
-        let value = &line[field.len_utf8()..];
-        match field {
-            'p' => {
-                pid = value.parse().ok();
-                uid = 0;
-                process = None;
-            }
-            'c' => {
-                if !value.is_empty() {
-                    process = Some(value.to_owned());
-                }
-            }
-            'u' => uid = value.parse().unwrap_or(0),
-            'n' => {
-                let Some((host, port)) = value.rsplit_once(':') else { continue };
-                let Ok(port) = port.parse::<u16>() else { continue };
-                let host = host.strip_prefix('[').unwrap_or(host);
-                let host = host.strip_suffix(']').unwrap_or(host);
-                rows.push(ListeningPort {
-                    port,
-                    pid,
-                    inode: None,
-                    uid,
-                    process: process.clone(),
-                    command: None,
-                    loopback: is_loopback_host(host),
-                });
-            }
-            _ => {}
-        }
-    }
-    rows
-}
-
-/// The darwin road: /proc does not exist there, so lsof names the listeners. lsof exits non-zero when nothing is
-/// listening, and whatever it printed before that is still read; a lsof that cannot run reads as no ports.
-pub(crate) async fn lsof_snapshot(program: &Path) -> Vec<ListeningPort> {
-    let printed = match tokio::process::Command::new(program).args(LSOF_ARGS).output().await {
-        Ok(out) => String::from_utf8_lossy(&out.stdout).into_owned(),
-        Err(_) => String::new(),
-    };
+/// The darwin road, as one reading: every process this user can see asked for its listening sockets, one row per port
+/// (the first wins), each holder named as lsof names it, by its long name. A process of another account answers no fd
+/// table and is skipped, as lsof skips it.
+#[cfg(target_os = "macos")]
+fn libproc_snapshot() -> Vec<ListeningPort> {
     let mut rows: Vec<ListeningPort> = Vec::new();
-    for row in parse_lsof_listeners(&printed) {
-        if !rows.iter().any(|r| r.port == row.port) {
-            rows.push(row);
+    for pid in crate::libproc::pids() {
+        let found = crate::libproc::listeners(pid);
+        if found.is_empty() {
+            continue;
+        }
+        let holder = crate::libproc::identity(pid);
+        for listener in found {
+            if rows.iter().any(|r| r.port == listener.port) {
+                continue;
+            }
+            rows.push(ListeningPort {
+                port: listener.port,
+                pid: Some(pid),
+                inode: None,
+                uid: holder.as_ref().map_or(0, |h| h.uid),
+                process: holder.as_ref().map(|h| h.name.clone()),
+                command: None,
+                loopback: is_loopback_bytes(&listener.address),
+            });
         }
     }
     rows
 }
 
-pub(crate) fn lsof_source() -> PortSource {
-    Arc::new(|| Box::pin(lsof_snapshot(Path::new("lsof"))))
+#[cfg(target_os = "macos")]
+fn libproc_source() -> PortSource {
+    Arc::new(|| Box::pin(async { tokio::task::spawn_blocking(libproc_snapshot).await.unwrap_or_default() }))
 }
 
 /// A platform with no road here reads empty rather than failing the daemon that asked, so a pane on it shows no
 /// ports instead of no daemon.
+#[cfg(not(target_os = "macos"))]
 pub(crate) fn empty_source() -> PortSource {
     Arc::new(|| Box::pin(async { Vec::new() }))
 }
@@ -269,7 +225,9 @@ pub(crate) fn source_for(proc_root: Option<&Path>) -> PortSource {
     match proc_root {
         Some(root) => proc_net_tcp_source(root.to_path_buf()),
         None if cfg!(target_os = "linux") => proc_net_tcp_source(PathBuf::from("/proc")),
-        None if cfg!(target_os = "macos") => lsof_source(),
+        #[cfg(target_os = "macos")]
+        None => libproc_source(),
+        #[cfg(not(target_os = "macos"))]
         None => empty_source(),
     }
 }
@@ -317,9 +275,9 @@ fn pid_alive(pid: u32) -> bool {
 }
 
 /// The processes a DevTools port can belong to, by the name the listener's holder goes by: /proc/<pid>/comm on Linux,
-/// cut at 15 bytes, and lsof's whole command name on a Mac, where each app's helpers are named after it. Electron is
-/// here because a DevTools port on an Electron app is one to hide too. A listener held by anything else is never
-/// asked, a node server a thread's tests start among them.
+/// cut at 15 bytes, and the kernel's longer name on a Mac, up to 31, where each app's helpers are named after it.
+/// Electron is here because a DevTools port on an Electron app is one to hide too. A listener held by anything else is
+/// never asked, a node server a thread's tests start among them.
 const BROWSER_NAMES: [&str; 11] = [
     "google chrome",
     "chrome",
@@ -370,18 +328,19 @@ fn proc_lineage(proc_root: &Path) -> Vec<Lineage> {
         .collect()
 }
 
-/// ps's `pid= ppid= pgid=` columns, the darwin road.
-fn parse_lineage(text: &str) -> Vec<Lineage> {
-    text.lines()
-        .filter_map(|line| {
-            let mut words = line.split_whitespace().map(|w| w.parse::<u32>().ok());
-            Some(Lineage { pid: words.next()??, ppid: words.next()??, pgid: words.next()?? })
-        })
+/// The darwin road: every process's parent and group off the kernel. A ps that cannot run cost the old road its whole
+/// table; a pid gone between the listing and the read is only left out here.
+#[cfg(target_os = "macos")]
+fn libproc_lineage() -> Vec<Lineage> {
+    crate::libproc::pids()
+        .into_iter()
+        .filter_map(|pid| crate::libproc::lineage(pid).map(|(ppid, pgid)| Lineage { pid, ppid, pgid }))
         .collect()
 }
 
 /// The road for this daemon, as source_for picks the ports': a fake /proc when one is given, the platform's own
-/// otherwise. A ps that fails reads as no processes, so a watch that names roots sees nothing rather than everything.
+/// otherwise. A platform with no road reads no processes, so a watch that names roots sees nothing rather than
+/// everything.
 pub(crate) fn lineage_for(proc_root: Option<&Path>) -> LineageSource {
     let root = match proc_root {
         Some(root) => Some(root.to_path_buf()),
@@ -393,15 +352,9 @@ pub(crate) fn lineage_for(proc_root: Option<&Path>) -> LineageSource {
             let root = root.clone();
             Box::pin(async move { tokio::task::spawn_blocking(move || proc_lineage(&root)).await.unwrap_or_default() })
         }),
-        None if cfg!(target_os = "macos") => Arc::new(|| {
-            Box::pin(async {
-                let read = tokio::task::spawn_blocking(|| host_command("ps", &["-A", "-o", "pid=,ppid=,pgid="]).output()).await;
-                match read {
-                    Ok(Ok(out)) if out.status.success() => parse_lineage(&String::from_utf8_lossy(&out.stdout)),
-                    _ => Vec::new(),
-                }
-            })
-        }),
+        #[cfg(target_os = "macos")]
+        None => Arc::new(|| Box::pin(async { tokio::task::spawn_blocking(libproc_lineage).await.unwrap_or_default() })),
+        #[cfg(not(target_os = "macos"))]
         None => Arc::new(|| Box::pin(async { Vec::new() })),
     }
 }
@@ -431,22 +384,8 @@ fn members(table: &[Lineage], roots: &[u32]) -> HashSet<u32> {
 /// left out.
 pub(crate) type CwdSource = Arc<dyn Fn(Vec<u32>) -> Pin<Box<dyn Future<Output = HashMap<u32, PathBuf>> + Send>> + Send + Sync>;
 
-/// lsof's field output for `-d cwd`: a process set opens with its pid and names its folder on an `n` line.
-fn parse_lsof_cwds(text: &str) -> HashMap<u32, PathBuf> {
-    let mut cwds = HashMap::new();
-    let mut pid = None;
-    for line in text.lines() {
-        if let Some(value) = line.strip_prefix('p') {
-            pid = value.parse::<u32>().ok();
-        } else if let (Some(value), Some(held)) = (line.strip_prefix('n'), pid) {
-            cwds.insert(held, PathBuf::from(value));
-        }
-    }
-    cwds
-}
-
 /// The road for this daemon, as source_for picks the ports': /proc/[pid]/cwd off a fake /proc when one is given or
-/// on Linux, and one lsof for every pid asked about on a Mac.
+/// on Linux, and the kernel's answer for each pid asked about on a Mac.
 pub(crate) fn cwd_for(proc_root: Option<&Path>) -> CwdSource {
     let root = match proc_root {
         Some(root) => Some(root.to_path_buf()),
@@ -466,17 +405,17 @@ pub(crate) fn cwd_for(proc_root: Option<&Path>) -> CwdSource {
                 .unwrap_or_default()
             })
         }),
-        None if cfg!(target_os = "macos") => Arc::new(|pids: Vec<u32>| {
+        #[cfg(target_os = "macos")]
+        None => Arc::new(|pids: Vec<u32>| {
             Box::pin(async move {
-                let list = pids.iter().map(u32::to_string).collect::<Vec<_>>().join(",");
-                let read =
-                    tokio::task::spawn_blocking(move || host_command("lsof", &["-a", "-d", "cwd", "-p", &list, "-Fpn"]).output()).await;
-                match read {
-                    Ok(Ok(out)) => parse_lsof_cwds(&String::from_utf8_lossy(&out.stdout)),
-                    _ => HashMap::new(),
-                }
+                tokio::task::spawn_blocking(move || {
+                    pids.into_iter().filter_map(|pid| crate::libproc::cwd(pid).map(|cwd| (pid, cwd))).collect()
+                })
+                .await
+                .unwrap_or_default()
             })
         }),
+        #[cfg(not(target_os = "macos"))]
         None => Arc::new(|_| Box::pin(async { HashMap::new() })),
     }
 }
@@ -826,7 +765,7 @@ mod tests {
         ListeningPort { port, pid, inode: Some(inode), uid, process: None, command: None, loopback }
     }
 
-    /// A listener held by a process of this name, as /proc/<pid>/comm or lsof names it.
+    /// A listener held by a process of this name, as /proc/<pid>/comm or the kernel names it.
     fn named(port: u16, pid: u32, inode: u64, process: &str) -> ListeningPort {
         ListeningPort { process: Some(process.to_owned()), ..row(port, Some(pid), inode, 0, true) }
     }
@@ -1165,22 +1104,6 @@ mod tests {
         assert!(members(&table, &[0, 1]).is_empty());
     }
 
-    #[test]
-    fn lsof_cwd_fields_read_as_each_pids_folder() {
-        let read = parse_lsof_cwds("p401\nfcwd\nn/Users/zingzy/wsp/landing/app\np402\nfcwd\nn/private/tmp\n");
-        assert_eq!(read.get(&401), Some(&PathBuf::from("/Users/zingzy/wsp/landing/app")));
-        assert_eq!(read.get(&402), Some(&PathBuf::from("/private/tmp")));
-        assert_eq!(read.len(), 2);
-    }
-
-    #[test]
-    fn ps_lineage_columns_read_as_pid_parent_and_group() {
-        assert_eq!(
-            parse_lineage("  1     0     1\n 50     1    50\nnot a row\n 51    50\n"),
-            [Lineage { pid: 1, ppid: 0, pgid: 1 }, Lineage { pid: 50, ppid: 1, pgid: 50 }]
-        );
-    }
-
     #[tokio::test]
     async fn only_a_listener_a_browser_or_electron_holds_is_asked_so_a_threads_node_server_hears_nothing() {
         let asked = Arc::new(Mutex::new(Vec::new()));
@@ -1513,84 +1436,31 @@ mod tests {
         assert_eq!(rows.iter().map(|r| (r.port, r.loopback)).collect::<Vec<_>>(), [(8080, false), (3000, true)]);
     }
 
-    #[test]
-    fn loopback_in_a_text_address_as_lsof_prints_it() {
-        for (host, loopback) in [
-            ("127.0.0.1", true),
-            ("127.0.0.2", true),
-            ("::1", true),
-            ("::ffff:127.0.0.1", true),
-            ("0.0.0.0", false),
-            ("192.168.1.1", false),
-            ("::", false),
-            ("fe80::1", false),
-            ("::ffff:192.168.1.1", false),
-            ("*", false),
-            ("", false),
-            ("not-an-address", false),
-        ] {
-            assert_eq!(is_loopback_host(host), loopback, "{host}");
-        }
-    }
-
-    fn lsof_row(port: u16, pid: u32, uid: u32, process: &str, loopback: bool) -> ListeningPort {
-        ListeningPort { port, pid: Some(pid), inode: None, uid, process: Some(process.into()), command: None, loopback }
-    }
-
-    #[test]
-    fn parse_lsof_listeners_gives_one_row_per_listening_socket_with_its_process_sets_pid_command_and_uid() {
-        assert_eq!(
-            parse_lsof_listeners(&fixture("lsof-listen.txt")),
-            [
-                lsof_row(7000, 712, 501, "ControlCenter", false),
-                lsof_row(5000, 712, 501, "ControlCenter", true),
-                lsof_row(3000, 1042, 501, "node", true),
-                lsof_row(3000, 1042, 501, "node", true),
-                lsof_row(49152, 88, 0, "rapportd", false),
-            ]
-        );
-    }
-
-    #[test]
-    fn a_line_that_is_not_a_field_and_a_name_with_no_port_are_skipped() {
-        assert_eq!(
-            parse_lsof_listeners("lsof: WARNING: can't stat()\np9\ncsh\nu0\nf3\nnpipe\nf4\nn127.0.0.1:8080\n"),
-            [lsof_row(8080, 9, 0, "sh", true)]
-        );
-    }
-
-    fn fake_lsof(script: &str) -> (tempfile::TempDir, PathBuf) {
-        use std::os::unix::fs::PermissionsExt;
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("lsof");
-        std::fs::write(&path, script).unwrap();
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-        (dir, path)
-    }
-
+    #[cfg(target_os = "macos")]
     #[tokio::test]
-    async fn the_darwin_road_asks_lsof_and_folds_its_rows_to_one_per_port() {
-        let (_dir, lsof) = fake_lsof(&format!("#!/bin/sh\ncat <<'OUT'\n{}OUT\n", fixture("lsof-listen.txt")));
-        assert_eq!(
-            lsof_snapshot(&lsof).await,
-            [
-                lsof_row(7000, 712, 501, "ControlCenter", false),
-                lsof_row(5000, 712, 501, "ControlCenter", true),
-                lsof_row(3000, 1042, 501, "node", true),
-                lsof_row(49152, 88, 0, "rapportd", false),
-            ]
-        );
-    }
-
-    #[tokio::test]
-    async fn lsof_exiting_non_zero_with_nothing_listening_reads_as_no_ports_not_as_a_failed_poll() {
-        let (_dir, lsof) = fake_lsof("#!/bin/sh\nexit 1\n");
-        assert!(lsof_snapshot(&lsof).await.is_empty());
-        assert!(lsof_snapshot(Path::new("/nonexistent/lsof")).await.is_empty());
+    async fn a_macs_own_roads_find_this_processs_listener_its_place_among_every_process_and_its_folder() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let me = std::process::id();
+        let read = source_for(None)().await;
+        let row = read.iter().find(|r| r.port == port).unwrap_or_else(|| panic!("{port} is not in {read:?}"));
+        assert_eq!((row.pid, row.loopback, row.uid), (Some(me), true, nix::unistd::geteuid().as_raw()));
+        assert!(row.process.as_deref().is_some_and(|name| !name.is_empty()), "{row:?}");
+        assert_eq!(read.iter().filter(|r| r.port == port).count(), 1);
+        let table = lineage_for(None)().await;
+        let pgid = nix::unistd::getpgrp().as_raw() as u32;
+        assert!(table.contains(&Lineage { pid: me, ppid: std::os::unix::process::parent_id(), pgid }));
+        // Another account's process is in the table too, as ps -A had it: launchd is root's.
+        assert!(table.contains(&Lineage { pid: 1, ppid: 0, pgid: 1 }));
+        let cwds = cwd_for(None)(vec![me, 1]).await;
+        assert_eq!(cwds.get(&me), Some(&std::env::current_dir().unwrap().canonicalize().unwrap()));
+        assert_eq!(cwds.get(&1), None);
+        drop(listener);
     }
 
     #[tokio::test]
     async fn a_platform_with_no_road_reads_empty_rather_than_failing_the_pane() {
+        #[cfg(not(target_os = "macos"))]
         assert!(empty_source()().await.is_empty());
         let root = fake_proc_root();
         assert_eq!(source_for(Some(root.path()))().await.len(), 2);

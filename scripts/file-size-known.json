@@ -2,7 +2,6 @@
   "daemon/crates/wsp-daemon/src/git.rs": 2001,
   "daemon/crates/wsp-daemon/src/hosts/github.rs": 1922,
   "daemon/crates/wsp-daemon/src/ops.rs": 2090,
-  "daemon/crates/wsp-daemon/src/ports.rs": 1598,
   "daemon/crates/wsp-runtime/src/bundle.rs": 2464,
   "daemon/crates/wsp-runtime/src/engine.rs": 2083,
   "daemon/crates/wsp-runtime/src/net.rs": 1629,
