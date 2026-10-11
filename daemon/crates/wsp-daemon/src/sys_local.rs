@@ -16,9 +16,9 @@ use crate::sys::{CpuTimes, SysReadings, SysSource};
 #[cfg_attr(target_os = "macos", cfg(test))]
 const BLOCK: u64 = 1024;
 
-/// One of this computer's small readers, in the C locale: df, ps and vm_stat all print numbers and column headers
-/// the parsers here read, and a login's own locale moves all three. Run behind the work-score line like every
-/// child of the daemon, so a slow ps is what the kernel takes first, never the daemon.
+/// One of this computer's small readers, in the C locale: df, ps and lsof print numbers and column headers the parsers
+/// here read, and a login's own locale moves them. Run behind the work-score line like every child of the daemon, so a
+/// slow ps is what the kernel takes first, never the daemon.
 pub(crate) fn host_command(file: &str, args: &[&str]) -> Command {
     let (sh, argv) = work_argv(file, args);
     let mut command = Command::new(sh);
@@ -200,11 +200,12 @@ mod darwin {
     }
 
     /// What a Mac can hand out without taking it from something running: pages that are free, pages read ahead on
-    /// speculation, and the inactive list, which the kernel reclaims without asking. Purgeable pages are already
-    /// counted inside those lists and are not added again. This is the reading MemAvailable is on Linux; the kernel's
-    /// free count alone reads a Mac at rest as nearly full, because it holds everything else for reuse.
+    /// speculation, and the inactive list, which the kernel reclaims without asking. The free count already holds the
+    /// speculative pages (vm_stat prints its free line as the free count less them), so they are not added again, and
+    /// neither are purgeable pages, which sit inside those lists. This is the reading MemAvailable is on Linux; the
+    /// kernel's free count alone reads a Mac at rest as nearly full, because it holds everything else for reuse.
     pub(crate) fn available_pages(info: &libc::vm_statistics64) -> u64 {
-        u64::from(info.free_count) + u64::from(info.speculative_count) + u64::from(info.inactive_count)
+        u64::from(info.free_count) + u64::from(info.inactive_count)
     }
 }
 
@@ -269,9 +270,10 @@ mod tests {
         let mut info: libc::vm_statistics64 = unsafe { std::mem::zeroed() };
         (info.free_count, info.speculative_count, info.inactive_count) = (98_304, 32_768, 262_144);
         (info.active_count, info.wire_count, info.purgeable_count) = (393_216, 196_608, 16_384);
-        // Free plus speculative plus the inactive list; purgeable is already inside those and is not added twice. The
-        // kernel's own free count alone would call a 16 GB Mac 1.5 GB free; the reclaimable pages make it 6.4 GB.
-        assert_eq!(darwin::available_pages(&info), 98_304 + 32_768 + 262_144);
+        // The free count already holds the speculative pages, which vm_stat prints apart by taking them off it, so the
+        // free count plus the inactive list is vm_stat's free, speculative and inactive lines added up. Purgeable pages
+        // are inside those lists too and are not added again.
+        assert_eq!(darwin::available_pages(&info), 98_304 + 262_144);
     }
 
     /// The pages vm_stat counts under one label.
@@ -286,12 +288,17 @@ mod tests {
     fn a_macs_memory_and_disk_are_what_vm_stat_and_df_print_without_running_either() {
         let page_line =
             |text: &str| -> u64 { text.split_once("page size of ").unwrap().1.split_whitespace().next().unwrap().parse().unwrap() };
+        // Read on either side of vm_stat, so its figure falls between the two give or take what moves in a moment; a
+        // speculative page counted twice reads more than a hundred megabytes off, past the window.
+        let before = darwin::DarwinHost.memory().unwrap();
         let vm_stat = String::from_utf8(Command::new("vm_stat").output().unwrap().stdout).unwrap();
-        let read = darwin::DarwinHost.memory().unwrap();
+        let after = darwin::DarwinHost.memory().unwrap();
         let available = (vm_stat_pages(&vm_stat, "free") + vm_stat_pages(&vm_stat, "speculative") + vm_stat_pages(&vm_stat, "inactive"))
             * page_line(&vm_stat);
-        // Memory moves between two reads, so the two agree to within a window rather than exactly.
-        assert!((read.used as i64 - read.total.saturating_sub(available) as i64).abs() < 512 * 1024 * 1024, "{read:?} {available}");
+        let printed = before.total.saturating_sub(available) as i64;
+        let (low, high) = (before.used.min(after.used) as i64, before.used.max(after.used) as i64);
+        const WINDOW: i64 = 32 * 1024 * 1024;
+        assert!(printed >= low - WINDOW && printed <= high + WINDOW, "vm_stat says {printed} used, this read {low} to {high}");
         let folder = std::env::current_dir().unwrap();
         let df = String::from_utf8(Command::new("df").args(["-kP"]).arg(&folder).output().unwrap().stdout).unwrap();
         let (printed, disk) = (parse_df(&df).unwrap(), darwin::DarwinHost.disk(&folder).unwrap());
