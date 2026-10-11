@@ -9,7 +9,7 @@ import {
   COMPOSER_INLINE_CHIP_ICON_CLASS_NAME,
 } from "../composerInlineChip";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { normalizeMarkdownLinkDestination, rewriteMarkdownFileUriHref } from "../../lib/markdownLinks";
+import { extractMarkdownLinkHrefs, normalizeMarkdownLinkDestination, resolveInlineCodeFileLinkMeta, resolveMarkdownFileLinkMeta, rewriteMarkdownFileUriHref, type MarkdownFileLinkMeta } from "../../lib/markdownLinks";
 import { cn } from "../../lib/utils";
 import { Spaced } from "../ui/spaced";
 import { WINDOWS_DRIVE_PATH_REGEX } from "./plugins";
@@ -35,6 +35,41 @@ function pathParentSegments(path: string): string[] {
   const normalized = path.replaceAll("\\", "/");
   const segments = normalized.split("/").filter((segment) => segment.length > 0);
   return segments.slice(0, -1);
+}
+
+/** The file chips a message draws, read off its text the way the page resolves them: the links and the inline code
+ * that name a file, and the folder each chip adds to tell apart two files of one name. */
+export interface MessageFileChips {
+  readonly byHref: ReadonlyMap<string, MarkdownFileLinkMeta>;
+  readonly byCode: ReadonlyMap<string, MarkdownFileLinkMeta>;
+  readonly suffixByPath: ReadonlyMap<string, string>;
+}
+
+export function messageFileChips(text: string, cwd: string | undefined, baseDir: string | undefined = cwd): MessageFileChips {
+  const byHref = new Map<string, MarkdownFileLinkMeta>();
+  for (const href of extractMarkdownLinkHrefs(text)) {
+    const key = normalizeMarkdownLinkHrefKey(href);
+    if (byHref.has(key)) continue;
+    const meta = resolveMarkdownFileLinkMeta(key, cwd, baseDir);
+    if (meta) byHref.set(key, meta);
+  }
+  const byCode = new Map<string, MarkdownFileLinkMeta>();
+  for (const span of extractInlineCodeSpans(text)) {
+    if (byCode.has(span)) continue;
+    const meta = resolveInlineCodeFileLinkMeta(span, cwd, baseDir);
+    if (meta) byCode.set(span, meta);
+  }
+  const suffixByPath = buildFileLinkParentSuffixByPath([...byHref.values(), ...byCode.values()].map(meta => meta.filePath));
+  return { byHref, byCode, suffixByPath };
+}
+
+/** What a file chip shows: the file's name, the folder that tells it from another file of that name, and its line. */
+export function fileChipLabel(meta: MarkdownFileLinkMeta, suffixByPath: ReadonlyMap<string, string>): string[] {
+  const parts = [meta.basename];
+  const suffix = suffixByPath.get(meta.filePath.replaceAll("\\", "/"));
+  if (typeof suffix === "string" && suffix.length > 0) parts.push(suffix);
+  if (meta.line) parts.push(`L${meta.line}${meta.column ? `:C${meta.column}` : ""}`);
+  return parts;
 }
 
 export function buildFileLinkParentSuffixByPath(filePaths: ReadonlyArray<string>): Map<string, string> {
@@ -299,7 +334,7 @@ function MarkdownFileChipContent({ label }: { label: ReadonlyArray<string> }) {
   return (
     <>
       <FileIcon aria-hidden className={COMPOSER_INLINE_CHIP_ICON_CLASS_NAME} />
-      <span className={CHAT_INLINE_CHIP_LABEL_CLASS_NAME}>
+      <span className={CHAT_INLINE_CHIP_LABEL_CLASS_NAME} data-find-text>
         <Spaced parts={label} />
       </span>
     </>

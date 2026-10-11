@@ -28,6 +28,8 @@ import { QUOTE_SOURCE_ATTRIBUTE } from "../AssistantSelectionToolbar";
 import { TimelineRowCtx, TimelineRowActivityCtx, type TimelineRow } from "./context";
 import { WorkingTimelineRow, ThinkingTimelineRow } from "./working";
 import { WorkGroupSection, LiveWorkEntryTimelineRow, WorkGroupToggleTimelineRow } from "./workGroup";
+import { findPartAttrs } from "../find/highlights";
+import { useRevealOpen } from "../find/store";
 
 // ---------------------------------------------------------------------------
 // TimelineRowContent: the actual row component
@@ -107,6 +109,7 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
       >
         <ChatFileRow records={row.message.attachments ?? []} files={files} />
         <CollapsibleUserMessageBody
+          entryId={row.id}
           text={row.message.text}
           skills={ctx.skills}
           markdownCwd={ctx.markdownCwd}
@@ -185,7 +188,7 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
   return (
     <>
       <div className="relative min-w-0 px-1 py-0.5" {...{ [QUOTE_SOURCE_ATTRIBUTE]: row.message.id }}>
-        <div className="flex flex-col gap-2.5">
+        <div className="flex flex-col gap-2.5" {...findPartAttrs(row.id, row.message.text.length > 0 ? 0 : null)}>
           {segments.map((segment, index) => {
             const markdown = (
               <ReplyRunContext key={index} value={runScopes[index] ?? null}>
@@ -231,7 +234,7 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
 function InsightNote({ children }: { children: ReactNode }) {
   return (
     <div role="note" data-insight className="border-l-2 border-border pl-3">
-      <p className={cn(GROUP_LABEL, "mb-1 text-muted-foreground")}>Insight</p>
+      <p className={cn(GROUP_LABEL, "mb-1 text-muted-foreground")} data-find-skip>Insight</p>
       {children}
     </div>
   );
@@ -261,6 +264,7 @@ function ProposedPlanTimelineRow({
   return (
     <div className="min-w-0 px-1 py-0.5">
       <ProposedPlanCard
+        entryId={row.id}
         planMarkdown={row.proposedPlan.planMarkdown}
         cwd={ctx.markdownCwd}
         workspaceRoot={ctx.workspaceRoot}
@@ -277,7 +281,7 @@ function PermissionTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "per
 
 function SubagentTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "subagent" }> }) {
   const ctx = use(TimelineRowCtx);
-  return <SubagentFoldRow onAnswer={ctx.onAnswerPermission} subagent={row.subagent} />;
+  return <SubagentFoldRow entryId={row.id} onAnswer={ctx.onAnswerPermission} subagent={row.subagent} />;
 }
 
 /** The children a run of calls started, as their rows where the calls stand. */
@@ -350,11 +354,12 @@ const COLLAPSED_USER_MESSAGE_FADE_MASK = CLAMP_FADE_MASK;
 const shouldCollapseUserMessage = shouldClampText;
 
 const CollapsibleUserMessageBody = memo(function CollapsibleUserMessageBody(props: {
+  entryId: string;
   text: string;
   skills: ReadonlyArray<ProviderSkill>;
   markdownCwd: string | undefined;
 }) {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useRevealOpen(props.entryId, false);
   const hasVisibleBody = props.text.trim().length > 0;
   const canCollapse = hasVisibleBody && shouldCollapseUserMessage(props.text);
   const isCollapsed = canCollapse && !expanded;
@@ -381,6 +386,7 @@ const CollapsibleUserMessageBody = memo(function CollapsibleUserMessageBody(prop
           data-user-message-collapsed={isCollapsed ? "true" : "false"}
           data-user-message-collapsible={canCollapse ? "true" : "false"}
           data-user-message-fade={isCollapsed ? "true" : "false"}
+          {...findPartAttrs(props.entryId, 0)}
           style={
             isCollapsed
               ? {

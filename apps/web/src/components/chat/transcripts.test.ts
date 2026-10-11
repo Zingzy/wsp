@@ -134,6 +134,20 @@ describe("a thread read from its head and its newest window", () => {
     await store.older("a");
     expect(host.asked.length).toBe(asked);
   });
+
+  it("keeps the host's word that its caps dropped the thread's oldest events, from the window or a page", async () => {
+    const host = fakeHost(Array.from({ length: 250 }, (_, i) => delta("a", `line ${i}`)));
+    const page = host.api.sessionPage!.bind(host.api);
+    let cut = false;
+    host.api.sessionPage = async (...args) => ({ ...(await page(...args)), ...(cut ? { trimmed: true as const } : {}) });
+    const store = createTranscripts();
+    store.bind(host.api);
+    await store.open(WS, "a");
+    expect(store.get("a")!.trimmed).toBe(false);
+    cut = true;
+    await store.older("a");
+    expect(store.get("a")).toMatchObject({ complete: true, trimmed: true });
+  });
 });
 
 describe("warming tiles", () => {

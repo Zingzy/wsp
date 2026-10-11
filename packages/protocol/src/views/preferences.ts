@@ -311,15 +311,18 @@ export const ThreadHead = z.object({
   events: z.array(SessionEvent),
   pos: z.number().int().nonnegative(),
   total: z.number().int().nonnegative(),
+  /** The transcript's caps dropped older events of the thread, which nothing can read again. */
+  trimmed: z.literal(true).optional(),
 });
 export type ThreadHead = z.infer<typeof ThreadHead>;
 
 /** One page of a thread's events out of sessions.history: the newest ones under `before`, oldest first, with pos and
- * total as ThreadHead carries them. */
+ * total and trimmed as ThreadHead carries them. */
 export const HistoryPage = z.object({
   events: z.array(SessionEvent),
   pos: z.number().int().nonnegative(),
   total: z.number().int().nonnegative(),
+  trimmed: z.literal(true).optional(),
 });
 export type HistoryPage = z.infer<typeof HistoryPage>;
 

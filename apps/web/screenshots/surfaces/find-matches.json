@@ -1,0 +1,19 @@
+{
+  "at": "/",
+  "fixture": "find",
+  "widths": [
+    1440,
+    390
+  ],
+  "reason": "The find bar rides the transcript's top right corner at 420px and shrinks with the column, so 1440 and 390 hold every layout it takes.",
+  "steps": [
+    "390:key:Escape",
+    "390:sidebar=trigger",
+    "row-id=thread:find-claude",
+    "390:key:Escape",
+    "testid=composer-editor",
+    "key:ControlOrMeta+f",
+    "type:refresh token"
+  ],
+  "wait": "thread-find=whole"
+}

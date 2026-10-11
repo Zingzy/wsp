@@ -49,6 +49,22 @@ export function workEntryDisplayLabel(entry: WorkLogEntry, workspaceRoot: string
   return prose(`${heading.charAt(0).toUpperCase()}${heading.slice(1)}`);
 }
 
+/** Whether a tool row opens onto more than its label says. */
+export function workEntryCanExpand(entry: WorkLogEntry, labelText: string): boolean {
+  const detail = entry.detail?.trim();
+  return Boolean(entry.command?.trim() || (detail && detail !== labelText) || entry.changedFiles?.length);
+}
+
+/** What an opened tool row shows under its label: the command, the detail and the paths it touched. */
+export function workEntryBody(entry: WorkLogEntry, workspaceRoot: string | undefined): string | null {
+  const blocks: string[] = [];
+  if (entry.command?.trim()) blocks.push(entry.command.trim());
+  if (entry.detail?.trim()) blocks.push(entry.detail.trim());
+  const changedFiles = entry.changedFiles ?? [];
+  if (changedFiles.length > 0) blocks.push(changedFiles.map(path => formatWorkspaceRelativePath(path, workspaceRoot)).join("\n"));
+  return blocks.length > 0 ? blocks.join("\n\n") : null;
+}
+
 export function liveWorkEntryLabel(
   entry: WorkLogEntry,
   workspaceRoot: string | undefined,

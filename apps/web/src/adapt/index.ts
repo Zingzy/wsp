@@ -6,6 +6,7 @@ export * from "./view-model.js";
 export { deriveSession, isPromptOpen, launchIn, subagentEntries, subagentOfRun, subagentRunOf, summarizeOutput, commandFirstLine, type SessionModel, type DeriveSessionOptions } from "./session.js";
 export {
   deriveMessagesTimelineRows,
+  entryHiders,
   entryTurnId,
   summarizeToolGroup,
   toolGroupAction,

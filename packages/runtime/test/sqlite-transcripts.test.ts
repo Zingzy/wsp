@@ -263,6 +263,35 @@ describe("a runtime whose store keeps transcripts as rows", () => {
     expect(rows.search).toBe(blobs.search);
   });
 
+  it("marks a thread the caps took events from on its head and its pages, in state.db, across a restart", async () => {
+    const lines = (prompt: string): { kind: "text"; text: string }[] => Array.from({ length: prompt.startsWith("busy") ? 1800 : 1 }, (_, i) => ({ kind: "text", text: `${prompt} ${i}` }));
+    const { store, statePath } = freshSqlite();
+    const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: scripted(lines) } });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
+    const quiet = await rt.sessions.start(ws.id, { prompt: "quiet" });
+    await quiet.finished;
+    const busy = await rt.sessions.start(ws.id, { prompt: "busy 1" });
+    await busy.finished;
+    const busyId = busy.view().threadId!;
+    const quietId = quiet.view().threadId!;
+    expect((await rt.sessions.page(ws.id, { threadId: busyId })).trimmed).toBeUndefined();
+    for (const n of [2, 3]) await (await rt.sessions.start(ws.id, { prompt: `busy ${n}`, thread: busyId })).finished;
+    expect((await rt.sessions.page(ws.id, { threadId: busyId })).trimmed).toBe(true);
+    expect((await rt.sessions.head(busyId)).trimmed).toBe(true);
+    expect((await rt.sessions.page(ws.id, { threadId: quietId })).trimmed).toBeUndefined();
+    expect((await rt.sessions.head(quietId)).trimmed).toBeUndefined();
+    await rt.close();
+    const d = openDb(statePath);
+    const index = (d.prepare("select json from transcript_index where workspace = ?").get(ws.id) as { json: string } | undefined)?.json;
+    d.close();
+    expect(JSON.parse(index!).trimmed).toEqual([busyId]);
+    const again = createRuntime({ backend: stubBackend(), store, adapters: {} });
+    expect((await again.sessions.page(ws.id, { threadId: busyId })).trimmed).toBe(true);
+    expect((await again.sessions.head(busyId)).trimmed).toBe(true);
+    expect((await again.sessions.page(ws.id, { threadId: quietId })).trimmed).toBeUndefined();
+    await again.close();
+  });
+
   it("forgets a thread's rows, and search no longer finds its words", async () => {
     const { store } = freshSqlite();
     const refused: HarnessAdapterFactory = () => ({

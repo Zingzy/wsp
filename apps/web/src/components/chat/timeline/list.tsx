@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Adapted from pingdotgg/t3code apps/web/src/components/chat/MessagesTimeline.tsx at 57a66608 (MIT).
 // Differs from upstream: store hooks are props (threadKey replaces the route and thread refs, expansion state is local, checkpoint data and callbacks arrive as optional props); rows come from the adapter; attachments, subagent rows, citations, user-message decorations, artifact templates, editor menus and the load-earlier header are removed.
-import { deriveMessagesTimelineRows, type MessageId, type MessagesTimelineRow, type ProviderSkill, type TimelineEntry, type TimestampFormat, type TurnDiffSummary, type TurnId, type TurnSummary } from "../adapt";
+import { deriveMessagesTimelineRows, entryHiders, type DeriveRowsInput, type MessageId, type MessagesTimelineRow, type ProviderSkill, type TimelineEntry, type TimestampFormat, type TurnDiffSummary, type TurnId, type TurnSummary } from "../adapt";
 import { resolveChatListAnchoredEndSpace } from "../../../lib/chatList";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
@@ -16,6 +16,8 @@ import { deriveTimelineMinimapItems, resolveTimelineRowTop, resolveTimelineRowHe
 import { TimelineRowContent } from "./rows";
 import { useSpawnedChildren } from "../../threads/SpawnTiles";
 import type { AnswerPrompt } from "../answerPrompt";
+import type { FindMatch } from "../find/search";
+import { revealMatch } from "../find/store";
 
 const NOOP_OPEN_TURN_DIFF = (_turnId: TurnId, _filePath?: string) => {};
 const NOOP_REWIND = (_messageId: MessageId) => {};
@@ -101,6 +103,52 @@ export interface MessagesTimelineProps {
   onQuote?: (quote: QuotedSelection) => void;
   /** Asks for the thread's older events once the reader is within two screens of the oldest row held. */
   onReachTop?: () => void;
+  /** Hands find in thread what it needs of the list, live while the list is mounted; a switch mounts the next list
+   * before the last one lets go, so a caller keeps the newest handle it was given. */
+  onFinder?: (handle: TimelineFinder, live: boolean) => void;
+}
+
+/** What find in thread asks of the transcript on screen. */
+export interface TimelineFinder {
+  /** The element every row is drawn inside. */
+  readonly viewport: HTMLElement;
+  /** The transcript's own scroller. */
+  scroller(): HTMLElement | null;
+  /** The index among the entries of the newest one at or above the bottom of what the reader sees; -1 for none. */
+  bottomEntry(): number;
+  /** Opens the turn and the run of tool calls hiding the match's entry, and brings its row into view. */
+  show(match: FindMatch): void;
+}
+
+/** The set with `from` taken out and `to` put in, the same set where neither moves it. */
+function swap(open: ReadonlySet<string>, from: string | null, to: string | null): ReadonlySet<string> {
+  const drop = from !== null && from !== to && open.has(from);
+  const add = to !== null && !open.has(to);
+  if (!drop && !add) return open;
+  const next = new Set(open);
+  if (drop) next.delete(from);
+  if (add) next.add(to);
+  return next;
+}
+
+/** The entries a row draws, by id. */
+function rowEntryIds(row: MessagesTimelineRow): ReadonlyArray<string> {
+  switch (row.kind) {
+    case "message":
+    case "proposed-plan":
+    case "permission":
+    case "subagent":
+      return [row.id];
+    case "work":
+    case "work-live":
+      return row.groupedEntries.map(e => e.id);
+    case "work-toggle":
+      return [row.id.slice("work-toggle:".length)];
+    case "spawn":
+      return [row.id.slice("spawn:".length)];
+    default:
+      return [];
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -144,6 +192,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   replyRuns = null,
   onQuote,
   onReachTop,
+  onFinder,
 }: MessagesTimelineProps) {
   const latestTurn = turns[turns.length - 1] ?? null;
   // A switch keeps the list it leaves mounted until the next one paints, and that list letting go of its handle
@@ -293,6 +342,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     [timelineEntries, turns, expandedTurnIds, expandedWorkGroupIds, isWorking, activeTurnStartedAt, waitingOn, openRun, spawned],
   );
   const rows = useStableRows(rawRows);
+  const deriveInput = useRef<DeriveRowsInput | null>(null);
+  deriveInput.current = { timelineEntries, turns, isWorking, activeTurnStartedAt, waitingOn, openRun, ...(spawned !== undefined ? { children: spawned } : {}) };
   const minimapItems = useMemo(() => deriveTimelineMinimapItems(rows), [rows]);
   const rowsRef = useRef(rows);
   rowsRef.current = rows;
@@ -447,6 +498,84 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       document.removeEventListener("selectstart", onSelectStart);
     };
   }, [timelineViewportElement]);
+
+  // Find in thread: which entry each row draws last, and a match's row brought into view once its folds are open.
+  const rowEntryIndex = useMemo(() => {
+    const at = new Map(timelineEntries.map((e, i) => [e.id, i]));
+    const out = new Map<string, number>();
+    let last = -1;
+    for (const row of rows) {
+      for (const id of rowEntryIds(row)) last = Math.max(last, at.get(id) ?? last);
+      out.set(row.id, last);
+    }
+    return out;
+  }, [rows, timelineEntries]);
+  const rowEntryIndexRef = useRef(rowEntryIndex);
+  rowEntryIndexRef.current = rowEntryIndex;
+  const expandedRef = useRef({ turns: expandedTurnIds, groups: expandedWorkGroupIds });
+  expandedRef.current = { turns: expandedTurnIds, groups: expandedWorkGroupIds };
+  /** The folds find opened for the match it shows, closed again when it moves on; one the person opened stays. */
+  const findOpened = useRef<{ turn: string | null; group: string | null }>({ turn: null, group: null });
+  const pendingShow = useRef<string | null>(null);
+  /** Brings the row drawing the entry into view unless it already is; false while no row draws it yet. */
+  const scrollToEntry = useCallback(
+    (entryId: string): boolean => {
+      const shown = rowsRef.current;
+      const index = shown.findIndex(row => row.kind !== "work-toggle" && row.kind !== "work-live" && rowEntryIds(row).includes(entryId));
+      if (index < 0) return false;
+      const scroller = ownList.current?.getScrollableNode();
+      const element = timelineViewportElement?.querySelector(`[data-timeline-row-id="${CSS.escape(shown[index]!.id)}"]`) ?? null;
+      if (scroller != null && element !== null) {
+        const box = scroller.getBoundingClientRect();
+        const rect = element.getBoundingClientRect();
+        if (rect.bottom > box.top && rect.top < box.bottom) return true;
+      }
+      void ownList.current?.scrollToIndex({ index, animated: false, viewPosition: 0.4 });
+      return true;
+    },
+    [timelineViewportElement],
+  );
+  useLayoutEffect(() => {
+    if (pendingShow.current !== null && scrollToEntry(pendingShow.current)) pendingShow.current = null;
+  }, [rows, scrollToEntry]);
+  useLayoutEffect(() => {
+    if (onFinder === undefined || timelineViewportElement === null) return;
+    const handle: TimelineFinder = {
+      viewport: timelineViewportElement,
+      scroller: () => ownList.current?.getScrollableNode() ?? null,
+      bottomEntry: () => {
+        const scroller = ownList.current?.getScrollableNode();
+        if (scroller == null) return -1;
+        const inset = parseFloat(getComputedStyle(scroller).getPropertyValue("--chat-composer-inset")) || 0;
+        const limit = scroller.getBoundingClientRect().bottom - inset;
+        let best = -1;
+        for (const element of timelineViewportElement.querySelectorAll<HTMLElement>("[data-timeline-row-id]")) {
+          const rect = element.getBoundingClientRect();
+          if (rect.height > 0 && rect.top < limit) best = Math.max(best, rowEntryIndexRef.current.get(element.dataset.timelineRowId ?? "") ?? -1);
+        }
+        return best;
+      },
+      show: match => {
+        const input = deriveInput.current;
+        if (input === null) return;
+        const { turnId, groupId } = entryHiders(input, match.entryId);
+        const { turns, groups } = expandedRef.current;
+        const was = findOpened.current;
+        const turn = turnId !== null && (!turns.has(turnId) || was.turn === turnId) ? turnId : null;
+        const group = groupId !== null && (!groups.has(groupId) || was.group === groupId) ? groupId : null;
+        findOpened.current = { turn, group };
+        revealMatch(match);
+        const turnsNext = swap(turns, was.turn, turn);
+        const groupsNext = swap(groups, was.group, group);
+        if (turnsNext === turns && groupsNext === groups && scrollToEntry(match.entryId)) return;
+        pendingShow.current = match.entryId;
+        setExpandedTurnIds(turnsNext);
+        setExpandedWorkGroupIds(groupsNext);
+      },
+    };
+    onFinder(handle, true);
+    return () => onFinder(handle, false);
+  }, [onFinder, timelineViewportElement, scrollToEntry]);
 
   const leadKey = spawned?.lead ?? null;
   const sharedState = useMemo<TimelineRowSharedState>(

@@ -24,6 +24,9 @@ import { Spaced } from "../ui/spaced";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { useStore } from "../../protocol/store";
+import { findPartAttrs } from "./find/highlights";
+import { useRevealOpen } from "./find/store";
+import { subagentPart } from "./find/text";
 
 const OPEN_PAGE = "Open its page";
 
@@ -37,14 +40,17 @@ function elapsedLine(run: SubagentRun): string | null {
 }
 
 export function SubagentFoldRow({
+  entryId,
   subagent,
   onAnswer,
 }: {
+  /** The fold's entry in the transcript, which find in thread opens it for; absent where find does not reach. */
+  entryId?: string;
   subagent: SubagentRun;
   onAnswer: AnswerPrompt;
 }) {
   const asking = subagent.prompts.some((p: PermissionPrompt) => p.outcome === null);
-  const [open, setOpen] = useState(asking);
+  const [open, setOpen] = useRevealOpen(entryId ?? "", asking);
   const [asked, setAsked] = useState(asking);
   // A question arriving is the edge that opens this, not the fact that one is open: a person who shuts the fold
   // again while the same question waits keeps it shut, and the next question opens it once more.
@@ -86,10 +92,11 @@ export function SubagentFoldRow({
           {/* The rail hangs from the chevron's centre (half of size-3) and the body starts under the title (size-3
               plus the trigger's gap), so the fold's own header is what its contents line up with. */}
           <div className="flex min-w-0 flex-col gap-1 border-border/60 border-l pt-1 pl-[11px] ml-1.5" data-subagent-body="">
-            {subagent.lines.map(line => (
-              <div className="flex min-w-0 flex-col" data-subagent-line={line.kind} key={line.id}>
+            {subagent.lines.map((line, i) => (
+              <div className="flex min-w-0 flex-col" data-subagent-line={line.kind} key={line.id} {...(line.kind === "text" ? {} : { "data-find-tool": "" })}>
                 {line.label === "" ? null : (
                   <span
+                    {...(entryId === undefined ? {} : findPartAttrs(entryId, subagentPart(i, false)))}
                     className={
                       line.kind === "text"
                         ? "break-words whitespace-pre-wrap text-sm leading-relaxed text-foreground/80"
@@ -100,7 +107,7 @@ export function SubagentFoldRow({
                   </span>
                 )}
                 {line.detail === undefined ? null : (
-                  <span className="break-words whitespace-pre-wrap font-mono text-xs leading-4 text-muted-foreground" data-subagent-detail="">
+                  <span className="break-words whitespace-pre-wrap font-mono text-xs leading-4 text-muted-foreground" data-subagent-detail="" {...(entryId === undefined ? {} : findPartAttrs(entryId, subagentPart(i, true)))}>
                     {line.detail}
                   </span>
                 )}

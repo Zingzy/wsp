@@ -38,6 +38,8 @@ export interface HeldThread {
   readonly whole: boolean;
   /** Nothing older is left on the host. */
   readonly complete: boolean;
+  /** The host's caps dropped older events of the thread, so even a complete hold is not all it ever said. */
+  readonly trimmed: boolean;
   readonly bytes: number;
   /** Events may be missing. After a gap the rows held still stand and the newest are read again over them; after a
    * rewind, or a socket the host could not replay to, none can be trusted and the thread is read from its head. */
@@ -225,7 +227,7 @@ export function createTranscripts(clock: () => number = Date.now) {
   };
 
   /** Lays a reply over what is held of the thread, or starts holding it, with the live events its read missed. */
-  const land = (workspaceId: string, threadId: string, reply: { events: ReadonlyArray<SessionEvent>; pos: number; total: number; facts?: ThreadFacts }, whole: boolean): void => {
+  const land = (workspaceId: string, threadId: string, reply: { events: ReadonlyArray<SessionEvent>; pos: number; total: number; trimmed?: true; facts?: ThreadFacts }, whole: boolean): void => {
     saw(workspaceId, reply.pos);
     const at = now();
     const was = held.get(threadId);
@@ -256,6 +258,7 @@ export function createTranscripts(clock: () => number = Date.now) {
       total,
       whole: whole || (was?.whole === true && was.stale === false),
       complete: recorded(rows.events) >= total,
+      trimmed: reply.trimmed === true || was?.trimmed === true,
       bytes: sumBytes(rows.events),
       stale: false,
       epoch: ++epochs,
@@ -374,6 +377,7 @@ export function createTranscripts(clock: () => number = Date.now) {
           arrivals: [...taken.map(() => at), ...now.arrivals],
           total,
           complete: taken.length === 0 || recorded(events) >= total,
+          trimmed: now.trimmed || page.trimmed === true,
           bytes: now.bytes + sumBytes(taken),
           epoch: ++epochs,
         });

@@ -15,8 +15,8 @@ const LIVE_ACTIVITY_ROW_ID = "live-activity-row";
 export interface DeriveRowsInput {
   readonly timelineEntries: ReadonlyArray<TimelineEntry>;
   readonly turns: ReadonlyArray<TurnSummary>;
-  readonly expandedTurnIds?: ReadonlySet<string>;
-  readonly expandedWorkGroupIds?: ReadonlySet<string>;
+  readonly expandedTurnIds?: Pick<ReadonlySet<string>, "has">;
+  readonly expandedWorkGroupIds?: Pick<ReadonlySet<string>, "has">;
   readonly isWorking: boolean;
   readonly activeTurnStartedAt: string | null;
   /** The thread this one's running call is stopped behind, with that thread's open question; null when it is behind
@@ -227,6 +227,24 @@ export function deriveMessagesTimelineRows(input: DeriveRowsInput): MessagesTime
     rows.push({ kind: "thinking", id: LIVE_ACTIVITY_ROW_ID, createdAt: input.activeTurnStartedAt });
   }
   return rows;
+}
+
+const EVERY: Pick<ReadonlySet<string>, "has"> = { has: () => true };
+
+/** What keeps an entry off the page: the settled turn folded over it and the run of tool calls it is folded into, by
+ * the ids the rows open them with; null where nothing does. */
+export function entryHiders(input: DeriveRowsInput, entryId: string): { readonly turnId: string | null; readonly groupId: string | null } {
+  const entries = input.timelineEntries;
+  const latest = input.turns[input.turns.length - 1] ?? null;
+  const unsettledTurnId = latest !== null && latest.state === "running" ? latest.turnId : null;
+  const { folds } = deriveTurnFolds(entries, terminalAssistantMessageIds(entries), new Map(input.turns.map(t => [t.turnId, t])), unsettledTurnId);
+  let turnId: string | null = null;
+  for (const fold of folds.values()) if (fold.hiddenEntryIds.has(entryId)) turnId = fold.turnId;
+  let groupId: string | null = null;
+  for (const row of deriveMessagesTimelineRows({ ...input, expandedTurnIds: EVERY, expandedWorkGroupIds: EVERY })) {
+    if (row.kind === "work" && row.isExpandedToolGroup && row.groupedEntries.some(e => e.id === entryId)) groupId = row.id.slice(0, -":details".length);
+  }
+  return { turnId, groupId };
 }
 
 /** Another thread's open question as this thread's own row: the turn it belongs to is not one of these, so it hangs

@@ -67,6 +67,14 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+shift+e", command: "thread.settle", when: "!terminalFocus" },
   { key: "mod+alt+u", command: "thread.nextNeedsYou", when: "!terminalFocus" },
   { key: "mod+o", command: "editor.open", when: "!terminalOwnsMod" },
+  // Find in thread takes the browser's own find over a thread, which cannot see the rows a virtualized list leaves
+  // out; anywhere else, Settings or an empty window, the key stays the browser's. Older comes first on Enter and G,
+  // as in VS Code's terminal and chat find, since a thread opens at its newest end.
+  { key: "mod+f", command: "thread.find", when: "threadOpen && !terminalFocus && !previewFocus" },
+  { key: "mod+g", command: "thread.findOlder", when: "threadFindOpen && !terminalFocus" },
+  { key: "f3", command: "thread.findOlder", when: "threadFindOpen && !terminalFocus" },
+  { key: "mod+shift+g", command: "thread.findNewer", when: "threadFindOpen && !terminalFocus" },
+  { key: "shift+f3", command: "thread.findNewer", when: "threadFindOpen && !terminalFocus" },
   { key: "ctrl+tab", command: "workspace.next", when: "!terminalFocus && !panelTabsFocus" },
   { key: "ctrl+shift+tab", command: "workspace.previous", when: "!terminalFocus && !panelTabsFocus" },
   { key: "ctrl+tab", command: "rightPanel.nextTab", when: "panelTabsFocus" },
