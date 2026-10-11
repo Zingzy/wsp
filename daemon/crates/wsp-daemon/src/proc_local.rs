@@ -559,13 +559,17 @@ mod tests {
         // in a reading, however much of this box the rest of it is using.
         let dir = tempfile::tempdir().unwrap();
         let stop = dir.path().join("stop");
-        let mut burn = std::process::Command::new("bash")
-            .args(["-c", &format!("while [ ! -f {} ]; do :; done; sleep 300", stop.display())])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .spawn()
-            .unwrap();
-        let pid = burn.id();
+        // The shell becomes the sleep, so the one pid the guard ends is the whole of it, and a test that fails before
+        // the stop file is written leaves no loop spinning a core.
+        let burn = Ended(
+            std::process::Command::new("bash")
+                .args(["-c", &format!("while [ ! -f {} ]; do :; done; exec sleep 300", stop.display())])
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .spawn()
+                .unwrap(),
+        );
+        let pid = burn.0.id();
         // Busy in the window it burned in.
         let spent = scan_until(&source, pid, "busy in a window", |r| r.is_some_and(|p| p.cpu > 0.0));
         assert!(spent.cpu > 0.0);
@@ -578,8 +582,16 @@ mod tests {
         assert_eq!(after.cpu, 0.0);
         // The start time held still across every scan, though the elapsed column moved a second at a time.
         assert_eq!(spent.started_at, after.started_at);
-        burn.kill().unwrap();
-        burn.wait().unwrap();
+    }
+
+    /// A child the test started, killed and reaped however the test ends.
+    struct Ended(std::process::Child);
+
+    impl Drop for Ended {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
     }
 
     #[test]

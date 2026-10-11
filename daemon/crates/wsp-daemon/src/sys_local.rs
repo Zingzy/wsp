@@ -289,16 +289,28 @@ mod tests {
         let page_line =
             |text: &str| -> u64 { text.split_once("page size of ").unwrap().1.split_whitespace().next().unwrap().parse().unwrap() };
         // Read on either side of vm_stat, so its figure falls between the two give or take what moves in a moment; a
-        // speculative page counted twice reads more than a hundred megabytes off, past the window.
-        let before = darwin::DarwinHost.memory().unwrap();
-        let vm_stat = String::from_utf8(Command::new("vm_stat").output().unwrap().stdout).unwrap();
-        let after = darwin::DarwinHost.memory().unwrap();
-        let available = (vm_stat_pages(&vm_stat, "free") + vm_stat_pages(&vm_stat, "speculative") + vm_stat_pages(&vm_stat, "inactive"))
-            * page_line(&vm_stat);
-        let printed = before.total.saturating_sub(available) as i64;
-        let (low, high) = (before.used.min(after.used) as i64, before.used.max(after.used) as i64);
+        // speculative page counted twice reads more than a hundred megabytes off, past the window. The kernel rate-limits
+        // host_statistics64 for programs Apple did not ship and answers a busy machine's with its last figure, while
+        // vm_stat is exempt and reads fresh, so a try can compare a stale read with a new one: up to three tries a
+        // second apart, and a double count misses every one.
         const WINDOW: i64 = 32 * 1024 * 1024;
-        assert!(printed >= low - WINDOW && printed <= high + WINDOW, "vm_stat says {printed} used, this read {low} to {high}");
+        let mut tries = Vec::new();
+        for _ in 0..3 {
+            let before = darwin::DarwinHost.memory().unwrap();
+            let vm_stat = String::from_utf8(Command::new("vm_stat").output().unwrap().stdout).unwrap();
+            let after = darwin::DarwinHost.memory().unwrap();
+            let available =
+                (vm_stat_pages(&vm_stat, "free") + vm_stat_pages(&vm_stat, "speculative") + vm_stat_pages(&vm_stat, "inactive"))
+                    * page_line(&vm_stat);
+            let printed = before.total.saturating_sub(available) as i64;
+            let (low, high) = (before.used.min(after.used) as i64, before.used.max(after.used) as i64);
+            if printed >= low - WINDOW && printed <= high + WINDOW {
+                break;
+            }
+            tries.push(format!("vm_stat says {printed} used, this read {low} to {high}"));
+            std::thread::sleep(std::time::Duration::from_secs(1));
+        }
+        assert!(tries.len() < 3, "{tries:?}");
         let folder = std::env::current_dir().unwrap();
         let df = String::from_utf8(Command::new("df").args(["-kP"]).arg(&folder).output().unwrap().stdout).unwrap();
         let (printed, disk) = (parse_df(&df).unwrap(), darwin::DarwinHost.disk(&folder).unwrap());
