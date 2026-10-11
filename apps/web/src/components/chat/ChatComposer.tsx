@@ -76,7 +76,7 @@
 import { cn, isMacPlatform } from "../../lib/utils";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type ClipboardEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { PaperclipIcon } from "lucide-react";
-import { ASIDE_NO_SESSION_LINE, composerHeldLine, HERE_PLACE_ID, hereName, HOST_ASLEEP_SEND, isLocalWorkspace, signedOutLine, type AgentsTarget, FILES_MAX, FILE_MAX_WORDS, IMAGE_MAX_WORDS, IMAGE_TYPE_WORDS, TURN_IN_FLIGHT, movesRunningAccess, noImagesLine, readsImages, screenCommandLine, screenCommandTyped, screenCommandsOf, sendRefusal, steerFilesBlocked, type SendRefusalKind, type TurnLimit, type WorkspaceState } from "@wsp/protocol";
+import { AGENT_WARM_TYPED_MS, ASIDE_NO_SESSION_LINE, composerHeldLine, HERE_PLACE_ID, hereName, HOST_ASLEEP_SEND, isLocalWorkspace, signedOutLine, type AgentsTarget, FILES_MAX, FILE_MAX_WORDS, IMAGE_MAX_WORDS, IMAGE_TYPE_WORDS, TURN_IN_FLIGHT, movesRunningAccess, noImagesLine, readsImages, screenCommandLine, screenCommandTyped, screenCommandsOf, sendRefusal, steerFilesBlocked, type SendRefusalKind, type TurnLimit, type WorkspaceState } from "@wsp/protocol";
 import type { ConnStatus, WarmAgentOptions } from "../../protocol/client";
 import { hostAsleep } from "../../boot";
 import { projectHomeKey, useAbsentComputer, useHarnessCatalogs, useStore, useThreadSessions, useWorkspace, useWorkspaceState } from "../../protocol/store";
@@ -426,9 +426,11 @@ export function ChatComposer({
   const fastOffered = pickedModel?.fast === true;
   const fastOn = fastOffered && (fastPicked ?? latestRow?.fast === true);
   // A new thread's agent starts while the person types, so its own startup is behind it by the send: asked for each
-  // time the box takes focus, which gives one standing its window again or starts one where the last ran out, and on a
-  // changed agent or pick, which the host answers with a process launched at it.
-  const [focuses, setFocuses] = useState(0);
+  // time the box takes focus, which gives one standing its window again or starts one where the last ran out, on a
+  // changed agent or pick, which the host answers with a process launched at it, and on typing, at most once in
+  // AGENT_WARM_TYPED_MS.
+  const [asks, setAsks] = useState(0);
+  const askedAt = useRef(0);
   // Keyed by its words, so a render that rebuilds the same picks asks nothing. A home's send to several models opens
   // a copy for each, which no process started here serves.
   const warmAsk = ((): string | null => {
@@ -436,9 +438,10 @@ export function ChatComposer({
     return at === undefined ? null : JSON.stringify({ ...at, harness: harnessId, ...sendPicks(pinned, startOptions), ...(fastOn ? { fast: true } : {}) } satisfies WarmAgentOptions);
   })();
   useEffect(() => {
-    if (focuses === 0 || warmAsk === null || api?.warmAgent === undefined) return;
+    if (asks === 0 || warmAsk === null || api?.warmAgent === undefined) return;
+    askedAt.current = Date.now();
     void api.warmAgent(JSON.parse(warmAsk) as WarmAgentOptions).catch(() => {});
-  }, [api, focuses, warmAsk]);
+  }, [api, asks, warmAsk]);
   const stopPending = stop !== null && runningTurn !== null && stop.turnId === runningTurn.turnId;
   const canStop = runningTurn !== null && api?.interruptSession !== undefined;
   // The catalog answers before the click: a harness that steers takes the row into the turn, any other queues it.
@@ -523,7 +526,13 @@ export function ChatComposer({
 
   useComposerFocusRequest(workspaceId, editorRef);
 
-  const onChange = useCallback((value: string, cursor: number) => setDraft(workspaceId, { prompt: value, cursor }), [setDraft, workspaceId]);
+  const onChange = useCallback(
+    (value: string, cursor: number) => {
+      setDraft(workspaceId, { prompt: value, cursor });
+      if (asks > 0 && warmAsk !== null && Date.now() - askedAt.current >= AGENT_WARM_TYPED_MS) setAsks(n => n + 1);
+    },
+    [asks, setDraft, warmAsk, workspaceId],
+  );
 
   /** The one road every file takes into the composer: the paste, the drop and the picker all end here, so the caps
    * and the refusal words are said once. An image for an agent that reads none is turned away before it is read
@@ -580,7 +589,7 @@ export function ChatComposer({
       const carried = rowId === undefined ? files : (useComposerFilesStore.getState().queued[rowId] ?? []);
       const attachments = carried.map(attachmentOf);
       setSending(true);
-      setFocuses(0);
+      setAsks(0);
       hold(threadKey);
       appendUserTurn(prompt, requestId, carried.map(recordOf));
       // A send that names no thread opens one the runtime has written no row for, so the sidebar is handed the same
@@ -747,7 +756,7 @@ export function ChatComposer({
       }
       setDraft(workspaceId, EMPTY_DRAFT);
       // The send moves or drops the picks it named; an ask at what is left would end the process started for it.
-      setFocuses(0);
+      setAsks(0);
       if (waits) {
         enqueue(threadKey, prompt);
         return;
@@ -1110,7 +1119,7 @@ export function ChatComposer({
                     onPasteCapture={onPasteCapture}
                     onKeyDown={onStashKey}
                     onFocus={e => {
-                      if (!e.currentTarget.contains(e.relatedTarget)) setFocuses(n => n + 1);
+                      if (!e.currentTarget.contains(e.relatedTarget)) setAsks(n => n + 1);
                     }}
                   >
                     {onStart !== undefined ? <ComposerModelChips workspaceId={workspaceId} /> : null}
