@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 //! The two readings a machine answers a pane with, one module per kind. The Machine tab's Live rows ride the
 //! metrics module and the Processes tab rides the processes module. A machine wsp forks reads the guest's own
-//! /proc; this computer reads its own host with ps, df and the platform's counters, because the /proc road reads
-//! nothing at all on a Mac and left both panes at pending. A kind with no row here refuses the watch with what the
+//! /proc; this computer reads its own host by the roads its system has, because the /proc road reads nothing at all
+//! on a Mac and left both panes at pending. A kind with no row here refuses the watch with what the
 //! pane prints, so no slot waits on a stream that never comes. Adding a kind is a row here and its two modules,
 //! and the words table in the protocol says the same about it for the panes that cannot ask a daemon at all.
 
@@ -13,7 +13,7 @@ use wsp_frames::{numbers, words, DaemonErrorCode, WorkspaceKind};
 
 use crate::paths::OpError;
 use crate::proc::{ProcFsSource, ProcSource};
-use crate::proc_local::{ports_of_pid_road, LocalProcSource};
+use crate::proc_local::{road_for, LocalProcSource};
 use crate::sys::{ProcSysSource, SysSource};
 use crate::sys_local::HostSysSource;
 
@@ -45,11 +45,11 @@ static PROC_READINGS: KindReadings = KindReadings {
     processes: |o| Arc::new(ProcFsSource::new(o.proc_root.clone(), o.passwd_path.clone(), numbers::PROC_CAP)),
 };
 
-/// What a daemon reads on a computer that is not a Linux guest: its own host, with ps, df and the platform's own
-/// counters, because the /proc road reads nothing at all on a Mac and left both panes at pending.
+/// What a daemon reads on a computer that is not a Linux guest: its own host, by the roads its system has, because the
+/// /proc road reads nothing at all on a Mac and left both panes at pending.
 static HOST_READINGS: KindReadings = KindReadings {
     metrics: |o| Arc::new(HostSysSource::new(o.work_folder.clone())),
-    processes: |o| Arc::new(LocalProcSource::new(None, ports_of_pid_road(o.platform), numbers::PROC_CAP)),
+    processes: |o| Arc::new(LocalProcSource::new(None, road_for(o.platform), numbers::PROC_CAP)),
 };
 
 /// Which modules a kind reads with.
@@ -126,7 +126,7 @@ mod tests {
 
     #[test]
     fn picks_a_places_two_modules_by_the_system_it_is_on_which_is_the_one_platform_switch_there_is() {
-        // On Linux a place reads its own /proc, as a fork does; elsewhere it reads its own host with ps and df,
+        // On Linux a place reads its own /proc, as a fork does; elsewhere it reads its own host,
         // which is what answers on a Mac: the /proc road reads nothing there and left both panes at pending.
         assert!(std::ptr::eq(readings_for("place", "linux").unwrap(), readings_for("cloud", "linux").unwrap()));
         assert!(std::ptr::eq(readings_for("place", "macos").unwrap(), readings_for("local", "linux").unwrap()));

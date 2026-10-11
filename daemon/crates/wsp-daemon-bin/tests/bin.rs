@@ -388,6 +388,116 @@ async fn stops_probing_once_the_pty_exits_even_with_the_client_still_attached() 
     d.child.kill().await.unwrap();
 }
 
+/// A Mac's daemon reads its processes and ports off the kernel. With ps and lsof first on its PATH as programs that
+/// write down every run and then run the real one, a dev server under a shell, as a thread starts one, is found by the
+/// shell it runs under and by the folder it runs in, listed with its memory and inspected for its port and folder, and
+/// neither program runs.
+#[cfg(target_os = "macos")]
+#[tokio::test]
+async fn a_macs_daemon_finds_a_dev_server_and_its_port_without_running_ps_or_lsof() {
+    let dir = tempfile::tempdir().unwrap();
+    let token = dir.path().join("token");
+    std::fs::write(&token, "modes-token\n").unwrap();
+    let bin = dir.path().join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let ran = dir.path().join("ran");
+    for (name, real) in [("ps", "/bin/ps"), ("lsof", "/usr/sbin/lsof")] {
+        let stub = bin.join(name);
+        std::fs::write(&stub, format!("#!/bin/sh\necho {name} \"$@\" >> {}\nexec {real} \"$@\"\n", ran.display())).unwrap();
+        std::fs::set_permissions(&stub, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    }
+    let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap_or_default());
+    let mut child = Command::new(BIN)
+        .args(["--host", "127.0.0.1", "--port", "0", "--kind", "local", "--ports-interval-ms", "50", "--proc-interval-ms", "100"])
+        .arg("--token-path")
+        .arg(&token)
+        .arg("--root")
+        .arg(dir.path())
+        .env("PATH", path)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap();
+    let mut stdout = BufReader::new(child.stdout.take().unwrap()).lines();
+    let line = tokio::time::timeout(Duration::from_secs(10), stdout.next_line()).await.unwrap().unwrap().unwrap();
+    let port: u16 = line.strip_prefix("wsp-daemon listening on 127.0.0.1:").expect("the listening line").parse().unwrap();
+
+    std::fs::create_dir_all(dir.path().join("app")).unwrap();
+    let app = dir.path().join("app").canonicalize().unwrap();
+    let server = "use IO::Socket::INET; $s = IO::Socket::INET->new(Listen => 1, LocalAddr => q(127.0.0.1:0)) or die; \
+                  print $s->sockport, qq(\\n); STDOUT->flush; sleep 60";
+    // The shell stays as the server's parent, the way a turn's shell holds what it started, and leads a group of
+    // its own, which the guard ends whole however the test ends.
+    let mut shell = Command::new("/bin/sh")
+        .args(["-c", &format!("/usr/bin/perl -e '{server}' & wait")])
+        .current_dir(&app)
+        .process_group(0)
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let root = u64::from(shell.id().unwrap());
+    let _group = Group(root as i32);
+    let mut said = BufReader::new(shell.stdout.take().unwrap()).lines();
+    let held: u64 = tokio::time::timeout(Duration::from_secs(10), said.next_line()).await.unwrap().unwrap().unwrap().parse().unwrap();
+
+    let mut c = Peer::connect(port).await;
+    let rooted = c.request("ports.watch", json!({ "roots": [root] })).await;
+    let mut by_folder = Peer::connect(port).await;
+    let foldered = by_folder.request("ports.watch", json!({ "roots": [], "folder": app })).await;
+    assert_eq!(c.request("proc.watch", json!({})).await["ok"], true);
+    assert!(c.wait_event("proc.snapshot", Duration::from_secs(5), |_| true).await, "{:?}", c.frames);
+    let snapshot = c.events("proc.snapshot")[0].clone();
+    let procs = snapshot["procs"].as_array().unwrap();
+    let server_row = procs.iter().find(|p| p["ppid"] == root).expect("the server is a row under its shell").clone();
+    let inspected = c.request("proc.inspect", json!({ "pid": server_row["pid"] })).await;
+    let top_mem = top_mem_bytes(server_row["pid"].as_u64().unwrap());
+    // Every road read at least once and both watches went round several times.
+    c.listen(Duration::from_millis(500)).await;
+    child.kill().await.unwrap();
+
+    assert!(!ran.exists(), "the daemon ran {}", std::fs::read_to_string(&ran).unwrap_or_default());
+    let has = |reply: &Value| reply["ports"].as_array().unwrap().iter().any(|p| p["port"] == held && p["pid"] == server_row["pid"]);
+    assert!(has(&rooted), "by its shell: {rooted}");
+    assert!(has(&foldered), "by its folder: {foldered}");
+    // The memory column is what Activity Monitor and top show, the physical footprint; ps's resident set reads a
+    // sleeping perl at more than twice it.
+    let memory = server_row["rss"].as_u64().unwrap() as f64;
+    assert!((memory - top_mem).abs() / top_mem < 0.1, "the row says {memory} bytes, top says {top_mem}: {server_row}");
+    assert_eq!(server_row["comm"], "perl", "{server_row}");
+    assert!(server_row["cmdline"].as_str().unwrap().starts_with("/usr/bin/perl -e use IO::Socket::INET;"), "{server_row}");
+    assert_eq!((&inspected["ports"], &inspected["cwd"]), (&json!([held]), &json!(app)), "{inspected}");
+}
+
+/// One process's memory as top prints it, `1296K` or `1.3M`, with the trend mark top adds after it dropped.
+#[cfg(target_os = "macos")]
+fn top_mem_bytes(pid: u64) -> f64 {
+    let out = std::process::Command::new("/usr/bin/top").args(["-l", "1", "-pid", &pid.to_string(), "-stats", "pid,mem"]).output().unwrap();
+    let text = String::from_utf8_lossy(&out.stdout).into_owned();
+    let line = text.lines().last().unwrap_or_default();
+    let mem = line.split_whitespace().nth(1).unwrap_or_else(|| panic!("top printed {text}")).trim_end_matches(['+', '-']);
+    let (number, unit) = mem.split_at(mem.len() - 1);
+    let scale = match unit {
+        "B" => 1.0,
+        "K" => 1024.0,
+        "M" => 1024.0 * 1024.0,
+        "G" => 1024.0 * 1024.0 * 1024.0,
+        _ => panic!("top printed {mem}"),
+    };
+    number.parse::<f64>().unwrap_or_else(|_| panic!("top printed {mem}")) * scale
+}
+
+/// A process group the test started, ended whole when the test lets go of it.
+#[cfg(target_os = "macos")]
+struct Group(i32);
+
+#[cfg(target_os = "macos")]
+impl Drop for Group {
+    fn drop(&mut self) {
+        let _ = std::process::Command::new("/bin/kill").args(["-KILL", "--", &format!("-{}", self.0)]).status();
+    }
+}
+
 /// A daemon spawned plain, its process a thing the test can count threads and fds of.
 async fn plain_daemon(env_without: Option<&str>) -> (tempfile::TempDir, tokio::process::Child, u16) {
     let dir = tempfile::tempdir().unwrap();

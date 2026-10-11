@@ -1,12 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-//! This computer's own utilisation, the metrics module of the local kind: disk from one df on the folder turns
-//! write in, which reads the same on macOS and on Linux; cpu, load and memory from the road the platform answers
-//! honestly on, one module per system below. On Linux that is the host's own /proc; on a Mac the mach counters,
-//! getloadavg, and vm_stat for the memory the kernel would hand out without taking it from anything running.
+//! This computer's own utilisation, the metrics module of the local kind: cpu, load, memory and the disk the folder
+//! turns write in is on, from the road the platform answers honestly on, one module per system below. On Linux that
+//! is the host's own /proc and one df; on a Mac the mach counters, getloadavg and statfs, with nothing spawned, since
+//! the readings kept for the Machine tab sample every fifteen seconds whether or not anyone looks.
 
-#[cfg(not(target_os = "macos"))]
-use std::path::Path;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use wsp_frames::Usage;
@@ -15,6 +13,7 @@ use crate::pty::work_argv;
 use crate::sys::{CpuTimes, SysReadings, SysSource};
 
 /// df's numbers are in 1024-byte blocks under -k.
+#[cfg_attr(target_os = "macos", cfg(test))]
 const BLOCK: u64 = 1024;
 
 /// One of this computer's small readers, in the C locale: df, ps and vm_stat all print numbers and column headers
@@ -29,6 +28,7 @@ pub(crate) fn host_command(file: &str, args: &[&str]) -> Command {
 
 /// The three counts and the capacity df -kP prints for one filesystem: blocks, used, available, then a percentage.
 /// Read from the percentage backwards, since a device name or a mount point may hold spaces and the numbers may not.
+#[cfg_attr(target_os = "macos", cfg(test))]
 pub(crate) fn parse_df(text: &str) -> Result<Usage, String> {
     let tokens: Vec<&str> = text.split_whitespace().collect();
     let digits = |t: &str| !t.is_empty() && t.bytes().all(|b| b.is_ascii_digit());
@@ -43,35 +43,13 @@ pub(crate) fn parse_df(text: &str) -> Result<Usage, String> {
     Err("df printed no filesystem line".to_owned())
 }
 
-/// What a Mac can hand out without taking it from something running, out of vm_stat: pages that are free, pages
-/// read ahead on speculation, and the inactive list, which the kernel reclaims without asking. Purgeable pages are
-/// already counted inside those lists and are not added again. This is the reading MemAvailable is on Linux; the
-/// kernel's free count alone reads a Mac at rest as nearly full, because it holds everything else for reuse.
-/// Only a Mac runs it; every platform's tests pin its arithmetic.
-#[cfg_attr(not(target_os = "macos"), cfg(test))]
-pub(crate) fn available_from_vm_stat(text: &str) -> Result<u64, String> {
-    let page_size: u64 = text
-        .split_once("page size of ")
-        .and_then(|(_, rest)| rest.split_whitespace().next())
-        .and_then(|n| n.parse().ok())
-        .filter(|n| *n > 0)
-        .ok_or_else(|| "vm_stat printed no page size".to_owned())?;
-    let pages = |label: &str| -> Result<u64, String> {
-        let prefix = format!("Pages {label}:");
-        text.lines()
-            .find_map(|l| l.strip_prefix(prefix.as_str()))
-            .and_then(|rest| rest.trim().trim_end_matches('.').parse().ok())
-            .ok_or_else(|| format!("vm_stat printed no {label} pages"))
-    };
-    Ok((pages("free")? + pages("speculative")? + pages("inactive")?) * page_size)
-}
-
-/// The three readings of this computer that the platform answers differently: cpu counters, the one-minute load,
-/// and memory. Adding a platform is a row in host_machine and its module.
+/// The four readings of this computer that the platform answers differently: cpu counters, the one-minute load,
+/// memory, and the disk a folder is on. Adding a platform is a row in host_machine and its module.
 pub(crate) trait HostMachine: Send + Sync {
     fn cpu(&self) -> Result<CpuTimes, String>;
     fn load1(&self) -> Result<f64, String>;
     fn memory(&self) -> Result<Usage, String>;
+    fn disk(&self, folder: &Path) -> Result<Usage, String>;
 }
 
 /// The Linux host reads its own /proc, which is what the guest's road reads too; the two modules differ only in
@@ -92,6 +70,11 @@ impl HostMachine for LinuxHost {
     fn memory(&self) -> Result<Usage, String> {
         let (total, available) = crate::sys::parse_meminfo(&crate::sys::read_named(Path::new("/proc/meminfo"))?)?;
         Ok(Usage { used: total.saturating_sub(available), total })
+    }
+
+    fn disk(&self, folder: &Path) -> Result<Usage, String> {
+        let df = host_command("df", &["-kP", &folder.to_string_lossy()]).output().map_err(|e| format!("df: {e}"))?;
+        parse_df(&String::from_utf8_lossy(&df.stdout))
     }
 }
 
@@ -143,10 +126,85 @@ mod darwin {
             if rc != 0 {
                 return Err("sysctl hw.memsize failed".to_owned());
             }
-            let output = host_command("vm_stat", &[]).output().map_err(|e| format!("vm_stat: {e}"))?;
-            let available = available_from_vm_stat(&String::from_utf8_lossy(&output.stdout))?;
-            Ok(Usage { used: total.saturating_sub(available), total })
+            let mut info = std::mem::MaybeUninit::<libc::vm_statistics64>::zeroed();
+            let mut count = libc::HOST_VM_INFO64_COUNT;
+            #[allow(deprecated)]
+            // SAFETY: mach writes at most `count` words into `info`, which is the struct that flavour names.
+            let rc = unsafe { libc::host_statistics64(libc::mach_host_self(), libc::HOST_VM_INFO64, info.as_mut_ptr().cast(), &mut count) };
+            if rc != libc::KERN_SUCCESS {
+                return Err(format!("host_statistics64 failed with {rc}"));
+            }
+            // SAFETY: the call succeeded, and a flavour the kernel filled short leaves the rest zeroed.
+            let info = unsafe { info.assume_init() };
+            // SAFETY: the kernel's page size, set before main runs and never written again.
+            let page = unsafe { vm_kernel_page_size } as u64;
+            Ok(Usage { used: total.saturating_sub(available_pages(&info) * page), total })
         }
+
+        /// The two numbers df -kP prints for the folder's volume: its size off statfs, and what the volume itself
+        /// holds. An APFS volume shares its container's free space with the system's own volumes, so the size less
+        /// the free space counts them too; df asks the volume for its own, and so does this, falling back to the
+        /// size less the free space on a volume that cannot say.
+        fn disk(&self, folder: &Path) -> Result<Usage, String> {
+            let path =
+                std::ffi::CString::new(folder.as_os_str().as_encoded_bytes()).map_err(|e| format!("statfs {}: {e}", folder.display()))?;
+            let mut fs = std::mem::MaybeUninit::<libc::statfs>::zeroed();
+            // SAFETY: statfs writes one struct of the type it is handed, and the path is a NUL-terminated string.
+            if unsafe { libc::statfs(path.as_ptr(), fs.as_mut_ptr()) } != 0 {
+                return Err(format!("statfs {}: {}", folder.display(), std::io::Error::last_os_error()));
+            }
+            // SAFETY: the call succeeded and filled it.
+            let fs = unsafe { fs.assume_init() };
+            let block = u64::from(fs.f_bsize);
+            let used = volume_used(&fs.f_mntonname).unwrap_or(fs.f_blocks.saturating_sub(fs.f_bfree) * block);
+            Ok(Usage { used, total: fs.f_blocks * block })
+        }
+    }
+
+    extern "C" {
+        /// The page the kernel's counts are in. vm_page_size is the process's own, which Rosetta makes 4 KB while the
+        /// kernel counts 16 KB pages, and an Intel build on Apple silicon counted a quarter of the free memory.
+        static vm_kernel_page_size: libc::vm_size_t;
+    }
+
+    /// The space a mounted volume itself holds, as getattrlist's ATTR_VOL_SPACEUSED answers it for its mount point.
+    fn volume_used(mount: &[libc::c_char]) -> Option<u64> {
+        /// The reply: its own length, then the one attribute asked for, packed on four bytes.
+        #[repr(C, packed(4))]
+        struct Reply {
+            length: u32,
+            used: libc::off_t,
+        }
+        let mut asked = libc::attrlist {
+            bitmapcount: libc::ATTR_BIT_MAP_COUNT,
+            reserved: 0,
+            commonattr: 0,
+            volattr: libc::ATTR_VOL_INFO | libc::ATTR_VOL_SPACEUSED,
+            dirattr: 0,
+            fileattr: 0,
+            forkattr: 0,
+        };
+        let mut reply = Reply { length: 0, used: 0 };
+        // SAFETY: the mount point is statfs's NUL-terminated name, and the reply buffer is as long as the size given.
+        let rc = unsafe {
+            libc::getattrlist(
+                mount.as_ptr(),
+                (&mut asked as *mut libc::attrlist).cast(),
+                (&mut reply as *mut Reply).cast(),
+                size_of::<Reply>(),
+                0,
+            )
+        };
+        let (length, used) = (reply.length, reply.used);
+        (rc == 0 && length as usize >= size_of::<Reply>() && used >= 0).then_some(used as u64)
+    }
+
+    /// What a Mac can hand out without taking it from something running: pages that are free, pages read ahead on
+    /// speculation, and the inactive list, which the kernel reclaims without asking. Purgeable pages are already
+    /// counted inside those lists and are not added again. This is the reading MemAvailable is on Linux; the kernel's
+    /// free count alone reads a Mac at rest as nearly full, because it holds everything else for reuse.
+    pub(crate) fn available_pages(info: &libc::vm_statistics64) -> u64 {
+        u64::from(info.free_count) + u64::from(info.speculative_count) + u64::from(info.inactive_count)
     }
 }
 
@@ -176,13 +234,11 @@ impl HostSysSource {
 
 impl SysSource for HostSysSource {
     fn read(&self) -> Result<SysReadings, String> {
-        let folder = self.work_folder.to_string_lossy();
-        let df = host_command("df", &["-kP", &folder]).output().map_err(|e| format!("df: {e}"))?;
         Ok(SysReadings {
             cpu: self.machine.cpu()?,
             load1: self.machine.load1()?,
             mem: self.machine.memory()?,
-            disk: parse_df(&String::from_utf8_lossy(&df.stdout))?,
+            disk: self.machine.disk(&self.work_folder)?,
         })
     }
 }
@@ -198,20 +254,6 @@ mod tests {
     /// A volume mounted under a name with a space in it, which is a Mac's normal state (Macintosh HD).
     const SPACED_DF: &str =
         "Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/disk4s2   1000000  400000    600000      40% /Volumes/Big Disk\n";
-    /// A Mac's vm_stat, whose free count alone reads this machine as 1.5 GB free of 16 GB while nothing is wrong.
-    const MAC_VM_STAT: &str = "Mach Virtual Memory Statistics: (page size of 16384 bytes)
-Pages free:                               98304.
-Pages active:                            393216.
-Pages inactive:                          262144.
-Pages speculative:                        32768.
-Pages throttled:                              0.
-Pages wired down:                        196608.
-Pages purgeable:                          16384.
-\"Translation faults\":                 123456789.
-Pages stored in compressor:               65536.
-Pages occupied by compressor:             32768.
-";
-
     #[test]
     fn reads_dfs_counts_off_the_capacity_column_whatever_the_device_or_the_mount_point_is_called() {
         assert_eq!(parse_df(LINUX_DF).unwrap(), Usage { used: 13_269_800 * 1024, total: 20_554_452 * 1024 });
@@ -220,18 +262,42 @@ Pages occupied by compressor:             32768.
         assert_eq!(parse_df("df: /nope: No such file or directory\n").unwrap_err(), "df printed no filesystem line");
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn counts_a_macs_reclaimable_pages_as_free_so_its_memory_row_reads_what_is_in_use_and_not_what_is_untouched() {
-        const PAGE: u64 = 16_384;
-        // Free plus speculative plus the inactive list; purgeable is already inside those and is not added twice.
-        assert_eq!(available_from_vm_stat(MAC_VM_STAT).unwrap(), (98_304 + 32_768 + 262_144) * PAGE);
-        // The kernel's own free count alone would call this Mac 1.5 GB free; the reclaimable pages make it 6.4 GB.
-        assert!(available_from_vm_stat(MAC_VM_STAT).unwrap() > 98_304 * PAGE);
-        assert_eq!(available_from_vm_stat("Pages free: 1.\n").unwrap_err(), "vm_stat printed no page size");
-        assert_eq!(
-            available_from_vm_stat("Mach Virtual Memory Statistics: (page size of 16384 bytes)\n").unwrap_err(),
-            "vm_stat printed no free pages"
-        );
+        // SAFETY: the struct is plain integers, all of them valid at zero.
+        let mut info: libc::vm_statistics64 = unsafe { std::mem::zeroed() };
+        (info.free_count, info.speculative_count, info.inactive_count) = (98_304, 32_768, 262_144);
+        (info.active_count, info.wire_count, info.purgeable_count) = (393_216, 196_608, 16_384);
+        // Free plus speculative plus the inactive list; purgeable is already inside those and is not added twice. The
+        // kernel's own free count alone would call a 16 GB Mac 1.5 GB free; the reclaimable pages make it 6.4 GB.
+        assert_eq!(darwin::available_pages(&info), 98_304 + 32_768 + 262_144);
+    }
+
+    /// The pages vm_stat counts under one label.
+    #[cfg(target_os = "macos")]
+    fn vm_stat_pages(text: &str, label: &str) -> u64 {
+        let prefix = format!("Pages {label}:");
+        text.lines().find_map(|l| l.strip_prefix(prefix.as_str())).unwrap().trim().trim_end_matches('.').parse().unwrap()
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_macs_memory_and_disk_are_what_vm_stat_and_df_print_without_running_either() {
+        let page_line =
+            |text: &str| -> u64 { text.split_once("page size of ").unwrap().1.split_whitespace().next().unwrap().parse().unwrap() };
+        let vm_stat = String::from_utf8(Command::new("vm_stat").output().unwrap().stdout).unwrap();
+        let read = darwin::DarwinHost.memory().unwrap();
+        let available = (vm_stat_pages(&vm_stat, "free") + vm_stat_pages(&vm_stat, "speculative") + vm_stat_pages(&vm_stat, "inactive"))
+            * page_line(&vm_stat);
+        // Memory moves between two reads, so the two agree to within a window rather than exactly.
+        assert!((read.used as i64 - read.total.saturating_sub(available) as i64).abs() < 512 * 1024 * 1024, "{read:?} {available}");
+        let folder = std::env::current_dir().unwrap();
+        let df = String::from_utf8(Command::new("df").args(["-kP"]).arg(&folder).output().unwrap().stdout).unwrap();
+        let (printed, disk) = (parse_df(&df).unwrap(), darwin::DarwinHost.disk(&folder).unwrap());
+        assert_eq!(disk.total, printed.total);
+        // Files come and go between the two reads; the system's own volumes the container also holds are tens of GB.
+        assert!((disk.used as i64 - printed.used as i64).abs() < 256 * 1024 * 1024, "{disk:?} {printed:?}");
     }
 
     #[cfg(target_os = "linux")]
@@ -259,8 +325,12 @@ Pages occupied by compressor:             32768.
     }
 
     #[test]
-    fn a_folder_that_is_not_there_is_refused_in_dfs_words() {
+    fn a_folder_that_is_not_there_is_refused_in_the_words_of_what_read_it() {
         let err = HostSysSource::new(PathBuf::from("/no/such/folder/anywhere")).read().unwrap_err();
-        assert_eq!(err, "df printed no filesystem line");
+        if cfg!(target_os = "macos") {
+            assert!(err.starts_with("statfs /no/such/folder/anywhere: "), "{err}");
+        } else {
+            assert_eq!(err, "df printed no filesystem line");
+        }
     }
 }
