@@ -10,15 +10,16 @@ const workflow = existsSync(path) ? readFileSync(path, "utf8") : "";
 const desktopScripts = (JSON.parse(readFileSync(join(repo, "apps", "desktop", "package.json"), "utf8")) as { scripts: Record<string, string> }).scripts;
 
 describe("the nightly desktop smoke", () => {
-  it("runs every night on main, by hand, and on a land branch push that changes the workflow or the smoke", () => {
+  it("runs every night on main, by hand, and on a land branch push that changes the workflow, the smoke or the browser tab's guests", () => {
     expect(workflow).toMatch(/\n {2}schedule:\n {4}- cron: "[^"]+"\n/);
     expect(workflow).toContain("\n  workflow_dispatch:\n");
     const push = workflow.slice(workflow.indexOf("\n  push:\n"), workflow.indexOf("\n  schedule:\n"));
     expect(push).toContain('branches:\n      - "land/**"\n');
     expect(push).toContain("paths:");
-    for (const file of [".github/workflows/desktop-smoke.yml", "apps/desktop/test/smoke.electron.test.ts", "apps/desktop/test/packaged.ts"]) {
+    const guests = ["apps/desktop/src/guests.ts", "apps/desktop/src/page-session.ts", "apps/web/src/browser/guests.ts", "apps/web/src/components/preview/**"];
+    for (const file of [".github/workflows/desktop-smoke.yml", "apps/desktop/test/smoke.electron.test.ts", "apps/desktop/test/packaged.ts", ...guests]) {
       expect(push).toContain(`- "${file}"`);
-      expect(existsSync(join(repo, file)), file).toBe(true);
+      expect(existsSync(join(repo, file.replace(/\/\*\*$/, ""))), file).toBe(true);
     }
     expect(workflow).not.toContain("pull_request:");
     expect(workflow).not.toContain("- main\n");

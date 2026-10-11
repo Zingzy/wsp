@@ -9,9 +9,9 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { LAUNCHD_PATH, computerNameHere, placeWiring, serve, serviceManagerFor, servingHost, shimPath, startHost, stopService, systemRunner, workspaceAsset, type CliIO, type HostHandle, type InstallReport } from "@wsp/host";
-import { DAEMON_VERSION, GET_THE_APP_WORD, HOST_WORDS, LAUNCH_ENV, STATE_SHAPE, type TurnResult } from "@wsp/protocol";
+import { BROWSER_PARTITION, DAEMON_VERSION, GET_THE_APP_WORD, HOST_WORDS, LAUNCH_ENV, STATE_SHAPE, type TurnResult } from "@wsp/protocol";
 import { createRuntime, memoryStore, sqliteStore, STATE_SHAPE_KEY, tokenDigest, type HarnessAdapterFactory, type Runtime } from "@wsp/runtime";
-import { _electron as electron, type ElectronApplication, type Frame, type Page } from "playwright";
+import { _electron as electron, type ElectronApplication, type Page } from "playwright";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { stubBackend } from "../../../packages/host/test/stub-backend.js";
 import { WORKSPACE_WORDS } from "../../web/src/actions/format.js";
@@ -313,7 +313,7 @@ function listenOn(server: Server): Promise<number> {
 }
 
 /** A page served on a loopback port the way a process inside a workspace serves one: it asks for a service worker on
- * its own origin when the test says so, and answers on either spelling of loopback, so the frame on one holds a
+ * its own origin when the test says so, and answers on either spelling of loopback, so the page on one holds a
  * frame on the other. */
 function workerPage(): Promise<{ port: number; server: Server }> {
   const server = createServer((req, res) => {
@@ -330,23 +330,26 @@ function workerPage(): Promise<{ port: number; server: Server }> {
   return listenOn(server).then(port => ({ port, server }));
 }
 
-/** A frame the window holds, by the url it is on. */
-function frameAt(win: Page, url: string): Promise<Frame> {
+/** Runs a script in a page of the browser tab's guest, its top page or a frame inside it, by the url it is on, once the
+ * page has defined its worker ask. A guest is a webview's own contents, which no window holds as a frame, so it is
+ * reached from the main process. */
+function inGuest(app: ElectronApplication, url: string, script: string): Promise<unknown> {
   return vi.waitFor(
-    () => {
-      const frame = win.frames().find(f => f.url() === url);
-      if (frame === undefined) throw new Error(`no frame at ${url}, saw ${JSON.stringify(win.frames().map(f => f.url()))}`);
-      return frame;
-    },
-    { timeout: 30_000, interval: 50 },
+    () =>
+      app.evaluate(
+        async ({ webContents }, { url, script }) => {
+          const frames = webContents
+            .getAllWebContents()
+            .filter(contents => contents.getType() === "webview")
+            .flatMap(contents => contents.mainFrame.framesInSubtree);
+          const frame = frames.find(f => f.url === url);
+          if (frame === undefined || !(await frame.executeJavaScript('"registerWorker" in window'))) throw new Error(`no guest page ready at ${url}, saw ${JSON.stringify(frames.map(f => f.url))}`);
+          return frame.executeJavaScript(script);
+        },
+        { url, script },
+      ),
+    { timeout: 30_000, interval: 100 },
   );
-}
-
-/** What the page inside a frame made of the worker it asked for. A frame has its url from the moment its navigation
- * commits, before the script at the end of its body has run, so the ask waits for the page to have defined it. */
-async function registerWorker(frame: Frame): Promise<string> {
-  await frame.waitForFunction(() => "registerWorker" in window);
-  return frame.evaluate(() => (window as unknown as { registerWorker(): Promise<string> }).registerWorker());
 }
 
 async function bootOf(page: Page): Promise<{ tokenHash: string; token?: string; version: string }> {
@@ -1144,7 +1147,7 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     120_000,
   );
 
-  it("no frame in the window registers a service worker on a loopback origin, and a host page loads into a session holding none", async () => {
+  it("no page in the browser tab's guest registers a service worker on a loopback origin, and after the Hosts menu reload no session the app made runs one", async () => {
     const served = await workerPage();
     standIn = served.server;
     // A workspace no thread names has no row and no actions, so one turn runs to its reply first and its thread is
@@ -1162,29 +1165,27 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     rmSync(agents, { recursive: true, force: true });
     expect(ran.status, `${ran.stdout}${ran.stderr}`).toBe(0);
     await win.click("[data-row-id^='thread:']");
-    // The preview pane on this computer's own workspace frames this computer's port, which is the pane a person types one into.
+    // The browser tab on this computer's own workspace is where a person types a port in, and its page is a guest.
     await win.keyboard.press("Meta+k");
     await win.locator("[data-command-palette]").getByText(WORKSPACE_WORDS.openBrowser, { exact: true }).click();
     await win.fill("[data-preview-url-input]", `localhost:${served.port}`);
     await win.press("[data-preview-url-input]", "Enter");
-    const framed = await frameAt(win, `http://localhost:${served.port}/`);
-    const nested = await frameAt(win, `http://127.0.0.1:${served.port}/nested`);
-    // The road the finding names is the 127.0.0.1 frame, which is the nested one; the localhost frame is the same
+    const top = `http://localhost:${served.port}/`;
+    const nested = `http://127.0.0.1:${served.port}/nested`;
+    // The road the finding names is the 127.0.0.1 frame, which is the nested one; the localhost page is the same
     // rule read on the other spelling, and neither may plant a worker on a port the kernel hands out again.
-    expect(await registerWorker(framed)).toMatch(/^refused/);
-    expect(await registerWorker(nested)).toMatch(/^refused/);
-    // The rule is the worker's alone: the framed page keeps its own storage, which a sandbox attribute would have taken.
-    expect(await framed.evaluate(() => {
-      localStorage.setItem("wsp-smoke", "kept");
-      return localStorage.getItem("wsp-smoke");
-    })).toBe("kept");
+    expect(await inGuest(launched.app, top, "registerWorker()")).toMatch(/^refused/);
+    expect(await inGuest(launched.app, nested, "registerWorker()")).toMatch(/^refused/);
+    // The rule is the worker's alone: the page keeps its own storage.
+    expect(await inGuest(launched.app, top, 'localStorage.setItem("wsp-smoke", "kept"); localStorage.getItem("wsp-smoke")')).toBe("kept");
     // And the move a person makes through the Hosts menu loads the host page with the session swept first. The window
     // is on that url already, so the reload is its own navigation of the main frame, waited for as one.
     const reloaded = win.waitForEvent("framenavigated", { predicate: frame => frame === win.mainFrame() });
     await hostsMenu(launched.app, computerNameHere());
     await reloaded;
     expect(win.url()).toMatch(APP_URL);
-    expect(await launched.app.evaluate(({ session }) => Object.keys(session.defaultSession.serviceWorkers.getAllRunning()).length)).toBe(0);
+    // The window's session and the guests' are the only two the app makes.
+    expect(await launched.app.evaluate(({ session }, partition) => [session.defaultSession, session.fromPartition(partition)].map(s => Object.keys(s.serviceWorkers.getAllRunning()).length), BROWSER_PARTITION)).toEqual([0, 0]);
   });
 
   it("does not attach to a host on the port that no lock beside the resolved home names: the first launch runs", async () => {
