@@ -375,11 +375,15 @@ describe("the MCP server over the host", () => {
     const branched = await call("run", { project: "mac", branch: "feat/x", message: "on the branch" });
     expect(branched.isError, branched.text).toBe(false);
     expect(claude.starts.at(-1)!.cwd).toBe(tree);
-    const rows = (await call("threads")).structured as { threads: { folder: string; branch: string; startedBy: string }[] };
+    const rows = (await call("threads")).structured as { threads: { threadId: string; folder: string; branch: string; startedBy: string; claudeSessionId?: string }[] };
     expect(rows.threads.map(t => [t.folder, t.startedBy])).toEqual([
       [here.path, "agent"],
       [tree, "agent"],
     ]);
+    // The folder and the agent's own session id are the two a terminal resumes the thread by.
+    const sessions = await rt.sessions.list();
+    for (const t of rows.threads) expect(t.claudeSessionId).toBe(sessions.find(s => s.threadId === t.threadId)!.claudeSessionId);
+    expect(rows.threads.every(t => typeof t.claudeSessionId === "string")).toBe(true);
     // The stand-in copier makes a plain folder, so git is put there as the real verb's worktree would have it.
     execFileSync("git", ["init", "-q", tree]);
     const removed = await call("worktree_remove", { project: "mac", branch: "feat/x" });

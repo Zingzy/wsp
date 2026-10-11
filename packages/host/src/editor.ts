@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Open in editor on the computer the host runs on: a fixed table of editors,
 // each found by its app bundle and run with its own program and the path as
-// one argument, never through a shell and never a program a client names.
+// one argument, never through a shell and never a program a client names. It
+// starts under the person's login shell environment, not the app's, and the
+// open answers once the program has ended, up to a cap.
 // The path has to resolve inside one of the folders the caller hands over,
 // lexically and then through its links, so a path from a page opens nothing
 // else on this computer.
 import { spawn } from "node:child_process";
 import { readFileSync, realpathSync, statSync } from "node:fs";
+import type { Socket } from "node:net";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, posix, resolve } from "node:path";
 import { editorOpensHereLine, type EditorChoice, type EditorId } from "@wsp/protocol";
@@ -17,7 +20,12 @@ import { under } from "./init-import.js";
 export interface EditorCommand {
   readonly file: string;
   readonly args: readonly string[];
+  /** The arguments without a flag a release older than it refuses, run again when the program names it refused. */
+  readonly older?: { readonly refused: string; readonly args: readonly string[] };
 }
+
+/** How a started program came out: its exit code and what it printed on stderr, or still running at the cap. */
+export type EditorRan = { readonly code: number; readonly stderr: string } | "running";
 
 interface EditorRow {
   readonly id: EditorId;
@@ -76,7 +84,12 @@ export const EDITORS: readonly EditorRow[] = [
     id: "zed",
     name: "Zed",
     apps: ["Zed.app"],
-    command: (found, path, line) => ({ file: join(found, "Contents/MacOS/cli"), args: [line === undefined ? path : `${path}:${line}`] }),
+    // --classic focuses the window holding the folder or opens a new one. Without a flag a Zed open on another
+    // folder asks how to open it and writes the answer into the person's settings.json; one before 0.232 refuses it.
+    command: (found, path, line) => {
+      const target = line === undefined ? path : `${path}:${line}`;
+      return { file: join(found, "Contents/MacOS/cli"), args: ["--classic", target], older: { refused: "--classic", args: [target] } };
+    },
     // The folder first: the file alone opens as a worktree of one file, which Zed asks to be trusted apart.
     remote: (found, alias, folder, file, line) => ({
       file: join(found, "Contents/MacOS/cli"),
@@ -104,6 +117,12 @@ export const EDITORS: readonly EditorRow[] = [
 export const NO_EDITOR_LINE = "No editor wsp knows is installed on this computer.";
 export const editorMissingLine = (name: string): string => `${name} is not installed on this computer; pick another editor in Settings.`;
 export const editorOutsideLine = (path: string): string => `${path} is not in this workspace's folder, so it does not open in your editor.`;
+/** A program that ended with a code other than 0, in the first line it printed where it printed one: Zed's cli and
+ * its flag parser both lead with the summary and follow with lines that explain it. */
+export const editorFailedLine = (name: string, code: number, stderr: string): string => {
+  const first = (stderr.trim().split("\n")[0] ?? "").replace(/^error:\s*/i, "").trim();
+  return `${name} did not open: ${first === "" ? `it exited with code ${code}` : first}`;
+};
 export const remoteExtensionLine = (name: string, install: string): string =>
   `${name} has no Remote SSH extension, so it cannot open files on another computer; install it with ${install}`;
 
@@ -111,12 +130,32 @@ export interface EditorHostOptions {
   /** What this computer runs; the table is the Mac's, and anything else has no editor in it. */
   platform?: NodeJS.Platform;
   home?: string;
-  /** The environment the editor is started with, which is this process's: startProgram hands it on. */
+  /** This process's environment, under the login shell's in the one the editor starts with. */
   env?: Readonly<Record<string, string | undefined>>;
+  /** The person's login shell environment; none unless the host hands its reader over. */
+  loginEnv?: () => Promise<Readonly<Record<string, string>>>;
+  /** How long an open waits on the program before it answers with the program still running. */
+  waitMs?: number;
   /** Whether a path exists; the disk's own answer unless a test gives one. */
   exists?: (path: string) => boolean;
-  /** Starts the program and resolves once it started; spawn with no shell unless a test gives one. */
-  run?: (command: EditorCommand) => Promise<void>;
+  /** Starts the program and resolves once it ended or the wait ran out; spawn with no shell unless a test gives one. */
+  run?: (command: EditorCommand, env: Readonly<Record<string, string>>, waitMs: number) => Promise<EditorRan>;
+}
+
+/** Cold Zed took 1.3 s and the first launch after its update about 3 s more, measured 2026-10-11. */
+const EDITOR_WAIT_MS = 10_000;
+/** Enough of stderr for the line a failing program leads with. */
+const STDERR_KEPT = 4096;
+
+/** The app's own names, which an editor would keep for its life and hand to every terminal and tool it runs: the
+ * shim's switch that turns Electron into Node, the service label launchd sets, and wsp's own. */
+const appsOwn = (name: string): boolean => name === "ELECTRON_RUN_AS_NODE" || name === "XPC_SERVICE_NAME" || name.startsWith("WSP_");
+
+/** The environment an editor starts with: the login shell's over this process's, less the app's own names. */
+function editorEnv(host: Readonly<Record<string, string | undefined>>, login: Readonly<Record<string, string>>): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const [name, value] of Object.entries({ ...host, ...login })) if (value !== undefined && !appsOwn(name)) env[name] = value;
+  return env;
 }
 
 function onDisk(path: string): boolean {
@@ -154,14 +193,36 @@ function realOf(path: string): string | null {
   }
 }
 
-/** Starts the program with its arguments as they are: no shell reads them, and the host does not wait for it to end. */
-export function startProgram(command: EditorCommand): Promise<void> {
+/** Starts the program with its arguments as they are, no shell reading them, and answers when it ends or at the
+ * wait, leaving it running past that. */
+export function startProgram(command: EditorCommand, env: Readonly<Record<string, string>>, waitMs: number): Promise<EditorRan> {
   return new Promise((done, fail) => {
-    const child = spawn(command.file, [...command.args], { shell: false, detached: true, stdio: "ignore" });
-    child.once("error", fail);
-    child.once("spawn", () => {
+    const child = spawn(command.file, [...command.args], { shell: false, detached: true, stdio: ["ignore", "ignore", "pipe"], env });
+    let stderr = "";
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk: string) => {
+      if (stderr.length < STDERR_KEPT) stderr = (stderr + chunk).slice(0, STDERR_KEPT);
+    });
+    const late = setTimeout(() => {
       child.unref();
-      done();
+      // The pipe is a socket at run time, and it holds the process open for as long as the program runs.
+      (child.stderr as Socket).unref();
+      done("running");
+    }, waitMs);
+    child.once("error", e => {
+      clearTimeout(late);
+      fail(e);
+    });
+    // A program that ended well is done at its exit, while a failing one's last words are read to the end of its
+    // stderr, which a child it started may hold open until the wait.
+    child.once("exit", code => {
+      if (code !== 0) return;
+      clearTimeout(late);
+      done({ code, stderr });
+    });
+    child.once("close", code => {
+      clearTimeout(late);
+      done({ code: code ?? 128, stderr });
     });
   });
 }
@@ -195,6 +256,22 @@ export function editorHost(o: EditorHostOptions = {}): HostEditor {
   const env = o.env ?? process.env;
   const exists = o.exists ?? onDisk;
   const run = o.run ?? startProgram;
+  const loginEnv = o.loginEnv ?? (async () => ({}));
+  const waitMs = o.waitMs ?? EDITOR_WAIT_MS;
+  /** Runs the command under the person's environment, an older release's way where it refuses the flag, and refuses
+   * in the program's words where it failed; the login shell read and the run share the one wait. */
+  const runFor = async (name: string, command: EditorCommand): Promise<void> => {
+    const until = Date.now() + waitMs;
+    const left = (): number => Math.max(0, until - Date.now());
+    let wait: ReturnType<typeof setTimeout> | undefined;
+    const login = await Promise.race([loginEnv(), new Promise<Record<string, string>>(done => (wait = setTimeout(() => done({}), waitMs)))]);
+    clearTimeout(wait);
+    const startEnv = editorEnv(env, login);
+    let ran = await run(command, startEnv, left());
+    const older = command.older;
+    if (ran !== "running" && ran.code !== 0 && older !== undefined && ran.stderr.includes(`'${older.refused}'`)) ran = await run({ file: command.file, args: older.args }, startEnv, left());
+    if (ran !== "running" && ran.code !== 0) throw new Error(editorFailedLine(name, ran.code, ran.stderr));
+  };
   const foundApp = (row: EditorRow): string | undefined => {
     for (const app of row.apps) {
       const places = isAbsolute(app) ? [app] : [join("/Applications", app), join(home, "Applications", app)];
@@ -237,7 +314,11 @@ export function editorHost(o: EditorHostOptions = {}): HostEditor {
     return { road };
   };
   return {
-    list: async (): Promise<EditorChoice[]> => installed().map(({ row, app }) => ({ id: row.id, name: row.name, ...(remoteReady(row, app) ? { remote: true as const } : {}) })),
+    list: async (): Promise<EditorChoice[]> => {
+      // Read now, since the header lists its editors long before a click, so the first open does not wait on the shell.
+      void loginEnv();
+      return installed().map(({ row, app }) => ({ id: row.id, name: row.name, ...(remoteReady(row, app) ? { remote: true as const } : {}) }));
+    },
     remoteRefusal: async ({ editor, name }) => {
       const pick = pickOf(editor);
       if (typeof pick === "string") return pick;
@@ -253,11 +334,11 @@ export function editorHost(o: EditorHostOptions = {}): HostEditor {
         const reached = remoteRoadOf(pick, remote.name);
         if ("refused" in reached) throw new Error(reached.refused);
         const folder = posix.resolve(remote.folder);
-        await run(reached.road(pick.app, remote.alias, folder, opening === folder ? undefined : opening, line));
+        await runFor(pick.row.name, reached.road(pick.app, remote.alias, folder, opening === folder ? undefined : opening, line));
         return pick.row.id;
       }
       const folder = statSync(opening).isDirectory();
-      await run(pick.row.command(pick.app, opening, folder ? undefined : line, folder));
+      await runFor(pick.row.name, pick.row.command(pick.app, opening, folder ? undefined : line, folder));
       return pick.row.id;
     },
   };

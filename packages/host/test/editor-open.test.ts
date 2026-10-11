@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { EditorId, editorOpensHereLine } from "@wsp/protocol";
 import { writeStub } from "../../protocol/test/stub-script.js";
-import { EDITORS, editorHost, editorMissingLine, editorOutsideLine, NO_EDITOR_LINE, remoteExtensionLine, type EditorCommand } from "../src/editor.js";
+import { EDITORS, editorFailedLine, editorHost, editorMissingLine, editorOutsideLine, NO_EDITOR_LINE, remoteExtensionLine, type EditorCommand } from "../src/editor.js";
 
 let tmp: string;
 let work: string;
@@ -36,7 +36,10 @@ function mac(apps: readonly string[], extensions: Readonly<Record<string, readon
     home,
     env,
     exists: path => apps.includes(path),
-    run: async command => void ran.push(command),
+    run: async command => {
+      ran.push(command);
+      return { code: 0, stderr: "" };
+    },
   });
   return { host, ran, home };
 }
@@ -64,7 +67,7 @@ describe("the editor table", () => {
       { id: "idea", name: "IntelliJ IDEA" },
       { id: "finder", name: "Finder" },
     ]);
-    const linux = editorHost({ platform: "linux", exists: () => true, run: async () => undefined });
+    const linux = editorHost({ platform: "linux", exists: () => true, run: async () => ({ code: 0, stderr: "" }) });
     expect(await linux.list()).toEqual([]);
   });
 });
@@ -85,7 +88,7 @@ describe("opening a path", () => {
       { file: "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code", args: ["-g", `${file}:12`] },
       { file: "/Applications/Cursor.app/Contents/Resources/app/bin/cursor", args: ["-g", `${file}:12`] },
       { file: "/Applications/Visual Studio Code - Insiders.app/Contents/Resources/app/bin/code", args: ["-g", `${file}:12`] },
-      { file: "/Applications/Zed.app/Contents/MacOS/cli", args: [`${file}:12`] },
+      { file: "/Applications/Zed.app/Contents/MacOS/cli", args: ["--classic", `${file}:12`], older: { refused: "--classic", args: [`${file}:12`] } },
       { file: "/usr/bin/open", args: ["-na", "/Applications/WebStorm.app", "--args", "--line", "12", file] },
       { file: "/usr/bin/open", args: ["-R", file] },
     ]);
@@ -132,9 +135,93 @@ describe("opening a path", () => {
     // Only the fake bundle counts as installed, so a real editor on the computer running the test is never started.
     const host = editorHost({ platform: "darwin", home, exists: path => path.startsWith(home) && existsSync(path) });
     expect(await host.open({ path: weird, line: 4, inside: [work], editor: "zed" })).toBe("zed");
-    await expect.poll(() => (existsSync(said) ? readFileSync(said, "utf8") : "")).toBe(`${weird}:4\n`);
+    expect(readFileSync(said, "utf8")).toBe(`--classic\n${weird}:4\n`);
     expect(existsSync("PWNED")).toBe(false);
     expect(existsSync(join(work, "PWNED"))).toBe(false);
+  });
+});
+
+describe("Zed on this computer", () => {
+  /** A Zed whose cli is the script given, installed under a home of its own so no real editor ever starts. */
+  function zed(script: string, o: { env?: Record<string, string>; loginEnv?: Record<string, string>; waitMs?: number } = {}) {
+    const home = join(tmp, "home");
+    const cli = join(home, "Applications", "Zed.app", "Contents", "MacOS", "cli");
+    mkdirSync(join(cli, ".."), { recursive: true });
+    writeStub(cli, `#!/bin/sh\n${script}\n`);
+    const loginEnv = o.loginEnv;
+    return editorHost({
+      platform: "darwin",
+      home,
+      env: o.env ?? { HOME: home, PATH: "/usr/bin:/bin" },
+      exists: path => path.startsWith(home) && existsSync(path),
+      ...(loginEnv !== undefined ? { loginEnv: async () => loginEnv } : {}),
+      ...(o.waitMs !== undefined ? { waitMs: o.waitMs } : {}),
+    });
+  }
+  const said = (): string => join(tmp, "said.txt");
+
+  it("opens a folder with --classic, so Zed focuses the window holding it or opens a new one and asks nothing", async () => {
+    const host = zed(`printf '%s\\n' "$@" > '${said()}'`);
+    await host.open({ path: work, inside: [work], editor: "zed" });
+    expect(readFileSync(said(), "utf8")).toBe(`--classic\n${work}\n`);
+  });
+
+  it("opens again without the flag where an older Zed refuses it, as one from before it shipped does", async () => {
+    // What Zed 0.231.2's cli printed and exited with for --classic, run on 2026-10-10.
+    const host = zed(`if [ "$1" = --classic ]; then printf "error: unexpected argument '--classic' found\\n" >&2; exit 2; fi\nprintf '%s\\n' "$@" >> '${said()}'`);
+    expect(await host.open({ path: work, inside: [work], editor: "zed" })).toBe("zed");
+    expect(readFileSync(said(), "utf8")).toBe(`${work}\n`);
+  });
+
+  it("starts with the person's environment: their login shell's PATH, and nothing of the app's own or wsp's", async () => {
+    const env = { HOME: join(tmp, "home"), PATH: "/usr/bin:/bin:/usr/sbin:/sbin", ELECTRON_RUN_AS_NODE: "1", WSP_HOME: "/tmp/wsp-home", XPC_SERVICE_NAME: "application.dev.wsp.app", LANG: "en_GB.UTF-8" };
+    // The login shell starts under the host's environment, so it hands the app's names back with its own.
+    const loginEnv = { ...env, PATH: "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin", EDITOR: "zed --wait" };
+    const host = zed(`/usr/bin/env > '${said()}'`, { env, loginEnv });
+    await host.open({ path: work, inside: [work], editor: "zed" });
+    const got = new Map(readFileSync(said(), "utf8").trim().split("\n").map(line => [line.slice(0, line.indexOf("=")), line.slice(line.indexOf("=") + 1)] as const));
+    expect(got.get("PATH")).toBe(loginEnv.PATH);
+    expect(got.get("EDITOR")).toBe("zed --wait");
+    expect(got.get("LANG")).toBe("en_GB.UTF-8");
+    expect([...got.keys()].filter(name => name === "ELECTRON_RUN_AS_NODE" || name === "XPC_SERVICE_NAME" || name.startsWith("WSP_"))).toEqual([]);
+  });
+
+  it("keeps the host's own environment, less the app's names, where the login shell gave nothing", async () => {
+    const env = { HOME: join(tmp, "home"), PATH: "/usr/local/bin:/usr/bin:/bin", ELECTRON_RUN_AS_NODE: "1", WSP_HOME: "/tmp/wsp-home" };
+    const host = zed(`/usr/bin/env > '${said()}'`, { env, loginEnv: {} });
+    await host.open({ path: work, inside: [work], editor: "zed" });
+    const text = readFileSync(said(), "utf8");
+    expect(text).toContain("PATH=/usr/local/bin:/usr/bin:/bin\n");
+    expect(text).not.toMatch(/^(ELECTRON_RUN_AS_NODE|WSP_HOME)=/m);
+  });
+
+  it("answers once the cli has ended, and a cli that fails is the open's refusal in its own words", async () => {
+    const ended = join(tmp, "ended");
+    const slow = zed(`sleep 1\ntouch '${ended}'`);
+    await slow.open({ path: work, inside: [work], editor: "zed" });
+    expect(existsSync(ended)).toBe(true);
+    // How Zed 1.6.3's cli refused to run as root, on 2026-10-10.
+    const failing = zed(`printf 'Error: Running Zed as root or via sudo is unsupported.\\n       Doing so (even once) may subtly break things.\\n' >&2; exit 1`);
+    await expect(failing.open({ path: work, inside: [work], editor: "zed" })).rejects.toThrow(/^Zed did not open: Running Zed as root or via sudo is unsupported\.$/);
+    // A panic leads with its message and can follow it with kilobytes of backtrace.
+    const panic = zed(`printf 'Error: the reason\\n' >&2; i=0; while [ $i -lt 200 ]; do printf '  at frame %s of a long backtrace\\n' $i >&2; i=$((i+1)); done; exit 101`);
+    await expect(panic.open({ path: work, inside: [work], editor: "zed" })).rejects.toThrow(/^Zed did not open: the reason$/);
+    const silent = zed("exit 3");
+    await expect(silent.open({ path: work, inside: [work], editor: "zed" })).rejects.toThrow(editorFailedLine("Zed", 3, ""));
+  });
+
+  it("answers at the cap when the cli is still running, and leaves it to finish", async () => {
+    const pid = join(tmp, "pid");
+    // A cli that ran its whole 30 s would outlast the test's own limit.
+    const host = zed(`echo $$ > '${pid}'\nexec sleep 30`, { waitMs: 300 });
+    try {
+      expect(await host.open({ path: work, inside: [work], editor: "zed" })).toBe("zed");
+      await expect.poll(() => existsSync(pid) && readFileSync(pid, "utf8").trim() !== "").toBe(true);
+      const running = Number(readFileSync(pid, "utf8"));
+      expect(() => process.kill(running, 0)).not.toThrow();
+    } finally {
+      if (existsSync(pid)) process.kill(Number(readFileSync(pid, "utf8")), "SIGKILL");
+    }
   });
 });
 

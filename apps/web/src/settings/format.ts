@@ -94,6 +94,9 @@ export const WHERE_WORDS = {
   removeDescription: (computer: string, here: string): string => onceNamed(here, h => `wsp comes off ${computer} and its threads' records leave ${h}. Your files there stay.`),
   removeCloudDescription: "Deletes every machine wsp made there and forgets the key.",
   removing: "Removing…",
+  /** The confirm for a computer whose link is down while forks or projects stand on it: they leave as records. */
+  forget: "Forget",
+  forgetting: "Forgetting…",
   /** The confirm where a task or a project folder there holds work no remote has, which the remove takes with it. */
   removeAnyway: "Remove anyway",
   /** The fix under that work's names: the ways to keep it, and what the button does. */
@@ -517,11 +520,12 @@ export const KEYBINDINGS_WORDS = {
 export const ABOUT_WORDS = {
   title: "Version",
   wsp: "wsp",
-  upToDate: "Up to date",
+  upToDate: (when: string): string => `Up to date, checked ${when}`,
+  unreached: (checked: string | undefined, missed: string): string => (checked === undefined ? `Could not reach GitHub ${missed}` : `Checked ${checked}; could not reach GitHub ${missed}`),
   available: (version: string): string => `${version} is out`,
   checking: "Checking for updates",
   checksOff: "Update checks are off",
-  notChecked: "Not checked yet",
+  checkNow: "Check for updates",
   whatsNew: "What's new",
   app: "App",
   appHover: "The desktop shell holding this window.",

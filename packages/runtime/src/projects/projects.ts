@@ -167,6 +167,7 @@ export function projectsArea(ctx: RuntimeContext): ProjectsArea {
       // Where Claude Code keeps its projects on this computer, which is the memory folder of a project worked in
       // place here; read the way every other road on this computer reads that store.
       macStateHome: local?.home("claude") ?? "",
+      branchHere: path => ctx.branchAt(path),
       // The name this wsp holds for that computer, read the way a fork's own line reads it.
       computerName: ctx.placeName(computer),
       now: () => clock.now(),
@@ -444,6 +445,11 @@ export function projectsArea(ctx: RuntimeContext): ProjectsArea {
     },
     computers: projectsDoor.computers,
     resolve: projectsDoor.resolve,
+    async branch(ref, origin) {
+      const project = await projectsDoor.resolve(ref, origin);
+      const { deps } = await landingDeps(project.computer);
+      return projectLanding(landingKind(project.computer)).branch(project, deps);
+    },
     remove: projectsDoor.remove,
     async import(o, origin) {
       ctx.spawnGuard("import", origin);

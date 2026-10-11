@@ -23,6 +23,8 @@ export interface IdlePolicyOptions {
   /** Fires when a window runs out. Resolved, the workspace is forgotten until its next touch; rejected, the deadline
    * stands and it fires again every retryMs until one resolves, a touch or a forget. */
   onIdle(id: string, windowMs: number): Promise<void>;
+  /** A turn reads running on the workspace, whether or not this process holds its run: held like a hold. */
+  busy?(id: string): boolean;
   /** How long after a nap that failed the window is asked again. */
   retryMs: number;
   /** Fires on every arming with the instant this policy's own backstop computes for the workspace, now plus
@@ -57,6 +59,8 @@ export function createIdlePolicy(o: IdlePolicyOptions): IdlePolicy {
   const clock = o.clock ?? realClock;
   let closed = false;
 
+  const held = (id: string): boolean => (holds.get(id) ?? 0) > 0 || o.busy?.(id) === true;
+
   const forget = (id: string): void => {
     const a = armed.get(id);
     if (!a) return;
@@ -72,7 +76,7 @@ export function createIdlePolicy(o: IdlePolicyOptions): IdlePolicy {
     if (windowMs === null) return;
     const entry: Armed = { at: clock.now() + windowMs, cancel: () => {} };
     const fire = (): void => {
-      if ((holds.get(id) ?? 0) > 0) {
+      if (held(id)) {
         arm(id);
         return;
       }
@@ -108,7 +112,7 @@ export function createIdlePolicy(o: IdlePolicyOptions): IdlePolicy {
       forget(id);
       holds.delete(id);
     },
-    idleAt: id => ((holds.get(id) ?? 0) > 0 ? undefined : armed.get(id)?.at),
+    idleAt: id => (held(id) ? undefined : armed.get(id)?.at),
     close: () => {
       closed = true;
       for (const id of [...armed.keys()]) forget(id);

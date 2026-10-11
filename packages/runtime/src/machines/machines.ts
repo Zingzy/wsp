@@ -671,6 +671,8 @@ export function machinesArea(ctx: RuntimeContext): MachinesArea {
         if (!(e instanceof NapRefusedError)) console.warn(`idle nap of ${id} was answered with ${providerSaid(e)}; a full ${Math.round(windowMs / 60_000)} min window starts over`);
       }
     },
+    // A row left running by a restart that could not reach its run holds no hold, and its turn is still working there.
+    busy: id => [...sessions.values()].some(s => s.view.workspaceId === id && s.view.status === "running"),
     retryMs: opts.status?.pollIntervalMs ?? POLL_INTERVAL_MS,
     clock,
     // A backend whose backstop is pushed rather than set at create hears the instant on every arming of a running

@@ -242,9 +242,10 @@ export function reachArea(ctx: RuntimeContext): ReachArea {
   };
 
   /** The copy's checkout read through its own daemon, kept on the entry and pushed on its status: at a turn's end, on
-   * view and after a write, and never on a timer. Within CHECKOUT_TTL_MS the fact held answers unless the caller
-   * forces a read. A machine that is not running is asked nothing unless its computer answers for it, which reads a
-   * stopped copy off its files; one that cannot answer keeps its last fact and the time git gave it. */
+   * view, after a write, and forced every few seconds by a composer about to open a thread; the host keeps no timer
+   * of its own. Within CHECKOUT_TTL_MS the fact held answers unless the caller forces a read. A machine that is not
+   * running is asked nothing unless its computer answers for it, which reads a stopped copy off its files; one that
+   * cannot answer keeps its last fact and the time git gave it. */
   const readCheckout = (entry: LiveWorkspace, force: boolean): Promise<Checkout | undefined> => {
     const held = entry.checkout;
     if (!force && held !== undefined && clock.now() - held.readAt < CHECKOUT_TTL_MS) return Promise.resolve(held);

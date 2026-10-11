@@ -49,7 +49,7 @@ const REPLY = [
   "```",
 ].join("\n");
 
-const scope = (runs: ReadonlyMap<string, SessionRunEvent> = new Map()): ReplyRunScope => ({ workspaceId: "ws_a", threadId: "th_1", turnId: "turn_1", messageId: "turn_1:m0", cwd: "/work/copy", runs });
+const scope = (runs: ReadonlyMap<string, SessionRunEvent> = new Map()): ReplyRunScope => ({ workspaceId: "ws_a", threadId: "th_1", turnId: "turn_1", messageId: "turn_1:m0", offset: 0, cwd: "/work/copy", runs });
 const run = (over: Partial<SessionRunEvent>): SessionRunEvent => ({ type: "session.run", workspaceId: "ws_a", sessionId: "s", threadId: "th_1", turnId: "turn_1", runId: "run-1", block: "b", command: "npm test", state: "exited", ...over });
 
 afterEach(() => {

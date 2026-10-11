@@ -41,6 +41,9 @@ export const THREAD_WORDS = {
   keep: "Keep this one",
   deleteCopies: "Delete copies",
   undoRewind: "Undo rewind",
+  continueInTerminal: "Continue in terminal",
+  stopAndContinueInTerminal: "Stop and continue in terminal",
+  terminalLineCopied: (computer?: string): string => `Copied. Paste it in a terminal${computer === undefined ? "" : ` on ${computer}`} to go on with this thread there`,
 } as const;
 
 /** The acts on a lead's children and on the lead's tree. */
@@ -190,6 +193,7 @@ export const CLIENT_CANNOT_SETTLE = "This client cannot settle a thread";
 export const CLIENT_CANNOT_RESTORE = "This client cannot restore a thread";
 export const CLIENT_CANNOT_MARK = "This client cannot pin or snooze a thread";
 export const THREAD_TREE_WORKING = "A thread in it is still working";
+export const THREAD_STILL_RUNNING_HERE = "wsp is still running this thread. Stop it first, or wsp and the terminal both write to one conversation";
 export const NOTHING_READ_TO_SETTLE = "No read thread to settle";
 
 /** Why the forget cannot run, or null when it can. The runtime owns the rule and raises the same sentence; the row

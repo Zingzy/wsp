@@ -120,6 +120,22 @@ describe("deriveSidebarProjects", () => {
     expect(quiet).toMatchObject({ subagents: [], lastLine: null, failure: null, foldedAt: null, replaces: null, replacedBy: null });
   });
 
+  it("a thread carries its agent's own session with the folder its latest turn ran in, once the agent announced one", () => {
+    const [project] = deriveSidebarProjects({
+      workspaces: [LIVE_WORKSPACE_1],
+      statuses: statusesFrom(LIVE_RUN_1),
+      sessions: {
+        [LIVE_WS]: [
+          { id: "s1", threadId: "thr_ran", workspaceId: LIVE_WS, harness: "claude", status: "completed", prompt: "fix it", startedAt: 1, claudeSessionId: "0c8e2b8e-5d6f-4c4e-9f3a-2b1c0d9e8f7a", cwd: "/Users/dev/acme" },
+          { id: "s2", threadId: "thr_new", workspaceId: LIVE_WS, harness: "claude", status: "running", prompt: "start it", startedAt: 2 },
+        ],
+      },
+    });
+    const by = Object.fromEntries(project!.threads.map(t => [t.id, t]));
+    expect(by["thr_ran"]?.harnessSession).toEqual({ id: "0c8e2b8e-5d6f-4c4e-9f3a-2b1c0d9e8f7a", folder: "/Users/dev/acme" });
+    expect(by["thr_new"]).not.toHaveProperty("harnessSession");
+  });
+
   it("a restart carries the thread it replaced with how and when that one ended, and the replaced one names its restart", () => {
     const [project] = deriveSidebarProjects({
       workspaces: [LIVE_WORKSPACE_1],

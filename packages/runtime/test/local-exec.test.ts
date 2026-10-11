@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EXEC_CHUNK_BYTES, endRun, shellQuote, turnCutLine, type ExecStream } from "@wsp/protocol";
+import { gateLoop } from "../../protocol/test/stub-script.js";
 import { groupExists, localExecStream, ownOrphans, type GroupWorkReader } from "../src/local-exec.js";
 import { LINUX_SHELL_PRELUDE } from "./linux-shell.js";
 import { alive, gone, grandchild, sweepStrays } from "./strays.js";
@@ -164,7 +165,7 @@ describe("local exec stream", () => {
 
   it("a child that keeps writing past the wall is cut at the cap", async () => {
     const factory = localExecStream({ root, runDir, idleMs: 60_000, deadlineMs: 150, pollMs: 10 });
-    const stream = factory("while true; do echo tick; sleep 0.02; done", { env: {} });
+    const stream = factory(gateLoop(join(root, "stop"), { each: "echo tick" }), { env: {} });
     await expect(collect(stream.lines)).rejects.toThrow(/at the 0m turn limit; send to continue where it stopped, or change the limit in Settings > Computers$/);
     expect(await stream.exited).toBeNull();
   });
@@ -173,7 +174,7 @@ describe("local exec stream", () => {
     const WALL_MS = 3_000;
     const reading = new Set<() => void>();
     const startedAt = Date.now();
-    const launched = localExecStream({ root, runDir, idleMs: 60_000, deadlineMs: WALL_MS, pollMs: 20, reading })("while true; do echo tick; sleep 0.05; done", { env: {} });
+    const launched = localExecStream({ root, runDir, idleMs: 60_000, deadlineMs: WALL_MS, pollMs: 20, reading })(gateLoop(join(root, "stop"), { each: "echo tick" }), { env: {} });
     await new Promise(resolve => setTimeout(resolve, WALL_MS / 2));
     // The host goes: its reader lets go of the run, which keeps running, and the next host re-opens it by handle.
     for (const drop of [...reading]) drop();
@@ -223,7 +224,7 @@ describe("local exec stream", () => {
 
   it("a run that ignores TERM keeps what it printed after the last poll, past one chunk of it, once the KILL ends it", async () => {
     // A poll slower than the grace, so no read falls between the TERM and the KILL: the lines are read at the end or never.
-    const stream = localExecStream({ root, runDir, pollMs: 1_500 })(`trap 'head -c ${EXEC_CHUNK_BYTES + 1000} /dev/zero | tr "\\0" x; echo; echo last words' TERM; echo ready; while :; do sleep 0.05; done`, { env: {} });
+    const stream = localExecStream({ root, runDir, pollMs: 1_500 })(`trap 'head -c ${EXEC_CHUNK_BYTES + 1000} /dev/zero | tr "\\0" x; echo; echo last words' TERM; echo ready; ${gateLoop(join(root, "stop"))}`, { env: {} });
     const lines = stream.lines[Symbol.asyncIterator]();
     expect(await lines.next()).toEqual({ value: "ready", done: false });
     await new Promise(resolve => setTimeout(resolve, 100));
@@ -293,7 +294,7 @@ describe("what a run leaves on this computer", () => {
     const seen = 'case "$ANTHROPIC_API_KEY" in sk-ant-x-*) echo "seen ${#ANTHROPIC_API_KEY}";; esac';
     // A turn as an agent's launch makes one, its prompt on an input channel; an exec as the exec verb makes one.
     const turn = factory(`${seen}; read -r line; echo "got $line"`, { env: { ANTHROPIC_API_KEY: key }, input: ["hello"], inputAfter: new Promise(() => {}) });
-    const exec = factory(`${seen}; while [ ! -f ${shellQuote(gate)} ]; do sleep 0.05; done`, { env: { ANTHROPIC_API_KEY: key } });
+    const exec = factory(`${seen}; ${gateLoop(gate)}`, { env: { ANTHROPIC_API_KEY: key } });
     try {
       const turnLines = turn.lines[Symbol.asyncIterator]();
       const execLines = exec.lines[Symbol.asyncIterator]();
@@ -335,7 +336,7 @@ describe("what a run leaves on this computer", () => {
       return base;
     };
     try {
-      const read = older("aaaaaaaaaaaa", `while [ ! -f ${shellQuote(gate)} ]; do sleep 0.05; done; echo done`);
+      const read = older("aaaaaaaaaaaa", `${gateLoop(gate)}; echo done`);
       const ended = older("bbbbbbbbbbbb", "echo done");
       await vi.waitFor(() => expect(readFileSync(`${ended}.exit`, "utf8").trim()).toBe("0"), { timeout: 5_000 });
       expect(holding(key).sort()).toEqual([`${read}.sh`, `${ended}.sh`]);
@@ -434,7 +435,7 @@ describe("a real turn's process group", () => {
   it("a factory that never launched a run attaches to it by handle and reads its whole log from the first byte", async () => {
     const gate = join(root, "gate");
     const factory = localExecStream({ root, runDir });
-    const launched = factory(`echo first; while [ ! -f ${gate} ]; do sleep 0.05; done; echo second; sleep 30`, { env: {} });
+    const launched = factory(`echo first; ${gateLoop(gate)}; echo second; sleep 30`, { env: {} });
     const run = launched.run!;
     expect(run.startsWith(`${runDir}/`)).toBe(true);
     // The run has printed its first line to the log on disk before anything attaches to it.
@@ -691,7 +692,7 @@ describe("a real turn's process group", () => {
     const gate = join(root, "gate");
     const reading = new Set<() => void>();
     const factory = localExecStream({ root, runDir, reading });
-    const launched = factory(`sleep 300 & echo $! > ${join(root, "child")}; echo first; while [ ! -f ${gate} ]; do sleep 0.05; done; echo second; sleep 300`, { env: {} });
+    const launched = factory(`sleep 300 & echo $! > ${join(root, "child")}; echo first; ${gateLoop(gate)}; echo second; sleep 300`, { env: {} });
     const pid = await leftRunning();
     const reader = launched.lines[Symbol.asyncIterator]();
     expect(await reader.next()).toEqual({ value: "first", done: false });

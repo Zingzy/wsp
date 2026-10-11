@@ -9,7 +9,7 @@
 // is a declaration through the seam or an internal of this file.
 
 import { createHash, randomBytes } from "node:crypto";
-import { DAEMON_UNIT, moveTimedOutLine, providerKeyName, providerRoadRetryLine, shellQuote, type Capabilities } from "@wsp/protocol";
+import { DAEMON_UNIT, moveTimedOutLine, noWorkFolderLine, providerKeyName, providerRoadRetryLine, shellQuote, type Capabilities } from "@wsp/protocol";
 import { GuestUnusableError, MoveUnansweredError, RestoreUnfinishedError, ROAD_TRIES, StopRefusedError, abort, backoffMs, classify, isMissing, realRetryClock, roadBackoffMs, roadCode, shouldRetry, type RetryClock, type WspError } from "./errors.js";
 import { DAEMON_ENV_FILE, DEADLINE_EXIT, INLINE_EXEC_MS, execDetached } from "./exec-detached.js";
 import { EXEC_ENV } from "./golden-import.js";
@@ -119,6 +119,10 @@ export const BOX_INLINE_MAX_MS = 30_000;
  * library goes through the provider's lazy filesystem, and that process alone runs at the image's soft limit of 1024
  * open files (read off a live box, 2026-09-12). */
 const LOADER_EMFILE = /^(bash|sudo): error while loading shared libraries: .*: Error 24/m;
+/** The box user's home, which the agent starts every command in when the call names no folder (its WORK_DIR, read
+ * off /opt/ascii-agent on a box 2026-10-10); gone, it refuses every command with these words. */
+export const BOX_WORK_DIR = "/home/user";
+const NO_WORK_DIR = /cwd must be an existing directory/i;
 
 /** How a box's own state reads as a machine state. `error` is folded into gone: nothing runs on it again and the
  * runtime's road out of gone is a rebuild. A state missing here reads running through stateOf: a delete that read a
@@ -721,6 +725,9 @@ export class BoxMachine implements Machine {
       capMs: timeoutS * 1000 + 30_000,
       ...(signal !== undefined ? { signal } : {}),
     }), signal).catch((e: unknown) => {
+      if (NO_WORK_DIR.test((e as Partial<WspError>).message ?? "")) {
+        throw new GuestUnusableError(this.id, providerKeyName("box"), noWorkFolderLine(providerKeyName("box"), BOX_WORK_DIR, (e as WspError).message), (e as WspError).status);
+      }
       // The agent that runs the endpoint failing to spawn the shell at all reads as the guest being dead, not as a
       // command refused: the message is the agent's own (`D.stdout.on` of nothing, seen 2026-09-11).
       if ((e as Partial<WspError>).kind === "unknown" && (e as Partial<WspError>).status === 500) {

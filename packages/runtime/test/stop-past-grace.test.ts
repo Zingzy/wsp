@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createClaudeAdapter } from "@wsp/adapter-claude";
 import { LocalBackend } from "@wsp/engine";
 import { HERE_PLACE_ID } from "@wsp/protocol";
-import { writeStub } from "../../protocol/test/stub-script.js";
+import { gateLoop, writeStub } from "../../protocol/test/stub-script.js";
 import { createRuntime, type LocalWiring, type Runtime } from "../src/runtime.js";
 import { groupExists, localExecStream } from "../src/local-exec.js";
 import { memoryStore } from "../src/store.js";
@@ -38,7 +38,7 @@ cat <<EOF
 {"type":"assistant","message":{"model":"claude-opus-5-5","id":"msg_1","type":"message","role":"assistant","content":[{"type":"text","text":"Editing src/a.ts."}]},"parent_tool_use_id":null,"session_id":"$sid"}
 EOF
 ps -o pgid= -p $$ > '${mark}.tmp' && mv '${mark}.tmp' '${mark}'
-while :; do sleep 0.05; done
+${gateLoop(`${mark}.stop`)}
 `;
 }
 

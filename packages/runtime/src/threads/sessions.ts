@@ -190,8 +190,11 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
     let ended = (): void => {};
     if (ends !== undefined) holdNext(thread!, new Promise<void>(resolve => (ended = resolve)));
     try {
-      // A row a restart left running with no road to its process is still a turn to stop where its group can be ended.
-      if (row.view.status !== "running" || (row.handle === undefined && (ends === undefined || row.end === undefined))) {
+      // A row a restart left running with no road to its process is still a turn to stop where its group can be ended,
+      // and where its machine answered nothing about the run, since the idle nap waits on that row; a line's try has
+      // its own hour, and a row whose re-open is still out has an end of its agent's own on the way.
+      const unanswered = row.unanswered === true && row.end !== undefined && !ctx.lineTry(row);
+      if (row.view.status !== "running" || (row.handle === undefined && !unanswered && (ends === undefined || row.end === undefined))) {
         // Another turn of the thread running or on its way stands in the same group, and is not what was stopped.
         if (ends === undefined || ctx.runningOn(thread!) !== undefined || ctx.launchingOn(thread!) !== undefined) return answered("not-running");
         return answered("not-running", await ends(entry!, thread!, {}));
@@ -211,6 +214,11 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
         return answered("accepted", left);
       }
       if (stopping === undefined) {
+        // No group to end on this kind: the run is left where it is, and the idle nap that the row held off takes it.
+        if (ends === undefined) {
+          row.end!(TURN_STOPPED_LINE, true, true);
+          return answered("accepted");
+        }
         row.end!(TURN_STOPPED_LINE, true);
         return answered("accepted", await ends!(entry!, thread!, {}));
       }

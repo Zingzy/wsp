@@ -47,6 +47,8 @@ export interface Box {
   endMs?: (cmd: string) => number;
   /** A thread's end there leaves pid 4242 standing, as a process stuck in the kernel does. */
   endFails?: boolean;
+  /** The branch the folders there have checked out; none answers as a detached head does. */
+  head?: string;
 }
 
 export interface BoxLogin {
@@ -100,6 +102,7 @@ export function box(client: WsClient, login: BoxLogin, o: { failClone?: boolean;
       return out(`${at}\n`);
     }
     if (o.failClone === true && line.includes("git clone")) return out("", 128);
+    if (line.includes("symbolic-ref --quiet --short HEAD")) return seen.head === undefined ? out("", 1) : out(`${seen.head}\n`);
     if (line.includes("wsp_mcp_read()")) {
       const said = [...line.matchAll(/^wsp_mcp_read (\d+) '([^']+)'$/gm)].map(([, i, path]) => {
         const text = seen.configs.get(path!);

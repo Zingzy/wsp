@@ -20,6 +20,7 @@ import type {
   ProjectGoldenRemoved,
   ProjectImportResult,
   ProjectView,
+  ProjectBranch,
   SeedChoice,
   SeedPlan,
   SessionEvent,
@@ -218,8 +219,9 @@ export interface Runtime {
      * files no commit has. Its threads go on in the project folder. With check, refuses as it would and takes nothing. */
     worktreeRemove(o: { project: string; branch: string; force?: boolean; check?: boolean }, origin?: Caller): Promise<void>;
     /** The copy's checkout as the host holds it, read again through the copy's daemon unless it was read within
-     * CHECKOUT_TTL_MS; a machine that is not running and whose computer does not answer for it keeps its last fact. */
-    checkout(id: string, origin?: Caller): Promise<CheckoutReply>;
+     * CHECKOUT_TTL_MS or `fresh` asks now, which reads no pull request or children; a machine that is not running and
+     * whose computer does not answer for it keeps its last fact. */
+    checkout(id: string, origin?: Caller, fresh?: boolean): Promise<CheckoutReply>;
     /** Puts one changed file of the copy back as HEAD has it, then reads the checkout again. With check, refuses a file
      * with no change as the discard would and puts nothing back. */
     discard(o: { workspaceId: string; path: string; check?: boolean; threadId?: string }, origin?: Caller): Promise<GitDiscardReply>;
@@ -332,6 +334,8 @@ export interface Runtime {
     computers(): Promise<{ id: string; name: string }[]>;
     /** The project a word names, by id or by name; refused naming the ones there are. */
     resolve(ref: string, origin?: Caller): Promise<ProjectView>;
+    /** The branch a new thread of the project starts on, read now: its folder's own where threads work in it. */
+    branch(ref: string, origin?: Caller): Promise<ProjectBranch>;
     /** Drops a project's record and whatever the add made for it on the computer holding it, with the one
      * sentence the person reads for that computer; refused while a workspace of it stands, naming them, and while its
      * folder on a computer of the person's holds work no remote has, unless force. With check, refuses as it would and

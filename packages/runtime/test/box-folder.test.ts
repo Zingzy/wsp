@@ -53,6 +53,19 @@ describe("a thread on a project of a computer the person joined", () => {
     expect(seen.ops).not.toContain("machine.create");
   });
 
+  it("starts a new thread on the branch its folder there has checked out now, read off that computer at each ask", async () => {
+    const { rt, project, seen } = await joined({});
+    seen.head = "feature-x";
+    expect(await rt.projects.branch(project.id)).toEqual({ branch: "feature-x", folder: true });
+    const read = seen.execs.at(-1)!;
+    expect(handedLine(read.cmd)).toContain("git -C /root/spoo-ts symbolic-ref --quiet --short HEAD");
+    seen.head = "main";
+    expect(await rt.projects.branch(project.id)).toEqual({ branch: "main", folder: true });
+    seen.head = undefined;
+    expect(await rt.projects.branch(project.id)).toEqual({ branch: null, folder: true });
+    expect(seen.ops).not.toContain("machine.create");
+  });
+
   it("goes with its computer in one remove, the threads in its folder with it and the folder left as it is", async () => {
     const starts: Started[] = [];
     const { rt, placeId, project, seen } = await joined({ adapters: { claude: answering(starts) } });

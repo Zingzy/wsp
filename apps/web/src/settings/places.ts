@@ -6,7 +6,7 @@
 // rate are all the protocol's (absentComputer, fmtSize, fmtBytes, offlineFor,
 // fmtRate) and are not copied here.
 import type { MarkState } from "../components/status/markState.js";
-import { FREE_WORD, JOINED_COMPUTER, PLACE_LEAVE_LINE, hereName, syncLine, isHere, isProviderPlace, placeName, placeOf, absentComputer, placeDaemonBehind, awayMsOf, chargesNothing, daemonSilent, fmtBytes, fmtRate, imageCopyLine, isLocalWorkspace, landsOn, namesPlace, ownDaemonDown, plural, placeWord, SETUP_WORDS, type AbsentComputer, type InitSetup, type PlaceKind, type PlaceProvisionRow, type PlaceView, type ProjectView, type SealedImageCopy, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { FREE_WORD, JOINED_COMPUTER, PLACE_LEAVE_LINE, placeAwayRefusal, placeForgetLine, type PlaceHolds, hereName, syncLine, isHere, isProviderPlace, placeName, placeOf, absentComputer, placeDaemonBehind, awayMsOf, chargesNothing, daemonSilent, fmtBytes, fmtRate, imageCopyLine, isLocalWorkspace, landsOn, namesPlace, ownDaemonDown, plural, placeWord, SETUP_WORDS, type AbsentComputer, type InitSetup, type PlaceKind, type PlaceProvisionRow, type PlaceView, type ProjectView, type SealedImageCopy, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { agentName } from "@wsp/catalog";
 import { PLACE_STATE_WORDS, PROVISION_OUTCOME_WORDS, WHERE_WORDS, capitalised } from "./format.js";
 
@@ -69,6 +69,14 @@ export function removeSentence(place: PlaceView, holding: PlaceHolding, here: st
 
 /** The dialog's own title. */
 export const removeTitle = (place: PlaceView): string => `Remove ${placeName(place)}?`;
+
+export const forgetTitle = (place: PlaceView): string => `Forget ${placeName(place)}?`;
+
+/** What a forget does, in its order: why a remove cannot, then the protocol's own sentence for the forget. */
+export function forgetSentence(place: PlaceView, holds: PlaceHolds): string {
+  const name = placeName(place);
+  return `${placeAwayRefusal(name, absentComputer(name, null).said).said}. ${placeForgetLine(name, holds, place.road?.ssh)}`;
+}
 
 /** What one row of the places list is, in the words the pane's Where row says after its name. One entry per kind
  * of row, so a third kind is a row here and nowhere else. A computer of the person's own is the protocol's own

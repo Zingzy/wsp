@@ -8,7 +8,7 @@ import { agentName } from "@wsp/catalog";
 import { PauseIcon, PlayIcon, SquareIcon } from "lucide-react";
 import { describe, expect, it, vi } from "vitest";
 import { taskStopRefusedLine, taskStopUnsupportedLine, goneRefusal, kindWords, machineWord, notAnsweringYet, ownDaemonDown, threadForgetRefusal, threadMarkdown, threadMessages, workspaceState, workspaceWord, type HarnessCatalog, type PlaceView, type SessionEvent, type SessionSettleResult, type SessionStatus, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
-import { CLIENT_CANNOT_OPEN, TERMINAL_WORDS, THREAD_WORDS, WORKSPACE_WORDS, terminalRefusedLine } from "../src/actions/format.js";
+import { CLIENT_CANNOT_OPEN, TERMINAL_WORDS, THREAD_STILL_RUNNING_HERE, THREAD_WORDS, WORKSPACE_WORDS, terminalRefusedLine } from "../src/actions/format.js";
 import { placeMenu } from "../src/actions/menuPlacement.js";
 import { actionById, actionIfAny, resolveActions, toMenuItems } from "../src/actions/registry.js";
 import { terminalActions, type TerminalVerbs } from "../src/actions/terminalActions.js";
@@ -446,6 +446,58 @@ describe("thread actions", () => {
     expect(renameOf("unreachable")).toBeNull();
     expect(renameOf("gone")).toBe("This workspace's machine is gone with its disk, so work that was not pushed is lost; rebuild it to rename, which brings back its home folder from the last saved nap");
     expect(renameOf("gone", "machine m1 is gone at the provider")).toBe("This workspace's machine is gone with its disk, so work that was not pushed is lost; rebuild it to rename, which brings back its home folder from the last saved nap (machine m1 is gone at the provider)");
+  });
+
+  describe("continue in terminal", () => {
+    const SESSION = "0c8e2b8e-5d6f-4c4e-9f3a-2b1c0d9e8f7a";
+    const resumable = (status: SessionStatus, folder = "/Users/dev/acme", catalog: HarnessCatalog | null = row("claude", { terminalResume: "claude --resume" }), elsewhere?: string): ThreadTarget =>
+      threadTarget(
+        { id: "thr_1", sessionId: "s1", threadId: "thr_1", workspaceId: "ws_a", harness: "claude", title: "fix the port list", status, ran: true, startedAt: null, endedAt: null, indicator: null, startedBy: "person", project: null, parentThreadId: null, attempt: null, model: null, asking: null, costUsd: null, unread: false, readAt: null, settledAt: null, needsYou: false, pinnedAt: null, snoozedUntil: null, section: null, subagents: [], lastLine: null, failure: null, foldedAt: null, replaces: null, replacedBy: null, harnessSession: { id: SESSION, folder } },
+        { catalog, state: "running", elsewhere },
+      );
+
+    it("copies the line that goes into the thread's folder and resumes its agent's session there, and says it copied", async () => {
+      useNotices.getState().clear();
+      const verbs = threadVerbs();
+      const actions = resolveActions(threadActions, resumable("completed"), verbs);
+      expect(actionById(actions, "continue-in-terminal")).toMatchObject({ title: THREAD_WORDS.continueInTerminal, refusal: null });
+      expect(actionIfAny(actions, "stop-continue-in-terminal")).toBeUndefined();
+      await actionById(actions, "continue-in-terminal").run();
+      expect(verbs.copyText).toHaveBeenCalledWith(`cd /Users/dev/acme && claude --resume ${SESSION}`);
+      expect(verbs.stop).not.toHaveBeenCalled();
+      expect(useNotices.getState().notices[0]).toMatchObject({ kind: "done", text: "Copied. Paste it in a terminal to go on with this thread there" });
+      // A thread on another computer: the line is for a terminal there, and the notice names it.
+      await actionById(resolveActions(threadActions, resumable("completed", "/root/acme", undefined, "hetzner"), verbs), "continue-in-terminal").run();
+      expect(useNotices.getState().notices[0]).toMatchObject({ text: "Copied. Paste it in a terminal on hetzner to go on with this thread there" });
+      // A folder sh would split is one word on the line.
+      const spaced = resolveActions(threadActions, resumable("completed", "/Users/dev/my repo"), verbs);
+      await actionById(spaced, "continue-in-terminal").run();
+      expect(verbs.copyText).toHaveBeenLastCalledWith(`cd '/Users/dev/my repo' && claude --resume ${SESSION}`);
+    });
+
+    it("is not offered for an agent whose row names no terminal resume, a row not read yet, or a thread whose agent announced no session", () => {
+      expect(actionIfAny(resolveActions(threadActions, resumable("completed", "/x", row("codex")), threadVerbs()), "continue-in-terminal")).toBeUndefined();
+      expect(actionIfAny(resolveActions(threadActions, resumable("completed", "/x", null), threadVerbs()), "continue-in-terminal")).toBeUndefined();
+      expect(actionIfAny(resolveActions(threadActions, thread("completed", "thr_1", "claude", { catalog: row("claude", { terminalResume: "claude --resume" }) }), threadVerbs()), "continue-in-terminal")).toBeUndefined();
+    });
+
+    it("while wsp holds the thread's process, says so and offers to stop it first: the stop goes to the thread's turn and the same line is copied", async () => {
+      useNotices.getState().clear();
+      const order: string[] = [];
+      const verbs = threadVerbs({ stop: vi.fn(async () => void order.push("stop")), copyText: vi.fn(async () => void order.push("copy")) });
+      const actions = resolveActions(threadActions, resumable("running"), verbs);
+      expect(actionById(actions, "continue-in-terminal").refusal).toBe(THREAD_STILL_RUNNING_HERE);
+      expect(actionById(actions, "stop-continue-in-terminal")).toMatchObject({ title: THREAD_WORDS.stopAndContinueInTerminal, refusal: null });
+      await actionById(actions, "stop-continue-in-terminal").run();
+      expect(verbs.stop).toHaveBeenCalledWith("s1");
+      expect(verbs.copyText).toHaveBeenCalledWith(`cd /Users/dev/acme && claude --resume ${SESSION}`);
+      expect(order).toEqual(["copy", "stop"]);
+      expect(useNotices.getState().notices[0]).toMatchObject({ kind: "done", text: THREAD_WORDS.terminalLineCopied() });
+      // A client with no road to a stop says so on the offer, and the line stays held.
+      const cannot = resolveActions(threadActions, resumable("running"), threadVerbs({ stop: undefined }));
+      expect(actionById(cannot, "stop-continue-in-terminal").refusal).toBe("This client cannot stop a turn");
+      expect(actionById(cannot, "continue-in-terminal").refusal).toBe(THREAD_STILL_RUNNING_HERE);
+    });
   });
 
   it("copy link writes the page's address for the thread", async () => {

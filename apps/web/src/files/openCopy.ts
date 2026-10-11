@@ -4,7 +4,9 @@
 // host opens in it. A running workspace on another computer opens there over
 // ssh, in the editor named or the host's default; the host's refusal for want
 // of the line in the person's ssh config raises the one question, and a yes
-// runs the same open again. A napping one asks the host nothing.
+// runs the same open again. A napping one asks the host nothing. From the
+// press to the host's answer the open is in flight, and another press waits.
+import { create } from "zustand";
 import { isLocalWorkspace, SSH_BEHIND_KIND, type EditorId, type WorkspaceView } from "@wsp/protocol";
 import { addNotice, noticeFailure } from "../notices/store.js";
 import { RequestError } from "../protocol/client.js";
@@ -21,6 +23,19 @@ export function openFailed(e: unknown): void {
   else noticeFailure(e);
 }
 
+/** The workspaces whose open the host has not answered yet. Here the host answers once the editor's program ends or
+ * its wait runs out; elsewhere it first wakes the workspace. */
+export const useOpening = create<{ ids: readonly string[] }>(() => ({ ids: [] }));
+
+async function inFlight(workspaceId: string, work: () => Promise<void>): Promise<void> {
+  useOpening.setState(s => ({ ids: [...s.ids, workspaceId] }));
+  try {
+    await work();
+  } finally {
+    useOpening.setState(s => ({ ids: s.ids.filter(id => id !== workspaceId) }));
+  }
+}
+
 /** Whether Open has anywhere to open this workspace: its folder here, or its machine running. */
 export const opensInEditor = (workspace: Pick<WorkspaceView, "kind" | "phase">): boolean => isLocalWorkspace(workspace) || workspace.phase === "running";
 
@@ -30,17 +45,19 @@ export async function openCopyInEditor(workspaceId: string, pick?: EditorId, edi
   const { api, workspaces, setPreferences } = useStore.getState();
   const workspace = workspaces.find(w => w.id === workspaceId);
   const open = api?.openInEditor;
-  if (open === undefined || workspace === undefined || !opensInEditor(workspace)) return;
-  if (pick !== undefined) await setPreferences({ editor: pick });
+  if (open === undefined || workspace === undefined || !opensInEditor(workspace) || useOpening.getState().ids.includes(workspaceId)) return;
   const named = isLocalWorkspace(workspace) ? undefined : (pick ?? editor);
   const run = async (): Promise<void> => {
     await (named === undefined ? open(workspaceId, projectFolderOf(workspace)) : open(workspaceId, projectFolderOf(workspace), undefined, named));
   };
   try {
-    await run();
+    await inFlight(workspaceId, async () => {
+      if (pick !== undefined) await setPreferences({ editor: pick });
+      await run();
+    });
   } catch (e) {
     if (e instanceof RequestError && e.kind === "sshInclude") {
-      useSshConsent.setState({ asking: { workspaceId, run } });
+      useSshConsent.setState({ asking: { workspaceId, run: () => inFlight(workspaceId, run) } });
       return;
     }
     openFailed(e);

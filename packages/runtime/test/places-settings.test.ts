@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join as joinPath } from "node:path";
 import { describe, expect, it } from "vitest";
 import { AGENTS_ON, foldThreads, placeSettingsLine, dayStart, spendCapRefusal, absentComputer, HERE_PLACE_ID, noSuchPlaceRefusal, type PlaceView, type TurnResult, TURN_WALL_MS, turnCutLine } from "@wsp/protocol";
+import { gateLoop } from "../../protocol/test/stub-script.js";
 import type { MachineExecOptions } from "../src/machine-exec.js";
 import { createRuntime, wiredPlace, type HarnessAdapterFactory } from "../src/runtime.js";
 import { newPlaceKeyPair } from "../src/places.js";
@@ -310,7 +311,7 @@ const busy: HarnessAdapterFactory = ctx => ({
     const sessionId = randomUUID();
     onEvent({ type: "session.start", sessionId });
     // It prints as it goes, so the idle cut never stands in for the limit under test.
-    const stream = ctx.execStream("while :; do echo working; sleep 0.05; done", { env: { ...ctx.env } });
+    const stream = ctx.execStream(gateLoop("$PWD/stop", { each: "echo working" }), { env: { ...ctx.env } });
     const finished = (async (): Promise<TurnResult> => {
       const result: TurnResult = await (async () => {
         for await (const line of stream.lines) void line;

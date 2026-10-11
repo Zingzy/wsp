@@ -237,6 +237,9 @@ export interface HarnessAdapter {
   readonly asideServers?: true;
   /** The message that runs this harness's own compaction of the thread's context as a turn; absent where it has none. */
   readonly compacts?: string;
+  /** The command that opens one of this harness's sessions in the person's own terminal, the session id going after
+   * it; absent where the CLI has no such road. */
+  readonly terminalResume?: string;
   /** What a turn's command is exported with on the machine; a plain exec on the workspace runs with the same. Absent
    * means nothing is exported and both run with the machine's own environment only. */
   readonly env?: Readonly<Record<string, string>>;

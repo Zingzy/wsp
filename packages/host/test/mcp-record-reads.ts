@@ -65,11 +65,22 @@ const REPORT = {
 
 const EMPTY_REPORT = { target: { workspaceId: "ws-1" }, home: "/root", user: "root", readAt: "2026-09-27T10:00:00.000Z", agents: [], skills: [], servers: [], refused: [] };
 
+/** A box's report as its read makes it: the launch's wsp server, which no file names, beside a file's row. */
+const BOX_REPORT = {
+  ...REPORT,
+  stale: undefined,
+  target: { placeId: "place-9" },
+  home: "/root",
+  user: "root",
+  servers: [{ agent: "claude", name: "wsp", scope: "user", launch: true, transport: { kind: "stdio", line: "wsp mcp" }, envNames: [], auth: "open", enabled: true }, REPORT.servers[0]],
+};
+
 const reportCases = (tool: string): Case[] => [
   { case: "here", arguments: {}, replies: { "agents.read": reply({ report: REPORT }) } },
   { case: "a thread", arguments: { thread: "t-1" }, replies: { "sessions.list": reply({ sessions: [{ id: "s-1", workspaceId: "ws-1", harness: "claude", status: "completed", threadId: "t-1 one" }] }), "workspaces.get": reply({ workspace: WORKSPACE }), "agents.read": reply({ report: EMPTY_REPORT }) } },
   { case: "a project's name", arguments: { thread: "wsp" }, replies: { "sessions.list": reply({ sessions: [] }), "projects.list": reply({ projects: [WORKSPACE.project] }) } },
   { case: "a computer", arguments: { on: "attic" }, replies: { "places.list": PLACES, "agents.read": reply({ report: { ...REPORT, stale: undefined, target: { placeId: "place-9", project: "wsp" } } }) } },
+  { case: "a box with its launch row", arguments: { on: "attic" }, replies: { "places.list": PLACES, "agents.read": reply({ report: BOX_REPORT }) } },
   { case: "both", arguments: { thread: "w", on: "attic" }, replies: {} },
   { case: "no such computer", arguments: { on: "cellar" }, replies: { "places.list": PLACES } },
   { case: "a report this build cannot read", arguments: {}, replies: { "agents.read": reply({ report: { ...REPORT, [tool]: [{ name: 5 }] } }) } },

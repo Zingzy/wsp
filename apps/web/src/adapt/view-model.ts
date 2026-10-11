@@ -386,6 +386,9 @@ export interface SidebarThreadSnapshot {
   readonly ran: boolean;
   /** Set while Undo rewind can still put back the files the thread's last rewind replaced. */
   readonly rewound?: boolean;
+  /** The agent's own session the latest turn ran, by the agent's id for it, and the folder that turn ran in: what a
+   * terminal resumes. Absent until the agent announced one. */
+  readonly harnessSession?: { readonly id: string; readonly folder: string };
   readonly startedAt: string | null;
   readonly endedAt: string | null;
   readonly indicator: StatusIndicator | null;

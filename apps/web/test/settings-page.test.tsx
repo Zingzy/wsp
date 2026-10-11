@@ -513,7 +513,7 @@ describe("Appearance's previews and new controls", () => {
     for (const name of ["--font-size-chat", "--font-size-prompt", "--font-size-code", "--diffs-font-size"]) document.documentElement.style.removeProperty(name);
   });
 
-  it("a pointer over a theme card shows this window in that theme, and leaving the cards puts the pick back", async () => {
+  it("a pointer over a theme card shows this window in that theme, and leaving the card puts the pick back", async () => {
     const { api, sets } = settingsApi();
     mountSettings({ api, children: <ThemeRule /> });
     await settle();
@@ -523,7 +523,7 @@ describe("Appearance's previews and new controls", () => {
     expect(document.documentElement.dataset["theme"]).toBe("moss");
     fireEvent.pointerEnter(cellOf("denim"));
     expect(document.documentElement.dataset["theme"]).toBe("denim");
-    fireEvent.pointerLeave(group(SETTINGS_WORDS.themesOf(THEME_WORDS.dark)));
+    fireEvent.pointerLeave(cellOf("denim"));
     expect(document.documentElement.dataset["theme"]).toBe("graphite");
     // The window losing focus with a card under the pointer puts the pick back too, as a pointer that is cancelled does.
     fireEvent.pointerEnter(cellOf("tungsten"));
@@ -535,6 +535,38 @@ describe("Appearance's previews and new controls", () => {
     expect(document.documentElement.dataset["theme"]).toBe("graphite");
     await settle();
     expect(sets).toEqual([{ theme: "dark" }]);
+  });
+
+  it("after a pick, the pointer over no card shows the pick: a gap between cards, the grid's empty cell, the page around", async () => {
+    const { api } = settingsApi();
+    mountSettings({ api, children: <ThemeRule /> });
+    await settle();
+    fireEvent.click(within(group(SETTINGS_WORDS.mode)).getByRole("radio", { name: "Dark" }));
+    const theme = (): string | undefined => document.documentElement.dataset["theme"];
+    // The pair a browser sends as the pointer crosses from one element to the next, from which React reads enter and leave.
+    let at: Element = document.body;
+    const move = (to: Element): void => {
+      fireEvent.pointerOut(at, { relatedTarget: to });
+      fireEvent.pointerOver(to, { relatedTarget: at });
+      at = to;
+    };
+    const grid = group(SETTINGS_WORDS.themesOf(THEME_WORDS.dark));
+    move(cellOf("denim"));
+    fireEvent.click(cellOf("denim"));
+    expect(theme()).toBe("denim");
+    for (const [road, off] of [["a gap or the empty cell", grid], ["the picker around the grid", grid.parentElement!], ["the page", document.body]] as const) {
+      move(cellOf("pitch"));
+      expect(theme()).toBe("pitch");
+      move(off);
+      expect(theme(), road).toBe("denim");
+    }
+    move(cellOf("pitch"));
+    move(cellOf("pitch").querySelector("[data-theme-line]")!);
+    expect(theme()).toBe("pitch");
+    move(cellOf("moss"));
+    expect(theme()).toBe("moss");
+    move(grid);
+    expect(theme()).toBe("denim");
   });
 
   it("a reading size and a code size write the record and every surface's variable, and Default takes them off", async () => {

@@ -124,6 +124,7 @@ import type { HostEditor, HostFolders, HostSsh, HostTerminalConfig, InitDoor, Pr
 
 import { forwardsOf, type ForwardsSource } from "./forwards.js";
 import { costMoved } from "./status.js";
+import { answerProject, isProjectRequest } from "./serve-projects.js";
 import { answerSlate, isSlateRequest, type SlateHolds } from "./serve-slates.js";
 export type { ForwardsSource };
 
@@ -285,7 +286,7 @@ export interface PlaceDoctor {
  * `on` is a host source like the init door's, so its events carry no sequence and are not replayed. */
 export interface ReleaseDoor {
   get(): ReleaseView;
-  check(): Promise<ReleaseView>;
+  check(force?: boolean): Promise<ReleaseView>;
   on(fn: (e: ReleaseChangedEvent) => void): () => void;
 }
 
@@ -871,6 +872,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
         };
         try {
           if (isSlateRequest(msg)) return void send({ id: msg.id, ok: true, ...(await answerSlate(rt.slates, msg, origin, slateHolds)) });
+          if (isProjectRequest(msg)) return void send({ id: msg.id, ok: true, ...(await answerProject(rt.projects, msg, origin)) });
           switch (msg.op) {
             case "auth":
               send({ id: msg.id, ok: true, ...released });
@@ -921,7 +923,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             }
             case "places.remove": {
               if (refusedOffOwnRoad()) return;
-              send({ id: msg.id, ok: true, ...(await places().remove(msg.placeId, { ...(msg.sudoPassword === undefined ? {} : { sudoPassword: msg.sudoPassword }), ...(msg.force === true ? { force: true } : {}) })) });
+              send({ id: msg.id, ok: true, ...(await places().remove(msg.placeId, { ...(msg.sudoPassword === undefined ? {} : { sudoPassword: msg.sudoPassword }), ...(msg.force === true ? { force: true } : {}), ...(msg.forget === true ? { forget: true } : {}) })) });
               return;
             }
             case "places.holds": {
@@ -1259,7 +1261,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               send({ id: msg.id, ok: true });
               return;
             case "workspaces.checkout":
-              send({ id: msg.id, ok: true, ...(await rt.workspaces.checkout(msg.workspaceId, origin)) });
+              send({ id: msg.id, ok: true, ...(await rt.workspaces.checkout(msg.workspaceId, origin, msg.fresh === true)) });
               return;
             case "workspaces.discard":
               send({ id: msg.id, ok: true, ...(await rt.workspaces.discard({ workspaceId: msg.workspaceId, path: msg.path, ...(msg.check === true ? { check: true } : {}), ...(msg.threadId !== undefined ? { threadId: msg.threadId } : {}) }, origin)) });
@@ -1398,23 +1400,6 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               return;
             case "workspaces.snapshot":
               send({ id: msg.id, ok: true, projectGolden: await rt.workspaces.snapshot(msg.workspaceId, origin) });
-              return;
-            case "projects.add": {
-              const { notice, ...project } = await rt.projects.add({ source: msg.source, ...(msg.on !== undefined ? { on: msg.on } : {}), ...(msg.name !== undefined ? { name: msg.name } : {}), ...(msg.base !== undefined ? { base: msg.base } : {}), ...(msg.into !== undefined ? { into: msg.into } : {}), ...(msg.seed !== undefined ? { seed: msg.seed } : {}) }, origin);
-              send({ id: msg.id, ok: true, project, ...(notice !== undefined ? { notice } : {}) });
-              return;
-            }
-            case "projects.list":
-              send({ id: msg.id, ok: true, projects: await rt.projects.list(origin) });
-              return;
-            case "projects.defaults":
-              send({ id: msg.id, ok: true, defaults: await rt.projects.defaults(origin) });
-              return;
-            case "projects.resolve":
-              send({ id: msg.id, ok: true, project: await rt.projects.resolve(msg.ref, origin) });
-              return;
-            case "projects.remove":
-              send({ id: msg.id, ok: true, ...(await rt.projects.remove(msg.projectId, origin, { ...(msg.force === true ? { force: true } : {}), ...(msg.check === true ? { check: true } : {}) })) });
               return;
             case "projectGoldens.list":
               send({ id: msg.id, ok: true, projectGoldens: await rt.golden.projects() });
@@ -1980,7 +1965,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               send({ id: msg.id, ok: true, release: release().get() });
               return;
             case "release.check":
-              send({ id: msg.id, ok: true, release: await release().check() });
+              send({ id: msg.id, ok: true, release: await release().check(msg.force === true) });
               return;
             case "host.restart": {
               if (!ownRoad()) {

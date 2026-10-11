@@ -102,6 +102,7 @@ import {
   type PlaceSetAlso,
   type PlaceSettingsAsk,
   type PlaceSettingWord,
+  ProjectBranch,
   ProjectView,
   type InitScreenId,
   type Attachment,
@@ -494,9 +495,9 @@ export interface Api {
   /** Pushes the branch the agent made and opens its pull request through the git host's own command line, and
    * answers what both did. Optional so a fixture with no remote need not fake it. */
   bringBack?(id: string): Promise<BringBackResult>;
-  /** The copy's checkout as the host holds it, read again unless it was read moments ago; the fact also rides every
-   * status. Optional so a fixture with no copy need not fake it. */
-  workspaceCheckout?(id: string): Promise<CheckoutReply>;
+  /** The copy's checkout as the host holds it, read again unless it was read moments ago or `fresh` asks now; the
+   * fact also rides every status. Optional so a fixture with no copy need not fake it. */
+  workspaceCheckout?(id: string, fresh?: boolean): Promise<CheckoutReply>;
   /** Puts one changed file back as its last commit has it. */
   discard?(id: string, path: string): Promise<GitDiscardReply>;
   /** Commits the files named with the message given. */
@@ -553,7 +554,7 @@ export interface Api {
    * the workspaces standing on it and the record. */
   /** What a remove of that computer takes with it, read now: its tasks and projects, and the work among them no remote has. */
   placeHolds?(placeId: string): Promise<PlaceHolds>;
-  removePlace?(placeId: string, sudoPassword?: string, force?: boolean): Promise<PlaceRemoved>;
+  removePlace?(placeId: string, sudoPassword?: string, force?: boolean, forget?: boolean): Promise<PlaceRemoved>;
   /** Puts this wsp's daemon on the computer where that computer runs an older one; what it was set up with stays.
    * Answers what the daemon half came to where it ran. A client without it holds Update rather than offering one
    * that asks nobody. */
@@ -759,6 +760,9 @@ export interface Api {
   /** What a new thread on each project starts on, by project id, each value with where it came from. Optional so a
    * fixture with no project page need not fake it; without it the page's rows name nothing they inherit. */
   projectsDefaults?(): Promise<Record<string, ThreadDefaults>>;
+  /** The branch a new thread of the project starts on, read now. Optional so a fixture need not fake it; without it
+   * New thread names no branch. */
+  projectBranch?(projectId: string): Promise<ProjectBranch>;
   /** Where a workspace of this project would land and what that computer offers: the computer's name, and the
    * flags the row's own words about the copy's ports and the state word's pause mode are read off. Refused in the
    * runtime's own sentence where that computer forks nothing. Optional so a fixture with no landing need not fake
@@ -790,8 +794,9 @@ export interface Api {
   setPreferences?(patch: PreferencesPatch): Promise<Preferences & { notice?: string }>;
   /** The newest release as the host last read it, asking nobody. Optional so fixtures without About need not fake it. */
   releaseGet?(): Promise<ReleaseView>;
-  /** Asks the host to read the newest release again; the host keeps asks ten minutes apart and answers its reading. */
-  releaseCheck?(): Promise<ReleaseView>;
+  /** Asks the host to read the newest release again; the host keeps asks ten minutes apart unless `force`, a person's
+   * press, and answers its reading. */
+  releaseCheck?(force?: boolean): Promise<ReleaseView>;
   /** Restarts the host on the files it was installed from; the socket drops on its stopping code and reconnects. */
   hostRestart?(): Promise<void>;
   /** Brings a folder and the agent sessions keyed to it home from the workspace's machine; progress rides project.export
@@ -951,7 +956,7 @@ export function makeApi(c: ProtocolClient): Api {
     deleteWorkspace: async id => void (await c.request("workspaces.delete", { workspaceId: id })),
     // Parsed, not trusted: the row's line is built from these fields and a reply short of them must not become one.
     bringBack: async id => BringBackResult.parse(await c.request("workspaces.bringBack", { workspaceId: id })),
-    workspaceCheckout: async id => CheckoutReply.parse(await c.request("workspaces.checkout", { workspaceId: id })),
+    workspaceCheckout: async (id, fresh) => CheckoutReply.parse(await c.request("workspaces.checkout", { workspaceId: id, ...(fresh === true ? { fresh } : {}) })),
     discard: async (id, path) => GitDiscardReply.parse(await c.request("workspaces.discard", { workspaceId: id, path })),
     commit: async (id, message, paths) => GitCommitReply.parse(await c.request("workspaces.commit", { workspaceId: id, message, ...(paths !== undefined ? { paths: [...paths] } : {}) })),
     commitDraft: async (id, paths) => CommitDraft.parse(await c.request("workspaces.commitDraft", { workspaceId: id, ...(paths !== undefined ? { paths: [...paths] } : {}) })),
@@ -1066,6 +1071,7 @@ export function makeApi(c: ProtocolClient): Api {
     projectsList: async () => ProjectView.array().parse((await c.request<{ projects?: unknown }>("projects.list")).projects),
     projectsAdd: async (source, on, into) => ProjectView.parse((await c.request<{ project?: unknown }>("projects.add", { source, ...(on === undefined ? {} : { on }), ...(into === undefined ? {} : { into }) })).project),
     projectsDefaults: async () => Object.fromEntries(Object.entries((await c.request<{ defaults?: Record<string, unknown> }>("projects.defaults")).defaults ?? {}).map(([id, defaults]) => [id, ThreadDefaults.parse(defaults)])),
+    projectBranch: async projectId => ProjectBranch.parse(await c.request<unknown>("projects.branch", { projectId })),
     projectsRemove: async projectId => {
       const reply = await c.request<{ said?: unknown }>("projects.remove", { projectId });
       return { said: typeof reply.said === "string" ? reply.said : undefined };
@@ -1089,7 +1095,7 @@ export function makeApi(c: ProtocolClient): Api {
       return typeof notice === "string" ? { ...record, notice } : record;
     },
     releaseGet: async () => ReleaseView.parse((await c.request<{ release?: unknown }>("release.get")).release),
-    releaseCheck: async () => ReleaseView.parse((await c.request<{ release?: unknown }>("release.check")).release),
+    releaseCheck: async (force?: boolean) => ReleaseView.parse((await c.request<{ release?: unknown }>("release.check", force === true ? { force } : {})).release),
     hostRestart: async () => void (await c.request("host.restart")),
     // Parsed, not trusted: the dialog renders only what the wire type vouches for.
     exportProject: async opts => ProjectExportResult.parse((await c.request<{ exported?: unknown }>("project.export", { ...opts })).exported),
@@ -1105,7 +1111,7 @@ export function makeApi(c: ProtocolClient): Api {
     initSignInCode: async o => InitJob.parse((await c.request<{ job?: unknown }>("init.signInCode", { ...o })).job),
     initCancel: async () => InitJob.parse((await c.request<{ job?: unknown }>("init.cancel")).job),
     placeHolds: async placeId => PlaceHolds.parse(await c.request("places.holds", { placeId })),
-    removePlace: async (placeId, sudoPassword, force) => PlaceRemoved.parse(await c.request("places.remove", { placeId, ...(sudoPassword === undefined ? {} : { sudoPassword }), ...(force === true ? { force: true } : {}) })),
+    removePlace: async (placeId, sudoPassword, force, forget) => PlaceRemoved.parse(await c.request("places.remove", { placeId, ...(sudoPassword === undefined ? {} : { sudoPassword }), ...(force === true ? { force: true } : {}), ...(forget === true ? { forget: true } : {}) })),
     // Parsed, not trusted: the row the answer lands on is redrawn off it, so only what the wire type vouches for
     // reaches the table.
     dialPlace: async placeId => PlaceDial.parse(await c.request<Record<string, unknown>>("places.dial", { placeId })),

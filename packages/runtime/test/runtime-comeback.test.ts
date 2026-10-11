@@ -10,10 +10,11 @@ import { execDetached, type ExecResult } from "@wsp/engine";
 
 /** The detached launch starts its run under setsid, which macOS lacks; detached runs only start on Linux machines. */
 const noSetsid = spawnSync("sh", ["-c", "command -v setsid"]).status !== 0;
-import { DAEMON_VERSION, PERMISSION_ALLOW, RUN_GONE_LINE, TURN_TOKEN_ENV, foldThreads, stillRunningLine, threadWordOf, type AdapterEvent, type Caller, type ExecStream, type SessionView, type TurnResult } from "@wsp/protocol";
+import { DAEMON_VERSION, LINK_RETRY_WINDOW_MS, PERMISSION_ALLOW, TURN_STOPPED_LINE, RUN_GONE_LINE, TURN_TOKEN_ENV, foldThreads, stillRunningLine, threadWordOf, type AdapterEvent, type Caller, type ExecStream, type SessionView, type TurnResult } from "@wsp/protocol";
 import { TRANSCRIPTS_HELD, createRuntime, type HarnessAdapterFactory, type HarnessSession, type ProjectLander, type Runtime } from "../src/runtime.js";
 import { TRANSCRIPT_CAP } from "../src/types/internal.js";
 import { memoryStore, type Store } from "../src/store.js";
+import { fakeClock } from "./fake-clock.js";
 import { until } from "./until.js";
 import { stubBackend, tokenGuest, type StubBackend, createOn } from "./stub-backend.js";
 import { scriptGuest } from "./script-guest.js";
@@ -39,6 +40,7 @@ describe("a turn the host comes back to", () => {
     let minted = 0;
     /** Set, nothing on the machine answers the question the attach asks, and the run is neither there nor gone. */
     let unreachable: Error | undefined;
+    let attempts = 0;
     const deliver = (run: Run, event: AdapterEvent): void => {
       if (event.type === "turn.done") run.result = event.result;
       run.live?.(event);
@@ -88,6 +90,7 @@ describe("a turn the host comes back to", () => {
         return session;
       },
       attach: async o => {
+        attempts++;
         if (unreachable !== undefined) throw unreachable;
         reopenedWith.push({ prompt: o.prompt, effort: o.effort });
         const run = runs.get(o.run);
@@ -108,9 +111,10 @@ describe("a turn the host comes back to", () => {
       prompts,
       handles: () => [...runs.keys()],
       sweep: (handle: string) => runs.delete(handle),
-      unreach: (e: Error) => (unreachable = e),
+      unreach: (e: Error | undefined) => (unreachable = e),
       asked: () => [...asked],
       reopened: () => [...reopenedWith],
+      attempts: () => attempts,
     };
   };
 
@@ -775,6 +779,154 @@ describe("a turn the host comes back to", () => {
     await rt2.workspaces.delete(ws!.id);
     await until(async () => (await rt2.sessions.list(workspaceId)).every(s => s.status !== "running"));
     await rt2.close();
+  });
+
+  it("a transcript that does not read leaves the turn running with no run opened, so no reader is left holding its lines", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const h = machineRuns();
+    const { workspaceId } = await hostWentDown(h, store, backend);
+    const failing: Store = { ...store, getBlob: async (collection, id) => (collection === "transcripts" ? Promise.reject(new Error("disk said EIO")) : store.getBlob(collection, id)) };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const rt2 = createRuntime({ backend, store: failing, adapters: { claude: h.adapter } });
+      expect((await rt2.sessions.list(workspaceId)).map(s => s.status)).toEqual(["running"]);
+      await until(() => warn.mock.calls.some(c => String(c[0]).includes("was left running")));
+      expect(h.reopened()).toEqual([]);
+      await rt2.close();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("a stop on a turn the restart could not reach ends it as stopped and unreached, and the next idle window naps the machine", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const h = machineRuns();
+    const { workspaceId } = await hostWentDown(h, store, backend);
+    h.unreach(new Error("daemon connect timed out after 15000ms"));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const fc = fakeClock();
+      const window = 20 * 60_000;
+      const rt2 = createRuntime({ backend, store, adapters: { claude: h.adapter }, clock: fc.clock, idle: { defaultWindowMs: window } });
+      const [row] = await rt2.sessions.list(workspaceId);
+      await until(() => warn.mock.calls.some(c => String(c[0]).includes("was left running")));
+      fc.advance(window * 2);
+      await new Promise(r => setImmediate(r));
+      expect(backend.machines[0]!.paused).toBe(false);
+
+      expect((await rt2.sessions.interrupt(row!.id)).outcome).toBe("accepted");
+      expect((await rt2.sessions.list(workspaceId)).map(s => s.status)).toEqual(["interrupted"]);
+      const end = (await rt2.sessions.history(workspaceId)).filter(e => e.type === "session.done").at(-1);
+      expect(end).toMatchObject({ result: { status: "interrupted", error: TURN_STOPPED_LINE, unreached: true } });
+      expect((await rt2.status.list())[0]!.idleAt).toBe(fc.clock.now() + window);
+      fc.advance(window);
+      await until(async () => (await rt2.workspaces.get(workspaceId)).phase === "napping");
+      expect(backend.machines[0]!.paused).toBe(true);
+      await rt2.close();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("a stop while a later ask after an unreached turn is still out leaves the turn to that ask, and the turn ends once", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const h = machineRuns();
+    const { workspaceId, run } = await hostWentDown(h, store, backend);
+    h.unreach(new Error("daemon connect timed out after 15000ms"));
+    // The later ask is held at the attach, as one waiting out a slow link is.
+    let gate: Promise<void> | undefined;
+    let open!: () => void;
+    let asked = 0;
+    const adapter: HarnessAdapterFactory = ctx => {
+      const harness = h.adapter(ctx);
+      return { ...harness, attach: async o => (asked++, await gate, harness.attach!(o)) };
+    };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const fc = fakeClock();
+      const rt2 = createRuntime({ backend, store, adapters: { claude: adapter }, clock: fc.clock, idle: { defaultWindowMs: 20 * 60_000 } });
+      const [row] = await rt2.sessions.list(workspaceId);
+      await until(() => warn.mock.calls.some(c => String(c[0]).includes("was left running")));
+      gate = new Promise<void>(resolve => (open = resolve));
+      h.unreach(undefined);
+      const before = asked;
+      await until(() => {
+        if (asked === before) fc.advance(LINK_RETRY_WINDOW_MS);
+        return asked > before;
+      });
+      expect((await rt2.sessions.interrupt(row!.id)).outcome).toBe("not-running");
+      open();
+      await until(() => h.reopened().length === 1);
+      h.emit(run, { type: "turn.done", sessionId: "sess-1", result: { status: "completed", text: "done" } });
+      h.emit(run, { type: "session.end", sessionId: "sess-1", exitCode: 0, sawResult: true });
+      await until(async () => (await rt2.sessions.list(workspaceId))[0]!.status === "completed");
+      expect((await rt2.sessions.history(workspaceId)).filter(e => e.type === "session.end")).toHaveLength(1);
+      await rt2.close();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("a turn the restart could not reach keeps its machine awake past every idle window, and the window starts from its end", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const h = machineRuns();
+    const { workspaceId, run } = await hostWentDown(h, store, backend);
+    h.unreach(new Error("daemon connect timed out after 15000ms"));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const fc = fakeClock();
+      const window = 20 * 60_000;
+      const rt2 = createRuntime({ backend, store, adapters: { claude: h.adapter }, clock: fc.clock, idle: { defaultWindowMs: window } });
+      expect((await rt2.sessions.list(workspaceId)).map(s => s.status)).toEqual(["running"]);
+      await until(() => warn.mock.calls.some(c => String(c[0]).includes("was left running")));
+      fc.advance(window * 3);
+      await new Promise(r => setImmediate(r));
+      expect(backend.machines[0]!.paused).toBe(false);
+      expect((await rt2.workspaces.get(workspaceId)).phase).toBe("running");
+      expect((await rt2.sessions.list(workspaceId)).map(s => s.status)).toEqual(["running"]);
+      expect((await rt2.status.list())[0]!.idleAt).toBeUndefined();
+
+      // Each round that the machine leaves unanswered asks once more, and says nothing and writes nothing.
+      const put = vi.spyOn(store, "put");
+      const asked = h.attempts();
+      for (let round = 0; round < 5; round++) {
+        fc.advance(LINK_RETRY_WINDOW_MS);
+        await until(() => h.attempts() === asked + round + 1);
+        await new Promise(r => setImmediate(r));
+      }
+      expect(warn.mock.calls.filter(c => String(c[0]).includes("was left running"))).toHaveLength(1);
+      expect(put.mock.calls.filter(c => c[0] === "sessions")).toEqual([]);
+      put.mockRestore();
+
+      // The machine answers again: the run is asked after a link window on, read, and its end is what the window counts from.
+      h.unreach(undefined);
+      await until(() => {
+        fc.advance(LINK_RETRY_WINDOW_MS);
+        return h.reopened().length === 1;
+      });
+      await until(async () => (await rt2.sessions.history(workspaceId)).filter(e => e.type === "session.delta").length === 1);
+      fc.advance(window * 2);
+      await new Promise(r => setImmediate(r));
+      expect(backend.machines[0]!.paused).toBe(false);
+      h.emit(run, { type: "turn.done", sessionId: "sess-1", result: { status: "completed", text: "done" } });
+      h.emit(run, { type: "session.end", sessionId: "sess-1", exitCode: 0, sawResult: true });
+      await until(async () => (await rt2.sessions.list(workspaceId))[0]!.status === "completed");
+      const ended = fc.clock.now();
+      expect((await rt2.status.list())[0]!.idleAt).toBe(ended + window);
+      fc.advance(window - 1);
+      await new Promise(r => setImmediate(r));
+      expect(backend.machines[0]!.paused).toBe(false);
+      fc.advance(1);
+      await until(async () => (await rt2.workspaces.get(workspaceId)).phase === "napping");
+      expect(backend.machines[0]!.paused).toBe(true);
+      await rt2.close();
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it("a turn whose reply is already written settles completed when the run is gone at boot, and tells its parent nothing more", async () => {

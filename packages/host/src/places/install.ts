@@ -142,7 +142,7 @@ export function placeInstaller(deps: { backend?: SshBackend; sshWord?: SshWordRe
       // The join on the box refuses a computer that already holds a place file, and only after the bundle landed; read
       // by the same rule here so a box in another wsp is refused with nothing of this one's sent.
       const held = parsePlaceFile((await machine.run(heldPlaceScript(login.HOME), { deadlineMs: SSH_DIAL_MS })).stdout);
-      if (held !== undefined) throw new Error(placeHeldRefusal(req.address, held, readJoinToken(req.code).hostKey));
+      if (held !== undefined) throw new Error(placeHeldRefusal(req.address, held, readJoinToken(req.code).hostKey, req.held));
       return { root: true as const, machine, login, hostKey, target, chip };
     };
     const standing = await stood().catch(async (e: unknown) => {

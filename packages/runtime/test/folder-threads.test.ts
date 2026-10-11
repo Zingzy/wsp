@@ -475,6 +475,35 @@ describe("a subfolder of a repo added as a project", () => {
   });
 });
 
+describe("the branch a new thread of a project here starts on", () => {
+  it("is the one its folder has checked out now, read again on each ask, for a repo, a worktree and a subfolder", async () => {
+    const { rt } = here();
+    const top = repo();
+    git(top, "switch", "-q", "-c", "feature-x");
+    mkdirSync(join(top, "apps", "web"), { recursive: true });
+    const tree = join(scratch(), "tree");
+    git(top, "worktree", "add", "-q", "-b", "wt-branch", tree);
+    const whole = await rt.projects.add({ source: top });
+    const sub = await rt.projects.add({ source: join(top, "apps", "web") });
+    const other = await rt.projects.add({ source: tree });
+    // The record keeps the remote's default; the folder is elsewhere.
+    expect(whole.defaultBranch).not.toBe("feature-x");
+    expect(await rt.projects.branch(whole.id)).toEqual({ branch: "feature-x", folder: true });
+    expect(await rt.projects.branch(sub.id)).toEqual({ branch: "feature-x", folder: true });
+    expect(await rt.projects.branch(other.id)).toEqual({ branch: "wt-branch", folder: true });
+    git(top, "switch", "-q", "main");
+    expect(await rt.projects.branch(whole.name)).toEqual({ branch: "main", folder: true });
+    git(top, "switch", "-q", "--detach");
+    expect(await rt.projects.branch(whole.id)).toEqual({ branch: null, folder: true });
+  });
+
+  it("is none on a folder git holds no repo in", async () => {
+    const { rt } = here();
+    const project = await rt.projects.add({ source: scratch() });
+    expect(await rt.projects.branch(project.id)).toEqual({ branch: null, folder: true });
+  });
+});
+
 describe("the folder Claude Code keys a thread's memory to", () => {
   /** The Claude adapter as the runtime wires it, over an exec that records each turn's launch and answers it at once.
    * The roads the runtime hands the machine's own exec go, since they would run the real binary. */

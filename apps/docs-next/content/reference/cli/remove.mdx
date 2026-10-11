@@ -3,22 +3,27 @@
 {/* Written by apps/docs-next/scripts/cli.ts: change the script or its source and run pnpm --filter @wsp/docs-next generate. */}
 
 ```text
-usage: wsp remove <computer> [--yes] [--force] [--json]
+usage: wsp remove <computer> [--yes] [--force] [--forget] [--json]
   take a computer out, asked once: its forks are deleted and its projects leave
   this wsp with their threads, then the agent and its files go and the computer
   is left as wsp found it. Stopped by a fork or a project folder there holding
-  work no remote has, naming each
+  work no remote has, naming each. A computer that will never answer again is
+  forgotten with --forget
 
-  --state    the state file: this word first, else WSP_HOME's state.json, else
-             ./.wsp/state.json when the current directory is a checkout of wsp,
-             else state.json in the home the running host serves
-  --yes      go ahead without being asked
-  --force    remove it even where a fork or a project folder there holds work no
-             remote has, which goes with it
-  --json     print the raw protocol values, one JSON object per line, with
-             everything else on stderr
-  --host     read to say this line runs at its own host's terminal; it dials no
-             other
+  --state     the state file: this word first, else WSP_HOME's state.json, else
+              ./.wsp/state.json when the current directory is a checkout of wsp,
+              else state.json in the home the running host serves
+  --yes       go ahead without being asked
+  --force     remove it even where a fork or a project folder there holds work
+              no remote has, which goes with it
+  --forget    for a computer whose link will never answer again: it, its forks,
+              its projects and their threads leave this wsp as records, wsp
+              tries the leave over the ssh login it was added on, and nothing
+              else is done on it; wsp leave there clears what stays
+  --json      print the raw protocol values, one JSON object per line, with
+              everything else on stderr
+  --host      read to say this line runs at its own host's terminal; it dials no
+              other
 ```
 
 No MCP tool: takes a computer out of this wsp and sweeps wsp off it, which belongs with the terminal that joined it.
