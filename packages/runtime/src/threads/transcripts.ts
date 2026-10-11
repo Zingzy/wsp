@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { randomBytes } from "node:crypto";
 import type { Machine } from "@wsp/engine";
-import { type SessionEvent, type Attachment, type RanPicks, isLocalWorkspace, attachmentKey, isImage, modelPicks, recordedPicks, threadRan } from "@wsp/protocol";
+import { type SessionEvent, type Attachment, type RanPicks, isLocalWorkspace, attachmentKey, isImage, keptPatch, modelPicks, recordedPicks, threadRan } from "@wsp/protocol";
 import { assertTokenShape, daemonTokenFor, daemonTokenPathOf, rotateDaemonToken } from "../daemon-token.js";
 import type { EventSize, TranscriptRows } from "../sqlite-transcripts.js";
 import { eventBytes, numbered, pickNewest, readThread, type TranscriptReader } from "../transcript-reader.js";
@@ -538,6 +538,20 @@ export function transcriptsArea(ctx: RuntimeContext): TranscriptsArea {
     return queued;
   };
 
+  /** An event as a transcript keeps it: a tool result's text past TOOL_RESULT_KEPT cut there with the bytes of the
+   * whole (the agent's own count where it cut first), and its patch to the hunks that fit in as many characters. A
+   * subagent's text and thinking are clipped as a tool result is, so a subagent that thinks for pages cannot push its
+   * lead's own lines out of the ring. */
+  const keptEvent = (event: SessionEvent): SessionEvent => {
+    if (event.type !== "session.delta") return event;
+    const result = event.kind === "tool_result";
+    const clipped = event.text.length > TOOL_RESULT_KEPT && (result || (event.parentToolUseId !== undefined && (event.kind === "text" || event.kind === "thinking")));
+    const patch = result && event.patch !== undefined ? keptPatch(event.patch, TOOL_RESULT_KEPT) : undefined;
+    if (!clipped && patch?.patchCut !== true) return event;
+    const text = clipped ? { text: event.text.slice(0, TOOL_RESULT_KEPT), ...(result ? { bytes: event.bytes ?? Buffer.byteLength(event.text) } : {}) } : {};
+    return { ...event, ...text, ...patch };
+  };
+
   // Deltas are only appended in memory; the store sees the transcript at turn
   // boundaries, so a crash mid-turn loses that turn's partial output and
   // nothing else. A session's end is written at once, anything before it waits
@@ -545,10 +559,7 @@ export function transcriptsArea(ctx: RuntimeContext): TranscriptsArea {
   const record = (unstamped: SessionEvent): void => {
     const event: SessionEvent = { ...unstamped, at: Date.now(), pos: indexFor(unstamped.workspaceId).pos + 1 };
     const id = event.workspaceId;
-    // A subagent's text and thinking are clipped as a tool result is, so a subagent that thinks for pages cannot push its
-    // lead's own lines out of the ring.
-    const clipped = event.type === "session.delta" && event.text.length > TOOL_RESULT_KEPT && (event.kind === "tool_result" || (event.parentToolUseId !== undefined && (event.kind === "text" || event.kind === "thinking")));
-    const kept = clipped ? { ...event, text: event.text.slice(0, TOOL_RESULT_KEPT) } : event;
+    const kept = keptEvent(event);
     const size = eventBytes(kept);
     const held = transcripts.get(id);
     if (held !== undefined) {

@@ -122,7 +122,7 @@ export interface SettingsState {
 }
 
 export type UsageTab = "used" | "limits";
-export type AgentsTab = "agents" | "servers" | "skills";
+export type AgentsTab = "agents" | "servers" | "skills" | "plugins";
 
 /** A page under the Agents page's list, by its name for the crumb: one item of the tab's kind by its key, the tab's
  * add, or one thing the add found, by its key and the search that found it. `up` is where the crumb's back goes. */

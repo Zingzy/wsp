@@ -1,0 +1,13 @@
+{
+  "at": "/",
+  "fixture": "project-icons",
+  "steps": [
+    "hover:row-id=thread:relay"
+  ],
+  "wait": "tile-card",
+  "settleMs": 1200,
+  "widths": [
+    1440
+  ],
+  "reason": "A tile's card opens on a pointer's hover, which a touch at 390 has no form of."
+}

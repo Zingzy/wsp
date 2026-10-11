@@ -422,6 +422,14 @@ const NAMED = 3;
 
 const listOf = (paths: readonly string[]): string => (paths.length <= NAMED ? paths.join(", ") : `${paths.slice(0, NAMED).join(", ")} and ${paths.length - NAMED} more`);
 
+/** What the row of a file that lands once says where it was there before the run: its bytes stand as they were, and
+ * only the servers step writes into it. */
+const STOOD_LINE = "already there before this run, so it stands as it was";
+
+/** What the row of such a file goes on to say once the servers step merged into it: which of this computer's
+ * servers stand in it now. */
+export const mergedIntoLine = (names: readonly string[]): string => (names.length === 0 ? "none of this computer's servers merged into it" : `this computer's ${names.join(", ")} merged into it`);
+
 /** How a file's row reads: the name of the recipe row that carries it, where one does, and the path it lands at on
  * that computer. The rows the landing answers with and the rows a round that never landed answers with read the
  * same way. */
@@ -438,7 +446,7 @@ export function filesRows(lands: readonly ProvisionLanding[], landed: readonly L
     if (owner === undefined) loose.push(l);
     else (byOwner.get(owner.dest) ?? byOwner.set(owner.dest, []).get(owner.dest)!).push(l);
   }
-  const rowOf = (id: string, label: string | undefined, dest: string, rows: readonly Landed[]): PlaceProvisionRow => {
+  const rowOf = (id: string, label: string | undefined, dest: string, rows: readonly Landed[], once = false): PlaceProvisionRow => {
     const under = (outcome: LandOutcome): string[] => rows.filter(r => r.outcome === outcome).map(r => r.rel);
     const failed = under("failed");
     const installed = under("installed");
@@ -449,11 +457,11 @@ export function filesRows(lands: readonly ProvisionLanding[], landed: readonly L
     ];
     const outcome: PlaceProvisionRow["outcome"] =
       failed.length > 0 ? "failed" : installed.length > 0 ? "installed" : rows.length === 0 || kept.length === rows.length ? "skipped" : "present";
-    const note = failed.length > 0 ? `could not be written: ${listOf(failed)}` : rows.length === 0 ? "nothing of it travelled" : notes.join("; ");
+    const note = failed.length > 0 ? `could not be written: ${listOf(failed)}` : rows.length === 0 ? "nothing of it travelled" : once && outcome === "present" ? STOOD_LINE : notes.join("; ");
     return { id, label: fileLabel(label, home, dest, roots), outcome, kind: "file", ...(note !== "" ? { note } : {}) };
   };
   return [
-    ...lands.map(l => rowOf(`files/${l.dest}`, l.label, l.dest, byOwner.get(l.dest) ?? [])),
+    ...lands.map(l => rowOf(`files/${l.dest}`, l.label, l.dest, byOwner.get(l.dest) ?? [], l.once === true)),
     // A path no planned row names is read by its path alone: the hook script a copied setting names travels
     // beside it, and no recipe row is its own.
     ...loose.map(l => rowOf(`files/${l.rel}`, undefined, l.rel, [l])),

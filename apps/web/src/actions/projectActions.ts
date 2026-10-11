@@ -42,7 +42,7 @@ export const projectActions: ReadonlyArray<ActionEntry<ProjectTarget, ProjectVer
     id: "project-settings",
     group: "open",
     icon: () => SettingsIcon,
-    searchTerms: ["project settings", "project icon", "project colour", "project color"],
+    searchTerms: ["project settings", "project icon", "project image", "project colour", "project color"],
     title: () => PROJECT_WORDS.settings,
     rowLabel: target => `${PROJECT_WORDS.settings} for ${target.name}`,
     refusal: () => null,

@@ -42,3 +42,6 @@ export function readJsonc(text: string): Jsonc {
 }
 
 export const parseJsonc = (text: string): unknown => readJsonc(text).value;
+
+/** A JSON value as an object, or nothing where it is an array, a scalar or null. */
+export const jsonObject = (v: unknown): Record<string, unknown> | undefined => (typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : undefined);

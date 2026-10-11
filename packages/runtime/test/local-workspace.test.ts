@@ -1338,20 +1338,27 @@ describe("a local turn and a host restart", () => {
   let runDir: string;
   let store: Store;
   let localWiring: LocalWiring;
+  let reading: Set<() => void>;
 
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), "wsp-localcut-"));
     runDir = join(root, "runs");
     store = memoryStore();
+    reading = new Set();
     localWiring = {
       backend: new LocalBackend({ root }),
-      execStream: o => localExecStream({ root, runDir, ...o }),
+      execStream: o => localExecStream({ root, runDir, reading, ...o }),
       home: () => join(root, ".claude"),
       homeDir: root,
       rootsPath: join(root, "roots"),
       env: () => ({ PATH: process.env["PATH"] ?? "/usr/bin:/bin" }),
       platform: testPlatform(),
       copier: copyingFake(),
+      // A closed host lets go of the runs it read, as the host's own wiring does: one still read writes its turn's
+      // rows beside the next host's.
+      close: async () => {
+        for (const drop of [...reading]) drop();
+      },
     };
   });
   afterEach(() => {
@@ -1398,9 +1405,7 @@ describe("a local turn and a host restart", () => {
     const gate = join(root, "gate");
     const marker = join(root, "turn.pid");
     // A turn that prints, then waits for the file the test writes once the new host is up, then replies: every line
-    // of it lands whether or not a host is reading at the time. It goes on after the reply, since this process is
-    // still holding the reader the first host left and two readers would race to reap the run at its end, which is
-    // an artifact of running both hosts here: a real one goes with its process.
+    // of it lands whether or not a host is reading at the time.
     const rt1 = createRuntime({ backend: stubBackend(), store, adapters: { claude: runAdapter(`echo $$ > ${marker}; echo reading the ticket; ${gateLoop(gate)}; echo wrote the fix; sleep 30`) }, local: localWiring });
     const ws = await createOn(rt1, { on: HERE_PLACE_ID, name: "mac" });
     await rt1.sessions.start(ws.id, { prompt: "build it" });
@@ -1468,23 +1473,20 @@ describe("a local turn and a host restart", () => {
   it("a turn whose run finished while the host was down keeps its reply when the next host re-opens it past the wall", async () => {
     const WALL_MS = 2_000;
     const gate = join(root, "gate");
-    // The first host's readers, let go of when it goes, as a host process that exits lets go of every run it read.
-    const reading = new Set<() => void>();
-    const walled = (held?: Set<() => void>): LocalWiring => ({ ...localWiring, execStream: o => localExecStream({ root, runDir, ...o, deadlineMs: WALL_MS, ...(held !== undefined ? { reading: held } : {}) }) });
+    const walled: LocalWiring = { ...localWiring, execStream: o => localExecStream({ root, runDir, reading, ...o, deadlineMs: WALL_MS }) };
     const startedAt = Date.now();
-    const rt1 = createRuntime({ backend: stubBackend(), store, adapters: { claude: runAdapter(`echo reading the ticket; ${gateLoop(gate)}; echo the reply`) }, local: walled(reading) });
+    const rt1 = createRuntime({ backend: stubBackend(), store, adapters: { claude: runAdapter(`echo reading the ticket; ${gateLoop(gate)}; echo the reply`) }, local: walled });
     const ws = await createOn(rt1, { on: HERE_PLACE_ID, name: "mac" });
     await rt1.sessions.start(ws.id, { prompt: "build it" });
     await until(async () => (await rt1.sessions.history(ws.id)).some(e => e.type === "session.delta"));
     await rt1.close();
-    for (const drop of [...reading]) drop();
 
     // While no host reads it the run replies and exits, and its wall passes.
     writeFileSync(gate, "go\n");
     await until(() => readdirSync(runDir).some(name => name.endsWith(".exit") && readFileSync(join(runDir, name), "utf8").trim() !== ""));
     await new Promise(resolve => setTimeout(resolve, Math.max(0, startedAt + WALL_MS * 1.25 - Date.now())));
 
-    const rt2 = createRuntime({ backend: stubBackend(), store, adapters: { claude: runAdapter("true") }, local: walled() });
+    const rt2 = createRuntime({ backend: stubBackend(), store, adapters: { claude: runAdapter("true") }, local: walled });
     await until(async () => (await rt2.sessions.list(ws.id))[0]!.status !== "running", 20_000);
     const history = await rt2.sessions.history(ws.id);
     expect(history.filter(e => e.type === "session.delta").map(e => e.text)).toEqual(["reading the ticket", "the reply"]);
@@ -1537,21 +1539,18 @@ describe("a local turn and a host restart", () => {
     const token = "cafef00d".repeat(3);
     // The first host's snapshot of the folder never answers, so the turn's prompt is still held when it goes.
     const stalled = async (): Promise<DaemonChannel> => ({ send: () => new Promise(() => {}), close: () => {}, closed: new Promise(() => {}) });
-    const reading = new Set<() => void>();
-    const wiring = (held?: Set<() => void>): LocalWiring => ({
+    const wiring: LocalWiring = {
       ...localWiring,
-      execStream: o => localExecStream({ root, runDir, ...o, ...(held !== undefined ? { reading: held } : {}) }),
       env: () => ({ PATH: `${bin}:${process.env["PATH"] ?? "/usr/bin:/bin"}` }),
       daemonRoad: async () => ({ url: "http://127.0.0.1:7070", expiresAt: Number.MAX_SAFE_INTEGER, daemonToken: token }),
-    });
-    const host = (held?: Set<() => void>): Runtime =>
-      createRuntime({ backend: stubBackend(), store, adapters: { claude: HARNESS_ADAPTERS.claude }, local: wiring(held), daemonToken: token, daemonChannel: stalled, turnSnapshotMs: 60_000 });
-    const rt1 = host(reading);
+    };
+    const host = (): Runtime =>
+      createRuntime({ backend: stubBackend(), store, adapters: { claude: HARNESS_ADAPTERS.claude }, local: wiring, daemonToken: token, daemonChannel: stalled, turnSnapshotMs: 60_000 });
+    const rt1 = host();
     const ws = await createOn(rt1, { on: HERE_PLACE_ID, name: "mac", project: (await projectOn(rt1, HERE_PLACE_ID, repoIn(root))).id });
     await rt1.sessions.start(ws.id, { prompt: "build it" });
     await grandchild(pidFile);
     await rt1.close();
-    for (const drop of [...reading]) drop();
     expect(existsSync(heard)).toBe(false);
 
     const rt2 = host();

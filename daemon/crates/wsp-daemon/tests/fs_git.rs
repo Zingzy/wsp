@@ -18,7 +18,9 @@ use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 use wsp_daemon::{Daemon, Options};
-use wsp_frames::numbers::{FS_IMAGE_CAP_BYTES, FS_READ_CAP_BYTES, FS_SEARCH_CAP_FILES, FS_SEARCH_CAP_HITS, GIT_DIFF_CAP_BYTES};
+use wsp_frames::numbers::{
+    FS_HASH_PATHS_MAX, FS_IMAGE_CAP_BYTES, FS_READ_CAP_BYTES, FS_SEARCH_CAP_FILES, FS_SEARCH_CAP_HITS, GIT_DIFF_CAP_BYTES,
+};
 
 const TOKEN: &str = "fs-token";
 
@@ -1016,4 +1018,26 @@ async fn fs_image_reads_an_image_from_any_whole_path_and_hands_back_no_other_fil
     refused(&c.request("fs.image", json!({ "path": at("pipe.png") })).await, "not-a-file");
     refused(&c.request("fs.image", json!({ "path": at("gone.png") })).await, "not-found");
     refused(&c.request("fs.image", json!({ "path": "repo/home.png" })).await, "bad-request");
+}
+
+#[tokio::test]
+async fn fs_hash_hashes_the_files_a_command_names_inside_its_folder_and_nothing_else() {
+    let (t, _d, mut c) = bench().await;
+    let root = t.outside().join("acme");
+    fs::create_dir_all(root.join("bin")).unwrap();
+    fs::write(root.join("stats.py"), "print('one')\n").unwrap();
+    fs::write(t.outside().join("away.py"), "x").unwrap();
+    assert!(Command::new("mkfifo").arg(root.join("pipe.py")).status().unwrap().success());
+    let root = root.to_string_lossy().into_owned();
+    let hash = |paths: Value| json!({ "root": root, "paths": paths });
+
+    let read = c.request("fs.hash", hash(json!(["stats.py", "/", "0.5", "/proc/loadavg", "../away.py", "bin", "pipe.py"]))).await;
+    assert_eq!(read["ok"].as_bool(), Some(true), "{read}");
+    assert_eq!(read["files"], json!({ "stats.py": "046076f59b3d9fe61bc5261e95b7e9e371634206007c3a1143f9eb6f3c8c0f85" }), "{read}");
+    fs::write(format!("{root}/stats.py"), "print('two')\n").unwrap();
+    let again = c.request("fs.hash", hash(json!([format!("{root}/stats.py")]))).await;
+    assert_ne!(again["files"]["stats.py"], read["files"]["stats.py"], "{again}");
+    refused(&c.request("fs.hash", json!({ "root": "acme", "paths": [] })).await, "bad-request");
+    refused(&c.request("fs.hash", json!({ "root": "/no/such/folder", "paths": [] })).await, "not-found");
+    refused(&c.request("fs.hash", hash(json!(vec!["x.py"; FS_HASH_PATHS_MAX + 1]))).await, "bad-request");
 }

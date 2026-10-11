@@ -119,7 +119,7 @@ import { NO_DEVICE_DOOR, safeEqual, threadOf, type DeviceDoor, type HeldDevice }
 import { NO_PLACE_DOOR, type PlaceDoor } from "./places.js";
 import { signInSocket } from "./sign-in-socket.js";
 import { keyFingerprint, openFrame, verifyPlaceBytes, type Seal } from "@wsp/keys";
-import { answeredStart } from "./threads/answered-start.js";
+import { answeredStart, startAt } from "./threads/answered-start.js";
 import type { HostEditor, HostFolders, HostSsh, HostTerminalConfig, InitDoor, ProjectBundler, ProjectLander, RecipeShelf, Runtime } from "./runtime.js";
 
 import { forwardsOf, type ForwardsSource } from "./forwards.js";
@@ -1509,28 +1509,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               // A start on this computer names a project, a branch or a folder rather than a record: the folder's record
               // is found or made first, and the start runs on it.
               if (msg.workspaceId !== undefined && msg.branch !== undefined) throw Object.assign(new Error(BRANCH_ON_A_THREAD_LINE), { kind: "usage" });
-              const picks = {
-                ...(msg.harness !== undefined ? { harness: msg.harness } : {}),
-                ...(msg.model !== undefined ? { model: msg.model } : {}),
-                ...(msg.effort !== undefined ? { effort: msg.effort } : {}),
-                ...(msg.access !== undefined ? { access: msg.access } : {}),
-                ...(msg.permissionMode !== undefined ? { permissionMode: msg.permissionMode } : {}),
-                ...(msg.fast === true ? { fast: true } : {}),
-              };
-              const at =
-                msg.workspaceId !== undefined
-                  ? { workspaceId: msg.workspaceId, cwd: msg.cwd }
-                  : await rt.workspaces
-                      .folderFor(
-                        {
-                          ...(msg.project !== undefined ? { project: msg.project } : {}),
-                          ...(msg.branch !== undefined ? { branch: msg.branch } : {}),
-                          ...(msg.cwd !== undefined ? { cwd: msg.cwd } : {}),
-                          ...(Object.keys(picks).length > 0 ? { picks } : {}),
-                        },
-                        origin,
-                      )
-                      .then(found => ({ workspaceId: found.workspace.id, cwd: found.cwd }));
+              const at = await startAt(rt.workspaces, msg, origin);
               await answeredStart(msg.answerHeld === true, onHeld => rt.sessions.start(at.workspaceId, {
                 prompt: msg.prompt, ...(onHeld !== undefined ? { onHeld } : {}), ...(msg.followed === true ? { followed: true } : {}),
                 ...(msg.harness !== undefined ? { harness: msg.harness } : {}),
@@ -1551,6 +1530,12 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
                 ...(msg.replaces !== undefined ? { replaces: msg.replaces } : {}),
                 ...(msg.attachments !== undefined ? { attachments: msg.attachments } : {}),
               }, origin), reply => send({ id: msg.id, ok: true, ...reply }));
+              return;
+            }
+            case "sessions.warm": {
+              const { id: _id, op: _op, workspaceId: _ws, project: _project, cwd: _cwd, ...picks } = msg;
+              const at = await startAt(rt.workspaces, msg, origin);
+              send({ id: msg.id, ok: true, ...(await rt.sessions.warm(at.workspaceId, { ...picks, ...(at.cwd !== undefined ? { cwd: at.cwd } : {}) }, origin)) });
               return;
             }
             case "harnesses.list":
@@ -1850,23 +1835,22 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               if (msg.op === "skills.search") send({ id: msg.id, ok: true, skills: await rt.agents.skillsSearch(msg.q, msg.limit) });
               else if (msg.op === "skills.get") send({ id: msg.id, ok: true, preview: await rt.agents.skillsGet(msg.skill) });
               else if (msg.op === "skills.preview") send({ id: msg.id, ok: true, preview: await rt.agents.skillsPreview(msg.target, skill(msg), origin) });
-              else if (msg.op === "skills.add") {
-                const ask = { skill: msg.skill, ...(msg.agents !== undefined ? { agents: msg.agents } : {}), ...(msg.project !== undefined ? { project: msg.project } : {}) };
-                send({ id: msg.id, ok: true, added: await rt.agents.skillsAdd(msg.target, ask, origin) });
-              } else if (msg.op === "skills.remove") send({ id: msg.id, ok: true, ...(await rt.agents.skillsRemove(msg.target, skill(msg), origin)) });
+              else if (msg.op === "skills.add") send({ id: msg.id, ok: true, added: await rt.agents.skillsAdd(msg.target, { skill: msg.skill, ...(msg.agents !== undefined ? { agents: msg.agents } : {}), ...(msg.project !== undefined ? { project: msg.project } : {}) }, origin) });
+              else if (msg.op === "skills.remove") send({ id: msg.id, ok: true, ...(await rt.agents.skillsRemove(msg.target, skill(msg), origin)) });
               else send({ id: msg.id, ok: true, ...(await rt.agents.skillsToggle(msg.target, { ...skill(msg), on: msg.on }, origin)) });
               return;
             }
             case "servers.add":
             case "servers.remove":
-            case "servers.toggle": {
-              // A server in an agent's config on one of the person's computers is theirs to change, and the values an
-              // add carries go into that file or the vault, never into an answer.
+            case "servers.toggle":
+            case "plugins.toggle": {
+              // A server in an agent's config, or one of its plugins, on one of the person's computers is theirs to change,
+              // and the values an add carries go into that file or the vault, never into an answer.
               if (refusedOffOwnRoad()) return;
+              if (msg.op === "plugins.toggle") return void send({ id: msg.id, ok: true, ...(await rt.agents.pluginsToggle(msg.target, { agent: msg.agent, plugin: msg.plugin, on: msg.on }, origin)) });
               if (msg.op === "servers.add") {
                 const { id: _id, op: _op, target, ...ask } = msg;
-                send({ id: msg.id, ok: true, ...(await rt.agents.serversAdd(target, ask, origin)) });
-                return;
+                return void send({ id: msg.id, ok: true, ...(await rt.agents.serversAdd(target, ask, origin)) });
               }
               const ask = { agent: msg.agent, name: msg.name, ...(msg.scope !== undefined ? { scope: msg.scope } : {}) };
               if (msg.op === "servers.remove") send({ id: msg.id, ok: true, ...(await rt.agents.serversRemove(msg.target, ask, origin)) });

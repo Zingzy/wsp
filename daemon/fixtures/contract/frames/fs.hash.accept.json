@@ -1,0 +1,15 @@
+[
+  {
+    "id": 1,
+    "op": "fs.hash",
+    "root": "/root/acme",
+    "paths": ["stats.py", "/root/acme/bin/run.sh", "/"]
+  },
+  {
+    "id": 1,
+    "op": "fs.hash",
+    "root": "/root/acme",
+    "paths": [],
+    "machineId": "wsp-a"
+  }
+]

@@ -1,0 +1,374 @@
+{
+  "cloudOff": {
+    "name": "plugins_disable",
+    "description": "Turns one agent's plugin off on one computer or where a thread runs, by its id and agent. Written for the login the computer was added with, where that agent's own command reads it: Claude Code's user settings, its enabledPlugins key written as claude plugin enable or disable writes it but with nothing downloaded first, Codex's config.toml through its app server's config write, which refuses a file changed since wsp read it. A plugin plugins does not list, a missing one, and one a project's settings switch are refused. A turn running now keeps what it loaded; the next one follows. A napping machine is not woken. The report there reads again at once. Answers its row after.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "plugin": {
+          "type": "string",
+          "description": "the plugin's id, name@marketplace, as plugins lists it"
+        },
+        "agent": {
+          "type": "string",
+          "description": "the catalog id of the agent whose plugin it is, as plugins lists it; one id can name a plugin of two agents"
+        },
+        "thread": {
+          "type": "string",
+          "description": "a thread, by its id or a prefix of it, whose computer and project to read; absent reads a computer"
+        },
+        "on": {
+          "type": "string",
+          "description": "the computer to read, by the name computers lists; absent with no thread is the computer the app runs on"
+        }
+      },
+      "required": [
+        "plugin",
+        "agent"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "plugin": {
+          "type": "object",
+          "properties": {
+            "agent": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "marketplace": {
+              "type": "string"
+            },
+            "version": {
+              "type": "string"
+            },
+            "scope": {
+              "type": "string",
+              "enum": [
+                "user",
+                "project",
+                "local"
+              ]
+            },
+            "project": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "path"
+              ],
+              "additionalProperties": false
+            },
+            "on": {
+              "type": "boolean"
+            },
+            "missing": {
+              "type": "string",
+              "enum": [
+                "folder",
+                "marketplace",
+                "unlisted",
+                "uninstalled"
+              ]
+            },
+            "path": {
+              "type": "string"
+            },
+            "setIn": {
+              "type": "string"
+            },
+            "description": {
+              "type": "string"
+            },
+            "source": {
+              "type": "string"
+            },
+            "brings": {
+              "type": "object",
+              "properties": {
+                "skills": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "commands": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "subagents": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "hooks": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "servers": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "lsp": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "apps": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "skills",
+                "commands",
+                "subagents",
+                "hooks",
+                "servers",
+                "lsp",
+                "apps"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "agent",
+            "id",
+            "name",
+            "marketplace",
+            "scope",
+            "on",
+            "brings"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "plugin"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    },
+    "_meta": {
+      "anthropic/alwaysLoad": false
+    }
+  },
+  "cloudOn": {
+    "name": "plugins_disable",
+    "description": "Turns one agent's plugin off on one computer or where a thread runs, by its id and agent. Written for the login the computer was added with, where that agent's own command reads it: Claude Code's user settings, its enabledPlugins key written as claude plugin enable or disable writes it but with nothing downloaded first, Codex's config.toml through its app server's config write, which refuses a file changed since wsp read it. A plugin plugins does not list, a missing one, and one a project's settings switch are refused. A turn running now keeps what it loaded; the next one follows. A napping machine is not woken. The report there reads again at once. Answers its row after.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "plugin": {
+          "type": "string",
+          "description": "the plugin's id, name@marketplace, as plugins lists it"
+        },
+        "agent": {
+          "type": "string",
+          "description": "the catalog id of the agent whose plugin it is, as plugins lists it; one id can name a plugin of two agents"
+        },
+        "thread": {
+          "type": "string",
+          "description": "a thread, by its id or a prefix of it, whose computer and project to read; absent reads a computer"
+        },
+        "on": {
+          "type": "string",
+          "description": "the computer to read, by the name computers lists; absent with no thread is the computer the app runs on"
+        }
+      },
+      "required": [
+        "plugin",
+        "agent"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "plugin": {
+          "type": "object",
+          "properties": {
+            "agent": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "marketplace": {
+              "type": "string"
+            },
+            "version": {
+              "type": "string"
+            },
+            "scope": {
+              "type": "string",
+              "enum": [
+                "user",
+                "project",
+                "local"
+              ]
+            },
+            "project": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "path"
+              ],
+              "additionalProperties": false
+            },
+            "on": {
+              "type": "boolean"
+            },
+            "missing": {
+              "type": "string",
+              "enum": [
+                "folder",
+                "marketplace",
+                "unlisted",
+                "uninstalled"
+              ]
+            },
+            "path": {
+              "type": "string"
+            },
+            "setIn": {
+              "type": "string"
+            },
+            "description": {
+              "type": "string"
+            },
+            "source": {
+              "type": "string"
+            },
+            "brings": {
+              "type": "object",
+              "properties": {
+                "skills": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "commands": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "subagents": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "hooks": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "servers": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "lsp": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "apps": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "skills",
+                "commands",
+                "subagents",
+                "hooks",
+                "servers",
+                "lsp",
+                "apps"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "agent",
+            "id",
+            "name",
+            "marketplace",
+            "scope",
+            "on",
+            "brings"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "plugin"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    },
+    "_meta": {
+      "anthropic/alwaysLoad": false
+    }
+  }
+}

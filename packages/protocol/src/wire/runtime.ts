@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { z } from "zod";
-import { AgentsTarget, McpScope, ServerAdd, ServerAsk } from "../agents-report.js";
+import { AgentsTarget, McpScope, PluginAsk, ServerAdd, ServerAsk } from "../agents-report.js";
 import { Attachment } from "../attachments.js";
 import { threadAt } from "../format.js";
 import { InitRoad, InitScreenId, SIGN_IN_CODE_MAX } from "../init-job.js";
@@ -11,6 +11,7 @@ import { SLATE_OPS } from "../slate/wire.js";
 import { RecipeFile } from "../recipe-file.js";
 import { MergeMethod, PullRequestItem, PR_REPLY_BODY_MAX, ReactionContent } from "../pull-request.js";
 import { WorkspaceLook } from "../workspace-look.js";
+import { PROJECT_ICON_MAX_BYTES, ProjectIconHash } from "../project-look.js";
 import { reqId } from "./helpers.js";
 import { RelayPort } from "./limits.js";
 import { type EventAsker, SeedChoice, WorkspaceAgents, WorkspaceOrigin } from "../views/workspace.js";
@@ -557,6 +558,25 @@ const RuntimeOp = z.discriminatedUnion("op", [
   /** Whether a start may name this thread as the one it restarts, read alone so a verb asks before it forks or wakes a
    * machine: refused as sessions.start's replaces is, and answers nothing else. Takes the runtime's thread id. */
   z.object({ id: reqId, op: z.literal("sessions.replaceable"), threadId: z.string() }),
+  /** The composer of a new thread took focus or changed a pick: the agent's process for the thread its send will open
+   * starts now, on this computer, so its own startup is behind it by the send. One stands per workspace and agent; one
+   * launched with other picks is ended and replaced. A send opening a thread there with the same picks runs on it, and
+   * one nobody sends to ends after AGENT_WARM_MS. Where is read as on sessions.start, less branch: a worktree is made by
+   * a send alone. Replies with a SessionWarmResult; none where the workspace's computer or the agent keeps no process. */
+  z.object({
+    id: reqId,
+    op: z.literal("sessions.warm"),
+    workspaceId: z.string().optional(),
+    project: z.string().optional(),
+    cwd: z.string().optional(),
+    harness: z.string().optional(),
+    model: z.string().optional(),
+    effort: z.string().optional(),
+    permissionMode: z.string().optional(),
+    access: AccessChoice.optional(),
+    contextWindow: z.string().optional(),
+    fast: z.boolean().optional(),
+  }),
   /** Settles each thread named and every thread under it, each taking a settled stamp and a read stamp of now, and
    * every window hears thread.marked; with finished, each named thread stays and the finished threads under it
    * settle. The named threads keep the settle's stamp, which a restore of them reads. Replies with a
@@ -771,6 +791,10 @@ const RuntimeOp = z.discriminatedUnion("op", [
   /** Replies with { file }: that one server turned off or on in that agent's config there, by the switch the agent
    * itself reads; refused for an agent that keeps no such switch per server. */
   z.object({ id: reqId, op: z.literal("servers.toggle"), target: AgentsTarget, ...ServerAsk.shape, on: z.boolean() }),
+  /** Replies with { plugin: PluginRow }: that agent's plugin turned on or off there for the login, where the agent's own
+   * command or config writer puts it, and the row as a read after it gives it. Refused for a plugin the report does
+   * not list, a missing one, and one a project's settings switch. */
+  z.object({ id: reqId, op: z.literal("plugins.toggle"), target: AgentsTarget, ...PluginAsk.shape, on: z.boolean() }),
   /** Replies with { setup: InitSetup }: the cloud setup as the modal opens on it, the init job included when one runs.
    * `on` prices the build at that place instead of the default one, by the name or id wsp places lists; once the
    * image stands, every build is priced at the image's own place whatever `on` says. */
@@ -855,6 +879,15 @@ const RuntimeOp = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("projects.branch"), projectId: z.string() }),
   /** Drops a project's record; refused while a workspace of it stands, naming the workspaces. Replies with {}. */
   z.object({ id: reqId, op: z.literal("projects.remove"), projectId: z.string(), force: z.boolean().optional(), check: z.boolean().optional() }),
+  /** Puts an image on a project, or with `png` null takes it off. `png` is base64 of the one PNG the window fitted:
+   * 128 px square, 8 bits, RGBA or RGB, no interlace and no animation, at most PROJECT_ICON_MAX_BYTES; anything
+   * else is refused. The host keeps its IHDR, IDAT and IEND alone, under the wsp home by its SHA-256, writes the hash
+   * to preferences' projectIcon, and deletes a file no project and no recipe names any more. Replies with
+   * { image: hash | null }. */
+  z.object({ id: reqId, op: z.literal("projects.icon"), projectId: z.string(), png: z.string().max(4 * PROJECT_ICON_MAX_BYTES).nullable() }),
+  /** Replies with { icons: { [hash]: data url | null } }: each image the host keeps by its hash, read from disk at
+   * each ask, null for a hash it does not hold. */
+  z.object({ id: reqId, op: z.literal("projects.icons"), hashes: z.array(ProjectIconHash).max(1000) }),
   /** Replies with { plan: ProjectPlan } for a folder on this computer; nothing is read into memory or uploaded. */
   z.object({ id: reqId, op: z.literal("project.plan"), source: z.string() }),
   /** Packs the folder and lands it at `dest` on the workspace's machine; progress rides project.import events and the
@@ -1058,6 +1091,9 @@ export const DEVICE_OPS: readonly string[] = [
   "projects.resolve",
   "projects.branch",
   "projects.remove",
+  // A project's image is part of its look, kept beside preferences, which a paired computer reads and writes too.
+  "projects.icon",
+  "projects.icons",
   "projectGoldens.list",
   "projectGoldens.remove",
   "sys.subscribe",
@@ -1273,3 +1309,7 @@ export const SessionStartOutcome = z.enum(["started", "steered", "queued", "held
 export type SessionStartOutcome = z.infer<typeof SessionStartOutcome>;
 export const SessionStartResult = z.object({ session: SessionView, outcome: SessionStartOutcome, turnId: z.string() });
 export type SessionStartResult = z.infer<typeof SessionStartResult>;
+/** What a sessions.warm did: started a process, found one launched as asked standing and gave it its window again, or
+ * nothing, where the workspace's computer or the agent keeps no process ahead of a send. */
+export const SessionWarmResult = z.object({ warm: z.enum(["started", "standing", "none"]) });
+export type SessionWarmResult = z.infer<typeof SessionWarmResult>;

@@ -15,7 +15,7 @@ import { diskUse, installTools, ownedFloorBytes, type ToolResult } from "./golde
 import type { GoldenImport, ImportResult, PackFiles } from "./golden.js";
 import { applyMachineContext } from "./machine-context.js";
 import type { Machine } from "./machine.js";
-import { closeAgentFiles, oncePathsOf, outsideAfterScript, outsideBeforeScript, provisionFiles, type OwnedPaths, type ProvisionLanding } from "./provision-files.js";
+import { closeAgentFiles, landedAt, mergedIntoLine, oncePathsOf, outsideAfterScript, outsideBeforeScript, provisionFiles, storeRoots, type OwnedPaths, type ProvisionLanding } from "./provision-files.js";
 import { headlessKeys, provisionMcp } from "./provision-mcp.js";
 
 /** What the recipe comes to on a computer you own, in run order: the node step, the agents after it, the tools by
@@ -452,6 +452,7 @@ async function stepRows(machine: Machine, plan: ProvisionPlan, step: EngineStep,
       const rows: PlaceProvisionRow[] = plan.files === undefined ? [] : await filesRound(machine, plan.files, FILES_LABEL, run, stage, on, false);
       if (plan.mcp !== undefined) {
         stage(`${MCP_LABEL}: ${plural(plan.mcp.agents.length, "agent")}`);
+        const into = new Map<string, readonly string[]>();
         const servers = await provisionMcp(machine, plan.mcp, {
           home: on.home,
           landed: run.landed,
@@ -462,7 +463,16 @@ async function stepRows(machine: Machine, plan: ProvisionPlan, step: EngineStep,
           stage: (_which, detail) => {
             if (detail !== undefined) stage(detail);
           },
+          into: (file, names) => into.set(file, names),
         });
+        // A file its agent keeps that was there before this run stood as it was, so its row says what of this
+        // computer's went into it.
+        const roots = storeRoots(on.home, on.stores);
+        for (const land of plan.files?.lands ?? []) {
+          const names = land.once === true ? into.get(landedAt(on.home, roots, land.dest)) : undefined;
+          const at = rows.findIndex(r => r.id === `files/${land.dest}` && r.outcome === "present");
+          if (names !== undefined && at >= 0) rows[at] = { ...rows[at]!, note: [rows[at]!.note, mergedIntoLine(names)].filter(n => n !== undefined).join("; ") };
+        }
         stage(provisionServersLine(servers.filter(r => r.outcome === "installed").length, servers.length));
         for (const row of servers) stage(rowLine(row), undefined, row);
         rows.push(...servers);

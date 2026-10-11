@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // A project's glyph and hue as two selects on its settings page, each drawn with
-// what it picks, saved on the pick and drawn at once in the sidebar and the
-// switcher.
+// what it picks, saved on the pick and drawn at once wherever the project shows;
+// the glyph's select ends in the road to an image of the person's own.
+import { ImageIcon } from "lucide-react";
+import type { ReactNode } from "react";
 import { ProjectHue, ProjectIcon } from "@wsp/protocol";
-import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../components/ui/select.js";
+import { Select, SelectItem, SelectPopup, SelectSeparator, SelectTrigger, SelectValue } from "../components/ui/select.js";
 import { cn } from "../lib/utils.js";
 import { PROJECT_GLYPHS, PROJECT_HUES } from "./look.js";
+import { PROJECTS_WORDS } from "../settings/format.js";
 import { SELECT_WIDTH } from "../settings/layout.js";
 
 const word = (name: string): string => name.charAt(0).toUpperCase() + name.slice(1);
@@ -29,11 +32,35 @@ function HueOption({ hue }: { hue: ProjectHue }) {
   );
 }
 
-export function IconSelect({ icon, hue, onChange, className }: { icon: ProjectIcon; hue: ProjectHue; onChange: (icon: ProjectIcon) => void; className?: string }) {
+/** The value the select holds while the project wears an image, and the foot item that opens the file chooser. */
+const IMAGE = "image";
+const CHOOSE = "choose";
+
+/** A project's glyph, and where `onChooseImage` is given the image it wears: `image` is that image drawn at 16 px, set
+ * while one is worn. Picking a glyph means wanting the glyph, so the caller clears the image on `onChange`. A recipe's
+ * own glyph takes no image, so it passes neither. */
+export function IconSelect({ icon, hue, image, onChange, onChooseImage, className }: { icon: ProjectIcon; hue: ProjectHue; image?: ReactNode; onChange: (icon: ProjectIcon) => void; onChooseImage?: () => void; className?: string }) {
   return (
-    <Select value={icon} onValueChange={next => onChange(ProjectIcon.parse(next))}>
+    <Select
+      value={image === undefined ? icon : IMAGE}
+      onValueChange={next => {
+        if (next === CHOOSE) onChooseImage?.();
+        else if (next !== IMAGE) onChange(ProjectIcon.parse(next));
+      }}
+    >
       <SelectTrigger size="sm" aria-label="Icon" data-k="project-icon" className={cn(SELECT_WIDTH, className)}>
-        <SelectValue>{(value: ProjectIcon) => <IconOption icon={value} hue={hue} />}</SelectValue>
+        <SelectValue>
+          {(value: string) =>
+            value === IMAGE ? (
+              <span className="flex items-center gap-2">
+                {image}
+                {PROJECTS_WORDS.iconImage}
+              </span>
+            ) : (
+              <IconOption icon={ProjectIcon.parse(value)} hue={hue} />
+            )
+          }
+        </SelectValue>
       </SelectTrigger>
       <SelectPopup>
         {ProjectIcon.options.map(name => (
@@ -41,6 +68,17 @@ export function IconSelect({ icon, hue, onChange, className }: { icon: ProjectIc
             <IconOption icon={name} hue={hue} />
           </SelectItem>
         ))}
+        {onChooseImage === undefined ? null : (
+          <>
+            <SelectSeparator />
+            <SelectItem value={CHOOSE} data-k="project-icon-choose">
+              <span className="flex items-center gap-2">
+                <ImageIcon aria-hidden className="size-4" />
+                {image === undefined ? PROJECTS_WORDS.chooseImage : PROJECTS_WORDS.chooseAnother}
+              </span>
+            </SelectItem>
+          </>
+        )}
       </SelectPopup>
     </Select>
   );

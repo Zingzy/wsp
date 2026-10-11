@@ -1,0 +1,32 @@
+{
+  "tool": "plugins_enable",
+  "cases": [
+    {
+      "case": "on",
+      "arguments": {
+        "plugin": "brag@brag",
+        "agent": "codex",
+        "on": "attic"
+      },
+      "replies": {
+        "places.list": "{\"id\":1,\"ok\":true,\"places\":[{\"id\":\"place-9\",\"kind\":\"computer\",\"name\":\"attic\",\"label\":\"zingzy's \u0085box\u007f \\\"one\\\" \\\\ two\\nthree 🧪\",\"default\":false,\"os\":\"linux\",\"shape\":{\"cpu\":8,\"memMb\":16384},\"diskFreeBytes\":123456789012,\"present\":true,\"agentVersions\":{\"2\":\"an index key\",\"claude\":\"2.1.0\"},\"forks\":{\"running\":1,\"room\":2}},{\"id\":\"place-solari\",\"kind\":\"provider\",\"name\":\"solari\",\"default\":true,\"rateUsdPerHour\":0.30000000000000004}]}",
+        "plugins.toggle": "{\"id\":1,\"ok\":true,\"plugin\":{\"on\":true,\"id\":\"brag@brag\",\"agent\":\"codex\",\"name\":\"brag\",\"marketplace\":\"brag\",\"scope\":\"user\",\"version\":\"0.4.0\",\"path\":\"~/.claude/plugins/cache/brag/brag/0.4.0\",\"description\":\"Turn a project into a launch video \u0085 🧪\",\"source\":\"latent-spaces/brag\",\"brings\":{\"skills\":[\"brag:brag\",\"brag:brag-slim\"],\"commands\":[],\"subagents\":[],\"hooks\":[],\"servers\":[],\"lsp\":[],\"apps\":[]}}}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"brag@brag is on for Codex; its next turn loads what it brings.\"}],\"structuredContent\":{\"plugin\":{\"agent\":\"codex\",\"id\":\"brag@brag\",\"name\":\"brag\",\"marketplace\":\"brag\",\"version\":\"0.4.0\",\"scope\":\"user\",\"on\":true,\"path\":\"~/.claude/plugins/cache/brag/brag/0.4.0\",\"description\":\"Turn a project into a launch video \\u0085 🧪\",\"source\":\"latent-spaces/brag\",\"brings\":{\"skills\":[\"brag:brag\",\"brag:brag-slim\"],\"commands\":[],\"subagents\":[],\"hooks\":[],\"servers\":[],\"lsp\":[],\"apps\":[]}}}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "places.list"
+        },
+        {
+          "op": "plugins.toggle",
+          "target": {
+            "placeId": "place-9"
+          },
+          "agent": "codex",
+          "plugin": "brag@brag",
+          "on": true
+        }
+      ]
+    }
+  ]
+}

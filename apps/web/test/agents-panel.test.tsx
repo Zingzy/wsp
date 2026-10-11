@@ -69,9 +69,9 @@ describe("the head and the tabs", () => {
     expect(panel().querySelector("[data-k=agents-computer]"), "a computer with no page of its own is no link").toBeNull();
   });
 
-  it("offers Agents, Tool servers and Skills as Settings does, with no search or Add on Agents and both on the rest", () => {
+  it("offers Agents, Tool servers, Skills and Plugins as Settings does, with no search or Add on Agents, both on servers and skills, and a search alone on plugins", () => {
     drawPanel();
-    expect(screen.getAllByRole("radio").map(r => r.textContent)).toEqual(["Agents", "Tool servers", "Skills"]);
+    expect(screen.getAllByRole("radio").map(r => r.textContent)).toEqual(["Agents", "Tool servers", "Skills", "Plugins"]);
     expect(panel().querySelector("[data-k=kind-search]")).toBeNull();
     expect(panel().querySelector("[data-k=kind-add]")).toBeNull();
     tab("Tool servers");
@@ -83,11 +83,14 @@ describe("the head and the tabs", () => {
     tab("Skills");
     expect(panel().querySelector<HTMLInputElement>("[data-k=kind-search]")?.placeholder).toBe("Search skills");
     expect(panel().querySelector("[data-k=kind-add]")?.textContent).toBe("Add skill");
+    tab("Plugins");
+    expect(panel().querySelector<HTMLInputElement>("[data-k=kind-search]")?.placeholder).toBe("Search plugins");
+    expect(panel().querySelector("[data-k=kind-add]")).toBeNull();
   });
 
   it("stands no mono in a row a person reads", () => {
     drawPanel({ ctx: { where: "here", typeInTerminal: () => {} } });
-    for (const name of ["Agents", "Tool servers", "Skills"]) {
+    for (const name of ["Agents", "Tool servers", "Skills", "Plugins"]) {
       tab(name);
       for (const el of panel().querySelectorAll<HTMLElement>("[data-settings-card] [data-settings-row], [data-settings-card] [data-settings-row] *")) expect(el.className.toString(), name).not.toContain("font-mono");
     }
@@ -296,7 +299,7 @@ describe("the tool servers and the skills", () => {
   it("lists skills by source, each with its real folder under its name and the agents that read it after", () => {
     drawPanel();
     tab("Skills");
-    expect(headsOf().slice(0, 4)).toEqual(["System on spoochecked 3 min ago", "Plugins", "Global", "wsp~/wsp"]);
+    expect(headsOf().slice(0, 3)).toEqual(["System on spoochecked 3 min ago", "Global", "wsp~/wsp"]);
     expect(descriptionOf("skill-user-frontend-design")).toBe("~/.agents/skills/frontend-design");
     expect([...rowOf("skill-user-frontend-design").querySelectorAll("[data-row-marks] [data-harness-mark]")].map(m => m.getAttribute("data-harness-mark"))).toEqual(["claude", "codex", "opencode"]);
   });
@@ -494,7 +497,7 @@ describe("an item's page", () => {
     expect(quiet.innerHTML).not.toContain("destructive");
   });
 
-  it("says what a skill wsp writes, a plugin's and a project's can and cannot do", () => {
+  it("says what a skill wsp writes and a project's can and cannot do", () => {
     drawPanel();
     tab("Skills");
     openRow("skill-user-wsp");
@@ -510,9 +513,6 @@ describe("an item's page", () => {
       ["", "~/.config/opencode/skills/frontend-design"],
     ]);
     expect(factOf("path-0")?.textContent).toContain("shared");
-    back();
-    openRow("skill-plugin-pdf");
-    expect(headActs()).toEqual([]);
   });
 
   it("goes back to the list when the open item leaves the report, and stays there when it returns", () => {
@@ -618,13 +618,13 @@ describe("the states", () => {
 });
 
 describe("the status dots", () => {
-  it("stands a dot after every state's word in every row and on every page, on all three tabs", () => {
+  it("stands a dot after every state's word in every row and on every page, on all four tabs", () => {
     const tools = fakeTools();
     tools.answer("airtable", SERVER_TOOLS["airtable"]!);
     tools.answer("github", SERVER_TOOLS["github"]!);
     drawPanel({ ctx: { where: "box", tools } });
     const undotted = (): string[] => [...panel().querySelectorAll<HTMLElement>("[data-k=agent-status], [data-k=kind-status]")].filter(s => !/bg-(success|warning|destructive|foreground\/30)/.test(s.lastElementChild?.className ?? "")).map(s => s.textContent ?? "");
-    for (const name of ["Agents", "Tool servers", "Skills"]) {
+    for (const name of ["Agents", "Tool servers", "Skills", "Plugins"]) {
       tab(name);
       expect(undotted(), name).toEqual([]);
       for (const id of rowIds()) {

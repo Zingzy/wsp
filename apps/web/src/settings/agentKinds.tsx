@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The Tool servers and Skills tabs of Settings > Agents and of a task's panel,
+// The Tool servers, Skills and Plugins tabs of Settings > Agents and of a task's panel,
 // in the settings pages' grammar for any kind of the registry: the tab's
 // search and add over one card per group the kind keeps its rows in, the
 // computer named in the first head with when it was read and its refresh, and
@@ -24,6 +24,7 @@ import { forgetServerIcons } from "../components/agents/useServerIcon.js";
 import { useServerActs } from "../components/agents/useServerActs.js";
 import { useServerTools } from "../components/agents/useServerTools.js";
 import { useSkillActs } from "../components/agents/useSkillActs.js";
+import { usePluginActs } from "../components/agents/usePluginActs.js";
 import { HarnessMark } from "../components/chat/HarnessMark.js";
 import { AddButton } from "../components/ui/add-button.js";
 import { Button } from "../components/ui/button.js";
@@ -327,6 +328,7 @@ function useKindRows(place: PlaceView, ctx: SettingsContext) {
   const acts = useAgentActs(target);
   const skills = useSkillActs(target);
   const servers = useServerActs(target);
+  const plugins = usePluginActs(target);
   const here = place.id === HERE_PLACE_ID;
   const name = placeName(place);
   const away = here ? null : absentOf(place, ctx.now);
@@ -340,6 +342,7 @@ function useKindRows(place: PlaceView, ctx: SettingsContext) {
     ...(acts === undefined ? {} : { acts }),
     ...(skills === undefined ? {} : { skills }),
     ...(servers === undefined ? {} : { servers }),
+    ...(plugins === undefined ? {} : { plugins }),
   };
   return { read, rows, name };
 }
@@ -543,7 +546,7 @@ function UnderCard({ under, now }: { under: UnderLevel; now: number }) {
   return (
     <Card id="kind-under" head={<OnHead head={under.title} readAt={under.readAt === undefined ? null : Date.parse(under.readAt)} reading={under.reading} now={now} {...(under.refresh === undefined ? {} : { refresh: under.refresh })} again={L.readAgain} />} {...(under.reading && rows.length === 0 ? { body: <RowSkeleton k="under-reading" /> } : {})}>
       {rows.map(row => (
-        <Row key={row.key} id={`under-${row.key}`} title={row.title} description={row.subtext ?? ""} />
+        <Row key={row.key} id={`under-${row.key}`} title={row.title} description={row.subtext ?? ""} {...(row.count === undefined ? {} : { clip: true, word: row.count, wordClass: "fact" as const })} />
       ))}
       {rows.length > 0 || under.reading ? null : <Line id="under-none" label={under.refused ?? under.empty ?? W.notListed} empty />}
     </Card>

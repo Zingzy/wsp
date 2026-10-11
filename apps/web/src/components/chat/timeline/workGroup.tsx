@@ -9,6 +9,7 @@ import { getVirtualizedScrollFadeClassName } from "../../ui/scroll-area";
 import { liveWorkEntryLabel, resolveWorkGroupScrollIndex, shouldFollowWorkGroupAppend, workEntryIsVisibleInGroup, workEntryLabelText } from "../MessagesTimeline.logic";
 import { cn } from "../../../lib/utils";
 import { TimelineRowCtx, WorkGroupViewCtx, type TimelineWorkEntry, type TimelineRow } from "./context";
+import { WorkingTimer } from "./working";
 import { LiveActivityRow, LiveActivityContent, TOOL_GROUP_GLYPHS, workEntryGlyph, SimpleWorkEntryRow } from "./workEntry";
 
 // ---------------------------------------------------------------------------
@@ -147,6 +148,19 @@ function ExpandedWorkGroupEntries({
     return () => observer.disconnect();
   }, [updateScrollFades]);
 
+  // An open row grows the list by what it opened rather than scrolling inside the cap, while scrolled out of view too.
+  const [expandedContentHeight, setExpandedContentHeight] = useState(0);
+  const updateExpandedContentHeight = useCallback(() => {
+    const state = listRef.current?.getState();
+    let height = 0;
+    for (const entryId of viewState.expandedEntries) {
+      if (state?.indexByKey(entryId) === undefined) continue;
+      height += Math.max(0, (state.sizes.get(entryId) ?? CLOSED_ROW_PX) - CLOSED_ROW_PX);
+    }
+    setExpandedContentHeight(height);
+  }, [viewState]);
+  useLayoutEffect(updateExpandedContentHeight, [entries, updateExpandedContentHeight]);
+
   const renderEntry = useCallback(
     ({ item }: { item: TimelineWorkEntry }) => (
       <SimpleWorkEntryRow
@@ -167,7 +181,7 @@ function ExpandedWorkGroupEntries({
         extraData={workspaceRoot}
         keyExtractor={workEntryKey}
         renderItem={renderEntry}
-        estimatedItemSize={24}
+        estimatedItemSize={CLOSED_ROW_PX}
         drawDistance={240}
         recycleItems
         {...(initialScrollIndex ? { initialScrollIndex } : {})}
@@ -184,12 +198,15 @@ function ExpandedWorkGroupEntries({
         onLoad={handleLoad}
         onScroll={handleScroll}
         onLayout={updateScrollFades}
+        onItemSizeChanged={updateExpandedContentHeight}
         tabIndex={0}
         role="region"
         aria-label="Tool calls"
         data-tool-group-scroll
+        style={{ maxHeight: `calc(min(18rem, 50dvh) + ${expandedContentHeight}px)` }}
         className={cn(
-          "scrollbar-gutter-stable max-h-[min(18rem,50dvh)] scroll-py-6 overflow-x-hidden rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70",
+          // Its rows stand 12 px in under the group's head, the sidebar tree's child indent, so they read as its own.
+          "ms-3 scrollbar-gutter-stable scroll-py-6 overflow-x-hidden rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70",
           getVirtualizedScrollFadeClassName(fades),
         )}
       />
@@ -198,6 +215,8 @@ function ExpandedWorkGroupEntries({
 }
 
 const workEntryKey = (entry: TimelineWorkEntry) => entry.id;
+/** A closed call row's height, the list's estimate for a row it has not measured. */
+const CLOSED_ROW_PX = 30;
 
 export function LiveWorkEntryTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "work-live" }> }) {
   const ctx = use(TimelineRowCtx);
@@ -213,7 +232,14 @@ export function LiveWorkEntryTimelineRow({ row }: { row: Extract<TimelineRow, { 
       onClick={() => ctx.onToggleWorkGroup(row.groupId, row.id)}
     >
       {row.active ? (
-        <LiveActivityRow label={label} tone={row.entry.tone} glyph={workEntryGlyph(row.entry)} failed={failed} />
+        <span className="flex min-w-0 max-w-full items-center gap-3">
+          <LiveActivityRow label={label} tone={row.entry.tone} glyph={workEntryGlyph(row.entry)} failed={failed} />
+          {row.entry.command !== undefined && row.entry.toolLifecycleStatus === "inProgress" && row.entry.createdAt !== "" ? (
+            <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+              <WorkingTimer createdAt={row.entry.createdAt} />
+            </span>
+          ) : null}
+        </span>
       ) : (
         <div className="min-h-6 w-fit max-w-full min-w-0 overflow-hidden rounded-md text-sm leading-relaxed">
           <LiveActivityContent

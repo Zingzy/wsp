@@ -41,7 +41,7 @@ import { readRecipes, useRecipes } from "../recipesStore.js";
 import { Card, Line } from "../rows.js";
 import { CopyRow, DeviceCode, RefusalSlot } from "../sheetParts.js";
 import { STEP_TITLES, askedHostKey, askedSudo, closeAdd, connect, copyKeysOn, firstCloseOf, firstPick, go, openSetup, readOptions, retrySetup, setupWithWay, setPicks, skipRow, setSaveAs, setUp, stepLine, stepsFor, tooBig, useAddFlow, weigh, type AddStep } from "./addFlow.js";
-import { everything, folderKey, fromRecipe, githubPick, noPicks, servable, tickUsedClis } from "./choices.js";
+import { everything, folderKey, folderLooks, fromRecipe, githubPick, noPicks, servable, tickUsedClis } from "./choices.js";
 import { AgentsPicks, Choice, ClisPicks, GitHubPicks, OtherPicks, PluginsPicks, ProjectsPicks, ServersPicks, SkillsPicks, type FolderOption } from "./PickLists.js";
 import { PickLine, PickRow } from "./PickRow.js";
 import { checkRows, opensLog, runningSince, setupCount, setupRows, setupStanding, stepLogs, type StepLine } from "./setup.js";
@@ -116,7 +116,7 @@ function StartFromStep({ here, picks, options, onPick, from }: { here: string; p
   const recipes = useRecipes(s => s.recipes) ?? [];
   const looks = useStore(s => s.preferences.recipeLook);
   const projects = useHereProjects();
-  const projectLooks = useStore(s => s.preferences.projectLook);
+  const projectLooks = useFolderLooks();
   const hereRow = useStore(s => s.places.find(p => p.id === HERE_PLACE_ID));
   const all = everything(picks.name, options, projects, projectLooks);
   return (
@@ -147,6 +147,13 @@ function useHereProjects() {
   return useMemo(() => projects.filter(p => p.computer === HERE_PLACE_ID), [projects]);
 }
 
+/** Each project's look as its folder row carries it, the image beside the glyph and hue. */
+function useFolderLooks() {
+  const projectLook = useStore(s => s.preferences.projectLook);
+  const projectIcon = useStore(s => s.preferences.projectIcon);
+  return useMemo(() => folderLooks(projectLook, projectIcon), [projectLook, projectIcon]);
+}
+
 /** What the host read of a folder of the computer running it, by its path: its size, whether it is private, and the
  * commits no remote holds. */
 const folderFacts = (facts: RecipeOptions["folders"], path: string): Pick<FolderOption, "bytes" | "private" | "unpushed"> => {
@@ -156,14 +163,14 @@ const folderFacts = (facts: RecipeOptions["folders"], path: string): Pick<Folder
 
 function ProjectsStep({ picks, box, boxId, facts, onChange }: { picks: RecipeFile; box: string; boxId: string; facts: RecipeOptions["folders"]; onChange: (next: RecipeFile) => void }) {
   const here = useHereProjects();
-  const looks = useStore(s => s.preferences.projectLook);
+  const looks = useFolderLooks();
   const onBox = useStore(s => s.projects).filter(p => p.computer === boxId);
   const [added, setAdded] = useState<readonly FolderOption[]>([]);
   // A folder already in the picks that is no project here is one the person picked: it stands at the top.
   const picked: FolderOption[] = Object.entries(picks.folders)
     .filter(([key]) => !here.some(p => folderKey(p.name) === key) && !added.some(f => f.key === key))
-    .map(([key, row]) => ({ key, name: row.name ?? key, path: row.from, icon: row.icon ?? "folder", hue: row.hue ?? "neutral", ...folderFacts(facts, row.from) }));
-  const folders: FolderOption[] = [...added, ...picked, ...here.map(p => ({ key: folderKey(p.name), name: p.name, path: p.path, remote: p.remote, icon: looks[p.id]?.icon ?? "folder", hue: looks[p.id]?.hue ?? "neutral", ...folderFacts(facts, p.path) }))];
+    .map(([key, row]) => ({ key, name: row.name ?? key, path: row.from, icon: row.icon ?? "folder", hue: row.hue ?? "neutral", ...(row.image === undefined ? {} : { image: row.image }), ...folderFacts(facts, row.from) }));
+  const folders: FolderOption[] = [...added, ...picked, ...here.map(p => ({ key: folderKey(p.name), name: p.name, path: p.path, remote: p.remote, icon: looks[p.id]?.icon ?? "folder", hue: looks[p.id]?.hue ?? "neutral", ...(looks[p.id]?.image === undefined ? {} : { image: looks[p.id]!.image }), ...folderFacts(facts, p.path) }))];
   const pick = desktopBridge()?.pickFolder;
   const addFolder = async (): Promise<void> => {
     const path = await pick?.();
@@ -512,7 +519,7 @@ export function AddComputerDialog() {
   const api = useStore(s => s.api);
   const places = useStore(s => s.places);
   const projects = useStore(s => s.projects);
-  const projectLooks = useStore(s => s.preferences.projectLook);
+  const projectLooks = useFolderLooks();
   const setPreferences = useStore(s => s.setPreferences);
   const recipes = useRecipes(s => s.recipes);
   const job = useAdds(s => (flow.addId === null ? undefined : s.jobs[flow.addId]));

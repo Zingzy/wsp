@@ -17,6 +17,7 @@ import {
   ASIDE_WALL_MS,
   CODEX_FEWER_TURNS,
   CODEX_LEGACY_HISTORY,
+  HUNK_HEAD,
   RUN_EXIT_MS,
   asideWallLine,
   codexKeyRefusedLine,
@@ -31,6 +32,7 @@ import {
   SLATE_SERVER_NAME,
   subagentAsked,
   titlePrompt,
+  wholeFileHunk,
 } from "@wsp/protocol";
 import type {
   AdapterAttachOptions,
@@ -38,11 +40,13 @@ import type {
   AgentLaunch,
   ExecStream,
   ExecStreamFactory,
+  FilePatch,
   HarnessCatalogAnswer,
   HarnessExec,
   McpServerSpec,
   PermissionAsk,
   PermissionOutcome,
+  PatchHunk,
   SessionAsker,
   SessionRenamer,
   SessionReverter,
@@ -86,6 +90,7 @@ import {
   type RequestId,
 } from "./rpc.js";
 import { draftForCommand, parseDraftFor, parseRename, parseSessionTitle, parseTitleFor, renameCommand, sessionTitleCommand, titleForCommand } from "./session-title.js";
+import { shellScriptOf } from "./shell-script.js";
 
 export interface CodexStartOptions {
   prompt: string;
@@ -278,12 +283,51 @@ const changesOf = (changes: unknown): { path: string; kind: string }[] =>
         .map(c => ({ path: str(c.path) ?? "", kind: str(rec(c.kind)?.type) ?? str(c.kind) ?? "change" }))
     : [];
 
+const MOVED = /\n\nMoved to: ([^\n]+)$/;
+
+/** The hunks of a unified diff; a line before the first hunk head is a header and is skipped. */
+function unifiedHunks(diff: string): PatchHunk[] {
+  const hunks: PatchHunk[] = [];
+  for (const line of diff.replace(/\n$/, "").split("\n")) {
+    const head = HUNK_HEAD.exec(line);
+    if (head !== null) hunks.push({ oldStart: Number(head[1]), oldLines: Number(head[2] ?? 1), newStart: Number(head[3]), newLines: Number(head[4] ?? 1), lines: [] });
+    else hunks.at(-1)?.lines.push(line);
+  }
+  return hunks;
+}
+
+/** Each change as the hunks it made, as the delta's patch field, absent where none made any; read only off a completed
+ * item, since a declined or failed one carries the diff it would have made. The app server (0.162.1,
+ * format_file_change_diff) sends an add's whole new file, a delete's whole old file, and an update's unified diff as
+ * `similar` writes it, with no file header and one line of context, then "\n\nMoved to: <path>" for a rename. */
+const filePatches = (changes: unknown): { patch?: FilePatch[] } => {
+  const patch = (Array.isArray(changes) ? changes : []).flatMap((raw): FilePatch[] => {
+    const change = rec(raw);
+    const path = str(change?.path);
+    const diff = str(change?.diff) ?? "";
+    if (change === undefined || path === undefined || path === "") return [];
+    const kind = str(rec(change.kind)?.type) ?? str(change.kind);
+    if (kind === "add" || kind === "delete") return diff === "" ? [] : [{ path, hunks: [wholeFileHunk(diff, kind === "add" ? "+" : "-")] }];
+    const moved = MOVED.exec(diff);
+    const hunks = unifiedHunks(moved === null ? diff : diff.slice(0, moved.index));
+    return hunks.length === 0 && moved === null ? [] : [{ path, hunks, ...(moved !== null ? { movedTo: moved[1]! } : {}) }];
+  });
+  return patch.length > 0 ? { patch } : {};
+};
+
 const changeLines = (changes: unknown): string =>
   changesOf(changes)
     .map(c => `${c.kind} ${c.path}`.trim())
     .join("\n");
 
 const count = (value: unknown): number | undefined => (typeof value === "number" && Number.isFinite(value) ? value : undefined);
+
+/** A finished command's exit code and how long it ran, each where the server gave one. */
+const ran = (item: Item): { exitCode?: number; durationMs?: number } => {
+  const exitCode = count(item.exitCode);
+  const durationMs = count(item.durationMs);
+  return { ...(exitCode !== undefined ? { exitCode } : {}), ...(durationMs !== undefined ? { durationMs } : {}) };
+};
 
 /** The fields of a token breakdown the server reports, by the names TurnTokens takes. */
 const BREAKDOWN = [
@@ -402,11 +446,11 @@ function itemDeltas(done: boolean, item: Item, sessionId: string): AdapterEvent[
     }
     case "commandExecution":
       return done
-        ? [delta({ kind: "tool_result", text: str(item.aggregatedOutput) ?? "", toolUseId: item.id, isError: failed() })]
-        : [delta({ kind: "tool_use", text: JSON.stringify({ command: str(item.command) ?? "" }), toolName: "command_execution", toolUseId: item.id })];
+        ? [delta({ kind: "tool_result", text: str(item.aggregatedOutput) ?? "", toolUseId: item.id, isError: failed(), ...ran(item) })]
+        : [delta({ kind: "tool_use", text: JSON.stringify({ command: shellScriptOf(str(item.command) ?? "") }), toolName: "command_execution", toolUseId: item.id })];
     case "fileChange":
       return done
-        ? [delta({ kind: "tool_result", text: changeLines(item.changes), toolUseId: item.id, isError: failed() })]
+        ? [delta({ kind: "tool_result", text: changeLines(item.changes), toolUseId: item.id, isError: failed(), ...(failed() ? {} : filePatches(item.changes)) })]
         : [delta({ kind: "tool_use", text: JSON.stringify({ changes: changesOf(item.changes) }), toolName: "file_change", toolUseId: item.id })];
     case "mcpToolCall": {
       // The slate's second server exists only for Codex's tool listing; its tools are wsp's, so they are named as wsp's.
@@ -823,7 +867,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
       const input =
         toolName === "file_change"
           ? { changes: changesOf(itemId === undefined ? undefined : changesById.get(itemId)) }
-          : { command: str(params.command) ?? "", ...(str(params.cwd) !== undefined ? { cwd: str(params.cwd) } : {}) };
+          : { command: shellScriptOf(str(params.command) ?? ""), ...(str(params.cwd) !== undefined ? { cwd: str(params.cwd) } : {}) };
       const reason = str(params.reason);
       const asker = foreign(params) ? str(params.threadId)! : undefined;
       const ask: PermissionAsk = {

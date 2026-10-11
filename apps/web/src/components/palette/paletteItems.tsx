@@ -6,7 +6,7 @@
 // whose title holds the typed query and every other one whose messages hold
 // it, as the host found them. Pure apart from the callbacks it is handed, so
 // the list is testable without the dialog.
-import { ArrowDownIcon, ArrowLeftIcon, ArrowUpIcon, BookOpenIcon, BugIcon, ChevronDownIcon, ChevronUpIcon, FileTextIcon, FolderIcon, FolderOpenIcon, FolderPlusIcon, GithubIcon, MonitorIcon, PanelLeftIcon, PanelRightIcon, PlusIcon, SettingsIcon } from "lucide-react";
+import { ArrowDownIcon, ArrowLeftIcon, ArrowUpIcon, BookOpenIcon, BugIcon, ChevronDownIcon, ChevronUpIcon, FileTextIcon, FolderOpenIcon, FolderPlusIcon, GithubIcon, MonitorIcon, PanelLeftIcon, PanelRightIcon, PlusIcon, SettingsIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { REPO } from "../../../../../packages/protocol/src/bundles.mjs";
 import { agentName } from "@wsp/catalog";
@@ -352,7 +352,7 @@ function workspaceItems(input: PaletteItemsInput): CommandPaletteActionItem[] {
       kind: "action",
       value: `workspace:${project.id}`,
       searchTerms: [project.displayName],
-      icon: <FolderIcon className={ITEM_ICON_CLASS} />,
+      icon: <ProjectGlyph projectId={project.workspace.project.id} />,
       title: project.displayName,
       description: `${absent?.word ?? project.indicator.label}${onName(computerName(input.places, project))}`,
       ...(current ? { titleTrailingContent: <span className="shrink-0 text-muted-foreground text-xs">Current task</span> } : {}),

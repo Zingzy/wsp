@@ -1,5 +1,5 @@
 import { imageServedWaitLine, machineUnreachableLine, moveTimedOutLine, providerKeyName, providerRoadRetryLine, RESUME_UNANSWERED, snapshotListedRefusedLine, snapshotListedWaitLine, type Capabilities } from "@wsp/protocol";
-import { ExecFailedError, MachineUnreachableError, MoveUnansweredError, NapRefusedError, NotFirstLifeError, ResumeUnansweredError, ROAD_TRIES, abort, backoffMs, classify, isCapped, isMissing, isNetworkError, realRetryClock, roadBackoffMs, roadCode, shouldRetry, type RetryClock, type WspError } from "./errors.js";
+import { ExecFailedError, MachineUnreachableError, MoveUnansweredError, NapRefusedError, NotFirstLifeError, PROVIDER_READ_CAP_MS, ResumeUnansweredError, ROAD_TRIES, abort, backoffMs, classify, isCapped, isMissing, isNetworkError, realRetryClock, roadBackoffMs, roadCode, shouldRetry, type RetryClock, type WspError } from "./errors.js";
 import { INLINE_EXEC_MS, execDetached } from "./exec-detached.js";
 import { EXEC_ENV } from "./golden-import.js";
 import type { BackendPricing, ExecResult, Lifecycle, Machine, MachineBackend, MachineKind, MachineLife, MachineShape, MachineSpec, MachineState, PreviewReach, RunOptions, SnapshotRow, SnapshotStoragePricing, TemplateRow } from "./machine.js";
@@ -23,6 +23,8 @@ export interface MoveBudgets {
   pauseMs: number;
   resumeCapMs: number;
   stateReadMs: number;
+  /** The cap on one read (a GET) whose road names none. */
+  readMs: number;
 }
 
 interface SandboxView {
@@ -191,7 +193,7 @@ export class SolariBackend implements MachineBackend {
     this.baseUrl = opts.baseUrl ?? "https://api.getsolari.com";
     this.fetch = opts.fetch ?? globalThis.fetch;
     this.clock = opts.clock ?? realRetryClock;
-    this.budgets = { pauseMs: opts.budgets?.pauseMs ?? PAUSE_MS, resumeCapMs: opts.budgets?.resumeCapMs ?? RESUME_CAP_MS, stateReadMs: opts.budgets?.stateReadMs ?? STATE_READ_MS };
+    this.budgets = { pauseMs: opts.budgets?.pauseMs ?? PAUSE_MS, resumeCapMs: opts.budgets?.resumeCapMs ?? RESUME_CAP_MS, stateReadMs: opts.budgets?.stateReadMs ?? STATE_READ_MS, readMs: opts.budgets?.readMs ?? PROVIDER_READ_CAP_MS };
   }
 
   /** capMs cuts the call off here when the provider has not answered it in that long, and `signal` cuts it off when
@@ -218,7 +220,7 @@ export class SolariBackend implements MachineBackend {
           method,
           headers,
           body: body !== undefined ? JSON.stringify(body) : undefined,
-          ...abort(capMs, signal),
+          ...abort(capMs ?? (method === "GET" ? this.budgets.readMs : undefined), signal),
         });
       } catch (e) {
         // A road that failed never carried the request out, so every call is safe to send again, keyed or not.

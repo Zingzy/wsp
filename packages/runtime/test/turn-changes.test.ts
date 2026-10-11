@@ -386,7 +386,7 @@ describe("what a turn changed", () => {
       await expect.poll(stored).toEqual([expect.objectContaining({ status: "running", run: RUN })]);
       return { ws, cwd: handle.view().cwd!, stored };
     };
-    return { run: () => runs.get(RUN)!, host, begin };
+    return { run: () => runs.get(RUN)!, host, begin, backend };
   };
   const reply = { status: "completed", text: "done" } as const;
 
@@ -452,6 +452,27 @@ describe("what a turn changed", () => {
     await new Promise(resolve => setTimeout(resolve, 30));
     expect(await cards()).toHaveLength(1);
     expect(daemon.frames.filter(f => f["op"] === "git.turn")).toEqual([{ op: "git.turn", cwd, from: sha(1), to: sha(3) }]);
+  });
+
+  it("reads that card once the next host loads a machine its provider answered for past the load's deadline", async () => {
+    const files = [{ path: "src/fix.ts", kind: "modified", additions: 4, deletions: 1 }];
+    const daemon = fakeDaemon({ files, stallAt: 2 });
+    const box = restartable(daemon);
+    const { ws, cwd, stored } = await box.begin("fix it");
+    box.run().onEvent({ type: "turn.done", sessionId: "sess-1", result: reply });
+    box.run().onEvent({ type: "session.end", sessionId: "sess-1", exitCode: 0, sawResult: true });
+    box.run().settle(reply);
+    await expect.poll(async () => (await rt!.sessions.list(ws.id))[0]!.status).toBe("completed");
+    await rt!.close();
+
+    // Past LOAD_READS_MS, so the next host holds the record while its read is out and loads it when the read lands.
+    const get = box.backend.get.bind(box.backend);
+    box.backend.get = async id => (await new Promise(resolve => setTimeout(resolve, 2_000)), get(id));
+    rt = box.host();
+    const cards = async () => (await rt!.sessions.history(ws.id)).filter(e => e.type === "session.changes");
+    await expect.poll(cards, { timeout: 6_000 }).toEqual([expect.objectContaining({ from: sha(1), to: sha(3), files })]);
+    expect(daemon.frames.filter(f => f["op"] === "git.turn")).toEqual([{ op: "git.turn", cwd, from: sha(1), to: sha(3) }]);
+    await expect.poll(async () => (await stored())[0]).not.toHaveProperty("snapshot");
   });
 
   it("takes the commit off the row of a turn its card read failed on after the exit, so no later host reads it", async () => {

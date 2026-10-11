@@ -864,7 +864,7 @@ describe("the Agents page on a computer", () => {
     // The computer's page draws no list of its own: one row hands it to the Agents page; its sign-ins read that report.
     expect(document.querySelector("[data-settings-page] [data-grid='agents']")).toBeNull();
     const row = document.querySelector<HTMLElement>("[data-settings-page] [data-k=agents-on]")!;
-    expect(row.querySelector("[data-settings-title]")?.textContent).toBe("Agents, tool servers and skills on hetzner");
+    expect(row.querySelector("[data-settings-title]")?.textContent).toBe("Agents, tool servers, skills and plugins on hetzner");
     fireEvent.click(row);
     await settle();
     expect(useSettingsStore.getState().agentsPlace).toBe("p_2");

@@ -30,14 +30,13 @@ import { openNamedFile } from "../../files/open";
 import { threadFolderOf } from "../../files/root";
 import { cn } from "../../lib/utils";
 import { DEFAULT_TIMESTAMP_FORMAT, launchIn, subagentEntries, subagentRunOf, turnWait, type MessageId, type TimestampFormat, type TurnDiffSummary, type TurnSummary } from "./adapt";
-import { onlyOf, useDiffStore } from "../../diffs/store";
-import { useRightPanelStore } from "../../rightPanelStore";
+import { changedPathOf, onlyOf, useDiffStore } from "../../diffs/store";
+import { openBrowserAt, useRightPanelStore } from "../../rightPanelStore";
 import { useReadStamp } from "./useReadStamp";
 import { threadsOpenedBy } from "../../sidebar/threadTree";
 import { computerName, useComputerName } from "../../sidebar/workspaceRows";
 import { TimelineRuleLine } from "./TimelineRuleLine";
 import { LoopbackLinks, openInBrowser } from "../../browser/loopbackLinks";
-import { useBrowserTabs } from "../../browser/tabs";
 import { MessagesTimeline, type MachineWait, type ReplyRuns } from "./MessagesTimeline";
 import { useNewThreadRequests } from "./newThreadRequests";
 import { useChatThread, type ChatThreadHandle } from "./useChatThread";
@@ -213,15 +212,19 @@ export function ChatView({
   const turnsRef = useRef(view.turns);
   turnsRef.current = view.turns;
   const onOpenTurnDiff = useCallback(
-    (turnId: string, path?: string) => {
+    (turnId: string, named?: string, line?: number) => {
       const changes = turnsRef.current.find(t => t.turnId === turnId)?.changes;
       const at = cwd ?? threadFolderOf(workspaceId);
-      if (!changes || at === null) return;
+      const path = named === undefined || !changes ? named : changedPathOf(changes, named);
+      if (!changes || at === null || (named !== undefined && path === undefined)) {
+        if (named !== undefined) onOpenFile(named, line);
+        return;
+      }
       const only = onlyOf(changes, path);
       useDiffStore.getState().openTurn(workspaceId, { turnId, cwd: at, from: changes.from, to: changes.to, ...(path === undefined ? {} : { path }), ...(only === undefined ? {} : { only }) });
       useRightPanelStore.getState().open(workspaceId, "diff");
     },
-    [cwd, workspaceId],
+    [cwd, onOpenFile, workspaceId],
   );
   const asked = useNewThreadRequests(s => s.pending.has(workspaceId));
   useEffect(() => {
@@ -363,7 +366,7 @@ export function ChatView({
   // A thread in a folder on a computer the person joined names that computer's ports in its links: they open in a
   // Browser tab, which holds the port's forward to this computer while it shows it.
   const opensForwarded = useMemo(
-    () => (workspace !== null && folderOnJoined(workspaceKind(workspace)) ? openInBrowser(at => useRightPanelStore.getState().openBrowser(workspaceId, useBrowserTabs.getState().createTab(workspaceId, at))) : null),
+    () => (workspace !== null && folderOnJoined(workspaceKind(workspace)) ? openInBrowser(at => openBrowserAt(workspaceId, at)) : null),
     [workspace, workspaceId],
   );
 

@@ -7,7 +7,11 @@
 // the old text; a file the agent wrote since the read is left as it wrote it;
 // a link inside the base is written through and stays a link. A temp file a
 // killed write left beside a config is swept by the next write there.
-import { configChangedRefusal, configHardLinkRefusal, configLinkRefusal, shellQuote } from "@wsp/protocol";
+import { configChangedRefusal, configHardLinkRefusal, configLinkRefusal, shellQuote, underProject } from "@wsp/protocol";
+
+/** The base of a write to a file in an agent's store: the home where the store sits under it, so a config linked into
+ * the home (a dotfiles checkout) is written through as the agent's own commands write it, else the store. */
+export const storeBase = (store: string, home: string): string => (underProject(store, home) ? home : store);
 
 /** The exit a write takes, with the file and where it points on stdout, when the file is a link out of its base. */
 export const CONFIG_LINK_EXIT = 4;

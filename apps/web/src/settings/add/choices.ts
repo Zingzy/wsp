@@ -21,12 +21,24 @@ export const folderKey = (name: string): string =>
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "") || "folder";
 
+/** A project's look as a folder row carries it: its glyph, its hue and the hash of the image it wears. */
+export interface FolderLook {
+  readonly icon?: ProjectIcon | undefined;
+  readonly hue?: ProjectHue | undefined;
+  readonly image?: string | undefined;
+}
+
+/** Each project's look by its id, the image the host keeps for it beside its glyph and hue. */
+export const folderLooks = (projectLook: Readonly<Record<string, { icon?: ProjectIcon; hue?: ProjectHue }>>, projectIcon: Readonly<Record<string, string>> | undefined): Record<string, FolderLook> =>
+  Object.fromEntries([...new Set([...Object.keys(projectLook), ...Object.keys(projectIcon ?? {})])].map(id => [id, { ...projectLook[id], ...(projectIcon?.[id] === undefined ? {} : { image: projectIcon[id] }) }]));
+
 /** A project of this computer as a recipe's folder row: its folder, its name, and the look it wears here. */
-export const folderOf = (project: Pick<ProjectView, "id" | "name" | "path">, look: { icon?: ProjectIcon; hue?: ProjectHue } | undefined): RecipeFile["folders"][string] => ({
+export const folderOf = (project: Pick<ProjectView, "id" | "name" | "path">, look: FolderLook | undefined): RecipeFile["folders"][string] => ({
   from: project.path,
   name: project.name,
   ...(look?.icon === undefined ? {} : { icon: look.icon }),
   ...(look?.hue === undefined ? {} : { hue: look.hue }),
+  ...(look?.image === undefined ? {} : { image: look.image }),
   keep: [],
 });
 
@@ -39,7 +51,7 @@ const githubOf = (signins: readonly GitHubSignIn[] | undefined): { signin?: GitH
 /** Every row the options offer, each agent signing in the first way it can, GitHub signing in on the computer, and every
  * project here. No CLI: each one is a person's pick, made from how often their agents ran it. No plugin switched off
  * here: it is offered and left off. */
-export function everything(name: string, options: RecipeOptions, projects: readonly Pick<ProjectView, "id" | "name" | "path">[], looks: Record<string, { icon?: ProjectIcon; hue?: ProjectHue }>): RecipeFile {
+export function everything(name: string, options: RecipeOptions, projects: readonly Pick<ProjectView, "id" | "name" | "path">[], looks: Readonly<Record<string, FolderLook>>): RecipeFile {
   return RecipeFile.parse({
     name: fileName(name),
     agents: Object.fromEntries(options.agents.map(a => [a.id, a.signins[0] === undefined ? {} : { signin: a.signins[0] }])),

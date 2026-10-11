@@ -1,0 +1,18 @@
+{
+  "at": "/",
+  "fixture": "project-icons",
+  "steps": [
+    "key:ControlOrMeta+k",
+    "type:new thread",
+    "key:Enter",
+    "type:wsp",
+    "key:Enter"
+  ],
+  "wait": "k=project-home",
+  "settleMs": 700,
+  "widths": [
+    1440,
+    390
+  ],
+  "reason": "The New thread heading draws the project's mark at 40px."
+}

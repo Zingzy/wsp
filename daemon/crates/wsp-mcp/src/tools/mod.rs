@@ -15,6 +15,7 @@ mod home;
 mod image;
 mod machine;
 mod named;
+mod plugins;
 mod projects;
 mod projects_change;
 mod pull_request;
@@ -76,6 +77,8 @@ pub const TOOLS: &[Tool] = &[
     servers::DISABLE,
     servers::ENABLE,
     servers::ADD_TOOLS,
+    plugins::DISABLE,
+    plugins::ENABLE,
     defaults::DEFAULT,
     defaults::SET,
     defaults::SETUP,
@@ -122,6 +125,7 @@ pub const TOOLS: &[Tool] = &[
     agents::AGENTS,
     agents::SKILLS,
     agents::SERVERS,
+    agents::PLUGINS,
     projects::TOOL,
     threads::THREADS,
     threads::THREAD_READ,

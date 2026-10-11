@@ -39,6 +39,13 @@ export const AGENT_KEEP_MS = 30 * 60_000;
 /** The most agent processes kept up between turns on that computer at once, the one idle longest ended first: an
  * idle one holds 200 to 400 MB with its MCP servers. */
 export const AGENTS_KEPT = 6;
+/** How long an agent process started ahead of a new thread's first send waits for that send, from the last time the
+ * composer asked for it. Claude Code under -p waits on its MCP servers and SessionStart hooks before its first turn:
+ * 4.2 s on one person's config against 1.0 s with neither (2026-10-10). It counts against AGENTS_KEPT. */
+export const AGENT_WARM_MS = 3 * 60_000;
+/** The most of those standing at once across every project, the ones asked for most recently: each holds about 380 MB
+ * with its MCP servers, and five projects' came to 1.9 GB (2026-10-10). */
+export const AGENTS_WARM = 2;
 /** How long a harness gets to exit on its own after the result its turn ended on, before the runtime ends it and its
  * tree. Long enough for the harness to flush its own session store and go, short enough that a machine running turns
  * all day never carries more than the one it is on: seven finished turns' processes were found alive on one guest,

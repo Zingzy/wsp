@@ -13,7 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { stubBackend } from "../../../packages/host/test/stub-backend.js";
 import { copyingFake, fakeDaemonStart } from "../../../packages/host/test/verbs-fixture.js";
 import { hostFeed, type FeedState } from "../src/host-feed.js";
-import { KeptOtherRelease, ensureService, firstLaunch, homeOf, hostTokenMatches, loginStart, openHost, openHostReady, earlierHostCheck, oneAtATime, servesAgainNotice, runningHere, setLoginStart, statePathIn, stopWsp, userDataIn, workingHere, type HostSession, type OpenHostOptions, type ReplacePrompt, type ServiceRoad } from "../src/host-lifecycle.js";
+import { KeptOtherRelease, StartFailed, ensureService, firstLaunch, homeOf, hostTokenMatches, loginStart, openHost, openHostReady, earlierHostCheck, oneAtATime, servesAgainNotice, runningHere, setLoginStart, statePathIn, stopWsp, userDataIn, workingHere, type HostSession, type OpenHostOptions, type ReplacePrompt, type ServiceRoad } from "../src/host-lifecycle.js";
 
 const PAGE = `<!doctype html>
 <html><head><title>wsp</title></head>
@@ -698,10 +698,13 @@ describe("openHost", () => {
     await expect(open({ service: { ...launchd.road, platform: "win32", manager: undefined } })).rejects.toThrow(noManagerLine("win32"));
   });
 
-  it("a service that never serves says so, with the end of its log", async () => {
+  it("a service that never serves says so in one line, naming its log and leaving an earlier start's lines out", async () => {
     const road = { ...launchd.road, waitMs: 300, run: async () => ({ code: 0, output: "" }) };
     writeFileSync(join(home, "host.log"), "wsp: this state file was written by a newer wsp\n");
-    await expect(open({ service: road })).rejects.toThrow(/wsp did not start within .*host\.log\nwsp: this state file was written by a newer wsp/s);
+    const failed = await open({ service: road }).catch((e: unknown) => e);
+    expect(failed).toBeInstanceOf(StartFailed);
+    expect((failed as StartFailed).message).toMatch(/^wsp did not start within \d+ms: nothing ran its service$/);
+    expect((failed as StartFailed).logPath).toBe(join(home, "host.log"));
   });
 
   it("a refused load is the manager's own line", async () => {

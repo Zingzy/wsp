@@ -62,7 +62,7 @@ import type {
 } from "@wsp/protocol";
 import type { TreeFact, TreeRecord, PullRequestSent, PullRequestRecord, PullRequestSeen, Checkout } from "@wsp/protocol";
 import { shellQuote } from "@wsp/protocol";
-import type { AgentsActs, AgentsReader, ServerIcons, ServersActs, SkillsActs } from "../agents-read.js";
+import type { AgentsActs, AgentsReader, PluginsActs, ServerIcons, ServersActs, SkillsActs } from "../agents-read.js";
 import type { DaemonChannel, DaemonChannelOptions } from "../daemon-channel.js";
 import type { MachineExecOptions, TurnWaiting } from "../machine-exec.js";
 import type { Copier } from "@wsp/engine";
@@ -686,6 +686,9 @@ export interface RuntimeOptions {
   /** How the host adds, removes and turns off and on one MCP server in an agent's config on a target; the host wires
    * the catalog's format modules. Absent, every one of those is refused. */
   serversActs?: ServersActs;
+  /** How the host reads an agent's plugins on a target and turns one on or off; the host wires the catalog's plugin
+   * modules. Absent, every switch is refused. */
+  pluginsActs?: PluginsActs;
   /** How the host asks Google for a remote MCP server's icon. Absent, every server draws its glyph. */
   serverIcons?: ServerIcons;
   /** The environment labs is read from; this process's when unset, which the entry points mean and a test does not:

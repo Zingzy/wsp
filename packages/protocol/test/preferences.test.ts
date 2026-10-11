@@ -10,7 +10,7 @@ describe("the preferences record", () => {
     expect(preferencesFrom({})).toEqual(DEFAULT_PREFERENCES);
     expect(preferencesFrom({ theme: "sepia" })).toEqual(DEFAULT_PREFERENCES);
     expect(preferencesFrom("nonsense")).toEqual(DEFAULT_PREFERENCES);
-    expect(DEFAULT_PREFERENCES).toEqual({ theme: "system", lightTheme: "paper", darkTheme: "graphite", sidebarMode: "list", terminalSize: "app", terminalZoom: {}, access: {}, projectLook: {}, computerLook: {}, serverIcons: true, agentVersions: true, usageLogs: true, productUsage: true, keepAwake: true, transparency: true, projectOrder: [], keybindings: {}, appFont: "", codeFont: "", agentDefaults: {}, projectDefaults: {}, sendWith: "enter", midTurn: "queue", notifyNeeds: "notify-sound", notifyDone: "notify", planAlerts: true, settleAfter: "2h", askDelete: true, onQuit: "ask", newThreadIn: "ask", labs: false });
+    expect(DEFAULT_PREFERENCES).toEqual({ theme: "system", lightTheme: "paper", darkTheme: "graphite", sidebarMode: "list", terminalSize: "app", terminalZoom: {}, access: {}, projectLook: {}, projectIcon: {}, computerLook: {}, serverIcons: true, agentVersions: true, usageLogs: true, productUsage: true, keepAwake: true, transparency: true, projectOrder: [], keybindings: {}, appFont: "", codeFont: "", agentDefaults: {}, projectDefaults: {}, sendWith: "enter", midTurn: "queue", notifyNeeds: "notify-sound", notifyDone: "notify", planAlerts: true, settleAfter: "2h", askDelete: true, onQuit: "ask", newThreadIn: "ask", labs: false });
   });
 
   it("a stored record keeps what it has and takes the defaults for the rest", () => {
@@ -19,11 +19,11 @@ describe("the preferences record", () => {
 
   it("a patch lands field by field, a null width clears the width, and the zoom lands per workspace, a null entry dropping that workspace's", () => {
     const one = applyPreferencesPatch(DEFAULT_PREFERENCES, { theme: "dark", sidebarWidth: 300, terminalZoom: { ws_a: 2 } });
-    expect(one).toEqual({ theme: "dark", lightTheme: "paper", darkTheme: "graphite", sidebarMode: "list", sidebarWidth: 300, terminalSize: "app", terminalZoom: { ws_a: 2 }, access: {}, projectLook: {}, computerLook: {}, serverIcons: true, agentVersions: true, usageLogs: true, productUsage: true, keepAwake: true, transparency: true, projectOrder: [], keybindings: {}, appFont: "", codeFont: "", agentDefaults: {}, projectDefaults: {}, sendWith: "enter", midTurn: "queue", notifyNeeds: "notify-sound", notifyDone: "notify", planAlerts: true, settleAfter: "2h", askDelete: true, onQuit: "ask", newThreadIn: "ask", labs: false });
+    expect(one).toEqual({ theme: "dark", lightTheme: "paper", darkTheme: "graphite", sidebarMode: "list", sidebarWidth: 300, terminalSize: "app", terminalZoom: { ws_a: 2 }, access: {}, projectLook: {}, projectIcon: {}, computerLook: {}, serverIcons: true, agentVersions: true, usageLogs: true, productUsage: true, keepAwake: true, transparency: true, projectOrder: [], keybindings: {}, appFont: "", codeFont: "", agentDefaults: {}, projectDefaults: {}, sendWith: "enter", midTurn: "queue", notifyNeeds: "notify-sound", notifyDone: "notify", planAlerts: true, settleAfter: "2h", askDelete: true, onQuit: "ask", newThreadIn: "ask", labs: false });
     const two = applyPreferencesPatch(one, { terminalZoom: { ws_b: -1 } });
     expect(two.terminalZoom).toEqual({ ws_a: 2, ws_b: -1 });
     const three = applyPreferencesPatch(two, { sidebarWidth: null, terminalZoom: { ws_a: null } });
-    expect(three).toEqual({ theme: "dark", lightTheme: "paper", darkTheme: "graphite", sidebarMode: "list", terminalSize: "app", terminalZoom: { ws_b: -1 }, access: {}, projectLook: {}, computerLook: {}, serverIcons: true, agentVersions: true, usageLogs: true, productUsage: true, keepAwake: true, transparency: true, projectOrder: [], keybindings: {}, appFont: "", codeFont: "", agentDefaults: {}, projectDefaults: {}, sendWith: "enter", midTurn: "queue", notifyNeeds: "notify-sound", notifyDone: "notify", planAlerts: true, settleAfter: "2h", askDelete: true, onQuit: "ask", newThreadIn: "ask", labs: false });
+    expect(three).toEqual({ theme: "dark", lightTheme: "paper", darkTheme: "graphite", sidebarMode: "list", terminalSize: "app", terminalZoom: { ws_b: -1 }, access: {}, projectLook: {}, projectIcon: {}, computerLook: {}, serverIcons: true, agentVersions: true, usageLogs: true, productUsage: true, keepAwake: true, transparency: true, projectOrder: [], keybindings: {}, appFont: "", codeFont: "", agentDefaults: {}, projectDefaults: {}, sendWith: "enter", midTurn: "queue", notifyNeeds: "notify-sound", notifyDone: "notify", planAlerts: true, settleAfter: "2h", askDelete: true, onQuit: "ask", newThreadIn: "ask", labs: false });
     expect(applyPreferencesPatch(one, {})).toEqual(one);
     expect(PreferencesPatch.safeParse({ terminalZoom: { ws_a: null } }).success).toBe(true);
   });
@@ -89,6 +89,21 @@ describe("the preferences record", () => {
     expect(PreferencesPatch.safeParse({ projectLook: { pr_1: { icon: "rocket" } } }).success).toBe(true);
     expect(PreferencesPatch.safeParse({ projectLook: { pr_1: { icon: "unicorn" } } }).success).toBe(false);
     expect(PreferencesPatch.safeParse({ projectLook: { pr_1: { hue: "blue", size: 3 } } }).success).toBe(false);
+  });
+
+  it("a project's image stands apart from its look: a look's patch keeps it, the stored record reads it, no patch names it, and a reader from before it drops the key alone", () => {
+    const hash = "c".repeat(64);
+    const held = preferencesFrom({ theme: "light", projectLook: { pr_1: { icon: "rocket", hue: "teal" } }, projectIcon: { pr_1: hash } });
+    expect(held.projectIcon).toEqual({ pr_1: hash });
+    expect(applyPreferencesPatch(held, { projectLook: { pr_1: { icon: "rocket", hue: "blue" } } }).projectIcon).toEqual({ pr_1: hash });
+    expect(applyPreferencesPatch(held, { projectLook: { pr_1: null } }).projectIcon).toEqual({ pr_1: hash });
+    expect(preferencesFrom({ theme: "light" }).projectIcon).toEqual({});
+    expect(PreferencesPatch.safeParse({ projectIcon: { pr_1: hash } }).success).toBe(false);
+    expect(Preferences.safeParse({ ...held, projectIcon: { pr_1: "../../etc/passwd" } }).success).toBe(false);
+    // The record as a command line one version behind parses it: the same object less the field, which strips a key it
+    // does not know rather than refusing the record.
+    const before = Preferences.omit({ projectIcon: true });
+    expect(before.parse(held)).toEqual(Object.fromEntries(Object.entries(held).filter(([k]) => k !== "projectIcon")));
   });
 
   it("a computer's icon lands per computer, a null entry dropping that computer's, and a stored record without icons reads as none", () => {

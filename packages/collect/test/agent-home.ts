@@ -86,8 +86,10 @@ export function agentHome(root: string): AgentHome {
     mkdirSync(bin, { recursive: true });
     writeStub(join(bin, name), `#!/bin/sh\n${body}\n`);
   };
-  script("claude", `case "$1" in --version) echo "2.1.281 (Claude Code)";; auth) echo '{"loggedIn": true, "authMethod": "claude.ai"}';; *) exit 2;; esac`);
-  script("codex", `case "$1" in --version) echo "codex-cli 0.155.1";; login) echo "Not logged in"; exit 1;; *) exit 2;; esac`);
+  // Its plugin switch answers as 2.1.296's does.
+  script("claude", `case "$1" in --version) echo "2.1.281 (Claude Code)";; auth) echo '{"loggedIn": true, "authMethod": "claude.ai"}';; plugin) echo "{\\"command\\":\\"$2\\",\\"outcome\\":\\"ok\\",\\"pluginId\\":\\"$3\\",\\"scope\\":\\"user\\"}";; *) exit 2;; esac`);
+  // Its app server answers a plugin read as 0.162.1 does with no plugins: the requests' ids in order, then it waits.
+  script("codex", `case "$1" in --version) echo "codex-cli 0.155.1";; login) echo "Not logged in"; exit 1;; app-server) printf '%s\\n' '{"id":1,"result":{}}' '{"id":2,"result":{"marketplaces":[]}}' '{"id":3,"result":{"config":{}}}'; cat >/dev/null;; *) exit 2;; esac`);
   script("hermes", `case "$1" in --version) echo "Hermes Agent v0.20.0 (2026.8.3)";; auth) echo "openrouter (1 credentials):";; *) exit 2;; esac`);
   for (const runner of ["npx", "uvx", "node", "wsp"]) script(runner, `touch "$HOME/SPAWNED"; exit 0`);
   return { home, bin, project };

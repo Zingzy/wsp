@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { CATALOG_AGENTS, CLAUDE_PLUGIN_SKILLS, CODEX_TOML, OPENCODE_JSON, SHARED_SKILLS, SKILL_NAME, WSP_SKILL_NAME, XDG_SHARED_SKILLS, catalogEntry, isSystemSkill, ownSkillFolder, skillsDirOf, type AgentEntry } from "../src/index.js";
+import { CATALOG_AGENTS, CODEX_TOML, OPENCODE_JSON, SHARED_SKILLS, SKILL_NAME, WSP_SKILL_NAME, XDG_SHARED_SKILLS, catalogEntry, isSystemSkill, ownSkillFolder, skillsDirOf, type AgentEntry } from "../src/index.js";
 
 describe("the folders each agent loads skills from", () => {
   it("every agent names its own folder under the home first, and project folders relative to the project", () => {
@@ -13,18 +13,6 @@ describe("the folders each agent loads skills from", () => {
     // several agents and carry no one of them, so a skill installed for one agent never lands where others read it.
     for (const shared of [SHARED_SKILLS, XDG_SHARED_SKILLS]) expect(CATALOG_AGENTS.map(skillsDirOf)).not.toContain(shared);
     expect(XDG_SHARED_SKILLS).toBe("~/.config/agents/skills");
-  });
-
-  it("Claude Code's plugin index names the skill folders of its user-scoped plugins only", () => {
-    const index = JSON.stringify({
-      version: 2,
-      plugins: {
-        "a@m": [{ scope: "user", installPath: "/h/.claude/plugins/cache/m/a/1/" }, { scope: "project", projectPath: "/p", installPath: "/h/.claude/plugins/cache/m/a/2" }],
-        "b@m": [{ scope: "user", installPath: "relative/path" }],
-      },
-    });
-    expect(CLAUDE_PLUGIN_SKILLS.roots(index)).toEqual(["/h/.claude/plugins/cache/m/a/1/skills"]);
-    expect(CLAUDE_PLUGIN_SKILLS.roots("not json")).toEqual([]);
   });
 });
 

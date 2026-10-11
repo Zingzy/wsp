@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Lays out build/app, the directory electron-builder packages: the bundled
-// main, command and preload, the onboarding page, every shipped asset in the
+// main, command and preload, the onboarding and starting pages, every shipped asset in the
 // host's own packed layout (build/app/assets, one folder up from the bundles,
 // where the host's asset table reads them back from for the window and for
 // the wsp command alike). Nothing native rides beside the bundles: the daemon
@@ -45,6 +45,11 @@ writeFileSync(
   join(app, "main", "onboarding.html"),
   page.replace("__WEB_CSS__", `../${ASSETS_DIR}/web/assets/${webCss}`).replace("__AGENT_GLYPHS__", JSON.stringify(glyphIds)),
 );
+
+// The window a launch shows while wsp starts draws with the same stylesheet.
+const starting = readFileSync(join(root, "src", "starting.html"), "utf8");
+if (!starting.includes("__WEB_CSS__")) throw new Error("starting.html has no __WEB_CSS__ to write the stylesheet into");
+writeFileSync(join(app, "main", "starting.html"), starting.replace("__WEB_CSS__", `../${ASSETS_DIR}/web/assets/${webCss}`));
 
 // The menu bar's template images, read beside main.
 cpSync(join(root, "src", "tray"), join(app, "main", "tray"), { recursive: true });

@@ -9,7 +9,7 @@
 // is not turned off here.
 import { posix } from "node:path";
 import { CATALOG_AGENTS, PROJECT_SHARED_SKILLS, SHARED_SKILLS, isSystemSkill, ownSkillFolder } from "@wsp/catalog";
-import { SKILL_LINK_ABOVE, detectSkills, expand, nodeHost, skillRoots, tilde, type Host } from "@wsp/collect";
+import { SKILL_LINK_ABOVE, detectPlugins, detectSkills, expand, nodeHost, skillRoots, tilde, type Host } from "@wsp/collect";
 import type { ExecResult } from "@wsp/engine";
 import { noSuchSkillRefusal, pluginSkillRefusal, projectSkillOffRefusal, shellQuote, systemSkillRefusal, type SkillAdded, type SkillPreview, type SkillRow } from "@wsp/protocol";
 import { projectOf, type AgentsOn, type SkillAsk, type SkillsActs } from "@wsp/runtime";
@@ -39,7 +39,11 @@ function theProject(on: AgentsOn): string {
 async function findSkill(road: Road, on: AgentsOn, ask: SkillAsk): Promise<{ row: SkillRow; roots: string[] }> {
   // Only the one project an act names: two projects' skills of one name would leave the act guessing.
   // A folder the list skips for linking out of the repo holds nothing an act may name, so it is no reason given here.
-  const roots = (await skillRoots(road.host, projectOf(on) !== undefined ? { projects: on.projects! } : {})).filter(r => r.skipped === undefined);
+  const projects = projectOf(on) !== undefined ? { projects: on.projects! } : {};
+  // A plugin's skill goes by its plugin's name first, `brag:brag`, and is found where the plugins say, so one is
+  // refused by its plugin's name; no other name asks for the plugins at all.
+  const plugins = ask.name.includes(":") ? (await detectPlugins(road.host, projects)).agents : [];
+  const roots = (await skillRoots(road.host, { ...projects, plugins })).filter(r => r.skipped === undefined);
   const read = await detectSkills(road.host, roots);
   const rows = read.skills.filter(s => s.name === ask.name && (ask.project === true ? s.scope === "project" : s.scope !== "project"));
   const row = rows.find(s => s.scope !== "plugin") ?? rows[0];
@@ -77,7 +81,7 @@ const realPath = (row: SkillRow): string => (row.paths.find(p => p.linkTo === un
 /** Whether a person may change the skill: never the one wsp writes or a plugin's, and never turn off a project's. */
 function mayChange(row: SkillRow, act: "toggle" | "remove"): void {
   if (isSystemSkill(row.name)) throw usage(systemSkillRefusal(row.name));
-  if (row.scope === "plugin") throw usage(pluginSkillRefusal(row.name));
+  if (row.scope === "plugin") throw usage(pluginSkillRefusal(row.name, row.plugin ?? row.name, row.paths.find(p => p.agent !== undefined)?.agent ?? ""));
   if (act === "toggle" && row.scope === "project") throw usage(projectSkillOffRefusal(row.name, realPath(row)));
 }
 

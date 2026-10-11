@@ -2,7 +2,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { STARTED_BY_ENV, accountAim, claudeKeyOnlyInThisShell, aimedAlias, aimedHost, computerNameHere, defaultHomeIn, devCheckoutState, dialAddress, dialHost, downCommand, homeNamed, hostLogPath, hostTokenFor, httpProbe, installService, keyOnlyInThisShell, lockPathFor, logTail, noManagerLine, ownPid, readHost, runAll, runFailureLine, serviceAddressHere, serviceEnv, serviceStartsAtLogin, servingHost, severalAccountHostsLine, stopService, vanishedHost, VERSION, type CliIO, type HostLock, type HostRecord, type HostProbe, type RunFailure, type ServiceDeps, type ServicePlan } from "@wsp/host";
+import { STARTED_BY_ENV, accountAim, logSince, logSize, pidAlive, claudeKeyOnlyInThisShell, aimedAlias, aimedHost, computerNameHere, defaultHomeIn, devCheckoutState, dialAddress, dialHost, downCommand, homeNamed, hostLogPath, hostTokenFor, httpProbe, installService, keyOnlyInThisShell, lockPathFor, noManagerLine, ownPid, readHost, runAll, runFailureLine, serviceAddressHere, serviceEnv, serviceStartsAtLogin, servingHost, severalAccountHostsLine, stopService, vanishedHost, VERSION, type CliIO, type HostLock, type HostRecord, type HostProbe, type RunFailure, type ServiceDeps, type ServicePlan } from "@wsp/host";
 import { BOOT_SCRIPT, LOOPBACK, THIS_COMPUTER, authority, bootLineOf, compareVersions, fmtDuration, holdsNothing, isLocalWorkspace, isLoopback, type BootPayload, type GoldenManifest, type SessionView, type WorkspaceView } from "@wsp/protocol";
 import { safeEqual, tokenDigest } from "@wsp/runtime";
 
@@ -248,10 +248,7 @@ export async function ensureService(opts: Pick<OpenHostOptions, "statePath" | "h
     const failure = await runAll(manager.atLogin(plan, false), run);
     if (failure !== undefined) opts.io.error(runFailureLine(failure));
   }
-  const started = Date.now();
-  if ((await untilAttachable(opts.statePath, opts.service.waitMs)) === undefined) {
-    throw new StartTimeout([`wsp did not start within ${fmtDuration(Date.now() - started)}; its log is ${plan.logPath}`, ...logTail(plan.logPath)].join("\n"));
-  }
+  await untilAttachable(opts, plan);
 }
 
 /** Whether the service serving this state file starts at every login, or only when the app or a line asks for it;
@@ -270,8 +267,15 @@ export async function setLoginStart(statePath: string, on: boolean, service: Ser
   return loginStart(statePath, service);
 }
 
-/** The service's host did not answer within the start's wait, which already covered a host still binding. */
-class StartTimeout extends Error {}
+/** A start that failed: the one line a person reads, and the log that says the rest. */
+export class StartFailed extends Error {
+  constructor(
+    line: string,
+    readonly logPath: string,
+  ) {
+    super(line);
+  }
+}
 
 /** Attaches to the host already serving this state file, which its lock names and this window has proof of, once it
  * is not of an earlier release, else opens on the host a line with no name on it takes, else makes this computer's
@@ -458,22 +462,69 @@ export async function firstLaunch(statePath: string, home: string, dial: typeof 
   }
 }
 
-/** How many of the start's waits a host that holds the lock is given to bind its page. A host reads its computers
- * between taking the lock and binding, which waits on every box that does not answer: 30 s on the dev home with four
- * unreachable boxes, past the start's own twenty. */
+/** How many of the start's waits a host may run with nothing moving (no answer, no line in its log, no lock taken)
+ * before the start is read as stuck. A host reading boxes that do not answer writes nothing for as long as each read
+ * takes. */
 const STARTING_WAITS = 6;
 const POLL_MS = 200;
 const pause = (): Promise<void> => new Promise(resolve => setTimeout(resolve, POLL_MS));
+/** How often the manager is asked for the process it runs while no lock names one. */
+const MANAGER_ASK_MS = 1_000;
+/** The exits a start meets before it is read as failed: the host on its way down under a restart is one, and a host
+ * that fails as it starts is lost again as the manager runs it the next time. */
+const EXITS_FAILED = 2;
 
-/** Waits for a host this window can attach to: one whose page answers with the digest of the token beside the state.
- * A live host holding the lock is one still starting, and is given the longer wait; nothing holding it, the start's. */
-async function untilAttachable(statePath: string, waitMs: number): Promise<HostLock | undefined> {
-  for (const from = Date.now(); ; await pause()) {
+/** Waits for a host this window can attach to, one whose page answers with the digest of the token beside the state,
+ * for as long as a process runs the service and something moves: the lock taken, a line in its log. The process is
+ * the lock's, else the one the manager says it runs. It fails, in one line, once no process has run it for the
+ * start's wait, once two have exited, or once one has run the longer wait with nothing moving. */
+async function untilAttachable(opts: Pick<OpenHostOptions, "statePath" | "service" | "io">, plan: ServicePlan): Promise<void> {
+  const { statePath } = opts;
+  const { manager, run, waitMs } = opts.service;
+  const from = Date.now();
+  const mark = logSize(plan.logPath);
+  let pid: number | undefined;
+  let exits = 0;
+  let asked = 0;
+  let aliveAt = from;
+  let movedAt = from;
+  let moved = "";
+  const failed = (line: string): StartFailed => {
+    for (const said of logSince(plan.logPath, mark).slice(-20)) opts.io.error(`host: ${said}`);
+    return new StartFailed(line, plan.logPath);
+  };
+  for (;; await pause()) {
     const lock = servingHost(statePath);
-    if (lock !== undefined && (await answersAsOwn(statePath)(lock))) return lock;
-    if (Date.now() - from >= waitMs * (lock === undefined ? 1 : STARTING_WAITS)) return undefined;
+    if (lock !== undefined && (await answersAsOwn(statePath)(lock))) return;
+    const now = Date.now();
+    if (pid !== undefined && !pidAlive(pid)) {
+      exits += 1;
+      pid = undefined;
+    }
+    if (lock !== undefined) pid = lock.pid;
+    else if (pid === undefined && manager !== undefined && now - asked >= MANAGER_ASK_MS) {
+      asked = now;
+      const runs = manager.pidOf(await run(manager.holds(plan)));
+      if (runs !== undefined && pidAlive(runs)) pid = runs;
+    }
+    if (pid !== undefined) aliveAt = now;
+    const state = `${lock?.pid}:${lock?.port}:${pid}:${logSize(plan.logPath)}`;
+    if (state !== moved) {
+      moved = state;
+      movedAt = now;
+    }
+    if (exits >= EXITS_FAILED || now - aliveAt >= waitMs) {
+      // A host that exits quicker than the manager is asked is never seen running, and its lines are how it is known.
+      const said = logSince(plan.logPath, mark).at(-1);
+      if (exits > 0 || said !== undefined) throw failed(stoppedLine(said));
+      throw failed(`wsp did not start within ${fmtDuration(now - from)}: nothing ran its service`);
+    }
+    if (now - movedAt >= waitMs * STARTING_WAITS) throw failed(`wsp did not start within ${fmtDuration(now - from)}: it neither answered nor wrote to its log`);
   }
 }
+
+/** What a host that exited as it started is said to have done: its own last line, which is how wsp up says why. */
+export const stoppedLine = (last: string | undefined): string => (last === undefined ? "wsp stopped as it started and wrote nothing to its log" : `wsp stopped as it started: ${last.trim()}`);
 
 /** Waits, until `until`, for the lock to be gone or to answer as this window's own host: a host on its way out lets
  * go, and the one after it, which may already hold the lock, binds. A lock whose page answers as anything else is a
@@ -504,7 +555,7 @@ export async function openHostReady(opts: OpenHostOptions, dial: typeof dialHost
       // A lock whose page answers is a host that is up and refused this window; one with nothing behind it is a host
       // closing or still binding. The start's own wait has already covered a host still binding.
       const lock = servingHost(opts.statePath);
-      if (e instanceof StartTimeout || lock === undefined || (await httpProbe(lock))) throw e;
+      if (e instanceof StartFailed || lock === undefined || (await httpProbe(lock))) throw e;
       if (!(await settles(opts.statePath, until))) throw gaveUp(e);
       continue;
     }

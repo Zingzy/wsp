@@ -148,7 +148,7 @@ const ALLOWED: readonly Allowed[] = [
   { text: "10e11780-df2f-45dc-a1ff-4540af32e9c0", count: 1, why: CURSOR },
   { text: "toolu_vrtx_01Nn", count: 2, why: CURSOR },
   { text: "59094224-bb3d-43b6-b054-322aa849fa00", count: 1, why: "the session id of a recorded live run, which the replay keys its events by" },
-  { text: "/Users/zingzy", count: 100, why: SAMPLE_HOME },
+  { text: "/Users/zingzy", count: 105, why: SAMPLE_HOME },
 ];
 
 interface Hit {

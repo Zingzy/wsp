@@ -3,16 +3,8 @@
 // the theme's --hero-field, a slow noise field drawn as mono characters by brightness, clear in the middle where the
 // stack stands. Each theme picks that ink for its own ground, since a project hue can clash with a tinted theme.
 import { useEffect, useRef } from "react";
-import { useStore } from "../../protocol/store.js";
 import { onFrame } from "../../lib/frames.js";
-import { cn } from "../../lib/utils.js";
-import { PROJECT_GLYPHS, PROJECT_HUES } from "../../projects/look.js";
-
-function useLook(projectId: string | undefined) {
-  const look = useStore(s => (projectId === undefined ? undefined : s.preferences.projectLook[projectId]));
-  const hue = look?.hue ?? "neutral";
-  return { Glyph: PROJECT_GLYPHS[look?.icon ?? "folder"], text: hue === "neutral" ? "text-foreground/70" : PROJECT_HUES[hue].text };
-}
+import { ProjectGlyph } from "../../projects/look.js";
 
 const RAMP = " .:~>x*#";
 const CELL_W = 10;
@@ -162,8 +154,7 @@ export function HeroField() {
   return <canvas ref={canvas} aria-hidden className="pointer-events-none absolute inset-0 -z-10 size-full text-(--hero-field)" />;
 }
 
-/** The project's glyph over the headline. */
+/** The project's mark over the headline. */
 export function HeroMark({ projectId }: { projectId?: string }) {
-  const { Glyph, text } = useLook(projectId);
-  return <Glyph aria-hidden strokeWidth={1.5} className={cn("mx-auto size-10", text)} />;
+  return <ProjectGlyph {...(projectId === undefined ? {} : { projectId })} strokeWidth={1.5} ink="text-foreground/70" className="mx-auto size-10" />;
 }
