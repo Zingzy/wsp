@@ -90,6 +90,7 @@ import {
   type RequestId,
 } from "./rpc.js";
 import { draftForCommand, parseDraftFor, parseRename, parseSessionTitle, parseTitleFor, renameCommand, sessionTitleCommand, titleForCommand } from "./session-title.js";
+import { shellScriptOf } from "./shell-script.js";
 
 export interface CodexStartOptions {
   prompt: string;
@@ -446,7 +447,7 @@ function itemDeltas(done: boolean, item: Item, sessionId: string): AdapterEvent[
     case "commandExecution":
       return done
         ? [delta({ kind: "tool_result", text: str(item.aggregatedOutput) ?? "", toolUseId: item.id, isError: failed(), ...ran(item) })]
-        : [delta({ kind: "tool_use", text: JSON.stringify({ command: str(item.command) ?? "" }), toolName: "command_execution", toolUseId: item.id })];
+        : [delta({ kind: "tool_use", text: JSON.stringify({ command: shellScriptOf(str(item.command) ?? "") }), toolName: "command_execution", toolUseId: item.id })];
     case "fileChange":
       return done
         ? [delta({ kind: "tool_result", text: changeLines(item.changes), toolUseId: item.id, isError: failed(), ...(failed() ? {} : filePatches(item.changes)) })]
@@ -866,7 +867,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
       const input =
         toolName === "file_change"
           ? { changes: changesOf(itemId === undefined ? undefined : changesById.get(itemId)) }
-          : { command: str(params.command) ?? "", ...(str(params.cwd) !== undefined ? { cwd: str(params.cwd) } : {}) };
+          : { command: shellScriptOf(str(params.command) ?? ""), ...(str(params.cwd) !== undefined ? { cwd: str(params.cwd) } : {}) };
       const reason = str(params.reason);
       const asker = foreign(params) ? str(params.threadId)! : undefined;
       const ask: PermissionAsk = {

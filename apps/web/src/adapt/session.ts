@@ -10,6 +10,7 @@
 import { AFTER_CUT_LINE, LIMIT_WORDS, NOTIFY_ME, compactedLine, spawnsThread, internalToolResult, subagentPrompt, subagentTaskLine, toolActivityLine, toolCallFacts, toolDoneLine, toolResultLine, type PlanStep, type SessionEvent, type SessionHarness, type SessionRunEvent, type SubagentView, type TurnResult } from "@wsp/protocol";
 import { spawnedThreadOf } from "./spawned.js";
 import type {
+  CallResult,
   ChatMessage,
   PermissionPrompt,
   SubagentLine,
@@ -75,7 +76,7 @@ interface TurnBuild {
   tools: Map<string, ToolCall>;
   /** Each of a subagent's open calls as the harness has reported it so far, by that line's own key: a call whose
    * input arrives in pieces reads as the whole of it, in both tenses, as the parent's own calls do. */
-  childCalls: Map<string, { name: string; input: string }>;
+  childCalls: Map<string, { name: string; input: string; at: string }>;
   /** Tool calls without an id resolve to the newest open one, as the CLI streams them in order. */
   openAnonymousTool: number | null;
   /** Where each subagent's fold sits in the timeline, by the call that launched it. */
@@ -147,6 +148,9 @@ export function createSessionFold(): SessionFold {
   /** Where each relayed permission prompt sits in the timeline, so its close lands on the row it opened rather than
    * on a second row after the work the answer let through. */
   const promptRows = new Map<string, number>();
+  /** The calls a permission prompt stood in front of, by their key in a turn's tools or childCalls: the time between
+   * such a call and its result is the person's, not the command's. */
+  const heldCalls = new Set<string>();
   let turn: TurnBuild | null = null;
   let modelName: string | null = null;
   let harness: SessionHarness | null = null;
@@ -401,6 +405,9 @@ export function createSessionFold(): SessionFold {
       case "session.permission": {
         const t = turnFor(event, at);
         closeOpenMessage(t);
+        const asking = event.toolUseId === undefined ? undefined : event.parentToolUseId === undefined ? event.toolUseId : foldLineKey(event.parentToolUseId, event.toolUseId);
+        if (asking !== undefined) heldCalls.add(asking);
+        else for (const key of [...t.tools.keys(), ...t.childCalls.keys()]) heldCalls.add(key);
         const permission: PermissionPrompt = {
           askId: event.askId,
           turnId: t.summary.turnId,
@@ -565,7 +572,7 @@ export function createSessionFold(): SessionFold {
         // The call as it stands, kept beside the line it opens: its result carries none of its own input, and both
         // the line and the past it turns into are written off that input alone.
         const open = key === undefined ? undefined : t.childCalls.get(key);
-        const call = { name: e.toolName ?? open?.name ?? "tool", input: (open?.input ?? "") + e.text };
+        const call = { name: e.toolName ?? open?.name ?? "tool", input: (open?.input ?? "") + e.text, at: open?.at ?? at };
         if (key !== undefined) t.childCalls.set(key, call);
         addFoldLine(t, parent, at, { createdAt: at, kind: "tool", label: toolActivityLine(call.name, call.input), status: "inProgress", call }, key);
         return;
@@ -577,6 +584,7 @@ export function createSessionFold(): SessionFold {
         const key = foldLineKey(parent, e.toolUseId);
         const call = key === undefined ? undefined : t.childCalls.get(key);
         const did = call === undefined || e.isError === true ? undefined : toolDoneLine(call.name, call.input);
+        const result = call === undefined ? undefined : callResult(e, toolCallFacts(call.name, call.input).command !== undefined, call.at, at, key !== undefined && heldCalls.has(key));
         addFoldLine(
           t,
           parent,
@@ -586,6 +594,7 @@ export function createSessionFold(): SessionFold {
             kind: "tool",
             status: e.isError === true ? "failed" : "completed",
             ...(did !== undefined ? { label: did } : {}),
+            ...result,
             ...(toolResultLine(e.text, e.isError === true) !== undefined ? { detail: toolResultLine(e.text, e.isError === true)! } : {}),
           },
           key,
@@ -695,6 +704,7 @@ export function createSessionFold(): SessionFold {
         }
         const failed = e.isError === true || entry.toolLifecycleStatus === "failed";
         if (!note) call.answered = { at, failed };
+        const result = note || key === undefined ? undefined : callResult(e, entry.command !== undefined, entry.createdAt, at, heldCalls.has(key));
         // A thread or a machine the lead asked for and was refused, by a cap or any other refusal, is the lead's to read
         // and the person's to see: the refusal stands as an error row, whole, where a folded call would hide it.
         const refused = e.isError === true && call.name !== undefined && spawnsThread(call.name) ? compactLines(e.text)[0] : undefined;
@@ -711,6 +721,7 @@ export function createSessionFold(): SessionFold {
           sourceActivityKind: "tool.completed",
           ...(output !== undefined ? { detail: output } : {}),
           ...(spawned !== undefined ? { spawned } : {}),
+          ...result,
         }, timeline[call.entryIndex]!.createdAt));
         if (e.toolUseId === undefined) t.openAnonymousTool = null;
         return;
@@ -793,6 +804,31 @@ export function subagentEntries(run: SubagentRun | null, asked: string | null, s
   return out;
 }
 
+/** What a call's result says beyond its first line. A command's duration is the agent's where it gave one (Codex);
+ * else the time between the call's stamp and its result's, which the host wrote as each arrived, unless a prompt
+ * stood between them (Claude Code sends none of its own). */
+function callResult(e: SessionDelta, command: boolean, startedAt: string, at: string, held: boolean): CallResult {
+  const took = Date.parse(at) - Date.parse(startedAt);
+  const durationMs = e.durationMs ?? (command && !held && took >= 0 ? took : undefined);
+  // Claude Code opens a failed command's words with its code for the model, which the row says on its own.
+  const output = e.exitCode === undefined ? e.text : e.text.replace(new RegExp(`^Exit code ${e.exitCode}(?:\\n|$)`), "");
+  const result: CallResult = {
+    ...(command && output !== "" ? { output } : {}),
+    ...(e.exitCode !== undefined ? { exitCode: e.exitCode } : {}),
+    ...(durationMs !== undefined ? { durationMs } : {}),
+    ...(e.bytes !== undefined ? { bytes: e.bytes } : {}),
+    ...(e.patch !== undefined ? { patch: e.patch } : {}),
+    ...(e.patchCut === true ? { patchCut: true as const } : {}),
+  };
+  return result;
+}
+
+/** A subagent line's result fields alone, which its work row carries. */
+function callResultOf(line: SubagentLine): CallResult {
+  const { output, exitCode, durationMs, bytes, patch, patchCut } = line;
+  return { ...(output !== undefined ? { output } : {}), ...(exitCode !== undefined ? { exitCode } : {}), ...(durationMs !== undefined ? { durationMs } : {}), ...(bytes !== undefined ? { bytes } : {}), ...(patch !== undefined ? { patch } : {}), ...(patchCut !== undefined ? { patchCut } : {}) };
+}
+
 /** One of a subagent's tool lines as the work row the thread's own call would be: named and grouped by its call. */
 function subagentCall(line: SubagentLine): WorkLogEntry {
   const facts = line.call === undefined ? {} : toolCallFacts(line.call.name, line.call.input);
@@ -808,6 +844,7 @@ function subagentCall(line: SubagentLine): WorkLogEntry {
     ...(line.status !== undefined ? { toolLifecycleStatus: line.status } : {}),
     ...facts,
     ...(line.detail !== undefined ? { detail: line.detail } : {}),
+    ...callResultOf(line),
   };
 }
 

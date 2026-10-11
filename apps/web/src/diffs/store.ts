@@ -31,6 +31,14 @@ export function onlyOf(changes: { readonly files: ReadonlyArray<{ readonly path:
   return (others.some(f => f.path === path) || files.length === 0 ? others : files).map(f => f.path);
 }
 
+/** The path a turn's changes name a file by, from the top of the checkout, for a path an edit named whole; undefined
+ * where the turn recorded no change to it. The longest match wins: git lists package.json before packages/x/package.json. */
+export function changedPathOf(changes: { readonly files: ReadonlyArray<{ readonly path: string }>; readonly others?: ReadonlyArray<{ readonly path: string }> }, named: string): string | undefined {
+  let found: string | undefined;
+  for (const { path } of [...changes.files, ...(changes.others ?? [])]) if ((path === named || named.endsWith(`/${path}`)) && path.length > (found?.length ?? -1)) found = path;
+  return found;
+}
+
 /** The same turn's range with nothing narrowed. */
 export function wholeRange(range: TurnRange): TurnRange {
   const { only: _narrowed, ...whole } = range;
