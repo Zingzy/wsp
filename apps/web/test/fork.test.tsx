@@ -297,6 +297,31 @@ describe("what the composer held before a fork off a person's message", () => {
     await heldAgain();
   });
 
+  it("comes back when the person leaves the draft for a thread of another project, then opens the source", async () => {
+    const WS2 = "ws_other";
+    const other: WorkspaceView = { ...cloud, id: WS2, name: "web", project: { ...project, id: "pr_2", name: "other-project", path: "/root/other" } };
+    const otherRow: SessionView = { ...ROW, id: "sess_2", workspaceId: WS2, threadId: "thr_other", claudeSessionId: "sess_2", prompt: "elsewhere" };
+    const otherHistory = turn(1, null, { thread: "thr_other" }).map(e => ({ ...e, workspaceId: WS2, sessionId: "sess_2", ...(e.type === "session.delta" ? { text: "over there" } : {}) }) as SessionEvent);
+    const { api } = fixtureApi();
+    api.listWorkspaces = async () => [cloud, other];
+    api.getWorkspace = async (id: string) => (id === WS2 ? other : cloud);
+    api.sessionHistory = async (id: string) => (id === WS2 ? otherHistory : HISTORY);
+    api.listSessions = async (id: string) => (id === WS2 ? [otherRow] : [ROW]);
+    provideDaemonWire(WS2, null);
+    await mount(api);
+    await waitFor(() => expect(forkButtons().length).toBeGreaterThan(0));
+    useComposerDraftStore.getState().setDraft(WS, { prompt: "half a thought", cursor: 4 });
+    fireEvent.click(forkOn("ask 2"));
+    await banner();
+    act(() => useStore.getState().select(WS2, "thr_other"));
+    await screen.findAllByText("over there");
+    act(() => useStore.getState().select(WS, THREAD));
+    await screen.findAllByText("reply 3");
+    expect(composerEditor().textContent).toBe("half a thought");
+    expect(useComposerDraftStore.getState().drafts[WS]).toEqual({ prompt: "half a thought", cursor: 4 });
+    expect(useForkDrafts.getState().drafts[WS]).toBeUndefined();
+  });
+
   it("comes back on the banner's dismiss", async () => {
     await forkAsk2();
     fireEvent.click(within(await banner()).getByRole("button", { name: "Cancel the fork" }));

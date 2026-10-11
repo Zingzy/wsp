@@ -580,10 +580,10 @@ export function ChatComposer({
   );
 
   const { setSending, appendUserTurn, appendLocalError, thread: into, busy, sending } = thread;
-  const wasFresh = useRef(thread.fresh);
+  // Drawing one of the workspace's threads ends its fork draft, here or on coming back from another project's thread:
+  // the composer is keyed by its workspace, so leaving for another project unmounts it before any change is seen.
   useEffect(() => {
-    if (wasFresh.current && !thread.fresh) endForkDraft(workspaceId);
-    wasFresh.current = thread.fresh;
+    if (!thread.fresh) endForkDraft(workspaceId);
   }, [thread.fresh, workspaceId]);
   const dismissFork = useCallback(() => {
     const draft = endForkDraft(workspaceId);
