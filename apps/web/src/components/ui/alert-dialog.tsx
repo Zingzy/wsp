@@ -9,7 +9,6 @@ import {
   DIALOG_MOBILE_SHEET_CLASS,
   DIALOG_POPUP_CLASS,
 } from "./dialog-styles";
-import { Kbd } from "./kbd";
 import { usePortalHost } from "./portal-host";
 
 const AlertDialogCreateHandle = AlertDialogPrimitive.createHandle;
@@ -87,16 +86,13 @@ function AlertDialogHeader({ className, ...props }: React.ComponentProps<"div">)
   );
 }
 
-function AlertDialogFooter({ className, children, ...props }: React.ComponentProps<"div">) {
+function AlertDialogFooter({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       className={cn("flex flex-col-reverse gap-2 px-5 pt-3 pb-4 sm:flex-row sm:items-center sm:justify-end", className)}
       data-slot="alert-dialog-footer"
       {...props}
-    >
-      <Kbd className="me-auto hidden sm:inline-flex">Esc</Kbd>
-      {children}
-    </div>
+    />
   );
 }
 
