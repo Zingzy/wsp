@@ -25,7 +25,7 @@ import { notForThisPage } from "../src/origin.js";
 import { QUIT_WORD } from "../src/quit.js";
 import { TRAY_WORDS, type TrayAct, type TrayModel } from "../src/tray.js";
 import { windowOptions } from "../src/window.js";
-import { writeStub } from "../../../packages/protocol/test/stub-script.js";
+import { gateLoop, writeStub } from "../../../packages/protocol/test/stub-script.js";
 
 const SMOKE = process.env["WSP_DESKTOP_SMOKE"] === "1";
 // Every app and wsp this file starts inherits this process's environment, so a smoke run from inside a wsp thread
@@ -426,7 +426,8 @@ function claudeStandIn(dir: string, gate: string, pidFile: string, o: { asks?: b
       `echo $$ >> ${JSON.stringify(pidFile)}`,
       `printf '%s\\n' '{"type":"system","subtype":"init","cwd":"'"$PWD"'","session_id":"'"$sid"'","tools":[],"mcp_servers":[],"model":"claude-sonnet-4-5","permissionMode":"'"$mode"'","slash_commands":[],"apiKeySource":"none","uuid":"init"}'`,
       say(1, "reading the ticket"),
-      `while [ ! -f ${JSON.stringify(gate)} ]; do sleep 0.1; done`,
+      // As long as the longest case: the restart case writes its gate only after a host restart and a second launch.
+      gateLoop(gate, { limitS: 120 }),
       // With asks, the gate raises a prompt for a Bash call over the CLI's own control channel, and the turn goes on
       // once an answer comes back down stdin, whichever window or menu gave it.
       ...(o.asks === true
