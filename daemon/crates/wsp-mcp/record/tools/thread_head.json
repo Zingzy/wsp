@@ -497,6 +497,74 @@
                   "cut": {
                     "type": "integer",
                     "exclusiveMinimum": 0
+                  },
+                  "bytes": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "exitCode": {
+                    "type": "integer"
+                  },
+                  "durationMs": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "patch": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "path": {
+                          "type": "string"
+                        },
+                        "hunks": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "oldStart": {
+                                "type": "integer"
+                              },
+                              "oldLines": {
+                                "type": "integer"
+                              },
+                              "newStart": {
+                                "type": "integer"
+                              },
+                              "newLines": {
+                                "type": "integer"
+                              },
+                              "lines": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              }
+                            },
+                            "required": [
+                              "oldStart",
+                              "oldLines",
+                              "newStart",
+                              "newLines",
+                              "lines"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "movedTo": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "path",
+                        "hunks"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "patchCut": {
+                    "type": "boolean",
+                    "const": true
                   }
                 },
                 "required": [
@@ -2073,6 +2141,74 @@
                   "cut": {
                     "type": "integer",
                     "exclusiveMinimum": 0
+                  },
+                  "bytes": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "exitCode": {
+                    "type": "integer"
+                  },
+                  "durationMs": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "patch": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "path": {
+                          "type": "string"
+                        },
+                        "hunks": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "oldStart": {
+                                "type": "integer"
+                              },
+                              "oldLines": {
+                                "type": "integer"
+                              },
+                              "newStart": {
+                                "type": "integer"
+                              },
+                              "newLines": {
+                                "type": "integer"
+                              },
+                              "lines": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              }
+                            },
+                            "required": [
+                              "oldStart",
+                              "oldLines",
+                              "newStart",
+                              "newLines",
+                              "lines"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "movedTo": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "path",
+                        "hunks"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "patchCut": {
+                    "type": "boolean",
+                    "const": true
                   }
                 },
                 "required": [

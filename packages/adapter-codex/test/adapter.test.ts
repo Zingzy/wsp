@@ -298,7 +298,7 @@ describe("CodexAdapter over codex app-server", () => {
     expect(launch.wires[0]!.written).toContainEqual({ id: 0, result: { decision: "accept" } });
     // The server's own resolved notice for that request finds nothing open, so the prompt closes once.
     expect(events.filter(e => e.type === "permission.close")).toEqual([{ type: "permission.close", sessionId: RECORDED_THREAD, askId: "0", outcome: "allowed", optionId: PERMISSION_ALLOW }]);
-    expect(deltas[3]).toMatchObject({ kind: "tool_result", toolUseId: RECORDED_COMMAND, text: "", isError: false });
+    expect(deltas[3]).toMatchObject({ kind: "tool_result", toolUseId: RECORDED_COMMAND, text: "", isError: false, exitCode: 0, durationMs: 0 });
     expect(deltas[4]).toMatchObject({ kind: "text", text: "Created hi.txt in this folder." });
     for (const d of deltas) expect(d.sessionId).toBe(RECORDED_THREAD);
 
@@ -353,6 +353,8 @@ describe("CodexAdapter over codex app-server", () => {
     const { events, onEvent } = collect();
     await adapterOver(launch).start({ prompt: "x", onEvent }).finished;
     const deltas = deltasOf(events);
+    // Changes whose diff the schema let be empty made no hunks to carry.
+    expect(deltas.find(d => d.kind === "tool_result" && d.toolUseId === "call_2")?.patch).toBeUndefined();
     expect(deltas.map(d => [d.kind, d.toolName, d.toolUseId, d.text])).toEqual([
       ["tool_use", "file_change", "call_2", JSON.stringify({ changes: [{ path: "README.md", kind: "update" }, { path: "docs/new.md", kind: "add" }] })],
       ["tool_result", undefined, "call_2", "update README.md\nadd docs/new.md"],
@@ -361,6 +363,32 @@ describe("CodexAdapter over codex app-server", () => {
       ["thinking", undefined, undefined, "Listing the repository first."],
       ["tool_use", "web_search", "ws_1", JSON.stringify({ query: "codex app-server" })],
       ["tool_result", undefined, "ws_1", "codex app-server"],
+    ]);
+  });
+
+  it("a finished command carries its exit code and how long it ran, and each file change its hunks", async () => {
+    // Written from the 0.162.1 schema: an update's diff as `similar` writes it (format_file_change_diff), an add's
+    // and a delete's the whole file, and a rename's update followed by its Moved to line.
+    const item = (body: Record<string, unknown>) => `{"method":"item/completed","params":{"item":${JSON.stringify(body)},"threadId":"${THREAD_ID}","turnId":"${TURN_ID}"}}`;
+    const failing = { type: "commandExecution", id: "call_8", command: "/bin/zsh -lc 'npm test'", cwd: "/root/lab", status: "failed", commandActions: [], aggregatedOutput: "1 failing\n", exitCode: 1, durationMs: 1534 };
+    const changes = [
+      { path: "/root/lab/f.txt", kind: { type: "update", move_path: null }, diff: "@@ -1,3 +1,3 @@\n alpha\n-beta\n+BETA\n gamma\n" },
+      { path: "/root/lab/new.txt", kind: { type: "add" }, diff: "hi\nthere\n" },
+      { path: "/root/lab/old.txt", kind: { type: "delete" }, diff: "gone\n" },
+      { path: "/root/lab/a.txt", kind: { type: "update", move_path: "/root/lab/b.txt" }, diff: "@@ -2 +2 @@\n-x\n+y\n\n\nMoved to: /root/lab/b.txt" },
+    ];
+    const launch = launcher(scripted([item(failing), item({ type: "fileChange", id: "call_9", changes, status: "completed" }), item({ type: "fileChange", id: "call_10", changes, status: "declined" }), completed("completed")]));
+    const { events, onEvent } = collect();
+    await adapterOver(launch).start({ prompt: "x", onEvent }).finished;
+    const [ran, changed, declined] = deltasOf(events).filter(d => d.kind === "tool_result");
+    expect(declined).toMatchObject({ toolUseId: "call_10", isError: true });
+    expect(declined!.patch).toBeUndefined();
+    expect(ran).toMatchObject({ toolUseId: "call_8", text: "1 failing\n", isError: true, exitCode: 1, durationMs: 1534 });
+    expect(changed!.patch).toEqual([
+      { path: "/root/lab/f.txt", hunks: [{ oldStart: 1, oldLines: 3, newStart: 1, newLines: 3, lines: [" alpha", "-beta", "+BETA", " gamma"] }] },
+      { path: "/root/lab/new.txt", hunks: [{ oldStart: 0, oldLines: 0, newStart: 1, newLines: 2, lines: ["+hi", "+there"] }] },
+      { path: "/root/lab/old.txt", hunks: [{ oldStart: 1, oldLines: 1, newStart: 0, newLines: 0, lines: ["-gone"] }] },
+      { path: "/root/lab/a.txt", hunks: [{ oldStart: 2, oldLines: 1, newStart: 2, newLines: 1, lines: ["-x", "+y"] }], movedTo: "/root/lab/b.txt" },
     ]);
   });
 

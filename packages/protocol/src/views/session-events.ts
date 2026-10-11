@@ -128,6 +128,26 @@ export const SessionStartEvent = z.object({
   harness: SessionHarness.optional(),
 });
 
+/** One hunk of a unified diff, as Claude Code's structuredPatch sends it: each line keeps its leading space, minus or
+ * plus. */
+export const PatchHunk = z.object({
+  oldStart: z.number().int(),
+  oldLines: z.number().int(),
+  newStart: z.number().int(),
+  newLines: z.number().int(),
+  lines: z.array(z.string()),
+});
+export type PatchHunk = z.infer<typeof PatchHunk>;
+
+/** What one edit did to one file. A file written whole or deleted is one hunk of every line, added or removed;
+ * movedTo is where a rename took it. */
+export const FilePatch = z.object({
+  path: z.string(),
+  hunks: z.array(PatchHunk),
+  movedTo: z.string().optional(),
+});
+export type FilePatch = z.infer<typeof FilePatch>;
+
 export const SessionDeltaEvent = z.object({
   type: z.literal("session.delta"),
   ...sessionScope,
@@ -158,6 +178,19 @@ export const SessionDeltaEvent = z.object({
   /** The length of the whole text, on a tool result a thread's head cut short; the rest is in a sessions.history
    * page. Absent on every row a transcript holds and on a result the head kept whole. */
   cut: z.number().int().positive().optional(),
+  /** On a tool result, the size in bytes of the whole output where text holds less of it: the agent's own count
+   * where it cut first, else that of the text the transcript's cap cut. */
+  bytes: z.number().int().nonnegative().optional(),
+  /** On a command's result, its exit code where the agent named one: Codex always, Claude Code only for a command
+   * that failed, since its clean result reads the same for a zero and for a code it took as fine (grep, diff). */
+  exitCode: z.number().int().optional(),
+  /** On a command's result, how long it ran where the agent said (Codex). */
+  durationMs: z.number().nonnegative().optional(),
+  /** On an edit's result, the hunks it made, per file. */
+  patch: z.array(FilePatch).optional(),
+  /** Set where lines past a cap on their characters were left out of patch: the transcript's, the same as
+   * its text's, or a head's (HEAD_RESULT_CHARS), whose rest is in a sessions.history page. */
+  patchCut: z.literal(true).optional(),
 });
 
 export const SessionDoneEvent = z.object({
