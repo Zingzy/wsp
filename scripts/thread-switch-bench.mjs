@@ -26,7 +26,8 @@
 // It stops everything it started and checks the pids are gone before it exits.
 import { execFileSync, spawn } from "node:child_process";
 import { createRequire } from "node:module";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
 import { cpus, loadavg, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -42,6 +43,7 @@ const require = createRequire(join(WEB_DIR, "package.json"));
 const { chromium } = require("playwright");
 const WebSocket = createRequire(join(REPO, "packages", "host", "package.json"))("ws");
 const { thisComputersPath } = await import(pathToFileURL(HOST_PACKAGE).href);
+const { resultFacts } = await import(pathToFileURL(join(REPO, "packages", "adapter-claude", "dist", "index.js")).href);
 
 const LOADING_WORDS = "Loading transcript";
 
@@ -89,8 +91,11 @@ function turnsOf(path, clip = Infinity) {
       const results = blocks.filter(b => b.type === "tool_result");
       if (results.length > 0 && turn !== null) {
         for (const b of results) {
-          const text = typeof b.content === "string" ? b.content : Array.isArray(b.content) ? b.content.map(c => c.text ?? "").join("\n") : "";
-          turn.blocks.push({ kind: "tool_result", text: text.slice(0, clip), toolUseId: b.tool_use_id, isError: b.is_error === true });
+          const said = typeof b.content === "string" ? b.content : Array.isArray(b.content) ? b.content.map(c => c.text ?? "").join("\n") : "";
+          // What the adapter reads off the same call's toolUseResult rides the seeded row as it rides a live one.
+          const { text = said, ...facts } = resultFacts(blocks, said, b.is_error === true, row.toolUseResult);
+          const bytes = facts.bytes ?? (text.length > clip ? Buffer.byteLength(text) : undefined);
+          turn.blocks.push({ kind: "tool_result", text: text.slice(0, clip), toolUseId: b.tool_use_id, isError: b.is_error === true, ...facts, ...(bytes !== undefined ? { bytes } : {}) });
         }
         continue;
       }
@@ -144,9 +149,9 @@ function makeThread({ name, harness, model, turns, target, workspaceId, cwd, end
     const startedAt = at;
     events.push({ type: "session.start", ...scope, at, prompt: turn.prompt, model, cwd, permissionMode: "bypassPermissions", agent: harness, harness: { permissionMode: "bypassPermissions" } });
     let reply = "";
-    for (const b of turn.blocks) {
+    for (const { isError, ...b } of turn.blocks) {
       at += 3_000;
-      events.push({ type: "session.delta", ...scope, at, kind: b.kind, text: b.text, ...(b.toolName ? { toolName: b.toolName } : {}), ...(b.toolUseId ? { toolUseId: b.toolUseId } : {}), ...(b.isError ? { isError: true } : {}) });
+      events.push({ type: "session.delta", ...scope, at, ...b, ...(isError ? { isError: true } : {}) });
       if (b.kind === "text") reply = b.text;
     }
     at += 3_000;
@@ -692,11 +697,22 @@ async function main() {
   await stopOne(first);
   const seeded = seedDocuments({ workspaceId: made.workspaceId, cwd: made.cwd, seeds: a.seed, clip: a.clip ?? Infinity });
   seeded.workspaceId = made.workspaceId;
-  const state = JSON.parse(readFileSync(statePath, "utf8"));
-  state.sessions = { [made.workspaceId]: seeded.sessions };
-  state.transcripts = { [made.workspaceId]: seeded.transcripts };
-  writeFileSync(statePath, JSON.stringify(state, null, 2));
-  const stateBytes = Buffer.byteLength(JSON.stringify(state, null, 2));
+  // The host keeps its records and each transcript's events as rows of state.db, and reads an index off the rows
+  // where none is kept.
+  const dbPath = join(dirname(statePath), "state.db");
+  const db = new DatabaseSync(dbPath);
+  db.exec("begin");
+  db.prepare("insert into collections (collection, id, json) values ('sessions', ?, ?) on conflict (collection, id) do update set json = excluded.json").run(made.workspaceId, JSON.stringify(seeded.sessions));
+  db.prepare("delete from events where workspace = ?").run(made.workspaceId);
+  db.prepare("delete from transcript_index where workspace = ?").run(made.workspaceId);
+  const put = db.prepare("insert into events (workspace, pos, thread, type, size, json) values (?, ?, ?, ?, ?, ?)");
+  seeded.transcripts.events.forEach((e, i) => {
+    const json = JSON.stringify({ ...e, pos: i + 1 });
+    put.run(made.workspaceId, i + 1, e.threadId ?? "", e.type, json.length, json);
+  });
+  db.exec("commit");
+  db.close();
+  const stateBytes = statSync(dbPath).size;
   console.log(`state ${statePath}: ${(stateBytes / 1e6).toFixed(1)} MB, ${seeded.turns} real turns tiled into ${seeded.threads.length} threads, ${seeded.threads.reduce((n, t) => n + t.events, 0)} events`);
 
   const host = await startHost({ statePath, home, port: a.port, wsPort: a.port, webDir });

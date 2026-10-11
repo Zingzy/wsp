@@ -13,7 +13,7 @@
 // these into the SessionEvent shapes in index.ts that clients read, which is
 // why the vocabulary they share (DeltaKind, TurnResult, SessionHarness) is
 // declared once there and imported back here.
-import type { DeltaKind, McpServerSpec, PermissionOption, PermissionOutcome, PlanStep, SessionHarness, SubagentState, TurnResult } from "./index.js";
+import type { DeltaKind, FilePatch, McpServerSpec, PermissionOption, PermissionOutcome, PlanStep, SessionHarness, SubagentState, TurnResult } from "./index.js";
 import { shellQuote } from "./shell-quote.js";
 import type { HarnessLimit } from "./usage.js";
 
@@ -83,6 +83,12 @@ export type AdapterEvent =
       parentToolUseId?: string;
       /** The agent's tool shell folder after this tool_use, present only when the call moved it. */
       cwd?: string;
+      /** On a tool result, what SessionDeltaEvent's fields of the same names say: bytes is the agent's own count of
+       * an output it cut, which the runtime keeps over its own. */
+      bytes?: number;
+      exitCode?: number;
+      durationMs?: number;
+      patch?: FilePatch[];
     }
   | {
       type: "turn.done";
