@@ -1,0 +1,362 @@
+{
+ "thread-list": {
+  "result": {
+   "data": [
+    {
+     "id": "01a12813-ce2c-7600-87d3-bfff156be264",
+     "environments": null,
+     "extra": null,
+     "sessionId": "01a12813-ce2c-7600-87d3-bfff156be264",
+     "forkedFromId": null,
+     "parentThreadId": null,
+     "preview": "first prompt from wsp",
+     "ephemeral": false,
+     "section": null,
+     "sectionEnteredAt": null,
+     "projectId": null,
+     "historyMode": "paginated",
+     "modelProvider": "stub",
+     "model": "stub-model",
+     "reasoningEffort": null,
+     "createdAt": 1791673749,
+     "updatedAt": 1791673749,
+     "recencyAt": 1791673749,
+     "status": {
+      "type": "notLoaded"
+     },
+     "path": "/home/dev/.codex/sessions/2026/10/10/rollout-2026-10-10T23-09-09-01a12813-ce2c-7600-87d3-bfff156be264.jsonl",
+     "cwd": "/work/acme/lab",
+     "cliVersion": "0.162.1",
+     "originator": "wsp",
+     "source": "vscode",
+     "canAcceptDirectInput": null,
+     "threadSource": null,
+     "agentNickname": null,
+     "agentRole": null,
+     "gitInfo": {
+      "sha": "e4d14a7e1d56b6bec44a4d71e42c406969ccf79f",
+      "branch": "feat/x",
+      "originUrl": null
+     },
+     "name": null,
+     "daybreakEnabled": null,
+     "turns": []
+    },
+    {
+     "id": "01a12813-cd12-7a12-9b13-e76892906ff0",
+     "environments": null,
+     "extra": null,
+     "sessionId": "01a12813-cd12-7a12-9b13-e76892906ff0",
+     "forkedFromId": null,
+     "parentThreadId": null,
+     "preview": "first prompt from codex-tui",
+     "ephemeral": false,
+     "section": null,
+     "sectionEnteredAt": null,
+     "projectId": null,
+     "historyMode": "paginated",
+     "modelProvider": "stub",
+     "model": "stub-model",
+     "reasoningEffort": null,
+     "createdAt": 1791673748,
+     "updatedAt": 1791673748,
+     "recencyAt": 1791673748,
+     "status": {
+      "type": "notLoaded"
+     },
+     "path": "/home/dev/.codex/sessions/2026/10/10/rollout-2026-10-10T23-09-08-01a12813-cd12-7a12-9b13-e76892906ff0.jsonl",
+     "cwd": "/work/acme/lab",
+     "cliVersion": "0.162.1",
+     "originator": "codex-tui",
+     "source": "vscode",
+     "canAcceptDirectInput": null,
+     "threadSource": null,
+     "agentNickname": null,
+     "agentRole": null,
+     "gitInfo": {
+      "sha": "e4d14a7e1d56b6bec44a4d71e42c406969ccf79f",
+      "branch": "feat/x",
+      "originUrl": null
+     },
+     "name": "lab terminal thread",
+     "daybreakEnabled": null,
+     "turns": []
+    }
+   ],
+   "nextCursor": null,
+   "backwardsCursor": "2026-10-10T23:09:09.113Z"
+  }
+ },
+ "turns-list": {
+  "result": {
+   "data": [
+    {
+     "id": "line-01",
+     "rootTurnId": "line-01",
+     "items": [
+      {
+       "type": "userMessage",
+       "id": "line-02",
+       "clientId": null,
+       "content": [
+        {
+         "type": "text",
+         "text": "second turn",
+         "text_elements": []
+        }
+       ]
+      },
+      {
+       "type": "agentMessage",
+       "id": "msg_bfdc33a6",
+       "text": "stub reply to: second turn",
+       "phase": null,
+       "memoryCitation": null,
+       "delivery": null,
+       "questions": null
+      }
+     ],
+     "itemsView": "summary",
+     "status": "completed",
+     "error": null,
+     "startedAt": 1791673748,
+     "completedAt": 1791673748,
+     "durationMs": 33
+    },
+    {
+     "id": "line-03",
+     "rootTurnId": "line-03",
+     "items": [
+      {
+       "type": "userMessage",
+       "id": "line-04",
+       "clientId": null,
+       "content": [
+        {
+         "type": "text",
+         "text": "first prompt from codex-tui",
+         "text_elements": []
+        }
+       ]
+      },
+      {
+       "type": "agentMessage",
+       "id": "msg_e6ccf1c9",
+       "text": "stub reply to: first prompt from codex-tui",
+       "phase": null,
+       "memoryCitation": null,
+       "delivery": null,
+       "questions": null
+      }
+     ],
+     "itemsView": "summary",
+     "status": "completed",
+     "error": null,
+     "startedAt": 1791673748,
+     "completedAt": 1791673748,
+     "durationMs": 63
+    }
+   ],
+   "nextCursor": null,
+   "backwardsCursor": "{\"requestedThreadId\":\"01a12813-cd12-7a12-9b13-e76892906ff0\",\"rolloutOrdinal\":14,\"includeAnchor\":true,\"scope\":{\"kind\":\"turns\"}}"
+  }
+ },
+ "items-list": {
+  "result": {
+   "data": [
+    {
+     "turnId": "line-01",
+     "item": {
+      "type": "agentMessage",
+      "id": "msg_bfdc33a6",
+      "text": "stub reply to: second turn",
+      "phase": null,
+      "memoryCitation": null,
+      "delivery": null,
+      "questions": null
+     },
+     "startedAtMs": 1791673748904,
+     "completedAtMs": 1791673748904
+    },
+    {
+     "turnId": "line-01",
+     "item": {
+      "type": "userMessage",
+      "id": "line-02",
+      "clientId": null,
+      "content": [
+       {
+        "type": "text",
+        "text": "second turn",
+        "text_elements": []
+       }
+      ]
+     },
+     "startedAtMs": 1791673748894,
+     "completedAtMs": 1791673748894
+    },
+    {
+     "turnId": "line-03",
+     "item": {
+      "type": "agentMessage",
+      "id": "msg_e6ccf1c9",
+      "text": "stub reply to: first prompt from codex-tui",
+      "phase": null,
+      "memoryCitation": null,
+      "delivery": null,
+      "questions": null
+     },
+     "startedAtMs": 1791673748862,
+     "completedAtMs": 1791673748862
+    },
+    {
+     "turnId": "line-03",
+     "item": {
+      "type": "userMessage",
+      "id": "line-04",
+      "clientId": null,
+      "content": [
+       {
+        "type": "text",
+        "text": "first prompt from codex-tui",
+        "text_elements": []
+       }
+      ]
+     },
+     "startedAtMs": 1791673748846,
+     "completedAtMs": 1791673748846
+    }
+   ],
+   "nextCursor": null,
+   "backwardsCursor": "{\"requestedThreadId\":\"01a12813-cd12-7a12-9b13-e76892906ff0\",\"rolloutOrdinal\":18,\"includeAnchor\":true,\"scope\":{\"kind\":\"itemsByCreatedAtOrdinal\"}}"
+  }
+ },
+ "fork": {
+  "result": {
+   "thread": {
+    "id": "01a12814-3d6c-7751-813b-3b1c4e6f33da",
+    "environments": [
+     {
+      "environmentId": "local",
+      "cwd": "/work/acme/lab",
+      "runtimeWorkspaceRoots": [
+       "/work/acme/lab"
+      ]
+     }
+    ],
+    "extra": null,
+    "sessionId": "01a12814-3d6c-7751-813b-3b1c4e6f33da",
+    "forkedFromId": "01a12813-cd12-7a12-9b13-e76892906ff0",
+    "parentThreadId": null,
+    "preview": "",
+    "ephemeral": false,
+    "section": null,
+    "sectionEnteredAt": null,
+    "projectId": null,
+    "historyMode": "paginated",
+    "modelProvider": "stub",
+    "model": "stub-model",
+    "reasoningEffort": null,
+    "createdAt": 1791673777,
+    "updatedAt": 1791673777,
+    "recencyAt": 1791673777,
+    "status": {
+     "type": "idle"
+    },
+    "path": "/home/dev/.codex/sessions/2026/10/10/rollout-2026-10-10T23-09-37-01a12814-3d6c-7751-813b-3b1c4e6f33da.jsonl",
+    "cwd": "/work/acme/lab",
+    "cliVersion": "0.162.1",
+    "originator": "codex-tui",
+    "source": "vscode",
+    "canAcceptDirectInput": true,
+    "threadSource": null,
+    "agentNickname": null,
+    "agentRole": null,
+    "gitInfo": {
+     "sha": "e4d14a7e1d56b6bec44a4d71e42c406969ccf79f",
+     "branch": "feat/x",
+     "originUrl": null
+    },
+    "name": "lab terminal thread",
+    "daybreakEnabled": null,
+    "turns": []
+   },
+   "model": "stub-model",
+   "modelProvider": "stub",
+   "serviceTier": null,
+   "disabledPluginIds": [],
+   "cwd": "/work/acme/lab",
+   "runtimeWorkspaceRoots": [
+    "/work/acme/lab"
+   ],
+   "instructionSources": [],
+   "approvalPolicy": "on-request",
+   "approvalsReviewer": "user",
+   "sandbox": {
+    "type": "readOnly",
+    "networkAccess": false
+   },
+   "activePermissionProfile": {
+    "id": ":read-only",
+    "extends": null
+   },
+   "reasoningEffort": null,
+   "multiAgentMode": "explicitRequestOnly"
+  }
+ },
+ "resume-held": {
+  "error": {
+   "code": -32600,
+   "message": "thread 01a12813-cd12-7a12-9b13-e76892906ff0 already has an active writer"
+  }
+ },
+ "unsubscribe": {
+  "result": {
+   "status": "unsubscribed"
+  }
+ },
+ "thread-read": {
+  "result": {
+   "thread": {
+    "id": "01a12813-cd12-7a12-9b13-e76892906ff0",
+    "environments": null,
+    "extra": null,
+    "sessionId": "01a12813-cd12-7a12-9b13-e76892906ff0",
+    "forkedFromId": null,
+    "parentThreadId": null,
+    "preview": "first prompt from codex-tui",
+    "ephemeral": false,
+    "section": null,
+    "sectionEnteredAt": null,
+    "projectId": null,
+    "historyMode": "paginated",
+    "modelProvider": "stub",
+    "model": "stub-model",
+    "reasoningEffort": null,
+    "createdAt": 1791673748,
+    "updatedAt": 1791673842,
+    "recencyAt": 1791673748,
+    "status": {
+     "type": "notLoaded"
+    },
+    "path": "/home/dev/.codex/sessions/2026/10/10/rollout-2026-10-10T23-09-08-01a12813-cd12-7a12-9b13-e76892906ff0.jsonl",
+    "cwd": "/work/acme/lab",
+    "cliVersion": "0.162.1",
+    "originator": "codex-tui",
+    "source": "vscode",
+    "canAcceptDirectInput": null,
+    "threadSource": null,
+    "agentNickname": null,
+    "agentRole": null,
+    "gitInfo": {
+     "sha": "e4d14a7e1d56b6bec44a4d71e42c406969ccf79f",
+     "branch": "feat/x",
+     "originUrl": null
+    },
+    "name": "lab terminal thread",
+    "daybreakEnabled": null,
+    "turns": []
+   }
+  }
+ }
+}

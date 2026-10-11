@@ -169,6 +169,7 @@ export * from "./run-block.js";
 export * from "./tool-result.js";
 export * from "./tree.js";
 export * from "./start.js";
+export * from "./conversations.js";
 export * from "./daemon-contract.js";
 export * from "./projects.js";
 export * from "./recipe-file.js";

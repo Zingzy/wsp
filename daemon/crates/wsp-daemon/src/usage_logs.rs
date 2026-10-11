@@ -206,7 +206,7 @@ fn cached_read(cache: &UsageCache, key: &str, stamp: &str, read: impl FnOnce() -
 /// these are the raw calls, since glibc's own setgroups changes every thread of the process. Nothing to drop where
 /// this daemon is not root, which is every Mac: there it runs as the person, in their own session.
 #[cfg(target_os = "linux")]
-struct AsOwner {
+pub(crate) struct AsOwner {
     uid: nix::unistd::Uid,
     gid: nix::unistd::Gid,
     groups: Vec<nix::unistd::Gid>,
@@ -215,7 +215,7 @@ struct AsOwner {
 /// Ok(None) where there is nothing to switch, and an error where a switch was due and did not take, which the read
 /// answers with nothing. setfsuid and setfsgid report no failure, so each is read back by setting it again.
 #[cfg(target_os = "linux")]
-fn as_owner(uid: u32, gid: u32) -> Result<Option<AsOwner>, ()> {
+pub(crate) fn as_owner(uid: u32, gid: u32) -> Result<Option<AsOwner>, ()> {
     use nix::unistd::{geteuid, getgroups, setfsgid, setfsuid, Gid, Uid};
     if !geteuid().is_root() || uid == 0 {
         return Ok(None);
@@ -247,7 +247,7 @@ impl Drop for AsOwner {
 }
 
 #[cfg(not(target_os = "linux"))]
-fn as_owner(_uid: u32, _gid: u32) -> Result<Option<()>, ()> {
+pub(crate) fn as_owner(_uid: u32, _gid: u32) -> Result<Option<()>, ()> {
     Ok(None)
 }
 
@@ -353,7 +353,7 @@ fn claude_session(rel: &str) -> Option<String> {
 }
 
 /// Each line of an open file that `wanted` keeps, a line past the cap skipped whole.
-fn lines(file: File, wanted: impl Fn(&str) -> bool, mut each: impl FnMut(&str)) -> Option<()> {
+pub(crate) fn lines(file: File, wanted: impl Fn(&str) -> bool, mut each: impl FnMut(&str)) -> Option<()> {
     let mut reader = BufReader::new(file);
     let mut line = Vec::new();
     loop {

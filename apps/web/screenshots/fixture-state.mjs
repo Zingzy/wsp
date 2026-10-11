@@ -78,6 +78,10 @@ export const fixtureClock = name => (name === undefined ? undefined : fixtureRow
 /** What a fixture's page finds in its local storage before it loads, by key: none for a fixture that names none. */
 export const fixtureStorage = name => (name === undefined ? {} : (fixtureRow(name).storage?.() ?? {}));
 
+/** The conversations the agents kept on this computer outside wsp, which a fixture's home holds in each agent's own
+ * store: none for a fixture that names none. */
+export const fixtureConversations = name => (name === undefined ? [] : (fixtureRow(name).conversations?.() ?? []));
+
 /** This computer's agents as a fixture's host reads them: every fixture's, unless it names its own. */
 export const fixtureAgents = name => (name === undefined ? HERE_AGENTS : (fixtureRow(name).agents?.() ?? HERE_AGENTS));
 

@@ -6,6 +6,8 @@
 // token; the store re-runs its standing fetches when the status comes back
 // to live.
 import {
+  ConversationsAnswer,
+  type ResumeAsk,
   PendingComputer,
   PlaceSetup,
   RecipeView,
@@ -691,6 +693,10 @@ export interface Api {
   restoreThreads?(threadIds: readonly string[]): Promise<SessionRestoreResult>;
   /** The threads whose messages or replies hold the words, searched on the host, one hit each with a snippet. */
   searchMessages?(query: string): Promise<SessionSearchResult>;
+  /** The conversations the agents kept in a project's folder outside wsp, read on the project's computer. */
+  conversationsList?(project: string): Promise<ConversationsAnswer>;
+  /** A thread opened on one of them, by project: the host reads it first and opens the thread in the folder it ran in. */
+  resumeConversation?(o: { project: string; prompt: string; requestId: string; harness: string; resume: ResumeAsk; model?: string; effort?: string; permissionMode?: string }): Promise<SessionView>;
   /** Asks the thread's agent a question beside the thread, by any of its session ids, on a copy of its session the
    * host keeps nowhere. Optional so fixtures that never ask one need not fake it; a client without it offers no /btw. */
   /** With askId, the answer's pieces go by as aside.text events under it before the whole answer resolves. */
@@ -1041,6 +1047,8 @@ export function makeApi(c: ProtocolClient): Api {
     restoreThreads: async threadIds => SessionRestoreResult.parse(await c.request<Record<string, unknown>>("sessions.restore", { threadIds })),
     // Parsed, not trusted: a hit names a thread the palette opens.
     searchMessages: async query => SessionSearchResult.parse(await c.request<Record<string, unknown>>("sessions.search", { query })),
+    conversationsList: async project => ConversationsAnswer.parse(await c.request<Record<string, unknown>>("conversations.list", { project })),
+    resumeConversation: async o => (await c.request<{ session: SessionView }>("sessions.start", { ...o })).session,
     askAside: async (sessionId, question, askId) => SessionAsideResult.parse(await c.request<Record<string, unknown>>("sessions.aside", { sessionId, question, ...(askId !== undefined ? { askId } : {}) })),
     rewindThread: async (threadId, turnId, files) => SessionRewindResult.parse(await c.request<Record<string, unknown>>("sessions.rewind", { threadId, turnId, files })),
     undoRewind: async threadId => SessionRewindResult.parse(await c.request<Record<string, unknown>>("sessions.rewind", { threadId, undo: true })),

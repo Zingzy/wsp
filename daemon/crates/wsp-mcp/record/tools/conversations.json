@@ -1,0 +1,238 @@
+{
+  "cloudOff": {
+    "name": "conversations",
+    "description": "The conversations the agents kept in a project's folder and its worktrees on the project's computer outside wsp, Claude Code's off its transcripts and Codex's off its own app server, newest first: agent, id, title (the person's name for it, else the agent's, else its last or first prompt), firstPrompt, branch, cwd, lastAt (ms), bytes, origin (terminal, wsp or script), live (another app holds it open now), thread (the wsp thread already on it, which is the one to send into) and letsGo (where the agent refuses a second writer: how soon it lets go of one whose window closed, in its own sentence). A Claude Code conversation a script ran is left out unless it is a wsp thread's. held names an agent whose store did not answer, in two halves. run with resume opens a thread on one; one that is live needs copy.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "project": {
+          "type": "string",
+          "description": "the project, by the name or the id projects lists; absent from a thread, the thread's own project"
+        },
+        "agent": {
+          "type": "string",
+          "description": "one agent's conversations alone, one of claude, codex, opencode, cursor; absent lists every agent's"
+        }
+      },
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "rows": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "agent": {
+                "type": "string"
+              },
+              "id": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "firstPrompt": {
+                "type": "string"
+              },
+              "branch": {
+                "type": "string"
+              },
+              "cwd": {
+                "type": "string"
+              },
+              "lastAt": {
+                "type": "number"
+              },
+              "bytes": {
+                "type": "number"
+              },
+              "origin": {
+                "type": "string",
+                "enum": [
+                  "terminal",
+                  "wsp",
+                  "script"
+                ]
+              },
+              "live": {
+                "type": "boolean"
+              },
+              "thread": {
+                "type": "string"
+              },
+              "letsGo": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "agent",
+              "id",
+              "title",
+              "cwd",
+              "lastAt",
+              "origin",
+              "live"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "held": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "agent": {
+                "type": "string"
+              },
+              "said": {
+                "type": "string"
+              },
+              "fix": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "agent",
+              "said",
+              "fix"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "rows",
+        "held"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    },
+    "_meta": {
+      "anthropic/alwaysLoad": false
+    }
+  },
+  "cloudOn": {
+    "name": "conversations",
+    "description": "The conversations the agents kept in a project's folder and its worktrees on the project's computer outside wsp, Claude Code's off its transcripts and Codex's off its own app server, newest first: agent, id, title (the person's name for it, else the agent's, else its last or first prompt), firstPrompt, branch, cwd, lastAt (ms), bytes, origin (terminal, wsp or script), live (another app holds it open now), thread (the wsp thread already on it, which is the one to send into) and letsGo (where the agent refuses a second writer: how soon it lets go of one whose window closed, in its own sentence). A Claude Code conversation a script ran is left out unless it is a wsp thread's. held names an agent whose store did not answer, in two halves. run with resume opens a thread on one; one that is live needs copy.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "project": {
+          "type": "string",
+          "description": "the project, by the name or the id projects lists; absent from a thread, the thread's own project"
+        },
+        "agent": {
+          "type": "string",
+          "description": "one agent's conversations alone, one of claude, codex, opencode, cursor; absent lists every agent's"
+        }
+      },
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "rows": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "agent": {
+                "type": "string"
+              },
+              "id": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "firstPrompt": {
+                "type": "string"
+              },
+              "branch": {
+                "type": "string"
+              },
+              "cwd": {
+                "type": "string"
+              },
+              "lastAt": {
+                "type": "number"
+              },
+              "bytes": {
+                "type": "number"
+              },
+              "origin": {
+                "type": "string",
+                "enum": [
+                  "terminal",
+                  "wsp",
+                  "script"
+                ]
+              },
+              "live": {
+                "type": "boolean"
+              },
+              "thread": {
+                "type": "string"
+              },
+              "letsGo": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "agent",
+              "id",
+              "title",
+              "cwd",
+              "lastAt",
+              "origin",
+              "live"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "held": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "agent": {
+                "type": "string"
+              },
+              "said": {
+                "type": "string"
+              },
+              "fix": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "agent",
+              "said",
+              "fix"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "rows",
+        "held"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    },
+    "_meta": {
+      "anthropic/alwaysLoad": false
+    }
+  }
+}

@@ -680,6 +680,24 @@ const ANSWERED: Answered = {
     { case: "nothing to set", arguments: { computer: "attic" }, replies: { "places.list": reply({ places: [PLACE, CLOUD] }), "places.set": refused(placeSetRefusal({ id: "place-9", kind: "computer", name: "attic", takesForks: true }, {})!, "usage") } },
     { case: "no such computer", arguments: { computer: "nowhere", threads: 1 }, replies: { "places.list": reply({ places: [PLACE, CLOUD] }) } },
   ],
+  conversations: [
+    {
+      case: "two agents' rows, an open one, a thread's, and a held line",
+      arguments: { project: "lab" },
+      replies: {
+        "conversations.list": reply({
+          rows: [
+            { agent: "codex", id: "01a12813-cd12-7a12-9b13-e76892906ff0", title: "lab terminal thread \u0085 \"tui\"", firstPrompt: "first prompt from codex-tui", branch: "feat/x", cwd: "/work/acme/lab", lastAt: 1_791_673_748_000, bytes: 2_048.5, origin: "terminal", live: false, letsGo: "Codex lets go about a minute after its window closes.", extra: "dropped" },
+            { agent: "claude", id: "7414323d-e71b-4957-8b56-eefdf6bfa350", title: "lab codewords", cwd: "/work/acme/lab-wt", lastAt: 1_791_673_566_000, origin: "terminal", live: true },
+            { agent: "claude", id: "e615a6ab-a2f2-4b10-8fd6-0dc38bf99c28", title: "café", cwd: "/work/acme/lab", lastAt: 5, bytes: 10, origin: "wsp", live: false, thread: "thread-4b1c2a7e" },
+          ],
+          held: [{ agent: "claude", said: "Claude Code conversations on attic were not read", fix: "Update attic with wsp add attic --update to list them." }],
+        }),
+      },
+    },
+    { case: "one agent's, none kept", arguments: { agent: "codex" }, replies: { "conversations.list": reply({ rows: [], held: [] }) } },
+    { case: "refused", arguments: { project: "nowhere" }, replies: { "conversations.list": refused("no project nowhere. Read the projects with wsp projects.", "not-found") } },
+  ],
   ...RECIPES,
   ...ADD,
   usage: [

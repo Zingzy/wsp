@@ -2,7 +2,8 @@
 // The project's actions, one registry: what a project's header row in the
 // sidebar and the palette offer for one project. A project is where a piece of
 // work starts and what a workspace is made of; nothing here touches a machine.
-import { PlusIcon, SettingsIcon, Trash2Icon } from "lucide-react";
+import { HistoryIcon, PlusIcon, SettingsIcon, Trash2Icon } from "lucide-react";
+import { CONVERSATION_WORDS } from "@wsp/protocol";
 import { PROJECTS_WORDS } from "../settings/format.js";
 import { NEW_WORKSPACE, PROJECT_WORDS } from "../sidebar/words.js";
 import type { ActionEntry } from "./registry.js";
@@ -18,6 +19,8 @@ export interface ProjectTarget {
 export interface ProjectVerbs {
   /** Opens this project's New thread page. */
   readonly newThread: (projectId: string) => void;
+  /** Opens the palette on the project's conversations kept outside wsp. */
+  readonly resumeConversation: (projectId: string) => void;
   /** Opens the project's own page in Settings. */
   readonly openSettings: (projectId: string) => void;
   /** Forgets the project; absent on a client whose host cannot, and the row says so. */
@@ -37,6 +40,16 @@ export const projectActions: ReadonlyArray<ActionEntry<ProjectTarget, ProjectVer
     rowLabel: target => `${NEW_WORKSPACE} on ${target.name}`,
     refusal: () => null,
     run: (target, verbs) => verbs.newThread(target.id),
+  },
+  {
+    id: "resume-conversation",
+    group: "open",
+    icon: () => HistoryIcon,
+    searchTerms: ["resume a conversation", "pick up a conversation", "claude code", "codex"],
+    title: () => CONVERSATION_WORDS.menu,
+    rowLabel: target => `${CONVERSATION_WORDS.row} in ${target.name}`,
+    refusal: () => null,
+    run: (target, verbs) => verbs.resumeConversation(target.id),
   },
   {
     id: "project-settings",

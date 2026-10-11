@@ -1,4 +1,5 @@
 // Adapted from pingdotgg/t3code apps/web/src/components/CommandPaletteResults.tsx at 57a66608 (MIT).
+import type { ReactNode } from "react";
 import type { ResolvedKeybindingsConfig } from "../../keybindingTypes.js";
 import { ChevronRightIcon } from "lucide-react";
 import { shortcutLabelForCommand, type ShortcutMatchOptions } from "../../keybindings.js";
@@ -18,7 +19,7 @@ import {
 import { cn } from "../../lib/utils.js";
 
 interface CommandPaletteResultsProps {
-  emptyStateMessage?: string;
+  emptyStateMessage?: ReactNode;
   groups: ReadonlyArray<CommandPaletteGroup>;
   highlightedItemValue?: string | null;
   isActionsOnly: boolean;

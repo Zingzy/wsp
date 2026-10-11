@@ -268,6 +268,23 @@ const draftScript = draft =>
     ? ""
     : `case " $* " in\n  *" --fork-session "*) ;;\n  *" --safe-mode "*) cat >/dev/null; sleep ${draft.afterS}; printf '%s\\n' ${shellQuote(JSON.stringify({ type: "result", subtype: "success", is_error: false, result: draft.text }))}; exit 0 ;;\nesac\n`;
 
+/** A stand-in's answer to `claude agents --json`: the sessions the fixture says another Claude Code holds open. */
+const agentsScript = live => (live === undefined ? "" : `case "$1" in\n  agents) printf '%s\\n' ${shellQuote(JSON.stringify(live.map((sessionId, i) => ({ pid: 4000 + i, cwd: "/", kind: "interactive", startedAt: 0, sessionId, status: "idle" }))))}; exit 0 ;;\nesac\n`);
+
+/** A stand-in codex whose app server answers thread/list with the fixture's threads and every other request with an
+ * empty result, as the conversation list reads Codex's own; its version and sign-in are the fixture's. */
+const codexServer = said => `#!${process.execPath}
+const [verb] = process.argv.slice(2);
+if (verb !== "app-server") { console.log(verb === "--version" ? ${JSON.stringify(said.version)} : ${JSON.stringify(said.status)}); process.exit(0); }
+const threads = ${JSON.stringify(said.threads)};
+process.getBuiltinModule("node:readline").createInterface({ input: process.stdin }).on("line", line => {
+  const m = JSON.parse(line);
+  if (m.id === undefined) return;
+  const result = m.method === "thread/list" ? { data: threads, nextCursor: null, backwardsCursor: null } : {};
+  process.stdout.write(JSON.stringify({ id: m.id, result }) + "\\n");
+}).on("close", () => process.exit(0));
+`;
+
 /** This computer's agents as a fixture has them, all under the throwaway home: a stand-in for each agent's command that
  * says the fixture's version and sign-in and answers a side question where the fixture gives it one, a stand-in
  * command for each server with tools, and each agent's own MCP file written by the catalog's module for its format.
@@ -282,7 +299,8 @@ export function writeHereAgents(home, here) {
   for (const [id, said] of Object.entries(here.agents)) {
     const agent = CATALOG_AGENTS.find(a => a.id === id);
     if (agent === undefined) throw new Error(`the fixture names an agent the catalog does not have: ${id}`);
-    writeScript(join(bin, agent.bin), sh(`${asideScript(said.aside)}${draftScript(said.draft)}case "$1" in\n  --version) printf '%s\\n' ${shellQuote(said.version)} ;;\n  app-server) printf '%s\\n' ${NO_PLUGINS} ; cat >/dev/null ;;\n  *) printf '%s\\n' ${shellQuote(said.status)} ;;\nesac`));
+    if (said.threads !== undefined) writeScript(join(bin, agent.bin), codexServer(said));
+    else writeScript(join(bin, agent.bin), sh(`${agentsScript(said.live)}${asideScript(said.aside)}${draftScript(said.draft)}case "$1" in\n  --version) printf '%s\\n' ${shellQuote(said.version)} ;;\n  app-server) printf '%s\\n' ${NO_PLUGINS} ; cat >/dev/null ;;\n  *) printf '%s\\n' ${shellQuote(said.status)} ;;\nesac`));
   }
   const transports = new Map(
     here.servers.map(s => {

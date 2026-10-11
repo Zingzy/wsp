@@ -7,7 +7,7 @@ use ts_rs::TS;
 
 use crate::{
     CheckState, DaemonErrorCode, FsEntryType, HostItemKind, MachineErrorKind, MergeMethod, Mergeable, PullRequestState, ReactionContent,
-    RequestId, ReviewState, Usage,
+    RequestId, ReviewState, TranscriptVoice, Usage,
 };
 
 /// The literal `true` the ok envelope carries.
@@ -459,6 +459,66 @@ pub struct SysHistoryReply {
 pub struct UsageLogsReply {
     pub rows: Vec<UsageLogRow>,
     pub limits: Vec<UsageLimitReading>,
+}
+
+/// What transcripts.list read: one row per conversation, newest file first.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct TranscriptsListReply {
+    pub rows: Vec<TranscriptRow>,
+}
+
+/// One conversation as its transcript's head and tail tell it. `title` is the last name the person gave it, else the
+/// last one Claude Code made, else the last prompt, else the first; `entrypoint` is the first one a line carries, the
+/// road it was opened from. `lastAt` is the file's mtime, ms epoch, and `bytes` its size.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct TranscriptRow {
+    pub id: String,
+    pub cwd: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub branch: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub entrypoint: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub first_prompt: Option<String>,
+    pub last_at: i64,
+    pub bytes: u64,
+}
+
+/// What transcripts.read found: nothing where no folder holds the id, else the conversation's first recorded cwd, its
+/// title as transcripts.list names it, its newest messages oldest first, and how many messages came before them.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct TranscriptsReadReply {
+    pub found: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub cwd: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub title: Option<String>,
+    pub messages: Vec<TranscriptMessage>,
+    pub earlier: u32,
+}
+
+/// One row of a transcript read: a message's words, or a tool call's name with its input as the CLI recorded it, cut
+/// to a few thousand characters.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct TranscriptMessage {
+    pub who: TranscriptVoice,
+    pub text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub tool: Option<String>,
 }
 
 /// One session's use in one half hour under one model, as its agent's own store counted it. `at` is the newest

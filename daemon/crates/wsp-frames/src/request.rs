@@ -5,7 +5,7 @@ use std::num::{NonZeroU16, NonZeroU32};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::validate::{bounded, bounded_opt, capped_list, cgroup_paths, exec_timeout, sha256_hex, upload_word, watch_name};
+use crate::validate::{bounded, bounded_list, bounded_opt, capped_list, cgroup_paths, exec_timeout, sha256_hex, upload_word, watch_name};
 use crate::{
     FsReadEncoding, FsSearchMode, GitDiffScope, GuestKind, MergeMethod, ProcSignal, ReactionContent, RequestId, ReviewEvent, ReviewSide,
     UsageLogFormat,
@@ -173,6 +173,30 @@ pub enum DaemonOp {
     UsageLogs {
         #[serde(deserialize_with = "usage_stores")]
         stores: Vec<UsageStore>,
+    },
+    /// Claude Code's transcripts under a store root, one row each: under each folder of `dirs`, every session whose
+    /// first recorded cwd is one of `cwds`, read off the first and the last 64 KB of its file. A title, a first
+    /// prompt, a branch and the file's own size and mtime leave here, never the conversation.
+    #[serde(rename = "transcripts.list")]
+    TranscriptsList {
+        #[serde(deserialize_with = "bounded::<_, 1, 4096>")]
+        root: String,
+        #[serde(deserialize_with = "bounded_list::<_, 255, 64>")]
+        dirs: Vec<String>,
+        #[serde(deserialize_with = "bounded_list::<_, 4096, 64>")]
+        cwds: Vec<String>,
+    },
+    /// One Claude Code session's transcript under a folder of `dirs`, its conversation along the branch the CLI resumes: the
+    /// newest `last` messages, each tool call one row, and how many messages came before them.
+    #[serde(rename = "transcripts.read")]
+    TranscriptsRead {
+        #[serde(deserialize_with = "bounded::<_, 1, 4096>")]
+        root: String,
+        #[serde(deserialize_with = "bounded_list::<_, 255, 64>")]
+        dirs: Vec<String>,
+        #[serde(deserialize_with = "bounded::<_, 1, 64>")]
+        session: String,
+        last: NonZeroU32,
     },
     #[serde(rename = "proc.watch")]
     ProcWatch,
@@ -869,7 +893,7 @@ fn usage_stores<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<UsageStore
     Ok(list)
 }
 
-pub const DAEMON_OPS: [&str; 75] = [
+pub const DAEMON_OPS: [&str; 77] = [
     "pty.create",
     "pty.attach",
     "pty.detach",
@@ -886,6 +910,8 @@ pub const DAEMON_OPS: [&str; 75] = [
     "sys.watch",
     "sys.history",
     "usage.logs",
+    "transcripts.list",
+    "transcripts.read",
     "proc.watch",
     "proc.unwatch",
     "proc.inspect",

@@ -40,7 +40,7 @@ export interface CommandPaletteSubmenuItem extends CommandPaletteItem {
   /** The search field's ghost while the page is open, in place of the submenu's own, and what a search that finds
    * nothing on it says. */
   readonly placeholder?: string;
-  readonly emptyStateMessage?: string;
+  readonly emptyStateMessage?: ReactNode;
 }
 
 export interface CommandPaletteGroup {

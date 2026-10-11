@@ -1,0 +1,53 @@
+{
+  "tool": "conversations",
+  "cases": [
+    {
+      "case": "two agents' rows, an open one, a thread's, and a held line",
+      "arguments": {
+        "project": "lab"
+      },
+      "replies": {
+        "conversations.list": "{\"id\":1,\"ok\":true,\"rows\":[{\"agent\":\"codex\",\"id\":\"01a12813-cd12-7a12-9b13-e76892906ff0\",\"title\":\"lab terminal thread \u0085 \\\"tui\\\"\",\"firstPrompt\":\"first prompt from codex-tui\",\"branch\":\"feat/x\",\"cwd\":\"/work/acme/lab\",\"lastAt\":1791673748000,\"bytes\":2048.5,\"origin\":\"terminal\",\"live\":false,\"letsGo\":\"Codex lets go about a minute after its window closes.\",\"extra\":\"dropped\"},{\"agent\":\"claude\",\"id\":\"7414323d-e71b-4957-8b56-eefdf6bfa350\",\"title\":\"lab codewords\",\"cwd\":\"/work/acme/lab-wt\",\"lastAt\":1791673566000,\"origin\":\"terminal\",\"live\":true},{\"agent\":\"claude\",\"id\":\"e615a6ab-a2f2-4b10-8fd6-0dc38bf99c28\",\"title\":\"café\",\"cwd\":\"/work/acme/lab\",\"lastAt\":5,\"bytes\":10,\"origin\":\"wsp\",\"live\":false,\"thread\":\"thread-4b1c2a7e\"}],\"held\":[{\"agent\":\"claude\",\"said\":\"Claude Code conversations on attic were not read\",\"fix\":\"Update attic with wsp add attic --update to list them.\"}]}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\n  \\\"rows\\\": [\\n    {\\n      \\\"agent\\\": \\\"codex\\\",\\n      \\\"id\\\": \\\"01a12813-cd12-7a12-9b13-e76892906ff0\\\",\\n      \\\"title\\\": \\\"lab terminal thread \\\\u0085 \\\\\\\"tui\\\\\\\"\\\",\\n      \\\"firstPrompt\\\": \\\"first prompt from codex-tui\\\",\\n      \\\"branch\\\": \\\"feat/x\\\",\\n      \\\"cwd\\\": \\\"/work/acme/lab\\\",\\n      \\\"lastAt\\\": 1791673748000,\\n      \\\"bytes\\\": 2048.5,\\n      \\\"origin\\\": \\\"terminal\\\",\\n      \\\"live\\\": false,\\n      \\\"letsGo\\\": \\\"Codex lets go about a minute after its window closes.\\\"\\n    },\\n    {\\n      \\\"agent\\\": \\\"claude\\\",\\n      \\\"id\\\": \\\"7414323d-e71b-4957-8b56-eefdf6bfa350\\\",\\n      \\\"title\\\": \\\"lab codewords\\\",\\n      \\\"cwd\\\": \\\"/work/acme/lab-wt\\\",\\n      \\\"lastAt\\\": 1791673566000,\\n      \\\"origin\\\": \\\"terminal\\\",\\n      \\\"live\\\": true\\n    },\\n    {\\n      \\\"agent\\\": \\\"claude\\\",\\n      \\\"id\\\": \\\"e615a6ab-a2f2-4b10-8fd6-0dc38bf99c28\\\",\\n      \\\"title\\\": \\\"café\\\",\\n      \\\"cwd\\\": \\\"/work/acme/lab\\\",\\n      \\\"lastAt\\\": 5,\\n      \\\"bytes\\\": 10,\\n      \\\"origin\\\": \\\"wsp\\\",\\n      \\\"live\\\": false,\\n      \\\"thread\\\": \\\"thread-4b1c2a7e\\\"\\n    }\\n  ],\\n  \\\"held\\\": [\\n    {\\n      \\\"agent\\\": \\\"claude\\\",\\n      \\\"said\\\": \\\"Claude Code conversations on attic were not read\\\",\\n      \\\"fix\\\": \\\"Update attic with wsp add attic --update to list them.\\\"\\n    }\\n  ]\\n}\"}],\"structuredContent\":{\"rows\":[{\"agent\":\"codex\",\"id\":\"01a12813-cd12-7a12-9b13-e76892906ff0\",\"title\":\"lab terminal thread \\u0085 \\\"tui\\\"\",\"firstPrompt\":\"first prompt from codex-tui\",\"branch\":\"feat/x\",\"cwd\":\"/work/acme/lab\",\"lastAt\":1791673748000,\"bytes\":2048.5,\"origin\":\"terminal\",\"live\":false,\"letsGo\":\"Codex lets go about a minute after its window closes.\"},{\"agent\":\"claude\",\"id\":\"7414323d-e71b-4957-8b56-eefdf6bfa350\",\"title\":\"lab codewords\",\"cwd\":\"/work/acme/lab-wt\",\"lastAt\":1791673566000,\"origin\":\"terminal\",\"live\":true},{\"agent\":\"claude\",\"id\":\"e615a6ab-a2f2-4b10-8fd6-0dc38bf99c28\",\"title\":\"café\",\"cwd\":\"/work/acme/lab\",\"lastAt\":5,\"bytes\":10,\"origin\":\"wsp\",\"live\":false,\"thread\":\"thread-4b1c2a7e\"}],\"held\":[{\"agent\":\"claude\",\"said\":\"Claude Code conversations on attic were not read\",\"fix\":\"Update attic with wsp add attic --update to list them.\"}]}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "conversations.list",
+          "project": "lab"
+        }
+      ]
+    },
+    {
+      "case": "one agent's, none kept",
+      "arguments": {
+        "agent": "codex"
+      },
+      "replies": {
+        "conversations.list": "{\"id\":1,\"ok\":true,\"rows\":[],\"held\":[]}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\n  \\\"rows\\\": [],\\n  \\\"held\\\": []\\n}\"}],\"structuredContent\":{\"rows\":[],\"held\":[]}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "conversations.list",
+          "agent": "codex"
+        }
+      ]
+    },
+    {
+      "case": "refused",
+      "arguments": {
+        "project": "nowhere"
+      },
+      "replies": {
+        "conversations.list": "{\"id\":1,\"ok\":false,\"error\":\"no project nowhere. Read the projects with wsp projects.\",\"kind\":\"not-found\"}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"no project nowhere. Read the projects with wsp projects.\"}],\"structuredContent\":{\"error\":\"no project nowhere. Read the projects with wsp projects.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "conversations.list",
+          "project": "nowhere"
+        }
+      ]
+    }
+  ]
+}

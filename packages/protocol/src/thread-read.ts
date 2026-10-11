@@ -94,6 +94,9 @@ export function threadMessages(events: ReadonlyArray<SessionEvent>, threadId: st
       case "session.behind":
         say("turn", event.at, event.text);
         continue;
+      case "session.earlier":
+        say(event.who === "note" ? "turn" : event.who, event.at, event.text);
+        continue;
       case "session.delta": {
         if (event.kind === "text") {
           // An empty piece of text opens no row: an adapter that splits a reply hands over the tail of a short one

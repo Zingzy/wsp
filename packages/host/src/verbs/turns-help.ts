@@ -94,6 +94,11 @@ import {
   takenNameAfter,
   ThreadDefaults,
   capWaitLine,
+  COPY_ALONE_LINE,
+  COPY_ALONE_FIX,
+  RESUME_WHERE_LINE,
+  RESUME_WHERE_FIX,
+  type ResumeAsk,
 } from "@wsp/protocol";
 import { mainWorktreeOf } from "../repo-root.js";
 import { CLOUD_ON } from "../cloud.js";
@@ -298,7 +303,7 @@ export async function forkFor(client: HostClient, project: ForkTarget["fork"], t
 
 /** The project on this computer a folder is in: the one whose folder holds it, the deepest where two do, else the one
  * whose repo the folder is a worktree of. */
-function projectOfFolder(projects: readonly ProjectView[], folder: string): ProjectView | undefined {
+export function projectOfFolder(projects: readonly ProjectView[], folder: string): ProjectView | undefined {
   const here = projects.filter(p => copiesFolder(kindForComputer(p.computer)));
   const holding = here.filter(p => under(folder, p.path)).sort((a, b) => b.path.length - a.path.length)[0];
   if (holding !== undefined) return holding;
@@ -382,8 +387,9 @@ export async function worktreeFor(client: HostClient, project: string, branch: s
  * turn they are running inside on a start: it is what the host reads NOTIFY_ME against, and there is none when the
  * caller is not a turn; the environment it is read off is the caller's, handed in, never this process's. A fork's
  * start carries no workspace until its machine stands, so the files are read before that machine is made. */
-export function openingOf(env: VerbDeps["env"], at: Pick<WorkspaceView, "id"> | FolderTarget | ForkTarget, prompt: string, opts: Picks & { harness?: string; cwd?: string; notify?: readonly string[]; title?: string; replaces?: string; files?: readonly string[]; elsewhere?: boolean } = {}): Record<string, unknown> {
-  const cwd = absoluteFolder("here" in at ? at.here.cwd : opts.cwd);
+export function openingOf(env: VerbDeps["env"], at: Pick<WorkspaceView, "id"> | FolderTarget | ForkTarget, prompt: string, opts: Picks & { harness?: string; cwd?: string; notify?: readonly string[]; title?: string; replaces?: string; files?: readonly string[]; elsewhere?: boolean; resume?: ResumeAsk } = {}): Record<string, unknown> {
+  // A conversation says where its thread runs, so the folder the line was typed in is not where it goes.
+  const cwd = opts.resume !== undefined ? undefined : absoluteFolder("here" in at ? at.here.cwd : opts.cwd);
   const attachments = filesFrom(opts.files ?? [], opts.elsewhere);
   const turnToken = turnTokenOf(env);
   return {
@@ -400,8 +406,20 @@ export function openingOf(env: VerbDeps["env"], at: Pick<WorkspaceView, "id"> | 
     ...(opts.title !== undefined ? { title: opts.title } : {}),
     ...(opts.replaces !== undefined ? { replaces: opts.replaces } : {}),
     ...(attachments.length > 0 ? { attachments } : {}),
+    ...(opts.resume !== undefined ? { resume: opts.resume } : {}),
     ...picksOf(opts),
   };
+}
+
+/** What --resume and --copy ask, refused where they cannot go together with where the line asked the thread to run:
+ * a conversation runs in the folder it ran in. */
+export function resumeAsked(id: string | undefined, copy: boolean, where: { beside?: string | undefined; branch?: string | undefined; cwd?: string | undefined }): ResumeAsk | undefined {
+  if (id === undefined) {
+    if (copy) throw usageRefusal(COPY_ALONE_LINE, COPY_ALONE_FIX);
+    return undefined;
+  }
+  if (where.beside !== undefined || where.branch !== undefined || where.cwd !== undefined) throw usageRefusal(RESUME_WHERE_LINE, RESUME_WHERE_FIX);
+  return { id, ...(copy ? { copy: true } : {}) };
 }
 
 /** The thread --replaces names, by its full id, once the host has said a start may replace it, so a refusal comes

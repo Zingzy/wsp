@@ -1424,6 +1424,53 @@
                 "properties": {
                   "type": {
                     "type": "string",
+                    "const": "session.earlier"
+                  },
+                  "workspaceId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/workspaceId"
+                  },
+                  "sessionId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/sessionId"
+                  },
+                  "at": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/at"
+                  },
+                  "turnId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/turnId"
+                  },
+                  "threadId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/threadId"
+                  },
+                  "pos": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/pos"
+                  },
+                  "who": {
+                    "type": "string",
+                    "enum": [
+                      "person",
+                      "agent",
+                      "tool",
+                      "note"
+                    ]
+                  },
+                  "text": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "type",
+                  "workspaceId",
+                  "sessionId",
+                  "who",
+                  "text"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
                     "const": "session.capped"
                   },
                   "workspaceId": {
@@ -3059,6 +3106,53 @@
                   "type",
                   "workspaceId",
                   "sessionId",
+                  "text"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "session.earlier"
+                  },
+                  "workspaceId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/workspaceId"
+                  },
+                  "sessionId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/sessionId"
+                  },
+                  "at": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/at"
+                  },
+                  "turnId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/turnId"
+                  },
+                  "threadId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/threadId"
+                  },
+                  "pos": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/pos"
+                  },
+                  "who": {
+                    "type": "string",
+                    "enum": [
+                      "person",
+                      "agent",
+                      "tool",
+                      "note"
+                    ]
+                  },
+                  "text": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "type",
+                  "workspaceId",
+                  "sessionId",
+                  "who",
                   "text"
                 ],
                 "additionalProperties": false

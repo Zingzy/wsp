@@ -1,0 +1,28 @@
+[
+  {
+    "found": true,
+    "cwd": "/home/dev/proj",
+    "title": "lab codewords",
+    "messages": [
+      {
+        "who": "person",
+        "text": "Run the shell command: echo hi"
+      },
+      {
+        "who": "tool",
+        "text": "{\"command\":\"echo hi\"}",
+        "tool": "Bash"
+      },
+      {
+        "who": "agent",
+        "text": "DONE"
+      }
+    ],
+    "earlier": 12
+  },
+  {
+    "found": false,
+    "messages": [],
+    "earlier": 0
+  }
+]

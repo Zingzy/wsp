@@ -5,12 +5,13 @@
 
 import { randomUUID } from "node:crypto";
 import { ASIDE_WALL_MS, baseModel, INTERRUPT_GRACE_MS, LOST_SESSION_NOTE, PERMISSION_ALLOW, PERMISSION_DENY, QUESTION_TOOL, RUN_EXIT_MS, asideWallLine, backgroundTasksLine, claudeMemoryDir, endAfterResult, endRun, fmtDuration, keepRun, harnessExitLine, lostSessionPrompt, refusedTurn, subagentAsked, taskFinishedLine, titlePrompt } from "@wsp/protocol";
-import type { AdapterAttachOptions, AdapterEvent, AgentLaunch, KeptAgent, KeptRun, KeptTurn, SubagentState, TaskStop, AsideAnswer, AsideQuestion, ExecStream, ExecStreamFactory, HarnessCatalogProbe, HarnessExec, McpServerSpec, PermissionAsk, PermissionOutcome, ScreenCommand, SessionAsker, SessionHarness, SessionRenamer, SessionTitleMaker, SessionTitleReader, TurnImage, TurnRefusal, TurnResult, TurnStatus, CommitDrafter, TurnTokens } from "@wsp/protocol";
+import type { AdapterAttachOptions, AdapterEvent, AgentLaunch, KeptAgent, KeptRun, KeptTurn, SubagentState, TaskStop, AsideAnswer, AsideQuestion, ExecStream, ExecStreamFactory, HarnessCatalogProbe, HarnessExec, McpServerSpec, PermissionAsk, PermissionOutcome, ScreenCommand, SessionAsker, SessionHarness, SessionRenamer, SessionTitleMaker, SessionTitleReader, TurnImage, TurnRefusal, TurnResult, TurnStatus, CommitDrafter, ConversationStore, TurnTokens } from "@wsp/protocol";
 import { SKIP_PROMPTS_MODE, controlAllowLine, controlAnswerLine, controlErrorLine, controlLine, interruptLine, modeOptionOn, setModeLine, stopTaskLine } from "./permissions.js";
 import { CLAUDE_SCREEN_COMMANDS, catalogProbeCommand, parseCatalogProbe, versionProbeCommand, parseVersion } from "./catalog.js";
-import { rec, str, num, strArr } from "./fields.js";
+import { harnessOf, parseLine, rec, str, num, strArr } from "./fields.js";
 import { limitOf, noteRejected, withLimit } from "./limits.js";
 import { ASIDE_HOOKS_ID, asideAnswer, asideCommand, asideCut, asideHooksLine, asidePrompt, asideTailCommand, asideTextOf, forkCleanupCommand, hookDenyLine, noConversationLine, promptDenyLine } from "./aside.js";
+import { claudeConversations } from "./conversations.js";
 import { draftForCommand, parseDraftFor, parseRename, parseSessionTitle, parseTitleFor, renameCommand, sessionTitleCommand, titleForCommand } from "./session-title.js";
 import { buildEnv, launchCommand, newSessionId, savedSpendCommand, serverValuesFile, terminalResumeCommand, userMessageLine } from "./landmines.js";
 import { steersOf } from "./steers.js";
@@ -23,6 +24,8 @@ export interface StartOptions {
   prompt: string;
   /** Session id of an earlier run; the CLI reloads its transcript. */
   resume?: string;
+  /** The turn opens a copy of `resume` under a new session id, the original left as it was. */
+  copy?: true;
   /** The uuid of the message a rewind kept, on the first resume after it: the CLI loads the session up to that
    * message and the turn goes on from there, leaving what came after it behind. */
   resumeAt?: string;
@@ -192,31 +195,8 @@ export interface ClaudeAdapter {
   readonly asideServers: true;
   /** What every session's command is exported with; the one environment a turn on the machine gets. */
   readonly env: Readonly<Record<string, string>>;
-}
-
-function harnessOf(init: Record<string, unknown>): SessionHarness | undefined {
-  const slashCommands = strArr(init.slash_commands);
-  const permissionMode = str(init.permissionMode);
-  const agents = strArr(init.agents);
-  if (slashCommands === undefined && permissionMode === undefined && agents === undefined) return undefined;
-  return {
-    ...(slashCommands !== undefined ? { slashCommands } : {}),
-    ...(permissionMode !== undefined ? { permissionMode } : {}),
-    ...(agents !== undefined ? { agents } : {}),
-  };
-}
-
-function parseLine(raw: string): Record<string, unknown> | undefined {
-  const line = raw.trim();
-  if (!line.startsWith("{")) return undefined;
-  let value: unknown;
-  try {
-    value = JSON.parse(line);
-  } catch {
-    return undefined;
-  }
-  const event = rec(value);
-  return event !== undefined && typeof event.type === "string" ? event : undefined;
+  /** The conversations Claude Code kept on the computer, read off its transcripts and its running processes. */
+  readonly conversations: ConversationStore;
 }
 
 function parseInput(text: string): unknown {
@@ -1279,15 +1259,17 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
   };
 
   const launch = (options: StartOptions): ClaudeSession => {
-    const localId = options.resume ?? newSessionId();
+    const [copyOf, resume] = options.copy === true ? [options.resume, undefined] : [undefined, options.resume];
+    const localId = resume ?? newSessionId();
     const valued = serverValuesFile(options.serverValues);
-    const command = launchCommand({ ...options, ...memory, ...(deps.launch !== undefined ? { launch: deps.launch } : {}) }, localId, valued !== undefined);
-    const launch = options.resume === undefined ? command : `${savedSpendCommand({ configDir: deps.configDir, sessionId: options.resume })}${command}`;
+    const { resume: _asked, ...asked } = options;
+    const command = launchCommand({ ...asked, ...(resume !== undefined ? { resume } : {}), ...(copyOf !== undefined ? { copyOf } : {}), ...memory, ...(deps.launch !== undefined ? { launch: deps.launch } : {}) }, localId, valued !== undefined);
+    const launch = resume === undefined ? command : `${savedSpendCommand({ configDir: deps.configDir, sessionId: resume })}${command}`;
     const line = userMessageLine(options.prompt, localId, options.images);
     const run = deps.exec(launch, { env: { ...env }, input: [line], ...(options.promptAfter !== undefined ? { inputAfter: options.promptAfter } : {}), ...(valued !== undefined ? { secret: valued } : {}) });
     const keeper = options.keep === true ? keepRun(run) : undefined;
     const stream = keeper === undefined ? run : keeper.turn().stream;
-    return follow({ stream, localId, announced: false, fresh: options.resume === undefined, command: launch, ...(keeper !== undefined ? { keeper } : {}), onEvent: options.onEvent });
+    return follow({ stream, localId, announced: false, fresh: resume === undefined, command: launch, ...(keeper !== undefined ? { keeper } : {}), onEvent: options.onEvent });
   };
 
   const warm: ClaudeAdapter["warm"] = options => {
@@ -1489,5 +1471,6 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
     aside,
     asideServers: true,
     env,
+    conversations: claudeConversations(deps),
   };
 }
