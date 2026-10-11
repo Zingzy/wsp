@@ -703,13 +703,16 @@ export function workspacesArea(ctx: RuntimeContext): WorkspacesArea {
       await ctx.removeWorktree(entry, force === true, check === true ? { check: true } : {});
     },
 
-    async checkout(id, origin) {
+    async checkout(id, origin, fresh = false) {
       const entry = await ctx.entryOf(id, origin);
-      const checkout = await ctx.readCheckout(entry, false);
-      // The tile asks as it mounts, and its word rides the status once the git host answers.
-      void ctx.readPullRequest(entry, false);
-      // A lead's thread opening reads its children again.
-      if ([...live.values()].some(e => e.record.parentWorkspaceId === entry.record.id)) void ctx.readTree(entry);
+      const checkout = await ctx.readCheckout(entry, fresh);
+      // A fresh ask is a composer reading the branch again on a timer; the pull request and the children are not its.
+      if (!fresh) {
+        // The tile asks as it mounts, and its word rides the status once the git host answers.
+        void ctx.readPullRequest(entry, false);
+        // A lead's thread opening reads its children again.
+        if ([...live.values()].some(e => e.record.parentWorkspaceId === entry.record.id)) void ctx.readTree(entry);
+      }
       return checkout === undefined ? {} : { checkout };
     },
 
