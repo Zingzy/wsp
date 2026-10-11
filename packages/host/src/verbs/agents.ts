@@ -7,6 +7,7 @@ import {
   AgentDefaults,
   AgentRow,
   McpRow,
+  PluginRow,
   ServerToolsAnswer,
   SkillAdded,
   SkillHit,
@@ -20,7 +21,7 @@ import {
 import { usageIs, tool, type Verb, flag, flagList } from "./client.js";
 import { HOST_SIDE_VAULT } from "./workspaces-help.js";
 import { asText, ACCESS_IN_WORDS, confirmed } from "./io.js";
-import { aimedUsage, agentsTarget, projectAsked, toolsProject, agentsReport, AGENTS_FRAME, reportFacts, agentRowLines, skillRowLines, serverRowLines, toolLines, serverToolsOf, serverChanged, serverValues, serverCommand, serverScope, ServerNameIn, ServerAgentIn, ServerScopeIn, ServerProjectIn, SERVER_CHANGE_WORDS, SERVER_TOOLS_WORDS, toolsAddedLine, addTools, signInHere, signedInLine, searchSkillsSh, skillHitLines, skillShown, shownText, skillAdded, isInLine, addedLine, goneFromLine, turnedInLine, removedLine, skillChanged, turnedLine, SkillNameIn, SkillProjectIn, SKILL_CHANGE_WORDS, AGENT_SET_RESETS, AGENT_SETUP_RESETS, agentDefaultsSet, agentDefaultsLine, defaultAgentSet, defaultAgentLine, envNameOf, agentSetupSet, agentSetupLines, AgentsThreadIn, AgentsOnIn, AGENTS_READ_WORDS } from "./agents-help.js";
+import { aimedUsage, agentsTarget, projectAsked, toolsProject, agentsReport, AGENTS_FRAME, reportFacts, agentRowLines, skillRowLines, serverRowLines, toolLines, serverToolsOf, serverChanged, serverValues, serverCommand, serverScope, ServerNameIn, ServerAgentIn, ServerScopeIn, ServerProjectIn, SERVER_CHANGE_WORDS, SERVER_TOOLS_WORDS, toolsAddedLine, addTools, signInHere, signedInLine, searchSkillsSh, skillHitLines, skillShown, shownText, skillAdded, isInLine, addedLine, goneFromLine, turnedInLine, removedLine, skillChanged, turnedLine, SkillNameIn, SkillProjectIn, SKILL_CHANGE_WORDS, AGENT_SET_RESETS, AGENT_SETUP_RESETS, agentDefaultsSet, agentDefaultsLine, defaultAgentSet, defaultAgentLine, envNameOf, agentSetupSet, agentSetupLines, AgentsThreadIn, AgentsOnIn, AGENTS_READ_WORDS, pluginRowLines, pluginChanged, pluginTurnedLine, PluginIdIn, PluginAgentIn, PLUGIN_CHANGE_WORDS } from "./agents-help.js";
 
 export const AGENT_VERBS: readonly Verb[] = [
   {
@@ -570,6 +571,55 @@ export const AGENT_VERBS: readonly Verb[] = [
           const asked = projectAsked(project, thread, on, usage);
           const changed = await serverChanged(await deps.client(), "servers.toggle", { agent, name, ...serverScope(scope, usage, asked), on: word === "enable" }, thread, on, usage, `wsp servers ${word}`, asked.name);
           return asText(turnedInLine(name, word === "enable", changed.file), changed);
+        },
+      }),
+    }),
+  ),
+  {
+    name: "plugins",
+    usage: "wsp plugins [<thread>] [--on <computer>]",
+    about: "each agent's plugins on this computer, a box you added or where a thread runs: on or off, missing where the agent names one it cannot load, its marketplace and version, and what it brings",
+    page: "agent",
+    options: { on: { type: "string" } },
+    run: async ctx => {
+      if (ctx.args.length > 1) throw usageRefusal("wsp plugins takes one thread at most.", usageIs(ctx));
+      const report = await agentsReport(await ctx.client(), ctx.args[0], flag(ctx.flags, "on"), usageIs(ctx), "wsp plugins");
+      ctx.out.emit({ ...reportFacts(report), plugins: report.plugins ?? [] }, pluginRowLines(report).join("\n"));
+      return 0;
+    },
+    tool: tool({
+      description: `Every plugin of each agent on one computer or where a thread runs, one row per agent and plugin in each scope: its id (name@marketplace), the agent, the scope it is installed for (user, or a project's or a project's local with that project), whether the agent's own settings turn it on there (Claude Code: local over project over user settings, then the plugin's default; Codex: what its app server answers), missing where the agent names it and loads nothing of it (Claude Code's folder for it is not there, or Codex lists no such plugin), its folder, its version, its description, where its marketplace comes from, and what it brings: skills, commands and subagents by the names a turn gives them, the events its hooks run on, its tool servers, language servers and apps. Claude Code's are read off its files, never by claude plugin list, which fetches; Codex's are asked of its app server. ${AGENTS_READ_WORDS}`,
+      input: { thread: AgentsThreadIn, on: AgentsOnIn },
+      output: { ...AGENTS_FRAME, plugins: z.array(PluginRow) },
+      call: async ({ thread, on }, deps) => {
+        const report = await agentsReport(await deps.client(), thread, on, aimedUsage("plugins"), "wsp plugins");
+        return asText(pluginRowLines(report).join("\n"), { ...reportFacts(report), plugins: report.plugins ?? [] });
+      },
+    }),
+  },
+  ...(["disable", "enable"] as const).map(
+    (word): Verb => ({
+      name: `plugins ${word}`,
+      usage: `wsp plugins ${word} <id> --agent <id> [<thread>] [--on <computer>]`,
+      about: word === "disable" ? "turns one agent's plugin off for the login, by the agent's own road, so its next turn loads nothing of it" : "turns one agent's plugin that was turned off on again",
+      page: "agent",
+      options: { agent: { type: "string" }, on: { type: "string" } },
+      run: async ctx => {
+        const [plugin, thread, ...rest] = ctx.args;
+        const agent = flag(ctx.flags, "agent");
+        if (plugin === undefined || rest.length > 0) throw usageRefusal(`wsp plugins ${word} takes one plugin's id and one thread at most.`, usageIs(ctx));
+        if (agent === undefined) throw usageRefusal(`wsp plugins ${word} needs --agent, the agent whose plugin it is, as wsp plugins shows it.`, usageIs(ctx));
+        const row = await pluginChanged(await ctx.client(), { agent, plugin, on: word === "enable" }, thread, flag(ctx.flags, "on"), usageIs(ctx), `wsp plugins ${word}`);
+        ctx.out.emit({ plugin: row }, pluginTurnedLine(row));
+        return 0;
+      },
+      tool: tool({
+        description: `Turns one agent's plugin ${word === "enable" ? "on again" : "off"} on one computer or where a thread runs, by its id and agent. ${PLUGIN_CHANGE_WORDS} Answers its row after.`,
+        input: { plugin: PluginIdIn, agent: PluginAgentIn, thread: AgentsThreadIn, on: AgentsOnIn },
+        output: { plugin: PluginRow },
+        call: async ({ plugin, agent, thread, on }, deps) => {
+          const row = await pluginChanged(await deps.client(), { agent, plugin, on: word === "enable" }, thread, on, aimedUsage(`plugins_${word}`), `wsp plugins ${word}`);
+          return asText(pluginTurnedLine(row), { plugin: row });
         },
       }),
     }),

@@ -21,6 +21,8 @@ import {
   ServerToolsAnswer,
   SkillAdded,
   SkillHit,
+  PluginRow,
+  type PluginAsk,
   SkillPreview,
   type AgentsTarget,
   type McpScope,
@@ -608,6 +610,8 @@ export interface Api {
   serversRemove?(target: AgentsTarget, ask: ServerAsk): Promise<{ file: string }>;
   /** One server turned off or on there by the switch its agent reads. */
   serversToggle?(target: AgentsTarget, ask: ServerAsk, on: boolean): Promise<{ file: string }>;
+  /** One agent's plugin turned on or off there for the login, and its row after. */
+  pluginsToggle?(target: AgentsTarget, ask: PluginAsk, on: boolean): Promise<PluginRow>;
   /** Asks the host to dial one computer once, now: a frame over the link it holds, or one login over the road it
    * was added on when it holds none. Answers what came back, the sentence to say it in and the row as it now
    * stands. A client without it draws no Try now rather than one that would ask nobody. */
@@ -1151,6 +1155,7 @@ export function makeApi(c: ProtocolClient): Api {
     serversAdd: async (target, ask) => ({ file: String((await c.request<{ file?: unknown }>("servers.add", { target, ...ask })).file) }),
     serversRemove: async (target, ask) => ({ file: String((await c.request<{ file?: unknown }>("servers.remove", { target, ...ask })).file) }),
     serversToggle: async (target, ask, on) => ({ file: String((await c.request<{ file?: unknown }>("servers.toggle", { target, ...ask, on })).file) }),
+    pluginsToggle: async (target, ask, on) => PluginRow.parse((await c.request<{ plugin?: unknown }>("plugins.toggle", { target, ...ask, on })).plugin),
     serversTools: async (target, agent, name, refresh) =>
       ServerToolsAnswer.parse((await c.request<{ answer?: unknown }>("servers.tools", { target, agent, name, ...(refresh === true ? { refresh } : {}) })).answer),
     serversIcon: async (host, refresh) => {

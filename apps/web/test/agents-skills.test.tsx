@@ -2,7 +2,7 @@
 // Skills in a task's panel: a skill's page draws its SKILL.md, read by the
 // host once, in the renderer's restricted mode; its switch and Remove go to
 // the host, Remove only once its confirmation is taken; the skill wsp writes
-// and a plugin's offer nothing and a project's has no switch; Add skill opens
+// offers nothing and a project's has no switch; Add skill opens
 // a search the host sends to skills.sh, and a result opens its page with its
 // SKILL.md before install, the agents to put it in and the project.
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
@@ -165,11 +165,11 @@ describe("a skill's page", () => {
     expect(h.removes).toEqual(["frontend-design"]);
   });
 
-  it("offers nothing on the skill wsp writes or a plugin's, and no switch on a project's, which lives in its repo", () => {
+  it("offers nothing on the skill wsp writes, and no switch on a project's, which lives in its repo", () => {
     const h = host();
     render(<List />);
     tab("Skills");
-    for (const key of ["skill-user-wsp", "skill-plugin-pdf", "skill-project-pr_wsp-wsp-review"]) {
+    for (const key of ["skill-user-wsp", "skill-project-pr_wsp-wsp-review"]) {
       openRow(key);
       expect(turn(), key).toBeNull();
       expect(headActs(), key).toEqual([]);

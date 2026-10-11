@@ -18,6 +18,7 @@ import { threadAgentsTarget, useAgentsReport } from "./useAgentsReport.js";
 import { useServerTools } from "./useServerTools.js";
 import { useServerActs } from "./useServerActs.js";
 import { useSkillActs } from "./useSkillActs.js";
+import { usePluginActs } from "./usePluginActs.js";
 
 export const PANEL_WORDS = {
   fork: (workspace: string, cloud: string): string => `${workspace} (${cloud})`,
@@ -60,6 +61,7 @@ export function AgentsSurface({ workspaceId }: { workspaceId: string }) {
   const acts = useAgentActs(actsAt);
   const skills = useSkillActs(actsAt);
   const servers = useServerActs(actsAt);
+  const plugins = usePluginActs(actsAt);
   const cloud = place === undefined ? undefined : placeName(place);
   const computer = where === "here" ? hereName(places) : where === "fork" && workspace !== null ? PANEL_WORDS.fork(workspace.name, cloud ?? "") : (cloud ?? "");
   const placeId = place?.id ?? (where === "here" ? HERE_PLACE_ID : undefined);
@@ -84,6 +86,7 @@ export function AgentsSurface({ workspaceId }: { workspaceId: string }) {
           ...(acts === undefined ? {} : { acts }),
           ...(skills === undefined ? {} : { skills }),
           ...(servers === undefined ? {} : { servers }),
+          ...(plugins === undefined ? {} : { plugins }),
           ...(where === "here" ? { typeInTerminal: (typed: string) => void openPanelTerminalWith(workspaceId, typed) } : {}),
         }}
         now={Date.now()}

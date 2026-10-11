@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The Agents page, an agent's own page and a project's New threads, drawn in a
-// real Chromium at the window's 1280 and a phone's 390 in both themes, since
+// real Chromium at the window's 1440 and 1280 and a phone's 390 in both themes, since
 // jsdom lays nothing out: every row's words and control stand inside the row
 // and the page never scrolls sideways. Each screen is photographed into the
 // render folder under the temp dir to be held against the locked design. Runs only when asked for (WSP_RENDER=1) and skips without
@@ -24,7 +24,8 @@ const SCREENS = [
   { screen: "settings-agents", ready: "[data-agent-row='claude']", rows: ["default-agent", "claude", "codex", "opencode"] },
   { screen: "settings-agent", ready: "[data-settings-row='agent-env']", rows: ["agent-model", "agent-access", "model-claude-opus-5-5", "model-claude-haiku-4-5-20251001", "agent-program", "agent-config", "agent-args", "agent-env"] },
   { screen: "settings-agents-servers", ready: "[data-kind-row='server-global-airtable-stdio-npx -y airtable-mcp-server']", rows: ["server-global-airtable-stdio-npx -y airtable-mcp-server", "server-global-sentry-http-mcp.sentry.dev"] },
-  { screen: "settings-agents-skills", ready: "[data-kind-row='skill-user-frontend-design']", rows: ["skill-user-frontend-design", "skill-user-wsp", "skill-plugin-pdf"] },
+  { screen: "settings-agents-skills", ready: "[data-kind-row='skill-user-frontend-design']", rows: ["skill-user-frontend-design", "skill-user-wsp"] },
+  { screen: "settings-agents-plugins", ready: "[data-kind-row='claude:user:vercel@claude-plugins-official']", rows: ["claude:user:vercel@claude-plugins-official", "claude:user:skill-creator@claude-plugins-official", "codex:user:chrome@openai-bundled", "claude:local:pr_wsp:rust-analyzer-lsp@claude-plugins-official"] },
   { screen: "settings-project-overrides", ready: "[data-settings-row='project-access']", rows: ["project-agent", "project-model", "project-access"] },
 ] as const;
 
@@ -84,7 +85,7 @@ describe.skipIf(renderSkipped !== undefined)("the agents settings pages in Chrom
   }
 
   for (const { screen, ready, rows } of SCREENS) {
-    for (const width of [1280, 390] as const) {
+    for (const width of [1440, 1280, 390] as const) {
       it.each(["dark", "light"] as const)(`${screen} at ${width} in the %s theme stands whole`, async theme => {
         const page = await browser!.newPage({ viewport: { width, height: 900 } });
         try {

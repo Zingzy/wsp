@@ -4,7 +4,7 @@
 // reading the agents, skills and servers off it is the host's, since the
 // catalog's readers live there. A read never wakes a machine.
 import { randomBytes } from "node:crypto";
-import { AgentsReport, GITHUB_CLI, HERE_PLACE_ID, installingFirstLine, refusal, toolNotInstalledFix, toolNotInstalledLine, lastLine, type McpServerSpec as LaunchServer, type PlaceProvisionRow, ptyBareOn, type AgentRow, type AgentSetupSet, type AgentSetupView, THIS_COMPUTER, noSuchAgentsProjectRefusal, sharedAgentsProjectRefusal, ServerToolsAnswer, SignInLine, SkillAdded, SkillHit, SkillPreview, isJoinedComputer, nappingAgentsRefusal, nappingServersRefusal, nappingSignInRefusal, nappingSkillsRefusal, nappingToolsRefusal, noSignInRefusal, noSuchPlaceRefusal, providerAgentsRefusal, type AgentSignInState, type AgentsProject, type AgentsSignInEvent, type AgentsTarget, type DaemonFrame, type PageReach, type ServerAdd, type ServerAsk, type WorkspacePhase, withoutControlChars, SIGN_IN_ENDED_KEPT_MS, type AgentsSignInRun, type McpScope } from "@wsp/protocol";
+import { AgentsReport, GITHUB_CLI, HERE_PLACE_ID, installingFirstLine, refusal, toolNotInstalledFix, toolNotInstalledLine, lastLine, type McpServerSpec as LaunchServer, type PlaceProvisionRow, ptyBareOn, type AgentRow, type AgentSetupSet, type AgentSetupView, THIS_COMPUTER, noSuchAgentsProjectRefusal, sharedAgentsProjectRefusal, ServerToolsAnswer, SignInLine, SkillAdded, SkillHit, SkillPreview, isJoinedComputer, nappingAgentsRefusal, nappingPluginsRefusal, nappingServersRefusal, nappingSignInRefusal, nappingSkillsRefusal, nappingToolsRefusal, noSignInRefusal, noSuchPlaceRefusal, providerAgentsRefusal, type AgentSignInState, type AgentsProject, type AgentsSignInEvent, type AgentsTarget, type DaemonFrame, type PageReach, type PluginAsk, PluginRow, type ServerAdd, type ServerAsk, type WorkspacePhase, withoutControlChars, SIGN_IN_ENDED_KEPT_MS, type AgentsSignInRun, type McpScope } from "@wsp/protocol";
 import type { Machine } from "@wsp/engine";
 import { catalogEntry, mintsToken } from "@wsp/catalog";
 import type { DaemonChannel } from "./daemon-channel.js";
@@ -25,7 +25,9 @@ export const GUEST_WSP_MCP: LaunchServer = { command: "wsp", args: ["mcp"] };
  * `stores` is the folder each agent's store variable names for a thread there, by agent id, which is where that agent
  * reads its own servers. */
 export type AgentsOn =
-  | { kind: "here"; projects?: readonly AgentsProject[] }
+  /** `stores`: each agent's folder a turn launched here reads, where it is not its own under the home, which the plugins
+   * are read and switched in. */
+  | { kind: "here"; projects?: readonly AgentsProject[]; stores?: Readonly<Record<string, string>> }
   /** `relayed`: this host forwards that computer's sign-in callback port from this computer. `setupRows`: every row
    * the computer's last setup came to, which says the agents it installed there. */
   | { kind: "box"; name?: string; machine: Pick<Machine, "exec">; login: { HOME?: string; PATH?: string }; signIns?: Record<string, AgentSignInState>; versions?: Record<string, string>; setupRows?: readonly PlaceProvisionRow[]; logins?: string; relayed?: boolean; projects?: readonly AgentsProject[]; stores?: Readonly<Record<string, string>> }
@@ -151,6 +153,12 @@ export interface ServersActs {
   toggle(on: AgentsOn, ask: ServerAsk & { on: boolean }): Promise<{ file: string }>;
 }
 
+/** What the host does with an agent's plugins on a target: one turned on or off for the login by the agent's own
+ * road, answering its row as it now stands. */
+export interface PluginsActs {
+  toggle(on: AgentsOn, ask: PluginAsk & { on: boolean }): Promise<{ plugin: PluginRow }>;
+}
+
 /** A remote MCP server's icon by its host, asked by this host alone: a data url, or nothing where there is none or
  * the host may not be asked for. */
 export interface ServerIcons {
@@ -182,11 +190,15 @@ export interface AgentsReadOptions<Caller> {
   workspace: (id: string, origin?: Caller) => Promise<AgentsWorkspace>;
   /** The folder each agent's store variable names for a thread on a computer you joined whose login's home is `home`. */
   placeStores?: (placeId: string, home: string) => Readonly<Record<string, string>>;
+  /** Each agent's folder a turn launched on this computer reads, a kept config folder or the store variable of the
+   * host's own environment, where it is not the agent's own under the home. */
+  storesHere?: () => Promise<Readonly<Record<string, string>>>;
   /** The projects this host holds on a computer, each with its folder there; none where it holds none. */
   projects?: (placeId: string) => Promise<readonly AgentsProject[]>;
   acts?: AgentsActs;
   skills?: SkillsActs;
   servers?: ServersActs;
+  plugins?: PluginsActs;
   /** Absent, or with the person's switch off, every server draws its glyph and nothing is asked. */
   icons?: ServerIcons;
   /** Whether the person lets this host ask vendors for each agent's newest version; absent, it may. */
@@ -206,6 +218,9 @@ export interface AgentsReadOptions<Caller> {
   /** Writes a change to how an agent runs on a computer, checked first, a config folder on the computer it names. */
   setupWrite?: (placeId: string, agent: string, change: AgentSetupSet) => Promise<void>;
 }
+
+/** A here target's stores, left off where there are none. */
+const storesOn = (stores: Readonly<Record<string, string>> | undefined): { stores?: Readonly<Record<string, string>> } => (stores === undefined || Object.keys(stores).length === 0 ? {} : { stores });
 
 /** How many hits a search asks skills.sh for where the asker names no number. */
 export const SKILLS_SEARCH_LIMIT = 20;
@@ -240,6 +255,7 @@ export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): {
   serversRemove(target: AgentsTarget, ask: ServerAsk, origin?: Caller): Promise<{ file: string }>;
   serversToggle(target: AgentsTarget, ask: ServerAsk & { on: boolean }, origin?: Caller): Promise<{ file: string }>;
   serversIcon(host: string, refresh?: boolean): Promise<string | null>;
+  pluginsToggle(target: AgentsTarget, ask: PluginAsk & { on: boolean }, origin?: Caller): Promise<{ plugin: PluginRow }>;
   setup(placeId: string, agent: string, change: AgentSetupSet, origin?: Caller): Promise<AgentRow>;
 } {
   /** A write in one project of a computer changes the computer's report, which is the one a page reads. */
@@ -347,7 +363,11 @@ export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): {
   /** Where a target's lines run, or the napping workspace's name; `read` covers every project a computer holds. */
   const onOf = async (target: AgentsTarget, origin?: Caller, read = false): Promise<AgentsOn | Napping> => {
     if ("placeId" in target) {
-      if (target.placeId === HERE_PLACE_ID) return { kind: "here", ...(await projectsAt(target, THIS_COMPUTER, read)) };
+      if (target.placeId === HERE_PLACE_ID) {
+        // A kept folder the setup now refuses refuses the launch too; the read falls back to the agents' own folders.
+        const stores = await o.storesHere?.().catch(() => undefined);
+        return { kind: "here", ...(storesOn(stores)), ...(await projectsAt(target, THIS_COMPUTER, read)) };
+      }
       const door = o.places();
       if (door === undefined) throw new Error(NO_PLACE_DOOR);
       const rows = await door.list(o.now());
@@ -375,7 +395,8 @@ export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): {
     }
     const ws = await o.workspace(target.workspaceId, origin);
     if (ws.phase === "napping") return { napping: ws.name };
-    return ws.local ? { kind: "here", projects: [ws.project] } : { kind: "machine", machine: ws.machine, projects: [ws.project], ...(o.relayed?.() === true ? { relayed: true } : {}), ...(ws.stores !== undefined ? { stores: ws.stores } : {}) };
+    const here = ws.local ? await o.storesHere?.().catch(() => undefined) : undefined;
+    return ws.local ? { kind: "here", projects: [ws.project], ...storesOn(here) } : { kind: "machine", machine: ws.machine, projects: [ws.project], ...(o.relayed?.() === true ? { relayed: true } : {}), ...(ws.stores !== undefined ? { stores: ws.stores } : {}) };
   };
   /** gh's login on a computer runs only where gh is, and the setup puts none there for a GitHub row set aside: the app's
    * sign-in and the command line's line both put it on here first. `installing` is told only once an install starts;
@@ -574,6 +595,11 @@ export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): {
     serversRemove: (target, ask, origin) => serverWrite(target, origin, (acts, on) => acts.remove(on, ask)),
     serversIcon: async (host, refresh) => (o.icons === undefined ? null : o.icons.icon(host, refresh)),
     serversToggle: (target, ask, origin) => serverWrite(target, origin, (acts, on) => acts.toggle(on, ask)),
+    async pluginsToggle(target, ask, origin) {
+      if (o.plugins === undefined) throw new Error(NO_AGENTS_READER);
+      const [acts, on] = [o.plugins, await awakeOn(target, nappingPluginsRefusal, origin)];
+      return written(target, async () => ({ plugin: PluginRow.parse((await acts.toggle(on, ask)).plugin) }));
+    },
     async addTools(target, agent, origin) {
       const acts = actsOf();
       const on = await onOf(target, origin);

@@ -6,7 +6,7 @@
 import { LogInIcon, PencilIcon, XIcon, type LucideIcon } from "lucide-react";
 import { agentName, catalogEntry, hasLogin, loginIdOf, loginThere, mintsToken, serverSignInRoad, signInRoadOf } from "@wsp/catalog";
 import { outcomeWord } from "../../settings/places.js";
-import { agentOfRow, type AgentRow, type AgentsProject, type AgentsReport, type AgentsTarget, type McpRow, type McpScope, type PageReach, type PlaceProvisionRow, type SealedImage, type ServerAdd, type ServerToolsAnswer, type SignInRoad, type SkillHit, type SkillPreview, type SkillRow } from "@wsp/protocol";
+import { agentOfRow, type AgentRow, type AgentsProject, type AgentsReport, type AgentsTarget, type McpRow, type McpScope, type PageReach, type PlaceProvisionRow, type PluginRow, type PluginScope, type SealedImage, type ServerAdd, type ServerToolsAnswer, type SignInRoad, type SkillHit, type SkillPreview, type SkillRow } from "@wsp/protocol";
 
 /** Where the report was read, which decides which acts a row offers: this computer, a joined box (its page, or a task
  * standing on it), a fork at a cloud (a copy, so every act is the image's), or a cloud's own page (the image's rows). */
@@ -20,7 +20,7 @@ export const NOT_ANSWERING_AFTER_MS = 30_000;
 export const saysNotAnswering = (awayMs: number | null): boolean => awayMs === null || awayMs >= NOT_ANSWERING_AFTER_MS;
 
 export const AGENTS_LIST_WORDS = {
-  section: "Agents, tool servers and skills",
+  section: "Agents, tool servers, skills and plugins",
   readAgain: "Read again",
   paused: "paused",
   notAnswering: "not answering",
@@ -127,7 +127,15 @@ export const AGENTS_LIST_WORDS = {
   keptCurrent: "wsp keeps it current on every start",
   inRepo: "in the repo",
   livesInRepo: (path: string): string => `lives in the repo at ${path}`,
-  fromPlugin: "from a plugin, turn the plugin off instead",
+  searchPlugins: "Search plugins",
+  noPlugins: (on: string): string => `No plugins on ${on} yet.`,
+  missing: "missing",
+  marketplace: "Marketplace",
+  scope: "Scope",
+  scopes: { user: "User", project: "Project", local: "Local" } satisfies Record<PluginScope, string>,
+  setIn: "Set in",
+  whatItBrings: "What it brings",
+  brings: { skills: "Skills", commands: "Commands", subagents: "Subagents", hooks: "Hooks", servers: "Tool servers", lsp: "Language servers", apps: "Apps" } satisfies Record<keyof PluginRow["brings"], string>,
   noReader: "This wsp reads no agents report yet.",
   copy: "Copy",
   off: "off",
@@ -269,6 +277,17 @@ export interface SkillActs {
   refusedOf(key: string): string | undefined;
 }
 
+/** The plugins road of one target: one plugin turned on or off by its key, with what is running and why the last ask was
+ * refused. */
+export interface PluginActs {
+  toggle(row: PluginRow, on: boolean): void;
+  busyOf(key: string): boolean;
+  refusedOf(key: string): string | undefined;
+}
+
+/** A plugin's key: its agent, its scope, the project's id where it is a project's, and its id. */
+export const pluginKey = (row: Pick<PluginRow, "agent" | "scope" | "id" | "project">): string => `${row.agent}:${row.scope}:${row.project === undefined ? "" : `${row.project.id}:`}${row.id}`;
+
 /** The servers road of one target: a server added, whose values the form alone holds until the host takes them,
  * and one entry's rows removed or turned off or on, each by the entry's key, with what is running and why the last
  * ask was refused. */
@@ -357,6 +376,7 @@ export interface RowsContext {
   readonly acts?: AgentActs;
   readonly skills?: SkillActs;
   readonly servers?: ServerActs;
+  readonly plugins?: PluginActs;
   /** Types a line into a terminal of the task on this computer, for a sign-in only the person can finish. */
   readonly typeInTerminal?: (line: string) => void;
   /** The computer as the lists' words name it, which the host of the lists fills in. */

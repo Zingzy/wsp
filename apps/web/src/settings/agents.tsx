@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Settings > Agents: the agents, tool servers and skills on one of the
+// Settings > Agents: the agents, tool servers, skills and plugins on one of the
 // person's computers. The page's head holds the computer it reads and the
 // tab. The agents tab says which agent a new thread starts on, then one row
 // per agent on that computer with its version, its sign-in and what a new
 // thread runs it with, each opening that agent's own page; an agent that is
-// not there offers its install. The other two tabs draw their kind's rows in
+// not there offers its install. The other three tabs draw their kind's rows in
 // the same grammar, each opening its item's own page. A task's panel draws
 // the same agent cards and tabs.
-import { BotIcon, CircleArrowUpIcon, ScrollTextIcon, ServerIcon } from "lucide-react";
+import { BotIcon, CircleArrowUpIcon, PuzzleIcon, ScrollTextIcon, ServerIcon } from "lucide-react";
 import { HERE_PLACE_ID, listWords, modelOf, resolveThreadDefaults, unmarked, withCustomModels, type AgentRow, type HarnessCatalog, type PlaceView, type ThreadDefaults } from "@wsp/protocol";
 import { agentName, catalogEntry } from "@wsp/catalog";
 import { copyText } from "../actions/clipboard.js";
@@ -39,6 +39,7 @@ export const AGENTS_TABS: ReadonlyArray<{ value: AgentsTab; label: React.ReactNo
   { value: "agents", label: <><BotIcon aria-hidden className="size-3.5" />{W.tabs.agents}</> },
   { value: "servers", label: <><ServerIcon aria-hidden className="size-3.5" />{W.tabs.servers}</> },
   { value: "skills", label: <><ScrollTextIcon aria-hidden className="size-3.5" />{W.tabs.skills}</> },
+  { value: "plugins", label: <><PuzzleIcon aria-hidden className="size-3.5" />{W.tabs.plugins}</> },
 ];
 
 /** The computers whose own agents a person manages: this one and every computer joined to it. A cloud's agents are its

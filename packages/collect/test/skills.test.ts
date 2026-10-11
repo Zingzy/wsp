@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { mkdirSync, mkdtempSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { catalogEntry, type AgentEntry } from "@wsp/catalog";
+import { detectPlugins } from "../src/detect/plugins.js";
 import { detectSkills, skillFrontmatter, skillMdFrontmatter, skillRoots } from "../src/detect/skills.js";
 import type { Host } from "../src/host.js";
 import { nodeHost } from "../src/live-host.js";
@@ -23,15 +25,21 @@ function fixture(): { host: Host; home: string; project: string; runs: string[][
   return { host, home, project, runs };
 }
 
+/** Claude Code's plugins alone, whose module reads files and runs nothing. */
+const CLAUDE_ONLY = [catalogEntry("claude") as AgentEntry];
+const pluginsOf = async (host: Host) => (await detectPlugins(host, { agents: CLAUDE_ONLY })).agents;
+
 describe("the skills on a computer", () => {
   it("lists every skill once by name with every folder it lives in, links and copies, and whose own folder each is", async () => {
     const { host, runs } = fixture();
-    const read = await detectSkills(host, await skillRoots(host));
+    const plugins = await pluginsOf(host);
+    runs.length = 0;
+    const read = await detectSkills(host, await skillRoots(host, { plugins }));
     expect(read.refused).toEqual([]);
     // One command for every folder, however many skills they hold.
     expect(runs).toHaveLength(1);
     expect(read.skills.map(s => [s.name, s.scope])).toEqual([
-      ["frontend-design", "plugin"],
+      ["frontend:frontend-design", "plugin"],
       ["pdf", "user"],
       ["plan", "user"],
       ["review", "user"],
@@ -48,7 +56,31 @@ describe("the skills on a computer", () => {
     expect(read.skills.find(s => s.name === "sql")!.paths.map(p => p.agent)).toEqual(["gemini", "opencode"]);
     expect(read.skills.find(s => s.name === "review")!.description).toBe("Review a diff");
     expect(read.skills.find(s => s.name === "plan")!.paths).toEqual([{ path: "~/.hermes/skills/software-development/plan", agent: "hermes" }]);
-    expect(read.skills.find(s => s.name === "frontend-design")!.paths[0]).toMatchObject({ path: "~/.claude/plugins/cache/official/frontend/abc123/skills/frontend-design", agent: "claude" });
+    const plugin = read.skills.find(s => s.name === "frontend:frontend-design")!;
+    expect(plugin.plugin).toBe("frontend@official");
+    expect(plugin.paths).toEqual([{ path: "~/.claude/plugins/cache/official/frontend/abc123/skills/frontend-design", agent: "claude" }]);
+  });
+
+  it("reads a plugin's skills off while settings switch its plugin off, under the name Claude announces", async () => {
+    const { host, home } = fixture();
+    writeFileSync(join(home, ".claude/settings.json"), JSON.stringify({ enabledPlugins: { "frontend@official": false } }));
+    const plugin = (await detectSkills(host, await skillRoots(host, { plugins: await pluginsOf(host) }))).skills.find(s => s.plugin === "frontend@official")!;
+    expect(plugin.name).toBe("frontend:frontend-design");
+    expect(plugin.paths.every(p => p.off === true)).toBe(true);
+  });
+
+  it("reads the agents' own skill folders and Claude Code's plugin index under the folder each store names", async () => {
+    const { host, home } = fixture();
+    const stores = { claude: join(home, "store-claude"), codex: join(home, "store-codex") };
+    renameSync(join(home, ".claude"), stores.claude);
+    renameSync(join(home, ".codex"), stores.codex);
+    // The index names folders under the old home, as an index carried over does; the store's own copy is what Claude reads.
+    const index = join(stores.claude, "plugins/installed_plugins.json");
+    writeFileSync(index, readFileSync(index, "utf8").replaceAll(`${home}/.claude/`, `${stores.claude}/`));
+    const at = { ...host, stores };
+    const read = await detectSkills(at, await skillRoots(at, { plugins: await pluginsOf(at) }));
+    expect(read.skills.find(s => s.name === "frontend:frontend-design")!.paths[0]!.path).toBe("~/store-claude/plugins/cache/official/frontend/abc123/skills/frontend-design");
+    expect(read.skills.find(s => s.name === "pdf")!.paths.map(p => p.path)).toEqual(["~/store-claude/skills/pdf", "~/store-codex/skills/pdf", "~/.agents/skills/pdf", "~/.pi/agent/skills/pdf"]);
   });
 
   it("leaves out dot folders, folders with no SKILL.md, a skill's own inner examples and a project's plugin", async () => {

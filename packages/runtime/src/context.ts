@@ -562,6 +562,7 @@ export interface AgentsArea {
   readonly setupRefusals: Map<string, string>;
   readonly setupRefusal: (entry: LiveWorkspace, named?: string) => Promise<string | null>;
   readonly homesHere: () => Promise<Record<string, string>>;
+  readonly storesHere: () => Promise<Record<string, string>>;
   readonly confineSetup: (entry: LiveWorkspace, named?: string) => Promise<void>;
   readonly launchAdapterFor: (entry: LiveWorkspace, named?: string | undefined, turnEnv?: Readonly<Record<string, string>> | undefined, waiting?: TurnWaiting | undefined, servers?: Readonly<Record<string, string>> | undefined) => Promise<ReturnType<(entry: LiveWorkspace, named?: string, turnEnv?: Readonly<Record<string, string>>, waiting?: TurnWaiting, servers?: Readonly<Record<string, string>>) => { harness: string; adapter: HarnessAdapter; }>>;
   readonly defaultAgentOf: (prefs: Preferences, entry: LiveWorkspace | undefined) => string;

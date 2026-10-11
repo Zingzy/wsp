@@ -1,0 +1,21 @@
+# wsp plugins disable
+
+{/* Written by apps/docs-next/scripts/cli.ts: change the script or its source and run pnpm --filter @wsp/docs-next generate. */}
+
+```text
+usage: wsp plugins disable <id> --agent <id> [<thread>] [--on <computer>]
+  turns one agent's plugin off for the login, by the agent's own road, so its
+  next turn loads nothing of it
+
+  --agent    the agent whose plugin it is, by its catalog id as wsp plugins
+             shows it
+  --on       the computer to read, by the name wsp computers shows; this
+             computer without it, and a thread names its own
+  --json     print the raw protocol values, one JSON object per line, with
+             everything else on stderr
+  --state    the state file the host serves
+  --host     run the line against a host on your account, by the name wsp hosts
+             lists it under; WSP_HOST names one for a whole shell
+```
+
+MCP tool: [`plugins_disable`](/reference/mcp-tools#pluginsdisable).

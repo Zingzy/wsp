@@ -102,6 +102,10 @@ pub struct Words {
     pub turned_off: String,
     pub turned_on_in: String,
     pub turned_off_in: String,
+    pub plugin_turned_on: String,
+    pub plugin_turned_off: String,
+    /// Each kind a plugin brings by its field, with its word for one and for many.
+    pub plugin_kinds: Vec<(String, String, String)>,
     pub tools_added: String,
     pub server_tools_head: String,
     pub server_tools_held: String,

@@ -2,7 +2,7 @@
 
 {/* Written by apps/docs-next/scripts/mcp-tools.ts: change the script or its source and run pnpm --filter @wsp/docs-next generate. */}
 
-`wsp mcp` serves these 67 tools over stdio to an agent on your computer, and `wsp mcp install --agent <id>` writes it into that agent's own config. A tool answers a failure as a tool error that carries the object `--json` prints.
+`wsp mcp` serves these 70 tools over stdio to an agent on your computer, and `wsp mcp install --agent <id>` writes it into that agent's own config. A tool answers a failure as a tool error that carries the object `--json` prints.
 
 Each tool but `projects_add` is a line of the command line, its words joined with `_`, and that line's page links here.
 
@@ -619,6 +619,114 @@ Merges a child thread's branch into the folder its lead works in with a merge co
 | `merged` | boolean | yes |  |
 | `commits` | integer | yes |  |
 | `conflicts` | string[] | yes |  |
+
+## plugins
+
+Every plugin of each agent on one computer or where a thread runs, one row per agent and plugin in each scope: its id (name@marketplace), the agent, the scope it is installed for (user, or a project's or a project's local with that project), whether the agent's own settings turn it on there (Claude Code: local over project over user settings, then the plugin's default; Codex: what its app server answers), missing where the agent names it and loads nothing of it (Claude Code's folder for it is not there, or Codex lists no such plugin), its folder, its version, its description, where its marketplace comes from, and what it brings: skills, commands and subagents by the names a turn gives them, the events its hooks run on, its tool servers, language servers and apps. Claude Code's are read off its files, never by claude plugin list, which fetches; Codex's are asked of its app server. Read as the login the computer was added with, off each agent's config and whether its files are there: no MCP server is started and no login file is opened. A napping machine answers what stood there when it last ran, marked stale, and is not woken.
+
+**Takes**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `thread` | string |  | a thread, by its id or a prefix of it, whose computer and project to read; absent reads a computer |
+| `on` | string |  | the computer to read, by the name computers lists; absent with no thread is the computer the app runs on |
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `target` | object or object | yes |  |
+| `home` | string | yes |  |
+| `user` | string | yes |  |
+| `readAt` | string | yes |  |
+| `stale` | `"napping"` |  |  |
+| `refused` | string[] | yes |  |
+| `projects` | object[] |  |  |
+| `projects[].id` | string | yes |  |
+| `projects[].name` | string | yes |  |
+| `projects[].path` | string | yes |  |
+| `reach` | `here`, `relay`, `none` |  |  |
+| `plugins` | object[] | yes |  |
+| `plugins[].agent` | string | yes |  |
+| `plugins[].id` | string | yes |  |
+| `plugins[].name` | string | yes |  |
+| `plugins[].marketplace` | string | yes |  |
+| `plugins[].version` | string |  |  |
+| `plugins[].scope` | `user`, `project`, `local` | yes |  |
+| `plugins[].project` | object |  |  |
+| `plugins[].on` | boolean | yes |  |
+| `plugins[].missing` | `folder`, `marketplace`, `unlisted`, `uninstalled` |  |  |
+| `plugins[].path` | string |  |  |
+| `plugins[].setIn` | string |  |  |
+| `plugins[].description` | string |  |  |
+| `plugins[].source` | string |  |  |
+| `plugins[].brings` | object | yes |  |
+
+## plugins_disable
+
+Turns one agent's plugin off on one computer or where a thread runs, by its id and agent. Written for the login the computer was added with, where that agent's own command reads it: Claude Code's user settings, its enabledPlugins key written as claude plugin enable or disable writes it but with nothing downloaded first, Codex's config.toml through its app server's config write, which refuses a file changed since wsp read it. A plugin plugins does not list, a missing one, and one a project's settings switch are refused. A turn running now keeps what it loaded; the next one follows. A napping machine is not woken. The report there reads again at once. Answers its row after.
+
+**Takes**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `plugin` | string | yes | the plugin's id, name@marketplace, as plugins lists it |
+| `agent` | string | yes | the catalog id of the agent whose plugin it is, as plugins lists it; one id can name a plugin of two agents |
+| `thread` | string |  | a thread, by its id or a prefix of it, whose computer and project to read; absent reads a computer |
+| `on` | string |  | the computer to read, by the name computers lists; absent with no thread is the computer the app runs on |
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `plugin` | object | yes |  |
+| `plugin.agent` | string | yes |  |
+| `plugin.id` | string | yes |  |
+| `plugin.name` | string | yes |  |
+| `plugin.marketplace` | string | yes |  |
+| `plugin.version` | string |  |  |
+| `plugin.scope` | `user`, `project`, `local` | yes |  |
+| `plugin.project` | object |  |  |
+| `plugin.on` | boolean | yes |  |
+| `plugin.missing` | `folder`, `marketplace`, `unlisted`, `uninstalled` |  |  |
+| `plugin.path` | string |  |  |
+| `plugin.setIn` | string |  |  |
+| `plugin.description` | string |  |  |
+| `plugin.source` | string |  |  |
+| `plugin.brings` | object | yes |  |
+
+## plugins_enable
+
+Turns one agent's plugin on again on one computer or where a thread runs, by its id and agent. Written for the login the computer was added with, where that agent's own command reads it: Claude Code's user settings, its enabledPlugins key written as claude plugin enable or disable writes it but with nothing downloaded first, Codex's config.toml through its app server's config write, which refuses a file changed since wsp read it. A plugin plugins does not list, a missing one, and one a project's settings switch are refused. A turn running now keeps what it loaded; the next one follows. A napping machine is not woken. The report there reads again at once. Answers its row after.
+
+**Takes**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `plugin` | string | yes | the plugin's id, name@marketplace, as plugins lists it |
+| `agent` | string | yes | the catalog id of the agent whose plugin it is, as plugins lists it; one id can name a plugin of two agents |
+| `thread` | string |  | a thread, by its id or a prefix of it, whose computer and project to read; absent reads a computer |
+| `on` | string |  | the computer to read, by the name computers lists; absent with no thread is the computer the app runs on |
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `plugin` | object | yes |  |
+| `plugin.agent` | string | yes |  |
+| `plugin.id` | string | yes |  |
+| `plugin.name` | string | yes |  |
+| `plugin.marketplace` | string | yes |  |
+| `plugin.version` | string |  |  |
+| `plugin.scope` | `user`, `project`, `local` | yes |  |
+| `plugin.project` | object |  |  |
+| `plugin.on` | boolean | yes |  |
+| `plugin.missing` | `folder`, `marketplace`, `unlisted`, `uninstalled` |  |  |
+| `plugin.path` | string |  |  |
+| `plugin.setIn` | string |  |  |
+| `plugin.description` | string |  |  |
+| `plugin.source` | string |  |  |
+| `plugin.brings` | object | yes |  |
 
 ## projects
 
@@ -1366,6 +1474,7 @@ Every skill on one computer or where a thread runs, one row per folder name: its
 | `skills[].paths` | object[] | yes |  |
 | `skills[].scope` | `user`, `project`, `plugin` | yes |  |
 | `skills[].project` | object |  |  |
+| `skills[].plugin` | string |  |  |
 
 ## skills_add
 

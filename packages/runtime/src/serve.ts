@@ -1835,23 +1835,22 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               if (msg.op === "skills.search") send({ id: msg.id, ok: true, skills: await rt.agents.skillsSearch(msg.q, msg.limit) });
               else if (msg.op === "skills.get") send({ id: msg.id, ok: true, preview: await rt.agents.skillsGet(msg.skill) });
               else if (msg.op === "skills.preview") send({ id: msg.id, ok: true, preview: await rt.agents.skillsPreview(msg.target, skill(msg), origin) });
-              else if (msg.op === "skills.add") {
-                const ask = { skill: msg.skill, ...(msg.agents !== undefined ? { agents: msg.agents } : {}), ...(msg.project !== undefined ? { project: msg.project } : {}) };
-                send({ id: msg.id, ok: true, added: await rt.agents.skillsAdd(msg.target, ask, origin) });
-              } else if (msg.op === "skills.remove") send({ id: msg.id, ok: true, ...(await rt.agents.skillsRemove(msg.target, skill(msg), origin)) });
+              else if (msg.op === "skills.add") send({ id: msg.id, ok: true, added: await rt.agents.skillsAdd(msg.target, { skill: msg.skill, ...(msg.agents !== undefined ? { agents: msg.agents } : {}), ...(msg.project !== undefined ? { project: msg.project } : {}) }, origin) });
+              else if (msg.op === "skills.remove") send({ id: msg.id, ok: true, ...(await rt.agents.skillsRemove(msg.target, skill(msg), origin)) });
               else send({ id: msg.id, ok: true, ...(await rt.agents.skillsToggle(msg.target, { ...skill(msg), on: msg.on }, origin)) });
               return;
             }
             case "servers.add":
             case "servers.remove":
-            case "servers.toggle": {
-              // A server in an agent's config on one of the person's computers is theirs to change, and the values an
-              // add carries go into that file or the vault, never into an answer.
+            case "servers.toggle":
+            case "plugins.toggle": {
+              // A server in an agent's config, or one of its plugins, on one of the person's computers is theirs to change,
+              // and the values an add carries go into that file or the vault, never into an answer.
               if (refusedOffOwnRoad()) return;
+              if (msg.op === "plugins.toggle") return void send({ id: msg.id, ok: true, ...(await rt.agents.pluginsToggle(msg.target, { agent: msg.agent, plugin: msg.plugin, on: msg.on }, origin)) });
               if (msg.op === "servers.add") {
                 const { id: _id, op: _op, target, ...ask } = msg;
-                send({ id: msg.id, ok: true, ...(await rt.agents.serversAdd(target, ask, origin)) });
-                return;
+                return void send({ id: msg.id, ok: true, ...(await rt.agents.serversAdd(target, ask, origin)) });
               }
               const ask = { agent: msg.agent, name: msg.name, ...(msg.scope !== undefined ? { scope: msg.scope } : {}) };
               if (msg.op === "servers.remove") send({ id: msg.id, ok: true, ...(await rt.agents.serversRemove(msg.target, ask, origin)) });

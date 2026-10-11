@@ -111,11 +111,13 @@ export function preferencesArea(ctx: RuntimeContext): PreferencesArea {
       return { name: entry.record.name, phase: entry.record.phase, local, machine: entry.machine, project: { id: project.id, name: project.name, path: ctx.checkoutOf(entry.record) }, stores };
     },
     placeStores: ctx.placeStores,
+    storesHere: ctx.storesHere,
     // A project's folder on the computer holding it: the checkout the add left there, else where it already sits.
     projects: async placeId => (await ctx.ready(), [...projectsHeld.values()].filter(p => p.computer === placeId).map(p => ({ id: p.id, name: p.name, path: p.checkout ?? p.path }))),
     ...(opts.agentsActs !== undefined ? { acts: opts.agentsActs } : {}),
     ...(opts.skillsActs !== undefined ? { skills: opts.skillsActs } : {}),
     ...(opts.serversActs !== undefined ? { servers: opts.serversActs } : {}),
+    ...(opts.pluginsActs !== undefined ? { plugins: opts.pluginsActs } : {}),
     latestOn: async () => (await preferences.get()).agentVersions,
     // The person's switch is read at every ask, so turning it off stops the next one.
     ...(opts.serverIcons !== undefined ? { icons: { folder: opts.serverIcons.folder, icon: async (host, refresh) => ((await iconsOn()) ? opts.serverIcons!.icon(host, refresh, iconsOn) : null), forget: () => opts.serverIcons!.forget() } satisfies ServerIcons } : {}),

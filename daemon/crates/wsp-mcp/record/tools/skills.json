@@ -148,6 +148,9 @@
               },
               "project": {
                 "$ref": "#/properties/projects/items"
+              },
+              "plugin": {
+                "type": "string"
               }
             },
             "required": [
@@ -326,6 +329,9 @@
               },
               "project": {
                 "$ref": "#/properties/projects/items"
+              },
+              "plugin": {
+                "type": "string"
               }
             },
             "required": [

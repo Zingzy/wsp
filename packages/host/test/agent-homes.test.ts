@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { guestAgentHomes, tarOf } from "@wsp/engine";
 import { HERE_PLACE_ID } from "@wsp/protocol";
-import { createRuntime, HARNESS_ADAPTERS, memoryStore, type AgentsReader, type Runtime } from "@wsp/runtime";
+import { createRuntime, HARNESS_ADAPTERS, memoryStore, type AgentsOn, type AgentsReader, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { tarRead } from "../../engine/test/tar-read.js";
 import { hostSeed, localWiring } from "../src/cli.js";
@@ -106,6 +106,23 @@ describe("the bundle and the landing on a host", () => {
     writeFileSync(archive, tarOf([{ path: "./src/index.ts", mode: 0o644, content: "export const a = 2;\n" }]));
     await expect(roads.lander.land({ source: "/root/work/proj", dest: join(user, "back"), replace: false, archive, state: { archive, homes: guestAgentHomes() } })).rejects.toMatchObject({ kind: "usage", message: words });
     expect(existsSync(join(user, "back"))).toBe(false);
+  });
+
+  it("hand a read on this computer no store while each agent's own folder stands, and the kept folder as Claude Code's store", async () => {
+    const user = scratch("wsp-homes-user-");
+    vi.stubEnv("HOME", user);
+    vi.stubEnv("CLAUDE_CONFIG_DIR", undefined);
+    const seen: AgentsOn[] = [];
+    const reader: AgentsReader = { ...READER, read: async on => (seen.push(on), READER.read(on)) };
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: HARNESS_ADAPTERS.claude }, local: localWiring(user, { PATH: "/usr/bin:/bin" }, undefined, join(user, ".wsp", "state.json")), agentsReader: reader });
+    runtimes.push(rt);
+    await rt.agents.read({ placeId: HERE_PLACE_ID });
+    expect(seen.at(-1)).toEqual({ kind: "here", projects: [] });
+    const kept = join(user, "claude-work");
+    mkdirSync(kept, { recursive: true });
+    await rt.agents.setup(HERE_PLACE_ID, "claude", { configDir: kept });
+    await rt.agents.read({ placeId: HERE_PLACE_ID });
+    expect(seen.at(-1)).toMatchObject({ kind: "here", stores: { claude: realpathSync(kept) } });
   });
 
   it("take the agent's own folder where none is kept", async () => {
