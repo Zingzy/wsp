@@ -31,6 +31,12 @@ export function onlyOf(changes: { readonly files: ReadonlyArray<{ readonly path:
   return (others.some(f => f.path === path) || files.length === 0 ? others : files).map(f => f.path);
 }
 
+/** The path a turn's changes name a file by, from the top of the checkout, for a path an edit named whole; undefined
+ * where the turn recorded no change to it. */
+export function changedPathOf(changes: { readonly files: ReadonlyArray<{ readonly path: string }>; readonly others?: ReadonlyArray<{ readonly path: string }> }, named: string): string | undefined {
+  return [...changes.files, ...(changes.others ?? [])].find(f => f.path === named || named.endsWith(`/${f.path}`))?.path;
+}
+
 /** The same turn's range with nothing narrowed. */
 export function wholeRange(range: TurnRange): TurnRange {
   const { only: _narrowed, ...whole } = range;

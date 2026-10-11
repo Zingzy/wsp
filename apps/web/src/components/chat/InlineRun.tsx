@@ -124,10 +124,10 @@ function EndedRun({ run }: { run: SessionRunEvent }) {
   );
 }
 
-function RunFooter({ words, children }: { words: string; children?: React.ReactNode }) {
+export function RunFooter({ words, children }: { words: React.ReactNode; children?: React.ReactNode }) {
   return (
     <div className="flex min-h-9 items-center justify-between gap-3 py-1 pr-1.5 pl-3 text-[12px] leading-4 text-muted-foreground tabular-nums">
-      <span data-reply-run-state>{words}</span>
+      <span data-reply-run-state className="flex min-w-0 items-center gap-3">{words}</span>
       <span className="flex items-center gap-1">{children}</span>
     </div>
   );

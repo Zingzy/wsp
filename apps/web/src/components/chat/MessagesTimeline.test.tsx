@@ -1256,7 +1256,7 @@ describe("MessagesTimeline", () => {
     );
     const expandedGroup = container.querySelector('[data-timeline-row-kind="work"]');
     expect(expandedGroup).not.toBeNull();
-    const commandRow = within(expandedGroup as HTMLElement).getByRole("button", { name: "ls" });
+    const commandRow = within(expandedGroup as HTMLElement).getByRole("button", { name: "Ran ls" });
     expect(commandRow.getAttribute("aria-expanded")).toBe("false");
     expect(commandRow.querySelector(".font-mono")?.textContent).toBe("ls");
     // The reasoning row collapses to its preview line and expands to the full text.
@@ -1277,9 +1277,11 @@ describe("MessagesTimeline", () => {
       fireEvent.click(commandRow);
     });
 
+    // Open, the command stays the heading; a result with no words says so under it.
     expect(commandRow.getAttribute("aria-expanded")).toBe("true");
-    expect(within(expandedGroup as HTMLElement).getByText("Command")).toBeTruthy();
-    expect((expandedGroup as HTMLElement).querySelector("pre")?.textContent).toBe("ls");
+    expect(commandRow.querySelector(".font-mono")?.textContent).toBe("ls");
+    expect((expandedGroup as HTMLElement).textContent).not.toContain("Command");
+    expect((expandedGroup as HTMLElement).textContent).toContain("No output");
   });
 
   it("a person's message with images this client did not send shows one muted mono line per image, the words the command line prints", () => {
@@ -1415,7 +1417,7 @@ describe("the tone table owns every work glyph", () => {
     return {
       glyph: [...svg.classList].find(c => c.startsWith("lucide-") && c !== "lucide")!,
       iconClass: svg.parentElement!.className,
-      labelClass: (row.querySelector(".truncate") as HTMLElement).className,
+      labelClass: row.querySelector(".truncate")?.className ?? "",
     };
   };
   const renderSettled = async (entries: TimelineEntry[]) => {

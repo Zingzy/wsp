@@ -21,7 +21,10 @@ const CODE_FENCE_LANGUAGE_REGEX = /(?:^|\s)language-([^\s]+)/;
 const MAX_HIGHLIGHT_CACHE_ENTRIES = 500;
 const MAX_HIGHLIGHT_CACHE_MEMORY_BYTES = 50 * 1024 * 1024;
 
-const highlightedCodeCache = new LRUCache<string>(
+/** A code block's frame, which a command the agent ran takes too, so a command it ran and one it wrote read alike. */
+export const CODE_BLOCK_SURFACE = "rounded-[var(--radius)] border border-border/70 bg-secondary dark:border-transparent dark:bg-input/32";
+
+export const highlightedCodeCache = new LRUCache<string>(
   MAX_HIGHLIGHT_CACHE_ENTRIES,
   MAX_HIGHLIGHT_CACHE_MEMORY_BYTES,
 );
@@ -104,11 +107,11 @@ export function extractCodeBlock(
   };
 }
 
-function createHighlightCacheKey(code: string, language: string, themeName: DiffThemeName): string {
+export function createHighlightCacheKey(code: string, language: string, themeName: DiffThemeName): string {
   return `${fnv1a32(code).toString(36)}:${code.length}:${language}:${themeName}`;
 }
 
-function estimateHighlightedSize(html: string, code: string): number {
+export function estimateHighlightedSize(html: string, code: string): number {
   return Math.max(html.length * 2, code.length * 3);
 }
 
@@ -202,7 +205,7 @@ export function MarkdownCodeBlock({
 
   return (
     <div
-      className="chat-markdown-codeblock my-[0.65rem] overflow-hidden rounded-[var(--radius)] border border-border/70 bg-secondary leading-snug dark:border-transparent dark:bg-input/32"
+      className={`chat-markdown-codeblock my-[0.65rem] overflow-hidden leading-snug ${CODE_BLOCK_SURFACE}`}
       data-language={language}
       data-wrap={wrapped ? "true" : "false"}
     >
