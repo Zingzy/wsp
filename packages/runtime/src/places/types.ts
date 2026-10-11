@@ -570,6 +570,10 @@ export interface PlaceDoor {
   /** An agent's own sign-in on that computer landed, as the tool's status there said: the file its shared login
    * writes is taken as listed, so every word read before that computer's next report says signed in. */
   loginLanded(placeId: string, agent: string): Promise<void>;
+  /** Which shared logins stand on that computer, read again over its link and put on its record in place of what
+   * its last dial listed of them: a login typed in a terminal there writes its file without a dial. Nothing changes
+   * where the computer is not linked or the read fails. */
+  loginsAgain(placeId: string): Promise<void>;
   /** An agent's token or key landed in this host's vault: every computer whose sign-in row for that agent had
    * nothing to copy now reads it copied, since every turn there is handed it. */
   keyLanded(agent: string): Promise<void>;

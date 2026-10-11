@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join as joinPath } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -15,7 +15,7 @@ import { stubBackend, createOn } from "./stub-backend.js";
 import { until } from "./until.js";
 import { WsClient } from "./ws-client.js";
 import { report, wiring } from "./place-join.js";
-import { ctx, sockets, serving, code, join, placesOf, KEEPS_NO_IMAGE, HOLDS_PROJECTS, forks } from "./places-fixture.js";
+import { ctx, sockets, serving, code, join, placesOf, KEEPS_NO_IMAGE, HOLDS_PROJECTS, forks, saysItsFacts, PLACE_FACTS } from "./places-fixture.js";
 
 describe("the agents on a computer you own", () => {
   const READ = { home: "/home/maya", user: "maya", agents: [], skills: [], servers: [], refused: [] };
@@ -82,6 +82,46 @@ describe("the agents on a computer you own", () => {
     expect(said).toEqual(["maya"]);
     expect((await c.request("agents.read", { target: { placeId: HERE_PLACE_ID } })).ok).toBe(true);
     expect(asked.at(-1)).toEqual({ kind: "here", projects: [] });
+  });
+
+  it("read again which logins stand there at every read, so a login typed in a terminal there reads without a dial", async () => {
+    const asked: AgentsOn[] = [];
+    const { hostKey } = await serving({ agentsReader: { read: async on => (asked.push(on), READ), tools: async () => ({ auth: "open", readAt: "2026-10-10T12:00:00.000Z" }) }, vault: {} });
+    const logins = mkdtempSync(joinPath(tmpdir(), "wsp-logins-"));
+    try {
+      const { client, placeId } = await join(hostKey, {
+        code: await code(),
+        name: "srv",
+        report: report("srv", { daemonVersion: DAEMON_VERSION, agents: ["codex"], logins: [] }),
+        answers: c => {
+          saysItsFacts(() => ({ ...PLACE_FACTS, logins }), { count: 0 })(c);
+          c.onFrame(raw => {
+            const frame = raw as unknown as Record<string, unknown>;
+            if (frame["op"] !== "exec") return;
+            const stdout = execFileSync("sh", ["-c", String(frame["cmd"])], { encoding: "utf8" });
+            c.say({ id: frame["id"], ok: true, exitCode: 0, stdout, stderr: "", truncated: false });
+          });
+        },
+      });
+      sockets.push(client.ws);
+      await until(async () => (await placesOf()).find(p => p.id === placeId)?.logins === logins);
+      const c = await WsClient.connect(ctx.srv!.port, { token: "host-token" });
+      sockets.push(c.ws);
+      const signIns = async (): Promise<unknown> => {
+        expect((await c.request("agents.read", { target: { placeId } })).ok).toBe(true);
+        return (asked.at(-1) as { signIns?: unknown }).signIns;
+      };
+      expect(await signIns()).toEqual({ codex: "none" });
+      // What `codex login` in a terminal of a thread there writes: every terminal there has CODEX_HOME in that folder.
+      mkdirSync(joinPath(logins, "codex"));
+      writeFileSync(joinPath(logins, "codex", "auth.json"), "{}");
+      expect(await signIns()).toEqual({ codex: "signed-in" });
+      expect(ctx.runtime!.places!.signInsAt(placeId)).toEqual({ codex: "signed-in" });
+      rmSync(joinPath(logins, "codex", "auth.json"));
+      expect(await signIns()).toEqual({ codex: "none" });
+    } finally {
+      rmSync(logins, { recursive: true, force: true });
+    }
   });
 
   it("hand the reader the rows that computer's last setup came to, which say the agents wsp installed there", async () => {
