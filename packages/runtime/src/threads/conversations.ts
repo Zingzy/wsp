@@ -17,6 +17,7 @@ import {
   conversationsUpdateFix,
   copiesFolder,
   earlierLine,
+  isLastingStoreError,
   noConversationsLine,
   refusal,
   toolActivityLine,
@@ -41,11 +42,13 @@ const STORE_EXEC_MS = 30_000;
 /** How long a project's kept list answers a visit while its stores' stamp stays the same and no thread of it ends. */
 export const KEPT_LIST_MS = 60_000;
 
-/** One agent's read of a project's store: its rows, the ids open now, or the line it was not read with. */
+/** One agent's read of a project's store: its rows, the ids open now, the line it was not read with, and whether
+ * it failed in a way that may pass, which is never kept for the next visit. */
 interface StoreRead {
   listed: StoredConversation[];
   live: ReadonlySet<string> | null;
   held?: ConversationsHeld;
+  passing?: true;
 }
 
 /** A read kept for the visits after it: the folders and stamp it was read under, when, and the read itself. */
@@ -58,8 +61,9 @@ interface Kept {
 
 export function conversationsArea(ctx: RuntimeContext): ConversationsArea {
   const { sessions, transcriptIndex } = ctx;
-  /** The last read of each project's store, by project and agent. Kept for KEPT_LIST_MS at most, so it holds the
-   * projects opened in the last minute and nothing for one nobody opens. */
+  /** The last read of each project's store, by project and agent, and nothing for a project nobody opens. A read
+   * older than KEPT_LIST_MS is dropped by the next visit to any project, so with no later visit the lists of the
+   * last minute stay until one comes. */
   const kept = new Map<string, Kept>();
   const keyOf = (project: string, harness: string): string => `${project}\0${harness}`;
   const forget = (workspaceId: string): void => {
@@ -108,33 +112,45 @@ export function conversationsArea(ctx: RuntimeContext): ConversationsArea {
     return { agent: harness, said: conversationsUnreadLine(ctx.agentLabel(harness), computer), fix: conversationsUpdateFix(computer) };
   };
 
-  /** One store read fresh: an agent whose store did not answer leaves the others' rows standing, a daemon too old for
-   * the read saying so in a line, an agent that is not there or answered nothing logged and listed as none. */
+  /** One store read fresh: an agent whose store did not answer leaves the others' rows standing, logged and listed as
+   * none. A daemon too old for the read says so in a line, and it and an agent not installed fail the same way all
+   * minute, so their read is kept; any other failure (a daemon reconnecting, a server past its time) is passing. */
   const readStore = async (entry: LiveWorkspace, cwds: string[], road: ConversationRoad, harness: string, store: ConversationStore): Promise<StoreRead> => {
     let unread: ConversationsHeld | undefined;
+    let passing = false;
     const [listed, live] = await Promise.all([
       store.list(cwds, road).catch((e: unknown) => {
         unread = unreadOf(e, entry, harness);
+        passing = unread === undefined && !isLastingStoreError(e);
         if (unread === undefined) console.warn(`the ${ctx.agentLabel(harness)} conversations on ${ctx.computerOf(entry)} were not read: ${e instanceof Error ? e.message : String(e)}`);
         return [];
       }),
       store.live?.(road) ?? Promise.resolve(null),
     ]);
-    return { listed, live, ...(unread !== undefined ? { held: unread } : {}) };
+    return { listed, live, ...(unread !== undefined ? { held: unread } : {}), ...(passing ? { passing: true as const } : {}) };
   };
 
-  /** The project's kept read where its folders and its store's stamp are as they were, else a fresh one kept in its place. */
-  const keptRead = async (entry: LiveWorkspace, cwds: string[], road: ConversationRoad, harness: string, store: ConversationStore): Promise<StoreRead> => {
+  /** The project's kept read where its folders and its store's stamp are as they were, else a fresh one kept in its
+   * place. Closing the app that holds a conversation moves no folder, so a kept read that marked one of the person's
+   * rows open asks the open ones again. */
+  const keptRead = async (entry: LiveWorkspace, cwds: string[], road: ConversationRoad, harness: string, store: ConversationStore, mine: ReadonlyMap<string, string>): Promise<StoreRead> => {
     const now = Date.now();
     for (const [key, k] of kept) if (now - k.at >= KEPT_LIST_MS) kept.delete(key);
     const key = keyOf(entry.record.project, harness);
     const folders = cwds.join("\0");
     const stamp = store.stamp === undefined ? "" : await store.stamp(cwds, road).catch(() => "");
     const was = kept.get(key);
-    if (was !== undefined && was.cwds === folders && was.stamp === stamp) return was.read;
+    if (was !== undefined && was.cwds === folders && was.stamp === stamp) {
+      const held = await was.read;
+      if (store.live === undefined || !held.listed.some(row => !mine.has(row.id) && held.live?.has(row.id) === true)) return held;
+      const fresh = { ...held, live: await store.live(road) };
+      if (kept.get(key) === was) kept.set(key, { ...was, read: Promise.resolve(fresh) });
+      return fresh;
+    }
     const read = readStore(entry, cwds, road, harness, store);
     kept.set(key, { at: Date.now(), cwds: folders, stamp, read });
-    read.catch(() => kept.get(key)?.read === read && kept.delete(key));
+    const drop = (): void => void (kept.get(key)?.read === read && kept.delete(key));
+    read.then(r => r.passing === true && drop(), drop);
     return read;
   };
 
@@ -149,7 +165,7 @@ export function conversationsArea(ctx: RuntimeContext): ConversationsArea {
     const rows: OutsideConversation[] = [];
     await Promise.all(
       stores.map(async ({ harness, store }) => {
-        const { listed, live, held: unread } = await keptRead(entry, cwds, road, harness, store);
+        const { listed, live, held: unread } = await keptRead(entry, cwds, road, harness, store, mine);
         if (unread !== undefined) held.push(unread);
         for (const row of listed) {
           const thread = mine.get(row.id);

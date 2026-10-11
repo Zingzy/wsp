@@ -90,6 +90,11 @@ export interface ConversationStore {
   readonly letsGo?: string;
 }
 
+/** A store read that fails the same way until something changes on the computer, the agent not installed there; a
+ * list kept with one answers the visits of its minute, where any other failure is read again on the next visit. */
+export const lastingStoreError = (message: string): Error => Object.assign(new Error(message), { lasting: true });
+export const isLastingStoreError = (e: unknown): boolean => e instanceof Error && (e as { lasting?: unknown }).lasting === true;
+
 /** A line per folder, each a shell word: its mtime in seconds and how many names it holds, blank where it is not
  * there; GNU stat, then BSD's. A transcript or rollout added moves its folder, one appended to does not. */
 export const foldersStampCommand = (folders: readonly string[]): string =>

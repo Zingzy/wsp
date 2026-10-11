@@ -20,6 +20,7 @@ import {
   earlierLine,
   foldThreads,
   refusalParts,
+  unknownOpLine,
   type AdapterEvent,
   type ConversationEarlier,
   type ConversationStore,
@@ -262,7 +263,8 @@ describe("a project's conversations", () => {
 });
 
 /** Claude Code's store and Codex's as the adapters read them, over folders in a scratch home, with `claude` and
- * `codex` stubs on PATH that note each start and list the conversations each store's folder holds. */
+ * `codex` stubs on PATH that note each start and list the conversations each store's folder holds, and the ones
+ * `open` names as open in another app. */
 function realStores(folder: string) {
   const home = scratch();
   const bin = join(home, "bin");
@@ -271,7 +273,8 @@ function realStores(folder: string) {
   const day = join(home, ".codex", "sessions", "2026", "10", "11");
   for (const dir of [bin, claudeDir, day]) mkdirSync(dir, { recursive: true });
   writeFileSync(starts, "");
-  writeStub(join(bin, "claude"), `#!/bin/sh\necho "claude $*" >> '${starts}'\necho '[]'\n`);
+  const opened = join(home, "open");
+  writeStub(join(bin, "claude"), `#!/bin/sh\necho "claude $*" >> '${starts}'\ncat '${opened}' 2>/dev/null || echo '[]'\n`);
   writeStub(
     join(bin, "codex"),
     [
@@ -301,6 +304,7 @@ function realStores(folder: string) {
     daemon,
     claudeDir,
     day,
+    open: (ids: string[]) => (ids.length === 0 ? rmSync(opened, { force: true }) : writeFileSync(opened, JSON.stringify(ids.map(sessionId => ({ sessionId }))))),
     starts: () => {
       const said = readFileSync(starts, "utf8");
       return { claude: said.split("claude agents --json").length - 1, codex: said.split("codex app-server").length - 1 };
@@ -336,6 +340,67 @@ describe("a project's kept conversation list", () => {
     expect((await rt.conversations.list({ project: project.id })).rows.map(r => r.agent).sort()).toEqual(["claude", "codex"]);
     await rt.conversations.list({ project: project.id });
     expect(real.starts()).toEqual({ claude: 2, codex: 2 });
+  });
+
+  it("asks the open ones again while a kept row is open elsewhere, so closing that app clears its mark", async () => {
+    const { folder } = repoWithTree();
+    const real = realStores(folder);
+    writeFileSync(join(real.claudeDir, `${ID}.jsonl`), "{}\n");
+    real.open([ID]);
+    const { rt } = here({ claude: real.claude }, real.daemon);
+    const project = await rt.projects.add({ source: folder });
+    const marks = async (): Promise<boolean[]> => (await rt.conversations.list({ project: project.id })).rows.map(r => r.live);
+    expect(await marks()).toEqual([true]);
+    real.open([]);
+    expect(await marks()).toEqual([false]);
+    expect(await marks()).toEqual([false]);
+    expect(real.starts().claude).toBe(2);
+  });
+
+  it("reads again on the next visit after a failure that passes", async () => {
+    const { folder } = repoWithTree();
+    let calls = 0;
+    const claude: ConversationStore = {
+      list: async () => {
+        calls += 1;
+        if (calls === 1) throw new Error("the daemon connection closed");
+        return [row(ID, folder, 100)];
+      },
+      earlier: async () => "gone",
+    };
+    const { rt } = here({ claude });
+    const project = await rt.projects.add({ source: folder });
+    const warned = vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect((await rt.conversations.list({ project: project.id })).rows).toEqual([]);
+    expect((await rt.conversations.list({ project: project.id })).rows.map(r => r.id)).toEqual([ID]);
+    expect(calls).toBe(2);
+    warned.mockRestore();
+  });
+
+  it("keeps a failure that lasts the minute: an agent not installed, a daemon too old for the read", async () => {
+    const { folder } = repoWithTree();
+    const home = scratch();
+    const noTurns = (() => {
+      throw new Error("no turn runs here");
+    }) as unknown as ExecStreamFactory;
+    const missing = createCodexAdapter({ exec: noTurns, home: join(home, ".codex"), login: "codex login", launch: { program: join(home, "bin", "codex") } }).conversations;
+    let lists = 0;
+    const codex: ConversationStore = { ...missing, list: (cwds, road) => ((lists += 1), missing.list(cwds, road)) };
+    let frames = 0;
+    const claude = { ...claudeConversations({ configDir: join(home, ".claude") }), live: async () => null };
+    const { rt } = here({ claude, codex }, {
+      "transcripts.list": () => {
+        frames += 1;
+        return { id: 1, ok: false, error: unknownOpLine("transcripts.list") } as DaemonResponse;
+      },
+    });
+    const project = await rt.projects.add({ source: folder });
+    const warned = vi.spyOn(console, "warn").mockImplementation(() => {});
+    for (let i = 0; i < 3; i++) expect((await rt.conversations.list({ project: project.id })).held.map(h => h.agent)).toEqual(["claude"]);
+    expect({ lists, frames }).toEqual({ lists: 1, frames: 1 });
+    expect(warned.mock.calls.flat().join("\n")).toContain("codex is not installed");
+    expect(warned).toHaveBeenCalledTimes(1);
+    warned.mockRestore();
   });
 
   it("is read again once a thread of the project ends, and once a minute has passed", async () => {
