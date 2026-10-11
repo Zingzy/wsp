@@ -387,7 +387,6 @@ describe("the body before the first list has arrived, and on a wsp with no proje
     expect(rowIds()).toEqual([]);
     expect(document.querySelectorAll("[data-slot=skeleton]").length).toBe(0);
     expect(screen.queryByText(PROJECT_WORDS.add)).toBeNull();
-    expect(screen.queryByText(PROJECT_WORDS.new)).toBeNull();
     expect(head().disabled).toBe(true);
     expect(head().textContent).toBe(SWITCHER_WORDS.all);
   });
@@ -395,7 +394,7 @@ describe("the body before the first list has arrived, and on a wsp with no proje
   it("holds the head, held, and one row that opens Add a project once the lists have arrived and hold nothing: no sentence", async () => {
     render(<SidebarProvider defaultOpen><WorkspaceSidebar /></SidebarProvider>);
     act(() => useStore.setState({ ready: true, projectsRead: true }));
-    const row = await screen.findByText(PROJECT_WORDS.new);
+    const row = await screen.findByText(PROJECT_WORDS.add);
     expect(row.closest("button")!.dataset["k"]).toBe("new-project");
     expect(row.closest("button")!.className).toContain("h-9");
     expect(row.closest("button")!.querySelector("svg.lucide-plus")).not.toBeNull();
@@ -407,9 +406,9 @@ describe("the body before the first list has arrived, and on a wsp with no proje
     expect(screen.queryByText(/No threads yet/)).toBeNull();
     expect(screen.queryByText(/No projects yet/)).toBeNull();
     expect(screen.queryByText(/A project is a folder/)).toBeNull();
-    expect(screen.queryByText(PROJECT_WORDS.add)).toBeNull();
+    expect(screen.getAllByText(PROJECT_WORDS.add)).toHaveLength(1);
     expect(rowIds()).toEqual([]);
-    // The compose glyph stands, held: there is no project to open a thread on.
+    // The New thread row stands, held: there is no project to open a thread on.
     expect(screen.getByRole("button", { name: "New thread" }).getAttribute("aria-disabled")).toBe("true");
     // Pressing the row opens the same Add a project dialog the first run's button opens.
     expect(document.querySelector("[data-k=add-project]")).toBeNull();
@@ -422,7 +421,7 @@ describe("the body before the first list has arrived, and on a wsp with no proje
     act(() => useStore.setState({ creations: [{ key: "creating:1", name: "beta", askedAt: Date.now(), workspaceId: null, lines: [], failed: null }] }));
     expect(screen.getByText("beta")).toBeDefined();
     expect(screen.queryByText(/No threads yet/)).toBeNull();
-    expect(screen.queryByText(PROJECT_WORDS.new)).toBeNull();
+    expect(screen.queryByText(PROJECT_WORDS.add)).toBeNull();
   });
 });
 

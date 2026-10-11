@@ -28,7 +28,6 @@ export const FIRST_RUN_WORDS = {
  * which sends a person to the first run in the centre. */
 export const PROJECT_WORDS = {
   add: "Add a project",
-  new: "New project",
   settings: "Project settings",
   remove: "Remove project",
   noWorkspaces: "No threads yet.",

@@ -159,7 +159,6 @@ export const workspaceActions: ReadonlyArray<ActionEntry<WorkspaceTarget, Worksp
     id: "new-thread",
     group: "open",
     icon: () => MessageSquarePlusIcon,
-    shortcutCommand: "chat.new",
     searchTerms: ["new thread", "new chat", "new session"],
     title: () => WORKSPACE_WORDS.newThread,
     rowLabel: target => rowNewThread(target.displayName),

@@ -57,7 +57,7 @@ export const GENERAL_DEFAULTS = {
   settleAfter: "2h",
   askDelete: true,
   onQuit: "ask",
-  newThreadIn: "ask",
+  newThreadIn: "current",
 } as const satisfies Record<string, unknown>;
 
 /** Each defaulted, so a record from a host older than the field parses on the wire. */
