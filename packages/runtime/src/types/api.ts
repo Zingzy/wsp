@@ -48,7 +48,7 @@ import type {
   WorkspaceCreatingEvent,
 } from "@wsp/protocol";
 import type { BringBackResult, GitCommitReply, GitDiscardReply, GitUpdateReply, MergeInResult, PullRequestPage, GitPrReplyReply, GitPrResolveReply, GitPrReactReply, ReactionContent, PullRequestItem, PullRequestSendResult, FixResult, MergeMethod, MergeResult, CheckoutReply, CommitDraft, ViewedMarks, RunStep, SessionRunEvent } from "@wsp/protocol";
-import type { WorktreeMade, KeptAttachment, WorkspaceKind, ForkSource } from "@wsp/protocol";
+import type { WorktreeMade, KeptAttachment, WorkspaceKind, ForkSource, ConversationsAnswer, ResumeAsk, SessionEarlierEvent } from "@wsp/protocol";
 import type { CallbackForwards, SignInAsk, SkillAsk } from "../agents-read.js";
 import type { DaemonChannel } from "../daemon-channel.js";
 import type { AccessChoice, AgentRow, AgentSetupSet, ThreadDefaults } from "@wsp/protocol";
@@ -431,6 +431,10 @@ export interface Runtime {
         /** The thread this request came out of follows the turn to its end, so the turn runs in that thread's slot. A
          * start with no onHeld is followed whatever this says, since its caller waits for the launch. */
         followed?: boolean;
+        /** A conversation the agent kept outside wsp that the thread this start opens runs on, as conversations.opening
+         * read it: its first turn resumes it, or a copy of it, its earlier rows written ahead of the prompt and its
+         * name the thread's until the person gives another. Rejects on a send into a thread that has run. */
+        outside?: OutsideOpening;
       },
       origin?: Caller,
     ): Promise<SessionHandle>;
@@ -626,6 +630,15 @@ export interface Runtime {
   /** The two usage records, never added together: what was used, split four ways over a range, and what each account
    * signed in anywhere may still use. */
   readonly usage: UsageDoor;
+  /** The conversations the agents kept on a project's computer outside wsp, and the one a new thread opens on: read on
+   * that computer before the thread exists, refused where it is gone, already a thread, or open in another app. */
+  readonly conversations: {
+    list(o: { project?: string; agent?: string }, origin?: Caller): Promise<ConversationsAnswer>;
+    opening(workspaceId: string, o: { harness?: string; resume: ResumeAsk }, origin?: Caller): Promise<OutsideOpening>;
+    /** Where a start on one runs: read on the project's computer, then the record of the folder it ran in, which a
+     * thread, a branch or a folder named beside it is refused for. */
+    placed(start: { workspaceId?: string; project?: string; harness?: string; thread?: string; branch?: string; cwd?: string }, resume: ResumeAsk, origin?: Caller): Promise<{ workspaceId: string; cwd?: string; outside: OutsideOpening }>;
+  };
   /** Each thread's slate: its record, the ops a window and the slate verbs send, and a press into the thread. */
   readonly slates: Slates;
   /** The computers paired with this host and the one time codes that pair them, one collection each on this state
@@ -666,4 +679,16 @@ export interface OrphansDeleted {
   templates: TemplateRow[];
   /** One per delete the provider refused; the row stays on the account. */
   failed: { id: string; name?: string; message: string }[];
+}
+
+/** A conversation the start of a thread opens on, read before the thread exists: the agent and its id for it, whether
+ * the thread runs on a copy, where it ran, what it is called, and the earlier rows the thread's transcript opens with. */
+export interface OutsideOpening {
+  harness: string;
+  id: string;
+  copy: boolean;
+  project: string;
+  cwd?: string;
+  title: string;
+  earlier: Pick<SessionEarlierEvent, "who" | "text">[];
 }

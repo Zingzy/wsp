@@ -6,6 +6,8 @@ import { plural } from "../words/base.js";
 import type { SysHistoryReply as WireSysHistoryReply } from "../generated/SysHistoryReply.js";
 import type { SysPoint as WireSysPoint } from "../generated/SysPoint.js";
 import type { UsageLogsReply as WireUsageLogsReply } from "../generated/UsageLogsReply.js";
+import type { TranscriptsListReply as WireTranscriptsListReply } from "../generated/TranscriptsListReply.js";
+import type { TranscriptsReadReply as WireTranscriptsReadReply } from "../generated/TranscriptsReadReply.js";
 import { HERE_PLACE_ID } from "../place-word.js";
 import { type Held, reqId, type Same } from "./helpers.js";
 import { EXEC_BODY_MAX, isPlainPath } from "./limits.js";
@@ -553,6 +555,30 @@ export const UsageLogsReply = z.object({
 });
 export type UsageLogsReply = WireUsageLogsReply;
 type UsageLogsReplyHeld = Held<Same<z.infer<typeof UsageLogsReply>, UsageLogsReply>>;
+
+/** What transcripts.list read: one row per Claude Code conversation, newest file first. The title is the person's
+ * name for it, else Claude Code's, else the last prompt, else the first; entrypoint is the road it was opened from,
+ * lastAt the file's mtime in ms and bytes its size. */
+export const TranscriptsListReply = z.object({
+  rows: z.array(
+    z.object({ id: z.string(), cwd: z.string(), branch: z.string().optional(), entrypoint: z.string().optional(), title: z.string().optional(), firstPrompt: z.string().optional(), lastAt: z.number(), bytes: z.number() }),
+  ),
+});
+export type TranscriptsListReply = WireTranscriptsListReply;
+type TranscriptsListReplyHeld = Held<Same<z.infer<typeof TranscriptsListReply>, TranscriptsListReply>>;
+
+/** What transcripts.read found: nothing where no folder holds the id, else the first recorded cwd, the title as the list
+ * names it, the newest messages
+ * oldest first (a tool row's text is its input as the CLI recorded it), and how many messages came before them. */
+export const TranscriptsReadReply = z.object({
+  found: z.boolean(),
+  cwd: z.string().optional(),
+  title: z.string().optional(),
+  messages: z.array(z.object({ who: z.enum(["person", "agent", "tool"]), text: z.string(), tool: z.string().optional() })),
+  earlier: z.number(),
+});
+export type TranscriptsReadReply = WireTranscriptsReadReply;
+type TranscriptsReadReplyHeld = Held<Same<z.infer<typeof TranscriptsReadReply>, TranscriptsReadReply>>;
 
 /** A computer's readings over a range as the Usage page draws them: the kept steps and the span they are drawn over. */
 export const ReadingsAnswer = z.object({ points: z.array(SysPoint), stepMs: z.number(), from: z.number(), to: z.number() });

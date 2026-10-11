@@ -70,6 +70,10 @@ pub struct RunIn {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub files: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resume: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub copy: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub detach: Option<bool>,
 }
 
@@ -1098,6 +1102,8 @@ async fn run(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
         title,
         replaces,
         files,
+        resume,
+        copy,
         detach,
     } = input("run", arguments)?;
     let words = super::workspace::words();
@@ -1110,6 +1116,23 @@ async fn run(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
     if fork.is_some() && (project.is_some() || beside.is_some() || cwd.is_some() || replaces.is_some()) {
         return Err(Failure::usage(words.fork_beside.clone()).into());
     }
+    if fork.is_some() && (resume.is_some() || copy == Some(true)) {
+        return Err(Failure::usage(words.fork_resume.clone()).into());
+    }
+    // A conversation runs in the folder it ran in, so it takes no word on where the thread goes.
+    let resume = match resume {
+        None if copy == Some(true) => return Err(Failure::usage(words.copy_alone.clone()).into()),
+        None => None,
+        Some(_) if beside.is_some() || branch.is_some() || cwd.is_some() => return Err(Failure::usage(words.resume_where.clone()).into()),
+        Some(id) => {
+            let mut asked = Map::new();
+            asked.insert("id".to_owned(), Value::from(id));
+            if copy == Some(true) {
+                asked.insert("copy".to_owned(), Value::from(true));
+            }
+            Some(Value::Object(asked))
+        }
+    };
     let client = host.client().await?;
     let picks = Picks { model, effort, access, fast };
     if let Some(fork) = fork {
@@ -1158,6 +1181,9 @@ async fn run(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
             Target::Here { .. } => (None, None),
         };
         checked_start(&client, &message, agent.as_deref(), &picks, on, fork_of).await?;
+        if resume.is_some() && matches!(target, Target::Fork(_)) {
+            return Err(Failure::usage(words.resume_here.clone()));
+        }
         let notify = notify_of(&client, notify.as_deref().unwrap_or_default()).await?;
         let replaces = match replaces {
             Some(named) => {
@@ -1168,6 +1194,7 @@ async fn run(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
             None => None,
         };
         let folder = match &target {
+            _ if resume.is_some() => None,
             Target::Here { cwd: here, .. } => here.as_deref(),
             _ => cwd.as_deref(),
         };
@@ -1191,12 +1218,12 @@ async fn run(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
     let (target, woken, notify, replaces, attachments) = before_sending(&client, read)?;
     let (mut start, opened) = match target {
         Target::Box(_) | Target::Fork(_) => {
-            let folder = absolute_folder(cwd.as_deref())?;
+            let folder = absolute_folder(cwd.as_deref().filter(|_| resume.is_none()))?;
             let woken = woken.as_ref().map_or("", |w| w.workspace.id.as_str());
             (opening(&host, woken, &message, agent, folder, notify), None)
         }
         Target::Here { project, branch, cwd } => {
-            let folder = absolute_folder(cwd.as_deref())?;
+            let folder = absolute_folder(cwd.as_deref().filter(|_| resume.is_none()))?;
             let mut at = Map::new();
             if let Some(project) = &project {
                 at.insert("project".to_owned(), Value::from(project.id.as_str()));
@@ -1216,6 +1243,9 @@ async fn run(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
     }
     if !attachments.is_empty() {
         start.insert("attachments".to_owned(), Value::from(attachments));
+    }
+    if let Some(resume) = resume {
+        start.insert("resume".to_owned(), resume);
     }
     picks.wire(&mut start)?;
     answered(&host, &client, &start, detach, opened, woken).await

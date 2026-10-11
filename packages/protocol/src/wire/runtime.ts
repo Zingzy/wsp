@@ -6,6 +6,7 @@ import { Attachment } from "../attachments.js";
 import { threadAt } from "../format.js";
 import { InitRoad, InitScreenId, SIGN_IN_CODE_MAX } from "../init-job.js";
 import { UsageRange, UsageSplit } from "../usage.js";
+import { ResumeAsk } from "../conversations.js";
 import { AccessChoice, AgentSetupSet } from "../thread-defaults.js";
 import { SLATE_OPS } from "../slate/wire.js";
 import { RecipeFile } from "../recipe-file.js";
@@ -495,6 +496,11 @@ const RuntimeOp = z.discriminatedUnion("op", [
     /** The name the thread is opened under, as a person's: it stands in every client at once, the harness is told it
      * too so its own UI says the same, and no generated title ever replaces it. Refused when it is blank. */
     title: z.string().optional(),
+    /** A conversation the agent kept outside wsp, by the agent's own id for it, which the new thread opens on: its
+     * first turn resumes it, in the folder it ran in, with its newest messages written ahead of the prompt; with copy,
+     * on a copy of it the agent makes, the original left as it was. Refused beside thread, branch and cwd, refused
+     * with CONVERSATION_OPEN_KIND where another process holds it open, and refused where the agent holds no such id. */
+    resume: ResumeAsk.optional(),
     /** The thread this start's new thread restarts, by its runtime id: the new thread's record keeps it, and once its
      * first turn starts the host settles the one it replaces. Refused on a send into a thread that has run, for a
      * thread still working or asking, for one that already has a restart, and for one a thread's token may not settle. */
@@ -875,6 +881,10 @@ const RuntimeOp = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("project.seed.plan"), source: z.string() }),
   /** Every project this host holds. Replies with { projects }. */
   z.object({ id: reqId, op: z.literal("projects.list") }),
+  /** The conversations the agents kept on a project's computer outside wsp, in its folder and its worktrees, newest
+   * first, each with whether another app holds it open now and the wsp thread already on it; an agent's store that
+   * did not answer is a held line. Replies with ConversationsAnswer's fields. */
+  z.object({ id: reqId, op: z.literal("conversations.list"), project: z.string().optional(), agent: z.string().optional() }),
   /** What a new thread on each of those projects starts on, by project id, each value with where it came from, read
    * off the runtime's table rather than any machine. Replies with { defaults }. */
   z.object({ id: reqId, op: z.literal("projects.defaults") }),
@@ -990,6 +1000,7 @@ export const THREAD_OPS: readonly string[] = [
   // thread there starts on; the host answers a thread those and no other, and refuses a name outside them by the
   // rule a start reads, which is how a fork names the project of the workspace it forks.
   "projects.list",
+  "conversations.list",
   "projects.defaults",
   "projects.resolve",
   "workspaces.list",
@@ -1092,6 +1103,7 @@ export const DEVICE_OPS: readonly string[] = [
   // here, since posting under the person's name is the person's act.
   "workspaces.reviewDraft",
   "projects.list",
+  "conversations.list",
   "projects.defaults",
   "projects.resolve",
   "projects.branch",

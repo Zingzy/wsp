@@ -512,6 +512,9 @@ export function forkBranchName(source: string | undefined, taken: ReadonlySet<st
 /** A fork refused for naming what its thread already decides. */
 export const FORK_BESIDE_LINE = "a fork starts in its thread's folder, or on a new branch with --branch";
 export const FORK_BESIDE_FIX = "Leave out the project, --cwd, --beside and --replaces.";
+/** A fork beside --resume: one carries a wsp thread's conversation, the other one an agent kept outside wsp. */
+export const FORK_RESUME_LINE = "a fork carries a thread's conversation and --resume carries one kept outside wsp, so a start takes one of them";
+export const FORK_RESUME_FIX = "Name the thread with --fork, or the conversation with --resume and --copy, not both.";
 
 /** --at with no thread to fork, or a count that is no turn. */
 export const AT_WITHOUT_FORK_LINE = "--at counts the turns of the thread --fork names";

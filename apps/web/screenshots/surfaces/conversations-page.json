@@ -1,0 +1,19 @@
+{
+  "at": "/",
+  "fixture": "conversations",
+  "steps": [
+    "390:key:Escape",
+    "390:sidebar=trigger",
+    "k=project-switcher",
+    "switcher-option=pr_spoo",
+    "menu:k=project-switcher",
+    "menu-item=resume-conversation"
+  ],
+  "wait": "palette-group=conversations",
+  "widths": [
+    1440,
+    390
+  ],
+  "reason": "The palette is a popup capped at 576px, the same at 1280 as at 1440; 390 is where it reflows, which is shot here.",
+  "settleMs": 700
+}

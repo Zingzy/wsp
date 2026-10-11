@@ -24,7 +24,7 @@ import type {
 import type { CommitDrafter } from "@wsp/protocol";
 import { PLACE_WORKSPACE_PATH, onNpmBin } from "@wsp/protocol";
 import type { TaskStop } from "@wsp/protocol";
-import type { AccessChoice, AgentLaunch } from "@wsp/protocol";
+import type { AccessChoice, AgentLaunch, ConversationStore } from "@wsp/protocol";
 
 // --- adapter port -------------------------------------------------------------
 
@@ -96,6 +96,9 @@ export const loginEnvOn = (place: string | undefined, npmBin?: string): Readonly
 export interface HarnessStartOptions {
   prompt: string;
   resume?: string;
+  /** The turn runs on a copy of `resume` the agent makes under an id of its own, the original left as it was: a
+   * conversation open in another app is continued on one. */
+  copy?: true;
   cwd?: string;
   /** Catalog slugs the adapter maps to its CLI's flags; absent leaves the CLI's default. */
   model?: string;
@@ -254,6 +257,9 @@ export interface HarnessAdapter {
   /** What a turn's command is exported with on the machine; a plain exec on the workspace runs with the same. Absent
    * means nothing is exported and both run with the machine's own environment only. */
   readonly env?: Readonly<Record<string, string>>;
+  /** The conversations this harness kept on the computer outside wsp, which a new thread can open on; absent on a
+   * harness whose store wsp does not read. */
+  readonly conversations?: ConversationStore;
 }
 
 /** Called per session start with the workspace's CURRENT machine (it can change on wake/upgrade). */

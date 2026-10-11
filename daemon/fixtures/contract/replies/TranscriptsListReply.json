@@ -1,0 +1,25 @@
+[
+  {
+    "rows": [
+      {
+        "id": "7414323d-e71b-4957-8b56-eefdf6bfa350",
+        "cwd": "/home/dev/proj",
+        "branch": "feat/x",
+        "entrypoint": "cli",
+        "title": "lab codewords",
+        "firstPrompt": "Remember the codeword ALPHA.",
+        "lastAt": 1791673566000,
+        "bytes": 209753
+      },
+      {
+        "id": "e615a6ab-a2f2-4b10-8fd6-0dc38bf99c28",
+        "cwd": "/home/dev/proj",
+        "lastAt": 1791673570000,
+        "bytes": 1024
+      }
+    ]
+  },
+  {
+    "rows": []
+  }
+]

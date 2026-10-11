@@ -13,7 +13,7 @@ import { type AddressInfo } from "node:net";
 import { promisify } from "node:util";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { HOST_TOKEN_ENV, HOST_URL_ENV, notAThreadLine, NAME_A_THREAD_FIX, NOT_UNDER_FIX, notUnderLine, replacesWorkingFix, replacesWorkingLine, CLOUD_ENV, DAEMON_TOKEN_PATH, deniedLine, noSuchAccountLine, PERMISSION_DENY, pushedForChildLine, EXIT_CODES, refusalLine, SCOPED_MCP_ARG, scopedNoPairLine, HERE_PLACE_ID, shellQuote, TURN_TOKEN_ENV, VerbFailure, WS_PATH } from "@wsp/protocol";
+import { FORK_RESUME_FIX, FORK_RESUME_LINE, HOST_TOKEN_ENV, HOST_URL_ENV, notAThreadLine, NAME_A_THREAD_FIX, NOT_UNDER_FIX, notUnderLine, replacesWorkingFix, replacesWorkingLine, CLOUD_ENV, DAEMON_TOKEN_PATH, deniedLine, noSuchAccountLine, PERMISSION_DENY, pushedForChildLine, EXIT_CODES, refusalLine, SCOPED_MCP_ARG, scopedNoPairLine, HERE_PLACE_ID, shellQuote, TURN_TOKEN_ENV, VerbFailure, WS_PATH } from "@wsp/protocol";
 import { CLOUD_ON } from "../src/cloud.js";
 import { copyKey, createRuntime, DAEMON_TOKEN_SET, localExecStream, memoryStore, type Runtime, type Store } from "@wsp/runtime";
 import { fakeCopier, LocalBackend } from "@wsp/engine";
@@ -475,6 +475,12 @@ describe("the agent contract on the command line and the tool door", () => {
       expect(refused.code, `wsp run ${beside.join(" ")}`).toBe(EXIT_CODES.usage);
       expect(failure(refused.io).error).not.toBe("");
     }
+    // A fork carries a thread's conversation and --resume one kept outside wsp: a start takes one of them.
+    for (const beside of [["--resume", "conv-7f3a"], ["--resume", "conv-7f3a", "--copy"], ["--copy"]]) {
+      const refused = await run("run", "--fork", opened.threadId, ...beside, "x", "--json");
+      expect(refused.code, `wsp run --fork ${beside.join(" ")}`).toBe(EXIT_CODES.usage);
+      expect(failure(refused.io).error).toBe(refusalLine(FORK_RESUME_LINE, FORK_RESUME_FIX));
+    }
     // The turn is over, so the wait answers off the transcript at once.
     expect(await last("threads wait", "threads", "wait", opened.threadId)).toEqual({ finished: { threadId: opened.threadId, status: "completed", reply: "re: again" } });
     // The read is off the transcript the host holds: the same turn, its rows, and its reply whole under --last.
@@ -530,6 +536,8 @@ describe("the agent contract on the command line and the tool door", () => {
     execFileSync("git", ["init", "-q", tree.path]);
     expect(await last("worktree remove", "worktree", "remove", "here", "feat/x")).toEqual({ project: "here", branch: "feat/x", removed: true });
     const inFolder = (await last("run", "run", "here", "hello here")) as { threadId: string };
+    // The fixture's agents keep no store of their own, so the project's list is empty and says no agent went unread.
+    expect(await last("conversations", "conversations", "here")).toEqual({ rows: [], held: [] });
     expect(await last("delete", "delete", inFolder.threadId, "--yes")).toEqual({ threadId: inFolder.threadId, workspaceId: expect.any(String), threads: 1 });
     // A launch that never started its agent leaves a row with no turn on it, which is the one a forget takes.
     const dead = await run("run", "--beside", lead, "--agent", "codex", "never gets going", "--json");

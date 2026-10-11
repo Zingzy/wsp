@@ -13,6 +13,8 @@ import {
   BESIDE_ALONE_FIX,
   FORK_BESIDE_LINE,
   FORK_BESIDE_FIX,
+  FORK_RESUME_LINE,
+  FORK_RESUME_FIX,
   AT_WITHOUT_FORK_LINE,
   AT_WITHOUT_FORK_FIX,
   notAThreadLine,
@@ -61,6 +63,12 @@ import {
   threadOnMachineLine,
   mergedInLine,
   nothingToMergeLine,
+  RESUME_WHERE_LINE,
+  RESUME_WHERE_FIX,
+  COPY_ALONE_LINE,
+  COPY_ALONE_FIX,
+  RESUME_HERE_LINE,
+  RESUME_HERE_FIX,
 } from "@wsp/protocol";
 import { absoluteFolder, deletedLine, forgotLine, otherVersion, NO_DRAFT_FIX, noDraftLine, rebuiltLine, renamedWorkspaceLine, threadLabel, type HostClient } from "../src/verbs.js";
 import type { TurnCase } from "./mcp-record-turns.js";
@@ -214,6 +222,10 @@ export async function workspaceWords(line: LineOf, host: HostOf): Promise<Record
     besideAlone: refusalLine(BESIDE_ALONE_LINE, BESIDE_ALONE_FIX),
     forkBeside: refusalLine(FORK_BESIDE_LINE, FORK_BESIDE_FIX),
     atWithoutFork: refusalLine(AT_WITHOUT_FORK_LINE, AT_WITHOUT_FORK_FIX),
+    forkResume: refusalLine(FORK_RESUME_LINE, FORK_RESUME_FIX),
+    resumeWhere: refusalLine(RESUME_WHERE_LINE, RESUME_WHERE_FIX),
+    copyAlone: refusalLine(COPY_ALONE_LINE, COPY_ALONE_FIX),
+    resumeHere: refusalLine(RESUME_HERE_LINE, RESUME_HERE_FIX),
     localFolder,
     localWorktree,
     threadDeleted: threadDeletedLine("{thread}", { threads: 1 }),

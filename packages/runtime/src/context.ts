@@ -789,6 +789,10 @@ export interface UsageArea {
   readonly usage: UsageDoor;
 }
 
+export interface ConversationsArea {
+  readonly conversations: Runtime["conversations"];
+}
+
 export interface StatusArea {
   readonly status: StatusApi;
   readonly adoptLost: (listing: ListedMachine[], known: Set<string>, failed: ReapFailure[]) => Promise<AdoptedMachine[]>;
@@ -803,4 +807,4 @@ export interface PreferencesArea {
 
 /** Every area's members on one object, filled in createRuntime in file order: a member is read at the moment it is
  * called, never copied into a local while the areas are still being built. */
-export type RuntimeContext = RuntimeCore & KindsArea & RulesArea & TranscriptsArea & SlatesArea & ChannelsArea & RecordsArea & ReachArea & PullRequestsArea & DaemonArea & MachinesArea & BootArea & CreateArea & FoldersArea & StartFromArea & WorkspacesArea & AgentsArea & ThreadsArea & TurnsArea & SessionsArea & BuildersArea & GoldenArea & ImageArea & ProjectsArea & ProjectIconsArea & UsageArea & StatusArea & PreferencesArea;
+export type RuntimeContext = RuntimeCore & KindsArea & RulesArea & TranscriptsArea & SlatesArea & ChannelsArea & RecordsArea & ReachArea & PullRequestsArea & DaemonArea & MachinesArea & BootArea & CreateArea & FoldersArea & StartFromArea & WorkspacesArea & AgentsArea & ThreadsArea & TurnsArea & SessionsArea & BuildersArea & GoldenArea & ImageArea & ProjectsArea & ProjectIconsArea & UsageArea & ConversationsArea & StatusArea & PreferencesArea;

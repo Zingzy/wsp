@@ -26,7 +26,7 @@ export interface ForkPlan {
   /** The turn the fork carries through, absent on a fork that carries none: its anchor and its checkpoint where it
    * left them, and the turns after it in the source, which a harness that counts finds it by. */
   turn?: { turnId: string; anchor?: string; ref?: string; after: CountedTurn[] };
-  /** The source's events through that turn, in their order. */
+  /** The source's events through that turn, in their order, after the outside conversation it opened on. */
   events: SessionEvent[];
   /** The model, effort, window, speed and access the source's latest turn ran at. */
   picks: { model?: string; effort?: string; contextWindow?: string; fast?: boolean; permissionMode?: string };
@@ -47,7 +47,11 @@ export async function readFork(ctx: RuntimeContext, fork: ForkSource, origin: Ca
   if (entry === undefined || workspaceId === undefined) throw notFoundRefusal(`no thread ${threadWord(threadId)}`);
   const harness = record?.harness ?? latest!.harness;
   // A slate's events are its own thread's, and the fork opens with no slate.
-  const events = (await ctx.openTranscript(workspaceId)).filter(e => e.threadId === threadId && e.turnId !== undefined && e.type !== "session.slate");
+  // An outside conversation the thread opened on is written ahead of its first turn under no turn, and is carried
+  // with any turn the fork carries through, since the agent's session holds it.
+  const read = (await ctx.openTranscript(workspaceId)).filter(e => e.threadId === threadId && e.type !== "session.slate");
+  const earlier = read.filter(e => e.type === "session.earlier");
+  const events = read.filter(e => e.turnId !== undefined);
   const order: string[] = [];
   for (const e of events) if (!order.includes(e.turnId!)) order.push(e.turnId!);
   const running = new Set([ctx.runningOn(threadId)?.turnId, ctx.launchingOn(threadId)?.turnId].filter((t): t is string => t !== undefined));
@@ -92,7 +96,7 @@ export async function readFork(ctx: RuntimeContext, fork: ForkSource, origin: Ca
           },
         }
       : {}),
-    events: events.filter(e => kept.includes(e.turnId!)),
+    events: [...(turnId !== undefined ? earlier : []), ...events.filter(e => kept.includes(e.turnId!))],
     picks: {
       ...(latest?.model !== undefined ? { model: latest.model } : {}),
       ...(latest?.effort !== undefined ? { effort: latest.effort } : {}),
@@ -187,4 +191,18 @@ export async function forkStart(ctx: RuntimeContext, start: (workspaceId: string
     }
     throw e;
   }
+}
+
+/** The session a thread resumes whose record still owes a rewind's cut, which a host before copied rewinds wrote: a
+ * copy through that cut. A copy refused for any reason, a session file Claude Code cleaned away or a read that ran
+ * out of time alike, owes nothing more, and the resume runs uncut. */
+export async function payCutOwed(ctx: RuntimeContext, adapter: HarnessAdapter, at: { workspaceId: string; threadId: string }, resume: string): Promise<string> {
+  const record = ctx.threadRecords.get(at.threadId);
+  const owed = record?.cutOwed;
+  if (owed === undefined || adapter.forkSession === undefined) return resume;
+  const moved = await readyFork(adapter, resume, { anchor: owed }, why => new Error(why)).catch((e: unknown) => void console.warn(`thread ${threadWord(at.threadId)} resumes without its owed cut: ${e instanceof Error ? e.message : String(e)}`));
+  if (moved !== undefined && "resume" in moved) moveSession(ctx, at.threadId, resume, moved.resume);
+  delete record!.cutOwed;
+  void ctx.persistSessions(at.workspaceId);
+  return moved !== undefined && "resume" in moved ? moved.resume : resume;
 }

@@ -13,6 +13,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import { LocalBackend } from "@wsp/engine";
 import {
   FORK_BESIDE_FIX,
+  FORK_RESUME_FIX,
+  FORK_RESUME_LINE,
   FORK_NO_CHECKPOINT_FIX,
   FORK_NO_CHECKPOINT_LINE,
   FORK_RUNNING_FIX,
@@ -21,6 +23,7 @@ import {
   REWIND_COPIED_LINE,
   codexNoTurnLine,
   copiedFromOf,
+  threadMessages,
   foldThreads,
   forkAgentLine,
   forkNoAnchorLine,
@@ -38,6 +41,8 @@ import { createRuntime, type HarnessAdapterFactory, type HarnessStartOptions, ty
 import type { DaemonChannel } from "../src/daemon-channel.js";
 import { localExecStream } from "../src/local-exec.js";
 import { memoryStore, type Store } from "../src/store.js";
+import { serveRuntime } from "../src/serve.js";
+import { wsRequest } from "./ws-client.js";
 import { SESSIONS, type SessionIndexRecord } from "../src/types/internal.js";
 import { gitCopier } from "./git-copier.js";
 import { createOn, stubBackend, testPlatform, tokenGuest } from "./stub-backend.js";
@@ -238,6 +243,38 @@ describe("a fork of a Claude Code thread at a finished turn", () => {
     expect((await threadOf(ws.id, threadId))!.forkedFrom).toBeUndefined();
     // The fork's own turns rewind; the turns it was handed do not.
     await expect(rt!.sessions.rewind(forkId, { turnId: turns[0]! })).rejects.toThrow(REWIND_COPIED_LINE);
+  });
+
+  it("carries the outside conversation its source opened on ahead of the turns, and wsp thread read shows it", async () => {
+    const { ws, claude } = await box();
+    const outside = { harness: "claude", id: sessionOf("0d0d0d0d", 1), copy: false, project: "lab", title: "lab codewords", earlier: [{ who: "person" as const, text: "Remember ALPHA." }, { who: "agent" as const, text: "ALPHA kept." }] };
+    const first = await rt!.sessions.start(ws.id, { prompt: "Remember BETA.", harness: "claude", outside });
+    await first.finished;
+    const threadId = first.view().threadId!;
+    expect(claude.starts.at(-1)).toMatchObject({ resume: outside.id });
+    await settle();
+    const run = await rt!.sessions.fork({ prompt: "list every code word you remember", fork: { threadId } });
+    await run.finished;
+    const forkId = run.view().threadId!;
+    const events = (await rt!.sessions.page(ws.id, { threadId: forkId })).events;
+    const earlier = events.filter(e => e.type === "session.earlier");
+    expect(earlier.map(e => [e.type === "session.earlier" ? e.text : "", e.threadId, copiedFromOf(e)])).toEqual([
+      ["Remember ALPHA.", forkId, threadId],
+      ["ALPHA kept.", forkId, threadId],
+    ]);
+    expect(events.slice(0, 2)).toEqual(earlier);
+    expect(threadMessages(events, forkId).filter(m => m.who !== "turn").map(m => [m.who, m.text])).toEqual([
+      ["person", "Remember ALPHA."],
+      ["agent", "ALPHA kept."],
+      ["person", "Remember BETA."],
+      ["agent", "reply 1"],
+      ["person", "list every code word you remember"],
+      ["agent", "reply 2"],
+    ]);
+    // A fork that carries no turn carries none of it either, as its agent starts with nothing.
+    const bare = await rt!.sessions.fork({ prompt: "x", fork: { threadId, at: 0 } });
+    await bare.finished;
+    expect((await rt!.sessions.page(ws.id, { threadId: bare.view().threadId! })).events.some(e => e.type === "session.earlier")).toBe(false);
   });
 
   it("leaves the source's transcript, rows, read stamp and status as they were", async () => {
@@ -529,5 +566,23 @@ describe("a fork's start beside what its source decides", () => {
     const { threadId } = await threeTurns(ws.id, "claude");
     const refused = await refusalOf(rt!.sessions.start(ws.id, { prompt: "x", fork: { threadId }, thread: threadId }));
     expect(refused).toMatchObject({ fix: FORK_BESIDE_FIX, kind: "usage" });
+  });
+
+  it("is refused as usage beside a conversation kept outside wsp, in process and over the wire, before anything starts", async () => {
+    const { ws, claude } = await box();
+    const { threadId } = await threeTurns(ws.id, "claude");
+    const starts = claude.starts.length;
+    const outside = { harness: "claude", id: sessionOf("0d0d0d0d", 1), copy: true, project: "lab", title: "lab", earlier: [] };
+    const refused = await refusalOf(rt!.sessions.start(ws.id, { prompt: "x", fork: { threadId }, outside }));
+    expect(refused).toMatchObject({ message: `${FORK_RESUME_LINE}. ${FORK_RESUME_FIX}`, kind: "usage" });
+    const srv = await serveRuntime(rt!, { port: 0, authToken: "t" });
+    try {
+      const res = await wsRequest(srv.port, "t", { op: "sessions.start", prompt: "x", fork: { threadId }, resume: { id: outside.id, copy: true } });
+      expect(res).toMatchObject({ ok: false, error: `${FORK_RESUME_LINE}. ${FORK_RESUME_FIX}` });
+    } finally {
+      await srv.close();
+    }
+    expect(claude.starts).toHaveLength(starts);
+    expect(claude.forks).toEqual([]);
   });
 });

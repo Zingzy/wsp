@@ -221,6 +221,17 @@ describe("an agent process started ahead of a new thread's first send", () => {
     expect(pidOf(mine.result.text)).toBe(warm!.pid);
   }, 30_000);
 
+  it("a start on a copy of an outside conversation launches its own copy, never the fresh one standing", async () => {
+    const rt = host();
+    const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
+    await rt.sessions.warm(ws.id, { harness: "claude" });
+    const [warm] = await upCount(1);
+    const outside = { harness: "claude", id: "7414323d-e71b-4957-8b56-eefdf6bfa350", copy: true, project: "lab", title: "lab codewords", earlier: [] };
+    const result = await (await rt.sessions.start(ws.id, { prompt: "one", harness: "claude", outside })).finished;
+    expect(pidOf(result.text)).not.toBe(warm!.pid);
+    expect(ups()[1]!.args).toContain(`--resume ${outside.id} --fork-session`);
+  }, 30_000);
+
   it("stands for the two composers asked for last across every project: warming a third ends the one asked for longest ago", async () => {
     const rt = host();
     const folders: Awaited<ReturnType<typeof createOn>>[] = [];

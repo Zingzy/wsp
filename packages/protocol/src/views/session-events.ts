@@ -527,6 +527,17 @@ export const SessionBehindEvent = z.object({
 });
 export type SessionBehindEvent = z.infer<typeof SessionBehindEvent>;
 
+/** One row of a conversation the thread was opened on, which ran outside wsp before it: written once, ahead of the
+ * thread's first prompt, oldest first. A tool row's text is the call's one line; the note says how many earlier
+ * messages stay in the agent's own history. */
+export const SessionEarlierEvent = z.object({
+  type: z.literal("session.earlier"),
+  ...sessionScope,
+  who: z.enum(["person", "agent", "tool", "note"]),
+  text: z.string(),
+});
+export type SessionEarlierEvent = z.infer<typeof SessionEarlierEvent>;
+
 /** A start found its computer running as many threads as it takes at once and holds its turn until one ends or the
  * person raises the number: written once as the wait begins, so the thread's transcript and whoever reads it say why
  * nothing has started. The turn it names starts on its own when a slot frees. */
@@ -591,6 +602,7 @@ export const SessionEvent = z.discriminatedUnion("type", [
   SessionRunEvent,
   SessionMovedEvent,
   SessionBehindEvent,
+  SessionEarlierEvent,
   SessionCappedEvent,
   SessionSubagentEvent,
   SessionSlateEvent,

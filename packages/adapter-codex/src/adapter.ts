@@ -10,16 +10,15 @@
 // codex-cli 0.155.1's own schema (`codex app-server generate-json-schema`).
 import { randomUUID } from "node:crypto";
 import {
+  conversationWrittenElsewhereLine,
   INTERRUPT_GRACE_MS,
   MCP_SERVER_NAME,
   PERMISSION_ALLOW,
   PERMISSION_DENY,
   ASIDE_WALL_MS,
-  CODEX_FEWER_TURNS,
   CODEX_LEGACY_HISTORY,
   HUNK_HEAD,
   RUN_EXIT_MS,
-  codexNoTurnLine,
   asideWallLine,
   codexKeyRefusedLine,
   codexMissingEnvLine,
@@ -39,6 +38,8 @@ import type {
   AdapterAttachOptions,
   AdapterEvent,
   AgentLaunch,
+  ConversationLine,
+  ConversationStore,
   ExecStream,
   ExecStreamFactory,
   FilePatch,
@@ -70,7 +71,7 @@ import type {
   ResetCredit,
 } from "@wsp/protocol";
 import { catalogProbeCommand, parseCatalogProbe, versionProbeCommand, parseVersion } from "./catalog.js";
-import { accessParams, buildCommand, buildEnv, imagePath } from "./command.js";
+import { accessParams, buildCommand, buildEnv, imagePath, slug } from "./command.js";
 import {
   INITIALIZED_LINE,
   REQUEST,
@@ -81,19 +82,21 @@ import {
   readMessage,
   refuseRequestLine,
   threadCompactStartLine,
+  threadCopyLine,
   threadForkLine,
-  threadForkThroughLine,
   threadResumeLine,
-  threadRevertLine,
   threadStartLine,
-  threadTurnsListLine,
+  threadUnsubscribeLine,
   turnInterruptLine,
   turnStartLine,
   turnSteerLine,
   type RequestId,
+  type ThreadOptions,
 } from "./rpc.js";
+import { LETS_GO, LIST_PAGES, WRITER_HELD, itemsCommand, listCommand, newestLines, parseItems, parseList, parseOpened, parseSizes, parseTurns, sizesCommand, turnsCommand } from "./conversations.js";
 import { draftForCommand, parseDraftFor, parseRename, parseSessionTitle, parseTitleFor, renameCommand, sessionTitleCommand, titleForCommand } from "./session-title.js";
 import { shellScriptOf } from "./shell-script.js";
+import { forkSessionOn, revertOn, type SideRunner } from "./turn-pages.js";
 
 export interface CodexStartOptions {
   prompt: string;
@@ -102,6 +105,9 @@ export interface CodexStartOptions {
   /** A thread to fork through one of its turns, by that turn's id, in place of a resume: the turn runs on the new
    * thread the fork answers with, which every later turn resumes. */
   fork?: { session: string; turn: string };
+  /** The turn runs on a copy of `resume` the server writes as a thread of its own, the original left as it was: what a
+   * thread another process writes is continued on. */
+  copy?: true;
   cwd?: string;
   model?: string;
   effort?: string;
@@ -218,6 +224,8 @@ export interface CodexAdapter {
   forkSession: SessionForker;
   readonly forksByCount: true;
   readonly env: Readonly<Record<string, string>>;
+  /** The threads Codex kept on the computer, read through its own app server there. */
+  readonly conversations: ConversationStore;
 }
 
 type Item = Record<string, unknown> & { id: string; type: string };
@@ -255,18 +263,6 @@ function failureWords(message: string, login: string, keyEnv?: string): { line: 
   const missing = MISSING_ENV.exec(message);
   return missing === null ? undefined : { line: codexMissingEnvLine(missing[1]!) };
 }
-
-/** The words a server that refuses to cut a legacy thread says it in (thread_processor.rs, 0.155.1). */
-const PAGINATED_ONLY = "only supports paginated threads";
-
-/** The start of every failure this adapter words itself before the server opened the turn. */
-const NEVER_OPENED = "codex could not ";
-
-/** Whether the server opened a cut turn, so the thread's own history holds it: one that kept the server's turn id did;
- * of the rest, a turn refused for want of a sign-in, or one the adapter failed before the server took it, left none
- * there, and one that never said how it ended counts as opened. */
-const serverOpened = (turn: { anchor?: string; result?: TurnResult }): boolean =>
-  turn.anchor !== undefined || (turn.result?.refusal === undefined && turn.result?.error?.startsWith(NEVER_OPENED) !== true);
 
 function rec(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
@@ -438,6 +434,15 @@ const totalBefore = (total: Record<string, unknown>, last: Record<string, unknow
 
 const stepState = (status: unknown): PlanStep["state"] => (status === "completed" ? "done" : status === "inProgress" ? "working" : "pending");
 
+/** One call as a thread's earlier messages show it: the tool and its input as a turn's own tool_use row names them. */
+export function toolCallOf(item: Record<string, unknown>): { tool: string; text: string } | undefined {
+  if (typeof item.id !== "string" || typeof item.type !== "string") return undefined;
+  for (const e of [false, true].flatMap(done => itemDeltas(done, item as Item, ""))) {
+    if (e.type === "turn.delta" && e.kind === "tool_use" && e.toolName !== undefined) return { tool: e.toolName, text: e.text };
+  }
+  return undefined;
+}
+
 /** Each item as the deltas a timeline draws: a call when it starts, its result when it completes. The tool names are
  * the ones codex exec reported the same calls under, which the clients read. */
 function itemDeltas(done: boolean, item: Item, sessionId: string): AdapterEvent[] {
@@ -578,6 +583,8 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
     /** The thread already open on the server, a kept one or a re-opened run read from a later turn's start: nothing
      * this turn reads announces it again, so it is announced at once. */
     opened?: { threadId: string; legacy?: boolean };
+    /** What the thread was opened with, which a kept server's next turn resumes it with after this one let it go. */
+    threadOptions?: ThreadOptions;
     onEvent: (event: AdapterEvent) => void;
   }): CodexSession => {
     const { stream, localId, startedAt } = o;
@@ -781,6 +788,8 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
       // A server is kept only past a turn that went as it should, so a sign-in or a fix made in between reaches the
       // next turn on a server launched again.
       if (result.status !== "completed" && result.status !== "interrupted") o.keeper?.release();
+      // A kept server lets go of the thread, so the person's own Codex may open it while wsp waits for the next message.
+      else if (o.keeper?.up === true && o.threadOptions !== undefined) void stream.write(threadUnsubscribeLine(threadId));
       emit({ type: "turn.done", sessionId: threadId, result });
       for (const askId of [...pending.keys()]) closeAsk(askId, "cancelled");
       settleAwaiting();
@@ -918,7 +927,8 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
         legacy ||= !announced && thread?.historyMode === "legacy";
         announce(str(thread?.id), str(answer?.model) ?? str(thread?.model), str(answer?.cwd) ?? str(thread?.cwd));
         if (o.sideRun !== undefined) side(id, answer);
-        else if (o.turnLine !== undefined) handOver(o.turnLine(threadId));
+        // A thread already open handed its turn over as it began; this answer is its resume's.
+        else if (o.turnLine !== undefined && o.opened === undefined) handOver(o.turnLine(threadId));
         else if (o.owedTurn !== undefined && stream.taken !== undefined && !stream.taken.some(isTurnStart)) void stream.write(o.owedTurn(threadId));
         return;
       }
@@ -959,7 +969,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
       }
       if (id === REQUEST.revert) finish({ status: "failed", error: `codex would not cut the thread: ${message}` });
       else if (id === REQUEST.turns) finish({ status: "failed", error: `codex could not list the thread's turns: ${message}` });
-      else if (id === REQUEST.thread) finish({ status: "failed", error: `codex could not open the thread: ${message}` });
+      else if (id === REQUEST.thread) finish({ status: "failed", error: message.includes(WRITER_HELD) ? conversationWrittenElsewhereLine("Codex", LETS_GO) : `codex could not open the thread: ${message}` });
       else if (id === REQUEST.turn || id === REQUEST.initialize) finish({ status: "failed", error: `codex could not start the turn: ${message}` });
     };
 
@@ -1218,7 +1228,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
         const thread = { threadId, legacy, ...(modelUsed !== undefined ? { model: modelUsed } : {}), ...(cwdUsed !== undefined ? { cwd: cwdUsed } : {}) };
         return {
           // Keyed as a cold resume of the thread is, so the rows a kept turn writes are the ones a launched one would.
-          next: turn => nextOn(keeper, threadId, thread, turn),
+          next: turn => nextOn(keeper, threadId, thread, turn, o.threadOptions),
           close: c => keeper.close(c?.now === true ? 0 : (deps.resultExitMs ?? RUN_EXIT_MS), graceMs),
           exited: keeper.exited,
           sessionFile: { folder: `${deps.home}/sessions`, name: `-${threadId}.jsonl`, depth: 3 },
@@ -1239,9 +1249,13 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
 
   /** The thread's next turn on a server its last turn left up: turn/start on the thread it already holds, at the
    * model, effort and access the earlier turn set, which the server keeps for every later turn. */
-  const nextOn = (keeper: KeptRun, localId: string, thread: { threadId: string; legacy: boolean; model?: string; cwd?: string }, turn: KeptTurn): CodexSession => {
+  const nextOn = (keeper: KeptRun, localId: string, thread: { threadId: string; legacy: boolean; model?: string; cwd?: string }, turn: KeptTurn, threadOptions?: ThreadOptions): CodexSession => {
     const images = turn.images?.map(imagePathOf);
     const { stream, from } = keeper.turn();
+    // The last turn let the thread go, so this one opens it again on the same server, its turn/start right behind:
+    // 0.162.1 takes the two in order when they arrive together, and a turn/start alone on a thread let go is never
+    // answered (measured 2026-10-11).
+    if (threadOptions !== undefined) void stream.write(threadResumeLine({ ...threadOptions, threadId: thread.threadId }));
     return follow({
       stream,
       localId,
@@ -1249,6 +1263,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
       keeper,
       ...(from !== undefined ? { from } : {}),
       opened: { threadId: thread.threadId, legacy: thread.legacy },
+      ...(threadOptions !== undefined ? { threadOptions } : {}),
       ...(thread.model !== undefined ? { model: thread.model } : {}),
       ...(thread.cwd !== undefined ? { cwd: thread.cwd } : {}),
       turnLine: threadId => turnStartLine({ threadId, text: turn.prompt, ...(images !== undefined ? { images } : {}) }),
@@ -1261,17 +1276,19 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
     if (options.contextWindow !== undefined) throw new Error("codex takes no context window");
     const images = options.images?.map(imagePathOf);
     const access = accessParams(options.permissionMode);
-    const localId = options.resume ?? randomUUID();
+    const localId = options.copy === true ? randomUUID() : (options.resume ?? randomUUID());
     const config = options.serverValues?.config ?? {};
     const valued = Object.keys(config).length > 0;
     const thread = { ...(options.cwd !== undefined ? { cwd: options.cwd } : {}), ...(options.model !== undefined ? { model: options.model } : {}), ...(options.fast === true ? { serviceTier: "fast" as const } : {}), access, ...(valued ? { config } : {}) };
     if (options.fork !== undefined && options.resume !== undefined) throw new Error("a codex start forks a thread or resumes one, never both");
     const threadLine =
       options.fork !== undefined
-        ? threadForkThroughLine({ ...thread, threadId: options.fork.session, lastTurnId: options.fork.turn })
+        ? threadCopyLine({ ...thread, threadId: options.fork.session, lastTurnId: options.fork.turn })
         : options.resume === undefined
           ? threadStartLine(thread)
-          : threadResumeLine({ ...thread, threadId: options.resume });
+          : options.copy === true
+            ? threadCopyLine({ ...thread, threadId: options.resume })
+            : threadResumeLine({ ...thread, threadId: options.resume });
     const command = buildCommand({ ...(options.cwd !== undefined ? { cwd: options.cwd } : {}), ...(options.mcpServers !== undefined ? { mcpServers: options.mcpServers } : {}), ...(deps.launch !== undefined ? { launch: deps.launch } : {}) });
     const run = deps.exec(command, { env: { ...env }, input: [initializeLine(), INITIALIZED_LINE, ACCOUNT_READ_LINE, rateLimitsReadLine(options.limitDetails === true), threadLine], ...(valued ? { secret: { input: true as const } } : {}) });
     const keeper = options.keep === true ? keepRun(run) : undefined;
@@ -1282,6 +1299,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
       startedAt: Date.now(),
       command,
       ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
+      threadOptions: thread,
       turnLine: threadId => turnLineFor({ threadId, prompt: options.prompt, ...(images !== undefined ? { images } : {}), ...(options.effort !== undefined ? { effort: options.effort } : {}) }),
       ...(options.promptAfter !== undefined ? { promptAfter: options.promptAfter } : {}),
       onEvent: options.onEvent,
@@ -1307,104 +1325,74 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
     return { text: result.text ?? "", ...(result.tokens !== undefined ? { usage: result.tokens } : {}) };
   };
 
-  /** The thread's own history cut before one of its turns, on a server run of its own that runs no turn: the
-   * thread resumed, then thread/revert, then EOF. Without the turn's own id the boundary is found by count, the way
-   * T3 Code's CodexThreadRevert.ts does it (MIT): the thread's turns newest first, page by page, the count-th one the
-   * first cut. */
-  const revert: SessionReverter = async o => {
-    const command = buildCommand({ ...(o.cwd !== undefined ? { cwd: o.cwd } : {}), ...(deps.launch?.program !== undefined ? { launch: { program: deps.launch.program } } : {}) });
-    const resume = threadResumeLine({ threadId: o.session, ...(o.cwd !== undefined ? { cwd: o.cwd } : {}), access: accessParams("read-only") });
-    let legacy = false;
-    let remaining = "turns" in o ? o.turns.filter(serverOpened).length : 0;
-    let beforeTurnId = "beforeTurn" in o ? o.beforeTurn : undefined;
-    let cursor: string | null = null;
-    const seen = new Set<string | null>();
-    let threadId = o.session;
-    const done = (): TurnResult => ({ status: "completed" });
-    const page = (): string => {
-      seen.add(cursor);
-      return threadTurnsListLine({ threadId, cursor, limit: Math.min(remaining, 100) });
-    };
-    const cutAt = (): string | TurnResult => (beforeTurnId === undefined ? done() : threadRevertLine({ threadId, beforeTurnId }));
-    const result = await follow({
-      stream: deps.exec(command, { env: { ...env }, input: [initializeLine(), INITIALIZED_LINE, resume] }),
-      localId: randomUUID(),
-      startedAt: Date.now(),
-      command,
-      sideRun: (id, answer) => {
-        if (id === REQUEST.thread) {
-          const thread = rec(answer?.thread);
-          threadId = str(thread?.id) ?? threadId;
-          legacy = thread?.historyMode === "legacy";
-          if (legacy) return done();
-          return beforeTurnId === undefined && remaining > 0 ? page() : cutAt();
-        }
-        if (id === REQUEST.turns) {
-          for (const turn of Array.isArray(answer?.data) ? answer.data : []) {
-            const turnId = str(rec(turn)?.id);
-            if (turnId === undefined) continue;
-            beforeTurnId = turnId;
-            if (--remaining === 0) break;
-          }
-          cursor = str(answer?.nextCursor) ?? null;
-          if (remaining === 0) return cutAt();
-          // wsp's count is rebuilt from its own transcript, so a server that runs out first disagrees with it.
-          if (cursor === null) return { status: "failed", error: CODEX_FEWER_TURNS };
-          return seen.has(cursor) ? { status: "failed", error: "codex could not list the thread's turns: it handed back a page it already gave" } : page();
-        }
-        return done();
-      },
-      onEvent: () => {},
-    }).finished;
-    if (legacy || (result.status === "failed" && result.error?.includes(PAGINATED_ONLY) === true)) return { kept: CODEX_LEGACY_HISTORY };
-    if (result.status !== "completed") throw new Error(result.error ?? "codex did not cut the thread");
+  /** A server run of its own that loads what its input asks and runs no turn, each answer handed to sideRun. */
+  const sideRunner: SideRunner = ({ cwd, input, sideRun }) => {
+    const command = buildCommand({ ...(cwd !== undefined ? { cwd } : {}), ...(deps.launch?.program !== undefined ? { launch: { program: deps.launch.program } } : {}) });
+    return follow({ stream: deps.exec(command, { env: { ...env }, input: [initializeLine(), INITIALIZED_LINE, ...input] }), localId: randomUUID(), startedAt: Date.now(), command, sideRun, onEvent: () => {} }).finished;
   };
-
-  /** The turn a fork carries the thread through, found on a server run of its own that loads no thread and runs no turn:
-   * the thread's turns newest first, page by page, until the turn by its id, or the one past the turns after it that
-   * the server opened. A thread whose history the server will not list forks at its anchor as given. */
-  const forkSession: SessionForker = async o => {
-    const command = buildCommand({ ...(deps.launch?.program !== undefined ? { launch: { program: deps.launch.program } } : {}) });
-    const anchor = "anchor" in o.turn ? o.turn.anchor : undefined;
-    let skip = "after" in o.turn ? o.turn.after.filter(serverOpened).length : 0;
-    let found: string | undefined;
-    let cursor: string | null = null;
-    const seen = new Set<string | null>();
-    const page = (): string => {
-      seen.add(cursor);
-      return threadTurnsListLine({ threadId: o.session, cursor, limit: 100 });
-    };
-    const result = await follow({
-      stream: deps.exec(command, { env: { ...env }, input: [initializeLine(), INITIALIZED_LINE, page()] }),
-      localId: randomUUID(),
-      startedAt: Date.now(),
-      command,
-      sideRun: (id, answer) => {
-        if (id !== REQUEST.turns) return { status: "completed" };
-        for (const turn of Array.isArray(answer?.data) ? answer.data : []) {
-          const turnId = str(rec(turn)?.id);
-          if (turnId === undefined) continue;
-          if (anchor !== undefined ? turnId === anchor : skip-- === 0) {
-            found = turnId;
-            return { status: "completed" };
-          }
-        }
-        cursor = str(answer?.nextCursor) ?? null;
-        if (cursor === null) return { status: "failed", error: anchor !== undefined ? codexNoTurnLine(anchor) : CODEX_FEWER_TURNS };
-        return seen.has(cursor) ? { status: "failed", error: "codex could not list the thread's turns: it handed back a page it already gave" } : page();
-      },
-      onEvent: () => {},
-    }).finished;
-    if (found !== undefined) return { fork: { session: o.session, turn: found } };
-    if (anchor !== undefined && result.error?.includes(PAGINATED_ONLY) === true) return { fork: { session: o.session, turn: anchor } };
-    throw new Error(result.error ?? "codex did not find the turn to fork the thread at");
-  };
+  const revert: SessionReverter = o => revertOn(sideRunner, o);
+  const forkSession: SessionForker = o => forkSessionOn(sideRunner, o);
 
   const attach = deps.exec.attach?.bind(deps.exec);
 
   const launch = deps.launch !== undefined ? { launch: deps.launch } : {};
   /** What every question outside a turn reads off its input: the session's own environment, never words of its text. */
   const questionEnv = (): Record<string, string> => buildEnv({ base: deps.baseEnv, home: deps.home });
+  /** The threads Codex kept on this computer, each read through a server that runs no turn and ends at once. */
+  const conversations: ConversationStore = {
+    letsGo: LETS_GO,
+    list: async (cwds, road) => {
+      if (cwds.length === 0) return [];
+      const rows: Awaited<ReturnType<typeof parseList>>["rows"] = [];
+      let cursor: string | undefined;
+      for (let page = 0; page < LIST_PAGES; page++) {
+        const read = parseList(await road.exec(listCommand({ cwds, ...(cursor !== undefined ? { cursor } : {}), ...launch }), questionEnv()));
+        rows.push(...read.rows);
+        if (read.next === undefined) break;
+        cursor = read.next;
+      }
+      const paths = rows.flatMap(r => (r.path !== undefined ? [r.path] : []));
+      const sizes = paths.length === 0 ? [] : parseSizes(await road.exec(sizesCommand(paths)).catch(() => ""), paths.length);
+      const sizeOf = new Map(paths.map((p, i) => [p, sizes[i]]));
+      return rows.map(({ path, ...row }) => {
+        const bytes = path === undefined ? undefined : sizeOf.get(path);
+        return { ...row, ...(bytes !== undefined ? { bytes } : {}) };
+      });
+    },
+    earlier: async (id, o, road) => {
+      const threadId = slug("threadId", id);
+      const first = await road.exec(turnsCommand({ threadId, probe: o.probe, ...launch }), questionEnv());
+      const opened = parseOpened(first);
+      if (opened === "gone" || opened === "open") return opened;
+      let page = parseTurns(first);
+      const turns = [...page.turns];
+      for (let read = 1; page.next !== undefined && read < LIST_PAGES; read++) {
+        page = parseTurns(await road.exec(turnsCommand({ threadId, probe: false, cursor: page.next, ...launch }), questionEnv()));
+        turns.push(...page.turns);
+      }
+      const total = turns.reduce((n, t) => n + t.messages, 0);
+      // The newest turns that hold the messages kept: their items are read and nothing older.
+      const kept = new Set<string>();
+      let held = 0;
+      for (const turn of turns) {
+        if (held >= o.last) break;
+        kept.add(turn.id);
+        held += turn.messages;
+      }
+      const lines: ConversationLine[] = [];
+      let cursor: string | undefined;
+      reading: for (let read = 0; read < LIST_PAGES; read++) {
+        const items = parseItems(await road.exec(itemsCommand({ threadId, ...(cursor !== undefined ? { cursor } : {}), ...launch }), questionEnv()), toolCallOf);
+        for (const item of items.items) {
+          if (item.turnId !== undefined && !kept.has(item.turnId)) break reading;
+          lines.unshift(item.line);
+        }
+        if (items.next === undefined) break;
+        cursor = items.next;
+      }
+      return { ...opened, ...newestLines(lines, total, o.last) };
+    },
+  };
   const probeCatalog = (exec: HarnessExec): Promise<HarnessCatalogAnswer> => exec(catalogProbeCommand(launch), questionEnv()).then(stdout => parseCatalogProbe(stdout, deps.login));
 
   return {
@@ -1440,6 +1428,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
     revert,
     forkSession,
     forksByCount: true,
+    conversations,
     probeCatalog,
     probeVersion: (exec: HarnessExec) => exec(versionProbeCommand(launch), questionEnv()).then(parseVersion),
     sessionTitle: (threadId, exec) => exec(sessionTitleCommand({ home: deps.home, threadId })).then(parseSessionTitle),

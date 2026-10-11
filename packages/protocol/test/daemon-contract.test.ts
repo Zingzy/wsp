@@ -115,6 +115,8 @@ import {
   FsFilesReply,
   GitSnapshotReply,
   SysHistoryReply,
+  TranscriptsListReply,
+  TranscriptsReadReply,
   UsageLogsReply,
   GitPushReply,
   GuestCliMessage,
@@ -871,6 +873,35 @@ const REPLIES: Record<string, { schema: ZodTypeAny; samples: unknown[] }> = {
         ],
       },
       { rows: [], limits: [] },
+    ],
+  },
+  TranscriptsListReply: {
+    schema: TranscriptsListReply,
+    samples: [
+      {
+        rows: [
+          { id: "7414323d-e71b-4957-8b56-eefdf6bfa350", cwd: "/home/dev/proj", branch: "feat/x", entrypoint: "cli", title: "lab codewords", firstPrompt: "Remember the codeword ALPHA.", lastAt: 1_791_673_566_000, bytes: 209_753 },
+          { id: "e615a6ab-a2f2-4b10-8fd6-0dc38bf99c28", cwd: "/home/dev/proj", lastAt: 1_791_673_570_000, bytes: 1_024 },
+        ],
+      },
+      { rows: [] },
+    ],
+  },
+  TranscriptsReadReply: {
+    schema: TranscriptsReadReply,
+    samples: [
+      {
+        found: true,
+        cwd: "/home/dev/proj",
+        title: "lab codewords",
+        messages: [
+          { who: "person", text: "Run the shell command: echo hi" },
+          { who: "tool", text: '{"command":"echo hi"}', tool: "Bash" },
+          { who: "agent", text: "DONE" },
+        ],
+        earlier: 12,
+      },
+      { found: false, messages: [], earlier: 0 },
     ],
   },
   FsFilesReply: { schema: FsFilesReply, samples: [{ files: ["README.md", "src/ChatView.tsx"], truncated: false }, { files: [], truncated: true }] },

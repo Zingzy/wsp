@@ -418,6 +418,12 @@ export const DaemonRequest = z.discriminatedUnion("op", [
   // What each agent's own store on the daemon's computer counted, for the stores the host names: counts, a model and
   // a folder per session and half hour, and the newest plan reading a store kept, never a line of a transcript.
   z.object({ id: reqId, op: z.literal("usage.logs"), stores: z.array(UsageStore).max(USAGE_STORES_MAX) }),
+  /** Claude Code's transcripts under a store root, one row each: under each folder of dirs, every session whose first
+   * recorded cwd is one of cwds, read off the first and last 64 KB of its file, never the conversation. */
+  z.object({ id: reqId, op: z.literal("transcripts.list"), root: z.string().min(1).max(4096), dirs: z.array(z.string().max(255)).max(64), cwds: z.array(z.string().max(4096)).max(64) }),
+  /** One Claude Code session's conversation along the branch the CLI resumes: its newest `last` messages, each tool
+   * call one row, and how many messages came before them. */
+  z.object({ id: reqId, op: z.literal("transcripts.read"), root: z.string().min(1).max(4096), dirs: z.array(z.string().max(255)).max(64), session: z.string().min(1).max(64), last: z.number().int().positive() }),
   /** Streams the processes to this socket until proc.unwatch or the socket
    * closes: one whole proc.snapshot first, two seconds after the reply since
    * cpu is a delta (at once where the sampler is already running), then a

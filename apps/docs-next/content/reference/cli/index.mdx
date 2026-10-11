@@ -59,6 +59,7 @@ wsp --version
 | [`wsp commit`](/reference/cli/commit) | commits every changed file in the folder the thread works in, other threads' changes there included, or the files named; without a message the thread's agent drafts one |
 | [`wsp computers`](/reference/cli/computers) | your computers: this Mac, each box you added, with what each has, whether it is connected, how many machines it holds and what runs there against its cap |
 | [`wsp computers set`](/reference/cli/computers-set) | what you set on one of your computers: its name, the ssh login it is reached by, how many threads run there at once, how long a quiet machine there runs before it naps, how long one turn there may run, whether agents there may start agents, the recipe it follows; --reset takes a setting back to its default |
+| [`wsp conversations`](/reference/cli/conversations) | the conversations Claude Code and Codex kept in the project's folder and its worktrees outside wsp, newest first, each with its id, last change, size, branch and title, and whether another app holds it open; wsp run --resume \<id> opens a thread on one |
 | [`wsp delete`](/reference/cli/delete) | takes a thread away, its turns and checkpoints with it, and the worktree wsp made for it with every thread in it, never the project folder |
 | [`wsp discard`](/reference/cli/discard) | puts one changed file in the folder the thread works in back as its last commit has it, or removes it where that has none |
 | [`wsp doctor`](/reference/cli/doctor) | prove a computer end to end. With no word, this computer and then every computer you added, forking nothing and billing nothing. With a computer's name, that one: a joined computer is proved by the host that computer dials, which makes a short-lived machine there and reads the recipe's tools inside it, and this line prints what the host says; a cloud account gets your image forked, wsp put on the fork, a file coming back and the teardown, which forks a live machine and bills while it runs. --local proves this computer alone: a thread here and its reply, no machine, no key. --project names the project the machine is made of, by name, on the computer named |
@@ -471,6 +472,11 @@ up and down for the host, recipe and image for what a machine starts from.
   wsp exec <thread> [--cwd <dir>] -- <command...>
       runs the command where the thread works, each word as given, in --cwd or
       the thread's own folder
+  wsp conversations [<project>] [--agent <id>]
+      the conversations Claude Code and Codex kept in the project's folder and
+      its worktrees outside wsp, newest first, each with its id, last change,
+      size, branch and title, and whether another app holds it open; wsp run
+      --resume <id> opens a thread on one
   wsp mcp install --agent <id> [--agent <id>] [--host <alias>] [--json]
     [--remove]   (claude, codex, gemini, opencode)
       put the wsp tools, this skill and wsp's own section of this project's

@@ -102,6 +102,10 @@ export interface BuildCommandOptions {
   sessionId?: string;
   /** Existing session: passed as --resume instead. */
   resume?: string;
+  /** Beside a fresh sessionId: the session that one starts as a copy of, `--resume <copyOf> --fork-session`, which the
+   * CLI's own `--bg --resume` runs on a session open in another process (measured on 2.1.296: the copy's file holds the
+   * original's active branch, every line stamped sdk-cli, and the original's file is byte for byte as it was). */
+  copyOf?: string;
   cwd?: string;
   /** The CLI's own slugs, from the harness catalog; absent leaves the CLI's default in place. */
   model?: string;
@@ -269,6 +273,7 @@ export function buildCommand(options: BuildCommandOptions): string {
   if (!UUID_RE.test(id)) {
     throw new Error(`session identifier must be a UUID, got "${id}"`);
   }
+  if (options.copyOf !== undefined && (sessionId === undefined || !UUID_RE.test(options.copyOf))) throw new Error(`a copy opens a new session of a session named by its UUID, got "${options.copyOf}"`);
   const aside = options.aside === true;
   if (aside && resume === undefined) throw new Error("a side question resumes the copy it is asked on");
   const idFlag =
@@ -276,7 +281,7 @@ export function buildCommand(options: BuildCommandOptions): string {
       ? `--max-turns 2 --resume ${id}`
       : sessionId === undefined
         ? `--resume ${id}`
-        : `--session-id ${id}`;
+        : `--session-id ${id}${options.copyOf === undefined ? "" : ` --resume ${options.copyOf} --fork-session`}`;
   const claude = [
     `${programWord("claude", options.launch)} -p`,
     ...person.words.map(shellQuote),

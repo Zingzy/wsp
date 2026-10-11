@@ -17,15 +17,15 @@ import {
   attachmentRecord, attachmentKey, filesBlocked, filesRefusal, steerFilesBlocked, type Attachment, isImage, sendFilesDir, attachedFilesPrompt, threadMessages,
   threadSeed, taskStopRefusedLine, taskStopUnsupportedLine, agentOffLine, HEAD_BYTES, HISTORY_PAGE_BYTES,
   HISTORY_PAGE_EVENTS, AGENT_STARTING_MS, ASIDE_EMPTY_LINE, capStoppedLine, deletedBeforeStartLine, type AsideQuestion,
-  type McpServerSpec, type SessionAsker, refusal, sendFilesAcrossLine, SEND_FILES_ACROSS_FIX, waitAcrossLine, WAIT_ACROSS_FIX,
+  type McpServerSpec, type SessionAsker, refusal, RESUME_A_THREAD_LINE, RESUME_A_THREAD_FIX, sendFilesAcrossLine, SEND_FILES_ACROSS_FIX, waitAcrossLine, WAIT_ACROSS_FIX,
   TURN_STOPPED_LINE, workspacePlace, STOP_REACH_MS, sendGivenUpLine, threadResult, listedFailure, turnLines,
   type Caller, type SessionSettleResult, SETTLE_MS, SETTLE_WORKING, SETTLE_ALREADY, subagentSettleLine,
-  SUBAGENT_SETTLE_FIX, notUnderLine, NOT_UNDER_FIX, type ForkedSession, usageRefusal, FORK_BESIDE_LINE, FORK_BESIDE_FIX,
+  SUBAGENT_SETTLE_FIX, notUnderLine, NOT_UNDER_FIX, type ForkedSession, usageRefusal, FORK_BESIDE_LINE, FORK_BESIDE_FIX, FORK_RESUME_LINE, FORK_RESUME_FIX,
   forkAgentLine, forkAgentFix, forksNotLine, FORKS_NOT_FIX, forkRefusedLine, FORK_REFUSED_FIX, REWIND_COPIED_LINE, copiedFromOf,
   replacesWorkingLine, replacesWorkingFix, replacedAlreadyLine, replacedAlreadyFix, RESTART_OPENS_LINE, RESTART_OPENS_FIX,
 } from "@wsp/protocol";
 import { harnessCatalog } from "../harness-catalog.js";
-import { copiedEvents, copyImages, forkStart, forkTurnOf, moveSession, readFork, readyFork } from "./forks.js";
+import { copiedEvents, copyImages, forkStart, forkTurnOf, moveSession, payCutOwed, readFork, readyFork } from "./forks.js";
 import { headShape } from "../transcript-reader.js";
 import type { HarnessAdapter, HarnessStartOptions } from "../types/harness.js";
 import { SESSION_TITLE_TIMEOUT_MS } from "../types/events.js";
@@ -294,6 +294,7 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
       // A fork reads its source first, every refusal of it before anything is written, and runs on that thread's agent
       // at its picks unless the start names others: a fork is that thread's conversation, carried on.
       if (opened.fork !== undefined && (opened.thread !== undefined || opened.replaces !== undefined)) throw usageRefusal(FORK_BESIDE_LINE, FORK_BESIDE_FIX);
+      if (opened.fork !== undefined && opened.outside !== undefined) throw usageRefusal(FORK_RESUME_LINE, FORK_RESUME_FIX);
       const plan = opened.fork === undefined ? undefined : await readFork(ctx, opened.fork, origin);
       if (plan !== undefined) {
         const source = plan.source.harness;
@@ -318,14 +319,17 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
       const fromTranscript = opened.thread === undefined ? undefined : ctx.startedAs(workspaceId, opened.thread);
       const heldOn = opened.thread === undefined ? undefined : (named?.workspaceId ?? threadRecords.get(opened.thread)?.workspaceId ?? (fromTranscript !== undefined ? workspaceId : undefined));
       if (opened.thread !== undefined && heldOn !== workspaceId) throw new Error(`no thread ${opened.thread} in this folder`);
+      // A conversation the agent kept outside wsp opens a thread; on a copy, the session is the one the agent names.
+      const outside = opened.outside;
+      if (outside !== undefined && opened.thread !== undefined) throw refusal(RESUME_A_THREAD_LINE, RESUME_A_THREAD_FIX, "usage");
       // Read again where the thread becomes this send's to run: the id it must resume may not exist yet.
-      let resume = named?.claudeSessionId ?? fromTranscript;
+      let resume = named?.claudeSessionId ?? fromTranscript ?? (outside !== undefined && !outside.copy ? outside.id : undefined);
       // A send of the person's opening a thread runs on the process the composer started for it, where one stands for
       // this workspace and agent: the thread takes the id that process's token and tools were minted for. Never a
       // thread's send, whose child sits in a tree that process's token is not, and never one launching otherwise. Nor
       // a fork, which resumes its source's conversation where a warm process holds none.
       const warmed =
-        opened.thread === undefined && plan === undefined && scopeOf(origin) === undefined && opened.harness !== undefined && opened.replaces === undefined && opened.title === undefined && opened.mcpServers === undefined && opened.asksUntilStopped === undefined
+        opened.thread === undefined && plan === undefined && outside === undefined && scopeOf(origin) === undefined && opened.harness !== undefined && opened.replaces === undefined && opened.title === undefined && opened.mcpServers === undefined && opened.asksUntilStopped === undefined
           ? ctx.claimWarm(workspaceId, opened.harness)
           : undefined;
       if (warmed !== undefined) claimedBy.set(opened, warmed);
@@ -377,7 +381,8 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
       if (carried !== undefined && opened.harness !== undefined && opened.harness !== carried.harness) throw new Error(threadRunsOnLine(carried.harness, opened.harness));
       // A start that names no agent runs the project's, else the person's default, else the catalog's first, so the
       // command line, the composer and a tool all open the next thread on the same agent.
-      const o = { ...opened, harness: carried?.harness ?? opened.harness ?? ctx.defaultAgentOf(prefs, entry) };
+      if (outside !== undefined && !opens) throw refusal(RESUME_A_THREAD_LINE, RESUME_A_THREAD_FIX, "usage");
+      const o = { ...opened, harness: carried?.harness ?? outside?.harness ?? opened.harness ?? ctx.defaultAgentOf(prefs, entry) };
       if (carried !== undefined) {
         delete o.permissionMode;
         delete o.access;
@@ -518,7 +523,9 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
         ...(o.attempt !== undefined ? { attempt: o.attempt } : {}),
         prompt: o.prompt,
         startedAt: Date.now(),
-        ...(title !== undefined ? { harnessTitle: title, titleSource: "person" as const } : ctx.carriedTitle(threadId)),
+        // An outside conversation's own name stands as a generated one: nothing generated replaces it, and nothing of
+        // wsp's is written into the agent's store until the person names the thread here.
+        ...(title !== undefined ? { harnessTitle: title, titleSource: "person" as const } : outside !== undefined ? { harnessTitle: titleLine(outside.title), titleSource: "auto" as const } : ctx.carriedTitle(threadId)),
         ...(resume !== undefined ? { claudeSessionId: resume } : {}),
         ...(o.contextWindow !== undefined ? { contextWindow: o.contextWindow } : {}),
       };
@@ -593,8 +600,9 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
       try {
         const { catalog, picksFor } = await launchPicks(entry, harness, adapter, prefs, threadId, o);
         // A pick the lists do not carry is refused here, before this send waits on anything; the picks themselves
-        // are decided below the loop, against the session this send turns out to resume.
-        picksFor(resume);
+        // are decided below the loop, against the session this send turns out to resume. An outside conversation is
+        // no session wsp ran, so it opens on the defaults as a new one does.
+        picksFor(outside !== undefined ? undefined : resume);
         const folder = await ctx.threadFolder(entry, o);
         if (o.cwd !== undefined && isLocalWorkspace(entry.record) && !existsSync(folder)) throw Object.assign(new Error(noCwdLine(homeShortened(folder, homedir()))), { kind: "usage" });
         const limitDetails = await ctx.limitDetailsDue(entry, harness);
@@ -714,7 +722,7 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
             if (filePaths.length > 0) filesFolder = landing;
             if (adapter.mcpServers === true) serverValues = await ctx.serverValuesFor(entry, harness, landing);
             // A fork's session is readied now, on the source's computer: a copy this turn resumes, or the turn the
-            // start forks itself. A thread whose record still owes a rewind's cut moves onto a copy through it.
+            // start forks itself.
             if (plan !== undefined) {
               if (forkTurn !== undefined) {
                 readied = await readyFork(adapter, plan.source.session!, forkTurn, why => refusal(forkRefusedLine(ctx.agentLabel(harness), why), FORK_REFUSED_FIX, "conflict"));
@@ -722,17 +730,7 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
               }
               await copyImages(ctx, plan, { workspaceId, threadId });
             }
-            const owed = opens ? undefined : threadRecords.get(threadId)?.cutOwed;
-            if (owed !== undefined && resume !== undefined && adapter.forkSession !== undefined) {
-              // A refused copy, of a session file Claude Code cleaned away say, owes nothing more: the resume runs uncut.
-              const moved = await readyFork(adapter, resume, { anchor: owed }, why => new Error(why)).catch((e: unknown) => void console.warn(`thread ${threadWord(threadId)} resumes without its owed cut: ${e instanceof Error ? e.message : String(e)}`));
-              if (moved !== undefined && "resume" in moved) {
-                moveSession(ctx, threadId, resume, moved.resume);
-                resume = moved.resume;
-              }
-              delete threadRecords.get(threadId)!.cutOwed;
-              void ctx.persistSessions(workspaceId);
-            }
+            if (!opens && resume !== undefined) resume = await payCutOwed(ctx, adapter, { workspaceId, threadId }, resume);
             const taken = promptsLate ? ctx.snapshotOf(entry, landing) : await ctx.snapshotOf(entry, landing);
             snapshot = taken === undefined ? undefined : { from: taken, cwd: landing };
             refuse();
@@ -786,7 +784,7 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
             delete view.claudeSessionId;
           }
         }
-        const picks = picksFor(resume);
+        const picks = picksFor(outside !== undefined ? undefined : resume);
         const afterCut = resume !== undefined && ctx.cutBefore(workspaceId, threadId);
         // What the trips above settled, onto the row the start wrote: the reads that decide them are behind us, so
         // none of them can be answered from the row they are about. Written before adapter.start, so events that
@@ -807,6 +805,8 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
         keptTaken = kept;
         // The fork's history opens its transcript, ahead of every event of its own first turn.
         if (plan !== undefined) ctx.recordCopies(copiedEvents(plan, { workspaceId, threadId }));
+        // The conversation so far, once, ahead of the prompt the turn opens with.
+        for (const row of outside?.earlier ?? []) ctx.record({ type: "session.earlier", workspaceId, sessionId: outside!.id, threadId, who: row.who, text: row.text });
         const handle = ctx.runTurn({
           entry,
           view,
@@ -834,7 +834,7 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
               ? kept.agent.next({ prompt: handed, ...(images.length > 0 ? { images } : {}), ...(promptAfter !== undefined ? { after: promptAfter } : {}), onEvent })
               : adapter.start({
               prompt: handed,
-              ...(resume !== undefined ? { resume } : {}),
+              ...(outside?.copy === true ? { resume: outside.id, copy: true as const } : resume !== undefined ? { resume } : {}),
               ...(forkOnStart !== undefined ? { fork: forkOnStart } : {}),
               ...(cwd !== undefined ? { cwd } : {}),
               ...picks,

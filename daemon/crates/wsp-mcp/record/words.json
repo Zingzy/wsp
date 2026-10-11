@@ -352,7 +352,7 @@
     "update": "wsp update <thread>",
     "image": "wsp image",
     "delete": "wsp delete <thread> [--yes]",
-    "run": "wsp run [<project>] [--beside <thread>] [--fork <thread> [--at <n>]] [--branch <branch>] [--cwd <path>] [--agent <id>] [--model, --effort, --access <word>] [--fast] [--notify <thread|me>] [--title <title>] [--replaces <thread>] [--file <path>] [--detach] \"<message>\"",
+    "run": "wsp run [<project>] [--beside <thread>] [--fork <thread> [--at <n>]] [--branch <branch>] [--cwd <path>] [--agent <id>] [--model, --effort, --access <word>] [--fast] [--notify <thread|me>] [--title <title>] [--replaces <thread>] [--file <path>] [--resume <id> [--copy]] [--detach] \"<message>\"",
     "worktree": "wsp worktree <project> <branch>",
     "worktree_remove": "wsp worktree remove <project> <branch> [--force] [--yes]",
     "thread_read": "wsp thread read <thread> [--last]",
@@ -373,7 +373,8 @@
     "exec": "wsp exec <thread> [--cwd <dir>] -- <command...>",
     "folders": "wsp folders [<folder>] [--hidden] [--repos] [--on <computer>]",
     "setup": "wsp setup",
-    "terminal_config": "wsp terminal config [--scheme light|dark]"
+    "terminal_config": "wsp terminal config [--scheme light|dark]",
+    "conversations": "wsp conversations [<project>] [--agent <id>]"
   },
   "defaults": {
     "agentSetNothing": "wsp agents set takes --model, --effort, --access, a model to --hide, --show, --add-model or --drop-model, --order or --reset. Name at least one; with none of them there is nothing to change.",
@@ -631,6 +632,10 @@
     "besideAlone": "--beside starts the thread in the folder another thread works in, so it takes no project and no --branch. Drop project and branch, or beside.",
     "forkBeside": "a fork starts in its thread's folder, or on a new branch with --branch. Leave out the project, --cwd, --beside and --replaces.",
     "atWithoutFork": "--at counts the turns of the thread --fork names. Name the thread with --fork, or leave --at out.",
+    "forkResume": "a fork carries a thread's conversation and --resume carries one kept outside wsp, so a start takes one of them. Name the thread with --fork, or the conversation with --resume and --copy, not both.",
+    "resumeWhere": "a resumed conversation runs where it ran, so --resume takes no --branch, --cwd or --beside. Leave --branch, --cwd and --beside off; the thread opens in the folder the conversation ran in.",
+    "copyAlone": "--copy copies the conversation --resume names, so it goes with --resume. Add --resume <id>, or leave --copy off.",
+    "resumeHere": "--resume picks up a conversation on the project's own computer, and this project's threads run on machines wsp makes for them. Name a project on this computer or on a box.",
     "localFolder": "{name} is a project's folder, which delete and forget leave alone. Run wsp threads to find its threads, then wsp delete <thread>.",
     "localWorktree": "{name} is a worktree of a project on this computer, which delete and forget leave alone. Remove it with wsp worktree remove <project> <branch>, or delete a thread there with wsp delete <thread>.",
     "threadDeleted": "deleted thread {thread}",

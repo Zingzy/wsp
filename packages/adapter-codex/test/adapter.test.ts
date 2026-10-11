@@ -5,9 +5,10 @@
 // CODEX_HOME.
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { asideWallLine, CODEX_FEWER_TURNS, CODEX_LEGACY_HISTORY, codexKeyRefusedLine, codexNoTurnLine, codexMissingEnvLine, codexNotSignedInLine, codexReconnectLine, PERMISSION_ALLOW, PERMISSION_DENY, SLATE_SERVER_NAME, toolCallFacts } from "@wsp/protocol";
+import { conversationWrittenElsewhereLine, asideWallLine, CODEX_FEWER_TURNS, CODEX_LEGACY_HISTORY, codexKeyRefusedLine, codexNoTurnLine, codexMissingEnvLine, codexNotSignedInLine, codexReconnectLine, PERMISSION_ALLOW, PERMISSION_DENY, SLATE_SERVER_NAME, toolCallFacts } from "@wsp/protocol";
 import type { AdapterEvent, ExecStream, ExecStreamFactory, TurnResult } from "@wsp/protocol";
 import { createCodexAdapter, creditsOf, type CodexSession } from "../src/adapter.js";
+import { LETS_GO } from "../src/conversations.js";
 
 const THREAD_ID = "01a0e2c1-5d10-7b42-9a6e-3f1c2d4b5a60";
 const TURN_ID = "01a0e2c1-5e02-7c11-8d3f-9b2a1c0d4e71";
@@ -1427,7 +1428,7 @@ describe("what a rewind needs of a Codex turn", () => {
       expect(launch.calls).toHaveLength(1);
       expect(launch.calls[0]!.command).toBe("cd '/root/app-fork' && codex app-server -c tools.update_plan.enabled='true'");
       const fork = parse(launch.calls[0]!.input!.at(-1)!);
-      expect(fork).toEqual({ id: "wsp-thread", method: "thread/fork", params: { threadId: THREAD_ID, lastTurnId: "t8", excludeTurns: true, cwd: "/root/app-fork", model: "gpt-5.5", sandbox: "workspace-write", approvalPolicy: "on-request" } });
+      expect(fork).toEqual({ id: "wsp-thread", method: "thread/fork", params: { threadId: THREAD_ID, lastTurnId: "t8", ephemeral: false, excludeTurns: true, cwd: "/root/app-fork", model: "gpt-5.5", sandbox: "workspace-write", approvalPolicy: "on-request" } });
       expect(launch.wires[0]!.written.some(m => m.method === "thread/start" || m.method === "thread/resume")).toBe(false);
       expect(launch.wires[0]!.written.find(m => m.method === "turn/start")!.params).toMatchObject({ threadId: FORK_ID, input: [{ type: "text", text: "list every code word you remember" }] });
       // The thread every later turn resumes is the fork's own, as the server answered it.
@@ -1755,5 +1756,103 @@ describe("a Codex thread's own compaction", () => {
     const launch = launcher(scripted([agentMessage("m1", "done"), completed("completed")]));
     await adapterOver(launch).start({ prompt: "/compact the notes please", resume: THREAD_ID, onEvent: () => {} }).finished;
     expect(launch.wires[0]!.written.map(m => m.method)).toContain("turn/start");
+  });
+});
+
+describe("a Codex thread picked up from outside wsp", () => {
+  const COPY_ID = "01a12814-3d6c-7751-813b-3b1c4e6f33da";
+
+  it("runs a copy on thread/fork, written to disk as a thread of its own, and turns on the copy's id", async () => {
+    const launch = launcher(seed => {
+      const w = wire({
+        onWrite: (message, self) => {
+          if (message.method === "thread/fork") self.push(...opened(COPY_ID));
+          if (message.method === "turn/start") self.push(turnStarted.replaceAll(THREAD_ID, COPY_ID), completed("completed").replaceAll(THREAD_ID, COPY_ID));
+        },
+      });
+      for (const line of seed) void w.stream.write(line);
+      return w;
+    });
+    const { events, onEvent } = collect();
+    const result = await adapterOver(launch).start({ prompt: "on the copy", resume: THREAD_ID, copy: true, cwd: "/work/acme/lab", onEvent }).finished;
+    expect(result.status).toBe("completed");
+    const written = launch.wires[0]!.written;
+    expect(written.find(m => m.id === "wsp-thread")).toMatchObject({ method: "thread/fork", params: { threadId: THREAD_ID, ephemeral: false, excludeTurns: true, cwd: "/work/acme/lab" } });
+    expect(written.some(m => m.method === "thread/resume")).toBe(false);
+    expect(written.find(m => m.method === "turn/start")).toMatchObject({ params: { threadId: COPY_ID } });
+    expect(events.find(e => e.type === "session.start")).toMatchObject({ sessionId: COPY_ID });
+  });
+
+  it("fails a turn whose thread another process writes in two halves, and sends no turn", async () => {
+    const launch = launcher(seed => {
+      const w = wire({
+        onWrite: (message, self) => {
+          if (message.method === "thread/resume") self.push(`{"error":{"code":-32600,"message":"thread ${THREAD_ID} already has an active writer"},"id":"wsp-thread"}`);
+        },
+      });
+      for (const line of seed) void w.stream.write(line);
+      return w;
+    });
+    const result = await adapterOver(launch).start({ prompt: "x", resume: THREAD_ID, onEvent: () => {} }).finished;
+    expect(result).toEqual({ status: "failed", error: conversationWrittenElsewhereLine("Codex", LETS_GO) });
+    expect(result.error).toBe("Codex is writing this conversation in another app, so this turn did not run. Close it there and send again. Codex lets go about a minute after its window closes.");
+    expect(launch.wires[0]!.written.some(m => m.method === "turn/start")).toBe(false);
+  });
+
+  it("lets go of the thread when a kept server's turn ends, and opens it again on that server for the next turn", async () => {
+    const launch = launcher(seed => {
+      const w = wire({
+        onWrite: (message, self) => {
+          if (message.method === "thread/start") self.push(...opened());
+          if (message.method === "thread/resume") self.push(opened()[1]!);
+          if (message.method === "turn/start") self.push(turnStarted, completed("completed"));
+          if (message.method === "thread/unsubscribe") self.push('{"id":"wsp-unsubscribe","result":{"status":"unsubscribed"}}');
+        },
+      });
+      for (const line of seed) void w.stream.write(line);
+      return w;
+    });
+    const first = adapterOver(launch).start({ prompt: "one", keep: true, onEvent: () => {} });
+    expect((await first.finished).status).toBe("completed");
+    const w = launch.wires[0]!;
+    await until(() => w.written.some(m => m.method === "thread/unsubscribe"));
+    expect(w.written.find(m => m.method === "thread/unsubscribe")).toEqual({ id: "wsp-unsubscribe", method: "thread/unsubscribe", params: { threadId: THREAD_ID } });
+    expect(w.closed).toBe(false);
+    const kept = first.kept?.();
+    expect(kept).toBeDefined();
+    const before = w.written.length;
+    const second = kept!.next({ prompt: "two", onEvent: () => {} });
+    expect((await second.finished).status).toBe("completed");
+    const after = w.written.slice(before).map(m => [m.method, (m.params as Json | undefined)?.["threadId"]]);
+    expect(after.slice(0, 2)).toEqual([["thread/resume", THREAD_ID], ["turn/start", THREAD_ID]]);
+    expect(launch.calls).toHaveLength(1);
+  });
+
+  it("lets go of a fork's own thread when a kept server's turn ends, and opens that thread again for the next turn, never the source", async () => {
+    const FORK_ID = "01a12812-adb3-7c12-9acc-a86fcbe74924";
+    const onFork = (line: string): string => line.replaceAll(THREAD_ID, FORK_ID);
+    const launch = launcher(seed => {
+      const w = wire({
+        onWrite: (message, self) => {
+          if (message.method === "thread/fork") self.push(...opened(FORK_ID));
+          if (message.method === "thread/resume") self.push(opened(FORK_ID)[1]!);
+          if (message.method === "turn/start") self.push(onFork(turnStarted), onFork(completed("completed")));
+          if (message.method === "thread/unsubscribe") self.push('{"id":"wsp-unsubscribe","result":{"status":"unsubscribed"}}');
+        },
+      });
+      for (const line of seed) void w.stream.write(line);
+      return w;
+    });
+    const first = adapterOver(launch).start({ prompt: "one", fork: { session: THREAD_ID, turn: "t8" }, keep: true, onEvent: () => {} });
+    expect((await first.finished).status).toBe("completed");
+    const w = launch.wires[0]!;
+    await until(() => w.written.some(m => m.method === "thread/unsubscribe"));
+    expect(w.written.find(m => m.method === "thread/unsubscribe")).toEqual({ id: "wsp-unsubscribe", method: "thread/unsubscribe", params: { threadId: FORK_ID } });
+    const before = w.written.length;
+    const second = first.kept!()!.next({ prompt: "two", onEvent: () => {} });
+    expect((await second.finished).status).toBe("completed");
+    const after = w.written.slice(before).map(m => [m.method, (m.params as Json | undefined)?.["threadId"]]);
+    expect(after.slice(0, 2)).toEqual([["thread/resume", FORK_ID], ["turn/start", FORK_ID]]);
+    expect(launch.calls).toHaveLength(1);
   });
 });

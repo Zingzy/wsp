@@ -351,6 +351,9 @@ function foldWords(index: TranscriptIndex, e: SessionEvent & { threadId?: string
   if ((e.type === "session.start" && e.prompt !== undefined) || e.type === "session.steer") {
     held.lines.push(e.prompt!);
     held.open = undefined;
+  } else if (e.type === "session.earlier" && (e.who === "person" || e.who === "agent")) {
+    held.lines.push(e.text);
+    held.open = undefined;
   } else if (e.type === "session.delta" && e.kind === "text" && e.parentToolUseId === undefined) {
     const message = `${e.turnId ?? e.sessionId}:${e.messageId ?? ""}`;
     if (held.open === message) held.lines[held.lines.length - 1] += e.text;

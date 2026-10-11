@@ -375,6 +375,7 @@ import { AGENT_VERBS } from "./verbs/agents.js";
 import { PROJECT_VERBS } from "./verbs/projects.js";
 import { WORKSPACE_VERBS } from "./verbs/workspaces.js";
 import { THREAD_VERBS } from "./verbs/threads.js";
+import { CONVERSATION_VERBS } from "./verbs/conversations.js";
 export * from "./verbs/client.js";
 export * from "./verbs/workspaces-help.js";
 export * from "./verbs/turns-help.js";
@@ -389,6 +390,7 @@ export const ALL_VERBS: readonly Verb[] = [
   ...PROJECT_VERBS,
   ...WORKSPACE_VERBS,
   ...THREAD_VERBS,
+  ...CONVERSATION_VERBS,
 ];
 
 const isCloudVerb = (v: Verb): boolean => "cloud" in v && v.cloud === true;
@@ -463,6 +465,9 @@ export const FLAG_WORDS: Readonly<Record<string, string>> = {
   cwd: "the folder on the machine to work in; the project's folder without it",
   "exec cwd": "the folder to run the command in, absolute; the folder the thread works in without it",
   detach: "print the thread's id and return, leaving the reply to the thread's finished line",
+  "conversations agent": "one agent's conversations alone, by its catalog id; every agent's without it",
+  resume: "a conversation the agent kept in the project's folder outside wsp, by the id wsp conversations lists: the thread opens on it, in the folder it ran in, with its newest messages above the first prompt",
+  copy: "with --resume, continue on a copy of the conversation the agent makes, the original left as it was: what a conversation open in another app needs",
   "thread deny reason": "what the agent should do instead, in your words; it reads them with the refusal, as it reads the reason typed in the app",
   "thread settle finished": "settle the finished threads under each thread named, and not the thread itself; a failed one stays for you to read",
   "stop subagent": "stop one of the agent's own subagents alone, by its id in the SUBAGENT column of wsp threads; the turn and its other subagents run on",
