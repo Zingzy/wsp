@@ -133,6 +133,7 @@ beforeEach(() => {
   useStore.setState({ sessions: {}, projects: [], places: [] });
   useForkDrafts.setState({ drafts: {} });
   useComposerDraftStore.setState({ drafts: {} });
+  useComposerFilesStore.getState().take(WS);
   provideDaemonWire(WS, null);
 });
 
@@ -262,6 +263,47 @@ describe("the fork's draft from a message that carried an image", () => {
   });
 });
 
+describe("what the composer held before a fork off a person's message", () => {
+  const mine = { id: "mine", mediaType: "text/plain", name: "notes.txt", bytes: "aGk=", size: 2 };
+  const forkAsk2 = async () => {
+    const { api, started } = fixtureApi();
+    await mount(api);
+    await waitFor(() => expect(forkButtons().length).toBeGreaterThan(0));
+    useComposerDraftStore.getState().setDraft(WS, { prompt: "half a thought", cursor: 4 });
+    useComposerFilesStore.getState().put(WS, [mine]);
+    fireEvent.click(forkOn("ask 2"));
+    await waitFor(() => expect(useComposerDraftStore.getState().drafts[WS]?.prompt).toBe("ask 2"));
+    await banner();
+    return started;
+  };
+  const heldAgain = async () => {
+    await waitFor(() => expect(useComposerDraftStore.getState().drafts[WS]).toEqual({ prompt: "half a thought", cursor: 4 }));
+    expect(useComposerFilesStore.getState().pending[WS]).toEqual([mine]);
+    expect(useForkDrafts.getState().drafts[WS]).toBeUndefined();
+  };
+
+  it("comes back when the person leaves the draft for the source, which never shows the forked message", async () => {
+    const started = await forkAsk2();
+    act(() => useStore.getState().select(WS, THREAD));
+    await heldAgain();
+    expect(started).toEqual([]);
+  });
+
+  it("comes back once the fork's send is answered", async () => {
+    const started = await forkAsk2();
+    await press(composerEditor(), "Enter");
+    await waitFor(() => expect(started).toHaveLength(1));
+    expect(started[0]).toMatchObject({ prompt: "ask 2", fork: { threadId: THREAD, turnId: "turn_1" } });
+    await heldAgain();
+  });
+
+  it("comes back on the banner's dismiss", async () => {
+    await forkAsk2();
+    fireEvent.click(within(await banner()).getByRole("button", { name: "Cancel the fork" }));
+    await heldAgain();
+  });
+});
+
 describe("a fork's draft and the agent started ahead of a send", () => {
   it("asks for none, since a fork resumes its source's conversation and a process started for a new thread holds none", async () => {
     const { api, started, warmed } = fixtureApi();
@@ -311,6 +353,8 @@ describe("the fork dialog", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Fork" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect((await banner()).textContent).toContain(forkWhereLine("main-fork-2"));
+    // The strip under the composer names the branch the fork opens on, not the folder's.
+    expect(document.querySelector("[data-composer-checkout]")?.textContent).toContain("main-fork-2");
     await typeInto(composerEditor(), "try it on a branch");
     await press(composerEditor(), "Enter");
     await waitFor(() => expect(started).toHaveLength(1));

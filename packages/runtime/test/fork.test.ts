@@ -325,6 +325,30 @@ describe("a Claude Code thread a host before copied rewinds left owing a cut", (
   });
 });
 
+describe("a Claude Code thread owing a cut whose session file is gone", () => {
+  it("drops the cut on the first send and resumes as before it, so the lost-session road runs, and is never refused again", async () => {
+    const store = memoryStore();
+    const { ws, claude, again } = await box({ store, claude: { refuse: "No conversation found with session ID: gone" } });
+    const { threadId } = await threeTurns(ws.id, "claude");
+    const session = (await threadOf(ws.id, threadId))!.claudeSessionId!;
+    await rt!.close();
+    const doc = (await store.get(SESSIONS, ws.id)) as SessionIndexRecord;
+    await store.put(SESSIONS, ws.id, { ...doc, threads: { ...doc.threads, [threadId]: { ...doc.threads![threadId]!, resumeAt: "a1" } } });
+    rt = again(store);
+    for (const prompt of ["one", "two", "three"]) {
+      const result = await (await rt.sessions.start(ws.id, { prompt, thread: threadId })).finished;
+      expect(result.status).toBe("completed");
+      expect(claude.starts.at(-1)).toMatchObject({ resume: session });
+    }
+    expect(claude.forks).toEqual([{ session, turn: { anchor: "a1" } }]);
+    await rt.close();
+    const kept = (await store.get(SESSIONS, ws.id)) as SessionIndexRecord;
+    expect(kept.threads![threadId]).not.toHaveProperty("resumeAt");
+    expect(kept.threads![threadId]).not.toHaveProperty("cutOwed");
+    rt = undefined;
+  });
+});
+
 describe("a fork of a Codex thread at a finished turn", () => {
   it("hands the start the turn to fork through, resuming nothing, and its next send resumes the thread the fork answered", async () => {
     const { ws, codex } = await box();

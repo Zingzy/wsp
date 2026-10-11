@@ -724,8 +724,9 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
             }
             const owed = opens ? undefined : threadRecords.get(threadId)?.cutOwed;
             if (owed !== undefined && resume !== undefined && adapter.forkSession !== undefined) {
-              const moved = await readyFork(adapter, resume, { anchor: owed }, why => new Error(why));
-              if ("resume" in moved) {
+              // A refused copy, of a session file Claude Code cleaned away say, owes nothing more: the resume runs uncut.
+              const moved = await readyFork(adapter, resume, { anchor: owed }, why => new Error(why)).catch((e: unknown) => void console.warn(`thread ${threadWord(threadId)} resumes without its owed cut: ${e instanceof Error ? e.message : String(e)}`));
+              if (moved !== undefined && "resume" in moved) {
                 moveSession(ctx, threadId, resume, moved.resume);
                 resume = moved.resume;
               }

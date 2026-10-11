@@ -21,7 +21,7 @@ import { RadioGroup } from "../ui/radio-group.js";
 import { EMPTY_DRAFT, useComposerDraftStore } from "./composerDraftStore.js";
 import { fileFromStash, useComposerFilesStore } from "./composerFiles.js";
 import { useComposerOptionsStore } from "./composerOptionsStore.js";
-import { forkSourceOf, useForkDrafts } from "./forks.js";
+import { forkSourceOf, useForkDrafts, type ForkDraft } from "./forks.js";
 
 /** Opens the fork's draft: a fresh composer in the thread's workspace under the fork's banner, its pickers on the
  * source's agent, model and effort, holding the person's message and its images where the fork came off one. */
@@ -55,6 +55,20 @@ export function openForkDraft(request: ForkRequest, branch?: string): void {
     }
   }
   requestComposerFocus(workspaceId);
+}
+
+/** Ends the workspace's fork draft, by its dismiss, by its send or by the view leaving it, and puts back the words and
+ * files the composer held before a fork off a person's message took it over: a folder's threads share that composer. */
+export function endForkDraft(workspaceId: string): ForkDraft | undefined {
+  const draft = useForkDrafts.getState().drafts[workspaceId];
+  if (draft === undefined) return undefined;
+  useForkDrafts.getState().drop(workspaceId);
+  if (draft.before !== undefined) {
+    useComposerDraftStore.getState().setDraft(workspaceId, draft.before.draft);
+    useComposerFilesStore.getState().take(workspaceId);
+    useComposerFilesStore.getState().put(workspaceId, draft.before.files);
+  }
+  return draft;
 }
 
 export function ForkDialogHost() {

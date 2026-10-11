@@ -117,6 +117,7 @@ import { BarRule, ComposerAccessPicker, ComposerOptionPickers, useAccessPick, us
 import { useComposerOptionsStore } from "./composerOptionsStore";
 import { ComposerBanner } from "./ComposerBanner";
 import { useForkDrafts } from "./forks";
+import { endForkDraft } from "./ForkDialog";
 import type { ComposerStart } from "./composerPicks";
 import { resolveComposerMenuActiveItemId } from "./composerMenuHighlight";
 import { ComposerModelChips } from "./ComposerModelChips";
@@ -581,17 +582,11 @@ export function ChatComposer({
   const { setSending, appendUserTurn, appendLocalError, thread: into, busy, sending } = thread;
   const wasFresh = useRef(thread.fresh);
   useEffect(() => {
-    if (wasFresh.current && !thread.fresh) useForkDrafts.getState().drop(workspaceId);
+    if (wasFresh.current && !thread.fresh) endForkDraft(workspaceId);
     wasFresh.current = thread.fresh;
   }, [thread.fresh, workspaceId]);
   const dismissFork = useCallback(() => {
-    const draft = useForkDrafts.getState().drafts[workspaceId];
-    useForkDrafts.getState().drop(workspaceId);
-    if (draft?.before !== undefined) {
-      useComposerDraftStore.getState().setDraft(workspaceId, draft.before.draft);
-      useComposerFilesStore.getState().take(workspaceId);
-      useComposerFilesStore.getState().put(workspaceId, draft.before.files);
-    }
+    const draft = endForkDraft(workspaceId);
     if (draft !== undefined) useStore.getState().select(draft.source.workspaceId, draft.source.threadId);
   }, [workspaceId]);
   /** Starts a turn with the box's files, or with a queued message's own when `rowId` names the card it came off. */
@@ -642,7 +637,7 @@ export function ChatComposer({
         .then(session => {
           if (into === undefined) useComposerOptionsStore.getState().drop(workspaceId, threadKey);
           if (fork === undefined) return;
-          useForkDrafts.getState().drop(workspaceId);
+          endForkDraft(workspaceId);
           // A fork onto a new branch runs in its worktree's own folder record, which is where the person reads it.
           if (session.workspaceId !== workspaceId && session.threadId !== undefined) {
             setSending(false);
@@ -1268,6 +1263,7 @@ export function ChatComposer({
           thread={thread}
           access={accessIn ? null : access}
           stash={stashWord}
+          {...(fork?.branch !== undefined ? { starts: fork.branch } : {})}
           />
         )}
       </ComposerSurface.Shell>
