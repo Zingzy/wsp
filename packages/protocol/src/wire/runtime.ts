@@ -11,6 +11,7 @@ import { SLATE_OPS } from "../slate/wire.js";
 import { RecipeFile } from "../recipe-file.js";
 import { MergeMethod, PullRequestItem, PR_REPLY_BODY_MAX, ReactionContent } from "../pull-request.js";
 import { WorkspaceLook } from "../workspace-look.js";
+import { PROJECT_ICON_MAX_BYTES, ProjectIconHash } from "../project-look.js";
 import { reqId } from "./helpers.js";
 import { RelayPort } from "./limits.js";
 import { type EventAsker, SeedChoice, WorkspaceAgents, WorkspaceOrigin } from "../views/workspace.js";
@@ -874,6 +875,15 @@ const RuntimeOp = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("projects.branch"), projectId: z.string() }),
   /** Drops a project's record; refused while a workspace of it stands, naming the workspaces. Replies with {}. */
   z.object({ id: reqId, op: z.literal("projects.remove"), projectId: z.string(), force: z.boolean().optional(), check: z.boolean().optional() }),
+  /** Puts an image on a project, or with `png` null takes it off. `png` is base64 of the one PNG the window fitted:
+   * 128 px square, 8 bits, RGBA or RGB, no interlace and no animation, at most PROJECT_ICON_MAX_BYTES; anything
+   * else is refused. The host keeps its IHDR, IDAT and IEND alone, under the wsp home by its SHA-256, writes the hash
+   * to preferences' projectIcon, and deletes a file no project and no recipe names any more. Replies with
+   * { image: hash | null }. */
+  z.object({ id: reqId, op: z.literal("projects.icon"), projectId: z.string(), png: z.string().max(4 * PROJECT_ICON_MAX_BYTES).nullable() }),
+  /** Replies with { icons: { [hash]: data url | null } }: each image the host keeps by its hash, read from disk at
+   * each ask, null for a hash it does not hold. */
+  z.object({ id: reqId, op: z.literal("projects.icons"), hashes: z.array(ProjectIconHash).max(1000) }),
   /** Replies with { plan: ProjectPlan } for a folder on this computer; nothing is read into memory or uploaded. */
   z.object({ id: reqId, op: z.literal("project.plan"), source: z.string() }),
   /** Packs the folder and lands it at `dest` on the workspace's machine; progress rides project.import events and the
@@ -1077,6 +1087,9 @@ export const DEVICE_OPS: readonly string[] = [
   "projects.resolve",
   "projects.branch",
   "projects.remove",
+  // A project's image is part of its look, kept beside preferences, which a paired computer reads and writes too.
+  "projects.icon",
+  "projects.icons",
   "projectGoldens.list",
   "projectGoldens.remove",
   "sys.subscribe",

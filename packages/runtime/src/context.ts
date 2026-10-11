@@ -762,8 +762,21 @@ export interface ProjectsArea {
   readonly copyImport: (entry: LiveWorkspace, o: ProjectImportOptions, report: ImportReport) => Promise<ImportLanded>;
   readonly landingKind: (computer: string, at: MachineBackend | undefined) => ProjectLanding["kind"];
   readonly landingDeps: (computer: string) => Promise<{ deps: LandingDeps; at: MachineBackend | undefined; placeId: string | undefined }>;
-  readonly projectsDoor: { seedPlan(source: string): Promise<SeedPlan>; add(o: { source: string; on?: string; name?: string; base?: string; into?: string; seed?: SeedChoice; id?: string; createdAt?: string; report?: (line: string) => void; }, origin?: Caller): Promise<ProjectView & { notice?: string; }>; list(origin?: Caller): Promise<ProjectView[]>; computers(): Promise<{ id: string; name: string; }[]>; resolve(ref: string, origin?: Caller): Promise<ProjectView>; unsaved(project: ProjectView): Promise<string | undefined>; folderStands(id: string): Promise<boolean>; seedInto(id: string, plan: SeedPlan, files: readonly string[]): Promise<void>; remove(id: string, origin?: Caller, o?: { force?: boolean; check?: boolean }): Promise<{ said: string; unsaved?: string }>; };
+  readonly projectsDoor: { seedPlan(source: string): Promise<SeedPlan>; add(o: { source: string; on?: string; name?: string; base?: string; into?: string; seed?: SeedChoice; id?: string; createdAt?: string; report?: (line: string) => void; }, origin?: Caller): Promise<ProjectView & { notice?: string; }>; list(origin?: Caller): Promise<ProjectView[]>; computers(): Promise<{ id: string; name: string; }[]>; resolve(ref: string, origin?: Caller): Promise<ProjectView>; unsaved(project: ProjectView): Promise<string | undefined>; folderStands(id: string): Promise<boolean>; seedInto(id: string, plan: SeedPlan, files: readonly string[]): Promise<void>; remove(id: string, origin?: Caller, o?: { force?: boolean; check?: boolean; keepLook?: boolean }): Promise<{ said: string; unsaved?: string }>; };
   readonly projects: Runtime["projects"];
+}
+
+export interface ProjectIconsArea {
+  readonly projectIcons: {
+    /** Keeps the window's PNG for a project, or with null takes its image off, and deletes what nothing names. */
+    set(projectId: string, png: string | null): Promise<{ image: string | null }>;
+    /** Each hash's kept image as a data url, null where none is kept. */
+    read(hashes: readonly string[]): Promise<Record<string, string | null>>;
+    /** Drops a project's look and image off the record, and its image's file where nothing else names it. */
+    forget(projectId: string): Promise<void>;
+    /** Puts a kept image on a project, as a recipe's folder names it; a hash not kept here leaves the glyph. */
+    wear(projectId: string, hash: string | undefined): Promise<void>;
+  };
 }
 
 export interface UsageArea {
@@ -783,9 +796,11 @@ export interface StatusArea {
 
 export interface PreferencesArea {
   readonly preferences: Runtime["preferences"];
+  /** The record moved by a change the host makes itself, in turn with every set, kept and pushed. */
+  readonly changePreferences: (change: (held: Preferences) => Preferences) => Promise<Preferences>;
   readonly agentsRead: ReturnType<typeof agentsReads<Caller>>;
 }
 
 /** Every area's members on one object, filled in createRuntime in file order: a member is read at the moment it is
  * called, never copied into a local while the areas are still being built. */
-export type RuntimeContext = RuntimeCore & KindsArea & RulesArea & TranscriptsArea & SlatesArea & ChannelsArea & RecordsArea & ReachArea & PullRequestsArea & DaemonArea & MachinesArea & BootArea & CreateArea & FoldersArea & StartFromArea & WorkspacesArea & AgentsArea & ThreadsArea & TurnsArea & SessionsArea & BuildersArea & GoldenArea & ImageArea & ProjectsArea & UsageArea & StatusArea & PreferencesArea;
+export type RuntimeContext = RuntimeCore & KindsArea & RulesArea & TranscriptsArea & SlatesArea & ChannelsArea & RecordsArea & ReachArea & PullRequestsArea & DaemonArea & MachinesArea & BootArea & CreateArea & FoldersArea & StartFromArea & WorkspacesArea & AgentsArea & ThreadsArea & TurnsArea & SessionsArea & BuildersArea & GoldenArea & ImageArea & ProjectsArea & ProjectIconsArea & UsageArea & StatusArea & PreferencesArea;

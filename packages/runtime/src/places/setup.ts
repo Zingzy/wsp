@@ -673,7 +673,7 @@ export function placeSetup(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea) 
         const ours = claim !== undefined && standing.has(claim.id) ? claim : undefined;
         if (ours !== undefined && ours.pick.from === folder.from && ours.pick.name === folder.name && ours.pick.keep.join("\n") === folder.keep.join("\n")) {
           const row: HeldRow = { id: `folders/${key}`, label: was!.label, outcome: "installed", project: { id: ours.id }, pick: folder };
-          if (ours.pick.icon === folder.icon && ours.pick.hue === folder.hue) out.push(landed(key, { ...row, earlier: true }));
+          if (ours.pick.icon === folder.icon && ours.pick.hue === folder.hue && ours.pick.image === folder.image) out.push(landed(key, { ...row, earlier: true }));
           else out.push(landed(key, await recording.folderLook(ours.id, ours.pick, folder).then(() => row, (e: unknown): HeldRow => ({ ...row, outcome: "failed", note: firstLineOf(e), pick: ours.pick }))));
           continue;
         }

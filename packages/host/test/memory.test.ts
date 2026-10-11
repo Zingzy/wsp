@@ -41,6 +41,8 @@ const SUBAGENT_DELTAS = 10;
 const MORNING_THREADS = 10;
 const MORNING_REPLY_WORDS = 3000;
 const DAY_TURNS = MORNING_THREADS + THREADS * TURNS_PER_THREAD + 1;
+/** Projects that each wear an image of their own through the day. */
+const IMAGES = 50;
 
 interface Reading {
   heldMb: number;
@@ -59,6 +61,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
+import { crc32, deflateSync } from "node:zlib";
 import { createRuntime, sqliteStore } from ${JSON.stringify(distOf("runtime"))};
 import { recipeShelf, startHost, localWiring, stateWriterHere } from ${JSON.stringify(DIST)};
 import { fakeCopier, NoProviderBackend } from ${JSON.stringify(distOf("engine"))};
@@ -120,6 +123,13 @@ execFileSync("git", ["init", "-q", "-b", "main", folder]);
 const project = await host.addProject(folder);
 const workspace = await host.createWorkspace("here", undefined, project.id);
 const worktree = (await runtime.workspaces.folderFor({ project: project.id, branch: "feat/side" })).workspace;
+// Fifty more projects, each to wear an image of its own during the day.
+const worn = [];
+for (let i = 0; i < ${IMAGES}; i++) {
+  const at = join(home, \`lab-\${i}\`);
+  mkdirSync(at, { recursive: true });
+  worn.push((await host.addProject(at)).id);
+}
 
 // The host writes its index and its transcripts behind a queue. What it holds is only known once it has been left
 // alone the way an idle minute leaves it, so this reads until a collection frees nothing more: the drain falls from
@@ -171,6 +181,29 @@ const shelf = recipeShelf({ statePath, home });
 await shelf.save(picks);
 await shelf.list();
 await store.put("pending-computers", "a_mem", { id: "a_mem", address: "root@10.0.0.9", step: "choosing", choices: picks, recipe: "laptop", startedAt: new Date().toISOString(), placeId: "p_mem" });
+
+// Each project wears a distinct 128 px image of noise, the most a kept PNG weighs, and every window's batch read of all
+// fifty is asked ten times: the files stay on disk and the host holds none of their bytes between asks.
+const chunk = (type, data) => {
+  const body = Buffer.concat([Buffer.from(type, "latin1"), data]);
+  const out = Buffer.alloc(12 + data.length);
+  out.writeUInt32BE(data.length, 0);
+  body.copy(out, 4);
+  out.writeUInt32BE(crc32(body), 8 + data.length);
+  return out;
+};
+const head = Buffer.alloc(13);
+head.writeUInt32BE(128, 0);
+head.writeUInt32BE(128, 4);
+head.set([8, 6, 0, 0, 0], 8);
+const hashes = [];
+for (const [i, id] of worn.entries()) {
+  const rows = Buffer.alloc(128 * 513);
+  for (let b = 0; b < rows.length; b++) rows[b] = b % 513 === 0 ? 0 : (Math.imul(b + 1, 2654435761 + i) >>> 13) & 255;
+  const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk("IHDR", head), chunk("IDAT", deflateSync(rows)), chunk("IEND", Buffer.alloc(0))]);
+  hashes.push((await runtime.projects.icon(id, png.toString("base64"))).image);
+}
+for (let n = 0; n < 10; n++) if (Object.values(await runtime.projects.icons(hashes)).some(url => url === null)) throw new Error("an image went missing");
 
 const readings = await quiet();
 const after = readings.at(-1);

@@ -8,6 +8,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { crc32, deflateSync } from "node:zlib";
 import { afterEach, describe, expect, it } from "vitest";
 import type WebSocket from "ws";
 import {
@@ -306,7 +307,7 @@ function signIns(o: { status?: boolean } = {}) {
 }
 
 /** A host with the setup wired, serving, and the road an add takes onto a computer that joins over the link. */
-async function hosting(o: { provision: PlaceProvisioner; checkouts?: Checkouts; seed?: SeedWiring; recipes?: RecipeShelf; store?: Store; cmds?: string[]; answer?: (cmd: string, input: string) => { exitCode: number; stdout?: string } | undefined; local?: boolean | LocalWiring; acts?: AgentsActs; vault?: Record<string, string>; report?: PlaceReport; install?: PlaceWiring["install"]; undo?: PlaceWiring["undo"]; leave?: PlaceWiring["leave"]; runOver?: PlaceWiring["runOver"]; hostKey?: PlaceKeyPair; clock?: Clock; update?: PlaceUpdater; adapters?: Record<string, HarnessAdapterFactory>; logins?: string; daemonChannel?: () => Promise<DaemonChannel> }): Promise<{ hostKey: PlaceKeyPair; store: Store; frames: PlaceSetupEvent[]; joined: { placeId: string; pair: PlaceKeyPair }[] }> {
+async function hosting(o: { provision: PlaceProvisioner; checkouts?: Checkouts; seed?: SeedWiring; recipes?: RecipeShelf; store?: Store; cmds?: string[]; answer?: (cmd: string, input: string) => { exitCode: number; stdout?: string } | undefined; local?: boolean | LocalWiring; acts?: AgentsActs; vault?: Record<string, string>; report?: PlaceReport; install?: PlaceWiring["install"]; undo?: PlaceWiring["undo"]; leave?: PlaceWiring["leave"]; runOver?: PlaceWiring["runOver"]; hostKey?: PlaceKeyPair; clock?: Clock; update?: PlaceUpdater; adapters?: Record<string, HarnessAdapterFactory>; logins?: string; daemonChannel?: () => Promise<DaemonChannel>; statePath?: string }): Promise<{ hostKey: PlaceKeyPair; store: Store; frames: PlaceSetupEvent[]; joined: { placeId: string; pair: PlaceKeyPair }[] }> {
   const hostKey = o.hostKey ?? newPlaceKeyPair();
   const joined: { placeId: string; pair: PlaceKeyPair }[] = [];
   const store = o.store ?? memoryStore();
@@ -321,6 +322,7 @@ async function hosting(o: { provision: PlaceProvisioner; checkouts?: Checkouts; 
     ...(o.daemonChannel !== undefined ? { daemonChannel: o.daemonChannel } : {}),
     ...(o.local === true ? { local: localWiring() } : typeof o.local === "object" ? { local: o.local } : {}),
     ...(o.recipes !== undefined ? { recipes: o.recipes } : {}),
+    ...(o.statePath !== undefined ? { statePath: o.statePath } : {}),
     vault: () => o.vault ?? { CLAUDE_CODE_OAUTH_TOKEN: "sk-ant-oat01-x" },
     placeLinks: {
       ...wiring(hostKey, undefined, o.update),
@@ -401,6 +403,30 @@ function seededFolder(files: SeedPlan["files"] = []): { folder: string; seed: Se
   const plan: SeedPlan = { source: folder, remote: "https://github.com/acme/app", branch: "main", defaultBranch: "main", unpushed: null, uncommitted: 0, memory: null, files, remembered: false };
   return { folder, seed: { plan: async () => plan, pack: async () => ({ tar: Buffer.from("seed archive"), files: 0, bytes: 12, commits: 0, left: [] }) } };
 }
+
+/** A folder gone when the test ends, for a state file and what the host keeps beside it. */
+function tempDir(): string {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "wsp-setup-state-")));
+  repos.push(dir);
+  return dir;
+}
+
+/** A clear 128 px RGBA PNG, the shape the window fits a project's image to. */
+const SQUARE_PNG = (() => {
+  const chunk = (type: string, data: Buffer): Buffer => {
+    const body = Buffer.concat([Buffer.from(type, "latin1"), data]);
+    const out = Buffer.alloc(12 + data.length);
+    out.writeUInt32BE(data.length, 0);
+    body.copy(out, 4);
+    out.writeUInt32BE(crc32(body), 8 + data.length);
+    return out;
+  };
+  const head = Buffer.alloc(13);
+  head.writeUInt32BE(128, 0);
+  head.writeUInt32BE(128, 4);
+  head.set([8, 6, 0, 0, 0], 8);
+  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk("IHDR", head), chunk("IDAT", deflateSync(Buffer.alloc(128 * 513))), chunk("IEND", Buffer.alloc(0))]);
+})();
 
 /** Every sync frame the host running now put on its stream. */
 const syncs: PlaceSyncEvent[] = [];
@@ -2462,6 +2488,42 @@ describe("a computer that follows a recipe", () => {
     expect((await runtime!.projects.list()).map(p => p.computer)).toEqual([place.id]);
   });
 
+  it("puts the image a recipe's folder names on the project the box gets where the host keeps it, and the glyph where it does not", async () => {
+    const { folder, seed } = seededFolder();
+    const state = tempDir();
+    const held = "a".repeat(64);
+    mkdirSync(join(state, "project-icons"));
+    writeFileSync(join(state, "project-icons", `${held}.png`), SQUARE_PNG);
+    const pick: RecipeFile = { ...V1, folders: { app: { from: folder, name: "app", keep: [], icon: "rocket", image: held }, site: { from: seededFolder().folder, name: "site", keep: [], hue: "teal", image: "b".repeat(64) } } };
+    await hosting({ provision: provisioner().wired, recipes: shelf(pick, ITEMS).recipes, checkouts: {}, seed, statePath: join(state, "state.json") });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: pick, recipe: "laptop" }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    const ids = Object.fromEntries((await runtime!.projects.list()).map(p => [p.name, p.id]));
+    const prefs = await runtime!.preferences.get();
+    expect(prefs.projectIcon).toEqual({ [ids["app"]!]: held });
+    expect(prefs.projectLook[ids["site"]!]).toEqual({ hue: "teal" });
+  });
+
+  it("takes the image off the project a setup made once the recipe's folder stops naming it", async () => {
+    const { folder, seed } = seededFolder();
+    const state = tempDir();
+    const held = "a".repeat(64);
+    mkdirSync(join(state, "project-icons"));
+    writeFileSync(join(state, "project-icons", `${held}.png`), SQUARE_PNG);
+    const pick = (more: object): RecipeFile => ({ ...V1, folders: { app: { from: folder, name: "app", keep: [], ...more } } });
+    const r = shelf(pick({ image: held }), ITEMS);
+    await hosting({ provision: provisioner().wired, recipes: r.recipes, checkouts: {}, seed, statePath: join(state, "state.json") });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: pick({ image: held }), recipe: "laptop" }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    const id = (await runtime!.projects.list()).find(p => p.name === "app")!.id;
+    expect((await runtime!.preferences.get()).projectIcon).toEqual({ [id]: held });
+    r.move(pick({ icon: "rocket" }), ITEMS, "h16");
+    await runtime!.places!.recipeChanged("laptop");
+    await until(async () => (await rowOf(place.id)).applied?.hash === "h16");
+    expect((await runtime!.preferences.get()).projectLook[id]).toEqual({ icon: "rocket" });
+    expect((await runtime!.preferences.get()).projectIcon[id]).toBeUndefined();
+  });
+
   it("puts a folder's hue the recipe moved on the project a setup made, and reads it installed", async () => {
     const { folder, seed } = seededFolder();
     const pick = (hue: string): RecipeFile => ({ ...V1, folders: { app: { from: folder, name: "app", keep: [], hue: hue as "red" } } });
@@ -2577,11 +2639,12 @@ describe("a computer that follows a recipe", () => {
     const pick = (more: object): RecipeFile => ({ ...V1, folders: { app: { from: folder, name: "app", keep: [], icon: "code", ...more } } });
     const r = shelf(pick({}), ITEMS);
     const cmds: string[] = [];
-    await hosting({ provision: provisioner().wired, recipes: r.recipes, checkouts: {}, seed, cmds, answer: folderGone });
+    await hosting({ provision: provisioner().wired, recipes: r.recipes, checkouts: {}, seed, cmds, answer: folderGone, statePath: join(tempDir(), "state.json") });
     const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: pick({}), recipe: "laptop" }, Date.now());
     await until(async () => (await rowOf(place.id)).setup?.state === "done");
     const { id: was, path: old } = (await runtime!.projects.list())[0]!;
     await runtime!.preferences.set({ projectDefaults: { [was]: { effort: "low" } }, projectLook: { [was]: { icon: "code", hue: "blue" } }, projectOrder: ["pr_other", was] });
+    const { image } = await runtime!.projects.icon(was, SQUARE_PNG.toString("base64"));
     cmds.length = 0;
     r.move(pick({ name: "web", icon: "rocket" }), ITEMS, "h20");
     await runtime!.places!.recipeChanged("laptop");
@@ -2591,6 +2654,7 @@ describe("a computer that follows a recipe", () => {
     const prefs = await runtime!.preferences.get();
     expect(prefs.projectDefaults[projects[0]!.id]).toEqual({ effort: "low" });
     expect(prefs.projectLook[projects[0]!.id]).toEqual({ icon: "rocket", hue: "blue" });
+    expect(prefs.projectIcon).toEqual({ [projects[0]!.id]: image });
     expect(prefs.projectOrder).toEqual(["pr_other", projects[0]!.id]);
     expect(Object.keys(prefs.projectDefaults).filter(id => id !== projects[0]!.id)).toEqual([]);
     expect(Object.keys(prefs.projectLook).filter(id => id !== projects[0]!.id)).toEqual([]);

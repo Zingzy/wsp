@@ -394,7 +394,7 @@ export function projectsArea(ctx: RuntimeContext): ProjectsArea {
       return projectLanding(landingKind(project.computer, at)).unsaved?.(project, deps);
     },
 
-    async remove(id: string, origin?: Caller, o: { force?: boolean; check?: boolean } = {}): Promise<{ said: string; unsaved?: string }> {
+    async remove(id: string, origin?: Caller, o: { force?: boolean; check?: boolean; keepLook?: boolean } = {}): Promise<{ said: string; unsaved?: string }> {
       await ctx.ready();
       ctx.spawnGuard("delete", origin);
       const project = await projectsDoor.resolve(id);
@@ -424,6 +424,7 @@ export function projectsArea(ctx: RuntimeContext): ProjectsArea {
       projectsHeld.delete(project.id);
       await store.delete(PROJECTS, project.id);
       bus.emit({ type: "project.removed", projectId: project.id });
+      if (o.keepLook !== true) await ctx.projectIcons.forget(project.id);
       return { said };
     },
   };
@@ -432,6 +433,8 @@ export function projectsArea(ctx: RuntimeContext): ProjectsArea {
     add: projectsDoor.add,
     seedPlan: projectsDoor.seedPlan,
     list: projectsDoor.list,
+    icon: (projectId, png) => ctx.projectIcons.set(projectId, png),
+    icons: hashes => ctx.projectIcons.read(hashes),
     async defaults(origin) {
       const prefs = await ctx.preferences.get();
       const runs = (id: string): boolean => adapters[id] !== undefined;

@@ -340,6 +340,10 @@ export interface Runtime {
      * folder on a computer of the person's holds work no remote has, unless force. With check, refuses as it would and
      * answers with that work, taking nothing. */
     remove(id: string, origin?: Caller, o?: { force?: boolean; check?: boolean }): Promise<{ said: string; unsaved?: string }>;
+    /** Puts the window's fitted PNG on a project as its image, or with null takes it off; answers the kept hash. */
+    icon(projectId: string, png: string | null): Promise<{ image: string | null }>;
+    /** Each hash's kept image as a data url, read from disk now, null where none is kept. */
+    icons(hashes: readonly string[]): Promise<Record<string, string | null>>;
     /** Lands the host's bundle of a folder on the workspace's machine; progress rides project.import events. */
     import(opts: ProjectImportOptions, origin?: Caller): Promise<ProjectImportResult>;
     /** Brings a folder and the agent state keyed to it home from the workspace's machine; progress rides project.export events. */

@@ -12,6 +12,10 @@ import { CloudIcon, FolderGitIcon, FolderIcon, FolderOpenIcon, GitBranchIcon, La
 import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
 import { HERE_PLACE_ID, projectNameOf, projectSourceOf, sourceKind, type HostFolder, type HostFolderListing, type PlaceView, type ProjectHue, type ProjectIcon } from "@wsp/protocol";
 import { HueSelect, IconSelect } from "../projects/LookPicker.js";
+import { useImagePick } from "../projects/ImageDialog.js";
+import { base64Of } from "../projects/imageFile.js";
+import { ProjectIconImage } from "../projects/look.js";
+import { noticeFailure } from "../notices/store.js";
 import { AddButton } from "../components/ui/add-button.js";
 import { Button } from "../components/ui/button.js";
 import { Dialog, DialogPopup, DialogTitle } from "../components/ui/dialog.js";
@@ -72,6 +76,14 @@ export function AddProjectDialog({ onClose }: { onClose: () => void }) {
   const setPreferences = useStore(s => s.setPreferences);
   const [icon, setIcon] = useState<ProjectIcon>("folder");
   const [hue, setHue] = useState<ProjectHue>("neutral");
+  // The image chosen before the project exists, sent once the add answers the project's id.
+  const [image, setImage] = useState<{ png: Blob; src: string } | null>(null);
+  const sendIcon = useStore(s => s.api?.projectIcon);
+  const pick = useImagePick(async png => {
+    setImage({ png, src: URL.createObjectURL(png) });
+    return null;
+  });
+  useEffect(() => (image === null ? undefined : () => URL.revokeObjectURL(image.src)), [image]);
   const browse = useStore(s => s.api?.hostFolders);
   const places = useStore(s => s.places);
   const openAddComputer = useStore(s => s.openAddComputer);
@@ -146,6 +158,12 @@ export function AddProjectDialog({ onClose }: { onClose: () => void }) {
     try {
       const project = await addProject(source, here ? undefined : computer?.id, into);
       if (project !== null && (icon !== "folder" || hue !== "neutral")) void setPreferences({ projectLook: { [project.id]: { icon, hue } } });
+      if (project !== null && image !== null && sendIcon !== undefined) {
+        const named = project.name;
+        void base64Of(image.png)
+          .then(png => sendIcon(project.id, png))
+          .catch((e: unknown) => noticeFailure(e, said => `${named}'s icon was not kept: ${said}`));
+      }
       onClose();
     } catch (e) {
       setRefusal(errorText(e));
@@ -319,7 +337,18 @@ export function AddProjectDialog({ onClose }: { onClose: () => void }) {
             </button>
             <span className={cn(GROUP_LABEL, "mt-4 flex h-10 shrink-0 items-center px-2.5 text-muted-foreground")}>{ADD_PROJECT_WORDS.look}</span>
             <div className="flex flex-col gap-2 px-2.5" data-k="new-project-look">
-              <IconSelect icon={icon} hue={hue} onChange={setIcon} className="w-full" />
+              <IconSelect
+                icon={icon}
+                hue={hue}
+                {...(image === null ? {} : { image: <ProjectIconImage src={image.src} /> })}
+                onChange={next => {
+                  setIcon(next);
+                  setImage(null);
+                }}
+                {...(sendIcon === undefined ? {} : { onChooseImage: pick.choose })}
+                className="w-full"
+              />
+              {pick.node}
               <HueSelect hue={hue} onChange={setHue} className="w-full" />
             </div>
           </aside>

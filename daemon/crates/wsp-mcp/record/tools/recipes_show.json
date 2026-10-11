@@ -201,6 +201,10 @@
                           "pink"
                         ]
                       },
+                      "image": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{64}$"
+                      },
                       "keep": {
                         "$ref": "#/properties/recipe/properties/machines",
                         "default": []
@@ -482,6 +486,10 @@
                           "violet",
                           "pink"
                         ]
+                      },
+                      "image": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{64}$"
                       },
                       "keep": {
                         "$ref": "#/properties/recipe/properties/machines",

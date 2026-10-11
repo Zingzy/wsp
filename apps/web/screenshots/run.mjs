@@ -28,6 +28,15 @@ import { leaveMidWork, writeKeys, writeStandIn, writeWorkFolder } from "./lab-ho
 import { indexMarkdown, readSurfaces, shippedSurfaces, shotPlan, surfacesIn } from "./plan.mjs";
 import { APP_UP, failuresToCheck, STILL_LOADING } from "./ready.mjs";
 
+/** The files an `image:` step picks for a project: an SVG logo, and a PNG whose header says 20000 px a side. */
+const HUGE = Buffer.concat([Buffer.from("89504e470d0a1a0a0000000d49484452000000004e2000004e20080600000000000000", "hex"), Buffer.alloc(64)]);
+HUGE.writeUInt32BE(20_000, 16);
+HUGE.writeUInt32BE(20_000, 20);
+const IMAGE_PICKS = {
+  logo: { name: "logo.svg", mimeType: "image/svg+xml", buffer: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="28" fill="#e11d48"/><path d="M20 34l8 8 16-18" fill="none" stroke="#fff" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/></svg>') },
+  huge: { name: "poster.png", mimeType: "image/png", buffer: HUGE },
+};
+
 function usage(why) {
   console.error(`${why}\n\nusage: pnpm --filter @wsp/web screenshots -- --out <folder> [--surfaces <file.json>]`);
   process.exit(2);
@@ -187,6 +196,10 @@ async function shoot(context, shot, base, out, token) {
       await page.locator('[data-composer-file-input="true"]').first().setInputFiles({ name: step.file.name, mimeType: "application/octet-stream", buffer: Buffer.alloc(step.file.bytes, 0x61) });
       // The composer reads a file before it holds it, so the next step waits for the file to stand in the box.
       await page.locator(`[data-composer-files] [data-chat-file="${step.file.name}"], [data-composer-refused-file="${step.file.name}"]`).first().waitFor({ state: "visible", timeout: 15_000 });
+    }
+    else if (step.image !== undefined) {
+      await page.locator('[data-k="project-icon-file"]').first().setInputFiles(IMAGE_PICKS[step.image]);
+      await page.locator('[data-k="project-icon-sheet"] img, [data-k="project-icon-refusal"]').first().waitFor({ state: "visible", timeout: 15_000 });
     }
     else await page.locator(step.click).first().click({ timeout: 15_000 });
   }

@@ -17,7 +17,9 @@ import { AddButton } from "../components/ui/add-button.js";
 import type { Api } from "../protocol/client.js";
 import { placeNames, projectComputerWord } from "../sidebar/workspaceRows.js";
 import { PROJECT_WORDS } from "../sidebar/words.js";
-import { RefusalSlot } from "./sheetParts.js";
+import { RefusalSlot, sheetWrite } from "./sheetParts.js";
+import { useImagePick } from "../projects/ImageDialog.js";
+import { base64Of } from "../projects/imageFile.js";
 import { AGENTS_PAGE_WORDS, PROJECTS_WORDS, WHERE_WORDS } from "./format.js";
 import { AgentChoice, defaultAgentOf, modelLabel, newThreadDefaults } from "./agents.js";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../components/ui/select.js";
@@ -299,6 +301,25 @@ export function ProjectPage({ project, ctx }: { project: ProjectView; ctx: Setti
   const icon = look?.icon ?? "folder";
   const hue = look?.hue ?? "neutral";
   const setLook = (next: ProjectLook): void => ctx.setPreferences({ projectLook: { [project.id]: next } });
+  const image = ctx.preferences.projectIcon?.[project.id];
+  const setIcon = ctx.api?.projectIcon;
+  const pick = useImagePick(async png => (setIcon === undefined ? null : sheetWrite(setIcon(project.id, await base64Of(png)))));
+  const clearImage = (): void => void setIcon?.(project.id, null).catch(ctx.failed);
+  const iconControl = (
+    <>
+      <IconSelect
+        icon={icon}
+        hue={hue}
+        {...(image === undefined ? {} : { image: <ProjectGlyph projectId={project.id} /> })}
+        onChange={next => {
+          setLook({ icon: next, hue });
+          if (image !== undefined) clearImage();
+        }}
+        {...(setIcon === undefined ? {} : { onChooseImage: pick.choose })}
+      />
+      {pick.node}
+    </>
+  );
   const cards: SettingsCardData[] = [
     {
       id: "project",
@@ -314,7 +335,7 @@ export function ProjectPage({ project, ctx }: { project: ProjectView; ctx: Setti
       id: "look",
       head: PROJECTS_WORDS.look,
       items: [
-        { kind: "row", id: "icon", title: PROJECTS_WORDS.icon, description: PROJECTS_WORDS.iconDescription, control: <IconSelect icon={icon} hue={hue} onChange={next => setLook({ icon: next, hue })} /> },
+        { kind: "row", id: "icon", title: PROJECTS_WORDS.icon, description: PROJECTS_WORDS.iconDescription, control: iconControl, ...(setIcon === undefined ? {} : { take: pick.take }), ...(image === undefined ? {} : { reset: clearImage }) },
         { kind: "row", id: "hue", title: PROJECTS_WORDS.hue, description: PROJECTS_WORDS.hueDescription, control: <HueSelect hue={hue} onChange={next => setLook({ icon, hue: next })} /> },
       ],
     },
