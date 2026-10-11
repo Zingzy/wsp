@@ -21,6 +21,8 @@ import {
   ServerToolsAnswer,
   SkillAdded,
   SkillHit,
+  PluginRow,
+  type PluginAsk,
   SkillPreview,
   type AgentsTarget,
   type McpScope,
@@ -165,6 +167,7 @@ export const NO_REASON = "The host answered with no reason. Try again.";
 
 /** The only icon a page draws for a server: an image of a kind the host keeps, carried inline. */
 const ICON_DATA_URL = /^data:image\/(?:png|x-icon|gif|webp);base64,[A-Za-z0-9+/]+=*$/;
+const PNG_DATA_URL = /^data:image\/png;base64,[A-Za-z0-9+/]+=*$/;
 
 export type DisconnectReason = "lost" | "closed" | "unauthorized";
 const DISCONNECT_MESSAGE: Record<DisconnectReason, string> = {
@@ -608,6 +611,8 @@ export interface Api {
   serversRemove?(target: AgentsTarget, ask: ServerAsk): Promise<{ file: string }>;
   /** One server turned off or on there by the switch its agent reads. */
   serversToggle?(target: AgentsTarget, ask: ServerAsk, on: boolean): Promise<{ file: string }>;
+  /** One agent's plugin turned on or off there for the login, and its row after. */
+  pluginsToggle?(target: AgentsTarget, ask: PluginAsk, on: boolean): Promise<PluginRow>;
   /** Asks the host to dial one computer once, now: a frame over the link it holds, or one login over the road it
    * was added on when it holds none. Answers what came back, the sentence to say it in and the row as it now
    * stands. A client without it draws no Try now rather than one that would ask nobody. */
@@ -627,6 +632,9 @@ export interface Api {
   portProbe?(id: string, port: number): Promise<PortProbeView>;
   /** One turn on the workspace; events arrive on the subscription, this resolves with the row. */
   startSession(opts: StartSessionOptions): Promise<SessionView>;
+  /** Starts the agent's process for the thread a send from this composer would open, ahead of the send; optional so
+   * fixtures that start nothing need not carry it. */
+  warmAgent?(opts: WarmAgentOptions): Promise<void>;
   /** All sessions the runtime knows, or one workspace's. */
   listSessions(id?: string): Promise<SessionView[]>;
   /** The workspace's persisted session events, oldest first: what a chat replays on mount. */
@@ -754,6 +762,11 @@ export interface Api {
    * still stands on, naming them. Optional so a fixture that removes none need not fake it; without it the row's
    * Remove project is held. */
   projectsRemove?(projectId: string): Promise<{ said: string | undefined }>;
+  /** Puts the window's fitted PNG, base64, on a project as its image, or with null takes it off; answers the hash the
+   * host keeps it under. Optional so a fixture that sets none need not fake it; without it the Icon select offers none. */
+  projectIcon?(projectId: string, png: string | null): Promise<string | null>;
+  /** Each hash's kept image as a PNG data url, null for one the host does not keep. Optional as projectIcon is. */
+  projectIcons?(hashes: readonly string[]): Promise<Record<string, string | null>>;
   /** What a new thread on each project starts on, by project id, each value with where it came from. Optional so a
    * fixture with no project page need not fake it; without it the page's rows name nothing they inherit. */
   projectsDefaults?(): Promise<Record<string, ThreadDefaults>>;
@@ -920,6 +933,10 @@ export interface StartSessionOptions {
   branch?: string;
 }
 
+/** Where a new thread's send would open it and on what: a workspace, or a project whose folder the host finds, with
+ * the agent and the picks the send would name. */
+export type WarmAgentOptions = ({ workspaceId: string; cwd?: string } | { project: string }) & Pick<StartSessionOptions, "harness" | "model" | "effort" | "permissionMode" | "contextWindow" | "fast">;
+
 export interface ExportProjectOptions {
   workspaceId: string;
   /** The folder on the machine, absolute. */
@@ -996,6 +1013,7 @@ export function makeApi(c: ProtocolClient): Api {
     portReach: async (id, port) => (await c.request<{ reach: PortReachView }>("workspaces.portReach", { workspaceId: id, port })).reach,
     portProbe: async (id, port) => (await c.request<{ probe: PortProbeView }>("workspaces.portProbe", { workspaceId: id, port })).probe,
     startSession: async ({ workspaceId, ...opts }) => (await c.request<{ session: SessionView }>("sessions.start", opts.fork === undefined ? { workspaceId, ...opts } : { ...opts })).session,
+    warmAgent: async opts => void (await c.request("sessions.warm", { ...opts })),
     sessionHistory: async id => (await c.request<{ events: SessionEvent[] }>("sessions.history", { workspaceId: id })).events,
     sessionHead: async threadId => {
       const { facts, events, pos, total } = await c.request<ThreadHead>("sessions.head", { threadId });
@@ -1077,6 +1095,15 @@ export function makeApi(c: ProtocolClient): Api {
       const reply = await c.request<{ said?: unknown }>("projects.remove", { projectId });
       return { said: typeof reply.said === "string" ? reply.said : undefined };
     },
+    projectIcon: async (projectId, png) => {
+      const { image } = await c.request<{ image?: unknown }>("projects.icon", { projectId, png });
+      return typeof image === "string" ? image : null;
+    },
+    // Drawn only as an <img> src, and only where it is the one type the host keeps.
+    projectIcons: async hashes => {
+      const { icons } = await c.request<{ icons?: Record<string, unknown> }>("projects.icons", { hashes: [...hashes] });
+      return Object.fromEntries(hashes.map(hash => [hash, typeof icons?.[hash] === "string" && PNG_DATA_URL.test(icons[hash]) ? icons[hash] : null]));
+    },
     // Parsed, not trusted: a row's words about a copy's ports and its state word are read off these flags.
     workspacesLanding: async project => WorkspaceLanding.parse(await c.request<unknown>("workspaces.landing", { project })),
     placesDoor: async () => PlaceDoorView.parse((await c.request<{ door?: unknown }>("places.door")).door),
@@ -1133,6 +1160,7 @@ export function makeApi(c: ProtocolClient): Api {
     serversAdd: async (target, ask) => ({ file: String((await c.request<{ file?: unknown }>("servers.add", { target, ...ask })).file) }),
     serversRemove: async (target, ask) => ({ file: String((await c.request<{ file?: unknown }>("servers.remove", { target, ...ask })).file) }),
     serversToggle: async (target, ask, on) => ({ file: String((await c.request<{ file?: unknown }>("servers.toggle", { target, ...ask, on })).file) }),
+    pluginsToggle: async (target, ask, on) => PluginRow.parse((await c.request<{ plugin?: unknown }>("plugins.toggle", { target, ...ask, on })).plugin),
     serversTools: async (target, agent, name, refresh) =>
       ServerToolsAnswer.parse((await c.request<{ answer?: unknown }>("servers.tools", { target, agent, name, ...(refresh === true ? { refresh } : {}) })).answer),
     serversIcon: async (host, refresh) => {

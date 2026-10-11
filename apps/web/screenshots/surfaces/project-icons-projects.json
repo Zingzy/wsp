@@ -1,0 +1,16 @@
+{
+  "at": "/",
+  "fixture": "project-icons",
+  "steps": [
+    "390:key:Escape",
+    "390:sidebar=trigger",
+    "k=settings-row",
+    "k=settings-projects"
+  ],
+  "wait": "settings-at=projects",
+  "widths": [
+    1440,
+    390
+  ],
+  "reason": "The Projects list and the Settings sidebar draw each project's mark; the column is 760px at most, so 1280 draws it as 1440 does."
+}

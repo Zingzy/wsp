@@ -191,6 +191,45 @@
   "turnedOff": "{name} is off.",
   "turnedOnIn": "{name} is on in {file}.",
   "turnedOffIn": "{name} is off in {file}.",
+  "pluginTurnedOn": "{id} is on for {agent}; its next turn loads what it brings.",
+  "pluginTurnedOff": "{id} is off for {agent}; its next turn leaves out what it brings.",
+  "pluginKinds": [
+    [
+      "skills",
+      "skill",
+      "skills"
+    ],
+    [
+      "commands",
+      "command",
+      "commands"
+    ],
+    [
+      "subagents",
+      "subagent",
+      "subagents"
+    ],
+    [
+      "hooks",
+      "hook",
+      "hooks"
+    ],
+    [
+      "servers",
+      "tool server",
+      "tool servers"
+    ],
+    [
+      "lsp",
+      "language server",
+      "language servers"
+    ],
+    [
+      "apps",
+      "app",
+      "apps"
+    ]
+  ],
   "toolsAdded": "{agent} now has the wsp tools: {file}",
   "serverToolsHead": "{name}: {auth}",
   "serverToolsHeld": "{name}: {auth}, {holder} holds the sign-in",
@@ -247,7 +286,8 @@
   "bothTargets": {
     "agents": "A thread already names its computer; give the thread or --on <computer>, not both. agents takes a thread or on, not both",
     "skills": "A thread already names its computer; give the thread or --on <computer>, not both. skills takes a thread or on, not both",
-    "servers": "A thread already names its computer; give the thread or --on <computer>, not both. servers takes a thread or on, not both"
+    "servers": "A thread already names its computer; give the thread or --on <computer>, not both. servers takes a thread or on, not both",
+    "plugins": "A thread already names its computer; give the thread or --on <computer>, not both. plugins takes a thread or on, not both"
   },
   "folderHere": "folder is a path on this computer, absolute, and got \"{path}\". Give a path that opens with /, since whoever reads it works in a folder this line cannot see.",
   "folderOn": "folder is a path on {name}, absolute, and got \"{path}\". Give a path that opens with /, since whoever reads it works in a folder this line cannot see.",
@@ -291,6 +331,9 @@
     "servers_remove": "wsp servers remove <name> [<thread>] [--on <computer>] --agent <id> [--scope <user|home|local|project>] [--project [<name>]] [--yes]",
     "servers_disable": "wsp servers disable <name> [<thread>] [--on <computer>] --agent <id> [--scope <user|home|local|project>] [--project [<name>]]",
     "servers_enable": "wsp servers enable <name> [<thread>] [--on <computer>] --agent <id> [--scope <user|home|local|project>] [--project [<name>]]",
+    "plugins": "wsp plugins [<thread>] [--on <computer>]",
+    "plugins_disable": "wsp plugins disable <id> --agent <id> [<thread>] [--on <computer>]",
+    "plugins_enable": "wsp plugins enable <id> --agent <id> [<thread>] [--on <computer>]",
     "projects": "wsp projects",
     "projects_remove": "wsp projects remove <project> [--yes] [--force]",
     "projects_set": "wsp projects set <project> [--agent <id>] [--model <slug>] [--effort <word>] [--access <word>] [--after-worktree <command>] [--reset <field>]...",

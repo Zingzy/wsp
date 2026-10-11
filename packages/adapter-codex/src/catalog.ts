@@ -11,7 +11,7 @@
 
 import { ENV_FROM_INPUT, codexNotSignedInLine, programWord } from "@wsp/protocol";
 import type { AgentLaunch, HarnessCatalogAnswer, HarnessCatalogModelProbe, HarnessCatalogProbe } from "@wsp/protocol";
-import { answersOf, appServerScript, initializeRequest, request, resultOf } from "./app-server-script.js";
+import { answersOf, appServerScript, initializeRequest, request, resultOf } from "@wsp/catalog";
 
 const SEP = "__WSP_CATALOG_SEP__";
 /** Request ids, in the order the probe sends them; the parser reads each answer by its own id. */

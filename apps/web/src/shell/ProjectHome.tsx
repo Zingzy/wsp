@@ -122,6 +122,7 @@ export function ProjectHome({ projectId }: { projectId: string }) {
         workspaceId={key}
         thread={thread}
         onStart={start}
+        homeProject={project.id}
         where={<WhereItRuns project={project} />}
         {...(link !== undefined && linked !== undefined ? { sendLabel: START_WORDS.startOn(link.number) } : {})}
         {...(link?.kind === "pull_request" && linked !== undefined

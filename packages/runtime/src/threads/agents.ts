@@ -357,6 +357,14 @@ export function agentsArea(ctx: RuntimeContext): AgentsArea {
     }
     return homes;
   };
+  /** Each agent's folder a launch here reads where it is not the agent's own under that launch's home: the store a read
+   * and a write on this computer point the agent at, since naming its own folder as a store would move files it keeps
+   * beside it (Claude Code's .claude.json sits in the home). */
+  const storesHere = async (): Promise<Record<string, string>> => {
+    const homes = await homesHere();
+    const home = local?.homeDir ?? homedir();
+    return Object.fromEntries(CATALOG_AGENTS.flatMap(a => (homes[a.id] === undefined || homes[a.id] === join(home, a.stateHome) ? [] : [[a.id, homes[a.id]!]])));
+  };
   /** Settles at once where no config folder is kept, so a road with nothing to check waits on nothing more than before. */
   const confineSetup = (entry: LiveWorkspace, named?: string): Promise<void> =>
     keptFolder(entry, named ?? DEFAULT_AGENT.id) === undefined
@@ -562,7 +570,7 @@ export function agentsArea(ctx: RuntimeContext): AgentsArea {
   };
   return {
     catalogOn, firstRunHere, refreshTitle, sourceOf, rowsOn, carriedTitle, nameInHarness, makeTitle, agentAsks, holdAsk, titleRows, setupPlace, agentOff,
-    agentLabel, configFolderOn, setupRefusals, setupRefusal, homesHere, confineSetup, launchAdapterFor, defaultAgentOf,
+    agentLabel, configFolderOn, setupRefusals, setupRefusal, homesHere, storesHere, confineSetup, launchAdapterFor, defaultAgentOf,
     defaultsOn, namedMode, landImages, landFiles, dropThreadFiles, dropImages, threadEnv, placeStores, serverValuesFor, adapterFor,
   };
 }

@@ -77,7 +77,7 @@ import { cn, isMacPlatform } from "../../lib/utils";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type ClipboardEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { PaperclipIcon, SplitIcon } from "lucide-react";
 import { ASIDE_NO_SESSION_LINE, forkOfLine, forkWhereLine, composerHeldLine, HERE_PLACE_ID, hereName, HOST_ASLEEP_SEND, isLocalWorkspace, signedOutLine, type AgentsTarget, FILES_MAX, FILE_MAX_WORDS, IMAGE_MAX_WORDS, IMAGE_TYPE_WORDS, TURN_IN_FLIGHT, movesRunningAccess, noImagesLine, readsImages, screenCommandLine, screenCommandTyped, screenCommandsOf, sendRefusal, steerFilesBlocked, type SendRefusalKind, type TurnLimit, type WorkspaceState } from "@wsp/protocol";
-import type { ConnStatus } from "../../protocol/client";
+import type { ConnStatus, WarmAgentOptions } from "../../protocol/client";
 import { hostAsleep } from "../../boot";
 import { projectHomeKey, useAbsentComputer, useHarnessCatalogs, useStore, useThreadSessions, useWorkspace, useWorkspaceState } from "../../protocol/store";
 import { useComputerName } from "../../sidebar/workspaceRows";
@@ -234,6 +234,7 @@ export function ChatComposer({
   workspaceId,
   thread,
   onStart,
+  homeProject,
   waiting,
   where,
   sendLabel: sendGiven,
@@ -245,6 +246,8 @@ export function ChatComposer({
   workspaceId: string;
   thread: ChatThreadHandle;
   onStart?: (prompt: string) => Promise<string | null>;
+  /** The project a home's send opens its thread in, whose agent the box starts ahead of the send. */
+  homeProject?: string;
   waiting?: { line: string; folder: string };
   /** New thread's where it runs: the row's first item, the project's one computer. */
   where?: ReactNode;
@@ -424,6 +427,25 @@ export function ChatComposer({
   const setFast = useComposerModesStore(s => s.setFast);
   const fastOffered = pickedModel?.fast === true;
   const fastOn = fastOffered && (fastPicked ?? latestRow?.fast === true);
+  // A new thread's agent starts while the person types, so its own startup is behind it by the send: asked for each
+  // time the box takes focus, which gives one standing its window again or starts one where the last ran out, and on a
+  // changed agent or pick, which the host answers with a process launched at it.
+  const [focuses, setFocuses] = useState(0);
+  // A fork's draft holds its source until the send, while this view stands fresh for it; leaving the fresh view lets it go.
+  const forkDraft = useForkDrafts(s => s.drafts[workspaceId]);
+  const fork = forkDraft !== undefined && thread.fresh && thread.thread === undefined ? forkDraft : undefined;
+  // Keyed by its words, so a render that rebuilds the same picks asks nothing. A home's send to several models opens
+  // a copy for each, which no process started here serves.
+  const warmAsk = ((): string | null => {
+    // A fork resumes its source's conversation, which no process started ahead of it holds.
+    if (fork !== undefined) return null;
+    const at = onStart !== undefined ? (homeProject === undefined || multiPicks.length > 0 ? undefined : { project: homeProject }) : opening && !waits && blocked === null ? { workspaceId, ...folderStart } : undefined;
+    return at === undefined ? null : JSON.stringify({ ...at, harness: harnessId, ...sendPicks(pinned, startOptions), ...(fastOn ? { fast: true } : {}) } satisfies WarmAgentOptions);
+  })();
+  useEffect(() => {
+    if (focuses === 0 || warmAsk === null || api?.warmAgent === undefined) return;
+    void api.warmAgent(JSON.parse(warmAsk) as WarmAgentOptions).catch(() => {});
+  }, [api, focuses, warmAsk]);
   const stopPending = stop !== null && runningTurn !== null && stop.turnId === runningTurn.turnId;
   const canStop = runningTurn !== null && api?.interruptSession !== undefined;
   // The catalog answers before the click: a harness that steers takes the row into the turn, any other queues it.
@@ -557,9 +579,6 @@ export function ChatComposer({
   );
 
   const { setSending, appendUserTurn, appendLocalError, thread: into, busy, sending } = thread;
-  // A fork's draft holds its source until the send, while this view stands fresh for it; leaving the fresh view lets it go.
-  const forkDraft = useForkDrafts(s => s.drafts[workspaceId]);
-  const fork = forkDraft !== undefined && thread.fresh && into === undefined ? forkDraft : undefined;
   const wasFresh = useRef(thread.fresh);
   useEffect(() => {
     if (wasFresh.current && !thread.fresh) useForkDrafts.getState().drop(workspaceId);
@@ -583,6 +602,7 @@ export function ChatComposer({
       const carried = rowId === undefined ? files : (useComposerFilesStore.getState().queued[rowId] ?? []);
       const attachments = carried.map(attachmentOf);
       setSending(true);
+      setFocuses(0);
       hold(threadKey);
       appendUserTurn(prompt, requestId, carried.map(recordOf));
       // A send that names no thread opens one the runtime has written no row for, so the sidebar is handed the same
@@ -766,6 +786,8 @@ export function ChatComposer({
         return;
       }
       setDraft(workspaceId, EMPTY_DRAFT);
+      // The send moves or drops the picks it named; an ask at what is left would end the process started for it.
+      setFocuses(0);
       if (waits) {
         enqueue(threadKey, prompt);
         return;
@@ -1144,6 +1166,9 @@ export function ChatComposer({
                     onPaste={onPaste}
                     onPasteCapture={onPasteCapture}
                     onKeyDown={onStashKey}
+                    onFocus={e => {
+                      if (!e.currentTarget.contains(e.relatedTarget)) setFocuses(n => n + 1);
+                    }}
                   >
                     {onStart !== undefined ? <ComposerModelChips workspaceId={workspaceId} /> : null}
                     {files.length > 0 || refusedFiles.length > 0 ? (

@@ -3,10 +3,10 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { adoptLoginPath, agentsHere, aimedHost, appLogsDir, computerNameHere, daemonBinaryHere, dialHost, installEach, mcpServerSpec, releaseFetch, runningWsp, serviceAddressHere, shimPath, systemService, wspHome, VERSION, type CliIO } from "@wsp/host";
+import { adoptLoginPath, agentsHere, aimedHost, appLogsDir, computerNameHere, daemonBinaryHere, dialHost, hostLogPath, installEach, mcpServerSpec, releaseFetch, runningWsp, serviceAddressHere, shimPath, systemService, wspHome, VERSION, type CliIO } from "@wsp/host";
 import { BROWSER_PARTITION, DEFAULT_PREFERENCES, HOME_ENV, type BundleOutcome, HOST_WORDS, OutsideLine, ThemePreference, hostMenuAction, hostsMenuItems } from "@wsp/protocol";
 import { BrowserWindow, Menu, Notification, Tray, app, crashReporter, dialog, ipcMain, nativeImage, nativeTheme, powerSaveBlocker, session as sessions, shell, type IpcMainEvent, type IpcMainInvokeEvent } from "electron";
-import { openAppLog, rendererReport } from "./app-log.js";
+import { APP_LOG, openAppLog, rendererReport } from "./app-log.js";
 import { awakeWanted } from "./awake.js";
 import { chooseFrom, contextMenuTemplate, parseContextMenuItems } from "./context-menu.js";
 import { deepLinks, linkInArgv } from "./deep-link.js";
@@ -24,6 +24,7 @@ import { pagePreviews } from "./previews.js";
 import { QUIT_WORD, quitAnswer, quitChoice, quitPrompt } from "./quit.js";
 import { bundleOf, discardStage, inPlaceRefusal, settleStage, stageOf, stageUpdate, startSwap } from "./self-update.js";
 import { installShim, keepAppImage, replaceOlderOnPath, shimText, type ShimTarget } from "./shim.js";
+import { sayStartFailed, startingAfter } from "./starting.js";
 import { trayModel, trayNotice, type TrayAct, type TrayModel, type TrayRow } from "./tray.js";
 import { desktopOf, setsMenu, titleBarOverlayFor, vibrancyFor, windowOptions, type UpdateRoad } from "./window.js";
 import { isShellZoomChord, shellChordOf } from "./zoom.js";
@@ -31,6 +32,7 @@ import { isShellZoomChord, shellChordOf } from "./zoom.js";
 const here = (rel: string): string => fileURLToPath(new URL(rel, import.meta.url));
 const PRELOAD = here("./preload.cjs");
 const ONBOARDING_PAGE = here("./onboarding.html");
+const STARTING_PAGE = here("./starting.html");
 /** The wsp command the shim runs, bundled beside this main. */
 const CLI_SCRIPT = here("./cli.mjs");
 
@@ -565,20 +567,46 @@ app.on("window-all-closed", () => {
 });
 app.on("activate", () => void reopen());
 
+/** The window standing while wsp starts, which the window after it or a failed start's answered dialog takes away. */
+let starting: { end(): void } | undefined;
+function showStarting(): () => void {
+  const page = newWindow();
+  void page.loadFile(STARTING_PAGE);
+  return () => page.destroy();
+}
+function endStarting(): void {
+  starting?.end();
+  starting = undefined;
+}
+
+/** A failed start or open, said in one line with a button to the log it came from; the whole of it is in the app's log. */
+async function sayFailed(title: string, e: unknown): Promise<void> {
+  const why = e instanceof Error ? e.message : String(e);
+  io.error(`${title}: ${why}`);
+  try {
+    if (!quitting) await sayStartFailed(title, e, { host: hostLogPath(where().statePath), app: join(LOGS, APP_LOG) }, { show: options => dialog.showMessageBox(options), open: path => shell.openPath(path), quit: () => app.quit() });
+  } finally {
+    endStarting();
+  }
+}
+
 /** The window for this launch: the app on the host it attaches to, or the first launch's screen where that host holds
- * nothing yet. */
+ * nothing yet. A start that takes a moment shows that it is starting, until the window after it stands. */
 async function openOnHost(): Promise<void> {
+  starting ??= startingAfter(showStarting);
   // Read across a restart: a launch that meets the host on its way down attaches again to the one coming up.
   const opened = await hostTurn(() => openHostReady(hostOptions())).catch((e: unknown) => {
     // The person kept a host of another release serving, and this app draws no page but its own release's.
     if (!(e instanceof KeptOtherRelease)) throw e;
     io.log(e.message);
+    endStarting();
     app.quit();
   });
   if (opened === undefined) return;
   const { session: on, first } = opened;
   if (!first) await showApp(on);
   else await showOnboarding();
+  endStarting();
 }
 
 let opening: Promise<void> | undefined;
@@ -599,11 +627,7 @@ function reopen(): Promise<void> {
   }
   // An open already under way says its own failure, the launch's included.
   if (opening !== undefined) return opening.catch(() => {});
-  return openWindow().catch((e: unknown) => {
-    const why = e instanceof Error ? e.message : String(e);
-    io.error(`wsp could not open: ${why}`);
-    if (!quitting) dialog.showErrorBox("wsp could not open", why);
-  });
+  return openWindow().catch((e: unknown) => sayFailed("wsp could not open", e));
 }
 
 /** The menu bar: its icon, its count and its menu, drawn from the feed on the host the window is on. */
@@ -823,10 +847,8 @@ app
     }
     await openWindow();
   })
-  .catch((e: unknown) => {
-    const why = e instanceof Error ? e.message : String(e);
+  .catch(async (e: unknown) => {
     // A launch nobody watches has only its log to say why it quit.
-    io.error(`wsp could not start: ${why}`);
-    if (!quitting) dialog.showErrorBox("wsp could not start", why);
+    await sayFailed("wsp could not start", e);
     app.quit();
   });

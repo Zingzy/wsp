@@ -8,7 +8,6 @@ import {
   DIALOG_MOBILE_SHEET_CLASS,
   DIALOG_POPUP_CLASS,
 } from "./dialog-styles";
-import { Kbd } from "./kbd";
 import { usePortalHost } from "./portal-host";
 import { ScrollArea } from "./scroll-area";
 
@@ -103,18 +102,15 @@ function DialogLine({ className, ...props }: React.ComponentProps<"div">) {
   );
 }
 
-/** The foot of a dialog: the key that closes it at the left, then Cancel and the primary at the right. A dialog has
- * no close glyph of its own; Esc and Cancel close it. */
-function DialogFooter({ className, children, ...props }: React.ComponentProps<"div">) {
+/** The foot of a dialog: Cancel and the primary at the right, and no keycap. A dialog has no close glyph of its own;
+ * Esc and Cancel close it. */
+function DialogFooter({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       className={cn("flex flex-col-reverse gap-2 px-5 pt-3 pb-4 sm:flex-row sm:items-center sm:justify-end", className)}
       data-slot="dialog-footer"
       {...props}
-    >
-      <Kbd className="me-auto hidden sm:inline-flex">Esc</Kbd>
-      {children}
-    </div>
+    />
   );
 }
 

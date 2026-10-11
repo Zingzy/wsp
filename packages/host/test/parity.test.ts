@@ -362,6 +362,7 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
       "sessions.rewind": "a rewind is a person's judgement in front of the transcript; an agent that wants an earlier state starts a new thread",
       "sessions.run": "running a reply's block is the person's click under the block; an agent runs a command in its own shell, or with wsp exec",
       "sessions.attachment": "a kept image is the pixels a person's row draws; wsp thread read prints its line, and an agent reads the file its turn was handed",
+      "sessions.warm": "a new thread's composer taking focus starts its agent before the person sends; wsp run and wsp send launch the agent with the message in hand, and nothing waits on a box being typed in",
     };
     expect(RUNTIME_OPS.filter(op => op.startsWith("sessions.") && !verbs.includes(`"${op}"`)).sort()).toEqual(Object.keys(WINDOW_ONLY).sort());
     for (const [op, why] of Object.entries(WINDOW_ONLY)) expect(why, `${op} says why it has no verb`).toMatch(/\S/);

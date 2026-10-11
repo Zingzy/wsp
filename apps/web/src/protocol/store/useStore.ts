@@ -28,6 +28,7 @@ import { couldNotStart, explainCreateRefusal, keptAtLoad, madeAs, NO_LINES, rest
 import { addressed, firstRow, groupSessions, keptRows, keptThread, openThreadOf, remembered } from "./selection.js";
 import { CREATION_PREFIX, NO_SESSIONS } from "./selectors.js";
 import type { CostTick, Creation, CreationLine, Opens, State } from "./types.js";
+import { followProjectIcons } from "../../projects/images.js";
 
 /** Where a refused places list is drawn: while that page is on screen, the refusal says itself there. */
 const COMPUTERS_PAGE: SettingsAt = { kind: "group", group: "computers" };
@@ -339,6 +340,8 @@ export const useStore = create<State>((set, get) => {
       })
       .catch(notRead("Setup"));
     readPlaces(api);
+    // A hash the host did not keep before the gap may be kept now.
+    followProjectIcons({ api, projectIcon: get().preferences.projectIcon, again: true });
     // An answer either way settles it, and a host whose wire carries no projects list settles it at once.
     const projectsAsked = api.projectsList?.();
     if (projectsAsked === undefined) set({ projectsRead: true });
@@ -1164,6 +1167,9 @@ useStore.subscribe((s, prev) => {
 // Every change to the record, the host's or a pick painted ahead of it, is what the next load paints first.
 useStore.subscribe((s, prev) => {
   if (s.preferences !== prev.preferences) rememberFirstPaint(s.preferences);
+});
+useStore.subscribe((s, prev) => {
+  if (s.api !== prev.api || s.preferences.projectIcon !== prev.preferences.projectIcon) followProjectIcons({ api: s.api, projectIcon: s.preferences.projectIcon });
 });
 useStore.subscribe((s, prev) => {
   if (s.creations === prev.creations && s.workspaces === prev.workspaces) return;

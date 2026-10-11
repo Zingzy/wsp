@@ -3,7 +3,7 @@
 // person's messages, the draft it opens and what that draft sends, the dialog
 // where a new branch can be offered, the rule line after a fork's history,
 // and the tile card's line. A fixture api; no live host.
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { FORK_BRANCH_DAEMON_VERSION, FORK_BRANCH_HEAD_NOTE, FORK_BRANCH_NOTE, HERE_PLACE_ID, forkBranchName, forkDialogLine, forkFolderNote, forkOfLine, forkWhereLine, forkedFromLine, type HarnessCatalog, type PlaceView, type ProjectView, type SessionEvent, type SessionView, type WorkspaceView } from "@wsp/protocol";
 import { installFakeLayout } from "./fake-layout.js";
@@ -11,10 +11,11 @@ import { TABLE_CATALOG, whenAgentsAnswered } from "./agents.js";
 import { caps } from "./caps.js";
 import { noDaemonApi } from "./fake-daemon-api.js";
 import { fakeWire } from "./surface-harness.js";
-import { composerEditor, press, typeInto } from "./composer-harness.js";
+import { clickIntoEditor, composerEditor, press, typeInto } from "./composer-harness.js";
 import { useStore } from "../src/protocol/store.js";
-import type { Api, StartSessionOptions } from "../src/protocol/client.js";
+import type { Api, StartSessionOptions, WarmAgentOptions } from "../src/protocol/client.js";
 import { provideDaemonWire } from "../src/files/wire.js";
+import { requestNewThread } from "../src/shell/shellRequests.js";
 import { WorkspaceThread } from "../src/shell/WorkspaceThread.js";
 import { ForkDialogHost } from "../src/components/chat/ForkDialog.js";
 import { RewindDialogHost } from "../src/components/chat/RewindDialog.js";
@@ -59,6 +60,7 @@ const FORKS: HarnessCatalog = { ...TABLE_CATALOG, rewindsConversation: true, for
 
 function fixtureApi(o: { catalog?: HarnessCatalog; history?: SessionEvent[]; rows?: SessionView[]; workspace?: WorkspaceView } = {}) {
   const started: StartSessionOptions[] = [];
+  const warmed: WarmAgentOptions[] = [];
   const api: Api = {
     portReach: async () => ({ url: "https://x/", expiresAt: Date.now() + 3_600_000 }),
     daemon: noDaemonApi,
@@ -84,8 +86,9 @@ function fixtureApi(o: { catalog?: HarnessCatalog; history?: SessionEvent[]; row
     interruptSession: async () => ({ outcome: "accepted" }),
     rewindThread: async () => ({ turns: 1 }),
     sessionAttachment: async () => ({ mediaType: "image/png", bytes: PNG }),
+    warmAgent: async opts => void warmed.push(opts),
   };
-  return { api, started };
+  return { api, started, warmed };
 }
 
 /** The thread the store has selected, as the app's centre draws it: a new-thread request unpins it. */
@@ -256,6 +259,28 @@ describe("the fork's draft from a message that carried an image", () => {
     await waitFor(() => expect(useComposerDraftStore.getState().drafts[WS]).toEqual({ prompt: "half a thought", cursor: 4 }));
     expect(useComposerFilesStore.getState().pending[WS]).toEqual([mine]);
     expect(started).toEqual([]);
+  });
+});
+
+describe("a fork's draft and the agent started ahead of a send", () => {
+  it("asks for none, since a fork resumes its source's conversation and a process started for a new thread holds none", async () => {
+    const { api, started, warmed } = fixtureApi();
+    await mount(api);
+    // The same box on a new thread that is no fork asks for one as it takes focus.
+    act(() => requestNewThread({ workspaceId: WS }));
+    await waitFor(() => expect(screen.queryByText("reply 3")).toBeNull());
+    clickIntoEditor(composerEditor());
+    await waitFor(() => expect(warmed).toHaveLength(1));
+    act(() => useStore.getState().select(WS, THREAD));
+    await waitFor(() => expect(forkButtons().length).toBeGreaterThan(0));
+    fireEvent.click(forkOn("reply 3"));
+    await banner();
+    clickIntoEditor(composerEditor());
+    await typeInto(composerEditor(), "carry on");
+    await press(composerEditor(), "Enter");
+    await waitFor(() => expect(started).toHaveLength(1));
+    expect(started[0]).toMatchObject({ fork: { threadId: THREAD, turnId: "turn_3" } });
+    expect(warmed).toHaveLength(1);
   });
 });
 

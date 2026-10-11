@@ -46,6 +46,9 @@ const HOVER = /^hover:(.+)$/;
 /** A step that attaches a file of that name and that many bytes through the composer's own picker, as a person picks
  * one: what a file over the cap or a message with a file looks like. */
 const FILE = /^file:([^:]+):(\d+)$/;
+/** A step that hands a project's Icon row the file a person picks: a logo the window fits, or a 20000 px image it
+ * refuses before decoding. */
+const IMAGE = /^image:(logo|huge)$/;
 /** The one step that is none of those: the network under the window goes, which is what a window on another computer
  * sees the moment the computer running wsp falls asleep. The rows stay as they were last known. */
 const OFFLINE = "offline";
@@ -89,6 +92,7 @@ export function stepFor(word, widths) {
   const menu = MENU.exec(typeof bare === "string" ? bare : "");
   const hovered = HOVER.exec(typeof bare === "string" ? bare : "");
   const filed = FILE.exec(typeof bare === "string" ? bare : "");
+  const imaged = IMAGE.exec(typeof bare === "string" ? bare : "");
   const step =
     bare === OFFLINE ? { offline: true }
     : bare === POINTER_OFF ? { pointerOff: true }
@@ -98,6 +102,7 @@ export function stepFor(word, widths) {
     : menu !== null ? { menu: selectorFor(withThreadId(menu[1])) }
     : hovered !== null ? { hover: selectorFor(withThreadId(hovered[1])) }
     : filed !== null ? { file: { name: filed[1], bytes: Number(filed[2]) } }
+    : imaged !== null ? { image: imaged[1] }
     : key === null ? { click: selectorFor(withThreadId(bare)) }
     : { key: key[1] };
   return width === undefined ? step : { width, ...step };
@@ -113,6 +118,7 @@ const stepWords = step =>
   : step.menu !== undefined ? `the menu of \`${step.menu}\``
   : step.hover !== undefined ? `the pointer on \`${step.hover}\``
   : step.file !== undefined ? `attaching \`${step.file.name}\` of ${step.file.bytes} bytes`
+  : step.image !== undefined ? `picking the ${step.image} image for the project`
   : step.key !== undefined ? `the ${step.key} key`
   : `\`${step.click}\``;
 

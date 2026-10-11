@@ -196,6 +196,11 @@ export function fetchCapMs(ms: number): number {
   return Math.min(TIMER_CAP_MS, Math.max(0, Math.ceil(ms)));
 }
 
+/** The longest one read of a provider (a machine, the fleet, the snapshots) is waited on when its road names no cap of
+ * its own. A read answers in 0.06 to 0.6 s (Box and Solari, measured 2026-10-11); a provider that takes the request
+ * and never answers otherwise holds whatever waits on it for good, a host's start among them. */
+export const PROVIDER_READ_CAP_MS = 20_000;
+
 /** What a fetch is given to end it early: the cap, the caller's own signal, or both. A fresh timeout per attempt, so
  * a call a backend sends again gets the whole cap again rather than what the first attempt left of it. */
 export function abort(capMs: number | undefined, signal: AbortSignal | undefined): { signal?: AbortSignal } {

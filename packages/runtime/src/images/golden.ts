@@ -255,6 +255,7 @@ export function goldenArea(ctx: RuntimeContext): GoldenArea {
 
     async seal(builderId, o) {
       await ctx.ready();
+      await ctx.refreshBuilders();
       const entry = builders.get(builderId);
       if (!entry) throw new Error(`no such builder: ${builderId}`);
       ctx.refuseUntouchable(entry);
@@ -399,6 +400,7 @@ export function goldenArea(ctx: RuntimeContext): GoldenArea {
 
     async builderReach(builderId) {
       await ctx.ready();
+      await ctx.refreshBuilders();
       const entry = builders.get(builderId);
       if (!entry) throw new Error(`no such builder: ${builderId}`);
       ctx.refuseUntouchable(entry);
@@ -410,6 +412,7 @@ export function goldenArea(ctx: RuntimeContext): GoldenArea {
 
     async builders() {
       await ctx.ready();
+      await ctx.refreshBuilders();
       return [...builders.values()].map(b => ctx.builderView(b.record, b));
     },
 

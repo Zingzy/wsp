@@ -3,7 +3,7 @@
 // skill with the agents that read it after its name and the folder it really
 // lives in under it. The detail says who wrote it, where every copy is, what
 // can be done to it, and draws its SKILL.md: a skill wsp writes is always on,
-// a plugin's comes and goes with the plugin, a project's lives in the repo.
+// a project's lives in the repo. A plugin's skills stand on its plugin's page.
 // Add a skill searches skills.sh through the host, and a result opens the
 // same detail with its SKILL.md before anything is installed.
 import { DownloadIcon, PowerIcon, PowerOffIcon, ScrollTextIcon, Trash2Icon } from "lucide-react";
@@ -25,18 +25,17 @@ const rowId = (row: SkillRow): string => rowKey(["skill", row.scope], row.projec
 const ON: Status = { state: "on", tone: "good", words: W.on };
 const OFF: Status = { state: "off", tone: "quiet", words: W.off };
 
-type Source = "system" | "plugin" | "user" | "project";
-const sourceOf = (row: SkillRow): Source => (isSystemSkill(row.name) ? "system" : row.scope);
+type Source = "system" | "user" | "project";
+const sourceOf = (row: SkillRow): Source => (isSystemSkill(row.name) ? "system" : row.scope === "project" ? "project" : "user");
 
 const SOURCES: readonly { source: Exclude<Source, "project">; label: string }[] = [
   { source: "system", label: "System" },
-  { source: "plugin", label: "Plugins" },
   { source: "user", label: "Global" },
 ];
 
 function actsOf(row: SkillRow, ctx: RowsContext): RowAct[] {
   const source = sourceOf(row);
-  if (source === "system" || source === "plugin" || onImage(ctx)) return [];
+  if (source === "system" || onImage(ctx)) return [];
   const skills = ctx.skills;
   const busy = skills?.busyOf(skillKey(row)) === true;
   const off = isOff(row);
@@ -162,7 +161,7 @@ export const SKILLS_KIND: KindModule<SkillRow> = {
   id: "skills",
   search: "Search skills",
   add: "Add skill",
-  items: (report: AgentsReport) => [...report.skills].sort(byName),
+  items: (report: AgentsReport) => report.skills.filter(s => s.scope !== "plugin").sort(byName),
   key: rowId,
   matches: (row, q) => matchesAny(q, row.name, row.description, realPath(row), row.project?.name, ...agentsOf(row).map(agentName)),
   groups: (items): GroupView<SkillRow>[] => {
@@ -180,9 +179,7 @@ export const SKILLS_KIND: KindModule<SkillRow> = {
     const status: Fact =
       source === "system"
         ? { id: "status", label: W.status, status: { ...ON, words: W.alwaysOn }, fact: W.keptCurrent }
-        : source === "plugin"
-          ? { id: "status", label: W.status, status: ON, fact: W.fromPlugin }
-          : source === "project"
+        : source === "project"
             ? { id: "status", label: W.status, status: isOff(row) ? OFF : ON, fact: W.inRepo }
             : { id: "status", label: W.status, status: isOff(row) ? OFF : ON };
     const facts: Fact[] = [

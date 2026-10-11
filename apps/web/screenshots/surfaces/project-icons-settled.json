@@ -1,0 +1,14 @@
+{
+  "at": "/",
+  "fixture": "project-icons",
+  "steps": [
+    "row-id=thread:cart",
+    "row-id=settled"
+  ],
+  "wait": "row-id=thread:coupons",
+  "widths": [
+    1440
+  ],
+  "height": 1100,
+  "reason": "The settled fold dims an image as it dims a glyph; the sidebar at 390 is shot in project-icons-sidebar."
+}

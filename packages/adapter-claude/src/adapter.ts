@@ -13,7 +13,7 @@ import { limitOf, noteRejected, withLimit } from "./limits.js";
 import { ASIDE_HOOKS_ID, asideAnswer, asideCommand, asideHooksLine, asidePrompt, asideTextOf, hookDenyLine, promptDenyLine } from "./aside.js";
 import { copyCleanupCommand, copySession } from "./chain.js";
 import { draftForCommand, parseDraftFor, parseRename, parseSessionTitle, parseTitleFor, renameCommand, sessionTitleCommand, titleForCommand } from "./session-title.js";
-import { buildCommand, buildEnv, forwardsSubagentText, newSessionId, savedSpendCommand, serverValuesFile, terminalResumeCommand, userMessageLine } from "./landmines.js";
+import { buildEnv, launchCommand, newSessionId, savedSpendCommand, serverValuesFile, terminalResumeCommand, userMessageLine } from "./landmines.js";
 import { steersOf } from "./steers.js";
 import { newPlanBook, readPlanCall, type PlanBook } from "./plans.js";
 import { flattenContent, resultFacts } from "./tool-results.js";
@@ -141,6 +141,9 @@ export const STOP_TASK_WAIT_MS = 10_000;
 
 export interface ClaudeAdapter {
   start(options: StartOptions): ClaudeSession;
+  /** The CLI launched with no message: under -p it connects its MCP servers and runs its SessionStart hooks before it
+   * reads its first line (2.1.296, measured 2026-10-10), so the first turn on it starts without that wait. */
+  warm(options: Pick<StartOptions, "cwd" | "model" | "effort" | "permissionMode" | "contextWindow" | "fast" | "mcpServers" | "serverValues" | "version">): KeptAgent<ClaudeSession>;
   /** Re-opens a turn this CLI is still running on the machine, by the run handle the launch reported; `gone` is the
    * machine's own answer that it no longer holds the run, and nothing is emitted for one. A machine that answers
    * nothing rejects. Absent when the exec factory's runs die with the process that launched them. */
@@ -1261,11 +1264,11 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
     return session;
   };
 
-  /** The thread's next message on a process its last turn left up: the CLI announces itself again for it and answers
-   * it as a turn of its own. */
-  const nextOn = (keeper: KeptRun, localId: string, sessionId: string, saved: SavedUse | undefined, turn: KeptTurn): ClaudeSession => {
+  /** The thread's next message on a process its last turn left up, or the first on one launched ahead of it: the CLI
+   * announces itself again for it and answers it as a turn of its own. */
+  const nextOn = (keeper: KeptRun, localId: string, sessionId: string, saved: SavedUse | undefined, turn: KeptTurn, first?: { command: string }): ClaudeSession => {
     const { stream, from } = keeper.turn();
-    const session = follow({ stream, localId, announced: false, fresh: false, keeper, ...(from !== undefined ? { from } : {}), ...(saved !== undefined ? { saved } : {}), onEvent: turn.onEvent });
+    const session = follow({ stream, localId, announced: false, fresh: first !== undefined, ...(first !== undefined ? { command: first.command } : {}), keeper, ...(from !== undefined ? { from } : {}), ...(saved !== undefined ? { saved } : {}), onEvent: turn.onEvent });
     const line = userMessageLine(turn.prompt, sessionId, turn.images);
     if (turn.after === undefined) void stream.write(line);
     else if (stream.writeAfter !== undefined) stream.writeAfter(line, turn.after);
@@ -1276,27 +1279,24 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
   const launch = (options: StartOptions): ClaudeSession => {
     const localId = options.resume ?? newSessionId();
     const valued = serverValuesFile(options.serverValues);
-    const command = buildCommand({
-      ...(options.resume === undefined ? { sessionId: localId } : { resume: options.resume }),
-      cwd: options.cwd,
-      model: options.model,
-      effort: options.effort,
-      permissionMode: options.permissionMode,
-      contextWindow: options.contextWindow,
-      ...(options.fast === true ? { fast: true } : {}),
-      ...memory,
-      ...(options.title !== undefined ? { name: options.title } : {}),
-      ...(options.mcpServers !== undefined ? { mcpServers: options.mcpServers } : {}),
-      ...(valued !== undefined ? { serverValues: true as const } : {}),
-      ...(deps.launch !== undefined ? { launch: deps.launch } : {}),
-      ...(forwardsSubagentText(options.version) ? { subagentText: true } : {}),
-    });
+    const command = launchCommand({ ...options, ...memory, ...(deps.launch !== undefined ? { launch: deps.launch } : {}) }, localId, valued !== undefined);
     const launch = options.resume === undefined ? command : `${savedSpendCommand({ configDir: deps.configDir, sessionId: options.resume })}${command}`;
     const line = userMessageLine(options.prompt, localId, options.images);
     const run = deps.exec(launch, { env: { ...env }, input: [line], ...(options.promptAfter !== undefined ? { inputAfter: options.promptAfter } : {}), ...(valued !== undefined ? { secret: valued } : {}) });
     const keeper = options.keep === true ? keepRun(run) : undefined;
     const stream = keeper === undefined ? run : keeper.turn().stream;
     return follow({ stream, localId, announced: false, fresh: options.resume === undefined, command: launch, ...(keeper !== undefined ? { keeper } : {}), onEvent: options.onEvent });
+  };
+
+  const warm: ClaudeAdapter["warm"] = options => {
+    const localId = newSessionId();
+    const valued = serverValuesFile(options.serverValues);
+    const command = launchCommand({ ...options, ...memory, ...(deps.launch !== undefined ? { launch: deps.launch } : {}) }, localId, valued !== undefined);
+    const keeper = keepRun(deps.exec(command, { env: { ...env }, input: [], ...(valued !== undefined ? { secret: valued } : {}) }));
+    // Its launch's view closes at once: the process rests as between turns, and its hooks' lines are no turn's.
+    keeper.turn().stream.closeInput();
+    const close = (c?: { now?: true }): Promise<void> => keeper.close(c?.now === true ? 0 : (deps.resultExitMs ?? RUN_EXIT_MS), deps.interruptGraceMs ?? INTERRUPT_GRACE_MS);
+    return { next: turn => nextOn(keeper, localId, localId, undefined, turn, { command }), close, exited: keeper.exited };
   };
 
   /** A launch, and where it resumes a session the CLI's store does not hold and a seed is at hand, a second launch in a
@@ -1437,6 +1437,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
 
   return {
     start,
+    warm,
     ...(attach !== undefined
       ? {
           attach: async (options: AdapterAttachOptions) => {

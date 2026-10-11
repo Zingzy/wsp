@@ -35,7 +35,9 @@ export interface TimelineRowSharedState {
   forkedFrom: ForkedFromLine | null;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   onOpenFile: ((path: string, line?: number) => void) | undefined;
-  onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
+  /** Opens Changes on a turn's range, at a file where one is named; an edit's file the turn recorded no change for
+   * opens in Files at the line given. */
+  onOpenTurnDiff: (turnId: TurnId, filePath?: string, line?: number) => void;
   onToggleTurnFold: (turnId: TurnId) => void;
   onToggleWorkGroup: (groupId: string, anchorKey: string) => void;
   onToggleWorkEntry: (anchorKey: string) => void;

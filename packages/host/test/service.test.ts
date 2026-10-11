@@ -75,6 +75,74 @@ function planFor(at: ServiceAddress, over: Partial<ServicePlan> = {}): ServicePl
   };
 }
 
+/** What `launchctl print gui/<uid>/<label>` answers for a running wsp service, in the shape read on a Mac on
+ * 2026-10-11: the service block one tab in, its pid on line 42, and nested blocks a tab deeper whose own `state` and
+ * `pid` lines are not the service's. Paths are a stand-in home. */
+const LAUNCHCTL_PRINT = [
+  "gui/501/com.wsp.host.193c7ac5 = {",
+  "\tactive count = 1",
+  "\tpath = /opt/acme/Library/LaunchAgents/com.wsp.host.193c7ac5.plist",
+  "\ttype = LaunchAgent",
+  "\tstate = running",
+  "",
+  "\tprogram = /opt/acme/.wsp/bin/wsp",
+  "\targuments = {",
+  "\t\t/opt/acme/.wsp/bin/wsp",
+  "\t\tup",
+  "\t\t--state",
+  "\t\t/opt/acme/.wsp/state.json",
+  "\t}",
+  "",
+  "\tstdout path = /opt/acme/.wsp/host.log",
+  "\tstderr path = /opt/acme/.wsp/host.log",
+  "\tinherited environment = {",
+  "\t\tSSH_AUTH_SOCK => /private/tmp/com.apple.launchd.acme/Listeners",
+  "\t}",
+  "",
+  "\tdefault environment = {",
+  "\t\tPATH => /usr/bin:/bin:/usr/sbin:/sbin",
+  "\t}",
+  "",
+  "\tenvironment = {",
+  "\t\tHOME => /opt/acme",
+  "\t\tWSP_STARTED_BY => service",
+  "\t\tXPC_SERVICE_NAME => com.wsp.host.193c7ac5",
+  "\t}",
+  "",
+  "\tdomain = gui/501 [100005]",
+  "\tasid = 100005",
+  "\tminimum runtime = 10",
+  "\texit timeout = 5",
+  "\truns = 2",
+  "\tsuccessive crashes = 0",
+  "\tlast exit code = (never exited)",
+  "",
+  "\tresource coalition = {",
+  "\t\tID = 1234",
+  "\t}",
+  "\tpid = 36019",
+  "\timmediate reason = inefficient",
+  "\tforks = 4",
+  "\texecs = 1",
+  "\tinitialized = 1",
+  "\ttrampolined = 1",
+  "\tstarted suspended = 0",
+  "\tproxy started suspended = 0",
+  "\tchecked allocations = 0 (queried = 1)",
+  "\tchecked allocations reason = no host",
+  "",
+  "\tjetsam coalition = {",
+  "\t\tID = 1235",
+  "\t\ttype = jetsam",
+  "\t\tstate = active",
+  "\t\tpid = 1",
+  "\t}",
+  "",
+  "\tspawn type = daemon (3)",
+  "\tproperties = keepalive | runatload | inferred program",
+  "}",
+].join("\n");
+
 describe("one module per service manager", () => {
   const at: ServiceAddress = { statePath: "/Users/z/.wsp/state.json", home: "/Users/z", uid: 501 };
   const tag = serviceTag(at.statePath);
@@ -168,7 +236,7 @@ describe("one module per service manager", () => {
       ["systemctl", "--user", "disable", "--now", `wsp-host-${tag}.service`],
       ["systemctl", "--user", "daemon-reload"],
     ]);
-    expect(systemd.holds(at)).toEqual(["systemctl", "--user", "show", `wsp-host-${tag}.service`, "--property=ActiveState,UnitFileState"]);
+    expect(systemd.holds(at)).toEqual(["systemctl", "--user", "show", `wsp-host-${tag}.service`, "--property=ActiveState,UnitFileState,MainPID"]);
     expect(systemd.afterLoad?.(at)).toContain("enable-linger");
     expect(systemd.needsRoot?.(at)).toBe(false);
   });
@@ -191,7 +259,7 @@ describe("one module per service manager", () => {
       ["systemctl", "disable", "--now", `wsp-place-${theirTag}.service`],
       ["systemctl", "daemon-reload"],
     ]);
-    expect(systemd.holds(there)).toEqual(["systemctl", "show", `wsp-place-${theirTag}.service`, "--property=ActiveState,UnitFileState"]);
+    expect(systemd.holds(there)).toEqual(["systemctl", "show", `wsp-place-${theirTag}.service`, "--property=ActiveState,UnitFileState,MainPID"]);
     // Both systemds, the one a place writes today first: a computer joined on the road before it has its unit
     // under that login's own, and a sweep that read the machine's alone left it there to flap under auto-restart.
     expect(systemd.held(there)).toEqual([
@@ -339,6 +407,23 @@ describe("one module per service manager", () => {
     expect(systemd.holding(show("inactive", ""))).toBe(false);
     expect(systemd.holding({ code: 1, output: "Failed to connect to bus: No medium found" })).toBe(false);
   });
+
+  it("reads the process a unit runs off the same answer, and none for a unit with none or an answer that failed", () => {
+    const launchd = SERVICE_MANAGERS.launchd;
+    // launchctl print on a Mac serving wsp, 2026-10-11: the service's own pid is the one line one tab in (line 42 there),
+    // and the blocks nested inside it carry lines of their own a tab deeper.
+    expect(launchd.pidOf({ code: 0, output: LAUNCHCTL_PRINT })).toBe(36019);
+    expect(LAUNCHCTL_PRINT.split("\n")[41]).toBe("\tpid = 36019");
+    expect(launchd.pidOf({ code: 0, output: LAUNCHCTL_PRINT.replace("\tpid = 36019\n", "") })).toBeUndefined();
+    expect(launchd.pidOf({ code: 0, output: "gui/501/com.wsp.host = {\n\tstate = not running\n\tlast exit code = 1\n}" })).toBeUndefined();
+    expect(launchd.pidOf({ code: 113, output: "Could not find service" })).toBeUndefined();
+
+    // As systemctl show answers here, with MainPID=0 for a unit that runs nothing.
+    const systemd = SERVICE_MANAGERS.systemd;
+    expect(systemd.pidOf({ code: 0, output: "MainPID=1208\nActiveState=active\nUnitFileState=disabled\n" })).toBe(1208);
+    expect(systemd.pidOf({ code: 0, output: "MainPID=0\nActiveState=inactive\nUnitFileState=\n" })).toBeUndefined();
+    expect(systemd.pidOf({ code: 1, output: "Failed to connect to bus: No medium found" })).toBeUndefined();
+  });
 });
 
 /** A manager that writes a file and answers commands, standing in for launchd here: load starts a host by writing
@@ -380,6 +465,7 @@ function fakeService(over: Partial<ServiceDeps> = {}): {
     unload: a => [["fake", "unload", unit(a).name]],
     holds: a => ["fake", "holds", unit(a).name],
     holding: answer => answer.code === 0,
+    pidOf: () => undefined,
     atLogin: (a, on) => [["fake", on ? "enable" : "disable", unit(a).name]],
     loginRead: a => ["fake", "is-enabled", unit(a).name],
     startsAtLogin: answer => answer.output === "enabled",

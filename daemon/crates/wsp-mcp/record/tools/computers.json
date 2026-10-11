@@ -650,6 +650,10 @@
                             "pink"
                           ]
                         },
+                        "image": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{64}$"
+                        },
                         "keep": {
                           "$ref": "#/properties/computers/items/properties/picks/properties/clis/additionalProperties/properties/needs",
                           "default": []
@@ -1654,6 +1658,10 @@
                             "violet",
                             "pink"
                           ]
+                        },
+                        "image": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{64}$"
                         },
                         "keep": {
                           "$ref": "#/properties/computers/items/properties/picks/properties/clis/additionalProperties/properties/needs",

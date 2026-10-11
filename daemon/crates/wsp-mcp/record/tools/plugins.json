@@ -1,0 +1,494 @@
+{
+  "cloudOff": {
+    "name": "plugins",
+    "description": "Every plugin of each agent on one computer or where a thread runs, one row per agent and plugin in each scope: its id (name@marketplace), the agent, the scope it is installed for (user, or a project's or a project's local with that project), whether the agent's own settings turn it on there (Claude Code: local over project over user settings, then the plugin's default; Codex: what its app server answers), missing where the agent names it and loads nothing of it (Claude Code's folder for it is not there, or Codex lists no such plugin), its folder, its version, its description, where its marketplace comes from, and what it brings: skills, commands and subagents by the names a turn gives them, the events its hooks run on, its tool servers, language servers and apps. Claude Code's are read off its files, never by claude plugin list, which fetches; Codex's are asked of its app server. Read as the login the computer was added with, off each agent's config and whether its files are there: no MCP server is started and no login file is opened. A napping machine answers what stood there when it last ran, marked stale, and is not woken.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "thread": {
+          "type": "string",
+          "description": "a thread, by its id or a prefix of it, whose computer and project to read; absent reads a computer"
+        },
+        "on": {
+          "type": "string",
+          "description": "the computer to read, by the name computers lists; absent with no thread is the computer the app runs on"
+        }
+      },
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "target": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "placeId": {
+                  "type": "string"
+                },
+                "project": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "placeId"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "workspaceId": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "workspaceId"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "home": {
+          "type": "string"
+        },
+        "user": {
+          "type": "string"
+        },
+        "readAt": {
+          "type": "string"
+        },
+        "stale": {
+          "type": "string",
+          "const": "napping"
+        },
+        "refused": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "projects": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "path": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "path"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "reach": {
+          "type": "string",
+          "enum": [
+            "here",
+            "relay",
+            "none"
+          ]
+        },
+        "plugins": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "agent": {
+                "type": "string"
+              },
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "marketplace": {
+                "type": "string"
+              },
+              "version": {
+                "type": "string"
+              },
+              "scope": {
+                "type": "string",
+                "enum": [
+                  "user",
+                  "project",
+                  "local"
+                ]
+              },
+              "project": {
+                "$ref": "#/properties/projects/items"
+              },
+              "on": {
+                "type": "boolean"
+              },
+              "missing": {
+                "type": "string",
+                "enum": [
+                  "folder",
+                  "marketplace",
+                  "unlisted",
+                  "uninstalled"
+                ]
+              },
+              "path": {
+                "type": "string"
+              },
+              "setIn": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "source": {
+                "type": "string"
+              },
+              "brings": {
+                "type": "object",
+                "properties": {
+                  "skills": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "commands": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "subagents": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "hooks": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "servers": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "lsp": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "apps": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "skills",
+                  "commands",
+                  "subagents",
+                  "hooks",
+                  "servers",
+                  "lsp",
+                  "apps"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "agent",
+              "id",
+              "name",
+              "marketplace",
+              "scope",
+              "on",
+              "brings"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "target",
+        "home",
+        "user",
+        "readAt",
+        "refused",
+        "plugins"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    },
+    "_meta": {
+      "anthropic/alwaysLoad": false
+    }
+  },
+  "cloudOn": {
+    "name": "plugins",
+    "description": "Every plugin of each agent on one computer or where a thread runs, one row per agent and plugin in each scope: its id (name@marketplace), the agent, the scope it is installed for (user, or a project's or a project's local with that project), whether the agent's own settings turn it on there (Claude Code: local over project over user settings, then the plugin's default; Codex: what its app server answers), missing where the agent names it and loads nothing of it (Claude Code's folder for it is not there, or Codex lists no such plugin), its folder, its version, its description, where its marketplace comes from, and what it brings: skills, commands and subagents by the names a turn gives them, the events its hooks run on, its tool servers, language servers and apps. Claude Code's are read off its files, never by claude plugin list, which fetches; Codex's are asked of its app server. Read as the login the computer was added with, off each agent's config and whether its files are there: no MCP server is started and no login file is opened. A napping machine answers what stood there when it last ran, marked stale, and is not woken.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "thread": {
+          "type": "string",
+          "description": "a thread, by its id or a prefix of it, whose computer and project to read; absent reads a computer"
+        },
+        "on": {
+          "type": "string",
+          "description": "the computer to read, by the name computers lists; absent with no thread is the computer the app runs on"
+        }
+      },
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "target": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "placeId": {
+                  "type": "string"
+                },
+                "project": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "placeId"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "workspaceId": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "workspaceId"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "home": {
+          "type": "string"
+        },
+        "user": {
+          "type": "string"
+        },
+        "readAt": {
+          "type": "string"
+        },
+        "stale": {
+          "type": "string",
+          "const": "napping"
+        },
+        "refused": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "projects": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "path": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "path"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "reach": {
+          "type": "string",
+          "enum": [
+            "here",
+            "relay",
+            "none"
+          ]
+        },
+        "plugins": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "agent": {
+                "type": "string"
+              },
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "marketplace": {
+                "type": "string"
+              },
+              "version": {
+                "type": "string"
+              },
+              "scope": {
+                "type": "string",
+                "enum": [
+                  "user",
+                  "project",
+                  "local"
+                ]
+              },
+              "project": {
+                "$ref": "#/properties/projects/items"
+              },
+              "on": {
+                "type": "boolean"
+              },
+              "missing": {
+                "type": "string",
+                "enum": [
+                  "folder",
+                  "marketplace",
+                  "unlisted",
+                  "uninstalled"
+                ]
+              },
+              "path": {
+                "type": "string"
+              },
+              "setIn": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "source": {
+                "type": "string"
+              },
+              "brings": {
+                "type": "object",
+                "properties": {
+                  "skills": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "commands": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "subagents": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "hooks": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "servers": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "lsp": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "apps": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "skills",
+                  "commands",
+                  "subagents",
+                  "hooks",
+                  "servers",
+                  "lsp",
+                  "apps"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "agent",
+              "id",
+              "name",
+              "marketplace",
+              "scope",
+              "on",
+              "brings"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "target",
+        "home",
+        "user",
+        "readAt",
+        "refused",
+        "plugins"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    },
+    "_meta": {
+      "anthropic/alwaysLoad": false
+    }
+  }
+}

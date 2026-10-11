@@ -1,0 +1,19 @@
+{
+  "at": "/",
+  "fixture": "project-icons",
+  "steps": [
+    "390:key:Escape",
+    "390:sidebar=trigger",
+    "k=settings-row",
+    "k=settings-projects",
+    "settings-row=pr_wsp",
+    "image:huge"
+  ],
+  "wait": "k=project-icon-refusal",
+  "settleMs": 700,
+  "widths": [
+    1440,
+    390
+  ],
+  "reason": "A 20000px image refused off its header in the sheet's slot, before anything decodes it."
+}

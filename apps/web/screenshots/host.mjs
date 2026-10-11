@@ -272,13 +272,17 @@ const draftScript = draft =>
  * says the fixture's version and sign-in and answers a side question where the fixture gives it one, a stand-in
  * command for each server with tools, and each agent's own MCP file written by the catalog's module for its format.
  * Answers the folder the commands are in, which leads the host's path. */
+/** What an app server answers a plugin read with on a computer whose agent has no plugins: its first three requests, by
+ * id, each a result with nothing in it. */
+const NO_PLUGINS = ['{"id":1,"result":{}}', '{"id":2,"result":{"marketplaces":[]}}', '{"id":3,"result":{"config":{}}}'].map(shellQuote).join(" ");
+
 export function writeHereAgents(home, here) {
   const bin = join(home, ".local", "bin");
   mkdirSync(bin, { recursive: true });
   for (const [id, said] of Object.entries(here.agents)) {
     const agent = CATALOG_AGENTS.find(a => a.id === id);
     if (agent === undefined) throw new Error(`the fixture names an agent the catalog does not have: ${id}`);
-    writeScript(join(bin, agent.bin), sh(`${asideScript(said.aside)}${draftScript(said.draft)}case "$1" in\n  --version) printf '%s\\n' ${shellQuote(said.version)} ;;\n  *) printf '%s\\n' ${shellQuote(said.status)} ;;\nesac`));
+    writeScript(join(bin, agent.bin), sh(`${asideScript(said.aside)}${draftScript(said.draft)}case "$1" in\n  --version) printf '%s\\n' ${shellQuote(said.version)} ;;\n  app-server) printf '%s\\n' ${NO_PLUGINS} ; cat >/dev/null ;;\n  *) printf '%s\\n' ${shellQuote(said.status)} ;;\nesac`));
   }
   const transports = new Map(
     here.servers.map(s => {

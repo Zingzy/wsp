@@ -7,7 +7,7 @@
 // the one the reset left. The count landed in 0.141, the details in 0.143.
 import { programWord, shellQuote, type HarnessLimit, type PlanResets, type ResetReading, type ResetRoad, type ResetSpend } from "@wsp/protocol";
 import { creditsOf, limitOf, snapshotOf } from "./adapter.js";
-import { answersOf, appServerScript, initializeRequest, notification, request, resultOf, type ServerAnswer } from "./app-server-script.js";
+import { answersOf, appServerScript, initializeRequest, notification, request, resultOf, type ServerAnswer } from "@wsp/catalog";
 import { buildEnv, slug } from "./command.js";
 
 const INIT = 1;

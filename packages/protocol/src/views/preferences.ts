@@ -4,7 +4,7 @@ import { z } from "zod";
 import { CLOUD_ENV, LABS_ENV } from "../env.js";
 import { AgentDefaults, AgentDefaultsPatch, ProjectOverrides, ProjectOverridesPatch, patchedFields } from "../thread-defaults.js";
 import { GENERAL_DEFAULTS, GENERAL_FIELDS, patchedGeneral } from "../general-prefs.js";
-import { ProjectHue, ProjectIcon } from "../project-look.js";
+import { ProjectHue, ProjectIcon, ProjectIconHash } from "../project-look.js";
 import { ThreadView } from "./session.js";
 import { SessionEvent } from "./session-events.js";
 
@@ -107,6 +107,10 @@ export const Preferences = z.object({
   target: PreferencesTarget.optional(),
   /** How each project is drawn, by project id; kept here so every screen that opens this wsp draws it the same. */
   projectLook: z.record(z.string(), ProjectLook),
+  /** The image each project wears over its glyph, by project id, as the hash of the PNG the host keeps under the wsp
+   * home. Apart from the look, so a hue change or a recipe's move cannot drop it and a reader that predates it drops
+   * the key rather than the record; written by projects.icon alone, so no client names a hash the host does not hold. */
+  projectIcon: z.record(z.string(), ProjectIconHash).default({}),
   /** How each computer is drawn, by place id. Defaulted rather than required, so a record from a host that kept no
    * icons still parses on the wire and does not blank every other preference. */
   computerLook: z.record(z.string(), ComputerLook).default({}),
@@ -170,12 +174,13 @@ export const labsFromEnv = (env: Record<string, string | undefined>): boolean =>
 /** Whether the cloud is on in an environment: CLOUD_ENV set to exactly 1, and nothing else counts. */
 export const cloudFromEnv = (env: Readonly<Record<string, string | undefined>>): boolean => env[CLOUD_ENV] === "1";
 
-/** What preferences.set takes: any of the record's fields but labs, which is the host's to say; a null sidebarWidth
- * clears it back to the default, terminalZoom and access name only the workspaces they move, a null entry dropping
+/** What preferences.set takes: any of the record's fields but labs, which is the host's to say, and projectIcon,
+ * which projects.icon writes; a null sidebarWidth clears it back to the default, terminalZoom and access name only
+ * the workspaces they move, a null entry dropping
  * that workspace's zoom or pick, keybindings names only the commands it moves, a null entry putting that command
  * back on its defaults, and a null target clears the last target. Strict, so a field this record dropped
  * is refused rather than written into a state file nothing reads. */
-export const PreferencesPatch = Preferences.omit({ labs: true })
+export const PreferencesPatch = Preferences.omit({ labs: true, projectIcon: true })
   .partial()
   .extend({
     sidebarWidth: z.number().int().positive().nullable().optional(),
@@ -196,12 +201,14 @@ export const PreferencesPatch = Preferences.omit({ labs: true })
   .strict();
 export type PreferencesPatch = z.infer<typeof PreferencesPatch>;
 
-export const DEFAULT_PREFERENCES: Preferences = { theme: "system", ...THEME_PICK_DEFAULTS, sidebarMode: "list", terminalSize: "app", terminalZoom: {}, access: {}, projectLook: {}, computerLook: {}, serverIcons: true, agentVersions: true, usageLogs: true, productUsage: true, keepAwake: true, transparency: true, projectOrder: [], keybindings: {}, appFont: "", codeFont: "", agentDefaults: {}, projectDefaults: {}, ...GENERAL_DEFAULTS, labs: false };
+export const DEFAULT_PREFERENCES: Preferences = { theme: "system", ...THEME_PICK_DEFAULTS, sidebarMode: "list", terminalSize: "app", terminalZoom: {}, access: {}, projectLook: {}, projectIcon: {}, computerLook: {}, serverIcons: true, agentVersions: true, usageLogs: true, productUsage: true, keepAwake: true, transparency: true, projectOrder: [], keybindings: {}, appFont: "", codeFont: "", agentDefaults: {}, projectDefaults: {}, ...GENERAL_DEFAULTS, labs: false };
 
 /** The record as stored, over the defaults; a record that does not parse (an older or a hand-edited state file) reads as the defaults. */
 export function preferencesFrom(stored: unknown): Preferences {
   const parsed = Preferences.partial().safeParse(stored ?? {});
-  return parsed.success ? applyPreferencesPatch(DEFAULT_PREFERENCES, parsed.data) : DEFAULT_PREFERENCES;
+  if (!parsed.success) return DEFAULT_PREFERENCES;
+  const { projectIcon, ...patch } = parsed.data;
+  return { ...applyPreferencesPatch(DEFAULT_PREFERENCES, patch), projectIcon: projectIcon ?? {} };
 }
 
 /** The record with the patch's fields over it. The one merge rule, read by the host that keeps the record and the client
@@ -242,6 +249,7 @@ export function applyPreferencesPatch(current: Preferences, patch: PreferencesPa
     terminalZoom: perWorkspace(current.terminalZoom, patch.terminalZoom),
     access: perWorkspace(current.access, patch.access),
     projectLook: perWorkspace(current.projectLook, patch.projectLook),
+    projectIcon: current.projectIcon,
     computerLook: perWorkspace(current.computerLook, patch.computerLook),
     serverIcons: patch.serverIcons ?? current.serverIcons,
     agentVersions: patch.agentVersions ?? current.agentVersions,

@@ -93,7 +93,7 @@ describe("the agents report off a computer you own whose daemon runs as root", (
     expect(server("codex", "old")).toMatchObject({ enabled: false });
     expect(server("gemini", "fs").transport).toEqual({ kind: "stdio", line: "npx @example/fs --token=…" });
     expect(server("opencode", "ctx")).toMatchObject({ enabled: false, auth: "unknown" });
-    expect(read.skills.map(s => s.name)).toEqual(["frontend-design", "pdf", "plan", "review", "sql"]);
+    expect(read.skills.map(s => s.name)).toEqual(["frontend:frontend-design", "pdf", "plan", "review", "sql"]);
     // The box's report stood in for the version and sign-in reads, so no agent's own command ran there.
     expect(lines.join("\n")).not.toMatch(/--version|auth status|login status/);
     nothingLeaked(at, read, lines);

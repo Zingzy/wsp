@@ -113,6 +113,8 @@ export interface ServiceManager {
   holds(at: ServiceAddress): readonly string[];
   /** That answer read: whether the manager holds the unit. */
   holding(answer: RunResult): boolean;
+  /** The same answer read for the process the unit runs now; nothing where none runs. */
+  pidOf(answer: RunResult): number | undefined;
   /** Whether a `holds` answer that is not holding is this manager saying it does not have the unit. A manager that is
    * not on PATH, or one that never reached the thing it asks, answers otherwise and that is not the same sentence:
    * wsp leaves a service it cannot read alone rather than throwing away the file that names it. */
@@ -123,6 +125,12 @@ export interface ServiceManager {
   /** Whether this service must be installed by root, which is a fact of where this manager puts the unit. A
    * manager that writes every unit under the person's own home answers false and needs no entry. */
   needsRoot?(at: ServiceAddress): boolean;
+}
+
+/** A pid a manager's answer names, where it answered at all; 0 is no process. */
+function pidIn(answer: RunResult, line: RegExp): number | undefined {
+  const pid = answer.code === 0 ? Number(line.exec(answer.output)?.[1] ?? 0) : 0;
+  return pid > 0 ? pid : undefined;
 }
 
 /** One service per state file: the manager's names carry the first eight hex of that path's digest, so two state
@@ -223,6 +231,8 @@ const launchd: ServiceManager = {
   startsAtLogin: (answer, at) => (answer.code !== 0 ? undefined : !new RegExp(`"${launchdName(at).replaceAll(".", "\\.")}" => (disabled|true)`).test(answer.output)),
   holds: at => ["launchctl", "print", `gui/${at.uid}/${launchdName(at)}`],
   holding: answer => answer.code === 0,
+  // The service's own pid sits one tab in; a nested block a tab deeper carries pid lines that are not the service's.
+  pidOf: answer => pidIn(answer, /^\tpid = (\d+)$/m),
   // One domain per login, so one file; launchd reads its units off that file alone and has nothing to forget and
   // nothing to reload once it has gone.
   held: at => [{ unit: launchdUnit(at), words: "launchd agent", stop: launchdUnload(at), forget: [], reload: [] }],
@@ -315,12 +325,14 @@ const systemd: ServiceManager = {
   },
   // Both facts, since is-enabled answers about login alone: a unit the person set not to start at login is disabled
   // and still running, and a stop that read it as not held left it running with Restart=always behind it.
-  holds: at => [...systemctlArgs(at), "show", systemdName(at), "--property=ActiveState,UnitFileState"],
+  holds: at => [...systemctlArgs(at), "show", systemdName(at), "--property=ActiveState,UnitFileState,MainPID"],
   holding: answer => {
     if (answer.code !== 0) return false;
     const said = (name: string): string => new RegExp(`^${name}=(.*)$`, "m").exec(answer.output)?.[1]?.trim() ?? "";
     return SYSTEMD_RUNNING.has(said("ActiveState")) || SYSTEMD_ENABLED.has(said("UnitFileState"));
   },
+  // MainPID=0 is a unit with no process.
+  pidOf: answer => pidIn(answer, /^MainPID=(\d+)\s*$/m),
   // systemd enables a unit by a symlink beside its file, so the file alone is not the whole of what it holds: a
   // stop and a disable while the unit file is still there take the process and that link with them, and the reload
   // after the file has gone leaves systemd holding nothing. Both scopes, the one this role writes today first: a

@@ -5,7 +5,7 @@
 // useDiscoveredLocalServers.ts and contracts (commit 57a66608). Fields the
 // wsp wire cannot fill today are kept when a copied component reads them and
 // dropped when nothing does. Everything here is data: no React, no schemas.
-import type { AttachmentRecord, MachineState, PermissionOption, PermissionOutcome, ReachState, SessionOrigin, SessionStatus, SubagentView, ThreadCapWait, ThreadPlacement, TurnLimit, WorkspacePhase, WorkspaceState, WorkspaceStatus, WorkspaceView, PlanStep, TurnChangedFile, TurnTokens } from "@wsp/protocol";
+import type { AttachmentRecord, FilePatch, MachineState, PermissionOption, PermissionOutcome, ReachState, SessionOrigin, SessionStatus, SubagentView, ThreadCapWait, ThreadPlacement, TurnLimit, WorkspacePhase, WorkspaceState, WorkspaceStatus, WorkspaceView, PlanStep, TurnChangedFile, TurnTokens } from "@wsp/protocol";
 
 // --- chat -------------------------------------------------------------------
 
@@ -57,7 +57,7 @@ export type WorkLogTone = "thinking" | "tool" | "notice" | "error" | "compaction
 /** Which wire event produced a work row; the copied rows key chrome on it. */
 export type WorkLogSourceKind = "tool.started" | "tool.completed" | "reasoning" | "runtime.error" | "runtime.notify" | "runtime.resume" | "runtime.starting" | "harness.note" | "harness.compaction";
 
-export interface WorkLogEntry {
+export interface WorkLogEntry extends CallResult {
   readonly id: string;
   readonly createdAt: string;
   readonly turnId: string | null;
@@ -79,6 +79,19 @@ export interface WorkLogEntry {
   readonly sourceActivityKind: WorkLogSourceKind;
   /** The thread a wsp run or fork call opened, as its answer names it. */
   readonly spawned?: string;
+}
+
+/** What a call's result says beyond its first line, as its row draws it, field by field so a row the fold builds
+ * again compares equal to the one before: a command's output as the transcript kept
+ * it, its exit code where the agent named one, how long it ran, and the bytes of the whole where the text holds less;
+ * an edit's hunks per file, and whether the transcript's cap left lines out of them. */
+export interface CallResult {
+  readonly output?: string;
+  readonly exitCode?: number;
+  readonly durationMs?: number;
+  readonly bytes?: number;
+  readonly patch?: ReadonlyArray<FilePatch>;
+  readonly patchCut?: true;
 }
 
 /** One step of the agent's list, with how long it took where the list set it working and later marked it done. */
@@ -130,7 +143,7 @@ export interface PermissionPrompt {
 
 /** One line a subagent wrote, inside its own fold: its prose, its reasoning, or one tool call with what that call
  * answered. Flat rather than the parent's own timeline, since a subagent's run is read as a list of what it did. */
-export interface SubagentLine {
+export interface SubagentLine extends CallResult {
   readonly id: string;
   readonly createdAt: string;
   readonly kind: "text" | "thinking" | "tool";

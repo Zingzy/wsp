@@ -282,7 +282,7 @@ describe("CodexAdapter over codex app-server", () => {
     const deltas = deltasOf(events);
     expect(deltas[0]!.text).toMatch(/^loading hooks from both /);
     expect(deltas[1]).toMatchObject({ text: "I\u2019ll create `hi.txt` in the current folder.", messageId: "msg_0567d7bf2c7ea0de016ab930865e9087d09774946388412886" });
-    expect(deltas[2]).toMatchObject({ toolName: "command_execution", toolUseId: RECORDED_COMMAND, text: JSON.stringify({ command: "/bin/zsh -lc 'touch hi.txt'" }) });
+    expect(deltas[2]).toMatchObject({ toolName: "command_execution", toolUseId: RECORDED_COMMAND, text: JSON.stringify({ command: "touch hi.txt" }) });
     // The recording's two rolling updates, each a plan window pair on a Plus plan, epoch seconds read as ms.
     expect(events.flatMap(e => (e.type === "limit" ? [e.limit] : [])).at(-1)).toEqual({
       windows: [
@@ -294,7 +294,7 @@ describe("CodexAdapter over codex app-server", () => {
     });
     const ask = events.find((e): e is Extract<AdapterEvent, { type: "permission.ask" }> => e.type === "permission.ask")!.ask;
     expect(ask).toMatchObject({ askId: "0", toolName: "command_execution", toolUseId: RECORDED_COMMAND, detail: "Allow me to create hi.txt in the current folder?" });
-    expect(JSON.parse(ask.input)).toEqual({ command: "/bin/zsh -lc 'touch hi.txt'", cwd: "/private/tmp/b7-real" });
+    expect(JSON.parse(ask.input)).toEqual({ command: "touch hi.txt", cwd: "/private/tmp/b7-real" });
     expect(launch.wires[0]!.written).toContainEqual({ id: 0, result: { decision: "accept" } });
     // The server's own resolved notice for that request finds nothing open, so the prompt closes once.
     expect(events.filter(e => e.type === "permission.close")).toEqual([{ type: "permission.close", sessionId: RECORDED_THREAD, askId: "0", outcome: "allowed", optionId: PERMISSION_ALLOW }]);

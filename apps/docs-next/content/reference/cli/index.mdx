@@ -82,6 +82,9 @@ wsp --version
 | [`wsp mcp install`](/reference/cli/mcp-install) | put the wsp tools, this skill and wsp's own section of this project's AGENTS.md into that agent (claude, codex, gemini, opencode); --agent repeats, --remove takes it back out, and --json prints what each agent took |
 | [`wsp merge`](/reference/cli/merge) | merges the pull request of the thread's branch, or merges it once its checks pass |
 | [`wsp merge in`](/reference/cli/merge-in) | merges a child thread's branch into its lead's folder with a merge commit, or names the files that conflict |
+| [`wsp plugins`](/reference/cli/plugins) | each agent's plugins on this computer, a box you added or where a thread runs: on or off, missing where the agent names one it cannot load, its marketplace and version, and what it brings |
+| [`wsp plugins disable`](/reference/cli/plugins-disable) | turns one agent's plugin off for the login, by the agent's own road, so its next turn loads nothing of it |
+| [`wsp plugins enable`](/reference/cli/plugins-enable) | turns one agent's plugin that was turned off on again |
 | [`wsp projects`](/reference/cli/projects) | your projects, each on its computer: where its code comes from, where its folder sits, the branch a machine of it starts on and how many threads it has |
 | [`wsp projects remove`](/reference/cli/projects-remove) | takes a project out of this wsp; its folder is left where it is, on this computer or on a computer you joined, a project with a machine standing on it is refused naming them, and one whose checkout on a computer of yours holds work no remote has is stopped naming it |
 | [`wsp projects set`](/reference/cli/projects-set) | what a new thread on one project starts on, over the agent's own defaults: its agent, model, effort and access; and the shell line a new worktree of it runs once, after each ecosystem's own install, for what none of them knows |
@@ -314,6 +317,15 @@ up and down for the host, recipe and image for what a machine starts from.
   wsp servers enable <name> [<thread>] [--on <computer>] --agent <id>
     [--scope <user|home|local|project>] [--project [<name>]]
       turns an MCP server that was turned off on again
+  wsp plugins [<thread>] [--on <computer>]
+      each agent's plugins on this computer, a box you added or where a thread
+      runs: on or off, missing where the agent names one it cannot load, its
+      marketplace and version, and what it brings
+  wsp plugins disable <id> --agent <id> [<thread>] [--on <computer>]
+      turns one agent's plugin off for the login, by the agent's own road, so
+      its next turn loads nothing of it
+  wsp plugins enable <id> --agent <id> [<thread>] [--on <computer>]
+      turns one agent's plugin that was turned off on again
   wsp projects remove <project> [--yes] [--force]
       takes a project out of this wsp; its folder is left where it is, on this
       computer or on a computer you joined, a project with a machine standing on

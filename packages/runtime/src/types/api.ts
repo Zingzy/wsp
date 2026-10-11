@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { GoldenDelta, ExecResult, GoldenManifest, GoldenVersion, MachineBackend, MachineKind, RetentionPlan, SnapshotRow, TemplateRow } from "@wsp/engine";
-import type { ThreadCapWait, ThreadScope, AgentsReport, AgentsSignInEvent, AgentsSignInRun, AgentsTarget, ServerAdd, ServerAsk, ServerToolsAnswer, SignInLine, SkillAdded, SkillHit, SkillPreview } from "@wsp/protocol";
+import type { ThreadCapWait, ThreadScope, AgentsReport, AgentsSignInEvent, AgentsSignInRun, AgentsTarget, PluginAsk, PluginRow, ServerAdd, ServerAsk, ServerToolsAnswer, SignInLine, SkillAdded, SkillHit, SkillPreview } from "@wsp/protocol";
 import type {
   Capabilities,
   DaemonReachView,
@@ -29,6 +29,7 @@ import type {
   SessionInterruptResult,
   SessionRenameResult,
   SessionSettleResult,
+  SessionWarmResult,
   SessionRestoreResult,
   SessionSteerResult,
   SessionOrigin,
@@ -119,6 +120,8 @@ export interface Runtime {
     serversToggle(target: AgentsTarget, ask: ServerAsk & { on: boolean }, origin?: Caller): Promise<{ file: string }>;
     /** A remote server's icon as a data url, asked of Google by this host only while the person's switch is on. */
     serversIcon(host: string, refresh?: boolean): Promise<string | null>;
+    /** One plugin of one agent turned on or off there for the login, by the agent's own road, and its row after. */
+    pluginsToggle(target: AgentsTarget, ask: PluginAsk & { on: boolean }, origin?: Caller): Promise<{ plugin: PluginRow }>;
     /** Changes how one agent runs on one computer, checked first, and answers its row there, names only. */
     setup(placeId: string, agent: string, change: AgentSetupSet, origin?: Caller): Promise<AgentRow>;
     /** Every catalog agent's config folder on this computer by id, where a launch here finds it: the one the person
@@ -339,6 +342,10 @@ export interface Runtime {
      * folder on a computer of the person's holds work no remote has, unless force. With check, refuses as it would and
      * answers with that work, taking nothing. */
     remove(id: string, origin?: Caller, o?: { force?: boolean; check?: boolean }): Promise<{ said: string; unsaved?: string }>;
+    /** Puts the window's fitted PNG on a project as its image, or with null takes it off; answers the kept hash. */
+    icon(projectId: string, png: string | null): Promise<{ image: string | null }>;
+    /** Each hash's kept image as a data url, read from disk now, null where none is kept. */
+    icons(hashes: readonly string[]): Promise<Record<string, string | null>>;
     /** Lands the host's bundle of a folder on the workspace's machine; progress rides project.import events. */
     import(opts: ProjectImportOptions, origin?: Caller): Promise<ProjectImportResult>;
     /** Brings a folder and the agent state keyed to it home from the workspace's machine; progress rides project.export events. */
@@ -475,6 +482,12 @@ export interface Runtime {
      * refuses goes again, its branch with it. Refused with branch where the turn kept no checkpoint or it is gone, where
      * the folder is no git repo, and on a computer whose threads run in no worktree, before anything is made. */
     fork(opts: Omit<Parameters<Runtime["sessions"]["start"]>[1], "fork" | "thread" | "cwd" | "replaces"> & { fork: ForkSource; branch?: string }, origin?: Caller): Promise<SessionHandle>;
+    /** Starts the agent's process for the thread a person's next send on this workspace opens, where the workspace's
+     * computer keeps agents between turns and the agent starts before its message: one per workspace and agent, a
+     * standing one launched with other picks ended and replaced, one launched as asked given its window again. A send
+     * the person makes there opening a thread on that agent at the same picks runs on it; nothing takes it from a
+     * thread's token, which answers none. */
+    warm(workspaceId: string, o: { harness?: string; cwd?: string; model?: string; effort?: string; permissionMode?: string; access?: AccessChoice; contextWindow?: string; fast?: boolean }, origin?: Caller): Promise<SessionWarmResult>;
     /** Stamps each thread and every thread under it settled and read, now, and tells every window as read does; a
      * thread whose tree works or asks is left whole, and one the fold holds already is left too. With finished, each
      * thread named stays and the finished threads under it settle, a failed one staying and one with work under it

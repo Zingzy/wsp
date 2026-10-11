@@ -136,6 +136,10 @@ export interface HarnessStartOptions {
   onEvent: (event: AdapterEvent) => void;
 }
 
+/** A launch ahead of a thread's first send: everything a start fixes for the life of the process, and nothing of the
+ * message, which the first turn on the process carries. */
+export type HarnessWarmOptions = Pick<HarnessStartOptions, "cwd" | "model" | "effort" | "permissionMode" | "contextWindow" | "fast" | "mcpServers" | "serverValues" | "version">;
+
 export interface HarnessSession {
   readonly localId: string;
   readonly finished: Promise<TurnResult>;
@@ -178,6 +182,9 @@ export interface HarnessSession {
 
 export interface HarnessAdapter {
   start(options: HarnessStartOptions): HarnessSession;
+  /** Launches the agent's process with no message, its own startup run while nobody waits on it: the first turn on
+   * it is a new session's first. Absent on an adapter whose CLI cannot start before it has its prompt. */
+  warm?(options: HarnessWarmOptions): KeptAgent<HarnessSession>;
   /** Re-opens a turn this harness is still running on the machine, by the run handle a session of an earlier host
    * process reported. The run's whole output is read again, so the events the host missed reach this one. `gone` is
    * the machine's own answer that it no longer holds the run, and no event is emitted for one. A machine that

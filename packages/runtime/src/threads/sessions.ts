@@ -6,11 +6,11 @@ import { CATALOG_AGENTS, serverValuesOf } from "@wsp/catalog";
 import { harnessExec } from "@wsp/engine";
 import {
   type SessionEvent, type SessionInterruptOutcome, type SessionInterruptResult, type SessionStartOutcome,
-  type SessionSearchResult, type SessionView, type StartPicks, type TurnImage, type TurnResult, foldThreads,
+  type SessionSearchResult, type SessionView, type TurnImage, type TurnResult, foldThreads,
   MCP_SERVER_NAME, threadForgetRefusal, threadKeyOf, threadRan, threadWord, SCOPED_MCP_ARG, roadOf, scopeOf,
   RUN_PERSONS_LINE, runOutputTail, type SessionRunEvent, NO_SLATE_MCP_ARG, ASIDE_NO_SESSION_LINE, BLANK_ASIDE_LINE,
   asideUnsupportedLine, isLocalWorkspace, mcpServersBlocked, actionRefusal, homeShortened, EMPTY_TITLE_LINE,
-  threadRunsOnLine, keptPicks, listedPick, notFoundRefusal, NOTIFY_ME, noCwdLine,
+  threadRunsOnLine, notFoundRefusal, NOTIFY_ME, noCwdLine,
   THREAD_WORKING_LINE, threadOnMachineLine, WORKTREE_BUSY_LINE, copiesFolder, runsInFolder, sendRefusal, startPicks, titleLine,
   TURN_TOKEN_ENV, turnImagesDir, workspaceState, REWIND_LATEST_LINE, REWIND_NO_CHECKPOINT_LINE, REWIND_NO_UNDO_LINE,
   REWIND_SHARED_LINE, REWIND_WORKING_LINE, rewindBesideLine, rewindChildrenLine, rewindKeptLine, rewindNoAnchorLine,
@@ -34,6 +34,7 @@ import {
   ATTACHMENTS, ATTACHMENT_KEYS, snippetAround, namedOnly, writeLines, type KeptProcess, type KeptLaunch, type ThreadRecord, type KeptImages,
   type LiveSession, type SessionEntry, stopLogLine,
 } from "../types/internal.js";
+import { launchArea } from "./launch.js";
 import type { RuntimeContext, SessionsArea } from "../context.js";
 
 /** A steered message's images as an adapter that declares steersImages reads them: the bytes, as a start's inline road. */
@@ -50,7 +51,7 @@ function servedTo(wsp: McpServerSpec | undefined, rootThreadId: string, threadId
 
 export function sessionsArea(ctx: RuntimeContext): SessionsArea {
   const {
-    opts, store, bus, clock, deviceDoor, threadLaunch, live, setups, threadRecords, sessions, transcriptIndex,
+    opts, store, bus, clock, deviceDoor, threadLaunch, live, threadRecords, sessions, transcriptIndex,
   } = ctx;
   /** The end a stop is running on a thread's group, by thread: the thread's next turn launches after it, never into
    * the group it is emptying. */
@@ -270,8 +271,14 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
     if (restart !== undefined) throw refusal(replacedAlreadyLine(threadId, restart), replacedAlreadyFix(restart), "usage");
   };
 
+  /** The process launched ahead that each start in flight claimed, by the start's own options. */
+  const claimedBy = new WeakMap<object, string>();
+  const { launchPicks, launchFixed, warm } = launchArea(ctx);
+
   const sessionsApi: Runtime["sessions"] = {
     replaceable,
+
+    warm,
 
     async start(workspaceId, opened, origin) {
       await ctx.ready();
@@ -313,7 +320,16 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
       if (opened.thread !== undefined && heldOn !== workspaceId) throw new Error(`no thread ${opened.thread} in this folder`);
       // Read again where the thread becomes this send's to run: the id it must resume may not exist yet.
       let resume = named?.claudeSessionId ?? fromTranscript;
-      const threadId = opened.thread ?? randomUUID();
+      // A send of the person's opening a thread runs on the process the composer started for it, where one stands for
+      // this workspace and agent: the thread takes the id that process's token and tools were minted for. Never a
+      // thread's send, whose child sits in a tree that process's token is not, and never one launching otherwise. Nor
+      // a fork, which resumes its source's conversation where a warm process holds none.
+      const warmed =
+        opened.thread === undefined && plan === undefined && scopeOf(origin) === undefined && opened.harness !== undefined && opened.replaces === undefined && opened.title === undefined && opened.mcpServers === undefined && opened.asksUntilStopped === undefined
+          ? ctx.claimWarm(workspaceId, opened.harness)
+          : undefined;
+      if (warmed !== undefined) claimedBy.set(opened, warmed);
+      const threadId = opened.thread ?? warmed ?? randomUUID();
       // A message into a thread that already has turns is a send; anything else opens one, and only one of those
       // two is what a thread's own token is capped on. Read before the machine is asked for anything. The thread's
       // record answers before its rows, since the rows are capped and the record is not.
@@ -361,7 +377,6 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
       if (carried !== undefined && opened.harness !== undefined && opened.harness !== carried.harness) throw new Error(threadRunsOnLine(carried.harness, opened.harness));
       // A start that names no agent runs the project's, else the person's default, else the catalog's first, so the
       // command line, the composer and a tool all open the next thread on the same agent.
-      const overrides = prefs.projectDefaults[entry.record.project];
       const o = { ...opened, harness: carried?.harness ?? opened.harness ?? ctx.defaultAgentOf(prefs, entry) };
       if (carried !== undefined) {
         delete o.permissionMode;
@@ -576,26 +591,7 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
       let keptTaken: KeptProcess | undefined;
       let readied: ForkedSession | undefined;
       try {
-        const table = harnessCatalog(harness);
-        // Checked against the binary's own lists, the ones the composer shows for this workspace, with the marks on
-        // what the person's defaults resolve to here, which startPicks fills in for anything this start leaves out.
-        const resolved = table === undefined ? undefined : ctx.defaultsOn(await ctx.catalogOn(table, entry, adapter), prefs, overrides);
-        const catalog = resolved?.catalog;
-        const named = o.permissionMode ?? (o.access === undefined ? undefined : ctx.namedMode(catalog, harness, o.access));
-        // The thread's own access, read against the list in front of us: a mode this harness does not take is a pick
-        // that does not apply here, not a send to refuse. An access this send NAMED is still refused, by startPicks. The
-        // model, effort and window it leaves out are the thread's own the same way; only a thread with none opens on
-        // the defaults.
-        const picksFor = (session: string | undefined): StartPicks & { contextWindow?: string } => {
-          const access = named ?? (catalog === undefined ? undefined : listedPick(catalog.permissionModes, ctx.accessOf(workspaceId, threadId, session)));
-          const ran = ctx.ranOn(workspaceId, threadId, session);
-          const kept = keptPicks(catalog, ran, { ...(o.model !== undefined ? { model: o.model } : {}), ...(o.effort !== undefined ? { effort: o.effort } : {}), ...(o.contextWindow !== undefined ? { contextWindow: o.contextWindow } : {}) });
-          const open = session === undefined && ran.model === undefined && ran.effort === undefined ? (resolved?.open ?? {}) : {};
-          const model = kept.model ?? open.model;
-          const effort = kept.effort ?? open.effort;
-          const picks = startPicks(catalog, { ...o, ...(model !== undefined ? { model } : {}), ...(effort !== undefined ? { effort } : {}), permissionMode: access }, session === undefined, session === undefined ? undefined : ctx.resumedFact(workspaceId, session, "model"));
-          return { ...picks, ...(kept.contextWindow !== undefined ? { contextWindow: kept.contextWindow } : {}) };
-        };
+        const { catalog, picksFor } = await launchPicks(entry, harness, adapter, prefs, threadId, o);
         // A pick the lists do not carry is refused here, before this send waits on anything; the picks themselves
         // are decided below the loop, against the session this send turns out to resume.
         picksFor(resume);
@@ -799,17 +795,11 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
         // What a launch fixes for the life of the agent's process: a turn runs on the thread's kept process only where
         // its own launch would be the same, and a fork is a launch of its own.
         const forkOnStart = readied !== undefined && "fork" in readied ? readied.fork : undefined;
-        const launchKey: KeptLaunch | undefined =
-          ctx.moduleOf(entry.record.kind).keepsAgents && forkOnStart === undefined
-            ? {
-                fixed: JSON.stringify({ harness, cwd, mcpServers: o.mcpServers, version: catalog?.version, setup: ctx.setupPlace(entry) === undefined ? undefined : setups.launchOf(ctx.setupPlace(entry)!, harness) }),
-                picks: { ...picks },
-              }
-            : undefined;
+        const launchKey: KeptLaunch | undefined = ctx.moduleOf(entry.record.kind).keepsAgents && forkOnStart === undefined ? { fixed: launchFixed(entry, harness, cwd, o.mcpServers, catalog?.version), picks: { ...picks } } : undefined;
         // Matched on what this send named and the thread's access alone: a pick it left out is the thread's own, which
         // is the kept process's, even where the agent announced its model in other words than it was launched with.
         const asked = { ...(o.model !== undefined ? { model: picks.model } : {}), ...(o.effort !== undefined ? { effort: picks.effort } : {}), ...(o.contextWindow !== undefined ? { contextWindow: picks.contextWindow } : {}), ...(picks.permissionMode !== undefined ? { permissionMode: picks.permissionMode } : {}), ...(picks.fast === true ? { fast: true } : {}) };
-        const kept = ctx.takeKept(threadId, launchKey === undefined ? undefined : { fixed: launchKey.fixed, picks: asked }, resume);
+        const kept = ctx.takeKept(threadId, launchKey === undefined ? undefined : { fixed: launchKey.fixed, picks: asked }, resume, launchKey);
         // The kept process carries the token and the device its first turn was launched with; this send's go unused.
         if (kept !== undefined) dropScope();
         const promptAfter = promptsLate && snapshot?.from instanceof Promise ? snapshot.from.then(() => {}) : undefined;
@@ -1496,5 +1486,14 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
     const s = sessions.get(rowId);
     if (s !== undefined) await endTurn(s, undefined, () => sessions.get(rowId));
   };
+  // A start that fails anywhere, refused before its launch included, ends the process it claimed: one left standing
+  // claimed is one nobody takes, beside the next one the composer asks for.
+  const startOn = sessionsApi.start;
+  sessionsApi.start = (workspaceId, opened, origin) =>
+    startOn(workspaceId, opened, origin).catch((e: unknown) => {
+      const claimed = claimedBy.get(opened);
+      if (claimed !== undefined && ctx.keptAgents.get(claimed)?.warm !== undefined) ctx.reapKept(claimed);
+      throw e;
+    });
   return { sessionsApi, stopHolds: threadId => ending.has(threadId), stopTry };
 }

@@ -10,7 +10,7 @@
 
 import { createHash, randomBytes } from "node:crypto";
 import { DAEMON_UNIT, moveTimedOutLine, noWorkFolderLine, providerKeyName, providerRoadRetryLine, shellQuote, type Capabilities } from "@wsp/protocol";
-import { GuestUnusableError, MoveUnansweredError, RestoreUnfinishedError, ROAD_TRIES, StopRefusedError, abort, backoffMs, classify, isMissing, realRetryClock, roadBackoffMs, roadCode, shouldRetry, type RetryClock, type WspError } from "./errors.js";
+import { GuestUnusableError, MoveUnansweredError, PROVIDER_READ_CAP_MS, RestoreUnfinishedError, ROAD_TRIES, StopRefusedError, abort, backoffMs, classify, isMissing, realRetryClock, roadBackoffMs, roadCode, shouldRetry, type RetryClock, type WspError } from "./errors.js";
 import { DAEMON_ENV_FILE, DEADLINE_EXIT, INLINE_EXEC_MS, execDetached } from "./exec-detached.js";
 import { EXEC_ENV } from "./golden-import.js";
 import { DROP_SUDO_MARKS } from "./run-env.js";
@@ -330,6 +330,8 @@ export interface BoxBudgets {
   snapshotMs: number;
   restoreMs: number;
   pollMs: number;
+  /** The cap on one read (a GET) whose road names none. */
+  readMs: number;
 }
 
 export interface BoxBackendOptions {
@@ -394,6 +396,7 @@ export class BoxBackend implements MachineBackend {
       snapshotMs: opts.budgets?.snapshotMs ?? BOX_SNAPSHOT_MS,
       restoreMs: opts.budgets?.restoreMs ?? BOX_RESTORE_MS,
       pollMs: opts.budgets?.pollMs ?? BOX_POLL_MS,
+      readMs: opts.budgets?.readMs ?? PROVIDER_READ_CAP_MS,
     };
   }
 
@@ -412,7 +415,7 @@ export class BoxBackend implements MachineBackend {
           method,
           headers,
           body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
-          ...abort(opts.capMs, opts.signal),
+          ...abort(opts.capMs ?? (method === "GET" ? this.budgets.readMs : undefined), opts.signal),
         });
       } catch (e) {
         const road = roadCode(e);
@@ -435,10 +438,17 @@ export class BoxBackend implements MachineBackend {
     }
   }
 
-  /** The auto-stop the account requires: two hours on the trial, none once it has paid. One read of /limits per
-   * backend, before the first create, since the trial refuses `null` with trial_auto_stop_required. */
+  /** The auto-stop the account requires: two hours on the trial, none once it has paid. One answered read of /limits
+   * per backend, before the first create, since the trial refuses `null` with trial_auto_stop_required. A read that
+   * failed is not kept: one that ended at its cap would otherwise fail every create, wake and backstop after it. */
   ttlCap(): Promise<number | null> {
-    this.ttlCapRead ??= this.request<{ accessTier?: string }>("GET", "/limits").then(l => (l.accessTier === "trial" ? TRIAL_TTL_S : null));
+    this.ttlCapRead ??= this.request<{ accessTier?: string }>("GET", "/limits").then(
+      l => (l.accessTier === "trial" ? TRIAL_TTL_S : null),
+      (e: unknown) => {
+        this.ttlCapRead = undefined;
+        throw e;
+      },
+    );
     return this.ttlCapRead;
   }
 
