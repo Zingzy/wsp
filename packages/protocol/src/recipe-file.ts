@@ -6,7 +6,7 @@
 // file; it is read when the recipe is resolved, so a recipe never pins one.
 import { z } from "zod";
 import { plural } from "./format.js";
-import { ProjectHue, ProjectIcon } from "./project-look.js";
+import { ProjectHue, ProjectIcon, ProjectIconHash } from "./project-look.js";
 import { listWords } from "./usage.js";
 import { MCP_SERVER_NAME } from "./wsp-tools.js";
 
@@ -69,6 +69,7 @@ export const RecipeFile = z
           name: NAME.optional(),
           icon: ProjectIcon.optional(),
           hue: ProjectHue.optional(),
+          image: ProjectIconHash.optional(),
           keep: NAMES.default([]),
         }),
       )

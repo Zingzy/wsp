@@ -1,0 +1,15 @@
+{
+  "at": "/",
+  "fixture": "project-icons",
+  "steps": [
+    "1440:row-id=thread:cart",
+    "390:key:Escape",
+    "390:sidebar=trigger"
+  ],
+  "wait": "row-id=thread:cart",
+  "widths": [
+    1440,
+    390
+  ],
+  "reason": "Projects wearing images beside projects wearing glyphs in the tiles, the Needs you inbox and the breadcrumb; the sidebar is 256px at every desktop width, so 1280 draws it as 1440 does."
+}

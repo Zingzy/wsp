@@ -1,0 +1,20 @@
+{
+  "at": "/",
+  "fixture": "project-icons",
+  "steps": [
+    "390:key:Escape",
+    "390:sidebar=trigger",
+    "k=settings-row",
+    "k=settings-projects",
+    "settings-row=pr_wsp",
+    "k=project-icon",
+    "scroll:900:k=project-icon-choose"
+  ],
+  "wait": "k=project-icon-choose",
+  "widths": [
+    1440,
+    390
+  ],
+  "height": 1100,
+  "reason": "The Icon select ends in Choose another image over a line while an image is worn."
+}

@@ -10,7 +10,7 @@ import { Chips, type ChipItem } from "../components/ui/chips.js";
 import { ChevronRightIcon, RotateCcwIcon } from "lucide-react";
 import { Button } from "../components/ui/button.js";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.js";
-import { Children, type ReactNode } from "react";
+import { Children, type ClipboardEvent, type DragEvent, type ReactNode, useState } from "react";
 import { Kbd, KbdGroup } from "../components/ui/kbd.js";
 import { Skeleton } from "../components/ui/skeleton.js";
 import { Spaced } from "../components/ui/spaced.js";
@@ -60,6 +60,9 @@ export interface SettingsRowData {
   readonly reset?: () => void;
   /** A title that warns: a computer that runs an older wsp. */
   readonly tone?: "warning";
+  /** A row that takes a file dropped on it, or pasted while it or its control holds focus; its ground turns to the
+   * accent while one is held over it. */
+  readonly take?: (file: File) => void;
   /** Extra attributes the tests and the screenshot list reach the row by. */
   readonly attrs?: Record<string, string>;
 }
@@ -147,7 +150,8 @@ export function Card({ id, head, lede, under, body, children }: { id: string; he
 }
 
 /** One row: the title over its sentence, and beside them the slot, which stands under them below 640 px. */
-export function Row({ id, title, lead, mark, markWord, description, chips, mono = false, clip = false, word, wordClass = "value", wordK, control, open, reset, tone, attrs }: Omit<SettingsRowData, "kind">) {
+export function Row({ id, title, lead, mark, markWord, description, chips, mono = false, clip = false, word, wordClass = "value", wordK, control, open, reset, tone, take, attrs }: Omit<SettingsRowData, "kind">) {
+  const [held, setHeld] = useState(false);
   const slot =
     word === undefined && control === undefined && open === undefined ? null : (
       <div data-settings-slot className={cn(SLOT_CLASS, lead !== undefined && LED_SLOT_INDENT)}>
@@ -237,8 +241,35 @@ export function Row({ id, title, lead, mark, markWord, description, chips, mono 
       </button>
     );
   }
+  const takes =
+    take === undefined
+      ? {}
+      : {
+          tabIndex: -1,
+          onDragOver: (event: DragEvent) => {
+            if (!event.dataTransfer.types.includes("Files")) return;
+            event.preventDefault();
+            setHeld(true);
+          },
+          onDragLeave: (event: DragEvent) => {
+            if (!(event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget))) setHeld(false);
+          },
+          onDrop: (event: DragEvent) => {
+            setHeld(false);
+            const file = event.dataTransfer.files[0];
+            if (file === undefined) return;
+            event.preventDefault();
+            take(file);
+          },
+          onPaste: (event: ClipboardEvent) => {
+            const file = event.clipboardData.files[0];
+            if (file === undefined) return;
+            event.preventDefault();
+            take(file);
+          },
+        };
   return (
-    <div data-settings-row={id} className={cn("flex flex-col justify-center py-3", CARD_INSET, ROW_FLOOR)} {...attrs}>
+    <div data-settings-row={id} className={cn("flex flex-col justify-center py-3 outline-none", CARD_INSET, ROW_FLOOR, held && "bg-accent")} {...takes} {...attrs}>
       {body}
     </div>
   );

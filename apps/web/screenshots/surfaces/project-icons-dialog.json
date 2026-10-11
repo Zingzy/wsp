@@ -1,0 +1,19 @@
+{
+  "at": "/",
+  "fixture": "project-icons",
+  "steps": [
+    "390:key:Escape",
+    "390:sidebar=trigger",
+    "k=settings-row",
+    "k=settings-projects",
+    "settings-row=pr_wsp",
+    "image:logo"
+  ],
+  "wait": "k=project-icon-sheet",
+  "settleMs": 700,
+  "widths": [
+    1440,
+    390
+  ],
+  "reason": "The Project image sheet over a picked logo, on the light and dark themes the person picked, at 12, 16 and 40px."
+}

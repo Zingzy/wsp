@@ -1,0 +1,15 @@
+{
+  "at": "/",
+  "fixture": "project-icons",
+  "steps": [
+    "390:key:Escape",
+    "390:sidebar=trigger",
+    "k=project-switcher"
+  ],
+  "wait": "switcher-option=pr_wsp",
+  "widths": [
+    1440,
+    390
+  ],
+  "reason": "The project switcher draws each project's mark; 1280 draws it as 1440 does."
+}

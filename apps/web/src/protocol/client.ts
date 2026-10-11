@@ -164,6 +164,7 @@ export const NO_REASON = "The host answered with no reason. Try again.";
 
 /** The only icon a page draws for a server: an image of a kind the host keeps, carried inline. */
 const ICON_DATA_URL = /^data:image\/(?:png|x-icon|gif|webp);base64,[A-Za-z0-9+/]+=*$/;
+const PNG_DATA_URL = /^data:image\/png;base64,[A-Za-z0-9+/]+=*$/;
 
 export type DisconnectReason = "lost" | "closed" | "unauthorized";
 const DISCONNECT_MESSAGE: Record<DisconnectReason, string> = {
@@ -753,6 +754,11 @@ export interface Api {
    * still stands on, naming them. Optional so a fixture that removes none need not fake it; without it the row's
    * Remove project is held. */
   projectsRemove?(projectId: string): Promise<{ said: string | undefined }>;
+  /** Puts the window's fitted PNG, base64, on a project as its image, or with null takes it off; answers the hash the
+   * host keeps it under. Optional so a fixture that sets none need not fake it; without it the Icon select offers none. */
+  projectIcon?(projectId: string, png: string | null): Promise<string | null>;
+  /** Each hash's kept image as a PNG data url, null for one the host does not keep. Optional as projectIcon is. */
+  projectIcons?(hashes: readonly string[]): Promise<Record<string, string | null>>;
   /** What a new thread on each project starts on, by project id, each value with where it came from. Optional so a
    * fixture with no project page need not fake it; without it the page's rows name nothing they inherit. */
   projectsDefaults?(): Promise<Record<string, ThreadDefaults>>;
@@ -1071,6 +1077,15 @@ export function makeApi(c: ProtocolClient): Api {
     projectsRemove: async projectId => {
       const reply = await c.request<{ said?: unknown }>("projects.remove", { projectId });
       return { said: typeof reply.said === "string" ? reply.said : undefined };
+    },
+    projectIcon: async (projectId, png) => {
+      const { image } = await c.request<{ image?: unknown }>("projects.icon", { projectId, png });
+      return typeof image === "string" ? image : null;
+    },
+    // Drawn only as an <img> src, and only where it is the one type the host keeps.
+    projectIcons: async hashes => {
+      const { icons } = await c.request<{ icons?: Record<string, unknown> }>("projects.icons", { hashes: [...hashes] });
+      return Object.fromEntries(hashes.map(hash => [hash, typeof icons?.[hash] === "string" && PNG_DATA_URL.test(icons[hash]) ? icons[hash] : null]));
     },
     // Parsed, not trusted: a row's words about a copy's ports and its state word are read off these flags.
     workspacesLanding: async project => WorkspaceLanding.parse(await c.request<unknown>("workspaces.landing", { project })),
