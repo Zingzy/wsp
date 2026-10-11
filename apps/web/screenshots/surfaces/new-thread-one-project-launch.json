@@ -1,0 +1,14 @@
+{
+  "at": "/",
+  "fixture": "mac-and-boxes",
+  "steps": [
+    "390:key:Escape"
+  ],
+  "wait": "k=project-home",
+  "widths": [
+    1440,
+    390
+  ],
+  "settleMs": 700,
+  "reason": "One project and nothing opened: the page New thread falls back to on launch, its header the project and New thread."
+}

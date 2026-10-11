@@ -161,11 +161,12 @@ async function closeFlow(flow: Pick<Flow, "dir" | "env" | "host"> & { app?: Elec
 /** The words of the thread pane, which is the window less its sidebar. */
 const paneText = (win: Page): Promise<string> => win.locator("main").innerText();
 
-/** Opens the project's New thread from the sidebar's button, which asks which project and takes the one picked. */
+/** Opens the project's New thread from the sidebar's New thread row. The flow holds one project, so the row opens its
+ * page with nothing to pick, and the heading names it. */
 async function openNewThread(win: Page): Promise<void> {
   await win.getByRole("button", { name: "New thread", exact: true }).click();
-  await win.getByRole("option", { name: new RegExp(`^${PROJECT}\\b`) }).click();
   await win.locator("[data-k=project-home]").waitFor({ timeout: 10_000 });
+  await win.getByRole("button", { name: `Project: ${PROJECT}`, exact: true }).waitFor({ timeout: 10_000 });
 }
 
 /** The one word the footer under a turn that ended any way but completed says, or nothing while it reads none, in

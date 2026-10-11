@@ -19,7 +19,7 @@ import { copyText } from "../../actions/clipboard.js";
 import { useRightPanelStore } from "../../rightPanelStore.js";
 import { cycleThreadInSpace, goToAdjacentWorkspace, goToWorkspace } from "../../shell/shellCommands.js";
 import { useKeybindings } from "../../shell/useKeybindings.js";
-import { openNewThread, useNewThreadPicks } from "../../shell/NewThreadPicks.js";
+import { newThreadAsks, openNewThread, useNewThreadPicks } from "../../shell/NewThreadPicks.js";
 import { requestAddProject } from "../../shell/shellRequests.js";
 import { CommandDialog, CommandDialogPopup } from "../ui/command.js";
 import { useSidebar } from "../ui/sidebar.js";
@@ -65,7 +65,7 @@ export function CommandPalette({ keybindings: given }: { keybindings?: ResolvedK
   const openProjectHome = useStore(s => s.openProjectHome);
   const recorded = useStore(s => s.projects);
   const picks = useNewThreadPicks(open);
-  const asks = useStore(s => s.preferences.newThreadIn === "ask");
+  const asks = useStore(newThreadAsks);
   const selectedId = useSelectedWorkspaceId();
   const selectedThreadId = useSelectedThreadId();
   const toggleRightPanel = useRightPanelStore(s => s.toggleVisibility);
