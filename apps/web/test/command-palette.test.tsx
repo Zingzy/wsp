@@ -611,7 +611,9 @@ describe("default shortcuts", () => {
     expect(panel("ws_a")?.surfaces.filter(s => s.kind === "terminal") ?? []).toEqual([]);
   });
 
+  // A browser tab keeps mod+n for its own new window, so the chord reaches a terminal in the desktop shell alone.
   it("mod+d splits and mod+n opens a drawer terminal only while the terminal has focus", async () => {
+    const restore = asDesktopShell();
     await mountShell();
     provideTerminals("ws_a", fakeTerminals());
     mod("d");
@@ -633,9 +635,11 @@ describe("default shortcuts", () => {
     await waitFor(() => expect(drawer("ws_a")?.terminalGroups.map(g => g.terminalIds)).toEqual([["pty1", "pty2"], ["pty3"]]));
     expect(panel("ws_a")?.surfaces.filter(s => s.kind === "terminal") ?? []).toEqual([]);
     term.remove();
+    restore();
   });
 
   it("mod+d and mod+n act on the right panel's terminal while one of its terminals has focus", async () => {
+    const restore = asDesktopShell();
     await mountShell();
     const terms = fakeTerminals();
     provideTerminals("ws_a", terms);
@@ -663,6 +667,7 @@ describe("default shortcuts", () => {
     expect(panel("ws_a")?.surfaces.map(s => s.id)).toEqual(["terminal:pty1"]);
     expect(drawer("ws_a")).toBeUndefined();
     term.remove();
+    restore();
   });
 
   it("a ctrl+tab tap walks the sidebar's workspaces and wraps, and ctrl+shift+tab walks back", async () => {

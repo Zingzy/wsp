@@ -1,0 +1,16 @@
+{
+  "at": "/",
+  "steps": [
+    "390:key:Escape",
+    "390:sidebar=trigger",
+    "k=project-switcher",
+    "switcher-option=pr_landing",
+    "pointer-off"
+  ],
+  "wait": "k=new-thread-in",
+  "widths": [
+    1440,
+    390
+  ],
+  "reason": "A project with no thread under the filter; the sidebar is 256px at every desktop width, so 1280 draws it as 1440 does."
+}

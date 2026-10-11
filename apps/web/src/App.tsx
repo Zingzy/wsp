@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { useEffect, useSyncExternalStore } from "react";
 import { makeApi, ProtocolClient } from "./protocol/client.js";
-import { useCreation, useFirstRun, useProjectsRead, useProjectsRefused, useReady, useSelectedId, useSelectedSubagent, useSelectedThreadId, useStore } from "./protocol/store.js";
+import { useCreation, useFirstRun, useHomeProject, useProjectsRead, useProjectsRefused, useReady, useSelectedId, useSelectedSubagent, useSelectedThreadId, useStore } from "./protocol/store.js";
 import { ComputerTerminalDrawer, WorkspaceTerminalDrawer } from "./components/WorkspaceTerminalDrawer.js";
 import { useFontEffect, useThemeEffect, useTransparencyEffect } from "./settings/theme.js";
 import { AppShell } from "./shell/AppShell.js";
@@ -80,7 +80,7 @@ function WorkspaceCenter() {
   const projectsRead = useProjectsRead();
   const projectsRefused = useProjectsRefused();
   // With nothing picked the centre is a project's home, the one picked or the first, never a screen that asks to pick.
-  const projectHome = useStore(s => s.projectHome ?? s.projects[0]?.id ?? null);
+  const projectHome = useHomeProject()?.id ?? null;
   if (creation) return <WorkspaceCreation creation={creation} />;
   // Nothing recorded and nothing standing, both answered for: the first run is the whole centre, and it is the one
   // screen that records a project. A host that holds either says the rest, since a workspace with no project record

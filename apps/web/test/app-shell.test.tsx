@@ -462,7 +462,7 @@ describe("the header row", () => {
     act(() => useStore.getState().select("ws_a", "thr_1"));
     expect(banner().querySelector("[data-thread-breadcrumb]")!.textContent).toBe("the-project/make me a simple server");
     act(() => useStore.getState().select(null));
-    expect(banner().querySelector("[data-thread-breadcrumb]")!.textContent).toBe("No task selected");
+    expect(banner().querySelector("[data-thread-breadcrumb]")!.textContent).toBe("No thread selected");
   });
 
   it("carries, left to right, the context ring, the pull request split, the Open split and the panel toggles", async () => {

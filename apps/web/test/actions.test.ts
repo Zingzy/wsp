@@ -291,7 +291,9 @@ describe("workspace actions", () => {
     expect(actionById(actions, "phase").rowLabel).toBe("Wake api");
     expect(actionById(resolveActions(workspaceActions, workspace("running"), workspaceVerbs()), "phase").rowLabel).toBe("Pause api");
     expect(actionById(actions, "open-terminal").shortcutCommand).toBe("terminal.toggle");
-    expect(actionById(actions, "new-thread").shortcutCommand).toBe("chat.new");
+    // New thread here starts in this copy's folder, a different act from the project's New thread that owns the chord.
+    expect(actionById(actions, "new-thread").title).toBe("New thread here");
+    expect(actionById(actions, "new-thread").shortcutCommand).toBeUndefined();
     expect(actionById(actions, "open-browser").shortcutCommand).toBe("preview.toggle");
     expect(actionById(actions, "copy-id").shortcutCommand).toBeUndefined();
   });
@@ -566,7 +568,9 @@ describe("menu items from actions", () => {
     ]);
     expect(items.find(i => i.id === "open-browser")?.refusal).toBe("Workspace is paused; wake it to preview");
     expect(items.find(i => i.id === "open-terminal")).toMatchObject({ shortcut: "⌘J", accelerator: "CommandOrControl+J" });
-    expect(items.find(i => i.id === "new-thread")).toMatchObject({ shortcut: "⌘N", accelerator: "CommandOrControl+N" });
+    // A tile's New thread here starts in that copy's folder: the chord is the project's New thread, so this row shows none.
+    expect(items.find(i => i.id === "new-thread")).toMatchObject({ label: "New thread here" });
+    expect(items.find(i => i.id === "new-thread")).not.toHaveProperty("shortcut");
     expect(items.find(i => i.id === "phase")).not.toHaveProperty("shortcut");
     expect(items.find(i => i.id === "phase")).not.toHaveProperty("refusal");
     expect(items.find(i => i.id === "delete")?.destructive).toBe(true);

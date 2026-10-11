@@ -1,0 +1,15 @@
+{
+  "at": "/",
+  "steps": [
+    "390:key:Escape",
+    "390:sidebar=trigger",
+    "1440:row-id=thread:redirect",
+    "pointer-off"
+  ],
+  "wait": "new-thread-row",
+  "widths": [
+    1440,
+    390
+  ],
+  "reason": "The sidebar is 256px at every desktop width, so 1280 draws its top as 1440 does; 390 opens it over the page, where the row drops its chord."
+}

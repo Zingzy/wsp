@@ -1,0 +1,15 @@
+{
+  "at": "/",
+  "steps": [
+    "1440:row-id=thread:redirect",
+    "1440:sidebar=trigger",
+    "390:key:Escape",
+    "pointer-off"
+  ],
+  "wait": "new-thread-glyph",
+  "widths": [
+    1440,
+    390
+  ],
+  "reason": "The glyph sits right after the toggle at the header's left edge, the same at every desktop width; 390 is the phone's closed sheet."
+}

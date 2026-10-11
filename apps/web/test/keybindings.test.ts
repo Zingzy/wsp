@@ -88,28 +88,45 @@ describe("default shortcuts", () => {
   it("gates the terminal chords on terminalFocus and hands mod+n to chat otherwise", () => {
     expect(resolve(cmd("d"), MAC)).toBeNull();
     expect(resolve(cmd("d"), MAC, { terminalFocus: true })).toBe("terminal.split");
-    expect(resolve(cmd("n"), MAC)).toBe("chat.new");
-    expect(resolve(cmd("n"), MAC, { terminalFocus: true })).toBe("terminal.new");
-    expect(resolve(cmd("o", { shiftKey: true }), MAC)).toBeNull();
+    expect(resolve(cmd("n"), MAC, DESKTOP_SHELL)).toBe("chat.new");
+    // A focused terminal keeps mod+n for a new terminal, and no thread starts.
+    expect(resolve(cmd("n"), MAC, { ...DESKTOP_SHELL, terminalFocus: true })).toBe("terminal.new");
+    expect(resolve(ctrl("n"), LINUX, { ...DESKTOP_SHELL, terminalFocus: true })).toBe("terminal.new");
+    expect(resolve(cmd("o", { shiftKey: true }), MAC, { terminalFocus: true })).toBeNull();
   });
 
-  it("mod+t opens a new thread in the selected workspace, Command on macOS and Control elsewhere, and is bound once", () => {
-    expect(resolve(cmd("t"), MAC, DESKTOP_SHELL)).toBe("chat.new");
-    expect(resolve(ctrl("t"), LINUX, DESKTOP_SHELL)).toBe("chat.new");
+  it("New thread is mod+n, mod+t and mod+shift+o in the desktop shell, labelled mod+n, and a focused terminal keeps all three", () => {
+    for (const chord of [cmd("n"), cmd("t"), cmd("o", { shiftKey: true }), cmd("O", { shiftKey: true })]) expect(resolve(chord, MAC, DESKTOP_SHELL)).toBe("chat.new");
+    for (const chord of [ctrl("n"), ctrl("t"), ctrl("O", { shiftKey: true })]) expect(resolve(chord, LINUX, DESKTOP_SHELL)).toBe("chat.new");
     expect(resolve(ctrl("t"), MAC, DESKTOP_SHELL)).toBeNull();
     // A terminal with focus keeps the chord: on Linux it is the shell's own.
     expect(resolve(ctrl("t"), LINUX, { ...DESKTOP_SHELL, terminalFocus: true })).toBeNull();
-    expect(DEFAULT_KEYBINDINGS.filter(rule => rule.key === "mod+t")).toEqual([{ key: "mod+t", command: "chat.new", when: "!terminalFocus" }]);
-    // The chord is what every surface labels the action with: the row's plus, the palette and the menu.
-    expect(shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "chat.new", { platform: MAC, context: DESKTOP_SHELL })).toBe("⌘T");
-    expect(shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "chat.new", { platform: LINUX, context: DESKTOP_SHELL })).toBe("Ctrl+T");
+    expect(resolve(ctrl("O", { shiftKey: true }), LINUX, { ...DESKTOP_SHELL, terminalFocus: true })).toBeNull();
+    expect(DEFAULT_KEYBINDINGS.filter(rule => rule.command === "chat.new")).toEqual([
+      { key: "mod+shift+o", command: "chat.new", when: "!terminalFocus" },
+      { key: "mod+t", command: "chat.new", when: "!terminalFocus" },
+      { key: "mod+n", command: "chat.new", when: "!terminalFocus" },
+    ]);
+    // The chord is what every surface labels the action with: the sidebar's row, the header's glyph and the palette.
+    expect(shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "chat.new", { platform: MAC, context: DESKTOP_SHELL })).toBe("⌘N");
+    expect(shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "chat.new", { platform: LINUX, context: DESKTOP_SHELL })).toBe("Ctrl+N");
   });
 
-  it("a browser tab keeps mod+t for its own new tab, so there the app's new thread is mod+n and reads so", () => {
+  it("a browser tab keeps mod+n and mod+t for its own new window and tab, so there New thread is mod+shift+o and reads so", () => {
+    const mod = (k: string) => parseKeybindingShortcut(`mod+${k}`)!;
+    for (const platform of [MAC, LINUX]) {
+      expect(browserTabClaimsShortcut(mod("n"), platform)).toBe(true);
+      expect(browserTabClaimsShortcut(mod("t"), platform)).toBe(true);
+      expect(browserTabClaimsShortcut(mod("shift+o"), platform)).toBe(false);
+    }
+    expect(resolve(cmd("n"), MAC)).toBeNull();
     expect(resolve(cmd("t"), MAC)).toBeNull();
+    expect(resolve(ctrl("n"), LINUX)).toBeNull();
     expect(resolve(ctrl("t"), LINUX)).toBeNull();
-    expect(shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "chat.new", MAC)).toBe("⌘N");
-    expect(shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "chat.new", LINUX)).toBe("Ctrl+N");
+    expect(resolve(cmd("o", { shiftKey: true }), MAC)).toBe("chat.new");
+    expect(resolve(ctrl("O", { shiftKey: true }), LINUX)).toBe("chat.new");
+    expect(shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "chat.new", MAC)).toBe("⇧⌘O");
+    expect(shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "chat.new", LINUX)).toBe("Ctrl+Shift+O");
   });
 
   it("opens the palette from a focused terminal on macOS and leaves ctrl+k to the shell elsewhere, where ctrl+shift+p opens it", () => {

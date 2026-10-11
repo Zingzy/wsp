@@ -13,7 +13,7 @@
 // the header the pane is scrolled under. On a subagent's page the lead stands
 // where an opener would, as the way back to it, and the subagent's title last.
 import { threadState, threadWordOf, waitingLine } from "@wsp/protocol";
-import { useCreation, useFirstRun, useOpenThread, useSelectedId, useSelectedSubagent, useSelectedWorkspaceId, useSettingsOpen, useSidebarProjects, useStore, useWorkspace } from "../protocol/store.js";
+import { useCreation, useFirstRun, useHomeProject, useOpenThread, useSelectedId, useSelectedSubagent, useSelectedWorkspaceId, useSettingsOpen, useSidebarProjects, useStore, useWorkspace } from "../protocol/store.js";
 import { ThreadLink } from "../components/ThreadLink.js";
 import { cn } from "../lib/utils.js";
 import { useState } from "react";
@@ -102,7 +102,8 @@ function ProjectCrumb({ project }: { project: Pick<ProjectRef, "id" | "name"> })
 }
 
 export function ThreadBreadcrumb() {
-  const creation = useCreation(useSelectedId());
+  const selectedId = useSelectedId();
+  const creation = useCreation(selectedId);
   const workspaceId = useSelectedWorkspaceId();
   const workspace = useWorkspace(workspaceId);
   const thread = useOpenThread(workspaceId);
@@ -118,20 +119,22 @@ export function ThreadBreadcrumb() {
   // On a subagent's page its lead is the crumb before it, the way back, as an opener is before a thread it opened.
   const opener = subagent === undefined || thread === null || workspaceId === null ? opened : { thread: { threadId: thread.threadId ?? null, workspaceId, title: thread.title } };
   const name = workspace?.name ?? creation?.name;
-  const home = useStore(s => (s.projectHome === null ? undefined : s.projects.find(p => p.id === s.projectHome)));
-  const project = workspace?.project ?? home;
+  // The centre falls back to a project's New thread page only while nothing is picked.
+  const home = useHomeProject();
+  const homeShown = selectedId === null ? home : undefined;
+  const project = workspace?.project;
   return (
     <span className="flex min-w-0 items-center gap-2 text-sm" data-thread-breadcrumb>
       {settingsOpen ? (
         <SettingsCrumbs />
       ) : name === undefined ? (
-        home !== undefined ? (
+        homeShown !== undefined ? (
           <>
-            <ProjectCrumb project={home} />
+            <ProjectCrumb project={homeShown} />
             <span className="shrink-0 font-medium text-foreground">{NEW_THREAD}</span>
           </>
         ) : firstRun ? null : (
-          <span className="truncate text-muted-foreground">No task selected</span>
+          <span className="truncate text-muted-foreground">No thread selected</span>
         )
       ) : (
         <>

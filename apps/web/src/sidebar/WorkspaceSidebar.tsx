@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The left region. Fixed at the top: the search row with the compose glyph that
-// opens a thread in the selected workspace, and the project switcher, "All
-// projects" or the one project the list is filtered to. Under them, scrolling:
+// The left region. Fixed at the top: the New thread row, the search row, and
+// the project switcher, "All projects" or the one project the list is filtered
+// to. Under them, scrolling:
 // every root thread as a tile under its section (Pinned, Needs you as an inbox of
 // each thread that needs the person, then the one list), newest first inside each
 // across every workspace, the threads and subagents its agent opened under it on
@@ -25,7 +25,7 @@ import { ChevronDownIcon, CopyIcon, PlusIcon, SquarePenIcon, Trash2Icon } from "
 import { Fragment, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type ReactNode } from "react";
 import { HOST_ASLEEP_LINE, SETTLE_MS, copiesFolder, isHere, kindForComputer, modelOf, runsInFolder, modelPicks, workspaceKind, workspaceState, type WorkspaceState, type WorkspaceView } from "@wsp/protocol";
 import { openContextMenu, runAction } from "../actions/contextMenu.js";
-import { THREAD_TREE_WORKING, rebuildRefusedLine } from "../actions/format.js";
+import { THREAD_TREE_WORKING, rebuildRefusedLine, rowNewThread } from "../actions/format.js";
 import { CREATE_ASKED, CREATE_STEP_WORDS, currentStep, stepWords, stoppedStep } from "../shell/creationLog.js";
 import { actionById, actionIfAny, resolveActions, type ResolvedAction } from "../actions/registry.js";
 import { projectActions, type ProjectVerbs } from "../actions/projectActions.js";
@@ -35,9 +35,8 @@ import { childActs, finishedTake, kindOf, leadActs, leadNodes, type ChildPart } 
 import { workspaceActions, workspaceTarget } from "../actions/workspaceActions.js";
 import type { SidebarProjectSnapshot } from "../adapt/index.js";
 import { ForgetWorkspaceDialog } from "../components/ForgetWorkspaceDialog.js";
-import { SidebarContent, SidebarGroupAction, SidebarMenuButton } from "../components/ui/sidebar.js";
+import { SidebarContent, SidebarMenuButton } from "../components/ui/sidebar.js";
 import { useWarmTiles } from "../components/chat/warmTiles.js";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.js";
 import { useLocalStorage, type Codec } from "../hooks/useLocalStorage.js";
 import { useNowMinute } from "../hooks/useNowMinute.js";
 import { cn } from "../lib/utils.js";
@@ -45,7 +44,6 @@ import { addNotice } from "../notices/store.js";
 import { catalogIn, useLaunches, useProjectsRead, useProjectsRefused, useReady, useSelectedId, useSelectedSubagent, useSelectedThreadId, useSelectedWorkspaceId, useSidebarProjects, useStore, useWorkspace, type Creation } from "../protocol/store.js";
 import { hostAsleep } from "../boot.js";
 import { onAddProjectRequest, onForgetWorkspaceRequest, onProjectTripRequest, onRenameWorkspaceRequest, requestAddProject, type ProjectTripRequest } from "../shell/shellRequests.js";
-import { useShortcutLabel } from "../shell/useKeybindings.js";
 import { ExportProjectDialog } from "./ExportProjectDialog.js";
 import { ForwardsList } from "./ForwardsList.js";
 import { AddProjectDialog } from "./AddProjectDialog.js";
@@ -53,6 +51,7 @@ import { ProjectSwitcher } from "./ProjectSwitcher.js";
 import { ComputerSwitcher } from "./ComputerSwitcher.js";
 import { COMPUTER_PICK_KEY, PROJECT_PICK_KEY, pickCodec, underPicks } from "./picks.js";
 import { CHILD_LIST_CLASS, ONE_LINE_ROW_CLASS, RAIL_ITEM_CLASS, ROW_META_CLASS, ROW_PROSE_CLASS, SETTLED_ROW_ID, sectionRowId, threadRowId, workspaceRowId } from "./rowGrammar.js";
+import { NewThreadRow } from "./NewThreadRow.js";
 import { SearchRow } from "./SearchRow.js";
 import { resolveAdjacentThreadId, threadSection, topSidebarThread } from "./Sidebar.logic.js";
 import { SIDEBAR_SECTIONS, drawnCount, drawsUnder, dropMarks, nodeOf, settleableRoots, sidebarTiles, tileTree, treeSettle, treeThreadIds, treeWorkspaceIds, type ProjectGroup, type SidebarSection, type TileNode } from "./threadTree.js";
@@ -62,7 +61,7 @@ import { SidebarCorner } from "./SidebarCorner.js";
 import { UpdateCard } from "./UpdateCard.js";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./SidebarChrome.js";
 import { CreationTile, ThreadLaunchTile, ThreadTile, WorkspaceTile, useTileHandlers, type TilePlace } from "./ThreadTile.js";
-import { newThreadTitle, computerName, computerOf, copyName, placeNames } from "./workspaceRows.js";
+import { computerName, computerOf, copyName, placeNames } from "./workspaceRows.js";
 import { tileCheckout, useCheckoutAsks } from "./tileCheckout.js";
 import { restingAge } from "../components/status/restingAge.js";
 import { PROJECT_WORDS, SECTION_WORDS } from "./words.js";
@@ -593,32 +592,10 @@ export function WorkspaceSidebar() {
     e.preventDefault();
   };
 
-  const newThreadShortcut = useShortcutLabel("chat.new");
-  /** The one add control at rest: New thread on a project, which needs no workspace selected, held while there is no
-   * project to open one on. Held by aria-disabled rather than the disabled attribute, so the pointer still reaches it
-   * and the tooltip can say what it is. */
-  const compose = (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <SidebarGroupAction
-            className="text-sidebar-muted-foreground transition-colors duration-150 aria-disabled:cursor-default aria-disabled:opacity-50 aria-disabled:hover:bg-transparent aria-disabled:hover:text-sidebar-muted-foreground"
-            aria-label="New thread"
-            aria-disabled={recorded.length === 0 || undefined}
-            onClick={verbs.newThread}
-          />
-        }
-      >
-        <SquarePenIcon />
-      </TooltipTrigger>
-      <TooltipPopup side="bottom">{newThreadTitle(newThreadShortcut)}</TooltipPopup>
-    </Tooltip>
-  );
   const header = (
     <div className="flex flex-col px-[var(--sidebar-content-inset)] pb-3" data-sidebar-search>
-      <div className="relative">
-        <SearchRow action={compose} />
-      </div>
+      <NewThreadRow />
+      <SearchRow />
       <ProjectSwitcher
         projects={groups.map(group => group.project)}
         onReorder={ids => void setPreferences({ projectOrder: ids })}
@@ -695,6 +672,12 @@ export function WorkspaceSidebar() {
                 <p data-k="no-workspaces" className="px-2 py-6 text-center text-[13px] text-muted-foreground">
                   {PROJECT_WORDS.noWorkspaces}
                 </p>
+                {picked !== null ? (
+                  <SidebarMenuButton size="sm" data-k="new-thread-in" className={ONE_LINE_ROW_CLASS} onClick={() => openProjectHome(picked.project.id)}>
+                    <SquarePenIcon className="size-4" />
+                    <span className="min-w-0 truncate">{rowNewThread(picked.project.name)}</span>
+                  </SidebarMenuButton>
+                ) : null}
               </li>
             ) : null}
             {projectsRefused !== null ? (
@@ -708,7 +691,7 @@ export function WorkspaceSidebar() {
               <li>
                 <SidebarMenuButton size="sm" data-k="new-project" className={ONE_LINE_ROW_CLASS} onClick={requestAddProject}>
                   <PlusIcon className="size-4" />
-                  <span>{PROJECT_WORDS.new}</span>
+                  <span>{PROJECT_WORDS.add}</span>
                 </SidebarMenuButton>
               </li>
             ) : null}

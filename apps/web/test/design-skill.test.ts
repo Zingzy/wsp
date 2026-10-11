@@ -2,13 +2,14 @@
 // The design skill names the pieces and the code holds their figures. Every piece the skill names in backticks is
 // exported from apps/web/src, and a px figure written just after a piece's name is one the piece's classes draw, so
 // changing a piece without the skill, or the skill without the piece, fails here.
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const WEB = join(dirname(fileURLToPath(import.meta.url)), "..");
-const SKILL = readFileSync(join(WEB, "..", "..", ".claude", "skills", "wsp-design", "SKILL.md"), "utf8");
+const SKILL_DIR = join(WEB, "..", "..", ".claude", "skills", "wsp-design");
+const SKILL = readFileSync(join(SKILL_DIR, "SKILL.md"), "utf8");
 
 function sources(dir: string): string[] {
   return readdirSync(dir).flatMap(name => {
@@ -57,6 +58,16 @@ describe("the design skill names what the code holds", () => {
   it("names pieces", () => {
     expect(PIECES_SECTION).not.toBe("");
     expect(NAMED.length).toBeGreaterThan(20);
+  });
+
+  it("every reference render it lists is a file beside it, the sidebar's kept top among them", () => {
+    const listed = [...SKILL.matchAll(/`(references\/[^`]+\.png)`/g)].map(([, path]) => path!);
+    expect(listed).toContain("references/sidebar-top-graphite.png");
+    expect(listed.filter(path => !existsSync(join(SKILL_DIR, path)))).toEqual([]);
+  });
+
+  it("keeps the sidebar's top with the New thread row first", () => {
+    expect(SKILL).toMatch(/the sidebar's top: the New thread row[^.]*, the search row, the project picker/);
   });
 
   it("every piece it names is exported from the app", () => {

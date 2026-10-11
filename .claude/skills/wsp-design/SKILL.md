@@ -16,8 +16,12 @@ rulings of 2026-09-26 this file restates.
 
 Two things do not change: the open thread (header with the agent mark and
 breadcrumb, the conversation, the composer, the right panel with its three
-tabs) and the sidebar's top (search row, new thread button, project picker).
-The owner kept both as they are. Everything else takes the grammar below.
+tabs) and the sidebar's top: the New thread row (pencil, the word, its chord
+at the right in the row meta), the search row, the project picker. The owner
+kept both, and put the New thread row first on 2026-10-11, in place of the
+bare pencil at the search row's end; wherever the sidebar is away (collapsed,
+Settings, a phone's closed sheet) the header holds the pencil right after the
+sidebar toggle. Everything else takes the grammar below.
 
 ## Foundations
 
@@ -547,12 +551,15 @@ the type sizes, the one left edge, the status tokens and both themes. Never
 
 - `references/mockup/index.html`, `assets.js`, `crab.js`: the locked mockup with the ruled words applied, every screen and state behind its foot bar.
 - `references/tiles-graphite.png`: the sidebar of thread tiles, the open thread kept, the agents panel kept.
+- `references/sidebar-top-graphite.png`: the sidebar's top as kept on 2026-10-11, New thread over Search and the project picker.
 - `references/nudge-graphite.png`: the sidebar with the cloud nudge pinned in the footer above Settings.
 - `references/computers-graphite.png`: the Computers page, two grids on one template.
 - `references/image-graphite.png`: the Image page, four lists with brand marks and MACHINES.
 - `references/cloud-solari-graphite.png`: a cloud's page, sign-ins by kind, limits, threads running here.
 - `references/addcloud-refused-paper.png`: the Add a cloud sheet on the light theme with a refused key.
 
-The six PNGs were rendered from the mockup with Playwright at 1440 wide, device
-scale 1, `?bar=0`; the tiles and cloud shots were quantized with
-`pngquant --quality=80-98 --speed 1` to stay under 400 KB.
+The six mockup PNGs were rendered from the mockup with Playwright at 1440 wide,
+device scale 1, `?bar=0`; the tiles and cloud shots were quantized with
+`pngquant --quality=80-98 --speed 1` to stay under 400 KB. The sidebar top is
+cropped from the built app's screenshot harness (`sidebar-new-thread`), since
+the mockup predates the New thread row.

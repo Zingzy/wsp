@@ -1,0 +1,17 @@
+{
+  "at": "/",
+  "steps": [
+    "1440:row-id=thread:redirect",
+    "390:key:Escape",
+    "key:ControlOrMeta+k",
+    "type:new thread in",
+    "key:Enter"
+  ],
+  "wait": "palette-group=projects",
+  "widths": [
+    1440,
+    390
+  ],
+  "settleMs": 700,
+  "reason": "The palette is a popup capped at 576px, the same at every desktop width; 390 is where it fills the phone."
+}
