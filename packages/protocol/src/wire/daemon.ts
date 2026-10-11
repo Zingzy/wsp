@@ -11,6 +11,7 @@ import type { GitCommitReply as WireGitCommitReply } from "../generated/GitCommi
 import type { GitDiscardReply as WireGitDiscardReply } from "../generated/GitDiscardReply.js";
 import type { GitDiffFile as WireGitDiffFile } from "../generated/GitDiffFile.js";
 import type { FsImageReply as WireFsImageReply } from "../generated/FsImageReply.js";
+import type { FsHashReply as WireFsHashReply } from "../generated/FsHashReply.js";
 import type { FsWriteReply as WireFsWriteReply } from "../generated/FsWriteReply.js";
 import type { PullRequest as WirePullRequest } from "../generated/PullRequest.js";
 import type { GitPrReadReply as WireGitPrReadReply } from "../generated/GitPrReadReply.js";
@@ -145,6 +146,10 @@ export type FsReadReply = z.infer<typeof FsReadReply>;
 export const FsImageReply = z.object({ size: z.number(), modified: z.number().optional(), inode: z.number().optional(), changed: z.number().optional(), mediaType: z.string().optional(), content: z.string().optional(), svg: z.boolean().optional() });
 export type FsImageReply = WireFsImageReply;
 type FsImageReplyHeld = Held<Same<z.infer<typeof FsImageReply>, FsImageReply>>;
+/** Each file an fs.hash found inside its root, by its path there, with the sha256 of its bytes. */
+export const FsHashReply = z.object({ files: z.record(z.string(), z.string()) });
+export type FsHashReply = WireFsHashReply;
+type FsHashReplyHeld = Held<Same<z.infer<typeof FsHashReply>, FsHashReply>>;
 
 export const FsSearchMode = z.enum(["files", "text"]);
 export type FsSearchMode = z.infer<typeof FsSearchMode>;
@@ -454,6 +459,8 @@ export const DaemonRequest = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("fs.read"), path: z.string(), encoding: FsReadEncoding.optional(), machineId: z.string().optional() }),
   /** A slate's image by its whole path, answered with its bytes only where they are an image under FS_IMAGE_CAP_BYTES. */
   z.object({ id: reqId, op: z.literal("fs.image"), path: z.string(), machineId: z.string().optional() }),
+  /** The files a slate's command names inside root, hashed: what an Always pins on the thread's own computer. */
+  z.object({ id: reqId, op: z.literal("fs.hash"), root: z.string(), paths: z.array(z.string()), machineId: z.string().optional() }),
   /** Replaces an existing regular file's contents whole and answers an FsWriteReply: written beside it and renamed
    * over, its mode and owner kept, never through a link standing where the file should be, and refused over
    * FS_WRITE_CAP_BYTES. The folder resolves inside a root as fs.read's path does. */

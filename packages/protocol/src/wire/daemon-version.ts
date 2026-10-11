@@ -155,6 +155,7 @@ const DAEMON_CONTENTS = [
   "f11092ebbda4c528bd4264ebe7e541e50941f573227f29a641a6c977b1281385",
   "30e5f5cfa31e466e2c1ef6c48698cfd4bca296363eb0a625c98d07edc7cdf017",
   "ec71770f7aa868a95bf5fa8e4c665b9b54d5f60b519763c39b7078db5a44dd0e",
+  "dd98d2cd024c4a809baf4fc57d89967cf13befd7cb4350a7a71cbe95d776bffb",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -575,7 +576,10 @@ const DAEMON_CONTENTS = [
  * Version 145: A workspace's stop and remove take its child cgroups and every stacked set of mounts, a boot clears a
  * set a failed stop left, a remove deletes nothing while anything is mounted under it, place.leave takes the project
  * folders the host names, a leave over a /wsp that stood before the add takes only wsp's own folders there, and wsp's
- * empty cgroups go. */
+ * empty cgroups go.
+ * Version 146: fs.hash hashes the files a slate's command names inside its folder, each where it lands on this computer
+ * or inside a workspace's root with no link followed, a regular file under the hash cap, so an Always on a command that
+ * runs there pins the script and asks again once it changes. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary

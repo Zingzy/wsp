@@ -13,6 +13,7 @@ mod files;
 mod fs;
 mod git;
 mod guest;
+mod hash;
 mod hosts;
 mod image;
 mod inbox;

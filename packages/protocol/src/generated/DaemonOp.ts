@@ -95,6 +95,10 @@ machineId?: string, } | { "op": "fs.image", path: string,
 /**
  * The workspace this frame is for, as on fs.list above.
  */
+machineId?: string, } | { "op": "fs.hash", root: string, paths: Array<string>, 
+/**
+ * The workspace this frame is for, as on fs.list above.
+ */
 machineId?: string, } | { "op": "fs.write", path: string, contents: string, 
 /**
  * The workspace this frame is for, as on fs.list above.

@@ -276,6 +276,7 @@ async fn handle_op(conn: &Arc<Conn>, ctx: &Arc<Ctx>, frame: &Value, id: Option<R
             | "fs.files"
             | "fs.read"
             | "fs.image"
+            | "fs.hash"
             | "fs.search"
             | "fs.folders"
             | "git.status"
@@ -742,6 +743,7 @@ async fn serve(conn: &Arc<Conn>, ctx: &Arc<Ctx>, id: Option<RequestId>, name: &s
             answer(id, read.await)
         }
         DaemonOp::FsImage { path, machine_id } => answer(id, crate::image::image_of(ctx, machine_id.as_deref(), path).await),
+        DaemonOp::FsHash { root, paths, machine_id } => answer(id, crate::hash::hash_of(ctx, machine_id.as_deref(), root, paths).await),
         DaemonOp::FsSearch { path, query, mode, machine_id } => {
             let found = async {
                 let (_, under, _) = road(ctx, machine_id.as_deref(), &path, Reads).await?;
