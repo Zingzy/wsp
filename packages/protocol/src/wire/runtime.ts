@@ -556,6 +556,25 @@ const RuntimeOp = z.discriminatedUnion("op", [
   /** Whether a start may name this thread as the one it restarts, read alone so a verb asks before it forks or wakes a
    * machine: refused as sessions.start's replaces is, and answers nothing else. Takes the runtime's thread id. */
   z.object({ id: reqId, op: z.literal("sessions.replaceable"), threadId: z.string() }),
+  /** The composer of a new thread took focus or changed a pick: the agent's process for the thread its send will open
+   * starts now, on this computer, so its own startup is behind it by the send. One stands per workspace and agent; one
+   * launched with other picks is ended and replaced. A send opening a thread there with the same picks runs on it, and
+   * one nobody sends to ends after AGENT_WARM_MS. Where is read as on sessions.start, less branch: a worktree is made by
+   * a send alone. Replies with a SessionWarmResult; none where the workspace's computer or the agent keeps no process. */
+  z.object({
+    id: reqId,
+    op: z.literal("sessions.warm"),
+    workspaceId: z.string().optional(),
+    project: z.string().optional(),
+    cwd: z.string().optional(),
+    harness: z.string().optional(),
+    model: z.string().optional(),
+    effort: z.string().optional(),
+    permissionMode: z.string().optional(),
+    access: AccessChoice.optional(),
+    contextWindow: z.string().optional(),
+    fast: z.boolean().optional(),
+  }),
   /** Settles each thread named and every thread under it, each taking a settled stamp and a read stamp of now, and
    * every window hears thread.marked; with finished, each named thread stays and the finished threads under it
    * settle. The named threads keep the settle's stamp, which a restore of them reads. Replies with a
@@ -1269,3 +1288,7 @@ export const SessionStartOutcome = z.enum(["started", "steered", "queued", "held
 export type SessionStartOutcome = z.infer<typeof SessionStartOutcome>;
 export const SessionStartResult = z.object({ session: SessionView, outcome: SessionStartOutcome, turnId: z.string() });
 export type SessionStartResult = z.infer<typeof SessionStartResult>;
+/** What a sessions.warm did: started a process, found one launched as asked standing and gave it its window again, or
+ * nothing, where the workspace's computer or the agent keeps no process ahead of a send. */
+export const SessionWarmResult = z.object({ warm: z.enum(["started", "standing", "none"]) });
+export type SessionWarmResult = z.infer<typeof SessionWarmResult>;

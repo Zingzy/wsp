@@ -28,6 +28,7 @@ import type {
   SessionInterruptResult,
   SessionRenameResult,
   SessionSettleResult,
+  SessionWarmResult,
   SessionRestoreResult,
   SessionSteerResult,
   SessionOrigin,
@@ -461,6 +462,12 @@ export interface Runtime {
     /** Whether a start may name this thread in replaces, read alone and refused as that start would refuse it: a
      * thread working or asking anywhere in its tree, one the caller may not settle, and one that already has a restart. */
     replaceable(threadId: string, origin?: Caller): Promise<void>;
+    /** Starts the agent's process for the thread a person's next send on this workspace opens, where the workspace's
+     * computer keeps agents between turns and the agent starts before its message: one per workspace and agent, a
+     * standing one launched with other picks ended and replaced, one launched as asked given its window again. A send
+     * the person makes there opening a thread on that agent at the same picks runs on it; nothing takes it from a
+     * thread's token, which answers none. */
+    warm(workspaceId: string, o: { harness?: string; cwd?: string; model?: string; effort?: string; permissionMode?: string; access?: AccessChoice; contextWindow?: string; fast?: boolean }, origin?: Caller): Promise<SessionWarmResult>;
     /** Stamps each thread and every thread under it settled and read, now, and tells every window as read does; a
      * thread whose tree works or asks is left whole, and one the fold holds already is left too. With finished, each
      * thread named stays and the finished threads under it settle, a failed one staying and one with work under it

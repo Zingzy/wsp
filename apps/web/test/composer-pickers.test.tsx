@@ -94,9 +94,9 @@ vi.mock("../src/components/ui/popover.js", () => {
 });
 
 import { installFakeLayout } from "./fake-layout.js";
-import { composerEditor, press, typeInto } from "./composer-harness.js";
+import { clickIntoEditor, composerEditor, press, typeInto } from "./composer-harness.js";
 import { useStore } from "../src/protocol/store.js";
-import type { Api, ProtocolEvent, StartSessionOptions } from "../src/protocol/client.js";
+import type { Api, ProtocolEvent, StartSessionOptions, WarmAgentOptions } from "../src/protocol/client.js";
 import { WorkspaceThread } from "../src/shell/WorkspaceThread.js";
 import { ProjectHome } from "../src/shell/ProjectHome.js";
 import { useMultiPickStore } from "../src/components/chat/composerMultiPick.js";
@@ -184,6 +184,7 @@ function fixtureApi(opts: {
   const workspace = opts.workspace ?? BARE;
   const listeners = new Set<(e: ProtocolEvent) => void>();
   const started: StartSessionOptions[] = [];
+  const warmed: WarmAgentOptions[] = [];
   const listed: Array<string | undefined> = [];
   const patches: PreferencesPatch[] = [];
   const moved: Array<{ sessionId: string; permissionMode: string }> = [];
@@ -227,8 +228,9 @@ function fixtureApi(opts: {
       started.push(o);
       return { id: "s1", workspaceId: o.workspaceId, harness: "claude", status: "running", prompt: o.prompt, startedAt: 0 };
     },
+    warmAgent: async o => void warmed.push(o),
   };
-  return { api, started, listed, patches, moved };
+  return { api, started, warmed, listed, patches, moved };
 }
 
 async function setup(api: Api) {
@@ -349,6 +351,40 @@ describe("composer pickers", () => {
     await waitFor(() => expect(started).toHaveLength(1));
     // A send that opens a thread names the agent the box shows.
     expect(started[0]).toMatchObject({ prompt: "go", harness: "claude", model: "claude-opus-5", effort: "low", contextWindow: "200k", permissionMode: "acceptEdits" });
+  });
+
+  it("starts the agent of the thread a send would open once the box takes focus, and again on a changed pick, at what that send names", async () => {
+    const { api, started, warmed } = fixtureApi({ table: [TABLE, CODEX], machine: [CLAUDE, CODEX] });
+    await setup(api);
+    await waitFor(() => expect(pickerValue("model")).toBe("claude-opus-5"));
+    expect(warmed).toEqual([]);
+    clickIntoEditor(composerEditor());
+    await waitFor(() => expect(warmed).toEqual([{ workspaceId: WS, harness: "claude" }]));
+    await openModelMenu();
+    fireEvent.click(option("claude-sonnet-5")!);
+    await waitFor(() => expect(warmed.at(-1)).toEqual({ workspaceId: WS, harness: "claude", model: "claude-sonnet-5" }));
+    fireEvent.click(picker("access")!);
+    fireEvent.click(option("acceptEdits")!);
+    await waitFor(() => expect(warmed.at(-1)).toEqual({ workspaceId: WS, harness: "claude", model: "claude-sonnet-5", permissionMode: "acceptEdits" }));
+    const editor = composerEditor();
+    await typeInto(editor, "go");
+    await press(editor, "Enter");
+    await waitFor(() => expect(started).toHaveLength(1));
+    const { prompt: _prompt, requestId: _request, ...named } = started[0]!;
+    expect(named).toEqual(warmed.at(-1));
+  });
+
+  it("asks again each time the box takes focus back, so a process whose window ran out while the box sat focused starts again", async () => {
+    const { api, warmed } = fixtureApi({ table: [TABLE, CODEX], machine: [CLAUDE, CODEX] });
+    await setup(api);
+    await waitFor(() => expect(pickerValue("model")).toBe("claude-opus-5"));
+    clickIntoEditor(composerEditor());
+    await waitFor(() => expect(warmed).toHaveLength(1));
+    const elsewhere = document.body.appendChild(document.createElement("button"));
+    elsewhere.focus();
+    elsewhere.remove();
+    clickIntoEditor(composerEditor());
+    await waitFor(() => expect(warmed).toEqual([{ workspaceId: WS, harness: "claude" }, { workspaceId: WS, harness: "claude" }]));
   });
 
   it("shows the table, marked so, until the machine answers, and keeps it when the machine never does", async () => {
@@ -837,6 +873,40 @@ async function home(prefs: Partial<typeof DEFAULT_PREFERENCES>) {
 }
 
 describe("a new thread opens on the defaults", () => {
+  it("a home's send asks nothing as it moves the picks to the thread, so the send runs on the process started at them", async () => {
+    const { started, warmed } = await home({});
+    clickIntoEditor(composerEditor());
+    await openModelMenu();
+    fireEvent.click(option("claude-sonnet-5")!);
+    await waitFor(() => expect(warmed.at(-1)).toEqual({ project: "pr_1", harness: "claude", model: "claude-sonnet-5" }));
+    await typeInto(composerEditor(), "go");
+    const asked = warmed.length;
+    await press(composerEditor(), "Enter");
+    await waitFor(() => expect(useComposerDraftStore.getState().queues[WS]?.length).toBe(1));
+    cleanup();
+    useStore.setState({ selectedId: WS, freshThread: true });
+    render(<WorkspaceThread workspaceId={WS} />);
+    await waitFor(() => expect(started).toHaveLength(1));
+    expect(warmed.slice(asked)).toEqual([]);
+    expect(started[0]).toEqual({ workspaceId: WS, prompt: "go", requestId: started[0]!.requestId, harness: "claude", model: "claude-sonnet-5" });
+  });
+
+  it("a home sending to several models asks for no process, since that send opens a copy per model", async () => {
+    const { warmed } = await home({});
+    await openModelMenu();
+    fireEvent.click(option("claude-sonnet-5")!, { shiftKey: true });
+    await waitFor(() => expect(document.querySelectorAll("[data-composer-model-chip]")).toHaveLength(2));
+    const asked = warmed.length;
+    const elsewhere = document.body.appendChild(document.createElement("button"));
+    elsewhere.focus();
+    elsewhere.remove();
+    act(() => clickIntoEditor(composerEditor()));
+    // A plain pick ends the list, and the box asks at it.
+    fireEvent.click(option("claude-sonnet-5")!);
+    await waitFor(() => expect(warmed.length).toBeGreaterThan(asked));
+    expect(warmed.slice(asked).filter(w => w.model !== "claude-sonnet-5")).toEqual([]);
+  });
+
   it("New thread on a project whose default agent is Codex opens on Codex", async () => {
     await home({ projectDefaults: { pr_1: { agent: "codex" } } });
     expect(picker("model")?.dataset["harness"]).toBe("codex");

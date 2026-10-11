@@ -625,6 +625,9 @@ export interface Api {
   portProbe?(id: string, port: number): Promise<PortProbeView>;
   /** One turn on the workspace; events arrive on the subscription, this resolves with the row. */
   startSession(opts: StartSessionOptions): Promise<SessionView>;
+  /** Starts the agent's process for the thread a send from this composer would open, ahead of the send; optional so
+   * fixtures that start nothing need not carry it. */
+  warmAgent?(opts: WarmAgentOptions): Promise<void>;
   /** All sessions the runtime knows, or one workspace's. */
   listSessions(id?: string): Promise<SessionView[]>;
   /** The workspace's persisted session events, oldest first: what a chat replays on mount. */
@@ -911,6 +914,10 @@ export interface StartSessionOptions {
   attachments?: readonly Attachment[];
 }
 
+/** Where a new thread's send would open it and on what: a workspace, or a project whose folder the host finds, with
+ * the agent and the picks the send would name. */
+export type WarmAgentOptions = ({ workspaceId: string; cwd?: string } | { project: string }) & Pick<StartSessionOptions, "harness" | "model" | "effort" | "permissionMode" | "contextWindow" | "fast">;
+
 export interface ExportProjectOptions {
   workspaceId: string;
   /** The folder on the machine, absolute. */
@@ -987,6 +994,7 @@ export function makeApi(c: ProtocolClient): Api {
     portReach: async (id, port) => (await c.request<{ reach: PortReachView }>("workspaces.portReach", { workspaceId: id, port })).reach,
     portProbe: async (id, port) => (await c.request<{ probe: PortProbeView }>("workspaces.portProbe", { workspaceId: id, port })).probe,
     startSession: async opts => (await c.request<{ session: SessionView }>("sessions.start", { ...opts })).session,
+    warmAgent: async opts => void (await c.request("sessions.warm", { ...opts })),
     sessionHistory: async id => (await c.request<{ events: SessionEvent[] }>("sessions.history", { workspaceId: id })).events,
     sessionHead: async threadId => {
       const { facts, events, pos, total } = await c.request<ThreadHead>("sessions.head", { threadId });
