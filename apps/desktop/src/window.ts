@@ -135,6 +135,8 @@ export function windowOptions(platform: NodeJS.Platform, version: string, preloa
       nodeIntegration: false,
       contextIsolation: true,
       sandbox: true,
+      // A browser tab's guest; the shell's will-attach-webview gate decides which page may make one and how it runs.
+      webviewTag: true,
       ...(preload !== undefined ? { preload } : {}),
       additionalArguments: [
         shellArg("version", version),

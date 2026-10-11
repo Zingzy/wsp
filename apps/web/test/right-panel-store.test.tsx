@@ -7,10 +7,12 @@ import { cleanup, render, screen } from "@testing-library/react";
 import type { WorkspaceView } from "@wsp/protocol";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { useStore } from "../src/protocol/store.js";
-import { selectActiveRightPanel, selectPanelTerminalIds, selectWorkspaceRightPanelState, useRightPanelStore } from "../src/rightPanelStore.js";
+import { guestCapLine, keepListedPanels, openBrowserAt, roomForBrowserTab, selectActiveRightPanel, selectPanelTerminalIds, selectWorkspaceRightPanelState, useRightPanelStore } from "../src/rightPanelStore.js";
 import { RightPanel } from "../src/shell/RightPanel.js";
 import { useBrowserTabs } from "../src/browser/tabs.js";
-import { clearNotices } from "./notice-text.js";
+import { GUEST_CAP, hideGuest, resetGuests, showGuest, useGuests } from "../src/browser/guests.js";
+import { HERE_KEY } from "../src/terminal/computer.js";
+import { clearNotices, lastNotice, noticeTexts } from "./notice-text.js";
 
 const KEY = "wsp:right-panel-state:v1";
 const WS = "ws_panel_store";
@@ -151,5 +153,89 @@ describe("rightPanelStore hydrate", () => {
     window.localStorage.setItem(KEY, JSON.stringify({ state: { byWorkspaceId: 7 }, version: 1 }));
     await useRightPanelStore.persist.rehydrate();
     expect(useRightPanelStore.getState().byWorkspaceId).toEqual({});
+  });
+});
+
+describe("the browser tab cap counts guests holding a page", () => {
+  const LIVE = "ws_live";
+  const RECT = { x: 0, y: 0, width: 400, height: 300, raised: false };
+  const browserTabsOf = (workspaceId: string) =>
+    (useRightPanelStore.getState().byWorkspaceId[workspaceId]?.surfaces ?? []).filter(s => s.kind === "preview" && s.resourceId !== null);
+  /** A guest holding a page for a tab of this workspace, shown and then hidden at the time given. */
+  const loaded = (workspaceId: string, n: number, hiddenAt: number) => {
+    const key = `${workspaceId}/t${n}`;
+    showGuest(key, { workspaceId, tabId: `t${n}`, src: "https://github.com/", route: null, loaded: 0 }, RECT);
+    hideGuest(key, hiddenAt);
+    return key;
+  };
+
+  beforeEach(() => {
+    resetGuests();
+    clearNotices();
+  });
+  afterEach(resetGuests);
+
+  it("never counts saved tabs with no page loaded, those of a workspace removed last week among them", async () => {
+    const saved = Array.from({ length: 10 }, (_, i) => ({ id: `browser:old${i}`, kind: "preview", resourceId: `old${i}` }));
+    window.localStorage.setItem(KEY, JSON.stringify({ state: { byWorkspaceId: { ws_deleted_last_week: { isOpen: true, activeSurfaceId: null, surfaces: saved } } }, version: 1 }));
+    await useRightPanelStore.persist.rehydrate();
+    expect(useRightPanelStore.getState().byWorkspaceId["ws_deleted_last_week"]?.surfaces).toHaveLength(10);
+    useRightPanelStore.getState().openNewBrowser(LIVE);
+    expect(browserTabsOf(LIVE)).toHaveLength(1);
+    expect(noticeTexts()).toEqual([]);
+  });
+
+  it("refuses a tab once ten guests hold a page, saying how many and how many are in other threads", () => {
+    for (let i = 0; i < 6; i++) loaded(LIVE, i, 1_000 + i);
+    for (let i = 0; i < 4; i++) loaded("ws_other", i, 2_000 + i);
+    expect(Object.keys(useGuests.getState().guests)).toHaveLength(GUEST_CAP);
+    useRightPanelStore.getState().openNewBrowser(LIVE);
+    expect(browserTabsOf(LIVE)).toHaveLength(0);
+    expect(lastNotice()).toBe("10 browser tabs have a page open, the most wsp keeps. Close one to open another; 4 of them are in other threads.");
+    openBrowserAt(LIVE, { port: 3000, path: "/" });
+    expect(browserTabsOf(LIVE)).toHaveLength(0);
+    expect(guestCapLine(10, 0)).toBe("10 browser tabs have a page open, the most wsp keeps. Close one to open another.");
+    expect(guestCapLine(10, 1)).toBe("10 browser tabs have a page open, the most wsp keeps. Close one to open another; 1 of them is in another thread.");
+    expect(roomForBrowserTab("ws_other")).toBe(false);
+    expect(lastNotice()).toContain("6 of them are in other threads");
+  });
+
+  it("a link in a reply opens a tab on its place while there is room", () => {
+    openBrowserAt(LIVE, { port: 3000, path: "/docs" });
+    const [tab] = browserTabsOf(LIVE);
+    expect(useRightPanelStore.getState().byWorkspaceId[LIVE]?.activeSurfaceId).toBe(tab?.id);
+  });
+
+  it("a saved tab shown again past the cap unloads the guest hidden longest, so no more than ten are ever held", () => {
+    const keys = Array.from({ length: GUEST_CAP }, (_, i) => loaded(LIVE, i, 5_000 - i));
+    showGuest(`${LIVE}/t99`, { workspaceId: LIVE, tabId: "t99", src: "https://github.com/", route: null, loaded: 0 }, RECT);
+    const held = Object.keys(useGuests.getState().guests);
+    expect(held).toHaveLength(GUEST_CAP);
+    expect(held).not.toContain(keys[GUEST_CAP - 1]);
+    expect(held).toContain(`${LIVE}/t99`);
+  });
+});
+
+describe("a workspace the host stops listing", () => {
+  const listed = (ids: string[]): WorkspaceView[] => ids.map(id => ({ ...view, id }));
+
+  it("drops its panel and its browser tabs, and keeps this computer's own panel and the listed ones", () => {
+    useStore.setState({ ready: false, workspaces: [], creations: [] });
+    const store = useRightPanelStore.getState();
+    for (const id of ["ws_kept", "ws_gone", HERE_KEY]) store.open(id, "diff");
+    const tab = useBrowserTabs.getState().createTab("ws_gone", { url: "https://github.com/" });
+    store.openBrowser("ws_gone", tab);
+    const stop = keepListedPanels();
+    try {
+      expect(Object.keys(useRightPanelStore.getState().byWorkspaceId).sort()).toEqual([HERE_KEY, "ws_gone", "ws_kept"].sort());
+      useStore.setState({ ready: true, workspaces: listed(["ws_kept"]) });
+      expect(Object.keys(useRightPanelStore.getState().byWorkspaceId).sort()).toEqual([HERE_KEY, "ws_kept"].sort());
+      expect(useBrowserTabs.getState().byWorkspaceId["ws_gone"]).toBeUndefined();
+      useStore.setState({ workspaces: [] });
+      expect(Object.keys(useRightPanelStore.getState().byWorkspaceId)).toEqual([HERE_KEY]);
+    } finally {
+      stop();
+      useStore.setState({ ready: false, workspaces: [] });
+    }
   });
 });

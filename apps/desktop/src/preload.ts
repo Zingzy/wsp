@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { AgentHere, InstallReport } from "@wsp/host";
-import type { BundleOutcome, ContextMenuItem, DesktopBridge, HostOutcome, HostsView, LinkTarget, LocalFontFace, OutsideLine, ShellChord, ThemePreference } from "@wsp/protocol";
+import type { BundleOutcome, ContextMenuItem, DesktopBridge, GuestOpen, HostOutcome, HostsView, LinkTarget, LocalFontFace, OutsideLine, ShellChord, ThemePreference } from "@wsp/protocol";
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 import type { RendererError } from "./app-log.js";
 import { shellArgFrom } from "./shell-args.js";
@@ -60,6 +60,12 @@ const bridge: DesktopBridge & OnboardingBridge = {
   contextMenu: (items: ContextMenuItem[]): Promise<string | null> => ipcRenderer.invoke("menu:context", items),
   capturePreview: (workspaceId: string, bounded?: boolean): Promise<void> => ipcRenderer.invoke("preview:capture", workspaceId, bounded === true),
   workspacePreview: (workspaceId: string): Promise<string | undefined> => ipcRenderer.invoke("preview:read", workspaceId),
+  browserGuests: (): boolean => ipcRenderer.sendSync("guests:allowed") === true,
+  onGuestOpen: (handler: (open: GuestOpen) => void): (() => void) => {
+    const listen = (_event: unknown, open: GuestOpen): void => handler(open);
+    ipcRenderer.on("guest:open", listen);
+    return () => ipcRenderer.off("guest:open", listen);
+  },
   setTerminalFocus: (focused: boolean): void => ipcRenderer.send("terminal:focus", focused),
   onShellChord: (handler: (chord: ShellChord) => void): (() => void) => {
     const listen = (_event: unknown, chord: ShellChord): void => handler(chord);
