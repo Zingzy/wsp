@@ -746,7 +746,7 @@ export function turnsArea(ctx: RuntimeContext): TurnsArea {
    * `cannot` covers a row with no run recorded (a host from before this road, or a harness whose runs die with it),
    * no workspace or no machine running under it, no adapter for its harness in this process, and a handle that is
    * not one this host could have launched. */
-  const reattach = async (s: { view: SessionView; turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin; turnLive?: TurnLive; run?: string; from?: number; asked?: TurnAsked; turnToken?: string; scopeDeviceId?: string; snapshot?: string }): Promise<Reopened> => {
+  const reattach = async (s: { view: SessionView; turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin; turnLive?: TurnLive; run?: string; from?: number; asked?: TurnAsked; turnToken?: string; scopeDeviceId?: string; snapshot?: string }, again = false): Promise<Reopened> => {
     const { view, run } = s;
     const threadId = view.threadId;
     const entry = live.get(view.workspaceId);
@@ -765,6 +765,18 @@ export function turnsArea(ctx: RuntimeContext): TurnsArea {
     }
     const open = adapter.attach?.bind(adapter);
     if (open === undefined) return "cannot";
+    const left = (e: unknown): "unreached" => {
+      if (!again) console.warn(`thread ${threadId.slice(0, 8)} on ${view.workspaceId} was left running: ${e instanceof Error ? e.message : String(e)}`);
+      return "unreached";
+    };
+    // The turn reads how much of itself is written off the transcript it is handed. Read before the run is opened, since
+    // an opened reader has no way to be let go: a file that did not read says nothing about the run, which is left as it was.
+    let written: SessionEvent[];
+    try {
+      written = await ctx.openTranscript(view.workspaceId);
+    } catch (e: unknown) {
+      return left(e);
+    }
     // The harness may start reading the run the moment it is opened, which is before the row that records those
     // lines exists, so what arrives first is held and handed to the row's own forward in order once it does.
     const held: AdapterEvent[] = [];
@@ -784,21 +796,11 @@ export function turnsArea(ctx: RuntimeContext): TurnsArea {
       });
     } catch (e: unknown) {
       // Nothing answered about the run, so nothing is known about it: the turn is left exactly as it was.
-      console.warn(`thread ${threadId.slice(0, 8)} on ${view.workspaceId} was left running: ${e instanceof Error ? e.message : String(e)}`);
-      return "unreached";
+      return left(e);
     }
     if (opened === "gone") return "gone";
     // The run was read off the machine, so the machine takes commands and needs no proof.
     delete entry.unchecked;
-    // The turn reads how much of itself is written off the transcript it is handed, the copy this open answers. A file
-    // that did not read says nothing about the run, so the row is left running as it was.
-    let written: SessionEvent[];
-    try {
-      written = await ctx.openTranscript(view.workspaceId);
-    } catch (e: unknown) {
-      console.warn(`thread ${threadId.slice(0, 8)} on ${view.workspaceId} was left running: ${e instanceof Error ? e.message : String(e)}`);
-      return "unreached";
-    }
     try {
       runTurn({
         entry,
