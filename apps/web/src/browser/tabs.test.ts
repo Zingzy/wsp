@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { afterEach, describe, expect, it } from "vitest";
-import { currentAddress, previewTabSnapshots, resetBrowserTabs, useBrowserTabs } from "./tabs.js";
+import { currentPlace, previewTabSnapshots, resetBrowserTabs, useBrowserTabs } from "./tabs.js";
 
 const WS = "ws_tabs";
 
@@ -14,9 +14,9 @@ describe("a browser tab is a port and a path", () => {
     tabs.navigate(WS, id, { port: 3000, path: "/about?x=1" });
     const tab = useBrowserTabs.getState().byWorkspaceId[WS]![id]!;
     expect(tab.entries).toEqual([null, { port: 3000, path: "/" }, { port: 3000, path: "/about?x=1" }]);
-    expect(currentAddress(tab)).toEqual({ port: 3000, path: "/about?x=1" });
+    expect(currentPlace(tab)).toEqual({ port: 3000, path: "/about?x=1" });
     tabs.back(WS, id);
-    expect(currentAddress(useBrowserTabs.getState().byWorkspaceId[WS]![id]!)).toEqual({ port: 3000, path: "/" });
+    expect(currentPlace(useBrowserTabs.getState().byWorkspaceId[WS]![id]!)).toEqual({ port: 3000, path: "/" });
   });
 
   it("the strip's title and url carry the path, and the root reads as the port alone", () => {

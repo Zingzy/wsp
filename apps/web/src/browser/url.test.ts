@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { frameSrc, loopbackAddress, loopbackUrl, parseAddress, portAndPath } from "./url.js";
+import { frameSrc, loopbackAddress, loopbackUrl, parseAddress, parseTarget, placeOfUrl, portAndPath, SEARCH_URL } from "./url.js";
 
 describe("parseAddress", () => {
   it.each([
@@ -80,5 +80,31 @@ describe("loopback forms", () => {
     expect(portAndPath(3000, "/caf%C3%A9")).toBe(":3000/café");
     expect(loopbackAddress(3000, "/a%2Fb%3Fc")).toBe("localhost:3000/a%2Fb%3Fc");
     expect(loopbackAddress(3000, "/%E0%A4%A")).toBe("localhost:3000/%E0%A4%A");
+  });
+});
+
+describe("what the desktop bar means by what was typed", () => {
+  it("a port stays a port, a web address is https unless a scheme was typed, and anything else is a search", () => {
+    expect(parseTarget("3000")).toEqual({ port: 3000, path: "/" });
+    expect(parseTarget("localhost:5173/a")).toEqual({ port: 5173, path: "/a" });
+    expect(parseTarget("github.com")).toEqual({ url: "https://github.com/" });
+    expect(parseTarget("  docs.example.co.uk/guide?x=1 ")).toEqual({ url: "https://docs.example.co.uk/guide?x=1" });
+    expect(parseTarget("http://example.org/a")).toEqual({ url: "http://example.org/a" });
+    expect(parseTarget("10.0.0.2:8080")).toEqual({ url: "https://10.0.0.2:8080/" });
+    expect(parseTarget("acme lab")).toEqual({ url: `${SEARCH_URL}acme%20lab` });
+    expect(parseTarget("vitest")).toEqual({ url: `${SEARCH_URL}vitest` });
+    expect(parseTarget("what is github.com")).toEqual({ url: `${SEARCH_URL}what%20is%20github.com` });
+    expect(parseTarget("slack://open")).toEqual({ url: `${SEARCH_URL}slack%3A%2F%2Fopen` });
+  });
+
+  it("a guest's url on the port's route reads back as the port with the token taken off, a loopback url as its port", () => {
+    const route = { url: "https://m1-3000.preview.example/?pt_token=edge", port: 3000 };
+    expect(placeOfUrl("https://m1-3000.preview.example/about?tab=2&pt_token=edge#top", route)).toEqual({ port: 3000, path: "/about?tab=2#top" });
+    expect(placeOfUrl("https://m1-3000.preview.example/?pt_token=t2", route)).toEqual({ port: 3000, path: "/" });
+    expect(placeOfUrl("http://localhost:4000/x", route)).toEqual({ port: 4000, path: "/x" });
+    expect(placeOfUrl("https://github.com/acme", route)).toEqual({ url: "https://github.com/acme" });
+    expect(placeOfUrl("https://m1-3000.preview.example/a", null)).toEqual({ url: "https://m1-3000.preview.example/a" });
+    const forward = { url: "http://localhost:41234/", port: 3000 };
+    expect(placeOfUrl("http://localhost:41234/about.html", forward)).toEqual({ port: 3000, path: "/about.html" });
   });
 });

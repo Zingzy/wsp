@@ -4,8 +4,8 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { adoptLoginPath, agentsHere, aimedHost, appLogsDir, computerNameHere, daemonBinaryHere, dialHost, installEach, mcpServerSpec, releaseFetch, runningWsp, serviceAddressHere, shimPath, systemService, wspHome, VERSION, type CliIO } from "@wsp/host";
-import { DEFAULT_PREFERENCES, HOME_ENV, type BundleOutcome, HOST_WORDS, OutsideLine, ThemePreference, hostMenuAction, hostsMenuItems } from "@wsp/protocol";
-import { BrowserWindow, Menu, Notification, Tray, app, crashReporter, dialog, ipcMain, nativeImage, nativeTheme, powerSaveBlocker, shell, type IpcMainEvent, type IpcMainInvokeEvent } from "electron";
+import { BROWSER_PARTITION, DEFAULT_PREFERENCES, HOME_ENV, type BundleOutcome, HOST_WORDS, OutsideLine, ThemePreference, hostMenuAction, hostsMenuItems } from "@wsp/protocol";
+import { BrowserWindow, Menu, Notification, Tray, app, crashReporter, dialog, ipcMain, nativeImage, nativeTheme, powerSaveBlocker, session as sessions, shell, type IpcMainEvent, type IpcMainInvokeEvent } from "electron";
 import { openAppLog, rendererReport } from "./app-log.js";
 import { awakeWanted } from "./awake.js";
 import { chooseFrom, contextMenuTemplate, parseContextMenuItems } from "./context-menu.js";
@@ -13,6 +13,7 @@ import { deepLinks, linkInArgv } from "./deep-link.js";
 import { fontDirs, fontFamilies, indexFonts, localFontFaces, type FontFile } from "./fonts.js";
 import { bundleShell, updateLogLine, type BundleShell } from "./get-bundle.js";
 import { KeptOtherRelease, earlierHostCheck, homeOf, loginStart, oneAtATime, openHost, openHostReady, servesAgainNotice, setLoginStart, statePathIn, stopWsp, userDataIn, workingHere, type HostSession, type Launch, type OpenHostOptions } from "./host-lifecycle.js";
+import { LEAVE_WORDS, guardGuestSession, guestGuards, type GuestShell } from "./guests.js";
 import { hostSwitcher, type HostSwitcher } from "./host-switch.js";
 import { offerMove, type MoveGate } from "./move.js";
 import { noticeWindowOf, sayOutside, showBadge, type Notifier } from "./needs-you.js";
@@ -261,6 +262,27 @@ ipcMain.on("drop:allowed", event => {
   event.returnValue = may(event, "drop:allowed");
 });
 
+ipcMain.on("guests:allowed", event => {
+  event.returnValue = may(event, "guests:allowed");
+});
+
+/** The browser tabs' guests, as the window that holds them answers for them. */
+const guestShell = (page: BrowserWindow): GuestShell => ({
+  mayHold: url => allowed(url, session, "guests:allowed"),
+  newTab: open => page.webContents.send("guest:open", open),
+  ask: async url => {
+    const { message, detail, open, cancel } = LEAVE_WORDS;
+    return (await dialog.showMessageBox(page, { type: "question", message: message(url), detail, buttons: [open, cancel], defaultId: 1, cancelId: 1 })).response === 0;
+  },
+  openOutside: url => void shell.openExternal(url),
+});
+
+function holdGuests(page: BrowserWindow, guests: GuestShell): void {
+  const guards = guestGuards(page.webContents, guests);
+  page.webContents.on("will-attach-webview", guards.willAttach);
+  page.webContents.on("did-attach-webview", guards.didAttach);
+}
+
 /** launchctl's name for the host service this app installed for its state file, which the swap restarts on the new
  * files; empty where none is registered. */
 function serviceTarget(): string {
@@ -397,6 +419,11 @@ async function showApp(on: HostSession): Promise<void> {
   win = newWindow(PRELOAD);
   const page = win;
   guardWorkers(page.webContents.session);
+  const guests = guestShell(page);
+  holdGuests(page, guests);
+  const guestSession = sessions.fromPartition(BROWSER_PARTITION);
+  guardWorkers(guestSession);
+  guardGuestSession(guestSession, guests);
   switcher = hostSwitcher({
     local: on,
     home: wspHome(),
@@ -460,6 +487,7 @@ async function showOnboarding(): Promise<void> {
   const { statePath } = where();
   const shim = shimPath(wspHome());
   const page = newWindow(PRELOAD);
+  holdGuests(page, guestShell(page));
   const gate = (event: IpcMainInvokeEvent, channel: string): void => {
     if (!fromOnboardingPage(event.senderFrame?.url, ONBOARDING_PAGE)) throw new Error(`${channel}: not the onboarding page`);
   };

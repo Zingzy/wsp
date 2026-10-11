@@ -7,7 +7,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it } from "vitest";
 import type { PreviewableServer } from "../src/adapt/view-model.js";
 import { recentsKey, type BrowserHistoryEntry } from "../src/browser/recents.js";
-import { currentAddress, useBrowserTabs } from "../src/browser/tabs.js";
+import { currentPlace, useBrowserTabs } from "../src/browser/tabs.js";
 import { BrowserSurface } from "../src/components/preview/BrowserSurface.js";
 import { PREVIEW_NO_MATCH, PreviewEmptyState } from "../src/components/preview/PreviewEmptyState.js";
 
@@ -89,6 +89,6 @@ describe("the address bar over the list", () => {
     act(() => bar().focus());
     fireEvent.change(bar(), { target: { value: "localhost:3000" } });
     fireEvent.keyDown(bar(), { key: "Enter" });
-    expect(currentAddress(useBrowserTabs.getState().byWorkspaceId[WS]?.[tabId] ?? null)?.port).toBe(3000);
+    expect(currentPlace(useBrowserTabs.getState().byWorkspaceId[WS]?.[tabId] ?? null)).toEqual({ port: 3000, path: "/" });
   });
 });
