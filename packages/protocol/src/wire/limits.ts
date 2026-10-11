@@ -43,6 +43,9 @@ export const AGENTS_KEPT = 6;
  * composer asked for it. Claude Code under -p waits on its MCP servers and SessionStart hooks before its first turn:
  * 4.2 s on one person's config against 1.0 s with neither (2026-10-10). It counts against AGENTS_KEPT. */
 export const AGENT_WARM_MS = 3 * 60_000;
+/** The least time between the composer's asks for that process from typing, so a person writing a long first message
+ * keeps it without a request per keystroke. */
+export const AGENT_WARM_TYPED_MS = 30_000;
 /** The most of those standing at once across every project, the ones asked for most recently: each holds about 380 MB
  * with its MCP servers, and five projects' came to 1.9 GB (2026-10-10). */
 export const AGENTS_WARM = 2;

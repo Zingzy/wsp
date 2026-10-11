@@ -387,6 +387,59 @@ describe("composer pickers", () => {
     await waitFor(() => expect(warmed).toEqual([{ workspaceId: WS, harness: "claude" }, { workspaceId: WS, harness: "claude" }]));
   });
 
+  /** The fixture's asks, each with the time the composer made it, under a clock only Date reads from. */
+  const timedAsks = (api: Api): number[] => {
+    const at: number[] = [];
+    const ask = api.warmAgent!;
+    api.warmAgent = async o => {
+      at.push(Date.now());
+      await ask(o);
+    };
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(0);
+    return at;
+  };
+
+  it("asks again as the person types, so five minutes of a keystroke a minute keeps the process up to the send", async () => {
+    const { api, started } = fixtureApi({ table: [TABLE, CODEX], machine: [CLAUDE, CODEX] });
+    const at = timedAsks(api);
+    try {
+      await setup(api);
+      await waitFor(() => expect(pickerValue("model")).toBe("claude-opus-5"));
+      clickIntoEditor(composerEditor());
+      await waitFor(() => expect(at).toEqual([0]));
+      for (let minute = 1; minute <= 5; minute++) {
+        vi.setSystemTime(minute * 60_000);
+        await typeInto(composerEditor(), "a");
+      }
+      await waitFor(() => expect(at).toEqual([0, 60_000, 120_000, 180_000, 240_000, 300_000]));
+      await press(composerEditor(), "Enter");
+      await waitFor(() => expect(started).toHaveLength(1));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("asks from typing at most once in 30 seconds: 100 keystrokes a second apart ask three times past the focus", async () => {
+    const { api, warmed } = fixtureApi({ table: [TABLE, CODEX], machine: [CLAUDE, CODEX] });
+    const at = timedAsks(api);
+    try {
+      await setup(api);
+      await waitFor(() => expect(pickerValue("model")).toBe("claude-opus-5"));
+      clickIntoEditor(composerEditor());
+      await waitFor(() => expect(at).toEqual([0]));
+      for (let key = 1; key <= 100; key++) {
+        vi.setSystemTime(key * 1_000);
+        await typeInto(composerEditor(), "a");
+      }
+      await waitFor(() => expect(composerEditor().textContent).toBe("a".repeat(100)));
+      expect(at).toEqual([0, 30_000, 60_000, 90_000]);
+      expect(warmed).toEqual(Array(4).fill({ workspaceId: WS, harness: "claude" }));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("shows the table, marked so, until the machine answers, and keeps it when the machine never does", async () => {
     const { api } = fixtureApi({ table: [TABLE], machine: new Error("machine not running") });
     await setup(api);

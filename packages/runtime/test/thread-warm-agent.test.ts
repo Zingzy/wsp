@@ -121,6 +121,23 @@ describe("an agent process started ahead of a new thread's first send", () => {
     expect(ups()).toHaveLength(3);
   }, 30_000);
 
+  it("asked for a minute apart for five minutes, as the composer does while the person types, runs the send on the process started at the first", async () => {
+    const fc = fakeClock();
+    const rt = host({ clock: fc.clock });
+    const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
+    await rt.sessions.warm(ws.id, { harness: "claude" });
+    const [warm] = await upCount(1);
+    for (let minute = 1; minute <= 5; minute++) {
+      fc.advance(60_000);
+      expect(await rt.sessions.warm(ws.id, { harness: "claude" })).toEqual({ warm: "standing" });
+    }
+    fc.advance(WARM_MS - 1_000);
+    expect(alive(warm!.pid)).toBe(true);
+    const one = await send(rt, ws.id, "one", { harness: "claude" });
+    expect(pidOf(one.result.text)).toBe(warm!.pid);
+    expect(ups()).toHaveLength(1);
+  }, 30_000);
+
   it("a changed model, effort or access ends the one standing and starts one launched with it", async () => {
     const rt = host();
     const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
