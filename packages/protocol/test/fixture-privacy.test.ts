@@ -44,6 +44,9 @@ const PLACEHOLDER_HOMES: ReadonlyArray<{ names: readonly string[]; why: string }
 ];
 const placeholder = (value: string) => PLACEHOLDER_HOMES.some(group => group.names.includes(value.split("/")[2] ?? ""));
 
+const CONVERSATION =
+  "the session id of a throwaway Claude Code conversation recorded on 2.1.296 for the transcript readers, its every other id made synthetic, and the conversation the daemon's frames, the replies and the tool record name";
+const CODEX_THREADS = "a thread id of throwaway Codex 0.162.1 threads recorded through its app server for the conversation readers, their turn and item ids made synthetic";
 const CLAUDE_STREAM = "a recorded Claude Code stream whose session and message ids the adapter tests match on";
 const SUBAGENTS = "the same recorded session with subagents; the tool ids are synthetic and pair each call with its result";
 const TITLES = "session ids the title reader keys its titles by";
@@ -58,6 +61,15 @@ const HANDBACK = "a recorded Claude Code turn ending a subagent or a background 
 /** Every recorded id or real home the fixtures and test sources still carry, in whichever file, as many times as count
  * says, each with why it stays. */
 const ALLOWED: readonly Allowed[] = [
+  { text: "7414323d-e71b-4957-8b56-eefdf6bfa350", count: 84, why: CONVERSATION },
+  { text: "e615a6ab-a2f2-4b10-8fd6-0dc38bf99c28", count: 4, why: CONVERSATION },
+  { text: "toolu_01WspFix2025Bash", count: 3, why: "the one tool call in the recorded two-writer Claude Code conversation, its id made synthetic" },
+  { text: "01a12813-cd12-7a12-9b13-e76892906ff0", count: 15, why: CODEX_THREADS },
+  { text: "01a12813-ce2c-7600-87d3-bfff156be264", count: 3, why: CODEX_THREADS },
+  { text: "01a12814-3d6c-7751-813b-3b1c4e6f33da", count: 3, why: CODEX_THREADS },
+  { text: "2025c1a0-0000-4aaa-8bbb-000000000001", count: 1, why: "a made-up Claude Code session id the screenshot fixture of a project's conversations names its transcript by" },
+  { text: "2025c1a0-0000-4aaa-8bbb-000000000002", count: 1, why: "a made-up Claude Code session id the screenshot fixture of a project's conversations names its transcript by" },
+  { text: "2025c1a0-0000-4aaa-8bbb-000000000003", count: 1, why: "a made-up Claude Code session id the screenshot fixture of a project's conversations names its transcript by" },
   { text: "e16ed170-8257-4668-879e-fe836341633c", count: 54, why: "the session id of a recorded Claude Code stream, shared by its subagent and WebFetch turns and the mid-turn thread a side question copies, which the adapter tests match on" },
   { text: "0f0d5872-9c1a-4e56-8a3b-7d2c4f6e9b01", count: 1, why: CLAUDE_STREAM },
   { text: "1a2b3c4d-0001-4aaa-8bbb-000000000001", count: 1, why: CLAUDE_STREAM },

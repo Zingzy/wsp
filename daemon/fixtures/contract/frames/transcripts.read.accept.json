@@ -1,0 +1,12 @@
+[
+  {
+    "id": 1,
+    "op": "transcripts.read",
+    "root": "~/.claude/projects",
+    "dirs": [
+      "-home-dev-proj"
+    ],
+    "session": "7414323d-e71b-4957-8b56-eefdf6bfa350",
+    "last": 200
+  }
+]

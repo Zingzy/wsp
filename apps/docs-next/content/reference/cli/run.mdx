@@ -6,7 +6,7 @@
 usage: wsp run [<project>] [--beside <thread>] [--branch <branch>]
        [--cwd <path>] [--agent <id>] [--model, --effort, --access <word>]
        [--fast] [--notify <thread|me>] [--title <title>] [--replaces <thread>]
-       [--file <path>] [--detach] "<message>"
+       [--file <path>] [--resume <id> [--copy]] [--detach] "<message>"
   an agent works in the project's folder and you read its reply: a thread with
   the agent, model, effort and access the app offers; a project on a box runs in
   its folder there as the login the box was added with; --beside runs it in the
@@ -45,6 +45,13 @@ usage: wsp run [<project>] [--beside <thread>] [--branch <branch>]
   --file        a file on this computer to send with the message: an image goes
                 as an image, any other file lands in the thread's folder and the
                 message names its path; repeats
+  --resume      a conversation the agent kept in the project's folder outside
+                wsp, by the id wsp conversations lists: the thread opens on it,
+                in the folder it ran in, with its newest messages above the
+                first prompt
+  --copy        with --resume, continue on a copy of the conversation the agent
+                makes, the original left as it was: what a conversation open in
+                another app needs
   --detach      print the thread's id and return, leaving the reply to the
                 thread's finished line
   --json        print the raw protocol values, one JSON object per line, with

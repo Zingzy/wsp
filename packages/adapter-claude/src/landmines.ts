@@ -102,6 +102,10 @@ export interface BuildCommandOptions {
   sessionId?: string;
   /** Existing session: passed as --resume instead. */
   resume?: string;
+  /** Beside a fresh sessionId: the session that one starts as a copy of, `--resume <copyOf> --fork-session`, which the
+   * CLI's own `--bg --resume` runs on a session open in another process (measured on 2.1.296: the copy's file holds the
+   * original's active branch, every line stamped sdk-cli, and the original's file is byte for byte as it was). */
+  copyOf?: string;
   /** The uuid of the message a rewind kept, on a resume alone: passed as --resume-session-at, which the CLI keeps out
    * of --help and loads the session up to (measured on 2.1.283: a resume at a turn's last message answered as if
    * the turns after it had never run, and its new turn hung off that message in the session file). */
@@ -274,6 +278,7 @@ export function buildCommand(options: BuildCommandOptions): string {
     throw new Error(`session identifier must be a UUID, got "${id}"`);
   }
   if (options.resumeAt !== undefined && resume === undefined) throw new Error("a cut at a message rides a resume alone");
+  if (options.copyOf !== undefined && (sessionId === undefined || !UUID_RE.test(options.copyOf))) throw new Error(`a copy opens a new session of a session named by its UUID, got "${options.copyOf}"`);
   const aside = options.aside === true;
   if (aside && resume === undefined) throw new Error("a side question resumes the copy it is asked on");
   if (options.resumeAt !== undefined && !UUID_RE.test(options.resumeAt)) throw new Error(`a cut must name a message by its UUID, got "${options.resumeAt}"`);
@@ -282,7 +287,7 @@ export function buildCommand(options: BuildCommandOptions): string {
       ? `--max-turns 2 --resume ${id}`
       : sessionId === undefined
         ? `--resume ${id}${options.resumeAt === undefined ? "" : ` --resume-session-at ${options.resumeAt}`}`
-        : `--session-id ${id}`;
+        : `--session-id ${id}${options.copyOf === undefined ? "" : ` --resume ${options.copyOf} --fork-session`}`;
   const claude = [
     `${programWord("claude", options.launch)} -p`,
     ...person.words.map(shellQuote),

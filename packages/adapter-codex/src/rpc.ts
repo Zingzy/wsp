@@ -6,7 +6,7 @@
 import type { AccessParams } from "./command.js";
 
 /** The ids of the requests a turn sends once each; a steer and an interrupt are numbered, since a turn may send several. */
-export const REQUEST = { initialize: "wsp-initialize", thread: "wsp-thread", turn: "wsp-turn", revert: "wsp-revert", turns: "wsp-turns", account: "wsp-account", rateLimits: "wsp-rate-limits" } as const;
+export const REQUEST = { initialize: "wsp-initialize", thread: "wsp-thread", turn: "wsp-turn", revert: "wsp-revert", turns: "wsp-turns", account: "wsp-account", rateLimits: "wsp-rate-limits", unsubscribe: "wsp-unsubscribe" } as const;
 
 /** A request id as the server sends one: a string or an integer, echoed back as it came. */
 export type RequestId = string | number;
@@ -64,6 +64,19 @@ export function threadForkLine(o: { threadId: string; cwd?: string; model?: stri
     method: "thread/fork",
     params: { threadId: o.threadId, ephemeral: true, excludeTurns: true, sandbox: "read-only", approvalPolicy: "never", ...named({ cwd: o.cwd, model: o.model }), developerInstructions: o.developerInstructions },
   });
+}
+
+/** A copy of the thread that is written to disk as a thread of its own, the original left as it was: what a thread
+ * another process writes is continued on. The answer names the copy, which the turn then runs on. */
+export function threadCopyLine(o: ThreadOptions & { threadId: string }): string {
+  return line({ id: REQUEST.thread, method: "thread/fork", params: { threadId: o.threadId, ephemeral: false, excludeTurns: true, ...named({ cwd: o.cwd, model: o.model, serviceTier: o.serviceTier }), ...o.access, ...configOf(o) } });
+}
+
+/** The thread let go of on this connection once its turn is over, so a process outside wsp may write it: the server
+ * unloads it once nobody is subscribed (another writer got in 61 s later on 0.162.1), and a later turn on the same
+ * server resumes it first, since a turn/start on the thread after this is never answered (measured on 0.162.1). */
+export function threadUnsubscribeLine(threadId: string): string {
+  return line({ id: REQUEST.unsubscribe, method: "thread/unsubscribe", params: { threadId } });
 }
 
 /** The thread's persisted history cut to the turns before one: that turn and every later one leave it. Files are

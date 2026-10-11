@@ -126,6 +126,7 @@ import { forwardsOf, type ForwardsSource } from "./forwards.js";
 import { costMoved } from "./status.js";
 import { answerProject, isProjectRequest } from "./serve-projects.js";
 import { answerSlate, isSlateRequest, type SlateHolds } from "./serve-slates.js";
+import { startOptionsOf } from "./serve-start.js";
 export type { ForwardsSource };
 
 /** The address a host binds when nobody names another and the path the runtime answers upgrades on, both the
@@ -1401,6 +1402,9 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             case "workspaces.snapshot":
               send({ id: msg.id, ok: true, projectGolden: await rt.workspaces.snapshot(msg.workspaceId, origin) });
               return;
+            case "conversations.list":
+              send({ id: msg.id, ok: true, ...(await rt.conversations.list({ ...(msg.project !== undefined ? { project: msg.project } : {}), ...(msg.agent !== undefined ? { agent: msg.agent } : {}) }, origin)) });
+              return;
             case "projectGoldens.list":
               send({ id: msg.id, ok: true, projectGoldens: await rt.golden.projects() });
               return;
@@ -1509,27 +1513,10 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               // A start on this computer names a project, a branch or a folder rather than a record: the folder's record
               // is found or made first, and the start runs on it.
               if (msg.workspaceId !== undefined && msg.branch !== undefined) throw Object.assign(new Error(BRANCH_ON_A_THREAD_LINE), { kind: "usage" });
-              const at = await startAt(rt.workspaces, msg, origin);
-              await answeredStart(msg.answerHeld === true, onHeld => rt.sessions.start(at.workspaceId, {
-                prompt: msg.prompt, ...(onHeld !== undefined ? { onHeld } : {}), ...(msg.followed === true ? { followed: true } : {}),
-                ...(msg.harness !== undefined ? { harness: msg.harness } : {}),
-                ...(msg.thread !== undefined ? { thread: msg.thread } : {}),
-                ...(at.cwd !== undefined ? { cwd: at.cwd } : {}),
-                ...(msg.model !== undefined ? { model: msg.model } : {}),
-                ...(msg.effort !== undefined ? { effort: msg.effort } : {}),
-                ...(msg.permissionMode !== undefined ? { permissionMode: msg.permissionMode } : {}),
-                ...(msg.access !== undefined ? { access: msg.access } : {}),
-                ...(msg.contextWindow !== undefined ? { contextWindow: msg.contextWindow } : {}),
-                ...(msg.fast !== undefined ? { fast: msg.fast } : {}),
-                ...(msg.startedBy !== undefined ? { startedBy: msg.startedBy } : {}),
-                ...(msg.requestId !== undefined ? { requestId: msg.requestId } : {}),
-                ...(msg.attempt !== undefined ? { attempt: msg.attempt } : {}),
-                ...(msg.notify !== undefined ? { notify: msg.notify } : {}),
-                ...(msg.turnToken !== undefined ? { turnToken: msg.turnToken } : {}),
-                ...(msg.title !== undefined ? { title: msg.title } : {}),
-                ...(msg.replaces !== undefined ? { replaces: msg.replaces } : {}),
-                ...(msg.attachments !== undefined ? { attachments: msg.attachments } : {}),
-              }, origin), reply => send({ id: msg.id, ok: true, ...reply }));
+              // A conversation the agent kept outside wsp says where its thread runs, so it is read before the folder is.
+              const resumed = msg.resume === undefined ? undefined : await rt.conversations.placed(msg, msg.resume, origin);
+              const at = resumed ?? (await startAt(rt.workspaces, msg, origin));
+              await answeredStart(msg.answerHeld === true, onHeld => rt.sessions.start(at.workspaceId, startOptionsOf(msg, at, resumed?.outside, onHeld !== undefined ? { onHeld } : {}), origin), reply => send({ id: msg.id, ok: true, ...reply }));
               return;
             }
             case "sessions.warm": {

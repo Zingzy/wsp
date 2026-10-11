@@ -6,6 +6,7 @@ import { Activity, useEffect, type ReactNode } from "react";
 import { ContextMenuHost } from "../actions/ContextMenuHost.js";
 import { CommandPalette } from "../components/palette/CommandPalette.js";
 import { BrowserGuests } from "../components/preview/BrowserGuests.js";
+import { ConversationConfirm } from "./ConversationConfirm.js";
 import { RewindDialogHost } from "../components/chat/RewindDialog.js";
 import { AddComputerDialog } from "../settings/add/AddComputerDialog.js";
 import { FileFinder } from "../files/FileFinder.js";
@@ -66,6 +67,7 @@ const HOSTS = (
     <KeybindingDispatcher />
     <SlateWatcher />
     <CommandPalette />
+    <ConversationConfirm />
     <FileFinder />
     <ContextMenuHost />
     <RewindDialogHost />

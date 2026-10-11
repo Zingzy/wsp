@@ -18,8 +18,8 @@ use wsp_frames::{
     GitPrReviewReply, GitPrViewReply, GitPushReply, GitRepoReadReply, GitRestoreReply, GitRunLogReply, GitSnapshotReply, GitStartOnReply,
     GitUpdateReply, GitWorktreesReply, GuestCliMessage, GuestOpenReply, HostFolderListing, MachineAnswersReply, MachineExecReply,
     MachineHandleReply, MachineLinkRequest, MachineListReply, MachineReachReply, MachineReadingReply, MachineShapeReply, MachineStateReply,
-    PlaceAuthRequest, PlaceCapacity, PlaceProveRequest, SshStartReply, SysHistoryReply, UsageLogsReply, WorktreeRemoval, WorktreeReport,
-    DAEMON_OPS, MACHINE_OPS,
+    PlaceAuthRequest, PlaceCapacity, PlaceProveRequest, SshStartReply, SysHistoryReply, TranscriptsListReply, TranscriptsReadReply,
+    UsageLogsReply, WorktreeRemoval, WorktreeReport, DAEMON_OPS, MACHINE_OPS,
 };
 
 fn fixtures() -> PathBuf {
@@ -316,6 +316,12 @@ fn every_reply_fixture_round_trips_through_the_reply_types() {
                 "UsageLogsReply" => {
                     round_trip::<UsageLogsReply>(&sample, &at);
                 }
+                "TranscriptsListReply" => {
+                    round_trip::<TranscriptsListReply>(&sample, &at);
+                }
+                "TranscriptsReadReply" => {
+                    round_trip::<TranscriptsReadReply>(&sample, &at);
+                }
                 other => panic!("{at}: no reply type here reads {other}"),
             }
         }
@@ -370,6 +376,8 @@ fn every_reply_fixture_round_trips_through_the_reply_types() {
         "MachineStateReply",
         "SshStartReply",
         "SysHistoryReply",
+        "TranscriptsListReply",
+        "TranscriptsReadReply",
         "UsageLogsReply",
     ];
     expected.sort_unstable();

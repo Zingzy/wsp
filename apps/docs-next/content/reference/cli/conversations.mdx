@@ -1,0 +1,21 @@
+# wsp conversations
+
+{/* Written by apps/docs-next/scripts/cli.ts: change the script or its source and run pnpm --filter @wsp/docs-next generate. */}
+
+```text
+usage: wsp conversations [<project>] [--agent <id>]
+  the conversations Claude Code and Codex kept in the project's folder and its
+  worktrees outside wsp, newest first, each with its id, last change, size,
+  branch and title, and whether another app holds it open; wsp run --resume <id>
+  opens a thread on one
+
+  --agent    one agent's conversations alone, by its catalog id; every agent's
+             without it
+  --json     print the raw protocol values, one JSON object per line, with
+             everything else on stderr
+  --state    the state file the host serves
+  --host     run the line against a host on your account, by the name wsp hosts
+             lists it under; WSP_HOST names one for a whole shell
+```
+
+MCP tool: [`conversations`](/reference/mcp-tools#conversations).

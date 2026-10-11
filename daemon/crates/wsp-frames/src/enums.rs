@@ -82,6 +82,16 @@ pub enum UsageLogFormat {
     OpencodeSqlite,
 }
 
+/// Who one row of a transcript read is: the person's message, the agent's words, or one tool call.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "lowercase")]
+pub enum TranscriptVoice {
+    Person,
+    Agent,
+    Tool,
+}
+
 /// What fs.search looks for: file paths, or lines of text inside the files.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export)]

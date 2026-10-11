@@ -20,6 +20,7 @@
 // traversal, the forget of a gone copy and the project trips' dialogs live
 // here; the tiles are ThreadTile beside this file. The surface itself is the
 // shell's sidebar-glass: nothing here paints a background.
+import { openCommandPalette } from "../commandPaletteBus.js";
 import { openProjectSettings } from "../settings/openAt.js";
 import { ChevronDownIcon, CopyIcon, PlusIcon, SquarePenIcon, Trash2Icon } from "lucide-react";
 import { Fragment, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type ReactNode } from "react";
@@ -288,6 +289,7 @@ export function WorkspaceSidebar() {
   const verbs = { ...defaultVerbs, rebuild: api?.rebuild ? rebuild : undefined };
   const projectVerbs: ProjectVerbs = {
     newThread: openProjectHome,
+    resumeConversation: (project: string) => openCommandPalette({ page: "conversations", project }),
     openSettings: openProjectSettings,
     ...(api?.projectsRemove === undefined ? {} : { removeProject: (project: string) => void removeProject(project) }),
   };

@@ -10,7 +10,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { cloneElement, type ReactElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_PREFERENCES, threadForgetRefusal, type ContextMenuItem, type ProjectView, type SessionView, type WorkspaceLook, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { CONVERSATION_WORDS, DEFAULT_PREFERENCES, threadForgetRefusal, type ContextMenuItem, type ProjectView, type SessionView, type WorkspaceLook, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 
 vi.mock("../src/components/ui/tooltip.js", () => ({
   TooltipProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
@@ -341,7 +341,7 @@ describe("a project's menu", () => {
     // The head stands in for the picked project's row, so its menu is that project's.
     rightClick(Array.from(document.querySelectorAll<HTMLElement>("[data-sidebar-search] button")).find(b => b.textContent?.startsWith("the-project"))!);
     await screen.findByRole("menu");
-    expect(labels()).toEqual([NEW_WORKSPACE, PROJECT_WORDS.settings, PROJECT_WORDS.remove]);
+    expect(labels()).toEqual([NEW_WORKSPACE, CONVERSATION_WORDS.menu, PROJECT_WORDS.settings, PROJECT_WORDS.remove]);
     // Two workspaces stand on it, so the removal is held back before any click, by count rather than by name.
     expect(item(PROJECT_WORDS.remove).getAttribute("aria-disabled")).toBe("true");
     expect(refusalOf(PROJECT_WORDS.remove)).toBe(PROJECTS_WORDS.inUse(2));
@@ -360,7 +360,7 @@ describe("a project's menu", () => {
     expect(document.querySelector('[data-row-id="workspace:ws_f"]')).toBeNull();
     rightClick(Array.from(document.querySelectorAll<HTMLElement>("[data-sidebar-search] button")).find(b => b.textContent?.startsWith("the-project"))!);
     await screen.findByRole("menu");
-    expect(labels().slice(0, 3)).toEqual([NEW_WORKSPACE, PROJECT_WORDS.settings, PROJECT_WORDS.remove]);
+    expect(labels().slice(0, 4)).toEqual([NEW_WORKSPACE, CONVERSATION_WORDS.menu, PROJECT_WORDS.settings, PROJECT_WORDS.remove]);
     expect(labels()).toContain(WORKSPACE_WORDS.openTerminal);
     expect(labels()).toContain(WORKSPACE_WORDS.openBrowser);
     // The project's own New thread is the one New thread on the menu.
@@ -382,7 +382,7 @@ describe("a project's menu", () => {
     await mountSidebar({ ...fakeApi([], []), projectsList: async () => [project], projectFolder }, "the-project");
     rightClick(Array.from(document.querySelectorAll<HTMLElement>("[data-sidebar-search] button")).find(b => b.textContent?.startsWith("the-project"))!);
     await screen.findByRole("menu");
-    expect(labels().slice(0, 3)).toEqual([NEW_WORKSPACE, PROJECT_WORDS.settings, PROJECT_WORDS.remove]);
+    expect(labels().slice(0, 4)).toEqual([NEW_WORKSPACE, CONVERSATION_WORDS.menu, PROJECT_WORDS.settings, PROJECT_WORDS.remove]);
     expect(labels()).toContain(WORKSPACE_WORDS.openTerminal);
     expect(labels()).toContain(WORKSPACE_WORDS.openBrowser);
     expect(labels().filter(label => label === NEW_WORKSPACE)).toHaveLength(1);

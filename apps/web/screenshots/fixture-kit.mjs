@@ -4,7 +4,8 @@
 import { HERE_PLACE_ID as HERE, subagentAsked } from "@wsp/protocol";
 import { createHash } from "node:crypto";
 import { homedir, hostname } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { mkdirSync, utimesSync, writeFileSync } from "node:fs";
 
 /** The name wsp gives a workspace of the local kind, which is this computer's host name. */
 export const THIS_COMPUTER = hostname();
@@ -952,3 +953,51 @@ export const tiles = ({ marked = false, snoozedTree = false } = {}) => {
     },
   });
 };
+
+/** One Claude Code conversation's transcript as the CLI writes one: the first line's cwd, entrypoint and branch, the
+ * person's first prompt, the reply, the name the person gave it, and the bulk a long conversation runs to. */
+const claudeTranscript = c => {
+  const at = new Date(ago(c.minutes)).toISOString();
+  const head = { cwd: c.cwd, entrypoint: "cli", gitBranch: c.branch, sessionId: c.id, version: "2.1.296", timestamp: at };
+  return [
+    { type: "user", uuid: "u1", parentUuid: null, isSidechain: false, ...head, message: { role: "user", content: c.firstPrompt } },
+    { type: "assistant", uuid: "a1", parentUuid: "u1", isSidechain: false, ...head, message: { id: "m1", role: "assistant", content: [{ type: "text", text: "On it." }] } },
+    { type: "attachment", uuid: "a2", parentUuid: "a1", ...head, attachment: { type: "note", content: "x".repeat(Math.max(0, c.bytes - 1200)) } },
+    { type: "last-prompt", lastPrompt: c.firstPrompt, leafUuid: "a2", sessionId: c.id },
+    ...(c.title !== undefined ? [{ type: "custom-title", customTitle: c.title, sessionId: c.id }] : []),
+  ]
+    .map(line => JSON.stringify(line))
+    .join("\n");
+};
+
+/** Writes a fixture's conversations into the agents' own stores under the home: a Claude Code transcript in the folder
+ * its project's key names, and a Codex rollout of the size its row says where the stand-in server lists it. Each file
+ * carries the time it was last written to. */
+export function writeConversations(home, state, rows) {
+  for (const c of rows) {
+    const project = state.projects?.[`pr_${c.project}`] ?? Object.values(state.projects ?? {}).find(p => p.name === c.project);
+    if (project === undefined) throw new Error(`a conversation names a project the fixture does not have: ${c.project}`);
+    const when = new Date(ago(c.minutes));
+    if (c.agent === "claude") {
+      const file = join(home, ".claude", "projects", project.path.replace(/[^A-Za-z0-9]/g, "-"), `${c.id}.jsonl`);
+      mkdirSync(dirname(file), { recursive: true });
+      writeFileSync(file, claudeTranscript({ ...c, cwd: project.path }));
+      utimesSync(file, when, when);
+    } else {
+      const file = join(home, ".codex", "sessions", "rollout-" + c.id + ".jsonl");
+      mkdirSync(dirname(file), { recursive: true });
+      writeFileSync(file, "x".repeat(c.bytes));
+      utimesSync(file, when, when);
+    }
+  }
+}
+
+/** The threads a stand-in Codex server lists for a fixture's Codex conversations, in its own shape. */
+export const codexThreads = (home, state, rows) =>
+  rows
+    .filter(c => c.agent === "codex")
+    .map(c => {
+      const project = state.projects?.[`pr_${c.project}`] ?? Object.values(state.projects ?? {}).find(p => p.name === c.project);
+      const at = Math.floor(ago(c.minutes) / 1000);
+      return { id: c.id, preview: c.firstPrompt, name: c.title ?? null, cwd: project?.path, path: join(home, ".codex", "sessions", "rollout-" + c.id + ".jsonl"), source: "vscode", originator: c.wsp === true ? "wsp" : "codex-tui", gitInfo: { branch: c.branch }, createdAt: at, updatedAt: at, recencyAt: at };
+    });

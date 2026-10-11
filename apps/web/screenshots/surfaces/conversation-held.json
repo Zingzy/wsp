@@ -1,0 +1,24 @@
+{
+  "at": "/",
+  "fixture": "conversations",
+  "steps": [
+    "390:key:Escape",
+    "390:sidebar=trigger",
+    "k=project-switcher",
+    "switcher-option=pr_spoo",
+    "menu:k=project-switcher",
+    "menu-item=resume-conversation",
+    "hover:palette-group=conversations",
+    "focus:slot=autocomplete-input",
+    "type:QR code",
+    "key:Enter",
+    "390:key:Escape"
+  ],
+  "wait": "k=conversation-held",
+  "widths": [
+    1440,
+    390
+  ],
+  "reason": "The held pick is one line under the New thread composer, whose 1280 layout the project home's shots already take; 390 is where it reflows.",
+  "settleMs": 700
+}

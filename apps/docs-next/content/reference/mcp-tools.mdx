@@ -2,7 +2,7 @@
 
 {/* Written by apps/docs-next/scripts/mcp-tools.ts: change the script or its source and run pnpm --filter @wsp/docs-next generate. */}
 
-`wsp mcp` serves these 70 tools over stdio to an agent on your computer, and `wsp mcp install --agent <id>` writes it into that agent's own config. A tool answers a failure as a tool error that carries the object `--json` prints.
+`wsp mcp` serves these 71 tools over stdio to an agent on your computer, and `wsp mcp install --agent <id>` writes it into that agent's own config. A tool answers a failure as a tool error that carries the object `--json` prints.
 
 Each tool but `projects_add` is a line of the command line, its words joined with `_`, and that line's page links here.
 
@@ -430,6 +430,39 @@ Sets what the person may set on one computer and answers its row as it now reads
 | `computer.spawn` | object |  |  |
 | `computer.spawnDefault` | object |  |  |
 | `computer.running` | integer |  |  |
+
+## conversations
+
+The conversations the agents kept in a project's folder and its worktrees on the project's computer outside wsp, Claude Code's off its transcripts and Codex's off its own app server, newest first: agent, id, title (the person's name for it, else the agent's, else its last or first prompt), firstPrompt, branch, cwd, lastAt (ms), bytes, origin (terminal, wsp or script), live (another app holds it open now), thread (the wsp thread already on it, which is the one to send into) and letsGo (where the agent refuses a second writer: how soon it lets go of one whose window closed, in its own sentence). A Claude Code conversation a script ran is left out unless it is a wsp thread's. held names an agent whose store did not answer, in two halves. run with resume opens a thread on one; one that is live needs copy.
+
+**Takes**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `project` | string |  | the project, by the name or the id projects lists; absent from a thread, the thread's own project |
+| `agent` | string |  | one agent's conversations alone, one of claude, codex, opencode, cursor; absent lists every agent's |
+
+**Answers**
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `rows` | object[] | yes |  |
+| `rows[].agent` | string | yes |  |
+| `rows[].id` | string | yes |  |
+| `rows[].title` | string | yes |  |
+| `rows[].firstPrompt` | string |  |  |
+| `rows[].branch` | string |  |  |
+| `rows[].cwd` | string | yes |  |
+| `rows[].lastAt` | number | yes |  |
+| `rows[].bytes` | number |  |  |
+| `rows[].origin` | `terminal`, `wsp`, `script` | yes |  |
+| `rows[].live` | boolean | yes |  |
+| `rows[].thread` | string |  |  |
+| `rows[].letsGo` | string |  |  |
+| `held` | object[] | yes |  |
+| `held[].agent` | string | yes |  |
+| `held[].said` | string | yes |  |
+| `held[].fix` | string | yes |  |
 
 ## delete
 
@@ -1213,6 +1246,8 @@ Opens a thread under the named agent, on the model, effort and access mode named
 | `title` | string |  | the thread's name, as a person's: it shows in the sidebar and in the agent's own list from the first second, and the title the host asks the agent for as the turn starts never replaces it; absent lets the thread be titled by its opening words until, seconds in, the agent names it |
 | `replaces` | string |  | a stopped or failed thread this new thread restarts, by id or a prefix of it, as threads lists them: the new thread's row names it, and once the new one starts the host settles it, so the person sees one row for the job; a restart the person starts of a child stands under that child's lead. Refused while that thread or one under it is working, for a thread that already has a restart (name that restart instead), and from a thread for one that is not under it, each before a machine is forked or woken |
 | `files` | string[] |  | paths on this computer, absolute or relative to the folder wsp runs in, of files to send with the message, at most 5. An image (PNG, JPEG, GIF or WebP, up to 10 MB) goes to the agent as an image; any other file, up to 10 MB, lands in the folder the thread works in, under .wsp-files where git lists none of it, and the message names its path. The host reads each file and sends its bytes, so the machine never reaches back for this computer’s files; an image to an agent that reads none is refused naming that agent. |
+| `resume` | string |  | a conversation the agent kept in the project's folder outside wsp, by the id conversations lists: the new thread opens on it, in the folder it ran in, under its own name, with its newest messages written above the message, and nothing of wsp's is written into the agent's own store until the thread is renamed here. Refused with beside, branch or cwd, since the conversation names its folder, where the agent holds no such conversation, where it is a wsp thread already, and where another app holds it open, unless copy |
+| `copy` | boolean |  | with resume, true runs the thread on a copy of the conversation the agent makes (Claude Code's --fork-session, Codex's thread/fork), the original left byte for byte as it was: the answer to one open in another app |
 | `detach` | boolean |  | true answers with the thread id the moment the turn is started, without the reply, and the turn's end reaches whoever notify named; for a turn that runs for minutes or an hour, so this call does not block for it. A wsp thread starts every child with --notify me and ends its turn, and each child's finished line wakes it with that child's whole report. |
 
 **Answers**
@@ -1915,7 +1950,7 @@ The thread's head (by id, or a prefix of it): facts, the thread as threads lists
 | `facts.effort` | string |  |  |
 | `facts.contextWindow` | string |  |  |
 | `facts.turnId` | string |  |  |
-| `events` | object or object or object or object or object or object or object or object or object or object or object or object or object or object or object or object or object or object or object[] | yes |  |
+| `events` | object or object or object or object or object or object or object or object or object or object or object or object or object or object or object or object or object or object or object or object[] | yes |  |
 | `pos` | integer | yes |  |
 | `total` | integer | yes |  |
 

@@ -34,6 +34,10 @@ import {
 } from "./CommandPalette.logic.js";
 import { CommandPaletteContent } from "./CommandPaletteContent.js";
 import { CommandPaletteResults } from "./CommandPaletteResults.js";
+import { CONVERSATIONS_PAGE } from "./conversationsPage.js";
+import { pickConversation, useConversationsStore } from "../../shell/conversations.js";
+import { placeNames } from "../../sidebar/workspaceRows.js";
+import { projectOfKey } from "../../protocol/store/selectors.js";
 import { NEW_THREAD_PAGE, buildPaletteItems, pickedRow, type PaletteHandlers, type PaletteItems } from "./paletteItems.js";
 
 const NO_ITEMS: ReadonlyArray<CommandPaletteActionItem> = [];
@@ -41,7 +45,7 @@ const NO_HITS: ReadonlyArray<SessionSearchHit> = [];
 const SHUT: PaletteItems = { actionItems: [], workspaceItems: [], recentThreadItems: [], threadSearchItems: [], messageSearchItems: [] };
 /** How long the typing rests before the words go to the host. */
 const MESSAGE_SEARCH_WAIT_MS = 200;
-const PAGES = { "new-thread": NEW_THREAD_PAGE } as const;
+const PAGES = { "new-thread": NEW_THREAD_PAGE, conversations: CONVERSATIONS_PAGE } as const;
 
 export function CommandPalette({ keybindings: given }: { keybindings?: ResolvedKeybindingsConfig }) {
   const live = useKeybindings();
@@ -66,6 +70,11 @@ export function CommandPalette({ keybindings: given }: { keybindings?: ResolvedK
   const selectedThreadId = useSelectedThreadId();
   const toggleRightPanel = useRightPanelStore(s => s.toggleVisibility);
   const verbs = useWorkspaceVerbs();
+  /** The project the conversations page lists: the one its menu named, else the one on screen as the palette opened. */
+  const onScreen = useStore(s => s.projectHome ?? (s.selectedId === null ? undefined : projectOfKey(s, s.selectedId)) ?? null);
+  const [named, setNamed] = useState<string | null>(null);
+  const listed = named ?? onScreen;
+  const conversationsRead = useConversationsStore(s => (listed === null ? undefined : s.answers[listed]));
 
   useEffect(
     () =>
@@ -77,12 +86,18 @@ export function CommandPalette({ keybindings: given }: { keybindings?: ResolvedK
         setQuery(detail.query ?? "");
         setHighlightedItemValue(null);
         setPages(detail.page === undefined ? [] : [PAGES[detail.page]]);
+        setNamed(detail.project ?? null);
         setOpen(true);
       }),
     [],
   );
 
   const projects = useSidebarProjects();
+  const onConversations = open && pages.at(-1) === CONVERSATIONS_PAGE;
+  // Read each time the page opens, the list the host last answered standing meanwhile.
+  useEffect(() => {
+    if (onConversations && listed !== null) void useConversationsStore.getState().read(listed);
+  }, [listed, onConversations]);
   const [found, setFound] = useState<{ query: string; hits: ReadonlyArray<SessionSearchHit> } | null>(null);
   const words = pages.length > 0 || query.startsWith(">") ? "" : query.trim();
   useEffect(() => {
@@ -129,9 +144,13 @@ export function CommandPalette({ keybindings: given }: { keybindings?: ResolvedK
   // what it last drew for its closing frames.
   const built = useRef<PaletteItems>(SHUT);
   const items = useMemo(() => {
-    if (open) built.current = buildPaletteItems({ projects, selectedId, query, messageHits, canCreate: api !== null, recorded, picks, asks, handlers, verbs, places });
+    if (open) {
+      const project = listed === null ? null : (recorded.find(p => p.id === listed) ?? null);
+      const conversations = { project, computer: project === null ? "" : (placeNames(places).get(project.computer) ?? project.computer), read: conversationsRead, pick: (row: Parameters<typeof pickConversation>[1]) => project !== null && pickConversation(project.id, row) };
+      built.current = buildPaletteItems({ projects, selectedId, query, messageHits, canCreate: api !== null, recorded, picks, asks, handlers, verbs, places, conversations });
+    }
     return built.current;
-  }, [api, asks, handlers, messageHits, open, picks, places, projects, query, recorded, selectedId, verbs]);
+  }, [api, asks, conversationsRead, handlers, listed, messageHits, open, picks, places, projects, query, recorded, selectedId, verbs]);
   // A page whose row is gone or held, as the last project's removal leaves it, reads as the root.
   const page = useMemo(() => {
     const at = pages.at(-1);
@@ -161,6 +180,7 @@ export function CommandPalette({ keybindings: given }: { keybindings?: ResolvedK
     setQuery("");
     setHighlightedItemValue(null);
     setPages([]);
+    setNamed(null);
   };
 
   const openPage = (item: CommandPaletteSubmenuItem): void => {

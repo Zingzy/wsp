@@ -1,0 +1,22 @@
+[
+  {
+    "id": 1,
+    "op": "transcripts.list",
+    "root": "~/.claude/projects",
+    "dirs": [
+      "-home-dev-proj",
+      "-home-dev-proj-wt"
+    ],
+    "cwds": [
+      "/home/dev/proj",
+      "/home/dev/proj-wt"
+    ]
+  },
+  {
+    "id": 1,
+    "op": "transcripts.list",
+    "root": "/home/dev/.config/claude/projects",
+    "dirs": [],
+    "cwds": []
+  }
+]
