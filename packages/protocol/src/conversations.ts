@@ -78,15 +78,27 @@ export interface ConversationRoad {
 
 /** An agent's own store of conversations, read on the project's computer. `list` answers the conversations whose
  * recorded folder is one of `cwds`; `live` the ids a running process holds now, null where nothing could say;
+ * `stamp` a few words that change when a conversation is added to the folders' store, read without starting the agent;
  * `earlier` one conversation's newest messages, gone where the store holds no such id, and open where `probe` asked it
  * and another process is writing it. `letsGo` says the agent refuses a second writer and lets go of a closed one,
  * and how soon, in a sentence. */
 export interface ConversationStore {
   list(cwds: readonly string[], road: ConversationRoad): Promise<StoredConversation[]>;
   live?(road: ConversationRoad): Promise<ReadonlySet<string> | null>;
+  stamp?(cwds: readonly string[], road: ConversationRoad): Promise<string>;
   earlier(id: string, o: { cwds: readonly string[]; last: number; probe: boolean }, road: ConversationRoad): Promise<ConversationEarlier | "gone" | "open">;
   readonly letsGo?: string;
 }
+
+/** A store read that fails the same way until something changes on the computer, the agent not installed there; a
+ * list kept with one answers the visits of its minute, where any other failure is read again on the next visit. */
+export const lastingStoreError = (message: string): Error => Object.assign(new Error(message), { lasting: true });
+export const isLastingStoreError = (e: unknown): boolean => e instanceof Error && (e as { lasting?: unknown }).lasting === true;
+
+/** A line per folder, each a shell word: its mtime in seconds and how many names it holds, blank where it is not
+ * there; GNU stat, then BSD's. A transcript or rollout added moves its folder, one appended to does not. */
+export const foldersStampCommand = (folders: readonly string[]): string =>
+  `for d in ${folders.join(" ")}; do printf '%s %s\\n' "$(stat -c %Y "$d" 2>/dev/null || stat -f %m "$d" 2>/dev/null)" "$(ls -A "$d" 2>/dev/null | wc -l)"; done`;
 
 /** How many of a conversation's newest messages a thread opens with. */
 export const EARLIER_MESSAGES = 200;

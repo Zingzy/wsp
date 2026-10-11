@@ -8,7 +8,7 @@
 // <id> already has an active writer" in about 20 ms, and its TUI's daemon lets go about a minute after its window
 // closes (measured twice on 0.162.1). So whether a thread is open elsewhere is learned by resuming it, the way a turn
 // would, in a server that ends at once.
-import { ENV_FROM_INPUT, programWord, shellQuote, type AgentLaunch, type ConversationLine, type ConversationOrigin, type StoredConversation } from "@wsp/protocol";
+import { ENV_FROM_INPUT, foldersStampCommand, lastingStoreError, programWord, shellQuote, type AgentLaunch, type ConversationLine, type ConversationOrigin, type ConversationStore, type StoredConversation } from "@wsp/protocol";
 import { answersOf, appServerScript, initializeRequest, notification, request, type ServerAnswer } from "@wsp/catalog";
 
 /** Codex's words for a thread another process writes, the -32600 answer's own (0.162.1). */
@@ -36,9 +36,15 @@ function rec(value: unknown): Record<string, unknown> | undefined {
 const str = (value: unknown): string | undefined => (typeof value === "string" && value !== "" ? value : undefined);
 const num = (value: unknown): number | undefined => (typeof value === "number" && Number.isFinite(value) ? value : undefined);
 
-/** One script: the server opened under the environment off its input, then each stage's requests. */
-function script(launch: AgentLaunch | undefined, stages: { lines: string[]; answers: number }[]): string {
-  return `cd ~ && ${ENV_FROM_INPUT}\n${appServerScript(programWord("codex", launch), stages)}`;
+/** What a list prints in place of the server's answers where the program is not on the turn's PATH. */
+const NOT_INSTALLED = "wsp-codex-not-installed";
+
+/** One script: the server opened under the environment off its input, then each stage's requests; `installed` first
+ * says so where the program is not there. */
+function script(launch: AgentLaunch | undefined, stages: { lines: string[]; answers: number }[], o: { installed?: true } = {}): string {
+  const program = programWord("codex", launch);
+  const installed = o.installed === true ? `command -v ${program} > /dev/null 2>&1 || { echo ${NOT_INSTALLED}; exit 0; }\n` : "";
+  return `cd ~ && ${ENV_FROM_INPUT}\n${installed}${appServerScript(program, stages)}`;
 }
 
 const opening = (): { lines: string[]; answers: number } => ({ lines: [initializeRequest(INIT), notification("initialized")], answers: 1 });
@@ -46,7 +52,7 @@ const opening = (): { lines: string[]; answers: number } => ({ lines: [initializ
 /** One page of the folder's threads, the interactive ones (thread/list leaves `exec` runs out by default), the most
  * recently active first. */
 export function listCommand(o: { cwds: readonly string[]; cursor?: string; launch?: AgentLaunch }): string {
-  return script(o.launch, [opening(), { lines: [request(ASK, "thread/list", { cwd: [...o.cwds], sortKey: "recency_at", limit: PAGE, ...(o.cursor !== undefined ? { cursor: o.cursor } : {}) })], answers: 1 }]);
+  return script(o.launch, [opening(), { lines: [request(ASK, "thread/list", { cwd: [...o.cwds], sortKey: "recency_at", limit: PAGE, ...(o.cursor !== undefined ? { cursor: o.cursor } : {}) })], answers: 1 }], { installed: true });
 }
 
 /** Who opened a thread, off the source and originator its index row carries. */
@@ -83,11 +89,20 @@ function answerOf(stdout: string, id: number, what: string): Record<string, unkn
 }
 
 export function parseList(stdout: string): { rows: (StoredConversation & { path?: string })[]; next?: string } {
+  if (stdout.split("\n").some(l => l.trim() === NOT_INSTALLED)) throw lastingStoreError("codex is not installed");
   const result = answerOf(stdout, ASK, "thread/list");
   const data = Array.isArray(result.data) ? result.data : [];
   const next = str(result.nextCursor);
   return { rows: data.flatMap(t => rowOf(rec(t) ?? {}) ?? []), ...(next !== undefined ? { next } : {}) };
 }
+
+/** The stamp of the newest day folder under sessions/, where Codex writes each new thread's rollout (YYYY/MM/DD on
+ * 0.162.1); a thread from any folder moves it, which only costs one more list. */
+export const newestDayStampCommand = (home: string): string =>
+  `d=$(ls -d ${shellQuote(`${home}/sessions`)}/*/*/* 2>/dev/null | tail -n 1); ${foldersStampCommand(['"$d"'])}`;
+
+/** What the store says without asking Codex: how soon it lets go of a thread, and the newest day folder's stamp. */
+export const storeMarks = (home: string): Pick<ConversationStore, "letsGo" | "stamp"> => ({ letsGo: LETS_GO, stamp: (_cwds, road) => road.exec(newestDayStampCommand(home)) });
 
 /** The size of each file, one line each in order, blank where it could not be read: GNU stat, then BSD's. */
 export function sizesCommand(paths: readonly string[]): string {
