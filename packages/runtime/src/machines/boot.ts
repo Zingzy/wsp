@@ -11,6 +11,19 @@ import type { WorkspaceRecord, LiveWorkspace, FoundMachine } from "../types/wiri
 import { WORKSPACES, PROJECTS, TRANSCRIPTS, SESSIONS, HELD_STARTS, type HeldStartRecord, READS, READS_ID, RESTARTED_REASON, goneLogLine, labelOf, restartCutLine, turnWritten, type TranscriptRecord, type TurnLive, type TurnAsked, readAsked, readScope, readRoad, readSteered, type ThreadRecord, type ThreadStamps, type TreeTalk, type SessionIndexRecord, BUILDERS, OWNER, HELD_TTL_MS, pidAlive, type BuilderRecord, type LiveBuilder, deadMachine, isAbsentMachine, absentMachine, type StoredBuilder } from "../types/internal.js";
 import type { RuntimeContext, BootArea } from "../context.js";
 
+/** How long the load waits on the provider's reads of its records' machines, all of them together. A host answers
+ * its app off its records: twenty reads one after another at a slow provider held a start past the app's wait. */
+export const LOAD_READS_MS = 1_500;
+
+/** The load's one deadline, and every read still out at it by the record it was for. */
+interface LoadReads {
+  until: number;
+  late: Map<string, Promise<Machine>>;
+}
+
+/** What a record held while its machine's read is still out says if anything asks it before the read lands. */
+const lateReadLine = (machineId: string): string => `the provider has not yet answered for ${machineId}; it is read in once it does`;
+
 export function bootArea(ctx: RuntimeContext): BootArea {
   const {
     store, local, placeDoor, bus, clock, hostId, deviceDoor, live, projectsHeld, setups, builders, threadRecords,
@@ -69,6 +82,8 @@ export function bootArea(ctx: RuntimeContext): BootArea {
       if ((await readGone(at, stored.id)) === "gone") await store.delete(BUILDERS, stored.id);
       return;
     }
+    // A read the load stopped waiting for can land after the host closed.
+    if (ctx.state.closed) return;
     // The view get() fetched is read once: a second read would reset the provider's idle timer again.
     const seen = machine.seen;
     const state = seen?.state ?? (await machine.state());
@@ -80,6 +95,17 @@ export function bootArea(ctx: RuntimeContext): BootArea {
     if (stored.firstLife === true && !firstLife) await store.put(BUILDERS, record.id, record);
     builders.set(record.id, liveOf(record, machine));
     if (stored.sealed !== undefined) ctx.armGrace(record.id, stored.sealed.at);
+  };
+  /** One read of a stored builder at a time, which the load and every refresh while it is out share. */
+  const admitting = new Map<string, Promise<void>>();
+  const admitOnce = (stored: StoredBuilder): Promise<void> => {
+    const out = admitting.get(stored.id);
+    if (out !== undefined) return out;
+    const read = admit(stored);
+    admitting.set(stored.id, read);
+    const done = (): void => void admitting.delete(stored.id);
+    read.then(done, done);
+    return read;
   };
   /** The store is the truth across processes, and another wsp (an init beside this host, a second host) writes it
    * after this one hydrated: every decision that kills or reuses a builder reads it first. A row this process has
@@ -97,7 +123,7 @@ export function bootArea(ctx: RuntimeContext): BootArea {
       if (pass !== passes) return latest;
       seen.add(stored.id);
       const current = builders.get(stored.id);
-      if (current === undefined) await admit(stored);
+      if (current === undefined) await admitOnce(stored);
       else if (current.life !== "own") {
         const record: BuilderRecord = { ...stored, firstLife: stored.firstLife === true && current.builder.firstLife, size: stored.size ?? current.record.size };
         Object.assign(current, liveOf(record, current.builder.machine));
@@ -105,6 +131,46 @@ export function bootArea(ctx: RuntimeContext): BootArea {
     }
     if (pass !== passes) return latest;
     for (const [id, b] of [...builders]) if (!seen.has(id) && b.life !== "own") builders.delete(id);
+  };
+
+  /** The provider's read of a record's machine, or the one the load already asked. At the load it waits no later
+   * than the load's one deadline: a read still out then leaves the record held on the word it was left with, and the
+   * read goes on, for the record's boot work to load once it lands. */
+  const readWithin = (at: MachineBackend, stored: WorkspaceRecord, load: LoadReads | undefined, held: (e: unknown) => Machine, asked = at.get(stored.machineId)): Promise<Machine> => {
+    if (load === undefined) return asked;
+    return new Promise<Machine>((resolve, reject) => {
+      const cancel = clock.schedule(
+        () => {
+          load.late.set(stored.id, asked);
+          resolve(held(new Error(lateReadLine(stored.machineId))));
+        },
+        Math.max(0, load.until - clock.now()),
+        { unref: true },
+      );
+      asked.then(
+        machine => (cancel(), resolve(machine)),
+        (e: unknown) => (cancel(), reject(e)),
+      );
+    });
+  };
+
+  /** A record the load held while its machine's read was still out, loaded once that read lands as an on-time read
+   * is: a read that failed holds the record on what the provider said, then takes the road every held record takes.
+   * Answers the entry whose daemon wants syncing, as the load does. */
+  const loadLate = async (id: string, read: Promise<Machine>): Promise<LiveWorkspace | undefined> => {
+    ctx.rereading.add(id);
+    let landed: LiveWorkspace | undefined;
+    try {
+      await read.catch(() => undefined);
+      const raw = await store.get(WORKSPACES, id);
+      if (raw !== undefined && !ctx.state.closed) landed = await hydrateWorkspace(raw, undefined, undefined, read);
+    } catch (e) {
+      console.warn(`workspace ${id} was not loaded once its provider answered: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      ctx.rereading.delete(id);
+    }
+    if (!ctx.state.closed && isHeldAway(id)) await rereadHeld(id, "record load");
+    return landed;
   };
 
   /** Whether this host holds that workspace by a stand-in for a machine it could not ask anything about: the one
@@ -149,7 +215,7 @@ export function bootArea(ctx: RuntimeContext): BootArea {
    * the record follows. Read once for every record at hydration, and again for a record on a place the moment that
    * place dials in, since until then nothing could be asked about its machine. Answers the entry whose daemon wants
    * syncing, since the sync waits out a running turn and only the caller knows when its session rows are in. */
-  const hydrateWorkspace = async (raw: unknown, seen?: FoundMachine): Promise<LiveWorkspace | undefined> => {
+  const hydrateWorkspace = async (raw: unknown, seen?: FoundMachine, load?: LoadReads, asked?: Promise<Machine>): Promise<LiveWorkspace | undefined> => {
     const stored = raw as WorkspaceRecord;
     const kind = stored.kind;
     // A record whose kind this host wired no module for, or whose place forks nothing any more, is left as it
@@ -181,7 +247,7 @@ export function bootArea(ctx: RuntimeContext): BootArea {
     };
     const machine =
       seen?.machine ??
-      (await at.get(stored.machineId).catch((e: unknown) => {
+      (await readWithin(at, stored, load, heldAway, asked).catch((e: unknown) => {
         if (!isMissing(e)) return heldAway(e);
         // One 404 is not gone: a gateway copy that never held the machine answers it while the other bills on. A live
         // record is held as it was and confirmed once the host serves (rereadHeld), since the reads that confirm a
@@ -272,8 +338,9 @@ export function bootArea(ctx: RuntimeContext): BootArea {
       }
       await setups.load();
       const toSync: LiveWorkspace[] = [];
+      const load: LoadReads = { until: clock.now() + LOAD_READS_MS, late: new Map() };
       for (const raw of await store.list(WORKSPACES)) {
-        const entry = await hydrateWorkspace(raw);
+        const entry = await hydrateWorkspace(raw, undefined, load);
         if (entry !== undefined) toSync.push(entry);
       }
       // A state file an older build wrote holds the transcripts inside it: each is written to its files whole, and
@@ -383,11 +450,15 @@ export function bootArea(ctx: RuntimeContext): BootArea {
           sessions.set(view.id, row);
         }
       }
+      // Each record the load held while its read was out, loaded once the read lands; whatever the load does with
+      // such a record's entry waits for this first.
+      const landing = new Map([...load.late].map(([id, read]) => [id, loadLate(id, read)]));
       for (const row of unread) {
         const { workspaceId, threadId, cwd, claudeSessionId, id, startedAt } = row.view;
-        const entry = live.get(workspaceId)!;
         const from = row.snapshot!;
         void (async () => {
+          await landing.get(workspaceId);
+          const entry = live.get(workspaceId)!;
           const read =
             threadId === undefined ||
             cwd === undefined ||
@@ -445,14 +516,18 @@ export function bootArea(ctx: RuntimeContext): BootArea {
       // run left over from a host that never came back to read it, whose harness holds the machine's memory for its
       // life, and every run started there while its listing was out. The daemon sync waits out a running turn, so it
       // starts once the rows the machine no longer holds are settled.
-      for (const entry of live.values()) {
-        const id = entry.record.id;
+      for (const held of live.values()) {
+        const id = held.record.id;
+        const late = landing.get(id);
         const work = (async () => {
+          const landed = await late;
+          const entry = late === undefined ? held : (landed ?? live.get(id));
+          if (entry === undefined) return;
           // A worktree's dependency mounts went with a restart of this computer.
           if (entry.record.worktree?.made === true) await ctx.worktreeMounted(entry);
           await reopen(left.filter(s => s.view.workspaceId === id));
           await ctx.sweepRuns(entry);
-          if (toSync.includes(entry)) void ctx.syncDaemon(entry);
+          if (late === undefined ? toSync.includes(entry) : landed !== undefined) void ctx.syncDaemon(entry);
         })();
         ctx.bootWork.set(id, work.catch((e: unknown) => console.warn(`the turns and runs on ${id} were not settled: ${e instanceof Error ? e.message : String(e)}`)).finally(() => ctx.bootWork.delete(id)));
       }
@@ -478,7 +553,17 @@ export function bootArea(ctx: RuntimeContext): BootArea {
       await deviceDoor.revokeAsides();
       // Each start waits for its thread's workspace to settle its turns, so a line meets the turn re-opened there.
       void ctx.deliverOwed().catch((e: unknown) => console.warn(`the lines owed to threads were not sent: ${e instanceof Error ? e.message : String(e)}`));
-      for (const raw of await store.list(BUILDERS)) await admit(raw as StoredBuilder);
+      // Each builder is read beside the others, and the load waits for them no later than its one deadline: one still
+      // out is admitted when its read lands, and a refresh before that waits on the same read.
+      const admitted = Promise.all(
+        ((await store.list(BUILDERS)) as StoredBuilder[]).map(b =>
+          admitOnce(b).catch((e: unknown) => console.warn(`builder ${b.id} was not read, so the next look at the builders reads it again: ${e instanceof Error ? e.message : String(e)}`)),
+        ),
+      );
+      await new Promise<void>(resolve => {
+        const cancel = clock.schedule(resolve, Math.max(0, load.until - clock.now()), { unref: true });
+        void admitted.then(() => (cancel(), resolve()));
+      });
       // Not waited on: a fetch of a big copy's branches takes seconds, and the records it drops leave as they go.
       ctx.state.copiesMoving = ctx.moveOldCopies().catch((e: unknown) => console.warn(`the move off old copies stopped: ${e instanceof Error ? e.message : String(e)}`));
       ctx.armSweep();
@@ -500,8 +585,10 @@ export function bootArea(ctx: RuntimeContext): BootArea {
     // A thread named here words a refusal only where it is of the caller's tree and on this record, which it knows.
     const thread = o.thread !== undefined && ctx.threadRecords.get(o.thread)?.workspaceId === id && ctx.drivesThread(o.thread, origin) ? o.thread : undefined;
     ctx.refuseRelayed(entry.record, origin, o.act, thread);
-    if (o.now !== true) await ctx.bootWork.get(id);
-    return entry;
+    if (o.now === true) return entry;
+    await ctx.bootWork.get(id);
+    // The boot work loads a record the load held while its machine's read was out, onto an entry of its own.
+    return live.get(id) ?? entry;
   };
   /** A lead's child named by id or by name, refused for a workspace that is not that lead's child. */
   const childOf = async (lead: LiveWorkspace, ref: string, origin?: Caller, threads: { lead?: string; child?: string } = {}): Promise<LiveWorkspace> => {
@@ -532,7 +619,7 @@ export function bootArea(ctx: RuntimeContext): BootArea {
     const entry = live.get(row.workspaceId);
     if (entry === undefined || entry.creating || !reachesRow(row, origin, talk)) return undefined;
     await ctx.bootWork.get(row.workspaceId);
-    return entry;
+    return live.get(row.workspaceId) ?? entry;
   };
   /** Rows as a listing answers them: each with the stamps and marks its thread's record keeps, and with what only a
    * live turn knows, which rides the answer and never the row. */

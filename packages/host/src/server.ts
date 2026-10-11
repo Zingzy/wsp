@@ -156,6 +156,9 @@ export interface HostHandle extends WorkspaceRoads {
  * there, which the runtime reads off the pair its place door signs with. */
 type DoorAt = Omit<PlaceDoorView, "hostKey"> & { backPort?: number };
 
+/** How long a starting host waits on its provider's start-up reads before it reports itself up without them. */
+export const START_READS_MS = 2_000;
+
 /** Orphan sweep period after the one at start. Matches the age a stray
  * workspace machine must reach before reap treats it as abandoned. */
 export const REAP_INTERVAL_MS = 10 * 60_000;
@@ -683,24 +686,32 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
   let sweeping: Promise<void> | undefined;
   const sweep = (listSpared: boolean): Promise<void> =>
     (sweeping ??= sweepOrphans(rt, log, listSpared).finally(() => (sweeping = undefined)));
-  await sweep(true);
-  for (const b of await rt.golden.builders()) {
-    if (b.foreignOwner !== undefined) log(`reap: left alone ${b.id}: recorded builder wearing another setup's owner label (${b.foreignOwner}); never touched by this host`);
-    else if (b.heldBy !== undefined) log(`reap: left alone ${b.id}: your earlier builder from this setup, in use by another wsp process (pid ${b.heldBy.pid}); never touched by this host`);
-    else if (b.building === true) log(`reap: left alone ${b.id}: your earlier builder from this setup; its setup never finished; the next sweep stops it`);
-    else if (b.sealed !== undefined) log(describeSealed(b, b.sealed, rt.backend.pricing.rateUsdPerHour(b.size)));
-    else if (b.sealable === true) log(describeKept(b, rt.backend.pricing.rateUsdPerHour(b.size)));
-  }
-  // No provider, no request: a host with no key has no account to list and says that where the line would be.
-  if (opts.provider === NO_PROVIDER) log(noProviderStorageLine(opts.statePath));
-  else {
-    try {
-      const storage = await rt.golden.storage();
-      if (storage !== undefined && storage.count > 0) log(describeStorage(storage));
-    } catch (e) {
-      log(`storage: snapshot listing failed (${e instanceof Error ? e.message : String(e)})`);
+  // What the provider says at start: the sweep, the builders and the storage line. Waited on for a moment, so a host
+  // whose provider answers says them before it reports itself up; one whose provider never answers comes up all the
+  // same, its stop signals and address lines with it, and says them once each read ends at its cap.
+  const startReads = (async () => {
+    await sweep(true);
+    for (const b of await rt.golden.builders()) {
+      if (b.foreignOwner !== undefined) log(`reap: left alone ${b.id}: recorded builder wearing another setup's owner label (${b.foreignOwner}); never touched by this host`);
+      else if (b.heldBy !== undefined) log(`reap: left alone ${b.id}: your earlier builder from this setup, in use by another wsp process (pid ${b.heldBy.pid}); never touched by this host`);
+      else if (b.building === true) log(`reap: left alone ${b.id}: your earlier builder from this setup; its setup never finished; the next sweep stops it`);
+      else if (b.sealed !== undefined) log(describeSealed(b, b.sealed, rt.backend.pricing.rateUsdPerHour(b.size)));
+      else if (b.sealable === true) log(describeKept(b, rt.backend.pricing.rateUsdPerHour(b.size)));
     }
-  }
+    // No provider, no request: a host with no key has no account to list and says that where the line would be.
+    if (opts.provider === NO_PROVIDER) log(noProviderStorageLine(opts.statePath));
+    else {
+      try {
+        const storage = await rt.golden.storage();
+        if (storage !== undefined && storage.count > 0) log(describeStorage(storage));
+      } catch (e) {
+        log(`storage: snapshot listing failed (${e instanceof Error ? e.message : String(e)})`);
+      }
+    }
+  })().catch((e: unknown) => log(`start: the provider's reads failed (${e instanceof Error ? e.message : String(e)})`));
+  let waited: ReturnType<typeof setTimeout> | undefined;
+  await Promise.race([startReads, new Promise<void>(resolve => (waited = setTimeout(resolve, START_READS_MS)))]);
+  clearTimeout(waited);
   const reapTimer = setInterval(() => void sweep(false), REAP_INTERVAL_MS);
   opts.release?.start();
 

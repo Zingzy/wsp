@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { execFailedLine, imageServedWaitLine, machineUnreachableLine, napRefusedLine, offeredSize, RESUME_UNANSWERED, sizeRefusal, snapshotListedRefusedLine, snapshotListedWaitLine } from "@wsp/protocol";
-import { ExecFailedError, fetchCapMs, isCapped, isMissing, MachineUnreachableError, MoveUnansweredError, NapRefusedError, NotFirstLifeError, ResumeUnansweredError, type RetryClock } from "../src/errors.js";
+import { ExecFailedError, PROVIDER_READ_CAP_MS, fetchCapMs, isCapped, isMissing, MachineUnreachableError, MoveUnansweredError, NapRefusedError, NotFirstLifeError, ResumeUnansweredError, type RetryClock } from "../src/errors.js";
 import { IDLE_TIMEOUT_MAX_MS, PREVIEW_TTL_MS, previewTokenExpiry, REQUEST_ID_HEADER, RESUME_CAP_MS, SOLARI_INLINE_MAX_MS, SOLARI_LIFECYCLE, SOLARI_PRICING, SolariBackend, type MoveBudgets } from "../src/solari-backend.js";
 import { BUILDER_DISK_GB } from "../src/tool-sizes.js";
 import { EXEC_ENV } from "../src/golden-import.js";
@@ -914,13 +914,13 @@ describe("a pause and a resume the provider does not answer", () => {
 
   it("ships four minutes for a pause, half a minute for a resume call and for a read, and takes shorter ones for tests", () => {
     const b = new SolariBackend({ apiKey: "k", fetch: fakeFetch({}) });
-    expect(b.budgets).toEqual({ pauseMs: 4 * 60_000, resumeCapMs: RESUME_CAP_MS, stateReadMs: 30_000 });
-    expect(new SolariBackend({ apiKey: "k", fetch: fakeFetch({}), budgets: { pauseMs: 40 } }).budgets).toEqual({ pauseMs: 40, resumeCapMs: 30_000, stateReadMs: 30_000 });
+    expect(b.budgets).toEqual({ pauseMs: 4 * 60_000, resumeCapMs: RESUME_CAP_MS, stateReadMs: 30_000, readMs: PROVIDER_READ_CAP_MS });
+    expect(new SolariBackend({ apiKey: "k", fetch: fakeFetch({}), budgets: { pauseMs: 40 } }).budgets).toEqual({ pauseMs: 40, resumeCapMs: 30_000, stateReadMs: 30_000, readMs: PROVIDER_READ_CAP_MS });
   });
 });
 
 describe("the cap the caller puts on one call", () => {
-  it("a resume carries its cap and a pause half its budget into the fetch; a read of the machine carries none", async () => {
+  it("a resume carries its cap, a pause half its budget and a read of the machine the read's cap into the fetch", async () => {
     const seen: boolean[] = [];
     const f = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
       seen.push(init?.signal !== undefined && init.signal !== null);
@@ -930,7 +930,7 @@ describe("the cap the caller puts on one call", () => {
     const m = await b.get("x");
     await m.pause();
     await m.resume();
-    expect(seen).toEqual([false, true, true]);
+    expect(seen).toEqual([true, true, true]);
   });
 
   it("the caller's own signal ends the call, so a resume nobody waits on is not left running behind them", async () => {
