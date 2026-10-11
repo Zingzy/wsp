@@ -37,6 +37,9 @@ export interface PluginIo {
   peek(groups: readonly PeekGroup[]): Promise<Peeked | undefined>;
   /** The line's stdout where it exits 0; nothing where it fails or could not run. */
   run(line: string): Promise<string | undefined>;
+  /** A config file there changed to the text `change` makes of it (nothing where there is no file), written as the
+   * login by the one config write, inside `base`. Only a switch has it; it throws the write's refusal. */
+  edit?(file: string, base: string, change: (text: string | undefined) => string): Promise<void>;
 }
 
 /** A project whose folders a read covers, its path absolute. */

@@ -655,7 +655,7 @@ Every plugin of each agent on one computer or where a thread runs, one row per a
 | `plugins[].scope` | `user`, `project`, `local` | yes |  |
 | `plugins[].project` | object |  |  |
 | `plugins[].on` | boolean | yes |  |
-| `plugins[].missing` | `folder`, `marketplace`, `unlisted` |  |  |
+| `plugins[].missing` | `folder`, `marketplace`, `unlisted`, `uninstalled` |  |  |
 | `plugins[].path` | string |  |  |
 | `plugins[].setIn` | string |  |  |
 | `plugins[].description` | string |  |  |
@@ -664,7 +664,7 @@ Every plugin of each agent on one computer or where a thread runs, one row per a
 
 ## plugins_disable
 
-Turns one agent's plugin off on one computer or where a thread runs, by its id and agent. Written for the login the computer was added with, where that agent's own command reads it: Claude Code's user settings through claude plugin enable or disable, Codex's config.toml through its app server's config write, which refuses a file changed since wsp read it. A plugin plugins does not list, a missing one, and one a project's settings switch are refused. A turn running now keeps what it loaded; the next one follows. A napping machine is not woken. The report there reads again at once. Answers its row after.
+Turns one agent's plugin off on one computer or where a thread runs, by its id and agent. Written for the login the computer was added with, where that agent's own command reads it: Claude Code's user settings, its enabledPlugins key written as claude plugin enable or disable writes it but with nothing downloaded first, Codex's config.toml through its app server's config write, which refuses a file changed since wsp read it. A plugin plugins does not list, a missing one, and one a project's settings switch are refused. A turn running now keeps what it loaded; the next one follows. A napping machine is not woken. The report there reads again at once. Answers its row after.
 
 **Takes**
 
@@ -688,7 +688,7 @@ Turns one agent's plugin off on one computer or where a thread runs, by its id a
 | `plugin.scope` | `user`, `project`, `local` | yes |  |
 | `plugin.project` | object |  |  |
 | `plugin.on` | boolean | yes |  |
-| `plugin.missing` | `folder`, `marketplace`, `unlisted` |  |  |
+| `plugin.missing` | `folder`, `marketplace`, `unlisted`, `uninstalled` |  |  |
 | `plugin.path` | string |  |  |
 | `plugin.setIn` | string |  |  |
 | `plugin.description` | string |  |  |
@@ -697,7 +697,7 @@ Turns one agent's plugin off on one computer or where a thread runs, by its id a
 
 ## plugins_enable
 
-Turns one agent's plugin on again on one computer or where a thread runs, by its id and agent. Written for the login the computer was added with, where that agent's own command reads it: Claude Code's user settings through claude plugin enable or disable, Codex's config.toml through its app server's config write, which refuses a file changed since wsp read it. A plugin plugins does not list, a missing one, and one a project's settings switch are refused. A turn running now keeps what it loaded; the next one follows. A napping machine is not woken. The report there reads again at once. Answers its row after.
+Turns one agent's plugin on again on one computer or where a thread runs, by its id and agent. Written for the login the computer was added with, where that agent's own command reads it: Claude Code's user settings, its enabledPlugins key written as claude plugin enable or disable writes it but with nothing downloaded first, Codex's config.toml through its app server's config write, which refuses a file changed since wsp read it. A plugin plugins does not list, a missing one, and one a project's settings switch are refused. A turn running now keeps what it loaded; the next one follows. A napping machine is not woken. The report there reads again at once. Answers its row after.
 
 **Takes**
 
@@ -721,7 +721,7 @@ Turns one agent's plugin on again on one computer or where a thread runs, by its
 | `plugin.scope` | `user`, `project`, `local` | yes |  |
 | `plugin.project` | object |  |  |
 | `plugin.on` | boolean | yes |  |
-| `plugin.missing` | `folder`, `marketplace`, `unlisted` |  |  |
+| `plugin.missing` | `folder`, `marketplace`, `unlisted`, `uninstalled` |  |  |
 | `plugin.path` | string |  |  |
 | `plugin.setIn` | string |  |  |
 | `plugin.description` | string |  |  |

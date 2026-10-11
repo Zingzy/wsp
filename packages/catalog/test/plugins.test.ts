@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { configChangedRefusal } from "@wsp/protocol";
+import { configChangedRefusal, pluginMissingLine } from "@wsp/protocol";
 import { CLAUDE_PLUGIN_SHELF, CODEX_PLUGIN_SHELF, catalogEntry, inStore, joinPath, plainValues, type FoundPlugin, type PeekGroup, type Peeked, type PluginIo } from "../src/index.js";
 
 const fixture = <T,>(name: string): T => JSON.parse(readFileSync(new URL(`./fixtures/plugins/${name}`, import.meta.url), "utf8")) as T;
@@ -140,18 +140,31 @@ describe("Claude Code's plugins off its files", () => {
     expect(inStore(catalogEntry("claude") as { stateHome: string }, "~/.claude/settings.json", { home: "/x", store: "/s" })).toBe("/s/settings.json");
   });
 
-  it("switches with claude plugin enable or disable at user scope, and counts already_in_goal_state as done", async () => {
+  it("switches by writing enabledPlugins in the user settings under the store, every other key as it was, and runs no command", async () => {
     const row = { id: "brag@brag" } as FoundPlugin;
-    const answers: Record<string, string> = {
-      disable: '{"command":"disable","outcome":"failed","plugin":"brag@brag","scope":"user","message":"Plugin \\"brag@brag\\" is already disabled at user scope","failureCode":"already_in_goal_state","alreadyInGoalState":true}\n\x1e1\n',
-      enable: '{"command":"enable","outcome":"ok","plugin":"brag@brag","pluginId":"brag@brag","scope":"user","message":"Successfully enabled plugin: brag (scope: user)"}\n\x1e0\n',
-    };
-    const io = filesIo({}, { run: line => answers[/claude plugin (\w+)/.exec(line)![1]!] });
+    const io = filesIo({}, { store: "/x/claude" });
+    const edits: { file: string; base: string; text: string }[] = [];
+    let text: string | undefined = '{\n  "model": "opus",\n  "enabledPlugins": {\n    "brag@brag": true,\n    "vercel@claude-plugins-official": true\n  }\n}\n';
+    io.edit = async (file, base, change) => void edits.push({ file, base, text: (text = change(text)) });
     expect(await CLAUDE_PLUGIN_SHELF.turn(io, row, false, { plugins: [], refused: [] })).toEqual({});
-    expect(await CLAUDE_PLUGIN_SHELF.turn(io, row, true, { plugins: [], refused: [] })).toEqual({});
-    expect(io.runs[0]).toMatch(/^claude plugin disable 'brag@brag' --scope user --json <\/dev\/null/);
-    const failed = filesIo({}, { run: () => '{"command":"enable","outcome":"failed","message":"Plugin \\"x@y\\" not found"}\n\x1e1\n' });
-    expect(await CLAUDE_PLUGIN_SHELF.turn(failed, row, true, { plugins: [], refused: [] })).toEqual({ refused: 'Plugin "x@y" not found, so nothing was switched.' });
+    expect(edits.map(e => [e.file, e.base])).toEqual([["/x/claude/settings.json", "/x"]]);
+    expect(JSON.parse(text ?? "")).toEqual({ model: "opus", enabledPlugins: { "brag@brag": false, "vercel@claude-plugins-official": true } });
+    // Already off is done: the same text again.
+    const before = text;
+    await CLAUDE_PLUGIN_SHELF.turn(io, row, false, { plugins: [], refused: [] });
+    expect(text).toBe(before);
+    // claude plugin enable and disable download every user plugin whose folder is missing before they write (2.1.296).
+    expect(io.runs).toEqual([]);
+    text = undefined;
+    await CLAUDE_PLUGIN_SHELF.turn(io, row, true, { plugins: [], refused: [] });
+    expect(JSON.parse(text ?? "")).toEqual({ enabledPlugins: { "brag@brag": true } });
+    // A store outside the home, a box's logins folder, is its own write's base.
+    const logins = filesIo({}, { store: "/logins/claude" });
+    logins.edit = async (file, base) => void edits.push({ file, base, text: "" });
+    await CLAUDE_PLUGIN_SHELF.turn(logins, row, true, { plugins: [], refused: [] });
+    expect(edits.at(-1)).toMatchObject({ file: "/logins/claude/settings.json", base: "/logins/claude" });
+    const unwritable = filesIo({});
+    expect((await CLAUDE_PLUGIN_SHELF.turn(unwritable, row, true, { plugins: [], refused: [] })).refused).toContain("brag@brag was not switched");
   });
 });
 
@@ -166,7 +179,7 @@ interface CodexFixture {
 const CODEX = fixture<CodexFixture>("codex-0.162.1.json");
 
 /** A computer whose codex app server answers each request in a script as 0.162.1 did. */
-function codexIo(o: { stale?: boolean; dead?: boolean; none?: boolean; old?: boolean } = {}): PluginIo & { runs: string[]; sent: { method: string; params: Record<string, unknown> }[] } {
+function codexIo(o: { stale?: boolean; dead?: boolean; none?: boolean; old?: boolean; uninstalled?: string } = {}): PluginIo & { runs: string[]; sent: { method: string; params: Record<string, unknown> }[] } {
   const sent: { method: string; params: Record<string, unknown> }[] = [];
   const io = filesIo({}, {
     run: line => {
@@ -177,6 +190,11 @@ function codexIo(o: { stale?: boolean; dead?: boolean; none?: boolean; old?: boo
         .map(req => {
           sent.push({ method: req.method, params: req.params });
           if (req.method === "initialize") return { id: req.id, result: { codexHome: "/x/codex" } };
+          if (req.method === "plugin/list" && o.uninstalled !== undefined) {
+            const list = JSON.parse(JSON.stringify(CODEX.pluginList)) as { marketplaces: { plugins: { id: string; installed: boolean; enabled: boolean }[] }[] };
+            for (const p of list.marketplaces.flatMap(m => m.plugins)) if (p.id === o.uninstalled) Object.assign(p, { installed: false, enabled: false });
+            return { id: req.id, result: list };
+          }
           if (req.method === "plugin/list") return o.old === true ? { id: req.id, error: { code: -32600, message: "Invalid request: unknown variant `plugin/list`, expected one of `initialize`, `thread/start`" } } : { id: req.id, result: CODEX.pluginList };
           if (req.method === "config/read") return { id: req.id, result: CODEX.configRead };
           if (req.method === "plugin/read") return { id: req.id, result: Object.values(CODEX.pluginRead).find(r => (r.plugin as { summary: { name: string } }).summary.name === req.params.pluginName) };
@@ -214,6 +232,12 @@ describe("Codex's plugins through its app server", () => {
       ["presentations@openai-primary-runtime", true, "marketplace"],
       ["spreadsheets@openai-primary-runtime", true, "marketplace"],
     ]);
+  });
+
+  it("reads a plugin config.toml names and plugin/list returns as not installed as Missing, with no switch", async () => {
+    const read = await CODEX_PLUGIN_SHELF.read(codexIo({ uninstalled: "brag@brag" }), []);
+    expect(read.plugins.filter(r => r.id === "brag@brag")).toEqual([expect.objectContaining({ id: "brag@brag", marketplace: "brag", on: true, missing: "uninstalled", source: "/x/mk/brag" })]);
+    expect(pluginMissingLine({ id: "brag@brag", marketplace: "brag", missing: "uninstalled", on: true }, "Codex", "lab-box")).toBe("The config.toml on lab-box names brag@brag, but Codex has it in its marketplace brag and not installed, so no turn loads it.");
   });
 
   it("says Codex's plugins were not read where its app server did not answer, and nothing where codex is not there", async () => {

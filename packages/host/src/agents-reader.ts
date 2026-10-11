@@ -191,13 +191,14 @@ interface BoxSaid {
  * and sign-in reads; everywhere else each agent's own version flag and status command answer, run side by side.
  * `launched` is a target whose turns are launched with the wsp server: any but this computer, where a session the
  * person starts outside wsp reads only the config. */
-export async function readAgents(host: Host, o: { user: string; vault: Readonly<Record<string, string>>; projects?: readonly AgentsProject[]; box?: BoxSaid; launched?: boolean }): Promise<AgentsRead> {
+export async function readAgents(host: Host, o: { user: string; vault: Readonly<Record<string, string>>; projects?: readonly AgentsProject[]; box?: BoxSaid; launched?: boolean; pluginStores?: Readonly<Record<string, string>> }): Promise<AgentsRead> {
   const projects = o.projects ?? [];
   const refused: string[] = [];
   const agents: readonly AgentEntry[] = CATALOG_AGENTS;
   // A plugin's skills are listed under the plugin's name and follow its switch, so the one find of every skill waits
   // for the plugins, which read in two round trips.
-  const plugins = detectPlugins(host, { projects });
+  // On this computer the plugins are read in the folders its own launches read, which is what the switch writes.
+  const plugins = detectPlugins(withStores(host, o.pluginStores), { projects });
   const [where, servers, found, skills, recipe] = await Promise.all([
     host.exec.run("sh", ["-c", WHERE, "sh", ...agents.map(a => a.bin)], { timeoutMs: READ_MS }),
     serversOf(host, projects, new Set(Object.keys(o.vault))),
@@ -275,6 +276,9 @@ export async function readAgents(host: Host, o: { user: string; vault: Readonly<
   };
 }
 
+/** A Host pointed at the stores named, beside any it has. */
+export const withStores = (host: Host, stores: Readonly<Record<string, string>> | undefined): Host => (stores === undefined || Object.keys(stores).length === 0 ? host : { ...host, stores: { ...host.stores, ...stores } });
+
 /** What a read or a tools ask answers once its reader is closed, one cut short among them: the commands it ran were
  * ended, so what they left says nothing of the agents. */
 export const READER_CLOSED = "this host is closing; it reads no agents and asks no server for its tools";
@@ -310,7 +314,7 @@ export function agentsReader(o: {
   const readOn = async (on: AgentsOn): Promise<AgentsRead> => {
     if (on.kind === "here") {
       const host = here();
-      return readAgents(host, { user: userInfo().username, vault: o.vault(), ...(on.projects !== undefined ? { projects: on.projects } : {}) });
+      return readAgents(host, { user: userInfo().username, vault: o.vault(), ...(on.projects !== undefined ? { projects: on.projects } : {}), ...(on.stores !== undefined ? { pluginStores: on.stores } : {}) });
     }
     const { host, user, runAs } = await hostOf(on);
     const box = on.kind === "box" ? { ...(on.signIns !== undefined ? { signIns: on.signIns } : {}), ...(on.versions !== undefined ? { versions: on.versions } : {}), ...(on.setupRows !== undefined ? { setupRows: on.setupRows } : {}) } : undefined;

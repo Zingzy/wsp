@@ -1,7 +1,7 @@
 {
   "cloudOff": {
     "name": "plugins_enable",
-    "description": "Turns one agent's plugin on again on one computer or where a thread runs, by its id and agent. Written for the login the computer was added with, where that agent's own command reads it: Claude Code's user settings through claude plugin enable or disable, Codex's config.toml through its app server's config write, which refuses a file changed since wsp read it. A plugin plugins does not list, a missing one, and one a project's settings switch are refused. A turn running now keeps what it loaded; the next one follows. A napping machine is not woken. The report there reads again at once. Answers its row after.",
+    "description": "Turns one agent's plugin on again on one computer or where a thread runs, by its id and agent. Written for the login the computer was added with, where that agent's own command reads it: Claude Code's user settings, its enabledPlugins key written as claude plugin enable or disable writes it but with nothing downloaded first, Codex's config.toml through its app server's config write, which refuses a file changed since wsp read it. A plugin plugins does not list, a missing one, and one a project's settings switch are refused. A turn running now keeps what it loaded; the next one follows. A napping machine is not woken. The report there reads again at once. Answers its row after.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -86,7 +86,8 @@
               "enum": [
                 "folder",
                 "marketplace",
-                "unlisted"
+                "unlisted",
+                "uninstalled"
               ]
             },
             "path": {
@@ -186,7 +187,7 @@
   },
   "cloudOn": {
     "name": "plugins_enable",
-    "description": "Turns one agent's plugin on again on one computer or where a thread runs, by its id and agent. Written for the login the computer was added with, where that agent's own command reads it: Claude Code's user settings through claude plugin enable or disable, Codex's config.toml through its app server's config write, which refuses a file changed since wsp read it. A plugin plugins does not list, a missing one, and one a project's settings switch are refused. A turn running now keeps what it loaded; the next one follows. A napping machine is not woken. The report there reads again at once. Answers its row after.",
+    "description": "Turns one agent's plugin on again on one computer or where a thread runs, by its id and agent. Written for the login the computer was added with, where that agent's own command reads it: Claude Code's user settings, its enabledPlugins key written as claude plugin enable or disable writes it but with nothing downloaded first, Codex's config.toml through its app server's config write, which refuses a file changed since wsp read it. A plugin plugins does not list, a missing one, and one a project's settings switch are refused. A turn running now keeps what it loaded; the next one follows. A napping machine is not woken. The report there reads again at once. Answers its row after.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -271,7 +272,8 @@
               "enum": [
                 "folder",
                 "marketplace",
-                "unlisted"
+                "unlisted",
+                "uninstalled"
               ]
             },
             "path": {

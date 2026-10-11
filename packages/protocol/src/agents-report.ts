@@ -219,9 +219,10 @@ export const PluginBrings = z.object({
 });
 export type PluginBrings = z.infer<typeof PluginBrings>;
 
-/** Why the agent loads nothing of a plugin it names: its install folder is not there (`folder`); or the agent lists no
- * such plugin, its marketplace a folder that is not there (`marketplace`), or for no reason it gives (`unlisted`). */
-export const PluginMissing = z.enum(["folder", "marketplace", "unlisted"]);
+/** Why the agent loads nothing of a plugin it names: its install folder is not there (`folder`); the agent lists no
+ * such plugin, its marketplace a folder that is not there (`marketplace`), or for no reason it gives (`unlisted`); or
+ * it lists the plugin in its marketplace and not installed (`uninstalled`). */
+export const PluginMissing = z.enum(["folder", "marketplace", "unlisted", "uninstalled"]);
 export type PluginMissing = z.infer<typeof PluginMissing>;
 
 /** One plugin of one agent, as `name@marketplace`, in the scope it is installed for. `on` is what the agent's own
@@ -252,12 +253,16 @@ export type PluginAsk = z.infer<typeof PluginAsk>;
 /** Why a missing plugin loads in no turn there, in the agent's terms. */
 export function pluginMissingLine(row: Pick<PluginRow, "id" | "marketplace" | "missing" | "on">, agent: string, computer: string): string {
   if (row.missing === "folder") return `${agent} has ${row.id} ${row.on ? "on" : "installed"}, but its folder is not on ${computer}, so no turn loads it.`;
+  if (row.missing === "uninstalled") return `The config.toml on ${computer} names ${row.id}, but ${agent} has it in its marketplace ${row.marketplace} and not installed, so no turn loads it.`;
   const unlisted = `The config.toml on ${computer} names ${row.id}, but ${agent} lists no such plugin there.`;
   return row.missing === "marketplace" ? `${unlisted} Its marketplace, ${row.marketplace}, is a folder that is not on ${computer}.` : unlisted;
 }
 
 /** Why an act named a plugin the report does not list for that agent. */
 export const noSuchPluginRefusal = (id: string, agent: string): string => `There is no plugin ${id} for ${agent} there, so nothing was switched.`;
+
+/** What to do where the agent's plugins could not be read, so whether one is there is not known. */
+export const pluginsNotReadFix = (agent: string): string => `Read again once ${agent} answers there, then switch the plugin.`;
 
 /** Why a missing plugin is not switched. */
 export const missingPluginRefusal = (line: string): string => `${line} Nothing was switched.`;

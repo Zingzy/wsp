@@ -7,7 +7,7 @@
 // entries in an --mcp-config file, which stand for the config's own for that
 // run; Codex takes config keys on its thread's start, laid over its own
 // entries, so every key the person set there stays.
-import { underProject } from "@wsp/protocol";
+import { storeBase } from "./config-write.js";
 import { readJsonc } from "./jsonc.js";
 import { CODEX_TOML, MCP_SERVERS_JSON, editJson, type McpFormat, type McpServer } from "./mcp.js";
 import { codexTrusts } from "./mcp-codex.js";
@@ -309,7 +309,7 @@ export async function turnServers(agent: TurnAgent, configs: LaunchConfigs): Pro
  * home, or the store where it sits outside the home. */
 export function ownServerConfig(agent: { id: string; mcp: { files: readonly string[] } }, home: string, store?: string): { files: string[]; base: string } {
   const road = LAUNCH_SERVER_ROADS[agent.id];
-  if (store !== undefined && road !== undefined) return { files: [road.user(store, home)], base: underProject(store, home) ? home : store };
+  if (store !== undefined && road !== undefined) return { files: [road.user(store, home)], base: storeBase(store, home) };
   return { files: agent.mcp.files.map(f => (f.startsWith("~/") ? `${home}/${f.slice(2)}` : f)), base: home };
 }
 

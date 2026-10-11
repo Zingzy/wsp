@@ -118,6 +118,16 @@ export const CODEX_PLUGIN_SHELF: PluginShelf = {
         brings: NOTHING_BROUGHT,
       });
     });
+    // One config.toml names that plugin/list has in a marketplace and not installed loads nowhere either.
+    for (const mk of marketplaces) {
+      for (const p of Array.isArray(mk.plugins) ? mk.plugins.filter(isRecord) : []) {
+        if (p.installed === true || typeof p.id !== "string" || !(p.id in named)) continue;
+        const { name, marketplace } = pluginIdParts(p.id);
+        const setting = named[p.id];
+        const source = sourceOf(p.source);
+        plugins.push({ id: p.id, name: str(p.name) ?? name, marketplace: str(mk.name) ?? marketplace, scope: "user", on: isRecord(setting) && setting.enabled === true, missing: "uninstalled", ...(source !== undefined ? { source } : {}), brings: NOTHING_BROUGHT });
+      }
+    }
     const refused = (Array.isArray(list.marketplaceLoadErrors) ? list.marketplaceLoadErrors : []).flatMap(e => (isRecord(e) && typeof e.message === "string" ? [`plugins: Codex could not load a marketplace: ${e.message}`] : []));
     return { plugins, refused, ...userLayer(config) };
   },

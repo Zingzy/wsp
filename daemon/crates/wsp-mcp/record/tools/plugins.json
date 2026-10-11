@@ -140,7 +140,8 @@
                 "enum": [
                   "folder",
                   "marketplace",
-                  "unlisted"
+                  "unlisted",
+                  "uninstalled"
                 ]
               },
               "path": {
@@ -385,7 +386,8 @@
                 "enum": [
                   "folder",
                   "marketplace",
-                  "unlisted"
+                  "unlisted",
+                  "uninstalled"
                 ]
               },
               "path": {

@@ -4,8 +4,14 @@
 // and wrote the cache) or `claude plugin details` (no JSON, and it said vercel
 // brings no agents while a turn loaded three). What a plugin brings follows
 // the manifest rules of code.claude.com/docs/en/plugins-reference, pinned by
-// a turn recorded on 2.1.296. The switch is Claude Code's own command.
-import { shellQuote, type PluginBrings, type PluginScope } from "@wsp/protocol";
+// a turn recorded on 2.1.296. The switch writes the one key Claude Code's own
+// `claude plugin enable|disable` writes, enabledPlugins in the user settings:
+// that command first downloads every user plugin whose folder is missing
+// (740 MB on the owner's index with no cache, 2.1.296), and a turn reads the
+// key as written.
+import type { PluginBrings, PluginScope } from "@wsp/protocol";
+import { storeBase } from "./config-write.js";
+import { editJson } from "./mcp.js";
 import { NOTHING_BROUGHT, baseName, inStore, joinPath, isRecord, jsonOf, pluginIdParts, type FoundPlugin, type Peeked, type PluginIo, type PluginProject, type PluginShelf, type PluginsFound } from "./plugins.js";
 
 const CLAUDE_HOME = { stateHome: ".claude" };
@@ -254,16 +260,9 @@ export const CLAUDE_PLUGIN_SHELF: PluginShelf = {
     return { plugins, refused: [] };
   },
   async turn(io, plugin, on) {
-    const verb = on ? "enable" : "disable";
-    const said = await io.run(`claude plugin ${verb} ${shellQuote(plugin.id)} --scope user --json </dev/null 2>/dev/null; printf '\\n\\036%s\\n' "$?"`);
-    if (said === undefined) return { refused: `claude plugin ${verb} did not run there, so nothing was switched.` };
-    const answer = said
-      .split("\n")
-      .map(line => jsonOf(line.trim()))
-      .find(isRecord);
-    // Switching a plugin to where it stands already exits 1 with this code; it stands as asked, so that is done.
-    if (answer?.outcome === "ok" || answer?.failureCode === "already_in_goal_state") return {};
-    const message = typeof answer?.message === "string" ? answer.message : `claude plugin ${verb} exited ${/\x1e(\d+)/.exec(said)?.[1] ?? "with no answer"}`;
-    return { refused: `${message.replace(/\.$/, "")}, so nothing was switched.` };
+    if (io.edit === undefined) return { refused: `${plugin.id} was not switched: this road writes no settings file.` };
+    // Claude Code's own disable writes through a settings.json linked into a dotfiles checkout, and so does this (2.1.296).
+    await io.edit(inStore(CLAUDE_HOME, SETTINGS, io), storeBase(inStore(CLAUDE_HOME, "~/.claude", io), io.home), text => editJson(text ?? "{}", [[["enabledPlugins", plugin.id], on]]));
+    return {};
   },
 };

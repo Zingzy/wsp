@@ -183,7 +183,7 @@ export const pluginTurnedLine = (row: PluginRow): string => pluginTurnedWords(ro
 export const PluginIdIn = z.string().describe("the plugin's id, name@marketplace, as plugins lists it");
 export const PluginAgentIn = z.string().describe("the catalog id of the agent whose plugin it is, as plugins lists it; one id can name a plugin of two agents");
 export const PLUGIN_CHANGE_WORDS =
-  "Written for the login the computer was added with, where that agent's own command reads it: Claude Code's user settings through claude plugin enable or disable, Codex's config.toml through its app server's config write, which refuses a file changed since wsp read it. A plugin plugins does not list, a missing one, and one a project's settings switch are refused. A turn running now keeps what it loaded; the next one follows. A napping machine is not woken. The report there reads again at once.";
+  "Written for the login the computer was added with, where that agent's own command reads it: Claude Code's user settings, its enabledPlugins key written as claude plugin enable or disable writes it but with nothing downloaded first, Codex's config.toml through its app server's config write, which refuses a file changed since wsp read it. A plugin plugins does not list, a missing one, and one a project's settings switch are refused. A turn running now keeps what it loaded; the next one follows. A napping machine is not woken. The report there reads again at once.";
 
 export const SERVER_TOOL_COLUMNS = ["TOOL", "DESCRIPTION"];
 
