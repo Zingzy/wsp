@@ -4,7 +4,7 @@
 // now off `claude agents --json`, which lists the session each running Claude Code process holds and drops a killed
 // one's stale file (measured on 2.1.296).
 import { buildEnv } from "./landmines.js";
-import { claudeProjectKey, ENV_FROM_INPUT, programWord, TranscriptsListReply, TranscriptsReadReply, type AgentLaunch, type ConversationOrigin, type ConversationStore } from "@wsp/protocol";
+import { claudeProjectKey, ENV_FROM_INPUT, foldersStampCommand, programWord, shellQuote, TranscriptsListReply, TranscriptsReadReply, type AgentLaunch, type ConversationOrigin, type ConversationStore } from "@wsp/protocol";
 
 /** The entrypoints Claude Code's own picker leaves out as programmatic, `PROGRAMMATIC_ENTRYPOINTS` in the 2.1.296
  * bundle: a `-p` run, the TypeScript SDK and the Python SDK. wsp's own turns run as `sdk-cli` too. */
@@ -58,6 +58,7 @@ export function claudeConversations(deps: { configDir: string; projectDirName?: 
         origin: originOf(r.entrypoint),
       }));
     },
+    stamp: (cwds, road) => road.exec(foldersStampCommand(keysFor(cwds, deps.projectDirName).map(k => shellQuote(`${root}/${k}`)))),
     live: road => road.exec(liveCommand(deps.launch !== undefined ? { launch: deps.launch } : {}), env).then(parseLive, () => null),
     earlier: async (id, o, road) => {
       const reply = TranscriptsReadReply.parse(await road.ask({ op: "transcripts.read", root, dirs: keysFor(o.cwds, deps.projectDirName), session: id, last: o.last }));

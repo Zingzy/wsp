@@ -95,7 +95,7 @@ import {
   type RequestId,
   type ThreadOptions,
 } from "./rpc.js";
-import { LETS_GO, LIST_PAGES, WRITER_HELD, itemsCommand, listCommand, newestLines, parseItems, parseList, parseOpened, parseSizes, parseTurns, sizesCommand, turnsCommand } from "./conversations.js";
+import { LETS_GO, LIST_PAGES, WRITER_HELD, itemsCommand, listCommand, newestLines, parseItems, parseList, parseOpened, parseSizes, parseTurns, sizesCommand, storeMarks, turnsCommand } from "./conversations.js";
 import { draftForCommand, parseDraftFor, parseRename, parseSessionTitle, parseTitleFor, renameCommand, sessionTitleCommand, titleForCommand } from "./session-title.js";
 import { shellScriptOf } from "./shell-script.js";
 
@@ -1385,7 +1385,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
   const questionEnv = (): Record<string, string> => buildEnv({ base: deps.baseEnv, home: deps.home });
   /** The threads Codex kept on this computer, each read through a server that runs no turn and ends at once. */
   const conversations: ConversationStore = {
-    letsGo: LETS_GO,
+    ...storeMarks(deps.home),
     list: async (cwds, road) => {
       if (cwds.length === 0) return [];
       const rows: Awaited<ReturnType<typeof parseList>>["rows"] = [];

@@ -8,7 +8,7 @@
 // <id> already has an active writer" in about 20 ms, and its TUI's daemon lets go about a minute after its window
 // closes (measured twice on 0.162.1). So whether a thread is open elsewhere is learned by resuming it, the way a turn
 // would, in a server that ends at once.
-import { ENV_FROM_INPUT, programWord, shellQuote, type AgentLaunch, type ConversationLine, type ConversationOrigin, type StoredConversation } from "@wsp/protocol";
+import { ENV_FROM_INPUT, foldersStampCommand, programWord, shellQuote, type AgentLaunch, type ConversationLine, type ConversationOrigin, type ConversationStore, type StoredConversation } from "@wsp/protocol";
 import { answersOf, appServerScript, initializeRequest, notification, request, type ServerAnswer } from "@wsp/catalog";
 
 /** Codex's words for a thread another process writes, the -32600 answer's own (0.162.1). */
@@ -88,6 +88,14 @@ export function parseList(stdout: string): { rows: (StoredConversation & { path?
   const next = str(result.nextCursor);
   return { rows: data.flatMap(t => rowOf(rec(t) ?? {}) ?? []), ...(next !== undefined ? { next } : {}) };
 }
+
+/** The stamp of the newest day folder under sessions/, where Codex writes each new thread's rollout (YYYY/MM/DD on
+ * 0.162.1); a thread from any folder moves it, which only costs one more list. */
+export const newestDayStampCommand = (home: string): string =>
+  `d=$(ls -d ${shellQuote(`${home}/sessions`)}/*/*/* 2>/dev/null | tail -n 1); ${foldersStampCommand(['"$d"'])}`;
+
+/** What the store says without asking Codex: how soon it lets go of a thread, and the newest day folder's stamp. */
+export const storeMarks = (home: string): Pick<ConversationStore, "letsGo" | "stamp"> => ({ letsGo: LETS_GO, stamp: (_cwds, road) => road.exec(newestDayStampCommand(home)) });
 
 /** The size of each file, one line each in order, blank where it could not be read: GNU stat, then BSD's. */
 export function sizesCommand(paths: readonly string[]): string {

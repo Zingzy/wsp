@@ -4,13 +4,15 @@
 // with its earlier messages ahead of the first prompt. The stores are fakes with the adapters' own shape, except where
 // the daemon's op is the point; the daemon is a fake; git is real.
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { LocalBackend } from "@wsp/engine";
 import { claudeConversations } from "@wsp/adapter-claude";
+import { createCodexAdapter } from "@wsp/adapter-codex";
 import {
+  claudeProjectKey,
   CONVERSATION_OPEN_KIND,
   conversationOpenFix,
   conversationsUnreadLine,
@@ -23,9 +25,12 @@ import {
   type ConversationStore,
   type DaemonFrame,
   type DaemonResponse,
+  type ExecStreamFactory,
   type StoredConversation,
   type TurnResult,
 } from "@wsp/protocol";
+import { writeStub } from "../../protocol/test/stub-script.js";
+import { KEPT_LIST_MS } from "../src/threads/conversations.js";
 import { createRuntime, type HarnessAdapterFactory, type HarnessStartOptions, type LocalWiring, type Runtime } from "../src/runtime.js";
 import type { DaemonChannel } from "../src/daemon-channel.js";
 import { localExecStream } from "../src/local-exec.js";
@@ -58,6 +63,8 @@ const repoWithTree = (): { folder: string; tree: string } => {
 
 let rt: Runtime | undefined;
 afterEach(async () => {
+  vi.unstubAllEnvs();
+  vi.useRealTimers();
   await rt?.close();
   rt = undefined;
   for (const at of roots.splice(0)) rmSync(at, { recursive: true, force: true });
@@ -251,6 +258,102 @@ describe("a project's conversations", () => {
     const project = await rt.projects.add({ source: folder });
     expect((await rt.conversations.list({ project: project.id })).rows).toEqual([{ agent: "claude", id: ID, title: "lab codewords", cwd: folder, lastAt: 9, bytes: 10, origin: "terminal", live: false }]);
     expect(frames[0]).toMatchObject({ op: "transcripts.list", root: "/home/dev/.claude/projects", cwds: [folder, `${folder}-wt`] });
+  });
+});
+
+/** Claude Code's store and Codex's as the adapters read them, over folders in a scratch home, with `claude` and
+ * `codex` stubs on PATH that note each start and list the conversations each store's folder holds. */
+function realStores(folder: string) {
+  const home = scratch();
+  const bin = join(home, "bin");
+  const starts = join(home, "starts");
+  const claudeDir = join(home, ".claude", "projects", claudeProjectKey(folder));
+  const day = join(home, ".codex", "sessions", "2026", "10", "11");
+  for (const dir of [bin, claudeDir, day]) mkdirSync(dir, { recursive: true });
+  writeFileSync(starts, "");
+  writeStub(join(bin, "claude"), `#!/bin/sh\necho "claude $*" >> '${starts}'\necho '[]'\n`);
+  writeStub(
+    join(bin, "codex"),
+    [
+      "#!/bin/sh",
+      `echo "codex $*" >> '${starts}'`,
+      '[ "$1" = app-server ] || exit 0',
+      "while IFS= read -r line; do",
+      "  case $line in",
+      `    *'"id":1,'*) echo '{"id":1,"result":{}}' ;;`,
+      `    *'"id":2,'*) rows=""; for f in '${day}'/*.jsonl; do [ -e "$f" ] || continue; rows="$rows\${rows:+,}{\\"id\\":\\"$(basename "$f" .jsonl)\\",\\"cwd\\":\\"${folder}\\",\\"recencyAt\\":1,\\"source\\":\\"cli\\"}"; done; printf '{"id":2,"result":{"data":[%s]}}\\n' "$rows" ;;`,
+      "  esac",
+      "done",
+      "",
+    ].join("\n"),
+  );
+  vi.stubEnv("PATH", `${bin}:${process.env["PATH"] ?? "/usr/bin:/bin"}`);
+  const noTurns = (() => {
+    throw new Error("no turn runs here");
+  }) as unknown as ExecStreamFactory;
+  const daemon = {
+    "transcripts.list": () =>
+      ({ id: 1, ok: true, rows: readdirSync(claudeDir).flatMap(f => (f.endsWith(".jsonl") ? [{ id: f.slice(0, -6), cwd: folder, entrypoint: "cli", lastAt: 2, bytes: 1 }] : [])) }) as unknown as DaemonResponse,
+  };
+  return {
+    claude: claudeConversations({ configDir: join(home, ".claude") }),
+    codex: createCodexAdapter({ exec: noTurns, home: join(home, ".codex"), login: "codex login" }).conversations,
+    daemon,
+    claudeDir,
+    day,
+    starts: () => {
+      const said = readFileSync(starts, "utf8");
+      return { claude: said.split("claude agents --json").length - 1, codex: said.split("codex app-server").length - 1 };
+    },
+  };
+}
+
+describe("a project's kept conversation list", () => {
+  it("answers ten visits within a minute with one claude agents --json and one Codex app server", async () => {
+    const { folder } = repoWithTree();
+    const real = realStores(folder);
+    writeFileSync(join(real.claudeDir, `${ID}.jsonl`), "{}\n");
+    writeFileSync(join(real.day, `rollout-2026-10-11T09-00-00-${OTHER}.jsonl`), "{}\n");
+    const { rt } = here({ claude: real.claude, codex: real.codex }, real.daemon);
+    const project = await rt.projects.add({ source: folder });
+    const visits: string[][] = [];
+    for (let i = 0; i < 5; i++) visits.push((await rt.conversations.list({ project: project.id })).rows.map(r => r.id));
+    for (const answer of await Promise.all(Array.from({ length: 5 }, () => rt.conversations.list({ project: project.id })))) visits.push(answer.rows.map(r => r.id));
+    expect(visits).toHaveLength(10);
+    for (const ids of visits) expect(ids.sort()).toEqual([`rollout-2026-10-11T09-00-00-${OTHER}`, ID].sort());
+    expect(real.starts()).toEqual({ claude: 1, codex: 1 });
+  });
+
+  it("shows a conversation started in a terminal on the next visit after its store moved", async () => {
+    const { folder } = repoWithTree();
+    const real = realStores(folder);
+    const { rt } = here({ claude: real.claude, codex: real.codex }, real.daemon);
+    const project = await rt.projects.add({ source: folder });
+    expect((await rt.conversations.list({ project: project.id })).rows).toEqual([]);
+    writeFileSync(join(real.claudeDir, `${ID}.jsonl`), "{}\n");
+    expect((await rt.conversations.list({ project: project.id })).rows.map(r => [r.agent, r.id])).toEqual([["claude", ID]]);
+    writeFileSync(join(real.day, `rollout-${OTHER}.jsonl`), "{}\n");
+    expect((await rt.conversations.list({ project: project.id })).rows.map(r => r.agent).sort()).toEqual(["claude", "codex"]);
+    await rt.conversations.list({ project: project.id });
+    expect(real.starts()).toEqual({ claude: 2, codex: 2 });
+  });
+
+  it("is read again once a thread of the project ends, and once a minute has passed", async () => {
+    const { folder } = repoWithTree();
+    const claude = fakeStore({ rows: [row(ID, folder, 100)], live: [] });
+    const { rt } = here({ claude });
+    const project = await rt.projects.add({ source: folder });
+    await rt.conversations.list({ project: project.id });
+    await rt.conversations.list({ project: project.id });
+    expect(claude.asked).toHaveLength(1);
+    const at = await rt.workspaces.folderFor({ project: project.id });
+    await (await rt.sessions.start(at.workspace.id, { prompt: "hello", harness: "claude" })).finished;
+    await rt.conversations.list({ project: project.id });
+    expect(claude.asked).toHaveLength(2);
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.now() + KEPT_LIST_MS);
+    await rt.conversations.list({ project: project.id });
+    expect(claude.asked).toHaveLength(3);
   });
 });
 
