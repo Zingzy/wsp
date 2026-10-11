@@ -550,6 +550,12 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(mobile-d
   ::highlight(assistant-citation-comment) {
     background-color: color-mix(in oklab, var(--primary) 45%, transparent);
   }
+  ::highlight(thread-find) {
+    background-color: color-mix(in oklab, var(--primary) 20%, transparent);
+  }
+  ::highlight(thread-find-current) {
+    background-color: color-mix(in oklab, var(--primary) 45%, transparent);
+  }
   :root {
     /* Keep the original artwork palettes as the defaults. Built-in
        themes override them with their own pigments in the components layer. */

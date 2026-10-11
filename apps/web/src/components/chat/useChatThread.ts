@@ -62,6 +62,10 @@ export interface ChatThreadHandle {
   /** Asks for the thread's events before the oldest held, where the transcripts hold it; nothing otherwise. Answers
    * whether older events may be left once that read is in. */
   readonly older: () => Promise<boolean>;
+  /** Every event the host holds of the thread is in this window, so nothing older is left to page in. */
+  readonly whole: boolean;
+  /** The host's caps dropped the thread's oldest events, which no page brings back. */
+  readonly trimmed: boolean;
   /** Moves when the view takes another thread's rows, and not when a pin names the thread it already shows: the list
    * is drawn anew, at its end, for a thread it did not just show. */
   readonly drawKey: string;
@@ -875,6 +879,9 @@ export function useChatThread(workspaceId: string, threadId: string | null = nul
     useCallback(fn => (threadId === null ? () => {} : transcripts.listen(threadId, fn)), [threadId]),
     () => (threadId === null ? null : (transcripts.get(threadId)?.facts ?? null)),
   );
+  const listenHeld = useCallback((fn: () => void) => (threadId === null ? () => {} : transcripts.listen(threadId, fn)), [threadId]);
+  const whole = useSyncExternalStore(listenHeld, () => !held || threadId === null || transcripts.get(threadId)?.complete === true);
+  const trimmed = useSyncExternalStore(listenHeld, () => held && threadId !== null && transcripts.get(threadId)?.trimmed === true);
   const facts = useMemo<ThreadSeed | null>(() => {
     if (threadId === null || state.fresh) return null;
     if (heldFacts !== null) return { harness: heldFacts.harness, model: heldFacts.model, permissionMode: heldFacts.permissionMode, cwd: heldFacts.cwd };
@@ -936,6 +943,8 @@ export function useChatThread(workspaceId: string, threadId: string | null = nul
     hydrated: hydratedFor === viewKey,
     facts,
     older,
+    whole,
+    trimmed,
     drawKey: `${drawn}`,
     busy: state.sending !== null || view.running,
     sending: state.sending !== null,

@@ -15,13 +15,20 @@ import { desktopBridge } from "../lib/desktopShell.js";
 import { isPanelTabsFocused } from "../lib/panelFocus.js";
 import { isPreviewFocused } from "../lib/previewFocus.js";
 import { isTerminalFocused } from "../lib/terminalFocus.js";
+import { threadFindOpen, threadOnScreen } from "../components/chat/find/store.js";
 import { useSelectedWorkspaceId, useStore } from "../protocol/store.js";
 import { cancelWorkspaceSwitch, commitWorkspaceSwitch, runShellCommand, type ShellCommandTarget } from "./shellCommands.js";
 import { useKeybindings } from "./useKeybindings.js";
 import { releasesSwitchHold, useWorkspaceSwitcher } from "./workspaceSwitcher.js";
 
 /** Where focus is, read on every chord: the rules' when clauses name these. */
-const focusContext = () => ({ terminalFocus: isTerminalFocused(), previewFocus: isPreviewFocused(), panelTabsFocus: isPanelTabsFocused() });
+const focusContext = () => ({
+  terminalFocus: isTerminalFocused(),
+  previewFocus: isPreviewFocused(),
+  panelTabsFocus: isPanelTabsFocused(),
+  threadOpen: threadOnScreen() && !useStore.getState().settingsOpen,
+  threadFindOpen: threadFindOpen() && !useStore.getState().settingsOpen,
+});
 
 export function KeybindingDispatcher({ keybindings: given }: { keybindings?: ResolvedKeybindingsConfig }) {
   const live = useKeybindings();
@@ -51,8 +58,8 @@ export function KeybindingDispatcher({ keybindings: given }: { keybindings?: Res
       }
       const command = resolveShortcutCommand(event, keybindings, { context: focusContext() });
       if (command === null) return;
-      // An unchorded key inside an input is the user's text, whatever a rule says.
-      const chorded = event.metaKey || event.ctrlKey;
+      // An unchorded key inside an input is the user's text, whatever a rule says; a function key types nothing.
+      const chorded = event.metaKey || event.ctrlKey || /^F\d+$/.test(event.key);
       if (!chorded && event.target instanceof Element && isTypingTarget(event.target)) return;
       event.preventDefault();
       event.stopPropagation();

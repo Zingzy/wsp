@@ -19,6 +19,8 @@ export interface ThreadEvents {
   events: SessionEvent[];
   pos: number;
   total: number;
+  /** The caps dropped older events of the thread. */
+  trimmed?: true;
 }
 
 /** One thread's events out of a workspace's transcript: everything a thread's head and a history page read, so the

@@ -993,12 +993,12 @@ export function makeApi(c: ProtocolClient): Api {
     startSession: async opts => (await c.request<{ session: SessionView }>("sessions.start", { ...opts })).session,
     sessionHistory: async id => (await c.request<{ events: SessionEvent[] }>("sessions.history", { workspaceId: id })).events,
     sessionHead: async threadId => {
-      const { facts, events, pos, total } = await c.request<ThreadHead>("sessions.head", { threadId });
-      return { facts, events, pos, total };
+      const { facts, events, pos, total, trimmed } = await c.request<ThreadHead>("sessions.head", { threadId });
+      return { facts, events, pos, total, ...(trimmed === true ? { trimmed } : {}) };
     },
     sessionPage: async (workspaceId, threadId, window = {}) => {
-      const { events, pos, total } = await c.request<HistoryPage>("sessions.history", { workspaceId, threadId, ...window });
-      return { events, pos, total };
+      const { events, pos, total, trimmed } = await c.request<HistoryPage>("sessions.history", { workspaceId, threadId, ...window });
+      return { events, pos, total, ...(trimmed === true ? { trimmed } : {}) };
     },
     sessionAttachment: async (workspaceId, threadId, requestId, index) => (await c.request<{ attachment: KeptAttachment }>("sessions.attachment", { workspaceId, threadId, requestId, index })).attachment,
     listSessions: async id =>

@@ -29,21 +29,26 @@ import { addNotice, noticeFailure } from "../../notices/store";
 import { failureOf } from "../../protocol/failure";
 import { RefusalSlot } from "../../settings/sheetParts";
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
+import { findPartAttrs } from "./find/highlights";
+import { useRevealOpen } from "./find/store";
 
 export const ProposedPlanCard = memo(function ProposedPlanCard({
+  entryId,
   planMarkdown,
   cwd,
   workspaceRoot,
   resolvedTheme,
   onSavePlan,
 }: {
+  /** The plan's entry in the transcript, which find in thread opens the card for. */
+  entryId?: string;
   planMarkdown: string;
   cwd: string | undefined;
   workspaceRoot: string | undefined;
   resolvedTheme: "light" | "dark";
   onSavePlan?: (input: { path: string; contents: string }) => Promise<void>;
 }) {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useRevealOpen(entryId ?? "", false);
   const [isSaveDialogOpen, setIsSaveDialogOpen] = useState(false);
   const [savePath, setSavePath] = useState("");
   const [isSavingToWorkspace, setIsSavingToWorkspace] = useState(false);
@@ -130,7 +135,7 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
         </Menu>
       </div>
       <div className="mt-4">
-        <div className={cn("relative", canCollapse && !expanded && "max-h-104 overflow-hidden")}>
+        <div className={cn("relative", canCollapse && !expanded && "max-h-104 overflow-hidden")} {...(entryId === undefined ? {} : findPartAttrs(entryId, 0))}>
           {canCollapse && !expanded ? (
             <ChatMarkdown
               text={collapsedPreview ?? ""}

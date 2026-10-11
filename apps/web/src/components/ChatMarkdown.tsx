@@ -18,7 +18,7 @@ import { resolveDiffThemeName } from "../lib/diffRendering";
 import { RenderErrorBoundary } from "./RenderErrorBoundary";
 import { chatMarkdownClipboardPayload } from "../lib/markdownClipboard";
 import { remarkNormalizeListItemIndentation } from "../lib/markdownListIndentation";
-import { extractMarkdownLinkHrefs, isWindowsDrivePathHref, normalizeMarkdownLinkDestination, resolveInlineCodeFileLinkMeta, resolveMarkdownFileLinkMeta, rewriteMarkdownFileUriHref, type MarkdownFileLinkMeta } from "../lib/markdownLinks";
+import { isWindowsDrivePathHref, normalizeMarkdownLinkDestination, resolveInlineCodeFileLinkMeta, resolveMarkdownFileLinkMeta, rewriteMarkdownFileUriHref, type MarkdownFileLinkMeta } from "../lib/markdownLinks";
 import { classifyMarkdownImageSource } from "../lib/markdownImages";
 import { mediaKindFromPath } from "../lib/filePreview";
 import { isAbsolutePath } from "../terminal-links";
@@ -29,7 +29,7 @@ import { hasMath, rehypePreserveImageSourceMeta, rehypeRestrict, remarkNormalize
 import { findTaskListMarkerOffset, GITHUB_ALERT_PRESENTATIONS, MarkdownDetails, MarkdownTable, orderedListGutterStyle } from "./markdown/blocks";
 import { extractCodeBlock, extractFenceLanguage, extractFenceTitle, extractPreCodeMeta, MarkdownCodeBlock, nodeToPlainText, SuspenseShikiCodeBlock } from "./markdown/codeBlocks";
 import { authoredImageSizeStyle, CHAT_MARKDOWN_IMAGE_SIZE_CLASS_NAME, ChatMarkdownImageFallback, expandableMarkdownImageProps, MarkdownLinkContext, markdownImageCopy, resolveProtocolRelativeMediaUrl } from "./markdown/images";
-import { buildFileLinkParentSuffixByPath, extractInlineCodeSpans, handleMarkdownFragmentClick, hastHasText, MarkdownExternalLinkContent, MarkdownFileLink, normalizeMarkdownLinkHrefKey, plainHastText, resolveExternalWebLinkHost } from "./markdown/links";
+import { fileChipLabel, handleMarkdownFragmentClick, hastHasText, MarkdownExternalLinkContent, MarkdownFileLink, messageFileChips, normalizeMarkdownLinkHrefKey, plainHastText, resolveExternalWebLinkHost, type MessageFileChips } from "./markdown/links";
 
 export { hasMath } from "./markdown/plugins";
 export { orderedListGutterStyle } from "./markdown/blocks";
@@ -65,6 +65,7 @@ interface ChatMarkdownProps {
 }
 
 const EMPTY_MARKDOWN_SKILLS: ReadonlyArray<ProviderSkill> = [];
+const NO_CHIPS: MessageFileChips = { byHref: new Map(), byCode: new Map(), suffixByPath: new Map() };
 const EMPTY_REMARK_PLUGINS: NonNullable<ReactMarkdownOptions["remarkPlugins"]> = [];
 
 const CHAT_MARKDOWN_SANITIZE_SCHEMA = {
@@ -84,7 +85,7 @@ const CHAT_MARKDOWN_SANITIZE_SCHEMA = {
   },
 } satisfies Parameters<typeof rehypeSanitize>[0];
 
-const CHAT_MARKDOWN_REMARK_PLUGINS = [
+export const CHAT_MARKDOWN_REMARK_PLUGINS: NonNullable<ReactMarkdownOptions["remarkPlugins"]> = [
   remarkGfm,
   remarkMath,
   remarkPandocMath,
@@ -92,9 +93,9 @@ const CHAT_MARKDOWN_REMARK_PLUGINS = [
   remarkNormalizeListItemIndentation,
   remarkPreserveCodeMeta,
   remarkNormalizeLinksAndTagInlineCode,
-] satisfies NonNullable<ReactMarkdownOptions["remarkPlugins"]>;
+];
 
-const CHAT_MARKDOWN_REMARK_PLUGINS_WITH_BREAKS = [
+export const CHAT_MARKDOWN_REMARK_PLUGINS_WITH_BREAKS: NonNullable<ReactMarkdownOptions["remarkPlugins"]> = [
   remarkGfm,
   remarkMath,
   remarkPandocMath,
@@ -103,7 +104,7 @@ const CHAT_MARKDOWN_REMARK_PLUGINS_WITH_BREAKS = [
   remarkBreaks,
   remarkPreserveCodeMeta,
   remarkNormalizeLinksAndTagInlineCode,
-] satisfies NonNullable<ReactMarkdownOptions["remarkPlugins"]>;
+];
 
 const CHAT_MARKDOWN_REHYPE_PLUGINS = [
   rehypeRaw,
@@ -188,41 +189,8 @@ function ChatMarkdown({
   const onImageExpand = restricted ? undefined : givenImageExpand;
   const onOpenFile = restricted ? undefined : givenOpenFile;
   const diffThemeName = resolveDiffThemeName(resolvedTheme);
-  const markdownFileLinkMetaByHref = useMemo(() => {
-    const metaByHref = new Map<
-      string,
-      NonNullable<ReturnType<typeof resolveMarkdownFileLinkMeta>>
-    >();
-    if (restricted) return metaByHref;
-    for (const href of extractMarkdownLinkHrefs(text)) {
-      const normalizedHref = normalizeMarkdownLinkHrefKey(href);
-      if (metaByHref.has(normalizedHref)) continue;
-      const meta = resolveMarkdownFileLinkMeta(normalizedHref, cwd, imageBaseDir ?? cwd);
-      if (meta) {
-        metaByHref.set(normalizedHref, meta);
-      }
-    }
-    return metaByHref;
-  }, [cwd, imageBaseDir, restricted, text]);
-  const inlineCodeFileLinkMetaByText = useMemo(() => {
-    const metaByText = new Map<string, MarkdownFileLinkMeta>();
-    if (restricted) return metaByText;
-    for (const span of extractInlineCodeSpans(text)) {
-      if (metaByText.has(span)) continue;
-      const meta = resolveInlineCodeFileLinkMeta(span, cwd, imageBaseDir ?? cwd);
-      if (meta) {
-        metaByText.set(span, meta);
-      }
-    }
-    return metaByText;
-  }, [cwd, imageBaseDir, restricted, text]);
-  const fileLinkParentSuffixByPath = useMemo(() => {
-    const filePaths = [
-      ...[...markdownFileLinkMetaByHref.values()].map((meta) => meta.filePath),
-      ...[...inlineCodeFileLinkMetaByText.values()].map((meta) => meta.filePath),
-    ];
-    return buildFileLinkParentSuffixByPath(filePaths);
-  }, [inlineCodeFileLinkMetaByText, markdownFileLinkMetaByHref]);
+  const chips = useMemo(() => (restricted ? NO_CHIPS : messageFileChips(text, cwd, imageBaseDir ?? cwd)), [cwd, imageBaseDir, restricted, text]);
+  const { byHref: markdownFileLinkMetaByHref, byCode: inlineCodeFileLinkMetaByText, suffixByPath: fileLinkParentSuffixByPath } = chips;
   const markdownUrlTransform = useCallback(
     (href: string) => {
       if (restricted) return defaultUrlTransform(href);
@@ -253,18 +221,7 @@ function ChatMarkdown({
       className?: string,
       options?: { readonly inert?: boolean },
     ) => {
-      const parentSuffix = fileLinkParentSuffixByPath.get(
-        fileLinkMeta.filePath.replaceAll("\\", "/"),
-      );
-      const labelParts = [fileLinkMeta.basename];
-      if (typeof parentSuffix === "string" && parentSuffix.length > 0) {
-        labelParts.push(parentSuffix);
-      }
-      if (fileLinkMeta.line) {
-        labelParts.push(
-          `L${fileLinkMeta.line}${fileLinkMeta.column ? `:C${fileLinkMeta.column}` : ""}`,
-        );
-      }
+      const labelParts = fileChipLabel(fileLinkMeta, fileLinkParentSuffixByPath);
       // Host files outside the workspace (a report in a temp dir) open by
       // their absolute path.
       const panelPath =

@@ -157,8 +157,16 @@ export function transcriptsArea(ctx: RuntimeContext): TranscriptsArea {
     trim.done();
     return left;
   };
+  /** Notes that the caps took an event of its thread, which a reader then says has lost its older events. */
+  const markTrimmed = (index: TranscriptIndex | undefined, e: { threadId?: string }): void => {
+    if (e.threadId !== undefined) index?.trimmed.add(e.threadId);
+  };
+  const trimmedOf = (workspaceId: string, threadId: string): { trimmed?: true } => (transcriptIndex.get(workspaceId)?.trimmed.has(threadId) === true ? { trimmed: true } : {});
   const trimTranscript = (workspaceId: string, events: SessionEvent[]): void =>
-    void transcriptBytes.set(workspaceId, trimmed(workspaceId, events, transcriptBytes.get(workspaceId), e => forgetChild(indexFor(workspaceId), e)));
+    void transcriptBytes.set(workspaceId, trimmed(workspaceId, events, transcriptBytes.get(workspaceId), e => {
+      forgetChild(indexFor(workspaceId), e);
+      markTrimmed(indexFor(workspaceId), e);
+    }));
   /** A transcript held as the one opened last, the oldest of the others let go past the cap. */
   const holdTranscript = (workspaceId: string, events: SessionEvent[]): void => {
     transcripts.delete(workspaceId);
@@ -229,6 +237,7 @@ export function transcriptsArea(ctx: RuntimeContext): TranscriptsArea {
     if (head.length > 0) await store.putBlob(TRANSCRIPT_HEADS, id, transcriptBlob({ workspaceId: id, events: head }));
     await store.putBlob(TRANSCRIPTS, id, transcriptBlob({ workspaceId: id, events: held }));
     const index = indexOf(held);
+    for (const e of head) markTrimmed(index, e);
     transcriptIndex.set(id, index);
     await writeIndex(id, index);
   };
@@ -310,7 +319,7 @@ export function transcriptsArea(ctx: RuntimeContext): TranscriptsArea {
     if (landed !== undefined) return landed;
     const read = await readTranscript(workspaceId);
     const events = [...(read ?? []), ...(pendingEvents.get(workspaceId) ?? [])];
-    const bytes = trimmed(workspaceId, events);
+    const bytes = trimmed(workspaceId, events, undefined, e => markTrimmed(transcriptIndex.get(workspaceId), e));
     if (events.length > 0 && transcriptIndex.has(workspaceId)) {
       holdTranscript(workspaceId, events);
       transcriptBytes.set(workspaceId, bytes);
@@ -332,13 +341,16 @@ export function transcriptsArea(ctx: RuntimeContext): TranscriptsArea {
   const transcriptReader: TranscriptReader = {
     read: async (workspaceId, threadId, o) => {
       const pos = transcriptIndex.get(workspaceId)?.pos ?? 0;
-      if (rows === undefined) return { ...readThread(await openTranscript(workspaceId), threadId, o), pos };
+      if (rows === undefined) {
+        const events = await openTranscript(workspaceId);
+        return { ...readThread(events, threadId, o), pos, ...trimmedOf(workspaceId, threadId) };
+      }
       const pending = (pendingEvents.get(workspaceId) ?? []).filter(e => e.threadId === threadId);
       const newest = function* (): Generator<SessionEvent> {
         for (let i = pending.length - 1; i >= 0; i--) yield pending[i]!;
         yield* rows.newest(workspaceId, threadId, o.before);
       };
-      return { events: pickNewest(newest(), o), total: rows.count(workspaceId, threadId) + pending.length, pos };
+      return { events: pickNewest(newest(), o), total: rows.count(workspaceId, threadId) + pending.length, pos, ...trimmedOf(workspaceId, threadId) };
     },
   };
   /** Inside the queue: `events` written as the transcript, the first `took` events written since the last flush
@@ -354,6 +366,7 @@ export function transcriptsArea(ctx: RuntimeContext): TranscriptsArea {
     } else if (pending !== undefined) pendingBytes.set(workspaceId, pending.reduce((n, e) => n + eventBytes(e), 0));
     const index = indexOf(events);
     index.pos = Math.max(index.pos, transcriptIndex.get(workspaceId)?.pos ?? 0);
+    index.trimmed = transcriptIndex.get(workspaceId)?.trimmed ?? index.trimmed;
     // An index that did not land keeps its old mark, and boot reads that transcript again.
     await writeIndex(workspaceId, index).catch((e: unknown) => console.warn(`the transcript index of ${workspaceId} was not written: ${e instanceof Error ? e.message : String(e)}`));
     // What arrived during the writes is folded on after them, as record folded it on the index this replaces.
@@ -392,6 +405,7 @@ export function transcriptsArea(ctx: RuntimeContext): TranscriptsArea {
       if (count > TRANSCRIPT_CAP || size > TRANSCRIPT_BYTES) {
         const going: EventSize[] = [];
         dropOldestOf(rows.sizes(workspaceId), size, e => e.size, e => void going.push(e));
+        for (const g of going) markTrimmed(index, g);
         // Only a start carries images, so only starts are read before they go.
         for (const e of rows.at(workspaceId, going.filter(g => g.type === "session.start").map(g => g.pos))) trim.gone(e);
         rows.remove(workspaceId, going.map(g => g.pos));
@@ -399,8 +413,10 @@ export function transcriptsArea(ctx: RuntimeContext): TranscriptsArea {
       }
       if (lost) {
         const issued = index.pos;
+        const { trimmed } = index;
         index = indexOf(rows.all(workspaceId).events);
         index.pos = Math.max(index.pos, issued);
+        index.trimmed = trimmed;
         unreadIndexes.delete(workspaceId);
       }
       if (!unreadIndexes.has(workspaceId)) rows.putIndex(workspaceId, indexBytes(index, undefined).toString("utf8"));
@@ -470,7 +486,7 @@ export function transcriptsArea(ctx: RuntimeContext): TranscriptsArea {
           return;
         }
         events = [...(read ?? []), ...(pendingEvents.get(workspaceId) ?? [])];
-        trimmed(workspaceId, events);
+        trimmed(workspaceId, events, undefined, e => markTrimmed(transcriptIndex.get(workspaceId), e));
       }
       unreadSaid.delete(workspaceId);
       await writeTranscript(workspaceId, events, pendingEvents.get(workspaceId)?.length ?? 0);

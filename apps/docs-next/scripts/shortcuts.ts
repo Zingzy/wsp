@@ -19,6 +19,8 @@ const WHERE: Record<string, string> = {
   "!terminalOwnsMod": "Anywhere on a Mac. On Linux, outside the terminal, which keeps Ctrl for itself",
   panelTabsFocus: "In a right panel of several tabs",
   "!terminalFocus && !panelTabsFocus": "Outside the terminal and a right panel of several tabs",
+  "threadOpen && !terminalFocus && !previewFocus": "With a thread on screen, outside the terminal and the right panel",
+  "threadFindOpen && !terminalFocus": "While find in thread is open, outside the terminal",
 };
 
 const label = (key: string, platform: string): string => {

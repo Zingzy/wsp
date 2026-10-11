@@ -10,6 +10,7 @@ import { liveWorkEntryLabel, resolveWorkGroupScrollIndex, shouldFollowWorkGroupA
 import { cn } from "../../../lib/utils";
 import { TimelineRowCtx, WorkGroupViewCtx, type TimelineWorkEntry, type TimelineRow } from "./context";
 import { LiveActivityRow, LiveActivityContent, TOOL_GROUP_GLYPHS, workEntryGlyph, SimpleWorkEntryRow } from "./workEntry";
+import { useOnReveal } from "../find/store";
 
 // ---------------------------------------------------------------------------
 // Extracted row sections: own their state / store subscriptions so changes
@@ -92,6 +93,11 @@ function ExpandedWorkGroupEntries({
     () => ({ state: viewState, onToggleEntry: () => onToggleWorkEntry(anchorKey) }),
     [anchorKey, onToggleWorkEntry, viewState],
   );
+  const entryIds = useMemo(() => entries.map(entry => entry.id), [entries]);
+  useOnReveal(entryIds, entryId => {
+    const index = entryIds.indexOf(entryId);
+    if (index >= 0) void listRef.current?.scrollToIndex({ index, animated: false, viewPosition: 0.5 });
+  });
   const updateScrollFades = useCallback(() => {
     const element = listRef.current?.getScrollableNode();
     if (!element) return;

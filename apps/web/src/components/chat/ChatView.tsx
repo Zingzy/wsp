@@ -37,7 +37,8 @@ import { threadsOpenedBy } from "../../sidebar/threadTree";
 import { computerName, useComputerName } from "../../sidebar/workspaceRows";
 import { TimelineRuleLine } from "./TimelineRuleLine";
 import { LoopbackLinks, openInBrowser } from "../../browser/loopbackLinks";
-import { MessagesTimeline, type MachineWait, type ReplyRuns } from "./MessagesTimeline";
+import { MessagesTimeline, type MachineWait, type ReplyRuns, type TimelineFinder } from "./MessagesTimeline";
+import { ThreadFind } from "./find/ThreadFind";
 import { useNewThreadRequests } from "./newThreadRequests";
 import { useChatThread, type ChatThreadHandle } from "./useChatThread";
 import { useOpenSubagentRun } from "./openSubagent";
@@ -273,6 +274,9 @@ export function ChatView({
     return scroller == null || content == null ? undefined : holdEndOnFooterShrink(node, scroller, content);
   }, []);
   const showTranscript = thread.hydrated && !empty;
+  const [finder, setFinder] = useState<TimelineFinder | null>(null);
+  const onFinder = useCallback((handle: TimelineFinder, live: boolean) => setFinder(held => (live ? handle : held === handle ? null : held)), []);
+  const findHistory = useMemo(() => ({ whole: thread.whole, trimmed: thread.trimmed, older: thread.older }), [thread.whole, thread.trimmed, thread.older]);
   // Rewind to here stands on each earlier reply that kept something to go back to, and opens the one dialog.
   const cutsConversation = catalog?.rewindsConversation === true;
   const byCount = catalog?.rewindsByCount === true;
@@ -355,6 +359,7 @@ export function ChatView({
               onRewind={onRewind}
               replyRuns={pageEntries === null ? replyRuns : null}
               {...(pageEntries === null ? { onReachTop: thread.older } : {})}
+              onFinder={onFinder}
             />
           ),
         };
@@ -409,6 +414,7 @@ export function ChatView({
         <ScrollToEnd hidden={!showTranscript || atEnd} onClick={() => void listRef.current?.scrollToEnd({ animated: true })} />
         {children?.(thread)}
       </div>
+      <ThreadFind workspaceId={workspaceId} entries={pageEntries ?? view.entries} cwd={cwd} threadKey={`${thread.threadKey}/${subagent ?? ""}`} finder={drawn === null ? null : finder} history={findHistory} />
     </div>
   );
 }

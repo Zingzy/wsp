@@ -38,6 +38,7 @@ import { resetTerminalZoom, stepTerminalZoom } from "../terminal/fontSetting.js"
 import { MAX_TERMINALS_PER_GROUP } from "../terminal/groups.js";
 import { getTerminals, type WorkspaceTerminals } from "../terminal/link.js";
 import { openNewThread } from "./NewThreadPicks.js";
+import { openThreadFind, stepThreadFind } from "../components/chat/find/store.js";
 import { requestComposerFocus } from "./shellRequests.js";
 import { recentThreads, useThreadHistory } from "./threadHistory.js";
 import { highlightedTarget, stepSwitcherAt, useWorkspaceSwitcher } from "./workspaceSwitcher.js";
@@ -368,6 +369,15 @@ export function runShellCommand(command: KeybindingCommand, target: ShellCommand
       return;
     case "thread.nextNeedsYou":
       openNextNeedsYou();
+      return;
+    case "thread.find":
+      openThreadFind();
+      return;
+    case "thread.findOlder":
+      stepThreadFind(-1);
+      return;
+    case "thread.findNewer":
+      stepThreadFind(1);
       return;
     case "editor.open":
       if (workspaceId && !useStore.getState().settingsOpen) void openCopyInEditor(workspaceId);

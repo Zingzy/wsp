@@ -220,6 +220,8 @@ export interface TranscriptIndex {
   taken: Map<string, Taken>;
   /** Each thread's subagents by the agent's id for them, in the order they started, with the turn each ran under. */
   children: Map<string, Map<string, Child>>;
+  /** The threads whose older events the transcript's caps dropped. */
+  trimmed: Set<string>;
   /** The newest position the transcript has issued. It never moves back, so the position of an event a delete or a
    * rewind took away is never issued again. */
   pos: number;
@@ -243,7 +245,7 @@ export const transcriptUnreadLine = (workspaceId: string, why: string): string =
 export const SESSION_FACTS = ["cwd", "permissionMode", "model", "effort"] as const;
 export type SessionFacts = Partial<Record<(typeof SESSION_FACTS)[number], string>>;
 
-export const emptyIndex = (): TranscriptIndex => ({ words: new Map(), starts: new Map(), cut: new Map(), facts: new Map(), taken: new Map(), children: new Map(), pos: 0 });
+export const emptyIndex = (): TranscriptIndex => ({ words: new Map(), starts: new Map(), cut: new Map(), facts: new Map(), taken: new Map(), children: new Map(), trimmed: new Set(), pos: 0 });
 
 /** One session.subagent row into a thread's children: a start makes the child, or runs a resumed one again, a later
  * running row adds the model it named, and an end moves one the index holds, with the last line of what it said or
@@ -389,13 +391,13 @@ export const turnWritten = (events: readonly SessionEvent[], turnId: string): Tu
  * one that does not parse, and one written before it held the starts by request id, since the restart that brings
  * this host up is the one a send may be waiting across. */
 export const indexBytes = (index: TranscriptIndex, of: BlobMark | undefined): Buffer =>
-  Buffer.from(JSON.stringify({ of, words: [...index.words], starts: [...index.starts], cut: [...index.cut], facts: [...index.facts], taken: [...index.taken], children: [...index.children].map(([thread, held]) => [thread, [...held]]), pos: index.pos }));
+  Buffer.from(JSON.stringify({ of, words: [...index.words], starts: [...index.starts], cut: [...index.cut], facts: [...index.facts], taken: [...index.taken], children: [...index.children].map(([thread, held]) => [thread, [...held]]), trimmed: [...index.trimmed], pos: index.pos }));
 export const indexRead = (bytes: Buffer): { index: TranscriptIndex; of?: BlobMark } | undefined => {
   try {
-    const held = JSON.parse(bytes.toString("utf8")) as { of?: BlobMark; words: [string, ThreadWords][]; starts: [string, string][]; cut: [string, boolean][]; facts: [string, SessionFacts][]; taken?: [string, Taken][]; children?: [string, [string, Child][]][]; pos?: number };
+    const held = JSON.parse(bytes.toString("utf8")) as { of?: BlobMark; words: [string, ThreadWords][]; starts: [string, string][]; cut: [string, boolean][]; facts: [string, SessionFacts][]; taken?: [string, Taken][]; children?: [string, [string, Child][]][]; trimmed?: string[]; pos?: number };
     if (held.taken === undefined || held.children === undefined || held.pos === undefined) return undefined;
     const children = new Map(held.children.map(([thread, kids]) => [thread, new Map(kids)]));
-    return { index: { words: new Map(held.words), starts: new Map(held.starts), cut: new Map(held.cut), facts: new Map(held.facts), taken: new Map(held.taken), children, pos: held.pos }, ...(held.of !== undefined ? { of: held.of } : {}) };
+    return { index: { words: new Map(held.words), starts: new Map(held.starts), cut: new Map(held.cut), facts: new Map(held.facts), taken: new Map(held.taken), children, trimmed: new Set(held.trimmed), pos: held.pos }, ...(held.of !== undefined ? { of: held.of } : {}) };
   } catch {
     return undefined;
   }

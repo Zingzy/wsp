@@ -48,6 +48,16 @@ async function connect() {
 }
 
 describe("makeApi wrappers", () => {
+  it("a thread's head and its pages keep the host's word that its caps dropped the oldest events", async () => {
+    const { api } = await connect();
+    const facts = { threadId: "thr_1", workspaceId: "ws_1" };
+    ScriptedSocket.reply = f => ({ id: f["id"], ok: true, ...(f["op"] === "sessions.head" ? { facts } : {}), events: [], pos: 9, total: 3, trimmed: true });
+    expect(await api.sessionHead!("thr_1")).toMatchObject({ total: 3, trimmed: true });
+    expect(await api.sessionPage!("ws_1", "thr_1", { before: 9 })).toMatchObject({ total: 3, trimmed: true });
+    ScriptedSocket.reply = f => ({ id: f["id"], ok: true, events: [], pos: 9, total: 3 });
+    expect(await api.sessionPage!("ws_1", "thr_1")).not.toHaveProperty("trimmed");
+  });
+
   it("startSession sends sessions.start with the scope and unwraps the session view", async () => {
     const { api, lastSent } = await connect();
     const session = { id: "s1", workspaceId: "ws_1", harness: "claude", status: "running" };

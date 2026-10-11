@@ -651,7 +651,9 @@ describe("Keybindings", () => {
     const cards = keybindingCards(DEFAULT_KEYBINDINGS, mac);
     expect(cards.map(card => card.head)).toEqual([KEYBINDINGS_WORDS.windowAndPanels, KEYBINDINGS_WORDS.workspacesAndThreads, KEYBINDINGS_WORDS.terminal, KEYBINDINGS_WORDS.fixed]);
     expect(cards[0]!.items.map(item => (item.kind === "line" ? item.label : ""))).toEqual(["Search", "Find a file", "Search in files", "Settings", "Toggle the sidebar", "Toggle the terminal drawer", "Toggle the right panel", "Next panel tab", "Previous panel tab", "Toggle the preview"]);
-    expect(cards[1]!.items.map(item => (item.kind === "line" ? item.label : ""))).toEqual(["New thread", "Next task", "Previous task", "Next thread", "Previous thread", "Settle thread", "Next thread that needs you", "Open in editor", JUMP_WORD]);
+    expect(cards[1]!.items.map(item => (item.kind === "line" ? item.label : ""))).toEqual(["New thread", "Next task", "Previous task", "Next thread", "Previous thread", "Settle thread", "Next thread that needs you", "Find in thread", "Step to the older match", "Step to the newer match", "Open in editor", JUMP_WORD]);
+    expect(label("thread.find")).toEqual([["⌘F"]]);
+    expect(label("thread.findOlder")).toEqual([["⌘G"], ["F3"]]);
     expect(cards[3]!.items.map(item => (item.kind === "line" ? [item.label, item.keys] : []))).toEqual([
       [KEYBINDINGS_WORDS.sendMessage, [["Enter"]]],
       [KEYBINDINGS_WORDS.submitComment, [["⌘Enter"]]],
