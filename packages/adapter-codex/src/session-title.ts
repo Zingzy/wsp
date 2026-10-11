@@ -9,7 +9,7 @@
 
 import { ENV_FROM_INPUT, generatedTitle, inFolder, programWord, shellQuote } from "@wsp/protocol";
 import type { AgentLaunch, SessionRenameWrite } from "@wsp/protocol";
-import { answersOf, appServerScript, initializeRequest, notification, request } from "./app-server-script.js";
+import { answersOf, appServerScript, initializeRequest, notification, request } from "@wsp/catalog";
 import { slug } from "./command.js";
 
 const PROMPT_END = "WSP_PROMPT_END";

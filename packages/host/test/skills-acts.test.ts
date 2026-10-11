@@ -238,8 +238,9 @@ describe("a skill's SKILL.md, turning it off and on, and removing it", () => {
     const acts = skillsActs({ fetch: skillsSh(at).fetch, here: () => here(at) });
     await expect(acts.toggle({ kind: "here" }, { name: "wsp", on: false })).rejects.toThrow(systemSkillRefusal("wsp"));
     await expect(acts.remove({ kind: "here" }, { name: "wsp" })).rejects.toThrow(systemSkillRefusal("wsp"));
-    await expect(acts.toggle({ kind: "here" }, { name: "frontend-design", on: false })).rejects.toThrow(pluginSkillRefusal("frontend-design"));
-    await expect(acts.remove({ kind: "here" }, { name: "frontend-design" })).rejects.toThrow(pluginSkillRefusal("frontend-design"));
+    await expect(acts.toggle({ kind: "here" }, { name: "frontend:frontend-design", on: false })).rejects.toThrow(pluginSkillRefusal("frontend:frontend-design", "frontend@official", "claude"));
+    await expect(acts.remove({ kind: "here" }, { name: "frontend:frontend-design" })).rejects.toThrow(pluginSkillRefusal("frontend:frontend-design", "frontend@official", "claude"));
+    expect(pluginSkillRefusal("frontend:frontend-design", "frontend@official", "claude")).toContain("wsp plugins disable frontend@official --agent claude");
     await expect(acts.toggle({ kind: "here", projects: [{ id: "pr_app", name: "app", path: at.project }] }, { name: "deploy", project: true, on: false })).rejects.toThrow(projectSkillOffRefusal("deploy", "~/code/app/.claude/skills/deploy"));
     expect(existsSync(join(at.home, ".claude/skills/wsp/SKILL.md"))).toBe(true);
     expect(existsSync(join(at.project, ".claude/skills/deploy/SKILL.md"))).toBe(true);

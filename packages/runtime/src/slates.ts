@@ -63,15 +63,16 @@ import {
   type SlateValues,
 } from "@wsp/protocol/slate";
 import type { Machine } from "@wsp/engine";
-import { mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { rmSync } from "node:fs";
 import { join } from "node:path";
 import type { Store } from "./store.js";
 import { SLATES } from "./lazy-slates.js";
 import { createSlateRuns, HELD_APPROVAL, lastResult, mapStrings, restartedRecord, rewoundRecord, runningRecord, type CmdRunDecl, type RunApprovals, type RunAsk, type RunBy, type RunInput, type RunRecord, type SlateRuns, type SlateRunsDeps } from "./slate-runs.js";
 import { boxLedger, boxRoad, boxSlateDir } from "./slate-box.js";
-import { pathsNamed, scriptsNamed, withFiles } from "./slate-files.js";
+import { boxPins, scriptsNamed, withFiles, writeSlateFiles, type HashOn } from "./slate-files.js";
 import { slateImage, type ImageOn } from "./slate-images.js";
 import { cutAt, defanged, longest } from "./slate-message.js";
+import { writeBudget } from "./slate-writes.js";
 import { HELD_CONFIRM, consentKey, createSlateMcp, slateSecretMark, type McpRunDecl, type McpServerSpec } from "./slate-mcp.js";
 import { HOST_SLATE_SOURCES, resolveIn, viewSources, type SlateSourceContext } from "./slate-sources/index.js";
 
@@ -148,6 +149,8 @@ export interface SlatesDeps {
   machineOf?(threadId: string): Machine | undefined;
   /** Where the thread runs on another computer: reads an image file there through its daemon, by its whole path. */
   imageOn?(threadId: string): ImageOn | undefined;
+  /** Absent where the thread runs on this computer. */
+  hashOn?(threadId: string): HashOn | undefined;
   /** That machine naps: a timer never wakes it, a press does, through wake. */
   asleep?(threadId: string): boolean;
   /** Readies that machine for a run a press starts: waits out the sweep a starting host has out there, which would end
@@ -205,9 +208,6 @@ const REQUESTS_KEPT = 500;
 const EVENTS_PER_SECOND = 5;
 const PRESS_SEND_MS = 2_000;
 const REACTION_SEND_MS = 60_000 / SLATE_LIMITS.reactionSendsPerMinute;
-const WRITES_BURST = 20;
-const WRITES_PER_SECOND = 5;
-const WRITES_PER_HOUR = 600;
 const ERRORS_LISTED = SLATE_LIMITS.errorsPerPass;
 const PROBLEMS_KEPT = 20;
 const PIECES_NAMED = SLATE_LIMITS.piecesNamed;
@@ -362,25 +362,13 @@ export function createSlates(deps: SlatesDeps): Slates {
       list: threadId => Object.entries(records.get(threadId)?.approvals ?? {}).flatMap(([k, a]) => (a.state === "allowed" ? [k] : [])),
   };
   const folderOf = (threadId: string): string | undefined => (deps.slatesDir === undefined ? undefined : join(deps.slatesDir, threadId));
-  /** The slate's folder made to hold its document's files and nothing else, written before every command reads it:
-   * a rewound slate runs the code of the turn it went back to. */
-  const writeFiles = (threadId: string): string => {
-    const dir = folderOf(threadId)!;
-    const files = records.get(threadId)?.document?.files ?? {};
-    mkdirSync(dir, { recursive: true, mode: 0o700 });
-    for (const name of readdirSync(dir)) if (files[name] === undefined) rmSync(join(dir, name), { recursive: true, force: true });
-    for (const [name, text] of Object.entries(files)) {
-      // Removed first, so a link left in its place is never followed and the mode is the new file's.
-      rmSync(join(dir, name), { recursive: true, force: true });
-      writeFileSync(join(dir, name), text, { mode: 0o600, flag: "wx" });
-    }
-    return dir;
-  };
+  const writeFiles = (threadId: string): string => writeSlateFiles(folderOf(threadId)!, records.get(threadId)?.document?.files ?? {});
   const moved = (threadId: string, run: string, record: RunRecord): void => {
     if (capturing?.threadId === threadId && capturing.run === run) return;
     void serial(threadId, () => runMoved(threadId, run, record)).catch((e: unknown) => console.warn(`the slate of thread ${threadWord(threadId)} lost a record of $${run}: ${e instanceof Error ? e.message : String(e)}`));
   };
   const ledger = boxLedger();
+  const pins = boxPins(threadId => deps.hashOn?.(threadId));
   const runs: SlateRuns = (deps.runs ?? createSlateRuns)({
     env: deps.runEnv,
     now: deps.now,
@@ -442,11 +430,11 @@ export function createSlates(deps: SlatesDeps): Slates {
   });
 
   /** A declaration as its approval takes it: the files it reads from the slate, and a hash of each file it names in
-   * the thread's folder, read again at every start. */
+   * the thread's folder, read again at every start, where the command runs. */
   function approvalDecl(r: SlateRecord, declared: SlateRunDecl): SlateRunDecl & { files?: Record<string, string>; scripts?: Record<string, string> } {
     const decl = withFiles(r.document, declared);
-    // The files are hashed where the command runs; a folder on the thread's machine is not on this disk to read.
-    const scripts = onMachine(r.threadId, declared) ? undefined : scriptsNamed(folderFor(r.threadId, declared), declared);
+    const folder = folderFor(r.threadId, declared);
+    const scripts = onMachine(r.threadId, declared) ? pins.scripts(r.threadId, folder, declared) : scriptsNamed(folder, declared);
     return scripts === undefined ? decl : { ...decl, scripts };
   }
 
@@ -493,23 +481,17 @@ export function createSlates(deps: SlatesDeps): Slates {
       const rec = r.values[name];
       if (isRunRecord(rec) && rec.state === "held" && (rec.why === HELD_APPROVAL || rec.why === HELD_CONFIRM)) startNow(r, name, "person", views);
     }
+    // The box is read after the load, so one that does not answer holds no start-up back.
+    if (runs.held(r.threadId).length > 0) void serial(r.threadId, async () => {
+      const moved = heldAgain(r, await startable(r));
+      if (moved.length > 0) await save(r).then(() => push(r, moved));
+    }).catch(() => {});
   }
 
-  const writes = new Map<string, { tokens: number; at: number; hour: number[] }>();
-  /** Agent writes: 5 a second sustained, a burst of 20, 600 an hour (V751). */
+  const writes = writeBudget(deps.now);
   const spendWrite = (threadId: string): void => {
-    const now = deps.now();
-    const b = writes.get(threadId) ?? { tokens: WRITES_BURST, at: now, hour: [] };
-    b.tokens = Math.min(WRITES_BURST, b.tokens + ((now - b.at) / 1000) * WRITES_PER_SECOND);
-    b.at = now;
-    b.hour = b.hour.filter(t => now - t < 3_600_000);
-    writes.set(threadId, b);
-    if (b.tokens < 1 || b.hour.length >= WRITES_PER_HOUR) {
-      const wait = b.tokens < 1 ? Math.ceil((1 - b.tokens) / WRITES_PER_SECOND) : Math.ceil((3_600_000 - (now - b.hour[0]!)) / 1000);
-      throw refused(problem("V751", "write-rate", `wait ${wait} s; a slate that rewrites itself constantly is a bug`), "conflict");
-    }
-    b.tokens -= 1;
-    b.hour.push(now);
+    const wait = writes.spend(threadId);
+    if (wait !== undefined) throw refused(problem("V751", "write-rate", `wait ${wait} s; a slate that rewrites itself constantly is a bug`), "conflict");
   };
 
   const pressSentAt = new Map<string, number>();
@@ -676,9 +658,11 @@ export function createSlates(deps: SlatesDeps): Slates {
     const declared = r.document?.runs[run];
     if (declared === undefined) return undefined;
     const now = approvalDecl(r, declared).scripts ?? {};
+    const unread = pathsThere(r.threadId, declared);
     for (const [k, a] of Object.entries(r.approvals)) {
-      if (k === key || a.state !== "allowed" || a.run !== run || a.scripts === undefined) continue;
-      const changed = Object.keys({ ...a.scripts, ...now }).filter(path => a.scripts![path] !== now[path]);
+      if (k === key || a.state !== "allowed" || a.run !== run) continue;
+      if (unread.length > 0) return `${unread.join(", ")} could not be read on ${deps.thread(r.threadId)?.computer ?? "this computer"}, so it asks again`;
+      const changed = a.scripts === undefined ? [] : Object.keys({ ...a.scripts, ...now }).filter(path => a.scripts![path] !== now[path]);
       if (changed.length > 0) return `${changed.join(", ")} changed since you allowed it, so it asks again`;
     }
     return undefined;
@@ -840,8 +824,26 @@ export function createSlates(deps: SlatesDeps): Slates {
   /** Where a command starts: the thread's own folder on its own computer, or this computer's for one `on` the host. */
   /** Whether a run's command runs on the thread's own machine rather than on this computer. */
   const onMachine = (threadId: string, decl: SlateRunDecl): boolean => decl.kind === "cmd" && decl.on !== "host" && deps.machineOf?.(threadId) !== undefined;
-  /** The files a command on the thread's machine names there: an Always pins their content, which this computer cannot read. */
-  const pathsThere = (threadId: string, decl: SlateRunDecl | undefined): string[] => (decl?.kind === "cmd" && onMachine(threadId, decl) ? pathsNamed(decl).filter(w => !w.includes("://")) : []);
+  /** The files a command on the thread's machine names there that its daemon could not hash, which no Always holds to. */
+  const pathsThere = (threadId: string, decl: SlateRunDecl | undefined): string[] => (decl?.kind === "cmd" && onMachine(threadId, decl) ? pins.unpinned(threadId, folderFor(threadId, decl), decl) : []);
+  /** The views a start reads, with the scripts the thread's machine holds hashed again, so a key holds what runs. */
+  const startable = (r: SlateRecord): Promise<ReadonlyMap<string, SlateJson | undefined>> => {
+    const there = Object.values(r.document?.runs ?? {}).flatMap(decl => (onMachine(r.threadId, decl) ? [{ folder: folderFor(r.threadId, decl), decl }] : []));
+    return there.length === 0 ? viewsFor(r) : Promise.all([viewsFor(r), pins.read(r.threadId, there, deps.asleep?.(r.threadId) === true)]).then(([views]) => views);
+  };
+  /** A press or the agent's start wakes a napping machine anyway: first here, so its pins are read and an Always holds. */
+  const wakeFor = async (r: SlateRecord, starts: readonly { run: string; by: RunBy }[]): Promise<void> => {
+    if (deps.asleep?.(r.threadId) !== true || !starts.some(s => s.by !== "timer" && pathsThere(r.threadId, r.document?.runs[s.run]).length > 0)) return;
+    if (await Promise.resolve(deps.wake?.(r.threadId)).then(() => true, () => false)) await startable(r);
+  };
+  /** Each start held on the sheet whose key moved (its command was rewritten, its box was read), held again as now. */
+  const heldAgain = (r: SlateRecord, views: ReadonlyMap<string, SlateJson | undefined>): string[] =>
+    runs.held(r.threadId).flatMap(a => {
+      const decl = r.document?.runs[a.run];
+      if (decl?.kind !== "cmd" || runs.key(approvalDecl(r, decl) as CmdRunDecl) === a.key) return [];
+      r.values[a.run] = asJson(startNow(r, a.run, "person", views).record);
+      return [a.run];
+    });
 
   const folderFor = (threadId: string, decl: SlateRunDecl): string | undefined => {
     const facts = deps.thread(threadId);
@@ -922,7 +924,7 @@ export function createSlates(deps: SlatesDeps): Slates {
   async function batch(r: SlateRecord, input: { path: string; value: SlateJson }[], by: BatchBy, o: { event?: BatchEvent; starts?: { run: string; by: RunBy }[]; requestId?: string; sendAt?: number; react?: false }): Promise<BatchOut> {
     const doc = r.document;
     if (doc === null) return { asks: [], started: [], sends: [] };
-    const views = await viewsFor(r);
+    const views = await startable(r);
     const asks: RunAsk[] = [];
     const before = r.values;
     const deferred: { run: string; by: RunBy; record: SlateRunRecord }[] = [];
@@ -941,6 +943,7 @@ export function createSlates(deps: SlatesDeps): Slates {
         return record;
       },
     };
+    await wakeFor(r, o.starts ?? []);
     // A timer's or the agent's start is no step of the document: it starts here and its record goes in as a run's write.
     const timed = (o.starts ?? []).map(s => ({ path: `$${s.run}`, value: asJson(startNow(r, s.run, s.by, views).record) }));
     const result = runSlateBatch(doc, r.values, [...input, ...timed], ctx);
@@ -952,6 +955,7 @@ export function createSlates(deps: SlatesDeps): Slates {
     r.values = result.values;
     keepProblems(r, result.problems);
     for (const run of result.cancels) runs.cancel(r.threadId, run);
+    await wakeFor(r, deferred);
     for (const d of deferred) {
       const started = startNow(r, d.run, d.by, views, before[d.run]);
       if (started.ask !== undefined) asks.push(started.ask);
@@ -1087,13 +1091,8 @@ export function createSlates(deps: SlatesDeps): Slates {
     armTimers(r);
     if (next !== null) {
       // A timed run the person has not allowed asks now, shown or not, so this answer and their slate both say it waits.
-      const asking = await viewsFor(r);
-      // A start held on the sheet whose command the write changed is held again as declared now, so the sheet shows
-      // the new command and Run once or Don't answers it.
-      for (const a of runs.held(r.threadId)) {
-        const decl = next.runs[a.run];
-        if (decl?.kind === "cmd" && runs.key(approvalDecl(r, decl) as CmdRunDecl) !== a.key) r.values[a.run] = asJson(startNow(r, a.run, "person", asking).record);
-      }
+      const asking = await startable(r);
+      heldAgain(r, asking);
       for (const [run, decl] of Object.entries(next.runs)) {
         const rec = r.values[run];
         if (decl.every !== undefined && isRunRecord(rec) && rec.state === "idle" && provisional(r, run).state === "held") r.values[run] = asJson(startNow(r, run, "timer", asking).record);
@@ -1411,7 +1410,7 @@ export function createSlates(deps: SlatesDeps): Slates {
       if (named.length === 0) throw usageRefusal(`this slate declares no command with approval key ${p.key}.`, "Read the slate again and approve what it asks now.");
       // The sheet offers no Always for these; a caller that asks for one anyway is told why.
       const unpinned = p.scope === "thread" ? named.find(run => pathsThere(p.threadId, r.document!.runs[run]).length > 0) : undefined;
-      if (unpinned !== undefined) throw usageRefusal(`$${unpinned} runs on the thread's machine and names ${pathsThere(p.threadId, r.document!.runs[unpinned]).join(", ")} there, which this computer cannot read to hold an Always to.`, "Approve it with scope once.");
+      if (unpinned !== undefined) throw usageRefusal(`$${unpinned} runs on the thread's machine and names ${pathsThere(p.threadId, r.document!.runs[unpinned]).join(", ")} there, which its computer could not hash to hold an Always to.`, "Approve it with scope once.");
       await serial(p.threadId, async () => {
         if (p.scope === "refuse") {
           r.approvals[p.key] = { state: "refused", at: deps.now(), ...approvalNames(r, p.key) };
@@ -1559,6 +1558,7 @@ export function createSlates(deps: SlatesDeps): Slates {
       await serial(threadId, async () => {
         runs.drop(threadId);
         mcp.drop(threadId);
+        pins.drop(threadId);
         records.delete(threadId);
         const dir = folderOf(threadId);
         if (dir !== undefined) rmSync(dir, { recursive: true, force: true });

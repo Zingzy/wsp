@@ -41,7 +41,7 @@ const SENT_KEPT = 10;
 
 /** Base64 in chunks: one spread of ten million bytes into fromCharCode overflows the argument stack. */
 const CHUNK = 0x8000;
-function toBase64(bytes: Uint8Array): string {
+export function toBase64(bytes: Uint8Array): string {
   let binary = "";
   for (let at = 0; at < bytes.length; at += CHUNK) binary += String.fromCharCode(...bytes.subarray(at, at + CHUNK));
   return btoa(binary);
@@ -55,7 +55,7 @@ export const attachmentOf = (file: ComposerFile): Attachment => ({ mediaType: fi
 
 /** A blob's bytes through FileReader, the one road every browser has; Blob.arrayBuffer is newer than the oldest
  * engine the app runs in and than the jsdom the component tests run under. */
-function bytesOf(blob: Blob): Promise<{ bytes: Uint8Array; buffer: ArrayBuffer }> {
+export function bytesOf(blob: Blob): Promise<{ bytes: Uint8Array; buffer: ArrayBuffer }> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => {

@@ -1,0 +1,18 @@
+{
+  "at": "/",
+  "fixture": "project-icons",
+  "steps": [
+    "390:key:Escape",
+    "390:sidebar=trigger",
+    "k=settings-row",
+    "k=settings-projects",
+    "settings-row=pr_wsp"
+  ],
+  "wait": "k=project-head",
+  "widths": [
+    1440,
+    390
+  ],
+  "height": 1100,
+  "reason": "A project's page: its head row, the Icon row with its reset while an image is worn, and the Colour row."
+}

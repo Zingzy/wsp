@@ -18,7 +18,7 @@ import { Radio, RadioGroup } from "../../components/ui/radio-group.js";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../../components/ui/select.js";
 import { cn } from "../../lib/utils.js";
 import { useStore } from "../../protocol/store.js";
-import { PROJECT_GLYPHS, PROJECT_HUES } from "../../projects/look.js";
+import { ProjectGlyph } from "../../projects/look.js";
 import { HueSelect, IconSelect } from "../../projects/LookPicker.js";
 import { signInSentence } from "../agents.js";
 import { ADD_COMPUTER_WORDS, FACT } from "../format.js";
@@ -364,6 +364,8 @@ export interface FolderOption {
   remote?: string;
   icon: ProjectIcon;
   hue: ProjectHue;
+  /** The hash of the image the project wears here, which its row and the project the box gets wear too. */
+  image?: string;
   bytes?: number;
   /** GitHub refuses an anonymous read of its repository: the box clones it only with GitHub signed in there. */
   private?: boolean;
@@ -382,7 +384,8 @@ export function ProjectsPicks({ picks, onChange, box, folders, taken }: Omit<Pic
   const noGitHub = githubPick(picks) === "skip";
   const rowOf = (folder: FolderOption): RecipeFile["folders"][string] & { name: string; icon: ProjectIcon; hue: ProjectHue } => {
     const row = picks.folders[folder.key];
-    return { from: folder.path, name: row?.name ?? folder.name, icon: row?.icon ?? folder.icon, hue: row?.hue ?? folder.hue, keep: row?.keep ?? [] };
+    const image = row === undefined ? folder.image : row.image;
+    return { from: folder.path, name: row?.name ?? folder.name, icon: row?.icon ?? folder.icon, hue: row?.hue ?? folder.hue, ...(image === undefined ? {} : { image }), keep: row?.keep ?? [] };
   };
   const set = (changes: PickChanges): void =>
     onChange(
@@ -399,8 +402,7 @@ export function ProjectsPicks({ picks, onChange, box, folders, taken }: Omit<Pic
       own={AS_FOUND}
       onSet={set}
       row={({ folder, on }, tick) => {
-        const { name, icon, hue } = rowOf(folder);
-        const Glyph = PROJECT_GLYPHS[icon];
+        const { name, icon, hue, image } = rowOf(folder);
         const clash = on && taken(name);
         const note = on && noGitHub && folder.private === true ? ADD_COMPUTER_WORDS.needsGitHub : folderNote(folder);
         const put = (next: Partial<RecipeFile["folders"][string]>): void => onChange(tickFolder(picks, folder.key, { ...rowOf(folder), ...next }));
@@ -411,7 +413,7 @@ export function ProjectsPicks({ picks, onChange, box, folders, taken }: Omit<Pic
             checked={on}
             onCheckedChange={tick}
             hover={RANGE_HOVER}
-            glyph={<Glyph aria-hidden className={cn("size-4", hue === "neutral" ? "text-foreground/80" : PROJECT_HUES[hue].text)} />}
+            glyph={<ProjectGlyph look={{ icon, hue, image }} ink="text-foreground/80" />}
             name={name}
             tag={folder.path}
             {...(note === undefined ? {} : { note })}
@@ -430,7 +432,16 @@ export function ProjectsPicks({ picks, onChange, box, folders, taken }: Omit<Pic
                   </span>
                 </PickLine>
                 <PickLine label="Icon">
-                  <IconSelect icon={icon} hue={hue} onChange={next => put({ icon: next })} />
+                  <IconSelect
+                    icon={icon}
+                    hue={hue}
+                    {...(image === undefined ? {} : { image: <ProjectGlyph look={{ icon, hue, image }} /> })}
+                    onChange={next => {
+                      // A glyph picked is the glyph wanted, so the image the row carried goes.
+                      const { image: _image, ...plain } = rowOf(folder);
+                      onChange(tickFolder(picks, folder.key, { ...plain, icon: next }));
+                    }}
+                  />
                 </PickLine>
                 <PickLine label="Colour">
                   <HueSelect hue={hue} onChange={next => put({ hue: next })} />

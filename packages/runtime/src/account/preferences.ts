@@ -67,22 +67,30 @@ export function preferencesArea(ctx: RuntimeContext): PreferencesArea {
     const rows = new Set([...ctx.sessions.values()].map(row => threadKeyOf(row.view)));
     return Object.fromEntries(Object.entries(shut).filter(([lead]) => rows.has(lead) || ctx.threadRecords.has(lead)));
   };
+  /** The record moved by `change` in its turn among every other write, kept and pushed to every socket. */
+  const changePreferences = (change: (held: Preferences) => Preferences): Promise<Preferences> => {
+    const write = preferenceWrites.then(async () => {
+      await ctx.ready();
+      const next = change(await preferences.get());
+      await store.put(PREFERENCES, PREFERENCES_ID, next);
+      ctx.state.preferencesHeld = next;
+      bus.emit({ type: "preferences.changed", preferences: next });
+      return next;
+    });
+    preferenceWrites = write.catch(() => undefined);
+    return write;
+  };
   const preferences: Runtime["preferences"] = {
     get: async () => (ctx.state.preferencesHeld ??= { ...preferencesFrom(await store.get(PREFERENCES, PREFERENCES_ID)), labs }),
-    set: patch => {
-      const write = preferenceWrites.then(async () => {
-        await ctx.ready();
-        const merged = applyPreferencesPatch(await preferences.get(), patch);
+    set: async patch => {
+      const next = await changePreferences(held => {
+        const merged = applyPreferencesPatch(held, patch);
         const next = patch.threadsShut === undefined || merged.threadsShut === undefined ? merged : { ...merged, threadsShut: heldLeads(merged.threadsShut) };
         defaultsRefusal(patch, next);
-        await store.put(PREFERENCES, PREFERENCES_ID, next);
-        ctx.state.preferencesHeld = next;
-        const notice = patch.serverIcons === false ? iconsForgotten() : undefined;
-        bus.emit({ type: "preferences.changed", preferences: next });
-        return notice === undefined ? { preferences: next } : { preferences: next, notice };
+        return next;
       });
-      preferenceWrites = write.catch(() => undefined);
-      return write;
+      const notice = patch.serverIcons === false ? iconsForgotten() : undefined;
+      return notice === undefined ? { preferences: next } : { preferences: next, notice };
     },
   };
 
@@ -103,11 +111,13 @@ export function preferencesArea(ctx: RuntimeContext): PreferencesArea {
       return { name: entry.record.name, phase: entry.record.phase, local, machine: entry.machine, project: { id: project.id, name: project.name, path: ctx.checkoutOf(entry.record) }, stores };
     },
     placeStores: ctx.placeStores,
+    storesHere: ctx.storesHere,
     // A project's folder on the computer holding it: the checkout the add left there, else where it already sits.
     projects: async placeId => (await ctx.ready(), [...projectsHeld.values()].filter(p => p.computer === placeId).map(p => ({ id: p.id, name: p.name, path: p.checkout ?? p.path }))),
     ...(opts.agentsActs !== undefined ? { acts: opts.agentsActs } : {}),
     ...(opts.skillsActs !== undefined ? { skills: opts.skillsActs } : {}),
     ...(opts.serversActs !== undefined ? { servers: opts.serversActs } : {}),
+    ...(opts.pluginsActs !== undefined ? { plugins: opts.pluginsActs } : {}),
     latestOn: async () => (await preferences.get()).agentVersions,
     // The person's switch is read at every ask, so turning it off stops the next one.
     ...(opts.serverIcons !== undefined ? { icons: { folder: opts.serverIcons.folder, icon: async (host, refresh) => ((await iconsOn()) ? opts.serverIcons!.icon(host, refresh, iconsOn) : null), forget: () => opts.serverIcons!.forget() } satisfies ServerIcons } : {}),
@@ -133,5 +143,5 @@ export function preferencesArea(ctx: RuntimeContext): PreferencesArea {
   bus.on("workspace.deleted", e => {
     if (e.type === "workspace.deleted") agentsRead.forget(e.workspaceId);
   });
-  return { preferences, agentsRead };
+  return { preferences, changePreferences, agentsRead };
 }

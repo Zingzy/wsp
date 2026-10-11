@@ -40,6 +40,7 @@ import { agentsReader } from "../src/agents-reader.js";
 import { hostActs } from "../src/agents-signin.js";
 import { skillsActs } from "../src/skills-acts.js";
 import { serversActs } from "../src/servers-acts.js";
+import { pluginsActs } from "../src/plugins-acts.js";
 import type { SkillsFetch } from "../src/skills-sh.js";
 
 /** skills.sh as far as this test asks it: one search and one skill's folder. */
@@ -231,6 +232,7 @@ describe("the agent contract on the command line and the tool door", () => {
       skillsActs: skillsActs({ fetch: skillsSh, here: () => fixtureHost(agents) }),
       // A server lands in the fixture's agents' configs, never the person's.
       serversActs: serversActs({ here: () => fixtureHost(agents) }),
+      pluginsActs: pluginsActs({ here: () => fixtureHost(agents) }),
       // Two places over one backend: this host's own, and one more for the image build road, which never boots a
       // machine here because the place already stands on the record.
       places: { wired: "default", backend: place => (place === "default" || place === "elsewhere" ? backend : undefined), list: () => ["default", "elsewhere"] },
@@ -395,6 +397,9 @@ describe("the agent contract on the command line and the tool door", () => {
     await last("agents", "agents");
     await last("skills", "skills", "--on", HERE_PLACE_ID);
     await last("servers", "servers");
+    expect(await last("plugins", "plugins")).toMatchObject({ plugins: [expect.objectContaining({ id: "frontend@official", agent: "claude", on: true })] });
+    expect(await last("plugins disable", "plugins", "disable", "frontend@official", "--agent", "claude")).toMatchObject({ plugin: { id: "frontend@official", agent: "claude", on: false } });
+    expect(await last("plugins enable", "plugins", "enable", "frontend@official", "--agent", "claude")).toMatchObject({ plugin: { id: "frontend@official", agent: "claude", on: true } });
     expect(await last("skills search", "skills", "search", "memo")).toEqual({ skills: [expect.objectContaining({ id: "acme/skills/memo" })] });
     expect(await last("skills show", "skills", "show", "acme/skills/memo")).toMatchObject({ size: expect.any(Number) });
     expect(await last("skills add", "skills", "add", "acme/skills/memo", "--agent", "claude")).toEqual({ path: "~/.agents/skills/memo", agents: [{ agent: "claude", path: "~/.claude/skills/memo" }] });

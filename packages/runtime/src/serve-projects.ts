@@ -23,5 +23,9 @@ export async function answerProject(projects: Runtime["projects"], msg: ProjectR
       return { ...(await projects.branch(msg.projectId, origin)) };
     case "projects.remove":
       return { ...(await projects.remove(msg.projectId, origin, { ...(msg.force === true ? { force: true } : {}), ...(msg.check === true ? { check: true } : {}) })) };
+    case "projects.icon":
+      return { ...(await projects.icon(msg.projectId, msg.png)) };
+    case "projects.icons":
+      return { icons: await projects.icons(msg.hashes) };
   }
 }

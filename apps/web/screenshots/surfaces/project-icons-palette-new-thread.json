@@ -1,0 +1,16 @@
+{
+  "at": "/",
+  "fixture": "project-icons",
+  "steps": [
+    "key:ControlOrMeta+k",
+    "type:new thread",
+    "key:Enter"
+  ],
+  "wait": "command-palette=true",
+  "settleMs": 700,
+  "widths": [
+    1440,
+    390
+  ],
+  "reason": "The palette's New thread page lists every project by its mark."
+}

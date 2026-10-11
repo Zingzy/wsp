@@ -15,9 +15,10 @@ Builds match the mockup; a change to the design goes through the owner, whose
 rulings of 2026-09-26 this file restates.
 
 Two things do not change: the open thread (header with the agent mark and
-breadcrumb, the conversation, the composer, the right panel with its three
-tabs) and the sidebar's top (search row, new thread button, project picker).
-The owner kept both as they are. Everything else takes the grammar below.
+breadcrumb, the conversation, the composer, the right panel with its four
+tabs, Plugins the fourth by the owner's word of 2026-10-11) and the sidebar's
+top (search row, new thread button, project picker). The owner kept both as
+they are. Everything else takes the grammar below.
 
 ## Foundations
 

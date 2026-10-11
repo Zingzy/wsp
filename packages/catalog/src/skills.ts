@@ -29,36 +29,16 @@ export interface SkillRoots {
   project: readonly SkillRoot[];
 }
 
-/** Skills a plugin brings: the index file that names each installed plugin's folder, and the skill folders that
- * index names. Read, never written: a plugin's skills come and go with the plugin. */
+/** The index file that names each installed plugin and its folder, which the recipe reads for the plugins it offers.
+ * Read, never written: a plugin's skills come and go with the plugin, and the plugin module reads them. */
 export interface PluginSkills {
   index: string;
-  roots(text: string): string[];
 }
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
-/** Claude Code's installed_plugins.json, version 2 (read 2026-09-24 on 2.1.281): `plugins.<name@marketplace>` is a
- * list of installs, each with its scope and installPath; a user-scoped install's skills are under
- * `<installPath>/skills`. A project-scoped one belongs to that project and is left out. */
-export const CLAUDE_PLUGIN_SKILLS: PluginSkills = {
-  index: "~/.claude/plugins/installed_plugins.json",
-  roots: text => {
-    let root: unknown;
-    try {
-      root = JSON.parse(text);
-    } catch {
-      return [];
-    }
-    const plugins = isObject(root) && isObject(root.plugins) ? root.plugins : {};
-    const out = new Set<string>();
-    for (const installs of Object.values(plugins)) {
-      if (!Array.isArray(installs)) continue;
-      for (const i of installs) if (isObject(i) && i.scope === "user" && typeof i.installPath === "string" && i.installPath.startsWith("/")) out.add(`${i.installPath.replace(/\/+$/, "")}/skills`);
-    }
-    return [...out];
-  },
-};
+/** Claude Code's installed_plugins.json, version 2 (read 2026-09-24 on 2.1.281). */
+export const CLAUDE_PLUGIN_SKILLS: PluginSkills = { index: "~/.claude/plugins/installed_plugins.json" };
 
 /** Skills an agent's own install puts in its skills folder, which come with the agent wherever it is installed and
  * so are never the person's to pick: the file the install writes naming each one it put there, and its names. */

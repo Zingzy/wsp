@@ -161,6 +161,42 @@ describe("gone machines", () => {
   });
 });
 
+describe("a machine its provider answers for past the load's deadline", () => {
+  /** One stored workspace whose next host's reads of its machine fail, the first landing 2 s on, past LOAD_READS_MS. */
+  const lateFailure = async (fails: (backend: ReturnType<typeof stubBackend>, get: (id: string) => Promise<never>) => Promise<never>) => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const rt1 = createRuntime({ backend, store, adapters: {} });
+    const ws = await createOn(rt1, { golden: "snap_g", name: "a" });
+    await rt1.close();
+    const get = backend.get.bind(backend) as (id: string) => Promise<never>;
+    let reads = 0;
+    backend.get = async () => {
+      if (reads++ === 0) await new Promise(resolve => setTimeout(resolve, 2_000));
+      return fails(backend, get);
+    };
+    const rt = createRuntime({ backend, store, adapters: {} });
+    onTestFinished(() => rt.close());
+    return { backend, rt, ws };
+  };
+
+  it("holds the record on what the provider said, as a read that fails in time does", async () => {
+    const { rt, ws } = await lateFailure(async () => {
+      throw new Error("provider: key refused (401)");
+    });
+    await expect(rt.workspaces.exec(ws.id, "true")).rejects.toThrow("provider: key refused (401)");
+  });
+
+  it("settles a machine it answers gone for with the provider's words, as a load that met the 404 in time does", async () => {
+    const { rt, ws } = await lateFailure((backend, get) => {
+      for (const m of backend.machines) m.killed = true;
+      return get("m1");
+    });
+    await until(async () => (await rt.workspaces.get(ws.id)).phase === "gone", 6_000);
+    expect((await rt.workspaces.get(ws.id)).gone).toMatch(/^machine m1 is gone at the provider: the record load found it gone at \S+Z \(404 gone\)$/);
+  });
+});
+
 describe("a create on a computer that names its own machines", () => {
   it("runs no hostname command inside the workspace, and a provider's fork is still named", async () => {
     const named = stubBackend();

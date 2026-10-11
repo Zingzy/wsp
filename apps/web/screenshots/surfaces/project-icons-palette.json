@@ -1,0 +1,15 @@
+{
+  "at": "/",
+  "fixture": "project-icons",
+  "steps": [
+    "key:ControlOrMeta+k",
+    "scroll:1300:slot=command-item"
+  ],
+  "wait": "command-palette=true",
+  "settleMs": 700,
+  "widths": [
+    1440,
+    390
+  ],
+  "reason": "The palette's switch rows draw each project's mark; the popup is capped at 576px, so 1280 draws it as 1440 does."
+}

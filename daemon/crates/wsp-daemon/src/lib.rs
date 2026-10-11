@@ -13,6 +13,7 @@ mod files;
 mod fs;
 mod git;
 mod guest;
+mod hash;
 mod hosts;
 mod image;
 mod inbox;
@@ -34,6 +35,7 @@ mod roads;
 /// The seal a place link agrees in its handshake. Public so the suite that drives both ends of a link can
 /// stand on the host's side of it, which in the product is node's own.
 pub use wsp_seal as seal;
+mod slate_reads;
 mod ssh;
 mod sys;
 mod sys_local;

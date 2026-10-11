@@ -1,0 +1,19 @@
+{
+  "at": "/",
+  "fixture": "project-icons-usage",
+  "steps": [
+    "390:key:Escape",
+    "390:sidebar=trigger",
+    "k=settings-row",
+    "k=settings-usage",
+    "segment=project"
+  ],
+  "wait": "k=usage-split",
+  "settleMs": 700,
+  "height": 1100,
+  "widths": [
+    1440,
+    390
+  ],
+  "reason": "Usage split by project draws the project's mark; the column is 760px at most, so 1280 draws it as 1440 does."
+}

@@ -127,13 +127,13 @@ function configOf(road: Road, on: AgentsOn, agentId: string, scope: McpScope): C
 }
 
 /** The config as it stands: the file it is, its text and the checksum a write compares, or no file yet. */
-interface Read {
+export interface Read {
   file: string;
   text?: string;
   sum?: string;
 }
 
-async function readConfig(road: Road, config: Config): Promise<Read> {
+export async function readConfig(road: Road, config: Pick<Config, "files" | "base">): Promise<Read> {
   const q = shellQuote;
   const line = [
     // A store not made yet holds no config; macOS's realpath refuses a missing folder where GNU's answers it.
@@ -164,7 +164,7 @@ async function readConfig(road: Road, config: Config): Promise<Read> {
 }
 
 /** Writes the text over what was read, as the login, by the one config write. */
-async function writeConfig(road: Road, config: Config, read: Read, text: string): Promise<void> {
+export async function writeConfig(road: Road, config: Pick<Config, "base" | "store">, read: Read, text: string): Promise<void> {
   const bytes = new TextEncoder().encode(text);
   // A store outside the home is made by its agent's sign-in there, a box's logins folder among them: one not made yet
   // is made as that sign-in makes it, the folder alone, so nothing above it is.

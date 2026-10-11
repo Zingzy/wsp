@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { CATALOG_AGENTS, type ThreadAgent } from "@wsp/catalog";
 import { MachineUnreachableError, MachineUnreached, isPlaceAbsent } from "@wsp/engine";
 import {
-  AGENT_KEEP_MS, AGENTS_KEPT, type PermissionAsk, type SessionRenameWrite, type SessionView, type TurnResult,
+  AGENT_KEEP_MS, AGENT_WARM_MS, AGENTS_KEPT, AGENTS_WARM, type PermissionAsk, type SessionRenameWrite, type SessionView, type TurnResult,
   type Caller, SessionOrigin, ThreadScope, WorkspaceOrigin, GitDiffReply, GitWorktreesReply, repoPathOf, worktreeOf, foldThreads, threadWord, threadsFollowed, scopeOf,
   type ThreadWaitingOn, isLocalWorkspace, NO_SUCH_TURN, NOTIFY_ME, notifyLine, runsInFolder, DEVICE_OPS, sendRefusal,
   workspaceState, HERE_PLACE_ID, runningOn as runningOnPlace, type ThreadCapWait, roadOf, unreadLine, turnLines,
@@ -137,11 +137,15 @@ export function threadsArea(ctx: RuntimeContext): ThreadsArea {
 
   /** The process a thread's next turn runs on, taken out of the keep: only where it was launched exactly as this turn
    * would be, resumes the session this turn resumes, and nothing else wrote that session since its last turn (the
-   * person resumed it in a terminal). Any other kept process of the thread is ended here, and the turn boots cold. */
-  const takeKept = (threadId: string, launch: KeptLaunch | undefined, session: string | undefined): KeptProcess | undefined => {
+   * person resumed it in a terminal). Any other kept process of the thread is ended here, and the turn boots cold. One
+   * launched ahead of the send runs at what it was launched with and nothing else, so it is matched on the send's whole
+   * launch, every pick the send left to the defaults included, both ways. */
+  const takeKept = (threadId: string, launch: KeptLaunch | undefined, session: string | undefined, whole?: KeptLaunch): KeptProcess | undefined => {
     const kept = keptAgents.get(threadId);
     if (kept === undefined) return undefined;
-    if (launch === undefined || !launchesAs(kept.launch, launch) || kept.session !== session || !sameSessionFile(kept.agent.sessionFile, kept.file)) {
+    const asked = kept.warm === undefined ? launch : whole;
+    const matches = asked !== undefined && launchesAs(kept.launch, asked) && (kept.warm === undefined || launchesAs(asked, kept.launch));
+    if (!matches || kept.session !== session || !sameSessionFile(kept.agent.sessionFile, kept.file)) {
       reapKept(threadId);
       return undefined;
     }
@@ -160,14 +164,55 @@ export function threadsArea(ctx: RuntimeContext): ThreadsArea {
     }
     reapKept(threadId);
     const file = stampSessionFile(o.agent.sessionFile);
-    const kept: KeptProcess = { ...o, ...(file !== undefined ? { file } : {}), usedAt: clock.now(), cancel: () => {} };
-    const timer = clock.schedule(() => {
+    keep(threadId, { ...o, ...(file !== undefined ? { file } : {}), usedAt: clock.now(), cancel: () => {} }, AGENT_KEEP_MS);
+    return true;
+  };
+
+  /** A process launched ahead of a new thread's first send, kept under the thread id its launch was minted for: it
+   * counts against the same cap, ends after AGENT_WARM_MS unless the composer asks for it again, and the one asked for
+   * longest ago ends once more than AGENTS_WARM stand. */
+  const holdWarm = (threadId: string, o: Omit<KeptProcess, "file" | "usedAt" | "cancel">): void => {
+    if (ctx.state.closing) {
+      endKept(threadId, { ...o, usedAt: 0, cancel: () => {} });
+      return;
+    }
+    keep(threadId, { ...o, usedAt: clock.now(), cancel: () => {} }, AGENT_WARM_MS);
+    for (;;) {
+      const standing = [...keptAgents].filter(([, kept]) => kept.warm?.claimed === false);
+      if (standing.length <= AGENTS_WARM) return;
+      reapKept(standing.reduce((a, b) => (b[1].usedAt < a[1].usedAt ? b : a))[0]);
+    }
+  };
+  /** The standing process launched ahead of a send on this workspace for this agent that no send took yet. */
+  const warmOn = (workspaceId: string, harness: string): [string, KeptProcess] | undefined =>
+    [...keptAgents].find(([, kept]) => kept.workspaceId === workspaceId && kept.warm?.harness === harness && !kept.warm.claimed);
+  /** The composer asked again for the process standing: its window starts over. */
+  const rewarm = (threadId: string): void => {
+    const kept = keptAgents.get(threadId);
+    if (kept === undefined) return;
+    kept.cancel();
+    kept.usedAt = clock.now();
+    arm(threadId, kept, AGENT_WARM_MS);
+  };
+  /** A send opening a thread takes the thread id of the process standing for its workspace and agent, so its launch
+   * runs as that thread's from here: taken once, by one send. */
+  const claimWarm = (workspaceId: string, harness: string): string | undefined => {
+    const found = warmOn(workspaceId, harness);
+    if (found === undefined) return undefined;
+    found[1].warm!.claimed = true;
+    return found[0];
+  };
+
+  const arm = (threadId: string, kept: KeptProcess, ms: number): void => {
+    kept.cancel = clock.schedule(() => {
       if (keptAgents.get(threadId) === kept) reapKept(threadId);
-    }, AGENT_KEEP_MS, { unref: true });
-    kept.cancel = timer;
+    }, ms, { unref: true });
+  };
+  const keep = (threadId: string, kept: KeptProcess, ms: number): void => {
+    arm(threadId, kept, ms);
     keptAgents.set(threadId, kept);
     // A process that went on its own takes its token with it; nothing is left to close.
-    void o.agent.exited.then(() => {
+    void kept.agent.exited.then(() => {
       if (keptAgents.get(threadId) !== kept) return;
       keptAgents.delete(threadId);
       kept.cancel();
@@ -177,7 +222,6 @@ export function threadsArea(ctx: RuntimeContext): ThreadsArea {
       const [oldest] = [...keptAgents].reduce((a, b) => (b[1].usedAt < a[1].usedAt ? b : a));
       reapKept(oldest);
     }
-    return true;
   };
 
   /** The thread a request came out of, by the token that request's own launch environment carries: the row holding
@@ -1040,7 +1084,7 @@ export function threadsArea(ctx: RuntimeContext): ThreadsArea {
   };
   return {
     threadRuns, launchingOn, runningOn, latestOn, keptAgents, reapKept, endKept, hostWrites, writeSession, takeKept,
-    holdKept, threadOfToken, treeUnder, restarts, drivesThread, settlesThread, leadAsks, capHeld, capHold, capLend, capFull, capWait, capStop, capStopping, capLeft, stoppedBehind, stopUnder, notifyOn, notifyReach, tellAs,
+    holdKept, holdWarm, warmOn, rewarm, claimWarm, threadOfToken, treeUnder, restarts, drivesThread, settlesThread, leadAsks, capHeld, capHold, capLend, capFull, capWait, capStop, capStopping, capLeft, stoppedBehind, stopUnder, notifyOn, notifyReach, tellAs,
     notifyEnd, deliverOwed, sendBack, settleCut, notARepo, checkpointsLanding, keepCheckpoint, takenTurn, keepSteer, steerAnswered, steerLost, recordSteer, lineTry, promptHeld, tryStopped, snapshotOf,
     readTurnChanges, usageComputerOf, vaultedFor, usageAccountOf, limitDetailsDue,
   };

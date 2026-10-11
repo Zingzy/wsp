@@ -84,6 +84,25 @@ describe("runtime golden builders", () => {
     expect(await store.get("builders", b.id)).toBeUndefined();
   });
 
+  it("a builder its provider answers for past the load's deadline is admitted once that read lands, the one read the listing waits on", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const crashed = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipe });
+    const kept = await crashed.golden.prepare({ name: "default" });
+    await crashed.close();
+    const get = backend.get.bind(backend);
+    const reads: string[] = [];
+    backend.get = async id => (reads.push(id), await new Promise(resolve => setTimeout(resolve, 2_000)), get(id));
+    const rt = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipe });
+    let listed = false;
+    void rt.golden.builders().then(() => (listed = true));
+    await rt.workspaces.list();
+    expect(listed).toBe(false);
+    expect((await rt.golden.builders()).map(b => [b.id, b.sealable])).toEqual([[kept.id, true]]);
+    expect(reads).toEqual([kept.id]);
+    await rt.close();
+  });
+
   it("builderReach mints the builder's daemon route once while fresh and writes the token to the guest", async () => {
     const backend = stubBackend();
     let minted = 0;

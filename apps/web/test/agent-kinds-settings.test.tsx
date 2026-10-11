@@ -6,7 +6,7 @@
 // and the tab's add open in place of the list, and the crumb goes back.
 import { act, cleanup, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { AgentsTarget, PlaceView, ServerAdd, ServerAsk } from "@wsp/protocol";
+import type { AgentsTarget, PlaceView, PluginAsk, ServerAdd, ServerAsk } from "@wsp/protocol";
 import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { useSettingsStore } from "../src/settings/settingsStore.js";
@@ -29,7 +29,7 @@ const METRICS = "server-project-pr_wsp-spoo-metrics-stdio-node scripts/metrics-m
 /** An api over this Mac's report with every server and skill in it, recording each ask the tabs make. A server's
  * tools answer as the wireframe's do; wsp's own is still being asked. */
 function toolsApi(over: Partial<Api> = {}) {
-  const asked = { tools: [] as Array<[AgentsTarget, string, string, boolean | undefined]>, toggles: [] as Array<[AgentsTarget, ServerAsk, boolean]>, removes: [] as Array<[AgentsTarget, ServerAsk]>, adds: [] as Array<[AgentsTarget, ServerAdd]>, skills: [] as unknown[][], reads: 0 };
+  const asked = { plugins: [] as Array<[AgentsTarget, PluginAsk, boolean]>, tools: [] as Array<[AgentsTarget, string, string, boolean | undefined]>, toggles: [] as Array<[AgentsTarget, ServerAsk, boolean]>, removes: [] as Array<[AgentsTarget, ServerAsk]>, adds: [] as Array<[AgentsTarget, ServerAdd]>, skills: [] as unknown[][], reads: 0 };
   const made = settingsApi({
     agentsRead: async () => (asked.reads++, AGENTS_TOOLS_REPORT),
     listHarnesses: async () => HARNESSES,
@@ -38,6 +38,7 @@ function toolsApi(over: Partial<Api> = {}) {
       return name === "wsp" ? new Promise<never>(() => {}) : (SERVER_TOOLS[name] ?? { auth: "connected", tools: [], readAt: AGENTS_TOOLS_REPORT.readAt });
     },
     serversToggle: async (target, ask, on) => (asked.toggles.push([target, ask, on]), { file: "~/.codex/config.toml" }),
+    pluginsToggle: async (target, ask, on) => (asked.plugins.push([target, ask, on]), { ...AGENTS_TOOLS_REPORT.plugins!.find(p => p.agent === ask.agent && p.id === ask.plugin)!, on }),
     serversRemove: async (target, ask) => (asked.removes.push([target, ask]), { file: "~/.codex/config.toml" }),
     serversAdd: async (target, ask) => (asked.adds.push([target, ask]), { file: "~/.claude.json" }),
     agentsSignIn: async () => ({ signInId: "si", stop: () => {}, off: () => {} }),
@@ -59,7 +60,7 @@ const status = (key: string): HTMLElement | null => rowOf(key)!.querySelector<HT
 const crumbPage = (): string | undefined => document.querySelector("[data-breadcrumb-page]")?.textContent ?? undefined;
 const level = () => useSettingsStore.getState().agentsLevel;
 
-const mountTab = async (api: Api, tab: "servers" | "skills"): Promise<void> => {
+const mountTab = async (api: Api, tab: "servers" | "skills" | "plugins"): Promise<void> => {
   useSettingsStore.getState().pickAgentsTab(tab);
   mountSettings({ api, at: { kind: "group", group: "agents" } });
   await settle();
@@ -234,16 +235,40 @@ describe("the Tool servers tab", () => {
   });
 });
 
+describe("the Plugins tab", () => {
+  it("draws the fourth segment, each agent's group, and sends a row's switch to the host for that agent and plugin", async () => {
+    const { api, asked } = toolsApi();
+    await mountTab(api, "plugins");
+    expect(screen.getAllByRole("radio").map(r => r.textContent)).toEqual(["Agents", "Tool servers", "Skills", "Plugins"]);
+    expect(headOf("kind-agent-claude")).toContain(`Claude Code on ${MAC}`);
+    expect(headOf("kind-agent-codex")).toBe("Codex");
+    const vercel = "claude:user:vercel@claude-plugins-official";
+    await act(async () => void fireEvent.click(rowOf(vercel)!.querySelector("[data-k=kind-on]")!));
+    await settle();
+    expect(asked.plugins).toEqual([[{ placeId: "here" }, { agent: "claude", plugin: "vercel@claude-plugins-official" }, false]]);
+  });
+
+  it("says under the row why the host refused a switch", async () => {
+    const { api } = toolsApi({ pluginsToggle: async () => Promise.reject(new Error("There is no plugin vercel@claude-plugins-official for Claude Code there, so nothing was switched.")) });
+    await mountTab(api, "plugins");
+    const vercel = "claude:user:vercel@claude-plugins-official";
+    await act(async () => void fireEvent.click(rowOf(vercel)!.querySelector("[data-k=kind-on]")!));
+    await settle();
+    expect(rowOf(vercel)!.closest("[data-kind-item]")!.querySelector("[data-k=kind-row-refused]")?.textContent).toBe("There is no plugin vercel@claude-plugins-official for Claude Code there, so nothing was switched.");
+  });
+});
+
 describe("the Skills tab", () => {
   const SHARED = "skill-user-frontend-design";
   const OWN = "skill-user-wsp";
-  const PLUGIN = "skill-plugin-pdf";
   const REPO = "skill-project-pr_wsp-wsp-review";
 
   it("lists each skill under where it comes from, with the folder it lives in and the agents that read it, a switch where the host turns it and its state in words where it does not", async () => {
     await mountTab(toolsApi().api, "skills");
     expect(headOf("kind-source-system")).toContain(`System on ${MAC}`);
-    expect(headOf("kind-source-plugin")).toBe("Plugins");
+    // A plugin's skills stand on its plugin's page, under the Plugins tab.
+    expect(page().querySelector("[data-settings-card=kind-source-plugin]")).toBeNull();
+    expect(rowOf("skill-plugin-brag:brag")).toBeNull();
     expect(headOf("kind-source-user")).toBe("Global");
     expect(headOf("kind-project-pr_wsp")).toBe("wsp~/wsp");
     expect(descriptionOf(SHARED)).toBe("~/.agents/skills/frontend-design");
@@ -253,10 +278,9 @@ describe("the Skills tab", () => {
     expect(status(SHARED)).toBeNull();
     expect(status(OWN)?.textContent).toBe("Always on");
     expect(status(OWN)?.dataset["tone"]).toBe("good");
-    expect(status(PLUGIN)?.textContent).toBe("On");
     // A project's skill lives in the repo, so the page says its state and turns nothing.
     expect(status(REPO)?.textContent).toBe("On");
-    for (const key of [OWN, PLUGIN, REPO]) expect(rowOf(key)!.querySelector("[data-k=kind-on]")).toBeNull();
+    for (const key of [OWN, REPO]) expect(rowOf(key)!.querySelector("[data-k=kind-on]")).toBeNull();
   });
 
   it("turns a skill off through the host from its row, without opening its page", async () => {

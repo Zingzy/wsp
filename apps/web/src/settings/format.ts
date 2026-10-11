@@ -333,14 +333,14 @@ export const DEVICES_WORDS = {
   refused: "Who is paired is read on the computer running wsp.",
 } as const;
 
-/** Settings > Agents: its title, the computer it reads and its three lists. */
+/** Settings > Agents: its title, the computer it reads and its four lists. */
 export const AGENTS_PAGE_WORDS = {
   title: "Agents",
   computer: "Computer",
   tab: "Show",
-  tabs: { agents: "Agents", servers: "Tool servers", skills: "Skills" },
-  onComputer: (name: string): string => `Agents, tool servers and skills on ${name}`,
-  onComputerDescription: "Installed agents, their sign-ins, and the tools and skills they get.",
+  tabs: { agents: "Agents", servers: "Tool servers", skills: "Skills", plugins: "Plugins" },
+  onComputer: (name: string): string => `Agents, tool servers, skills and plugins on ${name}`,
+  onComputerDescription: "Installed agents, their sign-ins, and the tools, skills and plugins they get.",
   newThreads: "New threads",
   defaultAgent: "Default agent",
   defaultAgentDescription: "A project can set its own.",
@@ -465,7 +465,14 @@ export const USAGE_PAGE_WORDS = {
 export const PROJECTS_WORDS = {
   look: "Look",
   icon: "Icon",
-  iconDescription: "Drawn beside the project in the sidebar and the switcher.",
+  iconDescription: "A glyph, or an image you choose. Drawn wherever the project shows.",
+  iconImage: "Icon",
+  chooseImage: "Choose an image",
+  chooseAnother: "Choose another image",
+  imageTitle: "Project icon",
+  imageLine: "How it draws on your light and dark themes.",
+  imageNote: "Drop or paste another image to replace this one.",
+  useImage: "Use icon",
   hue: "Colour",
   hueDescription: "The icon's colour, so the project reads at a glance.",
   title: "Projects",

@@ -126,6 +126,19 @@ describe("ComposerCommandMenu", () => {
     expect(groups[0]!.items.map(item => item.label)).toEqual(["$why"]);
   });
 
+  it("offers a plugin's skill once, by the name Claude Code announces it under, and no skill of a plugin that is off", () => {
+    // As the agents report reads them: named as the agent announces them, off while their plugin is off.
+    const skills = [
+      { name: "brag:brag", description: "Make a launch video", plugin: "brag@brag", paths: [{ path: "~/.claude/plugins/cache/brag/brag/0.4.0/skills/brag", agent: "claude" }], scope: "plugin" as const },
+      { name: "claude-mem:mem-search", plugin: "claude-mem@thedotmack", paths: [{ path: "~/.claude/plugins/cache/thedotmack/claude-mem/13.9.2/skills/mem-search", agent: "claude", off: true as const }], scope: "plugin" as const },
+    ];
+    const announced = [{ name: "brag:brag" }, { name: "review" }];
+    const groups = slashGroups({ harness: "claude", announced, skills, query: "" });
+    const labels = groups.flatMap(group => group.items.map(item => item.label));
+    expect(labels.filter(label => label.includes("brag"))).toEqual(["/brag:brag"]);
+    expect(labels.some(label => label.includes("mem-search"))).toBe(false);
+  });
+
   it("lists the repository's open pull requests and issues by number and title, each under its own heading", () => {
     const groups = referenceGroups(
       [

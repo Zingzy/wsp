@@ -1,0 +1,386 @@
+{
+ "recorded": "codex-cli 0.162.1 app-server in a scratch CODEX_HOME with brag and no-claude-coauthor installed from local marketplace copies, and the six app plugin tables",
+ "pluginList": {
+  "marketplaces": [
+   {
+    "name": "brag",
+    "path": "/x/mk/brag/.claude-plugin/marketplace.json",
+    "interface": null,
+    "plugins": [
+     {
+      "id": "brag@brag",
+      "remotePluginId": null,
+      "version": null,
+      "localVersion": "0.4.0",
+      "name": "brag",
+      "shareContext": null,
+      "source": {
+       "type": "local",
+       "path": "/x/mk/brag"
+      },
+      "installed": true,
+      "installedAt": null,
+      "enabled": true,
+      "installPolicy": "AVAILABLE",
+      "installPolicySource": null,
+      "mustShowInstallationInterstitial": null,
+      "authPolicy": "ON_INSTALL",
+      "availability": "AVAILABLE",
+      "disabledReason": null,
+      "eligiblePlanTypes": null,
+      "interface": {
+       "displayName": "brag",
+       "shortDescription": "Turn your project into a polished launch video.",
+       "longDescription": "Create a short, shareable launch video from the current project, complete with a tailored story, motion, music, sound effects, poster frame, and share copy.",
+       "developerName": "Latent Spaces",
+       "category": "Productivity",
+       "capabilities": [
+        "Read",
+        "Write",
+        "Execute"
+       ],
+       "websiteUrl": "https://latent-spaces.github.io/brag/",
+       "privacyPolicyUrl": null,
+       "termsOfServiceUrl": null,
+       "defaultPrompt": [
+        "Turn this project into a launch video.",
+        "Let's brag about what I built.",
+        "Make a polished launch video for this project."
+       ],
+       "brandColor": null,
+       "composerIcon": null,
+       "composerIconUrl": null,
+       "logo": null,
+       "logoDark": null,
+       "logoUrl": null,
+       "logoUrlDark": null,
+       "screenshots": [],
+       "screenshotUrls": []
+      },
+      "keywords": [
+       "video",
+       "launch",
+       "hyperframes",
+       "skill"
+      ]
+     }
+    ]
+   },
+   {
+    "name": "acme",
+    "path": "/x/mk/acme/.claude-plugin/marketplace.json",
+    "interface": null,
+    "plugins": [
+     {
+      "id": "no-claude-coauthor@acme",
+      "remotePluginId": null,
+      "version": null,
+      "localVersion": "0.1.0",
+      "name": "no-claude-coauthor",
+      "shareContext": null,
+      "source": {
+       "type": "local",
+       "path": "/x/mk/acme"
+      },
+      "installed": true,
+      "installedAt": null,
+      "enabled": true,
+      "installPolicy": "AVAILABLE",
+      "installPolicySource": null,
+      "mustShowInstallationInterstitial": null,
+      "authPolicy": "ON_INSTALL",
+      "availability": "AVAILABLE",
+      "disabledReason": null,
+      "eligiblePlanTypes": null,
+      "interface": null,
+      "keywords": []
+     }
+    ]
+   }
+  ],
+  "marketplaceLoadErrors": [],
+  "featuredPluginIds": []
+ },
+ "configRead": {
+  "config": {
+   "plugins": {
+    "presentations@openai-primary-runtime": {
+     "enabled": true
+    },
+    "computer-use@openai-bundled": {
+     "enabled": false
+    },
+    "browser@openai-bundled": {
+     "enabled": true
+    },
+    "documents@openai-primary-runtime": {
+     "enabled": true
+    },
+    "brag@brag": {
+     "enabled": true
+    },
+    "no-claude-coauthor@acme": {
+     "enabled": true
+    },
+    "spreadsheets@openai-primary-runtime": {
+     "enabled": true
+    },
+    "chrome@openai-bundled": {
+     "enabled": true
+    }
+   },
+   "marketplaces": {
+    "acme": {
+     "last_updated": null,
+     "last_revision": null,
+     "source_type": "local",
+     "source": "/x/mk/acme",
+     "ref": null,
+     "sparse_paths": null
+    },
+    "openai-primary-runtime": {
+     "last_updated": "2026-05-31T23:01:00Z",
+     "last_revision": null,
+     "source_type": "local",
+     "source": "/x/.cache/codex-runtimes/codex-primary-runtime/plugins/openai-primary-runtime",
+     "ref": null,
+     "sparse_paths": null
+    },
+    "brag": {
+     "last_updated": null,
+     "last_revision": null,
+     "source_type": "local",
+     "source": "/x/mk/brag",
+     "ref": null,
+     "sparse_paths": null
+    },
+    "openai-bundled": {
+     "last_updated": "2026-06-20T23:08:24Z",
+     "last_revision": null,
+     "source_type": "local",
+     "source": "/x/.codex/.tmp/bundled-marketplaces/openai-bundled",
+     "ref": null,
+     "sparse_paths": null
+    }
+   }
+  },
+  "layers": [
+   {
+    "name": {
+     "type": "user",
+     "file": "/x/codex/config.toml",
+     "profile": null
+    },
+    "version": "sha256:6e542174fd3edfc934b5de7580a377f888feb3ffb119e4dcf74a4c9eaea93acd",
+    "config": {
+     "marketplaces": {
+      "brag": {
+       "source_type": "local",
+       "source": "/x/mk/brag"
+      },
+      "acme": {
+       "source_type": "local",
+       "source": "/x/mk/acme"
+      },
+      "openai-bundled": {
+       "last_updated": "2026-06-20T23:08:24Z",
+       "source_type": "local",
+       "source": "/x/.codex/.tmp/bundled-marketplaces/openai-bundled"
+      },
+      "openai-primary-runtime": {
+       "last_updated": "2026-05-31T23:01:00Z",
+       "source_type": "local",
+       "source": "/x/.cache/codex-runtimes/codex-primary-runtime/plugins/openai-primary-runtime"
+      }
+     },
+     "plugins": {
+      "brag@brag": {
+       "enabled": true
+      },
+      "no-claude-coauthor@acme": {
+       "enabled": true
+      },
+      "documents@openai-primary-runtime": {
+       "enabled": true
+      },
+      "spreadsheets@openai-primary-runtime": {
+       "enabled": true
+      },
+      "presentations@openai-primary-runtime": {
+       "enabled": true
+      },
+      "chrome@openai-bundled": {
+       "enabled": true
+      },
+      "computer-use@openai-bundled": {
+       "enabled": false
+      },
+      "browser@openai-bundled": {
+       "enabled": true
+      }
+     }
+    }
+   },
+   {
+    "name": {
+     "type": "system",
+     "file": "/etc/codex/config.toml"
+    },
+    "version": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+    "config": {}
+   }
+  ]
+ },
+ "pluginRead": {
+  "brag@brag": {
+   "plugin": {
+    "marketplaceName": "brag",
+    "marketplacePath": "/x/mk/brag/.claude-plugin/marketplace.json",
+    "summary": {
+     "id": "brag@brag",
+     "remotePluginId": null,
+     "version": null,
+     "localVersion": "0.4.0",
+     "name": "brag",
+     "shareContext": null,
+     "source": {
+      "type": "local",
+      "path": "/x/mk/brag"
+     },
+     "installed": true,
+     "installedAt": null,
+     "enabled": true,
+     "installPolicy": "AVAILABLE",
+     "installPolicySource": null,
+     "mustShowInstallationInterstitial": null,
+     "authPolicy": "ON_INSTALL",
+     "availability": "AVAILABLE",
+     "disabledReason": null,
+     "eligiblePlanTypes": null,
+     "interface": {
+      "displayName": "brag",
+      "shortDescription": "Turn your project into a polished launch video.",
+      "longDescription": "Create a short, shareable launch video from the current project, complete with a tailored story, motion, music, sound effects, poster frame, and share copy.",
+      "developerName": "Latent Spaces",
+      "category": "Productivity",
+      "capabilities": [
+       "Read",
+       "Write",
+       "Execute"
+      ],
+      "websiteUrl": "https://latent-spaces.github.io/brag/",
+      "privacyPolicyUrl": null,
+      "termsOfServiceUrl": null,
+      "defaultPrompt": [
+       "Turn this project into a launch video.",
+       "Let's brag about what I built.",
+       "Make a polished launch video for this project."
+      ],
+      "brandColor": null,
+      "composerIcon": null,
+      "composerIconUrl": null,
+      "logo": null,
+      "logoDark": null,
+      "logoUrl": null,
+      "logoUrlDark": null,
+      "screenshots": [],
+      "screenshotUrls": []
+     },
+     "keywords": [
+      "video",
+      "launch",
+      "hyperframes",
+      "skill"
+     ]
+    },
+    "shareUrl": null,
+    "description": "Turn the current project into a short, polished, shareable launch video using Hyperframes.",
+    "skills": [
+     {
+      "name": "brag:brag",
+      "description": "Turn the current project website into a short, polished, shareable launch video using Hyperframes. Use when someone says \"/brag\", \"let's brag about this\", \"make a launch video\", \"turn this into a video\", or wants to share what they built. Reads the project code directly \u2014 no live URL or screenshots needed.",
+      "shortDescription": null,
+      "interface": null,
+      "path": "/x/mk/brag/skills/brag/SKILL.md",
+      "enabled": true
+     },
+     {
+      "name": "brag:brag-slim",
+      "description": "Turn a project directory or a website URL into a short, shareable launch video with music, motion, and share copy. One file, no bundled assets \u2014 built entirely by the model with the tools already on the machine. Use when someone says \"/brag-slim\", \"let's /brag about this\", \"brag about a website\", \"make a launch video\", or wants to show off what they built. If the /brag skill is also installed, let /brag handle those phrases; it hands off here on Opus 5.5.",
+      "shortDescription": null,
+      "interface": null,
+      "path": "/x/mk/brag/skills/brag-slim/SKILL.md",
+      "enabled": true
+     }
+    ],
+    "onboardingSkill": null,
+    "hooks": [],
+    "apps": [],
+    "appTemplates": [],
+    "mcpServers": [],
+    "scheduledTasks": null
+   }
+  },
+  "no-claude-coauthor@acme": {
+   "plugin": {
+    "marketplaceName": "acme",
+    "marketplacePath": "/x/mk/acme/.claude-plugin/marketplace.json",
+    "summary": {
+     "id": "no-claude-coauthor@acme",
+     "remotePluginId": null,
+     "version": null,
+     "localVersion": "0.1.0",
+     "name": "no-claude-coauthor",
+     "shareContext": null,
+     "source": {
+      "type": "local",
+      "path": "/x/mk/acme"
+     },
+     "installed": true,
+     "installedAt": null,
+     "enabled": true,
+     "installPolicy": "AVAILABLE",
+     "installPolicySource": null,
+     "mustShowInstallationInterstitial": null,
+     "authPolicy": "ON_INSTALL",
+     "availability": "AVAILABLE",
+     "disabledReason": null,
+     "eligiblePlanTypes": null,
+     "interface": null,
+     "keywords": []
+    },
+    "shareUrl": null,
+    "description": "Keeps 'Co-Authored-By: Claude' trailers out of your git commits - strips them automatically (and teaches Claude to stop), or blocks the commit in strict mode",
+    "skills": [],
+    "onboardingSkill": null,
+    "hooks": [
+     {
+      "key": "no-claude-coauthor@acme:hooks/hooks.json:pre_tool_use:0:0",
+      "eventName": "preToolUse"
+     }
+    ],
+    "apps": [],
+    "appTemplates": [],
+    "mcpServers": [],
+    "scheduledTasks": null
+   }
+  }
+ },
+ "readMissing": {
+  "code": -32600,
+  "message": "marketplace file `/x/.cache/codex-runtimes/codex-primary-runtime/plugins/openai-primary-runtime/.agents/plugins/marketplace.json` does not exist"
+ },
+ "writeOk": {
+  "status": "ok",
+  "version": "sha256:7f7a9c0b9ab9d0ecbe67f5425b27c6a359cb23da658da59a537c47da0fa0861a",
+  "filePath": "/x/codex/config.toml",
+  "overriddenMetadata": null
+ },
+ "writeStale": {
+  "code": -32600,
+  "data": {
+   "config_write_error_code": "configVersionConflict"
+  },
+  "message": "Configuration was modified since last read. Fetch latest version and retry."
+ }
+}

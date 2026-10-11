@@ -273,6 +273,9 @@ importers:
 
   packages/adapter-codex:
     dependencies:
+      '@wsp/catalog':
+        specifier: workspace:*
+        version: link:../catalog
       '@wsp/protocol':
         specifier: workspace:*
         version: link:../protocol

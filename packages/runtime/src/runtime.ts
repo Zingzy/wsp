@@ -345,6 +345,7 @@ import { usageArea } from "./account/usage.js";
 import { statusArea } from "./account/status.js";
 
 import { preferencesArea } from "./account/preferences.js";
+import { projectIconsArea } from "./projects/images.js";
 
 export * from "./types/harness.js";
 export {
@@ -471,6 +472,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   Object.assign(ctx, statusArea(ctx));
 
   Object.assign(ctx, preferencesArea(ctx));
+  Object.assign(ctx, projectIconsArea(ctx));
   return runtimeOf(ctx);
 }
 
@@ -563,6 +565,7 @@ function runtimeCore(ctx: RuntimeContext, opts: RuntimeOptions): RuntimeCore {
     const icon = was.icon !== now.icon ? now.icon : held?.icon;
     const hue = was.hue !== now.hue ? now.hue : held?.hue;
     await ctx.preferences.set({ projectLook: { [projectId]: icon === undefined && hue === undefined ? null : { ...(icon !== undefined ? { icon } : {}), ...(hue !== undefined ? { hue } : {}) } } });
+    if (was.image !== now.image) await (now.image === undefined ? ctx.projectIcons.set(projectId, null) : ctx.projectIcons.wear(projectId, now.image));
   };
   // The places joined to this host, over the one code store every code is spent from: the door holds the records
   // and the links, and the two roads into the runtime it needs are the ordinary record and delete roads below.
@@ -682,15 +685,17 @@ function runtimeCore(ctx: RuntimeContext, opts: RuntimeOptions): RuntimeCore {
           }
           if (old !== undefined) {
             if (await ctx.projectsDoor.folderStands(old.id)) throw new Error(folderMoveStandsLine(old.path, placeDoor!.nameOf(placeId)));
-            await ctx.projectsDoor.remove(old.id).catch((e: unknown) => {
+            // The project comes back under the same id, so what the person set on its look stays with it.
+            await ctx.projectsDoor.remove(old.id, undefined, { keepLook: true }).catch((e: unknown) => {
               throw new Error(folderMoveHeldLine((e instanceof Error ? e.message : String(e)).split("\n")[0]!));
             });
           }
           const createdAt = old?.createdAt ?? move?.createdAt;
           const project = await ctx.projectsDoor.add({ source, on: placeId, ...(folder.name !== undefined ? { name: folder.name } : {}), seed, ...(move !== undefined ? { id: move.id } : {}), ...(createdAt !== undefined ? { createdAt } : {}), ...(stage !== undefined ? { report: stage } : {}) });
           if (move !== undefined) await folderLook(project.id, move.pick, folder);
-          else if (folder.icon !== undefined || folder.hue !== undefined) {
-            await ctx.preferences.set({ projectLook: { [project.id]: { ...(folder.icon !== undefined ? { icon: folder.icon } : {}), ...(folder.hue !== undefined ? { hue: folder.hue } : {}) } } });
+          else {
+            if (folder.icon !== undefined || folder.hue !== undefined) await ctx.preferences.set({ projectLook: { [project.id]: { ...(folder.icon !== undefined ? { icon: folder.icon } : {}), ...(folder.hue !== undefined ? { hue: folder.hue } : {}) } } });
+            await ctx.projectIcons.wear(project.id, folder.image);
           }
           return { id: `folders/${key}`, label: project.name, outcome: "installed", project: { id: project.id }, pick: folder, createdAt: project.createdAt, ...(project.notice !== undefined ? { note: project.notice } : {}) };
         },
@@ -873,6 +878,7 @@ function runtimeCore(ctx: RuntimeContext, opts: RuntimeOptions): RuntimeCore {
     projectsHeld.delete(projectId);
     await store.delete(PROJECTS, projectId);
     bus.emit({ type: "project.removed", projectId });
+    await ctx.projectIcons.forget(projectId);
   };
   /** A fork as a remove names it: by its one thread's title, which is what the sidebar shows, else by its own name. */
   const forkName = (entry: LiveWorkspace): string => {

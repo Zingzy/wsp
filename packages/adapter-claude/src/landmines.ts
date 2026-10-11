@@ -304,6 +304,19 @@ export function buildCommand(options: BuildCommandOptions): string {
   return inFolder(cwd, claude);
 }
 
+/** A turn's launch, or a launch ahead of one, in the adapter's words: a fresh session under `localId` unless it resumes
+ * one, the thread's title as the CLI's name for it, and subagents' text forwarded on a version that forwards it. */
+export function launchCommand(o: Omit<BuildCommandOptions, "sessionId" | "name" | "serverValues" | "subagentText"> & { title?: string; version?: string; serverValues?: unknown }, localId: string, valued: boolean): string {
+  const { title, version, resume, serverValues: _values, ...rest } = o;
+  return buildCommand({
+    ...rest,
+    ...(resume === undefined ? { sessionId: localId } : { resume }),
+    ...(title !== undefined ? { name: title } : {}),
+    ...(valued ? { serverValues: true as const } : {}),
+    ...(forwardsSubagentText(version) ? { subagentText: true } : {}),
+  });
+}
+
 /** How much of a session's file the saved cost is looked for in: the CLI appends it as its process exits, so on a
  * resume the last one sits behind the previous turn's few closing lines, and a file of any length costs one read. */
 export const SAVED_SPEND_TAIL_BYTES = 8 * 1024 * 1024;
