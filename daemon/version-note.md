@@ -1,0 +1,1 @@
+fs.hash names back each path it was handed that lands on a regular file outside the folder once links are followed, and each that lands on one inside past the most it hashes, so the host refuses an Always for a script it cannot pin.

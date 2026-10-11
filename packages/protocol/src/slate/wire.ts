@@ -56,8 +56,8 @@ export const SlateCmdAsk = z.object({
   then: z.string().optional(),
   /** The text of each of the slate's files the run reads, by name. */
   files: z.record(z.string(), z.string()).optional(),
-  /** The command names files on the thread's machine that its daemon could not hash, so no Always can pin them and
-   * the sheet offers Run once alone. */
+  /** The command names a file no Always can pin: one the thread's machine could not hash, or a script outside the
+   * thread's folder, through a link out of it or past the files one command pins; the sheet offers Run once alone. */
   noAlways: z.literal(true).optional(),
   /** Why it is held: "needs your approval", "started 12 times in a minute; press to run it again". */
   why: z.string(),

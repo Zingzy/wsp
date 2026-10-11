@@ -69,7 +69,7 @@ import type { Store } from "./store.js";
 import { SLATES } from "./lazy-slates.js";
 import { createSlateRuns, HELD_APPROVAL, lastResult, mapStrings, restartedRecord, rewoundRecord, runningRecord, type CmdRunDecl, type RunApprovals, type RunAsk, type RunBy, type RunInput, type RunRecord, type SlateRuns, type SlateRunsDeps } from "./slate-runs.js";
 import { boxLedger, boxRoad, boxSlateDir } from "./slate-box.js";
-import { boxPins, scriptsNamed, withFiles, writeSlateFiles, type HashOn } from "./slate-files.js";
+import { alwaysRefused, boxPins, cannotPin, keyed, pinHere, withFiles, writeSlateFiles, type HashOn, type Pin } from "./slate-files.js";
 import { slateImage, type ImageOn } from "./slate-images.js";
 import { cutAt, defanged, longest } from "./slate-message.js";
 import { writeBudget } from "./slate-writes.js";
@@ -433,8 +433,7 @@ export function createSlates(deps: SlatesDeps): Slates {
    * the thread's folder, read again at every start, where the command runs. */
   function approvalDecl(r: SlateRecord, declared: SlateRunDecl): SlateRunDecl & { files?: Record<string, string>; scripts?: Record<string, string> } {
     const decl = withFiles(r.document, declared);
-    const folder = folderFor(r.threadId, declared);
-    const scripts = onMachine(r.threadId, declared) ? pins.scripts(r.threadId, folder, declared) : scriptsNamed(folder, declared);
+    const scripts = keyed(pinFor(r.threadId, declared));
     return scripts === undefined ? decl : { ...decl, scripts };
   }
 
@@ -658,7 +657,7 @@ export function createSlates(deps: SlatesDeps): Slates {
     const declared = r.document?.runs[run];
     if (declared === undefined) return undefined;
     const now = approvalDecl(r, declared).scripts ?? {};
-    const unread = pathsThere(r.threadId, declared);
+    const unread = pinFor(r.threadId, declared).unpinned.flatMap(u => (u.why === "unread" ? [u.path] : []));
     for (const [k, a] of Object.entries(r.approvals)) {
       if (k === key || a.state !== "allowed" || a.run !== run) continue;
       if (unread.length > 0) return `${unread.join(", ")} could not be read on ${deps.thread(r.threadId)?.computer ?? "this computer"}, so it asks again`;
@@ -672,6 +671,7 @@ export function createSlates(deps: SlatesDeps): Slates {
     const facts = deps.thread(r.threadId);
     const cmds = runs.held(r.threadId).map((a: RunAsk): SlateAsk => {
       const rec = r.values[a.run];
+      const pin = r.document?.runs[a.run] === undefined ? undefined : pinFor(r.threadId, r.document.runs[a.run]!);
       return {
         key: a.key,
         run: a.run,
@@ -686,8 +686,8 @@ export function createSlates(deps: SlatesDeps): Slates {
         ...(a.confirm !== undefined ? { confirm: a.confirm } : {}),
         ...(a.then !== undefined ? { then: a.then } : {}),
         ...(a.files !== undefined ? { files: a.files } : {}),
-        ...(pathsThere(r.threadId, r.document?.runs[a.run]).length > 0 ? { noAlways: true as const } : {}),
-        why: changedSince(r, a.run, a.key) ?? (isRunRecord(rec) && rec.why !== undefined ? rec.why : HELD_APPROVAL),
+        ...(pin !== undefined && pin.unpinned.length > 0 ? { noAlways: true as const } : {}),
+        why: (pin !== undefined ? cannotPin(pin) : undefined) ?? changedSince(r, a.run, a.key) ?? (isRunRecord(rec) && rec.why !== undefined ? rec.why : HELD_APPROVAL),
       };
     });
     return [...cmds, ...mcp.held(r.threadId)];
@@ -824,8 +824,8 @@ export function createSlates(deps: SlatesDeps): Slates {
   /** Where a command starts: the thread's own folder on its own computer, or this computer's for one `on` the host. */
   /** Whether a run's command runs on the thread's own machine rather than on this computer. */
   const onMachine = (threadId: string, decl: SlateRunDecl): boolean => decl.kind === "cmd" && decl.on !== "host" && deps.machineOf?.(threadId) !== undefined;
-  /** The files a command on the thread's machine names there that its daemon could not hash, which no Always holds to. */
-  const pathsThere = (threadId: string, decl: SlateRunDecl | undefined): string[] => (decl?.kind === "cmd" && onMachine(threadId, decl) ? pins.unpinned(threadId, folderFor(threadId, decl), decl) : []);
+  /** What an approval of a run binds where it runs: on the thread's machine as its daemon last read it, else here. */
+  const pinFor = (threadId: string, decl: SlateRunDecl): Pin => (onMachine(threadId, decl) ? pins.pin(threadId, folderFor(threadId, decl), decl) : pinHere(folderFor(threadId, decl), decl));
   /** The views a start reads, with the scripts the thread's machine holds hashed again, so a key holds what runs. */
   const startable = (r: SlateRecord): Promise<ReadonlyMap<string, SlateJson | undefined>> => {
     const there = Object.values(r.document?.runs ?? {}).flatMap(decl => (onMachine(r.threadId, decl) ? [{ folder: folderFor(r.threadId, decl), decl }] : []));
@@ -833,7 +833,7 @@ export function createSlates(deps: SlatesDeps): Slates {
   };
   /** A press or the agent's start wakes a napping machine anyway: first here, so its pins are read and an Always holds. */
   const wakeFor = async (r: SlateRecord, starts: readonly { run: string; by: RunBy }[]): Promise<void> => {
-    if (deps.asleep?.(r.threadId) !== true || !starts.some(s => s.by !== "timer" && pathsThere(r.threadId, r.document?.runs[s.run]).length > 0)) return;
+    if (deps.asleep?.(r.threadId) !== true || !starts.some(s => s.by !== "timer" && r.document?.runs[s.run] !== undefined && pinFor(r.threadId, r.document.runs[s.run]!).unpinned.some(u => u.why === "unread"))) return;
     if (await Promise.resolve(deps.wake?.(r.threadId)).then(() => true, () => false)) await startable(r);
   };
   /** Each start held on the sheet whose key moved (its command was rewritten, its box was read), held again as now. */
@@ -1409,8 +1409,8 @@ export function createSlates(deps: SlatesDeps): Slates {
       const named = Object.entries(r.document?.runs ?? {}).filter(([, decl]) => decl.kind === "cmd" && runs.key(approvalDecl(r, decl) as CmdRunDecl) === p.key).map(([name]) => name);
       if (named.length === 0) throw usageRefusal(`this slate declares no command with approval key ${p.key}.`, "Read the slate again and approve what it asks now.");
       // The sheet offers no Always for these; a caller that asks for one anyway is told why.
-      const unpinned = p.scope === "thread" ? named.find(run => pathsThere(p.threadId, r.document!.runs[run]).length > 0) : undefined;
-      if (unpinned !== undefined) throw usageRefusal(`$${unpinned} runs on the thread's machine and names ${pathsThere(p.threadId, r.document!.runs[unpinned]).join(", ")} there, which its computer could not hash to hold an Always to.`, "Approve it with scope once.");
+      const unpinned = p.scope === "thread" ? named.map(run => alwaysRefused(run, pinFor(p.threadId, r.document!.runs[run]!))).find(said => said !== undefined) : undefined;
+      if (unpinned !== undefined) throw usageRefusal(unpinned, "Approve it with scope once.");
       await serial(p.threadId, async () => {
         if (p.scope === "refuse") {
           r.approvals[p.key] = { state: "refused", at: deps.now(), ...approvalNames(r, p.key) };
