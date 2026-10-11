@@ -49,7 +49,7 @@ export function slatesArea(ctx: RuntimeContext): SlatesArea {
     hashOn: threadId => {
       const entry = ctx.boxOf(threadId);
       if (entry === undefined) return undefined;
-      return (root, paths) => ctx.withDaemon(entry, async ask => FsHashReply.parse(await ask({ op: "fs.hash", root, paths })).files);
+      return (root, paths) => ctx.withDaemon(entry, async ask => FsHashReply.parse(await ask({ op: "fs.hash", root, paths })));
     },
     asleep: threadId => {
       const entry = ctx.boxOf(threadId);
