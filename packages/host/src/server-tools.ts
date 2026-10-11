@@ -23,7 +23,7 @@
 import { createHash } from "node:crypto";
 import { posix } from "node:path";
 import { MCP_AGENTS, MCP_AGENT_IDS, harnessLine, valueForms, type McpAgent, type McpCheckWord, type McpTransport, type TurnServer } from "@wsp/catalog";
-import { readTurnServers, secretNamed, type Host } from "@wsp/collect";
+import { mcpRemoteOf, mcpRemoteTokenFile, readTurnServers, secretNamed, type Host } from "@wsp/collect";
 import type { ServerToolsAsk } from "@wsp/runtime";
 import { lastLine, serverNotSetUpLine, serverToolsLateRefusal, serverUntrustedLine, shellQuote, withoutControlChars, type McpTool, type McpToolParam, type ServerToolsAnswer } from "@wsp/protocol";
 import { ownServerFiles } from "./agents-here.js";
@@ -238,6 +238,26 @@ async function askStdio(host: Host, t: Extract<McpTransport, { kind: "stdio" }>,
   return read(rest.join("\n"), log, hide);
 }
 
+/** A command server's tools, off starting it. mcp-remote holding no sign-in there is asked of its address first, with
+ * the headers it would send: a start at an address that wants a sign-in begins a browser one, which leaves its files
+ * in mcp-remote's folder and prints the authorize URL into the log, so that one reads as needing a sign-in and is
+ * never started. One that gets its own token by `--client-credentials` needs no person, one that reads headers from a
+ * `--header-file` keys its sign-in by headers wsp does not read, and a version before 0.3.2 keeps it in a folder named
+ * by that version; each starts as any server does. */
+async function askCommand(host: Host, t: Extract<McpTransport, { kind: "stdio" }>, cwd: string, deadlineMs: number, now: () => number, log: (said: string) => void, hide: (said: string) => string, env: Readonly<Record<string, string>> = {}): Promise<Asked> {
+  const remote = mcpRemoteOf(t.args);
+  const its = { ...env, ...t.env };
+  if (remote !== undefined && remote.v1 && !remote.clientCredentials && !t.args.includes("--header-file") && (await host.fs.stat(mcpRemoteTokenFile(host, remote.hash, its))) === undefined) {
+    // mcp-remote reads a reference in a header's value from its own environment and leaves one it has no value for.
+    const headers = Object.fromEntries(Object.entries(remote.headers).map(([k, v]) => [k, v.replace(/\$\{([^}]+)}/g, (whole, name: string) => (Object.hasOwn(its, name) ? its[name]! : whole))]));
+    const asked = await askHttp(host, { kind: "http", url: remote.url, headers }, deadlineMs, log, hide);
+    if ("unauthorized" in asked) return { auth: "needs-sign-in" };
+    // A start would only wait out the same silence again, past the time its words name.
+    if (asked.refused === serverToolsLateRefusal(deadlineMs)) return asked;
+  }
+  return askStdio(host, t, cwd, deadlineMs, now, log, hide, env);
+}
+
 /** The tools answer as the page takes it, every word of the server's hidden by `hide`, with its own words sent to the log. */
 function read(body: string, log: (said: string) => void, hide: (said: string) => string): Asked {
   const got = toolsOf(body);
@@ -400,7 +420,7 @@ export function serverTools(o: { now: () => number; deadlineMs?: number; log: (l
       let held = connects.get(key);
       if (ask.refresh === true || held === undefined) {
         const log = (said: string): void => o.log(`servers tools: ${agent.id} ${ask.name} on ${ask.key}: ${hide(said)}`);
-        const mine: { at: number; asked: Promise<HttpAsked> } = { at: now, asked: asking(() => (t.kind === "stdio" ? askStdio(host, t, runIn, deadlineMs, o.now, log, hide, at.env) : askHttp(host, t, deadlineMs, log, hide))) };
+        const mine: { at: number; asked: Promise<HttpAsked> } = { at: now, asked: asking(() => (t.kind === "stdio" ? askCommand(host, t, runIn, deadlineMs, o.now, log, hide, at.env) : askHttp(host, t, deadlineMs, log, hide))) };
         // A connect that threw is not an answer, so the next ask makes its own.
         mine.asked.catch(() => connects.get(key) === mine && connects.delete(key));
         connects.set(key, mine);

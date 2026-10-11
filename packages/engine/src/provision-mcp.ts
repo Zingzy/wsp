@@ -14,6 +14,7 @@ import {
   absentCommands,
   landConfigs,
   mcpOpening,
+  parseMcpId,
   scopeRowId,
   mcpRows,
   parseConfigs,
@@ -150,7 +151,7 @@ export async function headlessKeys(machine: Machine, home: string, stores: Reado
 export async function provisionMcp(
   machine: Machine,
   planned: McpPlan,
-  o: { home: string; landed: OwnedPaths; tools: readonly ToolResult[]; stage: StageListener; path: string; held?: ReadonlySet<string>; stores?: Readonly<Record<string, string>> },
+  o: { home: string; landed: OwnedPaths; tools: readonly ToolResult[]; stage: StageListener; path: string; held?: ReadonlySet<string>; stores?: Readonly<Record<string, string>>; into?: (file: string, names: readonly string[]) => void },
 ): Promise<PlaceProvisionRow[]> {
   const plan = atHome(planned, o.home);
   o.stage("installing-mcp", mcpOpening(plan.agents));
@@ -336,6 +337,19 @@ export async function provisionMcp(
         }
       }
     }
+  }
+  // Each file the merge read, with the servers of this computer's standing in it as the round left it: none on a
+  // round whose configs did not land.
+  if (merged !== undefined && o.into !== undefined) {
+    const into = new Map([...new Set(merged.where.values())].map(file => [file, new Set<string>()]));
+    if (failure === undefined) {
+      for (const id of merged.records.keys()) {
+        const name = parseMcpId(id)?.name;
+        const file = merged.where.get(id);
+        if (name !== undefined && file !== undefined) into.get(file)?.add(name);
+      }
+    }
+    for (const [file, names] of into) o.into(file, [...names]);
   }
   if (failure === undefined && merged !== undefined) {
     await appendLanding(machine, o.home, [...[...merged.records].map(([id, digest]) => serverLine(id, digest)), ...merged.tombstones.map(tombstoneLine)]);

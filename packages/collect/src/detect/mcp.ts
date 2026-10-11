@@ -65,10 +65,21 @@ const isUrl = (s: string): boolean => /^https?:\/\//.test(s);
 
 const sortedJson = (o: Record<string, string>): string[] => (Object.keys(o).length > 0 ? [JSON.stringify(o, Object.keys(o).sort())] : []);
 
-/** The store key mcp-remote derives for a definition that runs it, as its getServerUrlHash does: md5 of the server
- * url, the `--resource`, the sorted `--authorize-param` pairs, the sorted `--header` pairs and the
- * `--client-metadata-url`, joined with `|`. Undefined when the definition does not run mcp-remote. */
-export function mcpRemoteHash(args: readonly string[]): string | undefined {
+/** Whether the mcp-remote a definition names keeps its sign-ins under mcp-remote-v1: unpinned, latest, and every version
+ * from 0.3.2 on. An earlier one names that folder by its own version, and a range or another tag may land either side. */
+function keepsV1(spec: string): boolean {
+  const pin = spec.split("@")[1];
+  if (pin === undefined || pin === "latest") return true;
+  const v = /^(\d+)\.(\d+)\.(\d+)$/.exec(pin)?.slice(1).map(Number);
+  return v !== undefined && (v[0]! > 0 || v[1]! > 3 || (v[1] === 3 && v[2]! >= 2));
+}
+
+/** What a definition that runs mcp-remote hands it: the server's url, its `--header` pairs, the store key mcp-remote
+ * derives as its getServerUrlHash does (md5 of the url, the `--resource`, the sorted `--authorize-param` pairs, the
+ * sorted `--header` pairs and the `--client-metadata-url`, joined with `|`), whether `--client-credentials` has it
+ * get its own token, where no person signs in, and whether its version keeps sign-ins under mcp-remote-v1. Undefined
+ * when the definition does not run mcp-remote. */
+export function mcpRemoteOf(args: readonly string[]): { url: string; headers: Record<string, string>; hash: string; clientCredentials: boolean; v1: boolean } | undefined {
   const at = args.findIndex(a => /^mcp-remote(@[^/]*)?$/.test(a));
   if (at < 0) return undefined;
   const rest = args.slice(at + 1);
@@ -94,8 +105,16 @@ export function mcpRemoteHash(args: readonly string[]): string | undefined {
   const resource = after("--resource");
   const metadata = after("--client-metadata-url");
   const parts = [url, ...(resource !== undefined ? [resource] : []), ...sortedJson(params), ...sortedJson(headers), ...(metadata !== undefined ? [metadata] : [])];
-  return createHash("md5").update(parts.join("|")).digest("hex");
+  return { url, headers, hash: createHash("md5").update(parts.join("|")).digest("hex"), clientCredentials: rest.includes("--client-credentials"), v1: keepsV1(args[at]!) };
 }
+
+/** The store key mcp-remote derives for a definition that runs it; undefined when the definition does not run it. */
+export const mcpRemoteHash = (args: readonly string[]): string | undefined => mcpRemoteOf(args)?.hash;
+
+/** The file mcp-remote keeps one store key's sign-in in on a computer, as its getConfigDir names the folder: under
+ * the MCP_REMOTE_CONFIG_DIR its environment sets, else ~/.mcp-auth. */
+export const mcpRemoteTokenFile = (host: Host, hash: string, env: Readonly<Record<string, string>>): string =>
+  `${env["MCP_REMOTE_CONFIG_DIR"] ? `${env["MCP_REMOTE_CONFIG_DIR"]}/mcp-remote-v1` : expand(host, MCP_REMOTE_STORE)}/${hash}_tokens.json`;
 
 // --- rows ----------------------------------------------------------------------------
 

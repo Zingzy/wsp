@@ -12,6 +12,7 @@ import type { McpCheck } from "./mcp-check.js";
 import type { McpLogin } from "./mcp-login.js";
 import { bearerOf, mcpBearerVariable } from "./mcp-bearer.js";
 import { resolveCodex, trustCodex } from "./mcp-codex.js";
+import { travelledServers } from "./mcp-travelled.js";
 
 export type McpTransport =
   | { kind: "stdio"; command: string; args: string[]; env: Record<string, string>; cwd?: string; toolTimeoutSec?: number }
@@ -798,11 +799,8 @@ function jsonMerger(key: string): McpFormat["merge"] {
     const held = own === undefined || own.trim() === "" ? undefined : own;
     const root = tree(held === undefined ? {} : readJsonc(held).value);
     if (root === undefined) throw new Error("the file is not a JSON object");
-    const from = tree(readJsonc(travelled).value);
-    if (from === undefined) throw new Error("the copy that travelled is not a JSON object");
     const project = scope.project;
-    const source = project === undefined ? from : tree(tree(from.projects)?.[project.from]) ?? {};
-    const arrived = tree(source[key]) ?? {};
+    const arrived = travelledServers(travelled, key, project);
     const at: JSONPath = project === undefined ? [key] : ["projects", project.to, key];
     const standing = project === undefined ? tree(root[key]) ?? {} : tree(tree(tree(root.projects)?.[project.to])?.[key]) ?? {};
     const replace = new Set(scope.replace);

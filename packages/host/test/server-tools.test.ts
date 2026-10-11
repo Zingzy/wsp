@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { createHash } from "node:crypto";
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
@@ -824,6 +825,61 @@ describe("a server's state, off its tools connect alone", () => {
     reader.forget("here");
     expect(await reader.tools({ kind: "here" }, { key: "here", agent: "claude", name: "zomato" })).toMatchObject({ auth: "signed-in", holder: "claude" });
   });
+
+  it("reads an mcp-remote server with no saved sign-in whose address wants one as needing it, and starts nothing", async () => {
+    const f = fixture();
+    // npx as mcp-remote runs it: a start is counted, then it answers as the plain server does.
+    writeStub(join(f.bin, "npx"), `#!/bin/bash\necho "$*" >> "$HOME/npx-starts"\nexec "$(dirname "$0")/server"\n`);
+    const npxStarts = (): number => (existsSync(join(f.home, "npx-starts")) ? readFileSync(join(f.home, "npx-starts"), "utf8").trim().split("\n").length : 0);
+    const { url, posts } = await remote();
+    const locked = `${url}/oauth`;
+    f.config({
+      locked: { command: "npx", args: ["-y", "mcp-remote@0.14.3", locked] },
+      keyed: { command: "npx", args: ["-y", "mcp-remote", url, "--header", "x-key:${KEYED}"], env: { KEYED: SECRET } },
+      machine: { command: "npx", args: ["-y", "mcp-remote", locked, "--client-credentials"] },
+      filed: { command: "npx", args: ["-y", "mcp-remote", locked, "--header-file", join(f.root, "headers")] },
+      pinned: { command: "npx", args: ["-y", "mcp-remote@0.1.29", locked] },
+    });
+    const reader = agentsReader({ vault: () => ({}), here: () => here(f) });
+    const ask = { key: "here", agent: "claude", name: "locked" };
+    expect(await reader.tools({ kind: "here" }, ask)).toEqual({ auth: "needs-sign-in", readAt: expect.any(String) });
+    expect(npxStarts(), "a server that would open a sign-in page is never started").toBe(0);
+    expect(posts.filter(p => p.startsWith("/oauth "))).toEqual(["/oauth - initialize"]);
+
+    // An address that takes its header answers, so mcp-remote begins no sign-in there and is started as any server is.
+    expect(await reader.tools({ kind: "here" }, { ...ask, name: "keyed" })).toMatchObject({ auth: "connected" });
+    expect(npxStarts()).toBe(1);
+    // One that gets its own token needs no person, so it is started too, and so is one whose headers sit in a file.
+    await reader.tools({ kind: "here" }, { ...ask, name: "machine" });
+    expect(npxStarts()).toBe(2);
+    await reader.tools({ kind: "here" }, { ...ask, name: "filed" });
+    expect(npxStarts()).toBe(3);
+    // A version before 0.3.2 keeps its sign-in in a folder named by that version, so it starts as before.
+    await reader.tools({ kind: "here" }, { ...ask, name: "pinned" });
+    expect(npxStarts()).toBe(4);
+
+    // Once mcp-remote holds its sign-in, the server is started and asked for its tools.
+    const hash = createHash("md5").update(locked).digest("hex");
+    mkdirSync(join(f.home, ".mcp-auth/mcp-remote-v1"), { recursive: true });
+    writeFileSync(join(f.home, `.mcp-auth/mcp-remote-v1/${hash}_tokens.json`), "{}");
+    expect(await reader.tools({ kind: "here" }, { ...ask, refresh: true })).toMatchObject({ auth: "connected" });
+    expect(npxStarts()).toBe(5);
+    // mcp-remote's own folder variable moves where that sign-in is read.
+    f.config({ locked: { command: "npx", args: ["-y", "mcp-remote", locked], env: { MCP_REMOTE_CONFIG_DIR: join(f.root, "elsewhere") } } });
+    expect(await reader.tools({ kind: "here" }, { ...ask, refresh: true })).toEqual({ auth: "needs-sign-in", readAt: expect.any(String) });
+    expect(npxStarts()).toBe(5);
+    reader.close();
+
+    // An address that says nothing in the time a check has reads late, and the server is not started to wait again.
+    const silent = createServer(() => undefined);
+    servers.push(silent);
+    await new Promise<void>(resolve => silent.listen(0, "127.0.0.1", resolve));
+    f.config({ late: { command: "npx", args: ["-y", "mcp-remote", `http://127.0.0.1:${(silent.address() as AddressInfo).port}/mcp`] } });
+    const quick = agentsReader({ vault: () => ({}), here: () => here(f), toolsMs: 1500 });
+    expect(await quick.tools({ kind: "here" }, { ...ask, name: "late" })).toMatchObject({ auth: "failed", refused: serverToolsLateRefusal(1500) });
+    expect(npxStarts()).toBe(5);
+    quick.close();
+  }, 30_000);
 
   it("asks the harness once per server per sign-in or per ten minutes, however often the server is asked", async () => {
     const f = fixture();
