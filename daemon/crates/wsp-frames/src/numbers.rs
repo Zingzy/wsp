@@ -133,6 +133,10 @@ pub const EXEC_DEADLINE_EXIT: i32 = 124;
 pub const FS_READ_CAP_BYTES: u64 = 2 * 1024 * 1024;
 /// The most one fs.image carries, the cap on an image a person attaches.
 pub const FS_IMAGE_CAP_BYTES: u64 = 10 * 1024 * 1024;
+/// The most files one fs.hash hashes, the largest it reads, and the most paths it is asked about.
+pub const FS_HASH_FILES_MAX: usize = 32;
+pub const FS_HASH_CAP_BYTES: u64 = 4 * 1024 * 1024;
+pub const FS_HASH_PATHS_MAX: usize = 256;
 /// The longest public key line an ssh.start carries; an ed25519 line is under a hundred bytes.
 pub const SSH_KEY_MAX: usize = 1024;
 /// How long an editor's ssh server stands once its last session closed, before it and every server the editor

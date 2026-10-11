@@ -109,6 +109,11 @@ export const AUTH_DEADLINE_MS = 5_000;
 export const TUNNEL_CAP = 64;
 /** How much of one file fs.read carries; the whole size travels beside it. */
 export const FS_READ_CAP_BYTES = 2 * 1024 * 1024;
+/** The most files one fs.hash hashes, the largest it reads, and the most paths one asks about: what an Always on a
+ * slate's command pins, on this computer and on the thread's own. */
+export const FS_HASH_FILES_MAX = 32;
+export const FS_HASH_CAP_BYTES = 4 * 1024 * 1024;
+export const FS_HASH_PATHS_MAX = 256;
 /** The longest public key line an ssh.start carries. */
 export const SSH_KEY_MAX = 1024;
 /** How long an editor's ssh server stands once its last session closed, before it and all it started is ended. */

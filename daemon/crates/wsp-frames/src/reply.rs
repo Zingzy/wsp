@@ -307,6 +307,13 @@ pub struct FsImageReply {
     pub svg: Option<bool>,
 }
 
+/// Each file an fs.hash found, by its path under the root, with the sha256 of its bytes in hex.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct FsHashReply {
+    pub files: std::collections::BTreeMap<String, String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct FsWriteReply {

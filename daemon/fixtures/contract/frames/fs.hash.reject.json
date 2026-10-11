@@ -1,0 +1,24 @@
+[
+  {
+    "id": 1,
+    "op": "fs.hash",
+    "paths": ["stats.py"]
+  },
+  {
+    "id": 1,
+    "op": "fs.hash",
+    "root": "/root/acme"
+  },
+  {
+    "id": 1,
+    "op": "fs.hash",
+    "root": "/root/acme",
+    "paths": "stats.py"
+  },
+  {
+    "id": 1,
+    "op": "fs.hash",
+    "root": "/root/acme",
+    "paths": [7]
+  }
+]

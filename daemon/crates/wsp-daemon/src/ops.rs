@@ -138,7 +138,7 @@ fn fail(id: Option<RequestId>, error: impl Into<String>) -> String {
     text(&DaemonErrorResponse::new(id, error))
 }
 
-fn refuse(id: Option<RequestId>, code: DaemonErrorCode, error: impl Into<String>) -> String {
+pub(crate) fn refuse(id: Option<RequestId>, code: DaemonErrorCode, error: impl Into<String>) -> String {
     text(&DaemonErrorResponse::new(id, error).with_code(code))
 }
 
@@ -181,7 +181,7 @@ fn lenient_base64(text: &str) -> Vec<u8> {
 }
 
 /// An op's outcome on the wire: the body under the ok envelope, or the failure with its code when it carries one.
-fn answer<T: Serialize>(id: Option<RequestId>, result: Result<T, OpError>) -> String {
+pub(crate) fn answer<T: Serialize>(id: Option<RequestId>, result: Result<T, OpError>) -> String {
     match result {
         Ok(body) => text(&Reply::new(id, body)),
         Err(OpError { code: Some(code), message }) => refuse(id, code, message),
@@ -262,6 +262,7 @@ async fn handle_op(conn: &Arc<Conn>, ctx: &Arc<Ctx>, frame: &Value, id: Option<R
         Some(name) if GUEST_OPS.contains(&name) && !guest_road_serves(&conn.road, ctx.is_place(), name) => {
             refuse(id, DaemonErrorCode::Forbidden, words::NOT_ON_THIS_ROAD)
         }
+        Some(name @ ("fs.image" | "fs.hash")) => crate::slate_reads::serve(ctx, id, name, frame).await,
         Some(
             name @ ("pty.create"
             | "pty.attach"
@@ -275,7 +276,6 @@ async fn handle_op(conn: &Arc<Conn>, ctx: &Arc<Ctx>, frame: &Value, id: Option<R
             | "fs.list"
             | "fs.files"
             | "fs.read"
-            | "fs.image"
             | "fs.search"
             | "fs.folders"
             | "git.status"
@@ -741,7 +741,6 @@ async fn serve(conn: &Arc<Conn>, ctx: &Arc<Ctx>, id: Option<RequestId>, name: &s
             };
             answer(id, read.await)
         }
-        DaemonOp::FsImage { path, machine_id } => answer(id, crate::image::image_of(ctx, machine_id.as_deref(), path).await),
         DaemonOp::FsSearch { path, query, mode, machine_id } => {
             let found = async {
                 let (_, under, _) = road(ctx, machine_id.as_deref(), &path, Reads).await?;

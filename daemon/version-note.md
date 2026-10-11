@@ -1,0 +1,1 @@
+fs.hash hashes the files a slate's command names inside its folder, each where it lands on this computer or inside a workspace's root with no link followed, a regular file under the hash cap, so an Always on a command that runs there pins the script and asks again once it changes
