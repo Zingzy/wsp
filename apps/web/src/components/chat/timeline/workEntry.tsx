@@ -2,12 +2,13 @@
 // Adapted from pingdotgg/t3code apps/web/src/components/chat/MessagesTimeline.tsx at 57a66608 (MIT).
 // Differs from upstream: store hooks are props (threadKey replaces the route and thread refs, expansion state is local, checkpoint data and callbacks arrive as optional props); rows come from the adapter; attachments, subagent rows, citations, user-message decorations, artifact templates, editor menus and the load-earlier header are removed.
 import { indicatesFailure, isToolLike, type ToolGroupSummaryKind, workEntryKind, type WorkLogTone } from "../adapt";
-import { memo, use, useState, type KeyboardEvent, type ReactNode } from "react";
+import { memo, type KeyboardEvent, type ReactNode } from "react";
 import { BotIcon, BrainIcon, ChevronDownIcon, CircleAlertIcon, EyeIcon, GlobeIcon, HammerIcon, InfoIcon, type LucideIcon, Minimize2Icon, SearchIcon, SquarePenIcon, TerminalIcon, WrenchIcon, ZapIcon } from "lucide-react";
 import { workEntryDisplayLabel, workEntryLabelText, type WorkEntryLabel } from "../MessagesTimeline.logic";
 import { cn } from "../../../lib/utils";
 import { formatWorkspaceRelativePath } from "../../../lib/filePathDisplay";
-import { WorkGroupViewCtx, type TimelineWorkEntry } from "./context";
+import { type TimelineWorkEntry } from "./context";
+import { CommandCallRow, EditCallRow, useEntryOpen } from "./callBlock";
 
 export function ActivityShimmerOverlay({ children }: { children: ReactNode }) {
   return (
@@ -133,9 +134,6 @@ function buildToolCallExpandedBody(
   workspaceRoot: string | undefined,
 ): string | null {
   const blocks: string[] = [];
-  if (workEntry.command?.trim()) {
-    blocks.push(workEntry.command.trim());
-  }
   if (workEntry.detail?.trim()) {
     blocks.push(workEntry.detail.trim());
   }
@@ -166,6 +164,9 @@ export const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
   isExpandedToolGroupEntry: boolean;
 }) {
   const { workEntry, workspaceRoot, isExpandedToolGroupEntry } = props;
+  if (workEntry.command?.trim()) return <CommandCallRow workEntry={workEntry} />;
+  const patch = workEntry.patch;
+  if (patch !== undefined && patch.length > 0) return <EditCallRow workEntry={workEntry} patch={patch} />;
   return (
     <PlainWorkEntryRow
       workEntry={workEntry}
@@ -181,32 +182,14 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
   isExpandedToolGroupEntry: boolean;
 }) {
   const { workEntry, workspaceRoot, isExpandedToolGroupEntry } = props;
-  const groupView = use(WorkGroupViewCtx);
-  const [expanded, setExpanded] = useState(
-    () => groupView?.state.expandedEntries.has(workEntry.id) ?? false,
-  );
-  const toggleExpanded = () => {
-    const next = !expanded;
-    if (groupView) {
-      groupView.onToggleEntry();
-      if (next) groupView.state.expandedEntries.add(workEntry.id);
-      else groupView.state.expandedEntries.delete(workEntry.id);
-    }
-    setExpanded(next);
-  };
+  const [expanded, toggleExpanded] = useEntryOpen(workEntry.id);
   const tone = WORK_TONES[workEntry.tone];
   const showFailedIndicator = indicatesFailure(workEntry);
   const Glyph = showFailedIndicator ? WORK_TONES.error.Glyph : workEntryGlyph(workEntry);
   const preview = workEntryDisplayLabel(workEntry, workspaceRoot);
   const previewText = workEntryLabelText(preview);
-  const display: WorkEntryLabel =
-    expanded && workEntry.command?.trim() ? { verb: null, text: "Command", mono: false } : preview;
   const detailText = workEntry.detail?.trim();
-  const canExpand = Boolean(
-    workEntry.command?.trim() ||
-      (detailText && detailText !== previewText) ||
-      workEntry.changedFiles?.length,
-  );
+  const canExpand = Boolean((detailText && detailText !== previewText) || workEntry.changedFiles?.length);
   const expandedBody = expanded ? buildToolCallExpandedBody(workEntry, workspaceRoot) : null;
   const showDestructiveRowStyle =
     showFailedIndicator &&
@@ -258,7 +241,7 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
         <div className="flex min-w-0 flex-1 items-center gap-1.5">
           <div className="min-w-0 flex-1 overflow-hidden">
             <p className="flex min-w-0 w-full items-baseline gap-1.5 text-sm leading-relaxed">
-              <span className={cn("min-w-0 flex-1", showDestructiveRowStyle ? "break-words" : "truncate", headingClass)}><WorkEntryLabelText label={display} /></span>
+              <span className={cn("min-w-0 flex-1", showDestructiveRowStyle ? "break-words" : "truncate", headingClass)}><WorkEntryLabelText label={preview} /></span>
             </p>
           </div>
           <span
