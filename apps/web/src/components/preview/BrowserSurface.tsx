@@ -7,7 +7,9 @@
 // protocol's, naming itself and the address that does answer. The servers
 // list is the workspace's port directory; recents live in local storage per
 // workspace. The bar shows the loopback address; copy and the frame keep the
-// route and its token.
+// route and its token. On the desktop app the frame is a guest of the shell's,
+// which opens any web page too and keeps its own history; a page in a plain
+// browser frames ports alone and sends any other site to a new browser tab.
 import { Check, Copy, Laptop } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { isLocalWorkspace, noPreviewRouteLine } from "@wsp/protocol";
@@ -16,16 +18,18 @@ import { usePortAnswering } from "../../browser/answering.js";
 import { useStoppedPort, useWorkspacePorts, useWorkspacePortsSeeded } from "../../browser/model.js";
 import { recordVisit, removeVisit, useRecents } from "../../browser/recents.js";
 import { useProbedRoute } from "../../browser/refusal.js";
-import { currentAddress, useBrowserTab, useBrowserTabs, ZOOM_STEP } from "../../browser/tabs.js";
-import { frameSrc, loopbackAddress, loopbackUrl, parseAddress, type Address } from "../../browser/url.js";
+import { browserGuestsHere, guestElement, guestKey, updateGuest, useGuestNav, useGuests, type GuestRoute } from "../../browser/guests.js";
+import { currentPlace, useBrowserTab, useBrowserTabs, ZOOM_STEP } from "../../browser/tabs.js";
+import { frameSrc, isSite, loopbackAddress, loopbackUrl, parseAddress, parseTarget, placeAddress, placeUrl, type Address, type Place } from "../../browser/url.js";
 import { useForwarded, useWorkspace } from "../../protocol/store.js";
 import { useComputerName } from "../../sidebar/workspaceRows.js";
-import { useRightPanelStore, type RightPanelSurface } from "../../rightPanelStore.js";
+import { roomForBrowserTab, useRightPanelStore, type RightPanelSurface } from "../../rightPanelStore.js";
 import { clockLabel } from "../../lib/timestampFormat.js";
 import { noticeFailure, notCopied } from "../../notices/store.js";
 import { Button } from "../ui/button.js";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty.js";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip.js";
+import { GuestSlot } from "./BrowserGuests.js";
 import { PreviewChromeRow } from "./PreviewChromeRow.js";
 import { PreviewEmptyState } from "./PreviewEmptyState.js";
 import { PreviewMoreMenu } from "./PreviewMoreMenu.js";
@@ -33,7 +37,7 @@ import { ZoomIndicator } from "./ZoomIndicator.js";
 
 type PreviewSurface = Extract<RightPanelSurface, { kind: "preview" }>;
 
-export const UNFRAMEABLE = "Only ports on the thread's computer can be framed here, like localhost:3000.";
+export const UNFRAMEABLE = "Only ports on the thread's computer show here, like localhost:3000. Other sites open in a new browser tab.";
 
 export function BrowserSurface({ workspaceId, surface }: { workspaceId: string; surface: PreviewSurface }) {
   const tabId = surface.resourceId;
@@ -48,7 +52,11 @@ export function BrowserSurface({ workspaceId, surface }: { workspaceId: string; 
   const [loading, setLoading] = useState(false);
   const [query, setQuery] = useState("");
 
-  const address = currentAddress(tab);
+  const guests = browserGuestsHere();
+  const key = tabId === null ? null : guestKey(workspaceId, tabId);
+  const nav = useGuestNav(key);
+  const place = currentPlace(tab);
+  const address: Address | null = place === null || isSite(place) ? null : place;
   const port = address?.port ?? null;
   // A workspace of this computer answers on this computer's own ports, which is the address the person's own
   // browser opens; nothing is minted for it and nothing is probed, since there is no preview edge in between.
@@ -58,8 +66,17 @@ export function BrowserSurface({ workspaceId, surface }: { workspaceId: string; 
   const [rechecks, setRechecks] = useState(0);
   const { reach, refusal } = useProbedRoute(workspaceId, here ? null : port, tab?.reloadNonce ?? 0, rechecks);
   const realUrl =
-    address === null ? null : here ? loopbackUrl(address.port, address.path) : reach.state === "ready" ? frameSrc(reach.reach.url, address.path) : null;
-  const shownUrl = address !== null ? loopbackAddress(address.port, address.path) : "";
+    place === null
+      ? null
+      : isSite(place)
+        ? place.url
+        : here
+          ? loopbackUrl(place.port, place.path)
+          : reach.state === "ready"
+            ? frameSrc(reach.reach.url, place.path)
+            : null;
+  const shownUrl = place !== null ? placeAddress(place) : "";
+  const routeUrl = !here && port !== null && reach.state === "ready" ? reach.reach.url : null;
   const listed = port === null || !portsSeeded || ports.some(p => p.port === port);
   // A port off the list may still answer: Docker's is held by a process of dockerd's, so no event names it. Until
   // its route and its first fetch are back, nothing is known, and nothing is said.
@@ -71,10 +88,35 @@ export function BrowserSurface({ workspaceId, surface }: { workspaceId: string; 
   const forwarded = useForwarded(workspaceId, port);
   const zoom = tab?.zoom ?? 1;
   const framed = realUrl !== null && (refusal === null || refusal.keepsFrame);
+  const route: GuestRoute | null = routeUrl === null || port === null ? null : { url: routeUrl, port };
 
   useEffect(() => {
     setLoading(framed);
   }, [framed, realUrl, tab?.reloadNonce]);
+
+  // The guest reads its own urls back against the port's route, which is reminted within the hour.
+  useEffect(() => {
+    if (key !== null) updateGuest(key, { route });
+  }, [key, routeUrl, port]);
+
+  // A place typed or picked is loaded into the guest the tab already has; a fresh route or a page the guest went to
+  // by itself leaves the count, so neither loads anything.
+  const loads = tab?.loads ?? 0;
+  useEffect(() => {
+    if (!guests || key === null || realUrl === null) return;
+    const guest = useGuests.getState().guests[key];
+    if (guest === undefined || guest.loaded === loads) return;
+    updateGuest(key, { loaded: loads });
+    void guestElement(key)?.loadURL(realUrl).catch(() => {});
+  }, [guests, key, realUrl, loads]);
+
+  const reloadNonce = tab?.reloadNonce ?? 0;
+  const reloaded = useRef(reloadNonce);
+  useEffect(() => {
+    if (reloadNonce === reloaded.current) return;
+    reloaded.current = reloadNonce;
+    if (guests && key !== null) guestElement(key)?.reload();
+  }, [guests, key, reloadNonce]);
 
   // The port listening again is the cue to probe its route anew, whether the last answer was framed or a refusal card.
   // The list naming it again counts on its own, since a fetch can find a fast restart up on both sides of it. A route
@@ -87,16 +129,19 @@ export function BrowserSurface({ workspaceId, surface }: { workspaceId: string; 
     if (tabId !== null && realUrl !== null && prev.realUrl !== null && prev.port === port && back) tabs.reload(workspaceId, tabId);
   }, [port, listening, listed, realUrl, tabId, workspaceId, tabs]);
 
-  const frameAddress = (next: Address): void => {
+  const frameAddress = (next: Place): void => {
     setHint(null);
-    if (tabId === null) openBrowser(workspaceId, tabs.createTab(workspaceId, next));
-    else tabs.navigate(workspaceId, tabId, next);
-    setRecents(prev => recordVisit(prev, loopbackUrl(next.port, next.path), Date.now()));
+    if (tabId === null) {
+      if (!roomForBrowserTab(workspaceId)) return;
+      openBrowser(workspaceId, tabs.createTab(workspaceId, next));
+    } else tabs.navigate(workspaceId, tabId, next);
+    setRecents(prev => recordVisit(prev, placeUrl(next), Date.now()));
   };
 
   const openUrl = (url: string): void => {
-    const next = parseAddress(url);
+    const next = guests ? parseTarget(url) : parseAddress(url);
     if (next === null) {
+      window.open(placeUrl(parseTarget(url)), "_blank", "noopener");
       setHint(UNFRAMEABLE);
       return;
     }
@@ -123,12 +168,12 @@ export function BrowserSurface({ workspaceId, surface }: { workspaceId: string; 
     <div className="flex h-full min-h-0 flex-1 flex-col" data-browser-surface>
       <PreviewChromeRow
         url={shownUrl}
-        loading={loading}
-        canGoBack={tab !== null && tab.index > 0}
-        canGoForward={tab !== null && tab.index < tab.entries.length - 1}
-        refreshDisabled={port === null}
-        onBack={withTab(id => tabs.back(workspaceId, id))}
-        onForward={withTab(id => tabs.forward(workspaceId, id))}
+        loading={guests ? nav.loading : loading}
+        canGoBack={guests ? nav.canGoBack : tab !== null && tab.index > 0}
+        canGoForward={guests ? nav.canGoForward : tab !== null && tab.index < tab.entries.length - 1}
+        refreshDisabled={place === null}
+        onBack={withTab(id => (guests ? guestElement(guestKey(workspaceId, id))?.goBack() : tabs.back(workspaceId, id)))}
+        onForward={withTab(id => (guests ? guestElement(guestKey(workspaceId, id))?.goForward() : tabs.forward(workspaceId, id)))}
         onRefresh={reload}
         onSubmit={openUrl}
         onDraft={setQuery}
@@ -158,7 +203,7 @@ export function BrowserSurface({ workspaceId, surface }: { workspaceId: string; 
         </div>
       ) : null}
       <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
-        {port === null ? (
+        {place === null ? (
           <PreviewEmptyState
             servers={servers}
             recentEntries={recents}
@@ -166,7 +211,7 @@ export function BrowserSurface({ workspaceId, surface }: { workspaceId: string; 
             onOpenUrl={openUrl}
             onRemoveRecent={url => setRecents(prev => removeVisit(prev, url))}
           />
-        ) : reach.state === "failed" ? (
+        ) : port !== null && reach.state === "failed" ? (
           <Empty className="flex-1">
             <EmptyHeader>
               <EmptyTitle>{noPreviewRouteLine(port, computer)}</EmptyTitle>
@@ -191,9 +236,11 @@ export function BrowserSurface({ workspaceId, surface }: { workspaceId: string; 
                   <EmptyDescription>{refusal.detail}</EmptyDescription>
                 </EmptyHeader>
               </Empty>
+            ) : framed && guests && tabId !== null && key !== null ? (
+              <GuestSlot id={key} made={{ workspaceId, tabId, src: realUrl, route, loaded: loads }} />
             ) : framed ? (
               <iframe
-                key={`${loopbackUrl(port, address?.path)}:${tab?.reloadNonce ?? 0}`}
+                key={`${place === null ? "" : placeUrl(place)}:${tab?.reloadNonce ?? 0}`}
                 title={`:${port}`}
                 src={realUrl}
                 onLoad={() => {
