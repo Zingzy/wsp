@@ -324,6 +324,25 @@ describe("the recipe's servers on a computer somebody owns", { timeout: 60_000 }
     expect(claudeOf(root).mcpServers["mine"]).toEqual({ command: "/usr/local/bin/mine", args: [] });
   });
 
+  it("reads a home folder's server in a copy whose folder keys the pack already moved to that computer's home, and says it landed", async () => {
+    const g = box();
+    const { root } = g;
+    const notion = { type: "http", url: "https://notion.example/mcp" };
+    const claude = `${JSON.stringify({ mcpServers: {}, projects: { [root]: { mcpServers: { notion } } } }, null, 2)}\n`;
+    const plan: McpPlan = { ...planOn(root), agents: [{ id: "claude", label: "Claude Code", scopes: [{ files: [join(root, ".claude-cfg/.claude.json")], format: MCP_SERVERS_JSON, project: { from: HOME, to: root }, keep: ["notion"], drop: [] }], aside: [] }] };
+    const o = { home: root, tools: [], path: TOOLS_PATH, stage: () => {} };
+    const landed = await provisionFiles(g.machine, { home: root, lands: LANDS, pack: async () => packed(tarOfConfigs(claude, "")) });
+    const rows = await provisionMcp(g.machine, plan, { ...o, landed: landed.owned });
+    expect(rows.map(r => [r.id, r.outcome, r.note])).toEqual([[`${MCP_ID_PREFIX}claude/home/notion`, "installed", undefined]]);
+    await closeAgentFiles(g.machine, root, oncePathsOf(LANDS));
+    expect(claudeOf(root).projects[root]).toEqual({ mcpServers: { notion } });
+
+    // A later run finds the file standing, its entry the one the copy carries: there as the recipe asks.
+    const again = await provisionFiles(g.machine, { home: root, lands: LANDS, pack: async () => packed(tarOfConfigs(claude, "")) });
+    expect((await provisionMcp(g.machine, plan, { ...o, landed: again.owned })).map(r => [r.id, r.outcome])).toEqual([[`${MCP_ID_PREFIX}claude/home/notion`, "present"]]);
+    await closeAgentFiles(g.machine, root, oncePathsOf(LANDS));
+  });
+
   it("says on a server's row where its key does not reach that computer's threads, since that agent's launch hands it no value", async () => {
     const g = box();
     const held = new Set(["LINEAR_TOKEN"]);
@@ -426,6 +445,25 @@ describe("the recipe's servers on a computer somebody owns", { timeout: 60_000 }
     expect(existsSync(none)).toBe(false);
     await headlessKeys(g.machine, g.root, { codex: none }, new Set(["codex"]));
     expect(existsSync(join(none, "config.toml")) ? readFileSync(join(none, "config.toml"), "utf8") : undefined).toBe(linux ? KEY : undefined);
+  });
+
+  it("says on the row of a store config that stood from an earlier run that it did, and which of this computer's servers merged into it", async () => {
+    const g = box();
+    const logins = mkdtempSync(join(tmpdir(), "wsp-box-logins-"));
+    g.dirs.push(logins);
+    const on = { home: g.root, stores: { codex: logins } };
+    const configRow = (rows: readonly { label: string; outcome: string; note?: string }[]) => rows.find(r => r.label === `Codex ${logins}/config.toml`);
+
+    // An earlier run's config, with a server of its own and its own context7: nothing of this computer's goes in.
+    writeFileSync(join(logins, "config.toml"), ["[mcp_servers.axiom]", 'url = "https://axiom.example/mcp"', "", "[mcp_servers.context7]", 'command = "/usr/local/bin/their-c7"', ""].join("\n"));
+    const none = await provisionStep(g.machine, codexStepPlan(g.root), "mcp", newSetupRun(), () => {}, on);
+    expect(configRow(none)).toMatchObject({ outcome: "present", note: "already there before this run, so it stands as it was; none of this computer's servers merged into it" });
+
+    // Without its own context7, this computer's merges into it, and the row names it.
+    writeFileSync(join(logins, "config.toml"), ["[mcp_servers.axiom]", 'url = "https://axiom.example/mcp"', ""].join("\n"));
+    const merged = await provisionStep(g.machine, codexStepPlan(g.root), "mcp", newSetupRun(), () => {}, on);
+    expect(configRow(merged)).toMatchObject({ outcome: "present", note: "already there before this run, so it stands as it was; this computer's context7 merged into it" });
+    expect(CODEX_TOML.read(readFileSync(join(logins, "config.toml"), "utf8"), g.root).map(s => s.name)).toEqual(["axiom", "context7"]);
   });
 
   it("lands the rest of an agent's own files under the store its threads there read, and leaves none of them under the home", async () => {
