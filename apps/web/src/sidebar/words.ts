@@ -106,4 +106,6 @@ export const TREE_WORDS = {
   startedBy: (path: ReadonlyArray<string>): string => `Started by ${path.join(" / ")}`,
   fold: "Fold",
   unfold: "Unfold",
+  /** What the sidebar's polite live region says once a tree moves. */
+  moved: (title: string, place: number, of: number, pinned: boolean): string => `Moved ${title} to ${place} of ${of}${pinned ? " in Pinned" : ""}`,
 } as const;

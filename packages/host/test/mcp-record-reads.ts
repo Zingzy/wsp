@@ -138,7 +138,7 @@ const WITH_CLOUD = reply({ workspaces: [{ id: "ws-cloud", name: "cloudwork", kin
 /** A thread whose marks and picks moved between its turns: the latest turn's stand, and the opening turn's attempt. */
 const PLACED = [
   { ...SESSIONS[0]!, pinnedAt: 1727431000000, section: { name: "working", whileState: "running" }, attempt: "att-1", permissionMode: "acceptEdits", fast: false },
-  { ...SESSIONS[2]!, pinnedAt: 1727431280000.5, snoozedUntil: 1727434800000, wokeAt: 1727431290000, section: { name: "needs-you", whileState: "asking \"é\"" }, attempt: "att-2", permissionMode: "bypass \u0085", fast: true },
+  { ...SESSIONS[2]!, pinnedAt: 1727431280000.5, order: 1727431199999.75, snoozedUntil: 1727434800000, wokeAt: 1727431290000, section: { name: "needs-you", whileState: "asking \"é\"" }, attempt: "att-2", permissionMode: "bypass \u0085", fast: true },
 ];
 
 const CJK_LINE = `${"完成".repeat(99)}🎉${"了".repeat(60)}`;

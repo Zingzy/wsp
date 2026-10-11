@@ -73,11 +73,22 @@ export type ThreadSection = z.infer<typeof ThreadSection>;
 export const ThreadPlacement = z.object({ name: ThreadSection, whileState: z.string() });
 export type ThreadPlacement = z.infer<typeof ThreadPlacement>;
 
+/** A sort key the sidebar writes: a finite number, so NaN and Infinity never land on a record every window sorts by. */
+const SortKey = z.number().finite();
+
 /** What sessions.mark moves on a thread: a pin set or taken off, a snooze set until a moment or taken off, a
- * placement set or taken off, Resume at reset armed or cancelled, its tree folded or opened in the sidebar. A field
- * left out is left as it is. */
+ * placement set or taken off, Resume at reset armed or cancelled, its tree folded or opened in the sidebar, and its
+ * place in the list. A pin given as a number is the key Pinned sorts by, as true pins it now; order is the key the
+ * list sorts a root by in place of its start, null to go back to its start. A field left out is left as it is. */
 export const ThreadMarks = z
-  .object({ pinned: z.boolean().optional(), snoozedUntil: z.number().nullable().optional(), section: ThreadPlacement.nullable().optional(), resumeAtReset: z.boolean().optional(), folded: z.boolean().optional() })
+  .object({
+    pinned: z.union([z.boolean(), SortKey]).optional(),
+    order: SortKey.nullable().optional(),
+    snoozedUntil: z.number().nullable().optional(),
+    section: ThreadPlacement.nullable().optional(),
+    resumeAtReset: z.boolean().optional(),
+    folded: z.boolean().optional(),
+  })
   .strict();
 export type ThreadMarks = z.infer<typeof ThreadMarks>;
 
@@ -212,8 +223,12 @@ export const SessionView = z.object({
   /** When the person settled this row's thread by hand, kept and stamped as readAt is; absent on a thread nobody
    * settled. Activity after it brings the thread back. */
   settledAt: z.number().optional(),
-  /** When the person pinned this row's thread to the top of the sidebar, kept and stamped as readAt is. */
+  /** When the person pinned this row's thread to the top of the sidebar, or the key they moved it to there, kept and
+   * stamped as readAt is. */
   pinnedAt: z.number().optional(),
+  /** The key the person moved this row's thread to in the sidebar's list, in the epoch-ms space of its start, kept
+   * and stamped as readAt is; absent on a thread nobody moved, which sorts by its start. */
+  order: z.number().optional(),
   /** When the person folded this row's thread's tree in the sidebar, kept and stamped as readAt is. */
   foldedAt: z.number().optional(),
   /** The thread this row's thread restarts, as its start named it, and the thread that restarts this one, both off the
@@ -284,6 +299,7 @@ export const ThreadView = z.object({
   readAt: z.number().optional(),
   settledAt: z.number().optional(),
   pinnedAt: z.number().optional(),
+  order: z.number().optional(),
   foldedAt: z.number().optional(),
   replaces: z.string().optional(),
   replacedBy: z.string().optional(),
@@ -354,6 +370,7 @@ export function foldThreads(sessions: ReadonlyArray<SessionView>): ThreadView[] 
       ...(latest.readAt !== undefined ? { readAt: latest.readAt } : {}),
       ...(latest.settledAt !== undefined ? { settledAt: latest.settledAt } : {}),
       ...(latest.pinnedAt !== undefined ? { pinnedAt: latest.pinnedAt } : {}),
+      ...(latest.order !== undefined ? { order: latest.order } : {}),
       ...(latest.foldedAt !== undefined ? { foldedAt: latest.foldedAt } : {}),
       ...(latest.replaces !== undefined ? { replaces: latest.replaces } : {}),
       ...(latest.replacedBy !== undefined ? { replacedBy: latest.replacedBy } : {}),

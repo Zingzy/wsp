@@ -1,0 +1,15 @@
+{
+  "at": "/",
+  "fixture": "tree-drag-plain",
+  "steps": [
+    "row-id=thread:notes",
+    "hover:row-id=thread:lead",
+    "hover:stop-act"
+  ],
+  "wait": "slot=tooltip-popup",
+  "settleMs": 900,
+  "widths": [
+    1440
+  ],
+  "reason": "what a drag and a hover show is the pointer's, drawn from md up; a phone has neither"
+}

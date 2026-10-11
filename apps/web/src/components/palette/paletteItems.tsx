@@ -61,6 +61,8 @@ export interface PaletteHandlers {
 
 export interface PaletteItemsInput {
   readonly projects: ReadonlyArray<SidebarProjectSnapshot>;
+  /** The moves of the open thread's root tree, as its tile's menu offers them; none while no thread is open. */
+  readonly threadMoves?: ReadonlyArray<ResolvedAction>;
   readonly selectedId: string | null;
   /** What the person typed; the thread search runs over it, the at-rest list ignores it. */
   readonly query: string;
@@ -225,6 +227,7 @@ function actionItems(input: PaletteItemsInput): Array<CommandPaletteActionItem |
       run: handlers.copyThreadMarkdown,
     });
   }
+  items.push(...(input.threadMoves ?? []).map(action => actionItem(action, "The open thread's tree, in the sidebar")));
   if (selected !== null) {
     // The one New thread row is the one above, which opens on a project; the copy's own act stays off the palette.
     items.push(...resolveActions(workspaceActions, workspaceTarget(selected.workspace, selected.status, input.places), input.verbs).filter(action => action.id !== "new-thread").map(action => actionItem(action, selected.displayName)));

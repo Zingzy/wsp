@@ -6,7 +6,7 @@
 // restore take a root thread with every thread under it; a pin and a snooze
 // mark the root alone, which carries its tree with it. Keep this one, on a
 // thread one send to several models opened, deletes the copies the others run in.
-import { AlarmClockIcon, ArchiveIcon, ArchiveRestoreIcon, CheckIcon, FileTextIcon, HistoryIcon, LinkIcon, MessageSquareIcon, PencilIcon, PinIcon, PinOffIcon, RotateCwIcon, SquareIcon, SquareTerminalIcon, Trash2Icon, Undo2Icon } from "lucide-react";
+import { AlarmClockIcon, ArrowDownIcon, ArrowUpIcon, ArrowUpToLineIcon, ArchiveIcon, ArchiveRestoreIcon, CheckIcon, FileTextIcon, HistoryIcon, LinkIcon, MessageSquareIcon, PencilIcon, PinIcon, PinOffIcon, RotateCwIcon, SquareIcon, SquareTerminalIcon, Trash2Icon, Undo2Icon, type LucideIcon } from "lucide-react";
 import { terminalResumeLine, threadMarkdown, threadMessages, type SessionSettleResult, type HarnessCatalog, type SessionEvent, type SessionStatus, type ThreadMarks, type WorkspaceState } from "@wsp/protocol";
 import type { SidebarThreadSnapshot } from "../adapt/index.js";
 import { addressLink } from "../protocol/address.js";
@@ -14,6 +14,8 @@ import { CHILD_WORDS, CLIENT_CANNOT_OPEN, CLIENT_CANNOT_SEND, CLIENT_CANNOT_REWI
 import type { ChildPart } from "../components/threads/leadTree.js";
 import { addNotice } from "../notices/store.js";
 import type { ActionEntry } from "./registry.js";
+import type { KeybindingShortcut } from "../keybindingTypes.js";
+import type { MoveStep, RootPlace } from "../sidebar/treeMoves.js";
 
 export interface ThreadTarget {
   /** The fold key of the thread, what a row is keyed by. */
@@ -60,6 +62,9 @@ export interface RootTree {
   readonly working: boolean;
   readonly pinned: boolean;
   readonly settled: boolean;
+  /** Where the tree stands in Pinned or the list, which its moves read; absent where it stands in neither, as a tree
+   * in the Needs you inbox alone or one snoozed at the foot. */
+  readonly place?: RootPlace | null | undefined;
 }
 
 /** One thread as its actions read it: the row, the agent's catalog row for the machine it runs on, and that
@@ -115,6 +120,9 @@ export interface ThreadVerbs {
   /** Opens the snooze's pick of times for a thread, by fold key; the surface that draws the rows puts its own opener
    * here, as it does the rename's. */
   readonly snooze?: ((threadId: string) => void) | undefined;
+  /** Moves a root's tree a step in its section, or to its top, by the root's fold key; the surface that draws the
+   * rows puts its own here, as it does the rename's opener. */
+  readonly move?: ((threadId: string, step: MoveStep) => void) | undefined;
   /** Asks to delete these workspaces, the copies with them: the surface that draws the rows puts its confirmation
    * here, as it does the rename's opener, and a client with no road to the op leaves it out. */
   readonly keep?: ((workspaceIds: ReadonlyArray<string>) => void) | undefined;
@@ -132,13 +140,34 @@ export interface ThreadVerbs {
  * another thread carries. One shape for both, so an address written in the app never differs from one copied out. */
 export const threadLink = (target: Pick<ThreadTarget, "workspaceId">, threadId: string): string => addressLink({ workspaceId: target.workspaceId, threadId });
 
+/** One of a root's moves, held at the end of its section it cannot pass. */
+const altShift = (key: string): KeybindingShortcut => ({ key, altKey: true, shiftKey: true, metaKey: false, ctrlKey: false, modKey: false });
+/** Alt+Shift and an arrow on a focused root tile: the sidebar's own keys, which Mod+Alt and an arrow (the thread walk)
+ * leave free, named on the menu's Move up and Move down. */
+export const MOVE_KEYS = { up: altShift("arrowup"), down: altShift("arrowdown") } as const satisfies Partial<Record<MoveStep, KeybindingShortcut>>;
+
+function moveEntry(id: string, step: MoveStep, icon: LucideIcon, title: string, end: (place: RootPlace) => string | null): ActionEntry<ThreadTarget, ThreadVerbs> {
+  const keys = step === "top" ? undefined : MOVE_KEYS[step];
+  return {
+    id,
+    group: "place",
+    ...(keys === undefined ? {} : { keys }),
+    icon: () => icon,
+    applies: target => target.root?.place != null && !target.root.settled,
+    title: () => title,
+    refusal: (target, verbs) => (verbs.move === undefined ? CLIENT_CANNOT_MARK : end(target.root!.place!)),
+    run: (target, verbs) => verbs.move?.(target.id, step),
+  };
+}
+
 export const threadActions: ReadonlyArray<ActionEntry<ThreadTarget, ThreadVerbs>> = [
   {
     id: "stop",
     group: "state",
     icon: () => SquareIcon,
     title: () => THREAD_WORDS.stop,
-    refusal: (target, verbs) => (target.status !== "running" ? THREAD_NOT_RUNNING : verbs.stop === undefined ? CLIENT_CANNOT_STOP : null),
+    // A stop takes the tree under a thread whose own turn is over too, so a lead whose builders run offers it.
+    refusal: (target, verbs) => (target.status !== "running" && target.root?.working !== true ? THREAD_NOT_RUNNING : verbs.stop === undefined ? CLIENT_CANNOT_STOP : null),
     run: (target, verbs) => verbs.stop?.(target.sessionId),
   },
   {
@@ -207,6 +236,9 @@ export const threadActions: ReadonlyArray<ActionEntry<ThreadTarget, ThreadVerbs>
     refusal: (_target, verbs) => (verbs.mark === undefined || verbs.snooze === undefined ? CLIENT_CANNOT_MARK : null),
     run: (target, verbs) => verbs.snooze?.(target.id),
   },
+  moveEntry("move-up", "up", ArrowUpIcon, THREAD_WORDS.moveUp, place => (place.index === 0 ? THREAD_WORDS.alreadyFirst : null)),
+  moveEntry("move-down", "down", ArrowDownIcon, THREAD_WORDS.moveDown, place => (place.index === place.count - 1 ? THREAD_WORDS.alreadyLast : null)),
+  moveEntry("move-top", "top", ArrowUpToLineIcon, THREAD_WORDS.moveTop, place => (place.index === 0 ? THREAD_WORDS.alreadyFirst : null)),
   {
     id: "copy-link",
     group: "copy",
@@ -310,6 +342,8 @@ export interface ChildTarget {
   /** What a settle of the thread takes, and whether anything in it works, which holds the settle. */
   readonly settles: ReadonlyArray<string>;
   readonly working: boolean;
+  /** Whether threads hang under it, which a stop of it takes with it. */
+  readonly under: boolean;
   /** The thread a restart replaced and the thread that restarts this one, by id; null where there is none. */
   readonly replaces: string | null;
   readonly replacedBy: string | null;
@@ -360,7 +394,7 @@ export const childActions: ReadonlyArray<ActionEntry<ChildTarget, ChildVerbs>> =
     id: "stop",
     group: "state",
     icon: () => SquareIcon,
-    applies: target => isThread(target) && target.part !== "settled" && target.running,
+    applies: target => isThread(target) && target.part !== "settled" && (target.running || target.working),
     title: () => THREAD_WORDS.stop,
     refusal: (_target, verbs) => (verbs.stop === undefined ? CLIENT_CANNOT_STOP : null),
     run: (target, verbs) => verbs.stop?.(target.sessionId),

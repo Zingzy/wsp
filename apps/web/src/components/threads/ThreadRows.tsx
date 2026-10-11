@@ -10,7 +10,7 @@ import { agentName } from "@wsp/catalog";
 import { appHash, type PlaceView, type SubagentView } from "@wsp/protocol";
 import { BotIcon, EllipsisIcon, type LucideIcon } from "lucide-react";
 import { memo, useState, type MouseEvent, type ReactNode } from "react";
-import { CHILD_WORDS } from "../../actions/format.js";
+import { CHILD_WORDS, THREAD_WORDS } from "../../actions/format.js";
 import { openContextMenu, runAction } from "../../actions/contextMenu.js";
 import { resolveActions, type ResolvedAction } from "../../actions/registry.js";
 import { childActions, type ChildTarget } from "../../actions/threadActions.js";
@@ -21,6 +21,7 @@ import { useStore } from "../../protocol/store.js";
 import { ComputerGlyph } from "../../settings/ComputerGlyph.js";
 import { HOVER_GLYPH_CLASS } from "../../sidebar/rowGrammar.js";
 import { RowNameInput } from "../../sidebar/RowNameInput.js";
+import { StopAct } from "../../sidebar/StopAct.js";
 import { HarnessMark } from "../chat/HarnessMark.js";
 import type { StatusKind } from "../status/kinds/index.js";
 import { restingAge } from "../status/restingAge.js";
@@ -86,20 +87,34 @@ function useWoken(): [boolean, { onPointerEnter: () => void; onFocus: () => void
 
 /** The status slot and, where the row takes acts, the acts it yields to while the pointer or the focus is on the row
  * or its menu is open: Send a message and the state act, then More, which opens the right-click's menu. */
-function Slot({ status, acts, menu, more, woken }: { status: ReactNode; acts: ReadonlyArray<ResolvedAction>; menu: (event: MouseEvent<HTMLElement>) => void; more: boolean; woken: boolean }) {
+function Slot({ status, acts, menu, more, woken, under }: { status: ReactNode; acts: ReadonlyArray<ResolvedAction>; menu: (event: MouseEvent<HTMLElement>) => void; more: boolean; woken: boolean; under: boolean }) {
+  // While Stop is armed the row's other acts give way to its word, in the room the acts already hold.
+  const [armed, setArmed] = useState(false);
   const shown = acts.filter(act => act.refusal === null && act.icon !== undefined).slice(0, 2);
+  const stops = shown.some(act => STOPS.has(act.id));
   const count = shown.length + (more ? 1 : 0);
   if (count === 0) return status;
   return (
-    <span className={cn("relative flex shrink-0 items-center justify-end", ACTS_ROOM[count])}>
+    <span className={cn("relative flex shrink-0 items-center justify-end", ACTS_ROOM[stops ? Math.max(count, 2) : count])}>
       <span className="inline-flex md:group-hover/row:invisible md:group-focus-within/row:invisible md:group-data-[acts=shown]/row:invisible">{status}</span>
       <span data-child-acts className={cn("absolute inset-y-0 right-0 flex items-center justify-end gap-1 transition-opacity duration-150 group-hover/row:opacity-100 group-focus-within/row:opacity-100 group-data-[acts=shown]/row:opacity-100", HOVER_GLYPH_CLASS)}>
-        {woken ? shown.map(act => <Act key={act.id} icon={act.icon!} label={act.title} run={() => void runAction(act)} />) : null}
-        {woken && more ? <Act icon={EllipsisIcon} label={CHILD_WORDS.more} run={menu} /> : null}
+        {woken
+          ? shown.map(act =>
+              STOPS.has(act.id) ? (
+                <StopAct key={act.id} on="bar" label={act.id === "stop" && under ? THREAD_WORDS.stopTree : act.title} onStop={() => void runAction(act)} onArmed={setArmed} />
+              ) : armed ? null : (
+                <Act key={act.id} icon={act.icon!} label={act.title} run={() => void runAction(act)} />
+              ),
+            )
+          : null}
+        {woken && more && !armed ? <Act icon={EllipsisIcon} label={CHILD_WORDS.more} run={menu} /> : null}
       </span>
     </span>
   );
 }
+
+/** The acts that stop, which take the two presses every row's Stop takes. */
+const STOPS: ReadonlySet<string> = new Set(["stop", "stop-subagent"]);
 
 /** The computer a child runs on, where that is not its lead's: its glyph and its name, the second line's first fact. */
 function RunsOn({ at, name }: { at: PlaceView | undefined; name: string }) {
@@ -168,6 +183,7 @@ export const ThreadRow = memo(function ThreadRow({ thread, place, at, note, targ
       data-thread-row={thread.id}
       {...(target !== undefined ? { "data-child-part": target.part } : {})}
       {...(shown ? { "data-acts": "shown" } : {})}
+      data-stop-row
       className={rowBox(twoLines, cn(threadId !== null && "cursor-pointer", className))}
       {...(threadId === null
         ? {}
@@ -206,7 +222,7 @@ export const ThreadRow = memo(function ThreadRow({ thread, place, at, note, targ
       {sending ? (
         status
       ) : (
-        <Slot status={status} acts={acts} menu={menu} more={target !== undefined && target.task === null} woken={woken || shown || threadId === null} />
+        <Slot status={status} acts={acts} menu={menu} more={target !== undefined && target.task === null} woken={woken || shown || threadId === null} under={target?.under === true} />
       )}
     </div>
   );
@@ -222,6 +238,7 @@ const sameTarget = (a: ChildTarget | undefined, b: ChildTarget | undefined): boo
     a.part === b.part &&
     a.running === b.running &&
     a.working === b.working &&
+    a.under === b.under &&
     a.task === b.task &&
     a.title === b.title &&
     a.sessionId === b.sessionId &&
@@ -275,6 +292,7 @@ export const SubagentRow = memo(function SubagentRow({ subagent, target, kind, n
     <div
       data-subagent-row={subagent.id}
       data-child-part={target.part}
+      data-stop-row
       className={rowBox(note !== undefined, opens === undefined ? undefined : "cursor-pointer")}
       {...(acts.length > 0 ? { onContextMenu: menu } : {})}
       {...wake}
@@ -312,7 +330,7 @@ export const SubagentRow = memo(function SubagentRow({ subagent, target, kind, n
         </Tooltip>
         <SecondLine place="" at={undefined} note={note} />
       </span>
-      <Slot status={status} acts={acts} menu={menu} more={false} woken={woken || opens === undefined} />
+      <Slot status={status} acts={acts} menu={menu} more={false} woken={woken || opens === undefined} under={false} />
     </div>
   );
 }, (a, b) => a.lead?.workspaceId === b.lead?.workspaceId && a.lead?.threadId === b.lead?.threadId && sameSubagentRow(a, b));

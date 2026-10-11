@@ -3,11 +3,21 @@
 // every tile redrawn while typing, and Settings back to a long thread blocked the window for 3.8 s rebuilding the
 // sidebar and the thread. The shell, the sidebar's tiles and the thread's composer are the real ones; ThreadTile is
 // counted where the sidebar draws it.
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-const drawn = vi.hoisted(() => ({ tiles: 0, subagents: new Map<string, number>() }));
+const drawn = vi.hoisted(() => ({ tiles: 0, sidebar: 0, subagents: new Map<string, number>() }));
+vi.mock("../src/sidebar/WorkspaceSidebar.js", async importOriginal => {
+  const real = await importOriginal<typeof import("../src/sidebar/WorkspaceSidebar.js")>();
+  return {
+    ...real,
+    WorkspaceSidebar: () => {
+      drawn.sidebar++;
+      return real.WorkspaceSidebar();
+    },
+  };
+});
 vi.mock("../src/sidebar/ThreadTile.js", async importOriginal => {
   const { memo } = await import("react");
   const real = await importOriginal<typeof import("../src/sidebar/ThreadTile.js")>();
@@ -47,6 +57,7 @@ import { caps } from "./caps.js";
 import { composerEditor, typeInto } from "./composer-harness.js";
 import { noDaemonApi } from "./fake-daemon-api.js";
 import { installFakeLayout } from "./fake-layout.js";
+import { pointerLeave } from "./pointer.js";
 
 let restoreLayout: () => void = () => {};
 beforeAll(() => {
@@ -94,6 +105,8 @@ const api: Api = {
   getGolden: async () => undefined,
   projectsList: async () => [PROJECT],
   startSession: async o => ({ id: "s9", workspaceId: o.workspaceId, harness: "claude", status: "running" }),
+  markThreads: async () => {},
+  interruptSession: async () => ({ outcome: "accepted" as const }),
 };
 
 const settle = () => act(() => new Promise<void>(resolve => setTimeout(resolve, 50)));
@@ -176,6 +189,29 @@ describe("over a lead's tree", () => {
   });
 });
 
+describe("Stop on a tile in a lead's tree", () => {
+  it("arming, a lapse and a disarm draw no tile and not the sidebar, in a tree of fourteen tiles", async () => {
+    SESSIONS = [thread(1, "running"), ...Array.from({ length: 12 }, (_, i) => ({ ...thread(i + 2, "running"), startedBy: "agent" as const, parentThreadId: "thr_1" })), { ...thread(20, "running"), startedBy: "agent" as const, parentThreadId: "thr_2" }];
+    await mount();
+    await waitFor(() => expect(document.querySelectorAll("[data-slot=sidebar] [data-thread-status=working]").length).toBe(14));
+    await settle();
+    const tiles = drawn.tiles;
+    const sidebar = drawn.sidebar;
+    const row = document.querySelector<HTMLElement>("[data-slot=sidebar] [data-row-id='thread:thr_7']")!.parentElement!;
+    const stop = (): HTMLElement => row.querySelector<HTMLElement>(":scope > [data-stop-act]")!;
+    fireEvent.click(stop());
+    expect(stop().hasAttribute("data-armed")).toBe(true);
+    await act(() => new Promise<void>(resolve => setTimeout(resolve, 2_100)));
+    expect(stop().hasAttribute("data-armed")).toBe(false);
+    fireEvent.click(stop());
+    pointerLeave(row);
+    expect(stop().hasAttribute("data-armed")).toBe(false);
+    await settle();
+    expect(drawn.tiles - tiles).toBe(0);
+    expect(drawn.sidebar - sidebar).toBe(0);
+  });
+});
+
 describe("a lead's subagents in the sidebar", () => {
   /** A working lead running twelve subagents, beside two threads of its own. */
   const subagents = (moved?: (sub: SubagentView) => SubagentView): SubagentView[] =>
@@ -198,5 +234,44 @@ describe("a lead's subagents in the sidebar", () => {
     await act(() => useStore.getState().reloadSessions(WS));
     await settle();
     expect(Object.fromEntries(drawn.subagents)).toEqual({ sa_5: 1 });
+  });
+});
+
+describe("a tree dragged in the sidebar", () => {
+  const transfer = () => ({ setData: () => {}, getData: () => "", types: ["text/plain"], effectAllowed: "move", dropEffect: "move" });
+  const frame = () => act(() => new Promise<void>(resolve => requestAnimationFrame(() => resolve())));
+  const tile = (n: number): HTMLElement => document.querySelector<HTMLElement>(`[data-slot=sidebar] [data-row-id='thread:thr_${n}']`)!;
+
+  it("draws neither the sidebar nor a tile from dragstart through every section to an Escape, and a drop draws the sidebar once", async () => {
+    SESSIONS = [
+      ...Array.from({ length: 12 }, (_, i) => thread(i + 1, "running")),
+      { ...thread(30, "running"), asking: "Permission for Bash: ls" },
+      { ...thread(31, "completed"), endedAt: 40, pinnedAt: 50 },
+    ];
+    await mount();
+    await waitFor(() => expect(document.querySelectorAll("[data-slot=sidebar] [data-thread-status=working]").length).toBe(12));
+    await settle();
+    const sidebar = drawn.sidebar;
+    const tiles = drawn.tiles;
+    const over = (el: Element): void => void fireEvent.dragOver(el, { dataTransfer: transfer() });
+    fireEvent.dragStart(tile(12), { dataTransfer: transfer() });
+    await frame();
+    over(document.querySelector("[data-section-head=pinned]")!);
+    over(document.querySelector("[data-section-head=needs-you]")!);
+    for (let n = 1; n <= 10; n++) over(tile(n));
+    over(document.querySelector("[data-drop-settled]")!);
+    fireEvent.dragEnd(tile(12), { dataTransfer: transfer() });
+    await settle();
+    expect(drawn.sidebar - sidebar).toBe(0);
+    expect(drawn.tiles - tiles).toBe(0);
+    fireEvent.dragStart(tile(12), { dataTransfer: transfer() });
+    await frame();
+    over(tile(5));
+    fireEvent.drop(tile(5), { dataTransfer: transfer() });
+    fireEvent.dragEnd(tile(12), { dataTransfer: transfer() });
+    await settle();
+    expect(drawn.sidebar - sidebar).toBe(1);
+    const order = [...document.querySelectorAll<HTMLElement>("[data-slot=sidebar] [data-section=threads] [data-root]")].map(item => item.dataset["root"]);
+    expect(order.indexOf("thr_12")).toBe(order.indexOf("thr_5") + 1);
   });
 });

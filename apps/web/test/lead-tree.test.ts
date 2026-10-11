@@ -63,7 +63,7 @@ const thread = (c: Child): SidebarThreadSnapshot => ({
   readAt: iso(c.read === true && c.ended !== undefined ? ago(c.ended) + 30_000 : undefined),
   settledAt: iso(c.settled === true && c.ended !== undefined ? ago(c.ended) + 60_000 : undefined),
   needsYou: false,
-  pinnedAt: null,
+  pinnedAt: null, order: null,
   snoozedUntil: null,
   section: null,
   subagents: c.subagents ?? [],

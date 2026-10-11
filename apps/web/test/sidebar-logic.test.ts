@@ -263,7 +263,7 @@ describe("the tree a thread's own threads make", () => {
     readAt: null,
     settledAt: null,
     needsYou: false,
-    pinnedAt: null,
+    pinnedAt: null, order: null,
     snoozedUntil: null,
     section: null,
     subagents: [],

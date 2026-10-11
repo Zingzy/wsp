@@ -17,7 +17,7 @@ import {
   attachmentRecord, attachmentKey, filesBlocked, filesRefusal, steerFilesBlocked, type Attachment, isImage, sendFilesDir, attachedFilesPrompt, threadMessages,
   threadSeed, taskStopRefusedLine, taskStopUnsupportedLine, agentOffLine, HEAD_BYTES, HISTORY_PAGE_BYTES,
   HISTORY_PAGE_EVENTS, AGENT_STARTING_MS, ASIDE_EMPTY_LINE, capStoppedLine, deletedBeforeStartLine, type AsideQuestion,
-  type McpServerSpec, type SessionAsker, refusal, RESUME_A_THREAD_LINE, RESUME_A_THREAD_FIX, sendFilesAcrossLine, SEND_FILES_ACROSS_FIX, waitAcrossLine, WAIT_ACROSS_FIX,
+  type McpServerSpec, type SessionAsker, refusal, usageRefusal, RESUME_A_THREAD_LINE, RESUME_A_THREAD_FIX, sendFilesAcrossLine, SEND_FILES_ACROSS_FIX, waitAcrossLine, WAIT_ACROSS_FIX,
   TURN_STOPPED_LINE, workspacePlace, STOP_REACH_MS, sendGivenUpLine, threadResult, listedFailure, turnLines,
   type Caller, type SessionSettleResult, SETTLE_MS, SETTLE_WORKING, SETTLE_ALREADY, subagentSettleLine,
   SUBAGENT_SETTLE_FIX, notUnderLine, NOT_UNDER_FIX, replacesWorkingLine, replacesWorkingFix, replacedAlreadyLine, replacedAlreadyFix, RESTART_OPENS_LINE, RESTART_OPENS_FIX,
@@ -1106,9 +1106,12 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
 
     async mark(threadIds, marks, origin) {
       const at = clock.now();
+      // Every window sorts by these keys, so one that is not a number on the line never lands on a record.
+      for (const key of [marks.pinned, marks.order]) if (typeof key === "number" && !Number.isFinite(key)) throw usageRefusal(`a thread's place in the sidebar is a number, and ${key} is not one.`, "Send a finite number, or leave the key out.");
       if (marks.resumeAtReset !== undefined) await ctx.armResume(threadIds, marks.resumeAtReset, origin);
       const stamps = {
-        ...(marks.pinned !== undefined ? { pinnedAt: marks.pinned ? at : undefined } : {}),
+        ...(marks.pinned !== undefined ? { pinnedAt: typeof marks.pinned === "number" ? marks.pinned : marks.pinned ? at : undefined } : {}),
+        ...(marks.order !== undefined ? { order: marks.order ?? undefined } : {}),
         ...(marks.folded !== undefined ? { foldedAt: marks.folded ? at : undefined } : {}),
         ...(marks.snoozedUntil === undefined ? {} : marks.snoozedUntil === null ? { snoozedUntil: undefined } : { snoozedUntil: marks.snoozedUntil, readAt: at }),
         ...(marks.section !== undefined ? { section: marks.section ?? undefined } : {}),

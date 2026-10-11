@@ -443,9 +443,12 @@ export interface SidebarThreadSnapshot {
   /** The thread asks, is stopped behind a thread that asks, or holds a finish or a failure nobody has seen, as the
    * protocol's threadNeedsYou reads it: what the jump, the dock's count and the menu bar count. */
   readonly needsYou: boolean;
-  /** The person's marks, as the host keeps them: when they pinned it, when its snooze ends while it has not, and the
-   * section they dragged it into; null where it holds none. */
-  readonly pinnedAt: string | null;
+  /** The person's marks, as the host keeps them: the key Pinned sorts it by, which a pin stamps with its moment, the
+   * key the list sorts it by in place of its start, when its snooze ends while it has not, and the section they
+   * dragged it into; null where it holds none. Both keys stay epoch-ms numbers: a key between two neighbours carries
+   * a fraction that an ISO string would cut. */
+  readonly pinnedAt: number | null;
+  readonly order: number | null;
   readonly snoozedUntil: string | null;
   readonly section: ThreadPlacement | null;
   /** The agent's own subagents of every turn, in the order they started; empty where it ran none. A lead's tree draws

@@ -27,6 +27,9 @@ export const WORKSPACE_WORDS = {
 
 export const THREAD_WORDS = {
   stop: "Stop thread",
+  stopTree: "Stop this thread and every thread under it",
+  stopArmed: "Stop",
+  stopAgain: "Press again to stop",
   rename: "Rename thread",
   copyMarkdown: "Copy as Markdown",
   copyLink: "Copy thread link",
@@ -38,6 +41,11 @@ export const THREAD_WORDS = {
   pin: "Pin thread",
   unpin: "Unpin thread",
   snooze: "Snooze thread",
+  moveUp: "Move up",
+  moveDown: "Move down",
+  moveTop: "Move to top",
+  alreadyFirst: "Already first",
+  alreadyLast: "Already last",
   keep: "Keep this one",
   deleteCopies: "Delete copies",
   undoRewind: "Undo rewind",
@@ -191,7 +199,7 @@ export const CLIENT_CANNOT_RENAME = "This client cannot rename a thread";
 export const CLIENT_CANNOT_FORGET_THREAD = "This client cannot forget a thread";
 export const CLIENT_CANNOT_SETTLE = "This client cannot settle a thread";
 export const CLIENT_CANNOT_RESTORE = "This client cannot restore a thread";
-export const CLIENT_CANNOT_MARK = "This client cannot pin or snooze a thread";
+export const CLIENT_CANNOT_MARK = "This client cannot pin, snooze or move a thread";
 export const THREAD_TREE_WORKING = "A thread in it is still working";
 export const THREAD_STILL_RUNNING_HERE = "wsp is still running this thread. Stop it first, or wsp and the terminal both write to one conversation";
 export const NOTHING_READ_TO_SETTLE = "No read thread to settle";

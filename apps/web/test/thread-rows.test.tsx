@@ -29,6 +29,7 @@ import { ThreadRow, type ThreadRowItem } from "../src/components/threads/ThreadR
 import { useNotices } from "../src/notices/store.js";
 import { useStore } from "../src/protocol/store.js";
 import { TreeRows, type ChildNode } from "../src/tree/TreeRows.js";
+import { pointerLeave } from "./pointer.js";
 
 const NOW = new Date("2026-09-26T12:00:00Z");
 
@@ -55,7 +56,7 @@ const thread = (id: string, over: Partial<SidebarThreadSnapshot> = {}): SidebarT
   readAt: null,
   settledAt: null,
   needsYou: false,
-  pinnedAt: null,
+  pinnedAt: null, order: null,
   snoozedUntil: null,
   section: null,
   subagents: [],
@@ -195,6 +196,28 @@ describe("a lead's children as rows", () => {
     expect(rows()[0]!.querySelector("[data-child-acts]")!.parentElement!.className).toContain("md:min-w-13");
   });
 
+  it("a row's Stop is two presses: armed, the other acts give way to its word in the room they held, and a second press stops", async () => {
+    const interruptSession = vi.fn(async () => ({ outcome: "accepted" as const }));
+    useStore.setState({ api: { interruptSession } } as never);
+    render(tree([nodeOf(working("Cart total rounding"))]));
+    const row = rows()[0]!;
+    expect(row.hasAttribute("data-stop-row")).toBe(true);
+    fireEvent.pointerEnter(row);
+    const acts = row.querySelector<HTMLElement>("[data-child-acts]")!;
+    const room = acts.parentElement!.className;
+    const stop = (): HTMLElement => acts.querySelector<HTMLElement>("[data-stop-act]")!;
+    fireEvent.click(stop());
+    expect(interruptSession).not.toHaveBeenCalled();
+    expect([...acts.querySelectorAll("button")].map(b => b.getAttribute("aria-label"))).toEqual(["Press again to stop"]);
+    expect(stop().textContent).toBe("Stop");
+    expect(acts.parentElement!.className).toBe(room);
+    pointerLeave(row);
+    expect([...acts.querySelectorAll("button")].map(b => b.getAttribute("aria-label"))).toEqual(["Send a message", "Stop thread", "More"]);
+    fireEvent.click(stop());
+    fireEvent.click(stop());
+    await waitFor(() => expect(interruptSession).toHaveBeenCalledWith("sess_Cart total rounding"));
+  });
+
   it("mounts a row's acts as focus lands on its title, after the title, and at once where the title is no link", () => {
     useStore.setState({ api: { interruptSession: vi.fn() } } as never);
     render(tree([nodeOf(working("Cart total rounding"))]));
@@ -283,7 +306,8 @@ describe("a lead's children as rows", () => {
     // Its title is no link, so its act is the row's one tab stop and stands mounted at rest.
     expect(row.querySelector("a, [tabindex]")).toBeNull();
     expect([...row.querySelectorAll("[data-child-acts] button")].map(b => b.getAttribute("aria-label"))).toEqual(["Stop subagent"]);
-    expect(row.querySelector("[data-child-acts]")!.parentElement!.className).toContain("md:min-w-6");
+    // Stop alone keeps room for its armed word, so the title's width never moves when it arms.
+    expect(row.querySelector("[data-child-acts]")!.parentElement!.className).toContain("md:min-w-13");
   });
 
   it("redraws only the row whose thread moved, among twelve", () => {
