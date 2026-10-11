@@ -2,7 +2,7 @@
 import { randomBytes } from "node:crypto";
 import { hostname } from "node:os";
 import { OWNER_LABEL, goldenHead, isMissing, readGone, sightMachine, type Machine, type MachineBackend, isNoProvider, isPlaceAbsent } from "@wsp/engine";
-import { type AcrossAct, type PlaceKind, type ProjectView, type SessionView, type Caller, type WorkspacePhase, ThreadPlacement, ThreadScope, TurnStatus, WorkspaceOrigin, notTheLeadsChildRefusal, foldThreads, threadKeyOf, threadWord, scopeOf, goneWords, NO_IMAGE_YET, noWorkspaceRefusal, notFoundRefusal, goneUnconfirmedLine, type GoneSeenBy, copiesFolder, kindForComputer, RUN_GONE_LINE, HERE_PLACE_ID, workspaceLands, type ThreadFacts, threadSettled, refusal, LIMIT_RESUME_PROMPT, heldUntil, capRestartedLine, tableName, threadsFollowed } from "@wsp/protocol";
+import { type AcrossAct, type PlaceKind, type ProjectView, type SessionView, type Caller, type WorkspacePhase, ThreadPlacement, ThreadScope, TurnStatus, WorkspaceOrigin, notTheLeadsChildRefusal, foldThreads, threadKeyOf, threadWord, scopeOf, goneWords, NO_IMAGE_YET, noWorkspaceRefusal, notFoundRefusal, goneUnconfirmedLine, type GoneSeenBy, copiesFolder, kindForComputer, RUN_GONE_LINE, HERE_PLACE_ID, workspaceLands, type ThreadFacts, threadSettled, refusal, LIMIT_RESUME_PROMPT, heldUntil, capRestartedLine, tableName, threadsFollowed, LINK_RETRY_WINDOW_MS } from "@wsp/protocol";
 import { keyOf } from "../agent-setup.js";
 import { harnessCatalog } from "../harness-catalog.js";
 import { accountOnComputer } from "../usage.js";
@@ -292,7 +292,7 @@ export function bootArea(ctx: RuntimeContext): BootArea {
       await Promise.all(moved.map(id => store.delete(TRANSCRIPTS, id)));
       if (rows !== undefined) ctx.moveBlobs(rows);
       for (const id of await store.keys(WORKSPACES)) if (!transcriptIndex.has(id)) await ctx.loadIndex(id);
-      const left: { view: SessionView; turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin; turnLive?: TurnLive; run?: string; from?: number; asked?: TurnAsked; turnToken?: string; scopeDeviceId?: string; snapshot?: string }[] = [];
+      const left: { view: SessionView; turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin; turnLive?: TurnLive; run?: string; from?: number; asked?: TurnAsked; turnToken?: string; scopeDeviceId?: string; snapshot?: string; unanswered?: true }[] = [];
       /** Turns that ended while their card was still being read: the commit stayed on the row for this host to read. */
       const unread: { view: SessionView; turnId: string; snapshot?: string }[] = [];
       for (const raw of await store.list(SESSIONS)) {
@@ -403,21 +403,42 @@ export function bootArea(ctx: RuntimeContext): BootArea {
       // that a run is gone ends that turn, and a machine that answered nothing leaves its turn running. The ends are
       // told once every workspace's rows are in: the parent a settled turn tells may sit in a workspace read after
       // its own, and a re-opened turn's own end tells it later, when it ends.
-      const reopen = async (rows: readonly (typeof left)[number][]): Promise<void> => {
-        const answers = await Promise.all(rows.map(async s => ({ row: s, answer: await ctx.reattach(s) })));
+      const reopen = async (rows: readonly (typeof left)[number][], again = false): Promise<void> => {
+        // A stop meeting a re-open still out would race the run it reads: the mark stands only between rounds.
+        for (const row of rows) delete row.unanswered;
+        const answers = await Promise.all(rows.map(async s => ({ row: s, answer: await ctx.reattach(s, again) })));
         const cut = new Set<string>();
         for (const { row, answer } of answers) {
           if (answer === "cannot") ctx.settleCut(row, RESTARTED_REASON, endedAt => restartCutLine(endedAt - (row.view.startedAt ?? endedAt)));
           else if (answer === "gone") ctx.settleCut(row, RUN_GONE_LINE, () => RUN_GONE_LINE);
           if ((answer === "cannot" || answer === "gone") && row.view.threadId !== undefined) cut.add(row.view.threadId);
         }
-        for (const workspaceId of new Set(rows.map(s => s.view.workspaceId))) void ctx.persistSessions(workspaceId);
+        // A row still unanswered changed nothing, so a round that answered nothing writes nothing.
+        for (const workspaceId of new Set(answers.filter(a => a.answer !== "unreached").map(a => a.row.view.workspaceId))) void ctx.persistSessions(workspaceId);
+        const unanswered = answers.filter(a => a.answer === "unreached").map(a => a.row);
+        for (const row of unanswered) row.unanswered = true;
+        if (unanswered.length > 0) askAgain(unanswered);
         // The token of a turn cut here dies with it, as the boot's own pass below takes the tokens of turns not running.
         if (cut.size === 0) return;
         for (const device of await deviceDoor.list()) {
           const thread = device.scope?.threadId;
           if (thread !== undefined && cut.has(thread) && !ctx.threadRuns(thread)) await deviceDoor.revoke(device.id);
         }
+      };
+      /** A run its machine said nothing about is asked after again a link window on, for as long as its row runs here:
+       * nothing else reads its end, a stop cannot reach it, and the idle nap waits on that row. */
+      const askAgain = (rows: readonly (typeof left)[number][]): void => {
+        clock.schedule(
+          () => {
+            if (ctx.state.closing) return;
+            const still = rows.filter(s => sessions.get(s.view.id) === s && s.view.status === "running");
+            const ready = still.filter(s => live.get(s.view.workspaceId)?.record.phase === "running");
+            if (ready.length < still.length) askAgain(still.filter(s => !ready.includes(s)));
+            if (ready.length > 0) void reopen(ready, true).catch((e: unknown) => console.warn(`the turns left running were not asked after again: ${e instanceof Error ? e.message : String(e)}`));
+          },
+          LINK_RETRY_WINDOW_MS,
+          { unref: true },
+        );
       };
       // Each machine's turns are re-opened and then its runs swept in the background, and only what starts a run on
       // that machine waits for it, since a machine still restoring answers nothing for minutes. The sweep ends every
