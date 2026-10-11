@@ -202,7 +202,7 @@ export function childTarget<N>(node: LeadNode<N>, part: ChildPart, tree: Tree<N>
   const take = settleTake(node, tree);
   if ("subagent" in node) {
     const { subagent, of } = node;
-    return { title: subagent.title, sessionId: of.sessionId, harness: of.harness, task: subagent.id, part, running: subagent.state === "running", settles: [], working: take.working, replaces: null, replacedBy: null };
+    return { title: subagent.title, sessionId: of.sessionId, harness: of.harness, task: subagent.id, part, running: subagent.state === "running", settles: [], working: take.working, under: false, replaces: null, replacedBy: null };
   }
   const thread = node.thread;
   return {
@@ -214,6 +214,7 @@ export function childTarget<N>(node: LeadNode<N>, part: ChildPart, tree: Tree<N>
     running: thread?.status === "running",
     settles: take.threadIds,
     working: take.working,
+    under: kidsOf(node, tree).some(kid => !("subagent" in kid)),
     replaces: thread?.replaces?.threadId ?? null,
     replacedBy: thread?.replacedBy ?? null,
   };

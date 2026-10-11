@@ -29,6 +29,7 @@ import { addressed, firstRow, groupSessions, keptRows, keptThread, openThreadOf,
 import { CREATION_PREFIX, NO_SESSIONS } from "./selectors.js";
 import type { CostTick, Creation, CreationLine, Opens, State } from "./types.js";
 import { followProjectIcons } from "../../projects/images.js";
+import { heldFrom, landedHolds, markTaken, type HeldKeys } from "./heldKeys.js";
 
 /** Where a refused places list is drawn: while that page is on screen, the refusal says itself there. */
 const COMPUTERS_PAGE: SettingsAt = { kind: "group", group: "computers" };
@@ -119,6 +120,8 @@ const agentListsMoved = (a: Preferences, b: Preferences): boolean =>
  * travel one ordered socket and the host emits on every change, so the last event before a reply carries the state
  * that reply was computed from or newer. The day they travel separate channels this needs a stamp instead. */
 let initJobViews = 0;
+/** Counts the marks this window sent, so a hold knows which one set it. */
+let holdMarks = 0;
 
 /** How many of one place's build frames are kept: every stage of a build and the tail of its install steps. */
 export const GOLDEN_FRAMES_KEPT = 64;
@@ -416,6 +419,7 @@ export const useStore = create<State>((set, get) => {
     landed: null,
     sessions: {},
     launches: {},
+    heldKeys: {},
     ready: false,
     gaps: 0,
     preferences: bootPreferences(),
@@ -734,9 +738,27 @@ export const useStore = create<State>((set, get) => {
     async markThreads(threadIds, marks) {
       const api = get().api;
       if (!api?.markThreads || threadIds.length === 0) return;
+      const hold = heldFrom(marks);
+      const mark = ++holdMarks;
+      if (hold !== null) set(s => ({ heldKeys: { ...s.heldKeys, ...Object.fromEntries(threadIds.map(id => [id, { ...s.heldKeys[id], ...hold, mark }])) } }));
+      /** This mark's holds, each as `answer` turns it: kept, changed, or gone where it answers null. */
+      const answered = (answer: (at: HeldKeys, id: string) => HeldKeys | null): void =>
+        set(s => {
+          const next: Record<string, HeldKeys> = {};
+          for (const [id, at] of Object.entries(s.heldKeys)) {
+            const kept = at.mark === mark ? answer(at, id) : at;
+            if (kept !== null) next[id] = kept;
+          }
+          return { heldKeys: next };
+        });
       try {
         await api.markThreads(threadIds, marks);
+        if (hold === null) return;
+        const landed = landedHolds(get().sessions, get().heldKeys, false).filter(id => threadIds.includes(id));
+        if (landed.length > 0) answered((at, id) => (landed.includes(id) ? null : at));
+        markTaken(mark);
       } catch (e: unknown) {
+        if (hold !== null) answered(() => null);
         noticeFailure(e);
       }
     },
@@ -1163,6 +1185,12 @@ export const useStore = create<State>((set, get) => {
 useStore.subscribe((s, prev) => {
   if (s.selectedId === prev.selectedId && s.selectedThreadId === prev.selectedThreadId) return;
   if (s.selectedId !== null && s.workspaces.some(w => w.id === s.selectedId)) rememberOpen(s.selectedId, s.selectedThreadId);
+});
+// A held key goes once a row the host sent carries it, by a push or a reload alike.
+useStore.subscribe((s, prev) => {
+  if (s.sessions === prev.sessions || Object.keys(s.heldKeys).length === 0) return;
+  const landed = landedHolds(s.sessions, s.heldKeys, true);
+  if (landed.length > 0) useStore.setState(now => ({ heldKeys: Object.fromEntries(Object.entries(now.heldKeys).filter(([id]) => !landed.includes(id))) }));
 });
 // Every change to the record, the host's or a pick painted ahead of it, is what the next load paints first.
 useStore.subscribe((s, prev) => {

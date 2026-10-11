@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, createEvent, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { cloneElement, createContext, useContext, useState, type ReactElement, type ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_PREFERENCES, type Capabilities, type Checkout, type PlaceView, type ProjectView, type PullRequestFact, type PullRequestSeen, type WorkspaceLanding, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
@@ -16,6 +16,7 @@ import { WorkspaceSidebar } from "./WorkspaceSidebar.js";
 import { askCheckout } from "./tileCheckout.js";
 import { PROJECT_WORDS } from "./words.js";
 import { EDITOR_SSH_WORDS } from "../files/EditorConsent.js";
+import { pointerLeave } from "../../test/pointer.js";
 
 // The triggers keep their elements and a popup mounts on a plain hover, with no positioning: Base UI's against
 // jsdom's zero-size rects costs seconds per open. A tile's card is read this way.
@@ -140,7 +141,7 @@ const ago = (ms: number): string => new Date(Date.now() - ms).toISOString();
 /** Sessions for the store, one per thread, keyed by workspace, every time read off one clock reading so two rows
  * given the same age share it exactly. A turn that ended was shown as it ended unless `readAgo` says the last
  * showing was earlier. */
-const sessions = (rows: Array<{ ws: string; id: string; prompt: string; parent?: string; status?: string; startedAgo?: number; endedAgo?: number; readAgo?: number; settledAgo?: number; asking?: string; pinnedAgo?: number; snoozed?: boolean; section?: { name: string; whileState: string }; foldedAgo?: number; subagents?: unknown[]; replaces?: string; replacedBy?: string }>) => {
+const sessions = (rows: Array<{ ws: string; id: string; prompt: string; parent?: string; status?: string; startedAgo?: number; endedAgo?: number; readAgo?: number; settledAgo?: number; asking?: string; pinnedAgo?: number; orderAt?: number; attempt?: string; snoozed?: boolean; section?: { name: string; whileState: string }; foldedAgo?: number; subagents?: unknown[]; replaces?: string; replacedBy?: string }>) => {
   const now = Date.now();
   const before = (ms: number): string => new Date(now - ms).toISOString();
   const by: Record<string, unknown[]> = {};
@@ -159,6 +160,8 @@ const sessions = (rows: Array<{ ws: string; id: string; prompt: string; parent?:
       ...(r.settledAgo === undefined ? {} : { settledAt: before(r.settledAgo) }),
       ...(r.asking === undefined ? {} : { asking: r.asking }),
       ...(r.pinnedAgo === undefined ? {} : { pinnedAt: now - r.pinnedAgo }),
+      ...(r.orderAt === undefined ? {} : { order: r.orderAt }),
+      ...(r.attempt === undefined ? {} : { attempt: r.attempt }),
       ...(r.snoozed === true ? { snoozedUntil: now + HOUR } : {}),
       ...(r.section === undefined ? {} : { section: r.section }),
       ...(r.foldedAgo === undefined ? {} : { foldedAt: now - r.foldedAgo }),
@@ -173,7 +176,7 @@ const sessions = (rows: Array<{ ws: string; id: string; prompt: string; parent?:
 afterEach(() => {
   cleanup();
   window.localStorage.clear();
-  useStore.setState({ api: null, projects: [], workspaces: [], landings: {} } as never);
+  useStore.setState({ api: null, projects: [], workspaces: [], landings: {}, heldKeys: {} } as never);
 });
 
 describe("the sidebar's list of thread tiles", () => {
@@ -857,7 +860,7 @@ describe("the sidebar's list of thread tiles", () => {
   });
 
   describe("the sections, the marks and the drag", () => {
-    const heads = (): string[] => [...document.querySelectorAll<HTMLElement>("[data-section-head]")].map(head => head.dataset["sectionHead"] ?? "");
+    const heads = (): string[] => [...document.querySelectorAll<HTMLElement>("[data-section-head]")].filter(head => head.closest("[data-drop-only]") === null).map(head => head.dataset["sectionHead"] ?? "");
     /** `onto` as a function is found once the drag has started, for a place that stands only while a tile is dragged. */
     const drag = (tile: HTMLElement, onto: HTMLElement | (() => HTMLElement)): void => {
       const data = new Map<string, string>();
@@ -1003,7 +1006,7 @@ describe("the sidebar's list of thread tiles", () => {
       const calls = markThreads.mock.calls.length;
       drag(rowOf("finished unseen"), section("threads"));
       expect(markThreads.mock.calls).toHaveLength(calls);
-      drag(rowOf("read already"), () => document.querySelector<HTMLElement>("[data-row-id=settled]")!);
+      drag(rowOf("read already"), () => document.querySelector<HTMLElement>("[data-drop-settled]")!);
       await waitFor(() => expect(settleThreads).toHaveBeenCalledWith(["th_idle"]));
     });
 
@@ -1014,25 +1017,321 @@ describe("the sidebar's list of thread tiles", () => {
       );
       await waitFor(() => expect(screen.getByText("its builder")).toBeDefined());
       clearNotices();
-      drag(rowOf("read already"), () => document.querySelector<HTMLElement>("[data-row-id=settled]")!);
+      drag(rowOf("read already"), () => document.querySelector<HTMLElement>("[data-drop-settled]")!);
       await waitFor(() => expect(lastNotice()).toBe(THREAD_TREE_WORKING));
       expect(settleThreads).not.toHaveBeenCalled();
     });
+  });
 
-    it("while a tile is dragged every section stands as a place to drop it, even one holding nothing", async () => {
+  describe("moving a tree by drag, by the menu and by the keys", () => {
+    const frame = () => act(() => new Promise<void>(resolve => requestAnimationFrame(() => resolve())));
+    const transfer = () => ({ setData: () => {}, getData: () => "", types: ["text/plain"], effectAllowed: "move", dropEffect: "move" });
+    /** A drag event with the pointer at `y`, which jsdom's events do not carry. */
+    const dragAt = (type: "dragOver" | "drop", el: Element, y = 0): void => {
+      const event = createEvent[type](el, { dataTransfer: transfer() });
+      Object.defineProperty(event, "clientY", { value: y });
+      fireEvent(el, event);
+    };
+    const itemOf = (title: string): HTMLElement => rowOf(title).closest("li")!;
+    const box = (el: Element, top: number, height: number): void => {
+      el.getBoundingClientRect = () => ({ top, bottom: top + height, height, left: 0, right: 240, width: 240, x: 0, y: top, toJSON: () => ({}) }) as DOMRect;
+    };
+    const dragging = (): boolean => document.querySelector("[data-tree-dragging]") !== null;
+    const head = (id: string): HTMLElement => document.querySelector<HTMLElement>(`[data-section-head=${id}]`)!;
+    const line = (): HTMLElement => document.querySelector<HTMLElement>("[data-drop-line]")!;
+    const startedMs = (id: string): number => Date.parse((Object.values(useStore.getState().sessions).flat().find(row => row.threadId === id)!.startedAt as unknown as string));
+    const three = [
+      { ws: "ws_a", id: "th_a", prompt: "first tree", startedAgo: 60_000 },
+      { ws: "ws_a", id: "th_b", prompt: "second tree", startedAgo: 2 * 60_000 },
+      { ws: "ws_a", id: "th_c", prompt: "third tree", startedAgo: 3 * 60_000 },
+    ];
+    /** The list's three trees one tile tall each, in a list whose top is at 0. */
+    const laidOut = (): void => {
+      box(document.querySelector("[data-sidebar-tree]")!, 0, 400);
+      ["first tree", "second tree", "third tree"].forEach((title, i) => {
+        box(itemOf(title), i * 52, 52);
+        box(itemOf(title).firstElementChild!, i * 52, 52);
+      });
+    };
+
+    it("starts a drag with nothing in the layout moved, then shows the empty heads and folds the tree a frame later; a drop on Pinned pins it", async () => {
+      const { markThreads } = mount({ projects: [project("pr_1", "spoo")], workspaces: [workspace("ws_a", "pricing page", "pr_1")] });
+      await act(async () => useStore.setState({ sessions: sessions([{ ws: "ws_a", id: "th_lead", prompt: "the lead", startedAgo: 5 * 60_000 }, { ws: "ws_a", id: "th_kid", prompt: "its builder", parent: "th_lead", startedAgo: 4 * 60_000 }, { ws: "ws_a", id: "th_other", prompt: "another one", startedAgo: 6 * 60_000 }]) } as never));
+      await waitFor(() => expect(screen.getByText("its builder")).toBeDefined());
+      // Nothing pinned and nothing waits: the heads are drawn with no box, so the keys and a screen reader pass them.
+      for (const bare of [document.querySelector("[data-section=pinned]")!, document.querySelector("[data-section=needs-you]")!, document.querySelector("[data-drop-settled]")!]) {
+        expect(bare.hasAttribute("data-drop-only")).toBe(true);
+        expect(bare.className.split(" ")).toEqual(expect.arrayContaining(["hidden", "data-[drop-shown]:block"]));
+      }
+      // The list starts where it did before any drag: its gap stands only while the bare heads above it show.
+      const list = document.querySelector<HTMLElement>("[data-section=threads]")!;
+      expect(list.className.split(" ")).not.toContain("mt-3");
+      expect(list.className.split(" ")).toContain("data-[drop-shown]:mt-3");
+      expect(list.hasAttribute("data-drop-gap")).toBe(true);
+      rowOf("the lead").focus();
+      fireEvent.keyDown(rowOf("the lead"), { key: "ArrowUp" });
+      expect(document.activeElement).toBe(rowOf("the lead"));
+      fireEvent.keyDown(rowOf("the lead"), { key: "End" });
+      expect(document.activeElement).toBe(rowOf("another one"));
+      const tree = document.querySelector("[data-sidebar-tree]")!;
+      const before = tree.outerHTML;
+      fireEvent.dragStart(rowOf("the lead"), { dataTransfer: transfer() });
+      expect(tree.outerHTML).toBe(before);
+      expect(dragging()).toBe(false);
+      await frame();
+      expect(dragging()).toBe(true);
+      // The frame shows the bare heads and the list's gap by attributes on them alone, never on an ancestor.
+      for (const shown of [document.querySelector("[data-section=pinned]")!, document.querySelector("[data-section=needs-you]")!, document.querySelector("[data-drop-settled]")!, list]) expect(shown.hasAttribute("data-drop-shown")).toBe(true);
+      const lead = itemOf("the lead");
+      expect(lead.hasAttribute("data-drag-source")).toBe(true);
+      expect(lead.className.split(" ")).toEqual(expect.arrayContaining(["data-[drag-source]:[&>:first-child]:opacity-50", "data-[drag-source]:[&>ul]:hidden"]));
+      // Folded by the CSS alone: the tree stays mounted under the tile.
+      expect(lead.querySelector(":scope > ul")!.textContent).toContain("its builder");
+      dragAt("dragOver", head("pinned"));
+      expect(document.querySelector("[data-section=pinned]")!.hasAttribute("data-drop-over")).toBe(true);
+      dragAt("drop", head("pinned"));
+      fireEvent.dragEnd(rowOf("the lead"));
+      await waitFor(() => expect(markThreads).toHaveBeenCalledWith(["th_lead"], { pinned: true }));
+      expect(dragging()).toBe(false);
+      expect(lead.hasAttribute("data-drag-source")).toBe(false);
+      expect(document.querySelector("[data-drop-over]")).toBeNull();
+      expect(document.querySelector("[data-drop-shown]")).toBeNull();
+      expect(markThreads.mock.calls.some(([, marks]) => "folded" in (marks as object))).toBe(false);
+    });
+
+    it("puts everything back on an Escape, writes nothing, and leaves a tree folded on the host folded", async () => {
+      const { markThreads } = mount({ projects: [project("pr_1", "spoo")], workspaces: [workspace("ws_a", "pricing page", "pr_1")] });
+      await act(async () => useStore.setState({ sessions: sessions([{ ws: "ws_a", id: "th_lead", prompt: "the lead", startedAgo: 5 * 60_000, foldedAgo: 60_000 }, { ws: "ws_a", id: "th_kid", prompt: "its builder", parent: "th_lead", startedAgo: 4 * 60_000 }]) } as never));
+      await waitFor(() => expect(rowOf("the lead").getAttribute("aria-expanded")).toBe("false"));
+      fireEvent.dragStart(rowOf("the lead"), { dataTransfer: transfer() });
+      await frame();
+      dragAt("dragOver", head("pinned"));
+      // The browser ends a drag Escape cancelled with a dragend and no drop.
+      fireEvent.dragEnd(rowOf("the lead"));
+      expect(dragging()).toBe(false);
+      expect(itemOf("the lead").hasAttribute("data-drag-source")).toBe(false);
+      expect(document.querySelector("[data-drop-over]")).toBeNull();
+      expect(rowOf("the lead").getAttribute("aria-expanded")).toBe("false");
+      expect(markThreads).not.toHaveBeenCalled();
+    });
+
+    it("scrolls the list by what the heads add over the tile, so the tile stays under the pointer", async () => {
       mount({ projects: [project("pr_1", "spoo")], workspaces: [workspace("ws_a", "pricing page", "pr_1")] });
-      await act(async () => useStore.setState({ sessions: sessions([all[1]!]) } as never));
-      const places = (): string[] => [...document.querySelectorAll<HTMLElement>("[data-section]")].map(section => section.dataset["section"] ?? "");
-      await waitFor(() => expect(places()).toEqual(["threads"]));
-      expect(heads()).toEqual([]);
-      expect(document.querySelector("[data-row-id=settled]")).toBeNull();
-      fireEvent.dragStart(rowOf("still going"), { dataTransfer: { setData: () => {}, effectAllowed: "move" } });
-      expect(places()).toEqual(["pinned", "needs-you", "threads"]);
-      expect(heads()).toEqual(["pinned", "needs-you"]);
-      expect(document.querySelector("[data-row-id=settled]")).not.toBeNull();
-      fireEvent.dragEnd(rowOf("still going"));
-      expect(places()).toEqual(["threads"]);
-      expect(document.querySelector("[data-row-id=settled]")).toBeNull();
+      await act(async () => useStore.setState({ sessions: sessions(three) } as never));
+      await waitFor(() => expect(screen.getByText("third tree")).toBeDefined());
+      const viewport = document.querySelector<HTMLElement>("[data-slot=scroll-area-viewport]")!;
+      let scrolled = 0;
+      Object.defineProperty(viewport, "scrollTop", { get: () => scrolled, set: (to: number) => void (scrolled = to), configurable: true });
+      const tile = itemOf("third tree").firstElementChild!;
+      tile.getBoundingClientRect = () => ({ top: dragging() ? 184 : 104, height: 52 }) as DOMRect;
+      fireEvent.dragStart(rowOf("third tree"), { dataTransfer: transfer() });
+      expect(scrolled).toBe(0);
+      await frame();
+      expect(scrolled).toBe(80);
+      fireEvent.dragEnd(rowOf("third tree"));
+    });
+
+    it("draws one 2 px line in the ring's blue before a tree over the top half of its head and after it anywhere else; a head takes the fill and no line", async () => {
+      mount({ projects: [project("pr_1", "spoo")], workspaces: [workspace("ws_a", "pricing page", "pr_1")] });
+      await act(async () => useStore.setState({ sessions: sessions([...three, { ws: "ws_a", id: "th_asks", prompt: "wants an answer", startedAgo: 30_000, asking: "Permission for Bash: ls" }]) } as never));
+      await waitFor(() => expect(screen.getByText("third tree")).toBeDefined());
+      laidOut();
+      expect(document.querySelectorAll("[data-drop-line]")).toHaveLength(1);
+      expect(line().className.split(" ")).toEqual(expect.arrayContaining(["h-0.5", "bg-ring", "absolute", "pointer-events-none"]));
+      expect(line().hidden).toBe(true);
+      fireEvent.dragStart(rowOf("first tree"), { dataTransfer: transfer() });
+      await frame();
+      // Over the bottom half of the second tree's head: after it, on the edge with the third.
+      dragAt("dragOver", rowOf("second tree"), 90);
+      expect(line().hidden).toBe(false);
+      expect(line().style.top).toBe("103px");
+      // Over the top half of the third tree's head: before it, the same edge.
+      dragAt("dragOver", rowOf("third tree"), 110);
+      expect(line().style.top).toBe("103px");
+      dragAt("dragOver", rowOf("third tree"), 140);
+      expect(line().style.top).toBe("155px");
+      // The edges either side of the dragged tree are where it already stands: no line.
+      dragAt("dragOver", rowOf("second tree"), 60);
+      expect(line().hidden).toBe(true);
+      dragAt("dragOver", head("pinned"));
+      expect(line().hidden).toBe(true);
+      expect(document.querySelector("[data-section=pinned]")!.hasAttribute("data-drop-over")).toBe(true);
+      dragAt("dragOver", rowOf("wants an answer"));
+      expect(line().hidden).toBe(true);
+      expect(document.querySelector("[data-section=needs-you]")!.hasAttribute("data-drop-over")).toBe(true);
+      expect(document.querySelector("[data-section=pinned]")!.hasAttribute("data-drop-over")).toBe(false);
+      fireEvent.dragEnd(rowOf("first tree"));
+      expect(line().hidden).toBe(true);
+    });
+
+    it("writes the neighbours' midpoint for a drop between two trees, a pin key into Pinned and the pin off with an order out of it, one mark each", async () => {
+      const { markThreads } = mount({ projects: [project("pr_1", "spoo")], workspaces: [workspace("ws_a", "pricing page", "pr_1")] });
+      await act(async () => useStore.setState({ sessions: sessions([...three, { ws: "ws_a", id: "th_p1", prompt: "pinned one", startedAgo: 9 * 60_000, pinnedAgo: 60_000 }, { ws: "ws_a", id: "th_p2", prompt: "pinned two", startedAgo: 9 * 60_000, pinnedAgo: 2 * 60_000 }]) } as never));
+      await waitFor(() => expect(screen.getByText("third tree")).toBeDefined());
+      laidOut();
+      fireEvent.dragStart(rowOf("third tree"), { dataTransfer: transfer() });
+      await frame();
+      dragAt("dragOver", rowOf("second tree"), 60);
+      dragAt("drop", rowOf("second tree"), 60);
+      fireEvent.dragEnd(rowOf("third tree"));
+      expect(markThreads).toHaveBeenCalledTimes(1);
+      expect(markThreads).toHaveBeenLastCalledWith(["th_c"], { order: (startedMs("th_a") + startedMs("th_b")) / 2 });
+      const pins = (id: string): number => Object.values(useStore.getState().sessions).flat().find(row => row.threadId === id)!.pinnedAt!;
+      box(itemOf("pinned one"), 0, 52);
+      box(itemOf("pinned one").firstElementChild!, 0, 52);
+      box(itemOf("pinned two"), 52, 52);
+      box(itemOf("pinned two").firstElementChild!, 52, 52);
+      fireEvent.dragStart(rowOf("first tree"), { dataTransfer: transfer() });
+      await frame();
+      dragAt("drop", rowOf("pinned two"), 60);
+      fireEvent.dragEnd(rowOf("first tree"));
+      expect(markThreads).toHaveBeenLastCalledWith(["th_a"], { pinned: (pins("th_p1") + pins("th_p2")) / 2 });
+      laidOut();
+      fireEvent.dragStart(rowOf("pinned one"), { dataTransfer: transfer() });
+      await frame();
+      dragAt("drop", rowOf("second tree"), 90);
+      fireEvent.dragEnd(rowOf("pinned one"));
+      expect(markThreads).toHaveBeenLastCalledWith(["th_p1"], { pinned: false, order: expect.any(Number) });
+      expect(markThreads).toHaveBeenCalledTimes(3);
+    });
+
+    it("lands a drop at once, keeps it until the host's rows carry it, and puts the tree back with the host's reason when it refuses", async () => {
+      let refuse: (e: Error) => void = () => {};
+      const markThreads = vi.fn(() => new Promise<void>((_resolve, reject) => void (refuse = reject)));
+      mount({ projects: [project("pr_1", "spoo")], workspaces: [workspace("ws_a", "pricing page", "pr_1")] }, { markThreads });
+      await act(async () => useStore.setState({ sessions: sessions(three) } as never));
+      await waitFor(() => expect(screen.getByText("third tree")).toBeDefined());
+      expect(rowIds()).toEqual(["thread:th_a", "thread:th_b", "thread:th_c"]);
+      laidOut();
+      fireEvent.dragStart(rowOf("third tree"), { dataTransfer: transfer() });
+      await frame();
+      act(() => dragAt("drop", rowOf("second tree"), 60));
+      fireEvent.dragEnd(rowOf("third tree"));
+      expect(rowIds()).toEqual(["thread:th_a", "thread:th_c", "thread:th_b"]);
+      // A reload that lands before the host's write still reads the old key; the hold stands over it.
+      await act(async () => useStore.setState({ sessions: sessions(three) } as never));
+      expect(rowIds()).toEqual(["thread:th_a", "thread:th_c", "thread:th_b"]);
+      clearNotices();
+      await act(async () => refuse(new Error("the host is read only")));
+      await waitFor(() => expect(rowIds()).toEqual(["thread:th_a", "thread:th_b", "thread:th_c"]));
+      expect(lastNotice()).toContain("the host is read only");
+    });
+
+    it("draws the order the host keeps the same in a second window, and lets the hold go once the host's rows carry the key", async () => {
+      mount({ projects: [project("pr_1", "spoo")], workspaces: [workspace("ws_a", "pricing page", "pr_1")] });
+      await act(async () => useStore.setState({ sessions: sessions(three) } as never));
+      await waitFor(() => expect(screen.getByText("third tree")).toBeDefined());
+      laidOut();
+      fireEvent.dragStart(rowOf("third tree"), { dataTransfer: transfer() });
+      await frame();
+      act(() => dragAt("drop", rowOf("second tree"), 60));
+      fireEvent.dragEnd(rowOf("third tree"));
+      const key = (startedMs("th_a") + startedMs("th_b")) / 2;
+      await act(async () => {});
+      const carried = three.map(row => (row.id === "th_c" ? { ...row, orderAt: key } : row));
+      await act(async () => useStore.setState({ sessions: sessions(carried) } as never));
+      expect(useStore.getState().heldKeys).toEqual({});
+      expect(rowIds()).toEqual(["thread:th_a", "thread:th_c", "thread:th_b"]);
+      cleanup();
+      mount({ projects: [project("pr_1", "spoo")], workspaces: [workspace("ws_a", "pricing page", "pr_1")] });
+      await act(async () => useStore.setState({ sessions: sessions(carried) } as never));
+      await waitFor(() => expect(rowIds()).toEqual(["thread:th_a", "thread:th_c", "thread:th_b"]));
+    });
+
+    it("drags a group sent to several models by its head under one key, and never a thread under a lead, a settled tile, a snoozed tree, a workspace tile or a tile being made", async () => {
+      const { markThreads } = mount({ projects: [project("pr_1", "spoo")], workspaces: [workspace("ws_a", "pricing page", "pr_1"), workspace("ws_b", "other copy", "pr_1"), workspace("ws_e", "empty copy", "pr_1")] });
+      await act(async () =>
+        useStore.setState({
+          creations: [{ key: "creating:1", name: "beta", askedAt: Date.now(), project: "pr_1", workspaceId: null, lines: [], failed: null }],
+          sessions: sessions([
+            ...three,
+            { ws: "ws_a", id: "th_g1", prompt: "the task", startedAgo: 30_000, attempt: "att" },
+            { ws: "ws_b", id: "th_g2", prompt: "the task", startedAgo: 29_000, attempt: "att" },
+            { ws: "ws_a", id: "th_kid", prompt: "a builder", parent: "th_a", startedAgo: 50_000 },
+            { ws: "ws_a", id: "th_away", prompt: "snoozed but busy", startedAgo: 40 * 60_000, snoozed: true },
+            { ws: "ws_a", id: "th_old", prompt: "settled one", status: "completed", startedAgo: 30 * HOUR, endedAgo: 29 * HOUR, settledAgo: HOUR },
+          ]),
+        } as never),
+      );
+      await waitFor(() => expect(screen.getByText("a builder")).toBeDefined());
+      fireEvent.click(document.querySelector<HTMLElement>("[data-row-id=settled]")!);
+      await waitFor(() => expect(screen.getByText("settled one")).toBeDefined());
+      const draggable = [...document.querySelectorAll<HTMLElement>('[draggable="true"]')].map(el => el.dataset["rowId"] ?? (el.hasAttribute("data-attempt-head") ? "group" : "?"));
+      expect(draggable.sort()).toEqual(["group", "thread:th_a", "thread:th_b", "thread:th_c"]);
+      box(document.querySelector("[data-sidebar-tree]")!, 0, 600);
+      const group = document.querySelector<HTMLElement>("[data-attempt-head]")!;
+      box(itemOf("first tree"), 100, 52);
+      box(itemOf("first tree").firstElementChild!, 100, 52);
+      fireEvent.dragStart(group, { dataTransfer: transfer() });
+      await frame();
+      dragAt("drop", rowOf("first tree"), 140);
+      fireEvent.dragEnd(group);
+      expect(markThreads).toHaveBeenCalledTimes(1);
+      const [ids, marks] = markThreads.mock.calls[0]!;
+      expect([...ids].sort()).toEqual(["th_g1", "th_g2"]);
+      expect(marks).toEqual({ order: (startedMs("th_a") + startedMs("th_b")) / 2 });
+    });
+
+    it("moves a tree up, down and to the top from its menu after Pin and Snooze, held at either end, and says where it went", async () => {
+      const { markThreads } = mount({ projects: [project("pr_1", "spoo")], workspaces: [workspace("ws_a", "pricing page", "pr_1")] });
+      await act(async () => useStore.setState({ sessions: sessions(three) } as never));
+      await waitFor(() => expect(screen.getByText("third tree")).toBeDefined());
+      type Offered = { id: string; group?: string; enabled?: boolean; refusal?: string; shortcut?: string; accelerator?: string };
+      const offered: Offered[][] = [];
+      const choose = (id: string) => (window.wsp = { contextMenu: async (items: Offered[]) => (offered.push(items), id) } as never);
+      try {
+        choose("");
+        fireEvent.contextMenu(rowOf("first tree"));
+        await waitFor(() => expect(offered).toHaveLength(1));
+        const place = offered[0]!.filter(item => item.group === "place");
+        expect(place.map(item => item.id)).toEqual(["pin", "snooze", "move-up", "move-down", "move-top"]);
+        expect(place.find(item => item.id === "move-up")).toMatchObject({ enabled: false, refusal: "Already first" });
+        expect(place.find(item => item.id === "move-top")).toMatchObject({ enabled: false, refusal: "Already first" });
+        expect(place.find(item => item.id === "move-down")).toMatchObject({ enabled: true });
+        // The keys a focused tile moves by are named on their rows, as Settle names its chord.
+        expect(place.map(item => [item.id, item.shortcut ?? null, item.accelerator ?? null])).toEqual([
+          ["pin", null, null],
+          ["snooze", null, null],
+          ["move-up", "Alt+Shift+Up", "Alt+Shift+Up"],
+          ["move-down", "Alt+Shift+Down", "Alt+Shift+Down"],
+          ["move-top", null, null],
+        ]);
+        choose("");
+        fireEvent.contextMenu(rowOf("third tree"));
+        await waitFor(() => expect(offered).toHaveLength(2));
+        expect(offered[1]!.find(item => item.id === "move-down")).toMatchObject({ enabled: false, refusal: "Already last" });
+        choose("move-top");
+        fireEvent.contextMenu(rowOf("third tree"));
+        await waitFor(() => expect(markThreads).toHaveBeenCalledWith(["th_c"], { order: startedMs("th_a") + 1 }));
+        expect(document.querySelector("[data-move-said]")!.getAttribute("aria-live")).toBe("polite");
+        expect(document.querySelector("[data-move-said]")!.textContent).toBe("Moved third tree to 1 of 3");
+        choose("move-down");
+        fireEvent.contextMenu(rowOf("first tree"));
+        // The third tree now stands first, so the first tree moves from second to third.
+        await waitFor(() => expect(document.querySelector("[data-move-said]")!.textContent).toBe("Moved first tree to 3 of 3"));
+      } finally {
+        delete (window as { wsp?: unknown }).wsp;
+      }
+    });
+
+    it("moves a focused root one place with Alt+Shift and an arrow, keeps the focus on it, and says the move in Pinned", async () => {
+      const { markThreads } = mount({ projects: [project("pr_1", "spoo")], workspaces: [workspace("ws_a", "pricing page", "pr_1")] });
+      await act(async () => useStore.setState({ sessions: sessions([...three, { ws: "ws_a", id: "th_p1", prompt: "pinned one", startedAgo: 9 * 60_000, pinnedAgo: 60_000 }, { ws: "ws_a", id: "th_p2", prompt: "pinned two", startedAgo: 9 * 60_000, pinnedAgo: 2 * 60_000 }]) } as never));
+      await waitFor(() => expect(screen.getByText("third tree")).toBeDefined());
+      rowOf("first tree").focus();
+      act(() => void fireEvent.keyDown(rowOf("first tree"), { key: "ArrowDown", altKey: true, shiftKey: true }));
+      expect(markThreads).toHaveBeenLastCalledWith(["th_a"], { order: (startedMs("th_b") + startedMs("th_c")) / 2 });
+      await waitFor(() => expect(rowIds().filter(id => !id.includes("th_p"))).toEqual(["thread:th_b", "thread:th_a", "thread:th_c"]));
+      expect(document.activeElement).toBe(rowOf("first tree"));
+      expect(document.querySelector("[data-move-said]")!.textContent).toBe("Moved first tree to 2 of 3");
+      rowOf("pinned two").focus();
+      act(() => void fireEvent.keyDown(rowOf("pinned two"), { key: "ArrowUp", altKey: true, shiftKey: true }));
+      await waitFor(() => expect(document.querySelector("[data-move-said]")!.textContent).toBe("Moved pinned two to 1 of 2 in Pinned"));
+      expect(document.activeElement).toBe(rowOf("pinned two"));
+      // At the top of its section the key moves nothing, and the plain arrows still walk.
+      const calls = markThreads.mock.calls.length;
+      act(() => void fireEvent.keyDown(rowOf("pinned two"), { key: "ArrowUp", altKey: true, shiftKey: true }));
+      expect(markThreads.mock.calls).toHaveLength(calls);
     });
   });
 
@@ -1307,7 +1606,7 @@ describe("a lead's tree in the sidebar", () => {
     expect(row.className).toContain("h-9");
     expect(row.querySelector("svg.lucide-bot")).not.toBeNull();
     expect(row.querySelector("[data-thread-status=working]")).not.toBeNull();
-    expect(row.parentElement!.querySelector(":scope > [data-subagent-stop]")).not.toBeNull();
+    expect(row.parentElement!.querySelector(":scope > [data-stop-act]")).not.toBeNull();
     expect(await menuOf(row)).toEqual(["stop-subagent"]);
     expect(screen.queryByText("Check the gate")).toBeNull();
     expect(document.querySelector("[data-child-fold=finished]")!.textContent).toBe("Finished1");
@@ -1415,5 +1714,63 @@ describe("a lead's tree in the sidebar", () => {
     await waitFor(() => expect(document.querySelector("[data-child-fold=more]")).toBeNull());
     fireEvent.click(fold());
     await waitFor(() => expect(more().textContent).toBe("25 more"));
+  });
+});
+
+describe("Stop on a tile", () => {
+  const stopOf = (title: string): HTMLElement | null => rowOf(title).parentElement!.querySelector<HTMLElement>(":scope > [data-stop-act]");
+  const settleOf = (title: string): HTMLElement | null => rowOf(title).parentElement!.querySelector<HTMLElement>(":scope > [data-tile-settle]");
+
+  it("offers Stop on a lead whose own turn ended while its builders run, saying the whole tree stops, Settle on a quiet tree, and one or the other only", async () => {
+    const interruptSession = vi.fn(async () => ({ outcome: "not-running" as const }));
+    mount({ projects: [project("pr_1", "spoo")], workspaces: [workspace("ws_a", "pricing page", "pr_1")] }, { interruptSession });
+    await act(async () =>
+      useStore.setState({
+        sessions: sessions([
+          { ws: "ws_a", id: "th_lead", prompt: "the lead", status: "completed", startedAgo: 20 * 60_000, endedAgo: 10 * 60_000 },
+          { ws: "ws_a", id: "th_kid", prompt: "its builder", parent: "th_lead", startedAgo: 9 * 60_000 },
+          { ws: "ws_a", id: "th_quiet", prompt: "a quiet one", status: "completed", startedAgo: 30 * 60_000, endedAgo: 29 * 60_000 },
+          { ws: "ws_a", id: "th_lone", prompt: "a lone one", startedAgo: 5 * 60_000 },
+        ]),
+      } as never),
+    );
+    await waitFor(() => expect(screen.getByText("its builder")).toBeDefined());
+    expect(stopOf("the lead")!.getAttribute("aria-label")).toBe("Stop this thread and every thread under it");
+    expect(settleOf("the lead")).toBeNull();
+    expect(stopOf("its builder")!.getAttribute("aria-label")).toBe("Stop thread");
+    expect(stopOf("a lone one")!.getAttribute("aria-label")).toBe("Stop thread");
+    expect(stopOf("a quiet one")).toBeNull();
+    expect(settleOf("a quiet one")).not.toBeNull();
+    fireEvent.click(stopOf("the lead")!);
+    expect(interruptSession).not.toHaveBeenCalled();
+    fireEvent.click(stopOf("the lead")!);
+    await waitFor(() => expect(interruptSession).toHaveBeenCalledWith("s_th_lead"));
+    // The menu's Stop thread is one press: opening the menu is the first.
+    const offered: Array<Array<{ id: string; enabled?: boolean }>> = [];
+    window.wsp = { contextMenu: async (items: Array<{ id: string; enabled?: boolean }>) => (offered.push(items), "stop") } as never;
+    try {
+      fireEvent.contextMenu(rowOf("the lead"));
+      await waitFor(() => expect(interruptSession).toHaveBeenCalledTimes(2));
+      expect(offered[0]!.find(item => item.id === "stop")).toMatchObject({ enabled: true });
+    } finally {
+      delete (window as { wsp?: unknown }).wsp;
+    }
+  });
+
+  it("a subagent row's Stop takes the same two presses", async () => {
+    const interruptSession = vi.fn(async () => ({ outcome: "accepted" as const }));
+    mount({ projects: [project("pr_1", "spoo")], workspaces: [workspace("ws_a", "pricing page", "pr_1")] }, { interruptSession });
+    await act(async () => useStore.setState({ sessions: sessions([{ ws: "ws_a", id: "th_lead", prompt: "the lead", startedAgo: 60_000, subagents: [{ id: "task_1", title: "Read the tickets", state: "running", startedAt: Date.now() - 30_000 }] }]) } as never));
+    const row = await waitFor(() => document.querySelector<HTMLElement>('[data-subagent-row="task_1"]')!);
+    const stop = row.parentElement!.querySelector<HTMLElement>(":scope > [data-stop-act]")!;
+    expect(stop.getAttribute("aria-label")).toBe("Stop subagent");
+    fireEvent.click(stop);
+    expect(interruptSession).not.toHaveBeenCalled();
+    expect(stop.textContent).toBe("Stop");
+    pointerLeave(row.parentElement!);
+    expect(stop.hasAttribute("data-armed")).toBe(false);
+    fireEvent.click(stop);
+    fireEvent.click(stop);
+    await waitFor(() => expect(interruptSession).toHaveBeenCalledWith("s_th_lead", "task_1"));
   });
 });

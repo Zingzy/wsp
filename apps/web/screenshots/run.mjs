@@ -161,6 +161,24 @@ function scrollAround(el, by) {
   throw new Error("nothing around that element scrolls");
 }
 
+/** Picks up one element and holds it over another, the pointer left down: the shot is taken mid-drag. The place it
+ * goes is read once the drag has started, since the heads a drag shows stand a frame after it starts and push the
+ * list down. */
+async function holdDrag(page, { from, to, dy }) {
+  const box = async selector => {
+    const at = await page.locator(selector).first().boundingBox({ timeout: 15_000 });
+    if (at === null) throw new Error(`${selector} has no box to drag`);
+    return at;
+  };
+  const a = await box(from);
+  await page.mouse.move(a.x + a.width / 2, a.y + a.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(a.x + a.width / 2, a.y + a.height / 2 + 8, { steps: 2 });
+  await page.waitForTimeout(150);
+  const b = await box(to);
+  await page.mouse.move(b.x + b.width / 2, b.y + (dy ?? b.height / 2), { steps: 8 });
+}
+
 /** One shot, in a browser that has never seen this app: the context is its own, so the sidebar width, the
  * chosen workspace and the right panel's last state are what a first launch has and not what the shot
  * before left behind. Sharing one context per width and theme is what hid the machine surface at 390,
@@ -202,6 +220,7 @@ async function shoot(context, shot, base, out, token) {
       await page.locator('[data-k="project-icon-file"]').first().setInputFiles(IMAGE_PICKS[step.image]);
       await page.locator('[data-k="project-icon-sheet"] img, [data-k="project-icon-refusal"]').first().waitFor({ state: "visible", timeout: 15_000 });
     }
+    else if (step.drag !== undefined) await holdDrag(page, step.drag);
     else await page.locator(step.click).first().click({ timeout: 15_000 });
   }
   if (shot.wait !== undefined) await page.locator(shot.wait).first().waitFor({ state: "visible", timeout: 15_000 });

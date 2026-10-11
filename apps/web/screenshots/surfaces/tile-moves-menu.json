@@ -1,0 +1,17 @@
+{
+  "at": "/",
+  "fixture": "tree-drag-plain",
+  "steps": [
+    "1440:row-id=thread:notes",
+    "390:key:Escape",
+    "390:sidebar=trigger",
+    "menu:row-id=thread:coupon"
+  ],
+  "wait": "menu-item=move-top",
+  "settleMs": 700,
+  "widths": [
+    1440,
+    390
+  ],
+  "reason": "The sidebar is 256px at every desktop width, so 1280 draws the menu as 1440 does; 390 opens it over the page, which is shot here."
+}

@@ -41,6 +41,8 @@ export const HOVER_GLYPH_CLASS = "opacity-0 max-md:hidden";
 /** A row's status slot that gives its place to the row's one act while the pointer or the focus is on the row, from
  * md up, where the act is drawn. */
 export const SLOT_YIELDS_CLASS = "md:group-hover/menu-item:invisible md:group-focus-within/menu-item:invisible";
+/** A yielding slot under Stop keeps the armed word's room, so the row's words end before the word starts. */
+export const STOP_ROOM_CLASS = "group-data-[stop-armed]/menu-item:min-w-9";
 /** That act, a `SidebarMenuAction` beside the row: centred on the slot's 12 px glyph, which ends 8 px in, in the
  * row's quiet ink, fading in by opacity. A tile moves it up to its first row. */
 export const SLOT_ACT_CLASS = "right-1 text-sidebar-muted-foreground transition-opacity duration-150 hover:text-sidebar-foreground";

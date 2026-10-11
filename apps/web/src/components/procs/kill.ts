@@ -3,8 +3,8 @@
 // arms, the second within two seconds sends TERM. KILL is only offered once
 // TERM has done nothing for five seconds, and takes the same two presses.
 import type { ProcSignal } from "@wsp/protocol";
+import { stillArmed } from "../arm.js";
 
-export const ARM_MS = 2000;
 export const ESCALATE_MS = 5000;
 
 export type KillState =
@@ -20,7 +20,7 @@ export function offered(state: KillState, now: number): { signal: ProcSignal; co
     case "idle":
       return { signal: "TERM", confirm: false };
     case "armed":
-      return { signal: state.signal, confirm: now - state.at < ARM_MS };
+      return { signal: state.signal, confirm: stillArmed(state.at, now) };
     case "sent":
       return now - state.at >= ESCALATE_MS ? { signal: "KILL", confirm: false } : null;
   }
@@ -35,6 +35,6 @@ export function press(state: KillState, now: number): { state: KillState; send: 
 
 /** Time passing: an unconfirmed arm lapses; everything else keeps its state, the offer reads the clock. */
 export function settle(state: KillState, now: number): KillState {
-  if (state.step === "armed" && now - state.at >= ARM_MS) return IDLE;
+  if (state.step === "armed" && !stillArmed(state.at, now)) return IDLE;
   return state;
 }

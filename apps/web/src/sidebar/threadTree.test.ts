@@ -2,6 +2,7 @@
 import { describe, expect, it } from "vitest";
 import type { ProjectView } from "@wsp/protocol";
 import type { SidebarProjectSnapshot, SidebarThreadSnapshot } from "../adapt/index.js";
+import { ABOVE_TOP_MS, BELOW_LAST_MS, keyAt, moveMarks, type MoveMark } from "./treeOrder";
 import { drawnCount, dropMarks, nextNeedsYou, placementFor, projectGroups, rootHolding, settleableRoots, sidebarTiles, threadTree, treeSettle, type TileNode } from "./threadTree";
 
 const project = (id: string, name: string, computer = "here"): ProjectView => ({
@@ -19,9 +20,10 @@ const project = (id: string, name: string, computer = "here"): ProjectView => ({
 
 const NOW = Date.parse("2026-09-26T12:00:00.000Z");
 const ago = (hours: number): string => new Date(NOW - hours * 3_600_000).toISOString();
+const agoMs = (hours: number): number => NOW - hours * 3_600_000;
 
 const thread = (id: string, workspaceId: string, parentThreadId: string | null = null, over: Partial<SidebarThreadSnapshot> = {}): SidebarThreadSnapshot =>
-  ({ id, threadId: id, sessionId: `s_${id}`, workspaceId, title: id, status: "running", startedAt: ago(1), endedAt: null, parentThreadId, asking: null, unread: false, needsYou: false, readAt: null, settledAt: null, pinnedAt: null, snoozedUntil: null, section: null, subagents: [], foldedAt: null, ...over }) as unknown as SidebarProjectSnapshot["threads"][number];
+  ({ id, threadId: id, sessionId: `s_${id}`, workspaceId, title: id, status: "running", startedAt: ago(1), endedAt: null, parentThreadId, asking: null, unread: false, needsYou: false, readAt: null, settledAt: null, pinnedAt: null, order: null, snoozedUntil: null, section: null, subagents: [], foldedAt: null, ...over }) as unknown as SidebarProjectSnapshot["threads"][number];
 /** A thread that finished `hours` ago and that a window showed as it finished. */
 const done = (id: string, workspaceId: string, hours: number, parentThreadId: string | null = null, over: Partial<SidebarThreadSnapshot> = {}): SidebarThreadSnapshot =>
   thread(id, workspaceId, parentThreadId, { status: "completed", startedAt: ago(hours + 0.1), endedAt: ago(hours), readAt: ago(hours), ...over });
@@ -245,9 +247,9 @@ describe("the sections the live list is drawn in", () => {
   it("puts pinned trees first whatever their state, the latest pin on top; a pinned tree never folds by time, and a settle by hand folds it all the same", () => {
     const rows = [
       row("ws_a", "pr_1", [
-        thread("works", "ws_a", null, { pinnedAt: ago(3) }),
-        done("old", "ws_a", 30, null, { pinnedAt: ago(1) }),
-        done("put-away", "ws_a", 30, null, { pinnedAt: ago(2), settledAt: ago(29) }),
+        thread("works", "ws_a", null, { pinnedAt: agoMs(3) }),
+        done("old", "ws_a", 30, null, { pinnedAt: agoMs(1) }),
+        done("put-away", "ws_a", 30, null, { pinnedAt: agoMs(2), settledAt: ago(29) }),
         done("other", "ws_a", 0.2),
       ]),
     ];
@@ -279,7 +281,7 @@ describe("the sections the live list is drawn in", () => {
       [
         row("ws_a", "pr_1", [
           thread("works", "ws_a"),
-          done("pinned", "ws_a", 0.2, null, { pinnedAt: ago(1) }),
+          done("pinned", "ws_a", 0.2, null, { pinnedAt: agoMs(1) }),
           thread("placed", "ws_a", null, { section: { name: "needs-you", whileState: "working:s_placed" } }),
           done("idle", "ws_a", 0.3),
           thread("asks", "ws_a", null, { asking: "Permission for Bash", needsYou: true }),
@@ -404,5 +406,136 @@ describe("Needs you as an inbox", () => {
     expect(drawnCount(lead, read)).toBe(7);
     const folded = { ...lead, thread: { ...lead.thread, thread: { ...lead.thread.thread!, foldedAt: ago(0.01) } } };
     expect(drawnCount(folded, read)).toBe(1);
+  });
+});
+
+describe("the order a person moves trees into", () => {
+  /** The keys a host would hold after these marks, laid over the rows: what a reload brings back. */
+  const marked = (rows: SidebarProjectSnapshot[], moves: ReadonlyArray<MoveMark>): SidebarProjectSnapshot[] =>
+    rows.map(r => ({
+      ...r,
+      threads: r.threads.map(t => {
+        const hits = moves.filter(m => m.threadIds.includes(t.id)).map(m => m.marks);
+        return hits.reduce<SidebarThreadSnapshot>(
+          (at, marks) => ({
+            ...at,
+            ...(marks.order !== undefined ? { order: marks.order } : {}),
+            ...(typeof marks.pinned === "number" ? { pinnedAt: marks.pinned } : marks.pinned === false ? { pinnedAt: null } : marks.pinned === true ? { pinnedAt: NOW } : {}),
+          }),
+          t,
+        );
+      }),
+    }));
+  const listed = (rows: SidebarProjectSnapshot[], section: "pinned" | "threads" = "threads") => sidebarTiles(rows, { picked: null, nowMs: NOW }).sections.find(s => s.id === section)?.roots ?? [];
+  /** Moves the root named to `at` in its section, as a drop there writes it. */
+  const move = (rows: SidebarProjectSnapshot[], id: string, to: "pinned" | "threads", at: number): MoveMark[] => {
+    const all = sidebarTiles(rows, { picked: null, nowMs: NOW }).live;
+    const node = all.find(n => n.thread.id === id)!;
+    const roots = listed(rows, to).filter(n => n !== node && n.thread.id !== id);
+    return moveMarks(node, to, roots, at, dropMarks(node, "threads"));
+  };
+
+  it("sorts Pinned by its key and the list by its order or else its start, largest first and ties by id, and Needs you follows the trees", () => {
+    const rows = [
+      row("ws_a", "pr_1", [
+        done("p-old", "ws_a", 3, null, { pinnedAt: agoMs(5) }),
+        done("p-new", "ws_a", 2, null, { pinnedAt: agoMs(4) }),
+        done("a", "ws_a", 0.5),
+        done("b", "ws_a", 0.6, null, { order: agoMs(0.1) }),
+        done("c", "ws_a", 0.7, null, { order: agoMs(0.8) }),
+        done("d", "ws_a", 0.7, null, { order: agoMs(0.8) }),
+        thread("asks-low", "ws_a", null, { asking: "Permission for Bash", needsYou: true, startedAt: ago(0.9), order: agoMs(0.95) }),
+        thread("asks-high", "ws_a", null, { asking: "Permission for Bash", needsYou: true, startedAt: ago(0.9), order: agoMs(0.05) }),
+      ]),
+    ];
+    expect(sections(rows)).toEqual([
+      ["pinned", ["p-new", "p-old"]],
+      ["needs-you", ["asks-high", "asks-low"]],
+      ["threads", ["b", "a", "c", "d"]],
+    ]);
+  });
+
+  it("puts a new thread on top of the list and a menu pin on top of Pinned; an unpin, a settle, a restore and a snooze keep the place", () => {
+    const base = [done("one", "ws_a", 0.3), done("two", "ws_a", 0.2), done("three", "ws_a", 0.1)];
+    let rows = [row("ws_a", "pr_1", base)];
+    rows = marked(rows, move(rows, "one", "threads", 0));
+    expect(shape(listed(rows))).toEqual(["one", "three", "two"]);
+    // A thread started now is later than every key, so it lands on top with no write.
+    const fresh = [row("ws_a", "pr_1", [...rows[0]!.threads, thread("fresh", "ws_a", null, { startedAt: ago(0) })])];
+    expect(shape(listed(fresh))).toEqual(["fresh", "one", "three", "two"]);
+    // A pin from the menu stamps now, which is over every pin's key.
+    let pins = marked(rows, [{ threadIds: ["two"], marks: { pinned: agoMs(10) } }]);
+    pins = marked(pins, [{ threadIds: ["three"], marks: { pinned: true } }]);
+    expect(shape(listed(pins, "pinned"))).toEqual(["three", "two"]);
+    // Unpinned, "one" was never pinned, and "three" goes back to its start: the list keeps the place a move gave.
+    const moved = marked(rows, [{ threadIds: ["one"], marks: { pinned: true } }]);
+    expect(shape(listed(moved))).toEqual(["three", "two"]);
+    const back = marked(moved, [{ threadIds: ["one"], marks: { pinned: false } }]);
+    expect(shape(listed(back))).toEqual(["one", "three", "two"]);
+    // Settled by hand, it sorts by its end in the fold, then a restore puts it back where it was moved to.
+    const settled = [row("ws_a", "pr_1", rows[0]!.threads.map(t => (t.id === "one" ? { ...t, settledAt: ago(0.01) } : t)))];
+    const tiles = sidebarTiles(settled, { picked: null, nowMs: NOW });
+    expect(shape(tiles.settled)).toEqual(["one"]);
+    expect(shape(listed(settled))).toEqual(["three", "two"]);
+    expect(shape(listed(rows))).toEqual(["one", "three", "two"]);
+    const ended = sidebarTiles([row("ws_a", "pr_1", [done("e-late", "ws_a", 0.1, null, { settledAt: ago(0.05), order: agoMs(9) }), done("e-early", "ws_a", 0.2, null, { settledAt: ago(0.05), order: agoMs(0.01) })])], { picked: null, nowMs: NOW });
+    expect(shape(ended.settled)).toEqual(["e-late", "e-early"]);
+    // A snoozed tree is out of the list and keeps its key, so it comes back to its place.
+    const snoozed = [row("ws_a", "pr_1", rows[0]!.threads.map(t => (t.id === "one" ? { ...t, snoozedUntil: ago(-1) } : t)))];
+    expect(shape(listed(snoozed))).toEqual(["three", "two"]);
+    expect(snoozed[0]!.threads.find(t => t.id === "one")!.order).toBe(rows[0]!.threads.find(t => t.id === "one")!.order);
+  });
+
+  it("writes the neighbours' midpoint between two trees, the top's key plus 1 ms above it and the last's less a minute below it", () => {
+    expect(keyAt([3000, 1000], 1)).toEqual({ key: 2000, rekeyed: [] });
+    expect(keyAt([3000, 1000], 0)).toEqual({ key: 3000 + ABOVE_TOP_MS, rekeyed: [] });
+    expect(keyAt([3000, 1000], 2)).toEqual({ key: 1000 - BELOW_LAST_MS, rekeyed: [] });
+    expect(ABOVE_TOP_MS).toBe(1);
+    expect(BELOW_LAST_MS).toBe(60_000);
+  });
+
+  it("lands each of thirty drops into one gap where it was dropped, re-keying the trees under it once the gap runs out", () => {
+    const top = NOW - 1000;
+    let rows = [row("ws_a", "pr_1", [done("top", "ws_a", 0, null, { startedAt: new Date(top).toISOString() }), done("bottom", "ws_a", 0, null, { startedAt: new Date(top - 1000).toISOString() })])];
+    const expected = ["top", "bottom"];
+    let rekeys = 0;
+    for (let i = 0; i < 30; i++) {
+      const id = `drop-${i}`;
+      rows = [row("ws_a", "pr_1", [...rows[0]!.threads, done(id, "ws_a", 0, null, { startedAt: new Date(top - 5000 - i).toISOString() })])];
+      // Each drop lands right under the top, so every new one squeezes into the gap the last one left.
+      const marks = move(rows, id, "threads", 1);
+      if (marks.length > 1) rekeys++;
+      for (const mark of marks.slice(1)) expect(mark.threadIds).toHaveLength(1);
+      rows = marked(rows, marks);
+      expected.splice(1, 0, id);
+      expect(shape(listed(rows))).toEqual(expected);
+    }
+    expect(rekeys).toBeGreaterThan(0);
+  });
+
+  it("re-keys the trees under a gap that ran out, down to the first gap of a millisecond, one mark each", () => {
+    const keys = [5000, 5000, 5000, 4999.9999, 3000];
+    const { key, rekeyed } = keyAt(keys, 1);
+    expect(rekeyed.map(r => r.index)).toEqual([1, 2, 3]);
+    const after = [keys[0]!, key, ...rekeyed.map(r => r.key), keys[4]!];
+    for (let i = 1; i < after.length; i++) expect(after[i]!).toBeLessThan(after[i - 1]!);
+  });
+
+  it("sends one mark across sections: a pin key into Pinned, the pin off with the order out of it; a group moves as one key", () => {
+    const rows = [
+      row("ws_a", "pr_1", [done("p1", "ws_a", 0.3, null, { pinnedAt: agoMs(5) }), done("p2", "ws_a", 0.2, null, { pinnedAt: agoMs(6) }), done("l1", "ws_a", 0.5), done("l2", "ws_a", 0.6)]),
+      row("ws_b", "pr_1", [done("g1", "ws_b", 0.4, null, { attempt: "att", title: "task" })]),
+      row("ws_c", "pr_1", [done("g2", "ws_c", 0.3, null, { attempt: "att", title: "task" })]),
+    ];
+    const into = move(rows, "l1", "pinned", 1);
+    expect(into).toEqual([{ threadIds: ["l1"], marks: { pinned: (agoMs(5) + agoMs(6)) / 2 } }]);
+    const out = move(rows, "p1", "threads", 1);
+    expect(out).toHaveLength(1);
+    expect(out[0]!.marks).toMatchObject({ pinned: false, order: expect.any(Number) });
+    expect(shape(listed(marked(rows, out)))).toEqual([["attempt:att", ["g1", "g2"]], "p1", "l1", "l2"]);
+    const group = move(rows, "attempt:att", "threads", 3);
+    expect(group).toHaveLength(1);
+    expect(group[0]!.threadIds.sort()).toEqual(["g1", "g2"]);
+    expect(shape(listed(marked(rows, group)))).toEqual(["l1", "l2", ["attempt:att", ["g1", "g2"]]]);
   });
 });

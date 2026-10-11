@@ -18,7 +18,7 @@ import { useSettingsStore } from "../src/settings/settingsStore.js";
 import { useRightPanelStore } from "../src/rightPanelStore.js";
 import { AppShell } from "../src/shell/AppShell.js";
 import { KeybindingDispatcher } from "../src/shell/KeybindingDispatcher.js";
-import { cancelWorkspaceSwitch, stepInOrder } from "../src/shell/shellCommands.js";
+import { cancelWorkspaceSwitch, openRootMoves, stepInOrder } from "../src/shell/shellCommands.js";
 import { onComposerFocusRequest, onNewThreadRequest } from "../src/shell/shellRequests.js";
 import { NEW_WORKSPACE, PROJECT_WORDS } from "../src/sidebar/words.js";
 import { useTerminalDrawerStore } from "../src/terminal/drawerStore.js";
@@ -37,6 +37,12 @@ vi.mock("../src/components/ui/tooltip.js", () => ({
     element === undefined ? <>{children}</> : cloneElement(element, {}, children ?? element.props.children),
   TooltipPopup: () => null,
 }));
+
+// Wrapped so a test can count how often the palette works out the open root's moves.
+vi.mock("../src/shell/shellCommands.js", async importOriginal => {
+  const real = await importOriginal<typeof import("../src/shell/shellCommands.js")>();
+  return { ...real, openRootMoves: vi.fn(real.openRootMoves) };
+});
 
 const view = (id: string, name: string, phase: WorkspaceView["phase"] = "running", over: Partial<WorkspaceView> = {}): WorkspaceView => ({
   id,
@@ -329,6 +335,25 @@ describe("command palette", () => {
     fireEvent.click(inPalette().getByText("worker"));
     await waitFor(() => expect(palette()).toBeNull());
     expect(useStore.getState().selectedId).toBe("ws_b");
+  });
+
+  it("works out the open root's moves once per open, not on every key typed", async () => {
+    await mountShell(ONE_THREAD_EACH);
+    const moves = vi.mocked(openRootMoves);
+    const before = moves.mock.calls.length;
+    mod("k");
+    await waitFor(() => expect(palette()).not.toBeNull());
+    await settle();
+    const opened = moves.mock.calls.length;
+    expect(opened).toBe(before + 1);
+    for (const words of ["m", "mo", "mov", "move"]) fireEvent.change(screen.getByPlaceholderText(/Search commands/), { target: { value: words } });
+    await settle();
+    expect(moves.mock.calls.length).toBe(opened);
+    mod("k");
+    await waitFor(() => expect(palette()).toBeNull());
+    mod("k");
+    await waitFor(() => expect(palette()).not.toBeNull());
+    expect(moves.mock.calls.length).toBe(opened + 1);
   });
 
   it("runs an action: pausing the selected workspace calls nap", async () => {

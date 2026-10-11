@@ -8,7 +8,7 @@ import { agentName } from "@wsp/catalog";
 import { PauseIcon, PlayIcon, SquareIcon } from "lucide-react";
 import { describe, expect, it, vi } from "vitest";
 import { taskStopRefusedLine, taskStopUnsupportedLine, goneRefusal, kindWords, machineWord, notAnsweringYet, ownDaemonDown, threadForgetRefusal, threadMarkdown, threadMessages, workspaceState, workspaceWord, type HarnessCatalog, type PlaceView, type SessionEvent, type SessionSettleResult, type SessionStatus, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
-import { CLIENT_CANNOT_OPEN, TERMINAL_WORDS, THREAD_STILL_RUNNING_HERE, THREAD_WORDS, WORKSPACE_WORDS, terminalRefusedLine } from "../src/actions/format.js";
+import { CLIENT_CANNOT_MARK, CLIENT_CANNOT_OPEN, TERMINAL_WORDS, THREAD_STILL_RUNNING_HERE, THREAD_WORDS, WORKSPACE_WORDS, terminalRefusedLine } from "../src/actions/format.js";
 import { placeMenu } from "../src/actions/menuPlacement.js";
 import { actionById, actionIfAny, resolveActions, toMenuItems } from "../src/actions/registry.js";
 import { terminalActions, type TerminalVerbs } from "../src/actions/terminalActions.js";
@@ -323,7 +323,7 @@ describe("thread actions", () => {
     ran = true,
   ): ThreadTarget =>
     threadTarget(
-      { id: "thr_1", sessionId: "s1", threadId, workspaceId: "ws_a", harness, title: "fix the port list", status, ran, startedAt: null, endedAt: null, indicator: null, startedBy: "person", project: null, parentThreadId: null, attempt: null, model: null, asking: null, costUsd: null, unread: false, readAt: null, settledAt: null, needsYou: false, pinnedAt: null, snoozedUntil: null, section: null, subagents: [], lastLine: null, failure: null, foldedAt: null, replaces: null, replacedBy: null },
+      { id: "thr_1", sessionId: "s1", threadId, workspaceId: "ws_a", harness, title: "fix the port list", status, ran, startedAt: null, endedAt: null, indicator: null, startedBy: "person", project: null, parentThreadId: null, attempt: null, model: null, asking: null, costUsd: null, unread: false, readAt: null, settledAt: null, needsYou: false, pinnedAt: null, order: null, snoozedUntil: null, section: null, subagents: [], lastLine: null, failure: null, foldedAt: null, replaces: null, replacedBy: null },
       { catalog: machine.catalog === undefined ? row(harness) : machine.catalog, state: machine.state ?? "running", ...(machine.goneWords !== undefined ? { goneWords: machine.goneWords } : {}) },
     );
   const threadVerbs = (over: Partial<ThreadVerbs> = {}): ThreadVerbs => ({ stop: vi.fn(async () => {}), rename: vi.fn(), forget: vi.fn(), readEvents: vi.fn(async () => []), copyText: vi.fn(async () => {}), ...over });
@@ -404,7 +404,7 @@ describe("thread actions", () => {
     await actionById(folded, "restore").run();
     expect(restore).toHaveBeenCalledWith(["thr_1", "thr_2"]);
     // A client with no road to the marks says so, and a thread under a root offers none of them.
-    expect(actionById(resolveActions(threadActions, root({}), threadVerbs()), "pin").refusal).toBe("This client cannot pin or snooze a thread");
+    expect(actionById(resolveActions(threadActions, root({}), threadVerbs()), "pin").refusal).toBe(CLIENT_CANNOT_MARK);
     expect(actionById(resolveActions(threadActions, root({ settled: true }), threadVerbs()), "restore").refusal).toBe("This client cannot restore a thread");
     expect(["pin", "snooze", "restore"].map(id => actionIfAny(resolveActions(threadActions, thread("completed"), threadVerbs({ mark, snooze, restore })), id))).toEqual([undefined, undefined, undefined]);
   });
@@ -454,7 +454,7 @@ describe("thread actions", () => {
     const SESSION = "0c8e2b8e-5d6f-4c4e-9f3a-2b1c0d9e8f7a";
     const resumable = (status: SessionStatus, folder = "/Users/dev/acme", catalog: HarnessCatalog | null = row("claude", { terminalResume: "claude --resume" }), elsewhere?: string): ThreadTarget =>
       threadTarget(
-        { id: "thr_1", sessionId: "s1", threadId: "thr_1", workspaceId: "ws_a", harness: "claude", title: "fix the port list", status, ran: true, startedAt: null, endedAt: null, indicator: null, startedBy: "person", project: null, parentThreadId: null, attempt: null, model: null, asking: null, costUsd: null, unread: false, readAt: null, settledAt: null, needsYou: false, pinnedAt: null, snoozedUntil: null, section: null, subagents: [], lastLine: null, failure: null, foldedAt: null, replaces: null, replacedBy: null, harnessSession: { id: SESSION, folder } },
+        { id: "thr_1", sessionId: "s1", threadId: "thr_1", workspaceId: "ws_a", harness: "claude", title: "fix the port list", status, ran: true, startedAt: null, endedAt: null, indicator: null, startedBy: "person", project: null, parentThreadId: null, attempt: null, model: null, asking: null, costUsd: null, unread: false, readAt: null, settledAt: null, needsYou: false, pinnedAt: null, order: null, snoozedUntil: null, section: null, subagents: [], lastLine: null, failure: null, foldedAt: null, replaces: null, replacedBy: null, harnessSession: { id: SESSION, folder } },
         { catalog, state: "running", elsewhere },
       );
 
@@ -625,7 +625,7 @@ describe("a lead's child", () => {
     readAt: null,
     settledAt: null,
     needsYou: false,
-    pinnedAt: null,
+    pinnedAt: null, order: null,
     snoozedUntil: null,
     section: null,
     subagents: [],
@@ -749,5 +749,38 @@ describe("a lead's child", () => {
     expect(useNotices.getState().notices[0]).toMatchObject({ kind: "done", text: "Settled 3 threads" });
     useNotices.getState().notices[0]!.action!.run();
     expect(restore).toHaveBeenCalledWith(["thr_a", "thr_a1", "thr_b"]);
+  });
+});
+
+describe("a root tree's moves", () => {
+  const WS: WorkspaceView = { id: "ws_a", name: "api", machineId: "m_a", kind: "local", project: { id: "pr_1", name: "api", path: "/root/api", computer: "here" }, phase: "running", golden: "", createdAt: "2026-10-01T00:00:00.000Z" };
+  const row = (n: number, over: Record<string, unknown> = {}) => ({ id: `s${n}`, workspaceId: "ws_a", harness: "claude", status: "running" as const, threadId: `thr_${n}`, prompt: `tree ${n}`, startedAt: 1_800_000_000_000 - n * 60_000, ...over });
+
+  it("the palette carries Move up, Move down and Move to top for the open thread's root, held as its menu holds them, writing a drag's marks", async () => {
+    const markThreads = vi.fn(async () => {});
+    useStore.setState({ api: { markThreads } as never, workspaces: [WS], statuses: {}, landings: {}, heldKeys: {}, projects: [], places: [], sessions: { ws_a: [row(1), row(2), row(3), { ...row(4), parentThreadId: "thr_2", startedBy: "agent" }] }, selectedId: "ws_a", selectedThreadId: "thr_4" } as never);
+    const { openRootMoves } = await import("../src/shell/shellCommands.js");
+    const moves = openRootMoves();
+    // The open thread is a builder under thr_2: the moves are its root's.
+    expect(moves.map(a => [a.id, a.title, a.refusal])).toEqual([
+      ["move-up", "Move up", null],
+      ["move-down", "Move down", null],
+      ["move-top", "Move to top", null],
+    ]);
+    const { buildPaletteItems } = await import("../src/components/palette/paletteItems.js");
+    const rows = buildPaletteItems({ projects: [], selectedId: null, query: "", messageHits: [], canCreate: false, recorded: [], picks: [], asks: false, threadMoves: moves, handlers: { copyThreadMarkdown: null } as never, verbs: {} as never, places: [] }).actionItems;
+    expect(rows.filter(item => item.kind === "action" && item.value.startsWith("action:move-")).map(item => item.title)).toEqual(["Move up", "Move down", "Move to top"]);
+    await actionById(moves, "move-up").run();
+    expect(markThreads).toHaveBeenCalledWith(["thr_2"], { order: row(1).startedAt + 1 });
+    useStore.setState({ selectedThreadId: "thr_1", heldKeys: {} } as never);
+    const top = openRootMoves();
+    expect(actionById(top, "move-up").refusal).toBe("Already first");
+    expect(actionById(top, "move-top").refusal).toBe("Already first");
+    useStore.setState({ selectedThreadId: "thr_3" } as never);
+    expect(actionById(openRootMoves(), "move-down").refusal).toBe("Already last");
+    // A client that cannot mark offers them held.
+    useStore.setState({ api: {} as never } as never);
+    expect(openRootMoves().map(a => a.refusal)).toEqual([CLIENT_CANNOT_MARK, CLIENT_CANNOT_MARK, CLIENT_CANNOT_MARK]);
+    useStore.setState({ api: null, workspaces: [], sessions: {}, selectedId: null, selectedThreadId: null } as never);
   });
 });

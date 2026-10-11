@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { Attachment, AccountRow, BringBackResult, Capabilities, GoldenStageEvent, HarnessCatalog, InitJob, InitSetup, PendingComputer, PlaceDial, PlaceSetAlso, PlaceSettingsAsk, PlaceSettingWord, PlaceView, PortForward, Preferences, PreferencesPatch, ProjectView, ReleaseView, ReviewDraft, SessionSettleResult, SessionView, ThreadMarks, WorkspaceCreateStage, WorkspaceLanding, WorkspaceLook, WorkspaceSize, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
 import type { Launch } from "../../adapt/view-model.js";
+import type { HeldKeys } from "./heldKeys.js";
 import type { Api, ConnStatus, ProtocolEvent } from "../client.js";
 import type { Failure } from "../failure.js";
 import type { ComposerStart } from "../../components/chat/composerPicks.js";
@@ -163,6 +164,8 @@ export interface State {
    * announces itself, which on this computer is the seconds the agent takes to boot, so between the send and that
    * row the sidebar had nothing to draw while the message was already in the transcript. */
   launches: Record<string, Launch>;
+  /** The sort keys a move wrote here, by thread, laid over the rows until a row the host sends carries them. */
+  heldKeys: Readonly<Record<string, HeldKeys>>;
   ready: boolean;
   /** How many reconnects the runtime could not replay events for; anything built from sessions.history reloads when it moves. */
   gaps: number;
@@ -280,7 +283,8 @@ export interface State {
   /** Settles each thread and every thread under it through the host, answering what it settled and what it left; a
    * refusal is a toast and answers nothing. */
   settleThreads(threadIds: readonly string[]): Promise<SessionSettleResult | undefined>;
-  /** Pins, snoozes or places threads through the host, or takes one of those back; a refusal is a toast. */
+  /** Pins, snoozes, places or moves threads through the host, or takes one of those back; a sort key it writes is
+   * held here until the host's row carries it, and a refusal drops the hold and is a toast. */
   markThreads(threadIds: readonly string[], marks: ThreadMarks): Promise<void>;
   /** Takes settled threads back out of the fold through the host; a refusal is a toast. */
   restoreThreads(threadIds: readonly string[]): Promise<void>;
