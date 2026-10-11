@@ -607,8 +607,12 @@ export interface ThreadsArea {
   readonly endKept: (threadId: string, kept: KeptProcess, o?: { now: true }) => void;
   readonly hostWrites: Map<string, Promise<void>>;
   readonly writeSession: (harnessSessionId: string, write: () => Promise<SessionRenameWrite>) => Promise<SessionRenameWrite>;
-  readonly takeKept: (threadId: string, launch: KeptLaunch | undefined, session: string | undefined) => KeptProcess | undefined;
+  readonly takeKept: (threadId: string, launch: KeptLaunch | undefined, session: string | undefined, whole?: KeptLaunch) => KeptProcess | undefined;
   readonly holdKept: (threadId: string, o: Omit<KeptProcess, "file" | "usedAt" | "cancel">) => boolean;
+  readonly holdWarm: (threadId: string, o: Omit<KeptProcess, "file" | "usedAt" | "cancel">) => void;
+  readonly warmOn: (workspaceId: string, harness: string) => [string, KeptProcess] | undefined;
+  readonly rewarm: (threadId: string) => void;
+  readonly claimWarm: (workspaceId: string, harness: string) => string | undefined;
   readonly threadOfToken: (token: string) => string;
   readonly treeUnder: (threadId: string) => string[];
   readonly restarts: () => Map<string, string>;

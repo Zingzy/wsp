@@ -508,12 +508,14 @@ export const KEPT_CLOSE_WAIT_MS = 2_000;
 
 /** A thread's agent process kept up between its turns: what its launch fixed, the session it holds, the turn token and
  * device its environment carries, the box its stream reads for a turn stopped on a person, how its session file stood
- * when its last turn ended, when that was, and the cancel of the keep's own clock. */
+ * when its last turn ended, when that was, and the cancel of the keep's own clock. One launched ahead of a new thread's
+ * first send holds no session yet and is `warm`: the agent it runs, and whether a send opening its thread took it. */
 export interface KeptProcess {
   workspaceId: string;
   agent: KeptAgent<HarnessSession>;
   launch: KeptLaunch;
-  session: string;
+  session?: string;
+  warm?: { harness: string; claimed: boolean };
   turnToken: string;
   scopeDeviceId?: string;
   waiting: { on: boolean };
