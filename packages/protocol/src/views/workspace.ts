@@ -212,6 +212,12 @@ export const ProjectView = z.object({
 });
 export type ProjectView = z.infer<typeof ProjectView>;
 
+/** The branch a new thread of a project starts on, read when asked: where its threads work in the folder itself (this
+ * computer, a box) the branch that folder has checked out now, null on a detached head or a folder git holds no repo
+ * in; on a computer that forks a copy, the branch a new copy starts from, off the record. */
+export const ProjectBranch = z.object({ branch: z.string().nullable(), folder: z.boolean() });
+export type ProjectBranch = z.infer<typeof ProjectBranch>;
+
 /** The project a workspace holds, joined onto the view by the runtime from the record's project id: what every row
  * that names a workspace's project reads, without a second fetch of the projects list. */
 export const ProjectRef = ProjectView.pick({ id: true, name: true, path: true, computer: true });
@@ -515,8 +521,8 @@ export const WorkspaceStatus = WorkspaceView.extend({
   wakeAsk: z.object({ ask: z.number(), of: z.number() }).optional(),
   /** Epoch ms when the runtime's idle policy naps this workspace; absent while napping, held by a running session, or with auto-nap off. */
   idleAt: z.number().optional(),
-  /** The copy's checkout as the host last read it, at a turn's end, on view and after a write, never on a timer;
-   * absent until git has answered once. */
+  /** The copy's checkout as the host last read it, at a turn's end, on view, after a write and every few seconds while
+   * a composer about to open a thread on it shows; absent until git has answered once. */
   checkout: Checkout.optional(),
   /** The workspace's pull request as the host last read it through the git host's command line on this computer, or
    * the one sentence saying why it could not; absent where its branch has none. */

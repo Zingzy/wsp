@@ -6,8 +6,8 @@
 // nothing outside this file decides by what a computer is. Adding a road is a
 // module and its row.
 import { CLAUDE_CONFIG_DIR, GUEST_HOME } from "@wsp/catalog";
-import { envInput, INSTALL_MS, INSTALL_STORES, installScript, projectInstalls, withEnvFromInput, type Machine } from "@wsp/engine";
-import { claudeMemoryDir, claudeProjectKey, NO_IMAGE_FOR_SEED, placeDaemonPaths, placeInstallLog, projectLeftOnComputerLine, projectPathOn, projectRemovedAtProviderLine, projectRemovedHereLine, unpushedUnreadLine, seedBytes, seedCommitsLandedLine, seedCommitsLostLine, SEED_DIR, SEED_MEMORY_DIR, SEED_PATCH, seedingLine, seedMemoryKeptLine, SEEDED_REFS, projectFolderNamed, shellLine, shellQuote, unpushedLine, type ExecResult, type MachineBind, type ProjectAddStage, type ProjectSource, type ProjectView, type SeedChoice, type SeedPlan } from "@wsp/protocol";
+import { envInput, INLINE_EXEC_MS, INSTALL_MS, INSTALL_STORES, installScript, projectInstalls, withEnvFromInput, type Machine } from "@wsp/engine";
+import { claudeMemoryDir, claudeProjectKey, NO_IMAGE_FOR_SEED, placeDaemonPaths, placeInstallLog, projectLeftOnComputerLine, projectPathOn, projectRemovedAtProviderLine, projectRemovedHereLine, unpushedUnreadLine, seedBytes, seedCommitsLandedLine, seedCommitsLostLine, SEED_DIR, SEED_MEMORY_DIR, SEED_PATCH, seedingLine, seedMemoryKeptLine, SEEDED_REFS, projectFolderNamed, shellLine, shellQuote, unpushedLine, type ExecResult, type MachineBind, type ProjectAddStage, type ProjectBranch, type ProjectSource, type ProjectView, type SeedChoice, type SeedPlan } from "@wsp/protocol";
 import type { ProjectSourceModule } from "./project-sources.js";
 
 /** How far the add has got, as the door turns each one into an event. */
@@ -67,6 +67,8 @@ export interface LandingDeps {
   computer?: { machine: Machine; home: string };
   /** Where Claude Code keeps its projects on this Mac, for the road whose project is a folder here. */
   macStateHome: string;
+  /** The branch a folder on this computer has checked out; nothing on a detached head or where git answers nothing. */
+  branchHere(path: string): Promise<string | undefined>;
   /** What this computer is called, since a record names it by its id and no sentence a person reads may. */
   computerName: string;
   /** The head of this host's own image, or nothing where it has sealed none: read by the road that forks one to
@@ -109,6 +111,8 @@ export interface ProjectLanding {
   unsaved?(project: ProjectView, deps: LandingDeps): Promise<string | undefined>;
   /** The folders of the computer's own every workspace of this project mounts. */
   workspaceBinds(project: ProjectView): MachineBind[];
+  /** The branch a new thread of the project starts on, read now: the folder's own where threads work in it. */
+  branch(project: ProjectView, deps: LandingDeps): Promise<ProjectBranch>;
 }
 
 /** The folder a fork of an image holds its checkout under: its own login's home, shared with nothing. */
@@ -484,6 +488,12 @@ const boxLanding: ProjectLanding = {
     if (project.checkout === undefined) return undefined;
     return readUnsaved(projectFolderNamed(project.name, project.checkout), project.checkout, (cmd, o) => computerOf(deps).machine.exec(cmd, o));
   },
+  async branch(project, deps) {
+    // A computer that cannot be reached right now names no branch rather than the one it had.
+    const read = await deps.computer?.machine.exec(shellLine(["git", "-C", project.path, "symbolic-ref", "--quiet", "--short", "HEAD"]), { timeoutMs: INLINE_EXEC_MS }).catch(() => undefined);
+    const branch = read?.exitCode === 0 ? read.stdout.trim() : "";
+    return { branch: branch === "" ? null : branch, folder: true };
+  },
   async land(o, deps) {
     const { machine, home } = computerOf(deps);
     // A folder already on that computer is the project as it stands, and nothing is cloned into it.
@@ -543,6 +553,8 @@ const providerLanding: ProjectLanding = {
     }
   },
   workspaceBinds: () => [],
+  // A new copy forks the image, so its branch is the record's and no machine is asked.
+  branch: async project => ({ branch: project.base ?? project.defaultBranch, folder: false }),
 };
 
 /** The computer the app runs on: the person's own folder is the project, so nothing is cloned, seeded or
@@ -564,6 +576,7 @@ const macLanding: ProjectLanding = {
     return {};
   },
   workspaceBinds: () => [],
+  branch: async (project, deps) => ({ branch: (await deps.branchHere(project.path)) ?? null, folder: true }),
 };
 
 export const PROJECT_LANDINGS: ReadonlyMap<ProjectLanding["kind"], ProjectLanding> = new Map([

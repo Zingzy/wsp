@@ -96,6 +96,7 @@ import { useStore } from "../src/protocol/store.js";
 import { provideTerminals, WorkspaceTerminals, type TerminalWire } from "../src/terminal/link.js";
 import type { Api, ProtocolEvent } from "../src/protocol/client.js";
 import { WorkspaceThread } from "../src/shell/WorkspaceThread.js";
+import { BRANCH_REREAD_MS } from "../src/components/chat/ComposerCheckoutRow.js";
 import { useComposerDraftStore } from "../src/components/chat/composerDraftStore.js";
 import { useNewThreadRequests } from "../src/components/chat/newThreadRequests.js";
 import { selectRoot, useRootStore } from "../src/files/root.js";
@@ -190,6 +191,43 @@ describe("composer checkout row", () => {
     await waitFor(() => expect(branch()).toBe("ticket/1401-live"));
     pushed("ticket/1401-moved");
     await waitFor(() => expect(branch()).toBe("ticket/1401-moved"));
+  });
+
+  it("asks the host to read the checkout again now, every few seconds and when the window comes back, while it is about to open a thread", async () => {
+    try {
+      provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "git.status": params => ({ ...STATUS, root: String(params["cwd"]) }) }));
+      const { api } = fixtureApi();
+      let on = "feature-x";
+      const asks: Array<boolean | undefined> = [];
+      const pushed = () => useStore.setState(s => ({ statuses: { ...s.statuses, [WS]: statusOf(workspace, { checkout: { branch: on, ahead: 0, behind: 0, changed: 0, readAt: 1 } }) } }));
+      // The host's answer rides the status it pushes, as readCheckout's does.
+      api.workspaceCheckout = async (_id, fresh) => {
+        asks.push(fresh);
+        pushed();
+        return { checkout: { branch: on, ahead: 0, behind: 0, changed: 0, readAt: 1 } };
+      };
+      // The intervals are faked from the mount on, so the row's own is the one the clock moves; vi.waitFor polls on
+      // timers the fake leaves alone, where testing-library's polls on the faked setInterval.
+      useStore.setState({ conn: "connecting", workspaces: [], statuses: {} });
+      useStore.getState().bind(api);
+      useStore.getState().setConn("live");
+      await vi.waitFor(() => expect(useStore.getState().workspaces.length).toBeGreaterThan(0));
+      await vi.waitFor(() => expect(useStore.getState().harnesses.length).toBeGreaterThan(0));
+      act(pushed);
+      vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+      render(<WorkspaceThread workspaceId={WS} threadId={null} />);
+      await waitFor(() => expect(branch()).toBe("feature-x"));
+      await waitFor(() => expect(asks).toContain(true));
+      on = "main";
+      await act(async () => void vi.advanceTimersByTime(BRANCH_REREAD_MS));
+      await waitFor(() => expect(branch()).toBe("main"));
+      on = "hotfix";
+      act(() => void window.dispatchEvent(new Event("focus")));
+      await waitFor(() => expect(branch()).toBe("hotfix"));
+      expect(asks.every(fresh => fresh === true)).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("names the computer first, then the access and the branch, every item in one grammar, and neither the folder's path nor a pull request's number", async () => {

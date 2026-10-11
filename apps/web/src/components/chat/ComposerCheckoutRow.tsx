@@ -11,11 +11,11 @@
 // what the panes follow. The branch is read, not switched: the daemon has no
 // checkout op, and a detached head shows no branch word.
 import { GitBranchIcon } from "lucide-react";
-import { useEffect, useMemo, type ReactNode } from "react";
-import { DETACHED_HEAD, type PlaceView } from "@wsp/protocol";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { DETACHED_HEAD, type PlaceView, type ProjectBranch } from "@wsp/protocol";
 import { projectFolderOf, useRootStore, useThreadFolder } from "../../files/root";
 import { useDaemonWire } from "../../files/wire";
-import { useStatus, useWorkspace } from "../../protocol/store";
+import { useStatus, useStore, useWorkspace } from "../../protocol/store";
 import { ComputerGlyph } from "../../settings/ComputerGlyph";
 import { useComputer, useComputerName } from "../../sidebar/workspaceRows";
 import { useBranch, useLinkWord } from "../../terminal/paneWords";
@@ -45,6 +45,51 @@ export function opensThread(thread: ChatThreadHandle): boolean {
 export const ROW_ITEM_CLASS = "inline-flex h-7 shrink-0 items-center gap-1 rounded-md px-2 text-xs font-normal text-muted-foreground sm:h-6 [&_svg]:size-3 [&_svg]:shrink-0";
 
 const BRANCH_NOTE = "The folder's branch as the task reports it. Nothing here switches it; check out another branch from the terminal.";
+const COPY_BRANCH_NOTE = "The branch a new copy of the project starts from.";
+
+/** How often a composer about to open a thread reads its branch again while the window shows it, so a checkout made
+ * in a terminal reaches the row without a send. */
+export const BRANCH_REREAD_MS = 5_000;
+
+/** Calls `read` now, each time the window comes back, and every BRANCH_REREAD_MS while the page is visible. */
+function useRereads(on: boolean, read: () => void): void {
+  useEffect(() => {
+    if (!on) return;
+    const again = (): void => {
+      if (document.visibilityState === "visible") read();
+    };
+    read();
+    const timer = setInterval(again, BRANCH_REREAD_MS);
+    window.addEventListener("focus", again);
+    document.addEventListener("visibilitychange", again);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener("focus", again);
+      document.removeEventListener("visibilitychange", again);
+    };
+  }, [on, read]);
+}
+
+/** The branch a new thread of the project starts on, as the host reads it now; null until its first answer lands,
+ * since the record's own branch is the remote's default and not what a folder is on. */
+export function useProjectBranch(projectId: string | null): ProjectBranch | null {
+  const api = useStore(s => s.api);
+  const [read, setRead] = useState<{ projectId: string; said: ProjectBranch } | null>(null);
+  const asked = useRef(projectId);
+  asked.current = projectId;
+  const ask = useCallback(() => {
+    if (projectId === null) return;
+    const land = (said: ProjectBranch): void => {
+      if (asked.current === projectId) setRead(was => (was?.projectId === projectId && was.said.branch === said.branch && was.said.folder === said.folder ? was : { projectId, said }));
+    };
+    // A read that failed knows no branch, so the chip goes empty rather than keep one the folder may have left.
+    void api?.projectBranch?.(projectId).then(land, () => land({ branch: null, folder: true }));
+  }, [api, projectId]);
+  const held = read !== null && read.projectId === projectId ? read.said : null;
+  // A copy's branch is the record's, which no checkout in a terminal moves: one read is the whole of it.
+  useRereads(projectId !== null && api?.projectBranch !== undefined && held?.folder !== false, ask);
+  return held;
+}
 
 /** The computer the thread runs on: its icon, as the Computers page draws it, and its name, the row's first item. */
 export function RowComputer({ name, place, className }: { name: string; place: PlaceView | undefined; className?: string }) {
@@ -58,7 +103,7 @@ export function RowComputer({ name, place, className }: { name: string; place: P
 
 /** The branch with its icon, and the note that it is read, not switched, on its hover. Empty where none is known, at
  * the same height, so the row does not move when a branch arrives; `why` says which empty it is. */
-function RowBranch({ head, why = "" }: { head: string | null; why?: string }) {
+function RowBranch({ head, why = "", note = BRANCH_NOTE }: { head: string | null; why?: string; note?: string }) {
   if (head === null) return <span className={ROW_ITEM_CLASS} data-composer-branch={why} />;
   return (
     <Tooltip>
@@ -67,7 +112,7 @@ function RowBranch({ head, why = "" }: { head: string | null; why?: string }) {
         <span className="min-w-0 max-w-60 truncate">{head}</span>
       </TooltipTrigger>
       <TooltipPopup side="top" align="start" className="max-w-80">
-        {BRANCH_NOTE}
+        {note}
       </TooltipPopup>
     </Tooltip>
   );
@@ -105,6 +150,10 @@ export function ComposerCheckoutRow({
   const moved = useMemo(() => thread.view.turns.length + finishedCalls(thread.view.entries), [thread.view.turns.length, thread.view.entries]);
   const branch = useBranch(wire, folder, !onCheckout, linkWord, { running, moved });
   const head = onCheckout ? fact.branch : branch.kind === "repo" ? branch.head : null;
+  // About to open a thread, the fact is asked for again now and as the window shows it, so the tile reads the same.
+  const api = useStore(s => s.api);
+  const refresh = useCallback(() => void api?.workspaceCheckout?.(workspaceId, true).catch(() => undefined), [api, workspaceId]);
+  useRereads(opening && onCheckout, refresh);
 
   useEffect(() => {
     if (cwd !== null) follow(workspaceId, cwd);
@@ -124,13 +173,15 @@ export function ComposerCheckoutRow({
 }
 
 /** The row under a project home's composer: no workspace exists yet, so it names where the send will run (the
- * project's one computer), the access and the branch the workspace starts from, off the project's own record. */
-export function HomeCheckoutRow({ path, branch, where = null, access = null }: { path: string; branch: string; where?: ReactNode; access?: ReactNode }) {
+ * project's one computer), the access and the branch the thread starts on, read off the project's folder; none
+ * while the workspace a send asked for is still being made. */
+export function HomeCheckoutRow({ path, projectId, where = null, access = null }: { path: string; projectId: string | null; where?: ReactNode; access?: ReactNode }) {
+  const read = useProjectBranch(projectId);
   return (
     <ComposerSurface.Tray data-composer-checkout data-composer-home data-composer-folder={path}>
       {where}
       {access}
-      <RowBranch head={branch === "" ? null : branch} />
+      <RowBranch head={read?.branch ?? null} note={read?.folder === false ? COPY_BRANCH_NOTE : BRANCH_NOTE} />
     </ComposerSurface.Tray>
   );
 }

@@ -1179,9 +1179,9 @@ export function ChatComposer({
           </form>
         </ComposerSurface.Host>
         {home !== undefined ? (
-          <HomeCheckoutRow path={home.path} branch={home.defaultBranch} where={where} access={accessIn ? null : access} />
+          <HomeCheckoutRow path={home.path} projectId={home.id} where={where} access={accessIn ? null : access} />
         ) : waiting !== undefined ? (
-          <HomeCheckoutRow path={waiting.folder} branch="" where={where} access={accessIn ? null : access} />
+          <HomeCheckoutRow path={waiting.folder} projectId={null} where={where} access={accessIn ? null : access} />
         ) : (
           <ComposerCheckoutRow
           workspaceId={workspaceId}
