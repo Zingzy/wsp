@@ -56,6 +56,9 @@ import {
   SPAWN_FOLDER_FIX,
   threadLeftLine,
   capWaitLine,
+  CONVERSATION_OPEN_KIND,
+  conversationOpenFix,
+  conversationOpenLine,
 } from "@wsp/protocol";
 import { BASE_GROUP, FLOOR_LINE, GROUP_LABEL, tableLines, totalsLine, type TableRow } from "../src/init-table.js";
 import { GUTTER } from "../src/init-layout.js";
@@ -582,6 +585,12 @@ export const TURN_ANSWERED: Record<string, TurnCase[]> = {
     { case: "the projects not read", arguments: { project: "attic-work", message: "t", detach: true }, replies: { "workspaces.list": ok({ workspaces: [WORKSPACE] }), "workspaces.resolve": resolved(), "harnesses.list": HARNESSES, "workspaces.wake": resolved(), "sessions.start": START } },
     { case: "a project held by the thread's own tree", arguments: { project: "wsp", message: "t", detach: true }, replies: { "workspaces.list": ok({ workspaces: [{ ...WORKSPACE, kind: "local", project: { id: "p-1", name: "wsp", path: "/Users/me/wsp", computer: "here" } }] }), "projects.resolve": ok({ project: HERE_PROJECT }), "harnesses.list": HARNESSES, "sessions.start": startIn("/Users/me/wsp") } },
     { case: "beside the thread asking", arguments: { message: "look", detach: true }, env: { [TURN_TOKEN_ENV]: "turn-token-1" }, replies: { "harnesses.list": HARNESSES, "sessions.start": startIn("/Users/me/wsp") } },
+    { case: "on a conversation from outside wsp, in the folder it ran in", arguments: { project: "wsp", message: "go on", resume: "7414323d-e71b-4957-8b56-eefdf6bfa350", detach: true }, replies: { ...PROJECTS, "projects.resolve": ok({ project: HERE_PROJECT }), "harnesses.list": HARNESSES, "sessions.start": startIn("/Users/me/wsp-wt") } },
+    { case: "on a copy of a conversation open in another app", arguments: { project: "wsp", message: "go on", agent: "codex", resume: "01a12813-cd12-7a12-9b13-e76892906ff0", copy: true, detach: true }, replies: { ...PROJECTS, "projects.resolve": ok({ project: HERE_PROJECT }), "harnesses.list": HARNESSES, "sessions.start": startIn("/Users/me/wsp") } },
+    { case: "a conversation open in another app, refused", arguments: { project: "wsp", message: "go on", resume: "7414323d-e71b-4957-8b56-eefdf6bfa350" }, replies: { ...PROJECTS, "projects.resolve": ok({ project: HERE_PROJECT }), "harnesses.list": HARNESSES, "sessions.start": no(refusalLine(conversationOpenLine("lab codewords", "zingzy's MacBook Pro"), conversationOpenFix(undefined)), CONVERSATION_OPEN_KIND) } },
+    { case: "a conversation beside a branch", arguments: { project: "wsp", branch: "x", message: "t", resume: "7414323d-e71b-4957-8b56-eefdf6bfa350" }, replies: {} },
+    { case: "a copy with no conversation", arguments: { project: "wsp", message: "t", copy: true }, replies: {} },
+    { case: "a conversation on a project that forks a machine", arguments: { project: "site", message: "t", resume: "7414323d-e71b-4957-8b56-eefdf6bfa350" }, replies: { ...PROJECTS, "workspaces.list": ok({ workspaces: [WORKSPACE] }), "projects.defaults": ok({ defaults: {} }), "harnesses.list": HARNESSES } },
     { case: "beside the thread with a branch", arguments: { message: "look", branch: "feat/y" }, env: { [TURN_TOKEN_ENV]: "turn-token-1" }, replies: { "harnesses.list": HARNESSES, "sessions.start": startIn("/Users/me/.wsp/worktrees/p-1/feat-y") }, pushed: { "sessions.start": [done({ status: "completed", text: "ok" })] } },
     { case: "no thread stamped", arguments: { project: "attic-work", message: "t", detach: true }, replies: { ...PROJECTS, "workspaces.resolve": resolved(), "harnesses.list": HARNESSES, "workspaces.wake": resolved(), "sessions.start": ok({ session: sessionRow({ id: "sess-9", status: "running" }), outcome: "started", turnId: "turn-9" }) } },
     { case: "another version", arguments: { project: "attic-work", message: "t", detach: true }, replies: { ...PROJECTS, "workspaces.resolve": resolved(), "harnesses.list": HARNESSES, "workspaces.wake": resolved(), "sessions.start": ok({ outcome: "started" }) } },

@@ -6,6 +6,7 @@ pub(crate) mod add;
 mod agents;
 mod changes;
 mod computers;
+mod conversations;
 mod create;
 pub(crate) mod defaults;
 mod dropping;
@@ -127,6 +128,7 @@ pub const TOOLS: &[Tool] = &[
     agents::SERVERS,
     agents::PLUGINS,
     projects::TOOL,
+    conversations::TOOL,
     threads::THREADS,
     threads::THREAD_READ,
     threads::THREAD_HEAD,

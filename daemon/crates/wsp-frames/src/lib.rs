@@ -30,7 +30,7 @@ pub use checkpoint::{checkpoint_copy_part, checkpoint_id_ok, checkpoint_prefix, 
 pub use copy::{Carried, CarryModule, CopyAsk, CopyReport, CopyRoadName, FoundModule, WorktreeRemoval, WorktreeReport};
 pub use enums::{
     CheckState, DaemonErrorCode, FsEntryType, FsReadEncoding, FsSearchMode, GitDiffScope, HostItemKind, MergeMethod, Mergeable, ProcSignal,
-    PtyMode, PullRequestState, ReactionContent, ReviewEvent, ReviewSide, ReviewState, UsageLogFormat, WorkspaceKind,
+    PtyMode, PullRequestState, ReactionContent, ReviewEvent, ReviewSide, ReviewState, TranscriptVoice, UsageLogFormat, WorkspaceKind,
 };
 pub use event::{DaemonEvent, ProcEntry, Usage};
 pub use guest::{GuestCliMessage, GuestKind, GuestOpen, GuestOpenReply, GuestStream};
@@ -64,8 +64,9 @@ pub use reply::{
     ManifestRestartScriptReply, PlaceLeaveReply, PlaceUpdateReply, PortsWatchReply, ProcInspectReply, PtyAttachReply, PtyCreateReply,
     PtyListEntry, PtyListReply, PullRequest, PullRequestAutoMerge, PullRequestCheck, PullRequestCheckRun, PullRequestComment,
     PullRequestCommit, PullRequestFile, PullRequestFork, PullRequestLabel, PullRequestPageCut, PullRequestReaction, PullRequestReview,
-    PullRequestReviewComment, PullRequestReviewRequest, PullRequestVerdict, Reply, SshStartReply, SysHistoryReply, SysPoint, True,
-    UsageLimitReading, UsageLimitWindow, UsageLogRow, UsageLogsReply, UsageTokens,
+    PullRequestReviewComment, PullRequestReviewRequest, PullRequestVerdict, Reply, SshStartReply, SysHistoryReply, SysPoint,
+    TranscriptMessage, TranscriptRow, TranscriptsListReply, TranscriptsReadReply, True, UsageLimitReading, UsageLimitWindow, UsageLogRow,
+    UsageLogsReply, UsageTokens,
 };
 pub use request::{DaemonOp, DaemonRequest, ReviewComment, UsageStore, DAEMON_OPS, GUEST_OPS};
 pub use shell::shell_quote;

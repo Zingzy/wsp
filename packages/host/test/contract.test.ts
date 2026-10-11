@@ -516,6 +516,8 @@ describe("the agent contract on the command line and the tool door", () => {
     execFileSync("git", ["init", "-q", tree.path]);
     expect(await last("worktree remove", "worktree", "remove", "here", "feat/x")).toEqual({ project: "here", branch: "feat/x", removed: true });
     const inFolder = (await last("run", "run", "here", "hello here")) as { threadId: string };
+    // The fixture's agents keep no store of their own, so the project's list is empty and says no agent went unread.
+    expect(await last("conversations", "conversations", "here")).toEqual({ rows: [], held: [] });
     expect(await last("delete", "delete", inFolder.threadId, "--yes")).toEqual({ threadId: inFolder.threadId, workspaceId: expect.any(String), threads: 1 });
     // A launch that never started its agent leaves a row with no turn on it, which is the one a forget takes.
     const dead = await run("run", "--beside", lead, "--agent", "codex", "never gets going", "--json");

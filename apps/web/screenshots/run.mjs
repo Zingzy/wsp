@@ -22,7 +22,8 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { chromium } from "playwright";
-import { fixtureAgents, fixtureChanges, fixtureClock, fixtureCloud, fixtureCompares, fixtureFiles, fixtureFleet, fixtureFolders, fixtureKeys, fixturePulls, fixtureRepos, fixtureState, fixtureStorage, HERE_AGENTS, HERE_HOST_ITEMS, HERE_PROJECT_FILES } from "./fixture-state.mjs";
+import { codexThreads, writeConversations } from "./fixture-kit.mjs";
+import { fixtureAgents, fixtureChanges, fixtureConversations, fixtureClock, fixtureCloud, fixtureCompares, fixtureFiles, fixtureFleet, fixtureFolders, fixtureKeys, fixturePulls, fixtureRepos, fixtureState, fixtureStorage, HERE_AGENTS, HERE_HOST_ITEMS, HERE_PROJECT_FILES } from "./fixture-state.mjs";
 import { BROWSER_ARGS, freePort, REPO, startHost, stopHost, whatIsNotBuilt } from "./host.mjs";
 import { leaveMidWork, writeKeys, writeStandIn, writeWorkFolder } from "./lab-home.mjs";
 import { indexMarkdown, readSurfaces, shippedSurfaces, shotPlan, surfacesIn } from "./plan.mjs";
@@ -234,9 +235,19 @@ function fixtureOn(home, fixture = "mac-in-use") {
     execFileSync("git", ["remote", "add", "origin", project.remote], { cwd: project.path, stdio: "ignore" });
   }
   for (const dest of fixtureChanges(fixture, state)) leaveMidWork(dest);
+  writeConversations(home, state, fixtureConversations(fixture));
   const keys = fixtureKeys(fixture);
   if (Object.keys(keys).length > 0) writeKeys(home, keys);
   return state;
+}
+
+/** A fixture's agents with what its conversations need of the stand-ins: the Claude Code sessions another app holds
+ * open, and the threads Codex's own server lists. */
+function withConversations(agents, home, state, rows) {
+  if (rows.length === 0) return agents;
+  const live = rows.filter(c => c.agent === "claude" && c.live === true).map(c => c.id);
+  const { claude, codex } = agents.agents;
+  return { ...agents, agents: { ...agents.agents, claude: { ...claude, live }, codex: { ...codex, threads: codexThreads(home, state, rows) } } };
 }
 
 /** Why a shot is not what it is named for: every failure the page shows that the surface did not wait for. */
@@ -279,13 +290,16 @@ async function main() {
     // The cloud the fixture's machines are meant to be at rides with it: without that word the stand-in stands in
     // for nothing, and the provider a fixture is about is on no row of the places table.
     const state = fixtureOn(own, fixture);
+    // A fixture's conversations sit in the agents' stores under its own home, which the host reads only as the
+    // person's home.
     const started = await startHost({
       home: own,
+      ...(fixtureConversations(fixture).length > 0 ? { personHome: own } : {}),
       state,
       port: await freePort(),
       cloud: fixtureCloud(fixture),
       records: writeStandIn(own, fixtureFleet(state)),
-      agents: fixtureAgents(fixture),
+      agents: withConversations(fixtureAgents(fixture), own, state, fixtureConversations(fixture)),
       files: fixtureFiles(fixture),
       hostItems: { ...HERE_HOST_ITEMS, pulls: fixturePulls(fixture), compares: fixtureCompares(fixture) },
     });

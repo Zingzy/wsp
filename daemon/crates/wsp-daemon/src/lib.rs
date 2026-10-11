@@ -39,6 +39,7 @@ mod slate_reads;
 mod ssh;
 mod sys;
 mod sys_local;
+mod transcripts;
 mod tunnel;
 mod under_home;
 mod urls;

@@ -14,8 +14,8 @@ use serde::Serialize;
 use serde_json::Value;
 use wsp_frames::{
     numbers, words, DaemonErrorCode, DaemonErrorResponse, DaemonOp, Empty, FsReadEncoding, GuestOpen, GuestOpenReply, InboxRescanReply,
-    ManifestGetReply, ManifestRecordReply, ManifestRestartScriptReply, PlaceLeaveReply, PlaceUpdateReply, PortsWatchReply, PtyAttachReply,
-    PtyCreateReply, PtyListReply, Reply, RequestId, DAEMON_OPS, GUEST_OPS, MACHINE_OPS, MACHINE_OPS_ON_ANY_ROAD,
+    ManifestGetReply, ManifestRecordReply, ManifestRestartScriptReply, PlaceLeaveReply, PortsWatchReply, PtyAttachReply, PtyCreateReply,
+    PtyListReply, Reply, RequestId, DAEMON_OPS, GUEST_OPS, MACHINE_OPS, MACHINE_OPS_ON_ANY_ROAD,
 };
 
 use crate::exec::{run_exec, ExecOptions};
@@ -33,7 +33,11 @@ use crate::workspace::no_such_workspace;
 use crate::workspace::workspaces_of;
 mod road;
 mod runner;
-use crate::{bring_back, frame_text as text, fs, git, hosts, paths, readings, ssh, tunnel, usage_logs, Ctx, Listener, Outbound, Outgoing};
+mod update;
+use crate::{
+    bring_back, frame_text as text, fs, git, hosts, paths, readings, ssh, transcripts, tunnel, usage_logs, Ctx, Listener, Outbound,
+    Outgoing,
+};
 pub(crate) use road::Road;
 use runner::Runner;
 
@@ -236,7 +240,7 @@ pub(crate) async fn handle(conn: &Arc<Conn>, ctx: &Arc<Ctx>, raw: &str) -> Outgo
                     Err(why) => Outgoing::Text(refuse(id, DaemonErrorCode::BadRequest, why)),
                 };
             }
-            Some("place.update") => return place_update(ctx, id, &frame).await,
+            Some("place.update") => return update::place_update(ctx, id, &frame).await,
             Some(name) if MACHINE_OPS.contains(&name) => return Outgoing::Text(machine_answer(ctx, id, name, &frame).await),
             _ => {}
         }
@@ -325,6 +329,8 @@ async fn handle_op(conn: &Arc<Conn>, ctx: &Arc<Ctx>, frame: &Value, id: Option<R
             | "sys.watch"
             | "sys.history"
             | "usage.logs"
+            | "transcripts.list"
+            | "transcripts.read"
             | "proc.watch"
             | "proc.unwatch"
             | "proc.inspect"
@@ -343,53 +349,6 @@ async fn handle_op(conn: &Arc<Conn>, ctx: &Arc<Ctx>, frame: &Value, id: Option<R
         }
         Some(name) if DAEMON_OPS.contains(&name) => refuse(id, DaemonErrorCode::Unsupported, not_built(name)),
         _ => fail(id, words::unknown_op(&op_word(frame))),
-    }
-}
-
-/// The daemon the host sent, landed part by part and started in place of this one. Every part but the last is a
-/// plain reply; the last checks the bytes against the sha256 the host named, moves them over the binary this
-/// process runs from and answers where they went, and the loop then ends this daemon so its supervisor starts the
-/// one that landed. Nothing here sweeps: the workspaces' records stay on the box and the daemon that comes up
-/// reads them again.
-async fn place_update(ctx: &Arc<Ctx>, id: Option<RequestId>, frame: &Value) -> Outgoing {
-    let typed = match serde_json::from_value::<DaemonOp>(frame.clone()) {
-        Ok(typed) => typed,
-        Err(e) => return Outgoing::Text(refuse(id, DaemonErrorCode::BadRequest, e.to_string())),
-    };
-    let DaemonOp::PlaceUpdate { upload_id, seq, last, data, sha256 } = typed else {
-        return Outgoing::Text(fail(id, words::unknown_op("place.update")));
-    };
-    let home = crate::place::place_home(ctx.options.home.as_deref());
-    let bytes = lenient_base64(&data);
-    let part = crate::place::update_part(&home, &upload_id);
-    // An upload beginning is the other moment nothing is arriving, so what an earlier try left goes here too.
-    if seq == 0 {
-        let (home, upload) = (home.clone(), upload_id.clone());
-        let _ = fs::blocking(move || Ok(crate::place::sweep_updates(&home, Some(&upload)))).await;
-    }
-    let taking = {
-        let (part, upload) = (part.clone(), upload_id.clone());
-        fs::blocking(move || crate::place::take_update_part(&part, seq, &bytes, &upload).map_err(OpError::plain)).await
-    };
-    if let Err(e) = taking {
-        return Outgoing::Text(fail(id, e.message));
-    }
-    if !last {
-        return Outgoing::Text(ok(id));
-    }
-    // Its own path rather than the unit's: the binary a unit starts is the file this process was execed from, and
-    // reading it here needs neither the unit's name nor the manager that holds it.
-    let exe = match crate::place::running_daemon(std::env::current_exe()) {
-        Ok(exe) => exe,
-        Err(e) => return Outgoing::Text(fail(id, e)),
-    };
-    let landed = fs::blocking(move || crate::place::install_daemon(&exe, &part, &sha256, &upload_id).map_err(OpError::plain)).await;
-    match landed {
-        Err(e) => Outgoing::Text(fail(id, e.message)),
-        Ok((at, kept)) => {
-            ctx.log(&words::update_landed(&at));
-            Outgoing::Restart(text(&Reply::new(id, PlaceUpdateReply { at, kept })))
-        }
     }
 }
 
@@ -1172,6 +1131,10 @@ async fn serve(conn: &Arc<Conn>, ctx: &Arc<Ctx>, id: Option<RequestId>, name: &s
             answer(id, read.await)
         }
         DaemonOp::UsageLogs { stores } => answer(id, usage_logs::serve(&conn.road, ctx, stores).await),
+        DaemonOp::TranscriptsList { root, dirs, cwds } => answer(id, transcripts::serve_list(&conn.road, ctx, root, dirs, cwds).await),
+        DaemonOp::TranscriptsRead { root, dirs, session, last } => {
+            answer(id, transcripts::serve_read(&conn.road, ctx, root, dirs, session, last.get()).await)
+        }
         DaemonOp::ProcWatch => {
             let watched = async {
                 let sampler = ctx.proc_sampler()?;

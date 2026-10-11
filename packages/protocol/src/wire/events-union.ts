@@ -8,7 +8,7 @@ import { UsageAlertEvent } from "../plan-alerts.js";
 import { SessionSlateEvent, SlateRunEvent, SlateValuesEvent } from "../slate/wire.js";
 import { ReleaseChangedEvent } from "../release.js";
 import { sequenced } from "./helpers.js";
-import { SessionBehindEvent, SessionCappedEvent, SessionChangesEvent, SessionCheckpointEvent, SessionDeltaEvent, SessionDoneEvent, SessionEndEvent, SessionHeldEvent, SessionMovedEvent, SessionNotifyEvent, SessionPermissionClosedEvent, SessionPermissionEvent, SessionPlanEvent, SessionCompactedEvent, SessionContextEvent, SessionQueuedEvent, SessionRowEvent, SessionRunEvent, SessionStartEvent, SessionStartingEvent, SessionSteerEvent, SessionSubagentEvent } from "../views/session-events.js";
+import { SessionBehindEvent, SessionEarlierEvent, SessionCappedEvent, SessionChangesEvent, SessionCheckpointEvent, SessionDeltaEvent, SessionDoneEvent, SessionEndEvent, SessionHeldEvent, SessionMovedEvent, SessionNotifyEvent, SessionPermissionClosedEvent, SessionPermissionEvent, SessionPlanEvent, SessionCompactedEvent, SessionContextEvent, SessionQueuedEvent, SessionRowEvent, SessionRunEvent, SessionStartEvent, SessionStartingEvent, SessionSteerEvent, SessionSubagentEvent } from "../views/session-events.js";
 import { InboxFileEvent, PortCloseEvent, PortOpenEvent, WorkspaceCostEvent, WorkspaceCreatedEvent, WorkspaceCreatingEvent, WorkspaceDeletedEvent, WorkspaceGoneEvent, WorkspaceLookEvent, WorkspaceNappedEvent, WorkspaceRenamedEvent, WorkspaceReviewEvent, WorkspaceStatusEvent, WorkspaceUpgradedEvent, WorkspaceViewedEvent, WorkspaceWokenEvent } from "../views/workspace-events.js";
 import { ProjectExportEvent, ProjectImportEvent } from "../views/project-bundle.js";
 import { PreferencesChangedEvent, ThreadHeadEvent, ThreadMarkedEvent, ThreadRewoundEvent } from "../views/preferences.js";
@@ -45,6 +45,7 @@ export const EventUnion = z.discriminatedUnion("type", [
   SessionRunEvent.extend(sequenced),
   SessionMovedEvent.extend(sequenced),
   SessionBehindEvent.extend(sequenced),
+  SessionEarlierEvent.extend(sequenced),
   SessionCappedEvent.extend(sequenced),
   SessionSubagentEvent.extend(sequenced),
   SessionSlateEvent.extend(sequenced),

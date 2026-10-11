@@ -201,6 +201,8 @@ function ownPlace(e: SessionEvent): string | undefined {
       return undefined;
     case "session.slate":
       return `session.slate:${e.threadId}:${e.version}`;
+    case "session.earlier":
+      return undefined;
     default: {
       const _exhaustive: never = e;
       return undefined;

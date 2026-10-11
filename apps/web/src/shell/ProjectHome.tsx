@@ -9,7 +9,9 @@
 // one attempt id, since a queue drains only in a composer on screen and one copy
 // at most is on screen; the computer's free room is read first, and a send it
 // has no room for is refused before any copy is made.
-import { HERE_PLACE_ID, START_WORDS, githubLinkOf, nameOfTask, placeRoom, plural, projectForRepo, type ProjectView } from "@wsp/protocol";
+import { CONVERSATION_OPEN_KIND, CONVERSATION_WORDS, HERE_PLACE_ID, START_WORDS, githubLinkOf, nameOfTask, placeRoom, plural, projectForRepo, refusalLine, type ProjectView } from "@wsp/protocol";
+import { ConversationLine } from "./ConversationLine.js";
+import { sendOn, useConversationsStore, type HeldPick, type SendPicks } from "./conversations.js";
 import { Button } from "../components/ui/button.js";
 import { RefusalSlot } from "../settings/sheetParts.js";
 import { EmptyThread } from "../components/chat/ChatView.js";
@@ -58,7 +60,27 @@ export function ProjectHome({ projectId }: { projectId: string }) {
   // A link in the box names a project of its own, whichever home it was typed in: the send starts on that project.
   const link = githubLinkOf(useComposerDraft(key).prompt);
   const linked = useStore(s => (link === undefined ? undefined : projectForRepo(s.projects, link.repo, HERE_PLACE_ID)));
+  const held = useConversationsStore(s => s.held[projectId]);
   if (project === undefined) return null;
+
+  /** A send with a conversation held opens the thread on it; one another app holds open asks first, the message kept. */
+  const continueOn = async (prompt: string, pick: HeldPick): Promise<string | null> => {
+    // The conversation's own agent runs it, so the picks ride only where they were made for that agent.
+    const catalog = catalogs.find(c => c.harness === pick.row.agent);
+    const own = catalog !== undefined && (picked.harness === undefined || picked.harness === pick.row.agent) ? startOptionsFrom(catalog, picked) : {};
+    const picks: SendPicks = {
+      ...(own.model !== undefined ? { model: own.model } : {}),
+      ...(own.effort !== undefined ? { effort: own.effort } : {}),
+      ...(own.permissionMode !== undefined ? { permissionMode: own.permissionMode } : {}),
+    };
+    const send = { prompt, picks, key };
+    const refused = await sendOn(project.id, pick, send);
+    if (refused === null) return null;
+    if (refused.kind !== CONVERSATION_OPEN_KIND) return refused.fix === undefined ? refused.said : refusalLine(refused.said, refused.fix);
+    useComposerDraftStore.getState().setDraft(key, { prompt, cursor: prompt.length });
+    useConversationsStore.getState().ask({ project: project.id, row: pick.row, send });
+    return null;
+  };
 
   /** A start or a review off the link, through the host, which opens the thread it made. */
   const fromLink = async (url: string, kind: "start" | "review"): Promise<string | null> => {
@@ -84,6 +106,7 @@ export function ProjectHome({ projectId }: { projectId: string }) {
   };
 
   const start = async (prompt: string): Promise<string | null> => {
+    if (held !== undefined) return continueOn(prompt, held);
     const asked = githubLinkOf(prompt);
     if (asked !== undefined) return fromLink(asked.url, "start");
     const picks = useMultiPickStore.getState().byKey[key];
@@ -124,7 +147,7 @@ export function ProjectHome({ projectId }: { projectId: string }) {
         onStart={start}
         homeProject={project.id}
         where={<WhereItRuns project={project} />}
-        {...(link !== undefined && linked !== undefined ? { sendLabel: START_WORDS.startOn(link.number) } : {})}
+        {...(held !== undefined ? { sendLabel: CONVERSATION_WORDS.send } : link !== undefined && linked !== undefined ? { sendLabel: START_WORDS.startOn(link.number) } : {})}
         {...(link?.kind === "pull_request" && linked !== undefined
           ? {
               beside: (
@@ -134,7 +157,7 @@ export function ProjectHome({ projectId }: { projectId: string }) {
               ),
             }
           : {})}
-        {...(link !== undefined && linked === undefined ? { under: <RefusalSlot k="start-refusal" said={START_WORDS.noProjectForRepo(link.repo)} /> } : {})}
+        {...(link !== undefined && linked === undefined ? { under: <RefusalSlot k="start-refusal" said={START_WORDS.noProjectForRepo(link.repo)} /> } : { under: <ConversationLine projectId={project.id} /> })}
       />
     </div>
   );

@@ -438,6 +438,11 @@
                     "title": "wsp computers set",
                     "filepath": "content/reference/cli/computers-set.mdx"
                   },
+                  "/conversations": {
+                    "type": "page",
+                    "title": "wsp conversations",
+                    "filepath": "content/reference/cli/conversations.mdx"
+                  },
                   "/delete": {
                     "type": "page",
                     "title": "wsp delete",

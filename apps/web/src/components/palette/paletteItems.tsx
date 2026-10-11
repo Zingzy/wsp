@@ -10,7 +10,7 @@ import { ArrowDownIcon, ArrowLeftIcon, ArrowUpIcon, BookOpenIcon, BugIcon, Chevr
 import type { ReactNode } from "react";
 import { REPO } from "../../../../../packages/protocol/src/bundles.mjs";
 import { agentName } from "@wsp/catalog";
-import { HERE_PLACE_ID, PLACES_WORDS, type PlaceView, type ProjectView, type SessionSearchHit } from "@wsp/protocol";
+import { HERE_PLACE_ID, PLACES_WORDS, type OutsideConversation, type PlaceView, type ProjectView, type SessionSearchHit } from "@wsp/protocol";
 import { THREAD_WORDS } from "../../actions/format.js";
 import { resolveActions, type ResolvedAction } from "../../actions/registry.js";
 import { workspaceActions, workspaceTarget, type WorkspaceVerbs } from "../../actions/workspaceActions.js";
@@ -35,6 +35,7 @@ import { restingAge } from "../status/restingAge.js";
 import { LINE_SLOT_CLASS, ThreadStatus } from "../status/ThreadStatus.js";
 import { CommandShortcut } from "../ui/command.js";
 import { type CommandPaletteActionItem, type CommandPaletteSubmenuItem, ITEM_ICON_CLASS, RECENT_THREAD_LIMIT } from "./CommandPalette.logic.js";
+import { conversationsPage, type ConversationsPageInput } from "./conversationsPage.js";
 
 export interface PaletteHandlers {
   readonly selectWorkspace: (workspaceId: string) => void;
@@ -77,6 +78,8 @@ export interface PaletteItemsInput {
   /** The computers and providers this host holds, for the one reading of a workspace whose computer is not
    * answering: a row that named its own state read Unreachable for the computer the app is drawn on. */
   readonly places: readonly PlaceView[];
+  /** The page of the conversations kept outside wsp in the project on screen, or the one its menu named. */
+  readonly conversations?: ConversationsPageInput;
 }
 
 export interface PaletteItems {
@@ -200,6 +203,7 @@ function actionItems(input: PaletteItemsInput): Array<CommandPaletteActionItem |
       run: sync(handlers.newThread),
     },
     newThreadPage(input),
+    ...(input.conversations !== undefined ? [conversationsPage({ ...input.conversations, pick: row => pickOrOpen(input, row) })] : []),
     {
       kind: "action",
       value: "action:add-project",
@@ -375,6 +379,14 @@ function threadItem(thread: SidebarThreadSnapshot, project: SidebarProjectSnapsh
     titleTrailingContent: <ThreadStatus thread={thread} age={restingAge(thread)} className={LINE_SLOT_CLASS} />,
     run: sync(() => handlers.selectThread(thread.workspaceId, thread.threadId)),
   };
+}
+
+/** A conversation a wsp thread already runs on opens that thread, where the sidebar holds it; any other goes to the
+ * page's own pick. */
+export function pickOrOpen(input: Pick<PaletteItemsInput, "projects" | "handlers" | "conversations">, row: OutsideConversation): void {
+  const thread = row.thread === undefined ? undefined : input.projects.flatMap(project => project.threads).find(t => t.threadId === row.thread);
+  if (thread !== undefined) input.handlers.selectThread(thread.workspaceId, thread.threadId);
+  else input.conversations?.pick(row);
 }
 
 export function buildPaletteItems(input: PaletteItemsInput): PaletteItems {

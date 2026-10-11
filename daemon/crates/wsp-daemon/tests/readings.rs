@@ -640,3 +640,31 @@ async fn usage_logs_reads_the_home_this_daemon_serves_and_refuses_a_store_it_can
     assert_eq!((refused["ok"].clone(), refused["code"].clone()), (json!(false), json!("bad-request")), "{refused}");
     c.close().await;
 }
+
+#[tokio::test]
+async fn transcripts_list_and_read_answer_a_conversation_under_the_home_this_daemon_serves() {
+    let home = tempfile::tempdir().unwrap();
+    let id = "7414323d-e71b-4957-8b56-eefdf6bfa350";
+    let file = home.path().join(format!(".claude/projects/-w-proj/{id}.jsonl"));
+    std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+    let lines = [
+        json!({ "type": "user", "uuid": "u1", "parentUuid": null, "cwd": "/w/proj", "entrypoint": "cli", "gitBranch": "main", "message": { "role": "user", "content": "hello" } }),
+        json!({ "type": "assistant", "uuid": "a1", "parentUuid": "u1", "cwd": "/w/proj", "message": { "id": "m1", "content": [{ "type": "text", "text": "hi there" }] } }),
+        json!({ "type": "last-prompt", "lastPrompt": "hello", "leafUuid": "a1" }),
+    ];
+    std::fs::write(&file, lines.iter().map(|l| format!("{l}\n")).collect::<String>()).unwrap();
+    let at = home.path().to_path_buf();
+    let d = start(move |o| o.home = Some(at)).await;
+    let mut c = Client::connect(d.addr).await;
+    let listed = c.request("transcripts.list", json!({ "root": "~/.claude/projects", "dirs": ["-w-proj"], "cwds": ["/w/proj"] })).await;
+    assert_eq!(listed["ok"], true, "{listed}");
+    assert_eq!(listed["rows"][0]["id"], id);
+    assert_eq!((listed["rows"][0]["title"].clone(), listed["rows"][0]["branch"].clone()), (json!("hello"), json!("main")));
+    let read = c.request("transcripts.read", json!({ "root": "~/.claude/projects", "dirs": ["-w-proj"], "session": id, "last": 10 })).await;
+    assert_eq!(read["ok"], true, "{read}");
+    assert_eq!(read["messages"], json!([{ "who": "person", "text": "hello" }, { "who": "agent", "text": "hi there" }]));
+    let refused =
+        c.request("transcripts.read", json!({ "root": "~/.claude/projects", "dirs": ["-w-proj"], "session": id, "last": 0 })).await;
+    assert_eq!((refused["ok"].clone(), refused["code"].clone()), (json!(false), json!("bad-request")), "{refused}");
+    c.close().await;
+}

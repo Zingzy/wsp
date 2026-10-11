@@ -353,6 +353,8 @@ export function createSessionFold(): SessionFold {
     return turn;
   };
 
+  /** How many rows of the conversation a thread was opened on came before this one. */
+  let earlier = 0;
   const add = (event: SessionEvent, received?: string): void => {
     taken += 1;
     place = event.pos;
@@ -540,6 +542,15 @@ export function createSessionFold(): SessionFold {
         }
         const at = turns.findIndex(t => t.turnId === event.turnId);
         if (at >= 0) turns[at] = { ...turns[at]!, slated: true };
+        return;
+      }
+      case "session.earlier": {
+        // The conversation the thread was opened on, as it ran outside wsp: rows of no turn of the thread's, so no turn
+        // draws a footer under them and none is left running.
+        earlier += 1;
+        const id = `earlier:${event.sessionId}:${event.pos ?? `n${earlier}`}`;
+        if (event.who === "person" || event.who === "agent") push(messageEntry({ id, role: event.who === "person" ? "user" : "assistant", text: event.text, turnId: null, streaming: false, createdAt: at, updatedAt: at }));
+        else push(workEntry({ id, turnId: null, createdAt: at, label: event.text, tone: event.who === "note" ? "notice" : "tool", sourceActivityKind: event.who === "note" ? "runtime.resume" : "tool.completed" }, at));
         return;
       }
       case "session.checkpoint": {

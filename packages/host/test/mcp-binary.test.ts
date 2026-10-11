@@ -147,6 +147,9 @@ const GHOSTTY: Record<string, string> = {
 
 /** Every tool the binary serves, called against the host as the command line runs its verb. A tool the binary takes
  * on adds its row here; a refused row is called with nothing on the host to act on. */
+/** Folders a row's given made, which the case's end takes away. */
+const madeRepos: string[] = [];
+
 const CALLED: readonly Called[] = [
   { tool: "computers", argv: ["computers"], arguments: {} },
   { tool: "computers_set", argv: ["computers", "set", "here", "--threads", "2"], arguments: { computer: "here", threads: 2 } },
@@ -163,6 +166,18 @@ const CALLED: readonly Called[] = [
   { tool: "usage", argv: ["usage"], arguments: {} },
   { tool: "usage", argv: ["usage", "--range", "week", "--by", "project"], arguments: { range: "week", by: "project" } },
   { tool: "projects", argv: ["projects"], arguments: {} },
+  { tool: "conversations", argv: ["conversations", "nowhere"], arguments: { project: "nowhere" }, refused: true },
+  {
+    tool: "conversations",
+    argv: ["conversations", "lab"],
+    arguments: { project: "lab" },
+    given: async rt => {
+      const repo = mkdtempSync(join(tmpdir(), "wsp-conversations-lab-"));
+      madeRepos.push(repo);
+      execFileSync("git", ["init", "-q", repo]);
+      await rt.projects.add({ source: repo, on: HERE_PLACE_ID, name: "lab" });
+    },
+  },
   { tool: "threads", argv: ["threads"], arguments: {} },
   { tool: "setup", argv: ["setup"], arguments: {} },
   { tool: "terminal_config", argv: ["terminal", "config"], arguments: {}, text: "prose" },
@@ -382,6 +397,7 @@ suite(`the tool server in the daemon binary${MCP_BIN === undefined ? " (set WSP_
       await handle?.close();
       handle = undefined;
       vi.unstubAllEnvs();
+      for (const repo of madeRepos.splice(0)) rmSync(repo, { recursive: true, force: true });
     });
 
     it.each(CALLED)("answers $tool with the object its verb prints under --json, its text that object as jsonLine(obj, 2) or this package's line byte for byte", async row => {
