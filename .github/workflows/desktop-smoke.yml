@@ -7,8 +7,8 @@ name: desktop smoke
 # chip's, this runner's, packaged from the release's config with the daemon
 # built from the same commit. The everyday flows walk the same tree after the
 # smoke; a land/** push runs them on Linux in flows.yml. A land/** push that
-# changes this file, the smoke or the flows runs it too, and so does a run
-# started by hand.
+# changes this file, the smoke, the flows or the browser tab's guests runs it
+# too, and so does a run started by hand.
 on:
   push:
     branches:
@@ -21,6 +21,10 @@ on:
       - "apps/desktop/test/workspace-menu.ts"
       - "apps/desktop/test/flows.electron.test.ts"
       - "apps/desktop/test/flow-agents.ts"
+      - "apps/desktop/src/guests.ts"
+      - "apps/desktop/src/page-session.ts"
+      - "apps/web/src/components/preview/**"
+      - "apps/web/src/browser/guests.ts"
   schedule:
     - cron: "17 3 * * *"
   workflow_dispatch:
