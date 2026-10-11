@@ -3,13 +3,15 @@
 // it, the road over a machine whose exec and run are this computer's bash (putFiles and all), and a box thread's run
 // reaching its machine through the runtime while one `on` the host stays here.
 import { execFileSync, spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join, relative } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ExecResult, Machine, RunOptions } from "@wsp/engine";
 import type { Caller } from "@wsp/protocol";
 import { boxLauncher, boxLedger, boxRoad, boxSlateDir } from "../src/slate-box.js";
+import { boxPins, type HashOn } from "../src/slate-files.js";
 import type { RoadEnd } from "../src/slate-runs.js";
 import { createSlates } from "../src/slates.js";
 import { memoryStore } from "../src/store.js";
@@ -462,7 +464,270 @@ describe("an Always for a box thread's command", () => {
     await done("there", "one\n");
     // No command line verb or tool approves a slate; another caller of slates.approve that asks for an Always is told why.
     const again = await press("t");
-    await expect(slates.approve({ threadId: thread, key: again.ask!.key, scope: "thread" })).rejects.toThrow(/\.wsp-system-resources\.py there, which this computer cannot read/);
+    await expect(slates.approve({ threadId: thread, key: again.ask!.key, scope: "thread" })).rejects.toThrow(/\.wsp-system-resources\.py there, which its computer could not hash/);
     slates.close();
   }, 30_000);
+});
+
+/** A box daemon's fs.hash over this computer's disk: each path under the root where it lands, a regular file. */
+const hashHere: HashOn = async (root, paths) => {
+  const top = realpathSync(root);
+  const files: Record<string, string> = {};
+  for (const path of paths) {
+    try {
+      const at = realpathSync(isAbsolute(path) ? path : join(root, path));
+      const rel = relative(top, at);
+      if (rel !== "" && !rel.startsWith("..") && statSync(at).isFile()) files[rel] = createHash("sha256").update(readFileSync(at)).digest("hex");
+    } catch {
+      // not there
+    }
+  }
+  return files;
+};
+
+describe("an Always for a command on the box, pinned by its daemon's hash", () => {
+  const boxThread = (hashOn: HashOn | undefined, o: { asleep?: () => boolean; wake?: () => Promise<void>; here?: true } = {}) => {
+    const machine = bashMachine();
+    const thread = `t-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    made.push(boxSlateDir(thread));
+    const folder = temp();
+    const store = memoryStore();
+    const open = () =>
+      createSlates({
+        store,
+        now: () => Date.now(),
+        record: () => {},
+        emit: () => {},
+        thread: () => ({ workspaceId: "w1", rootThreadId: thread, sessionId: "s1", folder, hostFolder: temp(), computer: "acme-box" }),
+        ...(o.here === true ? {} : { machineOf: () => machine }),
+        ...(hashOn !== undefined ? { hashOn: () => hashOn } : {}),
+        ...(o.asleep !== undefined ? { asleep: o.asleep } : {}),
+        ...(o.wake !== undefined ? { wake: o.wake } : {}),
+        under: lead => [lead],
+        threadOfToken: () => thread,
+        sources: (threadId, workspaceId) => ({ threadId, workspaceId, now: Date.now(), rows: () => [] }) as never,
+        deliver: async () => ({ outcome: "started" }),
+        runEnv: () => ({ PATH: process.env["PATH"] ?? "/usr/bin:/bin" }),
+      });
+    const asThread: Caller = { origin: "here", by: { kind: "thread", threadId: thread, workspaceId: "w1", rootThreadId: thread } };
+    const on = (slates: ReturnType<typeof open>) => ({
+      press: async (piece: string) => slates.event({ threadId: thread, version: (await slates.get(thread))!.version, piece, event: "press", requestId: `${piece}-${Math.random()}` }),
+      done: async (run: string, runs: number) => vi.waitFor(async () => expect((await slates.get(thread))!.values[run]).toMatchObject({ state: "done", runs }), { timeout: 10_000 }),
+      askOf: async (run: string) => (await slates.get(thread))!.asks.find(a => a.run === run),
+    });
+    return { thread, folder, open, asThread, on };
+  };
+
+  it("holds across a reopen with no second ask, and asks again once the script on the box changes", async () => {
+    const asked: string[][] = [];
+    const box = boxThread(async (root, paths) => {
+      asked.push(paths);
+      return hashHere(root, paths);
+    });
+    writeFileSync(join(box.folder, "stats.sh"), "echo one");
+    let slates = box.open();
+    await slates.write({ text: `<slate><run name="stats" cmd="bash stats.sh" timeout={20} /><column><button id="s" label="Stats" onPress={start($stats)} /></column></slate>` }, box.asThread);
+    let s = box.on(slates);
+
+    const first = await s.press("s");
+    expect(first.ask).toMatchObject({ run: "stats" });
+    expect(first.ask).not.toHaveProperty("noAlways");
+    expect(await s.askOf("stats")).not.toHaveProperty("noAlways");
+    await slates.approve({ threadId: box.thread, key: first.ask!.key, scope: "thread" });
+    await s.done("stats", 1);
+    expect((await s.press("s")).ask).toBeUndefined();
+    await s.done("stats", 2);
+    slates.close();
+
+    // A host that opens the same record reads the box again and finds the script the person allowed.
+    slates = box.open();
+    s = box.on(slates);
+    expect((await s.press("s")).ask).toBeUndefined();
+    await s.done("stats", 3);
+    expect(asked.length).toBeGreaterThan(0);
+    expect(asked.every(paths => paths.join() === `${box.folder}/stats.sh`)).toBe(true);
+
+    writeFileSync(join(box.folder, "stats.sh"), "echo two");
+    const changed = await s.press("s");
+    expect(changed.ask).toMatchObject({ run: "stats" });
+    expect(await s.askOf("stats")).toMatchObject({ why: "stats.sh changed since you allowed it, so it asks again" });
+    expect(await s.askOf("stats")).not.toHaveProperty("noAlways");
+    slates.close();
+  }, 30_000);
+
+  it("takes an Always for df -h / and sleep 0.5, which name no file inside the thread's folder", async () => {
+    let fails = false;
+    const box = boxThread(async (root, paths) => {
+      if (fails) throw new Error("the box did not answer");
+      return hashHere(root, paths);
+    });
+    const slates = box.open();
+    await slates.write({ text: `<slate><run name="disk" cmd="df -h /" timeout={20} /><run name="nap" cmd="sleep 0.5" timeout={20} /><column><button id="d" label="Disk" onPress={start($disk)} /><button id="n" label="Nap" onPress={start($nap)} /></column></slate>` }, box.asThread);
+    const s = box.on(slates);
+    for (const [piece, run] of [["d", "disk"], ["n", "nap"]] as const) {
+      const held = await s.press(piece);
+      expect(held.ask).toMatchObject({ run });
+      expect(await s.askOf(run)).not.toHaveProperty("noAlways");
+      await slates.approve({ threadId: box.thread, key: held.ask!.key, scope: "thread" });
+      await s.done(run, 1);
+      expect((await s.press(piece)).ask).toBeUndefined();
+      await s.done(run, 2);
+    }
+    fails = true;
+    expect((await s.press("d")).ask).toBeDefined();
+    expect(await s.askOf("disk")).toMatchObject({ noAlways: true, why: "/ could not be read on acme-box, so it asks again" });
+    slates.close();
+  }, 30_000);
+
+  it("offers no Always for a command naming a script where the daemon cannot hash, and refuses one asked for", async () => {
+    // What a daemon from before fs.hash answers, measured against one built from the base.
+    const box = boxThread(async () => {
+      throw new Error("unknown op: fs.hash");
+    });
+    writeFileSync(join(box.folder, "stats.sh"), "echo one");
+    const slates = box.open();
+    await slates.write({ text: `<slate><run name="stats" cmd="bash stats.sh" timeout={20} /><column><button id="s" label="Stats" onPress={start($stats)} /></column></slate>` }, box.asThread);
+    const s = box.on(slates);
+    const held = await s.press("s");
+    expect(held.ask).toMatchObject({ run: "stats", noAlways: true });
+    expect(await s.askOf("stats")).toMatchObject({ noAlways: true });
+    await expect(slates.approve({ threadId: box.thread, key: held.ask!.key, scope: "thread" })).rejects.toThrow(/names stats\.sh there, which its computer could not hash/);
+    await slates.approve({ threadId: box.thread, key: held.ask!.key, scope: "once" });
+    await s.done("stats", 1);
+    expect((await s.press("s")).ask).toMatchObject({ noAlways: true });
+    slates.close();
+  }, 30_000);
+
+  const STATS = `<slate><run name="stats" cmd="bash stats.sh" timeout={20} /><column><button id="s" label="Stats" onPress={start($stats)} /></column></slate>`;
+
+  it("asks when the read fails, even under an Always given before the script was there", async () => {
+    let fails = false;
+    const box = boxThread(async (root, paths) => {
+      if (fails) throw new Error("unknown op: fs.hash");
+      return hashHere(root, paths);
+    });
+    const slates = box.open();
+    await slates.write({ text: STATS }, box.asThread);
+    const s = box.on(slates);
+    const first = await s.press("s");
+    await slates.approve({ threadId: box.thread, key: first.ask!.key, scope: "thread" });
+    // No stats.sh yet: bash fails, and the Always holds a key with no script in it.
+    await vi.waitFor(async () => expect((await slates.get(box.thread))!.values["stats"]).toMatchObject({ state: "failed", runs: 1 }), { timeout: 10_000 });
+    writeFileSync(join(box.folder, "stats.sh"), "echo evil");
+    fails = true;
+    expect((await s.press("s")).ask).toMatchObject({ run: "stats" });
+    expect(await s.askOf("stats")).toMatchObject({ noAlways: true });
+    expect((await slates.get(box.thread))!.values["stats"]).toMatchObject({ state: "held" });
+    slates.close();
+  }, 30_000);
+
+  it("says the script could not be read there, not that it changed, when a read fails under an Always", async () => {
+    let fails = false;
+    const box = boxThread(async (root, paths) => {
+      if (fails) throw new Error("the box did not answer");
+      return hashHere(root, paths);
+    });
+    writeFileSync(join(box.folder, "stats.sh"), "echo one");
+    const slates = box.open();
+    await slates.write({ text: STATS }, box.asThread);
+    const s = box.on(slates);
+    const first = await s.press("s");
+    await slates.approve({ threadId: box.thread, key: first.ask!.key, scope: "thread" });
+    await s.done("stats", 1);
+    fails = true;
+    expect((await s.press("s")).ask).toBeDefined();
+    expect(await s.askOf("stats")).toMatchObject({ noAlways: true, why: "stats.sh could not be read on acme-box, so it asks again" });
+    slates.close();
+  }, 30_000);
+
+  for (const where of ["box", "here"] as const) {
+    it(`reads the scripts of a run with cwd in the folder it runs in, so an edit there asks again (${where})`, async () => {
+      const box = boxThread(hashHere, where === "here" ? { here: true } : {});
+      mkdirSync(join(box.folder, "scripts"));
+      writeFileSync(join(box.folder, "scripts", "stats.sh"), "echo one");
+      const slates = box.open();
+      await slates.write({ text: `<slate><run name="stats" cmd="bash stats.sh" cwd="scripts" timeout={20} /><column><button id="s" label="Stats" onPress={start($stats)} /></column></slate>` }, box.asThread);
+      const s = box.on(slates);
+      const first = await s.press("s");
+      expect(await s.askOf("stats")).not.toHaveProperty("noAlways");
+      await slates.approve({ threadId: box.thread, key: first.ask!.key, scope: "thread" });
+      await s.done("stats", 1);
+      expect((await s.press("s")).ask).toBeUndefined();
+      await s.done("stats", 2);
+      writeFileSync(join(box.folder, "scripts", "stats.sh"), "echo evil");
+      expect((await s.press("s")).ask).toMatchObject({ run: "stats" });
+      expect(await s.askOf("stats")).toMatchObject({ why: "scripts/stats.sh changed since you allowed it, so it asks again" });
+      slates.close();
+    }, 30_000);
+  }
+
+  it("wakes a napping machine for a press and holds to a standing Always there", async () => {
+    let asleep = false;
+    const seen: string[] = [];
+    const box = boxThread(
+      async (root, paths) => {
+        seen.push(asleep ? "hash asleep" : "hash");
+        return hashHere(root, paths);
+      },
+      {
+        asleep: () => asleep,
+        wake: async () => {
+          seen.push("wake");
+          asleep = false;
+        },
+      },
+    );
+    writeFileSync(join(box.folder, "stats.sh"), "echo one");
+    const slates = box.open();
+    await slates.write({ text: STATS }, box.asThread);
+    const s = box.on(slates);
+    const first = await s.press("s");
+    await slates.approve({ threadId: box.thread, key: first.ask!.key, scope: "thread" });
+    await s.done("stats", 1);
+    asleep = true;
+    seen.length = 0;
+    expect((await s.press("s")).ask).toBeUndefined();
+    await s.done("stats", 2);
+    // Woken before the box is read; the road's own wake before the run follows.
+    expect(seen.slice(0, 2)).toEqual(["wake", "hash"]);
+    expect(seen).not.toContain("hash asleep");
+    slates.close();
+  }, 30_000);
+
+  it("a held ask keeps its Always across a reopen", async () => {
+    const box = boxThread(hashHere);
+    writeFileSync(join(box.folder, "stats.sh"), "echo one");
+    let slates = box.open();
+    await slates.write({ text: STATS }, box.asThread);
+    await box.on(slates).press("s");
+    expect(await box.on(slates).askOf("stats")).not.toHaveProperty("noAlways");
+    slates.close();
+    slates = box.open();
+    const s = box.on(slates);
+    await vi.waitFor(async () => {
+      const ask = await s.askOf("stats");
+      expect(ask).toBeDefined();
+      expect(ask).not.toHaveProperty("noAlways");
+    });
+    await slates.approve({ threadId: box.thread, key: (await s.askOf("stats"))!.key, scope: "thread" });
+    await s.done("stats", 1);
+    slates.close();
+  }, 30_000);
+
+  it("leaves a command unpinned where the daemon does not answer in time, and asks nothing of a napping computer", async () => {
+    const decl = { kind: "cmd" as const, cmd: "bash stats.sh" };
+    let calls = 0;
+    const pins = boxPins(
+      () => async () => {
+        calls += 1;
+        return new Promise<Record<string, string>>(() => {});
+      },
+      20,
+    );
+    await pins.read("t1", [{ folder: "/root/acme", decl }], false);
+    expect(pins.unpinned("t1", "/root/acme", decl)).toEqual(["stats.sh"]);
+    await pins.read("t1", [{ folder: "/root/acme", decl }], true);
+    expect(calls).toBe(1);
+    expect(pins.unpinned("t1", "/root/acme", { kind: "cmd", cmd: "df -h" })).toEqual([]);
+  });
 });

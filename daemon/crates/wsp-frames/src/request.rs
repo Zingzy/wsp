@@ -229,6 +229,18 @@ pub enum DaemonOp {
         #[ts(optional)]
         machine_id: Option<String>,
     },
+    /// The files a slate's command names that stand inside its folder, each hashed: what an Always pins, so a
+    /// changed script asks again. A path is whole or under `root`; one outside it, missing, not a regular file or
+    /// over FS_HASH_CAP_BYTES is left out, and at most FS_HASH_FILES_MAX are hashed.
+    #[serde(rename = "fs.hash", rename_all = "camelCase")]
+    FsHash {
+        root: String,
+        paths: Vec<String>,
+        /// The workspace this frame is for, as on fs.list above.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        machine_id: Option<String>,
+    },
     /// Replaces an existing regular file's contents whole, keeping its mode and owner: a pane's save.
     #[serde(rename = "fs.write", rename_all = "camelCase")]
     FsWrite {
@@ -857,7 +869,7 @@ fn usage_stores<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<UsageStore
     Ok(list)
 }
 
-pub const DAEMON_OPS: [&str; 74] = [
+pub const DAEMON_OPS: [&str; 75] = [
     "pty.create",
     "pty.attach",
     "pty.detach",
@@ -883,6 +895,7 @@ pub const DAEMON_OPS: [&str; 74] = [
     "fs.files",
     "fs.read",
     "fs.image",
+    "fs.hash",
     "fs.search",
     "git.status",
     "git.diff",
