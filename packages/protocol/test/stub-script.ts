@@ -22,6 +22,15 @@ export function writeStub(path: string, script: string): string {
   return path;
 }
 
+/** A shell loop that waits for the gate file, running `each` on every pass, and ends its shell once the gate's folder
+ * is gone or after `limitS` seconds, so a run no sweep reached stops polling by itself. The gate is read inside double
+ * quotes, so it is a path or a word such as `$GATE`. The clock is read every 20th pass, not counted in passes: a pass
+ * took twice its sleep on a Mac runner. */
+export function gateLoop(gate: string, { each = "", limitS = 30 }: { each?: string; limitS?: number } = {}): string {
+  const pass = each === "" ? "" : `${each}; `;
+  return `_g="${gate}"; _end=$(($(date +%s) + ${limitS})); _n=0; while [ ! -f "$_g" ]; do { [ -d "\${_g%/*}" ] && { [ $((_n % 20)) -ne 0 ] || [ "$(date +%s)" -le $_end ]; }; } || exit 1; ${pass}sleep 0.05; _n=$((_n + 1)); done`;
+}
+
 function isRunnerLink(path: string): boolean {
   try {
     return lstatSync(path).isSymbolicLink() && readlinkSync(path) === STUB_RUNNER;

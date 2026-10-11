@@ -4,13 +4,13 @@
 // test never writes a script and runs it. writeStub puts a link at the path to a
 // runner that has run before, and the runner hands the script to its interpreter
 // to read, which no check stops.
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { lstatSync, mkdtempSync, readFileSync, readlinkSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { ROOT, testFiles } from "./source-files.js";
-import { STUB_RUNNER, writeStub } from "./stub-script.js";
+import { gateLoop, STUB_RUNNER, writeStub } from "./stub-script.js";
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -74,6 +74,42 @@ describe("a stub", () => {
     expect(r.status).toBe(127);
     expect(r.stderr).toContain("no script at");
   });
+});
+
+describe("a gate loop", () => {
+  /** Runs the loop under sh with nothing to kill it, does `meanwhile` 300 ms in, and answers its exit code, what it
+   * printed after the loop and how long it ran past `meanwhile`, or past its start when there is none. */
+  function timed(loop: string, meanwhile?: () => void): Promise<{ code: number | null; said: string; ms: number }> {
+    let from = Date.now();
+    const child = spawn("/bin/sh", ["-c", `${loop}; echo through`], { stdio: ["ignore", "pipe", "inherit"] });
+    let said = "";
+    child.stdout.on("data", (b: Buffer) => (said += b.toString()));
+    if (meanwhile !== undefined)
+      setTimeout(() => {
+        meanwhile();
+        from = Date.now();
+      }, 300);
+    return new Promise(done => child.once("exit", code => done({ code, said, ms: Date.now() - from })));
+  }
+
+  it("goes on past the loop once its gate is written", async () => {
+    const gate = join(scratch(), "gate");
+    expect(await timed(gateLoop(gate), () => writeFileSync(gate, "go\n"))).toMatchObject({ code: 0, said: "through\n" });
+  });
+
+  it("ends its shell within a second of its gate's folder going, with nothing killing it", async () => {
+    const dir = scratch();
+    const { code, said, ms } = await timed(gateLoop(join(dir, "gate"), { each: "echo working" }), () => rmSync(dir, { recursive: true }));
+    expect({ code, said: said.replaceAll("working\n", "") }).toEqual({ code: 1, said: "" });
+    expect(ms).toBeLessThan(1_000);
+  });
+
+  it("ends its shell after 30 s when its gate never comes", async () => {
+    const { code, said, ms } = await timed(gateLoop(join(scratch(), "gate")));
+    expect({ code, said }).toEqual({ code: 1, said: "" });
+    expect(ms).toBeGreaterThanOrEqual(30_000);
+    expect(ms).toBeLessThan(45_000);
+  }, 60_000);
 });
 
 /** A call's arguments as written, split at its top level commas, so a path is compared by its text. */
